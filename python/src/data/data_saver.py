@@ -9,7 +9,7 @@ def save_stock_data_with_features(
     symbol: str,
     start_date: str,
     end_date: str,
-    out_dir: str = "python/src/data"
+    out_dir: str = "python/data"
 ):
     """
     指定した市場・シンボル・期間の株価データを取得し、特徴量生成後、out_dirにCSV保存する。
@@ -49,12 +49,12 @@ def save_stock_data_with_features(
     data = X.copy()
     data['y'] = y
 
-    # ファイル名生成
-    fname = f"{market}_{symbol}_{start_date}_{end_date}.csv"
-    out_path = os.path.join(out_dir, fname)
-
-    # 保存先ディレクトリ作成
-    os.makedirs(out_dir, exist_ok=True)
+    # サブディレクトリ生成
+    sub_dir = os.path.join(out_dir, f"{market}_{symbol}")
+    os.makedirs(sub_dir, exist_ok=True)
+    # ファイル名生成（features_YYYY_MM_DD_YYYY_MM_DD.csv）
+    fname = f"features_{start_date.replace('-', '_')}_{end_date.replace('-', '_')}.csv"
+    out_path = os.path.join(sub_dir, fname)
 
     # 保存
     save_dataframe_to_csv(data, out_path)

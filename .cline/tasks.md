@@ -24,6 +24,16 @@
 
 ---
 
+## タスク名：出力ファイルパス・ファイル名設計改善
+- 状況：完了
+- 優先度：中
+- 期限：2025-08-11
+- 関連ファイル：context.md, instructions.md, knowledge.md
+- メモ：
+  - [market]_[symbol] サブディレクトリを自動生成し、その中にcsvを保存
+  - ファイル名を features_YYYY_MM_DD_YYYY_MM_DD.csv 形式に統一
+  - 既存run_data_creation.py等の呼び出し方法は変更不要
+
 ### 更新履歴
 - 2025-08-11 16:58：株価データ特徴量拡張タスクを追加・完了で記載
 - 2025-08-11 17:43：run_data_creation.py例外防止・yfinance仕様対応タスクを追加・完了で記載
