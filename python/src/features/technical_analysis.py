@@ -32,14 +32,16 @@ def add_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
     """
     DataFrameにテクニカル指標を追加する
 
-    Args:
+   Args:
         df (pd.DataFrame): OHLCVデータを含むDataFrame
 
     Returns:
         pd.DataFrame: テクニカル指標が追加されたDataFrame
     """
-    # RSI
-    df['rsi'] = ta.momentum.RSIIndicator(close=df['Close'], window=14, fillna=True).rsi()
+    
+    # デバッグ: カラム型と先頭データを出力
+    print("DEBUG: df.dtypes\n", df.dtypes)
+    print("DEBUG: df.head()\n", df.head())
 
     # MACD
     macd = ta.trend.MACD(close=df['Close'], window_slow=26, window_fast=12, window_sign=9, fillna=True)
@@ -53,5 +55,8 @@ def add_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
     # ATR
     df['atr'] = ta.volatility.AverageTrueRange(high=df['High'], low=df['Low'], close=df['Close'], window=14, fillna=True).average_true_range()
+
+    # RSI
+    df['rsi'] = ta.momentum.RSIIndicator(close=df['Close'], window=14, fillna=True).rsi()
 
     return df
