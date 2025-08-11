@@ -16,3 +16,7 @@ with open(CSV_PATH, encoding="utf-8") as f:
         ]
         print("実行:", " ".join(cmd))
         subprocess.run(cmd, check=True)
+
+# 全てのデータ取得が終わった後、モデル作成スクリプトを実行
+print("全データ取得完了後、モデル作成スクリプトを実行します。")
+subprocess.run(["python", "python/run_model_creation.py"], check=True)

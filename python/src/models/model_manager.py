@@ -10,7 +10,7 @@ class ModelManager:
     AIモデルの管理、学習、予測を行うクラス。
     複数のモデルタイプをサポートし、モデルの保存・ロードも管理する。
     """
-    def __init__(self, model_dir: str = "models"):
+    def __init__(self, model_dir: str = "python/models"):
         self.models: Dict[str, BaseModel] = {}
         self.model_dir = model_dir
         os.makedirs(self.model_dir, exist_ok=True)
