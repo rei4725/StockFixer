@@ -17,3 +17,5 @@ python/models/
 # OS generated files
 .DS_Store
 Thumbs.db
+*.csv
+*.joblib
