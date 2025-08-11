@@ -52,6 +52,14 @@
 
 ---
 
+## モデル予測差異上位抽出runのTips
+- モデル種別（XGBoost/LightGBM等）が複数ある場合、同一ティッカーの予想株価は案分（平均）して評価することで、モデル間のバイアスを低減できる。
+- 並列処理（ThreadPoolExecutor等）はAPI制限やcurrent_price競合バグの原因となるため、同期処理で集計する方が安定する。
+- symbolごとにcurrent_priceは最初に取得した値を固定し、以降はpred_priceのみ集約することで、race conditionを防げる。
+- 出力ファイルのカラムは「market, symbol, current_price, avg_pred_price, diff_ratio, model_count」とし、現状株価・案分予想株価・差異割合・モデル数を明示する。
+- 高速化したい場合は、対象銘柄・モデル数の絞り込みやデータ取得期間の短縮も有効。
+
+
 ## yfinanceのマルチインデックス仕様とフラット化Tips
 - yfinanceで複数銘柄やgroup_by="ticker"オプションを指定すると、DataFrameのカラムがタプル型（MultiIndex）になる。
     - 例: ('Close', 'AAPL'), ('Open', 'AAPL')
