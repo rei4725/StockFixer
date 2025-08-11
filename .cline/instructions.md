@@ -58,5 +58,14 @@
 
 ---
 
+## 指示：run_data_creation.pyで例外が発生しないように修正
+- 原文：python python/run_data_creation.py --market us --symbol AAPL --start_date 2024-01-01 --end_date 2024-01-31 の実行で例外が発生しないようにしてください
+- 要約：run_data_creation.pyの例外発生箇所を修正し、yfinanceのマルチインデックス仕様に対応
+- 対応状況：対応済み
+- 関連タスク：run_data_creation.py例外防止・yfinance仕様対応
+
+---
+
 ### 更新履歴
+- 2025-08-11 17:44：run_data_creation.py例外防止・yfinance仕様対応の指示を追加
 - 2025-08-11 16:58：株価データ特徴量拡張タスクの指示を追加

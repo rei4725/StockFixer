@@ -10,13 +10,16 @@ def main():
     parser.add_argument("--out_dir", type=str, default="python/data", help="保存先ディレクトリ")
     args = parser.parse_args()
 
-    save_stock_data_with_features(
-        market=args.market,
-        symbol=args.symbol,
-        start_date=args.start_date,
-        end_date=args.end_date,
-        out_dir=args.out_dir
-    )
+    try:
+        save_stock_data_with_features(
+            market=args.market,
+            symbol=args.symbol,
+            start_date=args.start_date,
+            end_date=args.end_date,
+            out_dir=args.out_dir
+        )
+    except Exception as e:
+        print(f"エラーが発生しました: {e}")
 
 if __name__ == "__main__":
     main()

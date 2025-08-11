@@ -18,7 +18,11 @@ def get_stock_data(ticker: str, start_date: Union[str, datetime], end_date: Unio
     """
     data = yf.download(ticker, start=start_date, end=end_date, auto_adjust=True, progress=False)
     if data.empty:
-        raise ValueError(f"No data found for ticker {ticker}")
+        return data
+    # マルチインデックス列をフラット化
+    if isinstance(data.columns, pd.MultiIndex):
+        # 例: ('Close', 'AAPL') → 'Close'
+        data.columns = [str(col[0]) for col in data.columns.values]
     return data
 
 def get_forex_data(ticker: str, start_date: Union[str, datetime], end_date: Union[str, datetime]) -> pd.DataFrame:
