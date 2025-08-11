@@ -75,6 +75,12 @@
 - data_saver.py で add_technical_indicators を呼び出し、RSI・MACD・EMA・ATR などの指標を追加した上で、全数値列のラグ特徴量を生成することで、モデル入力の情報量を増やせる。
 - 特徴量名の正規化処理も忘れずに行う。
 
+## バッチデータ生成・既存csv削除のTips
+- batch_run_data_creation.pyはmarket/symbolのみrun_data_creation.pyに渡すことでシンプルな設計にできる。
+- save_stock_data_with_featuresでstart_date, end_dateを省略可能にし、未指定時は「銘柄ごとの最古日付」「バッチ実行日時」を自動決定できる。
+- データ保存前に同一ディレクトリ内の既存csvファイルを全削除することで、常に最新データのみを保持できる。
+- データの一貫性・最新化が担保でき、運用・保守が容易になる。
+
 ## 出力ファイルパス・ファイル名設計Tips
 - データ出力時は `[market]_[symbol]` サブディレクトリを自動生成し、その中にcsvを保存することで管理性を向上させる。
 - ファイル名は `features_YYYY_MM_DD_YYYY_MM_DD.csv` 形式とし、用途（特徴量データ）と期間を明示する。
