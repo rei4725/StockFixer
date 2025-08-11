@@ -24,6 +24,18 @@
 
 ---
 
+## タスク名：モデル保存ディレクトリ分割・再帰的データ取得対応
+- 状況：完了
+- 優先度：高
+- 期限：2025-08-11
+- 関連ファイル：context.md, instructions.md, knowledge.md
+- メモ：
+  - モデル保存先を python/models/[market]_[symbol]/モデル名.joblib 形式に変更
+  - python/data配下のサブディレクトリも含めてcsvファイルを再帰的に探索
+  - サブディレクトリ名からmarket, symbolを抽出し、個別にモデル作成・保存
+  - run_model_creation.py, model_manager.py を修正
+
+
 ## タスク名：出力ファイルパス・ファイル名設計改善
 - 状況：完了
 - 優先度：中

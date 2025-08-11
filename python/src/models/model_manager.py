@@ -66,17 +66,19 @@ class ModelManager:
             raise ValueError(f"モデル '{model_name}' が見つかりません。")
         return self.models[model_name]
 
-    def train_model(self, model_name: str, X: pd.DataFrame, y: pd.Series):
+    def train_model(self, model_name: str, X: pd.DataFrame, y: pd.Series, market: str = None, symbol: str = None):
         """
         指定されたモデルを学習させる。
         Args:
             model_name (str): 学習させるモデルの名前。
             X (pd.DataFrame): 特徴量データ。
             y (pd.Series): ターゲット変数。
+            market (str, optional): 市場名。
+            symbol (str, optional): 銘柄コードやティッカー。
         """
         model = self.get_model(model_name)
         model.train(X, y)
-        self.save_model(model_name) # 学習後に自動保存
+        self.save_model(model_name, market=market, symbol=symbol) # 学習後に自動保存
 
     def predict_with_model(self, model_name: str, X: pd.DataFrame) -> pd.Series:
         """
@@ -90,25 +92,36 @@ class ModelManager:
         model = self.get_model(model_name)
         return model.predict(X)
 
-    def save_model(self, model_name: str):
+    def save_model(self, model_name: str, market: str = None, symbol: str = None):
         """
         指定されたモデルを保存する。
         Args:
             model_name (str): 保存するモデルの名前。
+            market (str, optional): 市場名。
+            symbol (str, optional): 銘柄コードやティッカー。
         """
         model = self.get_model(model_name)
-        model_path = os.path.join(self.model_dir, f"{model_name}.joblib")
+        if market and symbol:
+            save_dir = os.path.join(self.model_dir, f"{market}_{symbol}")
+            os.makedirs(save_dir, exist_ok=True)
+            model_path = os.path.join(save_dir, f"{model_name}.joblib")
+        else:
+            model_path = os.path.join(self.model_dir, f"{model_name}.joblib")
         model.save_model(model_path)
 
-    def load_model(self, model_name: str, model_type: str = None):
+    def load_model(self, model_name: str, model_type: str = None, market: str = None, symbol: str = None):
         """
         指定されたモデルをロードする。
         Args:
             model_name (str): ロードするモデルの名前。
             model_type (str, optional): ロードするモデルのタイプ。
-                                        指定しない場合、既存のモデルタイプから推測を試みる。
+            market (str, optional): 市場名。
+            symbol (str, optional): 銘柄コードやティッカー。
         """
-        model_path = os.path.join(self.model_dir, f"{model_name}.joblib")
+        if market and symbol:
+            model_path = os.path.join(self.model_dir, f"{market}_{symbol}", f"{model_name}.joblib")
+        else:
+            model_path = os.path.join(self.model_dir, f"{model_name}.joblib")
         
         if model_name in self.models:
             model_instance = self.models[model_name]

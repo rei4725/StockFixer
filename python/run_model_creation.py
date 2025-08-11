@@ -4,24 +4,28 @@ from src.features.technical_analysis import create_basic_lag_features
 from src.data.data_loader import get_stock_data
 import os
 
-def train_and_test_model(model_manager, model_type, model_name, X, y):
+def train_and_test_model(model_manager, model_type, model_name, X, y, market=None, symbol=None):
     try:
         print(f"モデル '{model_name}' ({model_type}) を作成中...")
         model = model_manager.create_model(model_type, model_name)
         print(f"モデル '{model_name}' の作成に成功しました。")
 
         print(f"モデル '{model_name}' を学習中...")
-        model_manager.train_model(model_name, X, y)
+        model_manager.train_model(model_name, X, y, market=market, symbol=symbol)
         print(f"モデル '{model_name}' の学習と保存に成功しました。")
 
-        model_path = os.path.join(model_manager.model_dir, f"{model_name}.joblib")
+        # モデルファイルパスをmarket, symbol付きで確認
+        if market and symbol:
+            model_path = os.path.join(model_manager.model_dir, f"{market}_{symbol}", f"{model_name}.joblib")
+        else:
+            model_path = os.path.join(model_manager.model_dir, f"{model_name}.joblib")
         if os.path.exists(model_path):
             print(f"モデルファイルが '{model_path}' に存在することを確認しました。")
         else:
             print(f"エラー: モデルファイル '{model_path}' が見つかりません。")
 
         print(f"モデル '{model_name}' をロードしてテスト中...")
-        loaded_model = model_manager.load_model(model_name, model_type)
+        loaded_model = model_manager.load_model(model_name, model_type, market=market, symbol=symbol)
         print(f"モデル '{model_name}' のロードに成功しました。")
         
         if not X.empty:
@@ -47,45 +51,53 @@ def run_model_creation():
     import re
     from src.utils.csv_io import load_dataframe_from_csv
 
-    data_dir = os.path.join(os.path.dirname(__file__), "..", "data")
-    csv_files = glob.glob(os.path.join(data_dir, "*.csv"))
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    data_dir = os.path.abspath(os.path.join(script_dir, "data"))
+    csv_files = glob.glob(os.path.join(data_dir, "**", "*.csv"), recursive=True)
+
     if not csv_files:
         print("データフォルダにCSVファイルがありません。")
         return
 
     print(f"データフォルダ内のCSVファイル: {csv_files}")
-    df_list = []
-    for f in csv_files:
-        df = load_dataframe_from_csv(f)
-        if df is not None:
-            df_list.append(df)
-    if not df_list:
-        print("有効なデータがありません。")
-        return
-
-    all_data = pd.concat(df_list, ignore_index=True)
-    print(f"全データ結合後のshape: {all_data.shape}")
-
-    # y列は「最後の1列」と仮定
-    X = all_data.iloc[:, :-1]
-    y = all_data.iloc[:, -1]
-
-    # 特徴量名の確認
-    print("特徴量名一覧:", list(X.columns))
-
-    # 特殊文字を含む特徴量名を正規化（LightGBM対策）
-    def normalize_col(col):
-        return re.sub(r'[^0-9a-zA-Z_]', '_', col)
-    X.columns = [normalize_col(str(c)) for c in X.columns]
-
-    # ModelManagerのインスタンスを作成
     model_manager = ModelManager()
 
-    # XGBoostモデル
-    train_and_test_model(model_manager, "XGBoostModel", "StockXGBoostModel", X, y)
+    def extract_market_symbol(filename):
+        # サブディレクトリ名（例: us_DIS）からmarket, symbolを取得
+        dir_name = os.path.basename(os.path.dirname(filename))
+        if "_" in dir_name:
+            market, symbol = dir_name.split("_", 1)
+            return market, symbol
+        # フォールバック: ファイル名からも試みる
+        base = os.path.basename(filename)
+        parts = base.split('_')
+        if len(parts) >= 2:
+            return parts[0], parts[1]
+        return "unknown", "unknown"
 
-    # LightGBMモデル
-    train_and_test_model(model_manager, "LightGBMModel", "StockLightGBMModel", X, y)
+    for f in csv_files:
+        df = load_dataframe_from_csv(f)
+        if df is None or df.empty:
+            print(f"{f} のデータが無効です。")
+            continue
+
+        market, symbol = extract_market_symbol(f)
+        print(f"処理中: market={market}, symbol={symbol}, file={f}")
+
+        X = df.iloc[:, :-1]
+        y = df.iloc[:, -1]
+
+        print("特徴量名一覧:", list(X.columns))
+
+        def normalize_col(col):
+            return re.sub(r'[^0-9a-zA-Z_]', '_', col)
+        X.columns = [normalize_col(str(c)) for c in X.columns]
+
+        # XGBoostモデル
+        train_and_test_model(model_manager, "XGBoostModel", "StockXGBoostModel", X, y, market, symbol)
+
+        # LightGBMモデル
+        train_and_test_model(model_manager, "LightGBMModel", "StockLightGBMModel", X, y, market, symbol)
 
     print("スクリプトを終了します。")
 
