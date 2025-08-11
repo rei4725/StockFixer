@@ -1,0 +1,10 @@
+{
+  "configurations": [
+    {
+      "type": "debugpy",
+      "request": "launch",
+      "name": "Launch sample_run.py",
+      "program": ""
+    }
+  ]
+}

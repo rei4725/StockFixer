@@ -1,0 +1,8 @@
+Flask
+yfinance
+scikit-learn
+lightgbm
+xgboost
+requests
+beautifulsoup4
+selenium
