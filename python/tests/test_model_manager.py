@@ -11,8 +11,8 @@ sys.modules['python.src.models.xgboost_model'] = MagicMock()
 sys.modules['python.src.models.lightgbm_model'] = MagicMock()
 
 # モック後にModelManagerをインポート
-from python.src.models.model_manager.model_manager import ModelManager
-from python.src.models.base_model.base_model import BaseModel
+from python.src.models.model_manager import ModelManager
+from python.src.models.base_model import BaseModel
 
 # BaseModelのモッククラス
 class MockBaseModel(BaseModel):

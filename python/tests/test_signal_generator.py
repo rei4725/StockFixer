@@ -1,7 +1,10 @@
 import unittest
 import pandas as pd
 import numpy as np
-from python.src.strategy.signal_generator.signal_generator import SignalGenerator
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../src")))
+from strategy.signal_generator.signal_generator import SignalGenerator
 
 class TestSignalGenerator(unittest.TestCase):
 

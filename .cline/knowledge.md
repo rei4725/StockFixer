@@ -1,5 +1,18 @@
 # Tips
 
+## Discord Bot `/Next10` コマンド運用Tips
+- `/Next10` コマンドで python/results/top10_diff_stocks.csv を参照し、内容をDiscordへ送信する実装例あり
+- 計算処理は外部スクリプトで事前実行し、BotはCSVのみを参照することで応答高速化
+- CSVの絶対パス参照でパス不整合を防止
+- 出力先ディレクトリ変更時はスクリプト・Bot両方のパス修正が必要
+- Discordメッセージ長制限（2000文字）に注意し、分割送信処理を実装
+
+## Discord連携Tips
+- PythonからDiscord通知を行う場合はWebhookを利用するのが簡便
+- Webhook URLは環境変数で管理し、ハードコーディングしない
+- 送信はrequests.postでOK、成功時は204/200、失敗時は例外処理で握りつぶさずログ出力
+- 重要通知はtry-exceptでAPI本体の処理と分離することで障害伝播を防止
+
 ## ファイル・ディレクトリ運用
 - 命名は一貫性を重視し、スネークケースを推奨（例: user_profile.md）
 - 拡張子は用途ごとに.md, .json, .yaml等を使い分ける
@@ -47,3 +60,11 @@
 - テストやスクリプトのパス修正
 
 ---
+
+## バックテスト・パスエラー対応Tips
+- run_backtest_sample.py実行時、sys.path.appendで絶対パス/相対パスを明示的に追加すること
+- data_loader.pyのimportはfrom data_loader import ...形式で直接指定
+- python/src/data/配下のimport時はsys.pathにpython/src/dataを追加
+- モジュール名・ファイル名の重複やパスの曖昧さに注意
+- 特徴量CSVにDate列がない場合はparse_dates, index_col指定を外す
+- テスト・スクリプトのパス設計を統一し、importエラーを防止

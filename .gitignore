@@ -1,4 +1,6 @@
 # C#
+# .envファイルを全て無視
+*.env
 [Bb]in/
 [Oo]bj/
 .vs/
@@ -18,4 +20,3 @@ python/models/
 .DS_Store
 Thumbs.db
 *.csv
-*.joblib
