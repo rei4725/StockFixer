@@ -19,7 +19,7 @@ def predict_single_stock(market: str, symbol: str, model_types=None, lookback_da
         if not os.path.exists(model_path):
             continue
         try:
-            df = data_loader.get_stock_data(symbol, pd.Timestamp.today() - pd.Timedelta(days=lookback_days), pd.Timestamp.today())
+            df = data_loader.get_stock_data(market, symbol, pd.Timestamp.today() - pd.Timedelta(days=lookback_days), pd.Timestamp.today())
             if df.empty or "Close" not in df.columns:
                 print(f"[{symbol}] 株価データ取得失敗")
                 continue

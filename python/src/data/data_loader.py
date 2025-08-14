@@ -38,27 +38,33 @@ def get_stock_data_from_file(market: str, symbol: str, start_date: Union[str, da
     return df
 
 def get_stock_data(
+    market: str,
     ticker: str,
     start_date: Union[str, datetime],
     end_date: Union[str, datetime]
 ) -> pd.DataFrame:
     """
-    指定されたティッカーの株価データを取得する
+    指定されたマーケット・ティッカーの株価データを取得する
 
     Args:
-        ticker (str): ティッカーシンボル (例: "AAPL")
+        market (str): 市場名（例: "us", "jp"）
+        ticker (str): ティッカーシンボル (例: "AAPL", "6146")
         start_date (Union[str, datetime]): データ取得開始日 (YYYY-MM-DD)
         end_date (Union[str, datetime]): データ取得終了日 (YYYY-MM-DD)
 
     Returns:
         pd.DataFrame: 株価データ (OHLCV)
     """
-    data = yf.download(ticker, start=start_date, end=end_date, auto_adjust=True, progress=False)
+    # マーケットに応じてtickerを変換
+    if market == "jp":
+        yf_ticker = f"{ticker}.T"
+    else:
+        yf_ticker = ticker
+    data = yf.download(yf_ticker, start=start_date, end=end_date, auto_adjust=True, progress=False)
     if data.empty:
         return data
     # マルチインデックス列をフラット化
     if isinstance(data.columns, pd.MultiIndex):
-        # 例: ('Close', 'AAPL') → 'Close'
         data.columns = [str(col[0]) for col in data.columns.values]
     return data
 
@@ -86,7 +92,7 @@ def get_stock_data_auto(
         return get_stock_data_from_file(market, symbol, start_date, end_date)
     elif source == "api":
         ticker = symbol if market == "" else f"{symbol}"
-        return get_stock_data(ticker, start_date, end_date)
+        return get_stock_data(market, ticker, start_date, end_date)
     else:
         raise ValueError(f"sourceは'file'または'api'のみ対応: {source}")
 

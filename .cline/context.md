@@ -13,3 +13,8 @@
 - 目的：Discord Botの出力仕様（銘柄テーブル）を部品化し、複数機能で統一的に利用できるようにする
 - 制約：dfの中身・列構成は完全に統一、convert_df_for_discord関数で一元管理
 - 関連：python/src/api/discord_bot.py, .cline/knowledge.md, .cline/instructions.md
+
+## プロジェクト：get_stock_data引数追加・関連修正
+- 目的：API/モデル/データ取得系の仕様統一と柔軟な市場対応（日本株・米国株等）
+- 制約：既存呼び出し箇所の引数変更が必要
+- 関連：python/src/data/data_loader.py, .cline/knowledge.md, .cline/instructions.md

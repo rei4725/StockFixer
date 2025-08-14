@@ -20,7 +20,7 @@ def save_stock_data_with_features(
     # start_date, end_date自動決定
     if start_date is None or end_date is None:
         try:
-            df_all = get_stock_data(symbol, "1900-01-01", datetime.now().strftime("%Y-%m-%d"))
+            df_all = get_stock_data(market, symbol, "1900-01-01", datetime.now().strftime("%Y-%m-%d"))
             if df_all is None or df_all.empty:
                 print(f"{symbol} のデータが取得できませんでした。")
                 return
@@ -40,7 +40,7 @@ def save_stock_data_with_features(
     # 他市場は必要に応じて拡張
 
     print(f"データ取得: market={market}, symbol={symbol}, ticker={ticker}, {start_date}～{end_date}")
-    df = get_stock_data(ticker, start_date, end_date)
+    df = get_stock_data(market, ticker, start_date, end_date)
     if df is None or df.empty:
         print("データが取得できませんでした。")
         return

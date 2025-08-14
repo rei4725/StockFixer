@@ -36,6 +36,7 @@ def generate_signal():
     """
     data = request.get_json()
     symbol = data.get('symbol')
+    market = data.get('market', 'us')
     start_date_str = data.get('start_date')
     end_date_str = data.get('end_date')
 
@@ -50,7 +51,7 @@ def generate_signal():
 
     try:
         # 1. データのロード
-        df = get_stock_data(symbol, start_date_str, end_date_str)
+        df = get_stock_data(market, symbol, start_date_str, end_date_str)
         if df.empty:
             return jsonify({"message": f"No data found for {symbol} from {start_date_str} to {end_date_str}."}), 404
 

@@ -38,3 +38,14 @@
   - df変換部品化（convert_df_for_discord）
   - 出力仕様「シンボル 現在値 予想終値 予想変化率」に統一
   - テスト検証済み
+
+## タスク名：get_stock_data引数追加・関連修正
+- 状況：進行中
+- 優先度：高
+- 期限：2025-08-14
+- 関連ファイル：context.md, instructions.md, knowledge.md
+- メモ：
+  - market引数追加
+  - 呼び出し箇所の機械的修正（data_saver.py, data_loader.py, predict_single_stock.py, api_server.py, test_data_loader.py）
+  - テスト修正・API/モデル/データ取得系の対応
+  - 既存機能への影響確認
