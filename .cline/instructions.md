@@ -15,3 +15,9 @@
 - 要約：/Next10コマンドでpython/results/top10_diff_stocks.csvを参照しDiscordへ送信する機能を追加
 - 対応状況：対応済み
 - 関連タスク：discord_bot.pyの/Next10コマンド機能改修
+
+## 指示：discord出力仕様統一・部品化
+- 原文：dfの中身は全く同じであるとして問題ない、列操作の部分も共通化して、「 シンボル   現在値  予想終値 予想変化率 」が出力される形に統一して
+- 要約：convert_df_for_discord関数でdf変換・出力仕様を統一
+- 対応状況：対応済み
+- 関連タスク：discord出力仕様統一・部品化

@@ -61,6 +61,13 @@
 
 ---
 
+## Discord出力仕様統一Tips
+- DataFrameをDiscord向けに出力する場合はconvert_df_for_discord関数で部品化・統一する
+- 列名・順序は「シンボル」「現在値」「予想終値」「予想変化率」に統一
+- 変化率は (予想終値-現在値)/現在値 で計算し、有効数字2桁のパーセント形式で出力
+- 値段は少数第3位で切り捨て
+- どちらの機能でも同じ部品を使うことで保守性・再利用性が向上
+
 ## バックテスト・パスエラー対応Tips
 - run_backtest_sample.py実行時、sys.path.appendで絶対パス/相対パスを明示的に追加すること
 - data_loader.pyのimportはfrom data_loader import ...形式で直接指定

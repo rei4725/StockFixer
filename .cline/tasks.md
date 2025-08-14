@@ -28,3 +28,13 @@
   - /Next10コマンドでpython/results/top10_diff_stocks.csvを参照しDiscordへ送信
   - 出力先ディレクトリ・パスの修正対応済み
   - 計算処理は外部スクリプトで事前実行
+
+## タスク名：discord出力仕様統一・部品化
+- 状況：完了
+- 優先度：高
+- 期限：2025-08-14
+- 関連ファイル：context.md, instructions.md, knowledge.md
+- メモ：
+  - df変換部品化（convert_df_for_discord）
+  - 出力仕様「シンボル 現在値 予想終値 予想変化率」に統一
+  - テスト検証済み

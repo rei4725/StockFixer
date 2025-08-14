@@ -1,10 +1,11 @@
+import glob
 import os
 import sys
 import pandas as pd
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
-from src.utils.df_to_string import df_to_pretty_string
+from discord.utils import escape_markdown
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_BOT_TOKEN") 
@@ -13,17 +14,129 @@ INTENTS.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=INTENTS)
 
+def get_top10_diff_stocks_df(csv_path: str) -> pd.DataFrame:
+    if not os.path.exists(csv_path):
+        return pd.DataFrame()  # 空のDataFrameを返す
+    df = pd.read_csv(csv_path)
+    return df
+
+def convert_df_for_discord(df: pd.DataFrame) -> pd.DataFrame:
+    import numpy as np
+    # 列名変換・順序統一
+    columns_map = {
+        "symbol": "シンボル",
+        "current_price": "現在値",
+        "avg_pred_price": "予想終値",
+        "diff_ratio": "予想変化率",
+        "予想値": "予想終値"
+    }
+    col_order = ["シンボル", "現在値", "予想終値", "予想変化率"]
+    df = df.rename(columns=columns_map)
+    # 予想変化率がなければ計算
+    if "現在値" in df.columns and "予想終値" in df.columns and "予想変化率" not in df.columns:
+        try:
+            df["予想変化率"] = (df["予想終値"].astype(float) - df["現在値"].astype(float)) / df["現在値"].astype(float)
+        except Exception:
+            df["予想変化率"] = ""
+    # 数値列変換
+    if "現在値" in df.columns:
+        df["現在値"] = df["現在値"].apply(lambda x: np.floor(float(x)*1000)/1000 if pd.notnull(x) else x)
+    if "予想終値" in df.columns:
+        df["予想終値"] = df["予想終値"].apply(lambda x: np.floor(float(x)*1000)/1000 if pd.notnull(x) else x)
+    if "予想変化率" in df.columns:
+        def format_percent(val):
+            try:
+                v = float(val)
+                return f"{v*100:.2g}%"
+            except:
+                return val
+        df["予想変化率"] = df["予想変化率"].apply(format_percent)
+    # 列順並べ替え
+    df = df[[c for c in col_order if c in df.columns]]
+    return df
+
 def get_top10_diff_stocks_message(csv_path: str) -> str:
     if not os.path.exists(csv_path):
-        return f"結果CSVが見つかりませんでした。\nパス: {csv_path}"
-    df = pd.read_csv(csv_path)
+        return ""
+    df = get_top10_diff_stocks_df(csv_path)
+    if df.empty:
+        return ""
+    df = convert_df_for_discord(df)
+    table_text = df.to_string(index=False)
+    return table_text
+
+async def handle_next10_command(message):
+    results_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../results"))
+    csv_files = glob.glob(os.path.join(results_dir, "*top10_diff_stocks*.csv"))
+    if not csv_files:
+        await message.channel.send(
+            escape_markdown("該当する結果CSVが見つかりませんでした。"),
+            allowed_mentions=None
+        )
+        return
+    csv_files.sort(reverse=True)
+    csv_path = csv_files[0]
     filename = os.path.basename(csv_path)
-    header = f"=== 差異割合上位10銘柄 ({filename}) ==="
-    return df_to_pretty_string(df, header=header)
+    table_text = get_top10_diff_stocks_message(csv_path)
+    if not table_text:
+        await message.channel.send(
+            escape_markdown("結果が見つかりませんでした。"),
+            allowed_mentions=None
+        )
+        return
+    msg = f"=== 差異割合上位10銘柄 ({filename}) ===\n```text\n{table_text}\n```"
+    await message.channel.send(msg)
 
 @bot.event
 async def on_ready():
     print(f"Bot起動完了: {bot.user}")
+
+def get_watchlist_prediction_text():
+    import csv
+    from src.models.predict_single_stock import predict_single_stock
+
+    WATCHLIST_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../監視対象.csv"))
+    rows = []
+    try:
+        with open(WATCHLIST_PATH, encoding="utf-8") as f:
+            reader = csv.reader(f)
+            for row in reader:
+                if len(row) < 2:
+                    continue
+                market, symbol = row[0], row[1]
+                result_df = predict_single_stock(market, symbol)
+                if result_df is None or result_df.empty:
+                    rows.append([symbol, "-", "-", "-"])
+                else:
+                    r = result_df.iloc[0]
+                    try:
+                        diff_ratio = (float(r["avg_pred_price"]) - float(r["current_price"])) / float(r["current_price"])
+                    except Exception:
+                        diff_ratio = "-"
+                    rows.append([
+                        str(r["symbol"]),
+                        f'{r["current_price"]:.2f}',
+                        f'{r["avg_pred_price"]:.2f}',
+                        diff_ratio
+                    ])
+    except Exception as e:
+        return f"[エラー] 監視対象予測処理で例外: {e}"
+
+    # DataFrame化して共通変換部品で整形
+    df = pd.DataFrame(rows, columns=["symbol", "current_price", "avg_pred_price", "diff_ratio"])
+    df = convert_df_for_discord(df)
+    table_text = df.to_string(index=False)
+    return table_text
+
+async def handle_watchnext_command(message):
+    text = get_watchlist_prediction_text()
+    # Discordメッセージ長制限対応
+    max_length = 1900
+    if len(text) > max_length:
+        text = text[:max_length]
+
+    msg = f"=== 監視対象銘柄 ===\n```text\n{text}\n```"
+    await message.channel.send(msg)
 
 @bot.event
 async def on_message(message):
@@ -32,17 +145,21 @@ async def on_message(message):
             return
 
         if message.content == "/Next10":
-            csv_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../results/top10_diff_stocks.csv"))
-            msg = get_top10_diff_stocks_message(csv_path)
-            await message.channel.send(f"```{msg}```")
+            await handle_next10_command(message)
+        elif message.content == "/WatchNext":
+            await handle_watchnext_command(message)
         else:
-            # 受信したメッセージ内容をそのまま返信
-            await message.channel.send(f"受信: {message.content}")
+            await message.channel.send(
+                escape_markdown(f"受信: {message.content}"),
+                allowed_mentions=None
+            )
 
-        # コマンド処理も有効化
         await bot.process_commands(message)
     except Exception as e:
-        await message.channel.send("エラーが発生しました")
+        await message.channel.send(
+            escape_markdown("エラーが発生しました"),
+            allowed_mentions=None
+        )
         print(f"Error in on_message: {e}")
 
 if __name__ == "__main__":
