@@ -21,12 +21,14 @@ class TestGetTop10DiffStocksMessage(unittest.TestCase):
             csv_path = os.path.join(tmpdir, "test.csv")
             df.to_csv(csv_path, index=False)
             msg = get_top10_diff_stocks_message(csv_path)
+            print(msg)
             self.assertIn("AAPL", msg)
             self.assertIn("SONY", msg)
             self.assertIn("=== 差異割合上位10銘柄", msg)
 
     def test_not_found(self):
         msg = get_top10_diff_stocks_message("not_exist.csv")
+        print(msg)
         self.assertIn("結果CSVが見つかりませんでした", msg)
 
 if __name__ == "__main__":

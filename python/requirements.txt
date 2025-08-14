@@ -1,8 +1,8 @@
 Flask
+tabulate
 python-dotenv
 yfinance
 scikit-learn
 lightgbm
 xgboost
 requests
-beautifulsoup4
