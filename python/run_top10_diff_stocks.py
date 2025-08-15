@@ -39,21 +39,32 @@ def main():
 
     if output_rows:
         df_result = pd.concat(output_rows, ignore_index=True)
-        df_result = df_result.sort_values("diff_ratio", ascending=False).head(10)
-        # 共通で使うカラムのみ抽出
         display_columns = ["market", "symbol", "current_price", "avg_pred_price", "diff_ratio", "model_count"]
-        df_display = df_result[display_columns]
 
         now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_path = f"python/results/{now_str}_top10_diff_stocks.csv"
+        result_dir = f"python/results/{now_str}"
+        os.makedirs(result_dir, exist_ok=True)
 
-        print(df_to_pretty_string(
-            df_display,
-            header=f"=== 差異割合上位10銘柄（モデル案分）=== 実行日時: {now_str} / ファイル: {output_path}"
-        ))
-        # 出力先を python/results フォルダに変更
-        os.makedirs("python/results", exist_ok=True)
-        df_display.to_csv(output_path, index=False)
+        for market, df_market in df_result.groupby("market"):
+            # Top10
+            df_top10 = df_market.sort_values("diff_ratio", ascending=False).head(10)
+            df_top10_display = df_top10[display_columns]
+            top10_path = f"{result_dir}/{market}_top10_diff_stocks.csv"
+            print(df_to_pretty_string(
+                df_top10_display,
+                header=f"=== {market} 差異割合上位10銘柄 === 実行日時: {now_str} / ファイル: {top10_path}"
+            ))
+            df_top10_display.to_csv(top10_path, index=False)
+
+            # ワースト10
+            df_worst10 = df_market.sort_values("diff_ratio", ascending=True).head(10)
+            df_worst10_display = df_worst10[display_columns]
+            worst10_path = f"{result_dir}/{market}_worst10_diff_stocks.csv"
+            print(df_to_pretty_string(
+                df_worst10_display,
+                header=f"=== {market} 差異割合ワースト10銘柄 === 実行日時: {now_str} / ファイル: {worst10_path}"
+            ))
+            df_worst10_display.to_csv(worst10_path, index=False)
     else:
         print("有効な結果がありませんでした。")
 

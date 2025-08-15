@@ -65,27 +65,65 @@ def get_top10_diff_stocks_message(csv_path: str) -> str:
     table_text = df.to_string(index=False)
     return table_text
 
-async def handle_next10_command(message):
-    results_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../results"))
-    csv_files = glob.glob(os.path.join(results_dir, "*top10_diff_stocks*.csv"))
-    if not csv_files:
+import re
+
+async def handle_forecast_command(message):
+    # 最新の python/results/{実行日時}/ フォルダを取得
+    results_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../results"))
+    subdirs = [d for d in os.listdir(results_root) if os.path.isdir(os.path.join(results_root, d))]
+    # 実行日時形式のサブフォルダのみ対象
+    subdirs = [d for d in subdirs if re.match(r"\d{8}_\d{6}", d)]
+    if not subdirs:
         await message.channel.send(
-            escape_markdown("該当する結果CSVが見つかりませんでした。"),
+            escape_markdown("結果フォルダが見つかりませんでした。"),
             allowed_mentions=None
         )
         return
-    csv_files.sort(reverse=True)
-    csv_path = csv_files[0]
-    filename = os.path.basename(csv_path)
-    table_text = get_top10_diff_stocks_message(csv_path)
-    if not table_text:
+    subdirs.sort(reverse=True)
+    latest_dir = os.path.join(results_root, subdirs[0])
+
+    # marketごとのtop10/worst10 csvを取得
+    top10_files = glob.glob(os.path.join(latest_dir, "*_top10_diff_stocks.csv"))
+    worst10_files = glob.glob(os.path.join(latest_dir, "*_worst10_diff_stocks.csv"))
+    if not top10_files and not worst10_files:
         await message.channel.send(
-            escape_markdown("結果が見つかりませんでした。"),
+            escape_markdown("結果CSVが見つかりませんでした。"),
             allowed_mentions=None
         )
         return
-    msg = f"=== 差異割合上位10銘柄 ({filename}) ===\n```text\n{table_text}\n```"
-    await message.channel.send(msg)
+
+    # market名抽出
+    def get_market_from_filename(filename):
+        m = re.match(r"(.+)_top10_diff_stocks\.csv", filename)
+        if m:
+            return m.group(1)
+        m = re.match(r"(.+)_worst10_diff_stocks\.csv", filename)
+        if m:
+            return m.group(1)
+        return filename
+
+    # Top10送信
+    for csv_path in sorted(top10_files):
+        market = get_market_from_filename(os.path.basename(csv_path))
+        table_text = get_top10_diff_stocks_message(csv_path)
+        if not table_text:
+            continue
+        msg = f"=== {market} 差異割合上位10銘柄 ===\n```text\n{table_text}\n```"
+        # Discordメッセージ長制限対応
+        max_length = 1900
+        for i in range(0, len(msg), max_length):
+            await message.channel.send(msg[i:i+max_length])
+
+    # ワースト10送信
+    for csv_path in sorted(worst10_files):
+        market = get_market_from_filename(os.path.basename(csv_path))
+        table_text = get_top10_diff_stocks_message(csv_path)
+        if not table_text:
+            continue
+        msg = f"=== {market} 差異割合ワースト10銘柄 ===\n```text\n{table_text}\n```"
+        max_length = 1900
+        for i in range(0, len(msg), max_length):
+            await message.channel.send(msg[i:i+max_length])
 
 @bot.event
 async def on_ready():
@@ -144,8 +182,8 @@ async def on_message(message):
         if message.author.bot:
             return
 
-        if message.content == "/Next10":
-            await handle_next10_command(message)
+        if message.content == "/forecast":
+            await handle_forecast_command(message)
         elif message.content == "/WatchNext":
             await handle_watchnext_command(message)
         else:

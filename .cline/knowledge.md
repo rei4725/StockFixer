@@ -98,6 +98,15 @@
 - モデル保存パスは python/models/[market]_[symbol]/モデル名.joblib で統一
 - 既存モデルがあれば従来通りロードして予測
 
+## マーケット別ランキング・DiscordBot連携Tips
+- run_top10_diff_stocks.pyはマーケット毎にTop10・ワースト10を抽出し、実行日時サブフォルダにmarket別でCSV保存
+- DiscordBotは/forecastコマンドで最新結果フォルダから全market分をヘッダー付きで送信
+- 2000文字超のメッセージは分割送信でDiscord制限に対応
+- ファイル命名は[market]_top10_diff_stocks.csv, [market]_worst10_diff_stocks.csvで統一
+- サブフォルダはYYYYMMDD_HHMMSS形式で管理し、最新フォルダを自動判定
+- DataFrame表示はconvert_df_for_discordで「シンボル 現在値 予想終値 予想変化率」に統一
+- .cline運用ルール・Tips・命名・パス設計を反映
+
 ## パス・ティッカー補正のutils化Tips
 - data_path_utils.pyにget_data_subdir, get_models_subdir, get_ticker等を実装
 - ファイルパス生成・ティッカー補正処理を一元化

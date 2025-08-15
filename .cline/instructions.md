@@ -46,6 +46,12 @@
 - 対応状況：対応済み
 - 関連タスク：predict_single_stock自動モデル生成・日本株対応
 
+## 指示：マーケット別Top10・ワースト10出力＆DiscordBot連携
+- 原文：run_top10_diff_stocks.pyをマーケット毎にランキング出力、ワースト10も出力。discord_bot.pyのコマンドを/forecastに変更し、全マーケットのTop10・ワースト10を送信する仕様にしてください
+- 要約：run_top10_diff_stocks.pyをマーケット毎にTop10・ワースト10抽出＆サブフォルダ保存に改修。discord_bot.pyを/forecastコマンドで全マーケット結果送信仕様に改修
+- 対応状況：対応済み
+- 関連タスク：マーケット別Top10・ワースト10出力＆DiscordBot連携
+
 ## 指示：パス・ティッカー補正のutils化
 - 原文：ファイルパス・ティッカー補正処理をutilsに切り出し、各所で利用するようリファクタリング
 - 要約：data_path_utils.pyにget_data_subdir, get_models_subdir, get_ticker等を実装し、各データ・モデル操作で利用
