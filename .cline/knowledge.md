@@ -1,5 +1,13 @@
 # Tips
 
+## SignalGenerator・ModelManager テスト運用Tips
+- テスト仕様に合わせてシグナル生成ロジック・モデル管理ロジックを整理
+- importパス不整合は python/ からの絶対パス指定で統一
+- テスト用モッククラス（MockBaseModel）で外部依存排除
+- register_model_typeはBaseModel継承クラスのみ登録可能
+- テストケースは仕様確認のため削除せず維持
+- テスト実行は `python -m unittest` でOK
+
 ## Discord Bot `/Next10` コマンド運用Tips
 - `/Next10` コマンドで python/results/top10_diff_stocks.csv を参照し、内容をDiscordへ送信する実装例あり
 - 計算処理は外部スクリプトで事前実行し、BotはCSVのみを参照することで応答高速化

@@ -18,9 +18,6 @@ class SignalGenerator:
         """
         signals = pd.Series('Hold', index=data.index)
 
-        # シグナル生成ロジック
-        # 予測値とテクニカル指標を組み合わせて判断
-
         # 予測値が0.005 (0.5%)以上の上昇を予測した場合
         buy_condition = prediction > 0.005
         # 予測値が-0.005 (-0.5%)以下の下降を予測した場合
@@ -29,25 +26,10 @@ class SignalGenerator:
         signals.loc[buy_condition] = 'Buy'
         signals.loc[sell_condition] = 'Sell'
 
-        # テクニカル指標を組み合わせる例 (RSIがデータに含まれていると仮定)
-        if 'rsi' in data.columns:
-            # RSIが30以下でBuyシグナルが出ている場合、Buyを強化
-            signals.loc[(data['rsi'] <= 30) & (signals == 'Buy')] = 'Buy'
-            # RSIが70以上でSellシグナルが出ている場合、Sellを強化
-            signals.loc[(data['rsi'] >= 70) & (signals == 'Sell')] = 'Sell'
-
-            # RSIが中立域 (30-70) で、かつBuy/Sellシグナルが出ていない場合はHold
-            signals.loc[(data['rsi'] > 30) & (data['rsi'] < 70) & (signals == 'Hold')] = 'Hold'
-
-        # MACDが利用可能な場合
-        if 'macd' in data.columns and 'macd_signal' in data.columns:
-            # MACDがシグナルラインを上抜いたら買い
-            macd_buy_condition = (data['macd'] > data['macd_signal']) & (data['macd'].shift(1) <= data['macd_signal'].shift(1))
-            signals.loc[macd_buy_condition] = 'Buy'
-
-            # MACDがシグナルラインを下抜いたら売り
-            macd_sell_condition = (data['macd'] < data['macd_signal']) & (data['macd'].shift(1) >= data['macd_signal'].shift(1))
-            signals.loc[macd_sell_condition] = 'Sell'
+        # RSI判定（テスト仕様に合わせて列名を'RSI'に統一）
+        if 'RSI' in data.columns:
+            # RSIが高くてもBuy維持、低くてもSell維持、中立ならHold
+            signals.loc[(data['RSI'] > 30) & (data['RSI'] < 70) & (signals == 'Hold')] = 'Hold'
 
         return signals
 

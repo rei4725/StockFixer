@@ -1,8 +1,14 @@
 ## プロジェクト：CuteStock - 株式自動売買システム
 - 目的：Pythonによる戦略ロジックとAI予測、C#による注文実行とUI表示を組み合わせたリアルタイム自動売買システムを構築し、利益を最大化する。
-- 制約：
+- 制約：テスト仕様に合わせてSignalGenerator・ModelManagerのロジック整理
 - 関連：
   - PROJECT_OVERVIEW.md を参照する
+  - .cline/knowledge.md テスト運用Tips参照
+
+## プロジェクト：SignalGenerator・ModelManager テスト運用
+- 目的：テスト仕様に準拠したシグナル生成・モデル管理の品質担保
+- 制約：テストケースは仕様確認のため削除せず維持
+- 関連：python/src/strategy/signal_generator.py, python/src/models/model_manager.py, .cline/knowledge.md
 
 ## プロジェクト：Discord Bot `/Next10` コマンド機能
 - 目的：Discord上で `/Next10` コマンドを受信した際、python/results/top10_diff_stocks.csv の内容を即時返信し、株式AI予測の上位10銘柄情報を共有する

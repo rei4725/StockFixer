@@ -1,11 +1,12 @@
 {
     "python.testing.unittestArgs": [
-        "-v",
+        "discover",
         "-s",
-        "./python",
+        "python/tests",
         "-p",
-        "*test*.py"
+        "test_*.py"
     ],
+    "python.testing.unittestEnabled": true,
     "python.testing.pytestEnabled": false,
-    "python.testing.unittestEnabled": true
+    "python.testing.unittestTestDiscoveryPattern": "python/tests/test_*.py"
 }

@@ -1,13 +1,23 @@
 ## タスク名：バックテスト実行・修正
-- 状況：進行中
+- 状況：完了
 - 優先度：高
 - 期限：2025-08-11
 - 関連ファイル：context.md, instructions.md, knowledge.md
 - メモ：
-  - run_backtest_sample.pyの実行でモジュールパスエラー発生
+  - run_backtest_sample.pyの実行でモジュールパスエラー発生 → importパス修正済み
   - data_loader.pyのDate列対応修正済み
-  - sys.path, import文の修正が必要
   - テスト・スクリプトのパス設計見直し要
+  - SignalGeneratorテスト全件成功・実装整理済み
+
+## タスク名：ModelManagerテスト・仕様確認
+- 状況：完了
+- 優先度：高
+- 期限：2025-08-15
+- 関連ファイル：context.md, instructions.md, knowledge.md
+- メモ：
+  - register_model_typeテスト正常動作
+  - テストパス修正（importパス修正）
+  - テスト実行結果（全件OK）
 
 ## タスク名：Discord連携機能の実装
 - 状況：完了

@@ -3,8 +3,7 @@ import pandas as pd
 import numpy as np
 import sys
 import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../src")))
-from strategy.signal_generator.signal_generator import SignalGenerator
+import python.src.strategy.signal_generator as signal_generator_module
 
 class TestSignalGenerator(unittest.TestCase):
 
@@ -13,8 +12,8 @@ class TestSignalGenerator(unittest.TestCase):
         各テストメソッドの実行前に呼び出されます。
         テストに必要な共通のセットアップを行います。
         """
-        self.signal_generator = SignalGenerator()
-        
+        self.signal_generator = signal_generator_module.SignalGenerator()
+
         # テスト用のダミーデータフレームと予測シリーズを作成
         dates = pd.to_datetime(pd.date_range(start='2023-01-01', periods=10, freq='D'))
         self.dummy_data = pd.DataFrame({
