@@ -3,6 +3,7 @@ from datetime import datetime
 from src.data.data_loader import get_stock_data
 from src.features.technical_analysis import create_basic_lag_features, add_technical_indicators
 from src.utils.csv_io import save_dataframe_to_csv
+from src.utils.data_path_utils import get_data_dir, get_data_subdir
 
 from typing import Optional
 
@@ -31,15 +32,8 @@ def save_stock_data_with_features(
         end_date = datetime.now().strftime("%Y-%m-%d")
 
     # 市場ごとにティッカーを補正
-    ticker = symbol
-    if market.lower() in ["jp", "japan"]:
-        if symbol.endswith(".T"):
-            ticker = symbol
-        else:
-            ticker = f"{symbol}.T"
-    elif market.lower() in ["us", "usa", "nyse", "nasdaq"]:
-        ticker = symbol  # US株はそのまま
-    # 他市場は必要に応じて拡張
+    from src.utils.data_path_utils import get_ticker
+    ticker = get_ticker(market, symbol)
 
     print(f"データ取得: market={market}, symbol={symbol}, ticker={ticker}, {start_date}～{end_date}")
     df = get_stock_data(market, ticker, start_date, end_date)
@@ -67,7 +61,7 @@ def save_stock_data_with_features(
     data['y'] = y
 
     # サブディレクトリ生成
-    sub_dir = os.path.join(out_dir, f"{market}_{symbol}")
+    sub_dir = get_data_subdir(market, symbol)
     os.makedirs(sub_dir, exist_ok=True)
     # 既存のcsvファイルを削除
     for file in os.listdir(sub_dir):

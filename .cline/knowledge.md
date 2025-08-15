@@ -97,3 +97,9 @@
 - 日本株（トヨタ: 7203）でも一連処理が正常動作することを確認
 - モデル保存パスは python/models/[market]_[symbol]/モデル名.joblib で統一
 - 既存モデルがあれば従来通りロードして予測
+
+## パス・ティッカー補正のutils化Tips
+- data_path_utils.pyにget_data_subdir, get_models_subdir, get_ticker等を実装
+- ファイルパス生成・ティッカー補正処理を一元化
+- data_loader.py, data_saver.py, model_manager.py, predict_single_stock.pyで利用
+- 実行パスや市場ごとのティッカー仕様変更時もutilsのみ修正で対応可能

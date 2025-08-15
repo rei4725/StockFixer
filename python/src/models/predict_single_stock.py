@@ -4,6 +4,7 @@ import traceback
 from src.models.model_manager import ModelManager
 from src.data import data_loader
 from src.features.technical_analysis import add_technical_indicators, create_basic_lag_features
+from src.utils.data_path_utils import get_models_subdir, get_data_dir
 
 def predict_single_stock(market: str, symbol: str, model_types=None, lookback_days=90):
     """
@@ -15,11 +16,11 @@ def predict_single_stock(market: str, symbol: str, model_types=None, lookback_da
     pred_prices = []
     current_price = None
     for model_type in model_types:
-        model_path = os.path.join("python", "models", f"{market}_{symbol}", model_type)
+        model_path = os.path.join(get_models_subdir(market, symbol), model_type)
         if not os.path.exists(model_path):
             # モデルが存在しない場合はデータ取得・特徴量生成・CSV保存・モデル作成・学習・保存を自動実行
             from src.data.data_saver import save_stock_data_with_features
-            save_stock_data_with_features(market, symbol)
+            save_stock_data_with_features(market, symbol, out_dir=get_data_dir())
             df = data_loader.get_stock_data(market, symbol, pd.Timestamp.today() - pd.Timedelta(days=lookback_days), pd.Timestamp.today())
             if df.empty or "Close" not in df.columns:
                 print(f"[{symbol}] 株価データ取得失敗")
@@ -31,7 +32,7 @@ def predict_single_stock(market: str, symbol: str, model_types=None, lookback_da
                 print(f"[{symbol}] 特徴量生成失敗")
                 continue
             latest_X = X.iloc[[-1]]
-            mm = ModelManager()
+            mm = ModelManager(model_dir="python/models")
             model_name = os.path.splitext(os.path.basename(model_path))[0]
             # モデル新規作成・学習・保存
             if "XGBoost" in model_name:

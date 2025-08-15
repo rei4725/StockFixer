@@ -4,6 +4,7 @@ from src.models.base_model import BaseModel
 from src.models.xgboost_model import XGBoostModel
 from src.models.lightgbm_model import LightGBMModel
 import os
+from src.utils.data_path_utils import get_models_subdir
 
 class ModelManager:
     """
@@ -102,7 +103,7 @@ class ModelManager:
         """
         model = self.get_model(model_name)
         if market and symbol:
-            save_dir = os.path.join(self.model_dir, f"{market}_{symbol}")
+            save_dir = get_models_subdir(market, symbol)
             os.makedirs(save_dir, exist_ok=True)
             model_path = os.path.join(save_dir, f"{model_name}.joblib")
         else:
@@ -119,7 +120,7 @@ class ModelManager:
             symbol (str, optional): 銘柄コードやティッカー。
         """
         if market and symbol:
-            model_path = os.path.join(self.model_dir, f"{market}_{symbol}", f"{model_name}.joblib")
+            model_path = os.path.join(get_models_subdir(market, symbol), f"{model_name}.joblib")
         else:
             model_path = os.path.join(self.model_dir, f"{model_name}.joblib")
         

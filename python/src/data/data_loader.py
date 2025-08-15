@@ -2,6 +2,7 @@ import yfinance as yf
 import pandas as pd
 from datetime import datetime, timedelta
 import os
+from src.utils.data_path_utils import get_data_subdir, get_ticker
 
 from typing import Union
 def get_stock_data_from_file(market: str, symbol: str, start_date: Union[str, datetime], end_date: Union[str, datetime]) -> pd.DataFrame:
@@ -18,7 +19,7 @@ def get_stock_data_from_file(market: str, symbol: str, start_date: Union[str, da
         pd.DataFrame: 株価データ (OHLCV)
     """
     # 例: python/data/us_AAPL/配下の最初のCSVファイルを自動検出
-    folder = f"python/data/{market}_{symbol}"
+    folder = get_data_subdir(market, symbol)
     csv_files = [f for f in os.listdir(folder) if f.endswith(".csv")]
     if not csv_files:
         raise FileNotFoundError(f"CSVファイルが存在しません: {folder}")
@@ -56,10 +57,7 @@ def get_stock_data(
         pd.DataFrame: 株価データ (OHLCV)
     """
     # マーケットに応じてtickerを変換
-    if market == "jp":
-        yf_ticker = f"{ticker}.T"
-    else:
-        yf_ticker = ticker
+    yf_ticker = get_ticker(market, ticker)
     data = yf.download(yf_ticker, start=start_date, end=end_date, auto_adjust=True, progress=False)
     if data.empty:
         return data
@@ -91,7 +89,7 @@ def get_stock_data_auto(
     if source == "file":
         return get_stock_data_from_file(market, symbol, start_date, end_date)
     elif source == "api":
-        ticker = symbol if market == "" else f"{symbol}"
+        ticker = get_ticker(market, symbol)
         return get_stock_data(market, ticker, start_date, end_date)
     else:
         raise ValueError(f"sourceは'file'または'api'のみ対応: {source}")

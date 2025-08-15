@@ -69,3 +69,13 @@
   - モデル未存在時の自動データ取得・csv保存・モデル作成・学習・保存・予測フロー実装
   - 日本株（トヨタ: 7203）で正常動作確認
   - ティッカー補正ロジック修正（.T二重付与防止）
+
+## タスク名：パス・ティッカー補正のutils化
+- 状況：完了
+- 優先度：高
+- 期限：2025-08-15
+- 関連ファイル：context.md, instructions.md, knowledge.md
+- メモ：
+  - data_path_utils.pyにget_data_subdir, get_models_subdir, get_ticker等を実装
+  - data_loader.py, data_saver.py, model_manager.py, predict_single_stock.pyで利用
+  - ファイルパス・ティッカー補正処理の一元化
