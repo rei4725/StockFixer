@@ -17,7 +17,34 @@ def predict_single_stock(market: str, symbol: str, model_types=None, lookback_da
     for model_type in model_types:
         model_path = os.path.join("python", "models", f"{market}_{symbol}", model_type)
         if not os.path.exists(model_path):
-            continue
+            # モデルが存在しない場合はデータ取得・特徴量生成・CSV保存・モデル作成・学習・保存を自動実行
+            from src.data.data_saver import save_stock_data_with_features
+            save_stock_data_with_features(market, symbol)
+            df = data_loader.get_stock_data(market, symbol, pd.Timestamp.today() - pd.Timedelta(days=lookback_days), pd.Timestamp.today())
+            if df.empty or "Close" not in df.columns:
+                print(f"[{symbol}] 株価データ取得失敗")
+                continue
+            current_price = df["Close"].iloc[-1]
+            df_feat = add_technical_indicators(df)
+            X, y = create_basic_lag_features(df_feat)
+            if X.empty:
+                print(f"[{symbol}] 特徴量生成失敗")
+                continue
+            latest_X = X.iloc[[-1]]
+            mm = ModelManager()
+            model_name = os.path.splitext(os.path.basename(model_path))[0]
+            # モデル新規作成・学習・保存
+            if "XGBoost" in model_name:
+                model_type_name = "XGBoostModel"
+            elif "LightGBM" in model_name:
+                model_type_name = "LightGBMModel"
+            else:
+                print(f"[{symbol}] 未知のモデルタイプ: {model_name}")
+                continue
+            model = mm.create_model(model_type_name, model_name)
+            mm.train_model(model_name, X, y, market=market, symbol=symbol)
+            # その後ロードして予測
+            model = mm.load_model(model_name, market=market, symbol=symbol)
         try:
             df = data_loader.get_stock_data(market, symbol, pd.Timestamp.today() - pd.Timedelta(days=lookback_days), pd.Timestamp.today())
             if df.empty or "Close" not in df.columns:

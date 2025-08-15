@@ -7,13 +7,6 @@ from python.src.data.data_loader import get_stock_data,get_stock_data_from_file,
 
 class TestDataLoader(unittest.TestCase):
 
-    def test_get_stock_data_jp_dis(self):
-        """
-        日本株ディスコ（6146）の株価データが取得できることを確認
-        """
-        df = get_stock_data("jp", "6146", "2024-01-01", "2024-01-31")
-        self.assertIsInstance(df, pd.DataFrame)
-        self.assertFalse(df.empty, "日本株ディスコの株価データが取得できませんでした。")
     def setUp(self):
         """
         各テストメソッドの実行前に呼び出されます。
@@ -32,6 +25,14 @@ class TestDataLoader(unittest.TestCase):
         df = get_stock_data("us", self.test_symbol, self.test_start_date, self.test_end_date)
         self.assertIsInstance(df, pd.DataFrame)
         self.assertFalse(df.empty, "Stock data DataFrame should not be empty.")
+
+    def test_get_stock_data_jp_dis(self):
+        """
+        日本株ディスコ（6146）の株価データが取得できることを確認
+        """
+        df = get_stock_data("jp", "6146", "2024-01-01", "2024-01-31")
+        self.assertIsInstance(df, pd.DataFrame)
+        self.assertFalse(df.empty, "日本株ディスコの株価データが取得できませんでした。")
 
     def test_get_stock_data_columns(self):
         """

@@ -1,8 +1,8 @@
 import pandas as pd
 from typing import Dict, Type
-from python.src.models.base_model import BaseModel
-from python.src.models.xgboost_model import XGBoostModel
-from python.src.models.lightgbm_model import LightGBMModel
+from src.models.base_model import BaseModel
+from src.models.xgboost_model import XGBoostModel
+from src.models.lightgbm_model import LightGBMModel
 import os
 
 class ModelManager:

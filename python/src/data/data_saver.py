@@ -33,7 +33,9 @@ def save_stock_data_with_features(
     # 市場ごとにティッカーを補正
     ticker = symbol
     if market.lower() in ["jp", "japan"]:
-        if not symbol.endswith(".T"):
+        if symbol.endswith(".T"):
+            ticker = symbol
+        else:
             ticker = f"{symbol}.T"
     elif market.lower() in ["us", "usa", "nyse", "nasdaq"]:
         ticker = symbol  # US株はそのまま

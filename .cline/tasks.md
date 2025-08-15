@@ -59,3 +59,13 @@
   - 呼び出し箇所の機械的修正（data_saver.py, data_loader.py, predict_single_stock.py, api_server.py, test_data_loader.py）
   - テスト修正・API/モデル/データ取得系の対応
   - 既存機能への影響確認
+
+## タスク名：predict_single_stock自動モデル生成・日本株対応
+- 状況：完了
+- 優先度：高
+- 期限：2025-08-15
+- 関連ファイル：context.md, instructions.md, knowledge.md
+- メモ：
+  - モデル未存在時の自動データ取得・csv保存・モデル作成・学習・保存・予測フロー実装
+  - 日本株（トヨタ: 7203）で正常動作確認
+  - ティッカー補正ロジック修正（.T二重付与防止）

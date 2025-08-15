@@ -24,3 +24,8 @@
 - 目的：API/モデル/データ取得系の仕様統一と柔軟な市場対応（日本株・米国株等）
 - 制約：既存呼び出し箇所の引数変更が必要
 - 関連：python/src/data/data_loader.py, .cline/knowledge.md, .cline/instructions.md
+
+## プロジェクト：predict_single_stock自動モデル生成・日本株対応
+- 目的：モデル未存在時の自動データ取得・csv保存・モデル作成・学習・保存・予測フローの実装、日本株ティッカー補正
+- 制約：既存モデルは従来通りロード、ティッカー補正は二重付与防止
+- 関連：.cline/tasks.md, .cline/instructions.md, .cline/knowledge.md
