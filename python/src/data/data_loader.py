@@ -27,11 +27,17 @@ def get_stock_data_from_file(market: str, symbol: str, start_date: Union[str, da
     # 'Date'列が存在しない場合にも対応
     try:
         df = pd.read_csv(file_path, parse_dates=["Date"], index_col="Date")
+        # MultiIndex列をフラット化
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = [str(col[0]) if isinstance(col, tuple) else str(col) for col in df.columns]
         # 期間フィルタ
         df = df.loc[start_date:end_date]
     except ValueError:
         # 'Date'列がない場合はそのまま読み込む
         df = pd.read_csv(file_path)
+        # MultiIndex列をフラット化
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = [str(col[0]) if isinstance(col, tuple) else str(col) for col in df.columns]
         # 期間フィルタ（Date列があればfilter、なければスキップ）
         if "Date" in df.columns:
             mask = (df["Date"] >= pd.to_datetime(start_date)) & (df["Date"] <= pd.to_datetime(end_date))
@@ -58,7 +64,19 @@ def get_stock_data(
     """
     # マーケットに応じてtickerを変換
     yf_ticker = get_ticker(market, ticker)
-    data = yf.download(yf_ticker, start=start_date, end=end_date, auto_adjust=True, progress=False)
+    
+    # yf.Ticker().history() を使用（スレッドセーフ）
+    # yf.download() は並列実行時にデータが混ざる可能性があるため非推奨
+    ticker_obj = yf.Ticker(yf_ticker)
+    
+    # yfinanceのend_dateはexclusive（その日を含まない）ため、1日加算
+    if isinstance(end_date, str):
+        end_date_adj = (pd.to_datetime(end_date) + timedelta(days=1)).strftime("%Y-%m-%d")
+    else:
+        end_date_adj = (end_date + timedelta(days=1)).strftime("%Y-%m-%d")
+    
+    data = ticker_obj.history(start=start_date, end=end_date_adj, auto_adjust=True)
+    
     if data.empty:
         return data
     # マルチインデックス列をフラット化
