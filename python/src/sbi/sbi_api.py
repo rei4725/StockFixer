@@ -1,8 +1,23 @@
-from flask import jsonify
+"""
+SBI証券API連携モジュール
 
-def sbi_login(user_id, password):
+SBI証券へのログインおよび売買操作を提供する
+戻り値はdict形式とし、HTTPレスポンス形式への変換はAPI層で行う
+"""
+
+from typing import Tuple, Dict, Any
+
+
+def sbi_login(user_id: str, password: str) -> Tuple[Dict[str, Any], int]:
     """
     SBI証券へログインします。
+    
+    Args:
+        user_id: ログインID
+        password: パスワード
+    
+    Returns:
+        (結果dict, HTTPステータスコード) のタプル
     """
     try:
         from selenium import webdriver
@@ -50,26 +65,36 @@ def sbi_login(user_id, password):
         driver.quit()
 
         if login_status == "ok":
-            return jsonify({
+            return {
                 "status": "ok",
                 "message": "SBI login successful.",
                 "account_info": account_info
-            }), 200
+            }, 200
         else:
-            return jsonify({
+            return {
                 "status": "failed",
                 "message": "SBI login failed."
-            }), 401
+            }, 401
 
     except Exception as e:
-        return jsonify({
+        return {
             "error": str(type(e).__name__),
             "message": str(e)
-        }), 500
+        }, 500
 
-def sbi_trade(user_id, password, symbol, quantity, trade_type):
+def sbi_trade(user_id: str, password: str, symbol: str, quantity: int, trade_type: str) -> Tuple[Dict[str, Any], int]:
     """
     SBI証券で株式を売買します。
+    
+    Args:
+        user_id: ログインID
+        password: パスワード
+        symbol: 銘柄コード
+        quantity: 数量
+        trade_type: 売買区分 ("buy" or "sell")
+    
+    Returns:
+        (結果dict, HTTPステータスコード) のタプル
     """
     try:
         from selenium import webdriver
@@ -129,14 +154,14 @@ def sbi_trade(user_id, password, symbol, quantity, trade_type):
         # WebDriverを終了
         driver.quit()
 
-        return jsonify({
+        return {
             "status": trade_status,
             "message": trade_message,
             "trade_status": trade_status
-        }), 200
+        }, 200
 
     except Exception as e:
-        return jsonify({
+        return {
             "error": str(type(e).__name__),
             "message": str(e)
-        }), 500
+        }, 500

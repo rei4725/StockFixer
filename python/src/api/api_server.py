@@ -8,7 +8,7 @@ from src.data.data_loader import get_stock_data
 from src.features.technical_analysis import add_technical_indicators
 from src.models.model_manager import ModelManager # AIモデルの管理クラス
 from src.strategy.signal_generator import SignalGenerator
-from src.sbi.sbi_api import sbi_api
+from src.sbi import sbi_api
 
 app = Flask(__name__)
 
@@ -101,8 +101,8 @@ def sbi_login():
         return jsonify({"error": "Missing parameters: user_id, password are required."}), 400
 
     try:
-        result = sbi_api.sbi_login(user_id, password)
-        return jsonify({"result": result}), 200
+        result, status_code = sbi_api.sbi_login(user_id, password)
+        return jsonify(result), status_code
 
     except Exception as e:
         app.logger.error(f"Error logging in to SBI: {e}")
