@@ -73,6 +73,14 @@ def save_stock_data_with_features(
 
     # X, yを1つのDataFrameにまとめる
     data = X.copy()
+    
+    # market と symbol を列として追加（統合モデル用）
+    data['market'] = market
+    data['symbol'] = symbol
+    # market をエンコード（数値化）
+    market_codes = {"us": 0, "jp": 1}
+    data['market_encoded'] = market_codes.get(market, -1)
+    
     data['y'] = y
 
     # サブディレクトリ生成（out_dirが指定されていなければデフォルトを使用）
