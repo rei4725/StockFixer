@@ -14,7 +14,7 @@ from src.data.data_loader import get_stock_data
 from src.data.data_saver import save_raw_stock_data
 from src.features.technical_analysis import create_basic_lag_features, add_technical_indicators
 from src.utils.csv_io import save_dataframe_to_csv
-from src.utils.data_path_utils import get_data_dir, get_data_subdir, get_ticker
+from src.utils.data_path_utils import get_data_dir, get_data_subdir, get_ticker, ensure_dir
 
 
 def save_stock_data_with_features(
@@ -22,7 +22,7 @@ def save_stock_data_with_features(
     symbol: str,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    out_dir: str = "python/data"
+    out_dir: str = None
 ):
     """
     指定した市場・シンボル・期間の株価データを取得し、特徴量生成後、out_dirにCSV保存する。
@@ -75,9 +75,12 @@ def save_stock_data_with_features(
     data = X.copy()
     data['y'] = y
 
-    # サブディレクトリ生成
-    sub_dir = get_data_subdir(market, symbol)
-    os.makedirs(sub_dir, exist_ok=True)
+    # サブディレクトリ生成（out_dirが指定されていなければデフォルトを使用）
+    if out_dir is None:
+        sub_dir = get_data_subdir(market, symbol)
+    else:
+        sub_dir = os.path.join(out_dir, f"{market}_{symbol}")
+    ensure_dir(sub_dir)
     
     # 既存のcsvファイルを削除
     for file in os.listdir(sub_dir):

@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 import os
 
 from src.data.data_loader import get_stock_data,get_stock_data_from_file,get_stock_data_auto,get_forex_data
+from src.utils.data_path_utils import get_data_subdir
 
 class TestDataLoader(unittest.TestCase):
 
@@ -167,7 +168,7 @@ class TestDataLoader(unittest.TestCase):
         # テスト用ダミーCSV作成
         market = "us"
         symbol = "TEST"
-        folder = f"python/data/{market}_{symbol}"
+        folder = get_data_subdir(market, symbol)
         os.makedirs(folder, exist_ok=True)
         csv_path = os.path.join(folder, "dummy.csv")
         df = pd.DataFrame({
@@ -192,7 +193,7 @@ class TestDataLoader(unittest.TestCase):
         """
         market = "us"
         symbol = "NOFILE"
-        folder = f"python/data/{market}_{symbol}"
+        folder = get_data_subdir(market, symbol)
         if os.path.exists(folder):
             for f in os.listdir(folder):
                 os.remove(os.path.join(folder, f))
@@ -206,7 +207,7 @@ class TestDataLoader(unittest.TestCase):
         """
         market = "us"
         symbol = "AUTO"
-        folder = f"python/data/{market}_{symbol}"
+        folder = get_data_subdir(market, symbol)
         os.makedirs(folder, exist_ok=True)
         csv_path = os.path.join(folder, "dummy.csv")
         df = pd.DataFrame({

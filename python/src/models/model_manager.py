@@ -4,17 +4,17 @@ from src.models.base_model import BaseModel
 from src.models.xgboost_model import XGBoostModel
 from src.models.lightgbm_model import LightGBMModel
 import os
-from src.utils.data_path_utils import get_models_subdir
+from src.utils.data_path_utils import get_models_dir, get_models_subdir, ensure_dir
 
 class ModelManager:
     """
     AIモデルの管理、学習、予測を行うクラス。
     複数のモデルタイプをサポートし、モデルの保存・ロードも管理する。
     """
-    def __init__(self, model_dir: str = "python/models"):
+    def __init__(self, model_dir: str = None):
         self.models: Dict[str, BaseModel] = {}
-        self.model_dir = model_dir
-        os.makedirs(self.model_dir, exist_ok=True)
+        self.model_dir = model_dir if model_dir else get_models_dir()
+        ensure_dir(self.model_dir)
         self._registered_models: Dict[str, Type[BaseModel]] = {
             "XGBoostModel": XGBoostModel,
             "LightGBMModel": LightGBMModel,

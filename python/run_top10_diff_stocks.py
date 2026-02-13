@@ -4,11 +4,14 @@ import pandas as pd
 from datetime import datetime
 from src.models.predict_single_stock import predict_single_stock
 from src.utils.df_to_string import df_to_pretty_string
+from src.utils.data_path_utils import get_models_dir, get_results_dir, get_results_subdir, ensure_dir
 
-def find_model_files(model_root="python/models", model_name="StockXGBoostModel.joblib"):
+def find_model_files(model_root=None, model_name="StockXGBoostModel.joblib"):
     """
     モデルディレクトリを再帰的に探索し、(market, symbol, model_path)のリストを返す
     """
+    if model_root is None:
+        model_root = get_models_dir()
     pattern = os.path.join(model_root, "*_*", model_name)
     files = glob.glob(pattern)
     result = []
@@ -42,14 +45,14 @@ def main():
         display_columns = ["market", "symbol", "current_price", "avg_pred_price", "diff_ratio", "model_count"]
 
         now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-        result_dir = f"python/results/{now_str}"
-        os.makedirs(result_dir, exist_ok=True)
+        result_dir = get_results_subdir(now_str)
+        ensure_dir(result_dir)
 
         for market, df_market in df_result.groupby("market"):
             # Top10
             df_top10 = df_market.sort_values("diff_ratio", ascending=False).head(10)
             df_top10_display = df_top10[display_columns]
-            top10_path = f"{result_dir}/{market}_top10_diff_stocks.csv"
+            top10_path = os.path.join(result_dir, f"{market}_top10_diff_stocks.csv")
             print(df_to_pretty_string(
                 df_top10_display,
                 header=f"=== {market} 差異割合上位10銘柄 === 実行日時: {now_str} / ファイル: {top10_path}"
@@ -59,7 +62,7 @@ def main():
             # ワースト10
             df_worst10 = df_market.sort_values("diff_ratio", ascending=True).head(10)
             df_worst10_display = df_worst10[display_columns]
-            worst10_path = f"{result_dir}/{market}_worst10_diff_stocks.csv"
+            worst10_path = os.path.join(result_dir, f"{market}_worst10_diff_stocks.csv")
             print(df_to_pretty_string(
                 df_worst10_display,
                 header=f"=== {market} 差異割合ワースト10銘柄 === 実行日時: {now_str} / ファイル: {worst10_path}"

@@ -6,6 +6,7 @@ import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 from discord.utils import escape_markdown
+from src.utils.data_path_utils import get_results_dir, get_monitor_list_path
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_BOT_TOKEN") 
@@ -68,8 +69,8 @@ def get_top10_diff_stocks_message(csv_path: str) -> str:
 import re
 
 async def handle_forecast_command(message):
-    # 最新の python/results/{実行日時}/ フォルダを取得
-    results_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../results"))
+    # 最新の results/{実行日時}/ フォルダを取得
+    results_root = get_results_dir()
     subdirs = [d for d in os.listdir(results_root) if os.path.isdir(os.path.join(results_root, d))]
     # 実行日時形式のサブフォルダのみ対象
     subdirs = [d for d in subdirs if re.match(r"\d{8}_\d{6}", d)]
@@ -133,10 +134,10 @@ def get_watchlist_prediction_text():
     import csv
     from src.models.predict_single_stock import predict_single_stock
 
-    WATCHLIST_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../監視対象.csv"))
+    watchlist_path = get_monitor_list_path()
     rows = []
     try:
-        with open(WATCHLIST_PATH, encoding="utf-8") as f:
+        with open(watchlist_path, encoding="utf-8") as f:
             reader = csv.reader(f)
             for row in reader:
                 if len(row) < 2:

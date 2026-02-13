@@ -6,3 +6,6 @@ scikit-learn
 lightgbm
 xgboost
 requests
+pandas
+discord.py
+ta

@@ -1,4 +1,4 @@
-import pandas as pd
+
 from src.models.model_manager import ModelManager
 from src.features.technical_analysis import create_basic_lag_features
 from src.data.data_loader import get_stock_data

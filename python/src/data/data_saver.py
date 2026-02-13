@@ -12,7 +12,7 @@ import pandas as pd
 
 from src.data.data_loader import get_stock_data
 from src.utils.csv_io import save_dataframe_to_csv
-from src.utils.data_path_utils import get_data_subdir, get_ticker
+from src.utils.data_path_utils import get_data_subdir, get_ticker, ensure_dir
 
 
 def save_raw_stock_data(
@@ -20,7 +20,7 @@ def save_raw_stock_data(
     symbol: str,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    out_dir: str = "python/data"
+    out_dir: str = None  # 省略時はdata_path_utilsのデフォルトを使用
 ) -> Optional[pd.DataFrame]:
     """
     指定した市場・シンボル・期間の生の株価データを取得し、CSVに保存する。
@@ -60,7 +60,7 @@ def save_raw_stock_data(
 
     # サブディレクトリ生成
     sub_dir = get_data_subdir(market, symbol)
-    os.makedirs(sub_dir, exist_ok=True)
+    ensure_dir(sub_dir)
     
     # ファイル名生成（raw_YYYY_MM_DD_YYYY_MM_DD.csv）
     fname = f"raw_{start_date.replace('-', '_')}_{end_date.replace('-', '_')}.csv"

@@ -1,12 +1,13 @@
 import csv
 import pprint
 from src.models.predict_single_stock import predict_single_stock
+from src.utils.data_path_utils import get_monitor_list_path
 
-WATCHLIST_PATH = "python/監視対象.csv"
 
 def main():
     results = []
-    with open(WATCHLIST_PATH, encoding="utf-8") as f:
+    watchlist_path = get_monitor_list_path()
+    with open(watchlist_path, encoding="utf-8") as f:
         reader = csv.reader(f)
         for row in reader:
             if len(row) < 2:

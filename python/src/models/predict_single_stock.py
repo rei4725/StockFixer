@@ -32,7 +32,7 @@ def predict_single_stock(market: str, symbol: str, model_types=None, lookback_da
                 print(f"[{symbol}] 特徴量生成失敗")
                 continue
             latest_X = X.iloc[[-1]]
-            mm = ModelManager(model_dir="python/models")
+            mm = ModelManager()
             model_name = os.path.splitext(os.path.basename(model_path))[0]
             # モデル新規作成・学習・保存
             if "XGBoost" in model_name:
@@ -62,7 +62,9 @@ def predict_single_stock(market: str, symbol: str, model_types=None, lookback_da
             model_name = os.path.splitext(os.path.basename(model_path))[0]
             model = mm.load_model(model_name, market=market, symbol=symbol)
             pred = model.predict(latest_X)
-            if isinstance(pred, (pd.Series, list, tuple)):
+            if isinstance(pred, pd.Series):
+                pred_price = float(pred.iloc[-1])
+            elif isinstance(pred, (list, tuple)):
                 pred_price = float(pred[-1])
             else:
                 pred_price = float(pred)
