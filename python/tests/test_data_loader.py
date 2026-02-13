@@ -3,7 +3,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 import os
 
-from python.src.data.data_loader import get_stock_data,get_stock_data_from_file,get_stock_data_auto,get_forex_data
+from src.data.data_loader import get_stock_data,get_stock_data_from_file,get_stock_data_auto,get_forex_data
 
 class TestDataLoader(unittest.TestCase):
 

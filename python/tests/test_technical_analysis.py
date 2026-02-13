@@ -1,7 +1,7 @@
 import unittest
 import pandas as pd
 import numpy as np
-from python.src.features import technical_analysis
+from src.features import technical_analysis
 
 class TestTechnicalAnalysis(unittest.TestCase):
 

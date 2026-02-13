@@ -31,7 +31,7 @@ class Backtester:
             self.market, self.symbol, self.start_date, self.end_date, source=source
         )
         # 2. 特徴量生成（テクニカル指標付与）
-        from python.src.features.technical_analysis import add_technical_indicators
+        from src.features.technical_analysis import add_technical_indicators
         df = add_technical_indicators(df)
         # 3. モデル予測
         model = self.model_manager.get_model(model_name)
