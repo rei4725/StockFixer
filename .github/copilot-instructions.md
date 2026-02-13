@@ -38,18 +38,24 @@ python/
 ├── Dockerfile                  # Docker設定
 ├── データ取得対象.csv           # 対象銘柄リスト
 ├── src/
-│   ├── api/                    # API・Discord Bot
+│   ├── api/                    # API・Discord Bot（最上位層）
+│   ├── services/               # オーケストレーション層（データパイプライン等）
 │   ├── backtest/               # バックテスト
-│   ├── data/                   # データ取得・保存
-│   ├── features/               # テクニカル分析
 │   ├── models/                 # AI予測モデル
-│   ├── sbi/                    # SBI証券連携
 │   ├── strategy/               # シグナル生成
-│   └── utils/                  # ユーティリティ
+│   ├── features/               # テクニカル分析・特徴量生成
+│   ├── data/                   # データ取得・保存（生データのみ）
+│   ├── sbi/                    # SBI証券連携（Flask非依存）
+│   └── utils/                  # ユーティリティ（最下位層）
 ├── tests/                      # ユニットテスト
 ├── data/                       # 株価データ保存先
 ├── models/                     # 学習済みモデル保存先
 └── results/                    # 予測結果保存先
+```
+
+### レイヤー構造（上位→下位への参照のみ許可）
+```
+run_*.py → api層 → services層 → models/strategy/backtest層 → features層 → data層 → utils層
 ```
 
 ---
