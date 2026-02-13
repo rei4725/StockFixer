@@ -25,10 +25,10 @@ class TestTechnicalAnalysis(unittest.TestCase):
         self.assertEqual(len(X), len(y))
         self.assertFalse(X.isnull().any().any())
         self.assertFalse(y.isnull().any())
-        # yは翌日のClose（インデックスが揃っていることのみ確認）
+        # yは翌日の変化率（インデックスが揃っていることのみ確認）
         self.assertTrue((y.index == X.index).all())
-        # yの値が元データのClose.shift(-1)と一致する（インデックスで比較）
-        expected_y = self.df['Close'].shift(-1).reindex(y.index)
+        # yの値が元データの変化率と一致する（インデックスで比較）
+        expected_y = ((self.df['Close'].shift(-1) - self.df['Close']) / self.df['Close']).reindex(y.index)
         pd.testing.assert_series_equal(y, expected_y, check_names=False)
 
     def test_create_basic_lag_features_with_feature_cols(self):
