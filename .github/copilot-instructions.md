@@ -85,6 +85,13 @@ run_*.py → api層 → services層 → models/strategy/backtest層 → features
 
 ---
 
+## Skills
+
+### プルリクエスト作成
+プルリクエストを作成する際は、GitHub CLI の `gh pr create` コマンドを使用してください。
+
+---
+
 ## 技術的なTips
 
 ### データ取得・処理
@@ -143,4 +150,5 @@ run_*.py → api層 → services層 → models/strategy/backtest層 → features
 ---
 
 ## 参照ドキュメント
-- `PROJECT_OVERVIEW.md` - システム構成・アーキテクチャ図
+- `docs/PROJECT_OVERVIEW.md` - システム構成・アーキテクチャ図
+- `docs/ARCHITECTURE.md` - 詳細アーキテクチャ・レイヤー構造・データフロー
