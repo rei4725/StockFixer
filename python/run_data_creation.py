@@ -1,5 +1,5 @@
 import argparse
-from src.data.data_saver import save_stock_data_with_features
+from src.services.data_pipeline import save_stock_data_with_features
 
 
 def main():

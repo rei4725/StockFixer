@@ -19,7 +19,7 @@ def predict_single_stock(market: str, symbol: str, model_types=None, lookback_da
         model_path = os.path.join(get_models_subdir(market, symbol), model_type)
         if not os.path.exists(model_path):
             # モデルが存在しない場合はデータ取得・特徴量生成・CSV保存・モデル作成・学習・保存を自動実行
-            from src.data.data_saver import save_stock_data_with_features
+            from src.services.data_pipeline import save_stock_data_with_features
             save_stock_data_with_features(market, symbol, out_dir=get_data_dir())
             df = data_loader.get_stock_data(market, symbol, pd.Timestamp.today() - pd.Timedelta(days=lookback_days), pd.Timestamp.today())
             if df.empty or "Close" not in df.columns:
