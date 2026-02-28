@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import sys
 import os
-import python.src.strategy.signal_generator as signal_generator_module
+import src.strategy.signal_generator as signal_generator_module
 
 class TestSignalGenerator(unittest.TestCase):
 
