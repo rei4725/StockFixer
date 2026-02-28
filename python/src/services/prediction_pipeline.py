@@ -21,8 +21,9 @@ from src.utils.db import save_prediction_results, get_all_symbols
 warnings.filterwarnings("ignore", category=FutureWarning)
 logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 
-# 並列実行時のワーカー数（I/Oバウンドのため多めに設定可能）
-MAX_WORKERS = 10
+# 並列実行時のワーカー数（デフォルト=1で同期実行、スレッド間競合を回避）
+# ガイドライン参照: 並列処理は競合バグの原因となるため同期集計が安定
+MAX_WORKERS = 1
 
 
 def find_model_files(model_root=None, model_name="StockXGBoostModel.joblib"):
