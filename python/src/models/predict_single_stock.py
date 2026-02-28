@@ -25,50 +25,10 @@ def predict_single_stock(market: str, symbol: str, model_types=None, lookback_da
     for model_type in model_types:
         model_path = os.path.join(get_models_subdir(market, symbol), model_type)
         if not os.path.exists(model_path):
-            # モデルが存在しない場合はデータ取得・特徴量生成・DB保存・モデル作成・学習・保存を自動実行
-            from src.services.data_pipeline import save_stock_data_with_features
-            save_stock_data_with_features(market, symbol)
-            df = data_loader.get_stock_data(market, symbol, pd.Timestamp.today() - pd.Timedelta(days=lookback_days), pd.Timestamp.today())
-            if df.empty or "Close" not in df.columns:
-                print(f"[{symbol}] 株価データ取得失敗")
-                continue
-            # 現在価格をyfinanceからリアルタイムで取得
-            try:
-                yf_ticker = get_ticker(market, symbol)
-                ticker_obj = yf.Ticker(yf_ticker)
-                hist = ticker_obj.history(period="1d")
-                if not hist.empty:
-                    current_price = float(hist["Close"].iloc[-1])
-                else:
-                    close_col = df["Close"]
-                    if hasattr(close_col, 'ndim') and close_col.ndim > 1:
-                        close_col = close_col.iloc[:, 0]
-                    current_price = float(close_col.iloc[-1])
-            except Exception:
-                close_col = df["Close"]
-                if hasattr(close_col, 'ndim') and close_col.ndim > 1:
-                    close_col = close_col.iloc[:, 0]
-                current_price = float(close_col.iloc[-1])
-            df_feat = add_technical_indicators(df)
-            X, y = create_basic_lag_features(df_feat)
-            if X.empty:
-                print(f"[{symbol}] 特徴量生成失敗")
-                continue
-            latest_X = X.iloc[[-1]]
-            mm = ModelManager()
-            model_name = os.path.splitext(os.path.basename(model_path))[0]
-            # モデル新規作成・学習・保存
-            if "XGBoost" in model_name:
-                model_type_name = "XGBoostModel"
-            elif "LightGBM" in model_name:
-                model_type_name = "LightGBMModel"
-            else:
-                print(f"[{symbol}] 未知のモデルタイプ: {model_name}")
-                continue
-            model = mm.create_model(model_type_name, model_name)
-            mm.train_model(model_name, X, y, market=market, symbol=symbol)
-            # その後ロードして予測
-            model = mm.load_model(model_name, market=market, symbol=symbol)
+            # モデルが存在しない場合はスキップ（並列実行時のDB書き込みロック回避）
+            # モデル作成は run_model_creation.py で事前に実行すること
+            print(f"[{symbol}] モデルが存在しません: {model_path}")
+            continue
         try:
             df = data_loader.get_stock_data(market, symbol, pd.Timestamp.today() - pd.Timedelta(days=lookback_days), pd.Timestamp.today())
             if df.empty or "Close" not in df.columns:

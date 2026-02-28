@@ -9,21 +9,19 @@ from src.models.model_manager import ModelManager
 from src.utils.db import load_stock_features
 
 
-def train_models_for_symbol(market: str, symbol: str) -> dict:
+def load_features_for_training(market: str, symbol: str) -> dict:
     """
-    単一銘柄に対してXGBoost・LightGBMモデルを学習・保存する
+    学習用の特徴量データをDBから読み込む（DB書き込みなし、並列安全）。
 
     Args:
         market: 市場名（例: "us", "jp"）
         symbol: 銘柄コード（例: "AAPL", "7203"）
 
     Returns:
-        dict: {"market", "symbol", "status", ...}
+        dict: {"market", "symbol", "status", "X", "y"}
     """
     try:
-        print(f"[モデル作成開始] {market}/{symbol}")
-
-        # DBから特徴量データを取得
+        print(f"[データ読み込み] {market}/{symbol}")
         df = load_stock_features(market, symbol)
 
         if df is None or df.empty:
@@ -39,6 +37,33 @@ def train_models_for_symbol(market: str, symbol: str) -> dict:
         def normalize_col(col):
             return re.sub(r'[^0-9a-zA-Z_]', '_', str(col))
         X.columns = [normalize_col(c) for c in X.columns]
+
+        return {"market": market, "symbol": symbol, "status": "success", "X": X, "y": y}
+    except Exception as e:
+        print(f"[データ読み込みエラー] {market}/{symbol}: {e}")
+        return {"market": market, "symbol": symbol, "status": "error", "error": str(e)}
+
+
+def train_models_for_symbol(market: str, symbol: str) -> dict:
+    """
+    単一銘柄に対してXGBoost・LightGBMモデルを学習・保存する
+
+    Args:
+        market: 市場名（例: "us", "jp"）
+        symbol: 銘柄コード（例: "AAPL", "7203"）
+
+    Returns:
+        dict: {"market", "symbol", "status", ...}
+    """
+    try:
+        print(f"[モデル作成開始] {market}/{symbol}")
+
+        # DBから特徴量データを取得
+        loaded = load_features_for_training(market, symbol)
+        if loaded["status"] != "success":
+            return loaded
+
+        X, y = loaded["X"], loaded["y"]
 
         # ModelManagerは各呼び出しで新規作成
         model_manager = ModelManager()

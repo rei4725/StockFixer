@@ -16,22 +16,24 @@ from src.utils.db import upsert_stock_features, delete_stock_features
 from src.utils.data_path_utils import get_ticker
 
 
-def save_stock_data_with_features(
+def fetch_stock_data_with_features(
     market: str,
     symbol: str,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    out_dir: str = None  # 後方互換のため残置（未使用）
-):
+) -> Optional[tuple]:
     """
-    指定した市場・シンボル・期間の株価データを取得し、特徴量生成後、DBに保存する。
-    
+    株価データを取得し特徴量を生成する（DB書き込みなし）。
+    並列実行しても安全な純粋なデータ処理のみを行う。
+
     Args:
         market: マーケット識別子 (例: "us", "jp")
         symbol: 銘柄シンボル (例: "AAPL", "7203")
         start_date: 開始日 (省略時は取得可能な最古日)
         end_date: 終了日 (省略時は現在日)
-        out_dir: 後方互換のため残置（未使用）
+
+    Returns:
+        (market, symbol, data) のタプル。失敗時はNone。
     """
     # start_date, end_date自動決定
     if start_date is None or end_date is None:
@@ -39,11 +41,11 @@ def save_stock_data_with_features(
             df_all = get_stock_data(market, symbol, "1900-01-01", datetime.now().strftime("%Y-%m-%d"))
             if df_all is None or df_all.empty:
                 print(f"{symbol} のデータが取得できませんでした。")
-                return
+                return None
             start_date = df_all.index.min().strftime("%Y-%m-%d")
         except Exception as e:
             print(f"{symbol} のデータ取得でエラー: {e}")
-            return
+            return None
         end_date = datetime.now().strftime("%Y-%m-%d")
 
     # 市場ごとにティッカーを補正
@@ -53,7 +55,7 @@ def save_stock_data_with_features(
     df = get_stock_data(market, ticker, start_date, end_date)
     if df is None or df.empty:
         print("データが取得できませんでした。")
-        return
+        return None
 
     # テクニカル指標を追加
     df = add_technical_indicators(df)
@@ -62,7 +64,7 @@ def save_stock_data_with_features(
     X, y = create_basic_lag_features(df, n_lags=5, feature_cols=None)
     if X is None or X.empty or y is None:
         print("特徴量生成に失敗しました。")
-        return
+        return None
 
     # 特徴量名の正規化
     def normalize_col(col):
@@ -71,17 +73,52 @@ def save_stock_data_with_features(
 
     # X, yを1つのDataFrameにまとめる
     data = X.copy()
-    
+
     # market と symbol を列として追加（統合モデル用）
     data['market'] = market
     data['symbol'] = symbol
     # market をエンコード（数値化）
     market_codes = {"us": 0, "jp": 1}
     data['market_encoded'] = market_codes.get(market, -1)
-    
+
     data['y'] = y
 
-    # 既存データを削除してからDBに保存（CSV時代の全削除→書き出しと同等）
+    return (market, symbol, data)
+
+
+def save_features_to_db(market: str, symbol: str, data) -> None:
+    """
+    特徴量DataFrameをDBに保存する（逐次実行用）。
+
+    Args:
+        market: マーケット識別子
+        symbol: 銘柄シンボル
+        data: 特徴量DataFrame
+    """
     delete_stock_features(market, symbol)
     upsert_stock_features(market, symbol, data)
     print(f"DB保存完了: {market}_{symbol}")
+
+
+def save_stock_data_with_features(
+    market: str,
+    symbol: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    out_dir: str = None  # 後方互換のため残置（未使用）
+):
+    """
+    指定した市場・シンボル・期間の株価データを取得し、特徴量生成後、DBに保存する。
+
+    Args:
+        market: マーケット識別子 (例: "us", "jp")
+        symbol: 銘柄シンボル (例: "AAPL", "7203")
+        start_date: 開始日 (省略時は取得可能な最古日)
+        end_date: 終了日 (省略時は現在日)
+        out_dir: 後方互換のため残置（未使用）
+    """
+    result = fetch_stock_data_with_features(market, symbol, start_date, end_date)
+    if result is None:
+        return
+    _, _, data = result
+    save_features_to_db(market, symbol, data)
