@@ -281,7 +281,9 @@ def save_prediction_results(predicted_at: str, df: pd.DataFrame) -> None:
             [row["market"], row["symbol"]]
         )
 
-    con.execute("INSERT INTO prediction_results SELECT * FROM save_df")
+    # DataFrame を登録してから INSERT（複数行の INSERT に対応）
+    con.register('_save_df_temp', save_df)
+    con.execute("INSERT INTO prediction_results SELECT * FROM _save_df_temp")
     print(f"DB保存完了: prediction_results [{predicted_at}] ({len(save_df)}行)")
 
 
