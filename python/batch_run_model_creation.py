@@ -4,11 +4,9 @@
 モデル作成を銘柄別に並列で処理する
 """
 import csv
-import glob
-import os
 import re
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from src.utils.data_path_utils import get_watchlist_path, get_data_subdir
+from src.utils.data_path_utils import get_watchlist_path
 
 # 並列数の設定（CPU数に応じて調整）
 MAX_MODEL_WORKERS = 4
@@ -19,22 +17,16 @@ def train_model_for_symbol(market: str, symbol: str) -> dict:
     単一銘柄のモデル作成（並列処理用）
     """
     from src.models.model_manager import ModelManager
-    from src.utils.csv_io import load_dataframe_from_csv
+    from src.utils.db import load_stock_features
     
     try:
         print(f"[モデル作成開始] {market}/{symbol}")
         
-        # 該当銘柄のCSVファイルを取得
-        data_dir = get_data_subdir(market, symbol)
-        csv_files = glob.glob(os.path.join(data_dir, "*.csv"))
+        # DBから特徴量データを取得
+        df = load_stock_features(market, symbol)
         
-        if not csv_files:
-            return {"market": market, "symbol": symbol, "status": "skip", "reason": "CSVなし"}
-        
-        # 最初のCSVファイルを使用
-        df = load_dataframe_from_csv(csv_files[0])
         if df is None or df.empty:
-            return {"market": market, "symbol": symbol, "status": "skip", "reason": "データ無効"}
+            return {"market": market, "symbol": symbol, "status": "skip", "reason": "データなし"}
         
         # 文字列列とターゲット列を除外
         exclude_cols = ["y", "market", "symbol"]

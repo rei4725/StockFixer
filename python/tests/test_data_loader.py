@@ -2,9 +2,12 @@ import unittest
 import pandas as pd
 from datetime import datetime, timedelta
 import os
+import tempfile
 
 from src.data.data_loader import get_stock_data,get_stock_data_from_file,get_stock_data_auto,get_forex_data
 from src.utils.data_path_utils import get_data_subdir
+import src.utils.db as db_module
+import src.utils.data_path_utils as path_utils
 
 class TestDataLoader(unittest.TestCase):
 
@@ -18,6 +21,28 @@ class TestDataLoader(unittest.TestCase):
         # テスト期間を短くし、API呼び出しの頻度を減らす
         self.test_start_date = (datetime.now() - timedelta(days=5)).strftime('%Y-%m-%d')
         self.test_end_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+        
+        # DB関連テスト用: テスト用一時DBを設定
+        db_module.close_connection()
+        self.tmp_dir = tempfile.mkdtemp()
+        self.tmp_db = os.path.join(self.tmp_dir, "test_loader.duckdb")
+        self._orig_get_db_path = path_utils.get_db_path
+        path_utils.get_db_path = lambda: self.tmp_db
+        db_module.get_db_path = lambda: self.tmp_db
+        db_module._connection = None
+
+    def tearDown(self):
+        """DB接続のクリーンアップ"""
+        db_module.close_connection()
+        path_utils.get_db_path = self._orig_get_db_path
+        db_module.get_db_path = self._orig_get_db_path
+        if os.path.exists(self.tmp_db):
+            os.remove(self.tmp_db)
+        wal_path = self.tmp_db + ".wal"
+        if os.path.exists(wal_path):
+            os.remove(wal_path)
+        if os.path.exists(self.tmp_dir):
+            os.rmdir(self.tmp_dir)
 
     def test_get_stock_data_returns_dataframe(self):
         """
@@ -162,68 +187,52 @@ class TestDataLoader(unittest.TestCase):
 
     def test_get_stock_data_from_file(self):
         """
-        get_stock_data_from_fileがローカルCSVから正しくデータを取得できることを確認します。
+        get_stock_data_from_fileがDBから正しくデータを取得できることを確認します。
         """
-        import tempfile
-        # テスト用ダミーCSV作成
+        from src.utils.db import upsert_stock_features
         market = "us"
         symbol = "TEST"
-        folder = get_data_subdir(market, symbol)
-        os.makedirs(folder, exist_ok=True)
-        csv_path = os.path.join(folder, "dummy.csv")
         df = pd.DataFrame({
-            "Date": pd.date_range("2022-01-01", periods=3),
-            "Open": [1, 2, 3],
-            "High": [2, 3, 4],
-            "Low": [0, 1, 2],
+            "Date": pd.date_range("2022-01-01", periods=3).astype(str),
+            "Open": [1.0, 2.0, 3.0],
+            "High": [2.0, 3.0, 4.0],
+            "Low": [0.0, 1.0, 2.0],
             "Close": [1.5, 2.5, 3.5],
             "Volume": [100, 200, 300]
         })
-        df.to_csv(csv_path, index=False)
+        upsert_stock_features(market, symbol, df)
         result = get_stock_data_from_file(market, symbol, "2022-01-01", "2022-01-03")
         self.assertIsInstance(result, pd.DataFrame)
         self.assertEqual(len(result), 3)
-        # クリーンアップ
-        os.remove(csv_path)
-        os.rmdir(folder)
 
     def test_get_stock_data_from_file_no_csv(self):
         """
-        CSVが存在しない場合にFileNotFoundErrorが発生することを確認します。
+        DBにデータが存在しない場合にFileNotFoundErrorが発生することを確認します。
         """
         market = "us"
         symbol = "NOFILE"
-        folder = get_data_subdir(market, symbol)
-        if os.path.exists(folder):
-            for f in os.listdir(folder):
-                os.remove(os.path.join(folder, f))
-            os.rmdir(folder)
         with self.assertRaises(FileNotFoundError):
             get_stock_data_from_file(market, symbol, "2022-01-01", "2022-01-03")
 
     def test_get_stock_data_auto_file(self):
         """
-        get_stock_data_autoがsource='file'でget_stock_data_from_fileを呼ぶことを確認します。
+        get_stock_data_autoがsource='file'でDBからデータを取得することを確認します。
         """
+        from src.utils.db import upsert_stock_features
         market = "us"
         symbol = "AUTO"
-        folder = get_data_subdir(market, symbol)
-        os.makedirs(folder, exist_ok=True)
-        csv_path = os.path.join(folder, "dummy.csv")
         df = pd.DataFrame({
-            "Date": pd.date_range("2022-01-01", periods=2),
-            "Open": [1, 2],
-            "High": [2, 3],
-            "Low": [0, 1],
+            "Date": pd.date_range("2022-01-01", periods=2).astype(str),
+            "Open": [1.0, 2.0],
+            "High": [2.0, 3.0],
+            "Low": [0.0, 1.0],
             "Close": [1.5, 2.5],
             "Volume": [100, 200]
         })
-        df.to_csv(csv_path, index=False)
+        upsert_stock_features(market, symbol, df)
         result = get_stock_data_auto(market, symbol, "2022-01-01", "2022-01-02", source="file")
         self.assertIsInstance(result, pd.DataFrame)
         self.assertEqual(len(result), 2)
-        os.remove(csv_path)
-        os.rmdir(folder)
 
     def test_get_stock_data_auto_api(self):
         """

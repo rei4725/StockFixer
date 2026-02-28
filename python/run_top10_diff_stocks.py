@@ -8,7 +8,8 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from src.models.predict_single_stock import predict_single_stock
 from src.utils.df_to_string import df_to_pretty_string
-from src.utils.data_path_utils import get_models_dir, get_data_dir, get_results_dir, get_results_subdir, ensure_dir
+from src.utils.data_path_utils import get_models_dir
+from src.utils.db import save_prediction_results, get_all_symbols
 
 # yfinanceの警告を抑制
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -48,18 +49,8 @@ def predict_wrapper(args):
 
 
 def get_all_symbols_from_data():
-    """データディレクトリから全銘柄を取得"""
-    data_dir = get_data_dir()
-    all_keys = set()
-    pattern = os.path.join(data_dir, "*_*")
-    for dir_path in glob.glob(pattern):
-        if not os.path.isdir(dir_path):
-            continue
-        dir_name = os.path.basename(dir_path)
-        if "_" in dir_name:
-            market, symbol = dir_name.split("_", 1)
-            all_keys.add((market, symbol))
-    return all_keys
+    """DBから全銘柄を取得"""
+    return set(get_all_symbols())
 
 
 def run_with_individual_models():
@@ -119,37 +110,33 @@ def run_with_unified_model():
 
 
 def output_results(output_rows, mode="individual"):
-    """結果を出力・保存"""
+    """結果を出力・DB保存"""
     if output_rows:
         df_result = pd.concat(output_rows, ignore_index=True)
         display_columns = ["market", "symbol", "current_price", "avg_pred_price", "diff_ratio", "model_count"]
 
         now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-        result_dir = get_results_subdir(now_str)
-        ensure_dir(result_dir)
 
         for market, df_market in df_result.groupby("market"):
             # Top10
             df_top10 = df_market.sort_values("diff_ratio", ascending=False).head(10)
             df_top10_display = df_top10[display_columns]
-            top10_path = os.path.join(result_dir, f"{market}_top10_diff_stocks.csv")
             print(df_to_pretty_string(
                 df_top10_display,
                 header=f"=== {market} 差異割合上位10銘柄 ({mode}) === 実行日時: {now_str}"
             ))
-            df_top10_display.to_csv(top10_path, index=False)
+            save_prediction_results(now_str, df_top10_display, rank_type="top10")
 
             # ワースト10
             df_worst10 = df_market.sort_values("diff_ratio", ascending=True).head(10)
             df_worst10_display = df_worst10[display_columns]
-            worst10_path = os.path.join(result_dir, f"{market}_worst10_diff_stocks.csv")
             print(df_to_pretty_string(
                 df_worst10_display,
                 header=f"=== {market} 差異割合ワースト10銘柄 ({mode}) === 実行日時: {now_str}"
             ))
-            df_worst10_display.to_csv(worst10_path, index=False)
+            save_prediction_results(now_str, df_worst10_display, rank_type="worst10")
         
-        print(f"\n結果保存先: {result_dir}")
+        print(f"\n結果保存完了: run_timestamp={now_str}")
     else:
         print("有効な結果がありませんでした。")
 

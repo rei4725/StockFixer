@@ -90,6 +90,12 @@ def get_ticker(market: str, symbol: str) -> str:
     return symbol
 
 
+# ===== DB関連パス =====
+def get_db_path() -> str:
+    """DuckDBファイルの絶対パスを返す"""
+    return os.path.join(get_data_dir(), "stockfixer.duckdb")
+
+
 # ===== ユーティリティ =====
 def ensure_dir(path: str) -> str:
     """ディレクトリが存在しなければ作成し、パスを返す"""

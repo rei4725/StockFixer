@@ -1,4 +1,3 @@
-import glob
 import os
 import sys
 import pandas as pd
@@ -6,7 +5,8 @@ import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 from discord.utils import escape_markdown
-from src.utils.data_path_utils import get_results_dir, get_monitor_list_path
+from src.utils.data_path_utils import get_monitor_list_path
+from src.utils.db import load_prediction_results, load_latest_prediction_timestamp, load_prediction_markets
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_BOT_TOKEN") 
@@ -15,10 +15,11 @@ INTENTS.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=INTENTS)
 
-def get_top10_diff_stocks_df(csv_path: str) -> pd.DataFrame:
-    if not os.path.exists(csv_path):
-        return pd.DataFrame()  # 空のDataFrameを返す
-    df = pd.read_csv(csv_path)
+def get_top10_diff_stocks_df(market: str, rank_type: str, run_timestamp: str = None) -> pd.DataFrame:
+    """DBから予測結果を取得する"""
+    df = load_prediction_results(run_timestamp=run_timestamp, market=market, rank_type=rank_type)
+    if df is None:
+        return pd.DataFrame()
     return df
 
 def convert_df_for_discord(df: pd.DataFrame) -> pd.DataFrame:
@@ -56,57 +57,36 @@ def convert_df_for_discord(df: pd.DataFrame) -> pd.DataFrame:
     df = df[[c for c in col_order if c in df.columns]]
     return df
 
-def get_top10_diff_stocks_message(csv_path: str) -> str:
-    if not os.path.exists(csv_path):
-        return ""
-    df = get_top10_diff_stocks_df(csv_path)
+def get_top10_diff_stocks_message(market: str, rank_type: str, run_timestamp: str = None) -> str:
+    """DBから予測結果を取得してDiscord表示用テキストに変換する"""
+    df = get_top10_diff_stocks_df(market, rank_type, run_timestamp)
     if df.empty:
         return ""
     df = convert_df_for_discord(df)
     table_text = df.to_string(index=False)
     return table_text
 
-import re
-
 async def handle_forecast_command(message):
-    # 最新の results/{実行日時}/ フォルダを取得
-    results_root = get_results_dir()
-    subdirs = [d for d in os.listdir(results_root) if os.path.isdir(os.path.join(results_root, d))]
-    # 実行日時形式のサブフォルダのみ対象
-    subdirs = [d for d in subdirs if re.match(r"\d{8}_\d{6}", d)]
-    if not subdirs:
+    # 最新の予測結果をDBから取得
+    latest_ts = load_latest_prediction_timestamp()
+    if latest_ts is None:
         await message.channel.send(
-            escape_markdown("結果フォルダが見つかりませんでした。"),
-            allowed_mentions=None
-        )
-        return
-    subdirs.sort(reverse=True)
-    latest_dir = os.path.join(results_root, subdirs[0])
-
-    # marketごとのtop10/worst10 csvを取得
-    top10_files = glob.glob(os.path.join(latest_dir, "*_top10_diff_stocks.csv"))
-    worst10_files = glob.glob(os.path.join(latest_dir, "*_worst10_diff_stocks.csv"))
-    if not top10_files and not worst10_files:
-        await message.channel.send(
-            escape_markdown("結果CSVが見つかりませんでした。"),
+            escape_markdown("予測結果が見つかりませんでした。"),
             allowed_mentions=None
         )
         return
 
-    # market名抽出
-    def get_market_from_filename(filename):
-        m = re.match(r"(.+)_top10_diff_stocks\.csv", filename)
-        if m:
-            return m.group(1)
-        m = re.match(r"(.+)_worst10_diff_stocks\.csv", filename)
-        if m:
-            return m.group(1)
-        return filename
+    markets = load_prediction_markets(latest_ts)
+    if not markets:
+        await message.channel.send(
+            escape_markdown("予測結果が見つかりませんでした。"),
+            allowed_mentions=None
+        )
+        return
 
     # Top10送信
-    for csv_path in sorted(top10_files):
-        market = get_market_from_filename(os.path.basename(csv_path))
-        table_text = get_top10_diff_stocks_message(csv_path)
+    for market in sorted(markets):
+        table_text = get_top10_diff_stocks_message(market, "top10", latest_ts)
         if not table_text:
             continue
         msg = f"=== {market} 差異割合上位10銘柄 ===\n```text\n{table_text}\n```"
@@ -116,9 +96,8 @@ async def handle_forecast_command(message):
             await message.channel.send(msg[i:i+max_length])
 
     # ワースト10送信
-    for csv_path in sorted(worst10_files):
-        market = get_market_from_filename(os.path.basename(csv_path))
-        table_text = get_top10_diff_stocks_message(csv_path)
+    for market in sorted(markets):
+        table_text = get_top10_diff_stocks_message(market, "worst10", latest_ts)
         if not table_text:
             continue
         msg = f"=== {market} 差異割合ワースト10銘柄 ===\n```text\n{table_text}\n```"

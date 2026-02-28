@@ -1,3 +1,10 @@
+"""
+csv_io.py - CSV入出力ユーティリティ（非推奨）
+
+注意: 本モジュールは後方互換のために残置されています。
+新規コードではDuckDB経由のデータアクセス（src.utils.db）を使用してください。
+"""
+
 import pandas as pd
 
 def save_dataframe_to_csv(df: pd.DataFrame, path: str, **kwargs):

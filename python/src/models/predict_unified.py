@@ -5,7 +5,6 @@
 """
 
 import os
-import glob
 import pandas as pd
 import warnings
 import logging
@@ -13,7 +12,8 @@ import yfinance as yf
 from typing import List, Optional, Dict, Any
 from threading import Lock
 
-from src.utils.data_path_utils import get_data_dir, get_data_subdir, get_models_dir, get_ticker
+from src.utils.data_path_utils import get_models_dir, get_ticker
+from src.utils.db import load_stock_features, get_all_symbols
 
 # yfinanceの警告を抑制
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -26,7 +26,7 @@ _model_cache_lock = Lock()
 
 def load_feature_data(market: str, symbol: str) -> Optional[pd.DataFrame]:
     """
-    特徴量CSVを読み込む
+    特徴量データをDBから読み込む
     
     Args:
         market: 市場名
@@ -36,12 +36,7 @@ def load_feature_data(market: str, symbol: str) -> Optional[pd.DataFrame]:
         特徴量DataFrame または None
     """
     try:
-        data_dir = get_data_subdir(market, symbol)
-        csv_files = [f for f in os.listdir(data_dir) if f.endswith(".csv")]
-        if not csv_files:
-            return None
-        csv_path = os.path.join(data_dir, csv_files[0])
-        df = pd.read_csv(csv_path)
+        df = load_stock_features(market, symbol)
         return df
     except Exception:
         return None
@@ -218,18 +213,10 @@ def predict_all_with_unified_model(
     preload_models(model_types)
     
     if data_dir is None:
-        data_dir = get_data_dir()
+        pass  # DBから直接取得するため不要
     
-    # 全銘柄を収集
-    all_keys = []
-    pattern = os.path.join(data_dir, "*_*")
-    for dir_path in glob.glob(pattern):
-        if not os.path.isdir(dir_path):
-            continue
-        dir_name = os.path.basename(dir_path)
-        if "_" in dir_name:
-            market, symbol = dir_name.split("_", 1)
-            all_keys.append((market, symbol))
+    # 全銘柄をDBから取得
+    all_keys = get_all_symbols()
     
     print(f"予測対象: {len(all_keys)}銘柄")
     

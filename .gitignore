@@ -16,6 +16,10 @@ __pycache__/
 python/data/
 python/models/
 
+# DuckDB
+*.duckdb
+*.duckdb.wal
+
 # OS generated files
 .DS_Store
 Thumbs.db

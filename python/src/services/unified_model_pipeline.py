@@ -5,78 +5,35 @@
 """
 
 import os
-import glob
 import pandas as pd
 import numpy as np
 from datetime import datetime
 from typing import List, Tuple, Optional
 
-from src.data.data_loader import get_stock_data_from_file
-from src.features.technical_analysis import add_technical_indicators, create_basic_lag_features
-from src.utils.data_path_utils import get_data_dir, get_models_dir, ensure_dir
+from src.utils.db import load_all_stock_features
+from src.utils.data_path_utils import get_models_dir, ensure_dir
 
 
 def load_all_stock_data(data_dir: str = None) -> pd.DataFrame:
     """
-    全銘柄のCSVデータを読み込み、結合して返す
+    全銘柄のデータをDBから読み込み、結合して返す
     
     Args:
-        data_dir: データディレクトリのパス
+        data_dir: 後方互換のため残置（未使用、DBから直接取得）
         
     Returns:
         pd.DataFrame: 全銘柄の結合データ（market, symbol列付き）
     """
-    if data_dir is None:
-        data_dir = get_data_dir()
-    
-    all_data = []
-    # market_symbol形式のディレクトリを探索
-    pattern = os.path.join(data_dir, "*_*")
-    dirs = glob.glob(pattern)
-    
-    for dir_path in dirs:
-        if not os.path.isdir(dir_path):
-            continue
-        
-        dir_name = os.path.basename(dir_path)
-        if "_" not in dir_name:
-            continue
-            
-        market, symbol = dir_name.split("_", 1)
-        
-        # CSVファイルを探す
-        csv_files = [f for f in os.listdir(dir_path) if f.endswith(".csv")]
-        if not csv_files:
-            continue
-            
-        csv_path = os.path.join(dir_path, csv_files[0])
-        try:
-            df = pd.read_csv(csv_path)
-            
-            # Date列があればインデックスに設定
-            if "Date" in df.columns:
-                df["Date"] = pd.to_datetime(df["Date"])
-                df = df.set_index("Date")
-            
-            # CSVにmarket, symbol列がない場合のみ追加（後方互換性）
-            if "market" not in df.columns:
-                df["market"] = market
-            if "symbol" not in df.columns:
-                df["symbol"] = symbol
-            
-            all_data.append(df)
-            print(f"読み込み: {market}_{symbol} ({len(df)}行)")
-        except Exception as e:
-            print(f"読み込みエラー ({market}_{symbol}): {e}")
-            continue
-    
-    if not all_data:
+    df = load_all_stock_features()
+    if df.empty:
         return pd.DataFrame()
     
-    # 全データを結合
-    combined = pd.concat(all_data, ignore_index=False)
-    print(f"合計: {len(combined)}行, {len(all_data)}銘柄")
-    return combined
+    # 銘柄数カウント
+    if "market" in df.columns and "symbol" in df.columns:
+        n_symbols = df.groupby(["market", "symbol"]).ngroups
+        print(f"合計: {len(df)}行, {n_symbols}銘柄")
+    
+    return df
 
 
 def prepare_unified_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:

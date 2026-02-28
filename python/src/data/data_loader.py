@@ -3,11 +3,40 @@ import pandas as pd
 from datetime import datetime, timedelta
 import os
 from src.utils.data_path_utils import get_data_subdir, get_ticker
+from src.utils.db import load_stock_features
 
 from typing import Union
+
+
+def get_stock_data_from_db(market: str, symbol: str, start_date: Union[str, datetime] = None, end_date: Union[str, datetime] = None) -> pd.DataFrame:
+    """
+    DuckDB から株価データ（特徴量含む）を取得する
+
+    Args:
+        market (str): 市場名（例: "us"）
+        symbol (str): ティッカー（例: "AAPL"）
+        start_date (Union[str, datetime], optional): データ取得開始日
+        end_date (Union[str, datetime], optional): データ取得終了日
+
+    Returns:
+        pd.DataFrame: 株価データ
+    """
+    df = load_stock_features(market, symbol)
+    if df is None or df.empty:
+        raise FileNotFoundError(f"DBにデータが存在しません: {market}_{symbol}")
+
+    # Date列があれば期間フィルタ
+    if "Date" in df.columns and start_date is not None and end_date is not None:
+        df["Date"] = pd.to_datetime(df["Date"])
+        df = df.set_index("Date")
+        df = df.loc[start_date:end_date]
+
+    return df
+
+
 def get_stock_data_from_file(market: str, symbol: str, start_date: Union[str, datetime], end_date: Union[str, datetime]) -> pd.DataFrame:
     """
-    ローカルCSVから株価データを取得する
+    DBから株価データを取得する（後方互換のため関数名を維持）
 
     Args:
         market (str): 市場名（例: "us"）
@@ -18,31 +47,7 @@ def get_stock_data_from_file(market: str, symbol: str, start_date: Union[str, da
     Returns:
         pd.DataFrame: 株価データ (OHLCV)
     """
-    # 例: python/data/us_AAPL/配下の最初のCSVファイルを自動検出
-    folder = get_data_subdir(market, symbol)
-    csv_files = [f for f in os.listdir(folder) if f.endswith(".csv")]
-    if not csv_files:
-        raise FileNotFoundError(f"CSVファイルが存在しません: {folder}")
-    file_path = os.path.join(folder, csv_files[0])
-    # 'Date'列が存在しない場合にも対応
-    try:
-        df = pd.read_csv(file_path, parse_dates=["Date"], index_col="Date")
-        # MultiIndex列をフラット化
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = [str(col[0]) if isinstance(col, tuple) else str(col) for col in df.columns]
-        # 期間フィルタ
-        df = df.loc[start_date:end_date]
-    except ValueError:
-        # 'Date'列がない場合はそのまま読み込む
-        df = pd.read_csv(file_path)
-        # MultiIndex列をフラット化
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = [str(col[0]) if isinstance(col, tuple) else str(col) for col in df.columns]
-        # 期間フィルタ（Date列があればfilter、なければスキップ）
-        if "Date" in df.columns:
-            mask = (df["Date"] >= pd.to_datetime(start_date)) & (df["Date"] <= pd.to_datetime(end_date))
-            df = df.loc[mask]
-    return df
+    return get_stock_data_from_db(market, symbol, start_date, end_date)
 
 def get_stock_data(
     market: str,

@@ -75,13 +75,14 @@ StockFixer/
     │   ├── sbi/                 # SBI証券連携
     │   │   └── sbi_api.py       # SBI API
     │   │
-    │   └── utils/               # ユーティリティ層（最下層）
-    │       ├── csv_io.py        # CSV入出力
-    │       ├── data_path_utils.py # パス・ティッカー補正
-    │       └── df_to_string.py  # DataFrame整形
+    │   ┌── utils/               # ユーティリティ層（最下層）
+    │   │   ├── db.py            # DuckDB接続管理・CRUD
+    │   │   ├── csv_io.py        # CSV入出力（非推奨）
+    │   │   ├── data_path_utils.py # パス・ティッカー補正
+    │   │   └── df_to_string.py  # DataFrame整形
     │
     ├── data/                    # 株価データ保存先
-    │   └── {market}_{symbol}/   # 例: us_AAPL/, jp_7203/
+    │   └── stockfixer.duckdb    # DuckDBデータベースファイル
     │
     ├── models/                  # 学習済みモデル保存先
     │   └── {market}_{symbol}/   # 例: us_AAPL/
@@ -131,8 +132,8 @@ StockFixer/
 └─────────────────────────────────────────────────┘
                         ↓
 ┌─────────────────────────────────────────────────┐
-│  utils層 (csv_io.py, data_path_utils.py等)      │
-│  - 汎用ユーティリティ（最下層）                 │
+│  utils層 (db.py, data_path_utils.py等)             │
+│  - 汎用ユーティリティ・DBアクセス（最下層）        │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -150,13 +151,13 @@ StockFixer/
 #### `discord_bot.py`
 - Discord Botの実装
 - `/forecast` コマンドで全マーケットのTop10・ワースト10を送信
-- 計算処理は事前実行されたCSVを参照
+- 計算処理は事前実行されたDB上の予測結果を参照
 
 ### services層
 
 #### `data_pipeline.py`
 - **データ取得 → 特徴量生成 → 保存** の一連の処理を統合
-- `save_stock_data_with_features()`: 銘柄データ取得から特徴量付きCSV保存まで
+- `save_stock_data_with_features()`: 銘柄データ取得から特徴量付きDB保存まで
 
 ### models層
 
@@ -202,20 +203,29 @@ StockFixer/
 
 #### `data_loader.py`
 - **`get_stock_data()`**: yfinanceから株価データ取得
-- **`get_stock_data_from_file()`**: ローカルCSVから読み込み
+- **`get_stock_data_from_file()`**: DuckDBから読み込み（後方互換のため関数名維持）
+- **`get_stock_data_from_db()`**: DuckDBから株価データ（特徴量含む）を取得
 - **`get_forex_data()`**: 為替データ取得
 
 #### `data_saver.py`
-- 生データのCSV保存
+- 生データのDuckDB保存
 
 ### utils層
+
+#### `db.py`
+- DuckDB接続管理・テーブル初期化・ CRUD操作の中央モジュール
+- `get_connection()`: シングルトン接続（スレッドセーフ）
+- `upsert_stock_features()` / `load_stock_features()`: stock_featuresテーブルのCRUD
+- `save_prediction_results()` / `load_prediction_results()`: prediction_resultsテーブルのCRUD
+- 動的カラム追加（ALTER TABLE ADD COLUMN）に対応
 
 #### `data_path_utils.py`
 - `get_data_subdir()` / `get_models_subdir()`: market/symbol別サブディレクトリ取得
 - `get_ticker()`: 市場別ティッカー補正（日本株は `.T` 付与）
+- `get_db_path()`: DuckDBファイルパス取得
 
 #### `csv_io.py`
-- DataFrameのCSV入出力ユーティリティ
+- DataFrameのCSV入出力ユーティリティ（非推奨・後方互換のため残置）
 
 #### `df_to_string.py`
 - DataFrameの整形出力
@@ -233,9 +243,10 @@ StockFixer/
 └──────────────┘    └──────────────┘    └──────────────┘    └──────────────┘
                             ↓
                     ┌──────────────┐    ┌──────────────┐
-                    │ technical_   │ → │ CSV保存       │
-                    │ analysis.py  │    │ (data/...)   │
-                    └──────────────┘    └──────────────┘
+                    │ technical_   │ → │ DuckDB保存  │
+                    │ analysis.py  │    │(stockfixer  │
+                    └──────────────┘    │ .duckdb)   │
+                                        └──────────────┘
 ```
 
 ### 2. モデル学習フロー
@@ -291,6 +302,7 @@ StockFixer/
 |-----------|------|
 | `yfinance` | 株価・為替データ取得 |
 | `pandas` | データ操作・分析 |
+| `duckdb` | 組み込みカラム型DB（株価・予測結果の永続化） |
 | `ta` | テクニカル指標計算 |
 | `xgboost` | 勾配ブースティングモデル |
 | `lightgbm` | 勾配ブースティングモデル |
@@ -320,9 +332,11 @@ StockFixer/
 - `register_model_type()` で動的にモデル登録
 
 ### 4. データ管理
-- 生データと特徴量データを分離
-- `{market}_{symbol}` 形式でディレクトリを整理
-- 既存CSVを削除してから新規保存（一貫性担保）
+- 株価データ・特徴量・予測結果はDuckDBで一元管理
+- `stock_features` テーブル: (market, symbol, row_num) を主キーとした株価・特徴量データ
+- `prediction_results` テーブル: (run_timestamp, market, symbol) を主キーとした予測結果
+- モデルファイルはjoblib形式でファイルシステムに保存
+- 設定用CSV（データ取得対象.csv等）はそのまま維持
 
 ### 5. セキュリティ
 - `.env` で機密情報を管理
@@ -374,6 +388,7 @@ graph TD
     end
 
     subgraph "ユーティリティ層"
+        U0[db.py]
         U1[csv_io.py]
         U2[data_path_utils.py]
         U3[df_to_string.py]
@@ -382,6 +397,7 @@ graph TD
     subgraph "外部サービス"
         E1[yfinance API]
         E2[Discord]
+        E3[DuckDB]
     end
 
     R1 --> S1
@@ -399,12 +415,13 @@ graph TD
     M5 --> M1
     ST1 --> M5
     D1 --> E1
+    D1 --> U0
+    D2 --> U0
     D1 --> U2
-    D2 --> U1
-    F1 --> U1
+    U0 --> E3
     M1 --> U2
 ```
 
 ---
 
-*Last updated: 2026-02-13*
+*Last updated: 2025-07-10*

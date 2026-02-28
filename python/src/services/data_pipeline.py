@@ -1,11 +1,10 @@
 """
 データパイプラインサービス
 
-データ取得 → 特徴量生成 → 保存 の一連の処理を統合するサービス層
+データ取得 → 特徴量生成 → DB保存 の一連の処理を統合するサービス層
 data層とfeatures層を組み合わせて利用する
 """
 
-import os
 import re
 from datetime import datetime
 from typing import Optional
@@ -13,8 +12,8 @@ from typing import Optional
 from src.data.data_loader import get_stock_data
 from src.data.data_saver import save_raw_stock_data
 from src.features.technical_analysis import create_basic_lag_features, add_technical_indicators
-from src.utils.csv_io import save_dataframe_to_csv
-from src.utils.data_path_utils import get_data_dir, get_data_subdir, get_ticker, ensure_dir
+from src.utils.db import upsert_stock_features, delete_stock_features
+from src.utils.data_path_utils import get_ticker
 
 
 def save_stock_data_with_features(
@@ -22,18 +21,17 @@ def save_stock_data_with_features(
     symbol: str,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    out_dir: str = None
+    out_dir: str = None  # 後方互換のため残置（未使用）
 ):
     """
-    指定した市場・シンボル・期間の株価データを取得し、特徴量生成後、out_dirにCSV保存する。
-    ファイル名: features_[start_date]_[end_date].csv
+    指定した市場・シンボル・期間の株価データを取得し、特徴量生成後、DBに保存する。
     
     Args:
         market: マーケット識別子 (例: "us", "jp")
         symbol: 銘柄シンボル (例: "AAPL", "7203")
         start_date: 開始日 (省略時は取得可能な最古日)
         end_date: 終了日 (省略時は現在日)
-        out_dir: 出力ディレクトリのベースパス
+        out_dir: 後方互換のため残置（未使用）
     """
     # start_date, end_date自動決定
     if start_date is None or end_date is None:
@@ -83,24 +81,7 @@ def save_stock_data_with_features(
     
     data['y'] = y
 
-    # サブディレクトリ生成（out_dirが指定されていなければデフォルトを使用）
-    if out_dir is None:
-        sub_dir = get_data_subdir(market, symbol)
-    else:
-        sub_dir = os.path.join(out_dir, f"{market}_{symbol}")
-    ensure_dir(sub_dir)
-    
-    # 既存のcsvファイルを削除
-    for file in os.listdir(sub_dir):
-        if file.endswith(".csv"):
-            file_path = os.path.join(sub_dir, file)
-            print(f"既存ファイル削除: {file_path}")
-            os.remove(file_path)
-    
-    # ファイル名生成（features_YYYY_MM_DD_YYYY_MM_DD.csv）
-    fname = f"features_{start_date.replace('-', '_')}_{end_date.replace('-', '_')}.csv"
-    out_path = os.path.join(sub_dir, fname)
-
-    # 保存
-    save_dataframe_to_csv(data, out_path)
-    print(f"保存完了: {out_path}")
+    # 既存データを削除してからDBに保存（CSV時代の全削除→書き出しと同等）
+    delete_stock_features(market, symbol)
+    upsert_stock_features(market, symbol, data)
+    print(f"DB保存完了: {market}_{symbol}")
