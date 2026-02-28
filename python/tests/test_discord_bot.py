@@ -40,8 +40,7 @@ class TestGetTop10DiffStocksMessage(unittest.TestCase):
             "current_price": [100.0, 200.0],
             "avg_pred_price": [110.0, 210.0],
             "diff_ratio": [0.1, 0.05],
-            "model_count": [2, 1],
-            "rank_type": ["top10", "top10"]
+            "model_count": [2, 1]
         })
         save_prediction_results("20260228_120000", df)
         msg = get_top10_diff_stocks_message("us", "top10", "20260228_120000")

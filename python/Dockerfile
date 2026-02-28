@@ -1,6 +1,19 @@
 # StockFixer Python Environment
 FROM python:3.11-slim
 
+# ビルド引数（イメージメタデータ）
+ARG BUILD_DATE=unknown
+ARG GIT_COMMIT=unknown
+ARG VERSION=dev
+
+# OCI 標準ラベル
+LABEL org.opencontainers.image.title="StockFixer" \
+      org.opencontainers.image.description="リアルタイム自動売買システム - Python環境" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.revision="${GIT_COMMIT}" \
+      org.opencontainers.image.source="https://github.com/rei4725/StockFixer"
+
 # 作業ディレクトリの設定
 WORKDIR /app
 

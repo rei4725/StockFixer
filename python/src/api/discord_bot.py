@@ -15,9 +15,14 @@ INTENTS.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=INTENTS)
 
-def get_top10_diff_stocks_df(market: str, rank_type: str, run_timestamp: str = None) -> pd.DataFrame:
-    """DBから予測結果を取得する"""
-    df = load_prediction_results(run_timestamp=run_timestamp, market=market, rank_type=rank_type)
+def get_top10_diff_stocks_df(market: str, rank_type: str, predicted_at: str = None) -> pd.DataFrame:
+    """DBから予測結果を取得する（top_n/worst_nでフィルタ）"""
+    if rank_type == "top10":
+        df = load_prediction_results(predicted_at=predicted_at, market=market, top_n=10)
+    elif rank_type == "worst10":
+        df = load_prediction_results(predicted_at=predicted_at, market=market, worst_n=10)
+    else:
+        df = load_prediction_results(predicted_at=predicted_at, market=market)
     if df is None:
         return pd.DataFrame()
     return df
@@ -57,9 +62,9 @@ def convert_df_for_discord(df: pd.DataFrame) -> pd.DataFrame:
     df = df[[c for c in col_order if c in df.columns]]
     return df
 
-def get_top10_diff_stocks_message(market: str, rank_type: str, run_timestamp: str = None) -> str:
+def get_top10_diff_stocks_message(market: str, rank_type: str, predicted_at: str = None) -> str:
     """DBから予測結果を取得してDiscord表示用テキストに変換する"""
-    df = get_top10_diff_stocks_df(market, rank_type, run_timestamp)
+    df = get_top10_diff_stocks_df(market, rank_type, predicted_at)
     if df.empty:
         return ""
     df = convert_df_for_discord(df)

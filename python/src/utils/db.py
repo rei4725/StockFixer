@@ -76,15 +76,14 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
     """)
     con.execute("""
         CREATE TABLE IF NOT EXISTS prediction_results (
-            run_timestamp  VARCHAR NOT NULL,
             market         VARCHAR NOT NULL,
             symbol         VARCHAR NOT NULL,
+            predicted_at   VARCHAR NOT NULL,
             current_price  DOUBLE,
             avg_pred_price DOUBLE,
             diff_ratio     DOUBLE,
             model_count    INTEGER,
-            rank_type      VARCHAR,
-            PRIMARY KEY (run_timestamp, market, symbol)
+            PRIMARY KEY (market, symbol, predicted_at)
         )
     """)
 
@@ -251,26 +250,22 @@ def get_all_symbols() -> list:
 
 # --- prediction_results テーブル操作 ---
 
-def save_prediction_results(run_timestamp: str, df: pd.DataFrame, rank_type: str = None) -> None:
+def save_prediction_results(predicted_at: str, df: pd.DataFrame) -> None:
     """
-    予測結果をDBに保存する。
+    予測結果をDBに保存する（Delete-Insert方式）。
+    対象銘柄の既存データを削除してから挿入する。
 
     Args:
-        run_timestamp: 実行タイムスタンプ (例: "20260213_142903")
+        predicted_at: 予測実行日時 (例: "20260213_142903")
         df: 予測結果DataFrame (market, symbol, current_price, avg_pred_price, diff_ratio, model_count)
-        rank_type: 'top10' / 'worst10' / None
     """
     con = get_connection()
 
     save_df = df.copy()
-    save_df["run_timestamp"] = run_timestamp
-    if rank_type is not None:
-        save_df["rank_type"] = rank_type
-    elif "rank_type" not in save_df.columns:
-        save_df["rank_type"] = None
+    save_df["predicted_at"] = predicted_at
 
     # 必要な列のみ選択
-    cols = ["run_timestamp", "market", "symbol", "current_price", "avg_pred_price", "diff_ratio", "model_count", "rank_type"]
+    cols = ["market", "symbol", "predicted_at", "current_price", "avg_pred_price", "diff_ratio", "model_count"]
     save_df = save_df[[c for c in cols if c in save_df.columns]]
 
     # 不足列補完
@@ -278,45 +273,58 @@ def save_prediction_results(run_timestamp: str, df: pd.DataFrame, rank_type: str
         if c not in save_df.columns:
             save_df[c] = None
 
+    # Delete-Insert: 対象銘柄の既存データを削除
+    pairs = save_df[["market", "symbol"]].drop_duplicates()
+    for _, row in pairs.iterrows():
+        con.execute(
+            "DELETE FROM prediction_results WHERE market = ? AND symbol = ?",
+            [row["market"], row["symbol"]]
+        )
+
     con.execute("INSERT INTO prediction_results SELECT * FROM save_df")
-    print(f"DB保存完了: prediction_results [{run_timestamp}] ({len(save_df)}行)")
+    print(f"DB保存完了: prediction_results [{predicted_at}] ({len(save_df)}行)")
 
 
 def load_prediction_results(
-    run_timestamp: str = None,
+    predicted_at: str = None,
     market: str = None,
-    rank_type: str = None
+    top_n: int = None,
+    worst_n: int = None
 ) -> pd.DataFrame:
     """
     予測結果をDBから取得する。
 
     Args:
-        run_timestamp: 実行タイムスタンプ（Noneなら最新）
+        predicted_at: 予測日時（Noneなら最新）
         market: マーケットフィルタ（Noneなら全マーケット）
-        rank_type: 'top10' / 'worst10'（Noneなら全件）
+        top_n: 上位N件のみ取得（diff_ratio降順）
+        worst_n: 下位N件のみ取得（diff_ratio昇順）
 
     Returns:
         予測結果DataFrame
     """
     con = get_connection()
 
-    if run_timestamp is None:
-        run_timestamp = load_latest_prediction_timestamp()
-        if run_timestamp is None:
+    if predicted_at is None:
+        predicted_at = load_latest_prediction_timestamp()
+        if predicted_at is None:
             return pd.DataFrame()
 
-    query = "SELECT * FROM prediction_results WHERE run_timestamp = ?"
-    params = [run_timestamp]
+    query = "SELECT * FROM prediction_results WHERE predicted_at = ?"
+    params = [predicted_at]
 
     if market is not None:
         query += " AND market = ?"
         params.append(market)
 
-    if rank_type is not None:
-        query += " AND rank_type = ?"
-        params.append(rank_type)
-
-    query += " ORDER BY diff_ratio DESC"
+    if worst_n is not None:
+        query += " ORDER BY diff_ratio ASC LIMIT ?"
+        params.append(worst_n)
+    elif top_n is not None:
+        query += " ORDER BY diff_ratio DESC LIMIT ?"
+        params.append(top_n)
+    else:
+        query += " ORDER BY diff_ratio DESC"
 
     try:
         df = con.execute(query, params).fetchdf()
@@ -335,7 +343,7 @@ def load_latest_prediction_timestamp() -> Optional[str]:
     con = get_connection()
     try:
         result = con.execute(
-            "SELECT DISTINCT run_timestamp FROM prediction_results ORDER BY run_timestamp DESC LIMIT 1"
+            "SELECT DISTINCT predicted_at FROM prediction_results ORDER BY predicted_at DESC LIMIT 1"
         ).fetchone()
         if result:
             return result[0]
@@ -344,27 +352,27 @@ def load_latest_prediction_timestamp() -> Optional[str]:
         return None
 
 
-def load_prediction_markets(run_timestamp: str = None) -> list:
+def load_prediction_markets(predicted_at: str = None) -> list:
     """
     指定タイムスタンプの予測結果に含まれるマーケット一覧を返す。
 
     Args:
-        run_timestamp: Noneなら最新
+        predicted_at: Noneなら最新
 
     Returns:
         マーケット名のリスト
     """
     con = get_connection()
 
-    if run_timestamp is None:
-        run_timestamp = load_latest_prediction_timestamp()
-        if run_timestamp is None:
+    if predicted_at is None:
+        predicted_at = load_latest_prediction_timestamp()
+        if predicted_at is None:
             return []
 
     try:
         result = con.execute(
-            "SELECT DISTINCT market FROM prediction_results WHERE run_timestamp = ? ORDER BY market",
-            [run_timestamp]
+            "SELECT DISTINCT market FROM prediction_results WHERE predicted_at = ? ORDER BY market",
+            [predicted_at]
         ).fetchall()
         return [row[0] for row in result]
     except Exception:

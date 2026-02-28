@@ -140,17 +140,19 @@ class TestDB(unittest.TestCase):
              "avg_pred_price": 2850.0, "diff_ratio": 0.018, "model_count": 2},
         ])
 
-        db_module.save_prediction_results("20260228_120000", df, rank_type="top10")
+        db_module.save_prediction_results("20260228_120000", df)
 
         loaded = db_module.load_prediction_results("20260228_120000")
         self.assertEqual(len(loaded), 2)
 
-        # rank_typeフィルタ
-        loaded_top = db_module.load_prediction_results("20260228_120000", rank_type="top10")
-        self.assertEqual(len(loaded_top), 2)
+        # top_n/worst_nフィルタ
+        loaded_top = db_module.load_prediction_results("20260228_120000", top_n=1)
+        self.assertEqual(len(loaded_top), 1)
+        self.assertEqual(loaded_top["symbol"].iloc[0], "AAPL")  # diff_ratio降順で1位
 
-        loaded_worst = db_module.load_prediction_results("20260228_120000", rank_type="worst10")
-        self.assertEqual(len(loaded_worst), 0)
+        loaded_worst = db_module.load_prediction_results("20260228_120000", worst_n=1)
+        self.assertEqual(len(loaded_worst), 1)
+        self.assertEqual(loaded_worst["symbol"].iloc[0], "GOOG")  # diff_ratio昇順で1位
 
     def test_load_latest_prediction_timestamp(self):
         """最新のタイムスタンプが正しく取得できることを確認"""
@@ -161,13 +163,18 @@ class TestDB(unittest.TestCase):
 
         db_module.save_prediction_results("20260101_100000", df)
         db_module.save_prediction_results("20260228_120000", df)
-        db_module.save_prediction_results("20260115_080000", df)
+        # 同じ銘柄(AAPL)への2回目のinsertはDelete-Insertで上書き
+        df3 = pd.DataFrame([{
+            "market": "us", "symbol": "MSFT", "current_price": 300.0,
+            "avg_pred_price": 310.0, "diff_ratio": 0.033, "model_count": 2
+        }])
+        db_module.save_prediction_results("20260115_080000", df3)
 
         latest = db_module.load_latest_prediction_timestamp()
         self.assertEqual(latest, "20260228_120000")
 
     def test_load_prediction_results_latest_default(self):
-        """run_timestamp=None で最新の結果が取得できることを確認"""
+        """predicted_at=None で最新の結果が取得できることを確認"""
         df1 = pd.DataFrame([{
             "market": "us", "symbol": "AAPL", "current_price": 150.0,
             "avg_pred_price": 155.0, "diff_ratio": 0.033, "model_count": 2

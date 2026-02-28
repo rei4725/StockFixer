@@ -8,6 +8,8 @@
 |---------|------|
 | [PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md) | プロジェクト概要、システム構成、アーキテクチャ図 |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 詳細アーキテクチャ、レイヤー構造、各モジュールの説明、データフロー |
+| [DOCKER_DB_ARCHITECTURE.md](DOCKER_DB_ARCHITECTURE.md) | Docker・DB アーキテクチャ、ロック制約、コンテナライフサイクル |
+| [OPERATIONS.md](OPERATIONS.md) | 運用手順書、Dockerビルド・デプロイ、命名規約、コマンドリファレンス |
 
 ## クイックリンク
 

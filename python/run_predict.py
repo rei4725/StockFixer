@@ -1,9 +1,10 @@
 """
 予測スクリプト（統合版）
 
+全銘柄予測:    py run_predict.py
+全銘柄予測(銘柄別モデル): py run_predict.py --individual
 単一銘柄:     py run_predict.py --mode single --market us --symbol AAPL
 ウォッチリスト: py run_predict.py --mode watchlist
-Top10/Worst10: py run_predict.py --mode top10 [--individual]
 """
 
 import argparse
@@ -77,9 +78,9 @@ def main():
     parser.add_argument(
         "--mode",
         type=str,
-        required=True,
-        choices=["single", "watchlist", "top10"],
-        help="実行モード: single=単一銘柄, watchlist=監視リスト, top10=差異割合ランキング",
+        default=None,
+        choices=["single", "watchlist"],
+        help="実行モード: single=単一銘柄, watchlist=監視リスト (default: 全銘柄予測)",
     )
     parser.add_argument("--market", type=str, help="市場名（singleモード時に必須）")
     parser.add_argument("--symbol", type=str, help="銘柄コード（singleモード時に必須）")
@@ -96,7 +97,7 @@ def main():
         run_single(args.market, args.symbol)
     elif args.mode == "watchlist":
         run_watchlist()
-    elif args.mode == "top10":
+    else:
         run_top10(use_individual=args.individual)
 
 

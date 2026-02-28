@@ -113,17 +113,17 @@ class TestOutputTopWorstResults(unittest.TestCase):
         from src.utils.db import load_prediction_results
         df = load_prediction_results()
         self.assertFalse(df.empty)
-        # top10 + worst10 = 20行（25銘柄なので重複なし）
-        self.assertEqual(len(df), 20)
+        # 全銘柄が保存される
+        self.assertEqual(len(df), 25)
 
     def test_top10_worst10_correct_order(self):
-        """Top10が降順、Worst10が昇順で保存されることを確認"""
+        """Top10が降順、Worst10が昇順で取得できることを確認"""
         rows = self._make_rows(20, market="us")
         output_top_worst_results(rows, mode="unified")
 
         from src.utils.db import load_prediction_results
-        df_top = load_prediction_results(rank_type="top10")
-        df_worst = load_prediction_results(rank_type="worst10")
+        df_top = load_prediction_results(market="us", top_n=10)
+        df_worst = load_prediction_results(market="us", worst_n=10)
 
         if not df_top.empty:
             # Top10のdiff_ratioは降順
@@ -132,10 +132,10 @@ class TestOutputTopWorstResults(unittest.TestCase):
                 df_top["diff_ratio"].iloc[-1]
             )
         if not df_worst.empty:
-            # Worst10のdiff_ratioは昇順（DB取得時はdiff_ratio DESC）
+            # Worst10のdiff_ratioは昇順
             self.assertLessEqual(
-                df_worst["diff_ratio"].min(),
-                df_worst["diff_ratio"].max()
+                df_worst["diff_ratio"].iloc[0],
+                df_worst["diff_ratio"].iloc[-1]
             )
 
     def test_multiple_markets(self):

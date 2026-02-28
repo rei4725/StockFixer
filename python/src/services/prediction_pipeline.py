@@ -119,7 +119,7 @@ def predict_all_unified(max_workers=MAX_WORKERS):
 
 def output_top_worst_results(output_rows, mode="individual"):
     """
-    予測結果からTop10/Worst10を出力し、DBに保存する
+    予測結果からTop10/Worst10を出力し、全結果をDBに保存する
 
     Args:
         output_rows: predict_all_*の戻り値
@@ -133,7 +133,7 @@ def output_top_worst_results(output_rows, mode="individual"):
     display_columns = ["market", "symbol", "current_price", "avg_pred_price", "diff_ratio", "model_count"]
     now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    # 全予測結果をDBに保存
+    # 全予測結果をDBに保存（Delete-Insert）
     save_prediction_results(now_str, df_result[display_columns])
 
     for market, df_market in df_result.groupby("market"):
@@ -144,7 +144,6 @@ def output_top_worst_results(output_rows, mode="individual"):
             df_top10_display,
             header=f"=== {market} 差異割合上位10銘柄 ({mode}) === 実行日時: {now_str}"
         ))
-        save_prediction_results(now_str, df_top10_display, rank_type="top10")
 
         # ワースト10
         df_worst10 = df_market.sort_values("diff_ratio", ascending=True).head(10)
@@ -153,6 +152,5 @@ def output_top_worst_results(output_rows, mode="individual"):
             df_worst10_display,
             header=f"=== {market} 差異割合ワースト10銘柄 ({mode}) === 実行日時: {now_str}"
         ))
-        save_prediction_results(now_str, df_worst10_display, rank_type="worst10")
 
-    print(f"\n結果保存完了: run_timestamp={now_str}")
+    print(f"\n結果保存完了: predicted_at={now_str}")

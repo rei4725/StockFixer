@@ -3,6 +3,11 @@ services:
     build:
       context: ./python
       dockerfile: Dockerfile
+      args:
+        - BUILD_DATE=${BUILD_DATE:-unknown}
+        - GIT_COMMIT=${GIT_COMMIT:-unknown}
+        - VERSION=${VERSION:-dev}
+    image: stockfixer:${VERSION:-dev}
     container_name: stockfixer
     restart: always
     env_file:
