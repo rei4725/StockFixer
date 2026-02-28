@@ -20,6 +20,12 @@ COPY . .
 # 環境変数の設定
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
 
-# デフォルトコマンド（必要に応じて変更）
-CMD ["python", "run_discord_bot.py"]
+# ヘルスチェック（プロセス生存確認）
+HEALTHCHECK --interval=60s --timeout=10s --retries=3 \
+    CMD python -c "import os, signal; os.kill(1, signal.SIG_DFL)" || exit 1
+
+# デフォルトコマンド: スケジューラ + Discord Bot
+CMD ["python", "run_scheduler.py", "--with-bot"]

@@ -1,0 +1,19 @@
+services:
+  stockfixer:
+    build:
+      context: ./python
+      dockerfile: Dockerfile
+    container_name: stockfixer
+    restart: always
+    env_file:
+      - ./python/.env
+    volumes:
+      # データ・モデル・結果をホスト側に永続化
+      - ./python/data:/app/data
+      - ./python/models:/app/models
+      - ./python/results:/app/results
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

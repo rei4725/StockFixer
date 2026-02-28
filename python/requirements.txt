@@ -10,3 +10,4 @@ pandas
 discord.py
 ta
 duckdb
+apscheduler

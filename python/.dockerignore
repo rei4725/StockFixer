@@ -20,9 +20,10 @@ ENV/
 .coverage
 htmlcov/
 
-# Data files (optional - remove if you need them in container)
-# *.csv
-# data/
+# Data files (volumes でマウントするためイメージには含めない)
+data/
+models/
+results/
 
 # Git
 .git/

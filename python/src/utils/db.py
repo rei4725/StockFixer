@@ -21,13 +21,25 @@ def get_connection() -> duckdb.DuckDBPyConnection:
     """
     DuckDBファイルへのシングルトン接続を返す。
     初回呼び出し時にテーブルを自動初期化する。
+    
+    読み取り性能を最適化するため、スレッド数を設定しロック競合を最小化する。
+    DuckDB は自動的にロック機構を最適化しており、複数読み取り接続を効率的に処理する。
     """
     global _connection
     with _connection_lock:
         if _connection is None:
             ensure_dir(get_data_dir())
             db_path = get_db_path()
-            _connection = duckdb.connect(db_path)
+            
+            # DuckDB 接続設定（ロック競合最小化）
+            # threads: CPU並列処理によるスループット向上
+            # max_memory: メモリ使用量制限で安定性確保
+            config = {
+                'threads': '4',
+                'memory_limit': '2GB'
+            }
+            _connection = duckdb.connect(db_path, config=config)
+            
             _init_tables(_connection)
     return _connection
 
