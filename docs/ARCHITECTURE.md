@@ -50,7 +50,11 @@ StockFixer/
     │   │   └── discord_bot.py   # Discord Bot
     │   │
     │   ├── services/            # オーケストレーション層
-    │   │   └── data_pipeline.py # データ取得〜特徴量生成パイプライン
+    │   │   ├── data_pipeline.py  # データ取得〜特徴量生成パイプライン
+    │   │   ├── model_training_pipeline.py # 銘柄別モデル学習パイプライン
+    │   │   ├── prediction_pipeline.py # 予測・Top10/Worst10集計パイプライン
+    │   │   ├── unified_model_pipeline.py # 統合モデル学習パイプライン
+    │   │   └── batch_runner.py   # バッチ実行ユーティリティ
     │   │
     │   ├── models/              # AI予測モデル層
     │   │   ├── base_model.py    # モデル基底クラス（抽象）
@@ -111,9 +115,12 @@ StockFixer/
 └─────────────────────────────────────────────────┘
                         ↓
 ┌─────────────────────────────────────────────────┐
-│  services層 (data_pipeline.py)                  │
-│  - ビジネスロジックのオーケストレーション       │
-│  - 複数モジュールの連携                         │
+│  services層                                     │
+│  - data_pipeline.py: データ取得〜特徴量生成     │
+│  - model_training_pipeline.py: 銘柄別モデル学習 │
+│  - prediction_pipeline.py: 予測・ランキング集計 │
+│  - unified_model_pipeline.py: 統合モデル学習    │
+│  - batch_runner.py: 並列実行・共通バッチ処理    │
 └─────────────────────────────────────────────────┘
                         ↓
 ┌─────────────────────────────────────────────────┐
@@ -158,6 +165,26 @@ StockFixer/
 #### `data_pipeline.py`
 - **データ取得 → 特徴量生成 → 保存** の一連の処理を統合
 - `save_stock_data_with_features()`: 銘柄データ取得から特徴量付きDB保存まで
+
+#### `model_training_pipeline.py`
+- 銘柄別モデル（XGBoost・LightGBM）の学習・保存
+- `train_models_for_symbol()`: 1銘柄に対して両モデルを学習
+
+#### `prediction_pipeline.py`
+- 全銘柄予測とTop10/Worst10集計・DB保存
+- `predict_all_individual()`: 銘柄別モデルで全銘柄予測
+- `predict_all_unified()`: 統合モデルで全銘柄予測
+- `output_top_worst_results()`: ランキング出力・DB保存
+
+#### `unified_model_pipeline.py`
+- 全銘柄のデータを結合して統合モデルを学習・保存
+- `train_unified_model()`: 統合モデルの学習
+
+#### `batch_runner.py`
+- バッチ実行共通ユーティリティ
+- `load_target_symbols()`: ウォッチリストCSVから対象銘柄読み込み
+- `run_parallel()`: 汎用並列実行ランナー
+- `print_summary()`: バッチ処理結果サマリー出力
 
 ### models層
 
@@ -267,11 +294,11 @@ StockFixer/
 
 ```
 ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
-│ run_predict_ │ → │ predict_     │ → │ model_       │
-│ single_stock │    │ single_stock │    │ manager.py   │
-└──────────────┘    └──────────────┘    └──────────────┘
-                            ↓
-                    ┌──────────────┐    ┌──────────────┐
+│ run_predict  │ → │ prediction_  │ → │ predict_     │
+│ .py          │    │ pipeline.py  │    │ single_stock │
+└──────────────┘    └──────────────┘    │/predict_     │
+                            ↓           │ unified.py   │
+                    ┌──────────────┐    └──────────────┘
                     │ signal_      │ → │ Discord/API  │
                     │ generator.py │    │ 出力         │
                     └──────────────┘    └──────────────┘
@@ -281,16 +308,14 @@ StockFixer/
 
 ## 実行スクリプト一覧
 
-| スクリプト | 用途 |
-|-----------|------|
-| `run_data_creation.py` | 単一銘柄のデータ作成 |
-| `batch_run_data_creation.py` | 複数銘柄のバッチデータ作成 |
-| `run_model_creation.py` | モデルの学習・保存 |
-| `run_predict_single_stock.py` | 単一銘柄の価格予測 |
-| `run_predict_watchlist.py` | ウォッチリスト銘柄の一括予測 |
-| `run_top10_diff_stocks.py` | Top10/ワースト10銘柄の抽出・保存 |
-| `run_discord_bot.py` | Discord Botの起動 |
-| `get_sp500_nasdaq100_list.py` | S&P500/NASDAQ100銘柄リスト取得 |
+| スクリプト | 用途 | 主な引数 |
+|-----------|------|----------|
+| `run_data_creation.py` | データ取得・特徴量生成・保存 | `--market us --symbol AAPL` / `--batch` |
+| `run_model_creation.py` | 銘柄別モデルの学習・保存 | `--market us --symbol AAPL` / `--batch` |
+| `run_unified_model_training.py` | 統合モデルの学習 | `--model-type`, `--no-both` |
+| `run_predict.py` | 株価予測（3モード統合） | `--mode single\|watchlist\|top10` |
+| `run_discord_bot.py` | Discord Botの起動 | — |
+| `run_ticker_list.py` | S&P500/NASDAQ100銘柄リスト取得 | — |
 
 ---
 
@@ -352,8 +377,8 @@ graph TD
     subgraph "実行スクリプト"
         R1[run_data_creation.py]
         R2[run_model_creation.py]
-        R3[run_predict_single_stock.py]
-        R4[run_top10_diff_stocks.py]
+        R3[run_predict.py]
+        R4[run_unified_model_training.py]
         R5[run_discord_bot.py]
     end
 
@@ -364,6 +389,10 @@ graph TD
 
     subgraph "サービス層"
         S1[data_pipeline.py]
+        S2[model_training_pipeline.py]
+        S3[prediction_pipeline.py]
+        S4[unified_model_pipeline.py]
+        S5[batch_runner.py]
     end
 
     subgraph "モデル層"
@@ -401,10 +430,16 @@ graph TD
     end
 
     R1 --> S1
-    R2 --> M1
+    R1 --> S5
+    R2 --> S2
+    R2 --> S5
+    R3 --> S3
     R3 --> M5
-    R4 --> M5
+    R4 --> S4
     R5 --> A2
+
+    S2 --> M1
+    S3 --> M5
 
     A2 --> E2
     S1 --> D1
@@ -424,4 +459,4 @@ graph TD
 
 ---
 
-*Last updated: 2025-07-10*
+*Last updated: 2026-02-28*

@@ -126,7 +126,7 @@ def predict_single_stock(market: str, symbol: str, model_types=None, lookback_da
     
     avg_pred_price = sum(pred_prices) / len(pred_prices)
     diff_ratio = (avg_pred_price - current_price) / current_price
-    # DataFrame形式で返す（run_top10_diff_stocks.pyと同じカラム構成）
+    # DataFrame形式で返す（prediction_pipeline.pyと同じカラム構成）
     return pd.DataFrame([{
         "market": market,
         "symbol": symbol,
