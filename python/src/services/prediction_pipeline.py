@@ -133,6 +133,9 @@ def output_top_worst_results(output_rows, mode="individual"):
     display_columns = ["market", "symbol", "current_price", "avg_pred_price", "diff_ratio", "model_count"]
     now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
 
+    # 全予測結果をDBに保存
+    save_prediction_results(now_str, df_result[display_columns])
+
     for market, df_market in df_result.groupby("market"):
         # Top10
         df_top10 = df_market.sort_values("diff_ratio", ascending=False).head(10)
