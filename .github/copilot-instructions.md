@@ -58,6 +58,19 @@ python/
 run_*.py → api層 → services層 → models/strategy/backtest層 → features層 → data層 → utils層
 ```
 
+### runレイヤー原則（必須）
+`run_*.py` は **CLIラッパーに徹する**こと。以下のみを許可する：
+- `argparse` による引数パース
+- services層（またはapi層）の関数呼び出し
+- 結果の標準出力
+
+**禁止事項:**
+- ビジネスロジック・データ変換・条件分岐の実装
+- モデル・DB・外部APIへの直接アクセス
+- `import` で features層・data層・utils層を直接参照すること
+
+ロジックが必要な場合は `src/services/` にパイプライン関数を作成し、`run_*.py` からはそれを呼び出すだけにする。
+
 ---
 
 ## コーディングガイドライン
@@ -145,23 +158,6 @@ run_*.py → api層 → services層 → models/strategy/backtest層 → features
 ### パス・ティッカー補正
 - `data_path_utils.py` に `get_data_subdir`, `get_models_subdir`, `get_ticker` 等を実装
 - 日本株ティッカー補正（7203→7203.T、二重付与防止）
-
----
-
-## 現在の進捗状況
-
-### 完了タスク
-- ✅ バックテスト実行・修正
-- ✅ ModelManagerテスト・仕様確認
-- ✅ Discord連携機能の実装
-- ✅ discord_bot.pyの/forecastコマンド機能改修
-- ✅ discord出力仕様統一・部品化
-- ✅ predict_single_stock自動モデル生成・日本株対応
-- ✅ マーケット別Top10・ワースト10出力＆DiscordBot連携
-- ✅ パス・ティッカー補正のutils化
-
-### 進行中タスク
-- 🔄 get_stock_data引数追加・関連修正（market引数対応）
 
 ---
 
