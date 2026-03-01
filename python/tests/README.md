@@ -4,34 +4,10 @@
 
 ```
 tests/
-├── unit/                              # Unit Test（全Mockingで隔離・11ファイル）
-│   ├── __init__.py
-│   ├── test_backtester.py            # Backtester基本動作
-│   ├── test_backtester_unit.py       # Backtester.simulate_trading
-│   ├── test_backtest_advanced.py     # ストップロス・テイクプロフィット・ポジションサイジング
-│   ├── test_backtest_metrics.py      # メトリクス計算ロジック
-│   ├── test_backtest_pipeline_unit.py # パイプラインロジック
-│   ├── test_backtest_task.py         # ReturnRegressionTask
-│   ├── test_data_path_utils.py       # パスユーティリティ
-│   ├── test_df_to_string.py          # DataFrame文字列変換
-│   ├── test_model_manager.py         # モデル管理ロジック
-│   ├── test_signal_generator.py      # シグナル生成ロジック
-│   └── test_technical_analysis.py    # テクニカル指標計算
-├── integration/                       # Integration Test（実依存・11ファイル）
-│   ├── __init__.py
-│   ├── test_backtest_e2e.py          # バックテスト E2E
-│   ├── test_backtest_optimize_e2e.py # 最適化 E2E
-│   ├── test_batch_runner.py          # バッチ処理実行
-│   ├── test_data_loader.py           # yfinance連携
-│   ├── test_data_pipeline.py         # データパイプライン統合
-│   ├── test_db.py                    # DuckDB操作（stock_features）
-│   ├── test_db_raw.py                # DuckDB操作（market_data_raw）
-│   ├── test_discord_bot.py           # Discord API連携
-│   ├── test_model_training_pipeline.py # モデル学習パイプライン
-│   ├── test_prediction_pipeline.py   # 予測パイプライン
-│   └── test_scheduler_pipeline.py    # スケジューラー統合
-├── conftest.py                       # pytest fixture 共有定義
-└── README.md                         # このファイル
+├── unit/                    # Unit Test（全Mockingで隔離）
+├── integration/             # Integration Test（実依存）
+├── conftest.py             # pytest fixture 共有定義
+└── README.md               # このファイル
 ```
 
 ## テスト実行方法
@@ -86,18 +62,8 @@ python -m unittest discover -s tests/integration -p "test_*.py"
 - **環境**: 開発マシンで常時実行可能
 - **使用場面**: コミット前チェック、CI/CD パイプラインの初期段階
 
-**対象ファイル（11ファイル）**:
-- `test_backtester.py` — Backtester基本機能（買い・売り・手数料・スリッページ）
-- `test_backtester_unit.py` — simulate_tradingメソッド詳細テスト
-- `test_backtest_advanced.py` — ストップロス・テイクプロフィット・ポジションサイジング
-- `test_backtest_metrics.py` — compute_metrics関数（勝率・profit_factor・シャープレシオ等）
-- `test_backtest_pipeline_unit.py` — パイプラインヘルパー関数（ラベル生成・メトリクス集計）
-- `test_backtest_task.py` — ReturnRegressionTask（make_labels・make_signal）
-- `test_data_path_utils.py` — パスユーティリティ関数
-- `test_df_to_string.py` — DataFrame文字列変換
-- `test_model_manager.py` — ModelManager（モデル登録・作成・保存・ロード）
-- `test_signal_generator.py` — SignalGenerator（シグナル生成ロジック）
-- `test_technical_analysis.py` — テクニカル指標計算（RSI・MACD・ATR等）
+**対象テスト**:
+Backtester（基本機能・詳細・ストップロス・テイクプロフィット・ポジションサイジング）、メトリクス計算、パイプラインロジック、パスユーティリティ、DataFrame変換、モデル管理、シグナル生成、テクニカル指標、最適パラメータ読込（Unit）
 
 ### Integration Test（`tests/integration/`）
 **目的**: 全フロー検証（実 DB・実モデル使用）  
@@ -107,18 +73,8 @@ python -m unittest discover -s tests/integration -p "test_*.py"
 - **環境**: セットアップ済みマシンで実行
 - **使用場面**: PR 時、ナイトリビルド
 
-**対象ファイル（11ファイル）**:
-- `test_backtest_e2e.py` — バックテストE2E（DB→特徴量→学習→バックテスト）
-- `test_backtest_optimize_e2e.py` — グリッドサーチ実行〜メトリクス計算
-- `test_batch_runner.py` — バッチ処理（並列実行・エラーハンドリング）
-- `test_data_loader.py` — yfinance連携（株価取得・保存）
-- `test_data_pipeline.py` — データパイプライン統合（取得→特徴量生成→DB保存）
-- `test_db.py` — DuckDB操作（stock_featuresテーブルCRUD）
-- `test_db_raw.py` — DuckDB操作（market_data_rawテーブルCRUD）
-- `test_discord_bot.py` — Discord Bot（/forecastコマンド・メッセージ送信）
-- `test_model_training_pipeline.py` — モデル学習パイプライン（学習→保存→ロード）
-- `test_prediction_pipeline.py` — 予測パイプライン（モデルロード→予測→結果保存）
-- `test_scheduler_pipeline.py` — スケジューラー統合（日次・週次ジョブ実行）
+**対象テスト**:
+バックテストE2E、最適化E2E、バッチ処理、データ取得（yfinance）、データパイプライン統合、DuckDB操作、Discord Bot、モデル学習パイプライン、予測パイプライン、スケジューラー統合、最適パラメータ読込E2E
 
 ## conftest.py（共有 Fixture）
 

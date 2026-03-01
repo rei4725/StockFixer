@@ -25,6 +25,7 @@ from src.services.backtest_optimize_pipeline import (
     run_optimization,
     print_optimization_results,
     save_optimization_results,
+    save_optimal_params_json,
 )
 
 
@@ -86,8 +87,12 @@ def main():
 
     print_optimization_results(result_df, args.sort_by)
 
-    path = save_optimization_results(result_df, args.market, args.symbol)
-    print(f"\n結果保存: {path}")
+    csv_path = save_optimization_results(result_df, args.market, args.symbol)
+    print(f"\n結果保存（CSV）: {csv_path}")
+
+    # 最適パラメータを JSON に保存
+    json_path = save_optimal_params_json(result_df, args.market, args.symbol, sort_by=args.sort_by)
+    print(f"最適パラメータ保存（JSON）: {json_path}")
 
 
 if __name__ == "__main__":

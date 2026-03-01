@@ -1,0 +1,36 @@
+{
+  "jp_1332": {
+    "market": "jp",
+    "symbol": "1332",
+    "timestamp": "2026-03-01T18:32:50.818256",
+    "sort_by": "sharpe_ratio",
+    "threshold": 0.0,
+    "stop_loss_pct": null,
+    "take_profit_pct": null,
+    "metrics": {
+      "total_return": -0.1520988,
+      "sharpe_ratio": 0.25460000000000005,
+      "max_drawdown": -0.39801699999999995,
+      "win_rate": 0.57524,
+      "profit_factor": 1.06494,
+      "num_trades": 182
+    }
+  },
+  "jp_1333": {
+    "market": "jp",
+    "symbol": "1333",
+    "timestamp": "2026-03-01T18:33:09.091922",
+    "sort_by": "sharpe_ratio",
+    "threshold": 0.004,
+    "stop_loss_pct": null,
+    "take_profit_pct": null,
+    "metrics": {
+      "total_return": -0.036658,
+      "sharpe_ratio": 0.14698000000000006,
+      "max_drawdown": -0.1819594,
+      "win_rate": 0.52916,
+      "profit_factor": 1.1505999999999998,
+      "num_trades": 31
+    }
+  }
+}

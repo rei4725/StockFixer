@@ -179,6 +179,15 @@ StockFixer/
 - `predict_all_individual()`: 銘柄別モデルで全銘柄予測
 - `predict_all_unified()`: 統合モデルで全銘柄予測
 - `output_top_worst_results()`: ランキング出力・DB保存
+- `get_optimal_params()`: ⭐ 保存済み最適パラメータを JSON から読込
+
+#### `backtest_optimize_pipeline.py`
+- ⭐ **バックテスト最適化特化パイプライン**
+- 複数パラメータ（閾値・ストップロス・テイクプロフィット）の組み合わせで Walk-Forward 検証を実行
+- グリッドサーチで最適パラメータを特定する
+- `run_optimization()`: パラメータグリッドサーチ実行
+- `save_optimal_params_json()`: 最適パラメータを JSON に保存（複数銘柄統合管理）
+- **出力**: CSV（詳細結果）+ JSON（最適パラメータ一元管理）
 
 #### `unified_model_pipeline.py`
 - 全銘柄のデータを結合して統合モデルを学習・保存

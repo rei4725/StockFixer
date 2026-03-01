@@ -7,9 +7,10 @@ Walk-Forward検証で実行し、最適パラメータを特定する。
 run_backtest_optimize.py はこのモジュールの関数を呼び出すラッパーとして機能する。
 """
 import itertools
+import json
 import os
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict, Any
 
 import pandas as pd
 
@@ -214,3 +215,119 @@ def save_optimization_results(
     path = os.path.join(out_dir, f"optimize_{ts}.csv")
     result_df.to_csv(path, index=False)
     return path
+
+
+def save_optimal_params_json(
+    result_df: pd.DataFrame,
+    market: str,
+    symbol: str,
+    sort_by: str = "sharpe_ratio",
+) -> str:
+    """
+    最適パラメータを JSON に保存する。
+    シャープレシオ（またはソート基準）が最高のパラメータを抽出し、
+    python/config/optimal_params.json に統合保存する。
+
+    Args:
+        result_df: run_optimization が返す DataFrame
+        market: マーケット識別子
+        symbol: 銘柄シンボル
+        sort_by: ソート基準列名（デフォルト: sharpe_ratio）
+
+    Returns:
+        保存先ファイルパス
+    """
+    if result_df.empty:
+        print("警告: 最適化結果が空です")
+        return ""
+
+    # エラー行を除外
+    if "error" in result_df.columns:
+        valid = result_df[result_df["error"].isna()].copy()
+    else:
+        valid = result_df.copy()
+
+    if valid.empty:
+        print("警告: 有効な最適化結果がありません")
+        return ""
+
+    # 最適パラメータを取得
+    ascending = sort_by == "max_drawdown"
+    best_row = valid.sort_values(sort_by, ascending=ascending).iloc[-1 if not ascending else 0]
+
+    # JSON形式に変換
+    optimal_param = {
+        "market": market,
+        "symbol": symbol,
+        "timestamp": datetime.now().isoformat(),
+        "sort_by": sort_by,
+        "threshold": float(best_row.get("threshold", 0.0)),
+        "stop_loss_pct": float(best_row.get("stop_loss_pct")) if best_row.get("stop_loss_pct") is not None else None,
+        "take_profit_pct": float(best_row.get("take_profit_pct")) if best_row.get("take_profit_pct") is not None else None,
+        "metrics": {
+            "total_return": float(best_row.get("total_return", 0.0)),
+            "sharpe_ratio": float(best_row.get("sharpe_ratio", 0.0)),
+            "max_drawdown": float(best_row.get("max_drawdown", 0.0)),
+            "win_rate": float(best_row.get("win_rate", 0.0)),
+            "profit_factor": float(best_row.get("profit_factor", 1.0)),
+            "num_trades": int(best_row.get("num_trades", 0)) if pd.notna(best_row.get("num_trades")) else 0,
+        },
+    }
+
+    # 既存の JSON ファイルを読み込み、統合
+    # python/src/services/backtest_optimize_pipeline.py -> python/config
+    config_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "config")
+    ensure_dir(config_dir)
+    json_path = os.path.join(config_dir, "optimal_params.json")
+
+    all_params = {}
+    if os.path.exists(json_path):
+        try:
+            with open(json_path, "r", encoding="utf-8") as f:
+                all_params = json.load(f)
+        except Exception as e:
+            print(f"既存JSONの読み込みエラー（空として初期化）: {e}")
+
+    # マーケット・シンボルをキーに保存
+    key = f"{market}_{symbol}"
+    all_params[key] = optimal_param
+
+    # JSON を保存
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(all_params, f, ensure_ascii=False, indent=2)
+
+    return json_path
+
+
+def get_optimal_params(
+    market: str,
+    symbol: str,
+    json_path: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    保存された最適パラメータを JSON から読み込む。
+
+    Args:
+        market: マーケット識別子
+        symbol: 銘柄シンボル
+        json_path: JSONファイルパス（Noneの場合は默认位置）
+
+    Returns:
+        最適パラメータ辞書、または見つからない場合は None
+    """
+    if json_path is None:
+        # python/src/services/backtest_optimize_pipeline.py -> python/config
+        config_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "config")
+        json_path = os.path.join(config_dir, "optimal_params.json")
+
+    if not os.path.exists(json_path):
+        return None
+
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            all_params = json.load(f)
+        key = f"{market}_{symbol}"
+        return all_params.get(key)
+    except Exception as e:
+        print(f"JSONの読み込みエラー: {e}")
+        return None

@@ -10,6 +10,8 @@
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 詳細アーキテクチャ、レイヤー構造、各モジュールの説明、データフロー |
 | [DOCKER_DB_ARCHITECTURE.md](DOCKER_DB_ARCHITECTURE.md) | Docker・DB アーキテクチャ、ロック制約、コンテナライフサイクル |
 | [OPERATIONS.md](OPERATIONS.md) | 運用手順書、Dockerビルド・デプロイ、命名規約、コマンドリファレンス |
+| [IMPLEMENTATION_BACKTEST_OPTIMIZE.md](IMPLEMENTATION_BACKTEST_OPTIMIZE.md) | ⭐ バックテスト最適化実装詳細、テスト結果、技術仕様 |
+| [OPTIMAL_PARAMS_GUIDE.md](OPTIMAL_PARAMS_GUIDE.md) | ⭐ 最適化パラメータ運用ガイド、利用方法、トラブルシューティング |
 
 ## クイックリンク
 

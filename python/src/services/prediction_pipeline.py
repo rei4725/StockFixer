@@ -6,6 +6,7 @@
 
 import os
 import glob
+import json
 import pandas as pd
 import warnings
 import logging
@@ -24,6 +25,37 @@ logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 # 並列実行時のワーカー数（デフォルト=1で同期実行、スレッド間競合を回避）
 # ガイドライン参照: 並列処理は競合バグの原因となるため同期集計が安定
 MAX_WORKERS = 1
+
+
+def get_optimal_params(market: str, symbol: str) -> dict:
+    """
+    保存された最適パラメータをJSONから読み込む。
+
+    Args:
+        market: マーケット識別子
+        symbol: 銘柄シンボル
+
+    Returns:
+        最適パラメータ辞書、見つからない場合は空辞書
+    """
+    # python/src/services/prediction_pipeline.py -> python/config
+    config_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "config")
+    json_path = os.path.join(config_dir, "optimal_params.json")
+
+    if not os.path.exists(json_path):
+        return {}
+
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            all_params = json.load(f)
+        key = f"{market}_{symbol}"
+        params = all_params.get(key, {})
+        if params:
+            print(f"[{market}_{symbol}] 最適パラメータを読み込みました: 閾値={params.get('threshold')}, SharpeRatio={params.get('metrics', {}).get('sharpe_ratio')}")
+        return params
+    except Exception as e:
+        print(f"[{market}_{symbol}] 最適パラメータ読み込みエラー: {e}")
+        return {}
 
 
 def find_model_files(model_root=None, model_name="StockXGBoostModel.joblib"):
