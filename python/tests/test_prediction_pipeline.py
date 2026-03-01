@@ -149,5 +149,174 @@ class TestOutputTopWorstResults(unittest.TestCase):
         self.assertIn("jp", markets)
 
 
+class TestRunPredictSingle(unittest.TestCase):
+    """run_predict_single 関数のテスト"""
+
+    def setUp(self):
+        """テスト用一時DBを設定"""
+        db_module.close_connection()
+        self.tmp_dir = tempfile.mkdtemp()
+        self.tmp_db = os.path.join(self.tmp_dir, "test_pred_single.duckdb")
+        self._orig_get_db_path = path_utils.get_db_path
+        path_utils.get_db_path = lambda: self.tmp_db
+        db_module.get_db_path = lambda: self.tmp_db
+        db_module._connection = None
+
+    def tearDown(self):
+        db_module.close_connection()
+        path_utils.get_db_path = self._orig_get_db_path
+        db_module.get_db_path = self._orig_get_db_path
+        if os.path.exists(self.tmp_db):
+            os.remove(self.tmp_db)
+        wal_path = self.tmp_db + ".wal"
+        if os.path.exists(wal_path):
+            os.remove(wal_path)
+        if os.path.exists(self.tmp_dir):
+            os.rmdir(self.tmp_dir)
+
+    @patch("src.services.prediction_pipeline.save_prediction_results")
+    @patch("src.services.prediction_pipeline.predict_single_stock")
+    def test_predict_single_success(
+        self,
+        mock_predict,
+        mock_save,
+    ):
+        """単一銘柄の予測が正常に完了することを確認"""
+        from src.services.prediction_pipeline import run_predict_single
+
+        # テスト用予測結果
+        result_df = pd.DataFrame([{
+            "market": "us",
+            "symbol": "AAPL",
+            "current_price": 150.0,
+            "avg_pred_price": 155.0,
+            "diff_ratio": 0.033,
+            "model_count": 2,
+        }])
+        mock_predict.return_value = result_df
+
+        # 実行
+        run_predict_single("us", "AAPL")
+
+        # predict_single_stockが呼ばれたことを確認
+        mock_predict.assert_called_once_with("us", "AAPL")
+        # save_prediction_resultsが呼ばれたことを確認
+        mock_save.assert_called_once()
+
+    @patch("src.services.prediction_pipeline.predict_single_stock")
+    def test_predict_single_failure(self, mock_predict):
+        """単一銘柄の予測に失敗した場合を確認"""
+        from src.services.prediction_pipeline import run_predict_single
+
+        mock_predict.return_value = None
+
+        # 実行（例外が発生しないことを確認）
+        run_predict_single("us", "NONEXIST")
+
+        # predict_single_stockが呼ばれたことを確認
+        mock_predict.assert_called_once()
+
+
+class TestRunPredictWatchlist(unittest.TestCase):
+    """run_predict_watchlist 関数のテスト"""
+
+    def setUp(self):
+        """テスト用一時DBを設定"""
+        db_module.close_connection()
+        self.tmp_dir = tempfile.mkdtemp()
+        self.tmp_db = os.path.join(self.tmp_dir, "test_pred_watch.duckdb")
+        self._orig_get_db_path = path_utils.get_db_path
+        path_utils.get_db_path = lambda: self.tmp_db
+        db_module.get_db_path = lambda: self.tmp_db
+        db_module._connection = None
+
+    def tearDown(self):
+        db_module.close_connection()
+        path_utils.get_db_path = self._orig_get_db_path
+        db_module.get_db_path = self._orig_get_db_path
+        if os.path.exists(self.tmp_db):
+            os.remove(self.tmp_db)
+        wal_path = self.tmp_db + ".wal"
+        if os.path.exists(wal_path):
+            os.remove(wal_path)
+        if os.path.exists(self.tmp_dir):
+            os.rmdir(self.tmp_dir)
+
+    @patch("src.services.prediction_pipeline.save_prediction_results")
+    @patch("src.utils.data_path_utils.get_monitor_list_path")
+    @patch("src.services.prediction_pipeline.predict_single_stock")
+    def test_predict_watchlist_success(
+        self,
+        mock_predict,
+        mock_get_path,
+        mock_save,
+    ):
+        """監視リスト予測が正常に完了することを確認"""
+        from src.services.prediction_pipeline import run_predict_watchlist
+        import tempfile
+
+        # テスト用監視リストファイル
+        watchlist_file = tempfile.NamedTemporaryFile(
+            mode='w', delete=False, suffix='.csv', encoding='utf-8'
+        )
+        watchlist_file.write("us,AAPL,Apple Inc.\n")
+        watchlist_file.write("us,MSFT,Microsoft\n")
+        watchlist_file.close()
+
+        mock_get_path.return_value = watchlist_file.name
+
+        # テスト用予測結果
+        result_df = pd.DataFrame([{
+            "market": "us",
+            "current_price": 150.0,
+            "avg_pred_price": 155.0,
+            "diff_ratio": 0.033,
+            "model_count": 2,
+        }])
+        mock_predict.return_value = result_df
+
+        # 実行
+        run_predict_watchlist()
+
+        # predict_single_stockが2回呼ばれたことを確認
+        self.assertEqual(mock_predict.call_count, 2)
+        # save_prediction_resultsが呼ばれたことを確認
+        mock_save.assert_called_once()
+
+        # テスト用ファイルを削除
+        os.remove(watchlist_file.name)
+
+    @patch("src.utils.data_path_utils.get_monitor_list_path")
+    @patch("src.services.prediction_pipeline.predict_single_stock")
+    def test_predict_watchlist_all_failures(
+        self,
+        mock_predict,
+        mock_get_path,
+    ):
+        """監視リストの全銘柄の予測に失敗した場合を確認"""
+        from src.services.prediction_pipeline import run_predict_watchlist
+        import tempfile
+
+        # テスト用監視リストファイル
+        watchlist_file = tempfile.NamedTemporaryFile(
+            mode='w', delete=False, suffix='.csv', encoding='utf-8'
+        )
+        watchlist_file.write("us,AAPL,Apple Inc.\n")
+        watchlist_file.write("us,MSFT,Microsoft\n")
+        watchlist_file.close()
+
+        mock_get_path.return_value = watchlist_file.name
+        mock_predict.return_value = None
+
+        # 実行（例外が発生しないことを確認）
+        run_predict_watchlist()
+
+        # predict_single_stockが2回呼ばれたことを確認
+        self.assertEqual(mock_predict.call_count, 2)
+
+        # テスト用ファイルを削除
+        os.remove(watchlist_file.name)
+
+
 if __name__ == '__main__':
     unittest.main()
