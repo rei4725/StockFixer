@@ -46,6 +46,11 @@ class WalkForwardValidator:
         slippage: float = 0.0,
         n_splits: int = 5,
         source: str = "file",
+        stop_loss_pct: Optional[float] = None,
+        take_profit_pct: Optional[float] = None,
+        position_sizing: str = "full",
+        position_fraction: float = 0.5,
+        ensemble: bool = False,
     ):
         self.market = market
         self.symbol = symbol
@@ -56,6 +61,11 @@ class WalkForwardValidator:
         self.slippage = slippage
         self.n_splits = n_splits
         self.source = source
+        self.stop_loss_pct = stop_loss_pct
+        self.take_profit_pct = take_profit_pct
+        self.position_sizing = position_sizing
+        self.position_fraction = position_fraction
+        self.ensemble = ensemble
 
     def run(
         self,
@@ -137,21 +147,25 @@ class WalkForwardValidator:
 
         feature_cols = [c for c in train_df.columns if c not in (task.label_col, "market", "symbol", "market_encoded")]
 
-        # 学習 (BaseModel の train() メソッドを使用)
         X_train = train_df[feature_cols].dropna()
         y_train = train_df.loc[X_train.index, task.label_col]
-        model = self.model_manager.get_model(model_name)
-        model.train(X_train, y_train)
-
-        # 予測
         X_val = val_df[feature_cols].dropna()
-        pred = pd.Series(model.predict(X_val), index=X_val.index, name="pred")
+
+        if self.ensemble:
+            from src.services.backtest_pipeline import _ensemble_predict
+            pred = _ensemble_predict(
+                self.model_manager, X_train, y_train, X_val, model_name,
+            )
+        else:
+            # 学習 (BaseModel の train() メソッドを使用)
+            model = self.model_manager.get_model(model_name)
+            model.train(X_train, y_train)
+            pred = pd.Series(model.predict(X_val), index=X_val.index, name="pred")
 
         # シグナル生成
         signal = task.make_signal(pred)
 
-        # Close 列を取得（バックテスト用）
-        close_col = "Close" if "Close" in val_df.columns else "close"
+        # シミュレーション
         backtester = Backtester(
             model_manager=self.model_manager,
             signal_generator=self.signal_generator,
@@ -163,8 +177,12 @@ class WalkForwardValidator:
             initial_cash=self.initial_cash,
             fee_rate=self.fee_rate,
             slippage=self.slippage,
+            stop_loss_pct=self.stop_loss_pct,
+            take_profit_pct=self.take_profit_pct,
+            position_sizing=self.position_sizing,
+            position_fraction=self.position_fraction,
         )
-        result_df, metrics = backtester.simulate_trading(val_df, signal)
+        result_df, metrics = backtester.simulate_trading(val_df, signal, pred=pred)
         return metrics
 
     def _load_features(self) -> Optional[pd.DataFrame]:

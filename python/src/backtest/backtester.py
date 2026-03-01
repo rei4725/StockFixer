@@ -18,6 +18,10 @@ class Backtester:
         initial_cash=1_000_000,
         fee_rate=0.0,
         slippage=0.0,
+        stop_loss_pct: Optional[float] = None,
+        take_profit_pct: Optional[float] = None,
+        position_sizing: str = "full",
+        position_fraction: float = 0.5,
     ):
         self.model_manager = model_manager
         self.signal_generator = signal_generator
@@ -29,6 +33,10 @@ class Backtester:
         self.initial_cash = initial_cash
         self.fee_rate = fee_rate
         self.slippage = slippage
+        self.stop_loss_pct = stop_loss_pct
+        self.take_profit_pct = take_profit_pct
+        self.position_sizing = position_sizing
+        self.position_fraction = position_fraction
 
     def run(
         self,
@@ -81,13 +89,16 @@ class Backtester:
         result_df, metrics = self.simulate_trading(df.loc[X.index], signal)
         return result_df, metrics
 
-    def simulate_trading(self, df: pd.DataFrame, signal: pd.Series):
+    def simulate_trading(self, df: pd.DataFrame, signal: pd.Series, pred: Optional[pd.Series] = None):
         """
         仮想売買シミュレーションを実行する。
+
+        ストップロス・テイクプロフィット・ポジションサイジングに対応。
 
         Args:
             df: Close 列を含む DataFrame
             signal: シグナル Series (1=buy, -1=sell, 0=hold)
+            pred: 予測値 Series（ポジションサイジング "confidence" モードで使用）
 
         Returns:
             (result_df, metrics) のタプル
@@ -99,24 +110,57 @@ class Backtester:
 
         close_col = "Close" if "Close" in df.columns else "close"
 
-        for date, sig in signal.items():
-            if date not in df.index:
-                continue
+        for date in df.index:
             price = df.loc[date, close_col]
+            sig = signal.get(date, 0) if date in signal.index else 0
+
+            # ストップロス / テイクプロフィット判定（シグナルより先に評価）
+            if position > 0 and position_price > 0:
+                change_from_entry = (price - position_price) / position_price
+
+                if self.stop_loss_pct is not None and change_from_entry <= -self.stop_loss_pct:
+                    proceeds = position * price * (1 - self.fee_rate - self.slippage)
+                    cash += proceeds
+                    trade_log.append({
+                        "date": date, "action": "stop_loss",
+                        "price": price, "qty": position, "cash": cash,
+                    })
+                    position = 0
+                    position_price = 0.0
+                    continue
+
+                if self.take_profit_pct is not None and change_from_entry >= self.take_profit_pct:
+                    proceeds = position * price * (1 - self.fee_rate - self.slippage)
+                    cash += proceeds
+                    trade_log.append({
+                        "date": date, "action": "take_profit",
+                        "price": price, "qty": position, "cash": cash,
+                    })
+                    position = 0
+                    position_price = 0.0
+                    continue
+
+            # シグナルに基づく売買
             if sig == 1 and position == 0:
                 # Buy
-                qty = int(cash // (price * (1 + self.fee_rate + self.slippage)))
+                qty = self._calc_qty(cash, price, pred.get(date) if pred is not None else None)
                 if qty > 0:
                     cost = qty * price * (1 + self.fee_rate + self.slippage)
                     cash -= cost
                     position += qty
                     position_price = price
-                    trade_log.append({"date": date, "action": "buy", "price": price, "qty": qty, "cash": cash})
+                    trade_log.append({
+                        "date": date, "action": "buy",
+                        "price": price, "qty": qty, "cash": cash,
+                    })
             elif sig == -1 and position > 0:
                 # Sell
                 proceeds = position * price * (1 - self.fee_rate - self.slippage)
                 cash += proceeds
-                trade_log.append({"date": date, "action": "sell", "price": price, "qty": position, "cash": cash})
+                trade_log.append({
+                    "date": date, "action": "sell",
+                    "price": price, "qty": position, "cash": cash,
+                })
                 position = 0
                 position_price = 0.0
 
@@ -125,12 +169,44 @@ class Backtester:
             price = df.iloc[-1][close_col]
             proceeds = position * price * (1 - self.fee_rate - self.slippage)
             cash += proceeds
-            trade_log.append({"date": df.index[-1], "action": "final_sell", "price": price, "qty": position, "cash": cash})
+            trade_log.append({
+                "date": df.index[-1], "action": "final_sell",
+                "price": price, "qty": position, "cash": cash,
+            })
             position = 0
 
         result_df = pd.DataFrame(trade_log)
         metrics = compute_metrics(result_df, self.initial_cash)
         return result_df, metrics
+
+    def _calc_qty(self, cash: float, price: float, pred_value: Optional[float] = None) -> int:
+        """
+        ポジションサイジングに基づいて購入数量を算出する。
+
+        Args:
+            cash: 利用可能な現金
+            price: 現在の株価
+            pred_value: 予測値（confidence モードで使用）
+
+        Returns:
+            購入数量（整数）
+        """
+        if self.position_sizing == "fixed":
+            available = cash * self.position_fraction
+        elif self.position_sizing == "confidence" and pred_value is not None:
+            # 予測確信度（|pred|）に比例して資金を配分
+            # |pred| = 0.01 (1%) → fraction ~0.5, |pred| = 0.02+ → fraction ~1.0
+            confidence = min(abs(pred_value) * 50, 1.0)
+            min_frac = 0.2
+            max_frac = 1.0
+            fraction = min_frac + confidence * (max_frac - min_frac)
+            available = cash * fraction
+        else:
+            # "full" モード（デフォルト: 全額投入）
+            available = cash
+
+        unit_cost = price * (1 + self.fee_rate + self.slippage)
+        return int(available // unit_cost) if unit_cost > 0 else 0
 
     def _load_from_raw(self) -> pd.DataFrame:
         """market_data_raw テーブルからOHLCVを取得する"""

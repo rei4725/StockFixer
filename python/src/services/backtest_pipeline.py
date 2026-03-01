@@ -102,6 +102,11 @@ def run_backtest_single(
     initial_cash: float = 1_000_000,
     fee_rate: float = 0.001,
     slippage: float = 0.0,
+    stop_loss_pct: Optional[float] = None,
+    take_profit_pct: Optional[float] = None,
+    position_sizing: str = "full",
+    position_fraction: float = 0.5,
+    ensemble: bool = False,
 ) -> Tuple[pd.DataFrame, dict, None]:
     """
     単一学習/検証期間のバックテストを実行する。
@@ -120,6 +125,11 @@ def run_backtest_single(
         initial_cash: 初期資金
         fee_rate: 取引手数料率
         slippage: スリッページ
+        stop_loss_pct: ストップロス率（例: 0.05=5%下落で損切り）
+        take_profit_pct: テイクプロフィット率（例: 0.10=10%上昇で利確）
+        position_sizing: ポジションサイジング ("full", "fixed", "confidence")
+        position_fraction: 固定ポジション比率（fixed モード用）
+        ensemble: XGBoost+LightGBMアンサンブル予測を使用
 
     Returns:
         (result_df, metrics, None) のタプル
@@ -166,13 +176,16 @@ def run_backtest_single(
     y_train = train_df.loc[X_train.index, label_col]
     X_test = test_df[feature_cols].dropna()
 
-    # モデル学習
+    # モデル学習・予測
     mm = ModelManager()
-    mm.create_model(model_type, model_name)
-    mm.train_model(model_name, X_train, y_train)
 
-    # 予測 → シグナル
-    pred = pd.Series(mm.predict_with_model(model_name, X_test), index=X_test.index)
+    if ensemble:
+        pred = _ensemble_predict(mm, X_train, y_train, X_test, model_name)
+    else:
+        mm.create_model(model_type, model_name)
+        mm.train_model(model_name, X_train, y_train)
+        pred = pd.Series(mm.predict_with_model(model_name, X_test), index=X_test.index)
+
     signal = task.make_signal(pred)
 
     # シミュレーション
@@ -187,8 +200,14 @@ def run_backtest_single(
         initial_cash=initial_cash,
         fee_rate=fee_rate,
         slippage=slippage,
+        stop_loss_pct=stop_loss_pct,
+        take_profit_pct=take_profit_pct,
+        position_sizing=position_sizing,
+        position_fraction=position_fraction,
     )
-    result_df, metrics = backtester.simulate_trading(test_df.loc[X_test.index], signal)
+    result_df, metrics = backtester.simulate_trading(
+        test_df.loc[X_test.index], signal, pred=pred,
+    )
     return result_df, metrics, None
 
 
@@ -204,6 +223,11 @@ def run_backtest_walk_forward(
     initial_cash: float = 1_000_000,
     fee_rate: float = 0.001,
     slippage: float = 0.0,
+    stop_loss_pct: Optional[float] = None,
+    take_profit_pct: Optional[float] = None,
+    position_sizing: str = "full",
+    position_fraction: float = 0.5,
+    ensemble: bool = False,
 ) -> Tuple[None, None, pd.DataFrame]:
     """
     Walk-Forward バックテストを実行する。
@@ -220,6 +244,11 @@ def run_backtest_walk_forward(
         initial_cash: 初期資金
         fee_rate: 取引手数料率
         slippage: スリッページ
+        stop_loss_pct: ストップロス率
+        take_profit_pct: テイクプロフィット率
+        position_sizing: ポジションサイジング ("full", "fixed", "confidence")
+        position_fraction: 固定ポジション比率（fixed モード用）
+        ensemble: XGBoost+LightGBMアンサンブル予測を使用
 
     Returns:
         (None, None, wf_df) のタプル
@@ -232,7 +261,8 @@ def run_backtest_walk_forward(
     model_name = model_name or f"Backtest{model_type}"
 
     mm = ModelManager()
-    mm.create_model(model_type, model_name)
+    if not ensemble:
+        mm.create_model(model_type, model_name)
 
     wfv = WalkForwardValidator(
         market=market,
@@ -244,6 +274,11 @@ def run_backtest_walk_forward(
         slippage=slippage,
         n_splits=n_splits,
         source=source,
+        stop_loss_pct=stop_loss_pct,
+        take_profit_pct=take_profit_pct,
+        position_sizing=position_sizing,
+        position_fraction=position_fraction,
+        ensemble=ensemble,
     )
 
     results_df = wfv.run(model_name=model_name, task=task)
@@ -310,3 +345,41 @@ def _build_task(task_name: str, threshold: float):
     if task_name == "return_regression":
         return ReturnRegressionTask(threshold=threshold)
     raise ValueError(f"未対応のタスク: {task_name}")
+
+
+def _ensemble_predict(
+    mm, X_train: pd.DataFrame, y_train: pd.Series, X_test: pd.DataFrame, base_name: str,
+) -> pd.Series:
+    """
+    XGBoost + LightGBM のアンサンブル予測（平均）を返す。
+
+    両モデルを同一データで学習し、予測値の平均を取ることで
+    バイアスを低減する。
+
+    Args:
+        mm: ModelManager インスタンス
+        X_train: 学習用特徴量
+        y_train: 学習用ラベル
+        X_test: 検証用特徴量
+        base_name: ベースモデル名
+
+    Returns:
+        アンサンブル予測値の Series
+    """
+    import numpy as np
+
+    xgb_name = f"{base_name}_XGB"
+    lgb_name = f"{base_name}_LGB"
+
+    mm.create_model("XGBoostModel", xgb_name)
+    mm.create_model("LightGBMModel", lgb_name)
+
+    mm.train_model(xgb_name, X_train, y_train)
+    mm.train_model(lgb_name, X_train, y_train)
+
+    pred_xgb = mm.predict_with_model(xgb_name, X_test)
+    pred_lgb = mm.predict_with_model(lgb_name, X_test)
+
+    avg = np.mean([pred_xgb, pred_lgb], axis=0)
+    print(f"  [Ensemble] XGBoost + LightGBM 予測値を平均")
+    return pd.Series(avg, index=X_test.index)

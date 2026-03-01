@@ -14,6 +14,15 @@
 
     # 生OHLCVからfeature再生成して実行
     py run_backtest.py --market jp --symbol 7203 --source raw
+
+    # ストップロス・テイクプロフィット付き
+    py run_backtest.py --market jp --symbol 7203 --stop-loss 0.05 --take-profit 0.10
+
+    # アンサンブル予測（XGBoost+LightGBM平均）
+    py run_backtest.py --market jp --symbol 7203 --ensemble
+
+    # ポジションサイジング（予測確信度ベース）
+    py run_backtest.py --market jp --symbol 7203 --position-sizing confidence
 """
 
 import argparse
@@ -71,44 +80,81 @@ def parse_args():
     parser.add_argument("--initial-cash", type=float, default=1_000_000, help="初期資金 (default: 1,000,000)")
     parser.add_argument("--fee-rate", type=float, default=0.001, help="取引手数料率 (default: 0.001)")
     parser.add_argument("--slippage", type=float, default=0.0, help="スリッページ (default: 0.0)")
+
+    # リスク管理
+    parser.add_argument(
+        "--stop-loss", type=float, default=None,
+        help="ストップロス率 (例: 0.05=5%%下落で損切り)",
+    )
+    parser.add_argument(
+        "--take-profit", type=float, default=None,
+        help="テイクプロフィット率 (例: 0.10=10%%上昇で利確)",
+    )
+
+    # ポジションサイジング
+    parser.add_argument(
+        "--position-sizing",
+        type=str,
+        default="full",
+        choices=["full", "fixed", "confidence"],
+        help="ポジションサイジング: full=全額, fixed=固定比率, confidence=予測確信度ベース (default: full)",
+    )
+    parser.add_argument(
+        "--position-fraction",
+        type=float,
+        default=0.5,
+        help="固定ポジション比率 (fixedモード用, default: 0.5)",
+    )
+
+    # アンサンブル
+    parser.add_argument("--ensemble", action="store_true", help="XGBoost+LightGBMアンサンブル予測を使用する")
+
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
-    print(f"\nバックテスト開始: {args.market}/{args.symbol} | task={args.task} | model={args.model_type}")
+    model_label = "Ensemble(XGB+LGB)" if args.ensemble else args.model_type
+    print(f"\nバックテスト開始: {args.market}/{args.symbol} | task={args.task} | model={model_label}")
+
+    if args.stop_loss:
+        print(f"  ストップロス: {args.stop_loss:.1%}")
+    if args.take_profit:
+        print(f"  テイクプロフィット: {args.take_profit:.1%}")
+    if args.position_sizing != "full":
+        print(f"  ポジションサイジング: {args.position_sizing}")
+
+    common_kwargs = dict(
+        market=args.market,
+        symbol=args.symbol,
+        model_type=args.model_type,
+        model_name=args.model_name,
+        task_name=args.task,
+        threshold=args.threshold,
+        source=args.source,
+        initial_cash=args.initial_cash,
+        fee_rate=args.fee_rate,
+        slippage=args.slippage,
+        stop_loss_pct=args.stop_loss,
+        take_profit_pct=args.take_profit,
+        position_sizing=args.position_sizing,
+        position_fraction=args.position_fraction,
+        ensemble=args.ensemble,
+    )
 
     if args.walk_forward:
         print(f"モード: Walk-Forward (n_splits={args.n_splits})")
         result_df, metrics, wf_df = run_backtest_walk_forward(
-            market=args.market,
-            symbol=args.symbol,
-            model_type=args.model_type,
-            model_name=args.model_name,
-            task_name=args.task,
-            threshold=args.threshold,
-            source=args.source,
+            **common_kwargs,
             n_splits=args.n_splits,
-            initial_cash=args.initial_cash,
-            fee_rate=args.fee_rate,
-            slippage=args.slippage,
         )
     else:
         print(f"モード: 単一期間 (train_ratio={args.train_ratio})")
         result_df, metrics, wf_df = run_backtest_single(
-            market=args.market,
-            symbol=args.symbol,
-            model_type=args.model_type,
-            model_name=args.model_name,
-            task_name=args.task,
-            threshold=args.threshold,
-            source=args.source,
+            **common_kwargs,
             start_date=args.start_date,
             end_date=args.end_date,
             train_ratio=args.train_ratio,
-            initial_cash=args.initial_cash,
-            fee_rate=args.fee_rate,
-            slippage=args.slippage,
         )
         print_backtest_metrics(metrics, label=f"{args.market}/{args.symbol} - {args.task}")
 

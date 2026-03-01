@@ -35,9 +35,10 @@ def compute_metrics(
         return _empty_metrics(initial_cash)
 
     # --- equity curve（決済後のキャッシュ推移）---
-    # buy直後はキャッシュが激減するため sell/final_sell 時点のキャッシュのみを使う
+    # buy直後はキャッシュが激減するため sell 系時点のキャッシュのみを使う
+    sell_actions = ["sell", "final_sell", "stop_loss", "take_profit"]
     if "action" in trade_log.columns:
-        sell_log = trade_log[trade_log["action"].isin(["sell", "final_sell"])]
+        sell_log = trade_log[trade_log["action"].isin(sell_actions)]
     else:
         sell_log = trade_log
 
@@ -107,7 +108,7 @@ def _extract_trade_pnl(trade_log: pd.DataFrame) -> tuple[list[float], list[float
         action = row.get("action", "")
         if action == "buy":
             buys.append({"price": row["price"], "qty": row["qty"]})
-        elif action in ("sell", "final_sell") and buys:
+        elif action in ("sell", "final_sell", "stop_loss", "take_profit") and buys:
             buy = buys.pop(0)
             pnl = (row["price"] - buy["price"]) * buy["qty"]
             (wins if pnl >= 0 else losses).append(pnl)
