@@ -9,8 +9,8 @@ import re
 from datetime import datetime
 from typing import Optional
 
-from src.data.data_loader import get_stock_data
-from src.data.data_saver import save_raw_stock_data
+from src.data.data_loader import get_stock_data, get_raw_ohlcv_from_db
+from src.data.data_saver import save_raw_stock_data, save_raw_ohlcv
 from src.features.technical_analysis import create_basic_lag_features, add_technical_indicators
 from src.utils.db import upsert_stock_features, delete_stock_features
 from src.utils.data_path_utils import get_ticker
@@ -51,11 +51,21 @@ def fetch_stock_data_with_features(
     # 市場ごとにティッカーを補正
     ticker = get_ticker(market, symbol)
 
-    print(f"データ取得: market={market}, symbol={symbol}, ticker={ticker}, {start_date}～{end_date}")
-    df = get_stock_data(market, ticker, start_date, end_date)
-    if df is None or df.empty:
-        print("データが取得できませんでした。")
-        return None
+    # まずDBのキャッシュから取得を試みる（yfinance再取得を回避）
+    df = get_raw_ohlcv_from_db(market, symbol, start_date, end_date)
+    if df is not None and not df.empty:
+        print(f"DBキャッシュから取得: market={market}, symbol={symbol} ({len(df)}行)")
+    else:
+        print(f"yfinanceから取得: market={market}, symbol={symbol}, ticker={ticker}, {start_date}～{end_date}")
+        df = get_stock_data(market, ticker, start_date, end_date)
+        if df is None or df.empty:
+            print("データが取得できませんでした。")
+            return None
+        # 生データをDBに保存（次回以降はキャッシュを使用）
+        try:
+            save_raw_ohlcv(market, symbol, df)
+        except Exception as e:
+            print(f"Raw OHLCV保存エラー（処理継続）: {e}")
 
     # テクニカル指標を追加
     df = add_technical_indicators(df)
