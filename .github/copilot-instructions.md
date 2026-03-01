@@ -47,7 +47,11 @@ python/
 │   ├── data/                   # データ取得・保存（生データのみ）
 │   ├── sbi/                    # SBI証券連携（Flask非依存）
 │   └── utils/                  # ユーティリティ（最下位層）
-├── tests/                      # ユニットテスト
+├── tests/                      # テスト（Unit/Integration分離）
+│   ├── unit/                  # ユニットテスト（Mock完全・11ファイル）
+│   ├── integration/           # 統合テスト（実DB/API依存・11ファイル）
+│   ├── conftest.py            # pytest共有Fixture
+│   └── README.md              # テスト戦略ドキュメント
 ├── data/                       # 株価データ保存先
 ├── models/                     # 学習済みモデル保存先
 └── results/                    # 予測結果保存先
@@ -88,7 +92,7 @@ run_*.py → api層 → services層 → models/strategy/backtest層 → features
 - Windowsではパス区切りに `\` を使用
 - モジュール化で再利用性・可読性向上、`__init__.py` 配置でimportエラー防止
 - importパスは `python/` からの絶対パス指定で統一
-- テスト実行は `python -m unittest discover -s python/tests`
+- テスト実行: `python -m pytest tests/unit/ -v` (高速) / `python -m pytest tests/integration/ -v` (完全)
 
 ### ファイル・ディレクトリ運用
 - 命名は一貫性を重視し、スネークケースを推奨（例: `user_profile.py`）
@@ -117,6 +121,7 @@ run_*.py → api層 → services層 → models/strategy/backtest層 → features
 | `add-symbol` | 新規銘柄追加フロー |
 | `duckdb-ops` | DuckDB操作・データ確認・移行 |
 | `docker-ops` | Docker環境のビルド・起動・管理 |
+| `git-ops` | Git操作（コミット、ブランチ、push、diff、status等） |
 | `troubleshooting` | よくあるエラーの原因と対処法 |
 
 ---
@@ -138,10 +143,13 @@ run_*.py → api層 → services層 → models/strategy/backtest層 → features
 - 予測値は直近データの翌営業日終値
 
 ### テスト運用
-- テスト仕様に合わせてシグナル生成ロジック・モデル管理ロジックを整理
+- **Unit Test（tests/unit/）**: Mock完全・外部依存なし・<5秒実行・開発中に常時実行
+- **Integration Test（tests/integration/）**: 実DB/API依存・分単位実行・PR/本番前検証
+- テスト実行: `python -m pytest tests/unit/ -v` (高速) / `python -m pytest tests/integration/ -v` (完全)
 - テスト用モッククラス（MockBaseModel）で外部依存排除
 - `register_model_type` は BaseModel 継承クラスのみ登録可能
 - `unittest.mock` や `MagicMock` で外部依存をモック
+- conftest.py に共有Fixture（sample_price_df、mock_model_manager等）を配置
 
 ### Discord Bot
 - `/forecast` コマンドで全マーケットのTop10・ワースト10を送信
