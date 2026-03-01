@@ -65,7 +65,7 @@ def get_readonly_connection() -> duckdb.DuckDBPyConnection:
 
 # --- テーブル初期化 ---
 def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
-    """stock_features / prediction_results テーブルを作成する"""
+    """stock_features / prediction_results / market_data_raw テーブルを作成する"""
     con.execute("""
         CREATE TABLE IF NOT EXISTS stock_features (
             market   VARCHAR NOT NULL,
@@ -84,6 +84,24 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
             diff_ratio     DOUBLE,
             model_count    INTEGER,
             PRIMARY KEY (market, symbol, predicted_at)
+        )
+    """)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS market_data_raw (
+            market      VARCHAR NOT NULL,
+            symbol      VARCHAR NOT NULL,
+            ticker      VARCHAR NOT NULL,
+            timeframe   VARCHAR NOT NULL,
+            ts          TIMESTAMP NOT NULL,
+            open        DOUBLE,
+            high        DOUBLE,
+            low         DOUBLE,
+            close       DOUBLE,
+            volume      BIGINT,
+            adj_close   DOUBLE,
+            source      VARCHAR NOT NULL DEFAULT 'yfinance',
+            ingested_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (market, symbol, timeframe, ts)
         )
     """)
 
@@ -379,3 +397,103 @@ def load_prediction_markets(predicted_at: str = None) -> list:
         return [row[0] for row in result]
     except Exception:
         return []
+
+
+# --- market_data_raw テーブル操作 ---
+
+def upsert_raw_ohlcv(rows: list[dict]) -> int:
+    """
+    生OHLCVデータをmarket_data_rawテーブルにUPSERT保存する。
+    同一 (market, symbol, timeframe, ts) は上書きされる（べき等）。
+
+    Args:
+        rows: 各行を表す辞書のリスト。必須キー: market, symbol, ticker, timeframe, ts,
+              open, high, low, close, volume。任意: adj_close, source
+
+    Returns:
+        保存した行数
+    """
+    if not rows:
+        return 0
+
+    con = get_connection()
+    df = pd.DataFrame(rows)
+
+    # 列の正規化
+    df["ts"] = pd.to_datetime(df["ts"])
+    if "adj_close" not in df.columns:
+        df["adj_close"] = None
+    if "source" not in df.columns:
+        df["source"] = "yfinance"
+    df["ingested_at"] = pd.Timestamp.utcnow()
+
+    cols = ["market", "symbol", "ticker", "timeframe", "ts",
+            "open", "high", "low", "close", "volume", "adj_close", "source", "ingested_at"]
+    df = df[[c for c in cols if c in df.columns]]
+
+    # INSERT OR REPLACE (DuckDB は INSERT OR REPLACE をサポート)
+    con.register("_raw_ohlcv_temp", df)
+    con.execute("""
+        INSERT OR REPLACE INTO market_data_raw
+            (market, symbol, ticker, timeframe, ts,
+             open, high, low, close, volume, adj_close, source, ingested_at)
+        SELECT market, symbol, ticker, timeframe, ts,
+               open, high, low, close, volume, adj_close, source, ingested_at
+        FROM _raw_ohlcv_temp
+    """)
+    n = len(df)
+    print(f"DB保存完了: market_data_raw [{rows[0].get('market', '')}_{rows[0].get('symbol', '')}] ({n}行)")
+    return n
+
+
+def load_raw_ohlcv(
+    market: str,
+    symbol: str,
+    start_date=None,
+    end_date=None,
+    timeframe: str = "1d"
+) -> Optional[pd.DataFrame]:
+    """
+    market_data_rawテーブルから生OHLCVを取得する。
+
+    Args:
+        market: マーケット識別子 (例: "us", "jp")
+        symbol: 銘柄シンボル (例: "AAPL", "7203")
+        start_date: 開始日 (str or datetime, Noneなら全期間)
+        end_date: 終了日 (str or datetime, Noneなら全期間)
+        timeframe: 時間軸 (default: "1d")
+
+    Returns:
+        OHLCVのDataFrame (インデックス=ts)、データなしはNone
+    """
+    con = get_connection()
+
+    query = """
+        SELECT ts, open, high, low, close, volume, adj_close
+        FROM market_data_raw
+        WHERE market = ? AND symbol = ? AND timeframe = ?
+    """
+    params: list = [market, symbol, timeframe]
+
+    if start_date is not None:
+        query += " AND ts >= ?"
+        params.append(pd.to_datetime(start_date))
+    if end_date is not None:
+        query += " AND ts <= ?"
+        params.append(pd.to_datetime(end_date))
+
+    query += " ORDER BY ts"
+
+    try:
+        df = con.execute(query, params).fetchdf()
+    except Exception:
+        return None
+
+    if df.empty:
+        return None
+
+    df = df.set_index("ts")
+    df.index.name = "Date"
+    # カラム名を yfinance 形式（先頭大文字）に揃える
+    df.columns = [c.capitalize() if c != "adj_close" else "Adj Close" for c in df.columns]
+    return df
