@@ -34,8 +34,20 @@ def compute_metrics(
     if trade_log is None or trade_log.empty:
         return _empty_metrics(initial_cash)
 
-    # --- equity curve（取引ごとのキャッシュ推移） ---
-    equity = trade_log.set_index("date")["cash"] if "date" in trade_log.columns else pd.Series([initial_cash])
+    # --- equity curve（決済後のキャッシュ推移）---
+    # buy直後はキャッシュが激減するため sell/final_sell 時点のキャッシュのみを使う
+    if "action" in trade_log.columns:
+        sell_log = trade_log[trade_log["action"].isin(["sell", "final_sell"])]
+    else:
+        sell_log = trade_log
+
+    if sell_log.empty or "date" not in sell_log.columns:
+        equity = pd.Series([initial_cash])
+    else:
+        equity = pd.concat([
+            pd.Series([initial_cash], index=[sell_log.iloc[0]["date"]]),
+            sell_log.set_index("date")["cash"],
+        ])
 
     final_cash = equity.iloc[-1]
     total_return = (final_cash - initial_cash) / initial_cash

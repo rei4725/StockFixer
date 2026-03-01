@@ -45,6 +45,7 @@ class WalkForwardValidator:
         fee_rate: float = 0.0,
         slippage: float = 0.0,
         n_splits: int = 5,
+        source: str = "file",
     ):
         self.market = market
         self.symbol = symbol
@@ -54,6 +55,7 @@ class WalkForwardValidator:
         self.fee_rate = fee_rate
         self.slippage = slippage
         self.n_splits = n_splits
+        self.source = source
 
     def run(
         self,
@@ -166,10 +168,9 @@ class WalkForwardValidator:
         return metrics
 
     def _load_features(self) -> Optional[pd.DataFrame]:
-        """DBから特徴量データを読み込む"""
-        from src.utils.db import load_stock_features
-        df = load_stock_features(self.market, self.symbol)
-        return df
+        """特徴量データを読み込む（source に応じてDB/API/Rawを使い分ける）"""
+        from src.services.backtest_pipeline import load_features
+        return load_features(self.market, self.symbol, self.source)
 
     @staticmethod
     def _print_summary(result_df: pd.DataFrame) -> None:

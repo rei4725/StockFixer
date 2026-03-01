@@ -57,8 +57,8 @@ def parse_args():
         "--source",
         type=str,
         default="file",
-        choices=["file", "raw"],
-        help="データソース: 'file'=DB特徴量, 'raw'=DBのOHLCVから再生成 (default: file)",
+        choices=["file", "api", "raw"],
+        help="データソース: 'file'=DB特徴量(Close_lag1代替), 'api'=yfinance直接取得, 'raw'=DBのOHLCVから再生成 (default: file)",
     )
     parser.add_argument("--walk-forward", action="store_true", help="Walk-Forward 検証を使用する")
     parser.add_argument("--n-splits", type=int, default=5, help="Walk-Forward の分割数 (default: 5)")
@@ -87,6 +87,7 @@ def main():
             model_name=args.model_name,
             task_name=args.task,
             threshold=args.threshold,
+            source=args.source,
             n_splits=args.n_splits,
             initial_cash=args.initial_cash,
             fee_rate=args.fee_rate,

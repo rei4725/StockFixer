@@ -20,12 +20,41 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
     Args:
         market: マーケット識別子 (例: "jp", "us")
         symbol: 銘柄シンボル (例: "7203", "AAPL")
-        source: "file"=stock_features テーブル, "raw"=market_data_raw から再生成
+        source: "file"=stock_features テーブル,
+                "api"=yfinanceから直接取得（Close列付き）,
+                "raw"=market_data_raw から再生成
 
     Returns:
-        特徴量 DataFrame（インデックス=日付）
+        特徴量 DataFrame（インデックス=日付 or row_num）
+        - "api" / "raw" の場合は Close 列を保持
+        - "file" の場合は Close_lag1 を Close として補完
     """
-    if source == "raw":
+    if source == "api":
+        from src.data.data_loader import get_stock_data
+        from src.features.technical_analysis import add_technical_indicators, create_basic_lag_features
+        from datetime import datetime, timedelta
+        from src.utils.data_path_utils import get_ticker
+
+        end = datetime.now().strftime("%Y-%m-%d")
+        start = (datetime.now() - timedelta(days=365 * 5)).strftime("%Y-%m-%d")
+        ticker = get_ticker(market, symbol)
+        df = get_stock_data(market, ticker, start, end)
+        if df is None or df.empty:
+            print(f"[エラー] yfinanceからデータを取得できませんでした: {market}/{symbol}")
+            sys.exit(1)
+        close_series = df["Close"].copy()
+        df = add_technical_indicators(df)
+        X, y = create_basic_lag_features(df, n_lags=5)
+        if X is None or X.empty:
+            print("[エラー] 特徴量生成に失敗しました。")
+            sys.exit(1)
+        X.columns = [re.sub(r"[^0-9a-zA-Z_]", "_", str(c)) for c in X.columns]
+        X["y"] = y
+        # シミュレーション用に Close 列を保持
+        X["Close"] = close_series.reindex(X.index)
+        return X
+
+    elif source == "raw":
         from src.data.data_loader import get_raw_ohlcv_from_db
         from src.features.technical_analysis import add_technical_indicators, create_basic_lag_features
 
@@ -34,6 +63,7 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
             print(f"[エラー] market_data_rawにデータがありません: {market}/{symbol}")
             print("先に run_data_creation.py を実行してください。")
             sys.exit(1)
+        close_series = df["Close"].copy()
         df = add_technical_indicators(df)
         X, y = create_basic_lag_features(df, n_lags=5)
         if X is None or X.empty:
@@ -41,14 +71,20 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
             sys.exit(1)
         X.columns = [re.sub(r"[^0-9a-zA-Z_]", "_", str(c)) for c in X.columns]
         X["y"] = y
+        X["Close"] = close_series.reindex(X.index)
         return X
-    else:
+
+    else:  # source == "file"
         from src.utils.db import load_stock_features
         df = load_stock_features(market, symbol)
         if df is None or df.empty:
             print(f"[エラー] stock_featuresにデータがありません: {market}/{symbol}")
             print("先に run_data_creation.py を実行してください。")
             sys.exit(1)
+        # stock_features には Close 列がないため Close_lag1 で代替
+        if "Close" not in df.columns and "Close_lag1" in df.columns:
+            df = df.copy()
+            df["Close"] = df["Close_lag1"]
         return df
 
 
@@ -163,6 +199,7 @@ def run_backtest_walk_forward(
     model_name: Optional[str] = None,
     task_name: str = "return_regression",
     threshold: float = 0.0,
+    source: str = "file",
     n_splits: int = 5,
     initial_cash: float = 1_000_000,
     fee_rate: float = 0.001,
@@ -178,6 +215,7 @@ def run_backtest_walk_forward(
         model_name: モデル名 (Noneなら "Backtest{model_type}")
         task_name: タスク名
         threshold: シグナル発生の変化率閾値
+        source: データソース ("file", "api", "raw")
         n_splits: Walk-Forward の分割数
         initial_cash: 初期資金
         fee_rate: 取引手数料率
@@ -205,6 +243,7 @@ def run_backtest_walk_forward(
         fee_rate=fee_rate,
         slippage=slippage,
         n_splits=n_splits,
+        source=source,
     )
 
     results_df = wfv.run(model_name=model_name, task=task)
