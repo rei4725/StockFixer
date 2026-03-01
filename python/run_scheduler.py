@@ -29,6 +29,15 @@ logging.basicConfig(
 logger = logging.getLogger("scheduler")
 
 
+def _build_queue_manager():
+    """キュー方式ジョブ管理を初期化する"""
+    from src.services.scheduler_queue import SchedulerQueueManager
+
+    manager = SchedulerQueueManager(SCHEDULE_CONFIG)
+    logger.info(f"キュー状態ログ: {manager.state_file_path}")
+    return manager
+
+
 # ── ジョブ定義 ────────────────────────────────────────
 def job_daily_pipeline():
     """毎日実行: データ取得 → 予測 → Discord通知用CSV出力"""
@@ -57,27 +66,36 @@ SCHEDULE_CONFIG = {
     "daily_pipeline": {
         "func": job_daily_pipeline,
         "trigger": "cron",
+        "period": "daily",
         "day_of_week": "mon-fri",
         "hour": 19,
         "minute": 0,
+        "recovery_delay_minutes": 10,
+        "max_executions_per_period": 3,
         "description": "毎営業日 19:00 - データ取得 → 予測",
     },
     "weekly_model_training": {
         "func": job_weekly_model_training,
         "trigger": "cron",
+        "period": "weekly",
         "day_of_week": "sat",
         "hour": 3,
         "minute": 0,
+        "recovery_delay_minutes": 15,
+        "max_executions_per_period": 2,
         "description": "毎週土曜 03:00 - 統合モデル再学習",
     },
 }
 
 
-def _register_jobs(scheduler):
+def _register_jobs(scheduler, queue_manager):
     """スケジューラにジョブを登録する"""
     for job_id, config in SCHEDULE_CONFIG.items():
+        def _managed_runner(_job_id=job_id):
+            queue_manager.run_job(_job_id, reason="scheduled")
+
         scheduler.add_job(
-            config["func"],
+            _managed_runner,
             trigger=config["trigger"],
             day_of_week=config["day_of_week"],
             hour=config["hour"],
@@ -86,8 +104,31 @@ def _register_jobs(scheduler):
             name=config["description"],
             misfire_grace_time=3600,  # 1時間以内なら遅延実行
             coalesce=True,           # 複数回分溜まっても1回だけ実行
+            max_instances=1,
         )
         logger.info(f"ジョブ登録: {job_id} - {config['description']}")
+
+    scheduler.add_job(
+        lambda: _poll_recovery_jobs(queue_manager),
+        trigger="interval",
+        minutes=5,
+        id="recovery_poller",
+        name="未実行補完ポーリング",
+        coalesce=True,
+        max_instances=1,
+    )
+    logger.info("ジョブ登録: recovery_poller - 5分間隔で未実行ジョブを補完")
+
+
+def _poll_recovery_jobs(queue_manager):
+    """所定時刻を過ぎても未実行のジョブを補完実行する"""
+    now = queue_manager.now()
+
+    for job_id in SCHEDULE_CONFIG.keys():
+        if not queue_manager.should_recover(job_id, now=now):
+            continue
+        logger.warning(f"補完実行を開始: {job_id}")
+        queue_manager.run_job(job_id, reason="recovery")
 
 
 def _print_schedule():
@@ -113,7 +154,8 @@ def run_with_bot():
 
     # BackgroundSchedulerを使用（Botのイベントループをブロックしない）
     scheduler = BackgroundScheduler()
-    _register_jobs(scheduler)
+    queue_manager = _build_queue_manager()
+    _register_jobs(scheduler, queue_manager)
     scheduler.add_listener(_job_listener, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR)
 
     _print_schedule()
@@ -129,7 +171,8 @@ def run_with_bot():
 def run_scheduler_only():
     """スケジューラのみ起動する"""
     scheduler = BlockingScheduler()
-    _register_jobs(scheduler)
+    queue_manager = _build_queue_manager()
+    _register_jobs(scheduler, queue_manager)
     scheduler.add_listener(_job_listener, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR)
 
     _print_schedule()
@@ -142,10 +185,12 @@ def run_scheduler_only():
 
 def run_now(pipeline: str):
     """指定パイプラインを即時実行する（テスト・手動実行用）"""
+    queue_manager = _build_queue_manager()
+
     if pipeline == "daily":
-        job_daily_pipeline()
+        queue_manager.run_job("daily_pipeline", reason="manual", force=True)
     elif pipeline == "weekly":
-        job_weekly_model_training()
+        queue_manager.run_job("weekly_model_training", reason="manual", force=True)
     else:
         print(f"不明なパイプライン: {pipeline}")
         print("使用可能: daily, weekly")
