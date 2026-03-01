@@ -3,9 +3,33 @@ import pandas as pd
 from datetime import datetime, timedelta
 import os
 from src.utils.data_path_utils import get_data_subdir, get_ticker
-from src.utils.db import load_stock_features
+from src.utils.db import load_stock_features, load_raw_ohlcv
 
-from typing import Union
+from typing import Optional, Union
+
+
+def get_raw_ohlcv_from_db(
+    market: str,
+    symbol: str,
+    start_date=None,
+    end_date=None,
+    timeframe: str = "1d"
+) -> Optional[pd.DataFrame]:
+    """
+    market_data_rawテーブルから生OHLCVを取得する。
+    DBに存在しない場合は None を返す（呼び出し元でyfinanceフォールバックを行う）。
+
+    Args:
+        market: マーケット識別子 (例: "us", "jp")
+        symbol: 銘柄シンボル (例: "AAPL", "7203")
+        start_date: 開始日 (str or datetime)
+        end_date: 終了日 (str or datetime)
+        timeframe: 時間軸 (default: "1d")
+
+    Returns:
+        OHLCVのDataFrame (インデックス=Date)、なければNone
+    """
+    return load_raw_ohlcv(market, symbol, start_date, end_date, timeframe)
 
 
 def get_stock_data_from_db(market: str, symbol: str, start_date: Union[str, datetime] = None, end_date: Union[str, datetime] = None) -> pd.DataFrame:

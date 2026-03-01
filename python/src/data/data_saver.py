@@ -9,9 +9,60 @@ from datetime import datetime
 from typing import Optional
 import pandas as pd
 
+from datetime import timezone
 from src.data.data_loader import get_stock_data
-from src.utils.db import upsert_stock_features
+from src.utils.db import upsert_stock_features, upsert_raw_ohlcv
 from src.utils.data_path_utils import get_ticker
+
+
+def save_raw_ohlcv(
+    market: str,
+    symbol: str,
+    df: pd.DataFrame,
+    timeframe: str = "1d",
+    source: str = "yfinance"
+) -> int:
+    """
+    yfinanceから取得したOHLCV DataFrameをmarket_data_rawに保存する。
+    カラム名の正規化（先頭大文字 → 小文字）を行ってから保存する。
+
+    Args:
+        market: マーケット識別子 (例: "us", "jp")
+        symbol: 銘柄シンボル (例: "AAPL", "7203")
+        df: yfinance形式のOHLCV DataFrame (インデックスは日付、カラムはOpen/High/Low/Close/Volume等)
+        timeframe: 時間軸 (default: "1d")
+        source: 取得元 (default: "yfinance")
+
+    Returns:
+        保存した行数
+    """
+    ticker = get_ticker(market, symbol)
+    col_map = {
+        "Open": "open", "High": "high", "Low": "low",
+        "Close": "close", "Volume": "volume",
+        "Adj Close": "adj_close", "Dividends": None, "Stock Splits": None,
+    }
+    rows = []
+    for ts, row in df.iterrows():
+        rec: dict = {
+            "market": market,
+            "symbol": symbol,
+            "ticker": ticker,
+            "timeframe": timeframe,
+            "ts": pd.Timestamp(ts).tz_localize(None) if pd.Timestamp(ts).tzinfo else pd.Timestamp(ts),
+            "source": source,
+        }
+        for src_col, dst_col in col_map.items():
+            if dst_col is None:
+                continue
+            if src_col in row.index:
+                rec[dst_col] = row[src_col]
+            elif src_col.lower() in [c.lower() for c in row.index]:
+                # 大文字小文字ゆらぎ吸収
+                matched = next(c for c in row.index if c.lower() == src_col.lower())
+                rec[dst_col] = row[matched]
+        rows.append(rec)
+    return upsert_raw_ohlcv(rows)
 
 
 def save_raw_stock_data(
