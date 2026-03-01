@@ -155,3 +155,54 @@ def output_top_worst_results(output_rows, mode="individual"):
         ))
 
     print(f"\n結果保存完了: predicted_at={now_str}")
+
+
+def run_predict_single(market: str, symbol: str):
+    """
+    単一銘柄の予測結果を表示・DB保存する
+    
+    Args:
+        market: マーケット識別子
+        symbol: 銘柄シンボル
+    """
+    import pprint
+    result = predict_single_stock(market, symbol)
+    if result is None:
+        print("予測に失敗しました。モデルまたはデータが存在しない可能性があります。")
+    else:
+        pprint.pprint(result.to_dict("records")[0], sort_dicts=False, width=120)
+        now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+        save_prediction_results(now_str, result)
+
+
+def run_predict_watchlist():
+    """
+    監視リストの全銘柄を予測・DB保存する
+    """
+    import csv
+    from src.utils.data_path_utils import get_monitor_list_path
+    
+    watchlist_path = get_monitor_list_path()
+    output_rows = []
+    with open(watchlist_path, encoding="utf-8") as f:
+        reader = csv.reader(f)
+        for row in reader:
+            if len(row) < 2:
+                continue
+            market, symbol = row[0], row[1]
+            company = row[2] if len(row) > 2 else ""
+            result = predict_single_stock(market, symbol)
+            if result is None:
+                print(f"[警告] {market},{symbol} ({company}) の予測に失敗しました。")
+            else:
+                print(f"{market},{symbol} ({company}) の予想株価:")
+                import pprint
+                pprint.pprint(result.to_dict("records")[0], sort_dicts=False, width=120)
+                print("-" * 40)
+                output_rows.append(result)
+
+    if output_rows:
+        now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+        df_all = pd.concat(output_rows, ignore_index=True)
+        save_prediction_results(now_str, df_all)
+        print(f"\n結果保存完了: run_timestamp={now_str}")
