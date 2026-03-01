@@ -56,11 +56,16 @@ def save_raw_ohlcv(
             if dst_col is None:
                 continue
             if src_col in row.index:
-                rec[dst_col] = row[src_col]
+                val = row[src_col]
+                # NaNは保存しない（adj_closeなどauto_adjust=True時に不要な列を除外）
+                if pd.notna(val):
+                    rec[dst_col] = val
             elif src_col.lower() in [c.lower() for c in row.index]:
                 # 大文字小文字ゆらぎ吸収
                 matched = next(c for c in row.index if c.lower() == src_col.lower())
-                rec[dst_col] = row[matched]
+                val = row[matched]
+                if pd.notna(val):
+                    rec[dst_col] = val
         rows.append(rec)
     return upsert_raw_ohlcv(rows)
 

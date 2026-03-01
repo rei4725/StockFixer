@@ -106,7 +106,7 @@ def run_model_batch():
     from src.services.batch_runner import load_target_symbols, run_parallel, print_summary
 
     # バッチ作成の並列数（CPU数に応じて調整）
-    MAX_MODEL_WORKERS = 4
+    MAX_MODEL_WORKERS = 3
 
     def _load_features_task(task: dict) -> dict:
         """バッチランナー用: DB読み込みのみ（並列安全）"""
