@@ -90,6 +90,22 @@ run_*.py → api層 → services層 → models/strategy/backtest層 → features
 ### プルリクエスト作成
 プルリクエストを作成する際は、GitHub CLI の `gh pr create` コマンドを使用してください。
 
+### Agent Skills（SKILL.md）
+タスク固有の詳細な手順は `.github/skills/` 配下のSKILL.mdに定義されています。
+オンデマンドで必要なスキルのみがコンテキストに読み込まれます。
+
+| スキル | 説明 |
+|--------|------|
+| `data-pipeline` | 株価データ取得・特徴量生成・DB保存 |
+| `model-training` | 銘柄別 / 統合モデル学習 |
+| `prediction` | 予測実行・Top10/Worst10出力 |
+| `backtest` | バックテスト（単一期間・Walk-Forward） |
+| `scheduler-ops` | スケジューラー運用・日次/週次ジョブ管理 |
+| `add-symbol` | 新規銘柄追加フロー |
+| `duckdb-ops` | DuckDB操作・データ確認・移行 |
+| `docker-ops` | Docker環境のビルド・起動・管理 |
+| `troubleshooting` | よくあるエラーの原因と対処法 |
+
 ---
 
 ## 技術的なTips
