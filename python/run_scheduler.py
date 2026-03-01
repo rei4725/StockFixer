@@ -32,47 +32,14 @@ logger = logging.getLogger("scheduler")
 # ── ジョブ定義 ────────────────────────────────────────
 def job_daily_pipeline():
     """毎日実行: データ取得 → 予測 → Discord通知用CSV出力"""
-    logger.info("=== 日次パイプライン開始 ===")
-
-    # 1. データ取得（バッチ）
-    logger.info("[1/2] データ取得開始")
-    from run_data_creation import run_batch as data_batch
-    try:
-        data_batch()
-        logger.info("[1/2] データ取得完了")
-    except Exception as e:
-        logger.error(f"[1/2] データ取得失敗: {e}")
-        return
-
-    # 2. 予測（Top10/Worst10）
-    logger.info("[2/2] 予測開始")
-    from run_predict import run_top10
-    try:
-        run_top10(use_individual=False)
-        logger.info("[2/2] 予測完了")
-    except Exception as e:
-        logger.error(f"[2/2] 予測失敗: {e}")
-        return
-
-    logger.info("=== 日次パイプライン完了 ===")
+    from src.services.scheduler_pipeline import run_daily_pipeline
+    run_daily_pipeline()
 
 
 def job_weekly_model_training():
     """週次実行: 統合モデル再学習"""
-    logger.info("=== 週次モデル学習開始 ===")
-
-    from src.services.unified_model_pipeline import train_unified_model
-
-    for model_type in ["XGBoostModel", "LightGBMModel"]:
-        model_name = f"UnifiedStock{model_type.replace('Model', '')}"
-        try:
-            logger.info(f"学習開始: {model_name}")
-            train_unified_model(model_type=model_type, model_name=model_name)
-            logger.info(f"学習完了: {model_name}")
-        except Exception as e:
-            logger.error(f"学習失敗 ({model_name}): {e}")
-
-    logger.info("=== 週次モデル学習完了 ===")
+    from src.services.scheduler_pipeline import run_weekly_training
+    run_weekly_training()
 
 
 # ── イベントリスナー ──────────────────────────────────
