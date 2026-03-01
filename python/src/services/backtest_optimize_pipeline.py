@@ -155,9 +155,11 @@ def print_optimization_results(result_df: pd.DataFrame, sort_by: str) -> None:
         return
 
     # エラー行を除外
-    valid = result_df[~result_df.get("error", pd.Series(dtype=str)).notna()].copy()
-    if "error" in valid.columns:
+    if "error" in result_df.columns:
+        valid = result_df[result_df["error"].isna()].copy()
         valid = valid.drop(columns=["error"])
+    else:
+        valid = result_df.copy()
 
     if valid.empty:
         print("有効な結果なし（全てエラー）")

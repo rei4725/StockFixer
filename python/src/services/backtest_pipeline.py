@@ -81,6 +81,10 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
             print(f"[エラー] stock_featuresにデータがありません: {market}/{symbol}")
             print("先に run_data_creation.py を実行してください。")
             sys.exit(1)
+        
+        # 100% NULL の列を除去（Dividends、Capital_Gains、Stock_Splits など）
+        df = df.dropna(axis=1, how='all')
+        
         # stock_features には Close 列がないため Close_lag1 で代替
         if "Close" not in df.columns and "Close_lag1" in df.columns:
             df = df.copy()
@@ -172,9 +176,14 @@ def run_backtest_single(
 
     feature_cols = [c for c in train_df.columns if c not in exclude_cols and c not in ("Close", "close")]
 
-    X_train = train_df[feature_cols].dropna()
-    y_train = train_df.loc[X_train.index, label_col]
-    X_test = test_df[feature_cols].dropna()
+    # NULL を含む行を極力除去しない（90% 以上、有効な特徴量が必要）
+    # thresh: 90% の列に値があることを要求
+    min_valid = int(len(feature_cols) * 0.9)
+    X_train = train_df[feature_cols].dropna(thresh=min_valid)
+    y_train = train_df.loc[X_train.index, label_col].dropna()
+    X_train = X_train.loc[y_train.index]
+    
+    X_test = test_df[feature_cols].dropna(thresh=min_valid)
 
     # モデル学習・予測
     mm = ModelManager()
