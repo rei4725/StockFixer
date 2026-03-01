@@ -94,7 +94,11 @@ StockFixer/
     ├── results/                 # 予測結果保存先
     │   └── {YYYYMMDD_HHMMSS}/   # 実行日時別
     │
-    └── tests/                   # ユニットテスト
+    └── tests/                   # テスト（Unit/Integration分離）
+        ├── unit/                # ユニットテスト（Mock完全・11ファイル）
+        ├── integration/         # 統合テスト（実DB/API依存・11ファイル）
+        ├── conftest.py          # pytest共有Fixture
+        └── README.md            # テスト戦略ドキュメント
 ```
 
 ---

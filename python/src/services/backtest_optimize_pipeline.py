@@ -116,7 +116,11 @@ def run_optimization(
                 numeric_cols = ["total_return", "sharpe_ratio", "max_drawdown",
                                 "win_rate", "profit_factor", "num_trades"]
                 available = [c for c in numeric_cols if c in wf_df.columns]
-                summary = wf_df[available].mean().to_dict()
+                # None値をnp.nanに変換して平均計算可能にする
+                wf_df_numeric = wf_df[available].copy()
+                for col in wf_df_numeric.columns:
+                    wf_df_numeric[col] = pd.to_numeric(wf_df_numeric[col], errors='coerce')
+                summary = wf_df_numeric.mean().to_dict()
                 summary["threshold"] = threshold
                 summary["stop_loss_pct"] = stop_loss
                 summary["take_profit_pct"] = take_profit

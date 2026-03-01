@@ -201,5 +201,9 @@ class WalkForwardValidator:
         if available:
             print(result_df[["fold", "val_start", "val_end"] + available].to_string(index=False))
             print("\n--- 平均 ---")
-            print(result_df[available].mean().round(4).to_string())
+            # None値をnp.nanに変換して平均計算可能にする
+            result_numeric = result_df[available].copy()
+            for col in result_numeric.columns:
+                result_numeric[col] = pd.to_numeric(result_numeric[col], errors='coerce')
+            print(result_numeric.mean().round(4).to_string())
         print("=" * 60)
