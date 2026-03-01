@@ -1,14 +1,10 @@
 ---
 name: docker-ops
-description: >-
-  Dockerコンテナのビルド・起動・ログ確認を行う。
-  Docker、コンテナ、docker-compose、デプロイ、ビルド、
-  本番環境、運用の話題で使用する。
+description: "Dockerコンテナのビルド・起動・ログ確認を行う。Docker、コンテナ、docker-compose、デプロイ、ビルド、本番環境、運用の話題で使用する。"
 metadata:
   author: StockFixer
   version: "1.0"
-compatibility: >-
-  Docker, docker-compose。プロジェクトルートで実行。
+compatibility: "Docker, docker-compose。プロジェクトルートで実行。"
 ---
 
 ## Goal

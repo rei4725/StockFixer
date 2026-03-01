@@ -1,14 +1,10 @@
 ---
 name: scheduler-ops
-description: >-
-  スケジューラーの起動・管理・即時実行を行う。
-  スケジューラー、scheduler、定期実行、日次パイプライン、
-  週次学習、cron、daily、weeklyの話題で使用する。
+description: "スケジューラーの起動・管理・即時実行を行う。スケジューラー、scheduler、定期実行、日次パイプライン、週次学習、cron、daily、weeklyの話題で使用する。"
 metadata:
   author: StockFixer
   version: "1.0"
-compatibility: >-
-  Python 3.10+, APScheduler。python/ ディレクトリで実行。
+compatibility: "Python 3.10+, APScheduler。python/ ディレクトリで実行。"
 ---
 
 ## Goal

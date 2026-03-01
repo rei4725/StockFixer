@@ -1,10 +1,6 @@
 ---
 name: troubleshooting
-description: >-
-  よくあるエラーの原因と対処法を提供する。
-  エラー、トラブル、障害、バグ、動かない、失敗、タイムアウト、
-  DuckDBロック、yfinanceエラー、モデルが見つからない、
-  Discord送信エラー、メモリ不足の話題で使用する。
+description: "よくあるエラーの原因と対処法を提供する。エラー、トラブル、障害、バグ、動かない、失敗、タイムアウト、DuckDBロック、yfinanceエラー、モデルが見つからない、Discord送信エラー、メモリ不足の話題で使用する。"
 metadata:
   author: StockFixer
   version: "1.0"

@@ -1,14 +1,10 @@
 ---
 name: data-pipeline
-description: >-
-  株価データの取得・特徴量生成・DuckDB保存のパイプラインを実行する。
-  データ取得、データ更新、バッチ処理、yfinance、特徴量生成、OHLCV、
-  stock_features、market_data_raw の話題で使用する。
+description: "株価データの取得・特徴量生成・DuckDB保存のパイプラインを実行する。データ取得、データ更新、バッチ処理、yfinance、特徴量生成、OHLCV、stock_features、market_data_raw の話題で使用する。"
 metadata:
   author: StockFixer
   version: "1.0"
-compatibility: >-
-  Python 3.10+, yfinance, DuckDB。python/ ディレクトリで実行。
+compatibility: "Python 3.10+, yfinance, DuckDB。python/ ディレクトリで実行。"
 ---
 
 ## Goal

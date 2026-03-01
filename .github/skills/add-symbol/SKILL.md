@@ -1,14 +1,10 @@
 ---
 name: add-symbol
-description: >-
-  新しい銘柄を監視対象に追加する手順を案内する。
-  銘柄追加、新規銘柄、ウォッチリスト追加、データ取得対象、
-  symbol追加、監視対象の話題で使用する。
+description: "新しい銘柄を監視対象に追加する手順を案内する。銘柄追加、新規銘柄、ウォッチリスト追加、データ取得対象、symbol追加、監視対象の話題で使用する。"
 metadata:
   author: StockFixer
   version: "1.0"
-compatibility: >-
-  Python 3.10+。python/ ディレクトリで実行。
+compatibility: "Python 3.10+。python/ ディレクトリで実行。"
 ---
 
 ## Goal
