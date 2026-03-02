@@ -280,6 +280,21 @@ docker compose run --rm stockfixer python run_data_creation.py --batch
 docker compose start
 ```
 
+### 差分更新処理での競合回避（2026-03 反映）
+
+`run_data_creation.py --batch` / 日次パイプラインでは、DB競合回避のため処理を以下の2フェーズに分離している。
+
+1. 並列フェーズ: データ取得・特徴量生成のみ（DB書き込みなし）
+2. 逐次フェーズ: `market_data_raw` と `stock_features` のDB保存
+
+この構成により、差分取得時の `market_data_raw` への `INSERT OR REPLACE` が並列で衝突するリスクを抑制する。
+
+運用上の注意:
+
+- DB書き込みを含むスクリプトは同時に複数起動しない
+- 定期実行は `run_scheduler.py` の単一プロセス運用を維持する
+- 手動実行を重ねる場合は先行ジョブ完了後に実行する
+
 ### イメージサイズが大きい場合
 
 ```powershell

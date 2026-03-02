@@ -39,7 +39,9 @@ def parse_args():
     parser = argparse.ArgumentParser(description="バックテストを実行する")
     parser.add_argument("--market", type=str, default="jp", help="マーケット (例: jp, us)")
     parser.add_argument("--symbol", type=str, required=True, help="銘柄コード (例: 7203, AAPL)")
-    parser.add_argument("--start-date", type=str, default=None, help="バックテスト開始日 YYYY-MM-DD")
+    parser.add_argument(
+        "--start-date", type=str, default=None, help="バックテスト開始日 YYYY-MM-DD"
+    )
     parser.add_argument("--end-date", type=str, default=None, help="バックテスト終了日 YYYY-MM-DD")
     parser.add_argument(
         "--model-type",
@@ -48,7 +50,9 @@ def parse_args():
         choices=["XGBoostModel", "LightGBMModel"],
         help="モデルタイプ (default: XGBoostModel)",
     )
-    parser.add_argument("--model-name", type=str, default=None, help="モデル名 (default: Backtest{model_type})")
+    parser.add_argument(
+        "--model-name", type=str, default=None, help="モデル名 (default: Backtest{model_type})"
+    )
     parser.add_argument(
         "--task",
         type=str,
@@ -70,24 +74,34 @@ def parse_args():
         help="データソース: 'file'=DB特徴量(Close_lag1代替), 'api'=yfinance直接取得, 'raw'=DBのOHLCVから再生成 (default: file)",
     )
     parser.add_argument("--walk-forward", action="store_true", help="Walk-Forward 検証を使用する")
-    parser.add_argument("--n-splits", type=int, default=5, help="Walk-Forward の分割数 (default: 5)")
+    parser.add_argument(
+        "--n-splits", type=int, default=5, help="Walk-Forward の分割数 (default: 5)"
+    )
     parser.add_argument(
         "--train-ratio",
         type=float,
         default=0.8,
         help="単一期間モードの学習データ比率 (default: 0.8)",
     )
-    parser.add_argument("--initial-cash", type=float, default=1_000_000, help="初期資金 (default: 1,000,000)")
-    parser.add_argument("--fee-rate", type=float, default=0.001, help="取引手数料率 (default: 0.001)")
+    parser.add_argument(
+        "--initial-cash", type=float, default=1_000_000, help="初期資金 (default: 1,000,000)"
+    )
+    parser.add_argument(
+        "--fee-rate", type=float, default=0.001, help="取引手数料率 (default: 0.001)"
+    )
     parser.add_argument("--slippage", type=float, default=0.0, help="スリッページ (default: 0.0)")
 
     # リスク管理
     parser.add_argument(
-        "--stop-loss", type=float, default=None,
+        "--stop-loss",
+        type=float,
+        default=None,
         help="ストップロス率 (例: 0.05=5%%下落で損切り)",
     )
     parser.add_argument(
-        "--take-profit", type=float, default=None,
+        "--take-profit",
+        type=float,
+        default=None,
         help="テイクプロフィット率 (例: 0.10=10%%上昇で利確)",
     )
 
@@ -107,7 +121,9 @@ def parse_args():
     )
 
     # アンサンブル
-    parser.add_argument("--ensemble", action="store_true", help="XGBoost+LightGBMアンサンブル予測を使用する")
+    parser.add_argument(
+        "--ensemble", action="store_true", help="XGBoost+LightGBMアンサンブル予測を使用する"
+    )
 
     return parser.parse_args()
 
@@ -115,7 +131,9 @@ def parse_args():
 def main():
     args = parse_args()
     model_label = "Ensemble(XGB+LGB)" if args.ensemble else args.model_type
-    print(f"\nバックテスト開始: {args.market}/{args.symbol} | task={args.task} | model={model_label}")
+    print(
+        f"\nバックテスト開始: {args.market}/{args.symbol} | task={args.task} | model={model_label}"
+    )
 
     if args.stop_loss:
         print(f"  ストップロス: {args.stop_loss:.1%}")

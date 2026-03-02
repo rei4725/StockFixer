@@ -5,12 +5,12 @@ DuckDB データベースアクセスモジュール
 他のモジュールはこのファイルの関数を使用してDB操作を行うこと。
 """
 
+from threading import Lock
+from typing import Optional
+
 import duckdb
 import pandas as pd
-from typing import Optional
-from threading import Lock
-
-from src.utils.data_path_utils import get_db_path, ensure_dir, get_data_dir
+from src.utils.data_path_utils import ensure_dir, get_data_dir, get_db_path
 
 # --- 接続管理（スレッドセーフ） ---
 _connection: Optional[duckdb.DuckDBPyConnection] = None
@@ -21,7 +21,7 @@ def get_connection() -> duckdb.DuckDBPyConnection:
     """
     DuckDBファイルへのシングルトン接続を返す。
     初回呼び出し時にテーブルを自動初期化する。
-    
+
     読み取り性能を最適化するため、スレッド数を設定しロック競合を最小化する。
     DuckDB は自動的にロック機構を最適化しており、複数読み取り接続を効率的に処理する。
     """
@@ -30,16 +30,13 @@ def get_connection() -> duckdb.DuckDBPyConnection:
         if _connection is None:
             ensure_dir(get_data_dir())
             db_path = get_db_path()
-            
+
             # DuckDB 接続設定（ロック競合最小化）
             # threads: CPU並列処理によるスループット向上
             # max_memory: メモリ使用量制限で安定性確保
-            config = {
-                'threads': '4',
-                'memory_limit': '2GB'
-            }
+            config = {"threads": "4", "memory_limit": "2GB"}
             _connection = duckdb.connect(db_path, config=config)
-            
+
             _init_tables(_connection)
     return _connection
 
@@ -114,6 +111,7 @@ def init_tables() -> None:
 
 # --- stock_features テーブル操作 ---
 
+
 def _ensure_columns(con: duckdb.DuckDBPyConnection, df: pd.DataFrame) -> None:
     """
     DataFrameの列がstock_featuresテーブルに存在しない場合、ALTER TABLEで追加する。
@@ -121,7 +119,9 @@ def _ensure_columns(con: duckdb.DuckDBPyConnection, df: pd.DataFrame) -> None:
     """
     existing_cols = set()
     try:
-        result = con.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'stock_features'").fetchall()
+        result = con.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = 'stock_features'"
+        ).fetchall()
         existing_cols = {row[0] for row in result}
     except Exception:
         pass
@@ -170,17 +170,12 @@ def upsert_stock_features(market: str, symbol: str, df: pd.DataFrame) -> None:
     _ensure_columns(con, save_df)
 
     # 既存データ削除
-    con.execute(
-        "DELETE FROM stock_features WHERE market = ? AND symbol = ?",
-        [market, symbol]
-    )
+    con.execute("DELETE FROM stock_features WHERE market = ? AND symbol = ?", [market, symbol])
 
     # INSERT（列名を明示的に指定して順序問題を回避）
     cols = list(save_df.columns)
     col_list = ", ".join(f'"{c}"' for c in cols)
-    con.execute(
-        f"INSERT INTO stock_features ({col_list}) SELECT {col_list} FROM save_df"
-    )
+    con.execute(f"INSERT INTO stock_features ({col_list}) SELECT {col_list} FROM save_df")
     print(f"DB保存完了: stock_features [{market}_{symbol}] ({len(save_df)}行)")
 
 
@@ -199,7 +194,7 @@ def load_stock_features(market: str, symbol: str) -> Optional[pd.DataFrame]:
     try:
         df = con.execute(
             "SELECT * FROM stock_features WHERE market = ? AND symbol = ? ORDER BY row_num",
-            [market, symbol]
+            [market, symbol],
         ).fetchdf()
     except Exception:
         return None
@@ -222,9 +217,7 @@ def load_all_stock_features() -> pd.DataFrame:
     """
     con = get_connection()
     try:
-        df = con.execute(
-            "SELECT * FROM stock_features ORDER BY market, symbol, row_num"
-        ).fetchdf()
+        df = con.execute("SELECT * FROM stock_features ORDER BY market, symbol, row_num").fetchdf()
     except Exception:
         return pd.DataFrame()
 
@@ -242,10 +235,7 @@ def load_all_stock_features() -> pd.DataFrame:
 def delete_stock_features(market: str, symbol: str) -> None:
     """指定 market/symbol のデータを削除する"""
     con = get_connection()
-    con.execute(
-        "DELETE FROM stock_features WHERE market = ? AND symbol = ?",
-        [market, symbol]
-    )
+    con.execute("DELETE FROM stock_features WHERE market = ? AND symbol = ?", [market, symbol])
     print(f"DB削除完了: stock_features [{market}_{symbol}]")
 
 
@@ -268,6 +258,7 @@ def get_all_symbols() -> list:
 
 # --- prediction_results テーブル操作 ---
 
+
 def save_prediction_results(predicted_at: str, df: pd.DataFrame) -> None:
     """
     予測結果をDBに保存する（Delete-Insert方式）。
@@ -283,7 +274,15 @@ def save_prediction_results(predicted_at: str, df: pd.DataFrame) -> None:
     save_df["predicted_at"] = predicted_at
 
     # 必要な列のみ選択
-    cols = ["market", "symbol", "predicted_at", "current_price", "avg_pred_price", "diff_ratio", "model_count"]
+    cols = [
+        "market",
+        "symbol",
+        "predicted_at",
+        "current_price",
+        "avg_pred_price",
+        "diff_ratio",
+        "model_count",
+    ]
     save_df = save_df[[c for c in cols if c in save_df.columns]]
 
     # 不足列補完
@@ -296,20 +295,17 @@ def save_prediction_results(predicted_at: str, df: pd.DataFrame) -> None:
     for _, row in pairs.iterrows():
         con.execute(
             "DELETE FROM prediction_results WHERE market = ? AND symbol = ?",
-            [row["market"], row["symbol"]]
+            [row["market"], row["symbol"]],
         )
 
     # DataFrame を登録してから INSERT（複数行の INSERT に対応）
-    con.register('_save_df_temp', save_df)
+    con.register("_save_df_temp", save_df)
     con.execute("INSERT INTO prediction_results SELECT * FROM _save_df_temp")
     print(f"DB保存完了: prediction_results [{predicted_at}] ({len(save_df)}行)")
 
 
 def load_prediction_results(
-    predicted_at: str = None,
-    market: str = None,
-    top_n: int = None,
-    worst_n: int = None
+    predicted_at: str = None, market: str = None, top_n: int = None, worst_n: int = None
 ) -> pd.DataFrame:
     """
     予測結果をDBから取得する。
@@ -392,7 +388,7 @@ def load_prediction_markets(predicted_at: str = None) -> list:
     try:
         result = con.execute(
             "SELECT DISTINCT market FROM prediction_results WHERE predicted_at = ? ORDER BY market",
-            [predicted_at]
+            [predicted_at],
         ).fetchall()
         return [row[0] for row in result]
     except Exception:
@@ -400,6 +396,7 @@ def load_prediction_markets(predicted_at: str = None) -> list:
 
 
 # --- market_data_raw テーブル操作 ---
+
 
 def upsert_raw_ohlcv(rows: list[dict]) -> int:
     """
@@ -427,8 +424,21 @@ def upsert_raw_ohlcv(rows: list[dict]) -> int:
         df["source"] = "yfinance"
     df["ingested_at"] = pd.Timestamp.utcnow()
 
-    cols = ["market", "symbol", "ticker", "timeframe", "ts",
-            "open", "high", "low", "close", "volume", "adj_close", "source", "ingested_at"]
+    cols = [
+        "market",
+        "symbol",
+        "ticker",
+        "timeframe",
+        "ts",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "adj_close",
+        "source",
+        "ingested_at",
+    ]
     df = df[[c for c in cols if c in df.columns]]
 
     # INSERT OR REPLACE (DuckDB は INSERT OR REPLACE をサポート)
@@ -442,16 +452,14 @@ def upsert_raw_ohlcv(rows: list[dict]) -> int:
         FROM _raw_ohlcv_temp
     """)
     n = len(df)
-    print(f"DB保存完了: market_data_raw [{rows[0].get('market', '')}_{rows[0].get('symbol', '')}] ({n}行)")
+    print(
+        f"DB保存完了: market_data_raw [{rows[0].get('market', '')}_{rows[0].get('symbol', '')}] ({n}行)"
+    )
     return n
 
 
 def load_raw_ohlcv(
-    market: str,
-    symbol: str,
-    start_date=None,
-    end_date=None,
-    timeframe: str = "1d"
+    market: str, symbol: str, start_date=None, end_date=None, timeframe: str = "1d"
 ) -> Optional[pd.DataFrame]:
     """
     market_data_rawテーブルから生OHLCVを取得する。

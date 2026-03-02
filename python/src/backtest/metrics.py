@@ -8,8 +8,9 @@ equity_curve (日次・取引ごとの資産曲線 pd.Series) を入力として
 from __future__ import annotations
 
 import math
-import pandas as pd
+
 import numpy as np
+import pandas as pd
 
 
 def compute_metrics(
@@ -45,10 +46,12 @@ def compute_metrics(
     if sell_log.empty or "date" not in sell_log.columns:
         equity = pd.Series([initial_cash])
     else:
-        equity = pd.concat([
-            pd.Series([initial_cash], index=[sell_log.iloc[0]["date"]]),
-            sell_log.set_index("date")["cash"],
-        ])
+        equity = pd.concat(
+            [
+                pd.Series([initial_cash], index=[sell_log.iloc[0]["date"]]),
+                sell_log.set_index("date")["cash"],
+            ]
+        )
 
     final_cash = equity.iloc[-1]
     total_return = (final_cash - initial_cash) / initial_cash
@@ -80,6 +83,7 @@ def compute_metrics(
 
 
 # --- internal helpers ---
+
 
 def _empty_metrics(initial_cash: float) -> dict:
     return {

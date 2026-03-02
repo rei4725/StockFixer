@@ -9,17 +9,17 @@ import re
 from datetime import datetime, timedelta
 from typing import Optional
 
-from src.data.data_loader import (
-    get_stock_data,
-    get_raw_ohlcv_from_db,
-    should_fetch_fresh_data,
-    merge_market_data,
-)
-from src.data.data_saver import save_raw_stock_data, save_raw_ohlcv
-from src.features.technical_analysis import create_basic_lag_features, add_technical_indicators
-from src.utils.db import upsert_stock_features, delete_stock_features
-from src.utils.data_path_utils import get_ticker
 import pandas as pd
+from src.data.data_loader import (
+    get_raw_ohlcv_from_db,
+    get_stock_data,
+    merge_market_data,
+    should_fetch_fresh_data,
+)
+from src.data.data_saver import save_raw_ohlcv, save_raw_stock_data
+from src.features.technical_analysis import add_technical_indicators, create_basic_lag_features
+from src.utils.data_path_utils import get_ticker
+from src.utils.db import delete_stock_features, upsert_stock_features
 
 
 def fetch_stock_data_with_features(
@@ -27,6 +27,7 @@ def fetch_stock_data_with_features(
     symbol: str,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    defer_raw_save: bool = False,
 ) -> Optional[tuple]:
     """
     株価データを取得し特徴量を生成する（DB書き込みなし）。
@@ -37,14 +38,19 @@ def fetch_stock_data_with_features(
         symbol: 銘柄シンボル (例: "AAPL", "7203")
         start_date: 開始日 (省略時は取得可能な最古日)
         end_date: 終了日 (省略時は現在日)
+        defer_raw_save: Trueの場合、raw OHLCVのDB保存を行わず呼び出し元に委譲する
 
     Returns:
-        (market, symbol, data) のタプル。失敗時はNone。
+        (market, symbol, data, raw_data_to_save) のタプル。失敗時はNone。
     """
+    raw_data_to_save = None
+
     # start_date, end_date自動決定
     if start_date is None or end_date is None:
         try:
-            df_all = get_stock_data(market, symbol, "1900-01-01", datetime.now().strftime("%Y-%m-%d"))
+            df_all = get_stock_data(
+                market, symbol, "1900-01-01", datetime.now().strftime("%Y-%m-%d")
+            )
             if df_all is None or df_all.empty:
                 print(f"{symbol} のデータが取得できませんでした。")
                 return None
@@ -59,15 +65,15 @@ def fetch_stock_data_with_features(
 
     # DB内のデータを確認
     df = get_raw_ohlcv_from_db(market, symbol, start_date, end_date)
-    
+
     # DB内の最新日付をチェック（営業日を考慮）
     db_latest_date = None
     if df is not None and not df.empty:
         db_latest_date = pd.to_datetime(df.index.max())
-    
+
     # 新規取得が必要かどうか判定（営業日考慮）
     need_fresh = should_fetch_fresh_data(db_latest_date, end_date=end_date)
-    
+
     if need_fresh:
         # 新規データを取得すべき
         if db_latest_date is not None:
@@ -78,24 +84,32 @@ def fetch_stock_data_with_features(
             if fresh_data is not None and not fresh_data.empty:
                 df = merge_market_data(df, fresh_data)
                 print(f"差分マージ完了: {len(fresh_data)}行追加")
-                try:
-                    # 差分のみ保存（全件再保存より効率的）
-                    save_raw_ohlcv(market, symbol, fresh_data)
-                except Exception as e:
-                    print(f"Raw OHLCV保存エラー（処理継続）: {e}")
+                if defer_raw_save:
+                    raw_data_to_save = fresh_data
+                else:
+                    try:
+                        # 差分のみ保存（全件再保存より効率的）
+                        save_raw_ohlcv(market, symbol, fresh_data)
+                    except Exception as e:
+                        print(f"Raw OHLCV保存エラー（処理継続）: {e}")
             else:
                 print(f"差分データなし（営業日外の可能性）")
         else:
             # DB内無データ：フル取得
-            print(f"yfinanceから取得: market={market}, symbol={symbol}, ticker={ticker}, {start_date}～{end_date}")
+            print(
+                f"yfinanceから取得: market={market}, symbol={symbol}, ticker={ticker}, {start_date}～{end_date}"
+            )
             df = get_stock_data(market, ticker, start_date, end_date)
             if df is None or df.empty:
                 print("データが取得できませんでした。")
                 return None
-            try:
-                save_raw_ohlcv(market, symbol, df)
-            except Exception as e:
-                print(f"Raw OHLCV保存エラー（処理継続）: {e}")
+            if defer_raw_save:
+                raw_data_to_save = df
+            else:
+                try:
+                    save_raw_ohlcv(market, symbol, df)
+                except Exception as e:
+                    print(f"Raw OHLCV保存エラー（処理継続）: {e}")
     else:
         # DBデータで十分
         if df is not None and not df.empty:
@@ -121,22 +135,23 @@ def fetch_stock_data_with_features(
 
     # 特徴量名の正規化
     def normalize_col(col):
-        return re.sub(r'[^0-9a-zA-Z_]', '_', str(col))
+        return re.sub(r"[^0-9a-zA-Z_]", "_", str(col))
+
     X.columns = [normalize_col(c) for c in X.columns]
 
     # X, yを1つのDataFrameにまとめる
     data = X.copy()
 
     # market と symbol を列として追加（統合モデル用）
-    data['market'] = market
-    data['symbol'] = symbol
+    data["market"] = market
+    data["symbol"] = symbol
     # market をエンコード（数値化）
     market_codes = {"us": 0, "jp": 1}
-    data['market_encoded'] = market_codes.get(market, -1)
+    data["market_encoded"] = market_codes.get(market, -1)
 
-    data['y'] = y
+    data["y"] = y
 
-    return (market, symbol, data)
+    return (market, symbol, data, raw_data_to_save)
 
 
 def save_features_to_db(market: str, symbol: str, data) -> None:
@@ -158,7 +173,7 @@ def save_stock_data_with_features(
     symbol: str,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    out_dir: str = None  # 後方互換のため残置（未使用）
+    out_dir: str = None,  # 後方互換のため残置（未使用）
 ):
     """
     指定した市場・シンボル・期間の株価データを取得し、特徴量生成後、DBに保存する。
@@ -173,22 +188,22 @@ def save_stock_data_with_features(
     result = fetch_stock_data_with_features(market, symbol, start_date, end_date)
     if result is None:
         return
-    _, _, data = result
+    _, _, data, _ = result
     save_features_to_db(market, symbol, data)
 
 
 def run_data_batch(fetch_only: bool = False):
     """
     ウォッチリストの全銘柄をバッチ取得する。
-    
+
     fetch_only=False（デフォルト）:
       フェーズ1: データ取得＋特徴量生成（並列） - I/O boundなAPI呼び出し
       フェーズ2: DB書き込み（逐次） - DuckDBの排他ロック制約を回避
-    
+
     fetch_only=True:
       フェーズ1のみ実行（DB保存しない）
     """
-    from src.services.batch_runner import load_target_symbols, run_parallel, print_summary
+    from src.services.batch_runner import load_target_symbols, print_summary, run_parallel
 
     # バッチ取得の並列数（yfinance API制限を考慮）
     MAX_DATA_WORKERS = 3
@@ -198,7 +213,11 @@ def run_data_batch(fetch_only: bool = False):
         market, symbol = task["market"], task["symbol"]
         try:
             print(f"[データ取得開始] {market}/{symbol}")
-            result = fetch_stock_data_with_features(market=market, symbol=symbol)
+            result = fetch_stock_data_with_features(
+                market=market,
+                symbol=symbol,
+                defer_raw_save=True,
+            )
             if result is None:
                 print(f"[データ取得スキップ] {market}/{symbol}")
                 return {"market": market, "symbol": symbol, "status": "skip"}
@@ -235,13 +254,20 @@ def run_data_batch(fetch_only: bool = False):
 
     db_results = []
     for i, r in enumerate(success_data, 1):
-        market, symbol, data = r["data"]
+        market, symbol, data, raw_data = r["data"]
         try:
+            if raw_data is not None and not raw_data.empty:
+                try:
+                    save_raw_ohlcv(market, symbol, raw_data)
+                except Exception as e:
+                    print(f"[Raw保存エラー] {market}/{symbol}: {e}")
             save_features_to_db(market, symbol, data)
             db_results.append({"market": market, "symbol": symbol, "status": "success"})
         except Exception as e:
             print(f"[DB書き込みエラー] {market}/{symbol}: {e}")
-            db_results.append({"market": market, "symbol": symbol, "status": "error", "error": str(e)})
+            db_results.append(
+                {"market": market, "symbol": symbol, "status": "error", "error": str(e)}
+            )
         if i % 50 == 0:
             print(f"  ... {i}/{len(success_data)} 件完了")
 

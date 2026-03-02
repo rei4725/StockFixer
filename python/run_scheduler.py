@@ -42,12 +42,14 @@ def _build_queue_manager():
 def job_daily_pipeline():
     """毎日実行: データ取得 → 予測 → Discord通知用CSV出力"""
     from src.services.scheduler_pipeline import run_daily_pipeline
+
     run_daily_pipeline()
 
 
 def job_weekly_model_training():
     """週次実行: 統合モデル再学習"""
     from src.services.scheduler_pipeline import run_weekly_training
+
     run_weekly_training()
 
 
@@ -91,6 +93,7 @@ SCHEDULE_CONFIG = {
 def _register_jobs(scheduler, queue_manager):
     """スケジューラにジョブを登録する"""
     for job_id, config in SCHEDULE_CONFIG.items():
+
         def _managed_runner(_job_id=job_id):
             queue_manager.run_job(_job_id, reason="scheduled")
 
@@ -103,7 +106,7 @@ def _register_jobs(scheduler, queue_manager):
             id=job_id,
             name=config["description"],
             misfire_grace_time=3600,  # 1時間以内なら遅延実行
-            coalesce=True,           # 複数回分溜まっても1回だけ実行
+            coalesce=True,  # 複数回分溜まっても1回だけ実行
             max_instances=1,
         )
         logger.info(f"ジョブ登録: {job_id} - {config['description']}")

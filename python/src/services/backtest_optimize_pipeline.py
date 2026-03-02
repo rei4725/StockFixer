@@ -6,16 +6,16 @@ Walk-Forward検証で実行し、最適パラメータを特定する。
 
 run_backtest_optimize.py はこのモジュールの関数を呼び出すラッパーとして機能する。
 """
+
 import itertools
 import json
 import os
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
 
 import pandas as pd
-
 from src.services.backtest_pipeline import run_backtest_walk_forward
-from src.utils.data_path_utils import get_results_dir, ensure_dir
+from src.utils.data_path_utils import ensure_dir, get_results_dir
 
 
 def _frange(start: float, stop: float, step: float) -> list[float]:
@@ -114,13 +114,19 @@ def run_optimization(
 
             if wf_df is not None and not wf_df.empty:
                 # 各fold平均をサマリーとして保存
-                numeric_cols = ["total_return", "sharpe_ratio", "max_drawdown",
-                                "win_rate", "profit_factor", "num_trades"]
+                numeric_cols = [
+                    "total_return",
+                    "sharpe_ratio",
+                    "max_drawdown",
+                    "win_rate",
+                    "profit_factor",
+                    "num_trades",
+                ]
                 available = [c for c in numeric_cols if c in wf_df.columns]
                 # None値をnp.nanに変換して平均計算可能にする
                 wf_df_numeric = wf_df[available].copy()
                 for col in wf_df_numeric.columns:
-                    wf_df_numeric[col] = pd.to_numeric(wf_df_numeric[col], errors='coerce')
+                    wf_df_numeric[col] = pd.to_numeric(wf_df_numeric[col], errors="coerce")
                 summary = wf_df_numeric.mean().to_dict()
                 summary["threshold"] = threshold
                 summary["stop_loss_pct"] = stop_loss
@@ -129,12 +135,14 @@ def run_optimization(
                 all_results.append(summary)
         except Exception as e:
             print(f"  エラー: {e}")
-            all_results.append({
-                "threshold": threshold,
-                "stop_loss_pct": stop_loss,
-                "take_profit_pct": take_profit,
-                "error": str(e),
-            })
+            all_results.append(
+                {
+                    "threshold": threshold,
+                    "stop_loss_pct": stop_loss,
+                    "take_profit_pct": take_profit,
+                    "error": str(e),
+                }
+            )
 
     return pd.DataFrame(all_results)
 
@@ -171,9 +179,17 @@ def print_optimization_results(result_df: pd.DataFrame, sort_by: str) -> None:
     if sort_by in valid.columns:
         valid = valid.sort_values(sort_by, ascending=ascending)
 
-    display_cols = ["threshold", "stop_loss_pct", "take_profit_pct",
-                    "total_return", "sharpe_ratio", "max_drawdown",
-                    "win_rate", "profit_factor", "num_trades"]
+    display_cols = [
+        "threshold",
+        "stop_loss_pct",
+        "take_profit_pct",
+        "total_return",
+        "sharpe_ratio",
+        "max_drawdown",
+        "win_rate",
+        "profit_factor",
+        "num_trades",
+    ]
     display_cols = [c for c in display_cols if c in valid.columns]
 
     print(valid[display_cols].to_string(index=False))
@@ -262,15 +278,25 @@ def save_optimal_params_json(
         "timestamp": datetime.now().isoformat(),
         "sort_by": sort_by,
         "threshold": float(best_row.get("threshold", 0.0)),
-        "stop_loss_pct": float(best_row.get("stop_loss_pct")) if best_row.get("stop_loss_pct") is not None else None,
-        "take_profit_pct": float(best_row.get("take_profit_pct")) if best_row.get("take_profit_pct") is not None else None,
+        "stop_loss_pct": (
+            float(best_row.get("stop_loss_pct"))
+            if best_row.get("stop_loss_pct") is not None
+            else None
+        ),
+        "take_profit_pct": (
+            float(best_row.get("take_profit_pct"))
+            if best_row.get("take_profit_pct") is not None
+            else None
+        ),
         "metrics": {
             "total_return": float(best_row.get("total_return", 0.0)),
             "sharpe_ratio": float(best_row.get("sharpe_ratio", 0.0)),
             "max_drawdown": float(best_row.get("max_drawdown", 0.0)),
             "win_rate": float(best_row.get("win_rate", 0.0)),
             "profit_factor": float(best_row.get("profit_factor", 1.0)),
-            "num_trades": int(best_row.get("num_trades", 0)) if pd.notna(best_row.get("num_trades")) else 0,
+            "num_trades": (
+                int(best_row.get("num_trades", 0)) if pd.notna(best_row.get("num_trades")) else 0
+            ),
         },
     }
 
@@ -317,7 +343,9 @@ def get_optimal_params(
     """
     if json_path is None:
         # python/src/services/backtest_optimize_pipeline.py -> python/config
-        config_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "config")
+        config_dir = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "config"
+        )
         json_path = os.path.join(config_dir, "optimal_params.json")
 
     if not os.path.exists(json_path):

@@ -1,7 +1,8 @@
+import joblib  # モデルの保存・ロード用
 import pandas as pd
 import xgboost as xgb
 from src.models.base_model import BaseModel
-import joblib # モデルの保存・ロード用
+
 
 class XGBoostModel(BaseModel):
     """

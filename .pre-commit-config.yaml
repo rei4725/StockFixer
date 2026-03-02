@@ -1,0 +1,112 @@
+# Pre-commit Hook Configuration for StockFixer
+# 
+# コミット前に自動的に以下のチェックと修正を実行する：
+# - コード品質チェック (pylint, flake8)
+# - 型チェック (mypy)
+# - コードフォーマット (black)
+# - トレーリング空白・改行の修正
+
+# インストール方法:
+#   pip install pre-commit
+#   pre-commit install
+#   pre-commit install --hook-type pre-commit --hook-type commit-msg
+#
+# 手動実行:
+#   pre-commit run --all-files
+#
+# 一時スキップ (コミット時のみ):
+#   git commit --no-verify
+#
+# フックの監視を無効化:
+#   pre-commit uninstall
+
+repos:
+  # 1. 基本的なファイル問題の修正
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace              # トレーリング空白を削除
+        args: [--markdown-args=markdown]
+      - id: end-of-file-fixer               # ファイル末尾の改行を修正
+      - id: check-yaml                      # YAML構文をチェック
+      - id: check-json                      # JSON構文をチェック
+      - id: check-added-large-files         # 大きなファイルをブロック
+        args: [--maxkb=5000]
+      - id: check-merge-conflict            # マージコンフリクトをチェック
+      - id: debug-statements                # debugステートメントを検出
+
+  # 2. Python コードフォーマッタ (Black)
+  - repo: https://github.com/psf/black
+    rev: 23.12.1
+    hooks:
+      - id: black
+        language_version: python3
+        args: [--line-length=100]
+
+  # 3. Python インポート整理 (isort)
+  - repo: https://github.com/PyCQA/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+        args: [--profile=black, --line-length=100]
+
+  # 4. Python コード品質チェック (Flake8)
+  - repo: https://github.com/PyCQA/flake8
+    rev: 6.1.0
+    hooks:
+      - id: flake8
+        args: [
+          --max-line-length=100,
+          --extend-ignore=E203,W503,
+          --exclude=__pycache__,.venv,.git,./venv
+        ]
+        additional_dependencies:
+          - flake8-docstrings
+          - flake8-bugbear
+
+  # 5. Python 型チェック (mypy)
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.7.1
+    hooks:
+      - id: mypy
+        args: [--ignore-missing-imports, --skip-validation]
+        additional_dependencies:
+          - types-requests
+          - types-PyYAML
+          - pandas-stubs
+        exclude: ^(tests/|.*_test\.py$)
+
+  # 6. Python コード品質メトリクス (Pylint) - オプション（軽量版）
+  # 本格的な Pylint 実行はCI/CDで行い、pre-commitでは軽量化版のみ実行
+  - repo: https://github.com/PyCQA/pylint
+    rev: pylint-3.0.3
+    hooks:
+      - id: pylint
+        args: [
+          --max-line-length=100,
+          --disable=all,
+          --enable=E0001,E0101,E0102,E0103,E0201,E0202,W0101,W0102,W0103,
+          --disable=missing-docstring,missing-module-docstring,
+          --disable=line-too-long,invalid-name
+        ]
+        exclude: ^(tests/|.*_test\.py$)
+        additional_dependencies:
+          - duckdb
+
+  # 7. コミットメッセージ検証 (commitlint スタイル)
+  # コミットメッセージが "feat:", "fix:", "docs:" などで始まることを確認
+  - repo: local
+    hooks:
+      - id: check-commit-message
+        name: Check commit message format
+        entry: python ./.github/hooks/check_commit_message.py
+        language: python
+        stages: [commit-msg]
+
+# グローバル設定
+default_stages: [commit]
+fail_fast: false
+exclude: ^(\.venv/|venv/|__pycache__/|\.git/)
+
+# Python version
+python: python3

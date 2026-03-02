@@ -1,5 +1,6 @@
 import pandas as pd
 
+
 def df_to_pretty_string(df: pd.DataFrame, columns=None, header=None) -> str:
     """
     DataFrameから指定カラムのみ抽出し、ヘッダー付きで整形文字列を返す

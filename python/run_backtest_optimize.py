@@ -34,13 +34,17 @@ def parse_args():
     parser.add_argument("--market", type=str, default="jp", help="マーケット (例: jp, us)")
     parser.add_argument("--symbol", type=str, required=True, help="銘柄コード (例: 7203, AAPL)")
     parser.add_argument(
-        "--model-type", type=str, default="XGBoostModel",
+        "--model-type",
+        type=str,
+        default="XGBoostModel",
         choices=["XGBoostModel", "LightGBMModel"],
         help="モデルタイプ (default: XGBoostModel)",
     )
     parser.add_argument("--ensemble", action="store_true", help="XGBoost+LightGBMアンサンブル予測")
     parser.add_argument(
-        "--source", type=str, default="file",
+        "--source",
+        type=str,
+        default="file",
         choices=["file", "api", "raw"],
         help="データソース (default: file)",
     )
@@ -48,18 +52,32 @@ def parse_args():
     parser.add_argument("--initial-cash", type=float, default=1_000_000, help="初期資金")
 
     # 閾値グリッド
-    parser.add_argument("--threshold-min", type=float, default=0.0, help="閾値の最小値 (default: 0.0)")
-    parser.add_argument("--threshold-max", type=float, default=0.015, help="閾値の最大値 (default: 0.015)")
-    parser.add_argument("--threshold-step", type=float, default=0.001, help="閾値のステップ (default: 0.001)")
+    parser.add_argument(
+        "--threshold-min", type=float, default=0.0, help="閾値の最小値 (default: 0.0)"
+    )
+    parser.add_argument(
+        "--threshold-max", type=float, default=0.015, help="閾値の最大値 (default: 0.015)"
+    )
+    parser.add_argument(
+        "--threshold-step", type=float, default=0.001, help="閾値のステップ (default: 0.001)"
+    )
 
     # リスク管理グリッド
-    parser.add_argument("--optimize-risk", action="store_true", help="ストップロス・テイクプロフィットもグリッドサーチ")
-    parser.add_argument("--fee-rate", type=float, default=0.001, help="取引手数料率 (default: 0.001)")
+    parser.add_argument(
+        "--optimize-risk",
+        action="store_true",
+        help="ストップロス・テイクプロフィットもグリッドサーチ",
+    )
+    parser.add_argument(
+        "--fee-rate", type=float, default=0.001, help="取引手数料率 (default: 0.001)"
+    )
     parser.add_argument("--slippage", type=float, default=0.0, help="スリッページ (default: 0.0)")
 
     # ソート基準
     parser.add_argument(
-        "--sort-by", type=str, default="sharpe_ratio",
+        "--sort-by",
+        type=str,
+        default="sharpe_ratio",
         choices=["sharpe_ratio", "total_return", "profit_factor", "win_rate", "max_drawdown"],
         help="結果のソート基準 (default: sharpe_ratio)",
     )

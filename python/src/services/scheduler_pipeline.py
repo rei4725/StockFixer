@@ -13,7 +13,7 @@ logger = logging.getLogger("scheduler")
 def run_daily_pipeline():
     """
     毎日実行: データ取得 → 予測 → Discord通知用CSV出力
-    
+
     流れ:
         1. 全マーケットのデータを取得（バッチ）
         2. Top10/Worst10の予測を実行
@@ -26,6 +26,7 @@ def run_daily_pipeline():
     # 1. データ取得（バッチ）
     logger.info("[1/2] データ取得開始")
     from src.services.data_pipeline import run_data_batch
+
     try:
         run_data_batch()
         logger.info("[1/2] データ取得完了")
@@ -36,7 +37,8 @@ def run_daily_pipeline():
 
     # 2. 予測（Top10/Worst10）
     logger.info("[2/2] 予測開始")
-    from src.services.prediction_pipeline import predict_all_unified, output_top_worst_results
+    from src.services.prediction_pipeline import output_top_worst_results, predict_all_unified
+
     try:
         output_rows = predict_all_unified()
         output_top_worst_results(output_rows, mode="unified")
@@ -61,7 +63,7 @@ def run_daily_pipeline():
 def run_weekly_training():
     """
     週次実行: 統合モデル再学習
-    
+
     流れ:
         1. XGBoostモデルの再学習
         2. LightGBMモデルの再学習

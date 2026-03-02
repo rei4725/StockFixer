@@ -1,8 +1,8 @@
-import pandas as pd
 from typing import Optional
 
-from src.backtest.task import BacktestTask, ReturnRegressionTask
+import pandas as pd
 from src.backtest.metrics import compute_metrics
+from src.backtest.task import BacktestTask, ReturnRegressionTask
 
 
 class Backtester:
@@ -69,7 +69,11 @@ class Backtester:
             )
 
         # 2. 特徴量生成（テクニカル指標付与）
-        from src.features.technical_analysis import add_technical_indicators, create_basic_lag_features
+        from src.features.technical_analysis import (
+            add_technical_indicators,
+            create_basic_lag_features,
+        )
+
         df = add_technical_indicators(df)
 
         # 3. ラベル生成（タスクに委譲）
@@ -89,7 +93,9 @@ class Backtester:
         result_df, metrics = self.simulate_trading(df.loc[X.index], signal)
         return result_df, metrics
 
-    def simulate_trading(self, df: pd.DataFrame, signal: pd.Series, pred: Optional[pd.Series] = None):
+    def simulate_trading(
+        self, df: pd.DataFrame, signal: pd.Series, pred: Optional[pd.Series] = None
+    ):
         """
         仮想売買シミュレーションを実行する。
 
@@ -121,10 +127,15 @@ class Backtester:
                 if self.stop_loss_pct is not None and change_from_entry <= -self.stop_loss_pct:
                     proceeds = position * price * (1 - self.fee_rate - self.slippage)
                     cash += proceeds
-                    trade_log.append({
-                        "date": date, "action": "stop_loss",
-                        "price": price, "qty": position, "cash": cash,
-                    })
+                    trade_log.append(
+                        {
+                            "date": date,
+                            "action": "stop_loss",
+                            "price": price,
+                            "qty": position,
+                            "cash": cash,
+                        }
+                    )
                     position = 0
                     position_price = 0.0
                     continue
@@ -132,10 +143,15 @@ class Backtester:
                 if self.take_profit_pct is not None and change_from_entry >= self.take_profit_pct:
                     proceeds = position * price * (1 - self.fee_rate - self.slippage)
                     cash += proceeds
-                    trade_log.append({
-                        "date": date, "action": "take_profit",
-                        "price": price, "qty": position, "cash": cash,
-                    })
+                    trade_log.append(
+                        {
+                            "date": date,
+                            "action": "take_profit",
+                            "price": price,
+                            "qty": position,
+                            "cash": cash,
+                        }
+                    )
                     position = 0
                     position_price = 0.0
                     continue
@@ -149,18 +165,28 @@ class Backtester:
                     cash -= cost
                     position += qty
                     position_price = price
-                    trade_log.append({
-                        "date": date, "action": "buy",
-                        "price": price, "qty": qty, "cash": cash,
-                    })
+                    trade_log.append(
+                        {
+                            "date": date,
+                            "action": "buy",
+                            "price": price,
+                            "qty": qty,
+                            "cash": cash,
+                        }
+                    )
             elif sig == -1 and position > 0:
                 # Sell
                 proceeds = position * price * (1 - self.fee_rate - self.slippage)
                 cash += proceeds
-                trade_log.append({
-                    "date": date, "action": "sell",
-                    "price": price, "qty": position, "cash": cash,
-                })
+                trade_log.append(
+                    {
+                        "date": date,
+                        "action": "sell",
+                        "price": price,
+                        "qty": position,
+                        "cash": cash,
+                    }
+                )
                 position = 0
                 position_price = 0.0
 
@@ -169,10 +195,15 @@ class Backtester:
             price = df.iloc[-1][close_col]
             proceeds = position * price * (1 - self.fee_rate - self.slippage)
             cash += proceeds
-            trade_log.append({
-                "date": df.index[-1], "action": "final_sell",
-                "price": price, "qty": position, "cash": cash,
-            })
+            trade_log.append(
+                {
+                    "date": df.index[-1],
+                    "action": "final_sell",
+                    "price": price,
+                    "qty": position,
+                    "cash": cash,
+                }
+            )
             position = 0
 
         result_df = pd.DataFrame(trade_log)
@@ -211,6 +242,7 @@ class Backtester:
     def _load_from_raw(self) -> pd.DataFrame:
         """market_data_raw テーブルからOHLCVを取得する"""
         from src.data.data_loader import get_raw_ohlcv_from_db
+
         df = get_raw_ohlcv_from_db(self.market, self.symbol, self.start_date, self.end_date)
         if df is None or df.empty:
             raise ValueError(

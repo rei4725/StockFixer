@@ -192,8 +192,8 @@ class TestRunDataBatch(unittest.TestCase):
         data['y'] = y
 
         phase1_results = [
-            {"market": "us", "symbol": "TEST1", "status": "success", "data": ("us", "TEST1", data)},
-            {"market": "us", "symbol": "TEST2", "status": "success", "data": ("us", "TEST2", data)},
+            {"market": "us", "symbol": "TEST1", "status": "success", "data": ("us", "TEST1", data, None)},
+            {"market": "us", "symbol": "TEST2", "status": "success", "data": ("us", "TEST2", data, None)},
         ]
         mock_run_parallel.return_value = phase1_results
 
@@ -252,7 +252,7 @@ class TestRunDataBatch(unittest.TestCase):
         data['y'] = y
 
         phase1_results = [
-            {"market": "us", "symbol": "TEST1", "status": "success", "data": ("us", "TEST1", data)},
+            {"market": "us", "symbol": "TEST1", "status": "success", "data": ("us", "TEST1", data, None)},
             {"market": "us", "symbol": "TEST2", "status": "error", "error": "取得失敗"},
         ]
         mock_run_parallel.return_value = phase1_results

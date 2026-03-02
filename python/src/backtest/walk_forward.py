@@ -8,11 +8,11 @@ Walk-Forward Validation
 from __future__ import annotations
 
 from typing import Optional
+
 import pandas as pd
 from sklearn.model_selection import TimeSeriesSplit
-
-from src.backtest.task import BacktestTask, ReturnRegressionTask
 from src.backtest.metrics import compute_metrics
+from src.backtest.task import BacktestTask, ReturnRegressionTask
 
 
 class WalkForwardValidator:
@@ -123,12 +123,14 @@ class WalkForwardValidator:
                 all_results.append(metrics)
             except Exception as e:
                 print(f"  [Fold {fold_idx+1}] エラー: {e}")
-                all_results.append({
-                    "fold": fold_idx + 1,
-                    "val_start": str(fold_start),
-                    "val_end": str(fold_end),
-                    "error": str(e),
-                })
+                all_results.append(
+                    {
+                        "fold": fold_idx + 1,
+                        "val_start": str(fold_start),
+                        "val_end": str(fold_end),
+                        "error": str(e),
+                    }
+                )
 
         result_df = pd.DataFrame(all_results)
         self._print_summary(result_df)
@@ -145,7 +147,11 @@ class WalkForwardValidator:
         """1折分の学習→予測→シミュレーションを実行する"""
         from src.backtest.backtester import Backtester
 
-        feature_cols = [c for c in train_df.columns if c not in (task.label_col, "market", "symbol", "market_encoded")]
+        feature_cols = [
+            c
+            for c in train_df.columns
+            if c not in (task.label_col, "market", "symbol", "market_encoded")
+        ]
 
         X_train = train_df[feature_cols].dropna()
         y_train = train_df.loc[X_train.index, task.label_col]
@@ -153,8 +159,13 @@ class WalkForwardValidator:
 
         if self.ensemble:
             from src.services.backtest_pipeline import _ensemble_predict
+
             pred = _ensemble_predict(
-                self.model_manager, X_train, y_train, X_val, model_name,
+                self.model_manager,
+                X_train,
+                y_train,
+                X_val,
+                model_name,
             )
         else:
             # 学習 (BaseModel の train() メソッドを使用)
@@ -188,6 +199,7 @@ class WalkForwardValidator:
     def _load_features(self) -> Optional[pd.DataFrame]:
         """特徴量データを読み込む（source に応じてDB/API/Rawを使い分ける）"""
         from src.services.backtest_pipeline import load_features
+
         return load_features(self.market, self.symbol, self.source)
 
     @staticmethod
@@ -204,6 +216,6 @@ class WalkForwardValidator:
             # None値をnp.nanに変換して平均計算可能にする
             result_numeric = result_df[available].copy()
             for col in result_numeric.columns:
-                result_numeric[col] = pd.to_numeric(result_numeric[col], errors='coerce')
+                result_numeric[col] = pd.to_numeric(result_numeric[col], errors="coerce")
             print(result_numeric.mean().round(4).to_string())
         print("=" * 60)

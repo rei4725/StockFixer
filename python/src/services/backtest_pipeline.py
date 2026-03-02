@@ -4,6 +4,7 @@
 バックテストの実行ロジックを統合するサービス層。
 run_backtest.py はこのモジュールの関数を呼び出すラッパーとして機能する。
 """
+
 import os
 import re
 import sys
@@ -30,9 +31,13 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
         - "file" の場合は Close_lag1 を Close として補完
     """
     if source == "api":
-        from src.data.data_loader import get_stock_data
-        from src.features.technical_analysis import add_technical_indicators, create_basic_lag_features
         from datetime import datetime, timedelta
+
+        from src.data.data_loader import get_stock_data
+        from src.features.technical_analysis import (
+            add_technical_indicators,
+            create_basic_lag_features,
+        )
         from src.utils.data_path_utils import get_ticker
 
         end = datetime.now().strftime("%Y-%m-%d")
@@ -56,7 +61,10 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
 
     elif source == "raw":
         from src.data.data_loader import get_raw_ohlcv_from_db
-        from src.features.technical_analysis import add_technical_indicators, create_basic_lag_features
+        from src.features.technical_analysis import (
+            add_technical_indicators,
+            create_basic_lag_features,
+        )
 
         df = get_raw_ohlcv_from_db(market, symbol)
         if df is None or df.empty:
@@ -76,15 +84,16 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
 
     else:  # source == "file"
         from src.utils.db import load_stock_features
+
         df = load_stock_features(market, symbol)
         if df is None or df.empty:
             print(f"[エラー] stock_featuresにデータがありません: {market}/{symbol}")
             print("先に run_data_creation.py を実行してください。")
             sys.exit(1)
-        
+
         # 100% NULL の列を除去（Dividends、Capital_Gains、Stock_Splits など）
-        df = df.dropna(axis=1, how='all')
-        
+        df = df.dropna(axis=1, how="all")
+
         # stock_features には Close 列がないため Close_lag1 で代替
         if "Close" not in df.columns and "Close_lag1" in df.columns:
             df = df.copy()
@@ -138,10 +147,10 @@ def run_backtest_single(
     Returns:
         (result_df, metrics, None) のタプル
     """
-    from src.models.model_manager import ModelManager
-    from src.strategy.signal_generator import SignalGenerator
     from src.backtest.backtester import Backtester
     from src.backtest.task import ReturnRegressionTask
+    from src.models.model_manager import ModelManager
+    from src.strategy.signal_generator import SignalGenerator
 
     task = _build_task(task_name, threshold)
     model_name = model_name or f"Backtest{model_type}"
@@ -171,10 +180,16 @@ def run_backtest_single(
     exclude_cols = {label_col, "market", "symbol", "market_encoded"}
 
     if label_col not in train_df.columns:
-        train_df[label_col] = task.make_labels(train_df.rename(columns={"close": "Close"}, errors="ignore"))
-        test_df[label_col] = task.make_labels(test_df.rename(columns={"close": "Close"}, errors="ignore"))
+        train_df[label_col] = task.make_labels(
+            train_df.rename(columns={"close": "Close"}, errors="ignore")
+        )
+        test_df[label_col] = task.make_labels(
+            test_df.rename(columns={"close": "Close"}, errors="ignore")
+        )
 
-    feature_cols = [c for c in train_df.columns if c not in exclude_cols and c not in ("Close", "close")]
+    feature_cols = [
+        c for c in train_df.columns if c not in exclude_cols and c not in ("Close", "close")
+    ]
 
     # NULL を含む行を極力除去しない（90% 以上、有効な特徴量が必要）
     # thresh: 90% の列に値があることを要求
@@ -182,7 +197,7 @@ def run_backtest_single(
     X_train = train_df[feature_cols].dropna(thresh=min_valid)
     y_train = train_df.loc[X_train.index, label_col].dropna()
     X_train = X_train.loc[y_train.index]
-    
+
     X_test = test_df[feature_cols].dropna(thresh=min_valid)
 
     # モデル学習・予測
@@ -215,7 +230,9 @@ def run_backtest_single(
         position_fraction=position_fraction,
     )
     result_df, metrics = backtester.simulate_trading(
-        test_df.loc[X_test.index], signal, pred=pred,
+        test_df.loc[X_test.index],
+        signal,
+        pred=pred,
     )
     return result_df, metrics, None
 
@@ -262,9 +279,9 @@ def run_backtest_walk_forward(
     Returns:
         (None, None, wf_df) のタプル
     """
+    from src.backtest.walk_forward import WalkForwardValidator
     from src.models.model_manager import ModelManager
     from src.strategy.signal_generator import SignalGenerator
-    from src.backtest.walk_forward import WalkForwardValidator
 
     task = _build_task(task_name, threshold)
     model_name = model_name or f"Backtest{model_type}"
@@ -313,7 +330,8 @@ def save_backtest_results(
         symbol: 銘柄シンボル
         task_name: タスク名
     """
-    from src.utils.data_path_utils import get_results_dir, ensure_dir
+    from src.utils.data_path_utils import ensure_dir, get_results_dir
+
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     out_dir = os.path.join(get_results_dir(), "backtest", f"{market}_{symbol}")
     ensure_dir(out_dir)
@@ -349,15 +367,21 @@ def print_backtest_metrics(metrics: dict, label: str = "") -> None:
 
 # --- internal helpers ---
 
+
 def _build_task(task_name: str, threshold: float):
     from src.backtest.task import ReturnRegressionTask
+
     if task_name == "return_regression":
         return ReturnRegressionTask(threshold=threshold)
     raise ValueError(f"未対応のタスク: {task_name}")
 
 
 def _ensemble_predict(
-    mm, X_train: pd.DataFrame, y_train: pd.Series, X_test: pd.DataFrame, base_name: str,
+    mm,
+    X_train: pd.DataFrame,
+    y_train: pd.Series,
+    X_test: pd.DataFrame,
+    base_name: str,
 ) -> pd.Series:
     """
     XGBoost + LightGBM のアンサンブル予測（平均）を返す。

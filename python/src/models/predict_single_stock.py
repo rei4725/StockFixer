@@ -1,17 +1,19 @@
+import logging
 import os
-import pandas as pd
 import traceback
 import warnings
-import logging
+
+import pandas as pd
 import yfinance as yf
-from src.models.model_manager import ModelManager
 from src.data import data_loader
 from src.features.technical_analysis import add_technical_indicators, create_basic_lag_features
+from src.models.model_manager import ModelManager
 from src.utils.data_path_utils import get_models_subdir, get_ticker
 
 # yfinanceの警告を抑制
 warnings.filterwarnings("ignore", category=FutureWarning)
 logging.getLogger("yfinance").setLevel(logging.CRITICAL)
+
 
 def predict_single_stock(market: str, symbol: str, model_types=None, lookback_days=90):
     """
@@ -30,7 +32,12 @@ def predict_single_stock(market: str, symbol: str, model_types=None, lookback_da
             print(f"[{symbol}] モデルが存在しません: {model_path}")
             continue
         try:
-            df = data_loader.get_stock_data(market, symbol, pd.Timestamp.today() - pd.Timedelta(days=lookback_days), pd.Timestamp.today())
+            df = data_loader.get_stock_data(
+                market,
+                symbol,
+                pd.Timestamp.today() - pd.Timedelta(days=lookback_days),
+                pd.Timestamp.today(),
+            )
             if df.empty or "Close" not in df.columns:
                 print(f"[{symbol}] 株価データ取得失敗")
                 continue
@@ -43,12 +50,12 @@ def predict_single_stock(market: str, symbol: str, model_types=None, lookback_da
                     current_price = float(hist["Close"].iloc[-1])
                 else:
                     close_col = df["Close"]
-                    if hasattr(close_col, 'ndim') and close_col.ndim > 1:
+                    if hasattr(close_col, "ndim") and close_col.ndim > 1:
                         close_col = close_col.iloc[:, 0]
                     current_price = float(close_col.iloc[-1])
             except Exception:
                 close_col = df["Close"]
-                if hasattr(close_col, 'ndim') and close_col.ndim > 1:
+                if hasattr(close_col, "ndim") and close_col.ndim > 1:
                     close_col = close_col.iloc[:, 0]
                 current_price = float(close_col.iloc[-1])
             df_feat = add_technical_indicators(df)
@@ -79,19 +86,23 @@ def predict_single_stock(market: str, symbol: str, model_types=None, lookback_da
         return None
 
     # スカラー値への変換を確実に行う
-    if hasattr(current_price, 'iloc'):
+    if hasattr(current_price, "iloc"):
         current_price = float(current_price.iloc[0] if len(current_price) > 0 else current_price)
     else:
         current_price = float(current_price)
-    
+
     avg_pred_price = sum(pred_prices) / len(pred_prices)
     diff_ratio = (avg_pred_price - current_price) / current_price
     # DataFrame形式で返す（prediction_pipeline.pyと同じカラム構成）
-    return pd.DataFrame([{
-        "market": market,
-        "symbol": symbol,
-        "current_price": float(current_price),
-        "avg_pred_price": float(avg_pred_price),
-        "diff_ratio": float(diff_ratio),
-        "model_count": int(len(pred_prices))
-    }])
+    return pd.DataFrame(
+        [
+            {
+                "market": market,
+                "symbol": symbol,
+                "current_price": float(current_price),
+                "avg_pred_price": float(avg_pred_price),
+                "diff_ratio": float(diff_ratio),
+                "model_count": int(len(pred_prices)),
+            }
+        ]
+    )

@@ -1,16 +1,19 @@
-import pandas as pd
-from typing import Dict, Type
-from src.models.base_model import BaseModel
-from src.models.xgboost_model import XGBoostModel
-from src.models.lightgbm_model import LightGBMModel
 import os
-from src.utils.data_path_utils import get_models_dir, get_models_subdir, ensure_dir
+from typing import Dict, Type
+
+import pandas as pd
+from src.models.base_model import BaseModel
+from src.models.lightgbm_model import LightGBMModel
+from src.models.xgboost_model import XGBoostModel
+from src.utils.data_path_utils import ensure_dir, get_models_dir, get_models_subdir
+
 
 class ModelManager:
     """
     AIモデルの管理、学習、予測を行うクラス。
     複数のモデルタイプをサポートし、モデルの保存・ロードも管理する。
     """
+
     def __init__(self, model_dir: str = None):
         self.models: Dict[str, BaseModel] = {}
         self.model_dir = model_dir if model_dir else get_models_dir()
@@ -45,8 +48,10 @@ class ModelManager:
             ValueError: 未登録のモデルタイプが指定された場合。
         """
         if model_type not in self._registered_models:
-            raise ValueError(f"未登録のモデルタイプ: {model_type}. 登録済みのタイプ: {list(self._registered_models.keys())}")
-        
+            raise ValueError(
+                f"未登録のモデルタイプ: {model_type}. 登録済みのタイプ: {list(self._registered_models.keys())}"
+            )
+
         model_class = self._registered_models[model_type]
         model_instance = model_class(model_name=model_name, **kwargs)
         self.models[model_name] = model_instance
@@ -67,7 +72,9 @@ class ModelManager:
             raise ValueError(f"モデル '{model_name}' が見つかりません。")
         return self.models[model_name]
 
-    def train_model(self, model_name: str, X: pd.DataFrame, y: pd.Series, market: str = None, symbol: str = None):
+    def train_model(
+        self, model_name: str, X: pd.DataFrame, y: pd.Series, market: str = None, symbol: str = None
+    ):
         """
         指定されたモデルを学習させる。
         Args:
@@ -79,7 +86,7 @@ class ModelManager:
         """
         model = self.get_model(model_name)
         model.train(X, y)
-        self.save_model(model_name, market=market, symbol=symbol) # 学習後に自動保存
+        self.save_model(model_name, market=market, symbol=symbol)  # 学習後に自動保存
 
     def predict_with_model(self, model_name: str, X: pd.DataFrame) -> pd.Series:
         """
@@ -110,7 +117,9 @@ class ModelManager:
             model_path = os.path.join(self.model_dir, f"{model_name}.joblib")
         model.save_model(model_path)
 
-    def load_model(self, model_name: str, model_type: str = None, market: str = None, symbol: str = None):
+    def load_model(
+        self, model_name: str, model_type: str = None, market: str = None, symbol: str = None
+    ):
         """
         指定されたモデルをロードする。
         Args:
@@ -123,7 +132,7 @@ class ModelManager:
             model_path = os.path.join(get_models_subdir(market, symbol), f"{model_name}.joblib")
         else:
             model_path = os.path.join(self.model_dir, f"{model_name}.joblib")
-        
+
         if model_name in self.models:
             model_instance = self.models[model_name]
         else:
@@ -134,7 +143,9 @@ class ModelManager:
                 elif "LightGBM" in model_name:
                     model_type = "LightGBMModel"
                 else:
-                    raise ValueError(f"モデル '{model_name}' はまだ作成されていません。model_typeを指定してください。")
+                    raise ValueError(
+                        f"モデル '{model_name}' はまだ作成されていません。model_typeを指定してください。"
+                    )
             model_instance = self.create_model(model_type, model_name)
 
         model_instance.load_model(model_path)

@@ -7,6 +7,7 @@ csv_io.py - CSV入出力ユーティリティ（非推奨）
 
 import pandas as pd
 
+
 def save_dataframe_to_csv(df: pd.DataFrame, path: str, **kwargs):
     """
     DataFrameをCSVファイルとして保存する。
@@ -19,6 +20,7 @@ def save_dataframe_to_csv(df: pd.DataFrame, path: str, **kwargs):
         print(f"DataFrameをCSVファイル '{path}' に保存しました。")
     except Exception as e:
         print(f"CSV保存時にエラーが発生しました: {e}")
+
 
 def load_dataframe_from_csv(path: str, **kwargs) -> pd.DataFrame:
     """

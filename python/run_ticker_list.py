@@ -5,6 +5,7 @@ S&P500全銘柄・Nasdaq10全銘柄リストを取得し、csv追記用データ
 
 import pandas as pd
 
+
 def get_sp500_list():
     # S&P500リストをWikipediaから取得
     url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
@@ -16,6 +17,7 @@ def get_sp500_list():
         for _, row in df.iterrows()
     ]
 
+
 def get_nasdaq100_list():
     # NASDAQ-100全銘柄を取得
     url = "https://en.wikipedia.org/wiki/NASDAQ-100"
@@ -25,6 +27,7 @@ def get_nasdaq100_list():
         {"市場": "us", "銘柄コード": row["Ticker"].replace(".", "-"), "銘柄名": row["Company"]}
         for _, row in df.iterrows()
     ]
+
 
 if __name__ == "__main__":
     sp500 = get_sp500_list()

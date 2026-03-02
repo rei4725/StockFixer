@@ -175,6 +175,15 @@ def get_connection() -> duckdb.DuckDBPyConnection:
 | `docker exec` で読み取り | **可** ✓ | WAL有効化により、ロック競合なしで即座に読める |
 | `docker compose run` で別コンテナから書き込み | **条件付き** | 常駐コンテナを停止すれば可 |
 
+### バッチ差分更新の実装ポリシー
+
+`src/services/data_pipeline.py` のバッチ更新は、DuckDB書き込み競合を避けるために以下を採用する。
+
+- フェーズ1（並列）: yfinance取得・特徴量生成のみ
+- フェーズ2（逐次）: `market_data_raw` の差分保存と `stock_features` 保存
+
+このポリシーにより、差分更新時の同時 `INSERT OR REPLACE` を回避し、待機時間増大やロック競合を抑える。
+
 ### テスト実行時の推奨手順
 
 **読み取り専用でのテスト（推奨）:**  

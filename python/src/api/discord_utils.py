@@ -6,9 +6,10 @@ Webhookを使用したDiscord通知機能
 
 import logging
 import os
-import requests
 from datetime import datetime
 from typing import Optional
+
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +34,7 @@ def send_webhook_notification(
 
     if not webhook_url:
         logger.warning(
-            "DISCORD_WEBHOOK_URLが環境変数に設定されていません。"
-            "Webhook通知をスキップします。"
+            "DISCORD_WEBHOOK_URLが環境変数に設定されていません。" "Webhook通知をスキップします。"
         )
         return False
 
@@ -75,8 +75,7 @@ def send_webhook_text(text: str) -> bool:
 
     if not webhook_url:
         logger.warning(
-            "DISCORD_WEBHOOK_URLが環境変数に設定されていません。"
-            "Webhook通知をスキップします。"
+            "DISCORD_WEBHOOK_URLが環境変数に設定されていません。" "Webhook通知をスキップします。"
         )
         return False
 
@@ -109,12 +108,12 @@ def send_daily_pipeline_completion(
     Returns:
         成功時True、失敗時False
     """
+    from src.api.discord_bot import convert_df_for_discord
     from src.utils.db import (
         load_latest_prediction_timestamp,
         load_prediction_markets,
         load_prediction_results,
     )
-    from src.api.discord_bot import convert_df_for_discord
 
     # 1. 完了メッセージを送信
     title = "✅ 日次パイプライン完了"

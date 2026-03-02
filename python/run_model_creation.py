@@ -25,7 +25,9 @@ def run_single(market: str, symbol: str):
 
 def main():
     parser = argparse.ArgumentParser(description="銘柄別モデル作成スクリプト")
-    parser.add_argument("--batch", action="store_true", help="ウォッチリストの全銘柄を並列で作成する")
+    parser.add_argument(
+        "--batch", action="store_true", help="ウォッチリストの全銘柄を並列で作成する"
+    )
     parser.add_argument("--market", type=str, help="市場名（例: us, jp）")
     parser.add_argument("--symbol", type=str, help="銘柄コード（例: AAPL, 7203）")
     args = parser.parse_args()

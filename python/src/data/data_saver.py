@@ -5,22 +5,17 @@
 特徴量生成を含む処理は src.services.data_pipeline を使用すること
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
-import pandas as pd
 
-from datetime import timezone
+import pandas as pd
 from src.data.data_loader import get_stock_data
-from src.utils.db import upsert_stock_features, upsert_raw_ohlcv
 from src.utils.data_path_utils import get_ticker
+from src.utils.db import upsert_raw_ohlcv, upsert_stock_features
 
 
 def save_raw_ohlcv(
-    market: str,
-    symbol: str,
-    df: pd.DataFrame,
-    timeframe: str = "1d",
-    source: str = "yfinance"
+    market: str, symbol: str, df: pd.DataFrame, timeframe: str = "1d", source: str = "yfinance"
 ) -> int:
     """
     yfinanceから取得したOHLCV DataFrameをmarket_data_rawに保存する。
@@ -38,9 +33,14 @@ def save_raw_ohlcv(
     """
     ticker = get_ticker(market, symbol)
     col_map = {
-        "Open": "open", "High": "high", "Low": "low",
-        "Close": "close", "Volume": "volume",
-        "Adj Close": "adj_close", "Dividends": None, "Stock Splits": None,
+        "Open": "open",
+        "High": "high",
+        "Low": "low",
+        "Close": "close",
+        "Volume": "volume",
+        "Adj Close": "adj_close",
+        "Dividends": None,
+        "Stock Splits": None,
     }
     rows = []
     for ts, row in df.iterrows():
@@ -49,7 +49,9 @@ def save_raw_ohlcv(
             "symbol": symbol,
             "ticker": ticker,
             "timeframe": timeframe,
-            "ts": pd.Timestamp(ts).tz_localize(None) if pd.Timestamp(ts).tzinfo else pd.Timestamp(ts),
+            "ts": (
+                pd.Timestamp(ts).tz_localize(None) if pd.Timestamp(ts).tzinfo else pd.Timestamp(ts)
+            ),
             "source": source,
         }
         for src_col, dst_col in col_map.items():
@@ -75,26 +77,28 @@ def save_raw_stock_data(
     symbol: str,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    out_dir: str = None  # 後方互換のため残置（未使用）
+    out_dir: str = None,  # 後方互換のため残置（未使用）
 ) -> Optional[pd.DataFrame]:
     """
     指定した市場・シンボル・期間の生の株価データを取得し、DBに保存する。
     特徴量生成は行わない（data層の責務として純粋なデータ保存のみ）
-    
+
     Args:
         market: マーケット識別子 (例: "us", "jp")
         symbol: 銘柄シンボル (例: "AAPL", "7203")
         start_date: 開始日 (省略時は取得可能な最古日)
         end_date: 終了日 (省略時は現在日)
         out_dir: 後方互換のため残置（未使用）
-    
+
     Returns:
         保存したDataFrame、または取得失敗時はNone
     """
     # start_date, end_date自動決定
     if start_date is None or end_date is None:
         try:
-            df_all = get_stock_data(market, symbol, "1900-01-01", datetime.now().strftime("%Y-%m-%d"))
+            df_all = get_stock_data(
+                market, symbol, "1900-01-01", datetime.now().strftime("%Y-%m-%d")
+            )
             if df_all is None or df_all.empty:
                 print(f"{symbol} のデータが取得できませんでした。")
                 return None
@@ -107,7 +111,9 @@ def save_raw_stock_data(
     # 市場ごとにティッカーを補正
     ticker = get_ticker(market, symbol)
 
-    print(f"データ取得: market={market}, symbol={symbol}, ticker={ticker}, {start_date}～{end_date}")
+    print(
+        f"データ取得: market={market}, symbol={symbol}, ticker={ticker}, {start_date}～{end_date}"
+    )
     df = get_stock_data(market, ticker, start_date, end_date)
     if df is None or df.empty:
         print("データが取得できませんでした。")
@@ -115,7 +121,7 @@ def save_raw_stock_data(
 
     # DBに保存
     upsert_stock_features(market, symbol, df)
-    
+
     return df
 
 
@@ -126,11 +132,13 @@ def save_stock_data_with_features(*args, **kwargs):
     代わりに from src.services.data_pipeline import save_stock_data_with_features を使用してください。
     """
     import warnings
+
     warnings.warn(
         "save_stock_data_with_features は src.services.data_pipeline に移動しました。"
         "from src.services.data_pipeline import save_stock_data_with_features を使用してください。",
         DeprecationWarning,
-        stacklevel=2
+        stacklevel=2,
     )
     from src.services.data_pipeline import save_stock_data_with_features as _save
+
     return _save(*args, **kwargs)

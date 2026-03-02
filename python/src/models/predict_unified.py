@@ -4,16 +4,16 @@
 統合モデルを使用して全銘柄の予測を行う
 """
 
-import os
-import pandas as pd
-import warnings
 import logging
-import yfinance as yf
-from typing import List, Optional, Dict, Any
+import os
+import warnings
 from threading import Lock
+from typing import Any, Dict, List, Optional
 
+import pandas as pd
+import yfinance as yf
 from src.utils.data_path_utils import get_models_dir, get_ticker
-from src.utils.db import load_stock_features, get_all_symbols
+from src.utils.db import get_all_symbols, load_stock_features
 
 # yfinanceの警告を抑制
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -27,11 +27,11 @@ _model_cache_lock = Lock()
 def load_feature_data(market: str, symbol: str) -> Optional[pd.DataFrame]:
     """
     特徴量データをDBから読み込む
-    
+
     Args:
         market: 市場名
         symbol: 銘柄コード
-        
+
     Returns:
         特徴量DataFrame または None
     """
@@ -48,7 +48,7 @@ def get_cached_model(model_name: str):
     スレッドセーフな実装
     """
     from src.services.unified_model_pipeline import load_unified_model
-    
+
     with _model_cache_lock:
         if model_name not in _model_cache:
             try:
@@ -65,7 +65,7 @@ def preload_models(model_types: List[str] = None):
     """
     if model_types is None:
         model_types = ["UnifiedStockXGBoost", "UnifiedStockLightGBM"]
-    
+
     print(f"モデルを事前ロード中: {model_types}")
     for model_name in model_types:
         model = get_cached_model(model_name)
@@ -77,43 +77,40 @@ def preload_models(model_types: List[str] = None):
 
 
 def predict_with_unified_model(
-    market: str,
-    symbol: str,
-    model_types: List[str] = None,
-    lookback_days: int = 90
+    market: str, symbol: str, model_types: List[str] = None, lookback_days: int = 90
 ) -> Optional[pd.DataFrame]:
     """
     統合モデルを使用して1銘柄の予測を行う
-    
+
     Args:
         market: 市場名
         symbol: 銘柄コード
         model_types: 使用するモデル名のリスト
         lookback_days: データ取得日数（未使用、互換性のため残す）
-        
+
     Returns:
         予測結果のDataFrame または None
     """
     if model_types is None:
         model_types = ["UnifiedStockXGBoost", "UnifiedStockLightGBM"]
-    
+
     # 特徴量データ読み込み
     df = load_feature_data(market, symbol)
     if df is None or df.empty:
         return None
-    
+
     # y列（予測ターゲット）と特徴量を分離
     if "y" not in df.columns:
         return None
-    
+
     # 特徴量列（文字列列とyを除外）
     exclude_cols = ["y", "market", "symbol"]
     feature_cols = [c for c in df.columns if c not in exclude_cols]
     X = df[feature_cols]
-    
+
     # 最新行を取得（必ずコピーを作成）
     latest_X = X.iloc[[-1]].copy()
-    
+
     # 現在価格をyfinanceからリアルタイムで取得
     try:
         yf_ticker = get_ticker(market, symbol)
@@ -133,12 +130,12 @@ def predict_with_unified_model(
             current_price = float(df["Close_lag1"].iloc[-1])
         else:
             current_price = float(df["y"].iloc[-2]) if len(df) > 1 else float(df["y"].iloc[-1])
-    
+
     # market_encoded列がない場合のみ追加（後方互換性）
     if "market_encoded" not in latest_X.columns:
         market_codes = {"us": 0, "jp": 1}
         latest_X["market_encoded"] = market_codes.get(market, 0)
-    
+
     # 各モデルで予測（キャッシュされたモデルを使用）
     pred_prices = []
     for model_name in model_types:
@@ -146,9 +143,9 @@ def predict_with_unified_model(
             model = get_cached_model(model_name)
             if model is None:
                 continue
-            
+
             # モデルの特徴量と入力特徴量を揃える（コピーを作成して変更）
-            if hasattr(model, 'model') and hasattr(model.model, 'feature_names_in_'):
+            if hasattr(model, "model") and hasattr(model.model, "feature_names_in_"):
                 expected_features = list(model.model.feature_names_in_)
                 latest_X_aligned = latest_X.copy()
                 # 不足している特徴量は0で埋める
@@ -159,7 +156,7 @@ def predict_with_unified_model(
                 latest_X_aligned = latest_X_aligned[expected_features]
             else:
                 latest_X_aligned = latest_X.copy()
-            
+
             pred = model.predict(latest_X_aligned)
             if isinstance(pred, pd.Series):
                 pred_return = float(pred.iloc[-1])
@@ -173,53 +170,56 @@ def predict_with_unified_model(
         except Exception as e:
             # エラーは静かにスキップ（並列処理時のログ抑制）
             continue
-    
+
     if not pred_prices:
         return None
-    
+
     avg_pred_price = sum(pred_prices) / len(pred_prices)
     diff_ratio = (avg_pred_price - current_price) / current_price
-    
-    return pd.DataFrame([{
-        "market": market,
-        "symbol": symbol,
-        "current_price": float(current_price),
-        "avg_pred_price": float(avg_pred_price),
-        "diff_ratio": float(diff_ratio),
-        "model_count": int(len(pred_prices))
-    }])
+
+    return pd.DataFrame(
+        [
+            {
+                "market": market,
+                "symbol": symbol,
+                "current_price": float(current_price),
+                "avg_pred_price": float(avg_pred_price),
+                "diff_ratio": float(diff_ratio),
+                "model_count": int(len(pred_prices)),
+            }
+        ]
+    )
 
 
 def predict_all_with_unified_model(
-    model_types: List[str] = None,
-    data_dir: str = None
+    model_types: List[str] = None, data_dir: str = None
 ) -> pd.DataFrame:
     """
     全銘柄について統合モデルで予測を行う
-    
+
     Args:
         model_types: 使用するモデル名のリスト
         data_dir: データディレクトリ
-        
+
     Returns:
         全銘柄の予測結果DataFrame
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
-    
+
     if model_types is None:
         model_types = ["UnifiedStockXGBoost", "UnifiedStockLightGBM"]
-    
+
     # モデルを事前にロード
     preload_models(model_types)
-    
+
     if data_dir is None:
         pass  # DBから直接取得するため不要
-    
+
     # 全銘柄をDBから取得
     all_keys = get_all_symbols()
-    
+
     print(f"予測対象: {len(all_keys)}銘柄")
-    
+
     # 並列予測
     def predict_wrapper(args):
         market, symbol = args
@@ -227,7 +227,7 @@ def predict_all_with_unified_model(
             return predict_with_unified_model(market, symbol, model_types=model_types)
         except Exception:
             return None
-    
+
     results = []
     with ThreadPoolExecutor(max_workers=8) as executor:
         futures = {executor.submit(predict_wrapper, key): key for key in all_keys}
@@ -235,7 +235,7 @@ def predict_all_with_unified_model(
             result = future.result()
             if result is not None:
                 results.append(result)
-    
+
     if results:
         return pd.concat(results, ignore_index=True)
     return pd.DataFrame()

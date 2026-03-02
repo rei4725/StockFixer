@@ -5,6 +5,7 @@
 """
 
 import re
+
 from src.models.model_manager import ModelManager
 from src.utils.db import load_stock_features
 
@@ -35,7 +36,8 @@ def load_features_for_training(market: str, symbol: str) -> dict:
 
         # 特徴量名の正規化
         def normalize_col(col):
-            return re.sub(r'[^0-9a-zA-Z_]', '_', str(col))
+            return re.sub(r"[^0-9a-zA-Z_]", "_", str(col))
+
         X.columns = [normalize_col(c) for c in X.columns]
 
         return {"market": market, "symbol": symbol, "status": "success", "X": X, "y": y}
@@ -103,7 +105,7 @@ def run_model_batch():
     フェーズ1: DB読み込み（並列） - DuckDB読み取りはスレッド並列で安全
     フェーズ2: モデル学習・保存（逐次） - ファイルI/Oの競合を回避
     """
-    from src.services.batch_runner import load_target_symbols, run_parallel, print_summary
+    from src.services.batch_runner import load_target_symbols, print_summary, run_parallel
 
     # バッチ作成の並列数（CPU数に応じて調整）
     MAX_MODEL_WORKERS = 3
@@ -139,14 +141,20 @@ def run_model_batch():
             print(f"[モデル作成開始] {market}/{symbol}")
             model_manager = ModelManager()
             model_manager.create_model("XGBoostModel", "StockXGBoostModel")
-            model_manager.train_model("StockXGBoostModel", r["X"], r["y"], market=market, symbol=symbol)
+            model_manager.train_model(
+                "StockXGBoostModel", r["X"], r["y"], market=market, symbol=symbol
+            )
             model_manager.create_model("LightGBMModel", "StockLightGBMModel")
-            model_manager.train_model("StockLightGBMModel", r["X"], r["y"], market=market, symbol=symbol)
+            model_manager.train_model(
+                "StockLightGBMModel", r["X"], r["y"], market=market, symbol=symbol
+            )
             print(f"[モデル作成完了] {market}/{symbol}")
             train_results.append({"market": market, "symbol": symbol, "status": "success"})
         except Exception as e:
             print(f"[モデル作成エラー] {market}/{symbol}: {e}")
-            train_results.append({"market": market, "symbol": symbol, "status": "error", "error": str(e)})
+            train_results.append(
+                {"market": market, "symbol": symbol, "status": "error", "error": str(e)}
+            )
         if i % 50 == 0:
             print(f"  ... {i}/{len(success_data)} 件完了")
 

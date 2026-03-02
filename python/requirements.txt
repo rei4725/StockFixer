@@ -10,4 +10,12 @@ pandas
 discord.py
 ta
 duckdb
-apscheduler
+apschedulerpre-commit
+mypy
+types-requests
+types-PyYAML
+types-tabulate
+pylint
+flake8
+black
+isort

@@ -4,6 +4,7 @@
 アプリ全体のファイルパス設定を一元管理する。
 他のモジュールはこのファイルの関数を使用してパスを取得すること。
 """
+
 import os
 from datetime import datetime
 
@@ -53,7 +54,7 @@ def get_results_dir() -> str:
 def get_results_subdir(timestamp: str = None) -> str:
     """
     結果サブディレクトリの絶対パスを返す
-    
+
     Args:
         timestamp: タイムスタンプ文字列（例: "20260213_120000"）。Noneの場合は現在日時
     """

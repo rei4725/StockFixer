@@ -4,19 +4,19 @@
 銘柄別モデル・統合モデルでの全銘柄予測、Top10/Worst10集計、DB保存を行う
 """
 
-import os
 import glob
 import json
-import pandas as pd
-import warnings
 import logging
-from datetime import datetime
+import os
+import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 
+import pandas as pd
 from src.models.predict_single_stock import predict_single_stock
-from src.utils.df_to_string import df_to_pretty_string
 from src.utils.data_path_utils import get_models_dir
-from src.utils.db import save_prediction_results, get_all_symbols
+from src.utils.db import get_all_symbols, save_prediction_results
+from src.utils.df_to_string import df_to_pretty_string
 
 # yfinanceの警告を抑制
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -51,7 +51,9 @@ def get_optimal_params(market: str, symbol: str) -> dict:
         key = f"{market}_{symbol}"
         params = all_params.get(key, {})
         if params:
-            print(f"[{market}_{symbol}] 最適パラメータを読み込みました: 閾値={params.get('threshold')}, SharpeRatio={params.get('metrics', {}).get('sharpe_ratio')}")
+            print(
+                f"[{market}_{symbol}] 最適パラメータを読み込みました: 閾値={params.get('threshold')}, SharpeRatio={params.get('metrics', {}).get('sharpe_ratio')}"
+            )
         return params
     except Exception as e:
         print(f"[{market}_{symbol}] 最適パラメータ読み込みエラー: {e}")
@@ -163,7 +165,14 @@ def output_top_worst_results(output_rows, mode="individual"):
         return
 
     df_result = pd.concat(output_rows, ignore_index=True)
-    display_columns = ["market", "symbol", "current_price", "avg_pred_price", "diff_ratio", "model_count"]
+    display_columns = [
+        "market",
+        "symbol",
+        "current_price",
+        "avg_pred_price",
+        "diff_ratio",
+        "model_count",
+    ]
     now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     # 全予測結果をDBに保存（Delete-Insert）
@@ -173,18 +182,22 @@ def output_top_worst_results(output_rows, mode="individual"):
         # Top10
         df_top10 = df_market.sort_values("diff_ratio", ascending=False).head(10)
         df_top10_display = df_top10[display_columns]
-        print(df_to_pretty_string(
-            df_top10_display,
-            header=f"=== {market} 差異割合上位10銘柄 ({mode}) === 実行日時: {now_str}"
-        ))
+        print(
+            df_to_pretty_string(
+                df_top10_display,
+                header=f"=== {market} 差異割合上位10銘柄 ({mode}) === 実行日時: {now_str}",
+            )
+        )
 
         # ワースト10
         df_worst10 = df_market.sort_values("diff_ratio", ascending=True).head(10)
         df_worst10_display = df_worst10[display_columns]
-        print(df_to_pretty_string(
-            df_worst10_display,
-            header=f"=== {market} 差異割合ワースト10銘柄 ({mode}) === 実行日時: {now_str}"
-        ))
+        print(
+            df_to_pretty_string(
+                df_worst10_display,
+                header=f"=== {market} 差異割合ワースト10銘柄 ({mode}) === 実行日時: {now_str}",
+            )
+        )
 
     print(f"\n結果保存完了: predicted_at={now_str}")
 
@@ -192,12 +205,13 @@ def output_top_worst_results(output_rows, mode="individual"):
 def run_predict_single(market: str, symbol: str):
     """
     単一銘柄の予測結果を表示・DB保存する
-    
+
     Args:
         market: マーケット識別子
         symbol: 銘柄シンボル
     """
     import pprint
+
     result = predict_single_stock(market, symbol)
     if result is None:
         print("予測に失敗しました。モデルまたはデータが存在しない可能性があります。")
@@ -212,8 +226,9 @@ def run_predict_watchlist():
     監視リストの全銘柄を予測・DB保存する
     """
     import csv
+
     from src.utils.data_path_utils import get_monitor_list_path
-    
+
     watchlist_path = get_monitor_list_path()
     output_rows = []
     with open(watchlist_path, encoding="utf-8") as f:
@@ -229,6 +244,7 @@ def run_predict_watchlist():
             else:
                 print(f"{market},{symbol} ({company}) の予想株価:")
                 import pprint
+
                 pprint.pprint(result.to_dict("records")[0], sort_dicts=False, width=120)
                 print("-" * 40)
                 output_rows.append(result)

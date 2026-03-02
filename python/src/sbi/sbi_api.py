@@ -5,17 +5,17 @@ SBI証券へのログインおよび売買操作を提供する
 戻り値はdict形式とし、HTTPレスポンス形式への変換はAPI層で行う
 """
 
-from typing import Tuple, Dict, Any
+from typing import Any, Dict, Tuple
 
 
 def sbi_login(user_id: str, password: str) -> Tuple[Dict[str, Any], int]:
     """
     SBI証券へログインします。
-    
+
     Args:
         user_id: ログインID
         password: パスワード
-    
+
     Returns:
         (結果dict, HTTPステータスコード) のタプル
     """
@@ -23,8 +23,8 @@ def sbi_login(user_id: str, password: str) -> Tuple[Dict[str, Any], int]:
         from selenium import webdriver
         from selenium.webdriver.chrome.options import Options
         from selenium.webdriver.common.by import By
-        from selenium.webdriver.support.ui import WebDriverWait
         from selenium.webdriver.support import expected_conditions as EC
+        from selenium.webdriver.support.ui import WebDriverWait
 
         # ChromeOptionsの設定
         chrome_options = Options()
@@ -55,7 +55,7 @@ def sbi_login(user_id: str, password: str) -> Tuple[Dict[str, Any], int]:
             )
             login_status = "ok"
             # 口座情報を取得する処理を実装する (例: ユーザー名を取得)
-            account_info_element = driver.find_element(By.ID, "user_name") # ユーザー名のIDを仮定
+            account_info_element = driver.find_element(By.ID, "user_name")  # ユーザー名のIDを仮定
             account_info = account_info_element.text if account_info_element else "口座情報取得失敗"
         except:
             login_status = "failed"
@@ -68,31 +68,28 @@ def sbi_login(user_id: str, password: str) -> Tuple[Dict[str, Any], int]:
             return {
                 "status": "ok",
                 "message": "SBI login successful.",
-                "account_info": account_info
+                "account_info": account_info,
             }, 200
         else:
-            return {
-                "status": "failed",
-                "message": "SBI login failed."
-            }, 401
+            return {"status": "failed", "message": "SBI login failed."}, 401
 
     except Exception as e:
-        return {
-            "error": str(type(e).__name__),
-            "message": str(e)
-        }, 500
+        return {"error": str(type(e).__name__), "message": str(e)}, 500
 
-def sbi_trade(user_id: str, password: str, symbol: str, quantity: int, trade_type: str) -> Tuple[Dict[str, Any], int]:
+
+def sbi_trade(
+    user_id: str, password: str, symbol: str, quantity: int, trade_type: str
+) -> Tuple[Dict[str, Any], int]:
     """
     SBI証券で株式を売買します。
-    
+
     Args:
         user_id: ログインID
         password: パスワード
         symbol: 銘柄コード
         quantity: 数量
         trade_type: 売買区分 ("buy" or "sell")
-    
+
     Returns:
         (結果dict, HTTPステータスコード) のタプル
     """
@@ -100,8 +97,8 @@ def sbi_trade(user_id: str, password: str, symbol: str, quantity: int, trade_typ
         from selenium import webdriver
         from selenium.webdriver.chrome.options import Options
         from selenium.webdriver.common.by import By
-        from selenium.webdriver.support.ui import WebDriverWait
         from selenium.webdriver.support import expected_conditions as EC
+        from selenium.webdriver.support.ui import WebDriverWait
 
         # ChromeOptionsの設定
         chrome_options = Options()
@@ -154,14 +151,7 @@ def sbi_trade(user_id: str, password: str, symbol: str, quantity: int, trade_typ
         # WebDriverを終了
         driver.quit()
 
-        return {
-            "status": trade_status,
-            "message": trade_message,
-            "trade_status": trade_status
-        }, 200
+        return {"status": trade_status, "message": trade_message, "trade_status": trade_status}, 200
 
     except Exception as e:
-        return {
-            "error": str(type(e).__name__),
-            "message": str(e)
-        }, 500
+        return {"error": str(type(e).__name__), "message": str(e)}, 500

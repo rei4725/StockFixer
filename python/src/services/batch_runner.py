@@ -6,7 +6,7 @@
 """
 
 import csv
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from typing import Callable, List
 
 from src.utils.data_path_utils import get_watchlist_path
@@ -24,10 +24,7 @@ def load_target_symbols() -> list:
     with open(csv_path, encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            symbols.append({
-                "market": row["市場"],
-                "symbol": row["銘柄コード"]
-            })
+            symbols.append({"market": row["市場"], "symbol": row["銘柄コード"]})
     return symbols
 
 
@@ -36,7 +33,7 @@ def run_parallel(
     tasks: list,
     max_workers: int = 5,
     use_process: bool = False,
-    label: str = "処理"
+    label: str = "処理",
 ) -> list:
     """
     タスクを並列実行する汎用ランナー

@@ -225,6 +225,53 @@ git rebase origin/feature/training
 - [GitHub Flow](https://docs.github.com/ja/get-started/quickstart/github-flow)
 - [Conventional Commits](https://www.conventionalcommits.org/ja/)
 
+
+## コミット前自動レビュー機構（Pre-commit Hooks）
+
+### 概要
+Git のコミット前に自動的にコード品質チェック・型検証・フォーマット検査を実行する仕組み。エラーがあるとコミットがブロックされます。
+
+### チェック内容
+1. **コードフォーマット（Black）**: PEP 8 スタイルに自動修正
+2. **インポート整理（isort）**: Python import をアルファベット順に自動整理
+3. **PEP 8 準拠性（Flake8）**: スタイル違反を検出
+4. **型安全性（mypy）**: Python型ヒントを検証
+5. **コード品質（Pylint）**: 軽量版で致命的エラーを検出
+6. **ファイル整備（pre-commit-hooks）**: 末尾改行修正、大ファイルブロック等
+7. **コミットメッセージ（カスタムスクリプト）**: Conventional Commits スタイル検証
+
+### セットアップ
+```powershell
+cd C:\src\StockFixer\python
+
+# 依存パッケージをインストール
+pip install -r requirements.txt
+
+# Git hooksを登録
+cd ..
+pre-commit install
+pre-commit install --hook-type commit-msg
+```
+
+### 使用方法
+コミット時に自動的にチェックが実行され、エラーがある場合は修正して再度コミットしてください。
+
+通常のコミット
+```
+git add python/run_data_creation.py
+git commit -m "fix(data-pipeline): エラーハンドリング改善"
+```
+
+手動でレビュー実行
+```
+# 全ファイルチェック
+pre-commit run --all-files
+
+# 特定のhookのみ実行
+pre-commit run black --all-files
+pre-commit run mypy --all-files
+```
+
 ## Notes
 - `directory` パラメータは常に `c:\\src\\StockFixer` を使用（Windowsパス形式）
 - GitKraken MCPツールは基本的なGit操作をカバー

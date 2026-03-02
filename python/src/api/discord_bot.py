@@ -1,19 +1,25 @@
 import os
 import sys
-import pandas as pd
+
 import discord
+import pandas as pd
 from discord.ext import commands
-from dotenv import load_dotenv
 from discord.utils import escape_markdown
+from dotenv import load_dotenv
 from src.utils.data_path_utils import get_monitor_list_path
-from src.utils.db import load_prediction_results, load_latest_prediction_timestamp, load_prediction_markets
+from src.utils.db import (
+    load_latest_prediction_timestamp,
+    load_prediction_markets,
+    load_prediction_results,
+)
 
 load_dotenv()
-TOKEN = os.getenv("DISCORD_BOT_TOKEN") 
+TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 INTENTS = discord.Intents.default()
 INTENTS.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=INTENTS)
+
 
 def get_top10_diff_stocks_df(market: str, rank_type: str, predicted_at: str = None) -> pd.DataFrame:
     """DBから予測結果を取得する（top_n/worst_nでフィルタ）"""
@@ -27,40 +33,51 @@ def get_top10_diff_stocks_df(market: str, rank_type: str, predicted_at: str = No
         return pd.DataFrame()
     return df
 
+
 def convert_df_for_discord(df: pd.DataFrame) -> pd.DataFrame:
     import numpy as np
+
     # 列名変換・順序統一
     columns_map = {
         "symbol": "シンボル",
         "current_price": "現在値",
         "avg_pred_price": "予想終値",
         "diff_ratio": "予想変化率",
-        "予想値": "予想終値"
+        "予想値": "予想終値",
     }
     col_order = ["シンボル", "現在値", "予想終値", "予想変化率"]
     df = df.rename(columns=columns_map)
     # 予想変化率がなければ計算
     if "現在値" in df.columns and "予想終値" in df.columns and "予想変化率" not in df.columns:
         try:
-            df["予想変化率"] = (df["予想終値"].astype(float) - df["現在値"].astype(float)) / df["現在値"].astype(float)
+            df["予想変化率"] = (df["予想終値"].astype(float) - df["現在値"].astype(float)) / df[
+                "現在値"
+            ].astype(float)
         except Exception:
             df["予想変化率"] = ""
     # 数値列変換
     if "現在値" in df.columns:
-        df["現在値"] = df["現在値"].apply(lambda x: np.floor(float(x)*1000)/1000 if pd.notnull(x) else x)
+        df["現在値"] = df["現在値"].apply(
+            lambda x: np.floor(float(x) * 1000) / 1000 if pd.notnull(x) else x
+        )
     if "予想終値" in df.columns:
-        df["予想終値"] = df["予想終値"].apply(lambda x: np.floor(float(x)*1000)/1000 if pd.notnull(x) else x)
+        df["予想終値"] = df["予想終値"].apply(
+            lambda x: np.floor(float(x) * 1000) / 1000 if pd.notnull(x) else x
+        )
     if "予想変化率" in df.columns:
+
         def format_percent(val):
             try:
                 v = float(val)
                 return f"{v*100:.2g}%"
             except:
                 return val
+
         df["予想変化率"] = df["予想変化率"].apply(format_percent)
     # 列順並べ替え
     df = df[[c for c in col_order if c in df.columns]]
     return df
+
 
 def get_top10_diff_stocks_message(market: str, rank_type: str, predicted_at: str = None) -> str:
     """DBから予測結果を取得してDiscord表示用テキストに変換する"""
@@ -71,21 +88,20 @@ def get_top10_diff_stocks_message(market: str, rank_type: str, predicted_at: str
     table_text = df.to_string(index=False)
     return table_text
 
+
 async def handle_forecast_command(message):
     # 最新の予測結果をDBから取得
     latest_ts = load_latest_prediction_timestamp()
     if latest_ts is None:
         await message.channel.send(
-            escape_markdown("予測結果が見つかりませんでした。"),
-            allowed_mentions=None
+            escape_markdown("予測結果が見つかりませんでした。"), allowed_mentions=None
         )
         return
 
     markets = load_prediction_markets(latest_ts)
     if not markets:
         await message.channel.send(
-            escape_markdown("予測結果が見つかりませんでした。"),
-            allowed_mentions=None
+            escape_markdown("予測結果が見つかりませんでした。"), allowed_mentions=None
         )
         return
 
@@ -98,7 +114,7 @@ async def handle_forecast_command(message):
         # Discordメッセージ長制限対応
         max_length = 1900
         for i in range(0, len(msg), max_length):
-            await message.channel.send(msg[i:i+max_length])
+            await message.channel.send(msg[i : i + max_length])
 
     # ワースト10送信
     for market in sorted(markets):
@@ -108,14 +124,17 @@ async def handle_forecast_command(message):
         msg = f"=== {market} 差異割合ワースト10銘柄 ===\n```text\n{table_text}\n```"
         max_length = 1900
         for i in range(0, len(msg), max_length):
-            await message.channel.send(msg[i:i+max_length])
+            await message.channel.send(msg[i : i + max_length])
+
 
 @bot.event
 async def on_ready():
     print(f"Bot起動完了: {bot.user}")
 
+
 def get_watchlist_prediction_text():
     import csv
+
     from src.models.predict_single_stock import predict_single_stock
 
     watchlist_path = get_monitor_list_path()
@@ -133,15 +152,19 @@ def get_watchlist_prediction_text():
                 else:
                     r = result_df.iloc[0]
                     try:
-                        diff_ratio = (float(r["avg_pred_price"]) - float(r["current_price"])) / float(r["current_price"])
+                        diff_ratio = (
+                            float(r["avg_pred_price"]) - float(r["current_price"])
+                        ) / float(r["current_price"])
                     except Exception:
                         diff_ratio = "-"
-                    rows.append([
-                        str(r["symbol"]),
-                        f'{r["current_price"]:.2f}',
-                        f'{r["avg_pred_price"]:.2f}',
-                        diff_ratio
-                    ])
+                    rows.append(
+                        [
+                            str(r["symbol"]),
+                            f'{r["current_price"]:.2f}',
+                            f'{r["avg_pred_price"]:.2f}',
+                            diff_ratio,
+                        ]
+                    )
     except Exception as e:
         return f"[エラー] 監視対象予測処理で例外: {e}"
 
@@ -150,6 +173,7 @@ def get_watchlist_prediction_text():
     df = convert_df_for_discord(df)
     table_text = df.to_string(index=False)
     return table_text
+
 
 async def handle_watchnext_command(message):
     text = get_watchlist_prediction_text()
@@ -160,6 +184,7 @@ async def handle_watchnext_command(message):
 
     msg = f"=== 監視対象銘柄 ===\n```text\n{text}\n```"
     await message.channel.send(msg)
+
 
 @bot.event
 async def on_message(message):
@@ -173,17 +198,14 @@ async def on_message(message):
             await handle_watchnext_command(message)
         else:
             await message.channel.send(
-                escape_markdown(f"受信: {message.content}"),
-                allowed_mentions=None
+                escape_markdown(f"受信: {message.content}"), allowed_mentions=None
             )
 
         await bot.process_commands(message)
     except Exception as e:
-        await message.channel.send(
-            escape_markdown("エラーが発生しました"),
-            allowed_mentions=None
-        )
+        await message.channel.send(escape_markdown("エラーが発生しました"), allowed_mentions=None)
         print(f"Error in on_message: {e}")
+
 
 if __name__ == "__main__":
     if not TOKEN:

@@ -15,18 +15,15 @@ def main():
         type=str,
         default="XGBoostModel",
         choices=["XGBoostModel", "LightGBMModel"],
-        help="モデルタイプ (default: XGBoostModel)"
+        help="モデルタイプ (default: XGBoostModel)",
     )
     parser.add_argument(
-        "--model-name",
-        type=str,
-        default=None,
-        help="モデル名 (default: Unified{model_type})"
+        "--model-name", type=str, default=None, help="モデル名 (default: Unified{model_type})"
     )
     parser.add_argument(
         "--no-both",
         action="store_true",
-        help="XGBoostとLightGBM両方ではなく、指定されたモデルのみ学習する"
+        help="XGBoostとLightGBM両方ではなく、指定されたモデルのみ学習する",
     )
     args = parser.parse_args()
     args.both = not args.no_both
