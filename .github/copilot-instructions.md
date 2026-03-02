@@ -122,6 +122,7 @@ run_*.py → api層 → services層 → models/strategy/backtest層 → features
 | `duckdb-ops` | DuckDB操作・データ確認・移行 |
 | `docker-ops` | Docker環境のビルド・起動・管理 |
 | `git-ops` | Git操作（コミット、ブランチ、push、diff、status等） |
+| `version-mgmt` | Gitタグによるバージョン管理・Dockerイメージ連動 |
 | `troubleshooting` | よくあるエラーの原因と対処法 |
 
 ---
