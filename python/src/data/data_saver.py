@@ -5,7 +5,7 @@
 特徴量生成を含む処理は src.services.data_pipeline を使用すること
 """
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
 
 import pandas as pd

@@ -16,7 +16,7 @@ from src.data.data_loader import (
     merge_market_data,
     should_fetch_fresh_data,
 )
-from src.data.data_saver import save_raw_ohlcv, save_raw_stock_data
+from src.data.data_saver import save_raw_ohlcv
 from src.features.technical_analysis import add_technical_indicators, create_basic_lag_features
 from src.utils.data_path_utils import get_ticker
 from src.utils.db import delete_stock_features, upsert_stock_features
@@ -93,11 +93,13 @@ def fetch_stock_data_with_features(
                     except Exception as e:
                         print(f"Raw OHLCV保存エラー（処理継続）: {e}")
             else:
-                print(f"差分データなし（営業日外の可能性）")
+                print("差分データなし（営業日外の可能性）")
         else:
             # DB内無データ：フル取得
             print(
-                f"yfinanceから取得: market={market}, symbol={symbol}, ticker={ticker}, {start_date}～{end_date}"
+                "yfinanceから取得: "
+                f"market={market}, symbol={symbol}, ticker={ticker}, "
+                f"{start_date}～{end_date}"
             )
             df = get_stock_data(market, ticker, start_date, end_date)
             if df is None or df.empty:
@@ -115,7 +117,7 @@ def fetch_stock_data_with_features(
         if df is not None and not df.empty:
             print(f"DBキャッシュで最新: market={market}, symbol={symbol} ({len(df)}行)")
         else:
-            print(f"ワーニング：DBデータなし")
+            print("ワーニング：DBデータなし")
             return None
 
     # 全行NaNな列を除去（例: auto_adjust=True時の Adj Close 等）
@@ -248,7 +250,7 @@ def run_data_batch(fetch_only: bool = False):
     # フェーズ2: DB書き込み（逐次） - DuckDB排他ロック制約のため直列実行
     success_data = [r for r in fetch_results if r.get("status") == "success" and r.get("data")]
     print(f"\n{'='*50}")
-    print(f"DB書き込み開始（逐次）")
+    print("DB書き込み開始（逐次）")
     print(f"対象件数: {len(success_data)}")
     print(f"{'='*50}\n")
 

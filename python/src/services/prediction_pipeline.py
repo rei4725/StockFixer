@@ -52,7 +52,9 @@ def get_optimal_params(market: str, symbol: str) -> dict:
         params = all_params.get(key, {})
         if params:
             print(
-                f"[{market}_{symbol}] 最適パラメータを読み込みました: 閾値={params.get('threshold')}, SharpeRatio={params.get('metrics', {}).get('sharpe_ratio')}"
+                f"[{market}_{symbol}] 最適パラメータを読み込みました: "
+                f"閾値={params.get('threshold')}, "
+                f"SharpeRatio={params.get('metrics', {}).get('sharpe_ratio')}"
             )
         return params
     except Exception as e:

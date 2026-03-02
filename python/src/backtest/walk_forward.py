@@ -11,7 +11,6 @@ from typing import Optional
 
 import pandas as pd
 from sklearn.model_selection import TimeSeriesSplit
-from src.backtest.metrics import compute_metrics
 from src.backtest.task import BacktestTask, ReturnRegressionTask
 
 

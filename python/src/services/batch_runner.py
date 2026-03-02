@@ -7,7 +7,7 @@
 
 import csv
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
-from typing import Callable, List
+from typing import Callable
 
 from src.utils.data_path_utils import get_watchlist_path
 

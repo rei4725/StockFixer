@@ -5,10 +5,8 @@
 """
 
 import os
-from datetime import datetime
-from typing import List, Optional, Tuple
+from typing import Tuple
 
-import numpy as np
 import pandas as pd
 from src.utils.data_path_utils import ensure_dir, get_models_dir
 from src.utils.db import load_all_stock_features

@@ -57,7 +57,7 @@ def sbi_login(user_id: str, password: str) -> Tuple[Dict[str, Any], int]:
             # 口座情報を取得する処理を実装する (例: ユーザー名を取得)
             account_info_element = driver.find_element(By.ID, "user_name")  # ユーザー名のIDを仮定
             account_info = account_info_element.text if account_info_element else "口座情報取得失敗"
-        except:
+        except Exception:
             login_status = "failed"
             account_info = None
 

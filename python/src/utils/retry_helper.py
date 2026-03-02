@@ -106,7 +106,7 @@ def _countdown_wait(seconds: float):
         seconds: 待機時間（秒）
     """
     remaining = int(seconds)
-    print(f"\n待機中: ", end="", flush=True)
+    print("\n待機中: ", end="", flush=True)
 
     while remaining > 0:
         print(f"{remaining}秒... ", end="", flush=True)

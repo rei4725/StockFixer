@@ -148,7 +148,6 @@ def run_backtest_single(
         (result_df, metrics, None) のタプル
     """
     from src.backtest.backtester import Backtester
-    from src.backtest.task import ReturnRegressionTask
     from src.models.model_manager import ModelManager
     from src.strategy.signal_generator import SignalGenerator
 
@@ -414,5 +413,5 @@ def _ensemble_predict(
     pred_lgb = mm.predict_with_model(lgb_name, X_test)
 
     avg = np.mean([pred_xgb, pred_lgb], axis=0)
-    print(f"  [Ensemble] XGBoost + LightGBM 予測値を平均")
+    print("  [Ensemble] XGBoost + LightGBM 予測値を平均")
     return pd.Series(avg, index=X_test.index)

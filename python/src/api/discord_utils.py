@@ -154,7 +154,7 @@ def send_daily_pipeline_completion(
                             # Discordメッセージ長制限対応（テキストメッセージは4000文字）
                             max_length = 3800
                             for i in range(0, len(msg), max_length):
-                                send_webhook_text(msg[i : i + max_length])
+                                send_webhook_text(msg[i:i + max_length])
 
                     # ワースト10送信
                     for market in sorted(markets):
@@ -169,7 +169,7 @@ def send_daily_pipeline_completion(
                             # Discordメッセージ長制限対応
                             max_length = 3800
                             for i in range(0, len(msg), max_length):
-                                send_webhook_text(msg[i : i + max_length])
+                                send_webhook_text(msg[i:i + max_length])
 
         except Exception as e:
             logger.error(f"予測結果テーブル送信失敗: {e}")

@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
@@ -50,8 +50,8 @@ def generate_signal():
         )
 
     try:
-        start_date = datetime.strptime(start_date_str, "%Y-%m-%d")
-        end_date = datetime.strptime(end_date_str, "%Y-%m-%d")
+        datetime.strptime(start_date_str, "%Y-%m-%d")
+        datetime.strptime(end_date_str, "%Y-%m-%d")
     except ValueError:
         return jsonify({"error": "Invalid date format. Use YYYY-MM-DD."}), 400
 
@@ -59,12 +59,11 @@ def generate_signal():
         # 1. データのロード
         df = get_stock_data(market, symbol, start_date_str, end_date_str)
         if df.empty:
+            no_data_message = (
+                f"No data found for {symbol} from {start_date_str} to {end_date_str}."
+            )
             return (
-                jsonify(
-                    {
-                        "message": f"No data found for {symbol} from {start_date_str} to {end_date_str}."
-                    }
-                ),
+                jsonify({"message": no_data_message}),
                 404,
             )
 

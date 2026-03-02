@@ -3,9 +3,9 @@
 コードレビュー実行スクリプト
 
 使用方法:
-    python run_code_review.py                    # 全ファイルをレビュー
-    python run_code_review.py python/src/services/data_pipeline.py  # 特定ファイルのみ
-    python run_code_review.py --full            # テスト+カバレッジを含む完全レビュー
+    python python/run_code_review.py                    # 全ファイルをレビュー
+    python python/run_code_review.py python/src/services/data_pipeline.py  # 特定ファイルのみ
+    python python/run_code_review.py --full            # テスト+カバレッジを含む完全レビュー
 """
 
 import subprocess
@@ -20,8 +20,11 @@ class CodeReviewRunner:
     def __init__(self, verbose: bool = True):
         self.verbose = verbose
         self.results = {}
-        self.venv_python = Path(".venv/Scripts/python.exe")
-        
+
+        # プロジェクトルートを特定（スクリプトの親の親）
+        self.project_root = Path(__file__).parent.parent
+        self.venv_python = self.project_root / ".venv/Scripts/python.exe"
+
         # Python実行コマンドを設定
         if self.venv_python.exists():
             self.python_cmd = str(self.venv_python)
@@ -42,6 +45,7 @@ class CodeReviewRunner:
                 capture_output=False,
                 text=True,
                 check=False,
+                cwd=str(self.project_root),
             )
             passed = result.returncode == 0
             self.results[name] = passed
@@ -53,9 +57,9 @@ class CodeReviewRunner:
 
     def run_code_quality_checks(self, files: Optional[List[str]] = None):
         """コード品質チェック実行"""
-        print("\n" + "="*70)
+        print("\n" + "=" * 70)
         print("📋 コード品質チェック開始")
-        print("="*70)
+        print("=" * 70)
 
         target = files if files else ["python/src", "python/run_*.py"]
         file_args = [f for f in target if f]
@@ -68,29 +72,32 @@ class CodeReviewRunner:
 
         # isort チェック
         self.run_command(
-            [self.python_cmd, "-m", "isort", "--check", "--profile=black", "--line-length=100"] + file_args,
+            [self.python_cmd, "-m", "isort", "--check", "--profile=black", "--line-length=100"]
+            + file_args,
             "isort インポート整理チェック",
         )
 
         # Flake8 実行
         self.run_command(
-            [self.python_cmd, "-m", "flake8"] + file_args
+            [self.python_cmd, "-m", "flake8"]
+            + file_args
             + ["--max-line-length=100", "--exclude=__pycache__,.venv,.git"],
             "Flake8 PEP8 チェック",
         )
 
         # mypy 実行
         self.run_command(
-            [self.python_cmd, "-m", "mypy"] + ["python/src"]
+            [self.python_cmd, "-m", "mypy"]
+            + ["python/src"]
             + ["--ignore-missing-imports", "--skip-validation"],
             "mypy 型安全性チェック",
         )
 
     def run_lock_detection(self, files: Optional[List[str]] = None):
         """ロック問題検出実行"""
-        print("\n" + "="*70)
+        print("\n" + "=" * 70)
         print("🔒 ロック問題検出開始")
-        print("="*70)
+        print("=" * 70)
 
         target = files if files else ["python/src"]
 
@@ -108,9 +115,9 @@ class CodeReviewRunner:
 
     def run_tests(self, full: bool = False):
         """テスト実行"""
-        print("\n" + "="*70)
+        print("\n" + "=" * 70)
         print("✅ テスト実行開始")
-        print("="*70)
+        print("=" * 70)
 
         # ユニットテスト
         self.run_command(
@@ -141,9 +148,9 @@ class CodeReviewRunner:
 
     def print_summary(self):
         """結果サマリーを表示"""
-        print("\n" + "="*70)
+        print("\n" + "=" * 70)
         print("📊 コードレビュー結果サマリー")
-        print("="*70)
+        print("=" * 70)
 
         passed_count = sum(1 for v in self.results.values() if v)
         total_count = len(self.results)
@@ -158,16 +165,14 @@ class CodeReviewRunner:
             print("\n🎉 すべてのチェックがパスしました！")
             return True
         else:
-            print(
-                f"\n⚠️  {total_count - passed_count} 個のチェックが失敗しました。"
-            )
+            print(f"\n⚠️  {total_count - passed_count} 個のチェックが失敗しました。")
             return False
 
     def run_auto_fix(self):
         """自動修正を実行"""
-        print("\n" + "="*70)
+        print("\n" + "=" * 70)
         print("🔧 自動修正開始")
-        print("="*70)
+        print("=" * 70)
 
         # Black 自動修正
         self.run_command(
@@ -177,7 +182,15 @@ class CodeReviewRunner:
 
         # isort 自動修正
         self.run_command(
-            [self.python_cmd, "-m", "isort", "--profile=black", "--line-length=100", "python/src", "python/run_*.py"],
+            [
+                self.python_cmd,
+                "-m",
+                "isort",
+                "--profile=black",
+                "--line-length=100",
+                "python/src",
+                "python/run_*.py",
+            ],
             "isort 自動修正",
         )
 
@@ -189,9 +202,7 @@ def main():
     """メインエントリポイント"""
     import argparse
 
-    parser = argparse.ArgumentParser(
-        description="StockFixer コードレビュー実行スクリプト"
-    )
+    parser = argparse.ArgumentParser(description="StockFixer コードレビュー実行スクリプト")
     parser.add_argument(
         "files",
         nargs="*",

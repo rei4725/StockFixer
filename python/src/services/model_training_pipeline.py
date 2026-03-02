@@ -130,7 +130,7 @@ def run_model_batch():
     # フェーズ2: モデル学習・保存（逐次）
     success_data = [r for r in load_results if r.get("status") == "success" and "X" in r]
     print(f"\n{'='*50}")
-    print(f"モデル学習開始（逐次）")
+    print("モデル学習開始（逐次）")
     print(f"対象件数: {len(success_data)}")
     print(f"{'='*50}\n")
 

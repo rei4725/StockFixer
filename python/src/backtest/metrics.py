@@ -62,7 +62,7 @@ def compute_metrics(
     win_rate = len(wins) / num_trades if num_trades > 0 else 0.0
 
     gross_profit = sum(w for w in wins if w > 0)
-    gross_loss = abs(sum(l for l in losses if l < 0))
+    gross_loss = abs(sum(loss for loss in losses if loss < 0))
     profit_factor = gross_profit / gross_loss if gross_loss > 0 else math.inf
 
     # --- Sharpe ratio（取引ごとのリターン列から） ---

@@ -10,7 +10,8 @@ pandas
 discord.py
 ta
 duckdb
-apschedulerpre-commit
+apscheduler
+pre-commit
 mypy
 types-requests
 types-PyYAML

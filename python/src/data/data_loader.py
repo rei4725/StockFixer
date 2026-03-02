@@ -1,10 +1,9 @@
-import os
 from datetime import datetime, timedelta
 from typing import Optional, Union
 
 import pandas as pd
 import yfinance as yf
-from src.utils.data_path_utils import get_data_subdir, get_ticker
+from src.utils.data_path_utils import get_ticker
 from src.utils.db import load_raw_ohlcv, load_stock_features
 from src.utils.retry_helper import retry_ticker_history, retry_yfinance_download
 

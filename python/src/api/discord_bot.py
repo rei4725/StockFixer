@@ -1,5 +1,4 @@
 import os
-import sys
 
 import discord
 import pandas as pd
@@ -70,7 +69,7 @@ def convert_df_for_discord(df: pd.DataFrame) -> pd.DataFrame:
             try:
                 v = float(val)
                 return f"{v*100:.2g}%"
-            except:
+            except Exception:
                 return val
 
         df["予想変化率"] = df["予想変化率"].apply(format_percent)
@@ -114,7 +113,7 @@ async def handle_forecast_command(message):
         # Discordメッセージ長制限対応
         max_length = 1900
         for i in range(0, len(msg), max_length):
-            await message.channel.send(msg[i : i + max_length])
+            await message.channel.send(msg[i:i + max_length])
 
     # ワースト10送信
     for market in sorted(markets):
@@ -124,7 +123,7 @@ async def handle_forecast_command(message):
         msg = f"=== {market} 差異割合ワースト10銘柄 ===\n```text\n{table_text}\n```"
         max_length = 1900
         for i in range(0, len(msg), max_length):
-            await message.channel.send(msg[i : i + max_length])
+            await message.channel.send(msg[i:i + max_length])
 
 
 @bot.event

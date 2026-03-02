@@ -358,8 +358,13 @@ def load_latest_prediction_timestamp() -> Optional[str]:
     """
     con = get_connection()
     try:
+        query = (
+            "SELECT DISTINCT predicted_at "
+            "FROM prediction_results "
+            "ORDER BY predicted_at DESC LIMIT 1"
+        )
         result = con.execute(
-            "SELECT DISTINCT predicted_at FROM prediction_results ORDER BY predicted_at DESC LIMIT 1"
+            query
         ).fetchone()
         if result:
             return result[0]
