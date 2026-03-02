@@ -93,7 +93,33 @@ repos:
         additional_dependencies:
           - duckdb
 
-  # 7. コミットメッセージ検証 (commitlint スタイル)
+  # 7. ロック問題検出 - DuckDB並行処理
+  # DB write 競合、排他ロック漏れなどを検出
+  - repo: local
+    hooks:
+      - id: check-duckdb-concurrency
+        name: DuckDB Concurrency Issues
+        entry: python ./.github/hooks/check_duckdb_concurrency.py
+        language: python
+        stages: [pre-commit]
+        files: \.(py)$
+        exclude: ^tests/
+        pass_filenames: true
+
+  # 8. ロック問題検出 - ファイルロック
+  # 並列ファイル操作でのロック漏れを検出
+  - repo: local
+    hooks:
+      - id: check-file-lock
+        name: File Lock Issues
+        entry: python ./.github/hooks/check_file_lock.py
+        language: python
+        stages: [pre-commit]
+        files: \.(py)$
+        exclude: ^tests/
+        pass_filenames: true
+
+  # 9. コミットメッセージ検証 (commitlint スタイル)
   # コミットメッセージが "feat:", "fix:", "docs:" などで始まることを確認
   - repo: local
     hooks:
@@ -104,9 +130,7 @@ repos:
         stages: [commit-msg]
 
 # グローバル設定
-default_stages: [commit]
+default_language_version:
+  python: python3
 fail_fast: false
 exclude: ^(\.venv/|venv/|__pycache__/|\.git/)
-
-# Python version
-python: python3
