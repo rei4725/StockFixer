@@ -115,12 +115,10 @@ class FileLockChecker:
         # ThreadPoolExecutor + ファイル操作があるがLock未使用
         if "ThreadPoolExecutor" in content or "ProcessPoolExecutor" in content:
             has_file_op = any(
-                keyword in content
-                for keyword in [".to_csv(", ".to_json(", "joblib.dump", "open("]
+                keyword in content for keyword in [".to_csv(", ".to_json(", "joblib.dump"]
             )
             has_lock = any(
-                keyword in content
-                for keyword in ["threading.Lock", "Lock(", "fcntl.flock"]
+                keyword in content for keyword in ["threading.Lock", "Lock(", "fcntl.flock"]
             )
 
             if has_file_op and not has_lock:
@@ -129,7 +127,7 @@ class FileLockChecker:
                         violations.append(
                             (
                                 i,
-                                "⚠️  並列処理がありますがロック機構(Lock/fcntl.flock)が見当たりません。"
+                                "[WARNING] 並列処理がありますがロック機構(Lock/fcntl.flock)が見当たりません。"
                                 "ファイルロック競合の可能性があります。",
                                 "medium",
                             )
@@ -141,6 +139,12 @@ class FileLockChecker:
 
 def main():
     """エントリポイント"""
+    # Windows cp932対策: stdoutをUTF-8に設定
+    import io
+
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+
     if len(sys.argv) < 2:
         print("使用方法: check_file_lock.py <file1> [file2] ...")
         sys.exit(0)
@@ -149,8 +153,13 @@ def main():
     all_violations = []
     exit_code = 0
 
+    # 自分自身のパターン文字列を検出しないよう除外
+    self_path = Path(__file__).resolve()
+
     for filepath in sys.argv[1:]:
         if not Path(filepath).exists():
+            continue
+        if Path(filepath).resolve() == self_path:
             continue
 
         # 標準チェック

@@ -6,10 +6,16 @@
 """
 
 import csv
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+import logging
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, TimeoutError, as_completed
 from typing import Callable
 
 from src.utils.data_path_utils import get_watchlist_path
+
+logger = logging.getLogger(__name__)
+
+# 個別タスクのタイムアウト（秒）: yfinance API応答待ち + 特徴量生成を考慮
+DEFAULT_TASK_TIMEOUT = 300
 
 
 def load_target_symbols() -> list:
@@ -34,6 +40,7 @@ def run_parallel(
     max_workers: int = 5,
     use_process: bool = False,
     label: str = "処理",
+    task_timeout: int = DEFAULT_TASK_TIMEOUT,
 ) -> list:
     """
     タスクを並列実行する汎用ランナー
@@ -44,6 +51,7 @@ def run_parallel(
         max_workers: 並列数
         use_process: Trueの場合ProcessPoolExecutor、FalseならThreadPoolExecutor
         label: ログ表示用のラベル
+        task_timeout: 個別タスクのタイムアウト（秒）。0で無制限。
 
     Returns:
         list of dict: 各タスクの結果
@@ -55,11 +63,36 @@ def run_parallel(
 
     Executor = ProcessPoolExecutor if use_process else ThreadPoolExecutor
     results = []
+    timeout_val = task_timeout if task_timeout > 0 else None
     with Executor(max_workers=max_workers) as executor:
         futures = {executor.submit(func, task): task for task in tasks}
         for future in as_completed(futures):
-            result = future.result()
-            results.append(result)
+            task = futures[future]
+            try:
+                result = future.result(timeout=timeout_val)
+                results.append(result)
+            except TimeoutError:
+                task_label = f"{task.get('market', '?')}/{task.get('symbol', '?')}"
+                logger.error(f"[タイムアウト] {task_label}: {task_timeout}秒超過")
+                results.append(
+                    {
+                        "market": task.get("market", "?"),
+                        "symbol": task.get("symbol", "?"),
+                        "status": "error",
+                        "error": f"タイムアウト（{task_timeout}秒）",
+                    }
+                )
+            except Exception as e:
+                task_label = f"{task.get('market', '?')}/{task.get('symbol', '?')}"
+                logger.error(f"[未処理エラー] {task_label}: {e}")
+                results.append(
+                    {
+                        "market": task.get("market", "?"),
+                        "symbol": task.get("symbol", "?"),
+                        "status": "error",
+                        "error": str(e),
+                    }
+                )
 
     return results
 

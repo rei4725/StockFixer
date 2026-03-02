@@ -129,10 +129,10 @@ def fetch_stock_data_with_features(
     # テクニカル指標を追加
     df = add_technical_indicators(df)
 
-    print("特徴量生成（全数値列ラグ特徴量）...")
+    print(f"特徴量生成（全数値列ラグ特徴量）... {market}/{symbol} ({len(df)}行)")
     X, y = create_basic_lag_features(df, n_lags=5, feature_cols=None)
     if X is None or X.empty or y is None:
-        print("特徴量生成に失敗しました。")
+        print(f"特徴量生成に失敗しました: {market}/{symbol}（元データ {len(df)}行）")
         return None
 
     # 特徴量名の正規化
@@ -175,7 +175,7 @@ def save_stock_data_with_features(
     symbol: str,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    out_dir: str = None,  # 後方互換のため残置（未使用）
+    out_dir: Optional[str] = None,  # 後方互換のため残置（未使用）
 ):
     """
     指定した市場・シンボル・期間の株価データを取得し、特徴量生成後、DBに保存する。

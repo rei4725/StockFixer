@@ -82,13 +82,11 @@ def with_retry(
 
             if is_rate_limit:
                 logger.warning(
-                    f"[レート制限] 検出されました。{wait_time:.1f}秒待機後にリトライします... "
-                    f"({attempt}/{max_retries})"
+                    f"[レート制限] 検出されました。{wait_time:.1f}秒待機後にリトライします... " f"({attempt}/{max_retries})"
                 )
             else:
                 logger.warning(
-                    f"[ネットワークエラー] {wait_time:.1f}秒待機後にリトライします... "
-                    f"({attempt}/{max_retries})"
+                    f"[ネットワークエラー] {wait_time:.1f}秒待機後にリトライします... " f"({attempt}/{max_retries})"
                 )
 
             # カウントダウン表示（5秒以上の場合）
@@ -96,6 +94,9 @@ def with_retry(
                 _countdown_wait(wait_time)
             else:
                 time.sleep(wait_time)
+
+    # max_retries <= 0 の場合のフォールバック（通常到達しない）
+    raise RuntimeError(f"with_retry: max_retries={max_retries} が不正です")
 
 
 def _countdown_wait(seconds: float):
@@ -143,7 +144,12 @@ def retry_yfinance_download(
 
 
 def retry_ticker_history(
-    ticker_obj: yf.Ticker, start: str, end: str, auto_adjust: bool = True, **kwargs
+    ticker_obj: yf.Ticker,
+    start: str,
+    end: str,
+    auto_adjust: bool = True,
+    timeout: int = 30,
+    **kwargs,
 ) -> Any:
     """
     yf.Ticker().history() をリトライロジック付きで実行する。
@@ -153,6 +159,7 @@ def retry_ticker_history(
         start: 開始日
         end: 終了日
         auto_adjust: 自動調整フラグ
+        timeout: HTTPリクエストタイムアウト（秒）（デフォルト30）
         **kwargs: その他のhistory()オプション
 
     Returns:
@@ -160,6 +167,8 @@ def retry_ticker_history(
     """
 
     def _history():
-        return ticker_obj.history(start=start, end=end, auto_adjust=auto_adjust, **kwargs)
+        return ticker_obj.history(
+            start=start, end=end, auto_adjust=auto_adjust, timeout=timeout, **kwargs
+        )
 
     return with_retry(_history)
