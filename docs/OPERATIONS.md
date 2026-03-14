@@ -157,6 +157,48 @@ docker compose up -d
 
 ---
 
+## ログ確認
+
+### ログファイルの場所
+
+| ファイル | 内容 | ローテーション |
+|---|---|---|
+| `python/logs/stockfixer.log` | 全ログ（INFO以上） | 10MB×5世代 |
+| `python/logs/stockfixer_error.log` | エラーのみ（ERROR以上） | 5MB×3世代 |
+
+### ローカル実行時のログ確認
+
+```powershell
+# 最新ログをリアルタイム監視
+Get-Content python\logs\stockfixer.log -Wait -Tail 50
+
+# エラーログのみ確認
+Get-Content python\logs\stockfixer_error.log -Tail 100
+```
+
+### Docker コンテナ内のログ確認
+
+```powershell
+# コンテナ内のログファイルを確認
+docker exec stockfixer tail -f logs/stockfixer.log
+docker exec stockfixer tail -100 logs/stockfixer_error.log
+```
+
+### ログレベルの変更
+
+`LOG_LEVEL` 環境変数でログレベルを制御できる（デフォルト: INFO）。
+
+```powershell
+# ローカル実行時（DEBUG レベルに上げる）
+$env:LOG_LEVEL = "DEBUG"
+py run_data_creation.py --batch
+
+# docker-compose.yml の environment セクションに追記
+# LOG_LEVEL: DEBUG
+```
+
+---
+
 ## 手動スクリプト実行
 
 コンテナ内でスクリプトを手動実行する場合は `docker exec` を使用する。
@@ -312,8 +354,9 @@ docker builder prune -f
 | `python/data/` | `/app/data/` | DuckDB、銘柄別サブディレクトリ |
 | `python/models/` | `/app/models/` | 学習済みモデル（.joblib） |
 | `python/results/` | `/app/results/` | 予測結果 |
+| `python/logs/` | `/app/logs/` | ログファイル（stockfixer.log 等） |
 
-> `data/` `models/` `results/` は `.dockerignore` でイメージから除外し、bind mount で永続化している。
+> `data/` `models/` `results/` `logs/` は `.dockerignore` でイメージから除外し、bind mount で永続化している。
 
 ---
 

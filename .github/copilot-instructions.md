@@ -47,12 +47,18 @@ python/
 │   ├── data/                   # データ取得・保存（生データのみ）
 │   ├── sbi/                    # SBI証券連携（Flask非依存）
 │   └── utils/                  # ユーティリティ（最下位層）
+│       ├── logger.py           # 統一ロガーファクトリー
+│       ├── db.py               # DuckDB接続管理・CRUD
+│       └── ...                 # その他ユーティリティ
 ├── tests/                      # テスト（Unit/Integration分離）
 │   ├── unit/                  # ユニットテスト（Mock完全・11ファイル）
 │   ├── integration/           # 統合テスト（実DB/API依存・11ファイル）
 │   ├── conftest.py            # pytest共有Fixture
 │   └── README.md              # テスト戦略ドキュメント
 ├── data/                       # 株価データ保存先
+├── logs/                       # ログファイル保存先（.gitignore 対象）
+│   ├── stockfixer.log          # 全ログ（INFO以上・RotatingFile 10MB×5世代）
+│   └── stockfixer_error.log    # エラーログ（ERROR以上・5MB×3世代）
 ├── models/                     # 学習済みモデル保存先
 └── results/                    # 予測結果保存先
 ```
@@ -167,6 +173,13 @@ run_*.py → api層 → services層 → models/strategy/backtest層 → features
 ### パス・ティッカー補正
 - `data_path_utils.py` に `get_data_subdir`, `get_models_subdir`, `get_ticker` 等を実装
 - 日本株ティッカー補正（7203→7203.T、二重付与防止）
+
+### ロギング
+- 全モジュールで `from src.utils.logger import get_logger; logger = get_logger(__name__)` を使用
+- `logger.error("message", exc_info=True)` で例外スタックトレースをログに記録（`except Exception: pass` は禁止）
+- `run_*.py` は `if __name__ == "__main__":` 内を `try/except Exception` で囲み、`logger.critical(..., exc_info=True); sys.exit(1)` で終了
+- ログ出力先: `python/logs/stockfixer.log`（INFO以上）/ `python/logs/stockfixer_error.log`（ERROR以上）
+- ログレベルは環境変数 `LOG_LEVEL` で制御（デフォルト: INFO）
 
 ---
 

@@ -80,6 +80,7 @@ StockFixer/
     │   │   └── sbi_api.py       # SBI API
     │   │
     │   ┌── utils/               # ユーティリティ層（最下層）
+    │   │   ├── logger.py        # 統一ロガーファクトリー（全レイヤーに供給）
     │   │   ├── db.py            # DuckDB接続管理・CRUD
     │   │   ├── csv_io.py        # CSV入出力（非推奨）
     │   │   ├── data_path_utils.py # パス・ティッカー補正
@@ -87,6 +88,10 @@ StockFixer/
     │
     ├── data/                    # 株価データ保存先
     │   └── stockfixer.duckdb    # DuckDBデータベースファイル
+    │
+    ├── logs/                    # ログファイル保存先（.gitignore 対象）
+    │   ├── stockfixer.log       # 全ログ（INFO以上・RotatingFile 10MB×5世代）
+    │   └── stockfixer_error.log # エラーログ（ERROR以上・5MB×3世代）
     │
     ├── models/                  # 学習済みモデル保存先
     │   └── {market}_{symbol}/   # 例: us_AAPL/
@@ -252,6 +257,17 @@ StockFixer/
 
 ### utils層
 
+#### `logger.py`
+- **統一ロガーファクトリー** — 全レイヤーが `get_logger(__name__)` を呼び出すだけでログを記録できる
+- ルートロガーを一度だけ設定（重複防止フラグ `_root_configured` による保護）
+- **ハンドラ構成**:
+  - `RotatingFileHandler` → `logs/stockfixer.log`（INFO以上・10MB×5世代）
+  - `RotatingFileHandler` → `logs/stockfixer_error.log`（ERROR以上・5MB×3世代）
+  - `StreamHandler` → stderr
+- **ログレベル制御**: 環境変数 `LOG_LEVEL` で上書き可能（デフォルト: INFO）
+- **外部ライブラリ抑制**: yfinance / urllib3 / apscheduler のログを WARNING 以上に制限
+- **フォーマット**: `[YYYY-MM-DD HH:MM:SS.mmm] [LEVEL] [module] message`
+
 #### `db.py`
 - DuckDB接続管理・テーブル初期化・ CRUD操作の中央モジュール
 - `get_connection()`: シングルトン接続（スレッドセーフ）
@@ -327,6 +343,8 @@ StockFixer/
 | `run_model_creation.py` | 銘柄別モデルの学習・保存 | `--market us --symbol AAPL` / `--batch` |
 | `run_unified_model_training.py` | 統合モデルの学習 | `--model-type`, `--no-both` |
 | `run_predict.py` | 株価予測（3モード統合） | `--mode single\|watchlist\|top10` |
+| `run_backtest.py` | バックテスト実行 | `--market`, `--symbol`, `--start`, `--end` |
+| `run_backtest_optimize.py` | バックテストパラメータ最適化 | `--market`, `--symbol`, `--batch` |
 | `run_discord_bot.py` | Discord Botの起動 | — |
 | `run_ticker_list.py` | S&P500/NASDAQ100銘柄リスト取得 | — |
 
