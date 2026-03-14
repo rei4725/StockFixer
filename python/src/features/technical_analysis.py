@@ -36,11 +36,14 @@ def create_basic_lag_features(
     df = df.copy()
     if feature_cols is None:
         feature_cols = df.select_dtypes(include=[float, int]).columns
+    # pd.concat で一括追加することで DataFrame の断片化警告を回避
+    new_cols: dict = {}
     for col in feature_cols:
         for lag in range(1, n_lags + 1):
-            df[f"{col}_lag{lag}"] = df[col].shift(lag)
+            new_cols[f"{col}_lag{lag}"] = df[col].shift(lag)
     # 予測ターゲットは target_horizon 日後の変化率（リターン）
-    df["target"] = (df["Close"].shift(-target_horizon) - df["Close"]) / df["Close"]
+    new_cols["target"] = (df["Close"].shift(-target_horizon) - df["Close"]) / df["Close"]
+    df = pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
     df = df.dropna()
     lag_feature_cols = [f"{col}_lag{lag}" for col in feature_cols for lag in range(1, n_lags + 1)]
     X = df[lag_feature_cols]

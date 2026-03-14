@@ -16,8 +16,10 @@
 ログレベルは環境変数 LOG_LEVEL（デフォルト: INFO）で制御可能。
 """
 
+import io
 import logging
 import os
+import sys
 from logging.handlers import RotatingFileHandler
 
 _LOG_FORMAT = "[%(asctime)s.%(msecs)03d] [%(levelname)-5s] [%(name)s] %(message)s"
@@ -73,8 +75,13 @@ def _configure_root() -> None:
     error_handler.setFormatter(formatter)
     root.addHandler(error_handler)
 
-    # ③ コンソール出力（stderr、INFO以上）
-    console_handler = logging.StreamHandler()
+    # ③ コンソール出力（stderr、INFO以上・UTF-8強制）
+    _utf8_stderr = (
+        io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace", line_buffering=True)
+        if hasattr(sys.stderr, "buffer")
+        else sys.stderr
+    )
+    console_handler = logging.StreamHandler(_utf8_stderr)
     console_handler.setLevel(log_level)
     console_handler.setFormatter(formatter)
     root.addHandler(console_handler)
