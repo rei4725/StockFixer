@@ -2,6 +2,7 @@
 統合モデル学習スクリプト
 
 全銘柄のデータを使用して1つの統合モデルを学習する
+多ホライズン: py run_unified_model_training.py --horizons 1 3 5 10
 """
 
 import argparse
@@ -30,19 +31,31 @@ def main():
         action="store_true",
         help="XGBoostとLightGBM両方ではなく、指定されたモデルのみ学習する",
     )
+    parser.add_argument(
+        "--horizons",
+        nargs="+",
+        type=int,
+        default=[1],
+        metavar="N",
+        help="予測ホライズン（営業日）。複数指定可（例: --horizons 1 3 5 10）",
+    )
     args = parser.parse_args()
     args.both = not args.no_both
 
-    if args.both:
-        # 両方のモデルを学習
-        for model_type in ["XGBoostModel", "LightGBMModel"]:
-            model_name = f"UnifiedStock{model_type.replace('Model', '')}"
-            logger.info(f"学習開始: {model_name}")
-            train_unified_model(model_type=model_type, model_name=model_name)
-    else:
-        # 指定されたモデルのみ学習
-        model_name = args.model_name or f"UnifiedStock{args.model_type.replace('Model', '')}"
-        train_unified_model(model_type=args.model_type, model_name=model_name)
+    for horizon in args.horizons:
+        suffix = f"_{horizon}d" if horizon > 1 else ""
+        logger.info(f"=== 統合モデル学習: horizon={horizon}d ===")
+
+        if args.both:
+            for model_type in ["XGBoostModel", "LightGBMModel"]:
+                short = model_type.replace("Model", "")
+                model_name = f"UnifiedStock{short}{suffix}"
+                logger.info(f"学習開始: {model_name}")
+                train_unified_model(model_type=model_type, model_name=model_name, horizon=horizon)
+        else:
+            short = args.model_type.replace("Model", "")
+            model_name = args.model_name or f"UnifiedStock{short}{suffix}"
+            train_unified_model(model_type=args.model_type, model_name=model_name, horizon=horizon)
 
 
 if __name__ == "__main__":

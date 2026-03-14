@@ -17,7 +17,9 @@ _DEFAULT_TA_PARAMS = {
 }
 
 
-def create_basic_lag_features(df: pd.DataFrame, n_lags: int = 5, feature_cols=None):
+def create_basic_lag_features(
+    df: pd.DataFrame, n_lags: int = 5, feature_cols=None, target_horizon: int = 1
+):
     """
     指定した数値列（または全数値列）について、過去n日分のラグ特徴量を作成する
 
@@ -25,10 +27,11 @@ def create_basic_lag_features(df: pd.DataFrame, n_lags: int = 5, feature_cols=No
         df (pd.DataFrame): OHLCVやテクニカル指標などを含むDataFrame（インデックスは日付）
         n_lags (int): ラグ数（過去何日分を特徴量にするか）
         feature_cols (list or None): ラグ付与対象の列名リスト。Noneなら全ての数値列。
+        target_horizon (int): 予測ホライズン（何営業日後の変化率を予測するか）。デフォルト=1（翌日）。
 
     Returns:
         X (pd.DataFrame): 特徴量データ
-        y (pd.Series): 予測ターゲット（翌日のClose）
+        y (pd.Series): 予測ターゲット（target_horizon日後の変化率）
     """
     df = df.copy()
     if feature_cols is None:
@@ -36,8 +39,8 @@ def create_basic_lag_features(df: pd.DataFrame, n_lags: int = 5, feature_cols=No
     for col in feature_cols:
         for lag in range(1, n_lags + 1):
             df[f"{col}_lag{lag}"] = df[col].shift(lag)
-    # 予測ターゲットは翌日の変化率（リターン）
-    df["target"] = (df["Close"].shift(-1) - df["Close"]) / df["Close"]
+    # 予測ターゲットは target_horizon 日後の変化率（リターン）
+    df["target"] = (df["Close"].shift(-target_horizon) - df["Close"]) / df["Close"]
     df = df.dropna()
     lag_feature_cols = [f"{col}_lag{lag}" for col in feature_cols for lag in range(1, n_lags + 1)]
     X = df[lag_feature_cols]

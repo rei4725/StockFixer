@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import yfinance as yf
+
 from src.utils.data_path_utils import get_ticker
 from src.utils.db import get_all_symbols, load_stock_features
 
@@ -76,7 +77,11 @@ def preload_models(model_types: List[str] = None):
 
 
 def predict_with_unified_model(
-    market: str, symbol: str, model_types: List[str] = None, lookback_days: int = 90
+    market: str,
+    symbol: str,
+    model_types: List[str] = None,
+    lookback_days: int = 90,
+    horizon: int = 1,
 ) -> Optional[pd.DataFrame]:
     """
     統合モデルを使用して1銘柄の予測を行う
@@ -86,12 +91,19 @@ def predict_with_unified_model(
         symbol: 銘柄コード
         model_types: 使用するモデル名のリスト
         lookback_days: データ取得日数（未使用、互換性のため残す）
+        horizon: 予測ホライズン（営業日）。1=翌日, 3=3日後, 5=5日後, 10=10日後。
 
     Returns:
         予測結果のDataFrame または None
     """
     if model_types is None:
-        model_types = ["UnifiedStockXGBoost", "UnifiedStockLightGBM"]
+        if horizon == 1:
+            model_types = ["UnifiedStockXGBoost", "UnifiedStockLightGBM"]
+        else:
+            model_types = [
+                f"UnifiedStockXGBoost_{horizon}d",
+                f"UnifiedStockLightGBM_{horizon}d",
+            ]
 
     # 特徴量データ読み込み
     df = load_feature_data(market, symbol)

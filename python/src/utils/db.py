@@ -80,17 +80,38 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
     con.execute(
         """
         CREATE TABLE IF NOT EXISTS prediction_results (
-            market         VARCHAR NOT NULL,
-            symbol         VARCHAR NOT NULL,
-            predicted_at   VARCHAR NOT NULL,
-            current_price  DOUBLE,
-            avg_pred_price DOUBLE,
-            diff_ratio     DOUBLE,
-            model_count    INTEGER,
+            market              VARCHAR NOT NULL,
+            symbol              VARCHAR NOT NULL,
+            predicted_at        VARCHAR NOT NULL,
+            current_price       DOUBLE,
+            avg_pred_price      DOUBLE,
+            diff_ratio          DOUBLE,
+            model_count         INTEGER,
+            avg_pred_price_3d   DOUBLE,
+            avg_pred_price_5d   DOUBLE,
+            avg_pred_price_10d  DOUBLE,
+            diff_ratio_3d       DOUBLE,
+            diff_ratio_5d       DOUBLE,
+            diff_ratio_10d      DOUBLE,
+            confluence_score    INTEGER,
             PRIMARY KEY (market, symbol, predicted_at)
         )
     """
     )
+    # 既存テーブルへのマルチホライズン列の追加（べき等）
+    for col, dtype in [
+        ("avg_pred_price_3d", "DOUBLE"),
+        ("avg_pred_price_5d", "DOUBLE"),
+        ("avg_pred_price_10d", "DOUBLE"),
+        ("diff_ratio_3d", "DOUBLE"),
+        ("diff_ratio_5d", "DOUBLE"),
+        ("diff_ratio_10d", "DOUBLE"),
+        ("confluence_score", "INTEGER"),
+    ]:
+        try:
+            con.execute(f"ALTER TABLE prediction_results ADD COLUMN IF NOT EXISTS {col} {dtype}")
+        except Exception:
+            pass  # DuckDB バージョンによっては IF NOT EXISTS 未対応のため握りつぶす
     con.execute(
         """
         CREATE TABLE IF NOT EXISTS market_data_raw (
@@ -122,6 +143,24 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
             directional_accuracy DOUBLE,
             n_samples            INTEGER,
             PRIMARY KEY (market, symbol, model_name, trained_at)
+        )
+    """
+    )
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS prediction_accuracy (
+            market          VARCHAR NOT NULL,
+            symbol          VARCHAR NOT NULL,
+            model_name      VARCHAR NOT NULL,
+            predicted_at    VARCHAR NOT NULL,
+            horizon         INTEGER NOT NULL DEFAULT 1,
+            predicted_price DOUBLE,
+            actual_price    DOUBLE,
+            predicted_ratio DOUBLE,
+            actual_ratio    DOUBLE,
+            direction_match BOOLEAN,
+            checked_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (market, symbol, model_name, predicted_at, horizon)
         )
     """
     )
@@ -300,8 +339,8 @@ def save_prediction_results(predicted_at: str, df: pd.DataFrame) -> None:
     save_df = df.copy()
     save_df["predicted_at"] = predicted_at
 
-    # 必要な列のみ選択
-    cols = [
+    # 必須列
+    base_cols = [
         "market",
         "symbol",
         "predicted_at",
@@ -310,6 +349,19 @@ def save_prediction_results(predicted_at: str, df: pd.DataFrame) -> None:
         "diff_ratio",
         "model_count",
     ]
+    # マルチホライズン列（存在する場合のみ）
+    multi_horizon_cols = [
+        "avg_pred_price_3d",
+        "avg_pred_price_5d",
+        "avg_pred_price_10d",
+        "diff_ratio_3d",
+        "diff_ratio_5d",
+        "diff_ratio_10d",
+        "confluence_score",
+    ]
+    extra_cols = [c for c in multi_horizon_cols if c in save_df.columns]
+    cols = base_cols + extra_cols
+
     save_df = save_df[[c for c in cols if c in save_df.columns]]
 
     # 不足列補完
@@ -325,9 +377,10 @@ def save_prediction_results(predicted_at: str, df: pd.DataFrame) -> None:
             [row["market"], row["symbol"]],
         )
 
-    # DataFrame を登録してから INSERT（複数行の INSERT に対応）
+    # 列名を明示して INSERT（テーブル列数とのミスマッチ回避）
+    col_str = ", ".join(cols)
     con.register("_save_df_temp", save_df)
-    con.execute("INSERT INTO prediction_results SELECT * FROM _save_df_temp")
+    con.execute(f"INSERT INTO prediction_results ({col_str}) SELECT {col_str} FROM _save_df_temp")
     logger.info(f"DB保存完了: prediction_results [{predicted_at}] ({len(save_df)}行)")
 
 
@@ -537,6 +590,29 @@ def upsert_raw_ohlcv(rows: list[dict]) -> int:
     return n
 
 
+def load_all_raw_ohlcv_symbols(timeframe: str = "1d") -> list:
+    """
+    market_data_raw テーブルに存在する全 (market, symbol) のリストを返す。
+
+    Args:
+        timeframe: 時間軸 (default: "1d")
+
+    Returns:
+        [(market, symbol), ...] のリスト
+    """
+    con = get_connection()
+    try:
+        sql = (
+            "SELECT DISTINCT market, symbol FROM market_data_raw"
+            " WHERE timeframe = ? ORDER BY market, symbol"
+        )
+        rows = con.execute(sql, [timeframe]).fetchall()
+        return [(r[0], r[1]) for r in rows]
+    except Exception as e:
+        logger.error(f"load_all_raw_ohlcv_symbols 失敗: {e}", exc_info=True)
+        return []
+
+
 def load_raw_ohlcv(
     market: str, symbol: str, start_date=None, end_date=None, timeframe: str = "1d"
 ) -> Optional[pd.DataFrame]:
@@ -585,3 +661,134 @@ def load_raw_ohlcv(
     # カラム名を yfinance 形式（先頭大文字）に揃える
     df.columns = [c.capitalize() if c != "adj_close" else "Adj Close" for c in df.columns]
     return df
+
+
+# --- prediction_accuracy テーブル操作 ---
+
+
+def save_prediction_accuracy(rows: list[dict]) -> int:
+    """
+    予測精度データを prediction_accuracy テーブルへ保存（UPSERT）する。
+
+    Args:
+        rows: 各行は以下のキーを持つ dict
+            market, symbol, model_name, predicted_at, horizon,
+            predicted_price, actual_price, predicted_ratio, actual_ratio, direction_match
+
+    Returns:
+        挿入/更新件数
+    """
+    if not rows:
+        return 0
+
+    con = get_connection()
+    inserted = 0
+    for row in rows:
+        try:
+            con.execute(
+                """
+                INSERT OR REPLACE INTO prediction_accuracy
+                    (market, symbol, model_name, predicted_at, horizon,
+                     predicted_price, actual_price, predicted_ratio, actual_ratio,
+                     direction_match, checked_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """,
+                [
+                    row["market"],
+                    row["symbol"],
+                    row["model_name"],
+                    row["predicted_at"],
+                    row.get("horizon", 1),
+                    row.get("predicted_price"),
+                    row.get("actual_price"),
+                    row.get("predicted_ratio"),
+                    row.get("actual_ratio"),
+                    row.get("direction_match"),
+                ],
+            )
+            inserted += 1
+        except Exception as e:
+            logger.error(
+                f"prediction_accuracy 保存失敗 [{row.get('market')}_{row.get('symbol')}]: {e}",
+                exc_info=True,
+            )
+
+    logger.info(f"prediction_accuracy 保存完了: {inserted}件")
+    return inserted
+
+
+def load_prediction_accuracy(
+    market: str = None,
+    symbol: str = None,
+    horizon: int = 1,
+    limit: int = 500,
+) -> pd.DataFrame:
+    """
+    prediction_accuracy テーブルからデータを取得する。
+
+    Args:
+        market: フィルタ対象の市場名（None なら全市場）
+        symbol: フィルタ対象の銘柄コード（None なら全銘柄）
+        horizon: フィルタ対象のホライズン（デフォルト 1）
+        limit: 返却行数の上限
+
+    Returns:
+        pd.DataFrame（結果なし時は空 DataFrame）
+    """
+    con = get_connection()
+    query = "SELECT * FROM prediction_accuracy WHERE horizon = ?"
+    params: list = [horizon]
+    if market is not None:
+        query += " AND market = ?"
+        params.append(market)
+    if symbol is not None:
+        query += " AND symbol = ?"
+        params.append(symbol)
+    query += " ORDER BY predicted_at DESC"
+    if limit:
+        query += f" LIMIT {int(limit)}"
+    try:
+        return con.execute(query, params).fetchdf()
+    except Exception as e:
+        logger.error(f"prediction_accuracy 読み込み失敗: {e}", exc_info=True)
+        return pd.DataFrame()
+
+
+def load_drift_summary(horizon: int = 1, recent_n: int = 30) -> pd.DataFrame:
+    """
+    直近 recent_n 件の予測について銘柄ごとの方向正解率・平均誤差を集計する。
+
+    Args:
+        horizon: 対象ホライズン
+        recent_n: 直近何件を対象にするか（銘柄ごとに最新 N 件）
+
+    Returns:
+        pd.DataFrame: [market, symbol, direction_accuracy, mean_abs_error, n_samples]
+    """
+    con = get_connection()
+    try:
+        df = con.execute(
+            f"""
+            WITH ranked AS (
+                SELECT *,
+                    ROW_NUMBER() OVER (PARTITION BY market, symbol ORDER BY predicted_at DESC) AS rn
+                FROM prediction_accuracy
+                WHERE horizon = ?
+            )
+            SELECT
+                market,
+                symbol,
+                AVG(CAST(direction_match AS INTEGER)) AS direction_accuracy,
+                AVG(ABS(predicted_ratio - actual_ratio))  AS mean_abs_error,
+                COUNT(*) AS n_samples
+            FROM ranked
+            WHERE rn <= {int(recent_n)}
+            GROUP BY market, symbol
+            ORDER BY direction_accuracy ASC
+            """,
+            [horizon],
+        ).fetchdf()
+        return df
+    except Exception as e:
+        logger.error(f"load_drift_summary 失敗: {e}", exc_info=True)
+        return pd.DataFrame()

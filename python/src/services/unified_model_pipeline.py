@@ -8,6 +8,7 @@ import os
 from typing import Tuple
 
 import pandas as pd
+
 from src.utils.data_path_utils import ensure_dir, get_models_dir
 from src.utils.db import load_all_stock_features
 from src.utils.logger import get_logger
@@ -77,6 +78,7 @@ def train_unified_model(
     model_name: str = "UnifiedStockModel",
     data_dir: str = None,
     save_dir: str = None,
+    horizon: int = 1,
 ) -> None:
     """
     全銘柄のデータを使って統合モデルを学習・保存する
@@ -84,23 +86,31 @@ def train_unified_model(
     Args:
         model_type: モデルタイプ ("XGBoostModel" or "LightGBMModel")
         model_name: 保存するモデル名
-        data_dir: データディレクトリ
+        data_dir: データディレクトリ（未使用、後方互換）
         save_dir: モデル保存ディレクトリ
+        horizon: 予測ホライズン（営業日）。1=翌日（デフォルト）。
     """
     from src.models.model_manager import ModelManager
 
-    logger.info("=== 統合モデル学習開始 ===")
+    logger.info(f"=== 統合モデル学習開始 (horizon={horizon}d) ===")
 
-    # 全データ読み込み
-    logger.info("1. データ読み込み中...")
-    df = load_all_stock_data(data_dir)
-    if df.empty:
-        logger.warning("データが見つかりません。")
-        return
+    if horizon == 1:
+        # 既存パス: stock_features の y 列（翌日変化率）を使用
+        logger.info("1. データ読み込み中...")
+        df = load_all_stock_data(data_dir)
+        if df.empty:
+            logger.warning("データが見つかりません。")
+            return
+        logger.info("2. 特徴量準備中...")
+        X, y = prepare_unified_features(df)
+    else:
+        # 多ホライズンパス: market_data_raw から全銘柄 OHLCV を取得して再計算
+        logger.info("1. OHLCV データ読み込み中（全銘柄）...")
+        X, y = _load_all_ohlcv_for_unified(horizon)
+        if X is None or X.empty:
+            logger.warning("OHLCVデータが見つかりません。")
+            return
 
-    # 特徴量準備
-    logger.info("2. 特徴量準備中...")
-    X, y = prepare_unified_features(df)
     logger.info(f"特徴量数: {len(X.columns)}, サンプル数: {len(X)}")
 
     # モデル作成・学習
@@ -119,7 +129,63 @@ def train_unified_model(
     model.save_model(save_path)
     logger.info(f"保存完了: {save_path}")
 
-    logger.info("=== 統合モデル学習完了 ===")
+    logger.info(f"=== 統合モデル学習完了 (horizon={horizon}d) ===")
+
+
+def _load_all_ohlcv_for_unified(horizon: int) -> Tuple[pd.DataFrame, pd.Series]:
+    """
+    market_data_raw から全銘柄の OHLCV を取得し、指定ホライズンの特徴量を生成する。
+
+    Args:
+        horizon: 予測ホライズン（営業日）
+
+    Returns:
+        (X, y): 特徴量DataFrame と ターゲットSeries
+    """
+    import re
+
+    from src.features.technical_analysis import add_technical_indicators, create_basic_lag_features
+    from src.utils.db import load_all_raw_ohlcv_symbols, load_raw_ohlcv
+
+    all_X = []
+    all_y = []
+
+    symbols = load_all_raw_ohlcv_symbols()
+    logger.info(f"OHLCV対象銘柄数: {len(symbols)}")
+
+    for market, symbol in symbols:
+        try:
+            raw = load_raw_ohlcv(market, symbol)
+            if raw is None or raw.empty:
+                continue
+
+            # load_raw_ohlcv はすでに先頭大文字列名（Open/High/Low/Close/Volume）で返す
+            df_feat = add_technical_indicators(raw)
+            X_sym, y_sym = create_basic_lag_features(df_feat, target_horizon=horizon)
+
+            # 銘柄を識別する特徴量を追加
+            market_codes = {"us": 0, "jp": 1}
+            X_sym = X_sym.copy()
+            X_sym["market_encoded"] = market_codes.get(market, -1)
+
+            def _norm(c):
+                return re.sub(r"[^0-9a-zA-Z_]", "_", str(c))
+
+            X_sym.columns = [_norm(c) for c in X_sym.columns]
+
+            all_X.append(X_sym)
+            all_y.append(y_sym)
+        except Exception as e:
+            logger.warning(f"OHLCV特徴量生成スキップ [{market}/{symbol}]: {e}")
+
+    if not all_X:
+        return pd.DataFrame(), pd.Series(dtype=float)
+
+    X = pd.concat(all_X, ignore_index=True)
+    y = pd.concat(all_y, ignore_index=True)
+
+    valid = X.notna().all(axis=1) & y.notna()
+    return X[valid], y[valid]
 
 
 def load_unified_model(model_name: str = "UnifiedStockModel", model_dir: str = None):
