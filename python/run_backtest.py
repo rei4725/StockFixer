@@ -1,4 +1,4 @@
-"""
+r"""
 バックテスト実行スクリプト（ラッパー）
 
 使用例:
@@ -9,7 +9,7 @@
     py run_backtest.py --market jp --symbol 7203 --walk-forward
 
     # モデル・閾値指定
-    py run_backtest.py --market us --symbol AAPL \\
+    py run_backtest.py --market us --symbol AAPL \
         --model-type LightGBMModel --threshold 0.005
 
     # 生OHLCVからfeature再生成して実行
@@ -26,22 +26,24 @@
 """
 
 import argparse
+import sys
 
 from src.services.backtest_pipeline import (
+    print_backtest_metrics,
     run_backtest_single,
     run_backtest_walk_forward,
     save_backtest_results,
-    print_backtest_metrics,
 )
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="バックテストを実行する")
     parser.add_argument("--market", type=str, default="jp", help="マーケット (例: jp, us)")
     parser.add_argument("--symbol", type=str, required=True, help="銘柄コード (例: 7203, AAPL)")
-    parser.add_argument(
-        "--start-date", type=str, default=None, help="バックテスト開始日 YYYY-MM-DD"
-    )
+    parser.add_argument("--start-date", type=str, default=None, help="バックテスト開始日 YYYY-MM-DD")
     parser.add_argument("--end-date", type=str, default=None, help="バックテスト終了日 YYYY-MM-DD")
     parser.add_argument(
         "--model-type",
@@ -71,12 +73,10 @@ def parse_args():
         type=str,
         default="file",
         choices=["file", "api", "raw"],
-        help="データソース: 'file'=DB特徴量(Close_lag1代替), 'api'=yfinance直接取得, 'raw'=DBのOHLCVから再生成 (default: file)",
+        help="データソース: 'file'=DB特徴量, 'api'=yfinance直接取得, 'raw'=DBのOHLCVから再生成 (default: file)",
     )
     parser.add_argument("--walk-forward", action="store_true", help="Walk-Forward 検証を使用する")
-    parser.add_argument(
-        "--n-splits", type=int, default=5, help="Walk-Forward の分割数 (default: 5)"
-    )
+    parser.add_argument("--n-splits", type=int, default=5, help="Walk-Forward の分割数 (default: 5)")
     parser.add_argument(
         "--train-ratio",
         type=float,
@@ -86,9 +86,7 @@ def parse_args():
     parser.add_argument(
         "--initial-cash", type=float, default=1_000_000, help="初期資金 (default: 1,000,000)"
     )
-    parser.add_argument(
-        "--fee-rate", type=float, default=0.001, help="取引手数料率 (default: 0.001)"
-    )
+    parser.add_argument("--fee-rate", type=float, default=0.001, help="取引手数料率 (default: 0.001)")
     parser.add_argument("--slippage", type=float, default=0.0, help="スリッページ (default: 0.0)")
 
     # リスク管理
@@ -121,9 +119,7 @@ def parse_args():
     )
 
     # アンサンブル
-    parser.add_argument(
-        "--ensemble", action="store_true", help="XGBoost+LightGBMアンサンブル予測を使用する"
-    )
+    parser.add_argument("--ensemble", action="store_true", help="XGBoost+LightGBMアンサンブル予測を使用する")
 
     return parser.parse_args()
 
@@ -131,16 +127,14 @@ def parse_args():
 def main():
     args = parse_args()
     model_label = "Ensemble(XGB+LGB)" if args.ensemble else args.model_type
-    print(
-        f"\nバックテスト開始: {args.market}/{args.symbol} | task={args.task} | model={model_label}"
-    )
+    logger.info(f"バックテスト開始: {args.market}/{args.symbol} | task={args.task} | model={model_label}")
 
     if args.stop_loss:
-        print(f"  ストップロス: {args.stop_loss:.1%}")
+        logger.info(f"  ストップロス: {args.stop_loss:.1%}")
     if args.take_profit:
-        print(f"  テイクプロフィット: {args.take_profit:.1%}")
+        logger.info(f"  テイクプロフィット: {args.take_profit:.1%}")
     if args.position_sizing != "full":
-        print(f"  ポジションサイジング: {args.position_sizing}")
+        logger.info(f"  ポジションサイジング: {args.position_sizing}")
 
     common_kwargs = dict(
         market=args.market,
@@ -161,13 +155,13 @@ def main():
     )
 
     if args.walk_forward:
-        print(f"モード: Walk-Forward (n_splits={args.n_splits})")
+        logger.info(f"モード: Walk-Forward (n_splits={args.n_splits})")
         result_df, metrics, wf_df = run_backtest_walk_forward(
             **common_kwargs,
             n_splits=args.n_splits,
         )
     else:
-        print(f"モード: 単一期間 (train_ratio={args.train_ratio})")
+        logger.info(f"モード: 単一期間 (train_ratio={args.train_ratio})")
         result_df, metrics, wf_df = run_backtest_single(
             **common_kwargs,
             start_date=args.start_date,
@@ -177,8 +171,12 @@ def main():
         print_backtest_metrics(metrics, label=f"{args.market}/{args.symbol} - {args.task}")
 
     save_backtest_results(result_df, metrics, wf_df, args.market, args.symbol, args.task)
-    print("\n完了")
+    logger.info("完了")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        logger.critical(f"バックテスト 異常終了: {e}", exc_info=True)
+        sys.exit(1)

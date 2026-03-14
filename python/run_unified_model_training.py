@@ -5,7 +5,12 @@
 """
 
 import argparse
+import sys
+
 from src.services.unified_model_pipeline import train_unified_model
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def main():
@@ -32,9 +37,7 @@ def main():
         # 両方のモデルを学習
         for model_type in ["XGBoostModel", "LightGBMModel"]:
             model_name = f"UnifiedStock{model_type.replace('Model', '')}"
-            print(f"\n{'='*50}")
-            print(f"学習開始: {model_name}")
-            print(f"{'='*50}")
+            logger.info(f"学習開始: {model_name}")
             train_unified_model(model_type=model_type, model_name=model_name)
     else:
         # 指定されたモデルのみ学習
@@ -43,4 +46,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        logger.critical(f"統合モデル学習 異常終了: {e}", exc_info=True)
+        sys.exit(1)

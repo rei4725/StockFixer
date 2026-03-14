@@ -8,14 +8,18 @@
 """
 
 import argparse
+import sys
 
 from src.services.prediction_pipeline import (
+    output_top_worst_results,
     predict_all_individual,
     predict_all_unified,
-    output_top_worst_results,
     run_predict_single,
     run_predict_watchlist,
 )
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def run_top10(use_individual: bool = False):
@@ -57,4 +61,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        logger.critical(f"予測 異常終了: {e}", exc_info=True)
+        sys.exit(1)

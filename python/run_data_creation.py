@@ -7,19 +7,22 @@
 """
 
 import argparse
+import sys
+
 from src.services.data_pipeline import (
     fetch_stock_data_with_features,
-    save_stock_data_with_features,
-    save_features_to_db,
     run_data_batch,
+    save_stock_data_with_features,
 )
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def run_single(market: str, symbol: str, start_date=None, end_date=None, fetch_only=False):
     """単一銘柄のデータを取得・保存する"""
     try:
         if fetch_only:
-            # データ取得と特徴量生成のみ（DB保存しない）
             result = fetch_stock_data_with_features(
                 market=market,
                 symbol=symbol,
@@ -27,12 +30,11 @@ def run_single(market: str, symbol: str, start_date=None, end_date=None, fetch_o
                 end_date=end_date,
             )
             if result is None:
-                print(f"[取得失敗] {market}/{symbol}")
+                logger.warning(f"[取得失敗] {market}/{symbol}")
                 return
             market, symbol, data, _ = result
-            print(f"[取得完了] {market}/{symbol} - {len(data)}行")
+            logger.info(f"[取得完了] {market}/{symbol} - {len(data)}行")
         else:
-            # データ取得 → 特徴量生成 → DB保存
             save_stock_data_with_features(
                 market=market,
                 symbol=symbol,
@@ -40,7 +42,7 @@ def run_single(market: str, symbol: str, start_date=None, end_date=None, fetch_o
                 end_date=end_date,
             )
     except Exception as e:
-        print(f"エラーが発生しました: {e}")
+        logger.error(f"エラーが発生しました: {e}", exc_info=True)
 
 
 def main():
@@ -50,9 +52,7 @@ def main():
     parser.add_argument("--symbol", type=str, help="銘柄コード（例: AAPL, 7203）")
     parser.add_argument("--start_date", type=str, default=None, help="開始日（YYYY-MM-DD）")
     parser.add_argument("--end_date", type=str, default=None, help="終了日（YYYY-MM-DD）")
-    parser.add_argument(
-        "--fetch-only", action="store_true", help="データ取得と特徴量生成のみ（DB保存しない）"
-    )
+    parser.add_argument("--fetch-only", action="store_true", help="データ取得と特徴量生成のみ（DB保存しない）")
     args = parser.parse_args()
 
     if args.batch:
@@ -66,4 +66,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        logger.critical(f"データ作成 異常終了: {e}", exc_info=True)
+        sys.exit(1)

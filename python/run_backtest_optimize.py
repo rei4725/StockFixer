@@ -1,4 +1,4 @@
-"""
+r"""
 バックテスト最適化スクリプト（ラッパー）
 
 閾値・ストップロス・テイクプロフィットのグリッドサーチを
@@ -15,18 +15,22 @@ Walk-Forward検証で実行し、最適パラメータを特定する。
     py run_backtest_optimize.py --market jp --symbol 7203 --ensemble
 
     # カスタム閾値レンジ
-    py run_backtest_optimize.py --market jp --symbol 7203 \\
+    py run_backtest_optimize.py --market jp --symbol 7203 \
         --threshold-min 0.0 --threshold-max 0.02 --threshold-step 0.002
 """
 
 import argparse
+import sys
 
 from src.services.backtest_optimize_pipeline import (
-    run_optimization,
     print_optimization_results,
-    save_optimization_results,
+    run_optimization,
     save_optimal_params_json,
+    save_optimization_results,
 )
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def parse_args():
@@ -52,9 +56,7 @@ def parse_args():
     parser.add_argument("--initial-cash", type=float, default=1_000_000, help="初期資金")
 
     # 閾値グリッド
-    parser.add_argument(
-        "--threshold-min", type=float, default=0.0, help="閾値の最小値 (default: 0.0)"
-    )
+    parser.add_argument("--threshold-min", type=float, default=0.0, help="閾値の最小値 (default: 0.0)")
     parser.add_argument(
         "--threshold-max", type=float, default=0.015, help="閾値の最大値 (default: 0.015)"
     )
@@ -68,9 +70,7 @@ def parse_args():
         action="store_true",
         help="ストップロス・テイクプロフィットもグリッドサーチ",
     )
-    parser.add_argument(
-        "--fee-rate", type=float, default=0.001, help="取引手数料率 (default: 0.001)"
-    )
+    parser.add_argument("--fee-rate", type=float, default=0.001, help="取引手数料率 (default: 0.001)")
     parser.add_argument("--slippage", type=float, default=0.0, help="スリッページ (default: 0.0)")
 
     # ソート基準
@@ -106,12 +106,15 @@ def main():
     print_optimization_results(result_df, args.sort_by)
 
     csv_path = save_optimization_results(result_df, args.market, args.symbol)
-    print(f"\n結果保存（CSV）: {csv_path}")
+    logger.info(f"\n結果保存（CSV）: {csv_path}")
 
-    # 最適パラメータを JSON に保存
     json_path = save_optimal_params_json(result_df, args.market, args.symbol, sort_by=args.sort_by)
-    print(f"最適パラメータ保存（JSON）: {json_path}")
+    logger.info(f"最適パラメータ保存（JSON）: {json_path}")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        logger.critical(f"バックテスト最適化 異常終了: {e}", exc_info=True)
+        sys.exit(1)

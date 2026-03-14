@@ -6,28 +6,28 @@
 """
 
 import argparse
-from src.services.model_training_pipeline import (
-    train_models_for_symbol,
-    run_model_batch,
-)
+import sys
+
+from src.services.model_training_pipeline import run_model_batch, train_models_for_symbol
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def run_single(market: str, symbol: str):
     """単一銘柄のモデルを作成する"""
     result = train_models_for_symbol(market, symbol)
     if result["status"] == "success":
-        print(f"{market}/{symbol} のモデル作成が完了しました。")
+        logger.info(f"{market}/{symbol} のモデル作成が完了しました。")
     elif result["status"] == "skip":
-        print(f"{market}/{symbol}: {result.get('reason', 'スキップ')}")
+        logger.info(f"{market}/{symbol}: {result.get('reason', 'スキップ')}")
     else:
-        print(f"{market}/{symbol} のモデル作成に失敗: {result.get('error', '不明')}")
+        logger.error(f"{market}/{symbol} のモデル作成に失敗: {result.get('error', '不明')}")
 
 
 def main():
     parser = argparse.ArgumentParser(description="銘柄別モデル作成スクリプト")
-    parser.add_argument(
-        "--batch", action="store_true", help="ウォッチリストの全銘柄を並列で作成する"
-    )
+    parser.add_argument("--batch", action="store_true", help="ウォッチリストの全銘柄を並列で作成する")
     parser.add_argument("--market", type=str, help="市場名（例: us, jp）")
     parser.add_argument("--symbol", type=str, help="銘柄コード（例: AAPL, 7203）")
     args = parser.parse_args()
@@ -41,4 +41,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        logger.critical(f"モデル作成 異常終了: {e}", exc_info=True)
+        sys.exit(1)

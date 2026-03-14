@@ -12,21 +12,17 @@ Discord Botと同時に起動し、1プロセスで全ジョブを管理する�
 """
 
 import argparse
-import logging
 import sys
 from datetime import datetime
 
-from apscheduler.schedulers.blocking import BlockingScheduler
+from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED
 from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR
+from apscheduler.schedulers.blocking import BlockingScheduler
 
-# ── ロギング設定 ─────────────────────────────────────
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-logger = logging.getLogger("scheduler")
+from src.utils.logger import get_logger
+
+# ログ設定（logger.pyに集約、basicConfigは不要）
+logger = get_logger(__name__)
 
 
 def _build_queue_manager():
@@ -149,7 +145,7 @@ def _print_schedule():
 
 def run_with_bot():
     """Discord Botとスケジューラを同時に起動する"""
-    from src.api.discord_bot import bot, TOKEN
+    from src.api.discord_bot import TOKEN, bot
 
     if not TOKEN:
         logger.error("DISCORD_BOT_TOKEN環境変数が設定されていません。")
@@ -224,4 +220,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        logger.critical(f"スケジューラ 異常終了: {e}", exc_info=True)
+        sys.exit(1)
