@@ -3,12 +3,13 @@
 import os
 import tempfile
 import unittest
-from unittest.mock import patch, MagicMock
-import pandas as pd
-import numpy as np
+from unittest.mock import patch
 
-import src.utils.db as db_module
+import numpy as np
+import pandas as pd
+
 import src.utils.data_path_utils as path_utils
+import src.utils.db as db_module
 from src.services.data_pipeline import save_stock_data_with_features
 
 
@@ -40,13 +41,16 @@ class TestSaveStockDataWithFeatures(unittest.TestCase):
     def _make_ohlcv(self, periods=30):
         """テスト用OHLCVデータを生成する"""
         dates = pd.date_range("2023-01-01", periods=periods, freq="D")
-        return pd.DataFrame({
-            "Open": np.linspace(100, 120, periods),
-            "High": np.linspace(101, 121, periods),
-            "Low": np.linspace(99, 119, periods),
-            "Close": np.linspace(100, 120, periods),
-            "Volume": np.random.randint(1000, 5000, periods),
-        }, index=dates)
+        return pd.DataFrame(
+            {
+                "Open": np.linspace(100, 120, periods),
+                "High": np.linspace(101, 121, periods),
+                "Low": np.linspace(99, 119, periods),
+                "Close": np.linspace(100, 120, periods),
+                "Volume": np.random.randint(1000, 5000, periods),
+            },
+            index=dates,
+        )
 
     @patch("src.services.data_pipeline.get_stock_data")
     def test_saves_features_to_db(self, mock_get_data):
@@ -55,12 +59,12 @@ class TestSaveStockDataWithFeatures(unittest.TestCase):
         mock_get_data.return_value = df
 
         save_stock_data_with_features(
-            market="us", symbol="TEST",
-            start_date="2023-01-01", end_date="2023-01-30"
+            market="us", symbol="TEST", start_date="2023-01-01", end_date="2023-01-30"
         )
 
         # DBから特徴量を取得して確認
         from src.utils.db import load_stock_features
+
         result = load_stock_features("us", "TEST")
         self.assertIsNotNone(result)
         self.assertFalse(result.empty)
@@ -73,8 +77,7 @@ class TestSaveStockDataWithFeatures(unittest.TestCase):
         mock_get_data.return_value = pd.DataFrame()
         # 例外が発生しなければ成功
         save_stock_data_with_features(
-            market="us", symbol="EMPTY",
-            start_date="2023-01-01", end_date="2023-01-30"
+            market="us", symbol="EMPTY", start_date="2023-01-01", end_date="2023-01-30"
         )
 
     @patch("src.services.data_pipeline.get_stock_data")
@@ -82,8 +85,7 @@ class TestSaveStockDataWithFeatures(unittest.TestCase):
         """Noneが返された場合にエラーにならないことを確認"""
         mock_get_data.return_value = None
         save_stock_data_with_features(
-            market="us", symbol="NONE",
-            start_date="2023-01-01", end_date="2023-01-30"
+            market="us", symbol="NONE", start_date="2023-01-01", end_date="2023-01-30"
         )
 
     @patch("src.services.data_pipeline.get_stock_data")
@@ -93,11 +95,11 @@ class TestSaveStockDataWithFeatures(unittest.TestCase):
         mock_get_data.return_value = df
 
         save_stock_data_with_features(
-            market="us", symbol="ENC",
-            start_date="2023-01-01", end_date="2023-01-30"
+            market="us", symbol="ENC", start_date="2023-01-01", end_date="2023-01-30"
         )
 
         from src.utils.db import load_stock_features
+
         result = load_stock_features("us", "ENC")
         if result is not None and not result.empty and "market_encoded" in result.columns:
             self.assertTrue((result["market_encoded"] == 0).all())
@@ -109,16 +111,15 @@ class TestSaveStockDataWithFeatures(unittest.TestCase):
         mock_get_data.return_value = df
 
         save_stock_data_with_features(
-            market="us", symbol="OVR",
-            start_date="2023-01-01", end_date="2023-01-30"
+            market="us", symbol="OVR", start_date="2023-01-01", end_date="2023-01-30"
         )
         from src.utils.db import load_stock_features
+
         result1 = load_stock_features("us", "OVR")
 
         # 2回目
         save_stock_data_with_features(
-            market="us", symbol="OVR",
-            start_date="2023-01-01", end_date="2023-01-30"
+            market="us", symbol="OVR", start_date="2023-01-01", end_date="2023-01-30"
         )
         result2 = load_stock_features("us", "OVR")
 
@@ -154,13 +155,16 @@ class TestRunDataBatch(unittest.TestCase):
     def _make_ohlcv(self, periods=30):
         """テスト用OHLCVデータを生成する"""
         dates = pd.date_range("2023-01-01", periods=periods, freq="D")
-        return pd.DataFrame({
-            "Open": np.linspace(100, 120, periods),
-            "High": np.linspace(101, 121, periods),
-            "Low": np.linspace(99, 119, periods),
-            "Close": np.linspace(100, 120, periods),
-            "Volume": np.random.randint(1000, 5000, periods),
-        }, index=dates)
+        return pd.DataFrame(
+            {
+                "Open": np.linspace(100, 120, periods),
+                "High": np.linspace(101, 121, periods),
+                "Low": np.linspace(99, 119, periods),
+                "Close": np.linspace(100, 120, periods),
+                "Volume": np.random.randint(1000, 5000, periods),
+            },
+            index=dates,
+        )
 
     @patch("src.services.batch_runner.load_target_symbols")
     @patch("src.services.batch_runner.run_parallel")
@@ -182,18 +186,32 @@ class TestRunDataBatch(unittest.TestCase):
 
         # フェーズ1の結果をシミュレート
         df = self._make_ohlcv(30)
-        from src.features.technical_analysis import add_technical_indicators, create_basic_lag_features
+        from src.features.technical_analysis import (
+            add_technical_indicators,
+            create_basic_lag_features,
+        )
+
         df = add_technical_indicators(df)
         X, y = create_basic_lag_features(df, n_lags=5, feature_cols=None)
         data = X.copy()
-        data['market'] = 'us'
-        data['symbol'] = 'TEST1'
-        data['market_encoded'] = 0
-        data['y'] = y
+        data["market"] = "us"
+        data["symbol"] = "TEST1"
+        data["market_encoded"] = 0
+        data["y"] = y
 
         phase1_results = [
-            {"market": "us", "symbol": "TEST1", "status": "success", "data": ("us", "TEST1", data, None)},
-            {"market": "us", "symbol": "TEST2", "status": "success", "data": ("us", "TEST2", data, None)},
+            {
+                "market": "us",
+                "symbol": "TEST1",
+                "status": "success",
+                "data": ("us", "TEST1", data, None),
+            },
+            {
+                "market": "us",
+                "symbol": "TEST2",
+                "status": "success",
+                "data": ("us", "TEST2", data, None),
+            },
         ]
         mock_run_parallel.return_value = phase1_results
 
@@ -242,17 +260,26 @@ class TestRunDataBatch(unittest.TestCase):
 
         # フェーズ1の結果（1つ成功、1つエラー）
         df = self._make_ohlcv(30)
-        from src.features.technical_analysis import add_technical_indicators, create_basic_lag_features
+        from src.features.technical_analysis import (
+            add_technical_indicators,
+            create_basic_lag_features,
+        )
+
         df = add_technical_indicators(df)
         X, y = create_basic_lag_features(df, n_lags=5, feature_cols=None)
         data = X.copy()
-        data['market'] = 'us'
-        data['symbol'] = 'TEST1'
-        data['market_encoded'] = 0
-        data['y'] = y
+        data["market"] = "us"
+        data["symbol"] = "TEST1"
+        data["market_encoded"] = 0
+        data["y"] = y
 
         phase1_results = [
-            {"market": "us", "symbol": "TEST1", "status": "success", "data": ("us", "TEST1", data, None)},
+            {
+                "market": "us",
+                "symbol": "TEST1",
+                "status": "success",
+                "data": ("us", "TEST1", data, None),
+            },
             {"market": "us", "symbol": "TEST2", "status": "error", "error": "取得失敗"},
         ]
         mock_run_parallel.return_value = phase1_results
@@ -264,5 +291,5 @@ class TestRunDataBatch(unittest.TestCase):
         mock_print_summary.assert_called_once()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()
