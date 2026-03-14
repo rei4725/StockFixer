@@ -1,13 +1,12 @@
-"""
-Unit Test: Backtester.simulate_trading
+"""Unit Test: Backtester.simulate_trading
 
 外部依存（DB・yfinance・モデル）なく、simulate_trading のロジックのみをテスト。
 全依存を Mock で隔離し、高速実行を実現。
 """
-import pytest
-import pandas as pd
-import numpy as np
 from unittest.mock import MagicMock
+
+import pandas as pd
+import pytest
 
 from src.backtest.backtester import Backtester
 
@@ -120,6 +119,26 @@ class TestBacktesterSimulateTradingBasic:
 
         # Buy → Sell の 1取引のみ
         assert metrics["num_trades"] == 1
+
+    def test_final_sell_on_remaining_position(self):
+        """売りシグナルなしで終了した場合、最終日に強制決済される"""
+        idx = pd.date_range("2024-01-01", periods=3, freq="B")
+        df = pd.DataFrame({"Close": [100.0, 100.0, 110.0]}, index=idx)
+        sig = pd.Series([1, 0, 0], index=idx)  # 買いのみ、売りなし
+        bt = Backtester(
+            model_manager=MagicMock(),
+            signal_generator=MagicMock(),
+            data_loader=MagicMock(),
+            start_date=None,
+            end_date=None,
+            market="jp",
+            symbol="7203",
+            initial_cash=100_000,
+            fee_rate=0.0,
+        )
+        result_df, _ = bt.simulate_trading(df, sig)
+        actions = result_df["action"].tolist() if not result_df.empty else []
+        assert "final_sell" in actions
 
 
 class TestBacktesterProfitLoss:
@@ -315,6 +334,151 @@ class TestBacktesterPositionSizing:
         assert metrics["num_trades"] == 1
         # リターンが full より低い
         # （資金が少なく投入されている）
+
+
+class TestBacktesterSlippage:
+    """スリッページの影響"""
+
+    def test_slippage_reduces_return(self):
+        """スリッページありのリターン < スリッページなしのリターン"""
+        idx = pd.date_range("2024-01-01", periods=3, freq="B")
+        df = pd.DataFrame({"Close": [100.0, 100.0, 120.0]}, index=idx)
+        sig = pd.Series([1, 0, -1], index=idx)
+
+        bt_no_slip = Backtester(
+            model_manager=MagicMock(),
+            signal_generator=MagicMock(),
+            data_loader=MagicMock(),
+            start_date=None,
+            end_date=None,
+            market="jp",
+            symbol="7203",
+            initial_cash=100_000,
+            fee_rate=0.0,
+            slippage=0.0,
+        )
+        _, metrics_no_slip = bt_no_slip.simulate_trading(df, sig)
+
+        bt_with_slip = Backtester(
+            model_manager=MagicMock(),
+            signal_generator=MagicMock(),
+            data_loader=MagicMock(),
+            start_date=None,
+            end_date=None,
+            market="jp",
+            symbol="7203",
+            initial_cash=100_000,
+            fee_rate=0.0,
+            slippage=0.005,
+        )
+        _, metrics_with_slip = bt_with_slip.simulate_trading(df, sig)
+
+        assert metrics_no_slip["total_return"] > metrics_with_slip["total_return"]
+
+
+class TestBacktesterMetricsShape:
+    """メトリクスキーと結果 DataFrame の構造検証"""
+
+    def test_metrics_contains_required_keys(self, sample_price_df):
+        """simulate_trading が必須キーを全て含むメトリクスを返す"""
+        bt = Backtester(
+            model_manager=MagicMock(),
+            signal_generator=MagicMock(),
+            data_loader=MagicMock(),
+            start_date=None,
+            end_date=None,
+            market="jp",
+            symbol="7203",
+            initial_cash=1_000_000,
+            fee_rate=0.001,
+        )
+        sig = pd.Series([1, 0, -1, 0, 0], index=sample_price_df.index)
+        _, metrics = bt.simulate_trading(sample_price_df, sig)
+        required = {
+            "final_cash",
+            "total_return",
+            "num_trades",
+            "win_rate",
+            "profit_factor",
+            "sharpe_ratio",
+            "max_drawdown",
+        }
+        assert required.issubset(metrics.keys())
+
+    def test_result_df_contains_action_price_cash(self, sample_price_df):
+        """取引ログ DataFrame に action / price / cash 列がある"""
+        bt = Backtester(
+            model_manager=MagicMock(),
+            signal_generator=MagicMock(),
+            data_loader=MagicMock(),
+            start_date=None,
+            end_date=None,
+            market="jp",
+            symbol="7203",
+            initial_cash=1_000_000,
+            fee_rate=0.001,
+        )
+        sig = pd.Series([1, 0, -1, 0, 0], index=sample_price_df.index)
+        result_df, _ = bt.simulate_trading(sample_price_df, sig)
+        if not result_df.empty:
+            assert "action" in result_df.columns
+            assert "price" in result_df.columns
+            assert "cash" in result_df.columns
+
+    def test_lowercase_close_column_accepted(self):
+        """Close 列が 'close'（小文字）でも動作する"""
+        idx = pd.date_range("2024-01-01", periods=3, freq="B")
+        df = pd.DataFrame({"close": [100.0, 100.0, 120.0]}, index=idx)
+        sig = pd.Series([1, 0, -1], index=idx)
+        bt = Backtester(
+            model_manager=MagicMock(),
+            signal_generator=MagicMock(),
+            data_loader=MagicMock(),
+            start_date=None,
+            end_date=None,
+            market="jp",
+            symbol="7203",
+            initial_cash=100_000,
+            fee_rate=0.0,
+        )
+        _, metrics = bt.simulate_trading(df, sig)
+        assert metrics["num_trades"] == 1
+
+    def test_multiple_cycles_count(self):
+        """複数の売買サイクルが正しくカウントされる"""
+        idx = pd.date_range("2024-01-01", periods=7, freq="B")
+        df = pd.DataFrame({"Close": [100, 100, 110, 110, 100, 100, 120]}, index=idx)
+        sig = pd.Series([1, 0, -1, 1, 0, 0, -1], index=idx)
+        bt = Backtester(
+            model_manager=MagicMock(),
+            signal_generator=MagicMock(),
+            data_loader=MagicMock(),
+            start_date=None,
+            end_date=None,
+            market="jp",
+            symbol="7203",
+            initial_cash=1_000_000,
+            fee_rate=0.0,
+        )
+        _, metrics = bt.simulate_trading(df, sig)
+        assert metrics["num_trades"] == 2
+
+
+class TestBacktesterWithTask:
+    """task.make_signal との統合"""
+
+    def test_return_regression_task_signal_counts(self):
+        """Buy/sell signal counts are correct via ReturnRegressionTask."""
+        from src.backtest.task import ReturnRegressionTask
+
+        task = ReturnRegressionTask(threshold=0.0)
+        pred = pd.Series(
+            [0.01, 0.01, -0.01, 0.0],
+            index=pd.date_range("2024-01-01", periods=4, freq="B"),
+        )
+        signal = task.make_signal(pred)
+        assert (signal == 1).sum() == 2
+        assert (signal == -1).sum() == 1
 
 
 if __name__ == "__main__":

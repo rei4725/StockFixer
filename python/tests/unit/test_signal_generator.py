@@ -14,21 +14,22 @@ class TestSignalGenerator(unittest.TestCase):
         """
         self.signal_generator = signal_generator_module.SignalGenerator()
 
-        # テスト用のダミーデータフレームと予測シリーズを作成
+        # 再現性確保のためシードを固定した乱数生成器を使用
+        rng = np.random.default_rng(seed=42)
         dates = pd.to_datetime(pd.date_range(start="2023-01-01", periods=10, freq="D"))
         self.dummy_data = pd.DataFrame(
             {
-                "Open": 100 + (np.random.rand(10) - 0.5).cumsum(),
-                "High": 101 + (np.random.rand(10) - 0.5).cumsum(),
-                "Low": 99 + (np.random.rand(10) - 0.5).cumsum(),
-                "Close": 100 + (np.random.rand(10) - 0.5).cumsum(),
-                "Volume": np.random.randint(1000, 5000, 10),
-                "RSI": np.random.uniform(20, 80, 10),
+                "Open": 100 + rng.uniform(-0.5, 0.5, 10).cumsum(),
+                "High": 101 + rng.uniform(-0.5, 0.5, 10).cumsum(),
+                "Low": 99 + rng.uniform(-0.5, 0.5, 10).cumsum(),
+                "Close": 100 + rng.uniform(-0.5, 0.5, 10).cumsum(),
+                "Volume": rng.integers(1000, 5000, 10),
+                "RSI": rng.uniform(20, 80, 10),
             },
             index=dates,
         )
 
-        self.dummy_prediction = pd.Series(np.random.uniform(-0.01, 0.01, 10), index=dates)
+        self.dummy_prediction = pd.Series(rng.uniform(-0.01, 0.01, 10), index=dates)
 
     def test_generate_signal_returns_series(self):
         """generate_signalメソッドがpandas.Seriesを返すことを確認します。"""

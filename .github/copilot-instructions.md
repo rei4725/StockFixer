@@ -119,6 +119,7 @@ run_*.py → api層 → services層 → models/strategy/backtest層 → features
 
 | スキル | 説明 |
 |--------|------|
+| `company` | **ORCHESTRATION** 大規模・複合タスクを仮想会社として部門委任・並列実行・統合する |
 | `data-pipeline` | 株価データ取得・特徴量生成・DB保存 |
 | `model-training` | 銘柄別 / 統合モデル学習 |
 | `prediction` | 予測実行・Top10/Worst10出力 |

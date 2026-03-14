@@ -1,17 +1,10 @@
-"""
-backtest/metrics.py のユニットテスト
-"""
-import math
+"""backtest/metrics.py のユニットテスト"""
 import unittest
+
 import pandas as pd
-import numpy as np
-from src.backtest.metrics import (
-    compute_metrics,
-    _empty_metrics,
-    _extract_trade_pnl,
-    _sharpe_ratio,
-    _max_drawdown,
-)
+import pytest
+
+from src.backtest.metrics import _extract_trade_pnl, _max_drawdown, _sharpe_ratio, compute_metrics
 
 
 def _trade_log(entries: list[dict]) -> pd.DataFrame:
@@ -43,10 +36,24 @@ class TestComputeMetricsProfitable(unittest.TestCase):
     def setUp(self):
         # 100株 @ 100円で買い、110円で売り → 利益 1000円
         self.initial_cash = 1_000_000
-        self.log = _trade_log([
-            {"date": "2024-01-02", "action": "buy",  "price": 100.0, "qty": 100, "cash": 990_000},
-            {"date": "2024-01-10", "action": "sell", "price": 110.0, "qty": 100, "cash": 1_001_000},
-        ])
+        self.log = _trade_log(
+            [
+                {
+                    "date": "2024-01-02",
+                    "action": "buy",
+                    "price": 100.0,
+                    "qty": 100,
+                    "cash": 990_000,
+                },
+                {
+                    "date": "2024-01-10",
+                    "action": "sell",
+                    "price": 110.0,
+                    "qty": 100,
+                    "cash": 1_001_000,
+                },
+            ]
+        )
 
     def test_num_trades(self):
         metrics = compute_metrics(self.log, self.initial_cash)
@@ -72,10 +79,24 @@ class TestComputeMetricsLoss(unittest.TestCase):
 
     def setUp(self):
         self.initial_cash = 1_000_000
-        self.log = _trade_log([
-            {"date": "2024-01-02", "action": "buy",  "price": 100.0, "qty": 100, "cash": 990_000},
-            {"date": "2024-01-10", "action": "sell", "price":  90.0, "qty": 100, "cash": 999_000},
-        ])
+        self.log = _trade_log(
+            [
+                {
+                    "date": "2024-01-02",
+                    "action": "buy",
+                    "price": 100.0,
+                    "qty": 100,
+                    "cash": 990_000,
+                },
+                {
+                    "date": "2024-01-10",
+                    "action": "sell",
+                    "price": 90.0,
+                    "qty": 100,
+                    "cash": 999_000,
+                },
+            ]
+        )
 
     def test_win_rate_zero(self):
         metrics = compute_metrics(self.log, self.initial_cash)
@@ -92,12 +113,38 @@ class TestComputeMetricsMixed(unittest.TestCase):
     def setUp(self):
         self.initial_cash = 1_000_000
         # 1回目: 100→120 (+2000), 2回目: 100→80 (-2000)
-        self.log = _trade_log([
-            {"date": "2024-01-02", "action": "buy",  "price": 100.0, "qty": 100, "cash": 990_000},
-            {"date": "2024-01-05", "action": "sell", "price": 120.0, "qty": 100, "cash": 1_002_000},
-            {"date": "2024-01-07", "action": "buy",  "price": 100.0, "qty": 100, "cash": 992_000},
-            {"date": "2024-01-10", "action": "sell", "price":  80.0, "qty": 100, "cash": 1_000_000},
-        ])
+        self.log = _trade_log(
+            [
+                {
+                    "date": "2024-01-02",
+                    "action": "buy",
+                    "price": 100.0,
+                    "qty": 100,
+                    "cash": 990_000,
+                },
+                {
+                    "date": "2024-01-05",
+                    "action": "sell",
+                    "price": 120.0,
+                    "qty": 100,
+                    "cash": 1_002_000,
+                },
+                {
+                    "date": "2024-01-07",
+                    "action": "buy",
+                    "price": 100.0,
+                    "qty": 100,
+                    "cash": 992_000,
+                },
+                {
+                    "date": "2024-01-10",
+                    "action": "sell",
+                    "price": 80.0,
+                    "qty": 100,
+                    "cash": 1_000_000,
+                },
+            ]
+        )
 
     def test_num_trades_two(self):
         metrics = compute_metrics(self.log, self.initial_cash)
@@ -121,20 +168,24 @@ class TestExtractTradePnl(unittest.TestCase):
     """_extract_trade_pnl のテスト"""
 
     def test_single_win(self):
-        log = _trade_log([
-            {"action": "buy",  "price": 100.0, "qty": 10, "cash": 900},
-            {"action": "sell", "price": 110.0, "qty": 10, "cash": 1000},
-        ])
+        log = _trade_log(
+            [
+                {"action": "buy", "price": 100.0, "qty": 10, "cash": 900},
+                {"action": "sell", "price": 110.0, "qty": 10, "cash": 1000},
+            ]
+        )
         wins, losses = _extract_trade_pnl(log)
         self.assertEqual(len(wins), 1)
         self.assertEqual(len(losses), 0)
         self.assertAlmostEqual(wins[0], 100.0)
 
     def test_single_loss(self):
-        log = _trade_log([
-            {"action": "buy",  "price": 100.0, "qty": 10, "cash": 900},
-            {"action": "sell", "price":  90.0, "qty": 10, "cash": 800},
-        ])
+        log = _trade_log(
+            [
+                {"action": "buy", "price": 100.0, "qty": 10, "cash": 900},
+                {"action": "sell", "price": 90.0, "qty": 10, "cash": 800},
+            ]
+        )
         wins, losses = _extract_trade_pnl(log)
         self.assertEqual(len(wins), 0)
         self.assertEqual(len(losses), 1)
@@ -146,10 +197,12 @@ class TestExtractTradePnl(unittest.TestCase):
         self.assertEqual(losses, [])
 
     def test_final_sell_counted(self):
-        log = _trade_log([
-            {"action": "buy",        "price": 100.0, "qty": 5, "cash": 950},
-            {"action": "final_sell", "price": 120.0, "qty": 5, "cash": 1050},
-        ])
+        log = _trade_log(
+            [
+                {"action": "buy", "price": 100.0, "qty": 5, "cash": 950},
+                {"action": "final_sell", "price": 120.0, "qty": 5, "cash": 1050},
+            ]
+        )
         wins, losses = _extract_trade_pnl(log)
         self.assertEqual(len(wins), 1)
 
@@ -199,6 +252,80 @@ class TestMaxDrawdown(unittest.TestCase):
     def test_empty_series_returns_zero(self):
         dd = _max_drawdown(pd.Series([], dtype=float))
         self.assertEqual(dd, 0.0)
+
+
+# ===========================================================================
+# 境界値テスト（pytest parametrize スタイル）
+# ===========================================================================
+
+
+class TestComputeMetricsBoundary:
+    """境界値・パラメータ化テスト"""
+
+    @pytest.mark.parametrize(
+        "buy_price, sell_price, expected_win_rate",
+        [
+            (100, 110, 1.0),  # 利益トレード → 勝率 1.0
+            (100, 90, 0.0),  # 損失トレード → 勝率 0.0
+        ],
+    )
+    def test_win_rate_single_trade(self, buy_price, sell_price, expected_win_rate):
+        """単一取引の勝率は利益/損失に応じて 1.0 / 0.0"""
+        initial_cash = 1_000_000
+        log = _trade_log(
+            [
+                {
+                    "date": "2024-01-02",
+                    "action": "buy",
+                    "price": float(buy_price),
+                    "qty": 100,
+                    "cash": initial_cash - buy_price * 100,
+                },
+                {
+                    "date": "2024-01-10",
+                    "action": "sell",
+                    "price": float(sell_price),
+                    "qty": 100,
+                    "cash": initial_cash + (sell_price - buy_price) * 100,
+                },
+            ]
+        )
+        metrics = compute_metrics(log, initial_cash)
+        assert metrics["win_rate"] == pytest.approx(expected_win_rate)
+
+    @pytest.mark.parametrize(
+        "pnl, expected_sign",
+        [
+            ([200.0, 100.0, 150.0], "positive"),
+            ([-200.0, -100.0, -150.0], "negative"),
+        ],
+    )
+    def test_sharpe_sign(self, pnl, expected_sign):
+        """平均プラスの PnL → シャープ正 / マイナスの PnL → シャープ負"""
+        sharpe = _sharpe_ratio(pnl, 0.0, 252)
+        if expected_sign == "positive":
+            assert sharpe > 0.0
+        else:
+            assert sharpe < 0.0
+
+    @pytest.mark.parametrize("initial_cash", [100_000, 500_000, 1_000_000, 5_000_000])
+    def test_empty_metrics_respects_initial_cash(self, initial_cash):
+        """取引なし時の final_cash が initial_cash に一致する"""
+        metrics = compute_metrics(pd.DataFrame(), initial_cash=initial_cash)
+        assert metrics["final_cash"] == initial_cash
+        assert metrics["total_return"] == 0.0
+
+    @pytest.mark.parametrize(
+        "equity, expected_dd",
+        [
+            ([1000, 1100, 1200, 1300], 0.0),  # 単調増加 → DDなし
+            ([1000, 1200, 900, 1100], (900 - 1200) / 1200),  # ピークから1200→9003々0  # ピークから 25% 褶辺
+        ],
+    )
+    def test_max_drawdown_scenarios(self, equity, expected_dd):
+        """max_drawdown の各シナリオ検証"""
+        dd = _max_drawdown(pd.Series(equity, dtype=float))
+        assert dd == pytest.approx(expected_dd, abs=1e-8)
 
 
 if __name__ == "__main__":

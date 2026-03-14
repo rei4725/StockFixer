@@ -20,3 +20,5 @@ pylint
 flake8
 black
 isort
+pytest-timeout
+pytest-cov
