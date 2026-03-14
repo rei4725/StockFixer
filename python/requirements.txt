@@ -6,6 +6,8 @@ scikit-learn
 lightgbm
 xgboost
 requests
+matplotlib
+shap>=0.46
 pandas
 discord.py
 ta
