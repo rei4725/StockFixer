@@ -1,6 +1,11 @@
 from abc import ABC, abstractmethod
 
+import joblib
 import pandas as pd
+
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class BaseModel(ABC):
@@ -36,23 +41,29 @@ class BaseModel(ABC):
 
     def save_model(self, path: str):
         """
-        学習済みモデルを保存するメソッド。
+        学習済みモデルを joblib 形式で保存する。
         Args:
             path (str): モデルの保存パス。
         """
-        # TODO: モデル保存の実装 (例: joblib, pickle)
-        print(f"モデルを {path} に保存します。")
-        pass
+        try:
+            joblib.dump(self.model, path)
+            logger.info(f"{self.model_name} モデルを {path} に保存しました。")
+        except Exception as e:
+            logger.error(f"{self.model_name} モデルの保存中にエラーが発生しました: {e}", exc_info=True)
+            raise
 
     def load_model(self, path: str):
         """
-        保存されたモデルをロードするメソッド。
+        Joblib 形式のモデルをロードする。
         Args:
             path (str): モデルのロードパス。
         """
-        # TODO: モデルロードの実装 (例: joblib, pickle)
-        print(f"モデルを {path} からロードします。")
-        pass
+        try:
+            self.model = joblib.load(path)
+            logger.info(f"{self.model_name} モデルを {path} からロードしました。")
+        except Exception as e:
+            logger.error(f"{self.model_name} モデルのロード中にエラーが発生しました: {e}", exc_info=True)
+            raise
 
     def get_model_name(self) -> str:
         """

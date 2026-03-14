@@ -5,9 +5,13 @@
 """
 
 import re
+from datetime import datetime
+
+import numpy as np
+import pandas as pd
 
 from src.models.model_manager import ModelManager
-from src.utils.db import load_stock_features
+from src.utils.db import load_stock_features, save_model_metrics
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -49,6 +53,13 @@ def load_features_for_training(market: str, symbol: str) -> dict:
         return {"market": market, "symbol": symbol, "status": "error", "error": str(e)}
 
 
+def _compute_training_metrics(y_true: pd.Series, y_pred: pd.Series) -> dict:
+    """学習データでの in-sample 評価指標を計算する（モデル品質監視用）。"""
+    rmse = float(np.sqrt(((y_pred - y_true) ** 2).mean()))
+    directional_accuracy = float((np.sign(y_pred) == np.sign(y_true)).mean())
+    return {"rmse": rmse, "directional_accuracy": directional_accuracy, "n_samples": len(y_true)}
+
+
 def train_models_for_symbol(market: str, symbol: str) -> dict:
     """
     単一銘柄に対してXGBoost・LightGBMモデルを学習・保存する
@@ -72,14 +83,27 @@ def train_models_for_symbol(market: str, symbol: str) -> dict:
 
         # ModelManagerは各呼び出しで新規作成
         model_manager = ModelManager()
+        trained_at = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-        # XGBoostモデル
-        model_manager.create_model("XGBoostModel", "StockXGBoostModel")
-        model_manager.train_model("StockXGBoostModel", X, y, market=market, symbol=symbol)
-
-        # LightGBMモデル
-        model_manager.create_model("LightGBMModel", "StockLightGBMModel")
-        model_manager.train_model("StockLightGBMModel", X, y, market=market, symbol=symbol)
+        for model_type, model_name in [
+            ("XGBoostModel", "StockXGBoostModel"),
+            ("LightGBMModel", "StockLightGBMModel"),
+        ]:
+            model_manager.create_model(model_type, model_name)
+            model_manager.train_model(model_name, X, y, market=market, symbol=symbol)
+            # 学習後in-sample精度計測・DB記録
+            try:
+                model = model_manager.get_model(model_name)
+                y_pred = model.predict(X)
+                metrics = _compute_training_metrics(y, y_pred)
+                save_model_metrics(market, symbol, model_name, trained_at, metrics)
+                logger.debug(
+                    f"[精度記録] {market}/{symbol}/{model_name}: "
+                    f"RMSE={metrics['rmse']:.6f}, "
+                    f"方向正解率={metrics['directional_accuracy']:.2%}"
+                )
+            except Exception as e:
+                logger.warning(f"精度指標保存スキップ [{market}_{symbol}/{model_name}]: {e}")
 
         logger.info(f"[モデル作成完了] {market}/{symbol}")
         return {"market": market, "symbol": symbol, "status": "success"}
@@ -132,34 +156,37 @@ def run_model_batch():
 
     # フェーズ2: モデル学習・保存（逐次）
     success_data = [r for r in load_results if r.get("status") == "success" and "X" in r]
-    print(f"\n{'='*50}")
-    print("モデル学習開始（逐次）")
-    print(f"対象件数: {len(success_data)}")
-    print(f"{'='*50}\n")
+    logger.info(f"モデル学習開始（逐次）: 対象件数={len(success_data)}")
 
+    trained_at = datetime.now().strftime("%Y%m%d_%H%M%S")
     train_results = []
     for i, r in enumerate(success_data, 1):
         market, symbol = r["market"], r["symbol"]
         try:
-            print(f"[モデル作成開始] {market}/{symbol}")
+            logger.info(f"[モデル作成開始] {market}/{symbol}")
             model_manager = ModelManager()
-            model_manager.create_model("XGBoostModel", "StockXGBoostModel")
-            model_manager.train_model(
-                "StockXGBoostModel", r["X"], r["y"], market=market, symbol=symbol
-            )
-            model_manager.create_model("LightGBMModel", "StockLightGBMModel")
-            model_manager.train_model(
-                "StockLightGBMModel", r["X"], r["y"], market=market, symbol=symbol
-            )
-            print(f"[モデル作成完了] {market}/{symbol}")
+            for model_type, model_name in [
+                ("XGBoostModel", "StockXGBoostModel"),
+                ("LightGBMModel", "StockLightGBMModel"),
+            ]:
+                model_manager.create_model(model_type, model_name)
+                model_manager.train_model(model_name, r["X"], r["y"], market=market, symbol=symbol)
+                try:
+                    model = model_manager.get_model(model_name)
+                    y_pred = model.predict(r["X"])
+                    metrics = _compute_training_metrics(r["y"], y_pred)
+                    save_model_metrics(market, symbol, model_name, trained_at, metrics)
+                except Exception as me:
+                    logger.warning(f"精度指標保存スキップ [{market}_{symbol}/{model_name}]: {me}")
+            logger.info(f"[モデル作成完了] {market}/{symbol}")
             train_results.append({"market": market, "symbol": symbol, "status": "success"})
         except Exception as e:
-            print(f"[モデル作成エラー] {market}/{symbol}: {e}")
+            logger.error(f"[モデル作成エラー] {market}/{symbol}: {e}", exc_info=True)
             train_results.append(
                 {"market": market, "symbol": symbol, "status": "error", "error": str(e)}
             )
         if i % 50 == 0:
-            print(f"  ... {i}/{len(success_data)} 件完了")
+            logger.info(f"  ... {i}/{len(success_data)} 件完了")
 
     # 最終サマリー
     final_results = train_results.copy()

@@ -1,7 +1,10 @@
-import joblib  # モデルの保存・ロード用
 import pandas as pd
 import xgboost as xgb
+
 from src.models.base_model import BaseModel
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class XGBoostModel(BaseModel):
@@ -21,9 +24,9 @@ class XGBoostModel(BaseModel):
             X (pd.DataFrame): 特徴量データ。
             y (pd.Series): ターゲット変数。
         """
-        print(f"{self.model_name} の学習を開始します...")
+        logger.info(f"{self.model_name} の学習を開始します...")
         self.model.fit(X, y)
-        print(f"{self.model_name} の学習が完了しました。")
+        logger.info(f"{self.model_name} の学習が完了しました。")
 
     def predict(self, X: pd.DataFrame) -> pd.Series:
         """
@@ -35,7 +38,7 @@ class XGBoostModel(BaseModel):
         """
         if self.model is None:
             raise ValueError("モデルが学習されていません。train()メソッドを実行してください。")
-        print(f"{self.model_name} で予測を実行します...")
+        logger.debug(f"{self.model_name} で予測を実行します...")
         predictions = self.model.predict(X)
         return pd.Series(predictions, index=X.index)
 
@@ -45,11 +48,7 @@ class XGBoostModel(BaseModel):
         Args:
             path (str): モデルの保存パス。
         """
-        try:
-            joblib.dump(self.model, path)
-            print(f"{self.model_name} モデルを {path} に保存しました。")
-        except Exception as e:
-            print(f"{self.model_name} モデルの保存中にエラーが発生しました: {e}")
+        super().save_model(path)
 
     def load_model(self, path: str):
         """
@@ -57,10 +56,4 @@ class XGBoostModel(BaseModel):
         Args:
             path (str): モデルのロードパス。
         """
-        try:
-            self.model = joblib.load(path)
-            print(f"{self.model_name} モデルを {path} からロードしました。")
-            print(f"ロード後の self.model の型: {type(self.model)}")
-            print(f"ロード後の self.model の値: {self.model}")
-        except Exception as e:
-            print(f"{self.model_name} モデルのロード中にエラーが発生しました: {e}")
+        super().load_model(path)

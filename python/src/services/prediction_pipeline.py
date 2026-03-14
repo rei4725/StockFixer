@@ -13,6 +13,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
 import pandas as pd
+
 from src.models.predict_single_stock import predict_single_stock
 from src.utils.data_path_utils import get_models_dir
 from src.utils.db import get_all_symbols, save_prediction_results
@@ -98,14 +99,14 @@ def predict_all_individual(max_workers=MAX_WORKERS):
 
     tasks = [(market, symbol, model_types) for market, symbol in all_keys]
     output_rows = []
-    print(f"並列予測開始（銘柄別モデル）: {len(tasks)}銘柄, ワーカー数: {max_workers}")
+    logger.info(f"並列予測開始（銘柄別モデル）: {len(tasks)}銘柄, ワーカー数: {max_workers}")
 
     def wrapper(args):
         market, symbol, mtypes = args
         try:
             return predict_single_stock(market, symbol, model_types=mtypes)
         except Exception as e:
-            print(f"[{market}_{symbol}] 予測エラー: {e}")
+            logger.error(f"[{market}_{symbol}] 予測エラー: {e}", exc_info=True)
             return None
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -139,11 +140,11 @@ def predict_all_unified(max_workers=MAX_WORKERS):
         try:
             return predict_with_unified_model(market, symbol, model_types=model_types)
         except Exception as e:
-            print(f"[{market}_{symbol}] 予測エラー: {e}")
+            logger.error(f"[{market}_{symbol}] 予測エラー: {e}", exc_info=True)
             return None
 
     output_rows = []
-    print(f"並列予測開始（統合モデル）: {len(all_keys)}銘柄, ワーカー数: {max_workers}")
+    logger.info(f"並列予測開始（統合モデル）: {len(all_keys)}銘柄, ワーカー数: {max_workers}")
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {executor.submit(wrapper, task): task for task in all_keys}
@@ -164,7 +165,7 @@ def output_top_worst_results(output_rows, mode="individual"):
         mode: "individual" or "unified"
     """
     if not output_rows:
-        print("有効な結果がありませんでした。")
+        logger.warning("有効な結果がありませんでした。")
         return
 
     df_result = pd.concat(output_rows, ignore_index=True)
@@ -185,7 +186,7 @@ def output_top_worst_results(output_rows, mode="individual"):
         # Top10
         df_top10 = df_market.sort_values("diff_ratio", ascending=False).head(10)
         df_top10_display = df_top10[display_columns]
-        print(
+        logger.info(
             df_to_pretty_string(
                 df_top10_display,
                 header=f"=== {market} 差異割合上位10銘柄 ({mode}) === 実行日時: {now_str}",
@@ -195,14 +196,14 @@ def output_top_worst_results(output_rows, mode="individual"):
         # ワースト10
         df_worst10 = df_market.sort_values("diff_ratio", ascending=True).head(10)
         df_worst10_display = df_worst10[display_columns]
-        print(
+        logger.info(
             df_to_pretty_string(
                 df_worst10_display,
                 header=f"=== {market} 差異割合ワースト10銘柄 ({mode}) === 実行日時: {now_str}",
             )
         )
 
-    print(f"\n結果保存完了: predicted_at={now_str}")
+    logger.info(f"結果保存完了: predicted_at={now_str}")
 
 
 def run_predict_single(market: str, symbol: str):
@@ -217,7 +218,7 @@ def run_predict_single(market: str, symbol: str):
 
     result = predict_single_stock(market, symbol)
     if result is None:
-        print("予測に失敗しました。モデルまたはデータが存在しない可能性があります。")
+        logger.warning("予測に失敗しました。モデルまたはデータが存在しない可能性があります。")
     else:
         pprint.pprint(result.to_dict("records")[0], sort_dicts=False, width=120)
         now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -241,7 +242,7 @@ def run_predict_watchlist():
             company = row[2] if len(row) > 2 else ""
             result = predict_single_stock(market, symbol)
             if result is None:
-                print(f"[警告] {market},{symbol} ({company}) の予測に失敗しました。")
+                logger.warning(f"{market},{symbol} ({company}) の予測に失敗しました。")
             else:
                 print(f"{market},{symbol} ({company}) の予想株価:")
                 import pprint

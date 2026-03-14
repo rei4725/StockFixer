@@ -10,6 +10,7 @@ from typing import Optional
 
 import duckdb
 import pandas as pd
+
 from src.utils.data_path_utils import ensure_dir, get_data_dir, get_db_path
 from src.utils.logger import get_logger
 
@@ -107,6 +108,20 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
             source      VARCHAR NOT NULL DEFAULT 'yfinance',
             ingested_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (market, symbol, timeframe, ts)
+        )
+    """
+    )
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS model_metrics (
+            market               VARCHAR NOT NULL,
+            symbol               VARCHAR NOT NULL,
+            model_name           VARCHAR NOT NULL,
+            trained_at           VARCHAR NOT NULL,
+            rmse                 DOUBLE,
+            directional_accuracy DOUBLE,
+            n_samples            INTEGER,
+            PRIMARY KEY (market, symbol, model_name, trained_at)
         )
     """
     )
@@ -360,6 +375,50 @@ def load_prediction_results(
     except Exception as e:
         logger.error(f"prediction_results読み込み失敗: {e}", exc_info=True)
         return pd.DataFrame()
+
+
+# --- model_metrics テーブル操作 ---
+
+
+def save_model_metrics(
+    market: str,
+    symbol: str,
+    model_name: str,
+    trained_at: str,
+    metrics: dict,
+) -> None:
+    """
+    モデル学習後の精度指標を model_metrics テーブルに保存する。
+
+    Args:
+        market: マーケット識別子
+        symbol: 銘柄シンボル
+        model_name: モデル名 (ex: "StockXGBoostModel")
+        trained_at: 学習日時文字列 (ex: "20260314_120000")
+        metrics: {"rmse": float, "directional_accuracy": float, "n_samples": int}
+    """
+    con = get_connection()
+    con.execute(
+        """
+        INSERT OR REPLACE INTO model_metrics
+            (market, symbol, model_name, trained_at, rmse, directional_accuracy, n_samples)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            market,
+            symbol,
+            model_name,
+            trained_at,
+            metrics.get("rmse"),
+            metrics.get("directional_accuracy"),
+            metrics.get("n_samples"),
+        ],
+    )
+    logger.debug(
+        f"model_metrics保存: [{market}_{symbol}/{model_name}] "
+        f"RMSE={metrics.get('rmse', 'N/A'):.6f}, "
+        f"方向正解率={metrics.get('directional_accuracy', 'N/A'):.2%}"
+    )
 
 
 def load_latest_prediction_timestamp() -> Optional[str]:
