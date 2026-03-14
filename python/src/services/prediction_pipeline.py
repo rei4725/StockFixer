@@ -11,6 +11,7 @@ import os
 import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
+from pathlib import Path
 
 import pandas as pd
 
@@ -43,10 +44,10 @@ def get_optimal_params(market: str, symbol: str) -> dict:
         最適パラメータ辞書、見つからない場合は空辞書
     """
     # python/src/services/prediction_pipeline.py -> python/config
-    config_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "config")
-    json_path = os.path.join(config_dir, "optimal_params.json")
+    config_dir = Path(__file__).parents[2] / "config"
+    json_path = config_dir / "optimal_params.json"
 
-    if not os.path.exists(json_path):
+    if not json_path.exists():
         return {}
 
     try:

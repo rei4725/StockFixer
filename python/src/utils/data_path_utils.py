@@ -76,9 +76,7 @@ def get_monitor_list_path() -> str:
 
 # ===== ティッカー補正 =====
 def get_ticker(market: str, symbol: str) -> str:
-    """
-    市場ごとにティッカーを補正して返す（例：日本株は .T を付与）
-    """
+    """市場ごとにティッカーを補正して返す（例：日本株は .T を付与）。"""
     market_lower = market.lower()
     if market_lower in ["jp", "japan"]:
         if symbol.endswith(".T"):
@@ -102,3 +100,10 @@ def ensure_dir(path: str) -> str:
     """ディレクトリが存在しなければ作成し、パスを返す"""
     os.makedirs(path, exist_ok=True)
     return path
+
+
+def normalize_col(col) -> str:
+    """列名を英数字・アンダースコアのみに正規化する（特徴量名の安全化用）。"""
+    import re
+
+    return re.sub(r"[^0-9a-zA-Z_]", "_", str(col))
