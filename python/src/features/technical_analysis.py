@@ -1,6 +1,21 @@
 import pandas as pd
 import ta
 
+# テクニカル指標のデフォルトパラメータ
+_DEFAULT_TA_PARAMS = {
+    "macd_slow": 26,
+    "macd_fast": 12,
+    "macd_sign": 9,
+    "ema_fast": 12,
+    "ema_slow": 26,
+    "atr_window": 14,
+    "rsi_window": 14,
+    "bb_window": 20,
+    "bb_dev": 2,
+    "stoch_window": 14,
+    "stoch_smooth": 3,
+}
+
 
 def create_basic_lag_features(df: pd.DataFrame, n_lags: int = 5, feature_cols=None):
     """
@@ -30,16 +45,20 @@ def create_basic_lag_features(df: pd.DataFrame, n_lags: int = 5, feature_cols=No
     return X, y
 
 
-def add_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
+def add_technical_indicators(df: pd.DataFrame, params: dict = None) -> pd.DataFrame:
     """
      DataFrameにテクニカル指標を追加する
 
     Args:
          df (pd.DataFrame): OHLCVデータを含むDataFrame
+         params (dict, optional): テクニカル指標のパラメータ辞書。
+             省略時は `_DEFAULT_TA_PARAMS` のデフォルト値を使用。
+             例: {"rsi_window": 21, "bb_window": 14}
 
      Returns:
          pd.DataFrame: テクニカル指標が追加されたDataFrame
     """
+    p = {**_DEFAULT_TA_PARAMS, **(params or {})}
     df = df.copy()
 
     # MultiIndex列をフラット化（yfinanceやCSV読み込み時の対策）
@@ -56,7 +75,11 @@ def add_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
     # MACD
     macd = ta.trend.MACD(
-        close=df["Close"], window_slow=26, window_fast=12, window_sign=9, fillna=True
+        close=df["Close"],
+        window_slow=p["macd_slow"],
+        window_fast=p["macd_fast"],
+        window_sign=p["macd_sign"],
+        fillna=True,
     )
     df["macd"] = macd.macd()
     df["macd_signal"] = macd.macd_signal()
@@ -64,22 +87,26 @@ def add_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
     # EMA
     df["ema_fast"] = ta.trend.EMAIndicator(
-        close=df["Close"], window=12, fillna=True
+        close=df["Close"], window=p["ema_fast"], fillna=True
     ).ema_indicator()
     df["ema_slow"] = ta.trend.EMAIndicator(
-        close=df["Close"], window=26, fillna=True
+        close=df["Close"], window=p["ema_slow"], fillna=True
     ).ema_indicator()
 
     # ATR
     df["atr"] = ta.volatility.AverageTrueRange(
-        high=df["High"], low=df["Low"], close=df["Close"], window=14, fillna=True
+        high=df["High"], low=df["Low"], close=df["Close"], window=p["atr_window"], fillna=True
     ).average_true_range()
 
     # RSI
-    df["rsi"] = ta.momentum.RSIIndicator(close=df["Close"], window=14, fillna=True).rsi()
+    df["rsi"] = ta.momentum.RSIIndicator(
+        close=df["Close"], window=p["rsi_window"], fillna=True
+    ).rsi()
 
     # Bollinger Bands
-    bb = ta.volatility.BollingerBands(close=df["Close"], window=20, window_dev=2, fillna=True)
+    bb = ta.volatility.BollingerBands(
+        close=df["Close"], window=p["bb_window"], window_dev=p["bb_dev"], fillna=True
+    )
     df["bb_upper"] = bb.bollinger_hband()
     df["bb_middle"] = bb.bollinger_mavg()
     df["bb_lower"] = bb.bollinger_lband()
@@ -87,7 +114,12 @@ def add_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
     # Stochastic Oscillator
     stoch = ta.momentum.StochasticOscillator(
-        high=df["High"], low=df["Low"], close=df["Close"], window=14, smooth_window=3, fillna=True
+        high=df["High"],
+        low=df["Low"],
+        close=df["Close"],
+        window=p["stoch_window"],
+        smooth_window=p["stoch_smooth"],
+        fillna=True,
     )
     df["stoch_k"] = stoch.stoch()
     df["stoch_d"] = stoch.stoch_signal()
