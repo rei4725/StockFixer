@@ -62,11 +62,12 @@ def run_daily_pipeline():
 
 def run_weekly_training():
     """
-    週次実行: 統合モデル再学習
+    週次実行: 統合モデル再学習 → 予測精度チェック → ドリフト警告
 
     流れ:
         1. XGBoostモデルの再学習
         2. LightGBMモデルの再学習
+        3. 予測精度チェック & ドリフト警告
     """
     logger.info("=== 週次モデル学習開始 ===")
 
@@ -82,4 +83,35 @@ def run_weekly_training():
             logger.error(f"学習失敗 ({model_name}): {e}")
             raise
 
+    # 予測精度チェック & ドリフト警告
+    logger.info("予測精度チェック開始")
+    try:
+        from src.api.discord_utils import send_drift_alert
+        from src.services.prediction_pipeline import run_accuracy_check
+
+        summary = run_accuracy_check(horizon=1)
+        send_drift_alert(summary, horizon=1)
+    except Exception as e:
+        logger.error(f"予測精度チェック失敗: {e}", exc_info=True)
+
     logger.info("=== 週次モデル学習完了 ===")
+
+
+def run_weekly_report():
+    """
+    週次パフォーマンスレポートを Discord に送信する。
+
+    直近の予測精度サマリーを集計し、Discord Webhook へ通知することで
+    モデルの劣化を早期検知する。
+    """
+    logger.info("=== 週次レポート生成開始 ===")
+    try:
+        from src.api.discord_utils import send_weekly_report
+        from src.utils.db import load_drift_summary
+
+        summary = load_drift_summary(horizon=1)
+        send_weekly_report(accuracy_df=summary, horizon=1)
+        logger.info("=== 週次レポート送信完了 ===")
+    except Exception as e:
+        logger.error(f"週次レポート生成失敗: {e}", exc_info=True)
+        raise

@@ -43,10 +43,17 @@ def job_daily_pipeline():
 
 
 def job_weekly_model_training():
-    """週次実行: 統合モデル再学習"""
+    """週次実行: 統合モデル再学習 + 予測精度チェック"""
     from src.services.scheduler_pipeline import run_weekly_training
 
     run_weekly_training()
+
+
+def job_weekly_report():
+    """週次実行: パフォーマンスレポート Discord 送信"""
+    from src.services.scheduler_pipeline import run_weekly_report
+
+    run_weekly_report()
 
 
 # ── イベントリスナー ──────────────────────────────────
@@ -81,7 +88,18 @@ SCHEDULE_CONFIG = {
         "minute": 0,
         "recovery_delay_minutes": 15,
         "max_executions_per_period": 2,
-        "description": "毎週土曜 03:00 - 統合モデル再学習",
+        "description": "毎週土曜 03:00 - 統合モデル再学習 + 精度チェック",
+    },
+    "weekly_report": {
+        "func": job_weekly_report,
+        "trigger": "cron",
+        "period": "weekly",
+        "day_of_week": "sat",
+        "hour": 4,
+        "minute": 0,
+        "recovery_delay_minutes": 15,
+        "max_executions_per_period": 2,
+        "description": "毎週土曜 04:00 - パフォーマンスレポート送信",
     },
 }
 
