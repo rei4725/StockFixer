@@ -1,3 +1,4 @@
+import json
 import os
 
 import discord
@@ -5,7 +6,8 @@ import pandas as pd
 from discord.ext import commands
 from discord.utils import escape_markdown
 from dotenv import load_dotenv
-from src.utils.data_path_utils import get_monitor_list_path
+
+from src.utils.data_path_utils import get_monitor_list_path, get_results_dir
 from src.utils.db import (
     load_latest_prediction_timestamp,
     load_prediction_markets,
@@ -49,9 +51,9 @@ def convert_df_for_discord(df: pd.DataFrame) -> pd.DataFrame:
     # 予想変化率がなければ計算
     if "現在値" in df.columns and "予想終値" in df.columns and "予想変化率" not in df.columns:
         try:
-            df["予想変化率"] = (df["予想終値"].astype(float) - df["現在値"].astype(float)) / df[
-                "現在値"
-            ].astype(float)
+            df["予想変化率"] = (df["予想終値"].astype(float) - df["現在値"].astype(float)) / df["現在値"].astype(
+                float
+            )
         except Exception:
             df["予想変化率"] = ""
     # 数値列変換
@@ -92,16 +94,12 @@ async def handle_forecast_command(message):
     # 最新の予測結果をDBから取得
     latest_ts = load_latest_prediction_timestamp()
     if latest_ts is None:
-        await message.channel.send(
-            escape_markdown("予測結果が見つかりませんでした。"), allowed_mentions=None
-        )
+        await message.channel.send(escape_markdown("予測結果が見つかりませんでした。"), allowed_mentions=None)
         return
 
     markets = load_prediction_markets(latest_ts)
     if not markets:
-        await message.channel.send(
-            escape_markdown("予測結果が見つかりませんでした。"), allowed_mentions=None
-        )
+        await message.channel.send(escape_markdown("予測結果が見つかりませんでした。"), allowed_mentions=None)
         return
 
     # Top10送信
@@ -113,7 +111,7 @@ async def handle_forecast_command(message):
         # Discordメッセージ長制限対応
         max_length = 1900
         for i in range(0, len(msg), max_length):
-            await message.channel.send(msg[i:i + max_length])
+            await message.channel.send(msg[i : i + max_length])
 
     # ワースト10送信
     for market in sorted(markets):
@@ -123,7 +121,7 @@ async def handle_forecast_command(message):
         msg = f"=== {market} 差異割合ワースト10銘柄 ===\n```text\n{table_text}\n```"
         max_length = 1900
         for i in range(0, len(msg), max_length):
-            await message.channel.send(msg[i:i + max_length])
+            await message.channel.send(msg[i : i + max_length])
 
 
 @bot.event
@@ -185,16 +183,148 @@ async def handle_watchnext_command(message):
     await message.channel.send(msg)
 
 
+async def handle_signal_command(message, parts: list):
+    """
+    /signal <symbol> [market] [--explain]
+    指定銘柄の最新予測シグナルを表示する。
+    --explain を付けると SHAP による特徴量寄与度トップ5を追加表示する。
+    """
+    if len(parts) < 2:
+        await message.channel.send(
+            escape_markdown(
+                "使い方: /signal <銘柄コード> [market] [--explain]  例: /signal AAPL us --explain"
+            ),
+            allowed_mentions=None,
+        )
+        return
+
+    symbol = parts[1].upper()
+    market = parts[2].lower() if len(parts) >= 3 and not parts[2].startswith("--") else "us"
+    explain = "--explain" in parts
+
+    from src.models.predict_single_stock import explain_prediction_shap, predict_single_stock
+
+    await message.channel.send(escape_markdown(f"計算中... {market}/{symbol}"), allowed_mentions=None)
+    result_df = predict_single_stock(market, symbol)
+    if result_df is None or result_df.empty:
+        await message.channel.send(
+            escape_markdown(f"モデルが見つかりませんでした: {market}/{symbol}"),
+            allowed_mentions=None,
+        )
+        return
+
+    r = result_df.iloc[0]
+    diff_ratio = float(r["diff_ratio"])
+    current_price = float(r["current_price"])
+    pred_price = float(r["avg_pred_price"])
+    model_count = int(r["model_count"])
+
+    if diff_ratio > 0.005:
+        signal = "⬆️ Buy"
+    elif diff_ratio < -0.005:
+        signal = "⬇️ Sell"
+    else:
+        signal = "⏺️ Hold"
+
+    import math
+
+    current_disp = math.floor(current_price * 1000) / 1000
+    pred_disp = math.floor(pred_price * 1000) / 1000
+    change_pct = f"{diff_ratio * 100:.2g}%"
+
+    lines = [
+        f"=== {market.upper()} / {symbol} ===",
+        f"現在値  : {current_disp}",
+        f"予想終値: {pred_disp}",
+        f"予想変化率: {change_pct}",
+        f"シグナル : {signal}",
+        f"使用モデル: {model_count}モデルの平均",
+    ]
+
+    if explain:
+        shap_result = explain_prediction_shap(market, symbol, top_n=5)
+        if shap_result:
+            lines.append("")
+            lines.append(f"[SHAP 寄与度 Top5 - 方向:{shap_result['direction']}]")
+            for feat in shap_result["top_features"]:
+                arrow = "▲" if feat["shap_value"] > 0 else "▼"
+                lines.append(f"  {arrow} {feat['feature'][:30]:<30}  {feat['shap_value']:+.5f}")
+        else:
+            lines.append("(SHAP 計算スキップ: モデルまたはライブラリが未対応)")
+
+    msg = "```text\n" + "\n".join(lines) + "\n```"
+    await message.channel.send(msg)
+
+
+async def handle_status_command(message):
+    """
+    /status
+    スケジューラの最終実行時刻を表示する。
+    """
+    state_file = os.path.join(get_results_dir(), "scheduler_queue_state.json")
+    if not os.path.exists(state_file):
+        await message.channel.send(
+            escape_markdown("スケジューラ状態ファイルが見つかりません。スケジューラが起動されていない可能性があります。"),
+            allowed_mentions=None,
+        )
+        return
+
+    try:
+        with open(state_file, encoding="utf-8") as f:
+            state = json.load(f)
+    except Exception as e:
+        await message.channel.send(
+            escape_markdown(f"状態ファイルの読み込みに失敗しました: {e}"),
+            allowed_mentions=None,
+        )
+        return
+
+    events = state.get("events", [])
+
+    # job_id ごとの最終実行を集計
+    last_runs: dict = {}
+    last_status: dict = {}
+    for event in reversed(events):
+        job_id = event.get("job_id", "")
+        if job_id and job_id not in last_runs:
+            last_runs[job_id] = event.get("finished_at") or event.get("started_at") or "不明"
+            last_status[job_id] = event.get("status", "不明")
+
+    job_labels = {
+        "daily_pipeline": "日次 (daily_pipeline)",
+        "weekly_model_training": "週次 (weekly_model_training)",
+    }
+
+    lines = ["=== スケジューラ状態 ==="]
+    for job_id, label in job_labels.items():
+        ts = last_runs.get(job_id, "実行履歴なし")
+        st = last_status.get(job_id, "-")
+        if len(ts) >= 19:
+            ts = ts[:19].replace("T", " ")
+        lines.append(f"{label}")
+        lines.append(f"  最終実行: {ts}  [状態: {st}]")
+
+    msg = "```text\n" + "\n".join(lines) + "\n```"
+    await message.channel.send(msg)
+
+
 @bot.event
 async def on_message(message):
     try:
         if message.author.bot:
             return
 
-        if message.content == "/forecast":
+        parts = message.content.split()
+        command = parts[0] if parts else ""
+
+        if command == "/forecast":
             await handle_forecast_command(message)
-        elif message.content == "/WatchNext":
+        elif command == "/WatchNext":
             await handle_watchnext_command(message)
+        elif command == "/signal":
+            await handle_signal_command(message, parts)
+        elif command == "/status":
+            await handle_status_command(message)
         else:
             await message.channel.send(
                 escape_markdown(f"受信: {message.content}"), allowed_mentions=None
