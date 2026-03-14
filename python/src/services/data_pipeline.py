@@ -5,7 +5,6 @@
 data層とfeatures層を組み合わせて利用する
 """
 
-import re
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -19,7 +18,7 @@ from src.data.data_loader import (
 )
 from src.data.data_saver import save_raw_ohlcv
 from src.features.technical_analysis import add_technical_indicators, create_basic_lag_features
-from src.utils.data_path_utils import get_ticker
+from src.utils.data_path_utils import get_ticker, normalize_col
 from src.utils.db import delete_stock_features, upsert_stock_features
 from src.utils.logger import get_logger
 
@@ -49,20 +48,11 @@ def fetch_stock_data_with_features(
     """
     raw_data_to_save = None
 
-    # start_date, end_date自動決定
-    if start_date is None or end_date is None:
-        try:
-            df_all = get_stock_data(
-                market, symbol, "1900-01-01", datetime.now().strftime("%Y-%m-%d")
-            )
-            if df_all is None or df_all.empty:
-                logger.warning(f"{symbol} のデータが取得できませんでした。")
-                return None
-            start_date = df_all.index.min().strftime("%Y-%m-%d")
-        except Exception as e:
-            logger.error(f"{symbol} のデータ取得でエラー: {e}", exc_info=True)
-            return None
+    # start_date, end_date自動決定（5年前〜現在をデフォルトとする）
+    if end_date is None:
         end_date = datetime.now().strftime("%Y-%m-%d")
+    if start_date is None:
+        start_date = (datetime.now() - timedelta(days=5 * 365)).strftime("%Y-%m-%d")
 
     # 市場ごとにティッカーを補正
     ticker = get_ticker(market, symbol)
@@ -140,9 +130,6 @@ def fetch_stock_data_with_features(
         return None
 
     # 特徴量名の正規化
-    def normalize_col(col):
-        return re.sub(r"[^0-9a-zA-Z_]", "_", str(col))
-
     X.columns = [normalize_col(c) for c in X.columns]
 
     # X, yを1つのDataFrameにまとめる
