@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 
 
@@ -29,8 +30,11 @@ class SignalGenerator:
 
         # RSI判定（テスト仕様に合わせて列名を'RSI'に統一）
         if "RSI" in data.columns:
-            # RSIが高くてもBuy維持、低くてもSell維持、中立ならHold
-            signals.loc[(data["RSI"] > 30) & (data["RSI"] < 70) & (signals == "Hold")] = "Hold"
+            # RSI極値でHoldゾーンを補強:
+            # 売られすぎ(RSI<30) かつ Holdなら Buy（押し目買いシグナル）
+            # 買われすぎ(RSI>70) かつ Holdなら Sell（高値売りシグナル）
+            signals.loc[(data["RSI"] < 30) & (signals == "Hold")] = "Buy"
+            signals.loc[(data["RSI"] > 70) & (signals == "Hold")] = "Sell"
 
         return signals
 
@@ -40,19 +44,18 @@ if __name__ == "__main__":
     dates = pd.to_datetime(pd.date_range(start="2023-01-01", periods=100, freq="D"))
     dummy_data = pd.DataFrame(
         {
-            "Open": 100 + (pd.np.random.rand(100) - 0.5).cumsum(),
-            "High": 101 + (pd.np.random.rand(100) - 0.5).cumsum(),
-            "Low": 99 + (pd.np.random.rand(100) - 0.5).cumsum(),
-            "Close": 100 + (pd.np.random.rand(100) - 0.5).cumsum(),
-            "Volume": pd.np.random.randint(1000, 5000, 100),
-            "RSI": pd.np.random.uniform(20, 80, 100),  # 仮のRSI値
+            "Open": 100 + (np.random.rand(100) - 0.5).cumsum(),
+            "High": 101 + (np.random.rand(100) - 0.5).cumsum(),
+            "Low": 99 + (np.random.rand(100) - 0.5).cumsum(),
+            "Close": 100 + (np.random.rand(100) - 0.5).cumsum(),
+            "Volume": np.random.randint(1000, 5000, 100),
+            "RSI": np.random.uniform(20, 80, 100),  # 仮のRSI値
         },
         index=dates,
     )
 
     # ダミーの予測結果 (価格変動率を想定)
-    dummy_prediction = pd.Series(pd.np.random.uniform(-0.01, 0.01, 100), index=dates)
-
+    dummy_prediction = pd.Series(np.random.uniform(-0.01, 0.01, 100), index=dates)
     generator = SignalGenerator()
     signals = generator.generate_signal(dummy_data, dummy_prediction)
 

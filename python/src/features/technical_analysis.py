@@ -44,13 +44,15 @@ def add_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
     # MultiIndex列をフラット化（yfinanceやCSV読み込み時の対策）
     if isinstance(df.columns, pd.MultiIndex):
-        df.columns = [str(col[0]) if isinstance(col, tuple) else str(col) for col in df.columns]
+        df.columns = pd.Index(  # type: ignore[assignment]
+            [str(col[0]) if isinstance(col, tuple) else str(col) for col in df.columns]
+        )
 
     # 各OHLCV列が2次元の場合は1次元に変換
     for col in ["Open", "High", "Low", "Close", "Volume"]:
         if col in df.columns:
             if hasattr(df[col], "ndim") and df[col].ndim > 1:
-                df[col] = df[col].iloc[:, 0]
+                df[col] = df[col].iloc[:, 0]  # type: ignore[call-overload]
 
     # MACD
     macd = ta.trend.MACD(
@@ -75,5 +77,30 @@ def add_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
     # RSI
     df["rsi"] = ta.momentum.RSIIndicator(close=df["Close"], window=14, fillna=True).rsi()
+
+    # Bollinger Bands
+    bb = ta.volatility.BollingerBands(close=df["Close"], window=20, window_dev=2, fillna=True)
+    df["bb_upper"] = bb.bollinger_hband()
+    df["bb_middle"] = bb.bollinger_mavg()
+    df["bb_lower"] = bb.bollinger_lband()
+    df["bb_width"] = bb.bollinger_wband()
+
+    # Stochastic Oscillator
+    stoch = ta.momentum.StochasticOscillator(
+        high=df["High"], low=df["Low"], close=df["Close"], window=14, smooth_window=3, fillna=True
+    )
+    df["stoch_k"] = stoch.stoch()
+    df["stoch_d"] = stoch.stoch_signal()
+
+    # OBV (On Balance Volume)
+    df["obv"] = ta.volume.OnBalanceVolumeIndicator(
+        close=df["Close"], volume=df["Volume"], fillna=True
+    ).on_balance_volume()
+
+    # 季節性特徴量（DatetimeIndexの場合のみ付与）
+    if isinstance(df.index, pd.DatetimeIndex):
+        df["day_of_week"] = df.index.dayofweek
+        df["month"] = df.index.month
+        df["is_month_end"] = df.index.is_month_end.astype(int)
 
     return df

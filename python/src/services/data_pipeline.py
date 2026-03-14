@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 import pandas as pd
+
 from src.data.data_loader import (
     get_raw_ohlcv_from_db,
     get_stock_data,
@@ -82,11 +83,11 @@ def fetch_stock_data_with_features(
         if db_latest_date is not None:
             # DB内有データ：差分更新ロジック
             fetch_start = (pd.to_datetime(db_latest_date) + timedelta(days=1)).strftime("%Y-%m-%d")
-            print(f"差分取得: {market}/{symbol} ({fetch_start}～{end_date})")
+            logger.info(f"差分取得: {market}/{symbol} ({fetch_start}～{end_date})")
             fresh_data = get_stock_data(market, ticker, fetch_start, end_date)
             if fresh_data is not None and not fresh_data.empty:
                 df = merge_market_data(df, fresh_data)
-                print(f"差分マージ完了: {len(fresh_data)}行追加")
+                logger.info(f"差分マージ完了: {len(fresh_data)}行追加")
                 if defer_raw_save:
                     raw_data_to_save = fresh_data
                 else:
@@ -94,9 +95,9 @@ def fetch_stock_data_with_features(
                         # 差分のみ保存（全件再保存より効率的）
                         save_raw_ohlcv(market, symbol, fresh_data)
                     except Exception as e:
-                        print(f"Raw OHLCV保存エラー（処理継続）: {e}")
+                        logger.error(f"Raw OHLCV保存エラー（処理継続）: {e}", exc_info=True)
             else:
-                print("差分データなし（営業日外の可能性）")
+                logger.warning("差分データなし（営業日外の可能性）")
         else:
             # DB内無データ：フル取得
             logger.info(
