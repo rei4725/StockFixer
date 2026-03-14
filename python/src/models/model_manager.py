@@ -6,6 +6,9 @@ from src.models.base_model import BaseModel
 from src.models.lightgbm_model import LightGBMModel
 from src.models.xgboost_model import XGBoostModel
 from src.utils.data_path_utils import ensure_dir, get_models_dir, get_models_subdir
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class ModelManager:
@@ -33,7 +36,7 @@ class ModelManager:
         if not issubclass(model_class, BaseModel):
             raise ValueError("登録するモデルクラスはBaseModelを継承している必要があります。")
         self._registered_models[name] = model_class
-        print(f"モデルタイプ '{name}' を登録しました。")
+        logger.debug(f"モデルタイプ '{name}' を登録しました。")
 
     def create_model(self, model_type: str, model_name: str, **kwargs) -> BaseModel:
         """
@@ -55,7 +58,7 @@ class ModelManager:
         model_class = self._registered_models[model_type]
         model_instance = model_class(model_name=model_name, **kwargs)
         self.models[model_name] = model_instance
-        print(f"モデル '{model_name}' ({model_type}) を作成しました。")
+        logger.debug(f"モデル '{model_name}' ({model_type}) を作成しました。")
         return model_instance
 
     def get_model(self, model_name: str) -> BaseModel:
@@ -143,12 +146,10 @@ class ModelManager:
                 elif "LightGBM" in model_name:
                     model_type = "LightGBMModel"
                 else:
-                    raise ValueError(
-                        f"モデル '{model_name}' はまだ作成されていません。model_typeを指定してください。"
-                    )
+                    raise ValueError(f"モデル '{model_name}' はまだ作成されていません。model_typeを指定してください。")
             model_instance = self.create_model(model_type, model_name)
 
         model_instance.load_model(model_path)
         self.models[model_name] = model_instance  # ロードしたモデルインスタンスを更新
-        print(f"モデル '{model_name}' をロードしました。")
+        logger.debug(f"モデル '{model_name}' をロードしました。")
         return model_instance

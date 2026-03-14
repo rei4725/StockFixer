@@ -5,16 +5,16 @@ yfinanceのAPI制限やネットワークエラーに対応する。
 指数バックオフで待機時間を徐々に増やしながらリトライする。
 """
 
-import logging
 import time
 from typing import Any, Callable, TypeVar
 
 import yfinance as yf
+from src.utils.logger import get_logger
 
 T = TypeVar("T")
 
 # ロギング設定
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def with_retry(

@@ -8,6 +8,9 @@ import re
 
 from src.models.model_manager import ModelManager
 from src.utils.db import load_stock_features
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def load_features_for_training(market: str, symbol: str) -> dict:
@@ -22,7 +25,7 @@ def load_features_for_training(market: str, symbol: str) -> dict:
         dict: {"market", "symbol", "status", "X", "y"}
     """
     try:
-        print(f"[データ読み込み] {market}/{symbol}")
+        logger.info(f"[データ読み込み] {market}/{symbol}")
         df = load_stock_features(market, symbol)
 
         if df is None or df.empty:
@@ -42,7 +45,7 @@ def load_features_for_training(market: str, symbol: str) -> dict:
 
         return {"market": market, "symbol": symbol, "status": "success", "X": X, "y": y}
     except Exception as e:
-        print(f"[データ読み込みエラー] {market}/{symbol}: {e}")
+        logger.error(f"[データ読み込みエラー] {market}/{symbol}: {e}", exc_info=True)
         return {"market": market, "symbol": symbol, "status": "error", "error": str(e)}
 
 
@@ -58,7 +61,7 @@ def train_models_for_symbol(market: str, symbol: str) -> dict:
         dict: {"market", "symbol", "status", ...}
     """
     try:
-        print(f"[モデル作成開始] {market}/{symbol}")
+        logger.info(f"[モデル作成開始] {market}/{symbol}")
 
         # DBから特徴量データを取得
         loaded = load_features_for_training(market, symbol)
@@ -78,10 +81,10 @@ def train_models_for_symbol(market: str, symbol: str) -> dict:
         model_manager.create_model("LightGBMModel", "StockLightGBMModel")
         model_manager.train_model("StockLightGBMModel", X, y, market=market, symbol=symbol)
 
-        print(f"[モデル作成完了] {market}/{symbol}")
+        logger.info(f"[モデル作成完了] {market}/{symbol}")
         return {"market": market, "symbol": symbol, "status": "success"}
     except Exception as e:
-        print(f"[モデル作成エラー] {market}/{symbol}: {e}")
+        logger.error(f"[モデル作成エラー] {market}/{symbol}: {e}", exc_info=True)
         return {"market": market, "symbol": symbol, "status": "error", "error": str(e)}
 
 
@@ -116,7 +119,7 @@ def run_model_batch():
 
     symbols = load_target_symbols()
     if not symbols:
-        print("対象銘柄がありません。")
+        logger.warning("対象銘柄がありません。")
         return
 
     # フェーズ1: データ読み込み（並列）

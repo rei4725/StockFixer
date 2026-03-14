@@ -12,6 +12,9 @@ from datetime import datetime
 from typing import Optional, Tuple
 
 import pandas as pd
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
@@ -45,13 +48,13 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
         ticker = get_ticker(market, symbol)
         df = get_stock_data(market, ticker, start, end)
         if df is None or df.empty:
-            print(f"[エラー] yfinanceからデータを取得できませんでした: {market}/{symbol}")
+            logger.error(f"[backtest] yfinanceからデータを取得できませんでした: {market}/{symbol}")
             sys.exit(1)
         close_series = df["Close"].copy()
         df = add_technical_indicators(df)
         X, y = create_basic_lag_features(df, n_lags=5)
         if X is None or X.empty:
-            print("[エラー] 特徴量生成に失敗しました。")
+            logger.error("[backtest] 特徴量生成に失敗しました。")
             sys.exit(1)
         X.columns = [re.sub(r"[^0-9a-zA-Z_]", "_", str(c)) for c in X.columns]
         X["y"] = y
@@ -68,14 +71,16 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
 
         df = get_raw_ohlcv_from_db(market, symbol)
         if df is None or df.empty:
-            print(f"[エラー] market_data_rawにデータがありません: {market}/{symbol}")
-            print("先に run_data_creation.py を実行してください。")
+            logger.error(
+                f"[backtest] market_data_rawにデータがありません: {market}/{symbol}"
+                " → run_data_creation.pyを先に実行してください"
+            )
             sys.exit(1)
         close_series = df["Close"].copy()
         df = add_technical_indicators(df)
         X, y = create_basic_lag_features(df, n_lags=5)
         if X is None or X.empty:
-            print("[エラー] 特徴量生成に失敗しました。")
+            logger.error("[backtest] 特徴量生成に失敗しました。")
             sys.exit(1)
         X.columns = [re.sub(r"[^0-9a-zA-Z_]", "_", str(c)) for c in X.columns]
         X["y"] = y
@@ -87,8 +92,10 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
 
         df = load_stock_features(market, symbol)
         if df is None or df.empty:
-            print(f"[エラー] stock_featuresにデータがありません: {market}/{symbol}")
-            print("先に run_data_creation.py を実行してください。")
+            logger.error(
+                f"[backtest] stock_featuresにデータがありません: {market}/{symbol}"
+                " → run_data_creation.pyを先に実行してください"
+            )
             sys.exit(1)
 
         # 100% NULL の列を除去（Dividends、Capital_Gains、Stock_Splits など）
@@ -169,8 +176,8 @@ def run_backtest_single(
     train_df = df.iloc[:split]
     test_df = df.iloc[split:]
 
-    print(f"学習期間: {train_df.index[0]} ～ {train_df.index[-1]} ({len(train_df)}行)")
-    print(f"検証期間: {test_df.index[0]} ～ {test_df.index[-1]} ({len(test_df)}行)")
+    logger.info(f"学習期間: {train_df.index[0]} ～ {train_df.index[-1]} ({len(train_df)}行)")
+    logger.info(f"検証期間: {test_df.index[0]} ～ {test_df.index[-1]} ({len(test_df)}行)")
 
     # ラベル付与
     label_col = task.label_col
@@ -382,8 +389,7 @@ def _ensemble_predict(
     X_test: pd.DataFrame,
     base_name: str,
 ) -> pd.Series:
-    """
-    XGBoost + LightGBM のアンサンブル予測（平均）を返す。
+    """アンサンブル予測（平均）を返す（XGBoost + LightGBM）。
 
     両モデルを同一データで学習し、予測値の平均を取ることで
     バイアスを低減する。

@@ -11,6 +11,9 @@ from typing import Optional
 import duckdb
 import pandas as pd
 from src.utils.data_path_utils import ensure_dir, get_data_dir, get_db_path
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 # --- 接続管理（スレッドセーフ） ---
 _connection: Optional[duckdb.DuckDBPyConnection] = None
@@ -63,15 +66,18 @@ def get_readonly_connection() -> duckdb.DuckDBPyConnection:
 # --- テーブル初期化 ---
 def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
     """stock_features / prediction_results / market_data_raw テーブルを作成する"""
-    con.execute("""
+    con.execute(
+        """
         CREATE TABLE IF NOT EXISTS stock_features (
             market   VARCHAR NOT NULL,
             symbol   VARCHAR NOT NULL,
             row_num  INTEGER NOT NULL,
             PRIMARY KEY (market, symbol, row_num)
         )
-    """)
-    con.execute("""
+    """
+    )
+    con.execute(
+        """
         CREATE TABLE IF NOT EXISTS prediction_results (
             market         VARCHAR NOT NULL,
             symbol         VARCHAR NOT NULL,
@@ -82,8 +88,10 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
             model_count    INTEGER,
             PRIMARY KEY (market, symbol, predicted_at)
         )
-    """)
-    con.execute("""
+    """
+    )
+    con.execute(
+        """
         CREATE TABLE IF NOT EXISTS market_data_raw (
             market      VARCHAR NOT NULL,
             symbol      VARCHAR NOT NULL,
@@ -100,7 +108,8 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
             ingested_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (market, symbol, timeframe, ts)
         )
-    """)
+    """
+    )
 
 
 def init_tables() -> None:
@@ -123,8 +132,8 @@ def _ensure_columns(con: duckdb.DuckDBPyConnection, df: pd.DataFrame) -> None:
             "SELECT column_name FROM information_schema.columns WHERE table_name = 'stock_features'"
         ).fetchall()
         existing_cols = {row[0] for row in result}
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"stock_featuresカラム一覧取得失敗: {e}")
 
     reserved = {"market", "symbol", "row_num"}
     for col in df.columns:
@@ -144,8 +153,8 @@ def _ensure_columns(con: duckdb.DuckDBPyConnection, df: pd.DataFrame) -> None:
             try:
                 con.execute(f'ALTER TABLE stock_features ADD COLUMN "{col}" {sql_type}')
             except Exception:
-                # 既に存在する場合（レースコンディション対策）
-                pass
+                # 既に存在する場合（レースコンディション対策）は無視
+                logger.debug(f"カラム追加スキップ（既存）: {col}")
 
 
 def upsert_stock_features(market: str, symbol: str, df: pd.DataFrame) -> None:
@@ -176,7 +185,7 @@ def upsert_stock_features(market: str, symbol: str, df: pd.DataFrame) -> None:
     cols = list(save_df.columns)
     col_list = ", ".join(f'"{c}"' for c in cols)
     con.execute(f"INSERT INTO stock_features ({col_list}) SELECT {col_list} FROM save_df")
-    print(f"DB保存完了: stock_features [{market}_{symbol}] ({len(save_df)}行)")
+    logger.info(f"DB保存完了: stock_features [{market}_{symbol}] ({len(save_df)}行)")
 
 
 def load_stock_features(market: str, symbol: str) -> Optional[pd.DataFrame]:
@@ -196,7 +205,8 @@ def load_stock_features(market: str, symbol: str) -> Optional[pd.DataFrame]:
             "SELECT * FROM stock_features WHERE market = ? AND symbol = ? ORDER BY row_num",
             [market, symbol],
         ).fetchdf()
-    except Exception:
+    except Exception as e:
+        logger.error(f"stock_features読み込み失敗 [{market}_{symbol}]: {e}", exc_info=True)
         return None
 
     if df.empty:
@@ -218,7 +228,8 @@ def load_all_stock_features() -> pd.DataFrame:
     con = get_connection()
     try:
         df = con.execute("SELECT * FROM stock_features ORDER BY market, symbol, row_num").fetchdf()
-    except Exception:
+    except Exception as e:
+        logger.error(f"stock_features全件読み込み失敗: {e}", exc_info=True)
         return pd.DataFrame()
 
     if df.empty:
@@ -228,7 +239,7 @@ def load_all_stock_features() -> pd.DataFrame:
     if "row_num" in df.columns:
         df = df.drop(columns=["row_num"])
 
-    print(f"DB読み込み完了: stock_features ({len(df)}行)")
+    logger.info(f"DB読み込み完了: stock_features ({len(df)}行)")
     return df
 
 
@@ -236,7 +247,7 @@ def delete_stock_features(market: str, symbol: str) -> None:
     """指定 market/symbol のデータを削除する"""
     con = get_connection()
     con.execute("DELETE FROM stock_features WHERE market = ? AND symbol = ?", [market, symbol])
-    print(f"DB削除完了: stock_features [{market}_{symbol}]")
+    logger.info(f"DB削除完了: stock_features [{market}_{symbol}]")
 
 
 def get_all_symbols() -> list:
@@ -252,7 +263,8 @@ def get_all_symbols() -> list:
             "SELECT DISTINCT market, symbol FROM stock_features ORDER BY market, symbol"
         ).fetchall()
         return [(row[0], row[1]) for row in result]
-    except Exception:
+    except Exception as e:
+        logger.error(f"stock_features銘柄一覧取得失敗: {e}", exc_info=True)
         return []
 
 
@@ -301,7 +313,7 @@ def save_prediction_results(predicted_at: str, df: pd.DataFrame) -> None:
     # DataFrame を登録してから INSERT（複数行の INSERT に対応）
     con.register("_save_df_temp", save_df)
     con.execute("INSERT INTO prediction_results SELECT * FROM _save_df_temp")
-    print(f"DB保存完了: prediction_results [{predicted_at}] ({len(save_df)}行)")
+    logger.info(f"DB保存完了: prediction_results [{predicted_at}] ({len(save_df)}行)")
 
 
 def load_prediction_results(
@@ -327,7 +339,7 @@ def load_prediction_results(
             return pd.DataFrame()
 
     query = "SELECT * FROM prediction_results WHERE predicted_at = ?"
-    params = [predicted_at]
+    params: list = [predicted_at]
 
     if market is not None:
         query += " AND market = ?"
@@ -345,7 +357,8 @@ def load_prediction_results(
     try:
         df = con.execute(query, params).fetchdf()
         return df
-    except Exception:
+    except Exception as e:
+        logger.error(f"prediction_results読み込み失敗: {e}", exc_info=True)
         return pd.DataFrame()
 
 
@@ -363,13 +376,12 @@ def load_latest_prediction_timestamp() -> Optional[str]:
             "FROM prediction_results "
             "ORDER BY predicted_at DESC LIMIT 1"
         )
-        result = con.execute(
-            query
-        ).fetchone()
+        result = con.execute(query).fetchone()
         if result:
             return result[0]
         return None
-    except Exception:
+    except Exception as e:
+        logger.error(f"最新予測タイムスタンプ取得失敗: {e}", exc_info=True)
         return None
 
 
@@ -396,7 +408,8 @@ def load_prediction_markets(predicted_at: str = None) -> list:
             [predicted_at],
         ).fetchall()
         return [row[0] for row in result]
-    except Exception:
+    except Exception as e:
+        logger.error(f"予測マーケット一覧取得失敗: {e}", exc_info=True)
         return []
 
 
@@ -448,16 +461,18 @@ def upsert_raw_ohlcv(rows: list[dict]) -> int:
 
     # INSERT OR REPLACE (DuckDB は INSERT OR REPLACE をサポート)
     con.register("_raw_ohlcv_temp", df)
-    con.execute("""
+    con.execute(
+        """
         INSERT OR REPLACE INTO market_data_raw
             (market, symbol, ticker, timeframe, ts,
              open, high, low, close, volume, adj_close, source, ingested_at)
         SELECT market, symbol, ticker, timeframe, ts,
                open, high, low, close, volume, adj_close, source, ingested_at
         FROM _raw_ohlcv_temp
-    """)
+    """
+    )
     n = len(df)
-    print(
+    logger.info(
         f"DB保存完了: market_data_raw [{rows[0].get('market', '')}_{rows[0].get('symbol', '')}] ({n}行)"
     )
     return n
@@ -499,7 +514,8 @@ def load_raw_ohlcv(
 
     try:
         df = con.execute(query, params).fetchdf()
-    except Exception:
+    except Exception as e:
+        logger.error(f"market_data_raw読み込み失敗 [{market}_{symbol}]: {e}", exc_info=True)
         return None
 
     if df.empty:

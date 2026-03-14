@@ -5,9 +5,9 @@
 各パイプラインの制御フロー、エラーハンドリングをここで実装。
 """
 
-import logging
+from src.utils.logger import get_logger
 
-logger = logging.getLogger("scheduler")
+logger = get_logger(__name__)
 
 
 def run_daily_pipeline():

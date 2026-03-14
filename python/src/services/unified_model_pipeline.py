@@ -10,6 +10,9 @@ from typing import Tuple
 import pandas as pd
 from src.utils.data_path_utils import ensure_dir, get_models_dir
 from src.utils.db import load_all_stock_features
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def load_all_stock_data(data_dir: str = None) -> pd.DataFrame:
@@ -29,7 +32,7 @@ def load_all_stock_data(data_dir: str = None) -> pd.DataFrame:
     # 銘柄数カウント
     if "market" in df.columns and "symbol" in df.columns:
         n_symbols = df.groupby(["market", "symbol"]).ngroups
-        print(f"合計: {len(df)}行, {n_symbols}銘柄")
+        logger.info(f"全銘柄データ読み込み: {len(df)}行, {n_symbols}銘柄")
 
     return df
 
@@ -86,37 +89,37 @@ def train_unified_model(
     """
     from src.models.model_manager import ModelManager
 
-    print("=== 統合モデル学習開始 ===")
+    logger.info("=== 統合モデル学習開始 ===")
 
     # 全データ読み込み
-    print("\n1. データ読み込み中...")
+    logger.info("1. データ読み込み中...")
     df = load_all_stock_data(data_dir)
     if df.empty:
-        print("データが見つかりません。")
+        logger.warning("データが見つかりません。")
         return
 
     # 特徴量準備
-    print("\n2. 特徴量準備中...")
+    logger.info("2. 特徴量準備中...")
     X, y = prepare_unified_features(df)
-    print(f"特徴量数: {len(X.columns)}, サンプル数: {len(X)}")
+    logger.info(f"特徴量数: {len(X.columns)}, サンプル数: {len(X)}")
 
     # モデル作成・学習
-    print(f"\n3. モデル学習中 ({model_type})...")
+    logger.info(f"3. モデル学習中 ({model_type})...")
     mm = ModelManager(model_dir=save_dir)
     model = mm.create_model(model_type, model_name)
     model.train(X, y)
 
     # 保存（unified/ディレクトリに保存）
-    print("\n4. モデル保存中...")
+    logger.info("4. モデル保存中...")
     if save_dir is None:
         save_dir = os.path.join(get_models_dir(), "unified")
     ensure_dir(save_dir)
 
     save_path = os.path.join(save_dir, f"{model_name}.joblib")
     model.save_model(save_path)
-    print(f"保存完了: {save_path}")
+    logger.info(f"保存完了: {save_path}")
 
-    print("\n=== 統合モデル学習完了 ===")
+    logger.info("=== 統合モデル学習完了 ===")
 
 
 def load_unified_model(model_name: str = "UnifiedStockModel", model_dir: str = None):

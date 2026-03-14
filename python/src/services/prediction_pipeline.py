@@ -17,10 +17,13 @@ from src.models.predict_single_stock import predict_single_stock
 from src.utils.data_path_utils import get_models_dir
 from src.utils.db import get_all_symbols, save_prediction_results
 from src.utils.df_to_string import df_to_pretty_string
+from src.utils.logger import get_logger
 
 # yfinanceの警告を抑制
 warnings.filterwarnings("ignore", category=FutureWarning)
 logging.getLogger("yfinance").setLevel(logging.CRITICAL)
+
+logger = get_logger(__name__)
 
 # 並列実行時のワーカー数（デフォルト=1で同期実行、スレッド間競合を回避）
 # ガイドライン参照: 並列処理は競合バグの原因となるため同期集計が安定
@@ -51,21 +54,19 @@ def get_optimal_params(market: str, symbol: str) -> dict:
         key = f"{market}_{symbol}"
         params = all_params.get(key, {})
         if params:
-            print(
+            logger.debug(
                 f"[{market}_{symbol}] 最適パラメータを読み込みました: "
-                f"閾値={params.get('threshold')}, "
+                f"閉値={params.get('threshold')}, "
                 f"SharpeRatio={params.get('metrics', {}).get('sharpe_ratio')}"
             )
         return params
     except Exception as e:
-        print(f"[{market}_{symbol}] 最適パラメータ読み込みエラー: {e}")
+        logger.error(f"[{market}_{symbol}] 最適パラメータ読み込みエラー: {e}")
         return {}
 
 
 def find_model_files(model_root=None, model_name="StockXGBoostModel.joblib"):
-    """
-    モデルディレクトリを再帰的に探索し、(market, symbol, model_path)のリストを返す
-    """
+    """モデルディレクトリを再帰的に探索し、(market, symbol, model_path)のリストを返す。"""
     if model_root is None:
         model_root = get_models_dir()
     pattern = os.path.join(model_root, "*_*", model_name)
@@ -224,9 +225,7 @@ def run_predict_single(market: str, symbol: str):
 
 
 def run_predict_watchlist():
-    """
-    監視リストの全銘柄を予測・DB保存する
-    """
+    """監視リストの全銘柄を予測・DB保存する。"""
     import csv
 
     from src.utils.data_path_utils import get_monitor_list_path

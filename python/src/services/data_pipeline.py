@@ -20,6 +20,9 @@ from src.data.data_saver import save_raw_ohlcv
 from src.features.technical_analysis import add_technical_indicators, create_basic_lag_features
 from src.utils.data_path_utils import get_ticker
 from src.utils.db import delete_stock_features, upsert_stock_features
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def fetch_stock_data_with_features(
@@ -52,11 +55,11 @@ def fetch_stock_data_with_features(
                 market, symbol, "1900-01-01", datetime.now().strftime("%Y-%m-%d")
             )
             if df_all is None or df_all.empty:
-                print(f"{symbol} のデータが取得できませんでした。")
+                logger.warning(f"{symbol} のデータが取得できませんでした。")
                 return None
             start_date = df_all.index.min().strftime("%Y-%m-%d")
         except Exception as e:
-            print(f"{symbol} のデータ取得でエラー: {e}")
+            logger.error(f"{symbol} のデータ取得でエラー: {e}", exc_info=True)
             return None
         end_date = datetime.now().strftime("%Y-%m-%d")
 
@@ -96,14 +99,14 @@ def fetch_stock_data_with_features(
                 print("差分データなし（営業日外の可能性）")
         else:
             # DB内無データ：フル取得
-            print(
+            logger.info(
                 "yfinanceから取得: "
                 f"market={market}, symbol={symbol}, ticker={ticker}, "
                 f"{start_date}～{end_date}"
             )
             df = get_stock_data(market, ticker, start_date, end_date)
             if df is None or df.empty:
-                print("データが取得できませんでした。")
+                logger.warning("データが取得できませんでした。")
                 return None
             if defer_raw_save:
                 raw_data_to_save = df
@@ -111,28 +114,28 @@ def fetch_stock_data_with_features(
                 try:
                     save_raw_ohlcv(market, symbol, df)
                 except Exception as e:
-                    print(f"Raw OHLCV保存エラー（処理継続）: {e}")
+                    logger.error(f"Raw OHLCV保存エラー（処理継続）: {e}")
     else:
         # DBデータで十分
         if df is not None and not df.empty:
-            print(f"DBキャッシュで最新: market={market}, symbol={symbol} ({len(df)}行)")
+            logger.debug(f"DBキャッシュで最新: market={market}, symbol={symbol} ({len(df)}行)")
         else:
-            print("ワーニング：DBデータなし")
+            logger.warning(f"DBデータなし: market={market}, symbol={symbol}")
             return None
 
     # 全行NaNな列を除去（例: auto_adjust=True時の Adj Close 等）
     all_nan_cols = df.columns[df.isnull().all()].tolist()
     if all_nan_cols:
-        print(f"全NaN列を除去: {all_nan_cols}")
+        logger.debug(f"全NaN列を除去: {all_nan_cols}")
         df = df.drop(columns=all_nan_cols)
 
     # テクニカル指標を追加
     df = add_technical_indicators(df)
 
-    print(f"特徴量生成（全数値列ラグ特徴量）... {market}/{symbol} ({len(df)}行)")
+    logger.info(f"特徴量生成（全数値列ラグ特徴量）... {market}/{symbol} ({len(df)}行)")
     X, y = create_basic_lag_features(df, n_lags=5, feature_cols=None)
     if X is None or X.empty or y is None:
-        print(f"特徴量生成に失敗しました: {market}/{symbol}（元データ {len(df)}行）")
+        logger.warning(f"特徴量生成に失敗しました: {market}/{symbol}（元データ {len(df)}行）")
         return None
 
     # 特徴量名の正規化
@@ -167,7 +170,7 @@ def save_features_to_db(market: str, symbol: str, data) -> None:
     """
     delete_stock_features(market, symbol)
     upsert_stock_features(market, symbol, data)
-    print(f"DB保存完了: {market}_{symbol}")
+    logger.info(f"DB保存完了: {market}_{symbol}")
 
 
 def save_stock_data_with_features(
@@ -214,24 +217,24 @@ def run_data_batch(fetch_only: bool = False):
         """バッチランナー用: データ取得＋特徴量生成のみ（DB書き込みなし）"""
         market, symbol = task["market"], task["symbol"]
         try:
-            print(f"[データ取得開始] {market}/{symbol}")
+            logger.info(f"[データ取得開始] {market}/{symbol}")
             result = fetch_stock_data_with_features(
                 market=market,
                 symbol=symbol,
                 defer_raw_save=True,
             )
             if result is None:
-                print(f"[データ取得スキップ] {market}/{symbol}")
+                logger.info(f"[データ取得スキップ] {market}/{symbol}")
                 return {"market": market, "symbol": symbol, "status": "skip"}
-            print(f"[データ取得完了] {market}/{symbol}")
+            logger.info(f"[データ取得完了] {market}/{symbol}")
             return {"market": market, "symbol": symbol, "status": "success", "data": result}
         except Exception as e:
-            print(f"[データ取得エラー] {market}/{symbol}: {e}")
+            logger.error(f"[データ取得エラー] {market}/{symbol}: {e}", exc_info=True)
             return {"market": market, "symbol": symbol, "status": "error", "error": str(e)}
 
     symbols = load_target_symbols()
     if not symbols:
-        print("対象銘柄がありません。")
+        logger.warning("対象銘柄がありません。")
         return
 
     # フェーズ1: データ取得＋特徴量生成（並列）
@@ -249,10 +252,7 @@ def run_data_batch(fetch_only: bool = False):
 
     # フェーズ2: DB書き込み（逐次） - DuckDB排他ロック制約のため直列実行
     success_data = [r for r in fetch_results if r.get("status") == "success" and r.get("data")]
-    print(f"\n{'='*50}")
-    print("DB書き込み開始（逐次）")
-    print(f"対象件数: {len(success_data)}")
-    print(f"{'='*50}\n")
+    logger.info(f"DB書き込み開始（逐次） 対象件数: {len(success_data)}")
 
     db_results = []
     for i, r in enumerate(success_data, 1):
@@ -262,16 +262,16 @@ def run_data_batch(fetch_only: bool = False):
                 try:
                     save_raw_ohlcv(market, symbol, raw_data)
                 except Exception as e:
-                    print(f"[Raw保存エラー] {market}/{symbol}: {e}")
+                    logger.error(f"[Raw保存エラー] {market}/{symbol}: {e}")
             save_features_to_db(market, symbol, data)
             db_results.append({"market": market, "symbol": symbol, "status": "success"})
         except Exception as e:
-            print(f"[DB書き込みエラー] {market}/{symbol}: {e}")
+            logger.error(f"[DB書き込みエラー] {market}/{symbol}: {e}", exc_info=True)
             db_results.append(
                 {"market": market, "symbol": symbol, "status": "error", "error": str(e)}
             )
         if i % 50 == 0:
-            print(f"  ... {i}/{len(success_data)} 件完了")
+            logger.info(f"  ... {i}/{len(success_data)} 件完了")
 
     # 最終サマリー（取得フェーズのエラー/スキップ + DB書き込み結果を統合）
     final_results = db_results.copy()

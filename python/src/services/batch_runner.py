@@ -6,13 +6,13 @@
 """
 
 import csv
-import logging
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, TimeoutError, as_completed
 from typing import Callable
 
 from src.utils.data_path_utils import get_watchlist_path
+from src.utils.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # 個別タスクのタイムアウト（秒）: yfinance API応答待ち + 特徴量生成を考慮
 DEFAULT_TASK_TIMEOUT = 300
@@ -56,10 +56,7 @@ def run_parallel(
     Returns:
         list of dict: 各タスクの結果
     """
-    print(f"\n{'='*50}")
-    print(f"{label}開始（並列数: {max_workers}）")
-    print(f"対象件数: {len(tasks)}")
-    print(f"{'='*50}\n")
+    logger.info(f"{label}開始（並列数: {max_workers}） 対象件数: {len(tasks)}")
 
     Executor = ProcessPoolExecutor if use_process else ThreadPoolExecutor
     results = []
@@ -109,15 +106,11 @@ def print_summary(phase: str, results: list) -> None:
     errors = [r for r in results if r.get("status") == "error"]
     skipped = [r for r in results if r.get("status") == "skip"]
 
-    print(f"\n{'='*50}")
-    print(f"{phase} 結果サマリー")
-    print(f"{'='*50}")
-    print(f"成功: {len(success)}")
-    print(f"スキップ: {len(skipped)}")
-    print(f"エラー: {len(errors)}")
+    logger.info(f"{phase} 結果サマリー 成功: {len(success)} / スキップ: {len(skipped)} / エラー: {len(errors)}")
 
     if errors:
-        print("\nエラー詳細:")
+        logger.warning(f"\n{phase} エラー詳細:")
         for e in errors:
-            print(f"  - {e.get('market', '?')}/{e.get('symbol', '?')}: {e.get('error', 'unknown')}")
-    print()
+            logger.warning(
+                f"  - {e.get('market', '?')}/{e.get('symbol', '?')}: {e.get('error', 'unknown')}"
+            )
