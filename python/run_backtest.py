@@ -26,6 +26,7 @@ r"""
 """
 
 import argparse
+import os
 import sys
 
 from src.services.backtest_pipeline import (
@@ -121,6 +122,14 @@ def parse_args():
     # アンサンブル
     parser.add_argument("--ensemble", action="store_true", help="XGBoost+LightGBMアンサンブル予測を使用する")
 
+    # グラフ出力
+    parser.add_argument("--save-chart", action="store_true", help="バックテスト結果グラフ(PNG)をresults/に保存する")
+    parser.add_argument(
+        "--discord-chart",
+        action="store_true",
+        help="バックテスト結果グラフをDiscord Webhookに送信する（--save-chart も自動有効化）",
+    )
+
     return parser.parse_args()
 
 
@@ -171,6 +180,31 @@ def main():
         print_backtest_metrics(metrics, label=f"{args.market}/{args.symbol} - {args.task}")
 
     save_backtest_results(result_df, metrics, wf_df, args.market, args.symbol, args.task)
+
+    # グラフ出力（--save-chart または --discord-chart 指定時）
+    if (args.save_chart or args.discord_chart) and result_df is not None and not result_df.empty:
+        from src.backtest.metrics import plot_backtest
+        from src.utils.data_path_utils import get_results_dir
+
+        out_dir = os.path.join(get_results_dir(), "backtest", f"{args.market}_{args.symbol}")
+        chart_path = plot_backtest(
+            result_df,
+            metrics or {},
+            out_dir,
+            market=args.market,
+            symbol=args.symbol,
+            initial_cash=args.initial_cash,
+        )
+        if chart_path:
+            logger.info(f"グラフ保存: {chart_path}")
+            if args.discord_chart:
+                from src.api.discord_utils import send_webhook_file
+
+                send_webhook_file(
+                    chart_path,
+                    title=f"{args.market.upper()}/{args.symbol} バックテスト結果",
+                )
+
     logger.info("完了")
 
 
