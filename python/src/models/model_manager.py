@@ -2,6 +2,7 @@ import os
 from typing import Dict, Type
 
 import pandas as pd
+
 from src.models.base_model import BaseModel
 from src.models.lightgbm_model import LightGBMModel
 from src.models.xgboost_model import XGBoostModel
@@ -76,7 +77,13 @@ class ModelManager:
         return self.models[model_name]
 
     def train_model(
-        self, model_name: str, X: pd.DataFrame, y: pd.Series, market: str = None, symbol: str = None
+        self,
+        model_name: str,
+        X: pd.DataFrame,
+        y: pd.Series,
+        market: str = None,
+        symbol: str = None,
+        auto_save: bool = True,
     ):
         """
         指定されたモデルを学習させる。
@@ -86,10 +93,12 @@ class ModelManager:
             y (pd.Series): ターゲット変数。
             market (str, optional): 市場名。
             symbol (str, optional): 銘柄コードやティッカー。
+            auto_save (bool): Trueの場合、学習完了後に自動保存する（デフォルト: True）。
         """
         model = self.get_model(model_name)
         model.train(X, y)
-        self.save_model(model_name, market=market, symbol=symbol)  # 学習後に自動保存
+        if auto_save:
+            self.save_model(model_name, market=market, symbol=symbol)
 
     def predict_with_model(self, model_name: str, X: pd.DataFrame) -> pd.Series:
         """
@@ -140,11 +149,12 @@ class ModelManager:
             model_instance = self.models[model_name]
         else:
             if model_type is None:
-                # モデルタイプをファイル名から推測
-                if "XGBoost" in model_name:
-                    model_type = "XGBoostModel"
-                elif "LightGBM" in model_name:
-                    model_type = "LightGBMModel"
+                # 登録済みモデルタイプ名からモデルタイプを推測
+                for registered_name in self._registered_models:
+                    base_name = registered_name.replace("Model", "")
+                    if base_name in model_name:
+                        model_type = registered_name
+                        break
                 else:
                     raise ValueError(f"モデル '{model_name}' はまだ作成されていません。model_typeを指定してください。")
             model_instance = self.create_model(model_type, model_name)

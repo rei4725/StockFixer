@@ -1,5 +1,7 @@
 import lightgbm as lgb
 import pandas as pd
+from sklearn.exceptions import NotFittedError
+from sklearn.utils.validation import check_is_fitted
 
 from src.models.base_model import BaseModel
 from src.utils.logger import get_logger
@@ -36,24 +38,10 @@ class LightGBMModel(BaseModel):
         Returns:
             pd.Series: 予測結果。
         """
-        if self.model is None:
+        try:
+            check_is_fitted(self.model)
+        except NotFittedError:
             raise ValueError("モデルが学習されていません。train()メソッドを実行してください。")
         logger.debug(f"{self.model_name} で予測を実行します...")
         predictions = self.model.predict(X)
         return pd.Series(predictions, index=X.index)
-
-    def save_model(self, path: str):
-        """
-        学習済みLightGBMモデルを保存する。
-        Args:
-            path (str): モデルの保存パス。
-        """
-        super().save_model(path)
-
-    def load_model(self, path: str):
-        """
-        保存されたLightGBMモデルをロードする。
-        Args:
-            path (str): モデルのロードパス。
-        """
-        super().load_model(path)
