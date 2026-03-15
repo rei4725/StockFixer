@@ -57,7 +57,7 @@ repos:
       - id: flake8
         args: [
           --max-line-length=100,
-          "--extend-ignore=E203,W503,D100,D101,D102,D103,D104,D105,D107,D205,D400,B007",
+          "--extend-ignore=E203,W503,D100,D101,D102,D103,D104,D105,D107,D200,D205,D400,D403,B007",
           "--exclude=__pycache__,.venv,.git,./venv"
         ]
         additional_dependencies:

@@ -1,13 +1,15 @@
 import os
 import sys
 import tempfile
-import pandas as pd
 import unittest
 
+import pandas as pd
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from src.api.discord_bot import get_top10_diff_stocks_message
-import src.utils.db as db_module
-import src.utils.data_path_utils as path_utils
+import src.utils.data_path_utils as path_utils  # noqa: E402
+import src.utils.db as db_module  # noqa: E402
+from src.api.discord_bot import get_top10_diff_stocks_message  # noqa: E402
+
 
 class TestGetTop10DiffStocksMessage(unittest.TestCase):
     def setUp(self):
@@ -18,7 +20,7 @@ class TestGetTop10DiffStocksMessage(unittest.TestCase):
         self._orig_get_db_path = path_utils.get_db_path
         path_utils.get_db_path = lambda: self.tmp_db
         db_module.get_db_path = lambda: self.tmp_db
-        db_module._connection = None
+        db_module._tables_initialized = False
 
     def tearDown(self):
         db_module.close_connection()
@@ -34,14 +36,17 @@ class TestGetTop10DiffStocksMessage(unittest.TestCase):
 
     def test_normal(self):
         from src.utils.db import save_prediction_results
-        df = pd.DataFrame({
-            "market": ["us", "us"],
-            "symbol": ["AAPL", "SONY"],
-            "current_price": [100.0, 200.0],
-            "avg_pred_price": [110.0, 210.0],
-            "diff_ratio": [0.1, 0.05],
-            "model_count": [2, 1]
-        })
+
+        df = pd.DataFrame(
+            {
+                "market": ["us", "us"],
+                "symbol": ["AAPL", "SONY"],
+                "current_price": [100.0, 200.0],
+                "avg_pred_price": [110.0, 210.0],
+                "diff_ratio": [0.1, 0.05],
+                "model_count": [2, 1],
+            }
+        )
         save_prediction_results("20260228_120000", df)
         msg = get_top10_diff_stocks_message("us", "top10", "20260228_120000")
         print(msg)
@@ -52,6 +57,7 @@ class TestGetTop10DiffStocksMessage(unittest.TestCase):
         msg = get_top10_diff_stocks_message("us", "top10", "19700101_000000")
         print(msg)
         self.assertEqual(msg, "")
+
 
 if __name__ == "__main__":
     unittest.main()

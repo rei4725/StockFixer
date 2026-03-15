@@ -7,13 +7,12 @@ test_db.py と同じセットアップパターンで一時 DB を使用する�
 import os
 import tempfile
 import unittest
-from datetime import datetime
 
 import pandas as pd
 
-import src.utils.db as db_module
 import src.utils.data_path_utils as path_utils
-from src.utils.db import upsert_raw_ohlcv, load_raw_ohlcv
+import src.utils.db as db_module
+from src.utils.db import load_raw_ohlcv, upsert_raw_ohlcv
 
 
 def _row(
@@ -50,7 +49,7 @@ class TestMarketDataRawSetup(unittest.TestCase):
         self._orig = path_utils.get_db_path
         path_utils.get_db_path = lambda: self.tmp_db
         db_module.get_db_path = lambda: self.tmp_db
-        db_module._connection = None
+        db_module._tables_initialized = False
 
     def tearDown(self):
         db_module.close_connection()
@@ -93,7 +92,7 @@ class TestUpsertRawOhlcv(unittest.TestCase):
         self._orig = path_utils.get_db_path
         path_utils.get_db_path = lambda: self.tmp_db
         db_module.get_db_path = lambda: self.tmp_db
-        db_module._connection = None
+        db_module._tables_initialized = False
 
     def tearDown(self):
         db_module.close_connection()
@@ -116,7 +115,7 @@ class TestUpsertRawOhlcv(unittest.TestCase):
         self.assertEqual(n, 1)
 
     def test_upsert_multiple_rows(self):
-        rows = [_row(ts=f"2024-01-0{i+1}", close=100+i) for i in range(3)]
+        rows = [_row(ts=f"2024-01-0{i+1}", close=100 + i) for i in range(3)]
         n = upsert_raw_ohlcv(rows)
         self.assertEqual(n, 3)
 
@@ -156,7 +155,7 @@ class TestLoadRawOhlcv(unittest.TestCase):
         self._orig = path_utils.get_db_path
         path_utils.get_db_path = lambda: self.tmp_db
         db_module.get_db_path = lambda: self.tmp_db
-        db_module._connection = None
+        db_module._tables_initialized = False
         # 初期データ挿入
         rows = [
             _row(ts="2024-01-02", close=100.0),
@@ -236,7 +235,7 @@ class TestSaveRawOhlcv(unittest.TestCase):
         self._orig = path_utils.get_db_path
         path_utils.get_db_path = lambda: self.tmp_db
         db_module.get_db_path = lambda: self.tmp_db
-        db_module._connection = None
+        db_module._tables_initialized = False
 
     def tearDown(self):
         db_module.close_connection()
@@ -253,14 +252,18 @@ class TestSaveRawOhlcv(unittest.TestCase):
     def test_save_raw_ohlcv_from_yfinance_df(self):
         """yfinance 形式のDataFrameをそのまま保存できる"""
         from src.data.data_saver import save_raw_ohlcv
+
         idx = pd.date_range("2024-01-02", periods=3, freq="B")
-        df = pd.DataFrame({
-            "Open":   [99.0, 100.0, 101.0],
-            "High":   [101.0, 102.0, 103.0],
-            "Low":    [98.0,  99.0, 100.0],
-            "Close":  [100.0, 101.0, 102.0],
-            "Volume": [1000,  2000,  1500],
-        }, index=idx)
+        df = pd.DataFrame(
+            {
+                "Open": [99.0, 100.0, 101.0],
+                "High": [101.0, 102.0, 103.0],
+                "Low": [98.0, 99.0, 100.0],
+                "Close": [100.0, 101.0, 102.0],
+                "Volume": [1000, 2000, 1500],
+            },
+            index=idx,
+        )
 
         n = save_raw_ohlcv("jp", "7203", df)
         self.assertEqual(n, 3)
@@ -270,14 +273,18 @@ class TestSaveRawOhlcv(unittest.TestCase):
 
     def test_save_raw_ohlcv_returns_row_count(self):
         from src.data.data_saver import save_raw_ohlcv
+
         idx = pd.date_range("2024-02-01", periods=5, freq="B")
-        df = pd.DataFrame({
-            "Open":   [100.0] * 5,
-            "High":   [105.0] * 5,
-            "Low":    [95.0]  * 5,
-            "Close":  [102.0] * 5,
-            "Volume": [1000]  * 5,
-        }, index=idx)
+        df = pd.DataFrame(
+            {
+                "Open": [100.0] * 5,
+                "High": [105.0] * 5,
+                "Low": [95.0] * 5,
+                "Close": [102.0] * 5,
+                "Volume": [1000] * 5,
+            },
+            index=idx,
+        )
         n = save_raw_ohlcv("us", "AAPL", df)
         self.assertEqual(n, 5)
 

@@ -1,15 +1,16 @@
 """
 DuckDB アクセスモジュールのユニットテスト
 """
-import unittest
-import pandas as pd
 import os
 import tempfile
-import duckdb
+import unittest
+
+import pandas as pd
+
+import src.utils.data_path_utils as path_utils
 
 # テスト用にDB パスを一時ファイルに差し替える
 import src.utils.db as db_module
-import src.utils.data_path_utils as path_utils
 
 
 class TestDB(unittest.TestCase):
@@ -27,7 +28,7 @@ class TestDB(unittest.TestCase):
         path_utils.get_db_path = lambda: self.tmp_db
         db_module.get_db_path = lambda: self.tmp_db
         # 接続を強制的にリセット
-        db_module._connection = None
+        db_module._tables_initialized = False
 
     def tearDown(self):
         """各テスト後にDBをクリーンアップ"""
@@ -56,14 +57,16 @@ class TestDB(unittest.TestCase):
 
     def test_upsert_and_load_stock_features(self):
         """stock_features の upsert と load が正しく動作することを確認"""
-        df = pd.DataFrame({
-            "Open": [100.0, 101.0, 102.0],
-            "High": [105.0, 106.0, 107.0],
-            "Low": [95.0, 96.0, 97.0],
-            "Close": [103.0, 104.0, 105.0],
-            "Volume": [1000, 2000, 3000],
-            "y": [104.0, 105.0, 106.0],
-        })
+        df = pd.DataFrame(
+            {
+                "Open": [100.0, 101.0, 102.0],
+                "High": [105.0, 106.0, 107.0],
+                "Low": [95.0, 96.0, 97.0],
+                "Close": [103.0, 104.0, 105.0],
+                "Volume": [1000, 2000, 3000],
+                "y": [104.0, 105.0, 106.0],
+            }
+        )
 
         db_module.upsert_stock_features("us", "AAPL", df)
 
@@ -133,12 +136,26 @@ class TestDB(unittest.TestCase):
 
     def test_save_and_load_prediction_results(self):
         """prediction_results の保存と取得が正しく動作することを確認"""
-        df = pd.DataFrame([
-            {"market": "us", "symbol": "AAPL", "current_price": 150.0,
-             "avg_pred_price": 155.0, "diff_ratio": 0.033, "model_count": 2},
-            {"market": "us", "symbol": "GOOG", "current_price": 2800.0,
-             "avg_pred_price": 2850.0, "diff_ratio": 0.018, "model_count": 2},
-        ])
+        df = pd.DataFrame(
+            [
+                {
+                    "market": "us",
+                    "symbol": "AAPL",
+                    "current_price": 150.0,
+                    "avg_pred_price": 155.0,
+                    "diff_ratio": 0.033,
+                    "model_count": 2,
+                },
+                {
+                    "market": "us",
+                    "symbol": "GOOG",
+                    "current_price": 2800.0,
+                    "avg_pred_price": 2850.0,
+                    "diff_ratio": 0.018,
+                    "model_count": 2,
+                },
+            ]
+        )
 
         db_module.save_prediction_results("20260228_120000", df)
 
@@ -156,18 +173,34 @@ class TestDB(unittest.TestCase):
 
     def test_load_latest_prediction_timestamp(self):
         """最新のタイムスタンプが正しく取得できることを確認"""
-        df = pd.DataFrame([{
-            "market": "us", "symbol": "AAPL", "current_price": 150.0,
-            "avg_pred_price": 155.0, "diff_ratio": 0.033, "model_count": 2
-        }])
+        df = pd.DataFrame(
+            [
+                {
+                    "market": "us",
+                    "symbol": "AAPL",
+                    "current_price": 150.0,
+                    "avg_pred_price": 155.0,
+                    "diff_ratio": 0.033,
+                    "model_count": 2,
+                }
+            ]
+        )
 
         db_module.save_prediction_results("20260101_100000", df)
         db_module.save_prediction_results("20260228_120000", df)
         # 同じ銘柄(AAPL)への2回目のinsertはDelete-Insertで上書き
-        df3 = pd.DataFrame([{
-            "market": "us", "symbol": "MSFT", "current_price": 300.0,
-            "avg_pred_price": 310.0, "diff_ratio": 0.033, "model_count": 2
-        }])
+        df3 = pd.DataFrame(
+            [
+                {
+                    "market": "us",
+                    "symbol": "MSFT",
+                    "current_price": 300.0,
+                    "avg_pred_price": 310.0,
+                    "diff_ratio": 0.033,
+                    "model_count": 2,
+                }
+            ]
+        )
         db_module.save_prediction_results("20260115_080000", df3)
 
         latest = db_module.load_latest_prediction_timestamp()
@@ -175,14 +208,30 @@ class TestDB(unittest.TestCase):
 
     def test_load_prediction_results_latest_default(self):
         """predicted_at=None で最新の結果が取得できることを確認"""
-        df1 = pd.DataFrame([{
-            "market": "us", "symbol": "AAPL", "current_price": 150.0,
-            "avg_pred_price": 155.0, "diff_ratio": 0.033, "model_count": 2
-        }])
-        df2 = pd.DataFrame([{
-            "market": "us", "symbol": "GOOG", "current_price": 2800.0,
-            "avg_pred_price": 2850.0, "diff_ratio": 0.018, "model_count": 2
-        }])
+        df1 = pd.DataFrame(
+            [
+                {
+                    "market": "us",
+                    "symbol": "AAPL",
+                    "current_price": 150.0,
+                    "avg_pred_price": 155.0,
+                    "diff_ratio": 0.033,
+                    "model_count": 2,
+                }
+            ]
+        )
+        df2 = pd.DataFrame(
+            [
+                {
+                    "market": "us",
+                    "symbol": "GOOG",
+                    "current_price": 2800.0,
+                    "avg_pred_price": 2850.0,
+                    "diff_ratio": 0.018,
+                    "model_count": 2,
+                }
+            ]
+        )
 
         db_module.save_prediction_results("20260101_100000", df1)
         db_module.save_prediction_results("20260228_120000", df2)
@@ -193,12 +242,26 @@ class TestDB(unittest.TestCase):
 
     def test_load_prediction_markets(self):
         """マーケット一覧が正しく取得できることを確認"""
-        df = pd.DataFrame([
-            {"market": "us", "symbol": "AAPL", "current_price": 150.0,
-             "avg_pred_price": 155.0, "diff_ratio": 0.033, "model_count": 2},
-            {"market": "jp", "symbol": "7203", "current_price": 2000.0,
-             "avg_pred_price": 2050.0, "diff_ratio": 0.025, "model_count": 2},
-        ])
+        df = pd.DataFrame(
+            [
+                {
+                    "market": "us",
+                    "symbol": "AAPL",
+                    "current_price": 150.0,
+                    "avg_pred_price": 155.0,
+                    "diff_ratio": 0.033,
+                    "model_count": 2,
+                },
+                {
+                    "market": "jp",
+                    "symbol": "7203",
+                    "current_price": 2000.0,
+                    "avg_pred_price": 2050.0,
+                    "diff_ratio": 0.025,
+                    "model_count": 2,
+                },
+            ]
+        )
 
         db_module.save_prediction_results("20260228_120000", df)
 

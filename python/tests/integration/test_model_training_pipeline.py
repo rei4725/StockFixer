@@ -3,12 +3,13 @@
 import os
 import tempfile
 import unittest
-from unittest.mock import patch, MagicMock
-import pandas as pd
-import numpy as np
+from unittest.mock import MagicMock, patch
 
-import src.utils.db as db_module
+import numpy as np
+import pandas as pd
+
 import src.utils.data_path_utils as path_utils
+import src.utils.db as db_module
 from src.services.model_training_pipeline import (
     train_models_for_symbol,
     train_models_for_symbol_task,
@@ -26,7 +27,7 @@ class TestTrainModelsForSymbol(unittest.TestCase):
         self._orig_get_db_path = path_utils.get_db_path
         path_utils.get_db_path = lambda: self.tmp_db
         db_module.get_db_path = lambda: self.tmp_db
-        db_module._connection = None
+        db_module._tables_initialized = False
 
     def tearDown(self):
         db_module.close_connection()
@@ -49,7 +50,9 @@ class TestTrainModelsForSymbol(unittest.TestCase):
 
     def test_skip_with_empty_data(self):
         """DBに空データがある場合にskipステータスが返ることを確認"""
-        with patch("src.services.model_training_pipeline.load_stock_features", return_value=pd.DataFrame()):
+        with patch(
+            "src.services.model_training_pipeline.load_stock_features", return_value=pd.DataFrame()
+        ):
             result = train_models_for_symbol("us", "EMPTY")
         self.assertEqual(result["status"], "skip")
 
@@ -58,11 +61,13 @@ class TestTrainModelsForSymbol(unittest.TestCase):
     def test_success_trains_both_models(self, mock_load, mock_mm_cls):
         """正常なデータでXGBoostとLightGBMの両方が学習されることを確認"""
         # テスト用DataFrameを返す
-        df = pd.DataFrame({
-            "feat1": np.random.rand(50),
-            "feat2": np.random.rand(50),
-            "y": np.random.rand(50),
-        })
+        df = pd.DataFrame(
+            {
+                "feat1": np.random.rand(50),
+                "feat2": np.random.rand(50),
+                "y": np.random.rand(50),
+            }
+        )
         mock_load.return_value = df
 
         mock_mm = MagicMock()
@@ -80,10 +85,12 @@ class TestTrainModelsForSymbol(unittest.TestCase):
     @patch("src.services.model_training_pipeline.load_stock_features")
     def test_error_returns_error_status(self, mock_load, mock_mm_cls):
         """学習中に例外が発生した場合にerrorステータスが返ることを確認"""
-        df = pd.DataFrame({
-            "feat1": np.random.rand(20),
-            "y": np.random.rand(20),
-        })
+        df = pd.DataFrame(
+            {
+                "feat1": np.random.rand(20),
+                "y": np.random.rand(20),
+            }
+        )
         mock_load.return_value = df
         mock_mm = MagicMock()
         mock_mm.create_model.side_effect = RuntimeError("学習エラー")
@@ -97,12 +104,14 @@ class TestTrainModelsForSymbol(unittest.TestCase):
     @patch("src.services.model_training_pipeline.load_stock_features")
     def test_excludes_string_columns(self, mock_load, mock_mm_cls):
         """market, symbol, y列が特徴量から除外されることを確認"""
-        df = pd.DataFrame({
-            "feat1": np.random.rand(20),
-            "market": ["us"] * 20,
-            "symbol": ["AAPL"] * 20,
-            "y": np.random.rand(20),
-        })
+        df = pd.DataFrame(
+            {
+                "feat1": np.random.rand(20),
+                "market": ["us"] * 20,
+                "symbol": ["AAPL"] * 20,
+                "y": np.random.rand(20),
+            }
+        )
         mock_load.return_value = df
         mock_mm = MagicMock()
         mock_mm_cls.return_value = mock_mm
@@ -140,7 +149,7 @@ class TestRunModelBatch(unittest.TestCase):
         self._orig_get_db_path = path_utils.get_db_path
         path_utils.get_db_path = lambda: self.tmp_db
         db_module.get_db_path = lambda: self.tmp_db
-        db_module._connection = None
+        db_module._tables_initialized = False
 
     def tearDown(self):
         db_module.close_connection()
@@ -279,5 +288,5 @@ class TestRunModelBatch(unittest.TestCase):
         mock_print_summary.assert_called_once()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

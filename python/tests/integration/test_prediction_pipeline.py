@@ -3,15 +3,13 @@
 import os
 import tempfile
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
+
 import pandas as pd
 
-import src.utils.db as db_module
 import src.utils.data_path_utils as path_utils
-from src.services.prediction_pipeline import (
-    find_model_files,
-    output_top_worst_results,
-)
+import src.utils.db as db_module
+from src.services.prediction_pipeline import find_model_files, output_top_worst_results
 
 
 class TestFindModelFiles(unittest.TestCase):
@@ -35,6 +33,7 @@ class TestFindModelFiles(unittest.TestCase):
 
     def tearDown(self):
         import shutil
+
         shutil.rmtree(self.tmp_dir)
 
     def test_finds_correct_model_files(self):
@@ -71,7 +70,7 @@ class TestOutputTopWorstResults(unittest.TestCase):
         self._orig_get_db_path = path_utils.get_db_path
         path_utils.get_db_path = lambda: self.tmp_db
         db_module.get_db_path = lambda: self.tmp_db
-        db_module._connection = None
+        db_module._tables_initialized = False
 
     def tearDown(self):
         db_module.close_connection()
@@ -89,14 +88,20 @@ class TestOutputTopWorstResults(unittest.TestCase):
         """テスト用予測結果DataFrameリストを生成する"""
         rows = []
         for i in range(n):
-            rows.append(pd.DataFrame([{
-                "market": market,
-                "symbol": f"SYM{i:03d}",
-                "current_price": 100.0 + i,
-                "avg_pred_price": 100.0 + i + (i - n // 2),
-                "diff_ratio": (i - n // 2) / 100.0,
-                "model_count": 2,
-            }]))
+            rows.append(
+                pd.DataFrame(
+                    [
+                        {
+                            "market": market,
+                            "symbol": f"SYM{i:03d}",
+                            "current_price": 100.0 + i,
+                            "avg_pred_price": 100.0 + i + (i - n // 2),
+                            "diff_ratio": (i - n // 2) / 100.0,
+                            "model_count": 2,
+                        }
+                    ]
+                )
+            )
         return rows
 
     def test_empty_rows(self):
@@ -111,6 +116,7 @@ class TestOutputTopWorstResults(unittest.TestCase):
 
         # prediction_resultsテーブルにデータが保存されている
         from src.utils.db import load_prediction_results
+
         df = load_prediction_results()
         self.assertFalse(df.empty)
         # 全銘柄が保存される
@@ -122,28 +128,24 @@ class TestOutputTopWorstResults(unittest.TestCase):
         output_top_worst_results(rows, mode="unified")
 
         from src.utils.db import load_prediction_results
+
         df_top = load_prediction_results(market="us", top_n=10)
         df_worst = load_prediction_results(market="us", worst_n=10)
 
         if not df_top.empty:
             # Top10のdiff_ratioは降順
-            self.assertGreaterEqual(
-                df_top["diff_ratio"].iloc[0],
-                df_top["diff_ratio"].iloc[-1]
-            )
+            self.assertGreaterEqual(df_top["diff_ratio"].iloc[0], df_top["diff_ratio"].iloc[-1])
         if not df_worst.empty:
             # Worst10のdiff_ratioは昇順
-            self.assertLessEqual(
-                df_worst["diff_ratio"].iloc[0],
-                df_worst["diff_ratio"].iloc[-1]
-            )
+            self.assertLessEqual(df_worst["diff_ratio"].iloc[0], df_worst["diff_ratio"].iloc[-1])
 
     def test_multiple_markets(self):
         """複数市場のデータが正しく分離されて保存されることを確認"""
         rows = self._make_rows(25, market="us") + self._make_rows(25, market="jp")
         output_top_worst_results(rows, mode="individual")
 
-        from src.utils.db import load_prediction_results, load_prediction_markets
+        from src.utils.db import load_prediction_markets
+
         markets = load_prediction_markets()
         self.assertIn("us", markets)
         self.assertIn("jp", markets)
@@ -160,7 +162,7 @@ class TestRunPredictSingle(unittest.TestCase):
         self._orig_get_db_path = path_utils.get_db_path
         path_utils.get_db_path = lambda: self.tmp_db
         db_module.get_db_path = lambda: self.tmp_db
-        db_module._connection = None
+        db_module._tables_initialized = False
 
     def tearDown(self):
         db_module.close_connection()
@@ -185,14 +187,18 @@ class TestRunPredictSingle(unittest.TestCase):
         from src.services.prediction_pipeline import run_predict_single
 
         # テスト用予測結果
-        result_df = pd.DataFrame([{
-            "market": "us",
-            "symbol": "AAPL",
-            "current_price": 150.0,
-            "avg_pred_price": 155.0,
-            "diff_ratio": 0.033,
-            "model_count": 2,
-        }])
+        result_df = pd.DataFrame(
+            [
+                {
+                    "market": "us",
+                    "symbol": "AAPL",
+                    "current_price": 150.0,
+                    "avg_pred_price": 155.0,
+                    "diff_ratio": 0.033,
+                    "model_count": 2,
+                }
+            ]
+        )
         mock_predict.return_value = result_df
 
         # 実行
@@ -228,7 +234,7 @@ class TestRunPredictWatchlist(unittest.TestCase):
         self._orig_get_db_path = path_utils.get_db_path
         path_utils.get_db_path = lambda: self.tmp_db
         db_module.get_db_path = lambda: self.tmp_db
-        db_module._connection = None
+        db_module._tables_initialized = False
 
     def tearDown(self):
         db_module.close_connection()
@@ -252,12 +258,13 @@ class TestRunPredictWatchlist(unittest.TestCase):
         mock_save,
     ):
         """監視リスト予測が正常に完了することを確認"""
-        from src.services.prediction_pipeline import run_predict_watchlist
         import tempfile
+
+        from src.services.prediction_pipeline import run_predict_watchlist
 
         # テスト用監視リストファイル
         watchlist_file = tempfile.NamedTemporaryFile(
-            mode='w', delete=False, suffix='.csv', encoding='utf-8'
+            mode="w", delete=False, suffix=".csv", encoding="utf-8"
         )
         watchlist_file.write("us,AAPL,Apple Inc.\n")
         watchlist_file.write("us,MSFT,Microsoft\n")
@@ -266,13 +273,17 @@ class TestRunPredictWatchlist(unittest.TestCase):
         mock_get_path.return_value = watchlist_file.name
 
         # テスト用予測結果
-        result_df = pd.DataFrame([{
-            "market": "us",
-            "current_price": 150.0,
-            "avg_pred_price": 155.0,
-            "diff_ratio": 0.033,
-            "model_count": 2,
-        }])
+        result_df = pd.DataFrame(
+            [
+                {
+                    "market": "us",
+                    "current_price": 150.0,
+                    "avg_pred_price": 155.0,
+                    "diff_ratio": 0.033,
+                    "model_count": 2,
+                }
+            ]
+        )
         mock_predict.return_value = result_df
 
         # 実行
@@ -294,12 +305,13 @@ class TestRunPredictWatchlist(unittest.TestCase):
         mock_get_path,
     ):
         """監視リストの全銘柄の予測に失敗した場合を確認"""
-        from src.services.prediction_pipeline import run_predict_watchlist
         import tempfile
+
+        from src.services.prediction_pipeline import run_predict_watchlist
 
         # テスト用監視リストファイル
         watchlist_file = tempfile.NamedTemporaryFile(
-            mode='w', delete=False, suffix='.csv', encoding='utf-8'
+            mode="w", delete=False, suffix=".csv", encoding="utf-8"
         )
         watchlist_file.write("us,AAPL,Apple Inc.\n")
         watchlist_file.write("us,MSFT,Microsoft\n")
@@ -318,5 +330,5 @@ class TestRunPredictWatchlist(unittest.TestCase):
         os.remove(watchlist_file.name)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

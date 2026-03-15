@@ -27,7 +27,7 @@ class _TmpDbTestCase(unittest.TestCase):
         self._orig_get_db_path = path_utils.get_db_path
         path_utils.get_db_path = lambda: self.tmp_db
         db_module.get_db_path = lambda: self.tmp_db
-        db_module._connection = None
+        db_module._tables_initialized = False
 
     def tearDown(self):
         db_module.close_connection()

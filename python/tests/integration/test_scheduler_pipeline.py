@@ -3,10 +3,10 @@
 import os
 import tempfile
 import unittest
-from unittest.mock import patch, MagicMock, call
+from unittest.mock import patch
 
-import src.utils.db as db_module
 import src.utils.data_path_utils as path_utils
+import src.utils.db as db_module
 from src.services.scheduler_pipeline import run_daily_pipeline, run_weekly_training
 
 
@@ -21,7 +21,7 @@ class TestRunDailyPipeline(unittest.TestCase):
         self._orig_get_db_path = path_utils.get_db_path
         path_utils.get_db_path = lambda: self.tmp_db
         db_module.get_db_path = lambda: self.tmp_db
-        db_module._connection = None
+        db_module._tables_initialized = False
 
     def tearDown(self):
         db_module.close_connection()
@@ -72,7 +72,7 @@ class TestRunDailyPipeline(unittest.TestCase):
         mock_run_batch.side_effect = Exception("データ取得失敗")
 
         # 例外が発生することを確認
-        with self.assertRaises(Exception):
+        with self.assertRaises(Exception):  # noqa: B017
             run_daily_pipeline()
 
         # エラー通知が送られたことを確認
@@ -95,7 +95,7 @@ class TestRunDailyPipeline(unittest.TestCase):
         mock_predict.side_effect = Exception("予測失敗")
 
         # 例外が発生することを確認
-        with self.assertRaises(Exception):
+        with self.assertRaises(Exception):  # noqa: B017
             run_daily_pipeline()
 
         # エラー通知が送られたことを確認
@@ -116,7 +116,7 @@ class TestRunDailyPipeline(unittest.TestCase):
         mock_send_completion.side_effect = Exception("Discord通知失敗")
 
         # 例外が発生することを確認
-        with self.assertRaises(Exception):
+        with self.assertRaises(Exception):  # noqa: B017
             run_daily_pipeline()
 
         # データ取得・予測は正常に完了後、通知で失敗
@@ -149,7 +149,7 @@ class TestRunWeeklyTraining(unittest.TestCase):
         mock_train.side_effect = Exception("学習失敗")
 
         # 例外が発生することを確認
-        with self.assertRaises(Exception):
+        with self.assertRaises(Exception):  # noqa: B017
             run_weekly_training()
 
         # train_unified_modelがエラーで呼ばれたことを確認
@@ -162,7 +162,7 @@ class TestRunWeeklyTraining(unittest.TestCase):
         mock_train.side_effect = [None, Exception("学習失敗")]
 
         # 例外が発生することを確認
-        with self.assertRaises(Exception):
+        with self.assertRaises(Exception):  # noqa: B017
             run_weekly_training()
 
         # train_unified_modelが2回呼ばれたことを確認
