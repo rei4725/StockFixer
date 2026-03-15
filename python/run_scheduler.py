@@ -56,6 +56,20 @@ def job_weekly_report():
     run_weekly_report()
 
 
+def job_daily_auto_order():
+    """毎営業日 8:50 - ペーパートレード注文発注（前日予測シグナルを使用）"""
+    from src.services.scheduler_pipeline import run_daily_auto_order
+
+    run_daily_auto_order()
+
+
+def job_daily_settle_orders():
+    """毎営業日 9:05 - ペーパートレード pending 注文を当日始値で約定処理"""
+    from src.services.scheduler_pipeline import run_daily_settle_orders
+
+    run_daily_settle_orders()
+
+
 # ── イベントリスナー ──────────────────────────────────
 def _job_listener(event):
     """ジョブ実行結果のログ出力"""
@@ -100,6 +114,28 @@ SCHEDULE_CONFIG = {
         "recovery_delay_minutes": 15,
         "max_executions_per_period": 2,
         "description": "毎週土曜 04:00 - パフォーマンスレポート送信",
+    },
+    "daily_auto_order": {
+        "func": job_daily_auto_order,
+        "trigger": "cron",
+        "period": "daily",
+        "day_of_week": "mon-fri",
+        "hour": 8,
+        "minute": 50,
+        "recovery_delay_minutes": 10,
+        "max_executions_per_period": 1,
+        "description": "毎営業日 08:50 - 自動発注（ペーパートレード）",
+    },
+    "daily_settle_orders": {
+        "func": job_daily_settle_orders,
+        "trigger": "cron",
+        "period": "daily",
+        "day_of_week": "mon-fri",
+        "hour": 9,
+        "minute": 5,
+        "recovery_delay_minutes": 10,
+        "max_executions_per_period": 1,
+        "description": "毎営業日 09:05 - pending 注文の約定処理（ペーパートレード）",
     },
 }
 

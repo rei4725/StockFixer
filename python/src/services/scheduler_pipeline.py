@@ -115,3 +115,56 @@ def run_weekly_report():
     except Exception as e:
         logger.error(f"週次レポート生成失敗: {e}", exc_info=True)
         raise
+
+
+def run_daily_auto_order():
+    """
+    毎営業日 8:50 実行: 前夜の予測シグナルに基づきペーパートレード注文を発注する。
+
+    本番切り替え時は環境変数 AUTO_TRADE_MODE=live に変更する。
+    """
+    import os
+
+    from src.brokers.paper.paper_broker import PaperBroker
+    from src.services.order_execution_pipeline import run_daily_orders
+
+    mode = os.environ.get("AUTO_TRADE_MODE", "paper")
+    logger.info(f"=== 自動発注開始 (mode={mode}) ===")
+
+    if mode == "live":
+        from src.brokers.kabu.kabu_client import KabuBroker
+
+        broker = KabuBroker()
+    else:
+        broker = PaperBroker()
+
+    try:
+        stats = run_daily_orders(broker=broker, market="jp", mode=mode)
+        logger.info(f"=== 自動発注完了: 買い={stats['buy_orders']} 売り={stats['sell_orders']} ===")
+    except Exception as e:
+        logger.error(f"自動発注失敗: {e}", exc_info=True)
+        raise
+
+
+def run_daily_settle_orders():
+    """
+    毎営業日 9:05 実行: pending 状態のペーパートレード注文を当日始値で約定処理する。
+    本番（live）モードでは kabu STATION® が自動処理するため不要。
+    """
+    import os
+
+    mode = os.environ.get("AUTO_TRADE_MODE", "paper")
+    if mode == "live":
+        logger.info("live モードのため settle スキップ")
+        return
+
+    from src.brokers.paper.paper_broker import PaperBroker
+
+    logger.info("=== ペーパートレード約定処理開始 ===")
+    try:
+        broker = PaperBroker()
+        settled = broker.settle_pending_orders()
+        logger.info(f"=== 約定処理完了: {len(settled)} 件 ===")
+    except Exception as e:
+        logger.error(f"約定処理失敗: {e}", exc_info=True)
+        raise
