@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Optional
 
 import pandas as pd
+
 from src.data.data_loader import get_stock_data
 from src.utils.data_path_utils import get_ticker
 from src.utils.db import upsert_raw_ohlcv, upsert_stock_features
@@ -50,7 +51,9 @@ def save_raw_ohlcv(
             "ticker": ticker,
             "timeframe": timeframe,
             "ts": (
-                pd.Timestamp(ts).tz_localize(None) if pd.Timestamp(ts).tzinfo else pd.Timestamp(ts)
+                pd.Timestamp(ts).tz_localize(None)  # type: ignore[arg-type]
+                if pd.Timestamp(ts).tzinfo  # type: ignore[arg-type]
+                else pd.Timestamp(ts)  # type: ignore[arg-type]
             ),
             "source": source,
         }
@@ -111,9 +114,7 @@ def save_raw_stock_data(
     # 市場ごとにティッカーを補正
     ticker = get_ticker(market, symbol)
 
-    print(
-        f"データ取得: market={market}, symbol={symbol}, ticker={ticker}, {start_date}～{end_date}"
-    )
+    print(f"データ取得: market={market}, symbol={symbol}, ticker={ticker}, {start_date}～{end_date}")
     df = get_stock_data(market, ticker, start_date, end_date)
     if df is None or df.empty:
         print("データが取得できませんでした。")
@@ -123,22 +124,3 @@ def save_raw_stock_data(
     upsert_stock_features(market, symbol, df)
 
     return df
-
-
-# 後方互換性のため、save_stock_data_with_featuresはservices層からインポートするよう促す
-def save_stock_data_with_features(*args, **kwargs):
-    """
-    非推奨: この関数はservices層に移動しました。
-    代わりに from src.services.data_pipeline import save_stock_data_with_features を使用してください。
-    """
-    import warnings
-
-    warnings.warn(
-        "save_stock_data_with_features は src.services.data_pipeline に移動しました。"
-        "from src.services.data_pipeline import save_stock_data_with_features を使用してください。",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    from src.services.data_pipeline import save_stock_data_with_features as _save
-
-    return _save(*args, **kwargs)
