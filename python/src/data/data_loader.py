@@ -2,10 +2,10 @@ from datetime import datetime, timedelta
 from typing import Optional, Union
 
 import pandas as pd
-import yfinance as yf
+
+from src.utils import yf_client
 from src.utils.data_path_utils import get_ticker
 from src.utils.db import load_raw_ohlcv, load_stock_features
-from src.utils.retry_helper import retry_ticker_history, retry_yfinance_download
 
 
 def get_raw_ohlcv_from_db(
@@ -54,7 +54,7 @@ def get_stock_data_from_db(
     if "Date" in df.columns and start_date is not None and end_date is not None:
         df["Date"] = pd.to_datetime(df["Date"])
         df = df.set_index("Date")
-        df = df.loc[start_date:end_date]
+        df = df.loc[pd.to_datetime(start_date) : pd.to_datetime(end_date)]  # type: ignore[misc]
 
     return df
 
@@ -95,10 +95,6 @@ def get_stock_data(
     # マーケットに応じてtickerを変換
     yf_ticker = get_ticker(market, ticker)
 
-    # yf.Ticker().history() を使用（スレッドセーフ）
-    # yf.download() は並列実行時にデータが混ざる可能性があるため非推奨
-    ticker_obj = yf.Ticker(yf_ticker)
-
     # yfinanceのend_dateはexclusive（その日を含まない）ため、1日加算
     if isinstance(end_date, str):
         end_date_adj = (pd.to_datetime(end_date) + timedelta(days=1)).strftime("%Y-%m-%d")
@@ -106,13 +102,8 @@ def get_stock_data(
         end_date_adj = (end_date + timedelta(days=1)).strftime("%Y-%m-%d")
 
     # リトライロジック付きでデータ取得
-    data = retry_ticker_history(ticker_obj, start=start_date, end=end_date_adj, auto_adjust=True)
+    data = yf_client.ticker_history(yf_ticker, start=str(start_date), end=end_date_adj)
 
-    if data.empty:
-        return data
-    # マルチインデックス列をフラット化
-    if isinstance(data.columns, pd.MultiIndex):
-        data.columns = [str(col[0]) for col in data.columns.values]
     return data
 
 
@@ -160,9 +151,7 @@ def get_forex_data(
         pd.DataFrame: 為替レートデータ
     """
     # リトライロジック付きでデータ取得
-    data = retry_yfinance_download(
-        ticker, start=start_date, end=end_date, auto_adjust=True, progress=False
-    )
+    data = yf_client.download(ticker, start=str(start_date), end=str(end_date), auto_adjust=True)
 
     if data.empty:
         raise ValueError(f"No data found for forex ticker {ticker}")
@@ -252,9 +241,9 @@ def merge_market_data(db_data: pd.DataFrame, fresh_data: pd.DataFrame) -> pd.Dat
 
     # インデックスをタイムゾーン除去（混在を回避）
     # tz_convert(None): tz-aware → tz-naive への正しい変換
-    if db_data_copy.index.tz is not None:
+    if isinstance(db_data_copy.index, pd.DatetimeIndex) and db_data_copy.index.tz is not None:
         db_data_copy.index = db_data_copy.index.tz_convert(None)
-    if fresh_data_copy.index.tz is not None:
+    if isinstance(fresh_data_copy.index, pd.DatetimeIndex) and fresh_data_copy.index.tz is not None:
         fresh_data_copy.index = fresh_data_copy.index.tz_convert(None)
 
     # 既存データの最新日付より新しいデータのみ取得

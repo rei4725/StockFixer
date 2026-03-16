@@ -11,9 +11,8 @@ kabu STATION® API が利用できない環境（APIキー未取得・テスト�
 
 import uuid
 
-import yfinance as yf
-
 from src.brokers.base import BrokerBase, OrderSide, OrderType
+from src.utils import yf_client
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -103,9 +102,7 @@ class PaperBroker(BrokerBase):
         for order_id, symbol, side, qty, limit_price, order_type_val in rows:
             ticker = f"{symbol}.T"
             try:
-                hist = yf.download(
-                    ticker, period="2d", interval="1d", progress=False, auto_adjust=True
-                )
+                hist = yf_client.download(ticker, period="2d", interval="1d")
                 if hist.empty:
                     logger.warning(f"[paper] {symbol}: 株価取得失敗、スキップ")
                     continue
