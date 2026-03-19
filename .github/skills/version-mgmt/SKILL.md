@@ -25,6 +25,19 @@ v{MAJOR}.{MINOR}.{PATCH}
 
 - タグには必ず `v` プレフィックスを付ける（例: `v1.2.3`）
 
+## VERSION ファイル（必須）
+
+`StockFixer/VERSION` がバージョンの **唯一の正として機能する**。
+
+- バージョンアップ時は **必ず VERSION ファイルを先に更新**してからコミット・タグ作成を行う
+- デプロイ時は **VERSION ファイルを参照**して `$env:VERSION` を設定する（Gitタグから取得しない）
+- VERSION ファイルの内容は `v` プレフィックスなしの数値のみ（例: `1.2.3`）
+
+```
+StockFixer/
+└── VERSION          # バージョン番号の正（例: 1.2.3）
+```
+
 ## Procedure
 
 ### 1. 現在のバージョン確認
@@ -44,42 +57,55 @@ git tag -l "v*" --sort=-version:refname
 git log --oneline --decorate --tags
 ```
 
-### 2. バージョンを上げる（タグ作成）
+### 2. バージョンを上げる（VERSIONファイル更新 → コミット → タグ作成）
+
+**手順はこの順序で行うこと：**
+1. VERSION ファイルを編集して新バージョンを記載
+2. VERSION ファイルをコミット
+3. Gitタグを作成
 
 #### PATCH バージョンアップ（バグ修正・小改善）
 ```powershell
-# 最新タグを取得して次のPATCHバージョンを計算
-$latest = git describe --tags --abbrev=0 2>$null
-if (-not $latest) { $latest = "v0.0.0" }
-$parts = $latest.TrimStart("v").Split(".")
-$newVersion = "v$($parts[0]).$($parts[1]).$([int]$parts[2] + 1)"
+# 現在のVERSIONファイルから取得して次のPATCHバージョンを計算
+$current = (Get-Content C:\src\StockFixer\VERSION -Raw).Trim()
+$parts = $current.Split(".")
+$newVersionNum = "$($parts[0]).$($parts[1]).$([int]$parts[2] + 1)"
+$newVersion = "v$newVersionNum"
+
+# VERSIONファイルを更新
+$newVersionNum | Set-Content C:\src\StockFixer\VERSION -NoNewline
+git add VERSION
+git commit -m "chore: bump version to $newVersionNum"
 git tag -a $newVersion -m "Release $newVersion"
 Write-Host "Created tag: $newVersion"
 ```
 
 #### MINOR バージョンアップ（機能追加）
 ```powershell
-$latest = git describe --tags --abbrev=0 2>$null
-if (-not $latest) { $latest = "v0.0.0" }
-$parts = $latest.TrimStart("v").Split(".")
-$newVersion = "v$($parts[0]).$([int]$parts[1] + 1).0"
+$current = (Get-Content C:\src\StockFixer\VERSION -Raw).Trim()
+$parts = $current.Split(".")
+$newVersionNum = "$($parts[0]).$([int]$parts[1] + 1).0"
+$newVersion = "v$newVersionNum"
+
+$newVersionNum | Set-Content C:\src\StockFixer\VERSION -NoNewline
+git add VERSION
+git commit -m "chore: bump version to $newVersionNum"
 git tag -a $newVersion -m "Release $newVersion"
 Write-Host "Created tag: $newVersion"
 ```
 
 #### MAJOR バージョンアップ（破壊的変更）
 ```powershell
-$latest = git describe --tags --abbrev=0 2>$null
-if (-not $latest) { $latest = "v0.0.0" }
-$parts = $latest.TrimStart("v").Split(".")
-$newVersion = "v$([int]$parts[0] + 1).0.0"
+$current = (Get-Content C:\src\StockFixer\VERSION -Raw).Trim()
+$parts = $current.Split(".")
+$newVersionNum = "$([int]$parts[0] + 1).0.0"
+$newVersion = "v$newVersionNum"
+
+$newVersionNum | Set-Content C:\src\StockFixer\VERSION -NoNewline
+git add VERSION
+git commit -m "chore: bump version to $newVersionNum"
 git tag -a $newVersion -m "Release $newVersion"
 Write-Host "Created tag: $newVersion"
-```
-
-#### 手動でバージョン指定
-```powershell
-git tag -a v1.2.3 -m "Release v1.2.3: 機能追加の説明"
 ```
 
 ### 3. タグをリモートにプッシュ
@@ -93,25 +119,23 @@ git push origin --tags
 
 ### 4. Docker イメージをバージョン付きでビルド
 
-タグからバージョンを取得し、Docker イメージに適用する。
+**デプロイ時のバージョンは `VERSION` ファイルを参照する。**
 
 ```powershell
 cd C:\src\StockFixer
 
-# Git タグからバージョンを取得
-$VERSION = git describe --tags --abbrev=0 2>$null
-if (-not $VERSION) { $VERSION = "dev" }
-$VERSION = $VERSION.TrimStart("v")
+# VERSIONファイルからバージョンを取得（正）
+$env:VERSION = (Get-Content .\VERSION -Raw).Trim()
+if (-not $env:VERSION) { $env:VERSION = "dev" }
 
 # ビルド情報を設定
-$env:VERSION = $VERSION
 $env:BUILD_DATE = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
 $env:GIT_COMMIT = git rev-parse --short HEAD
 
 # ビルド＆起動
 docker-compose up -d --build
 
-Write-Host "Built image: stockfixer:$VERSION"
+Write-Host "Built image: stockfixer:$($env:VERSION)"
 ```
 
 ### 5. タグの削除（必要な場合のみ）
@@ -133,30 +157,37 @@ cd C:\src\StockFixer
 # 1. バージョンアップの種類を決定（patch / minor / major）
 $bumpType = "patch"  # ← 適宜変更
 
-# 2. 現在のバージョン取得
-$latest = git describe --tags --abbrev=0 2>$null
-if (-not $latest) { $latest = "v0.0.0" }
-$parts = $latest.TrimStart("v").Split(".")
+# 2. VERSIONファイルから現在のバージョン取得
+$current = (Get-Content .\VERSION -Raw).Trim()
+$parts = $current.Split(".")
 
 # 3. 新バージョン計算
 switch ($bumpType) {
-    "patch" { $newVersion = "v$($parts[0]).$($parts[1]).$([int]$parts[2] + 1)" }
-    "minor" { $newVersion = "v$($parts[0]).$([int]$parts[1] + 1).0" }
-    "major" { $newVersion = "v$([int]$parts[0] + 1).0.0" }
+    "patch" { $newVersionNum = "$($parts[0]).$($parts[1]).$([int]$parts[2] + 1)" }
+    "minor" { $newVersionNum = "$($parts[0]).$([int]$parts[1] + 1).0" }
+    "major" { $newVersionNum = "$([int]$parts[0] + 1).0.0" }
 }
+$newVersion = "v$newVersionNum"
 
-# 4. タグ作成
+# 4. VERSIONファイルを更新してコミット
+$newVersionNum | Set-Content .\VERSION -NoNewline
+git add VERSION
+git commit -m "chore: bump version to $newVersionNum"
+Write-Host "Version bumped: $newVersionNum"
+
+# 5. タグ作成
 git tag -a $newVersion -m "Release $newVersion"
 Write-Host "Tagged: $newVersion"
 
-# 5. Docker ビルド
-$env:VERSION = $newVersion.TrimStart("v")
+# 6. Docker ビルド（VERSIONファイルを参照）
+$env:VERSION = (Get-Content .\VERSION -Raw).Trim()
 $env:BUILD_DATE = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
 $env:GIT_COMMIT = git rev-parse --short HEAD
 docker-compose up -d --build
 Write-Host "Built image: stockfixer:$($env:VERSION)"
 
-# 6. タグをリモートにプッシュ
+# 7. コミット & タグをリモートにプッシュ
+git push origin feature/training
 git push origin $newVersion
 Write-Host "Pushed tag: $newVersion"
 ```
@@ -215,7 +246,13 @@ git push origin --tags
 ```
 
 ### Docker ビルドでバージョンが dev になる
-→ 環境変数 `VERSION` が設定されていない。タグから取得して `$env:VERSION` に設定する。
+→ 環境変数 `VERSION` が設定されていない。`VERSION` ファイルから取得して `$env:VERSION` に設定する。
+```powershell
+$env:VERSION = (Get-Content .\VERSION -Raw).Trim()
+```
+
+### VERSIONファイルとGitタグがずれた場合
+→ VERSIONファイルを正として扱う。Gitタグを修正するか、VERSIONファイルを最新タグに合わせて更新してコミットする。
 
 ## References
 - [Semantic Versioning 2.0.0](https://semver.org/lang/ja/)
