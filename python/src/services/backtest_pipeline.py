@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import Optional, Tuple
 
 import pandas as pd
+
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -52,9 +53,19 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
             sys.exit(1)
         close_series = df["Close"].copy()
         df = add_technical_indicators(df)
+        _nan = int(df.isnull().sum().sum())
+        if _nan > 0:
+            df = df.ffill().bfill()
+        _MIN_ROWS = 30
+        if len(df) < _MIN_ROWS:
+            logger.error(f"[backtest] データ行数不足: {market}/{symbol} " f"（{len(df)}行 < 最低{_MIN_ROWS}行）")
+            sys.exit(1)
         X, y = create_basic_lag_features(df, n_lags=5)
         if X is None or X.empty:
-            logger.error("[backtest] 特徴量生成に失敗しました。")
+            nan_cols = df.isnull().sum()
+            nan_cols = nan_cols[nan_cols > 0]
+            detail = f"NaN残存列: {nan_cols.to_dict()}" if not nan_cols.empty else "NaN列なし"
+            logger.error(f"[backtest] 特徴量生成に失敗しました: {market}/{symbol}（{len(df)}行, {detail}）")
             sys.exit(1)
         X.columns = [re.sub(r"[^0-9a-zA-Z_]", "_", str(c)) for c in X.columns]
         X["y"] = y
@@ -78,9 +89,19 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
             sys.exit(1)
         close_series = df["Close"].copy()
         df = add_technical_indicators(df)
+        _nan = int(df.isnull().sum().sum())
+        if _nan > 0:
+            df = df.ffill().bfill()
+        _MIN_ROWS = 30
+        if len(df) < _MIN_ROWS:
+            logger.error(f"[backtest] データ行数不足: {market}/{symbol} " f"（{len(df)}行 < 最低{_MIN_ROWS}行）")
+            sys.exit(1)
         X, y = create_basic_lag_features(df, n_lags=5)
         if X is None or X.empty:
-            logger.error("[backtest] 特徴量生成に失敗しました。")
+            nan_cols = df.isnull().sum()
+            nan_cols = nan_cols[nan_cols > 0]
+            detail = f"NaN残存列: {nan_cols.to_dict()}" if not nan_cols.empty else "NaN列なし"
+            logger.error(f"[backtest] 特徴量生成に失敗しました: {market}/{symbol}（{len(df)}行, {detail}）")
             sys.exit(1)
         X.columns = [re.sub(r"[^0-9a-zA-Z_]", "_", str(c)) for c in X.columns]
         X["y"] = y

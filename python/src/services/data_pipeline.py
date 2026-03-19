@@ -123,10 +123,27 @@ def fetch_stock_data_with_features(
     # テクニカル指標を追加
     df = add_technical_indicators(df)
 
+    # 部分的なNaN値を前方/後方補完（OHLCV欠損日等によるdropna行数増大を防ぐ）
+    nan_before = int(df.isnull().sum().sum())
+    if nan_before > 0:
+        df = df.ffill().bfill()
+        nan_after = int(df.isnull().sum().sum())
+        logger.debug(f"NaN補完: {nan_before}個→{nan_after}個 ({market}/{symbol})")
+
+    # 行数不足チェック（TA指標の最大ウィンドウ26 + ラグ5 + ターゲット1 = 実用最低30行）
+    _MIN_ROWS = 30
+    if len(df) < _MIN_ROWS:
+        logger.warning(f"特徴量生成をスキップ: {market}/{symbol} " f"（{len(df)}行 < 最低{_MIN_ROWS}行）")
+        return None
+
     logger.info(f"特徴量生成（全数値列ラグ特徴量）... {market}/{symbol} ({len(df)}行)")
     X, y = create_basic_lag_features(df, n_lags=5, feature_cols=None)
     if X is None or X.empty or y is None:
-        logger.warning(f"特徴量生成に失敗しました: {market}/{symbol}（元データ {len(df)}行）")
+        # dropna後に空になった場合の詳細診断
+        nan_cols = df.isnull().sum()
+        nan_cols = nan_cols[nan_cols > 0]
+        detail = f"NaN残存列: {nan_cols.to_dict()}" if not nan_cols.empty else "NaN列なし"
+        logger.warning(f"特徴量生成に失敗しました: {market}/{symbol} " f"（元データ {len(df)}行, {detail}）")
         return None
 
     # 特徴量名の正規化
