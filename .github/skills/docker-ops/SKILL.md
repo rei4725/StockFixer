@@ -1,36 +1,106 @@
 ---
 name: docker-ops
-description: "Dockerコンテナのビルド・起動・ログ確認を行う。Docker、コンテナ、docker-compose、デプロイ、ビルド、本番環境、運用の話題で使用する。"
-metadata:
-  author: StockFixer
-  version: "1.0"
-compatibility: "Docker, docker-compose。プロジェクトルートで実行。"
+description: "Dockerコンテナのビルド・起動・ログ確認を行う。Docker・デプロイ・本番環境・weekly_redeploy・register_taskの話題では必ずこのスキルを使用する。コンテナ管理・docker-compose・スケジュールタスクの設定が絡む場合も使用する。"
+compatibility: "Docker, docker-compose, PowerShell 5.1+。C:\\src\\StockFixer で実行。"
 ---
 
 ## Goal
-Docker環境でのビルド・起動・ログ確認を正確に行う。
+デプロイは `weekly_redeploy.ps1` を中心に行う。
+毎デプロイで `VERSION` ファイルのパッチ番号を +1 し、コミット・タグを打ってから実行する。
 
-## Procedure
+---
 
-### ビルド＆起動
-```bash
-docker-compose up -d --build
+## 手動デプロイ手順（標準フロー）
+
+### Step 1: パッチバージョンを上げる
+```powershell
+cd C:\src\StockFixer
+
+# VERSIONファイルを読んでパッチ+1
+$current = (Get-Content VERSION).Trim()
+$parts   = $current.Split(".")
+$newVer  = "$($parts[0]).$($parts[1]).$([int]$parts[2] + 1)"
+
+Set-Content VERSION $newVer
+Write-Host "バージョン: $current -> $newVer"
 ```
 
-### ログ確認
-```bash
+### Step 2: コミット & タグ
+```powershell
+git add VERSION
+git commit -m "chore: bump version to $newVer"
+git tag -a "v$newVer" -m "Release v$newVer"
+```
+
+### Step 3: デプロイ実行（weekly_redeploy.ps1）
+```powershell
+# weekly_redeploy.ps1 は VERSION ファイルを読んで docker-compose up --build する
+powershell -ExecutionPolicy Bypass -File C:\src\StockFixer\weekly_redeploy.ps1
+```
+
+> `weekly_redeploy.ps1` の処理内容:
+> 1. `git pull origin feature/training`
+> 2. `VERSION` / `GIT_COMMIT` / `BUILD_DATE` を環境変数にセット
+> 3. `docker-compose up -d --build`
+> 4. コンテナ起動確認
+> 5. 結果を `python/logs/redeploy.log` に記録
+
+---
+
+## 週次自動デプロイの設定
+
+### タスクスケジューラーへの登録（初回のみ・管理者権限で実行）
+```powershell
+# 管理者 PowerShell で実行
+C:\src\StockFixer\register_task.ps1
+```
+- 毎週土曜 04:00 に `weekly_redeploy.ps1` が自動実行される
+- タスク名: `StockFixer Weekly Redeploy`
+
+### タスクの即時テスト実行
+```powershell
+Start-ScheduledTask -TaskName "StockFixer Weekly Redeploy"
+```
+
+### タスクの状態確認
+```powershell
+Get-ScheduledTask -TaskName "StockFixer Weekly Redeploy" | Select-Object TaskName, State, LastRunTime, NextRunTime
+```
+
+---
+
+## 状態確認・ログ
+
+### コンテナ起動状態
+```powershell
+docker ps --filter "name=stockfixer" --format "table {{.Names}}\t{{.Status}}\t{{.Image}}"
+```
+
+### アプリログ（リアルタイム）
+```powershell
 docker-compose logs -f stockfixer
 ```
 
+### デプロイログ
+```powershell
+Get-Content C:\src\StockFixer\python\logs\redeploy.log -Tail 30
+```
+
 ### 停止
-```bash
+```powershell
 docker-compose down
 ```
 
-### コンテナ構成
-- 単一コンテナ構成（`stockfixer`）
-- `restart: always` で常時稼働
-- イメージ: `stockfixer:${VERSION:-dev}`
+---
+
+## コンテナ構成
+
+| 項目 | 値 |
+|------|-----|
+| コンテナ名 | `stockfixer` |
+| イメージタグ | `stockfixer:<VERSION>` |
+| 再起動ポリシー | `always` |
+| ログドライバ | `json-file` (10MB × 3) |
 
 ### ボリュームマウント
 | ホスト側 | コンテナ側 | 用途 |
@@ -39,14 +109,17 @@ docker-compose down
 | `./python/models` | `/app/models` | 学習済みモデル永続化 |
 | `./python/results` | `/app/results` | 予測結果永続化 |
 
-### 環境変数
-- `python/.env` から `env_file` で読み込み
-- ビルド引数: `BUILD_DATE`, `GIT_COMMIT`, `VERSION`
+### ビルド引数（自動セット）
+| 変数 | 値 |
+|------|-----|
+| `VERSION` | `VERSION` ファイルの内容 |
+| `GIT_COMMIT` | `git rev-parse --short HEAD` |
+| `BUILD_DATE` | 実行時のISO日時 |
 
-### ログ設定
-- ドライバ: `json-file`
-- 最大サイズ: 10MB × 3ファイル
+---
 
 ## References
+- [weekly_redeploy.ps1](../../../weekly_redeploy.ps1)
+- [register_task.ps1](../../../register_task.ps1)
 - [docker-compose.yml](../../../docker-compose.yml)
 - [Dockerfile](../../../python/Dockerfile)

@@ -1,9 +1,6 @@
 ---
 name: duckdb-ops
-description: "DuckDBのデータ確認・操作・移行を行う。DuckDB、DB、データベース、テーブル、stock_features、prediction_results、market_data_raw、データ確認、データ移行、check_data、migrateの話題で使用する。"
-metadata:
-  author: StockFixer
-  version: "1.0"
+description: "DuckDBのデータ確認・操作・移行を行う。DB・テーブル確認・データ移行・check_data・migrateの話題では必ずこのスキルを使用する。stock_features・prediction_results・market_data_rawの内容確認や操作が必要な場面でも、明示的に言及されなくても使用する。"
 compatibility: "Python 3.10+, DuckDB。python/ ディレクトリで実行。"
 ---
 

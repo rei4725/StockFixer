@@ -1,9 +1,6 @@
 ---
 name: backtest
-description: "バックテストを実行して戦略の有効性を検証する。バックテスト、backtest、Walk-Forward、損益、シミュレーション、パフォーマンス検証、シャープレシオの話題で使用する。"
-metadata:
-  author: StockFixer
-  version: "1.0"
+description: "バックテストを実行して戦略の有効性を検証する。バックテスト・Walk-Forward・損益シミュレーション・パフォーマンス検証・シャープレシオの話題では必ずこのスキルを使用する。戦略の有効性確認や取引成績の検証が必要な場面でも使用する。"
 compatibility: "Python 3.10+。python/ ディレクトリで実行。"
 ---
 

@@ -1,9 +1,6 @@
 ---
 name: version-mgmt
-description: "Gitタグによるバージョン管理とDockerイメージのバージョン付きビルドを行う。バージョン、version、タグ、tag、リリース、release、セマンティックバージョニング、semver、バージョンアップの話題で使用する。"
-metadata:
-  author: StockFixer
-  version: "1.0"
+description: "Gitタグによるバージョン管理とDockerイメージのバージョン付きビルドを行う。バージョン管理・タグ・リリース・バージョンアップ・セマンティックバージョニングの話題では必ずこのスキルを使用する。VERSIONファイルの更新やDockerイメージのバージョン連動が必要な場面でも使用する。"
 compatibility: "Git 2.0+, Docker, docker-compose。プロジェクトルートで実行。"
 ---
 

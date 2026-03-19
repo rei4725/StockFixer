@@ -1,9 +1,6 @@
 ---
 name: prediction
-description: "学習済みモデルを使用して株価予測を実行し、結果をDuckDBに保存する。予測、predict、forecast、Top10、Worst10、予想変化率、統合モデル予測、銘柄別モデル予測の話題で使用する。"
-metadata:
-  author: StockFixer
-  version: "1.0"
+description: "学習済みモデルを使用して株価予測を実行し、結果をDuckDBに保存する。予測・forecast・Top10/Worst10・予想変化率の話題では必ずこのスキルを使用する。統合モデル予測・銘柄別モデル予測・予測結果の確認が絡む場面でも使用する。"
 compatibility: "Python 3.10+, 学習済みモデルが必要。python/ ディレクトリで実行。"
 ---
 

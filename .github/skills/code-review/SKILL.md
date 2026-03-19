@@ -1,3 +1,9 @@
+---
+name: code-review
+description: "AIと自動チェックツールを活用した包括的なコードレビューを実行する。コードレビュー・品質確認・pre-commit・lint・セキュリティ検査・DuckDB並行問題・ロック検出の話題では必ずこのスキルを使用する。明示的に言及されなくても、コードの品質・安全性・アーキテクチャ準拠の確認が必要な場面で使用する。"
+compatibility: "Python 3.10+, pre-commit, black, flake8, mypy, pylint。C:\\src\\StockFixer で実行。"
+---
+
 # code-review スキル: コードレビュー実行ガイド
 
 ## 概要
@@ -483,4 +489,3 @@ A: 段階的に修正してください：
 1. 変更内容に対して `data-pipeline` / `model-training` スキルを実行
 2. バックテスト結果を確認（`backtest` スキル）
 3. PR を作成して レビューを受ける（`git-ops` スキル）
-

@@ -1,9 +1,6 @@
 ---
 name: model-training
-description: "AIモデルの学習・保存を行う。銘柄別モデル学習と統合モデル学習の両方に対応。モデル学習、モデル作成、XGBoost、LightGBM、統合モデル、unified model、train、学習の話題で使用する。"
-metadata:
-  author: StockFixer
-  version: "1.0"
+description: "AIモデルの学習・保存を行う（銘柄別・統合モデル両対応）。モデル学習・作成・XGBoost・LightGBM・統合モデルの話題では必ずこのスキルを使用する。trainやunified modelが話題になった場合も使用する。"
 compatibility: "Python 3.10+, XGBoost, LightGBM, joblib。python/ ディレクトリで実行。"
 ---
 

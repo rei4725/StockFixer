@@ -131,6 +131,7 @@ run_*.py → api層 → services層 → models/strategy/backtest層 → features
 | `git-ops` | Git操作（コミット、ブランチ、push、diff、status等） |
 | `version-mgmt` | Gitタグによるバージョン管理・Dockerイメージ連動 |
 | `troubleshooting` | よくあるエラーの原因と対処法 |
+| `code-review` | AIと自動チェックツールによる包括的コードレビュー（品質・ロック問題・セキュリティ） |
 
 ---
 

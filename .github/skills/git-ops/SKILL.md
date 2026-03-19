@@ -1,9 +1,6 @@
 ---
 name: git-ops
-description: "Git操作（コミット、ブランチ、push、diff、status等）を実行する。git、バージョン管理、コミット、ブランチ、push、pull、diff、status、checkout、stash、blame、履歴、変更確認の話題で使用する。"
-metadata:
-  author: StockFixer
-  version: "1.0"
+description: "Git操作（コミット、ブランチ、push、diff、status等）を実行する。git・バージョン管理・コミット・ブランチ操作・変更確認の話題では必ずこのスキルを使用する。変更のpush・pull・stash・履歴確認が絡む場合も使用する。"
 compatibility: "Git 2.0+。GitKraken MCPツール使用。"
 ---
 
