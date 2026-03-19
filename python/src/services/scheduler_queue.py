@@ -49,9 +49,15 @@ class SchedulerQueueManager:
     def now(self) -> datetime:
         return datetime.now(self.tz)
 
-    def run_job(self, job_id: str, reason: str, force: bool = False) -> bool:
+    def run_job(
+        self, job_id: str, reason: str, force: bool = False, period_key: str | None = None
+    ) -> bool:
         """
         ジョブを実行し、ログと実行回数制御を適用する。
+
+        Args:
+            period_key: ログに記録する期間キー。Noneの場合は実行日時から自動生成。
+                        前日分の補完実行など、実際の対象期間を明示したい場合に使用する。
 
         Returns:
             実際に実行した場合はTrue、スキップ時はFalse
@@ -61,7 +67,8 @@ class SchedulerQueueManager:
 
         config = self.schedule_config[job_id]
         now = self.now()
-        period_key = self._build_period_key(config, now)
+        if period_key is None:
+            period_key = self._build_period_key(config, now)
 
         if job_id in self._in_progress_jobs:
             logger.info(f"ジョブ '{job_id}' は実行中のためスキップします")
@@ -118,6 +125,39 @@ class SchedulerQueueManager:
                 }
             )
             self._in_progress_jobs.discard(job_id)
+
+    def get_missed_past_periods(
+        self, job_id: str, lookback_days: int = 2, now: datetime | None = None
+    ) -> list[str]:
+        """
+        過去N日分で未実行（成功なし・上限未到達）の period_key を返す（daily ジョブ専用）。
+
+        コンテナ再起動などで当日スケジュール時刻前に起動した場合に、
+        前日分の欠落を検出して補完実行するために使用する。
+        """
+        if job_id not in self.schedule_config:
+            return []
+
+        config = self.schedule_config[job_id]
+        if config.get("period", "daily") != "daily":
+            return []
+
+        now = now or self.now()
+        missed: list[str] = []
+        max_executions = config.get("max_executions_per_period", 1)
+
+        for days_back in range(1, lookback_days + 1):
+            past_dt = now - timedelta(days=days_back)
+            if not self._is_scheduled_day(config, past_dt):
+                continue
+            past_period_key = self._build_period_key(config, past_dt)
+            if self.has_success(job_id, past_period_key):
+                continue
+            if self.get_execution_count(job_id, past_period_key) >= max_executions:
+                continue
+            missed.append(past_period_key)
+
+        return missed
 
     def should_recover(self, job_id: str, now: datetime | None = None) -> bool:
         """補完実行すべきか判定する。"""

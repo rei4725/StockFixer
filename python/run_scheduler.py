@@ -174,14 +174,21 @@ def _register_jobs(scheduler, queue_manager):
 
 
 def _poll_recovery_jobs(queue_manager):
-    """所定時刻を過ぎても未実行のジョブを補完実行する"""
+    """所定時刻を過ぎても未実行のジョブを補完実行する（前日分も含む）"""
     now = queue_manager.now()
 
     for job_id in SCHEDULE_CONFIG.keys():
-        if not queue_manager.should_recover(job_id, now=now):
+        # 当日分の補完
+        if queue_manager.should_recover(job_id, now=now):
+            logger.warning(f"補完実行を開始: {job_id}")
+            queue_manager.run_job(job_id, reason="recovery")
             continue
-        logger.warning(f"補完実行を開始: {job_id}")
-        queue_manager.run_job(job_id, reason="recovery")
+
+        # 前日分の補完（コンテナ再起動などで当日スケジュール前に前日分が欠落した場合）
+        missed_periods = queue_manager.get_missed_past_periods(job_id, lookback_days=2, now=now)
+        for missed_period_key in missed_periods:
+            logger.warning(f"前日分補完実行を開始: {job_id} (period={missed_period_key})")
+            queue_manager.run_job(job_id, reason="recovery_backfill", period_key=missed_period_key)
 
 
 def _print_schedule():
@@ -206,7 +213,7 @@ def run_with_bot():
         sys.exit(1)
 
     # BackgroundSchedulerを使用（Botのイベントループをブロックしない）
-    scheduler = BackgroundScheduler()
+    scheduler = BackgroundScheduler(timezone="Asia/Tokyo")
     queue_manager = _build_queue_manager()
     _register_jobs(scheduler, queue_manager)
     scheduler.add_listener(_job_listener, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR)
@@ -223,7 +230,7 @@ def run_with_bot():
 
 def run_scheduler_only():
     """スケジューラのみ起動する"""
-    scheduler = BlockingScheduler()
+    scheduler = BlockingScheduler(timezone="Asia/Tokyo")
     queue_manager = _build_queue_manager()
     _register_jobs(scheduler, queue_manager)
     scheduler.add_listener(_job_listener, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR)
