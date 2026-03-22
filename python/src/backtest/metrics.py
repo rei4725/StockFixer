@@ -247,3 +247,48 @@ def plot_backtest(
     plt.savefig(output_path, dpi=100, bbox_inches="tight")
     plt.close(fig)
     return output_path
+
+
+def fetch_benchmark_returns(
+    ticker: str,
+    start: str,
+    end: str,
+) -> dict:
+    """
+    ベンチマーク指数の期間リターンを取得する。
+
+    Args:
+        ticker: Yahoo Finance ティッカー (例: "^N225", "^GSPC")
+        start: 開始日 YYYY-MM-DD
+        end: 終了日 YYYY-MM-DD
+
+    Returns:
+        dict: {"ticker": str, "total_return": float, "start": str, "end": str}
+        取得失敗時は total_return=None
+    """
+    try:
+        import yfinance as yf
+
+        df = yf.download(ticker, start=start, end=end, progress=False, auto_adjust=True)
+        if df is None or df.empty:
+            return {"ticker": ticker, "total_return": None, "start": start, "end": end}
+        close = df["Close"].dropna()
+        if len(close) < 2:
+            return {"ticker": ticker, "total_return": None, "start": start, "end": end}
+        total_return = float((close.iloc[-1] - close.iloc[0]) / close.iloc[0])
+        return {
+            "ticker": ticker,
+            "total_return": round(total_return, 6),
+            "start": str(close.index[0].date()),
+            "end": str(close.index[-1].date()),
+        }
+    except Exception:
+        return {"ticker": ticker, "total_return": None, "start": start, "end": end}
+
+
+BENCHMARK_TICKERS = {
+    "n225": "^N225",
+    "sp500": "^GSPC",
+    "topix": "^TOPX",
+    "nasdaq": "^IXIC",
+}

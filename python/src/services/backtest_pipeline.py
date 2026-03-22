@@ -126,6 +126,39 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
         if "Close" not in df.columns and "Close_lag1" in df.columns:
             df = df.copy()
             df["Close"] = df["Close_lag1"]
+
+        # date 列があれば DatetimeIndex に復元する
+        if "date" in df.columns:
+            df["date"] = pd.to_datetime(df["date"])
+            df = df.set_index("date")
+            df.index.name = "Date"
+        else:
+            # 旧データ（date列なし）: market_data_raw の ts 列で補完を試みる
+            try:
+                from src.utils.db._connection import _db_connection
+
+                with _db_connection() as con:
+                    raw_dates = con.execute(
+                        "SELECT ts FROM market_data_raw "
+                        "WHERE market = ? AND symbol = ? AND timeframe = 'daily' "
+                        "ORDER BY ts",
+                        [market, symbol],
+                    ).fetchdf()
+                if not raw_dates.empty:
+                    ts_series = pd.to_datetime(raw_dates["ts"])
+                    # create_basic_lag_features(n_lags=5, target=1) で先頭5行・末尾1行が除去される
+                    # 位置合わせ: raw_dates[5:-1] が stock_features の行数と一致する想定
+                    n_lags_assumed = 5
+                    expected_start = n_lags_assumed
+                    expected_end = len(ts_series) - 1  # target shift -1
+                    aligned = ts_series.iloc[expected_start:expected_end].values
+                    if len(aligned) == len(df):
+                        df = df.copy()
+                        df.index = pd.DatetimeIndex(aligned, name="Date")
+                        logger.debug(f"[backtest] market_data_raw から日付を補完: {market}/{symbol}")
+            except Exception as e:
+                logger.debug(f"[backtest] 日付補完スキップ: {e}")
+
         return df
 
 
@@ -148,7 +181,7 @@ def run_backtest_single(
     position_sizing: str = "full",
     position_fraction: float = 0.5,
     ensemble: bool = False,
-) -> Tuple[pd.DataFrame, dict, None]:
+) -> Tuple[pd.DataFrame, dict, pd.Series]:
     """
     単一学習/検証期間のバックテストを実行する。
 
@@ -184,13 +217,21 @@ def run_backtest_single(
 
     df = load_features(market, symbol, source)
 
+    # 日付列をインデックスに設定（大文字・小文字どちらも対応）
+    date_col = next((c for c in df.columns if c.lower() == "date"), None)
+    if date_col is not None:
+        df = df.set_index(date_col)
+        df.index = pd.to_datetime(df.index)
+    elif not isinstance(df.index, pd.DatetimeIndex):
+        # インデックスが日付型でない場合、期間フィルタはスキップ
+        start_date = None
+        end_date = None
+
     # 期間フィルタ
-    if "Date" in df.columns:
-        df = df.set_index("Date")
     if start_date:
-        df = df[df.index >= start_date]
+        df = df[df.index >= pd.Timestamp(start_date)]
     if end_date:
-        df = df[df.index <= end_date]
+        df = df[df.index <= pd.Timestamp(end_date)]
 
     # train / test 分割
     split = int(len(df) * train_ratio)
@@ -261,7 +302,9 @@ def run_backtest_single(
         signal,
         pred=pred,
     )
-    return result_df, metrics, None
+    close_col = "Close" if "Close" in test_df.columns else "close"
+    price_series = test_df[close_col].rename("price")
+    return result_df, metrics, price_series
 
 
 def run_backtest_walk_forward(
@@ -373,13 +416,16 @@ def save_backtest_results(
         print(f"\n取引ログ保存: {path}")
 
 
-def print_backtest_metrics(metrics: dict, label: str = "") -> None:
+def print_backtest_metrics(
+    metrics: dict, label: str = "", benchmark: Optional[dict] = None
+) -> None:
     """
     バックテストメトリクスを標準出力に表示する。
 
     Args:
         metrics: compute_metrics が返す辞書
         label: ヘッダーラベル
+        benchmark: fetch_benchmark_returns が返す辞書（オプション）
     """
     if not metrics:
         return
@@ -389,6 +435,16 @@ def print_backtest_metrics(metrics: dict, label: str = "") -> None:
     print(f"{'='*50}")
     for k, v in metrics.items():
         print(f"  {k:20s}: {v}")
+    if benchmark and benchmark.get("total_return") is not None:
+        bm_ret = benchmark["total_return"]
+        strategy_ret = metrics.get("total_return", 0.0)
+        alpha = strategy_ret - bm_ret
+        print(f"{'─'*50}")
+        print(
+            f"  {'ベンチマーク':20s}: {benchmark['ticker']} ({benchmark['start']} ～ {benchmark['end']})"
+        )
+        print(f"  {'BM リターン':20s}: {bm_ret:.4%}")
+        print(f"  {'アルファ':20s}: {alpha:+.4%}")
     print(f"{'='*50}")
 
 

@@ -122,6 +122,15 @@ def parse_args():
     # アンサンブル
     parser.add_argument("--ensemble", action="store_true", help="XGBoost+LightGBMアンサンブル予測を使用する")
 
+    # ベンチマーク比較
+    parser.add_argument(
+        "--benchmark",
+        type=str,
+        default="none",
+        choices=["none", "n225", "sp500", "topix", "nasdaq"],
+        help="比較するベンチマーク指数 (default: none)",
+    )
+
     # グラフ出力
     parser.add_argument("--save-chart", action="store_true", help="バックテスト結果グラフ(PNG)をresults/に保存する")
     parser.add_argument(
@@ -177,7 +186,28 @@ def main():
             end_date=args.end_date,
             train_ratio=args.train_ratio,
         )
-        print_backtest_metrics(metrics, label=f"{args.market}/{args.symbol} - {args.task}")
+        # ベンチマーク比較
+        benchmark_info = None
+        if args.benchmark != "none" and metrics and result_df is not None and not result_df.empty:
+            from src.backtest.metrics import BENCHMARK_TICKERS, fetch_benchmark_returns
+
+            bm_ticker = BENCHMARK_TICKERS.get(args.benchmark, args.benchmark)
+            bm_start = (
+                str(result_df["date"].min())[:10]
+                if "date" in result_df.columns
+                else args.start_date
+            )
+            bm_end = (
+                str(result_df["date"].max())[:10] if "date" in result_df.columns else args.end_date
+            )
+            if bm_start and bm_end:
+                benchmark_info = fetch_benchmark_returns(bm_ticker, bm_start, bm_end)
+
+        print_backtest_metrics(
+            metrics,
+            label=f"{args.market}/{args.symbol} - {args.task}",
+            benchmark=benchmark_info,
+        )
 
     save_backtest_results(result_df, metrics, wf_df, args.market, args.symbol, args.task)
 
