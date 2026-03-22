@@ -31,7 +31,9 @@ st.title("📈 バックテスト実行 UI")
 st.caption("サイドバーでパラメータを設定し「バックテスト実行」ボタンを押してください。")
 
 # メインタブ
-tab_single, tab_portfolio = st.tabs(["📈 単一銘柄", "📊 ポートフォリオ"])
+tab_single, tab_portfolio, tab_wf, tab_optimize = st.tabs(
+    ["📈 単一銘柄", "📊 ポートフォリオ", "🔄 Walk-Forward", "⚡ パラメータ最適化"]
+)
 
 # ──────────────────────────────────────────────
 # サイドバー: パラメータ設定
@@ -223,6 +225,74 @@ with st.sidebar:
         )
 
     pf_run_button = st.button("▶ ポートフォリオ実行", type="primary", use_container_width=True, key="pf_run")
+
+    st.divider()
+
+    # ── Walk-Forward 設定 ──
+    st.header("🔄 Walk-Forward 設定")
+    with st.expander("🔄 Walk-Forward 設定", expanded=True):
+        wf_n_splits = st.slider(
+            "フォールド数", min_value=2, max_value=10, value=5, step=1, key="wf_n_splits"
+        )
+
+    wf_run_button = st.button(
+        "▶ Walk-Forward 実行", type="primary", use_container_width=True, key="wf_run"
+    )
+
+    st.divider()
+
+    # ── パラメータ最適化設定 ──
+    st.header("⚡ パラメータ最適化設定")
+    with st.expander("⚡ 最適化設定", expanded=True):
+        opt_threshold_min = st.number_input(
+            "閾値 最小値",
+            min_value=0.0,
+            max_value=0.05,
+            value=0.0,
+            step=0.001,
+            format="%.3f",
+            key="opt_thr_min",
+        )
+        opt_threshold_max = st.number_input(
+            "閾値 最大値",
+            min_value=0.001,
+            max_value=0.05,
+            value=0.015,
+            step=0.001,
+            format="%.3f",
+            key="opt_thr_max",
+        )
+        opt_threshold_step = st.number_input(
+            "閾値 ステップ",
+            min_value=0.001,
+            max_value=0.01,
+            value=0.001,
+            step=0.001,
+            format="%.3f",
+            key="opt_thr_step",
+        )
+        opt_n_splits = st.slider(
+            "フォールド数",
+            min_value=2,
+            max_value=10,
+            value=5,
+            step=1,
+            key="opt_n_splits",
+        )
+        opt_optimize_risk = st.checkbox(
+            "SL/TP もグリッドサーチ",
+            value=False,
+            key="opt_risk",
+            help="有効にするとストップロス・テイクプロフィットの組み合わせも探索します（時間がかかります）",
+        )
+        opt_sort_by = st.selectbox(
+            "ソート基準",
+            ["sharpe_ratio", "total_return", "profit_factor", "win_rate"],
+            index=0,
+            key="opt_sort_by",
+        )
+
+    opt_run_button = st.button("▶ 最適化実行", type="primary", use_container_width=True, key="opt_run")
 
 
 # ──────────────────────────────────────────────
@@ -583,7 +653,7 @@ with tab_single:
 
             # ── 1. メトリクスカード ──
             st.subheader("📊 パフォーマンスサマリー")
-            m1, m2, m3, m4, m5, m6 = st.columns(6)
+            m1, m2, m3, m4, m5, m6, m7 = st.columns(7)
 
             total_return_pct = metrics.get("total_return", 0) * 100
             win_rate_pct = metrics.get("win_rate", 0) * 100
@@ -597,6 +667,7 @@ with tab_single:
             m4.metric("最大ドローダウン", f"{max_dd_pct:.2f}%")
             m5.metric("取引回数", f"{metrics.get('num_trades', 0)} 回")
             m6.metric("最終資産", f"¥{metrics.get('final_cash', initial_cash):,.0f}")
+            m7.metric("プロフィットファクター", pf_str)
 
             st.divider()
 
@@ -628,6 +699,25 @@ with tab_single:
                 log_df["action"] = log_df["action"].map(lambda a: action_emoji.get(a, a))
                 log_df.columns = ["日付", "アクション", "価格", "数量", "資産"]
                 st.dataframe(log_df, use_container_width=True, height=300)
+
+                # ── 5. CSV エクスポート ──
+                col_dl1, col_dl2 = st.columns(2)
+                with col_dl1:
+                    trade_csv = result_df.to_csv(index=False).encode("utf-8-sig")
+                    st.download_button(
+                        "📥 売買ログをCSVでダウンロード",
+                        trade_csv,
+                        file_name=f"backtest_{market}_{symbol}_trades.csv",
+                        mime="text/csv",
+                    )
+                with col_dl2:
+                    metrics_csv = pd.DataFrame([metrics]).to_csv(index=False).encode("utf-8-sig")
+                    st.download_button(
+                        "📥 メトリクスをCSVでダウンロード",
+                        metrics_csv,
+                        file_name=f"backtest_{market}_{symbol}_metrics.csv",
+                        mime="text/csv",
+                    )
             else:
                 st.info("売買ログがありません。閾値を下げるか、データソースを確認してください。")
 
@@ -739,6 +829,25 @@ with tab_portfolio:
                         }
                     )
                     st.dataframe(display_df, use_container_width=True, height=400)
+
+                    # ── 6. CSV エクスポート ──
+                    col_pf_dl1, col_pf_dl2 = st.columns(2)
+                    with col_pf_dl1:
+                        eq_csv = equity_df.to_csv(index=False).encode("utf-8-sig")
+                        st.download_button(
+                            "📥 エクイティカーブをCSVでダウンロード",
+                            eq_csv,
+                            file_name=f"portfolio_equity_{pf_market}.csv",
+                            mime="text/csv",
+                        )
+                    with col_pf_dl2:
+                        hold_csv = holdings_df.to_csv(index=False).encode("utf-8-sig")
+                        st.download_button(
+                            "📥 保有銘柄をCSVでダウンロード",
+                            hold_csv,
+                            file_name=f"portfolio_holdings_{pf_market}.csv",
+                            mime="text/csv",
+                        )
                 else:
                     st.info("保有銘柄データがありません。")
 
@@ -766,3 +875,444 @@ with tab_portfolio:
                 "手数料率": f"{pf_fee_rate:.4f}",
             }
             st.table(pd.DataFrame(pf_params.items(), columns=["パラメータ", "値"]))
+
+
+# ──────────────────────────────────────────────
+# Walk-Forward 実行ロジック（キャッシュ付き）
+# ──────────────────────────────────────────────
+@st.cache_data(show_spinner="Walk-Forward 検証中...")
+def _run_walk_forward(
+    market,
+    symbol,
+    model_type,
+    ensemble,
+    threshold,
+    source,
+    n_splits,
+    initial_cash,
+    fee_rate,
+    slippage,
+    stop_loss_pct,
+    take_profit_pct,
+    position_sizing,
+    position_fraction,
+):
+    """Walk-Forward 検証をキャッシュ付きで実行する。"""
+    from src.services.backtest_pipeline import run_backtest_walk_forward
+
+    _, _, wf_df = run_backtest_walk_forward(
+        market=market,
+        symbol=symbol,
+        model_type=model_type,
+        threshold=threshold,
+        source=source,
+        n_splits=n_splits,
+        initial_cash=initial_cash,
+        fee_rate=fee_rate,
+        slippage=slippage,
+        stop_loss_pct=stop_loss_pct,
+        take_profit_pct=take_profit_pct,
+        position_sizing=position_sizing,
+        position_fraction=position_fraction,
+        ensemble=ensemble,
+    )
+    return wf_df
+
+
+# ──────────────────────────────────────────────
+# パラメータ最適化 実行ロジック（キャッシュ付き）
+# ──────────────────────────────────────────────
+@st.cache_data(show_spinner="パラメータ最適化中（時間がかかります）...", ttl=1800)
+def _run_optimization(
+    market,
+    symbol,
+    model_type,
+    ensemble,
+    source,
+    n_splits,
+    initial_cash,
+    fee_rate,
+    slippage,
+    threshold_min,
+    threshold_max,
+    threshold_step,
+    optimize_risk,
+):
+    """パラメータ最適化をキャッシュ付きで実行する。"""
+    from src.services.backtest_optimize_pipeline import run_optimization
+
+    result_df = run_optimization(
+        market=market,
+        symbol=symbol,
+        model_type=model_type,
+        ensemble=ensemble,
+        source=source,
+        n_splits=n_splits,
+        initial_cash=initial_cash,
+        fee_rate=fee_rate,
+        slippage=slippage,
+        threshold_min=threshold_min,
+        threshold_max=threshold_max,
+        threshold_step=threshold_step,
+        optimize_risk=optimize_risk,
+    )
+    return result_df
+
+
+# ──────────────────────────────────────────────
+# Walk-Forward グラフ
+# ──────────────────────────────────────────────
+def build_wf_fold_chart(wf_df: pd.DataFrame) -> go.Figure:
+    """Fold 別リターン（棒）+ シャープ比（折れ線・第2Y軸）のチャートを生成する。"""
+    if wf_df is None or wf_df.empty:
+        return go.Figure()
+
+    df = wf_df.copy()
+    folds = df["fold"].astype(str)
+    returns_pct = df["total_return"] * 100
+
+    fig = go.Figure()
+
+    # リターン棒グラフ (左Y軸)
+    bar_colors = ["#2ecc71" if r >= 0 else "#e74c3c" for r in returns_pct]
+    fig.add_trace(
+        go.Bar(
+            x=folds,
+            y=returns_pct,
+            name="リターン (%)",
+            marker_color=bar_colors,
+            yaxis="y1",
+        )
+    )
+
+    # シャープ比折れ線 (右Y軸)
+    fig.add_trace(
+        go.Scatter(
+            x=folds,
+            y=df["sharpe_ratio"],
+            mode="lines+markers",
+            name="シャープ比",
+            line=dict(color="#9b59b6", width=2),
+            marker=dict(size=8),
+            yaxis="y2",
+        )
+    )
+
+    fig.add_hline(y=0, line_dash="dot", line_color="gray", yref="y1")
+
+    fig.update_layout(
+        title="Fold 別 リターン & シャープ比",
+        xaxis_title="Fold",
+        yaxis=dict(title="リターン (%)", side="left"),
+        yaxis2=dict(title="シャープ比", side="right", overlaying="y", showgrid=False),
+        height=380,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        margin=dict(l=0, r=0, t=40, b=0),
+    )
+    return fig
+
+
+def build_optimize_heatmap(result_df: pd.DataFrame, sort_by: str) -> go.Figure:
+    """threshold × stop_loss の 2D ヒートマップ（optimize_risk=True 時のみ使用）。"""
+    if result_df is None or result_df.empty:
+        return go.Figure()
+    if "stop_loss_pct" not in result_df.columns:
+        return go.Figure()
+
+    pivot = result_df.pivot_table(
+        index="stop_loss_pct", columns="threshold", values=sort_by, aggfunc="mean"
+    )
+    if pivot.empty:
+        return go.Figure()
+
+    fig = go.Figure(
+        go.Heatmap(
+            z=pivot.values,
+            x=[f"{v:.3f}" for v in pivot.columns],
+            y=[str(v) if v is not None else "なし" for v in pivot.index],
+            colorscale="RdYlGn",
+            colorbar=dict(title=sort_by),
+            hovertemplate="閾値: %{x}<br>SL: %{y}<br>%{z:.4f}<extra></extra>",
+        )
+    )
+    fig.update_layout(
+        title=f"ヒートマップ: {sort_by}（threshold × stop_loss_pct）",
+        xaxis_title="シグナル閾値",
+        yaxis_title="ストップロス率",
+        height=400,
+        margin=dict(l=0, r=0, t=40, b=0),
+    )
+    return fig
+
+
+# ──────────────────────────────────────────────
+# タブ3: Walk-Forward バックテスト
+# ──────────────────────────────────────────────
+with tab_wf:
+    if wf_run_button:
+        start_str_wf = start_date.strftime("%Y-%m-%d") if start_date else None
+        end_str_wf = end_date.strftime("%Y-%m-%d") if end_date else None
+
+        try:
+            wf_df = _run_walk_forward(
+                market=market,
+                symbol=symbol,
+                model_type=model_type,
+                ensemble=ensemble,
+                threshold=threshold,
+                source=source,
+                n_splits=wf_n_splits,
+                initial_cash=initial_cash,
+                fee_rate=fee_rate,
+                slippage=slippage,
+                stop_loss_pct=stop_loss_pct,
+                take_profit_pct=take_profit_pct,
+                position_sizing=position_sizing,
+                position_fraction=position_fraction,
+            )
+
+            if wf_df is None or wf_df.empty:
+                st.warning("Walk-Forward 結果が空です。データソースとパラメータを確認してください。")
+            else:
+                # ── 1. サマリー（全 fold 平均） ──
+                st.subheader("📊 Walk-Forward サマリー（全 Fold 平均）")
+                wf_mean = wf_df.mean(numeric_only=True)
+                wf_std = wf_df.std(numeric_only=True)
+
+                wm1, wm2, wm3, wm4, wm5, wm6 = st.columns(6)
+                wm1.metric("平均リターン", f"{wf_mean.get('total_return', 0) * 100:+.2f}%")
+                wm2.metric("平均シャープ比", f"{wf_mean.get('sharpe_ratio', 0):.3f}")
+                wm3.metric("平均最大DD", f"{wf_mean.get('max_drawdown', 0) * 100:.2f}%")
+                wm4.metric("平均勝率", f"{wf_mean.get('win_rate', 0) * 100:.1f}%")
+                wm5_pf = wf_mean.get("profit_factor")
+                wm5.metric("平均PF", f"{wm5_pf:.2f}" if wm5_pf is not None else "∞")
+                wm6.metric("平均取引回数", f"{wf_mean.get('num_trades', 0):.1f} 回")
+
+                # ── 2. 安定性評価 ──
+                ret_std = wf_std.get("total_return", 0)
+                if ret_std < 0.05:
+                    stability_color = "success"
+                    stability_msg = f"✅ 安定（リターン標準偏差 {ret_std * 100:.2f}% — 低リスク）"
+                elif ret_std < 0.15:
+                    stability_color = "warning"
+                    stability_msg = f"⚠️ やや不安定（リターン標準偏差 {ret_std * 100:.2f}%）"
+                else:
+                    stability_color = "error"
+                    stability_msg = f"❌ 不安定（リターン標準偏差 {ret_std * 100:.2f}% — 過学習の可能性）"
+
+                getattr(st, stability_color)(stability_msg)
+
+                st.divider()
+
+                # ── 3. Fold 別グラフ ──
+                st.subheader("📉 Fold 別 リターン & シャープ比")
+                wf_fig = build_wf_fold_chart(wf_df)
+                st.plotly_chart(wf_fig, use_container_width=True)
+
+                # ── 4. Fold 別テーブル ──
+                st.subheader("📋 Fold 別 詳細メトリクス")
+                wf_display = wf_df.copy()
+                for col in ["total_return", "win_rate", "max_drawdown"]:
+                    if col in wf_display.columns:
+                        wf_display[col] = wf_display[col].map(lambda x: f"{x * 100:+.2f}%")
+                for col in ["sharpe_ratio"]:
+                    if col in wf_display.columns:
+                        wf_display[col] = wf_display[col].map(lambda x: f"{x:.3f}")
+                for col in ["profit_factor"]:
+                    if col in wf_display.columns:
+                        wf_display[col] = wf_display[col].map(
+                            lambda x: f"{x:.2f}" if x is not None else "∞"
+                        )
+                col_rename = {
+                    "fold": "Fold",
+                    "val_start": "検証開始",
+                    "val_end": "検証終了",
+                    "train_rows": "学習行数",
+                    "val_rows": "検証行数",
+                    "total_return": "リターン",
+                    "sharpe_ratio": "シャープ比",
+                    "max_drawdown": "最大DD",
+                    "win_rate": "勝率",
+                    "profit_factor": "PF",
+                    "num_trades": "取引回数",
+                }
+                wf_display = wf_display.rename(
+                    columns={k: v for k, v in col_rename.items() if k in wf_display.columns}
+                )
+                st.dataframe(wf_display, use_container_width=True)
+
+                # ── 5. CSV エクスポート ──
+                wf_csv = wf_df.to_csv(index=False).encode("utf-8-sig")
+                st.download_button(
+                    "📥 Walk-Forward 結果を CSV でダウンロード",
+                    wf_csv,
+                    file_name=f"walk_forward_{market}_{symbol}.csv",
+                    mime="text/csv",
+                )
+
+        except Exception as e:
+            st.error(f"Walk-Forward 実行中にエラーが発生しました:\n\n```\n{e}\n```")
+            logger.error("Walk-Forward UIエラー", exc_info=True)
+
+    else:
+        st.info(
+            "👈 サイドバーの共有パラメータ（基本設定・モデル設定・取引条件・リスク管理）と"
+            "「🔄 Walk-Forward 設定」でフォールド数を設定し、「▶ Walk-Forward 実行」を押してください。\n\n"
+            "**Walk-Forward とは**: データを時系列で複数のフォールドに分割し、学習→検証を繰り返すことで"
+            "モデルの汎化性能を評価します。単一バックテストより過学習リスクを排除できます。"
+        )
+        with st.expander("現在のパラメータを確認する"):
+            wf_params = {
+                "マーケット": market,
+                "銘柄コード": symbol,
+                "データソース": source,
+                "モデルタイプ": "アンサンブル" if ensemble else model_type,
+                "シグナル閾値": f"{threshold:.3f}",
+                "フォールド数": wf_n_splits,
+                "初期資金": f"¥{initial_cash:,}",
+                "手数料率": f"{fee_rate:.4f}",
+                "ストップロス": f"{stop_loss_pct:.0%}" if stop_loss_pct else "無効",
+                "テイクプロフィット": f"{take_profit_pct:.0%}" if take_profit_pct else "無効",
+                "ポジションサイジング": position_sizing,
+            }
+            st.table(pd.DataFrame(wf_params.items(), columns=["パラメータ", "値"]))
+
+
+# ──────────────────────────────────────────────
+# タブ4: パラメータ最適化
+# ──────────────────────────────────────────────
+with tab_optimize:
+    if opt_run_button:
+        try:
+            opt_df = _run_optimization(
+                market=market,
+                symbol=symbol,
+                model_type=model_type,
+                ensemble=ensemble,
+                source=source,
+                n_splits=opt_n_splits,
+                initial_cash=initial_cash,
+                fee_rate=fee_rate,
+                slippage=slippage,
+                threshold_min=opt_threshold_min,
+                threshold_max=opt_threshold_max,
+                threshold_step=opt_threshold_step,
+                optimize_risk=opt_optimize_risk,
+            )
+
+            if opt_df is None or opt_df.empty:
+                st.warning("最適化結果が空です。パラメータ範囲を確認してください。")
+            else:
+                sorted_df = opt_df.sort_values(opt_sort_by, ascending=False).reset_index(drop=True)
+                best = sorted_df.iloc[0]
+
+                # ── 1. ベストパラメータ表示 ──
+                st.subheader("🏆 最良パラメータ")
+                best_sl = best.get("stop_loss_pct")
+                best_tp = best.get("take_profit_pct")
+                best_msg = (
+                    f"**閾値**: `{best['threshold']:.3f}` | "
+                    f"**SL**: `{f'{best_sl:.0%}' if best_sl else 'なし'}` | "
+                    f"**TP**: `{f'{best_tp:.0%}' if best_tp else 'なし'}` | "
+                    f"**{opt_sort_by}**: `{best[opt_sort_by]:.4f}`"
+                )
+                st.success(best_msg)
+
+                # ── 2. 適用ボタン ──
+                if st.button("📋 このパラメータを単一銘柄タブに適用", key="opt_apply"):
+                    st.session_state["apply_threshold"] = float(best["threshold"])
+                    if best_sl is not None:
+                        st.session_state["apply_stop_loss"] = float(best_sl)
+                    if best_tp is not None:
+                        st.session_state["apply_take_profit"] = float(best_tp)
+                    st.success("✅ パラメータを適用しました。単一銘柄タブで確認してください。")
+                    st.info(
+                        "ℹ️ Streamlit の仕様上、サイドバーのウィジェット値は次回再読み込み時に反映されます。"
+                        "「▶ バックテスト実行」を押すと最新値が使われます。"
+                    )
+
+                # ── 3. 保存ボタン ──
+                if st.button("💾 最適パラメータを JSON に保存", key="opt_save"):
+                    import json
+                    from pathlib import Path
+
+                    params_path = Path(__file__).parent / "config" / "optimal_params.json"
+                    params_path.parent.mkdir(exist_ok=True)
+                    existing = {}
+                    if params_path.exists():
+                        try:
+                            existing = json.loads(params_path.read_text(encoding="utf-8"))
+                        except Exception:
+                            existing = {}
+
+                    key = f"{market}_{symbol}"
+                    existing[key] = {
+                        "threshold": float(best["threshold"]),
+                        "stop_loss_pct": float(best_sl) if best_sl is not None else None,
+                        "take_profit_pct": float(best_tp) if best_tp is not None else None,
+                        "sort_by": opt_sort_by,
+                        "score": float(best[opt_sort_by]),
+                        "updated_at": pd.Timestamp.now().isoformat(),
+                    }
+                    params_path.write_text(
+                        json.dumps(existing, ensure_ascii=False, indent=2), encoding="utf-8"
+                    )
+                    st.success(f"✅ 保存しました: `{params_path}`")
+
+                st.divider()
+
+                # ── 4. ヒートマップ（optimize_risk=True 時のみ） ──
+                if opt_optimize_risk:
+                    st.subheader(f"🗺️ ヒートマップ: {opt_sort_by}")
+                    hmap_fig = build_optimize_heatmap(sorted_df, opt_sort_by)
+                    st.plotly_chart(hmap_fig, use_container_width=True)
+
+                # ── 5. 全結果テーブル ──
+                st.subheader(f"📋 全組み合わせ結果（{opt_sort_by} 降順）")
+                display_opt = sorted_df.copy()
+                for col in ["total_return", "win_rate", "max_drawdown"]:
+                    if col in display_opt.columns:
+                        display_opt[col] = display_opt[col].map(lambda x: f"{x * 100:+.2f}%")
+                for col in ["sharpe_ratio"]:
+                    if col in display_opt.columns:
+                        display_opt[col] = display_opt[col].map(lambda x: f"{x:.3f}")
+                for col in ["profit_factor"]:
+                    if col in display_opt.columns:
+                        display_opt[col] = display_opt[col].map(
+                            lambda x: f"{x:.2f}" if x is not None else "∞"
+                        )
+                st.dataframe(display_opt, use_container_width=True, height=400)
+
+                # ── 6. CSV エクスポート ──
+                opt_csv = opt_df.to_csv(index=False).encode("utf-8-sig")
+                st.download_button(
+                    "📥 最適化結果を CSV でダウンロード",
+                    opt_csv,
+                    file_name=f"optimize_{market}_{symbol}.csv",
+                    mime="text/csv",
+                )
+
+        except Exception as e:
+            st.error(f"パラメータ最適化中にエラーが発生しました:\n\n```\n{e}\n```")
+            logger.error("最適化UIエラー", exc_info=True)
+
+    else:
+        st.info(
+            "👈 サイドバーの「⚡ 最適化設定」でパラメータ範囲を設定し、「▶ 最適化実行」ボタンを押してください。\n\n"
+            "**動作概要**: 指定した閾値レンジをグリッドサーチし、各組み合わせで Walk-Forward 検証を実行します。\n"
+            "最良パラメータは `python/config/optimal_params.json` に保存でき、単一銘柄タブへの適用も可能です。"
+        )
+        with st.expander("現在の最適化設定を確認する"):
+            opt_params_display = {
+                "マーケット": market,
+                "銘柄コード": symbol,
+                "データソース": source,
+                "モデルタイプ": "アンサンブル" if ensemble else model_type,
+                "フォールド数": opt_n_splits,
+                "閾値 最小": f"{opt_threshold_min:.3f}",
+                "閾値 最大": f"{opt_threshold_max:.3f}",
+                "閾値 ステップ": f"{opt_threshold_step:.3f}",
+                "SL/TP グリッドサーチ": "有効" if opt_optimize_risk else "無効",
+                "ソート基準": opt_sort_by,
+            }
+            st.table(pd.DataFrame(opt_params_display.items(), columns=["パラメータ", "値"]))
