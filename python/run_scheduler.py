@@ -9,6 +9,7 @@ Discord Botと同時に起動し、1プロセスで全ジョブを管理する�
   py run_scheduler.py --with-bot       # Discord Bot と同時起動
   py run_scheduler.py --run-now daily  # daily パイプラインを即時実行して終了
   py run_scheduler.py --run-now weekly # weekly パイプラインを即時実行して終了
+  py run_scheduler.py --run-now paper  # 自動発注→約定処理を順番に即時実行して終了
 """
 
 import argparse
@@ -251,9 +252,15 @@ def run_now(pipeline: str):
         queue_manager.run_job("daily_pipeline", reason="manual", force=True)
     elif pipeline == "weekly":
         queue_manager.run_job("weekly_model_training", reason="manual", force=True)
+    elif pipeline == "paper":
+        logger.info("=== ペーパートレード テスト実行開始 ===")
+        queue_manager.run_job("daily_auto_order", reason="manual", force=True)
+        logger.info("--- 注文発注完了 → 約定処理へ ---")
+        queue_manager.run_job("daily_settle_orders", reason="manual", force=True)
+        logger.info("=== ペーパートレード テスト実行完了 ===")
     else:
         print(f"不明なパイプライン: {pipeline}")
-        print("使用可能: daily, weekly")
+        print("使用可能: daily, weekly, paper")
         sys.exit(1)
 
 
@@ -267,8 +274,8 @@ def main():
     parser.add_argument(
         "--run-now",
         type=str,
-        choices=["daily", "weekly"],
-        help="指定パイプラインを即時実行して終了する（テスト用）",
+        choices=["daily", "weekly", "paper"],
+        help="指定パイプラインを即時実行して終了する（テスト用）。paper=自動発注→約定処理を順番に実行",
     )
     args = parser.parse_args()
 

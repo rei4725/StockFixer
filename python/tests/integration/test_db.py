@@ -1,6 +1,7 @@
 """
 DuckDB アクセスモジュールのユニットテスト
 """
+
 import os
 import tempfile
 import unittest
@@ -8,9 +9,8 @@ import unittest
 import pandas as pd
 
 import src.utils.data_path_utils as path_utils
-
-# テスト用にDB パスを一時ファイルに差し替える
 import src.utils.db as db_module
+from src.domain.types import PredictionResult
 
 
 class TestDB(unittest.TestCase):
@@ -136,28 +136,26 @@ class TestDB(unittest.TestCase):
 
     def test_save_and_load_prediction_results(self):
         """prediction_results の保存と取得が正しく動作することを確認"""
-        df = pd.DataFrame(
-            [
-                {
-                    "market": "us",
-                    "symbol": "AAPL",
-                    "current_price": 150.0,
-                    "avg_pred_price": 155.0,
-                    "diff_ratio": 0.033,
-                    "model_count": 2,
-                },
-                {
-                    "market": "us",
-                    "symbol": "GOOG",
-                    "current_price": 2800.0,
-                    "avg_pred_price": 2850.0,
-                    "diff_ratio": 0.018,
-                    "model_count": 2,
-                },
-            ]
-        )
+        results = [
+            PredictionResult(
+                market="us",
+                symbol="AAPL",
+                current_price=150.0,
+                avg_pred_price=155.0,
+                diff_ratio=0.033,
+                model_count=2,
+            ),
+            PredictionResult(
+                market="us",
+                symbol="GOOG",
+                current_price=2800.0,
+                avg_pred_price=2850.0,
+                diff_ratio=0.018,
+                model_count=2,
+            ),
+        ]
 
-        db_module.save_prediction_results("20260228_120000", df)
+        db_module.save_prediction_results("20260228_120000", results)
 
         loaded = db_module.load_prediction_results("20260228_120000")
         self.assertEqual(len(loaded), 2)
@@ -173,68 +171,60 @@ class TestDB(unittest.TestCase):
 
     def test_load_latest_prediction_timestamp(self):
         """最新のタイムスタンプが正しく取得できることを確認"""
-        df = pd.DataFrame(
-            [
-                {
-                    "market": "us",
-                    "symbol": "AAPL",
-                    "current_price": 150.0,
-                    "avg_pred_price": 155.0,
-                    "diff_ratio": 0.033,
-                    "model_count": 2,
-                }
-            ]
-        )
+        result_aapl = [
+            PredictionResult(
+                market="us",
+                symbol="AAPL",
+                current_price=150.0,
+                avg_pred_price=155.0,
+                diff_ratio=0.033,
+                model_count=2,
+            )
+        ]
+        result_msft = [
+            PredictionResult(
+                market="us",
+                symbol="MSFT",
+                current_price=300.0,
+                avg_pred_price=310.0,
+                diff_ratio=0.033,
+                model_count=2,
+            )
+        ]
 
-        db_module.save_prediction_results("20260101_100000", df)
-        db_module.save_prediction_results("20260228_120000", df)
+        db_module.save_prediction_results("20260101_100000", result_aapl)
+        db_module.save_prediction_results("20260228_120000", result_aapl)
         # 同じ銘柄(AAPL)への2回目のinsertはDelete-Insertで上書き
-        df3 = pd.DataFrame(
-            [
-                {
-                    "market": "us",
-                    "symbol": "MSFT",
-                    "current_price": 300.0,
-                    "avg_pred_price": 310.0,
-                    "diff_ratio": 0.033,
-                    "model_count": 2,
-                }
-            ]
-        )
-        db_module.save_prediction_results("20260115_080000", df3)
+        db_module.save_prediction_results("20260115_080000", result_msft)
 
         latest = db_module.load_latest_prediction_timestamp()
         self.assertEqual(latest, "20260228_120000")
 
     def test_load_prediction_results_latest_default(self):
         """predicted_at=None で最新の結果が取得できることを確認"""
-        df1 = pd.DataFrame(
-            [
-                {
-                    "market": "us",
-                    "symbol": "AAPL",
-                    "current_price": 150.0,
-                    "avg_pred_price": 155.0,
-                    "diff_ratio": 0.033,
-                    "model_count": 2,
-                }
-            ]
-        )
-        df2 = pd.DataFrame(
-            [
-                {
-                    "market": "us",
-                    "symbol": "GOOG",
-                    "current_price": 2800.0,
-                    "avg_pred_price": 2850.0,
-                    "diff_ratio": 0.018,
-                    "model_count": 2,
-                }
-            ]
-        )
+        results_aapl = [
+            PredictionResult(
+                market="us",
+                symbol="AAPL",
+                current_price=150.0,
+                avg_pred_price=155.0,
+                diff_ratio=0.033,
+                model_count=2,
+            )
+        ]
+        results_goog = [
+            PredictionResult(
+                market="us",
+                symbol="GOOG",
+                current_price=2800.0,
+                avg_pred_price=2850.0,
+                diff_ratio=0.018,
+                model_count=2,
+            )
+        ]
 
-        db_module.save_prediction_results("20260101_100000", df1)
-        db_module.save_prediction_results("20260228_120000", df2)
+        db_module.save_prediction_results("20260101_100000", results_aapl)
+        db_module.save_prediction_results("20260228_120000", results_goog)
 
         loaded = db_module.load_prediction_results()
         self.assertEqual(len(loaded), 1)
@@ -242,28 +232,26 @@ class TestDB(unittest.TestCase):
 
     def test_load_prediction_markets(self):
         """マーケット一覧が正しく取得できることを確認"""
-        df = pd.DataFrame(
-            [
-                {
-                    "market": "us",
-                    "symbol": "AAPL",
-                    "current_price": 150.0,
-                    "avg_pred_price": 155.0,
-                    "diff_ratio": 0.033,
-                    "model_count": 2,
-                },
-                {
-                    "market": "jp",
-                    "symbol": "7203",
-                    "current_price": 2000.0,
-                    "avg_pred_price": 2050.0,
-                    "diff_ratio": 0.025,
-                    "model_count": 2,
-                },
-            ]
-        )
+        results = [
+            PredictionResult(
+                market="us",
+                symbol="AAPL",
+                current_price=150.0,
+                avg_pred_price=155.0,
+                diff_ratio=0.033,
+                model_count=2,
+            ),
+            PredictionResult(
+                market="jp",
+                symbol="7203",
+                current_price=2000.0,
+                avg_pred_price=2050.0,
+                diff_ratio=0.025,
+                model_count=2,
+            ),
+        ]
 
-        db_module.save_prediction_results("20260228_120000", df)
+        db_module.save_prediction_results("20260228_120000", results)
 
         markets = db_module.load_prediction_markets("20260228_120000")
         self.assertEqual(sorted(markets), ["jp", "us"])

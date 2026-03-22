@@ -272,6 +272,59 @@ docker exec stockfixer python run_scheduler.py --run-now weekly
 
 ---
 
+## 週次自動再デプロイ（Windowsタスクスケジューラ）
+
+毎週土曜 04:00 に `weekly_redeploy.ps1` が自動実行され、コードの最新化・Dockerイメージ再ビルド・コンテナ再起動を行う。
+
+### 実行フロー
+
+```
+土曜 03:00  weekly_model_training（APScheduler・コンテナ内）
+    ↓ 約30〜60分で完了
+土曜 04:00  weekly_redeploy.ps1（Windowsタスクスケジューラ）
+    1. git pull origin feature/training
+    2. VERSION / BUILD_DATE / GIT_COMMIT を環境変数にセット
+    3. docker-compose up -d --build
+    4. コンテナ起動確認
+    5. ログ出力 → python/logs/redeploy.log
+```
+
+### 関連ファイル
+
+| ファイル | 説明 |
+|---|---|
+| `weekly_redeploy.ps1` | 再デプロイスクリプト本体（プロジェクトルート） |
+| `register_task.ps1` | タスクスケジューラ再登録用スクリプト（管理者権限必要） |
+| `python/logs/redeploy.log` | 実行ログ（UTF-8、追記形式） |
+
+### タスクスケジューラ確認
+
+```powershell
+# タスク状態確認
+schtasks /query /tn "StockFixer Weekly Redeploy" /fo LIST
+
+# 即時テスト実行
+schtasks /run /tn "StockFixer Weekly Redeploy"
+
+# ログ確認
+Get-Content C:\src\StockFixer\python\logs\redeploy.log -Tail 30
+```
+
+### タスク再登録（PCセットアップ時など）
+
+```powershell
+# 管理者PowerShellで実行
+.\register_task.ps1
+```
+
+### 注意事項
+
+- タスクは「対話型のみ」モードで登録されているため、**PCにログインしている状態**でのみ実行される
+- 管理者権限で「バックグラウンドでも実行」にしたい場合は、`register_task.ps1` で再登録し、タスクスケジューラのGUIから「ユーザーのログオン状態にかかわらず実行する」に変更する
+- `git pull` の認証は Git Credential Manager（Windows標準）に記憶済みの認証情報を使用する
+
+---
+
 ## ローカル実行（Docker 不使用）
 
 Docker を使わずローカルで直接実行する場合。
@@ -360,4 +413,4 @@ docker builder prune -f
 
 ---
 
-*Last updated: 2026-03-01*
+*Last updated: 2026-03-16*

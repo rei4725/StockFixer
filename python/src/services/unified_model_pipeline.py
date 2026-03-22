@@ -57,9 +57,13 @@ def prepare_unified_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]
     # y列があるか確認
     if "y" in df.columns:
         y = df["y"]
-        # 特徴量から除外する列（文字列列とターゲット）
-        exclude_cols = ["market", "symbol", "y"]
-        feature_cols = [c for c in df.columns if c not in exclude_cols]
+        # 特徴量から除外する列（文字列列・日付列・ターゲット）
+        exclude_cols = ["market", "symbol", "y", "date"]
+        feature_cols = [
+            c
+            for c in df.columns
+            if c not in exclude_cols and not pd.api.types.is_datetime64_any_dtype(df[c])
+        ]
         X = df[feature_cols]
     else:
         # y列がない場合は作成（翌日終値）

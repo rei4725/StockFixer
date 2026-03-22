@@ -40,6 +40,8 @@ python/
 ├── src/
 │   ├── api/                    # API・Discord Bot（最上位層）
 │   ├── services/               # オーケストレーション層（データパイプライン等）
+│   ├── domain/                 # ドメイン型定義（全層共通）
+│   │   └── types.py            # SymbolTask / FeatureLoadResult / TrainingMetrics / PredictionResult
 │   ├── backtest/               # バックテスト
 │   ├── models/                 # AI予測モデル
 │   ├── strategy/               # シグナル生成
@@ -66,6 +68,8 @@ python/
 ### レイヤー構造（上位→下位への参照のみ許可）
 ```
 run_*.py → api層 → services層 → models/strategy/backtest層 → features層 → data層 → utils層
+                              ↑
+                        domain層（全層から参照可・依存方向なし）
 ```
 
 ### runレイヤー原則（必須）
@@ -150,6 +154,16 @@ run_*.py → api層 → services層 → models/strategy/backtest層 → features
 - モデルファイルは `joblib` 形式で保存
 - モデル保存パスは `python/models/[market]_[symbol]/モデル名.joblib` で統一
 - 予測値は直近データの翌営業日終値
+
+### ドメイン型（型安全なデータ受け渡し）
+- 層をまたぐデータは `src/domain/types.py` の dataclass で受け渡す（`dict` / 生 `pd.DataFrame` 返却禁止）
+- `SymbolTask`: バッチ実行の単位タスク。`batch_runner.load_target_symbols()` が返す
+- `FeatureLoadResult`: `load_features_for_training()` の戻り値。`is_success` プロパティで判定する
+- `TrainingMetrics`: `_compute_training_metrics()` の戻り値。`save_model_metrics()` に直接渡す
+- `PredictionResult`: `predict_single_stock()` / `predict_with_unified_model()` の戻り値
+  - 複数件をまとめて渡すとき → `PredictionResult.to_dataframe(results)` で DataFrame 変換
+  - `save_prediction_results(predicted_at, results: list[PredictionResult])` でDB保存
+- ML ライブラリ（XGBoost / LightGBM）に渡す特徴量行列 `X` は `pd.DataFrame` のまま維持（型付け対象外）
 
 ### テスト運用
 - **Unit Test（tests/unit/）**: Mock完全・外部依存なし・<5秒実行・開発中に常時実行

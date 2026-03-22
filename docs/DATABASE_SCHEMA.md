@@ -94,6 +94,13 @@ DataFrame の列に応じて `_ensure_columns()` が自動的に列を追加す�
 | `avg_pred_price` | DOUBLE | NULL可 | 予想終値（複数モデルの平均） |
 | `diff_ratio` | DOUBLE | NULL可 | 予想変化率 `(avg_pred_price - current_price) / current_price` |
 | `model_count` | INTEGER | NULL可 | 予測に使用したモデル数 |
+| `avg_pred_price_3d` | DOUBLE | NULL可 | 3日後予想終値（多ホライズン時） |
+| `avg_pred_price_5d` | DOUBLE | NULL可 | 5日後予想終値 |
+| `avg_pred_price_10d` | DOUBLE | NULL可 | 10日後予想終値 |
+| `diff_ratio_3d` | DOUBLE | NULL可 | 3日後予想変化率 |
+| `diff_ratio_5d` | DOUBLE | NULL可 | 5日後予想変化率 |
+| `diff_ratio_10d` | DOUBLE | NULL可 | 10日後予想変化率 |
+| `confluence_score` | INTEGER | NULL可 | 1d予測と同方向のホライズン数（多ホライズン時） |
 
 **主キー**: `(market, symbol, predicted_at)`
 
@@ -101,7 +108,7 @@ DataFrame の列に応じて `_ensure_columns()` が自動的に列を追加す�
 
 | 操作 | 関数 | 説明 |
 |------|------|------|
-| INSERT | `save_prediction_results(predicted_at, df)` | 対象銘柄の既存データを DELETE → INSERT |
+| INSERT | `save_prediction_results(predicted_at, results: list[PredictionResult])` | 対象銘柄の既存データを DELETE → INSERT |
 | SELECT | `load_prediction_results(predicted_at, market, top_n, worst_n)` | predicted_at=None で最新、top_n/worst_n でフィルタ |
 | 最新タイムスタンプ | `load_latest_prediction_timestamp()` | 最新の predicted_at を返す |
 | マーケット一覧 | `load_prediction_markets(predicted_at)` | 指定タイムスタンプのマーケット一覧 |

@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from src.domain.types import PredictionResult
 from src.models.predict_single_stock import predict_single_stock
 from src.utils.data_path_utils import get_models_dir
 from src.utils.db import get_all_symbols, save_prediction_results
@@ -89,7 +90,7 @@ def predict_all_individual(max_workers=MAX_WORKERS):
     銘柄別モデルで全銘柄の予測を実行する
 
     Returns:
-        list[pd.DataFrame]: 各銘柄の予測結果
+        list[PredictionResult]: 各銘柄の予測結果
     """
     model_types = ["StockXGBoostModel.joblib", "StockLightGBMModel.joblib"]
     all_keys = set()
@@ -99,7 +100,7 @@ def predict_all_individual(max_workers=MAX_WORKERS):
             all_keys.add((market, symbol))
 
     tasks = [(market, symbol, model_types) for market, symbol in all_keys]
-    output_rows = []
+    output_rows: list[PredictionResult] = []
     logger.info(f"並列予測開始（銘柄別モデル）: {len(tasks)}銘柄, ワーカー数: {max_workers}")
 
     def wrapper(args):
@@ -125,7 +126,7 @@ def predict_all_unified(max_workers=MAX_WORKERS):
     統合モデルで全銘柄の予測を実行する
 
     Returns:
-        list[pd.DataFrame]: 各銘柄の予測結果
+        list[PredictionResult]: 各銘柄の予測結果
     """
     from src.models.predict_unified import predict_with_unified_model, preload_models
 
@@ -144,7 +145,7 @@ def predict_all_unified(max_workers=MAX_WORKERS):
             logger.error(f"[{market}_{symbol}] 予測エラー: {e}", exc_info=True)
             return None
 
-    output_rows = []
+    output_rows: list[PredictionResult] = []
     logger.info(f"並列予測開始（統合モデル）: {len(all_keys)}銘柄, ワーカー数: {max_workers}")
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -159,7 +160,7 @@ def predict_all_unified(max_workers=MAX_WORKERS):
 
 def predict_all_unified_multi_horizon(
     horizons: list = None, max_workers: int = MAX_WORKERS
-) -> list:
+) -> list[PredictionResult]:
     """
     複数ホライズンの統合モデルで全銘柄を予測し、コンフルエンスを付与して返す。
 
@@ -168,7 +169,7 @@ def predict_all_unified_multi_horizon(
         max_workers: 並列ワーカー数
 
     Returns:
-        list[pd.DataFrame]: 各銘柄の多ホライズン予測結果
+        list[PredictionResult]: 各銘柄の多ホライズン予測結果
     """
     if horizons is None:
         horizons = [1, 3, 5, 10]
@@ -183,65 +184,85 @@ def predict_all_unified_multi_horizon(
     preload_models(model_names)
 
     all_keys = get_all_symbols()
-    output_rows = []
+    output_rows: list[PredictionResult] = []
     logger.info(f"多ホライズン予測開始（統合モデル）: {len(all_keys)}銘柄, horizons={horizons}")
 
     for market, symbol in all_keys:
         try:
-            horizon_results = {}
+            horizon_results: dict[int, PredictionResult] = {}
             for h in horizons:
                 suffix = f"_{h}d" if h > 1 else ""
-                mtypes = [f"UnifiedStockXGBoost{suffix}", f"UnifiedStockLightGBM{suffix}"]
+                mtypes = [
+                    f"UnifiedStockXGBoost{suffix}",
+                    f"UnifiedStockLightGBM{suffix}",
+                ]
                 res = predict_with_unified_model(market, symbol, model_types=mtypes, horizon=h)
-                if res is not None and not res.empty:
-                    horizon_results[h] = res.iloc[0]
+                if res is not None:
+                    horizon_results[h] = res
 
             if not horizon_results or 1 not in horizon_results:
                 continue
 
-            # horizon=1 をベースに行を構築
-            base = horizon_results[1].to_dict()
-            for h in horizons:
-                if h == 1 or h not in horizon_results:
-                    continue
-                row = horizon_results[h]
-                base[f"avg_pred_price_{h}d"] = row.get("avg_pred_price")
-                base[f"diff_ratio_{h}d"] = row.get("diff_ratio")
-
-            # confluence_score: 1d と同じ方向を示すホライズン数
-            base_dir = 1 if base.get("diff_ratio", 0) >= 0 else -1
+            base = horizon_results[1]
+            base_dir = base.diff_ratio >= 0
             conf = sum(
                 1
                 for h in horizons
                 if h != 1
                 and h in horizon_results
-                and (
-                    (horizon_results[h].get("diff_ratio", 0) >= 0 and base_dir > 0)
-                    or (horizon_results[h].get("diff_ratio", 0) < 0 and base_dir < 0)
+                and (horizon_results[h].diff_ratio >= 0) == base_dir
+            )
+
+            output_rows.append(
+                PredictionResult(
+                    market=base.market,
+                    symbol=base.symbol,
+                    current_price=base.current_price,
+                    avg_pred_price=base.avg_pred_price,
+                    diff_ratio=base.diff_ratio,
+                    model_count=base.model_count,
+                    avg_pred_price_3d=(
+                        horizon_results[3].avg_pred_price if 3 in horizon_results else None
+                    ),
+                    avg_pred_price_5d=(
+                        horizon_results[5].avg_pred_price if 5 in horizon_results else None
+                    ),
+                    avg_pred_price_10d=(
+                        horizon_results[10].avg_pred_price if 10 in horizon_results else None
+                    ),
+                    diff_ratio_3d=(horizon_results[3].diff_ratio if 3 in horizon_results else None),
+                    diff_ratio_5d=(horizon_results[5].diff_ratio if 5 in horizon_results else None),
+                    diff_ratio_10d=(
+                        horizon_results[10].diff_ratio if 10 in horizon_results else None
+                    ),
+                    confluence_score=conf,
                 )
             )
-            base["confluence_score"] = conf
-
-            output_rows.append(pd.DataFrame([base]))
         except Exception as e:
             logger.error(f"[{market}_{symbol}] 多ホライズン予測エラー: {e}", exc_info=True)
 
     return output_rows
 
 
-def output_top_worst_results(output_rows, mode="individual"):
+def output_top_worst_results(output_rows: list[PredictionResult], mode="individual"):
     """
     予測結果からTop10/Worst10を出力し、全結果をDBに保存する
 
     Args:
-        output_rows: predict_all_*の戻り値
+        output_rows: predict_all_*の戻り値（list[PredictionResult]）
         mode: "individual" or "unified"
     """
     if not output_rows:
         logger.warning("有効な結果がありませんでした。")
         return
 
-    df_result = pd.concat(output_rows, ignore_index=True)
+    now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    # 全予測結果をDBに保存（Delete-Insert）
+    save_prediction_results(now_str, output_rows)
+
+    # 表示用 DataFrame変換（ログ出力用）
+    df_result = PredictionResult.to_dataframe(output_rows)
     display_columns = [
         "market",
         "symbol",
@@ -250,28 +271,19 @@ def output_top_worst_results(output_rows, mode="individual"):
         "diff_ratio",
         "model_count",
     ]
-    now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-    # 全予測結果をDBに保存（Delete-Insert）
-    save_prediction_results(now_str, df_result[display_columns])
 
     for market, df_market in df_result.groupby("market"):
-        # Top10
         df_top10 = df_market.sort_values("diff_ratio", ascending=False).head(10)
-        df_top10_display = df_top10[display_columns]
         logger.info(
             df_to_pretty_string(
-                df_top10_display,
+                df_top10[display_columns],
                 header=f"=== {market} 差異割合上位10銘柄 ({mode}) === 実行日時: {now_str}",
             )
         )
-
-        # ワースト10
         df_worst10 = df_market.sort_values("diff_ratio", ascending=True).head(10)
-        df_worst10_display = df_worst10[display_columns]
         logger.info(
             df_to_pretty_string(
-                df_worst10_display,
+                df_worst10[display_columns],
                 header=f"=== {market} 差異割合ワースト10銘柄 ({mode}) === 実行日時: {now_str}",
             )
         )
@@ -293,9 +305,9 @@ def run_predict_single(market: str, symbol: str):
     if result is None:
         logger.warning("予測に失敗しました。モデルまたはデータが存在しない可能性があります。")
     else:
-        pprint.pprint(result.to_dict("records")[0], sort_dicts=False, width=120)
+        pprint.pprint(vars(result), sort_dicts=False, width=120)
         now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-        save_prediction_results(now_str, result)
+        save_prediction_results(now_str, [result])
 
 
 def run_predict_watchlist():
@@ -320,14 +332,13 @@ def run_predict_watchlist():
                 print(f"{market},{symbol} ({company}) の予想株価:")
                 import pprint
 
-                pprint.pprint(result.to_dict("records")[0], sort_dicts=False, width=120)
+                pprint.pprint(vars(result), sort_dicts=False, width=120)
                 print("-" * 40)
                 output_rows.append(result)
 
     if output_rows:
         now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-        df_all = pd.concat(output_rows, ignore_index=True)
-        save_prediction_results(now_str, df_all)
+        save_prediction_results(now_str, output_rows)
         print(f"\n結果保存完了: run_timestamp={now_str}")
 
 

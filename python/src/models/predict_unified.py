@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 import yfinance as yf
 
+from src.domain.types import PredictionResult
 from src.utils.data_path_utils import get_ticker
 from src.utils.db import get_all_symbols, load_stock_features
 
@@ -82,7 +83,7 @@ def predict_with_unified_model(
     model_types: List[str] = None,
     lookback_days: int = 90,
     horizon: int = 1,
-) -> Optional[pd.DataFrame]:
+) -> Optional[PredictionResult]:
     """
     統合モデルを使用して1銘柄の予測を行う
 
@@ -188,17 +189,13 @@ def predict_with_unified_model(
     avg_pred_price = sum(pred_prices) / len(pred_prices)
     diff_ratio = (avg_pred_price - current_price) / current_price
 
-    return pd.DataFrame(
-        [
-            {
-                "market": market,
-                "symbol": symbol,
-                "current_price": float(current_price),
-                "avg_pred_price": float(avg_pred_price),
-                "diff_ratio": float(diff_ratio),
-                "model_count": int(len(pred_prices)),
-            }
-        ]
+    return PredictionResult(
+        market=market,
+        symbol=symbol,
+        current_price=float(current_price),
+        avg_pred_price=float(avg_pred_price),
+        diff_ratio=float(diff_ratio),
+        model_count=int(len(pred_prices)),
     )
 
 

@@ -8,6 +8,7 @@ from typing import Optional
 
 import pandas as pd
 
+from src.domain.types import PredictionResult, TrainingMetrics
 from src.utils.db._connection import _db_connection
 from src.utils.logger import get_logger
 
@@ -19,16 +20,16 @@ logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def save_prediction_results(predicted_at: str, df: pd.DataFrame) -> None:
+def save_prediction_results(predicted_at: str, results: list[PredictionResult]) -> None:
     """
     予測結果を DB に保存する（Delete-Insert 方式）。
     対象銘柄の既存データを削除してから挿入する。
 
     Args:
         predicted_at: 予測実行日時 (例: "20260213_142903")
-        df: 予測結果 DataFrame (market, symbol, current_price, avg_pred_price, diff_ratio, model_count)
+        results: 予測結果のリスト
     """
-    save_df = df.copy()
+    save_df = PredictionResult.to_dataframe(results)
     save_df["predicted_at"] = predicted_at
 
     base_cols = [
@@ -171,7 +172,7 @@ def save_model_metrics(
     symbol: str,
     model_name: str,
     trained_at: str,
-    metrics: dict,
+    metrics: TrainingMetrics,
 ) -> None:
     """
     モデル学習後の精度指標を model_metrics テーブルに保存する。
@@ -181,7 +182,7 @@ def save_model_metrics(
         symbol: 銘柄シンボル
         model_name: モデル名 (ex: "StockXGBoostModel")
         trained_at: 学習日時文字列 (ex: "20260314_120000")
-        metrics: {"rmse": float, "directional_accuracy": float, "n_samples": int}
+        metrics: TrainingMetrics（rmse, directional_accuracy, n_samples）
     """
     with _db_connection() as con:
         con.execute(
@@ -195,15 +196,15 @@ def save_model_metrics(
                 symbol,
                 model_name,
                 trained_at,
-                metrics.get("rmse"),
-                metrics.get("directional_accuracy"),
-                metrics.get("n_samples"),
+                metrics.rmse,
+                metrics.directional_accuracy,
+                metrics.n_samples,
             ],
         )
     logger.debug(
         f"model_metrics 保存: [{market}_{symbol}/{model_name}] "
-        f"RMSE={metrics.get('rmse', 'N/A'):.6f}, "
-        f"方向正解率={metrics.get('directional_accuracy', 'N/A'):.2%}"
+        f"RMSE={metrics.rmse:.6f}, "
+        f"方向正解率={metrics.directional_accuracy:.2%}"
     )
 
 

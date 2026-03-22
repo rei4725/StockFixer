@@ -61,6 +61,12 @@ def upsert_stock_features(market: str, symbol: str, df: pd.DataFrame) -> None:
         df: 保存する DataFrame（市場・銘柄の全行）
     """
     save_df = df.copy()
+    # DatetimeIndex を date 列として保存する（バックテスト等で日付が必要なため）
+    if isinstance(save_df.index, pd.DatetimeIndex) and "date" not in save_df.columns:
+        save_df = save_df.reset_index()
+        first_col = save_df.columns[0]
+        if first_col != "date":
+            save_df = save_df.rename(columns={first_col: "date"})
     save_df["market"] = market
     save_df["symbol"] = symbol
     save_df["row_num"] = range(len(save_df))

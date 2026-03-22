@@ -46,8 +46,11 @@ StockFixer/
     │
     ├── src/                     # ソースコード
     │   ├── api/                 # API・外部インターフェース層
-    │   │   ├── api_server.py    # Flask REST APIサーバー
-    │   │   └── discord_bot.py   # Discord Bot
+    │   │   ├── discord_bot.py   # Discord Bot
+    │   │   └── discord_utils.py # Discord通知ユーティリティ
+    │   │
+    │   ├── domain/              # ドメイン型定義層（全層共通）
+    │   │   └── types.py         # 共有データクラス（SymbolTask / FeatureLoadResult / TrainingMetrics / PredictionResult）
     │   │
     │   ├── services/            # オーケストレーション層
     │   │   ├── data_pipeline.py  # データ取得〜特徴量生成パイプライン
@@ -76,13 +79,12 @@ StockFixer/
     │   │   ├── data_loader.py   # 株価データ取得
     │   │   └── data_saver.py    # データ保存
     │   │
-    │   ├── sbi/                 # SBI証券連携
-    │   │   └── sbi_api.py       # SBI API
+    │   ├── _deprecated/         # 廃止モジュール
+    │   │   └── sbi/             # SBI証券連携（廃止）
     │   │
     │   ┌── utils/               # ユーティリティ層（最下層）
     │   │   ├── logger.py        # 統一ロガーファクトリー（全レイヤーに供給）
-    │   │   ├── db.py            # DuckDB接続管理・CRUD
-    │   │   ├── csv_io.py        # CSV入出力（非推奨）
+    │   │   ├── db/              # DuckDB接続管理・CRUD（パッケージ）
     │   │   ├── data_path_utils.py # パス・ティッカー補正
     │   │   └── df_to_string.py  # DataFrame整形
     │
@@ -119,8 +121,8 @@ StockFixer/
 └─────────────────────────────────────────────────┘
                         ↓
 ┌─────────────────────────────────────────────────┐
-│  api層 (api_server.py, discord_bot.py)          │
-│  - 外部との接点、HTTPリクエスト/Discordコマンド │
+│  api層 (discord_bot.py, discord_utils.py)       │
+│  - 外部との接点、Discordコマンド/Webhook通知    │
 └─────────────────────────────────────────────────┘
                         ↓
 ┌─────────────────────────────────────────────────┐
@@ -148,21 +150,37 @@ StockFixer/
 └─────────────────────────────────────────────────┘
                         ↓
 ┌─────────────────────────────────────────────────┐
-│  utils層 (db.py, data_path_utils.py等)             │
+│  utils層 (db/, data_path_utils.py等)               │
 │  - 汎用ユーティリティ・DBアクセス（最下層）        │
 └─────────────────────────────────────────────────┘
+
+> **domain層** (`src/domain/types.py`) は上記階層に横断的に適用される共有型定義であり、
+> どのレイヤーからも参照可能な特別な位置づけです。
 ```
 
 ---
 
 ## 各モジュールの詳細
 
-### api層
+### domain層
 
-#### `api_server.py`
-- Flask REST APIサーバー
-- C#側（注文実行）との通信インターフェース
-- シグナル・予測結果をHTTPエンドポイントで提供
+#### `domain/types.py`
+- **全レイヤー共通の型定義**を一元管理する特別な層
+- `dict` / 生 `pd.DataFrame` を排除し、型安全なデータクラスで置き換える
+- **定義されている型**:
+
+| クラス | 説明 | 主なフィールド |
+|--------|------|----------------|
+| `SymbolTask` | バッチ実行の単位タスク | `market`, `symbol`, `horizon` |
+| `FeatureLoadResult` | 特徴量ロード結果 | `status`, `market`, `symbol`, `X`, `y`, `reason`, `error` / `is_success` プロパティ |
+| `TrainingMetrics` | モデル学習指標 | `rmse`, `directional_accuracy`, `n_samples` |
+| `PredictionResult` | 単一銘柄の予測結果 | `market`, `symbol`, `current_price`, `avg_pred_price`, `diff_ratio`, `model_count` + 多ホライズンオプション |
+
+- `FeatureLoadResult` は `__getitem__` / `get()` でdict互換アクセスをサポート
+- `PredictionResult.to_dataframe(results)` でリスト → DataFrame 変換
+- `PredictionResult.from_dataframe_row(row)` でDBロード時に逆変換
+
+### api層
 
 #### `discord_bot.py`
 - Discord Botの実装
@@ -200,8 +218,8 @@ StockFixer/
 
 #### `batch_runner.py`
 - バッチ実行共通ユーティリティ
-- `load_target_symbols()`: ウォッチリストCSVから対象銘柄読み込み
-- `run_parallel()`: 汎用並列実行ランナー
+- `load_target_symbols()`: ウォッチリストCSVから対象銘柄読み込み → `list[SymbolTask]` を返す
+- `run_parallel()`: 汎用並列実行ランナー（`SymbolTask` / `dict` 両対応）
 - `print_summary()`: バッチ処理結果サマリー出力
 
 ### models層
@@ -224,8 +242,10 @@ StockFixer/
   - `save_model()` / `load_model()`: 永続化
 
 #### `predict_single_stock.py`
-- 単一銘柄の予測を実行
+- 単一銘柄の予測を実行し `PredictionResult` を返す
 - 複数モデルの予測値を平均化してバイアス低減
+- `predict_single_stock()` → `PredictionResult | None`
+- `predict_single_stock_multi_horizon()` → `PredictionResult | None`（多ホライズンフィールド付き）
 
 ### strategy層
 
@@ -410,7 +430,13 @@ StockFixer/
 - モデルファイルはjoblib形式でファイルシステムに保存
 - 設定用CSV（データ取得対象.csv等）はそのまま維持
 
-### 6. セキュリティ
+### 6. 型安全なデータ受け渡し（domain型）
+- `src/domain/types.py` が全レイヤー共通の **Single Source of Truth**
+- `dict` / 生 `pd.DataFrame` 返却を廃止し、意図を明示する dataclass に置き換えた
+- ML ライブラリ（XGBoost / LightGBM）が直接必要とする特徴量行列 `X` のみ `pd.DataFrame` のまま維持
+- `FeatureLoadResult` の dict 互換メソッドにより、既存コードへの影響を最小化
+
+### 7. セキュリティ
 - `.env` で機密情報を管理
 - 認証情報のハードコーディング禁止
 - ログに認証情報を含めない
@@ -430,8 +456,8 @@ graph TD
     end
 
     subgraph "API層"
-        A1[api_server.py]
-        A2[discord_bot.py]
+        A1[discord_bot.py]
+        A2[discord_utils.py]
     end
 
     subgraph "サービス層"
@@ -440,6 +466,10 @@ graph TD
         S3[prediction_pipeline.py]
         S4[unified_model_pipeline.py]
         S5[batch_runner.py]
+    end
+
+    subgraph "ドメイン型層"
+        DM1[domain/types.py]
     end
 
     subgraph "モデル層"
@@ -487,6 +517,10 @@ graph TD
 
     S2 --> M1
     S3 --> M5
+    S2 --> DM1
+    S3 --> DM1
+    S5 --> DM1
+    M5 --> DM1
 
     A2 --> E2
     S1 --> D1

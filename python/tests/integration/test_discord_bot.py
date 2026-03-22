@@ -3,8 +3,6 @@ import sys
 import tempfile
 import unittest
 
-import pandas as pd
-
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import src.utils.data_path_utils as path_utils  # noqa: E402
 import src.utils.db as db_module  # noqa: E402
@@ -35,19 +33,28 @@ class TestGetTop10DiffStocksMessage(unittest.TestCase):
             os.rmdir(self.tmp_dir)
 
     def test_normal(self):
+        from src.domain.types import PredictionResult
         from src.utils.db import save_prediction_results
 
-        df = pd.DataFrame(
-            {
-                "market": ["us", "us"],
-                "symbol": ["AAPL", "SONY"],
-                "current_price": [100.0, 200.0],
-                "avg_pred_price": [110.0, 210.0],
-                "diff_ratio": [0.1, 0.05],
-                "model_count": [2, 1],
-            }
-        )
-        save_prediction_results("20260228_120000", df)
+        results = [
+            PredictionResult(
+                market="us",
+                symbol="AAPL",
+                current_price=100.0,
+                avg_pred_price=110.0,
+                diff_ratio=0.1,
+                model_count=2,
+            ),
+            PredictionResult(
+                market="us",
+                symbol="SONY",
+                current_price=200.0,
+                avg_pred_price=210.0,
+                diff_ratio=0.05,
+                model_count=1,
+            ),
+        ]
+        save_prediction_results("20260228_120000", results)
         msg = get_top10_diff_stocks_message("us", "top10", "20260228_120000")
         print(msg)
         self.assertIn("AAPL", msg)

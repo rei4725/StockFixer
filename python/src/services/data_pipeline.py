@@ -19,7 +19,7 @@ from src.data.data_loader import (
 from src.data.data_saver import save_raw_ohlcv
 from src.features.technical_analysis import add_technical_indicators, create_basic_lag_features
 from src.utils.data_path_utils import get_ticker, normalize_col
-from src.utils.db import delete_stock_features, upsert_stock_features
+from src.utils.db import upsert_stock_features
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -173,7 +173,6 @@ def save_features_to_db(market: str, symbol: str, data) -> None:
         symbol: 銘柄シンボル
         data: 特徴量DataFrame
     """
-    delete_stock_features(market, symbol)
     upsert_stock_features(market, symbol, data)
     logger.info(f"DB保存完了: {market}_{symbol}")
 
@@ -218,9 +217,10 @@ def run_data_batch(fetch_only: bool = False):
     # バッチ取得の並列数（yfinance API制限を考慮）
     MAX_DATA_WORKERS = 3
 
-    def _fetch_only(task: dict) -> dict:
+    def _fetch_only(task) -> dict:
         """バッチランナー用: データ取得＋特徴量生成のみ（DB書き込みなし）"""
-        market, symbol = task["market"], task["symbol"]
+        market = getattr(task, "market", None) or task["market"]
+        symbol = getattr(task, "symbol", None) or task["symbol"]
         try:
             logger.info(f"[データ取得開始] {market}/{symbol}")
             result = fetch_stock_data_with_features(

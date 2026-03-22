@@ -7,6 +7,7 @@ import pandas as pd
 import yfinance as yf
 
 from src.data import data_loader
+from src.domain.types import PredictionResult
 from src.features.technical_analysis import add_technical_indicators, create_basic_lag_features
 from src.models.model_manager import ModelManager
 from src.utils.data_path_utils import get_models_subdir, get_ticker
@@ -18,7 +19,7 @@ logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 
 def predict_single_stock(
     market: str, symbol: str, model_types=None, lookback_days=90, horizon: int = 1
-):
+) -> "PredictionResult | None":
     """
     指定したmarket, symbolについて、複数モデルで予測値を案分（平均）し、現値・予測値・差異割合を返す
 
@@ -112,34 +113,29 @@ def predict_single_stock(
 
     avg_pred_price = sum(pred_prices) / len(pred_prices)
     diff_ratio = (avg_pred_price - current_price) / current_price
-    # DataFrame形式で返す（prediction_pipeline.pyと同じカラム構成）
-    return pd.DataFrame(
-        [
-            {
-                "market": market,
-                "symbol": symbol,
-                "current_price": float(current_price),
-                "avg_pred_price": float(avg_pred_price),
-                "diff_ratio": float(diff_ratio),
-                "model_count": int(len(pred_prices)),
-            }
-        ]
+    return PredictionResult(
+        market=market,
+        symbol=symbol,
+        current_price=float(current_price),
+        avg_pred_price=float(avg_pred_price),
+        diff_ratio=float(diff_ratio),
+        model_count=int(len(pred_prices)),
     )
 
 
 def predict_single_stock_multi_horizon(
     market: str, symbol: str, horizons: list = None
-) -> "pd.DataFrame | None":
+) -> "PredictionResult | None":
     """
     複数ホライズンで予測し、各ホライズンの値を横に結合して返す。
 
     Args:
         market: マーケット識別子
-        symbol: 銃柔コード
+        symbol: 銘柄コード
         horizons: 予測ホライズンのリスト。デフォルト: [1, 3, 5, 10]
 
     Returns:
-        DataFrame：各ホライズンの予測値を含む。全ホライズン失敗時は None。
+        PredictionResult：各ホライズンの予測値を含む。全ホライズン失敗時は None。
     """
     if horizons is None:
         horizons = [1, 3, 5, 10]
@@ -147,43 +143,33 @@ def predict_single_stock_multi_horizon(
     results: dict = {}
     for h in horizons:
         r = predict_single_stock(market, symbol, horizon=h)
-        if r is not None and not r.empty:
-            results[h] = r.iloc[0]
+        if r is not None:
+            results[h] = r
 
     if not results:
         return None
 
-    # horizon=1 をベースとして、存在する最小ホライズンをフォールバック
     base_h = 1 if 1 in results else min(results.keys())
     base = results[base_h]
 
-    row = {
-        "market": base["market"],
-        "symbol": base["symbol"],
-        "current_price": base["current_price"],
-        "avg_pred_price": base["avg_pred_price"],
-        "diff_ratio": base["diff_ratio"],
-        "model_count": base["model_count"],
-    }
-
-    horizon_map = {3: "3d", 5: "5d", 10: "10d"}
-    for h, suffix in horizon_map.items():
-        if h in results:
-            r = results[h]
-            row[f"avg_pred_price_{suffix}"] = r["avg_pred_price"]
-            row[f"diff_ratio_{suffix}"] = r["diff_ratio"]
-        else:
-            row[f"avg_pred_price_{suffix}"] = None
-            row[f"diff_ratio_{suffix}"] = None
-
-    # confluence_score: 翌日と同じ方向に予測しているホライズン数
-    base_dir = base["diff_ratio"] > 0
-    same_dir = sum(
-        1 for h in horizons if h in results and (results[h]["diff_ratio"] > 0) == base_dir
+    base_dir = base.diff_ratio > 0
+    return PredictionResult(
+        market=base.market,
+        symbol=base.symbol,
+        current_price=base.current_price,
+        avg_pred_price=base.avg_pred_price,
+        diff_ratio=base.diff_ratio,
+        model_count=base.model_count,
+        avg_pred_price_3d=results[3].avg_pred_price if 3 in results else None,
+        avg_pred_price_5d=results[5].avg_pred_price if 5 in results else None,
+        avg_pred_price_10d=results[10].avg_pred_price if 10 in results else None,
+        diff_ratio_3d=results[3].diff_ratio if 3 in results else None,
+        diff_ratio_5d=results[5].diff_ratio if 5 in results else None,
+        diff_ratio_10d=results[10].diff_ratio if 10 in results else None,
+        confluence_score=sum(
+            1 for h in horizons if h in results and (results[h].diff_ratio > 0) == base_dir
+        ),
     )
-    row["confluence_score"] = same_dir
-
-    return pd.DataFrame([row])
 
 
 def explain_prediction_shap(

@@ -9,6 +9,7 @@ import csv
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, TimeoutError, as_completed
 from typing import Callable
 
+from src.domain.types import SymbolTask
 from src.utils.data_path_utils import get_watchlist_path
 from src.utils.logger import get_logger
 
@@ -18,19 +19,19 @@ logger = get_logger(__name__)
 DEFAULT_TASK_TIMEOUT = 300
 
 
-def load_target_symbols() -> list:
+def load_target_symbols() -> list[SymbolTask]:
     """
     CSVから対象銘柄リストを読み込む
 
     Returns:
-        list of dict: [{"market": "us", "symbol": "AAPL"}, ...]
+        list[SymbolTask]: SymbolTask(市場, 銘柄コード) のリスト
     """
     symbols = []
     csv_path = get_watchlist_path()
     with open(csv_path, encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            symbols.append({"market": row["市場"], "symbol": row["銘柄コード"]})
+            symbols.append(SymbolTask(market=row["市場"], symbol=row["銘柄コード"]))
     return symbols
 
 
@@ -69,23 +70,27 @@ def run_parallel(
                 result = future.result(timeout=timeout_val)
                 results.append(result)
             except TimeoutError:
-                task_label = f"{task.get('market', '?')}/{task.get('symbol', '?')}"
+                _m = getattr(task, "market", None) or task.get("market", "?")
+                _s = getattr(task, "symbol", None) or task.get("symbol", "?")
+                task_label = f"{_m}/{_s}"
                 logger.error(f"[タイムアウト] {task_label}: {task_timeout}秒超過")
                 results.append(
                     {
-                        "market": task.get("market", "?"),
-                        "symbol": task.get("symbol", "?"),
+                        "market": getattr(task, "market", None) or task.get("market", "?"),
+                        "symbol": getattr(task, "symbol", None) or task.get("symbol", "?"),
                         "status": "error",
                         "error": f"タイムアウト（{task_timeout}秒）",
                     }
                 )
             except Exception as e:
-                task_label = f"{task.get('market', '?')}/{task.get('symbol', '?')}"
+                _m = getattr(task, "market", None) or task.get("market", "?")
+                _s = getattr(task, "symbol", None) or task.get("symbol", "?")
+                task_label = f"{_m}/{_s}"
                 logger.error(f"[未処理エラー] {task_label}: {e}")
                 results.append(
                     {
-                        "market": task.get("market", "?"),
-                        "symbol": task.get("symbol", "?"),
+                        "market": getattr(task, "market", None) or task.get("market", "?"),
+                        "symbol": getattr(task, "symbol", None) or task.get("symbol", "?"),
                         "status": "error",
                         "error": str(e),
                     }
