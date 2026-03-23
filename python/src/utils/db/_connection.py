@@ -217,6 +217,45 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
         )
     """
     )
+    # ペーパートレード用テーブル
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS paper_balance (
+            balance DOUBLE NOT NULL
+        )
+    """
+    )
+    # paper_balanceが空なら初期残高（100万円）を挿入
+    count = con.execute("SELECT COUNT(*) FROM paper_balance").fetchone()[0]
+    if count == 0:
+        con.execute("INSERT INTO paper_balance VALUES (1000000.0)")
+
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS paper_orders (
+            order_id    VARCHAR NOT NULL PRIMARY KEY,
+            symbol      VARCHAR NOT NULL,
+            side        INTEGER NOT NULL,
+            qty         INTEGER NOT NULL,
+            price       DOUBLE,
+            order_type  INTEGER NOT NULL,
+            status      VARCHAR NOT NULL DEFAULT 'pending',
+            fill_price  DOUBLE,
+            filled_at   TIMESTAMP,
+            created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    """
+    )
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS paper_positions (
+            symbol      VARCHAR NOT NULL PRIMARY KEY,
+            qty         INTEGER NOT NULL,
+            avg_price   DOUBLE NOT NULL,
+            updated_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    """
+    )
 
 
 def init_tables() -> None:

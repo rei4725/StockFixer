@@ -106,7 +106,7 @@ class TestPaperBrokerSettle(unittest.TestCase):
         )
 
     @patch("src.brokers.paper.paper_broker._get_con", side_effect=_get_test_con)
-    @patch("src.brokers.paper.paper_broker.yf.download")
+    @patch("src.brokers.paper.paper_broker.yf_client.download")
     def test_settle_market_buy(self, mock_yf, _mock_con):
         mock_yf.return_value = self._mock_yf_download()
         self.broker.send_order("7203", OrderSide.BUY, 100)
@@ -118,7 +118,7 @@ class TestPaperBrokerSettle(unittest.TestCase):
         self.assertAlmostEqual(balance, 1_000_000.0 - 1000.0 * 100)
 
     @patch("src.brokers.paper.paper_broker._get_con", side_effect=_get_test_con)
-    @patch("src.brokers.paper.paper_broker.yf.download")
+    @patch("src.brokers.paper.paper_broker.yf_client.download")
     def test_settle_creates_position(self, mock_yf, _mock_con):
         mock_yf.return_value = self._mock_yf_download()
         self.broker.send_order("7203", OrderSide.BUY, 100)
