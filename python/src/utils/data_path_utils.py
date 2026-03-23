@@ -65,8 +65,8 @@ def get_results_subdir(timestamp: str = None) -> str:
 
 # ===== 設定ファイル関連パス =====
 def get_watchlist_path() -> str:
-    """データ取得対象CSVのパスを返す"""
-    return os.path.join(_PYTHON_ROOT, "データ取得対象.csv")
+    """ウォッチリスト JSON のパスを返す（config/watchlist.json）"""
+    return os.path.join(_PYTHON_ROOT, "config", "watchlist.json")
 
 
 def get_monitor_list_path() -> str:

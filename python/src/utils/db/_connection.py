@@ -22,8 +22,8 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 # --- 設定 ---
-_RETRY_COUNT = 5  # ロック衝突時の最大リトライ回数
-_RETRY_DELAY = 0.5  # リトライ間隔（秒）
+_RETRY_COUNT = 10  # ロック衝突時の最大リトライ回数
+_RETRY_DELAY = 1.0  # リトライ間隔（秒）
 _DB_CONFIG = {"threads": "4", "memory_limit": "2GB"}
 
 _init_lock = Lock()  # テーブル初期化の二重実行防止
@@ -57,7 +57,7 @@ def _db_connection() -> Generator[duckdb.DuckDBPyConnection, None, None]:
         try:
             con = duckdb.connect(db_path, config=_DB_CONFIG)
             break
-        except duckdb.IOException as e:
+        except (duckdb.IOException, duckdb.BinderException) as e:
             last_exc = e
             if attempt < _RETRY_COUNT - 1:
                 logger.warning(f"DB接続待機中 ({attempt + 1}/{_RETRY_COUNT}): {e}")

@@ -5,7 +5,7 @@
 バッチ実行スクリプト共通の処理を提供する
 """
 
-import csv
+import json
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, TimeoutError, as_completed
 from typing import Callable
 
@@ -21,17 +21,21 @@ DEFAULT_TASK_TIMEOUT = 300
 
 def load_target_symbols() -> list[SymbolTask]:
     """
-    CSVから対象銘柄リストを読み込む
+    config/watchlist.json から対象銘柄リストを読み込む
+
+    フォーマット:
+        {"us": ["AAPL", "MSFT", ...], "jp": ["7203", "9984", ...]}
 
     Returns:
         list[SymbolTask]: SymbolTask(市場, 銘柄コード) のリスト
     """
+    json_path = get_watchlist_path()
+    with open(json_path, encoding="utf-8") as f:
+        data = json.load(f)
     symbols = []
-    csv_path = get_watchlist_path()
-    with open(csv_path, encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            symbols.append(SymbolTask(market=row["市場"], symbol=row["銘柄コード"]))
+    for market, symbol_list in data.items():
+        for symbol in symbol_list:
+            symbols.append(SymbolTask(market=market, symbol=symbol))
     return symbols
 
 

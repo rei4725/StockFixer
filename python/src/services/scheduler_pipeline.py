@@ -94,6 +94,18 @@ def run_weekly_training():
     except Exception as e:
         logger.error(f"予測精度チェック失敗: {e}", exc_info=True)
 
+    # Discord 完了通知
+    try:
+        from src.api.discord_utils import send_weekly_training_completion
+
+        trained_models = [
+            "UnifiedStockXGBoost",
+            "UnifiedStockLightGBM",
+        ]
+        send_weekly_training_completion(trained_models)
+    except Exception as e:
+        logger.error(f"週次学習完了通知失敗: {e}", exc_info=True)
+
     logger.info("=== 週次モデル学習完了 ===")
 
 
@@ -145,6 +157,18 @@ def run_daily_auto_order():
         logger.error(f"自動発注失敗: {e}", exc_info=True)
         raise
 
+    # Discord 完了通知
+    try:
+        from src.api.discord_utils import send_daily_order_completion
+
+        send_daily_order_completion(
+            buy_orders=stats["buy_orders"],
+            sell_orders=stats["sell_orders"],
+            mode=mode,
+        )
+    except Exception as e:
+        logger.error(f"自動発注完了通知失敗: {e}", exc_info=True)
+
 
 def run_daily_settle_orders():
     """
@@ -168,3 +192,50 @@ def run_daily_settle_orders():
     except Exception as e:
         logger.error(f"約定処理失敗: {e}", exc_info=True)
         raise
+
+    # Discord 完了通知
+    try:
+        from src.api.discord_utils import send_daily_settle_completion
+
+        send_daily_settle_completion(settled_count=len(settled))
+    except Exception as e:
+        logger.error(f"約定処理完了通知失敗: {e}", exc_info=True)
+
+
+def run_weekly_optimization():
+    """
+    週次実行: 全銘柄バックテスト最適化バッチ
+
+    週次モデル学習（土曜03:00）完了後に実行し、最適パラメータを更新する。
+
+    流れ:
+        1. ウォッチリスト全銘柄のグリッドサーチ（並列数3）
+        2. 最適パラメータを config/optimal_params.json に保存
+    """
+    logger.info("=== 週次バックテスト最適化開始 ===")
+
+    from src.services.backtest_optimize_pipeline import run_optimize_batch
+
+    try:
+        results = run_optimize_batch(
+            model_type="XGBoostModel",
+            ensemble=False,
+            source="file",
+            n_splits=5,
+            max_workers=3,
+            sort_by="sharpe_ratio",
+        )
+        success = sum(1 for r in results if not r.get("error"))
+        failed = len(results) - success
+        logger.info(f"=== 週次バックテスト最適化完了: 成功={success}, 失敗={failed} ===")
+    except Exception as e:
+        logger.error(f"週次バックテスト最適化失敗: {e}", exc_info=True)
+        raise
+
+    # Discord 完了通知
+    try:
+        from src.api.discord_utils import send_optimization_completion
+
+        send_optimization_completion(success=success, failed=failed)
+    except Exception as e:
+        logger.error(f"週次最適化完了通知失敗: {e}", exc_info=True)

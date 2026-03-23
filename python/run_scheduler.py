@@ -7,9 +7,10 @@ Discord Botと同時に起動し、1プロセスで全ジョブを管理する�
 使い方:
   py run_scheduler.py                  # スケジューラのみ起動
   py run_scheduler.py --with-bot       # Discord Bot と同時起動
-  py run_scheduler.py --run-now daily  # daily パイプラインを即時実行して終了
-  py run_scheduler.py --run-now weekly # weekly パイプラインを即時実行して終了
-  py run_scheduler.py --run-now paper  # 自動発注→約定処理を順番に即時実行して終了
+  py run_scheduler.py --run-now daily        # daily パイプラインを即時実行して終了
+  py run_scheduler.py --run-now weekly       # weekly パイプラインを即時実行して終了
+  py run_scheduler.py --run-now paper        # 自動発注→約定処理を順番に即時実行して終了
+  py run_scheduler.py --run-now optimization # 全銘柄バックテスト最適化を即時実行して終了
 """
 
 import argparse
@@ -69,6 +70,13 @@ def job_daily_settle_orders():
     from src.services.scheduler_pipeline import run_daily_settle_orders
 
     run_daily_settle_orders()
+
+
+def job_weekly_optimization():
+    """週次実行: 全銘柄バックテスト最適化 → 最適パラメータ更新"""
+    from src.services.scheduler_pipeline import run_weekly_optimization
+
+    run_weekly_optimization()
 
 
 # ── イベントリスナー ──────────────────────────────────
@@ -137,6 +145,17 @@ SCHEDULE_CONFIG = {
         "recovery_delay_minutes": 10,
         "max_executions_per_period": 1,
         "description": "毎営業日 09:05 - pending 注文の約定処理（ペーパートレード）",
+    },
+    "weekly_optimization": {
+        "func": job_weekly_optimization,
+        "trigger": "cron",
+        "period": "weekly",
+        "day_of_week": "sat",
+        "hour": 6,
+        "minute": 0,
+        "recovery_delay_minutes": 30,
+        "max_executions_per_period": 1,
+        "description": "毎週土曜 06:00 - 全銘柄バックテスト最適化",
     },
 }
 
@@ -258,9 +277,11 @@ def run_now(pipeline: str):
         logger.info("--- 注文発注完了 → 約定処理へ ---")
         queue_manager.run_job("daily_settle_orders", reason="manual", force=True)
         logger.info("=== ペーパートレード テスト実行完了 ===")
+    elif pipeline == "optimization":
+        queue_manager.run_job("weekly_optimization", reason="manual", force=True)
     else:
         print(f"不明なパイプライン: {pipeline}")
-        print("使用可能: daily, weekly, paper")
+        print("使用可能: daily, weekly, paper, optimization")
         sys.exit(1)
 
 
@@ -274,8 +295,8 @@ def main():
     parser.add_argument(
         "--run-now",
         type=str,
-        choices=["daily", "weekly", "paper"],
-        help="指定パイプラインを即時実行して終了する（テスト用）。paper=自動発注→約定処理を順番に実行",
+        choices=["daily", "weekly", "paper", "optimization"],
+        help="指定パイプラインを即時実行して終了する（テスト用）。paper=自動発注→約定処理を順番に実行、optimization=全銘柄最適化",
     )
     args = parser.parse_args()
 

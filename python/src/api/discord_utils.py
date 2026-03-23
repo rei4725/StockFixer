@@ -328,3 +328,79 @@ def send_weekly_report(accuracy_df=None, horizon: int = 1) -> bool:
         if not send_webhook_text(chunk):
             success = False
     return success
+
+
+def send_weekly_training_completion(models: list) -> bool:
+    """
+    週次モデル学習完了通知を Discord Webhook に送信する。
+
+    Args:
+        models: 学習したモデル名のリスト
+
+    Returns:
+        成功時 True、失敗時 False
+    """
+    title = "✅ 週次モデル学習完了"
+    models_str = "\n".join(f"• {m}" for m in models)
+    message = f"時刻: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n" f"学習済みモデル:\n{models_str}"
+    return send_webhook_notification(title, message, color=0x00FF00)
+
+
+def send_daily_order_completion(buy_orders: int, sell_orders: int, mode: str = "paper") -> bool:
+    """
+    自動発注完了通知を Discord Webhook に送信する。
+
+    Args:
+        buy_orders: 買い注文数
+        sell_orders: 売り注文数
+        mode: 実行モード（paper / live）
+
+    Returns:
+        成功時 True、失敗時 False
+    """
+    title = "✅ 自動発注完了"
+    message = (
+        f"時刻: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"モード: {mode}\n"
+        f"買い注文: {buy_orders} 件\n"
+        f"売り注文: {sell_orders} 件"
+    )
+    return send_webhook_notification(title, message, color=0x00BFFF)
+
+
+def send_daily_settle_completion(settled_count: int) -> bool:
+    """
+    ペーパートレード約定処理完了通知を Discord Webhook に送信する。
+
+    Args:
+        settled_count: 約定処理した注文数
+
+    Returns:
+        成功時 True、失敗時 False
+    """
+    title = "✅ 約定処理完了"
+    message = f"時刻: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n" f"約定件数: {settled_count} 件"
+    return send_webhook_notification(title, message, color=0x00BFFF)
+
+
+def send_optimization_completion(success: int, failed: int) -> bool:
+    """
+    週次バックテスト最適化完了通知を Discord Webhook に送信する。
+
+    Args:
+        success: 最適化成功銘柄数
+        failed: 最適化失敗銘柄数
+
+    Returns:
+        成功時 True、失敗時 False
+    """
+    title = "✅ 週次バックテスト最適化完了"
+    status_icon = "⚠️" if failed > 0 else "✅"
+    message = (
+        f"時刻: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"成功: {success} 銘柄\n"
+        f"失敗: {failed} 銘柄 {status_icon if failed > 0 else ''}\n"
+        f"最適パラメータを `config/optimal_params.json` に保存しました"
+    )
+    color = 0x00FF00 if failed == 0 else 0xFFAA00
+    return send_webhook_notification(title, message, color=color)
