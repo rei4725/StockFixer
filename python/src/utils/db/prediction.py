@@ -92,26 +92,44 @@ def load_prediction_results(
     market: str = None,
     top_n: int = None,
     worst_n: int = None,
+    limit: int = None,
 ) -> pd.DataFrame:
     """
     予測結果を DB から取得する。
 
     Args:
-        predicted_at: 予測日時（None なら最新）
+        predicted_at: 予測日時（None なら最新）。limit 指定時は全タイムスタンプから取得
         market: マーケットフィルタ（None なら全マーケット）
         top_n: 上位 N 件のみ取得（diff_ratio 降順）
         worst_n: 下位 N 件のみ取得（diff_ratio 昇順）
+        limit: 取得件数上限。predicted_at=None のときは全タイムスタンプ対象で N 件取得
 
     Returns:
         予測結果 DataFrame
     """
+    if limit is not None and predicted_at is None:
+        # 全タイムスタンプから直近 N 件を取得（精度チェック用）
+        query = "SELECT * FROM prediction_results"
+        params: list = []
+        if market is not None:
+            query += " WHERE market = ?"
+            params.append(market)
+        query += " ORDER BY predicted_at DESC"
+        query += f" LIMIT {int(limit)}"
+        with _db_connection() as con:
+            try:
+                return con.execute(query, params).fetchdf()
+            except Exception as e:
+                logger.error(f"prediction_results 読み込み失敗: {e}", exc_info=True)
+                return pd.DataFrame()
+
     if predicted_at is None:
         predicted_at = load_latest_prediction_timestamp()
         if predicted_at is None:
             return pd.DataFrame()
 
     query = "SELECT * FROM prediction_results WHERE predicted_at = ?"
-    params: list = [predicted_at]
+    params = [predicted_at]
 
     if market is not None:
         query += " AND market = ?"
