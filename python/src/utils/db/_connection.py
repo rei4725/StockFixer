@@ -233,19 +233,29 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
     con.execute(
         """
         CREATE TABLE IF NOT EXISTS paper_orders (
-            order_id    VARCHAR NOT NULL PRIMARY KEY,
-            symbol      VARCHAR NOT NULL,
-            side        INTEGER NOT NULL,
-            qty         INTEGER NOT NULL,
-            price       DOUBLE,
-            order_type  INTEGER NOT NULL,
-            status      VARCHAR NOT NULL DEFAULT 'pending',
-            fill_price  DOUBLE,
-            filled_at   TIMESTAMP,
-            created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            order_id     VARCHAR NOT NULL PRIMARY KEY,
+            symbol       VARCHAR NOT NULL,
+            side         INTEGER NOT NULL,
+            qty          INTEGER NOT NULL,
+            price        DOUBLE,
+            order_type   INTEGER NOT NULL,
+            status       VARCHAR NOT NULL DEFAULT 'pending',
+            fill_price   DOUBLE,
+            realized_pnl DOUBLE,
+            filled_at    TIMESTAMP,
+            created_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
     """
     )
+    # realized_pnl カラムが既存テーブルに存在しない場合にマイグレーション
+    existing_cols = [
+        row[0]
+        for row in con.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_name='paper_orders'"
+        ).fetchall()
+    ]
+    if "realized_pnl" not in existing_cols:
+        con.execute("ALTER TABLE paper_orders ADD COLUMN realized_pnl DOUBLE")
     con.execute(
         """
         CREATE TABLE IF NOT EXISTS paper_positions (

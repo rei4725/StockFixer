@@ -72,6 +72,13 @@ def job_daily_settle_orders():
     run_daily_settle_orders()
 
 
+def job_daily_paper_trade_report():
+    """毎営業日 15:30 - ペーパートレードポジション・損益レポートを Discord に送信"""
+    from src.services.scheduler_pipeline import run_daily_paper_trade_report
+
+    run_daily_paper_trade_report()
+
+
 def job_weekly_optimization():
     """週次実行: 全銘柄バックテスト最適化 → 最適パラメータ更新"""
     from src.services.scheduler_pipeline import run_weekly_optimization
@@ -145,6 +152,17 @@ SCHEDULE_CONFIG = {
         "recovery_delay_minutes": 10,
         "max_executions_per_period": 1,
         "description": "毎営業日 09:05 - pending 注文の約定処理（ペーパートレード）",
+    },
+    "daily_paper_trade_report": {
+        "func": job_daily_paper_trade_report,
+        "trigger": "cron",
+        "period": "daily",
+        "day_of_week": "mon-fri",
+        "hour": 15,
+        "minute": 30,
+        "recovery_delay_minutes": 10,
+        "max_executions_per_period": 1,
+        "description": "毎営業日 15:30 - ペーパートレード ポジション・損益レポート",
     },
     "weekly_optimization": {
         "func": job_weekly_optimization,
@@ -277,6 +295,8 @@ def run_now(pipeline: str):
         logger.info("--- 注文発注完了 → 約定処理へ ---")
         queue_manager.run_job("daily_settle_orders", reason="manual", force=True)
         logger.info("=== ペーパートレード テスト実行完了 ===")
+    elif pipeline == "paper_report":
+        queue_manager.run_job("daily_paper_trade_report", reason="manual", force=True)
     elif pipeline == "optimization":
         queue_manager.run_job("weekly_optimization", reason="manual", force=True)
     else:
@@ -295,8 +315,13 @@ def main():
     parser.add_argument(
         "--run-now",
         type=str,
-        choices=["daily", "weekly", "paper", "optimization"],
-        help="指定パイプラインを即時実行して終了する（テスト用）。paper=自動発注→約定処理を順番に実行、optimization=全銘柄最適化",
+        choices=["daily", "weekly", "paper", "paper_report", "optimization"],
+        help=(
+            "指定パイプラインを即時実行して終了する（テスト用）。"
+            "paper=自動発注→約定処理を順番に実行、"
+            "paper_report=ポジション・損益レポート送信、"
+            "optimization=全銘柄最適化"
+        ),
     )
     args = parser.parse_args()
 

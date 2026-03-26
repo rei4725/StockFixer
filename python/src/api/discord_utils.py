@@ -404,3 +404,73 @@ def send_optimization_completion(success: int, failed: int) -> bool:
     )
     color = 0x00FF00 if failed == 0 else 0xFFAA00
     return send_webhook_notification(title, message, color=color)
+
+
+def send_paper_trade_position_report(positions: list[dict], summary: dict) -> bool:
+    """
+    ペーパートレードのポジション・損益レポートを Discord Webhook に送信する。
+
+    Args:
+        positions: PaperBroker.get_positions() の戻り値
+                   [{"symbol", "qty", "avg_price", "current_price", "unrealized_pnl"}, ...]
+        summary: PaperBroker.get_pnl_summary() の戻り値
+                 {"realized_pnl", "unrealized_pnl", "total_pnl", "balance",
+                  "initial_balance", "trade_count", "started_at"}
+
+    Returns:
+        成功時 True、失敗時 False
+    """
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # ── ポジション一覧 ──────────────────────────────────
+    if positions:
+        lines = ["**銘柄         | 保有数 |  平均取得  |  現在値  |  含み損益**"]
+        lines.append("─" * 56)
+        for p in positions:
+            sym = p["symbol"].ljust(8)
+            qty = str(p["qty"]).rjust(5)
+            avg = f"{p['avg_price']:,.0f}".rjust(8)
+            cur = f"{p['current_price']:,.0f}".rjust(8)
+            pnl = p["unrealized_pnl"]
+            pnl_str = f"{pnl:+,.0f}".rjust(10)
+            icon = "📈" if pnl >= 0 else "📉"
+            lines.append(f"`{sym}` | {qty}株 | {avg}円 | {cur}円 | {pnl_str}円 {icon}")
+        position_block = "\n".join(lines)
+    else:
+        position_block = "現在保有中のポジションはありません。"
+
+    # ── 通算損益サマリー ────────────────────────────────
+    realized = summary["realized_pnl"]
+    unrealized = summary["unrealized_pnl"]
+    total = summary["total_pnl"]
+    balance = summary["balance"]
+    initial = summary["initial_balance"]
+    trade_count = summary["trade_count"]
+    started_at = summary["started_at"] or "-"
+
+    total_icon = "📈" if total >= 0 else "📉"
+    return_rate = (total / initial * 100) if initial else 0.0
+
+    summary_lines = [
+        f"**[ペーパートレード損益レポート] {now_str}**",
+        "",
+        "**ポジション一覧**",
+        position_block,
+        "",
+        "**通算損益サマリー**",
+        f"• 実現損益　　: `{realized:+,.0f}円`",
+        f"• 含み損益　　: `{unrealized:+,.0f}円`",
+        f"• 通算損益　　: `{total:+,.0f}円` {total_icon}  ({return_rate:+.2f}%)",
+        f"• 現在残高　　: `{balance:,.0f}円`",
+        f"• 取引回数　　: `{trade_count}回`",
+        f"• 運用開始日　: `{started_at}`",
+    ]
+    message = "\n".join(summary_lines)
+
+    # 2000文字制限対応で分割送信
+    success = True
+    max_len = 1900
+    for i in range(0, len(message), max_len):
+        if not send_webhook_text(message[i : i + max_len]):
+            success = False
+    return success

@@ -202,6 +202,35 @@ def run_daily_settle_orders():
         logger.error(f"約定処理完了通知失敗: {e}", exc_info=True)
 
 
+def run_daily_paper_trade_report():
+    """
+    毎営業日 15:30 実行: ペーパートレードのポジション・損益レポートを Discord に送信する。
+
+    内容:
+        - 現在のポジション一覧（銘柄・保有数・平均取得価格・現在値・含み損益）
+        - 通算損益サマリー（実現損益・含み損益・合計損益）
+    """
+    import os
+
+    mode = os.environ.get("AUTO_TRADE_MODE", "paper")
+    if mode == "live":
+        logger.info("live モードのためペーパートレードレポートをスキップ")
+        return
+
+    logger.info("=== ペーパートレード損益レポート送信開始 ===")
+    try:
+        from src.api.discord_utils import send_paper_trade_position_report
+        from src.brokers.paper.paper_broker import PaperBroker
+
+        broker = PaperBroker()
+        positions = broker.get_positions()
+        summary = broker.get_pnl_summary()
+        send_paper_trade_position_report(positions, summary)
+        logger.info("=== ペーパートレード損益レポート送信完了 ===")
+    except Exception as e:
+        logger.error(f"ペーパートレードレポート送信失敗: {e}", exc_info=True)
+
+
 def run_weekly_optimization():
     """
     週次実行: 全銘柄バックテスト最適化バッチ
