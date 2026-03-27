@@ -55,10 +55,11 @@ repos:
     rev: 6.1.0
     hooks:
       - id: flake8
+        exclude: ^\.github/skills/
         args: [
           --max-line-length=100,
           "--extend-ignore=E203,W503,D100,D101,D102,D103,D104,D105,D107,D200,D205,D400,D403,B007",
-          "--exclude=__pycache__,.venv,.git,./venv"
+          "--exclude=__pycache__,.venv,.git,./venv,.github/skills"
         ]
         additional_dependencies:
           - flake8-docstrings
@@ -74,7 +75,7 @@ repos:
           - types-requests
           - types-PyYAML
           - pandas-stubs
-        exclude: ^(tests/|.*_test\.py$)
+        exclude: ^(tests/|.*_test\.py$|\.github/skills/)
 
   # 6. Python コード品質メトリクス (Pylint) - オプション（軽量版）
   # 本格的な Pylint 実行はCI/CDで行い、pre-commitでは軽量化版のみ実行
