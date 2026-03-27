@@ -23,6 +23,7 @@ py run_scheduler.py --with-bot
 ```bash
 py run_scheduler.py --run-now daily
 py run_scheduler.py --run-now weekly
+py run_scheduler.py --run-now optimization
 ```
 
 ### スケジュール定義
@@ -30,6 +31,10 @@ py run_scheduler.py --run-now weekly
 |----------|-------------|----------|
 | `daily_pipeline` | 月〜金 19:00 JST | データバッチ取得 → 統合モデル予測 → Discord通知 |
 | `weekly_model_training` | 毎週土曜 03:00 JST | XGBoost + LightGBM 統合モデル再学習 |
+| `weekly_report` | 毎週土曜 04:00 JST | パフォーマンスレポート Discord 送信 |
+| `weekly_optimization` | 毎週土曜 06:00 JST | 全銘柄バックテスト最適化 → `config/optimal_params.json` 更新 |
+| `daily_auto_order` | 月〜金 08:50 JST | ペーパートレード注文発注 |
+| `daily_settle_orders` | 月〜金 09:05 JST | pending 注文の約定処理 |
 
 ### 共通設定
 - `misfire_grace_time=3600` — 1時間以内の遅延なら実行
@@ -48,6 +53,7 @@ py run_scheduler.py --run-now weekly
 ## Key Functions
 - `run_daily_pipeline()` — 日次パイプライン（データ→予測→通知）
 - `run_weekly_training()` — 週次統合モデル再学習
+- `run_weekly_optimization()` — 週次全銘柄バックテスト最適化（`config/optimal_params.json` 更新）
 
 ## References
 - [scheduler_pipeline.py](../../../python/src/services/scheduler_pipeline.py)
