@@ -70,7 +70,8 @@ def convert_df_for_discord(df: pd.DataFrame) -> pd.DataFrame:
         def format_percent(val):
             try:
                 v = float(val)
-                return f"{v*100:.2g}%"
+                sign = "+" if v >= 0 else ""
+                return f"{sign}{v*100:.2g}%"
             except Exception:
                 return val
 

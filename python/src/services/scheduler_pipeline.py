@@ -268,3 +268,24 @@ def run_weekly_optimization():
         send_optimization_completion(success=success, failed=failed)
     except Exception as e:
         logger.error(f"週次最適化完了通知失敗: {e}", exc_info=True)
+
+
+def run_weekly_watchlist_refresh():
+    """
+    週次実行: ウォッチリスト自動更新
+
+    指数構成銘柄（S&P500 / 日経225）をWikipediaから取得し、
+    watchlist.json を差分更新する。
+    上場廃止確認済み銘柄を除外し、新規追加銘柄を組み込む。
+    """
+    logger.info("=== 週次ウォッチリスト更新開始 ===")
+    try:
+        from src.api.discord_utils import send_watchlist_update_report
+        from src.services.watchlist_manager import run_watchlist_refresh
+
+        diffs = run_watchlist_refresh()
+        send_watchlist_update_report(diffs)
+        logger.info("=== 週次ウォッチリスト更新完了 ===")
+    except Exception as e:
+        logger.error(f"ウォッチリスト更新失敗: {e}", exc_info=True)
+        raise

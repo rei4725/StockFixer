@@ -129,7 +129,8 @@ def send_daily_pipeline_completion(
 
     success = send_webhook_notification(title, message, color=0x00FF00)
 
-    # 2. 予測結果テーブルを送信
+    # 2. 予測結果テーブルを送信（マーケット単位でTop→Worst、1メッセージにまとめる）
+    _MARKET_EMOJI = {"JP": "🇯🇵", "NASDAQ": "🇺🇸", "US": "🇺🇸"}
     if include_forecast:
         try:
             latest_ts = load_latest_prediction_timestamp()
@@ -137,35 +138,34 @@ def send_daily_pipeline_completion(
                 markets = load_prediction_markets(latest_ts)
 
                 if markets:
-                    # Top10送信
+                    ts_label = latest_ts[:16] if len(latest_ts) >= 16 else latest_ts
+                    parts = [f"📊 予測結果 — {ts_label}\n{'━' * 28}"]
+
+                    # マーケット単位で上位10 → 下位10の順に出力
                     for market in sorted(markets):
-                        df = load_prediction_results(
+                        emoji = _MARKET_EMOJI.get(market, "🌐")
+                        parts.append(f"\n{emoji} {market}")
+
+                        df_top = load_prediction_results(
                             predicted_at=latest_ts, market=market, top_n=10
                         )
-                        if df is not None and not df.empty:
-                            df = convert_df_for_discord(df)
-                            table_text = df.to_string(index=False)
-                            msg = f"=== {market} 差異割合上位10銘柄 ===\n```text\n{table_text}\n```"
+                        if df_top is not None and not df_top.empty:
+                            df_top = convert_df_for_discord(df_top)
+                            parts.append(f"📈 上位10銘柄\n```\n{df_top.to_string(index=False)}\n```")
 
-                            # Discordメッセージ長制限対応（テキストメッセージは4000文字）
-                            max_length = 3800
-                            for i in range(0, len(msg), max_length):
-                                send_webhook_text(msg[i : i + max_length])
-
-                    # ワースト10送信
-                    for market in sorted(markets):
-                        df = load_prediction_results(
+                        df_worst = load_prediction_results(
                             predicted_at=latest_ts, market=market, worst_n=10
                         )
-                        if df is not None and not df.empty:
-                            df = convert_df_for_discord(df)
-                            table_text = df.to_string(index=False)
-                            msg = f"=== {market} 差異割合ワースト10銘柄 ===\n```text\n{table_text}\n```"
+                        if df_worst is not None and not df_worst.empty:
+                            df_worst = convert_df_for_discord(df_worst)
+                            parts.append(f"📉 下位10銘柄\n```\n{df_worst.to_string(index=False)}\n```")
 
-                            # Discordメッセージ長制限対応
-                            max_length = 3800
-                            for i in range(0, len(msg), max_length):
-                                send_webhook_text(msg[i : i + max_length])
+                    if len(parts) > 1:
+                        msg = "\n".join(parts)
+                        # Discordメッセージ長制限対応（超過時のみ分割）
+                        max_length = 3800
+                        for i in range(0, len(msg), max_length):
+                            send_webhook_text(msg[i : i + max_length])
 
         except Exception as e:
             logger.error(f"予測結果テーブル送信失敗: {e}")
@@ -470,6 +470,59 @@ def send_paper_trade_position_report(positions: list[dict], summary: dict) -> bo
     # 2000文字制限対応で分割送信
     success = True
     max_len = 1900
+    for i in range(0, len(message), max_len):
+        if not send_webhook_text(message[i : i + max_len]):
+            success = False
+    return success
+
+
+def send_watchlist_update_report(diffs) -> bool:
+    """
+    ウォッチリスト更新結果を Discord Webhook に送信する。
+
+    変更が1件もない場合は何も送信しない。
+
+    Args:
+        diffs: WatchlistDiff のリスト
+
+    Returns:
+        成功時 True、失敗時 False（送信不要な場合も True）
+    """
+    changed = [d for d in diffs if d.has_changes or d.removed_unverified]
+    if not changed:
+        logger.info("ウォッチリスト変更なし。Discord通知をスキップします。")
+        return True
+
+    lines = [f"🔄 **ウォッチリスト更新** — {datetime.now().strftime('%Y-%m-%d %H:%M')}"]
+    lines.append("━" * 28)
+
+    _MARKET_EMOJI = {"us": "🇺🇸", "jp": "🇯🇵"}
+
+    for diff in diffs:
+        emoji = _MARKET_EMOJI.get(diff.market.lower(), "🌐")
+        lines.append(f"\n{emoji} **{diff.market.upper()}**")
+
+        if diff.added:
+            syms = ", ".join(f"`{s}`" for s in diff.added)
+            lines.append(f"➕ 追加 ({len(diff.added)}銘柄): {syms}")
+
+        if diff.removed:
+            syms = ", ".join(f"`{s}`" for s in diff.removed)
+            lines.append(f"➖ 削除 ({len(diff.removed)}銘柄): {syms}")
+
+        if diff.removed_unverified:
+            syms = ", ".join(f"`{s}`" for s in diff.removed_unverified)
+            lines.append(f"⚠️ 指数除外・取引可能のため保留 ({len(diff.removed_unverified)}銘柄): {syms}")
+
+        if diff.capped:
+            lines.append("🛑 安全弁発動: 削除上限（10%）に達したため一部保留")
+
+        total_after = len(diff.kept) + len(diff.added)
+        lines.append(f"📋 合計: {total_after}銘柄")
+
+    message = "\n".join(lines)
+    max_len = 1900
+    success = True
     for i in range(0, len(message), max_len):
         if not send_webhook_text(message[i : i + max_len]):
             success = False

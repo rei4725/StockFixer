@@ -86,6 +86,13 @@ def job_weekly_optimization():
     run_weekly_optimization()
 
 
+def job_weekly_watchlist_refresh():
+    """週次実行: ウォッチリスト自動更新（S&P500 / 日経225 との差分同期）"""
+    from src.services.scheduler_pipeline import run_weekly_watchlist_refresh
+
+    run_weekly_watchlist_refresh()
+
+
 # ── イベントリスナー ──────────────────────────────────
 def _job_listener(event):
     """ジョブ実行結果のログ出力"""
@@ -174,6 +181,17 @@ SCHEDULE_CONFIG = {
         "recovery_delay_minutes": 30,
         "max_executions_per_period": 1,
         "description": "毎週土曜 06:00 - 全銘柄バックテスト最適化",
+    },
+    "weekly_watchlist_refresh": {
+        "func": job_weekly_watchlist_refresh,
+        "trigger": "cron",
+        "period": "weekly",
+        "day_of_week": "sun",
+        "hour": 2,
+        "minute": 0,
+        "recovery_delay_minutes": 30,
+        "max_executions_per_period": 1,
+        "description": "毎週日曜 02:00 - ウォッチリスト自動更新",
     },
 }
 
@@ -299,6 +317,8 @@ def run_now(pipeline: str):
         queue_manager.run_job("daily_paper_trade_report", reason="manual", force=True)
     elif pipeline == "optimization":
         queue_manager.run_job("weekly_optimization", reason="manual", force=True)
+    elif pipeline == "watchlist":
+        queue_manager.run_job("weekly_watchlist_refresh", reason="manual", force=True)
     else:
         print(f"不明なパイプライン: {pipeline}")
         print("使用可能: daily, weekly, paper, optimization")
@@ -315,12 +335,13 @@ def main():
     parser.add_argument(
         "--run-now",
         type=str,
-        choices=["daily", "weekly", "paper", "paper_report", "optimization"],
+        choices=["daily", "weekly", "paper", "paper_report", "optimization", "watchlist"],
         help=(
             "指定パイプラインを即時実行して終了する（テスト用）。"
             "paper=自動発注→約定処理を順番に実行、"
             "paper_report=ポジション・損益レポート送信、"
-            "optimization=全銘柄最適化"
+            "optimization=全銘柄最適化、"
+            "watchlist=ウォッチリスト自動更新"
         ),
     )
     args = parser.parse_args()

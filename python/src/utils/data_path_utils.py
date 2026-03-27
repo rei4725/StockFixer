@@ -74,6 +74,11 @@ def get_monitor_list_path() -> str:
     return os.path.join(_PYTHON_ROOT, "監視対象.csv")
 
 
+def get_watchlist_audit_log_path() -> str:
+    """ウォッチリスト監査ログ JSON のパスを返す（config/watchlist_audit_log.json）"""
+    return os.path.join(_PYTHON_ROOT, "config", "watchlist_audit_log.json")
+
+
 # ===== ティッカー補正 =====
 def get_ticker(market: str, symbol: str) -> str:
     """市場ごとにティッカーを補正して返す（例：日本株は .T を付与）。"""
