@@ -35,7 +35,7 @@ def upsert_raw_ohlcv(rows: list[dict]) -> int:
         df["adj_close"] = None
     if "source" not in df.columns:
         df["source"] = "yfinance"
-    df["ingested_at"] = pd.Timestamp.utcnow()
+    df["ingested_at"] = pd.Timestamp.now("UTC")
 
     cols = [
         "market",

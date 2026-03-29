@@ -5,19 +5,19 @@ import tempfile
 import unittest
 
 from src.utils.data_path_utils import (
-    get_python_root,
+    ensure_dir,
     get_data_dir,
     get_data_subdir,
+    get_db_path,
+    get_model_path,
     get_models_dir,
     get_models_subdir,
-    get_model_path,
+    get_monitor_list_path,
+    get_python_root,
     get_results_dir,
     get_results_subdir,
-    get_watchlist_path,
-    get_monitor_list_path,
     get_ticker,
-    get_db_path,
-    ensure_dir,
+    get_watchlist_path,
 )
 
 
@@ -71,8 +71,8 @@ class TestDataPathUtils(unittest.TestCase):
         self.assertEqual(len(dirname), 15)
 
     def test_get_watchlist_path_ends_with_csv(self):
-        """get_watchlist_path がCSVファイルパスを返すことを確認"""
-        self.assertTrue(get_watchlist_path().endswith(".csv"))
+        """get_watchlist_path がJSONファイルパスを返すことを確認"""
+        self.assertTrue(get_watchlist_path().endswith(".json"))
 
     def test_get_monitor_list_path_ends_with_csv(self):
         """get_monitor_list_path がCSVファイルパスを返すことを確認"""
@@ -142,5 +142,5 @@ class TestEnsureDir(unittest.TestCase):
             self.assertTrue(os.path.isdir(nested))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()
