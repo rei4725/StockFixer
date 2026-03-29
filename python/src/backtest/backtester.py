@@ -1,7 +1,8 @@
 from typing import Optional
 
 import pandas as pd
-from src.backtest.metrics import compute_metrics
+
+from src.backtest.metrics import compute_cost_comparison_metrics
 from src.backtest.task import BacktestTask, ReturnRegressionTask
 
 
@@ -107,6 +108,7 @@ class Backtester:
             (result_df, metrics) のタプル
         """
         cash = self.initial_cash
+        cash_gross = self.initial_cash
         position = 0
         position_price = 0.0
         trade_log = []
@@ -123,7 +125,9 @@ class Backtester:
 
                 if self.stop_loss_pct is not None and change_from_entry <= -self.stop_loss_pct:
                     proceeds = position * price * (1 - self.fee_rate - self.slippage)
+                    proceeds_gross = position * price
                     cash += proceeds
+                    cash_gross += proceeds_gross
                     trade_log.append(
                         {
                             "date": date,
@@ -131,6 +135,7 @@ class Backtester:
                             "price": price,
                             "qty": position,
                             "cash": cash,
+                            "cash_gross": cash_gross,
                         }
                     )
                     position = 0
@@ -139,7 +144,9 @@ class Backtester:
 
                 if self.take_profit_pct is not None and change_from_entry >= self.take_profit_pct:
                     proceeds = position * price * (1 - self.fee_rate - self.slippage)
+                    proceeds_gross = position * price
                     cash += proceeds
+                    cash_gross += proceeds_gross
                     trade_log.append(
                         {
                             "date": date,
@@ -147,6 +154,7 @@ class Backtester:
                             "price": price,
                             "qty": position,
                             "cash": cash,
+                            "cash_gross": cash_gross,
                         }
                     )
                     position = 0
@@ -159,7 +167,9 @@ class Backtester:
                 qty = self._calc_qty(cash, price, pred.get(date) if pred is not None else None)
                 if qty > 0:
                     cost = qty * price * (1 + self.fee_rate + self.slippage)
+                    cost_gross = qty * price
                     cash -= cost
+                    cash_gross -= cost_gross
                     position += qty
                     position_price = price
                     trade_log.append(
@@ -169,12 +179,15 @@ class Backtester:
                             "price": price,
                             "qty": qty,
                             "cash": cash,
+                            "cash_gross": cash_gross,
                         }
                     )
             elif sig == -1 and position > 0:
                 # Sell
                 proceeds = position * price * (1 - self.fee_rate - self.slippage)
+                proceeds_gross = position * price
                 cash += proceeds
+                cash_gross += proceeds_gross
                 trade_log.append(
                     {
                         "date": date,
@@ -182,6 +195,7 @@ class Backtester:
                         "price": price,
                         "qty": position,
                         "cash": cash,
+                        "cash_gross": cash_gross,
                     }
                 )
                 position = 0
@@ -191,7 +205,9 @@ class Backtester:
         if position > 0:
             price = df.iloc[-1][close_col]
             proceeds = position * price * (1 - self.fee_rate - self.slippage)
+            proceeds_gross = position * price
             cash += proceeds
+            cash_gross += proceeds_gross
             trade_log.append(
                 {
                     "date": df.index[-1],
@@ -199,12 +215,13 @@ class Backtester:
                     "price": price,
                     "qty": position,
                     "cash": cash,
+                    "cash_gross": cash_gross,
                 }
             )
             position = 0
 
         result_df = pd.DataFrame(trade_log)
-        metrics = compute_metrics(result_df, self.initial_cash)
+        metrics = compute_cost_comparison_metrics(result_df, self.initial_cash)
         return result_df, metrics
 
     def _calc_qty(self, cash: float, price: float, pred_value: Optional[float] = None) -> int:

@@ -4,13 +4,12 @@ Unit Test: バックテストパイプライン ロジック
 load_features, _build_task, メトリクス計算など、
 パイプラインの計算ロジックのみをテスト（外部依存なし）。
 """
-import pytest
-import pandas as pd
 import numpy as np
-from unittest.mock import patch, MagicMock
+import pandas as pd
+import pytest
 
+from src.backtest.metrics import _extract_trade_pnl, _max_drawdown, _sharpe_ratio, compute_metrics
 from src.backtest.task import ReturnRegressionTask
-from src.backtest.metrics import compute_metrics, _extract_trade_pnl, _max_drawdown, _sharpe_ratio
 
 
 class TestBacktestTaskLocalLogic:
@@ -30,8 +29,8 @@ class TestBacktestTaskLocalLogic:
 
         # ラベルが Series として返される
         assert isinstance(labels, pd.Series)
-        # ラベル数がデータ数 - 1（次営業日終値の変化率なので）
-        assert len(labels) == len(df) - 1
+        # 翌日変化率のため最終行は NaN だが、インデックス長は入力と同じ
+        assert len(labels) == len(df)
 
     def test_signal_generation_from_prediction(self):
         """予測値からシグナルを生成"""
@@ -115,8 +114,8 @@ class TestComputeMetrics:
             }
         )
         metrics2 = compute_metrics(trade_log, initial_cash=1_000_000)
-        # profit_factor は数値
-        assert isinstance(metrics2["profit_factor"], (int, float))
+        # 勝ちトレードのみの場合は損失ゼロのため None が返る
+        assert metrics2["profit_factor"] is None
 
 
 class TestMetricsHelpers:
@@ -178,7 +177,7 @@ class TestProbitFactorNoneHandling:
 
         # None → NaN 変換
         for col in ["total_return", "sharpe_ratio", "profit_factor"]:
-            metrics_df[col] = pd.to_numeric(metrics_df[col], errors='coerce')
+            metrics_df[col] = pd.to_numeric(metrics_df[col], errors="coerce")
 
         # 平均計算が成功する（dtype エラーなし）
         means = metrics_df.mean()

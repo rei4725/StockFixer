@@ -3,7 +3,9 @@
 外部依存（DB・yfinance・モデル）なく、simulate_trading のロジックのみをテスト。
 全依存を Mock で隔離し、高速実行を実現。
 """
-from unittest.mock import MagicMock
+import sys
+import types
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
@@ -235,7 +237,7 @@ class TestBacktesterRiskManagement:
         """ストップロス発動"""
         # 105 → 100 に下落（5%）
         prices = pd.DataFrame(
-            {"Close": [105, 104, 103, 102, 101, 100]},
+            {"Close": [105, 104, 103, 102, 101, 99]},
             index=pd.date_range("2024-01-01", periods=6, freq="B"),
         )
 
@@ -479,6 +481,66 @@ class TestBacktesterWithTask:
         signal = task.make_signal(pred)
         assert (signal == 1).sum() == 2
         assert (signal == -1).sum() == 1
+
+
+class TestBacktesterRunPath:
+    """run / _load_from_raw の分岐カバレッジ"""
+
+    def test_run_executes_with_mock_dependencies(self):
+        idx = pd.date_range("2024-01-01", periods=8, freq="B")
+        df = pd.DataFrame(
+            {
+                "Close": [100, 101, 102, 103, 104, 105, 106, 107],
+                "feat1": [1, 2, 3, 4, 5, 6, 7, 8],
+                "feat2": [2, 3, 4, 5, 6, 7, 8, 9],
+            },
+            index=idx,
+        )
+
+        model = MagicMock()
+        model.predict.return_value = [0.01] * 7
+        mm = MagicMock()
+        mm.get_model.return_value = model
+
+        dl = MagicMock()
+        dl.get_stock_data_auto.return_value = df
+
+        bt = Backtester(
+            model_manager=mm,
+            signal_generator=MagicMock(),
+            data_loader=dl,
+            start_date=None,
+            end_date=None,
+            market="jp",
+            symbol="7203",
+            initial_cash=100_000,
+            fee_rate=0.0,
+        )
+
+        with patch(
+            "src.features.technical_analysis.add_technical_indicators", side_effect=lambda x: x
+        ):
+            result_df, metrics = bt.run(model_name="dummy")
+
+        assert isinstance(result_df, pd.DataFrame)
+        assert "total_return" in metrics
+
+    def test_load_from_raw_raises_when_empty(self):
+        bt = Backtester(
+            model_manager=MagicMock(),
+            signal_generator=MagicMock(),
+            data_loader=MagicMock(),
+            start_date=None,
+            end_date=None,
+            market="jp",
+            symbol="7203",
+        )
+
+        fake_loader = types.ModuleType("src.data.data_loader")
+        fake_loader.get_raw_ohlcv_from_db = lambda *_a, **_k: pd.DataFrame()
+        with patch.dict(sys.modules, {"src.data.data_loader": fake_loader}):
+            with pytest.raises(ValueError):
+                bt._load_from_raw()
 
 
 if __name__ == "__main__":

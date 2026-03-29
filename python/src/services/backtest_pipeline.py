@@ -433,8 +433,28 @@ def print_backtest_metrics(
     if label:
         print(f" {label}")
     print(f"{'='*50}")
-    for k, v in metrics.items():
-        print(f"  {k:20s}: {v}")
+
+    # net（手数料・スリッページ控除後）
+    print("  [NET] 手数料・スリッページ控除後")
+    print(f"  {'final_cash':20s}: {metrics.get('final_cash')}")
+    print(f"  {'total_return':20s}: {metrics.get('total_return')}")
+    print(f"  {'sharpe_ratio':20s}: {metrics.get('sharpe_ratio')}")
+    print(f"  {'max_drawdown':20s}: {metrics.get('max_drawdown')}")
+    print(f"  {'num_trades':20s}: {metrics.get('num_trades')}")
+    print(f"  {'win_rate':20s}: {metrics.get('win_rate')}")
+    print(f"  {'profit_factor':20s}: {metrics.get('profit_factor')}")
+
+    # gross（比較用: コスト控除前）
+    if "gross_total_return" in metrics:
+        print(f"{'─'*50}")
+        print("  [GROSS] コスト控除前（同一約定数量ベース）")
+        print(f"  {'gross_final_cash':20s}: {metrics.get('gross_final_cash')}")
+        print(f"  {'gross_total_return':20s}: {metrics.get('gross_total_return')}")
+        print(f"  {'gross_sharpe_ratio':20s}: {metrics.get('gross_sharpe_ratio')}")
+        print(f"  {'gross_max_drawdown':20s}: {metrics.get('gross_max_drawdown')}")
+        print(f"  {'cost_impact_cash':20s}: {metrics.get('cost_impact_cash')}")
+        print(f"  {'cost_impact_return':20s}: {metrics.get('cost_impact_return')}")
+
     if benchmark and benchmark.get("total_return") is not None:
         bm_ret = benchmark["total_return"]
         strategy_ret = metrics.get("total_return", 0.0)

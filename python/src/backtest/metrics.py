@@ -20,6 +20,7 @@ def compute_metrics(
     initial_cash: float,
     risk_free_rate: float = 0.0,
     trading_days_per_year: int = 252,
+    cash_column: str = "cash",
 ) -> dict:
     """
     取引ログから主要メトリクスを一括計算する。
@@ -30,11 +31,12 @@ def compute_metrics(
         initial_cash: 初期資金
         risk_free_rate: 無リスク金利（年率、小数）
         trading_days_per_year: 1年の取引日数（Sharpe計算用）
+        cash_column: equity curve 算出に使う資産列名
 
     Returns:
         dict: 各指標の辞書
     """
-    if trade_log is None or trade_log.empty:
+    if trade_log is None or trade_log.empty or cash_column not in trade_log.columns:
         return _empty_metrics(initial_cash)
 
     # --- equity curve（決済後のキャッシュ推移）---
@@ -51,7 +53,7 @@ def compute_metrics(
         equity = pd.concat(
             [
                 pd.Series([initial_cash], index=[sell_log.iloc[0]["date"]]),
-                sell_log.set_index("date")["cash"],
+                sell_log.set_index("date")[cash_column],
             ]
         )
 
@@ -60,6 +62,7 @@ def compute_metrics(
 
     # 取引ペア（buy/sell）を抽出して勝率・Profit Factor を計算
     wins, losses = _extract_trade_pnl(trade_log)
+    trade_pnls = wins + losses
     num_trades = len(wins) + len(losses)
     win_rate = len(wins) / num_trades if num_trades > 0 else 0.0
 
@@ -68,7 +71,7 @@ def compute_metrics(
     profit_factor = gross_profit / gross_loss if gross_loss > 0 else math.inf
 
     # --- Sharpe ratio（取引ごとのリターン列から） ---
-    sharpe = _sharpe_ratio(wins + losses, risk_free_rate, trading_days_per_year)
+    sharpe = _sharpe_ratio(trade_pnls, risk_free_rate, trading_days_per_year)
 
     # --- Maximum Drawdown ---
     max_dd = _max_drawdown(equity)
@@ -120,6 +123,46 @@ def _extract_trade_pnl(trade_log: pd.DataFrame) -> tuple[list[float], list[float
             (wins if pnl >= 0 else losses).append(pnl)
 
     return wins, losses
+
+
+def compute_cost_comparison_metrics(
+    trade_log: pd.DataFrame,
+    initial_cash: float,
+    risk_free_rate: float = 0.0,
+    trading_days_per_year: int = 252,
+) -> dict:
+    """控除後（net）と控除前（gross）のKPI比較を返す。"""
+    net = compute_metrics(
+        trade_log=trade_log,
+        initial_cash=initial_cash,
+        risk_free_rate=risk_free_rate,
+        trading_days_per_year=trading_days_per_year,
+        cash_column="cash",
+    )
+    gross = compute_metrics(
+        trade_log=trade_log,
+        initial_cash=initial_cash,
+        risk_free_rate=risk_free_rate,
+        trading_days_per_year=trading_days_per_year,
+        cash_column="cash_gross",
+    )
+
+    result = {
+        # 互換性維持: 既存キーは net を据え置く
+        **net,
+        # 追加: 比較用の明示キー
+        "gross_final_cash": gross.get("final_cash", initial_cash),
+        "gross_total_return": gross.get("total_return", 0.0),
+        "gross_sharpe_ratio": gross.get("sharpe_ratio", 0.0),
+        "gross_max_drawdown": gross.get("max_drawdown", 0.0),
+        "cost_impact_cash": round(
+            gross.get("final_cash", initial_cash) - net.get("final_cash", initial_cash), 2
+        ),
+        "cost_impact_return": round(
+            gross.get("total_return", 0.0) - net.get("total_return", 0.0), 6
+        ),
+    }
+    return result
 
 
 def _sharpe_ratio(

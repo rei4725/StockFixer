@@ -1,10 +1,21 @@
 """backtest/metrics.py のユニットテスト"""
+import sys
+import tempfile
+import types
 import unittest
+from pathlib import Path
 
 import pandas as pd
 import pytest
 
-from src.backtest.metrics import _extract_trade_pnl, _max_drawdown, _sharpe_ratio, compute_metrics
+from src.backtest.metrics import (
+    _extract_trade_pnl,
+    _max_drawdown,
+    _sharpe_ratio,
+    compute_metrics,
+    fetch_benchmark_returns,
+    plot_backtest,
+)
 
 
 def _trade_log(entries: list[dict]) -> pd.DataFrame:
@@ -237,6 +248,110 @@ class TestMaxDrawdown(unittest.TestCase):
         equity = pd.Series([1000, 1100, 1200, 1300])
         dd = _max_drawdown(equity)
         self.assertAlmostEqual(dd, 0.0)
+
+
+class TestPlotBacktestAndBenchmark(unittest.TestCase):
+    """plot_backtest / fetch_benchmark_returns のテスト"""
+
+    def _install_fake_matplotlib(self):
+        class _Axis:
+            def __init__(self):
+                self.xaxis = types.SimpleNamespace(
+                    set_major_formatter=lambda *_a, **_k: None,
+                    get_majorticklabels=lambda: [],
+                )
+
+            def plot(self, *_a, **_k):
+                return None
+
+            def axhline(self, *_a, **_k):
+                return None
+
+            def set_ylabel(self, *_a, **_k):
+                return None
+
+            def set_xlabel(self, *_a, **_k):
+                return None
+
+            def legend(self, *_a, **_k):
+                return None
+
+            def grid(self, *_a, **_k):
+                return None
+
+            def fill_between(self, *_a, **_k):
+                return None
+
+        class _Fig:
+            def suptitle(self, *_a, **_k):
+                return None
+
+            def text(self, *_a, **_k):
+                return None
+
+        fake_pyplot = types.ModuleType("matplotlib.pyplot")
+        fake_pyplot.subplots = lambda *a, **k: (_Fig(), (_Axis(), _Axis()))
+        fake_pyplot.setp = lambda *_a, **_k: None
+        fake_pyplot.tight_layout = lambda *_a, **_k: None
+        fake_pyplot.savefig = lambda path, **_k: Path(path).write_bytes(b"png")
+        fake_pyplot.close = lambda *_a, **_k: None
+
+        fake_mdates = types.ModuleType("matplotlib.dates")
+        fake_mdates.DateFormatter = lambda fmt: fmt
+
+        fake_matplotlib = types.ModuleType("matplotlib")
+        fake_matplotlib.__path__ = []
+        fake_matplotlib.use = lambda *_a, **_k: None
+        fake_matplotlib.pyplot = fake_pyplot
+        fake_matplotlib.dates = fake_mdates
+
+        sys.modules["matplotlib"] = fake_matplotlib
+        sys.modules["matplotlib.pyplot"] = fake_pyplot
+        sys.modules["matplotlib.dates"] = fake_mdates
+
+    def test_plot_backtest_saves_png(self):
+        self._install_fake_matplotlib()
+        trade_log = pd.DataFrame(
+            {
+                "date": pd.to_datetime(["2024-01-02", "2024-01-10"]),
+                "action": ["buy", "sell"],
+                "price": [100.0, 110.0],
+                "qty": [10, 10],
+                "cash": [999_000, 1_001_000],
+            }
+        )
+        metrics = {
+            "total_return": 0.01,
+            "sharpe_ratio": 1.1,
+            "max_drawdown": -0.03,
+            "num_trades": 1,
+            "win_rate": 1.0,
+        }
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            out = plot_backtest(trade_log, metrics, str(tmp_dir), market="jp", symbol="7203")
+            self.assertTrue(out.endswith(".png"))
+            self.assertTrue(Path(out).exists())
+
+    def test_fetch_benchmark_returns_success(self):
+        idx = pd.date_range("2024-01-01", periods=3, freq="D")
+        df = pd.DataFrame({"Close": [100.0, 110.0, 120.0]}, index=idx)
+        fake_yf = types.SimpleNamespace(download=lambda *_a, **_k: df)
+        sys.modules["yfinance"] = fake_yf
+
+        result = fetch_benchmark_returns("^N225", "2024-01-01", "2024-01-10")
+        self.assertEqual(result["ticker"], "^N225")
+        self.assertIsNotNone(result["total_return"])
+
+    def test_fetch_benchmark_returns_failure(self):
+        class _ErrYf:
+            @staticmethod
+            def download(*_a, **_k):
+                raise RuntimeError("network")
+
+        sys.modules["yfinance"] = _ErrYf
+        result = fetch_benchmark_returns("^N225", "2024-01-01", "2024-01-10")
+        self.assertIsNone(result["total_return"])
 
     def test_monotone_decrease_full_drawdown(self):
         equity = pd.Series([1000, 900, 800, 700])
