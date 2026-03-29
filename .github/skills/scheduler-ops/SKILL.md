@@ -58,3 +58,7 @@ py run_scheduler.py --run-now optimization
 ## References
 - [scheduler_pipeline.py](../../../python/src/services/scheduler_pipeline.py)
 - [run_scheduler.py](../../../python/run_scheduler.py)
+
+## 運用メモ（デプロイ連携）
+- Windows タスク `StockFixer Weekly Redeploy`（`weekly_redeploy.ps1`）は、再デプロイ前に `python -m pytest tests/unit -v` を実行する
+- UnitTest が失敗した場合、再デプロイは中断される（`exit 1`）

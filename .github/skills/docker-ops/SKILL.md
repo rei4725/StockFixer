@@ -40,10 +40,16 @@ powershell -ExecutionPolicy Bypass -File C:\src\StockFixer\weekly_redeploy.ps1
 
 > `weekly_redeploy.ps1` の処理内容:
 > 1. `git pull origin feature/training`
-> 2. `VERSION` / `GIT_COMMIT` / `BUILD_DATE` を環境変数にセット
-> 3. `docker-compose up -d --build`
-> 4. コンテナ起動確認
-> 5. 結果を `python/logs/redeploy.log` に記録
+> 2. `python -m pytest tests/unit -v` を実行（失敗時は即中断）
+> 3. `VERSION` / `GIT_COMMIT` / `BUILD_DATE` を環境変数にセット
+> 4. `docker-compose up -d --build`
+> 5. コンテナ起動確認
+> 6. 結果を `python/logs/redeploy.log` に記録
+
+### デプロイゲート（必須）
+- UnitTest が 1 件でも失敗した場合、`weekly_redeploy.ps1` は `exit 1` で終了する
+- この場合、Docker イメージの再ビルド・再起動は実行されない
+- ログ確認: `Get-Content C:\src\StockFixer\python\logs\redeploy.log -Tail 100`
 
 ---
 

@@ -61,6 +61,12 @@ python -m unittest discover -s tests/integration -p "test_*.py"
 - **実行時間**: <5秒
 - **環境**: 開発マシンで常時実行可能
 - **使用場面**: コミット前チェック、CI/CD パイプラインの初期段階
+- **カバレッジ基準**: `src/` 全体で **80%以上**（`--cov-fail-under=80`）
+
+### CI運用ルール（必須）
+- Pull Request 作成/更新時に GitHub Actions で Unit Test を自動実行する
+- CI が失敗している PR はマージしない
+- Unit Test は外部API・実DBに依存させない（依存は Mock で隔離）
 
 **対象テスト**:
 Backtester（基本機能・詳細・ストップロス・テイクプロフィット・ポジションサイジング）、メトリクス計算、パイプラインロジック、パスユーティリティ、DataFrame変換、モデル管理、シグナル生成、テクニカル指標、最適パラメータ読込（Unit）
@@ -129,11 +135,22 @@ python -m pytest tests/unit/test_backtester_unit.py -v
 python -m pytest tests/ -v
 
 # 3. PR 前：カバレッジ確認
-python -m pytest tests/ --cov=src --cov-report=term-missing
+python -m pytest tests/unit/ -v --cov=src --cov-report=term-missing --cov-fail-under=80
 
 # 4. CI/CD で Integration Test も含めて検証
 python -m pytest tests/integration/ -v
 ```
+
+## Unit Test 実装チェックリスト
+
+- テスト対象は1つの責務に絞る（1テスト1意図）
+- テスト名は `test_期待する挙動_条件` 形式で命名する
+- 外部依存（DB/API/ファイルI/O/時刻依存）は Mock または Fixture で隔離する
+- 正常系と異常系（例外・境界値）を最低1ケースずつ含める
+- `Arrange / Act / Assert` の3段構成を意識して可読性を保つ
+- アサーションメッセージ不要の単純比較を優先し、過剰な分岐を避ける
+- 失敗が再現しやすいようにランダム値は固定シードを使用する
+- 変更したロジックには対応する Unit Test を同一PRで追加する
 
 ## トラブルシューティング
 

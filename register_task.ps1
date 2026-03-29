@@ -1,7 +1,6 @@
-# register_task.ps1
-# タスクスケジューラへの登録スクリプト（管理者権限で実行）
-# 実行方法: このファイルを右クリック → "PowerShellで実行" または
-#           管理者PowerShellで: .\register_task.ps1
+﻿# register_task.ps1
+# Register StockFixer weekly redeploy to Windows Task Scheduler (run as Administrator)
+# Usage: Right-click -> "Run with PowerShell"  OR  .\register_task.ps1 (in admin PS)
 
 $action = New-ScheduledTaskAction `
     -Execute "powershell.exe" `
@@ -20,11 +19,11 @@ Register-ScheduledTask `
     -Trigger    $trigger `
     -Settings   $settings `
     -RunLevel   Highest `
-    -Description "StockFixer Dockerコンテナの週次再ビルド・再起動（毎週土曜 04:00）" `
+    -Description "StockFixer Docker weekly rebuild and restart (every Saturday 04:00)" `
     -Force
 
-Write-Host "登録完了。タスク名: 'StockFixer Weekly Redeploy'" -ForegroundColor Green
-Write-Host "次回実行: 毎週土曜 04:00" -ForegroundColor Cyan
-Write-Host ""
-Write-Host "即時テスト実行:"
-Write-Host "  Start-ScheduledTask -TaskName 'StockFixer Weekly Redeploy'" -ForegroundColor Yellow
+Write-Host '[OK] Registered: StockFixer Weekly Redeploy' -ForegroundColor Green
+Write-Host '     Schedule : Every Saturday 04:00' -ForegroundColor Cyan
+Write-Host ''
+Write-Host 'Run manually:'
+Write-Host '  Start-ScheduledTask -TaskName "StockFixer Weekly Redeploy"' -ForegroundColor Yellow

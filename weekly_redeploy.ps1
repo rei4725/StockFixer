@@ -1,6 +1,6 @@
 # weekly_redeploy.ps1
 # Windowsタスクスケジューラから毎週土曜 04:00 に呼び出される
-# 処理: git pull -> docker-compose up --build -> 結果ログ
+# 処理: git pull -> UnitTest -> docker-compose up --build -> 結果ログ
 
 $repoDir = "C:\src\StockFixer"
 $logDir  = Join-Path $repoDir "python\logs"
@@ -19,11 +19,29 @@ Write-Log "=== 週次再デプロイ開始 ==="
 try {
     Set-Location $repoDir
 
+    $pythonExe = Join-Path $repoDir ".venv\Scripts\python.exe"
+    if (-not (Test-Path $pythonExe)) {
+        throw "Python 実行ファイルが見つかりません: $pythonExe"
+    }
+
     # --- git pull ---
     Write-Log "[git] git pull origin feature/training"
     git pull origin feature/training 2>&1 | ForEach-Object { Write-Log "  [git] $_" }
     Write-Log "[git] 完了 (exit=$LASTEXITCODE)"
     if ($LASTEXITCODE -ne 0) { throw "git pull が失敗しました (exit=$LASTEXITCODE)" }
+
+    # --- UnitTest（失敗時はデプロイ中断） ---
+    Write-Log "[test] python -m pytest tests/unit -v"
+    $testExitCode = 0
+    Push-Location (Join-Path $repoDir "python")
+    try {
+        & $pythonExe -m pytest tests/unit -v 2>&1 | ForEach-Object { Write-Log "  [test] $_" }
+        $testExitCode = $LASTEXITCODE
+    } finally {
+        Pop-Location
+    }
+    Write-Log "[test] 完了 (exit=$testExitCode)"
+    if ($testExitCode -ne 0) { throw "UnitTest が失敗しました。デプロイを中断します (exit=$testExitCode)" }
 
     # --- ビルド引数セット ---
     $env:VERSION    = (Get-Content (Join-Path $repoDir "VERSION")).Trim()

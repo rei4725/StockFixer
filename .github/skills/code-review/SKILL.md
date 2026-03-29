@@ -167,6 +167,10 @@ git diff origin/feature/training..HEAD
 - [ ] テストケースが存在
 - [ ] カバレッジ 80% 以上
 
+**デプロイ安全性:**
+- [ ] `weekly_redeploy.ps1` で `python -m pytest tests/unit -v` が実行される
+- [ ] UnitTest 失敗時にデプロイ処理（docker-compose）が中断される
+
 ---
 
 ### ステップ4: 修正と再検証
@@ -257,6 +261,22 @@ gh pr create --title "feat: <概要>" \
 # ローカルで Copilot にレビューを依頼（オプション）
 .\.venv\Scripts\python -m pre_commit run check-duckdb-concurrency --all-files \
   --show-diff
+```
+
+#### 5-4. PRごとの Actions 手動確認（必須）
+ブランチ保護の必須ステータスチェックが利用できないプランでは、以下を手動で実施する。
+
+1. PR 画面の Actions で `Unit Tests` の最新実行結果を確認
+2. `Unit Tests` が Success の場合のみマージ可
+3. Failure / Cancelled の場合はログ確認 -> 修正 -> push -> 再確認
+
+チェック用コマンド（任意）:
+```bash
+# PR に紐づく最新のワークフロー実行一覧
+gh run list --workflow "Unit Tests" --limit 5
+
+# 失敗ジョブのログ確認
+gh run view <run-id> --log
 ```
 
 ---
@@ -416,10 +436,10 @@ git status --short
 
 | ドキュメント | 説明 |
 |------------|------|
-| [LOCK_DETECTION_GUIDE.md](../../docs/LOCK_DETECTION_GUIDE.md) | DuckDB/ファイルロック問題の詳細ガイド |
-| [PRE_COMMIT_GUIDE.md](../../docs/PRE_COMMIT_GUIDE.md) | Pre-commit フック全体の使用方法 |
-| [ARCHITECTURE.md](../../docs/ARCHITECTURE.md) | システムアーキテクチャ・レイヤー構造 |
-| [copilot-instructions.md](../copilot-instructions.md) | コード標準・禁止事項 |
+| [LOCK_DETECTION_GUIDE.md](../../../docs/LOCK_DETECTION_GUIDE.md) | DuckDB/ファイルロック問題の詳細ガイド |
+| [PRE_COMMIT_GUIDE.md](../../../docs/PRE_COMMIT_GUIDE.md) | Pre-commit フック全体の使用方法 |
+| [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md) | システムアーキテクチャ・レイヤー構造 |
+| [copilot-instructions.md](../../copilot-instructions.md) | コード標準・禁止事項 |
 
 ---
 
