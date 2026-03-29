@@ -180,6 +180,8 @@ def run_backtest_single(
     take_profit_pct: Optional[float] = None,
     position_sizing: str = "full",
     position_fraction: float = 0.5,
+    atr_risk_pct: float = 0.02,
+    atr_multiplier: float = 1.0,
     ensemble: bool = False,
 ) -> Tuple[pd.DataFrame, dict, pd.Series]:
     """
@@ -201,8 +203,10 @@ def run_backtest_single(
         slippage: スリッページ
         stop_loss_pct: ストップロス率（例: 0.05=5%下落で損切り）
         take_profit_pct: テイクプロフィット率（例: 0.10=10%上昇で利確）
-        position_sizing: ポジションサイジング ("full", "fixed", "confidence")
+        position_sizing: ポジションサイジング ("full", "fixed", "confidence", "atr")
         position_fraction: 固定ポジション比率（fixed モード用）
+        atr_risk_pct: ATRモード: 1トレードあたりのリスク割合（デフォルト: 2%）
+        atr_multiplier: ATRモード: ストップ幅のATR倍数（デフォルト: 1.0）
         ensemble: XGBoost+LightGBMアンサンブル予測を使用
 
     Returns:
@@ -296,6 +300,8 @@ def run_backtest_single(
         take_profit_pct=take_profit_pct,
         position_sizing=position_sizing,
         position_fraction=position_fraction,
+        atr_risk_pct=atr_risk_pct,
+        atr_multiplier=atr_multiplier,
     )
     result_df, metrics = backtester.simulate_trading(
         test_df.loc[X_test.index],
@@ -323,6 +329,8 @@ def run_backtest_walk_forward(
     take_profit_pct: Optional[float] = None,
     position_sizing: str = "full",
     position_fraction: float = 0.5,
+    atr_risk_pct: float = 0.02,
+    atr_multiplier: float = 1.0,
     ensemble: bool = False,
 ) -> Tuple[None, None, pd.DataFrame]:
     """
@@ -342,8 +350,10 @@ def run_backtest_walk_forward(
         slippage: スリッページ
         stop_loss_pct: ストップロス率
         take_profit_pct: テイクプロフィット率
-        position_sizing: ポジションサイジング ("full", "fixed", "confidence")
+        position_sizing: ポジションサイジング ("full", "fixed", "confidence", "atr")
         position_fraction: 固定ポジション比率（fixed モード用）
+        atr_risk_pct: ATRモード時に１トレードでリスクする資金の割合（デフォルト: 2%）
+        atr_multiplier: ATRの何倒をストップ幅とするか（デフォルト: 1.0）
         ensemble: XGBoost+LightGBMアンサンブル予測を使用
 
     Returns:
@@ -374,6 +384,8 @@ def run_backtest_walk_forward(
         take_profit_pct=take_profit_pct,
         position_sizing=position_sizing,
         position_fraction=position_fraction,
+        atr_risk_pct=atr_risk_pct,
+        atr_multiplier=atr_multiplier,
         ensemble=ensemble,
     )
 

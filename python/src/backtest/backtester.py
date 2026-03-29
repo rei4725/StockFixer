@@ -23,6 +23,8 @@ class Backtester:
         take_profit_pct: Optional[float] = None,
         position_sizing: str = "full",
         position_fraction: float = 0.5,
+        atr_risk_pct: float = 0.02,
+        atr_multiplier: float = 1.0,
     ):
         self.model_manager = model_manager
         self.signal_generator = signal_generator
@@ -38,6 +40,8 @@ class Backtester:
         self.take_profit_pct = take_profit_pct
         self.position_sizing = position_sizing
         self.position_fraction = position_fraction
+        self.atr_risk_pct = atr_risk_pct
+        self.atr_multiplier = atr_multiplier
 
     def run(
         self,
@@ -164,7 +168,13 @@ class Backtester:
             # シグナルに基づく売買
             if sig == 1 and position == 0:
                 # Buy
-                qty = self._calc_qty(cash, price, pred.get(date) if pred is not None else None)
+                atr_value = df.loc[date, "atr"] if "atr" in df.columns else None
+                qty = self._calc_qty(
+                    cash,
+                    price,
+                    pred.get(date) if pred is not None else None,
+                    atr_value=atr_value,
+                )
                 if qty > 0:
                     cost = qty * price * (1 + self.fee_rate + self.slippage)
                     cost_gross = qty * price
@@ -224,7 +234,13 @@ class Backtester:
         metrics = compute_cost_comparison_metrics(result_df, self.initial_cash)
         return result_df, metrics
 
-    def _calc_qty(self, cash: float, price: float, pred_value: Optional[float] = None) -> int:
+    def _calc_qty(
+        self,
+        cash: float,
+        price: float,
+        pred_value: Optional[float] = None,
+        atr_value: Optional[float] = None,
+    ) -> int:
         """
         ポジションサイジングに基づいて購入数量を算出する。
 
@@ -232,6 +248,7 @@ class Backtester:
             cash: 利用可能な現金
             price: 現在の株価
             pred_value: 予測値（confidence モードで使用）
+            atr_value: ATR値（atr モードで使用）
 
         Returns:
             購入数量（整数）
@@ -246,6 +263,17 @@ class Backtester:
             max_frac = 1.0
             fraction = min_frac + confidence * (max_frac - min_frac)
             available = cash * fraction
+        elif self.position_sizing == "atr" and atr_value is not None and atr_value > 0:
+            # ATR連動ポジションサイジング
+            # リスク額 = equity × atr_risk_pct
+            # ストップ幅 = ATR × atr_multiplier（1ATR分の価格変動をリスク上限とみなす）
+            # 購入株数 = リスク額 / (ATR × atr_multiplier)
+            risk_amount = cash * self.atr_risk_pct
+            stop_distance = atr_value * self.atr_multiplier
+            qty_by_risk = risk_amount / stop_distance
+            # 上限キャップ: 現金の全額を超えない
+            max_qty = cash / (price * (1 + self.fee_rate + self.slippage))
+            return max(0, int(min(qty_by_risk, max_qty)))
         else:
             # "full" モード（デフォルト: 全額投入）
             available = cash

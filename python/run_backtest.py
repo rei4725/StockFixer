@@ -109,14 +109,26 @@ def parse_args():
         "--position-sizing",
         type=str,
         default="full",
-        choices=["full", "fixed", "confidence"],
-        help="ポジションサイジング: full=全額, fixed=固定比率, confidence=予測確信度ベース (default: full)",
+        choices=["full", "fixed", "confidence", "atr"],
+        help="ポジションサイジング: full=全額, fixed=固定比率, confidence=予測確信度ベース, atr=ATR連動 (default: full)",
     )
     parser.add_argument(
         "--position-fraction",
         type=float,
         default=0.5,
         help="固定ポジション比率 (fixedモード用, default: 0.5)",
+    )
+    parser.add_argument(
+        "--atr-risk-pct",
+        type=float,
+        default=0.02,
+        help="ATRモード: 1トレードあたりのリスク割合 (default: 0.02 = 2%%)",
+    )
+    parser.add_argument(
+        "--atr-multiplier",
+        type=float,
+        default=1.0,
+        help="ATRモード: ストップ幅とするATRの倍数 (default: 1.0)",
     )
 
     # アンサンブル
@@ -169,6 +181,8 @@ def main():
         take_profit_pct=args.take_profit,
         position_sizing=args.position_sizing,
         position_fraction=args.position_fraction,
+        atr_risk_pct=args.atr_risk_pct,
+        atr_multiplier=args.atr_multiplier,
         ensemble=args.ensemble,
     )
 

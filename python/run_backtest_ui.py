@@ -136,11 +136,13 @@ with st.sidebar:
 
         position_sizing = st.selectbox(
             "ポジションサイジング",
-            ["full", "fixed", "confidence"],
+            ["full", "fixed", "confidence", "atr"],
             index=0,
-            help="full=全額 / fixed=固定比率 / confidence=予測確信度ベース",
+            help="full=全額 / fixed=固定比率 / confidence=予測確信度ベース / atr=ATR連動",
         )
         position_fraction = 0.5
+        atr_risk_pct = 0.02
+        atr_multiplier = 1.0
         if position_sizing in ("fixed", "confidence"):
             position_fraction = st.slider(
                 "ポジション比率",
@@ -148,6 +150,24 @@ with st.sidebar:
                 max_value=1.0,
                 value=0.5,
                 step=0.1,
+            )
+        elif position_sizing == "atr":
+            atr_risk_pct = st.slider(
+                "ATR リスク割合",
+                min_value=0.005,
+                max_value=0.1,
+                value=0.02,
+                step=0.005,
+                format="%.3f",
+                help="1トレードあたりのリスク隔52%%",
+            )
+            atr_multiplier = st.slider(
+                "ATR 倍数",
+                min_value=0.5,
+                max_value=3.0,
+                value=1.0,
+                step=0.25,
+                help="ストップ宽 = ATR × 倍数",
             )
 
     st.divider()
@@ -316,6 +336,8 @@ def _run_backtest(
     take_profit_pct,
     position_sizing,
     position_fraction,
+    atr_risk_pct=0.02,
+    atr_multiplier=1.0,
 ):
     """パラメータが変わらない限りキャッシュされる。"""
     from src.services.backtest_pipeline import run_backtest_single
@@ -337,6 +359,8 @@ def _run_backtest(
         take_profit_pct=take_profit_pct,
         position_sizing=position_sizing,
         position_fraction=position_fraction,
+        atr_risk_pct=atr_risk_pct,
+        atr_multiplier=atr_multiplier,
     )
     return result_df, metrics, price_series
 
@@ -649,6 +673,8 @@ with tab_single:
                 take_profit_pct=take_profit_pct,
                 position_sizing=position_sizing,
                 position_fraction=position_fraction,
+                atr_risk_pct=atr_risk_pct,
+                atr_multiplier=atr_multiplier,
             )
 
             # ── 1. メトリクスカード ──
@@ -896,6 +922,8 @@ def _run_walk_forward(
     take_profit_pct,
     position_sizing,
     position_fraction,
+    atr_risk_pct=0.02,
+    atr_multiplier=1.0,
 ):
     """Walk-Forward 検証をキャッシュ付きで実行する。"""
     from src.services.backtest_pipeline import run_backtest_walk_forward
@@ -914,6 +942,8 @@ def _run_walk_forward(
         take_profit_pct=take_profit_pct,
         position_sizing=position_sizing,
         position_fraction=position_fraction,
+        atr_risk_pct=atr_risk_pct,
+        atr_multiplier=atr_multiplier,
         ensemble=ensemble,
     )
     return wf_df
@@ -1069,6 +1099,8 @@ with tab_wf:
                 take_profit_pct=take_profit_pct,
                 position_sizing=position_sizing,
                 position_fraction=position_fraction,
+                atr_risk_pct=atr_risk_pct,
+                atr_multiplier=atr_multiplier,
             )
 
             if wf_df is None or wf_df.empty:

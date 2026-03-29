@@ -11,6 +11,7 @@ from typing import Optional
 
 import pandas as pd
 from sklearn.model_selection import TimeSeriesSplit
+
 from src.backtest.task import BacktestTask, ReturnRegressionTask
 
 
@@ -49,6 +50,8 @@ class WalkForwardValidator:
         take_profit_pct: Optional[float] = None,
         position_sizing: str = "full",
         position_fraction: float = 0.5,
+        atr_risk_pct: float = 0.02,
+        atr_multiplier: float = 1.0,
         ensemble: bool = False,
     ):
         self.market = market
@@ -64,6 +67,8 @@ class WalkForwardValidator:
         self.take_profit_pct = take_profit_pct
         self.position_sizing = position_sizing
         self.position_fraction = position_fraction
+        self.atr_risk_pct = atr_risk_pct
+        self.atr_multiplier = atr_multiplier
         self.ensemble = ensemble
 
     def run(
@@ -191,6 +196,8 @@ class WalkForwardValidator:
             take_profit_pct=self.take_profit_pct,
             position_sizing=self.position_sizing,
             position_fraction=self.position_fraction,
+            atr_risk_pct=self.atr_risk_pct,
+            atr_multiplier=self.atr_multiplier,
         )
         result_df, metrics = backtester.simulate_trading(val_df, signal, pred=pred)
         return metrics
@@ -207,7 +214,18 @@ class WalkForwardValidator:
         print("\n" + "=" * 60)
         print("Walk-Forward 検証 サマリー")
         print("=" * 60)
-        numeric_cols = ["total_return", "sharpe_ratio", "max_drawdown", "win_rate", "profit_factor"]
+        numeric_cols = [
+            "total_return",
+            "sharpe_ratio",
+            "max_drawdown",
+            "gross_total_return",
+            "gross_sharpe_ratio",
+            "gross_max_drawdown",
+            "cost_impact_return",
+            "cost_impact_cash",
+            "win_rate",
+            "profit_factor",
+        ]
         available = [c for c in numeric_cols if c in result_df.columns]
         if available:
             print(result_df[["fold", "val_start", "val_end"] + available].to_string(index=False))
