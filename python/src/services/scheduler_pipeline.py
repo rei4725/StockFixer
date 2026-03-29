@@ -270,6 +270,42 @@ def run_weekly_optimization():
         logger.error(f"週次最適化完了通知失敗: {e}", exc_info=True)
 
 
+def run_weekly_walk_forward_report():
+    """
+    週次実行: Walk-Forward 比較レポート生成
+
+    標準条件（source=file, n_splits=5）で全銘柄を再検証し、
+    前回スナップショットとの差分レポートを保存する。
+    """
+    logger.info("=== 週次 Walk-Forward 比較レポート開始 ===")
+    try:
+        from src.services.walk_forward_report_pipeline import run_walk_forward_comparison_report
+
+        result = run_walk_forward_comparison_report(
+            model_type="XGBoostModel",
+            source="file",
+            n_splits=5,
+            threshold=0.0,
+            fee_rate=0.001,
+            slippage=0.0,
+        )
+        logger.info(
+            "=== 週次 Walk-Forward 比較レポート完了: "
+            f"success={result['success']} failed={result['failed']} total={result['total']} ==="
+        )
+    except Exception as e:
+        logger.error(f"Walk-Forward 比較レポート生成失敗: {e}", exc_info=True)
+        raise
+
+    # Discord 完了通知
+    try:
+        from src.api.discord_utils import send_walk_forward_report_completion
+
+        send_walk_forward_report_completion(result)
+    except Exception as e:
+        logger.error(f"Walk-Forward レポート通知失敗: {e}", exc_info=True)
+
+
 def run_weekly_watchlist_refresh():
     """
     週次実行: ウォッチリスト自動更新

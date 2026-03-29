@@ -11,6 +11,7 @@ Discord Botと同時に起動し、1プロセスで全ジョブを管理する�
   py run_scheduler.py --run-now weekly       # weekly パイプラインを即時実行して終了
   py run_scheduler.py --run-now paper        # 自動発注→約定処理を順番に即時実行して終了
   py run_scheduler.py --run-now optimization # 全銘柄バックテスト最適化を即時実行して終了
+  py run_scheduler.py --run-now wf_report    # Walk-Forward比較レポートを即時実行して終了
 """
 
 import argparse
@@ -84,6 +85,13 @@ def job_weekly_optimization():
     from src.services.scheduler_pipeline import run_weekly_optimization
 
     run_weekly_optimization()
+
+
+def job_weekly_walk_forward_report():
+    """週次実行: Walk-Forward 比較レポート生成"""
+    from src.services.scheduler_pipeline import run_weekly_walk_forward_report
+
+    run_weekly_walk_forward_report()
 
 
 def job_weekly_watchlist_refresh():
@@ -181,6 +189,17 @@ SCHEDULE_CONFIG = {
         "recovery_delay_minutes": 30,
         "max_executions_per_period": 1,
         "description": "毎週土曜 06:00 - 全銘柄バックテスト最適化",
+    },
+    "weekly_walk_forward_report": {
+        "func": job_weekly_walk_forward_report,
+        "trigger": "cron",
+        "period": "weekly",
+        "day_of_week": "sat",
+        "hour": 7,
+        "minute": 30,
+        "recovery_delay_minutes": 30,
+        "max_executions_per_period": 1,
+        "description": "毎週土曜 07:30 - Walk-Forward 比較レポート生成",
     },
     "weekly_watchlist_refresh": {
         "func": job_weekly_watchlist_refresh,
@@ -317,11 +336,13 @@ def run_now(pipeline: str):
         queue_manager.run_job("daily_paper_trade_report", reason="manual", force=True)
     elif pipeline == "optimization":
         queue_manager.run_job("weekly_optimization", reason="manual", force=True)
+    elif pipeline == "wf_report":
+        queue_manager.run_job("weekly_walk_forward_report", reason="manual", force=True)
     elif pipeline == "watchlist":
         queue_manager.run_job("weekly_watchlist_refresh", reason="manual", force=True)
     else:
         print(f"不明なパイプライン: {pipeline}")
-        print("使用可能: daily, weekly, paper, optimization")
+        print("使用可能: daily, weekly, paper, paper_report, optimization, wf_report, watchlist")
         sys.exit(1)
 
 
@@ -335,12 +356,21 @@ def main():
     parser.add_argument(
         "--run-now",
         type=str,
-        choices=["daily", "weekly", "paper", "paper_report", "optimization", "watchlist"],
+        choices=[
+            "daily",
+            "weekly",
+            "paper",
+            "paper_report",
+            "optimization",
+            "wf_report",
+            "watchlist",
+        ],
         help=(
             "指定パイプラインを即時実行して終了する（テスト用）。"
             "paper=自動発注→約定処理を順番に実行、"
             "paper_report=ポジション・損益レポート送信、"
             "optimization=全銘柄最適化、"
+            "wf_report=Walk-Forward比較レポート生成、"
             "watchlist=ウォッチリスト自動更新"
         ),
     )

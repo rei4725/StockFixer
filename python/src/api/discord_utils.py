@@ -476,6 +476,49 @@ def send_paper_trade_position_report(positions: list[dict], summary: dict) -> bo
     return success
 
 
+def send_walk_forward_report_completion(result: dict) -> bool:
+    """
+    Walk-Forward 比較レポート完了通知を Discord Webhook に送信する。
+
+    サマリー（成功/失敗件数）を embed で送信した後、
+    Markdown 比較レポートの内容をテキストで分割送信する。
+
+    Args:
+        result: run_walk_forward_comparison_report() の戻り値辞書
+
+    Returns:
+        成功時 True、失敗時 False
+    """
+    success_count = result.get("success", 0)
+    failed_count = result.get("failed", 0)
+    total_count = result.get("total", 0)
+    markdown_path = result.get("markdown_path")
+    previous_path = result.get("previous_path")
+
+    status_icon = "⚠️" if failed_count > 0 else "✅"
+    title = f"{status_icon} Walk-Forward 比較レポート完了"
+    message_lines = [
+        f"時刻: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"成功: {success_count} 銘柄 / 失敗: {failed_count} 銘柄 / 合計: {total_count} 銘柄",
+        f"前回比較: {previous_path if previous_path else 'なし（初回実行）'}",
+    ]
+    color = 0x00FF00 if failed_count == 0 else 0xFFAA00
+    ok = send_webhook_notification(title, "\n".join(message_lines), color=color)
+
+    if markdown_path:
+        try:
+            md_text = open(markdown_path, encoding="utf-8").read()
+            max_len = 1900
+            for i in range(0, len(md_text), max_len):
+                if not send_webhook_text(md_text[i : i + max_len]):
+                    ok = False
+        except Exception as e:
+            logger.error(f"Walk-Forwardレポートテキスト送信失敗: {e}")
+            ok = False
+
+    return ok
+
+
 def send_watchlist_update_report(diffs) -> bool:
     """
     ウォッチリスト更新結果を Discord Webhook に送信する。
