@@ -78,7 +78,15 @@ def parse_args():
         "--sort-by",
         type=str,
         default="sharpe_ratio",
-        choices=["sharpe_ratio", "total_return", "profit_factor", "win_rate", "max_drawdown"],
+        choices=[
+            "sharpe_ratio",
+            "total_return",
+            "gross_total_return",
+            "cost_impact_return",
+            "profit_factor",
+            "win_rate",
+            "max_drawdown",
+        ],
         help="結果のソート基準 (default: sharpe_ratio)",
     )
     return parser.parse_args()

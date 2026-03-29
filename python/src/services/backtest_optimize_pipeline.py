@@ -119,6 +119,11 @@ def run_optimization(
                     "total_return",
                     "sharpe_ratio",
                     "max_drawdown",
+                    "gross_total_return",
+                    "gross_sharpe_ratio",
+                    "gross_max_drawdown",
+                    "cost_impact_return",
+                    "cost_impact_cash",
                     "win_rate",
                     "profit_factor",
                     "num_trades",
@@ -176,7 +181,7 @@ def print_optimization_results(result_df: pd.DataFrame, sort_by: str) -> None:
         return
 
     # ソート
-    ascending = sort_by == "max_drawdown"
+    ascending = sort_by in {"max_drawdown", "cost_impact_return", "cost_impact_cash"}
     if sort_by in valid.columns:
         valid = valid.sort_values(sort_by, ascending=ascending)
 
@@ -185,8 +190,12 @@ def print_optimization_results(result_df: pd.DataFrame, sort_by: str) -> None:
         "stop_loss_pct",
         "take_profit_pct",
         "total_return",
+        "gross_total_return",
+        "cost_impact_return",
         "sharpe_ratio",
+        "gross_sharpe_ratio",
         "max_drawdown",
+        "gross_max_drawdown",
         "win_rate",
         "profit_factor",
         "num_trades",
@@ -204,7 +213,17 @@ def print_optimization_results(result_df: pd.DataFrame, sort_by: str) -> None:
         print(f"  ストップロス: {best['stop_loss_pct']}")
     if "take_profit_pct" in best and best["take_profit_pct"] is not None:
         print(f"  テイクプロフィット: {best['take_profit_pct']}")
-    for col in ["total_return", "sharpe_ratio", "max_drawdown", "win_rate", "profit_factor"]:
+    for col in [
+        "total_return",
+        "gross_total_return",
+        "cost_impact_return",
+        "sharpe_ratio",
+        "gross_sharpe_ratio",
+        "max_drawdown",
+        "gross_max_drawdown",
+        "win_rate",
+        "profit_factor",
+    ]:
         if col in best:
             print(f"  {col}: {best[col]}")
     print(f"{'='*70}")
@@ -269,7 +288,7 @@ def save_optimal_params_json(
         return ""
 
     # 最適パラメータを取得
-    ascending = sort_by == "max_drawdown"
+    ascending = sort_by in {"max_drawdown", "cost_impact_return", "cost_impact_cash"}
     best_row = valid.sort_values(sort_by, ascending=ascending).iloc[-1 if not ascending else 0]
 
     # JSON形式に変換
@@ -289,8 +308,13 @@ def save_optimal_params_json(
         ),
         "metrics": {
             "total_return": float(best_row.get("total_return", 0.0)),
+            "gross_total_return": float(best_row.get("gross_total_return", 0.0)),
+            "cost_impact_return": float(best_row.get("cost_impact_return", 0.0)),
+            "cost_impact_cash": float(best_row.get("cost_impact_cash", 0.0)),
             "sharpe_ratio": float(best_row.get("sharpe_ratio", 0.0)),
+            "gross_sharpe_ratio": float(best_row.get("gross_sharpe_ratio", 0.0)),
             "max_drawdown": float(best_row.get("max_drawdown", 0.0)),
+            "gross_max_drawdown": float(best_row.get("gross_max_drawdown", 0.0)),
             "win_rate": float(best_row.get("win_rate", 0.0)),
             "profit_factor": float(best_row.get("profit_factor", 1.0)),
             "num_trades": (
