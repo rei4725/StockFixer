@@ -5,9 +5,9 @@
 """
 
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
-from src.brokers.base import BrokerBase
+from src.brokers.base import BrokerBase, OrderSide
 from src.services.risk_manager import (
     MAX_CONSECUTIVE_LOSSES,
     MAX_DAILY_LOSS_RATE,
@@ -99,6 +99,59 @@ class TestRiskManagerCalcPositionSize(unittest.TestCase):
         )
         qty_low = risk.calc_position_size("7203", 1000.0, win_rate=0.4, avg_win=0.02, avg_loss=0.01)
         self.assertGreaterEqual(qty_high, qty_low)
+
+
+class TestRiskManagerPersistence(unittest.TestCase):
+    """DB参照を伴う内部ヘルパーのテスト"""
+
+    def test_daily_realized_loss_uses_paper_orders(self):
+        broker = _make_broker()
+        risk = RiskManager(broker)
+
+        mock_con = MagicMock()
+        mock_con.execute.return_value.fetchone.return_value = (-1234.0,)
+
+        with patch("src.services.risk_manager._get_con", return_value=mock_con):
+            daily_loss = risk._get_daily_realized_loss()
+
+        self.assertEqual(daily_loss, 1234.0)
+        query, params = mock_con.execute.call_args[0]
+        self.assertIn("FROM paper_orders", query)
+        self.assertEqual(params, [int(OrderSide.SELL)])
+        mock_con.close.assert_called_once()
+
+    def test_consecutive_losses_uses_paper_orders(self):
+        broker = _make_broker()
+        risk = RiskManager(broker)
+
+        mock_con = MagicMock()
+        mock_con.execute.return_value.fetchall.return_value = [(-100.0,), (-50.0,), (20.0,)]
+
+        with patch("src.services.risk_manager._get_con", return_value=mock_con):
+            consecutive = risk._get_consecutive_losses()
+
+        self.assertEqual(consecutive, 2)
+        query, params = mock_con.execute.call_args[0]
+        self.assertIn("FROM paper_orders", query)
+        self.assertEqual(params, [int(OrderSide.SELL), MAX_CONSECUTIVE_LOSSES])
+        mock_con.close.assert_called_once()
+
+    def test_missing_trade_pnl_returns_zero_for_non_paper_broker(self):
+        broker = _make_broker()
+        broker.broker_name = "live"
+        risk = RiskManager(broker)
+
+        mock_con = MagicMock()
+        mock_con.execute.return_value.fetchone.return_value = (0,)
+
+        with patch("src.services.risk_manager._get_con", return_value=mock_con):
+            daily_loss = risk._get_daily_realized_loss()
+
+        self.assertEqual(daily_loss, 0.0)
+        query, params = mock_con.execute.call_args[0]
+        self.assertIn("information_schema.tables", query)
+        self.assertEqual(params, ["trade_pnl"])
+        mock_con.close.assert_called_once()
 
 
 if __name__ == "__main__":

@@ -11,7 +11,7 @@ OrderExecutionPipeline が注文を送信する前にゲートチェックを行
     4. 最大保有銘柄数 = 10 銘柄
 """
 
-from src.brokers.base import BrokerBase
+from src.brokers.base import BrokerBase, OrderSide
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -129,38 +129,100 @@ class RiskManager:
     # 内部ヘルパー
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _table_exists(con, table_name: str) -> bool:
+        row = con.execute(
+            """
+            SELECT COUNT(*)
+            FROM information_schema.tables
+            WHERE table_name = ?
+            """,
+            [table_name],
+        ).fetchone()
+        return bool(row and row[0])
+
     def _get_daily_realized_loss(self) -> float:
         """当日の確定損失合計（プラスが損失）を返す"""
         con = _get_con()
-        row = con.execute(
-            """
-            SELECT COALESCE(SUM(realized_pnl), 0.0)
-            FROM trade_pnl
-            WHERE DATE(closed_at) = CURRENT_DATE
-              AND broker = ?
-              AND realized_pnl < 0
-            """,
-            [self._broker.broker_name],
-        ).fetchone()
-        return abs(float(row[0])) if row else 0.0
+        try:
+            if self._broker.broker_name == "paper":
+                row = con.execute(
+                    """
+                    SELECT COALESCE(SUM(realized_pnl), 0.0)
+                    FROM paper_orders
+                    WHERE status = 'filled'
+                      AND side = ?
+                      AND filled_at IS NOT NULL
+                      AND DATE(filled_at) = CURRENT_DATE
+                      AND realized_pnl < 0
+                    """,
+                    [int(OrderSide.SELL)],
+                ).fetchone()
+                return abs(float(row[0])) if row else 0.0
+
+            if not self._table_exists(con, "trade_pnl"):
+                logger.warning(
+                    f"[risk] trade_pnl テーブル未作成のため日次損失を 0 として扱います: broker={self._broker.broker_name}"
+                )
+                return 0.0
+
+            row = con.execute(
+                """
+                SELECT COALESCE(SUM(realized_pnl), 0.0)
+                FROM trade_pnl
+                WHERE DATE(closed_at) = CURRENT_DATE
+                  AND broker = ?
+                  AND realized_pnl < 0
+                """,
+                [self._broker.broker_name],
+            ).fetchone()
+            return abs(float(row[0])) if row else 0.0
+        finally:
+            con.close()
 
     def _get_consecutive_losses(self) -> int:
         """直近の連続損失回数を返す"""
         con = _get_con()
-        rows = con.execute(
-            """
-            SELECT realized_pnl
-            FROM trade_pnl
-            WHERE broker = ?
-            ORDER BY closed_at DESC
-            LIMIT ?
-            """,
-            [self._broker.broker_name, MAX_CONSECUTIVE_LOSSES],
-        ).fetchall()
-        count = 0
-        for (pnl,) in rows:
-            if pnl < 0:
-                count += 1
+        try:
+            if self._broker.broker_name == "paper":
+                rows = con.execute(
+                    """
+                    SELECT realized_pnl
+                    FROM paper_orders
+                    WHERE status = 'filled'
+                      AND side = ?
+                      AND realized_pnl IS NOT NULL
+                    ORDER BY filled_at DESC
+                    LIMIT ?
+                    """,
+                    [int(OrderSide.SELL), MAX_CONSECUTIVE_LOSSES],
+                ).fetchall()
             else:
-                break
-        return count
+                if not self._table_exists(con, "trade_pnl"):
+                    message = (
+                        "[risk] trade_pnl テーブル未作成のため連続損失を 0 として扱います: "
+                        f"broker={self._broker.broker_name}"
+                    )
+                    logger.warning(message)
+                    return 0
+
+                rows = con.execute(
+                    """
+                    SELECT realized_pnl
+                    FROM trade_pnl
+                    WHERE broker = ?
+                    ORDER BY closed_at DESC
+                    LIMIT ?
+                    """,
+                    [self._broker.broker_name, MAX_CONSECUTIVE_LOSSES],
+                ).fetchall()
+
+            count = 0
+            for (pnl,) in rows:
+                if pnl < 0:
+                    count += 1
+                else:
+                    break
+            return count
+        finally:
+            con.close()

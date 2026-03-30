@@ -12,6 +12,7 @@ shap==0.51.0
 numba==0.60.0
 llvmlite==0.43.0
 pandas==2.2.3
+lxml==5.4.0
 discord.py==2.7.1
 ta==0.11.0
 duckdb==1.5.0
