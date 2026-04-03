@@ -85,7 +85,14 @@ mcp_gitkraken_git_add_or_commit(
 ```
 - `files`を省略すると全ファイルをステージング
 
-#### コミット
+#### コミット（必ずチェック後に実施）
+> **重要**: コミット前に必ず以下のチェックを実行すること。エラーが残った状態でのコミットは禁止。
+```powershell
+# コミット前チェック（python/ ディレクトリで実行）
+cd C:\src\StockFixer
+pre-commit run --all-files
+```
+チェックがすべてパスしたことを確認してからコミットする。
 ```
 mcp_gitkraken_git_add_or_commit(
     directory="c:\\src\\StockFixer",
@@ -148,8 +155,15 @@ mcp_gitkraken_git_worktree(
 ### コミット前の整理
 1. `git_status` で変更ファイル確認
 2. `git_add_or_commit` (action="add", files=[...]) で必要なファイルのみステージング
-3. `git_add_or_commit` (action="commit") でコミット
-4. `git_push` でリモートに反映
+3. **（必須）** pre-commit チェックを実行し、全項目パスを確認
+   ```powershell
+   cd C:\src\StockFixer
+   pre-commit run --all-files
+   ```
+   - エラーがある場合は修正してから再度 `add` → チェックを繰り返す
+   - Black/isort による自動修正が発生した場合は修正後ファイルを再 `add` すること
+4. `git_add_or_commit` (action="commit") でコミット
+5. `git_push` でリモートに反映
 
 ### PRマージ前の必須確認（手動運用）
 1. GitHub の PR 画面で Actions タブを開く
