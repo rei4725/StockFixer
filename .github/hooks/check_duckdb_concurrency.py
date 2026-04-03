@@ -35,13 +35,18 @@ class DuckDBConcurrencyChecker:
             },
             # upsert_raw_ohlcv の並列実行
             "parallel_upsert": {
-                "pattern": r"(ThreadPoolExecutor|ProcessPoolExecutor|run_parallel).*upsert_raw_ohlcv",
+                "pattern": (
+                    r"(ThreadPoolExecutor|ProcessPoolExecutor|run_parallel)" r".*upsert_raw_ohlcv"
+                ),
                 "message": "警告: 並列処理内で upsert_raw_ohlcv を実行。INSERT OR REPLACE の同時実行はロック競合。",
                 "severity": "high",
             },
             # save_features_to_db の並列実行
             "parallel_save_features": {
-                "pattern": r"(ThreadPoolExecutor|ProcessPoolExecutor|executor\.(map|submit)).*save_features_to_db",
+                "pattern": (
+                    r"(ThreadPoolExecutor|ProcessPoolExecutor|executor\.(map|submit))"
+                    r".*save_features_to_db"
+                ),
                 "message": "警告: 並列処理内で save_features_to_db を実行。DELETE + INSERT の同時実行。",
                 "severity": "high",
             },
@@ -127,7 +132,7 @@ class DuckDBConcurrencyChecker:
                     for i, line in enumerate(lines, 1):
                         if (
                             "fetch_stock_data_with_features" in line
-                            and "run_parallel" in content[:content.find(line)]
+                            and "run_parallel" in content[: content.find(line)]
                         ):
                             violations.append(
                                 (
@@ -191,14 +196,10 @@ def main():
         print(f"Low:      {low}")
 
         if critical > 0:
-            print(
-                "\n❌ Critical エラーがあります。コミットはブロックされます。\n"
-            )
+            print("\n[ERROR] Critical エラーがあります。コミットはブロックされます。\n")
             exit_code = 1
         elif high > 0:
-            print(
-                "\n⚠️  High リスクの警告があります。修正を推奨します。\n"
-            )
+            print("\n[WARNING] High リスクの警告があります。修正を推奨します。\n")
             exit_code = 1
 
     sys.exit(exit_code)

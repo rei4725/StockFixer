@@ -1,13 +1,12 @@
 """batch_runner モジュールのユニットテスト"""
 
-import os
 import csv
+import os
 import tempfile
 import unittest
-from unittest.mock import patch, MagicMock
-from io import StringIO
+from unittest.mock import MagicMock, patch
 
-from src.services.batch_runner import load_target_symbols, run_parallel, print_summary
+from src.services.batch_runner import load_target_symbols, print_summary, run_parallel
 
 
 class TestLoadTargetSymbols(unittest.TestCase):
@@ -15,7 +14,9 @@ class TestLoadTargetSymbols(unittest.TestCase):
 
     def _create_csv(self, rows):
         """テスト用CSVファイルを作成し、パスを返す"""
-        tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False, encoding="utf-8", newline="")
+        tmp = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".csv", delete=False, encoding="utf-8", newline=""
+        )
         writer = csv.DictWriter(tmp, fieldnames=["市場", "銘柄コード"])
         writer.writeheader()
         for row in rows:
@@ -25,10 +26,12 @@ class TestLoadTargetSymbols(unittest.TestCase):
 
     def test_reads_csv_correctly(self):
         """CSVから銘柄リストが正しく読み込まれることを確認"""
-        csv_path = self._create_csv([
-            {"市場": "us", "銘柄コード": "AAPL"},
-            {"市場": "jp", "銘柄コード": "7203"},
-        ])
+        csv_path = self._create_csv(
+            [
+                {"市場": "us", "銘柄コード": "AAPL"},
+                {"市場": "jp", "銘柄コード": "7203"},
+            ]
+        )
         try:
             with patch("src.services.batch_runner.get_watchlist_path", return_value=csv_path):
                 result = load_target_symbols()
@@ -54,6 +57,7 @@ class TestRunParallel(unittest.TestCase):
 
     def test_returns_all_results(self):
         """全タスクの結果が返されることを確認"""
+
         def dummy_func(task):
             return {"id": task, "status": "success"}
 
@@ -76,11 +80,14 @@ class TestRunParallel(unittest.TestCase):
 
     def test_uses_process_pool_when_specified(self):
         """use_process=TrueでProcessPoolExecutorを使用することを確認"""
+
         def dummy_func(task):
             return {"status": "success"}
 
         # ProcessPoolExecutorは実際に使用してテスト
-        results = run_parallel(dummy_func, ["a", "b"], max_workers=2, use_process=False, label="プロセステスト")
+        results = run_parallel(
+            dummy_func, ["a", "b"], max_workers=2, use_process=False, label="プロセステスト"
+        )
         self.assertEqual(len(results), 2)
 
     def test_empty_tasks(self):
@@ -127,5 +134,5 @@ class TestPrintSummary(unittest.TestCase):
             self.assertNotIn("エラー詳細", output)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

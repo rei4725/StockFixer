@@ -105,7 +105,7 @@ repos:
         language: python
         stages: [pre-commit]
         files: \.(py)$
-        exclude: ^tests/
+        exclude: ^(tests/|\.github/hooks/)
         pass_filenames: true
 
   # 8. ロック問題検出 - ファイルロック

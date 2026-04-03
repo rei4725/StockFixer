@@ -2,8 +2,9 @@
 BacktestTask / ReturnRegressionTask のユニットテスト
 """
 import unittest
+
 import pandas as pd
-import numpy as np
+
 from src.backtest.task import BacktestTask, ReturnRegressionTask
 
 
@@ -90,9 +91,9 @@ class TestReturnRegressionTaskSignal(unittest.TestCase):
         task = ReturnRegressionTask(threshold=0.005)
         pred = self._pred([0.003, -0.003, 0.01, -0.01])
         signal = task.make_signal(pred)
-        self.assertEqual(signal.iloc[0], 0)   # 0.003 < 0.005 → hold
-        self.assertEqual(signal.iloc[1], 0)   # -0.003 > -0.005 → hold
-        self.assertEqual(signal.iloc[2], 1)   # 0.01 > 0.005 → buy
+        self.assertEqual(signal.iloc[0], 0)  # 0.003 < 0.005 → hold
+        self.assertEqual(signal.iloc[1], 0)  # -0.003 > -0.005 → hold
+        self.assertEqual(signal.iloc[2], 1)  # 0.01 > 0.005 → buy
         self.assertEqual(signal.iloc[3], -1)  # -0.01 < -0.005 → sell
 
     def test_signal_returns_series_with_same_index(self):

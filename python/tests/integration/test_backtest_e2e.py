@@ -4,11 +4,10 @@ Integration Test: バックテストパイプライン End-to-End
 DuckDB から特徴量取得 → モデル学習 → バックテスト実行
 完全なフロー検証。
 """
-import unittest
-import sys
 import os
+import sys
+import unittest
 
-import pandas as pd
 import duckdb
 
 # パス設定
@@ -21,11 +20,9 @@ class TestBacktestPipelineE2E(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         """テスト前準備：環境確認"""
-        try:
-            import xgboost
-            cls.xgboost_available = True
-        except ImportError:
-            cls.xgboost_available = False
+        import importlib.util
+
+        cls.xgboost_available = importlib.util.find_spec("xgboost") is not None
 
     def test_duckdb_tables_exist(self):
         """DuckDBテーブルが存在することを確認"""
@@ -71,17 +68,11 @@ class TestBacktestPipelineE2E(unittest.TestCase):
         except Exception as e:
             self.skipTest(f"JP/7203 データ確認に失敗: {e}")
 
-    @unittest.skipIf(
-        not __import__("importlib").util.find_spec("xgboost"),
-        "XGBoost not available"
-    )
+    @unittest.skipIf(not __import__("importlib").util.find_spec("xgboost"), "XGBoost not available")
     def test_backtest_single_runs_without_error(self):
         """単一期間バックテストが実行可能なことを確認"""
         try:
-            from src.services.backtest_pipeline import (
-                run_backtest_single,
-                print_backtest_metrics,
-            )
+            from src.services.backtest_pipeline import print_backtest_metrics, run_backtest_single
 
             result_df, metrics, wf_df = run_backtest_single(
                 market="jp",
@@ -110,16 +101,13 @@ class TestBacktestPipelineE2E(unittest.TestCase):
             self.assertIn("total_return", metrics, "total_return メトリクスが存在すること")
             self.assertIn("sharpe_ratio", metrics, "sharpe_ratio メトリクスが存在すること")
 
-            print(f"\n[Integration Test Result] バックテスト実行成功")
+            print("\n[Integration Test Result] バックテスト実行成功")
             print_backtest_metrics(metrics, label="jp_7203_single")
 
         except Exception as e:
             self.fail(f"バックテスト実行に失敗: {e}")
 
-    @unittest.skipIf(
-        not __import__("importlib").util.find_spec("xgboost"),
-        "XGBoost not available"
-    )
+    @unittest.skipIf(not __import__("importlib").util.find_spec("xgboost"), "XGBoost not available")
     def test_backtest_walk_forward_runs_without_error(self):
         """Walk-Forward バックテストが実行可能なことを確認"""
         try:
@@ -146,16 +134,14 @@ class TestBacktestPipelineE2E(unittest.TestCase):
 
             # Walk-Forward 結果が存在することを確認
             self.assertIsNotNone(wf_df, "Walk-Forward 結果が None でないこと")
-            self.assertGreater(
-                len(wf_df), 0, "Walk-Forward 結果に最低1行以上のデータがあること"
-            )
+            self.assertGreater(len(wf_df), 0, "Walk-Forward 結果に最低1行以上のデータがあること")
 
             # 重要なメトリクス列が存在することを確認
             expected_cols = ["fold", "val_start", "val_end", "total_return", "sharpe_ratio"]
             for col in expected_cols:
                 self.assertIn(col, wf_df.columns, f"{col} 列が存在すること")
 
-            print(f"\n[Integration Test Result] Walk-Forward バックテスト実行成功")
+            print("\n[Integration Test Result] Walk-Forward バックテスト実行成功")
             print(f"  分割数: {len(wf_df)}")
 
         except Exception as e:

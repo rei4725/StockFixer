@@ -1,6 +1,7 @@
 """df_to_string モジュールのユニットテスト"""
 
 import unittest
+
 import pandas as pd
 
 from src.utils.df_to_string import df_to_pretty_string
@@ -11,11 +12,13 @@ class TestDfToPrettyString(unittest.TestCase):
 
     def setUp(self):
         """テスト用のDataFrameを作成"""
-        self.df = pd.DataFrame({
-            "symbol": ["AAPL", "GOOG", "MSFT"],
-            "price": [150.0, 2800.0, 300.0],
-            "change": [0.05, -0.02, 0.01],
-        })
+        self.df = pd.DataFrame(
+            {
+                "symbol": ["AAPL", "GOOG", "MSFT"],
+                "price": [150.0, 2800.0, 300.0],
+                "change": [0.05, -0.02, 0.01],
+            }
+        )
 
     def test_returns_string(self):
         """戻り値がstr型であることを確認"""
@@ -64,5 +67,5 @@ class TestDfToPrettyString(unittest.TestCase):
         self.assertIsInstance(result, str)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

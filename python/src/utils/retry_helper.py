@@ -9,6 +9,7 @@ import time
 from typing import Any, Callable, TypeVar
 
 import yfinance as yf
+
 from src.utils.logger import get_logger
 
 T = TypeVar("T")

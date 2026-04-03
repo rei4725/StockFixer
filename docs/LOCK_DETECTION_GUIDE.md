@@ -390,4 +390,3 @@ self.danger_patterns["my_pattern"] = {
 - [DOCKER_DB_ARCHITECTURE.md](../DOCKER_DB_ARCHITECTURE.md) - バッチ差分更新の実装ポリシー
 - [PRE_COMMIT_GUIDE.md](../PRE_COMMIT_GUIDE.md) - Pre-commit フック全体ガイド
 - [copilot-instructions.md](../.github/copilot-instructions.md) - レイヤー構造・禁止事項
-

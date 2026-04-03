@@ -11,7 +11,7 @@
 import subprocess
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 
 class CodeReviewRunner:
@@ -19,7 +19,7 @@ class CodeReviewRunner:
 
     def __init__(self, verbose: bool = True):
         self.verbose = verbose
-        self.results = {}
+        self.results: Dict[str, bool] = {}
 
         # プロジェクトルートを特定（スクリプトの親の親）
         self.project_root = Path(__file__).parent.parent

@@ -141,14 +141,14 @@ DuckDB 最適化接続:
 ```python
 def get_connection() -> duckdb.DuckDBPyConnection:
     db_path = get_db_path()
-    
+
     # DuckDB 接続設定（ロック競合最小化）
     _connection = duckdb.connect(
         db_path,
         threads=4,              # CPU並列処理によるスループット向上
         memory_limit='2GB'      # メモリ制限で安定性確保
     )
-    
+
     _init_tables(_connection)
     return _connection
 ```

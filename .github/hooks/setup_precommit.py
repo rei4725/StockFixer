@@ -5,7 +5,6 @@ Pre-commit hooks セットアップスクリプト
 初回セットアップ時に実行。見立てのチェック・インストール・設定を自動化する。
 """
 
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -48,20 +47,19 @@ def check_pip():
 def install_dependencies():
     """依存パッケージをインストール"""
     print("[3/5] 依存パッケージをインストール ...", end=" ")
-    
+
     # requirements.txt の場所を特定
     script_dir = Path(__file__).parent.parent.parent  # .github/hooks/ → StockFixer
     req_file = script_dir / "python" / "requirements.txt"
-    
+
     if not req_file.exists():
         print(f"✗ (requirements.txt が見つかりません: {req_file})")
         return False
-    
+
     success, stdout, stderr = run_command(
-        f"{sys.executable} -m pip install -q -r {req_file}",
-        check=False
+        f"{sys.executable} -m pip install -q -r {req_file}", check=False
     )
-    
+
     if success:
         print("✓")
         return True
@@ -73,13 +71,10 @@ def install_dependencies():
 def setup_git_hooks():
     """Git pre-commit hooksをセットアップ"""
     print("[4/5] Git pre-commit hooksをセットアップ ...", end=" ")
-    
-    # プロジェクトルートを特定
-    script_dir = Path(__file__).parent.parent.parent  # .github/hooks/ → StockFixer
-    
+
     success1, _, stderr1 = run_command("pre-commit install", check=False)
     success2, _, stderr2 = run_command("pre-commit install --hook-type commit-msg", check=False)
-    
+
     if success1 and success2:
         print("✓")
         return True
@@ -92,7 +87,7 @@ def setup_git_hooks():
 def verify_setup():
     """セットアップからが完了したか確認"""
     print("[5/5] セットアップ確認 ...", end=" ")
-    
+
     success, stdout, stderr = run_command("pre-commit --version", check=False)
     if success:
         print(f"✓ ({stdout})")
@@ -103,10 +98,10 @@ def verify_setup():
 
 
 def main():
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("StockFixer Pre-commit Hooks セットアップ")
-    print("="*60 + "\n")
-    
+    print("=" * 60 + "\n")
+
     checks = [
         ("Python バージョン", check_python_version),
         ("pip", check_pip),
@@ -114,7 +109,7 @@ def main():
         ("Git hooks", setup_git_hooks),
         ("セットアップ確認", verify_setup),
     ]
-    
+
     results = []
     for name, check_func in checks:
         try:
@@ -123,15 +118,15 @@ def main():
         except Exception as e:
             print(f"エラー: {e}")
             results.append((name, False))
-    
+
     # サマリー
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("セットアップサマリー")
-    print("="*60)
-    
+    print("=" * 60)
+
     success_count = sum(1 for _, result in results if result)
     print(f"成功: {success_count}/{len(results)}")
-    
+
     if success_count == len(results):
         print("\n✓ セットアップ完了！\n")
         print("次のコマンドで確認できます:")

@@ -4,12 +4,11 @@ Integration Test: バックテスト最適化パイプライン End-to-End
 グリッドサーチ実行 → メトリクス計算（dtype エラー修正の検証）
 完全なフロー検証。
 """
-import unittest
-import sys
 import os
+import sys
+import unittest
 
 import pandas as pd
-import numpy as np
 
 # パス設定
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -18,10 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 class TestBacktestOptimizeE2E(unittest.TestCase):
     """バックテスト最適化パイプラインのEnd-to-Endテスト"""
 
-    @unittest.skipIf(
-        not __import__("importlib").util.find_spec("xgboost"),
-        "XGBoost not available"
-    )
+    @unittest.skipIf(not __import__("importlib").util.find_spec("xgboost"), "XGBoost not available")
     def test_optimization_metrics_dtype_fix(self):
         """
         最適化時のメトリクス計算で dtype エラーが発生しないことを確認
@@ -29,10 +25,7 @@ class TestBacktestOptimizeE2E(unittest.TestCase):
         profit_factor が None と数値の混在データを正しく平均計算できることを検証。
         """
         try:
-            from src.services.backtest_optimize_pipeline import (
-                run_optimization,
-                print_optimization_results,
-            )
+            from src.services.backtest_optimize_pipeline import run_optimization
 
             # グリッドサーチを最小限（1-2パラメータ）で実行
             result_df = run_optimization(
@@ -72,15 +65,13 @@ class TestBacktestOptimizeE2E(unittest.TestCase):
                 # None / NaN 混在データを数値型に変換して平均計算
                 result_numeric = result_df[available].copy()
                 for col in result_numeric.columns:
-                    result_numeric[col] = pd.to_numeric(
-                        result_numeric[col], errors='coerce'
-                    )
+                    result_numeric[col] = pd.to_numeric(result_numeric[col], errors="coerce")
 
                 # 平均計算が成功することを確認（dtype エラーが発生しない）
                 try:
                     means = result_numeric.mean()
                     self.assertIsNotNone(means, "平均値が計算されること")
-                    print(f"\n[Integration Test Result] メトリクス計算成功")
+                    print("\n[Integration Test Result] メトリクス計算成功")
                     print(f"  平均値:\n{means.round(4).to_string()}")
                 except TypeError as e:
                     self.fail(f"メトリクス平均計算時に dtype エラー: {e}")
@@ -88,10 +79,7 @@ class TestBacktestOptimizeE2E(unittest.TestCase):
         except Exception as e:
             self.fail(f"最適化実行に失敗: {e}")
 
-    @unittest.skipIf(
-        not __import__("importlib").util.find_spec("xgboost"),
-        "XGBoost not available"
-    )
+    @unittest.skipIf(not __import__("importlib").util.find_spec("xgboost"), "XGBoost not available")
     def test_optimization_with_risk_parameters(self):
         """
         ストップロス・テイクプロフィット付きグリッドサーチが実行可能なことを確認
@@ -122,16 +110,14 @@ class TestBacktestOptimizeE2E(unittest.TestCase):
             self.assertGreater(len(result_df), 0, "結果に最低1行以上のデータがあること")
 
             # リスク管理列が存在することを確認
-            self.assertIn(
-                "stop_loss_pct", result_df.columns, "stop_loss_pct 列が存在すること"
-            )
+            self.assertIn("stop_loss_pct", result_df.columns, "stop_loss_pct 列が存在すること")
             self.assertIn(
                 "take_profit_pct",
                 result_df.columns,
                 "take_profit_pct 列が存在すること",
             )
 
-            print(f"\n[Integration Test Result] リスク管理パラメータ付きグリッドサーチ成功")
+            print("\n[Integration Test Result] リスク管理パラメータ付きグリッドサーチ成功")
             print(f"  パラメータ組み合わせ数: {len(result_df)}")
 
         except Exception as e:
