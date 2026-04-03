@@ -588,3 +588,88 @@ def send_watchlist_update_report(diffs) -> bool:
         if not send_webhook_text(message[i : i + max_len]):
             success = False
     return success
+
+
+def send_shap_notification(
+    market: str,
+    symbol: str,
+    model_name: str,
+    shap_top_bottom,
+) -> bool:
+    """
+    SHAP特徴量寄与の上位・下位をDiscordに通知する。
+
+    Args:
+        market: マーケット識別子
+        symbol: 銘柄シンボル
+        model_name: モデル名
+        shap_top_bottom: [feature, shap_mean, shap_rank] を含むDataFrame
+
+    Returns:
+        成功時True、失敗時False
+    """
+    import pandas as pd
+
+    if not isinstance(shap_top_bottom, pd.DataFrame) or shap_top_bottom.empty:
+        return False
+
+    sorted_df = shap_top_bottom.sort_values("shap_rank")
+    n_total = sorted_df["shap_rank"].max() if "shap_rank" in sorted_df.columns else len(sorted_df)
+    top_df = sorted_df.head(10)
+    bottom_df = sorted_df.tail(10).sort_values("shap_rank", ascending=False)
+
+    lines = [f"**SHAP特徴量寄与 [{market}/{symbol}] {model_name}**"]
+    lines.append(f"総特徴量数: {n_total}")
+    lines.append("")
+    lines.append("📈 **上位（寄与大）**")
+    for _, row in top_df.iterrows():
+        lines.append(f"  #{int(row['shap_rank']):>3} `{row['feature']}` — {row['shap_mean']:.6f}")
+    lines.append("")
+    lines.append("📉 **下位（寄与小）**")
+    for _, row in bottom_df.iterrows():
+        lines.append(f"  #{int(row['shap_rank']):>3} `{row['feature']}` — {row['shap_mean']:.6f}")
+
+    message = "\n".join(lines)
+    max_len = 1900
+    success = True
+    for i in range(0, len(message), max_len):
+        if not send_webhook_text(message[i : i + max_len]):
+            success = False
+    return success
+
+
+def send_drift_retrain_notification(
+    triggered_symbols: list, mae_threshold: float, hit_rate_threshold: float
+) -> bool:
+    """
+    ドリフト検知による自動再学習トリガー通知を Discord に送信する。
+
+    Args:
+        triggered_symbols: 再学習をトリガーした銘柄リスト
+            (dicts: market, symbol, mean_abs_error, direction_accuracy)
+        mae_threshold: 使用した MAE 閾値
+        hit_rate_threshold: 使用した Hit Rate 閾値
+
+    Returns:
+        送信成功時 True
+    """
+    if not triggered_symbols:
+        return False
+
+    from datetime import datetime
+
+    now = datetime.now().strftime("%Y/%m/%d %H:%M")
+    lines = [
+        f"**[ドリフト検知・自動再学習トリガー] {now}**",
+        f"MAE閾値={mae_threshold:.2%} / Hit Rate閾値={hit_rate_threshold:.0%}",
+        f"対象銘柄数: {len(triggered_symbols)}",
+        "",
+    ]
+    for sym in triggered_symbols:
+        lines.append(
+            f"• `{sym['market']}/{sym['symbol']}` "
+            f"MAE={sym.get('mean_abs_error', 0):.4f} "
+            f"HitRate={sym.get('direction_accuracy', 0):.1%}"
+        )
+
+    return send_webhook_text("\n".join(lines))
