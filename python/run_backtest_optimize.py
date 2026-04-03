@@ -33,6 +33,10 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+def _parse_csv_floats(raw: str) -> list[float]:
+    return [float(part.strip()) for part in raw.split(",") if part.strip()]
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="バックテスト最適化（グリッドサーチ）")
     parser.add_argument("--market", type=str, default="jp", help="マーケット (例: jp, us)")
@@ -72,6 +76,43 @@ def parse_args():
     )
     parser.add_argument("--fee-rate", type=float, default=0.001, help="取引手数料率 (default: 0.001)")
     parser.add_argument("--slippage", type=float, default=0.0, help="スリッページ (default: 0.0)")
+    parser.add_argument(
+        "--position-sizing",
+        type=str,
+        default="full",
+        choices=["full", "fixed", "confidence", "atr"],
+        help="ポジションサイジング (default: full)",
+    )
+    parser.add_argument(
+        "--position-fraction",
+        type=float,
+        default=0.5,
+        help="fixed モード用の資金比率 (default: 0.5)",
+    )
+    parser.add_argument(
+        "--atr-risk-pcts",
+        type=str,
+        default="0.02",
+        help="ATR モード時のリスク割合候補をカンマ区切りで指定 (default: 0.02)",
+    )
+    parser.add_argument(
+        "--atr-multipliers",
+        type=str,
+        default="1.0",
+        help="ATR モード時の倍率候補をカンマ区切りで指定 (default: 1.0)",
+    )
+    parser.add_argument(
+        "--atr-min-fraction",
+        type=float,
+        default=0.1,
+        help="ATR モード時の建玉下限比率 (default: 0.1)",
+    )
+    parser.add_argument(
+        "--atr-max-fraction",
+        type=float,
+        default=1.0,
+        help="ATR モード時の建玉上限比率 (default: 1.0)",
+    )
 
     # ソート基準
     parser.add_argument(
@@ -105,6 +146,12 @@ def main():
         initial_cash=args.initial_cash,
         fee_rate=args.fee_rate,
         slippage=args.slippage,
+        position_sizing=args.position_sizing,
+        position_fraction=args.position_fraction,
+        atr_risk_pcts=_parse_csv_floats(args.atr_risk_pcts),
+        atr_multipliers=_parse_csv_floats(args.atr_multipliers),
+        atr_min_fraction=args.atr_min_fraction,
+        atr_max_fraction=args.atr_max_fraction,
         threshold_min=args.threshold_min,
         threshold_max=args.threshold_max,
         threshold_step=args.threshold_step,

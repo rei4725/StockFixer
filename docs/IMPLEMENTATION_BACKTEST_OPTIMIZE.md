@@ -51,6 +51,31 @@ JSON: config/optimal_params.json (更新・統合)
 最適パラメータ保存（JSON）: C:\src\StockFixer\python\config\optimal_params.json
 ```
 
+### 4. ATR連動ポジションサイズ対応
+
+📁 **ファイル**:
+- `src/backtest/backtester.py`
+- `src/services/backtest_pipeline.py`
+- `src/backtest/walk_forward.py`
+- `run_backtest.py`
+- `run_backtest_optimize.py`
+
+**追加内容:**
+- ATRモードの建玉下限比率 / 上限比率を追加
+- `avg_position_fraction`, `max_position_fraction`, `avg_position_value` をKPIへ追加
+- `atr_fallback_trades` を追加し、ATR欠損時の full フォールバック回数を可視化
+- 最適化JSONに `position_sizing`, `atr_risk_pct`, `atr_multiplier`, `atr_min_fraction`, `atr_max_fraction` を保存
+
+**デフォルト値:**
+- `atr_risk_pct = 0.02`
+- `atr_multiplier = 1.0`
+- `atr_min_fraction = 0.1`
+- `atr_max_fraction = 1.0`
+
+**補足:**
+- `source=file` では `atr_lag1` を ATR の代替値として使用
+- `source=raw` / `source=api` では再生成した `atr` を使用
+
 ---
 
 ## 🧪 テスト実行結果
@@ -112,6 +137,32 @@ $ params['metrics']['sharpe_ratio']
 ```
 
 ✅ **予測時に自動読込が正常に動作**
+
+### テスト4: ATR連動サイジング実測確認（jp/7203）
+
+```bash
+$ py run_backtest.py --market jp --symbol 7203 --source file --position-sizing full
+$ py run_backtest.py --market jp --symbol 7203 --source file --position-sizing atr \
+  --atr-risk-pct 0.02 --atr-multiplier 1.0 --atr-min-fraction 0.1 --atr-max-fraction 1.0
+```
+
+**比較結果（source=file）:**
+- full: total_return=-9.9952%, sharpe=-0.0966, max_drawdown=-17.5299%, avg_position_fraction=0.998514
+- atr: total_return=-0.3798%, sharpe=1.0794, max_drawdown=-11.6698%, avg_position_fraction=0.802547
+
+```bash
+$ py run_backtest.py --market jp --symbol 7203 --source raw --position-sizing atr \
+  --atr-risk-pct 0.02 --atr-multiplier 1.0 --atr-min-fraction 0.1 --atr-max-fraction 1.0
+```
+
+**結果（source=raw, atr）:**
+- total_return=12.8922%
+- sharpe=2.5526
+- max_drawdown=-7.8342%
+- avg_position_fraction=0.786479
+- atr_fallback_trades=0
+
+✅ **ATR連動ポジションサイズが実データ上でも動作し、高ボラ局面で建玉抑制が効くことを確認**
 
 ---
 
@@ -193,12 +244,22 @@ python/config/optimal_params.json
     "threshold": 浮動小数点,
     "stop_loss_pct": 浮動小数点 | null,
     "take_profit_pct": 浮動小数点 | null,
+    "position_sizing": "full|fixed|confidence|atr",
+    "position_fraction": 浮動小数点,
+    "atr_risk_pct": 浮動小数点,
+    "atr_multiplier": 浮動小数点,
+    "atr_min_fraction": 浮動小数点,
+    "atr_max_fraction": 浮動小数点,
     "metrics": {
       "total_return": 浮動小数点,
       "sharpe_ratio": 浮動小数点,
       "max_drawdown": 浮動小数点,
       "win_rate": 浮動小数点,
       "profit_factor": 浮動小数点,
+      "avg_position_fraction": 浮動小数点,
+      "max_position_fraction": 浮動小数点,
+      "avg_position_value": 浮動小数点,
+      "atr_fallback_trades": 整数,
       "num_trades": 整数
     }
   }
@@ -214,6 +275,9 @@ python/config/optimal_params.json
 - [x] パスの正確な計算（python/configを指す）
 - [x] 複数銘柄の統合管理
 - [x] ユニットテスト・パス確認テスト実施
+- [x] ATR連動ポジションサイズの上下限比率追加
+- [x] ATR関連メトリクス追加
+- [x] 実データでのATR検証実施
 - [x] ドキュメント作成
 
 ---

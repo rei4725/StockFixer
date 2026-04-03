@@ -22,6 +22,8 @@ def _make_backtester(
     position_fraction=0.5,
     atr_risk_pct=0.02,
     atr_multiplier=1.0,
+    atr_min_fraction=0.1,
+    atr_max_fraction=1.0,
 ) -> Backtester:
     """依存モックを持つ Backtester を生成する"""
     return Backtester(
@@ -41,6 +43,8 @@ def _make_backtester(
         position_fraction=position_fraction,
         atr_risk_pct=atr_risk_pct,
         atr_multiplier=atr_multiplier,
+        atr_min_fraction=atr_min_fraction,
+        atr_max_fraction=atr_max_fraction,
     )
 
 
@@ -288,6 +292,21 @@ class TestATRPositionSizing(unittest.TestCase):
         qty = bt._calc_qty(100_000, 1000.0, atr_value=1.0)
         self.assertLessEqual(qty * 1000.0, 100_000)
 
+    def test_atr_qty_respects_fraction_bounds(self):
+        """ATRモードの購入株数が建玉比率の上下限に収まる"""
+        bt = _make_backtester(
+            initial_cash=100_000,
+            position_sizing="atr",
+            atr_risk_pct=0.0001,
+            atr_multiplier=1.0,
+            atr_min_fraction=0.1,
+            atr_max_fraction=0.3,
+            fee_rate=0.0,
+        )
+        qty = bt._calc_qty(100_000, 1000.0, atr_value=100.0)
+        self.assertGreaterEqual(qty, 10)
+        self.assertLessEqual(qty, 30)
+
     def test_atr_fallback_to_full_when_no_atr(self):
         """atr_valueがNoneの場合は full モードと同じ動作になる"""
         bt = _make_backtester(initial_cash=1_000_000, position_sizing="atr", fee_rate=0.0)
@@ -295,6 +314,15 @@ class TestATRPositionSizing(unittest.TestCase):
         bt_full = _make_backtester(initial_cash=1_000_000, position_sizing="full", fee_rate=0.0)
         qty_full = bt_full._calc_qty(1_000_000, 1000.0)
         self.assertEqual(qty_no_atr, qty_full)
+
+    def test_atr_fallback_trade_is_counted_in_metrics(self):
+        """ATR欠損で full フォールバックした回数がメトリクスに反映される"""
+        bt = _make_backtester(initial_cash=100_000, position_sizing="atr", fee_rate=0.0)
+        df = _price_df([100.0, 100.0, 120.0])
+        sig = _signal([1, 0, -1], df)
+        _, metrics = bt.simulate_trading(df, sig)
+        self.assertEqual(metrics["atr_fallback_trades"], 1)
+        self.assertAlmostEqual(metrics["avg_position_fraction"], 1.0)
 
     def test_simulate_trading_atr_mode(self):
         """ATR列付き df で atr モードのシミュレーションが正常完了する"""
@@ -306,6 +334,7 @@ class TestATRPositionSizing(unittest.TestCase):
         result_df, metrics = bt.simulate_trading(df, sig)
         self.assertEqual(metrics["num_trades"], 1)
         self.assertGreater(metrics["total_return"], 0.0)
+        self.assertGreater(metrics["avg_position_fraction"], 0.0)
 
 
 if __name__ == "__main__":

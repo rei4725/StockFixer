@@ -130,6 +130,18 @@ def parse_args():
         default=1.0,
         help="ATRモード: ストップ幅とするATRの倍数 (default: 1.0)",
     )
+    parser.add_argument(
+        "--atr-min-fraction",
+        type=float,
+        default=0.1,
+        help="ATRモード: 建玉下限比率 (default: 0.1)",
+    )
+    parser.add_argument(
+        "--atr-max-fraction",
+        type=float,
+        default=1.0,
+        help="ATRモード: 建玉上限比率 (default: 1.0)",
+    )
 
     # アンサンブル
     parser.add_argument("--ensemble", action="store_true", help="XGBoost+LightGBMアンサンブル予測を使用する")
@@ -165,6 +177,12 @@ def main():
         logger.info(f"  テイクプロフィット: {args.take_profit:.1%}")
     if args.position_sizing != "full":
         logger.info(f"  ポジションサイジング: {args.position_sizing}")
+    if args.position_sizing == "atr":
+        logger.info(
+            "  ATR設定: "
+            f"risk_pct={args.atr_risk_pct:.2%}, multiplier={args.atr_multiplier}, "
+            f"min_fraction={args.atr_min_fraction:.0%}, max_fraction={args.atr_max_fraction:.0%}"
+        )
 
     common_kwargs = dict(
         market=args.market,
@@ -183,6 +201,8 @@ def main():
         position_fraction=args.position_fraction,
         atr_risk_pct=args.atr_risk_pct,
         atr_multiplier=args.atr_multiplier,
+        atr_min_fraction=args.atr_min_fraction,
+        atr_max_fraction=args.atr_max_fraction,
         ensemble=args.ensemble,
     )
 

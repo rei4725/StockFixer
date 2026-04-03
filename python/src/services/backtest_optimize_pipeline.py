@@ -29,6 +29,12 @@ def _frange(start: float, stop: float, step: float) -> list[float]:
     return result
 
 
+def _parse_grid_values(values: Optional[list[float]], default: float) -> list[float]:
+    if not values:
+        return [default]
+    return [float(v) for v in values]
+
+
 def run_optimization(
     market: str,
     symbol: str,
@@ -39,6 +45,12 @@ def run_optimization(
     initial_cash: float = 1_000_000,
     fee_rate: float = 0.001,
     slippage: float = 0.0,
+    position_sizing: str = "full",
+    position_fraction: float = 0.5,
+    atr_risk_pcts: Optional[list[float]] = None,
+    atr_multipliers: Optional[list[float]] = None,
+    atr_min_fraction: float = 0.1,
+    atr_max_fraction: float = 1.0,
     threshold_min: float = 0.0,
     threshold_max: float = 0.015,
     threshold_step: float = 0.001,
@@ -57,6 +69,12 @@ def run_optimization(
         initial_cash: 初期資金
         fee_rate: 取引手数料率
         slippage: スリッページ
+        position_sizing: ポジションサイジング種別
+        position_fraction: fixed モード用比率
+        atr_risk_pcts: ATR リスク割合の候補一覧
+        atr_multipliers: ATR 倍率の候補一覧
+        atr_min_fraction: ATR 建玉下限比率
+        atr_max_fraction: ATR 建玉上限比率
         threshold_min: 閾値の最小値
         threshold_max: 閾値の最大値
         threshold_step: 閾値のステップ
@@ -74,7 +92,15 @@ def run_optimization(
         stop_losses = [None]
         take_profits = [None]
 
-    param_grid = list(itertools.product(thresholds, stop_losses, take_profits))
+    atr_risk_grid = _parse_grid_values(atr_risk_pcts, 0.02)
+    atr_multiplier_grid = _parse_grid_values(atr_multipliers, 1.0)
+    if position_sizing != "atr":
+        atr_risk_grid = [0.02]
+        atr_multiplier_grid = [1.0]
+
+    param_grid = list(
+        itertools.product(thresholds, stop_losses, take_profits, atr_risk_grid, atr_multiplier_grid)
+    )
     total = len(param_grid)
 
     print(f"\n最適化開始: {market}/{symbol}")
@@ -83,16 +109,24 @@ def run_optimization(
     if optimize_risk:
         print(f"  ストップロス: {stop_losses}")
         print(f"  テイクプロフィット: {take_profits}")
+    if position_sizing == "atr":
+        print(f"  ATR risk_pct: {atr_risk_grid}")
+        print(f"  ATR multiplier: {atr_multiplier_grid}")
+        print(f"  ATR fraction range: {atr_min_fraction} - {atr_max_fraction}")
     print()
 
     all_results = []
 
-    for i, (threshold, stop_loss, take_profit) in enumerate(param_grid, 1):
+    for i, (threshold, stop_loss, take_profit, atr_risk_pct, atr_multiplier) in enumerate(
+        param_grid, 1
+    ):
         label = f"[{i}/{total}] threshold={threshold}"
         if stop_loss is not None:
             label += f", SL={stop_loss}"
         if take_profit is not None:
             label += f", TP={take_profit}"
+        if position_sizing == "atr":
+            label += f", ATRrisk={atr_risk_pct}, ATRx={atr_multiplier}"
         print(f"\n{'='*60}")
         print(label)
         print(f"{'='*60}")
@@ -110,6 +144,12 @@ def run_optimization(
                 slippage=slippage,
                 stop_loss_pct=stop_loss,
                 take_profit_pct=take_profit,
+                position_sizing=position_sizing,
+                position_fraction=position_fraction,
+                atr_risk_pct=atr_risk_pct,
+                atr_multiplier=atr_multiplier,
+                atr_min_fraction=atr_min_fraction,
+                atr_max_fraction=atr_max_fraction,
                 ensemble=ensemble,
             )
 
@@ -127,6 +167,10 @@ def run_optimization(
                     "win_rate",
                     "profit_factor",
                     "num_trades",
+                    "avg_position_fraction",
+                    "max_position_fraction",
+                    "avg_position_value",
+                    "atr_fallback_trades",
                 ]
                 available = [c for c in numeric_cols if c in wf_df.columns]
                 # None値をnp.nanに変換して平均計算可能にする
@@ -137,6 +181,12 @@ def run_optimization(
                 summary["threshold"] = threshold
                 summary["stop_loss_pct"] = stop_loss
                 summary["take_profit_pct"] = take_profit
+                summary["position_sizing"] = position_sizing
+                summary["position_fraction"] = position_fraction
+                summary["atr_risk_pct"] = atr_risk_pct
+                summary["atr_multiplier"] = atr_multiplier
+                summary["atr_min_fraction"] = atr_min_fraction
+                summary["atr_max_fraction"] = atr_max_fraction
                 summary["ensemble"] = ensemble
                 all_results.append(summary)
         except Exception as e:
@@ -146,6 +196,9 @@ def run_optimization(
                     "threshold": threshold,
                     "stop_loss_pct": stop_loss,
                     "take_profit_pct": take_profit,
+                    "position_sizing": position_sizing,
+                    "atr_risk_pct": atr_risk_pct,
+                    "atr_multiplier": atr_multiplier,
                     "error": str(e),
                 }
             )
@@ -189,6 +242,9 @@ def print_optimization_results(result_df: pd.DataFrame, sort_by: str) -> None:
         "threshold",
         "stop_loss_pct",
         "take_profit_pct",
+        "position_sizing",
+        "atr_risk_pct",
+        "atr_multiplier",
         "total_return",
         "gross_total_return",
         "cost_impact_return",
@@ -199,6 +255,10 @@ def print_optimization_results(result_df: pd.DataFrame, sort_by: str) -> None:
         "win_rate",
         "profit_factor",
         "num_trades",
+        "avg_position_fraction",
+        "max_position_fraction",
+        "avg_position_value",
+        "atr_fallback_trades",
     ]
     display_cols = [c for c in display_cols if c in valid.columns]
 
@@ -306,6 +366,12 @@ def save_optimal_params_json(
             if best_row.get("take_profit_pct") is not None
             else None
         ),
+        "position_sizing": str(best_row.get("position_sizing", "full")),
+        "position_fraction": float(best_row.get("position_fraction", 0.5)),
+        "atr_risk_pct": float(best_row.get("atr_risk_pct", 0.02)),
+        "atr_multiplier": float(best_row.get("atr_multiplier", 1.0)),
+        "atr_min_fraction": float(best_row.get("atr_min_fraction", 0.1)),
+        "atr_max_fraction": float(best_row.get("atr_max_fraction", 1.0)),
         "metrics": {
             "total_return": float(best_row.get("total_return", 0.0)),
             "gross_total_return": float(best_row.get("gross_total_return", 0.0)),
@@ -317,6 +383,10 @@ def save_optimal_params_json(
             "gross_max_drawdown": float(best_row.get("gross_max_drawdown", 0.0)),
             "win_rate": float(best_row.get("win_rate", 0.0)),
             "profit_factor": float(best_row.get("profit_factor", 1.0)),
+            "avg_position_fraction": float(best_row.get("avg_position_fraction", 0.0)),
+            "max_position_fraction": float(best_row.get("max_position_fraction", 0.0)),
+            "avg_position_value": float(best_row.get("avg_position_value", 0.0)),
+            "atr_fallback_trades": int(best_row.get("atr_fallback_trades", 0)),
             "num_trades": (
                 int(best_row.get("num_trades", 0)) if pd.notna(best_row.get("num_trades")) else 0
             ),
@@ -392,6 +462,12 @@ def run_optimize_batch(
     initial_cash: float = 1_000_000,
     fee_rate: float = 0.001,
     slippage: float = 0.0,
+    position_sizing: str = "full",
+    position_fraction: float = 0.5,
+    atr_risk_pcts: Optional[list[float]] = None,
+    atr_multipliers: Optional[list[float]] = None,
+    atr_min_fraction: float = 0.1,
+    atr_max_fraction: float = 1.0,
     threshold_min: float = 0.0,
     threshold_max: float = 0.015,
     threshold_step: float = 0.001,
@@ -414,6 +490,12 @@ def run_optimize_batch(
         initial_cash: 初期資金
         fee_rate: 取引手数料率
         slippage: スリッページ
+        position_sizing: ポジションサイジング種別
+        position_fraction: fixed モード用比率
+        atr_risk_pcts: ATR リスク割合の候補一覧
+        atr_multipliers: ATR 倍率の候補一覧
+        atr_min_fraction: ATR 建玉下限比率
+        atr_max_fraction: ATR 建玉上限比率
         threshold_min: 閾値の最小値
         threshold_max: 閾値の最大値
         threshold_step: 閾値のステップ
@@ -470,6 +552,12 @@ def run_optimize_batch(
                 initial_cash=initial_cash,
                 fee_rate=fee_rate,
                 slippage=slippage,
+                position_sizing=position_sizing,
+                position_fraction=position_fraction,
+                atr_risk_pcts=atr_risk_pcts,
+                atr_multipliers=atr_multipliers,
+                atr_min_fraction=atr_min_fraction,
+                atr_max_fraction=atr_max_fraction,
                 threshold_min=threshold_min,
                 threshold_max=threshold_max,
                 threshold_step=threshold_step,

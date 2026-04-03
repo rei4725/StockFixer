@@ -52,6 +52,8 @@ class WalkForwardValidator:
         position_fraction: float = 0.5,
         atr_risk_pct: float = 0.02,
         atr_multiplier: float = 1.0,
+        atr_min_fraction: float = 0.1,
+        atr_max_fraction: float = 1.0,
         ensemble: bool = False,
     ):
         self.market = market
@@ -69,6 +71,8 @@ class WalkForwardValidator:
         self.position_fraction = position_fraction
         self.atr_risk_pct = atr_risk_pct
         self.atr_multiplier = atr_multiplier
+        self.atr_min_fraction = atr_min_fraction
+        self.atr_max_fraction = atr_max_fraction
         self.ensemble = ensemble
 
     def run(
@@ -198,6 +202,8 @@ class WalkForwardValidator:
             position_fraction=self.position_fraction,
             atr_risk_pct=self.atr_risk_pct,
             atr_multiplier=self.atr_multiplier,
+            atr_min_fraction=self.atr_min_fraction,
+            atr_max_fraction=self.atr_max_fraction,
         )
         result_df, metrics = backtester.simulate_trading(val_df, signal, pred=pred)
         return metrics
@@ -225,6 +231,10 @@ class WalkForwardValidator:
             "cost_impact_cash",
             "win_rate",
             "profit_factor",
+            "avg_position_fraction",
+            "max_position_fraction",
+            "avg_position_value",
+            "atr_fallback_trades",
         ]
         available = [c for c in numeric_cols if c in result_df.columns]
         if available:

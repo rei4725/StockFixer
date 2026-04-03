@@ -51,6 +51,7 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
         if df is None or df.empty:
             logger.error(f"[backtest] yfinanceからデータを取得できませんでした: {market}/{symbol}")
             sys.exit(1)
+        df = df.dropna(axis=1, how="all")
         close_series = df["Close"].copy()
         df = add_technical_indicators(df)
         _nan = int(df.isnull().sum().sum())
@@ -71,6 +72,8 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
         X["y"] = y
         # シミュレーション用に Close 列を保持
         X["Close"] = close_series.reindex(X.index)
+        if "atr" in df.columns:
+            X["atr"] = df["atr"].reindex(X.index)
         return X
 
     elif source == "raw":
@@ -87,6 +90,7 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
                 " → run_data_creation.pyを先に実行してください"
             )
             sys.exit(1)
+        df = df.dropna(axis=1, how="all")
         close_series = df["Close"].copy()
         df = add_technical_indicators(df)
         _nan = int(df.isnull().sum().sum())
@@ -106,6 +110,8 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
         X.columns = [re.sub(r"[^0-9a-zA-Z_]", "_", str(c)) for c in X.columns]
         X["y"] = y
         X["Close"] = close_series.reindex(X.index)
+        if "atr" in df.columns:
+            X["atr"] = df["atr"].reindex(X.index)
         return X
 
     else:  # source == "file"
@@ -126,6 +132,9 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
         if "Close" not in df.columns and "Close_lag1" in df.columns:
             df = df.copy()
             df["Close"] = df["Close_lag1"]
+        if "atr" not in df.columns and "atr_lag1" in df.columns:
+            df = df.copy()
+            df["atr"] = df["atr_lag1"]
 
         # date 列があれば DatetimeIndex に復元する
         if "date" in df.columns:
@@ -182,6 +191,8 @@ def run_backtest_single(
     position_fraction: float = 0.5,
     atr_risk_pct: float = 0.02,
     atr_multiplier: float = 1.0,
+    atr_min_fraction: float = 0.1,
+    atr_max_fraction: float = 1.0,
     ensemble: bool = False,
 ) -> Tuple[pd.DataFrame, dict, pd.Series]:
     """
@@ -207,6 +218,8 @@ def run_backtest_single(
         position_fraction: 固定ポジション比率（fixed モード用）
         atr_risk_pct: ATRモード: 1トレードあたりのリスク割合（デフォルト: 2%）
         atr_multiplier: ATRモード: ストップ幅のATR倍数（デフォルト: 1.0）
+        atr_min_fraction: ATRモード: 建玉下限比率（デフォルト: 10%）
+        atr_max_fraction: ATRモード: 建玉上限比率（デフォルト: 100%）
         ensemble: XGBoost+LightGBMアンサンブル予測を使用
 
     Returns:
@@ -302,6 +315,8 @@ def run_backtest_single(
         position_fraction=position_fraction,
         atr_risk_pct=atr_risk_pct,
         atr_multiplier=atr_multiplier,
+        atr_min_fraction=atr_min_fraction,
+        atr_max_fraction=atr_max_fraction,
     )
     result_df, metrics = backtester.simulate_trading(
         test_df.loc[X_test.index],
@@ -331,6 +346,8 @@ def run_backtest_walk_forward(
     position_fraction: float = 0.5,
     atr_risk_pct: float = 0.02,
     atr_multiplier: float = 1.0,
+    atr_min_fraction: float = 0.1,
+    atr_max_fraction: float = 1.0,
     ensemble: bool = False,
 ) -> Tuple[None, None, pd.DataFrame]:
     """
@@ -354,6 +371,8 @@ def run_backtest_walk_forward(
         position_fraction: 固定ポジション比率（fixed モード用）
         atr_risk_pct: ATRモード時に１トレードでリスクする資金の割合（デフォルト: 2%）
         atr_multiplier: ATRの何倒をストップ幅とするか（デフォルト: 1.0）
+        atr_min_fraction: ATRモード: 建玉下限比率（デフォルト: 10%）
+        atr_max_fraction: ATRモード: 建玉上限比率（デフォルト: 100%）
         ensemble: XGBoost+LightGBMアンサンブル予測を使用
 
     Returns:
@@ -386,6 +405,8 @@ def run_backtest_walk_forward(
         position_fraction=position_fraction,
         atr_risk_pct=atr_risk_pct,
         atr_multiplier=atr_multiplier,
+        atr_min_fraction=atr_min_fraction,
+        atr_max_fraction=atr_max_fraction,
         ensemble=ensemble,
     )
 
@@ -455,6 +476,11 @@ def print_backtest_metrics(
     print(f"  {'num_trades':20s}: {metrics.get('num_trades')}")
     print(f"  {'win_rate':20s}: {metrics.get('win_rate')}")
     print(f"  {'profit_factor':20s}: {metrics.get('profit_factor')}")
+    if "avg_position_fraction" in metrics:
+        print(f"  {'avg_position_fraction':20s}: {metrics.get('avg_position_fraction')}")
+        print(f"  {'max_position_fraction':20s}: {metrics.get('max_position_fraction')}")
+        print(f"  {'avg_position_value':20s}: {metrics.get('avg_position_value')}")
+        print(f"  {'atr_fallback_trades':20s}: {metrics.get('atr_fallback_trades')}")
 
     # gross（比較用: コスト控除前）
     if "gross_total_return" in metrics:

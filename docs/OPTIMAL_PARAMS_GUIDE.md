@@ -20,12 +20,22 @@
     "threshold": 0.0,
     "stop_loss_pct": null,
     "take_profit_pct": null,
+    "position_sizing": "atr",
+    "position_fraction": 0.5,
+    "atr_risk_pct": 0.02,
+    "atr_multiplier": 1.0,
+    "atr_min_fraction": 0.1,
+    "atr_max_fraction": 1.0,
     "metrics": {
       "total_return": -0.1520988,
       "sharpe_ratio": 0.25460000000000005,
       "max_drawdown": -0.39801699999999995,
       "win_rate": 0.57524,
-      "profit_factor": 1.06494,
+    "profit_factor": 1.06494,
+    "avg_position_fraction": 0.78,
+    "max_position_fraction": 0.99,
+    "avg_position_value": 845000.0,
+    "atr_fallback_trades": 0,
       "num_trades": 182
     }
   },
@@ -51,6 +61,8 @@ params = get_optimal_params('jp', '1332')
 if params:
     threshold = params['threshold']  # 0.0
     sharpe_ratio = params['metrics']['sharpe_ratio']  # 0.2546
+    position_sizing = params.get('position_sizing', 'full')
+    atr_risk_pct = params.get('atr_risk_pct', 0.02)
     # ...
 ```
 
@@ -125,7 +137,25 @@ done
 
 # リスク調整を含める
 --optimize-risk  # SL/TPも最適化
+
+# ATR連動ポジションサイズも同時に最適化
+--position-sizing atr --atr-risk-pcts 0.01,0.02,0.03 --atr-multipliers 0.5,1.0,1.5
 ```
+
+### ATR連動ポジションサイズの運用メモ
+
+- `--source file` では保存済み特徴量の `atr_lag1` を ATR 代替値として使用する
+- `--source raw` / `--source api` では再生成した `atr` をそのまま使用する
+- デフォルト値は `atr_risk_pct=0.02`, `atr_multiplier=1.0`, `atr_min_fraction=0.1`, `atr_max_fraction=1.0`
+- 高ボラ局面で建玉比率が下がるかは `avg_position_fraction` と `max_position_fraction` で確認する
+
+### 実測メモ（2026-04-03, jp/7203）
+
+- `source=file`, `position_sizing=full`: total_return=-0.099952, sharpe_ratio=-0.0966, max_drawdown=-0.175299
+- `source=file`, `position_sizing=atr`: total_return=-0.003798, sharpe_ratio=1.0794, max_drawdown=-0.116698, avg_position_fraction=0.802547
+- `source=raw`, `position_sizing=atr`: total_return=0.128922, sharpe_ratio=2.5526, max_drawdown=-0.078342, avg_position_fraction=0.786479
+
+少なくとも検証サンプルでは、ATR連動により建玉を抑えながらドローダウンとシャープレシオが改善した。
 
 ## 📈 パフォーマンス監視
 
@@ -142,7 +172,7 @@ for key, p in params.items():
     # Win Rate が 50% 以上あるか確認
     if metrics['win_rate'] < 0.5:
         print(f"⚠️  {key}: 勝率が低い ({metrics['win_rate']:.1%})")
-    
+
     # Sharpe Ratio が妥当か
     if metrics['sharpe_ratio'] < 0:
         print(f"⚠️  {key}: シャープレシオが負 ({metrics['sharpe_ratio']:.2f})")

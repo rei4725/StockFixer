@@ -76,6 +76,22 @@ def compute_metrics(
     # --- Maximum Drawdown ---
     max_dd = _max_drawdown(equity)
 
+    buy_log = (
+        trade_log[trade_log["action"] == "buy"] if "action" in trade_log.columns else pd.DataFrame()
+    )
+    position_fractions = pd.Series(dtype=float)
+    position_values = pd.Series(dtype=float)
+    atr_fallback_trades = 0
+    if not buy_log.empty:
+        if "position_fraction" in buy_log.columns:
+            position_fractions = pd.to_numeric(
+                buy_log["position_fraction"], errors="coerce"
+            ).dropna()
+        if "position_value" in buy_log.columns:
+            position_values = pd.to_numeric(buy_log["position_value"], errors="coerce").dropna()
+        if "atr_fallback_used" in buy_log.columns:
+            atr_fallback_trades = int(buy_log["atr_fallback_used"].fillna(False).astype(bool).sum())
+
     return {
         "final_cash": round(final_cash, 2),
         "total_return": round(total_return, 6),
@@ -84,6 +100,19 @@ def compute_metrics(
         "profit_factor": round(profit_factor, 4) if profit_factor != math.inf else None,
         "sharpe_ratio": round(sharpe, 4),
         "max_drawdown": round(max_dd, 6),
+        "avg_position_fraction": round(float(position_fractions.mean()), 6)
+        if not position_fractions.empty
+        else 0.0,
+        "min_position_fraction": round(float(position_fractions.min()), 6)
+        if not position_fractions.empty
+        else 0.0,
+        "max_position_fraction": round(float(position_fractions.max()), 6)
+        if not position_fractions.empty
+        else 0.0,
+        "avg_position_value": round(float(position_values.mean()), 2)
+        if not position_values.empty
+        else 0.0,
+        "atr_fallback_trades": atr_fallback_trades,
     }
 
 
@@ -99,6 +128,11 @@ def _empty_metrics(initial_cash: float) -> dict:
         "profit_factor": None,
         "sharpe_ratio": 0.0,
         "max_drawdown": 0.0,
+        "avg_position_fraction": 0.0,
+        "min_position_fraction": 0.0,
+        "max_position_fraction": 0.0,
+        "avg_position_value": 0.0,
+        "atr_fallback_trades": 0,
     }
 
 

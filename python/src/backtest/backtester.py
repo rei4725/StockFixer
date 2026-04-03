@@ -25,6 +25,8 @@ class Backtester:
         position_fraction: float = 0.5,
         atr_risk_pct: float = 0.02,
         atr_multiplier: float = 1.0,
+        atr_min_fraction: float = 0.1,
+        atr_max_fraction: float = 1.0,
     ):
         self.model_manager = model_manager
         self.signal_generator = signal_generator
@@ -42,6 +44,8 @@ class Backtester:
         self.position_fraction = position_fraction
         self.atr_risk_pct = atr_risk_pct
         self.atr_multiplier = atr_multiplier
+        self.atr_min_fraction = max(0.0, atr_min_fraction)
+        self.atr_max_fraction = min(1.0, max(0.0, atr_max_fraction))
 
     def run(
         self,
@@ -169,12 +173,13 @@ class Backtester:
             if sig == 1 and position == 0:
                 # Buy
                 atr_value = df.loc[date, "atr"] if "atr" in df.columns else None
-                qty = self._calc_qty(
+                position_details = self._calc_position_details(
                     cash,
                     price,
                     pred.get(date) if pred is not None else None,
                     atr_value=atr_value,
                 )
+                qty = position_details["qty"]
                 if qty > 0:
                     cost = qty * price * (1 + self.fee_rate + self.slippage)
                     cost_gross = qty * price
@@ -190,6 +195,13 @@ class Backtester:
                             "qty": qty,
                             "cash": cash,
                             "cash_gross": cash_gross,
+                            "position_fraction": position_details["position_fraction"],
+                            "position_value": round(cost_gross, 2),
+                            "sizing_mode": position_details["sizing_mode"],
+                            "atr_value": position_details["atr_value"],
+                            "atr_stop_distance": position_details["atr_stop_distance"],
+                            "atr_risk_amount": position_details["atr_risk_amount"],
+                            "atr_fallback_used": position_details["atr_fallback_used"],
                         }
                     )
             elif sig == -1 and position > 0:
@@ -241,6 +253,15 @@ class Backtester:
         pred_value: Optional[float] = None,
         atr_value: Optional[float] = None,
     ) -> int:
+        return self._calc_position_details(cash, price, pred_value, atr_value)["qty"]
+
+    def _calc_position_details(
+        self,
+        cash: float,
+        price: float,
+        pred_value: Optional[float] = None,
+        atr_value: Optional[float] = None,
+    ) -> dict:
         """
         ポジションサイジングに基づいて購入数量を算出する。
 
@@ -251,8 +272,20 @@ class Backtester:
             atr_value: ATR値（atr モードで使用）
 
         Returns:
-            購入数量（整数）
+            購入数量と補助情報
         """
+        unit_cost = price * (1 + self.fee_rate + self.slippage)
+        if unit_cost <= 0 or cash <= 0:
+            return {
+                "qty": 0,
+                "position_fraction": 0.0,
+                "sizing_mode": self.position_sizing,
+                "atr_value": atr_value,
+                "atr_stop_distance": None,
+                "atr_risk_amount": None,
+                "atr_fallback_used": False,
+            }
+
         if self.position_sizing == "fixed":
             available = cash * self.position_fraction
         elif self.position_sizing == "confidence" and pred_value is not None:
@@ -271,15 +304,65 @@ class Backtester:
             risk_amount = cash * self.atr_risk_pct
             stop_distance = atr_value * self.atr_multiplier
             qty_by_risk = risk_amount / stop_distance
-            # 上限キャップ: 現金の全額を超えない
-            max_qty = cash / (price * (1 + self.fee_rate + self.slippage))
-            return max(0, int(min(qty_by_risk, max_qty)))
+            min_fraction = min(self.atr_min_fraction, self.atr_max_fraction)
+            max_fraction = max(self.atr_min_fraction, self.atr_max_fraction)
+            min_qty = int((cash * min_fraction) // unit_cost)
+            max_qty_by_fraction = int((cash * max_fraction) // unit_cost)
+            max_affordable_qty = int(cash // unit_cost)
+            effective_max_qty = min(max_affordable_qty, max_qty_by_fraction)
+            if effective_max_qty <= 0:
+                qty = 0
+            else:
+                qty = int(min(qty_by_risk, effective_max_qty))
+                if min_qty > effective_max_qty:
+                    min_qty = effective_max_qty
+                qty = max(min_qty, qty)
+            return self._build_position_details(
+                qty=qty,
+                cash=cash,
+                unit_cost=unit_cost,
+                sizing_mode="atr",
+                atr_value=atr_value,
+                atr_stop_distance=round(stop_distance, 6),
+                atr_risk_amount=round(risk_amount, 6),
+            )
         else:
             # "full" モード（デフォルト: 全額投入）
             available = cash
+            fallback_used = self.position_sizing == "atr"
 
-        unit_cost = price * (1 + self.fee_rate + self.slippage)
-        return int(available // unit_cost) if unit_cost > 0 else 0
+        qty = int(available // unit_cost)
+        return self._build_position_details(
+            qty=qty,
+            cash=cash,
+            unit_cost=unit_cost,
+            sizing_mode="full" if self.position_sizing == "atr" else self.position_sizing,
+            atr_value=atr_value,
+            atr_fallback_used=fallback_used if self.position_sizing == "atr" else False,
+        )
+
+    @staticmethod
+    def _build_position_details(
+        qty: int,
+        cash: float,
+        unit_cost: float,
+        sizing_mode: str,
+        atr_value: Optional[float],
+        atr_stop_distance: Optional[float] = None,
+        atr_risk_amount: Optional[float] = None,
+        atr_fallback_used: bool = False,
+    ) -> dict:
+        position_value = max(0, qty) * unit_cost
+        position_fraction = position_value / cash if cash > 0 else 0.0
+        return {
+            "qty": max(0, qty),
+            "position_fraction": round(position_fraction, 6),
+            "sizing_mode": sizing_mode,
+            "atr_value": atr_value,
+            "atr_stop_distance": atr_stop_distance,
+            "atr_risk_amount": atr_risk_amount,
+            "atr_fallback_used": atr_fallback_used,
+        }
 
     def _load_from_raw(self) -> pd.DataFrame:
         """market_data_raw テーブルからOHLCVを取得する"""
