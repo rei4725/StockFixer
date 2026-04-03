@@ -12,49 +12,58 @@ logger = get_logger(__name__)
 
 def run_daily_pipeline():
     """
-    毎日実行: データ取得 → 予測 → Discord通知用CSV出力
+    毎日実行: データ取得 → 予測 → ドリフト監視 → Discord通知用CSV出力
 
     流れ:
         1. 全マーケットのデータを取得（バッチ）
         2. Top10/Worst10の予測を実行
-        3. Discord通知用CSVを出力し、Botに通知
+        3. 日次ドリフトチェック（閾値超過銘柄を自動再学習）
+        4. Discord通知
     """
     logger.info("=== 日次パイプライン開始 ===")
 
     from src.api.discord_utils import send_daily_pipeline_completion, send_daily_pipeline_error
 
     # 1. データ取得（バッチ）
-    logger.info("[1/2] データ取得開始")
+    logger.info("[1/3] データ取得開始")
     from src.services.data_pipeline import run_data_batch
 
     try:
         run_data_batch()
-        logger.info("[1/2] データ取得完了")
+        logger.info("[1/3] データ取得完了")
     except Exception as e:
-        logger.error(f"[1/2] データ取得失敗: {e}")
+        logger.error(f"[1/3] データ取得失敗: {e}")
         send_daily_pipeline_error(f"データ取得失敗: {e}")
         raise
 
     # 2. 予測（Top10/Worst10）
-    logger.info("[2/2] 予測開始")
+    logger.info("[2/3] 予測開始")
     from src.services.prediction_pipeline import output_top_worst_results, predict_all_unified
 
     try:
         output_rows = predict_all_unified()
         output_top_worst_results(output_rows, mode="unified")
-        logger.info("[2/2] 予測完了")
+        logger.info("[2/3] 予測完了")
     except Exception as e:
-        logger.error(f"[2/2] 予測失敗: {e}")
+        logger.error(f"[2/3] 予測失敗: {e}")
         send_daily_pipeline_error(f"予測失敗: {e}")
         raise
 
-    # 3. Discord通知
-    logger.info("[3/3] Discord通知送信")
+    # 3. 日次ドリフトチェック（非致命的：失敗しても後続処理を継続）
+    logger.info("[3/3] 日次ドリフトチェック開始")
+    try:
+        run_daily_drift_check()
+        logger.info("[3/3] 日次ドリフトチェック完了")
+    except Exception as e:
+        logger.error(f"[3/3] 日次ドリフトチェック失敗: {e}", exc_info=True)
+
+    # 4. Discord通知
+    logger.info("[4/4] Discord通知送信")
     try:
         send_daily_pipeline_completion()
-        logger.info("[3/3] Discord通知完了")
+        logger.info("[4/4] Discord通知完了")
     except Exception as e:
-        logger.error(f"[3/3] Discord通知失敗: {e}")
+        logger.error(f"[4/4] Discord通知失敗: {e}")
         raise
 
     logger.info("=== 日次パイプライン完了 ===")
@@ -329,3 +338,74 @@ def run_weekly_watchlist_refresh():
     except Exception as e:
         logger.error(f"ウォッチリスト更新失敗: {e}", exc_info=True)
         raise
+
+
+def run_daily_drift_check():
+    """
+    日次ドリフト監視: 直近 20 営業日の MAE / Hit Rate を監視し、閾値超過銘柄を自動再学習する。
+
+    環境変数:
+        DRIFT_MAE_THRESHOLD:      MAE 閾値（デフォルト 0.02 = 2%）
+        DRIFT_HIT_RATE_THRESHOLD: Hit Rate 閾値（デフォルト 0.45 = 45%）
+
+    完了条件:
+        - 閾値超過銘柄が存在する場合に銘柄別モデルを再学習
+        - 再学習トリガーを Discord に通知
+    """
+    import os
+
+    from src.utils.db import load_drift_summary
+
+    mae_threshold = float(os.environ.get("DRIFT_MAE_THRESHOLD", "0.02"))
+    hit_rate_threshold = float(os.environ.get("DRIFT_HIT_RATE_THRESHOLD", "0.45"))
+
+    logger.info(
+        f"=== 日次ドリフトチェック開始 (MAE閾値={mae_threshold:.2%}, HitRate閾値={hit_rate_threshold:.0%}) ==="
+    )
+
+    summary = load_drift_summary(horizon=1, recent_n=20)
+    if summary is None or summary.empty:
+        logger.info("ドリフトチェック: 精度データなし（スキップ）")
+        return
+
+    triggered = summary[
+        (summary["mean_abs_error"] >= mae_threshold)
+        | (summary["direction_accuracy"] <= hit_rate_threshold)
+    ]
+
+    if triggered.empty:
+        logger.info("ドリフトチェック: 閾値超過銘柄なし")
+        return
+
+    triggered_list = triggered[
+        ["market", "symbol", "mean_abs_error", "direction_accuracy"]
+    ].to_dict("records")
+    logger.warning(f"ドリフト検知: {len(triggered_list)} 銘柄が閾値超過 → 自動再学習開始")
+
+    # Discord 通知（再学習開始前）
+    try:
+        from src.api.discord_utils import send_drift_retrain_notification
+
+        send_drift_retrain_notification(triggered_list, mae_threshold, hit_rate_threshold)
+    except Exception as e:
+        logger.error(f"ドリフト通知失敗: {e}", exc_info=True)
+
+    # 銘柄別モデル再学習
+    from src.services.batch_runner import load_target_symbols
+    from src.services.model_training_pipeline import train_models_for_symbol
+
+    all_tasks = {(t.market, t.symbol): t for t in load_target_symbols()}
+    success_count = 0
+    for sym in triggered_list:
+        task = all_tasks.get((sym["market"], sym["symbol"]))
+        if task is None:
+            logger.warning(f"ドリフト再学習: タスクが見つかりません ({sym['market']}/{sym['symbol']})")
+            continue
+        try:
+            logger.info(f"ドリフト再学習開始: {sym['market']}/{sym['symbol']}")
+            train_models_for_symbol(task)
+            success_count += 1
+        except Exception as e:
+            logger.error(f"ドリフト再学習失敗 ({sym['market']}/{sym['symbol']}): {e}", exc_info=True)
+
+    logger.info(f"=== 日次ドリフトチェック完了: 再学習={success_count}/{len(triggered_list)} 件 ===")
