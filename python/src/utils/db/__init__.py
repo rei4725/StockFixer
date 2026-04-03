@@ -51,9 +51,11 @@ from src.utils.db.prediction import (  # noqa: F401
     load_prediction_accuracy,
     load_prediction_markets,
     load_prediction_results,
+    load_shap_latest,
     save_model_metrics,
     save_prediction_accuracy,
     save_prediction_results,
+    save_shap_values,
 )
 
 # --- stock_features ---

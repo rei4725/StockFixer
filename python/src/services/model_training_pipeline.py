@@ -12,7 +12,7 @@ import pandas as pd
 
 from src.domain.types import FeatureLoadResult, TrainingMetrics
 from src.models.model_manager import ModelManager
-from src.utils.db import load_stock_features, save_model_metrics
+from src.utils.db import load_stock_features, save_model_metrics, save_shap_values
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -88,6 +88,56 @@ def _compute_training_metrics(y_true: pd.Series, y_pred: pd.Series) -> TrainingM
     )
 
 
+def _compute_and_save_shap(
+    model,
+    X: pd.DataFrame,
+    market: str,
+    symbol: str,
+    model_name: str,
+    trained_at: str,
+    top_n: int = 10,
+) -> pd.DataFrame:
+    """
+    SHAP値を計算してDBに保存し、上位・下位特徴量のDataFrameを返す。
+
+    Args:
+        model: 学習済みモデルインスタンス（XGBoostModel / LightGBMModel）
+        X: 特徴量行列
+        market: マーケット識別子
+        symbol: 銘柄シンボル
+        model_name: モデル名
+        trained_at: 学習日時文字列
+        top_n: Discord通知する上位・下位N件
+
+    Returns:
+        pd.DataFrame: [feature, shap_mean, shap_rank] の上位+下位N件
+    """
+    try:
+        import shap
+
+        # サンプルサイズが大きい場合は計算コスト削減のため最大500行を使用
+        X_sample = X.iloc[-500:] if len(X) > 500 else X
+
+        explainer = shap.TreeExplainer(model.model)
+        shap_arr = explainer.shap_values(X_sample)
+
+        # 各特徴量の平均絶対SHAP値を計算
+        mean_abs = np.abs(shap_arr).mean(axis=0)
+        shap_df = pd.DataFrame({"feature": X_sample.columns.tolist(), "shap_mean": mean_abs})
+        shap_df = shap_df.sort_values("shap_mean", ascending=False).reset_index(drop=True)
+        shap_df["shap_rank"] = range(1, len(shap_df) + 1)
+
+        save_shap_values(market, symbol, model_name, trained_at, shap_df)
+
+        # 上位N件 + 下位N件を返す
+        top = shap_df.head(top_n)
+        bottom = shap_df.tail(top_n)
+        return pd.concat([top, bottom], ignore_index=True).drop_duplicates(subset=["feature"])
+    except Exception as e:
+        logger.warning(f"SHAP計算スキップ [{market}_{symbol}/{model_name}]: {e}")
+        return pd.DataFrame()
+
+
 def train_models_for_symbol(market: str, symbol: str, horizon: int = 1) -> dict:
     """
     単一銘柄に対してXGBoost・LightGBMモデルを学習・保存する
@@ -142,6 +192,18 @@ def train_models_for_symbol(market: str, symbol: str, horizon: int = 1) -> dict:
                 )
             except Exception as e:
                 logger.warning(f"精度指標保存スキップ [{market}_{symbol}/{model_name}]: {e}")
+            # SHAP特徴量寄与の計算・保存・Discord通知
+            try:
+                model = model_manager.get_model(model_name)
+                shap_top_bottom = _compute_and_save_shap(
+                    model, X, market, symbol, model_name, trained_at
+                )
+                if not shap_top_bottom.empty:
+                    from src.api.discord_utils import send_shap_notification
+
+                    send_shap_notification(market, symbol, model_name, shap_top_bottom)
+            except Exception as e:
+                logger.warning(f"SHAP通知スキップ [{market}_{symbol}/{model_name}]: {e}")
 
         logger.info(f"[モデル作成完了] {market}/{symbol} (horizon={horizon}d)")
         return {"market": market, "symbol": symbol, "status": "success"}

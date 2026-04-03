@@ -266,6 +266,20 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
         )
     """
     )
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS shap_values (
+            market      VARCHAR NOT NULL,
+            symbol      VARCHAR NOT NULL,
+            model_name  VARCHAR NOT NULL,
+            trained_at  VARCHAR NOT NULL,
+            feature     VARCHAR NOT NULL,
+            shap_mean   DOUBLE NOT NULL,
+            shap_rank   INTEGER NOT NULL,
+            PRIMARY KEY (market, symbol, model_name, trained_at, feature)
+        )
+    """
+    )
 
 
 def init_tables() -> None:

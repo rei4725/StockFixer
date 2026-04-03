@@ -356,3 +356,107 @@ def load_drift_summary(horizon: int = 1, recent_n: int = 30) -> pd.DataFrame:
         except Exception as e:
             logger.error(f"load_drift_summary 失敗: {e}", exc_info=True)
             return pd.DataFrame()
+
+
+# ---------------------------------------------------------------------------
+# shap_values
+# ---------------------------------------------------------------------------
+
+
+def save_shap_values(
+    market: str,
+    symbol: str,
+    model_name: str,
+    trained_at: str,
+    shap_df: pd.DataFrame,
+) -> None:
+    """
+    SHAP特徴量寄与をshap_valuesテーブルに保存する（Delete-Insert方式）。
+
+    Args:
+        market: マーケット識別子
+        symbol: 銘柄シンボル
+        model_name: モデル名
+        trained_at: 学習日時文字列 (ex: "20260314_120000")
+        shap_df: 列 [feature, shap_mean, shap_rank] を持つ DataFrame
+    """
+    save_df = shap_df.copy()
+    save_df["market"] = market
+    save_df["symbol"] = symbol
+    save_df["model_name"] = model_name
+    save_df["trained_at"] = trained_at
+
+    with _db_connection() as con:
+        con.execute(
+            "DELETE FROM shap_values "
+            "WHERE market = ? AND symbol = ? AND model_name = ? AND trained_at = ?",
+            [market, symbol, model_name, trained_at],
+        )
+        con.execute(
+            """
+            INSERT INTO shap_values
+                (market, symbol, model_name, trained_at, feature, shap_mean, shap_rank)
+            SELECT market, symbol, model_name, trained_at, feature, shap_mean, shap_rank
+            FROM save_df
+            """
+        )
+    logger.debug(f"shap_values 保存: [{market}_{symbol}/{model_name}] {len(save_df)}特徴量")
+
+
+def load_shap_latest(
+    market: str,
+    symbol: str,
+    model_name: str,
+    top_n: int = 10,
+    bottom_n: int = 10,
+) -> pd.DataFrame:
+    """
+    指定銘柄・モデルの最新SHAP値を取得する。
+
+    Args:
+        market: マーケット識別子
+        symbol: 銘柄シンボル
+        model_name: モデル名
+        top_n: 上位N特徴量
+        bottom_n: 下位N特徴量
+
+    Returns:
+        pd.DataFrame: [feature, shap_mean, shap_rank, trained_at]
+    """
+    with _db_connection() as con:
+        try:
+            latest = con.execute(
+                "SELECT MAX(trained_at) FROM shap_values "
+                "WHERE market = ? AND symbol = ? AND model_name = ?",
+                [market, symbol, model_name],
+            ).fetchone()[0]
+            if latest is None:
+                return pd.DataFrame()
+            top_df = con.execute(
+                f"""
+                SELECT feature, shap_mean, shap_rank, trained_at
+                FROM shap_values
+                WHERE market = ? AND symbol = ? AND model_name = ? AND trained_at = ?
+                ORDER BY shap_rank ASC
+                LIMIT {int(top_n)}
+                """,
+                [market, symbol, model_name, latest],
+            ).fetchdf()
+            bottom_df = con.execute(
+                f"""
+                SELECT feature, shap_mean, shap_rank, trained_at
+                FROM shap_values
+                WHERE market = ? AND symbol = ? AND model_name = ? AND trained_at = ?
+                ORDER BY shap_rank DESC
+                LIMIT {int(bottom_n)}
+                """,
+                [market, symbol, model_name, latest],
+            ).fetchdf()
+            return pd.concat([top_df, bottom_df], ignore_index=True).drop_duplicates(
+                subset=["feature"]
+            )
+        except Exception as e:
+            logger.error(
+                f"load_shap_latest 失敗 [{market}_{symbol}/{model_name}]: {e}", exc_info=True
+            )
+            return pd.DataFrame()
