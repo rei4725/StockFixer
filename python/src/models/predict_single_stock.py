@@ -18,6 +18,134 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 
 
+def _resolve_model_types(horizon: int, model_types=None) -> list:
+    """
+    ホライズンに応じたモデルファイル名リストを解決する（後方互換）。
+
+    Args:
+        horizon: 予測ホライズン（営業日）
+        model_types: 明示指定がある場合はそのまま返す
+
+    Returns:
+        モデルファイル名のリスト
+    """
+    if model_types is not None:
+        return list(model_types)
+    if horizon == 1:
+        return ["StockXGBoostModel.joblib", "StockLightGBMModel.joblib"]
+    return [
+        f"StockXGBoostModel_{horizon}d.joblib",
+        f"StockLightGBMModel_{horizon}d.joblib",
+    ]
+
+
+def _fetch_current_price(market: str, symbol: str, df: pd.DataFrame) -> "float | None":
+    """
+    yfinanceでリアルタイム価格を取得し、失敗時はdfの末尾Close値を使用する。
+
+    Args:
+        market: マーケット識別子
+        symbol: 銘柄コード
+        df: 株価DataFrame（fallback用）
+
+    Returns:
+        現在価格（float）。取得不能な場合は None。
+    """
+    try:
+        yf_ticker = get_ticker(market, symbol)
+        ticker_obj = yf.Ticker(yf_ticker)
+        hist = ticker_obj.history(period="1d")
+        if not hist.empty:
+            return float(hist["Close"].iloc[-1])
+    except Exception:
+        pass
+    # yfinance失敗時はdfの末尾を使用（fallback）
+    try:
+        close_col = df["Close"]
+        if isinstance(close_col, pd.DataFrame):
+            close_col = close_col.iloc[:, 0]
+        return float(close_col.iloc[-1])
+    except Exception:
+        return None
+
+
+def _run_single_model_prediction(
+    model_path: str,
+    market: str,
+    symbol: str,
+    df: pd.DataFrame,
+    current_price: float,
+) -> "tuple[float, float] | None":
+    """
+    1つのモデルで予測を行い (pred_price, pred_return) を返す。
+
+    Args:
+        model_path: モデルファイルパス
+        market: マーケット識別子
+        symbol: 銘柄コード
+        df: 株価DataFrame
+        current_price: 現在価格（絶対価格計算に使用）
+
+    Returns:
+        (pred_price, pred_return) のタプル。失敗時は None。
+    """
+    df_feat = add_technical_indicators(df)
+    X, _ = create_basic_lag_features(df_feat)
+    if X.empty:
+        return None
+    latest_X = X.iloc[[-1]]
+    mm = ModelManager()
+    model_name = os.path.splitext(os.path.basename(model_path))[0]
+    model = mm.load_model(model_name, market=market, symbol=symbol)
+    pred = model.predict(latest_X)
+    if isinstance(pred, pd.Series):
+        pred_return = float(pred.iloc[-1])
+    elif isinstance(pred, (list, tuple)):
+        pred_return = float(pred[-1])
+    else:
+        # numpy配列など: flat[-1] で末尾要素をスカラー変換（ndim>0 の場合の警告を回避）
+        pred_return = float(np.asarray(pred).flat[-1])
+    pred_price = current_price * (1 + pred_return)
+    return pred_price, pred_return
+
+
+def _build_prediction_result(
+    market: str,
+    symbol: str,
+    current_price: "float | None",
+    pred_prices: list,
+    pred_returns: list,
+) -> "PredictionResult | None":
+    """
+    複数モデルの予測を集計して PredictionResult を構築する（純粋関数）。
+
+    Args:
+        market: マーケット識別子
+        symbol: 銘柄コード
+        current_price: 現在価格
+        pred_prices: 各モデルの予測絶対価格リスト
+        pred_returns: 各モデルの予測変化率リスト
+
+    Returns:
+        集計済み PredictionResult。pred_prices が空の場合は None。
+    """
+    if not pred_prices or current_price is None:
+        return None
+    avg_pred_price = sum(pred_prices) / len(pred_prices)
+    diff_ratio = (avg_pred_price - current_price) / current_price
+    model_std = float(np.std(pred_returns)) if len(pred_returns) > 1 else 0.0
+    confidence_ratio = 1.0 / (1.0 + model_std)
+    return PredictionResult(
+        market=market,
+        symbol=symbol,
+        current_price=float(current_price),
+        avg_pred_price=float(avg_pred_price),
+        diff_ratio=float(diff_ratio),
+        model_count=int(len(pred_prices)),
+        confidence_ratio=confidence_ratio,
+    )
+
+
 def predict_single_stock(
     market: str, symbol: str, model_types=None, lookback_days=90, horizon: int = 1
 ) -> "PredictionResult | None":
@@ -31,21 +159,12 @@ def predict_single_stock(
         lookback_days: データ取得日数
         horizon: 予測ホライズン（営業日）。1=翌日, 3=3日後, 5=5日後, 10=10日後
     """
-    # horizon に応じたモデルファイル名の決定
-    # horizon=1 は既存名を使用（後方互換）、それ以外は _Nd サフィックス
-    if model_types is None:
-        if horizon == 1:
-            model_types = ["StockXGBoostModel.joblib", "StockLightGBMModel.joblib"]
-        else:
-            model_types = [
-                f"StockXGBoostModel_{horizon}d.joblib",
-                f"StockLightGBMModel_{horizon}d.joblib",
-            ]
+    resolved_model_types = _resolve_model_types(horizon, model_types)
 
     pred_prices = []
     pred_returns = []
     current_price = None
-    for model_type in model_types:
+    for model_type in resolved_model_types:
         model_path = os.path.join(get_models_subdir(market, symbol), model_type)
         if not os.path.exists(model_path):
             # モデルが存在しない場合はスキップ（並列実行時のDB書き込みロック回避）
@@ -62,41 +181,15 @@ def predict_single_stock(
             if df.empty or "Close" not in df.columns:
                 print(f"[{symbol}] 株価データ取得失敗")
                 continue
-            # 現在価格をyfinanceからリアルタイムで取得
-            try:
-                yf_ticker = get_ticker(market, symbol)
-                ticker_obj = yf.Ticker(yf_ticker)
-                hist = ticker_obj.history(period="1d")
-                if not hist.empty:
-                    current_price = float(hist["Close"].iloc[-1])
-                else:
-                    close_col = df["Close"]
-                    if hasattr(close_col, "ndim") and close_col.ndim > 1:
-                        close_col = close_col.iloc[:, 0]
-                    current_price = float(close_col.iloc[-1])
-            except Exception:
-                close_col = df["Close"]
-                if hasattr(close_col, "ndim") and close_col.ndim > 1:
-                    close_col = close_col.iloc[:, 0]
-                current_price = float(close_col.iloc[-1])
-            df_feat = add_technical_indicators(df)
-            X, y = create_basic_lag_features(df_feat)
-            if X.empty:
+            current_price = _fetch_current_price(market, symbol, df)
+            if current_price is None:
+                print(f"[{symbol}] 価格取得失敗")
+                continue
+            result = _run_single_model_prediction(model_path, market, symbol, df, current_price)
+            if result is None:
                 print(f"[{symbol}] 特徴量生成失敗")
                 continue
-            latest_X = X.iloc[[-1]]
-            mm = ModelManager()
-            model_name = os.path.splitext(os.path.basename(model_path))[0]
-            model = mm.load_model(model_name, market=market, symbol=symbol)
-            pred = model.predict(latest_X)
-            if isinstance(pred, pd.Series):
-                pred_return = float(pred.iloc[-1])
-            elif isinstance(pred, (list, tuple)):
-                pred_return = float(pred[-1])
-            else:
-                pred_return = float(pred)
-            # 変化率から絶対価格を計算
-            pred_price = current_price * (1 + pred_return)
+            pred_price, pred_return = result
             pred_prices.append(pred_price)
             pred_returns.append(pred_return)
         except Exception as e:
@@ -104,29 +197,7 @@ def predict_single_stock(
             traceback.print_exc()
             continue
 
-    if not pred_prices or current_price is None:
-        return None
-
-    # スカラー値への変換を確実に行う
-    try:
-        # pandas Series の場合は最初の要素を取得
-        current_price = float(current_price.iloc[0])  # type: ignore[attr-defined]
-    except AttributeError:
-        current_price = float(current_price)  # type: ignore[arg-type]
-
-    avg_pred_price = sum(pred_prices) / len(pred_prices)
-    diff_ratio = (avg_pred_price - current_price) / current_price
-    model_std = float(np.std(pred_returns)) if len(pred_returns) > 1 else 0.0
-    confidence_ratio = 1.0 / (1.0 + model_std)
-    return PredictionResult(
-        market=market,
-        symbol=symbol,
-        current_price=float(current_price),
-        avg_pred_price=float(avg_pred_price),
-        diff_ratio=float(diff_ratio),
-        model_count=int(len(pred_prices)),
-        confidence_ratio=confidence_ratio,
-    )
+    return _build_prediction_result(market, symbol, current_price, pred_prices, pred_returns)
 
 
 def predict_single_stock_multi_horizon(
