@@ -253,6 +253,16 @@ class TestMaxDrawdown(unittest.TestCase):
 class TestPlotBacktestAndBenchmark(unittest.TestCase):
     """plot_backtest / fetch_benchmark_returns のテスト"""
 
+    def setUp(self):
+        import yfinance as _real_yf
+
+        self._real_yf = _real_yf
+
+    def tearDown(self):
+        import sys
+
+        sys.modules["yfinance"] = self._real_yf
+
     def _install_fake_matplotlib(self):
         class _Axis:
             def __init__(self):

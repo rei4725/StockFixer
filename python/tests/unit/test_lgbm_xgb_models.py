@@ -1,6 +1,8 @@
 """LightGBMModel / XGBoostModel のユニットテスト"""
 
+import os
 import sys
+import tempfile
 import unittest
 
 import numpy as np
@@ -189,6 +191,69 @@ class TestXGBoostModel(unittest.TestCase):
         result = model.predict(self.X.iloc[[-1]])
 
         self.assertEqual(len(result), 1)
+
+
+class TestBaseModelSaveLoad(unittest.TestCase):
+    """BaseModel.save_model / load_model / get_model_name のテスト（LightGBMModel 経由）"""
+
+    @classmethod
+    def setUpClass(cls):
+        _clear_mock_modules()
+
+    def setUp(self):
+        self.X, self.y = _make_xy()
+        from src.models.lightgbm_model import LightGBMModel
+
+        self.model = LightGBMModel("TestLGBM")
+        self.model.train(self.X, self.y)
+        self.tmp_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        for f in os.listdir(self.tmp_dir):
+            os.remove(os.path.join(self.tmp_dir, f))
+        os.rmdir(self.tmp_dir)
+
+    def test_get_model_name(self):
+        """get_model_name がコンストラクタで設定した名前を返すこと"""
+        self.assertEqual(self.model.get_model_name(), "TestLGBM")
+
+    def test_save_and_load_roundtrip(self):
+        """save_model で保存し load_model で読み込むことができること"""
+        path = os.path.join(self.tmp_dir, "model.joblib")
+        self.model.save_model(path)
+        self.assertTrue(os.path.exists(path))
+
+        from src.models.lightgbm_model import LightGBMModel
+
+        model2 = LightGBMModel("TestLGBM2")
+        model2.load_model(path)
+        self.assertIsNotNone(model2.model)
+
+    def test_saved_model_produces_same_predictions(self):
+        """保存→読み込み後の予測が元モデルと一致すること"""
+        import numpy as np
+
+        path = os.path.join(self.tmp_dir, "model.joblib")
+        pred_before = self.model.predict(self.X)
+        self.model.save_model(path)
+
+        from src.models.lightgbm_model import LightGBMModel
+
+        model2 = LightGBMModel()
+        model2.load_model(path)
+        pred_after = model2.predict(self.X)
+
+        np.testing.assert_array_almost_equal(pred_before.values, pred_after.values, decimal=10)
+
+    def test_save_model_raises_on_invalid_path(self):
+        """存在しないディレクトリへの保存は例外が伝播すること"""
+        with self.assertRaises(OSError):
+            self.model.save_model("/nonexistent_dir/model.joblib")
+
+    def test_load_model_raises_on_missing_file(self):
+        """存在しないファイルのロードは例外が伝播すること"""
+        with self.assertRaises((FileNotFoundError, OSError)):
+            self.model.load_model("/nonexistent_dir/model.joblib")
 
 
 if __name__ == "__main__":

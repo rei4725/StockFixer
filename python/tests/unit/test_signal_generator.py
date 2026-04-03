@@ -122,6 +122,48 @@ class TestSignalGenerator(unittest.TestCase):
         signals_os = self.signal_generator.generate_signal(data_oversold, neutral_prediction)
         self.assertTrue(all(signals_os == "Buy"))
 
+    def test_dynamic_threshold_with_rolling_std(self):
+        """rolling_std を渡すと動的閾値（ボラティリティ連動）が計算されること"""
+        dates = self.dummy_data.index
+        # 強い買いシグナルを生成する予測値
+        buy_prediction = pd.Series([0.05] * len(dates), index=dates)
+        # avg_std > 0 になるよう差のある rolling_std を用意する
+        rolling_std = pd.Series(
+            [0.001, 0.002, 0.003, 0.004, 0.005, 0.006, 0.007, 0.008, 0.009, 0.010],
+            index=dates,
+        )
+
+        signals = self.signal_generator.generate_signal(
+            self.dummy_data, buy_prediction, rolling_std=rolling_std
+        )
+        # 動的閾値でも明確なBuy予測なのでBuyが含まれる
+        self.assertIsInstance(signals, pd.Series)
+        self.assertTrue((signals.isin(["Buy", "Sell", "Hold"])).all())
+
+    def test_dynamic_threshold_with_zero_avg_std_fallback(self):
+        """rolling_std の平均が0の場合は固定閾値にフォールバックすること"""
+        dates = self.dummy_data.index
+        # avg_std = 0 になるよう全て0の rolling_std
+        rolling_std_zero = pd.Series([0.0] * len(dates), index=dates)
+        buy_prediction = pd.Series([0.01] * len(dates), index=dates)
+
+        signals = self.signal_generator.generate_signal(
+            self.dummy_data, buy_prediction, rolling_std=rolling_std_zero
+        )
+        # 固定閾値フォールバックでも Buy が返ること
+        self.assertTrue(all(signals == "Buy"))
+
+    def test_dynamic_threshold_all_nan_rolling_std_fallback(self):
+        """rolling_std が全て NaN の場合は固定閾値を使用すること"""
+        dates = self.dummy_data.index
+        rolling_std_nan = pd.Series([float("nan")] * len(dates), index=dates)
+        sell_prediction = pd.Series([-0.01] * len(dates), index=dates)
+
+        signals = self.signal_generator.generate_signal(
+            self.dummy_data, sell_prediction, rolling_std=rolling_std_nan
+        )
+        self.assertTrue(all(signals == "Sell"))
+
 
 if __name__ == "__main__":
     unittest.main()

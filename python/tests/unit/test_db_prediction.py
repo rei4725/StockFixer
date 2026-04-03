@@ -4,15 +4,22 @@ import os
 import tempfile
 import unittest
 
+import pandas as pd
+
 import src.utils.data_path_utils as path_utils
 import src.utils.db as db_module
 from src.domain.types import PredictionResult, TrainingMetrics
 from src.utils.db.prediction import (
+    load_drift_summary,
     load_latest_prediction_timestamp,
+    load_prediction_accuracy,
     load_prediction_markets,
     load_prediction_results,
+    load_shap_latest,
     save_model_metrics,
+    save_prediction_accuracy,
     save_prediction_results,
+    save_shap_values,
 )
 
 
@@ -262,6 +269,276 @@ class TestSaveModelMetrics(_TmpDbTestCase):
         """JP市場の指標も保存できること"""
         metrics = TrainingMetrics(rmse=0.015, directional_accuracy=0.60, n_samples=300)
         save_model_metrics("jp", "7203", "StockXGBoostModel", "20260403_120000", metrics)
+
+
+class TestSavePredictionAccuracy(_TmpDbTestCase):
+    """save_prediction_accuracy のテスト"""
+
+    def _make_row(self, **kwargs):
+        base = {
+            "market": "us",
+            "symbol": "AAPL",
+            "model_name": "StockXGBoostModel",
+            "predicted_at": "20260403_120000",
+            "horizon": 1,
+            "predicted_price": 102.0,
+            "actual_price": 101.5,
+            "predicted_ratio": 0.02,
+            "actual_ratio": 0.015,
+            "direction_match": True,
+        }
+        base.update(kwargs)
+        return base
+
+    def test_save_returns_count(self):
+        """保存件数を返すこと"""
+        rows = [self._make_row()]
+        count = save_prediction_accuracy(rows)
+        self.assertEqual(count, 1)
+
+    def test_save_multiple_rows(self):
+        """複数行を保存できること"""
+        rows = [
+            self._make_row(symbol="AAPL"),
+            self._make_row(symbol="MSFT"),
+            self._make_row(symbol="GOOG"),
+        ]
+        count = save_prediction_accuracy(rows)
+        self.assertEqual(count, 3)
+
+    def test_empty_rows_returns_zero(self):
+        """空リストは0を返すこと"""
+        count = save_prediction_accuracy([])
+        self.assertEqual(count, 0)
+
+    def test_horizon_default_is_one(self):
+        """horizonを省略した場合はデフォルト1で保存されること"""
+        row = self._make_row()
+        row.pop("horizon")
+        save_prediction_accuracy([row])
+        df = load_prediction_accuracy(horizon=1)
+        self.assertFalse(df.empty)
+
+
+class TestLoadPredictionAccuracy(_TmpDbTestCase):
+    """load_prediction_accuracy のテスト"""
+
+    def setUp(self):
+        super().setUp()
+        rows = [
+            {
+                "market": "us",
+                "symbol": "AAPL",
+                "model_name": "XGB",
+                "predicted_at": "20260403_120000",
+                "horizon": 1,
+                "predicted_price": 102.0,
+                "actual_price": 101.5,
+                "predicted_ratio": 0.02,
+                "actual_ratio": 0.015,
+                "direction_match": True,
+            },
+            {
+                "market": "us",
+                "symbol": "MSFT",
+                "model_name": "XGB",
+                "predicted_at": "20260403_120000",
+                "horizon": 1,
+                "predicted_price": 305.0,
+                "actual_price": 303.0,
+                "predicted_ratio": 0.017,
+                "actual_ratio": 0.010,
+                "direction_match": True,
+            },
+            {
+                "market": "jp",
+                "symbol": "7203",
+                "model_name": "XGB",
+                "predicted_at": "20260403_120000",
+                "horizon": 5,
+                "predicted_price": 3100.0,
+                "actual_price": 3050.0,
+                "predicted_ratio": 0.033,
+                "actual_ratio": 0.017,
+                "direction_match": True,
+            },
+        ]
+        save_prediction_accuracy(rows)
+
+    def test_load_all_returns_dataframe(self):
+        """全件取得でDataFrameが返ること"""
+        df = load_prediction_accuracy(horizon=1)
+        self.assertIsInstance(df, pd.DataFrame)
+        self.assertFalse(df.empty)
+
+    def test_filter_by_market(self):
+        """market フィルタが機能すること"""
+        df = load_prediction_accuracy(market="us", horizon=1)
+        self.assertTrue((df["market"] == "us").all())
+
+    def test_filter_by_symbol(self):
+        """symbol フィルタが機能すること"""
+        df = load_prediction_accuracy(symbol="AAPL", horizon=1)
+        self.assertTrue((df["symbol"] == "AAPL").all())
+
+    def test_filter_by_horizon(self):
+        """horizon フィルタが機能すること"""
+        df = load_prediction_accuracy(horizon=5)
+        self.assertFalse(df.empty)
+        self.assertTrue((df["horizon"] == 5).all())
+
+    def test_limit_parameter(self):
+        """limit パラメータが機能すること"""
+        df = load_prediction_accuracy(horizon=1, limit=1)
+        self.assertLessEqual(len(df), 1)
+
+    def test_empty_for_unknown_horizon(self):
+        """存在しないhorizonは空DataFrameを返すこと"""
+        df = load_prediction_accuracy(horizon=99)
+        self.assertTrue(df.empty)
+
+
+class TestLoadDriftSummary(_TmpDbTestCase):
+    """load_drift_summary のテスト"""
+
+    def setUp(self):
+        super().setUp()
+        rows = []
+        for i in range(5):
+            rows.append(
+                {
+                    "market": "us",
+                    "symbol": "AAPL",
+                    "model_name": "XGB",
+                    "predicted_at": f"2026040{i+1}_120000",
+                    "horizon": 1,
+                    "predicted_price": 102.0,
+                    "actual_price": 101.5,
+                    "predicted_ratio": 0.02,
+                    "actual_ratio": 0.015,
+                    "direction_match": i % 2 == 0,
+                }
+            )
+        rows.append(
+            {
+                "market": "jp",
+                "symbol": "7203",
+                "model_name": "XGB",
+                "predicted_at": "20260401_120000",
+                "horizon": 1,
+                "predicted_price": 3100.0,
+                "actual_price": 3050.0,
+                "predicted_ratio": 0.03,
+                "actual_ratio": 0.017,
+                "direction_match": True,
+            }
+        )
+        save_prediction_accuracy(rows)
+
+    def test_returns_dataframe(self):
+        """DataFrameが返ること"""
+        df = load_drift_summary(horizon=1)
+        self.assertIsInstance(df, pd.DataFrame)
+
+    def test_contains_direction_accuracy(self):
+        """direction_accuracy 列が含まれること"""
+        df = load_drift_summary(horizon=1)
+        self.assertIn("direction_accuracy", df.columns)
+
+    def test_contains_mean_abs_error(self):
+        """mean_abs_error 列が含まれること"""
+        df = load_drift_summary(horizon=1)
+        self.assertIn("mean_abs_error", df.columns)
+
+    def test_recent_n_limits_records(self):
+        """recent_n が機能すること（全件よりも少ないデータで集計）"""
+        df_full = load_drift_summary(horizon=1, recent_n=100)
+        df_limited = load_drift_summary(horizon=1, recent_n=2)
+        self.assertFalse(df_limited.empty)
+        # recent_n制限で同じか少ないn_samplesになる
+        if len(df_full) > 0 and len(df_limited) > 0:
+            self.assertLessEqual(
+                df_limited["n_samples"].max(),
+                df_full["n_samples"].max(),
+            )
+
+    def test_empty_for_unknown_horizon(self):
+        """存在しないhorizonは空DataFrameを返すこと"""
+        df = load_drift_summary(horizon=99)
+        self.assertTrue(df.empty)
+
+
+class TestSaveShapValues(_TmpDbTestCase):
+    """save_shap_values のテスト"""
+
+    def _make_shap_df(self, n=5):
+        return pd.DataFrame(
+            {
+                "feature": [f"feat_{i}" for i in range(n)],
+                "shap_mean": [0.1 * i for i in range(n)],
+                "shap_rank": list(range(1, n + 1)),
+            }
+        )
+
+    def test_save_without_error(self):
+        """保存がエラーなく実行されること"""
+        shap_df = self._make_shap_df()
+        save_shap_values("us", "AAPL", "StockXGBoostModel", "20260403_120000", shap_df)
+
+    def test_save_and_load_roundtrip(self):
+        """保存したSHAP値を読み込めること"""
+        shap_df = self._make_shap_df(3)
+        save_shap_values("us", "AAPL", "StockXGBoostModel", "20260403_120000", shap_df)
+
+        result = load_shap_latest("us", "AAPL", "StockXGBoostModel")
+        self.assertFalse(result.empty)
+        self.assertIn("feature", result.columns)
+
+    def test_delete_insert_no_duplicate(self):
+        """同じキーに2回保存しても重複しないこと"""
+        shap_df = self._make_shap_df(3)
+        save_shap_values("us", "AAPL", "StockXGBoostModel", "20260403_120000", shap_df)
+        save_shap_values("us", "AAPL", "StockXGBoostModel", "20260403_120000", shap_df)
+
+        result = load_shap_latest("us", "AAPL", "StockXGBoostModel")
+        self.assertEqual(len(result), 3)
+
+
+class TestLoadShapLatest(_TmpDbTestCase):
+    """load_shap_latest のテスト"""
+
+    def setUp(self):
+        super().setUp()
+        shap_df = pd.DataFrame(
+            {
+                "feature": [f"feat_{i}" for i in range(10)],
+                "shap_mean": [0.1 * (10 - i) for i in range(10)],
+                "shap_rank": list(range(1, 11)),
+            }
+        )
+        save_shap_values("us", "AAPL", "StockXGBoostModel", "20260403_120000", shap_df)
+
+    def test_returns_dataframe(self):
+        """DataFrameが返ること"""
+        result = load_shap_latest("us", "AAPL", "StockXGBoostModel")
+        self.assertIsInstance(result, pd.DataFrame)
+        self.assertFalse(result.empty)
+
+    def test_top_n_limit(self):
+        """top_n でフィルタした件数が取得されること"""
+        result = load_shap_latest("us", "AAPL", "StockXGBoostModel", top_n=3, bottom_n=0)
+        self.assertLessEqual(len(result), 3)
+
+    def test_returns_empty_for_unknown_symbol(self):
+        """存在しない銘柄は空DataFrameを返すこと"""
+        result = load_shap_latest("us", "UNKNOWN", "StockXGBoostModel")
+        self.assertTrue(result.empty)
+
+    def test_contains_expected_columns(self):
+        """必要な列が含まれること"""
+        result = load_shap_latest("us", "AAPL", "StockXGBoostModel")
+        for col in ["feature", "shap_mean", "shap_rank", "trained_at"]:
+            self.assertIn(col, result.columns)
 
 
 if __name__ == "__main__":

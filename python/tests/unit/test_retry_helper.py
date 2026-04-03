@@ -10,7 +10,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.utils.retry_helper import with_retry
+from src.utils.retry_helper import (
+    _countdown_wait,
+    retry_ticker_history,
+    retry_yfinance_download,
+    with_retry,
+)
 
 
 class TestWithRetrySuccess:
@@ -147,3 +152,86 @@ class TestWithRetryBackoff:
         with patch("src.utils.retry_helper.time.sleep") as mock_sleep:
             with_retry(func, max_retries=5, base_wait_seconds=0.1)
         assert mock_sleep.call_count == 2
+
+
+class TestCountdownWait:
+    """_countdown_wait のテスト（5秒以上の待機時のカウントダウン表示付き待機）"""
+
+    def test_sleeps_for_each_second(self):
+        """整数秒ごとに time.sleep(1) が呼ばれること"""
+        with patch("src.utils.retry_helper.time.sleep") as mock_sleep:
+            _countdown_wait(3.0)
+        assert mock_sleep.call_count == 3
+
+    def test_zero_seconds_no_sleep(self):
+        """0秒では sleep が呼ばれないこと"""
+        with patch("src.utils.retry_helper.time.sleep") as mock_sleep:
+            _countdown_wait(0.0)
+        mock_sleep.assert_not_called()
+
+    def test_fractional_seconds_truncated(self):
+        """小数秒は切り捨てて整数秒ぶん sleep すること"""
+        with patch("src.utils.retry_helper.time.sleep") as mock_sleep:
+            _countdown_wait(2.9)
+        assert mock_sleep.call_count == 2
+
+    def test_countdown_triggered_for_5s_wait(self):
+        """wait_time >= 5.0 のとき _countdown_wait が使われること（統合確認）"""
+        func = MagicMock(side_effect=[Exception("rate limit exceeded"), "ok"])
+        with patch("src.utils.retry_helper._countdown_wait") as mock_countdown:
+            with_retry(func, max_retries=3, base_wait_seconds=5.0, max_wait_seconds=60.0)
+        mock_countdown.assert_called_once()
+
+
+class TestRetryYfinanceDownload:
+    """retry_yfinance_download のテスト"""
+
+    def test_calls_yf_download(self):
+        """yf.download を呼び出すこと"""
+        import pandas as pd
+
+        mock_df = pd.DataFrame({"Close": [100.0]})
+        with patch("src.utils.retry_helper.yf.download", return_value=mock_df) as mock_dl:
+            result = retry_yfinance_download("AAPL", "2026-01-01", "2026-01-31")
+        mock_dl.assert_called_once()
+        assert result is mock_df
+
+    def test_retries_on_rate_limit(self):
+        """レート制限エラーでリトライしてから成功すること"""
+        import pandas as pd
+
+        mock_df = pd.DataFrame({"Close": [100.0]})
+        with patch(
+            "src.utils.retry_helper.yf.download",
+            side_effect=[Exception("rate limit exceeded"), mock_df],
+        ), patch("src.utils.retry_helper.time.sleep"):
+            result = retry_yfinance_download("AAPL", "2026-01-01", "2026-01-31")
+        assert result is mock_df
+
+
+class TestRetryTickerHistory:
+    """retry_ticker_history のテスト"""
+
+    def test_calls_ticker_history(self):
+        """ticker_obj.history を呼び出すこと"""
+        import pandas as pd
+
+        mock_df = pd.DataFrame({"Close": [100.0]})
+        ticker_obj = MagicMock()
+        ticker_obj.history.return_value = mock_df
+
+        result = retry_ticker_history(ticker_obj, "2026-01-01", "2026-01-31")
+        ticker_obj.history.assert_called_once()
+        assert result is mock_df
+
+    def test_retries_on_connection_error(self):
+        """接続エラーでリトライしてから成功すること"""
+        import pandas as pd
+
+        mock_df = pd.DataFrame({"Close": [100.0]})
+        ticker_obj = MagicMock()
+        ticker_obj.history.side_effect = [Exception("connection reset"), mock_df]
+
+        with patch("src.utils.retry_helper.time.sleep"):
+            result = retry_ticker_history(ticker_obj, "2026-01-01", "2026-01-31")
+        assert result is mock_df
