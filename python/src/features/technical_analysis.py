@@ -142,3 +142,57 @@ def add_technical_indicators(df: pd.DataFrame, params: dict = None) -> pd.DataFr
         df["is_month_end"] = df.index.is_month_end.astype(int)
 
     return df
+
+
+def classify_regime(
+    df: pd.DataFrame,
+    ema_window: int = 200,
+    atr_window: int = 14,
+    vol_high_quantile: float = 0.67,
+) -> pd.Series:
+    """
+    市場レジームを「bull（上昇）」「bear（下降）」「range（レンジ）」に分類する。
+
+    判定ロジック:
+        1. Close と 200日EMA の大小関係でトレンド方向を判定
+        2. ATR の高低でボラティリティを分類し、高ボラ局面を「range」に分類
+
+    Args:
+        df:               Close, High, Low 列を含む DataFrame（DatetimeIndex 推奨）
+        ema_window:       EMA のウィンドウ幅（デフォルト: 200日）
+        atr_window:       ATR 計算に使うウィンドウ幅（デフォルト: 14日）
+        vol_high_quantile: ATR がこの分位数以上なら高ボラ → "range"（デフォルト: 0.67）
+
+    Returns:
+        pd.Series[str]: 各日に "bull" / "bear" / "range" を付与したシリーズ（元の df と同インデックス）
+    """
+    if df.empty or "Close" not in df.columns:
+        return pd.Series(dtype=str, index=df.index)
+
+    close = pd.Series(df["Close"].values, index=df.index, dtype=float)
+
+    # EMA（データ数が ema_window 未満のときは実際の長さを使用）
+    actual_window = min(ema_window, max(1, len(df) - 1))
+    ema: pd.Series = close.ewm(span=actual_window, adjust=False).mean()
+
+    # ATR（High / Low がなければ Close のみで簡易計算）
+    if "High" in df.columns and "Low" in df.columns:
+        high = pd.Series(df["High"].values, index=df.index, dtype=float)
+        low = pd.Series(df["Low"].values, index=df.index, dtype=float)
+        tr_parts: list[pd.Series] = [
+            (high - low),
+            (high - close.shift(1)).abs(),
+            (low - close.shift(1)).abs(),
+        ]
+        tr: pd.Series = pd.concat(tr_parts, axis=1).max(axis=1)
+    else:
+        tr = close.pct_change().abs()
+
+    atr: pd.Series = tr.rolling(window=atr_window, min_periods=1).mean()
+    vol_threshold = float(atr.quantile(vol_high_quantile))
+
+    regime = pd.Series("bear", index=df.index, dtype=str)
+    regime[close > ema] = "bull"
+    regime[atr >= vol_threshold] = "range"
+
+    return regime

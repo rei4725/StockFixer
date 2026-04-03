@@ -369,3 +369,63 @@ BENCHMARK_TICKERS = {
     "topix": "^TOPX",
     "nasdaq": "^IXIC",
 }
+
+
+def compute_metrics_by_regime(
+    trade_log: pd.DataFrame,
+    price_df: pd.DataFrame,
+    initial_cash: float,
+    ema_window: int = 200,
+    atr_window: int = 14,
+) -> dict[str, dict]:
+    """
+    バックテスト取引ログをレジーム別（bull / bear / range）に分割し、各指標を返す。
+
+    完了条件 (Issue #24):
+        レジーム別成績（Net Return / Sharpe / Hit Rate）が Walk-Forward レポートに出力される。
+
+    Args:
+        trade_log:    Backtester.simulate_trading が返す DataFrame (columns: date, action, ...)
+        price_df:     Close, High, Low を含む OHLCV DataFrame（trade_log と同じ日付範囲）
+        initial_cash: 初期資金
+        ema_window:   classify_regime に渡す EMA ウィンドウ幅（デフォルト: 200）
+        atr_window:   classify_regime に渡す ATR ウィンドウ幅（デフォルト: 14）
+
+    Returns:
+        dict: レジームラベル ("bull", "bear", "range", "all") をキーとする metrics dict
+    """
+    from src.features.technical_analysis import classify_regime
+
+    results: dict[str, dict] = {}
+
+    # 全件合算メトリクス
+    results["all"] = compute_metrics(trade_log, initial_cash)
+
+    if trade_log is None or trade_log.empty or price_df is None or price_df.empty:
+        return results
+
+    if "date" not in trade_log.columns:
+        return results
+
+    regime_series = classify_regime(price_df, ema_window=ema_window, atr_window=atr_window)
+    if regime_series.empty:
+        return results
+
+    # DatetimeIndex に統一
+    if not isinstance(regime_series.index, pd.DatetimeIndex):
+        regime_series.index = pd.to_datetime(regime_series.index)
+
+    trade_log = trade_log.copy()
+    trade_log["_date_dt"] = pd.to_datetime(trade_log["date"])
+    trade_log["_regime"] = trade_log["_date_dt"].map(
+        lambda d: regime_series.asof(d) if d >= regime_series.index.min() else None
+    )
+
+    for label in ("bull", "bear", "range"):
+        leg = trade_log[trade_log["_regime"] == label].drop(columns=["_date_dt", "_regime"])
+        if leg.empty:
+            results[label] = _empty_metrics(initial_cash)
+        else:
+            results[label] = compute_metrics(leg, initial_cash)
+
+    return results
