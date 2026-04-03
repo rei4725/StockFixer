@@ -3,6 +3,7 @@ import os
 import traceback
 import warnings
 
+import numpy as np
 import pandas as pd
 import yfinance as yf
 
@@ -42,6 +43,7 @@ def predict_single_stock(
             ]
 
     pred_prices = []
+    pred_returns = []
     current_price = None
     for model_type in model_types:
         model_path = os.path.join(get_models_subdir(market, symbol), model_type)
@@ -96,6 +98,7 @@ def predict_single_stock(
             # 変化率から絶対価格を計算
             pred_price = current_price * (1 + pred_return)
             pred_prices.append(pred_price)
+            pred_returns.append(pred_return)
         except Exception as e:
             print(f"[{symbol}] エラー: {e}")
             traceback.print_exc()
@@ -113,6 +116,8 @@ def predict_single_stock(
 
     avg_pred_price = sum(pred_prices) / len(pred_prices)
     diff_ratio = (avg_pred_price - current_price) / current_price
+    model_std = float(np.std(pred_returns)) if len(pred_returns) > 1 else 0.0
+    confidence_ratio = 1.0 / (1.0 + model_std)
     return PredictionResult(
         market=market,
         symbol=symbol,
@@ -120,6 +125,7 @@ def predict_single_stock(
         avg_pred_price=float(avg_pred_price),
         diff_ratio=float(diff_ratio),
         model_count=int(len(pred_prices)),
+        confidence_ratio=confidence_ratio,
     )
 
 

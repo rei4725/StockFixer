@@ -138,6 +138,7 @@ class RiskManager:
         win_rate: float = 0.55,
         avg_win: float = 0.015,
         avg_loss: float = 0.008,
+        confidence_ratio: float = 1.0,
     ) -> int:
         """
         ハーフ Kelly 基準で発注株数を計算する。
@@ -148,6 +149,8 @@ class RiskManager:
             win_rate: 勝率（バックテスト実績 or デフォルト 55%）
             avg_win: 平均利益率（デフォルト 1.5%）
             avg_loss: 平均損失率（デフォルト 0.8%）
+            confidence_ratio: モデル信頼度係数（1/(1+model_std)）。1.0=最大信頼度。
+                              モデル間分散が大きいほど小さくなり、ポジションを縮小する。
 
         Returns:
             発注株数（1株未満は切り捨て、0 になる場合は 0）
@@ -172,13 +175,17 @@ class RiskManager:
 
         qty = int(invest_amount / price)
 
+        # モデル信頼度によるポジション縮小
+        confidence_ratio = max(0.0, min(confidence_ratio, 1.0))
+        qty = int(qty * confidence_ratio)
+
         # 最低単元（日本株は原則 100 株単位）
         lot = 100
         qty = (qty // lot) * lot
 
         logger.debug(
             f"[risk] {symbol}: balance={balance:.0f} kelly={kelly:.3f} "
-            f"invest={invest_amount:.0f} qty={qty}"
+            f"invest={invest_amount:.0f} confidence={confidence_ratio:.3f} qty={qty}"
         )
         return qty
 

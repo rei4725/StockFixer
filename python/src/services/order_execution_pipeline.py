@@ -217,7 +217,11 @@ def run_daily_orders(
             stats["skipped"] += 1
             continue
 
-        qty = risk.calc_position_size(symbol, current_price)
+        qty = risk.calc_position_size(
+            symbol,
+            current_price,
+            confidence_ratio=float(row.get("confidence_ratio") or 1.0),
+        )
         if qty <= 0:
             logger.info(f"[exec] {symbol}: 発注株数 0 → スキップ（残高不足or上限）")
             stats["skipped"] += 1

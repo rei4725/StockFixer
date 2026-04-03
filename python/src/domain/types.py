@@ -122,6 +122,7 @@ class PredictionResult:
     diff_ratio_5d: Optional[float] = None
     diff_ratio_10d: Optional[float] = None
     confluence_score: Optional[int] = None
+    confidence_ratio: Optional[float] = None  # 1/(1+model_std); 1.0=最大信頼度（モデル間分散が小さい）
 
     # ------------------------------------------------------------------
     # 変換メソッド（変換知識はここに1箇所）
@@ -154,6 +155,8 @@ class PredictionResult:
                 row["diff_ratio_10d"] = r.diff_ratio_10d
             if r.confluence_score is not None:
                 row["confluence_score"] = r.confluence_score
+            if r.confidence_ratio is not None:
+                row["confidence_ratio"] = r.confidence_ratio
             rows.append(row)
         return pd.DataFrame(rows) if rows else pd.DataFrame()
 
@@ -183,4 +186,5 @@ class PredictionResult:
             diff_ratio_5d=_opt_float("diff_ratio_5d"),
             diff_ratio_10d=_opt_float("diff_ratio_10d"),
             confluence_score=_opt_int("confluence_score"),
+            confidence_ratio=_opt_float("confidence_ratio"),
         )
