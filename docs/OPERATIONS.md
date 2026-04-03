@@ -265,6 +265,32 @@ docker exec stockfixer python run_scheduler.py --run-now daily
 docker exec stockfixer python run_scheduler.py --run-now weekly
 ```
 
+### 日次損失上限ガード
+
+自動発注では `RiskManager` が当日確定損失を監視し、上限到達時は新規発注のみ停止する。
+予測、レポート、損益集計などの読み取り系ジョブは継続する。
+
+- `MAX_DAILY_LOSS_RATE` 未設定時は残高の 2% を日次損失上限として使用する
+- `MAX_DAILY_LOSS_RATE=0` または負値では日次損失ガードを無効化する
+- `DISABLE_DAILY_LOSS_GUARD=1` でも日次損失ガードを一時的に無効化できる
+- 連続損失回数と保有銘柄数の上限チェックは無効化されない
+
+停止解除ルール:
+
+- 日次損失は `CURRENT_DATE` 基準で集計するため、翌営業日に日付が変われば自動的に再開対象になる
+- 当日中に誤停止を解除する場合は、原因調査後に `DISABLE_DAILY_LOSS_GUARD=1` を設定して該当ジョブを再実行する
+- 手動解除後は環境変数を削除し、恒久的な無効化を残さない
+
+```powershell
+# 既定値のまま自動発注を即時実行
+docker exec stockfixer python run_scheduler.py --run-now paper
+
+# 日次損失ガードを一時的に無効化して再実行
+docker exec -e DISABLE_DAILY_LOSS_GUARD=1 stockfixer python run_scheduler.py --run-now paper
+```
+
+停止時は `python/logs/stockfixer.log` に理由、損失額、上限額が出力され、Discord の自動発注通知も警告タイトルに切り替わる。
+
 ---
 
 ## 自動スケジュール

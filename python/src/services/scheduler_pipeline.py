@@ -165,6 +165,10 @@ def run_daily_auto_order():
             buy_orders=stats["buy_orders"],
             sell_orders=stats["sell_orders"],
             mode=mode,
+            trading_stopped=stats.get("trading_stopped", False),
+            stop_reason=stats.get("stop_reason"),
+            daily_loss=stats.get("daily_loss"),
+            daily_loss_limit=stats.get("daily_loss_limit"),
         )
     except Exception as e:
         logger.error(f"自動発注完了通知失敗: {e}", exc_info=True)

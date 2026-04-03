@@ -11,7 +11,10 @@ OrderExecutionPipeline が注文を送信する前にゲートチェックを行
     4. 最大保有銘柄数 = 10 銘柄
 """
 
+import os
+
 from src.brokers.base import BrokerBase, OrderSide
+from src.domain.types import TradingGateStatus
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -22,6 +25,8 @@ MAX_POSITION_RATE = 0.10  # 残高の 10%
 MAX_CONSECUTIVE_LOSSES = 3  # 連続損失でその日停止
 MAX_POSITIONS = 10  # 最大保有銘柄数
 HALF_KELLY = 0.5  # Kelly 係数に掛ける安全係数
+DAILY_LOSS_RATE_ENV = "MAX_DAILY_LOSS_RATE"
+DISABLE_DAILY_LOSS_GUARD_ENV = "DISABLE_DAILY_LOSS_GUARD"
 
 
 class RiskError(Exception):
@@ -47,28 +52,80 @@ class RiskManager:
         全リスクルールを一括チェックする。
         一つでも違反があれば False を返す。
         """
+        return self.evaluate_trading_gate().is_allowed
+
+    def evaluate_trading_gate(self) -> TradingGateStatus:
+        """発注可否と停止理由の詳細を返す。"""
         balance = self._broker.get_balance()
+        positions = self._broker.get_positions()
+        daily_loss_limit = self._resolve_daily_loss_limit(balance)
+        daily_loss = 0.0
+
+        if daily_loss_limit is not None:
+            daily_loss = self._get_daily_realized_loss()
 
         # ルール 1: 当日損失上限
-        daily_loss = self._get_daily_realized_loss()
-        max_loss = balance * MAX_DAILY_LOSS_RATE
-        if daily_loss >= max_loss:
-            logger.warning(f"[risk] 当日損失上限超過: 損失={daily_loss:.0f}円 / 上限={max_loss:.0f}円 → 取引停止")
-            return False
+        if daily_loss_limit is not None and daily_loss >= daily_loss_limit:
+            reason = f"日次損失上限に到達: 損失={daily_loss:.0f}円 / " f"上限={daily_loss_limit:.0f}円"
+            logger.warning(f"[risk] {reason} → 新規発注停止")
+            return TradingGateStatus(
+                is_allowed=False,
+                stop_active=True,
+                reason_code="daily_loss_limit",
+                reason=reason,
+                daily_loss=daily_loss,
+                daily_loss_limit=daily_loss_limit,
+                consecutive_losses=0,
+                consecutive_loss_limit=MAX_CONSECUTIVE_LOSSES,
+                position_count=len(positions),
+                max_positions=MAX_POSITIONS,
+            )
 
         # ルール 3: 連続損失
         consecutive = self._get_consecutive_losses()
         if consecutive >= MAX_CONSECUTIVE_LOSSES:
-            logger.warning(f"[risk] 連続損失 {consecutive} 回 >= {MAX_CONSECUTIVE_LOSSES} 回 → 当日取引停止")
-            return False
+            reason = f"連続損失 {consecutive} 回 >= {MAX_CONSECUTIVE_LOSSES} 回"
+            logger.warning(f"[risk] {reason} → 当日取引停止")
+            return TradingGateStatus(
+                is_allowed=False,
+                stop_active=True,
+                reason_code="consecutive_losses",
+                reason=reason,
+                daily_loss=daily_loss,
+                daily_loss_limit=daily_loss_limit,
+                consecutive_losses=consecutive,
+                consecutive_loss_limit=MAX_CONSECUTIVE_LOSSES,
+                position_count=len(positions),
+                max_positions=MAX_POSITIONS,
+            )
 
         # ルール 4: 最大保有銘柄数
-        positions = self._broker.get_positions()
         if len(positions) >= MAX_POSITIONS:
-            logger.warning(f"[risk] 保有銘柄数上限: {len(positions)} >= {MAX_POSITIONS} → 新規買い停止")
-            return False
+            reason = f"保有銘柄数上限: {len(positions)} >= {MAX_POSITIONS}"
+            logger.warning(f"[risk] {reason} → 新規買い停止")
+            return TradingGateStatus(
+                is_allowed=False,
+                stop_active=False,
+                reason_code="max_positions",
+                reason=reason,
+                daily_loss=daily_loss,
+                daily_loss_limit=daily_loss_limit,
+                consecutive_losses=consecutive,
+                consecutive_loss_limit=MAX_CONSECUTIVE_LOSSES,
+                position_count=len(positions),
+                max_positions=MAX_POSITIONS,
+            )
 
-        return True
+        return TradingGateStatus(
+            is_allowed=True,
+            stop_active=False,
+            daily_loss=daily_loss,
+            daily_loss_limit=daily_loss_limit,
+            consecutive_losses=consecutive,
+            consecutive_loss_limit=MAX_CONSECUTIVE_LOSSES,
+            position_count=len(positions),
+            max_positions=MAX_POSITIONS,
+        )
 
     # ------------------------------------------------------------------
     # ポジションサイジング
@@ -140,6 +197,41 @@ class RiskManager:
             [table_name],
         ).fetchone()
         return bool(row and row[0])
+
+    @staticmethod
+    def _resolve_daily_loss_rate() -> float | None:
+        if os.getenv(DISABLE_DAILY_LOSS_GUARD_ENV, "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }:
+            logger.info(f"[risk] {DISABLE_DAILY_LOSS_GUARD_ENV}=1 のため日次損失ガードを無効化します")
+            return None
+
+        raw_value = os.getenv(DAILY_LOSS_RATE_ENV)
+        if raw_value is None or raw_value.strip() == "":
+            return MAX_DAILY_LOSS_RATE
+
+        try:
+            rate = float(raw_value)
+        except ValueError:
+            default_rate = f"{MAX_DAILY_LOSS_RATE:.2%}"
+            logger.warning(
+                f"[risk] {DAILY_LOSS_RATE_ENV}={raw_value!r} を解釈できないため" f"既定値 {default_rate} を使用します"
+            )
+            return MAX_DAILY_LOSS_RATE
+
+        if rate <= 0:
+            logger.info(f"[risk] {DAILY_LOSS_RATE_ENV}<=0 のため日次損失ガードを無効化します")
+            return None
+        return rate
+
+    def _resolve_daily_loss_limit(self, balance: float) -> float | None:
+        rate = self._resolve_daily_loss_rate()
+        if rate is None:
+            return None
+        return balance * rate
 
     def _get_daily_realized_loss(self) -> float:
         """当日の確定損失合計（プラスが損失）を返す"""

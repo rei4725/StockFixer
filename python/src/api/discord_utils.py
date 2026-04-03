@@ -346,7 +346,15 @@ def send_weekly_training_completion(models: list) -> bool:
     return send_webhook_notification(title, message, color=0x00FF00)
 
 
-def send_daily_order_completion(buy_orders: int, sell_orders: int, mode: str = "paper") -> bool:
+def send_daily_order_completion(
+    buy_orders: int,
+    sell_orders: int,
+    mode: str = "paper",
+    trading_stopped: bool = False,
+    stop_reason: Optional[str] = None,
+    daily_loss: Optional[float] = None,
+    daily_loss_limit: Optional[float] = None,
+) -> bool:
     """
     自動発注完了通知を Discord Webhook に送信する。
 
@@ -354,18 +362,28 @@ def send_daily_order_completion(buy_orders: int, sell_orders: int, mode: str = "
         buy_orders: 買い注文数
         sell_orders: 売り注文数
         mode: 実行モード（paper / live）
+        trading_stopped: リスクガードにより停止中かどうか
+        stop_reason: 停止理由
+        daily_loss: 当日損失額
+        daily_loss_limit: 当日損失上限額
 
     Returns:
         成功時 True、失敗時 False
     """
-    title = "✅ 自動発注完了"
-    message = (
-        f"時刻: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-        f"モード: {mode}\n"
-        f"買い注文: {buy_orders} 件\n"
-        f"売り注文: {sell_orders} 件"
-    )
-    return send_webhook_notification(title, message, color=0x00BFFF)
+    title = "⚠️ 自動発注停止" if trading_stopped else "✅ 自動発注完了"
+    lines = [
+        f"時刻: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"モード: {mode}",
+        f"買い注文: {buy_orders} 件",
+        f"売り注文: {sell_orders} 件",
+    ]
+    if trading_stopped:
+        lines.append(f"停止理由: {stop_reason or 'リスクガードにより停止'}")
+        if daily_loss is not None and daily_loss_limit is not None:
+            lines.append(f"当日損失: {daily_loss:.0f} 円 / 上限: {daily_loss_limit:.0f} 円")
+    message = "\n".join(lines)
+    color = 0xFF9900 if trading_stopped else 0x00BFFF
+    return send_webhook_notification(title, message, color=color)
 
 
 def send_daily_settle_completion(settled_count: int) -> bool:

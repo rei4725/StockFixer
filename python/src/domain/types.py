@@ -78,6 +78,22 @@ class TrainingMetrics:
     n_samples: int
 
 
+@dataclass
+class TradingGateStatus:
+    """発注前リスクゲートの評価結果。"""
+
+    is_allowed: bool
+    stop_active: bool
+    reason_code: Optional[str] = None
+    reason: Optional[str] = None
+    daily_loss: float = 0.0
+    daily_loss_limit: Optional[float] = None
+    consecutive_losses: int = 0
+    consecutive_loss_limit: Optional[int] = None
+    position_count: int = 0
+    max_positions: Optional[int] = None
+
+
 # ---------------------------------------------------------------------------
 # 予測結果型
 # ---------------------------------------------------------------------------

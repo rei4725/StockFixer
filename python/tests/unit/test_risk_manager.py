@@ -47,6 +47,44 @@ class TestRiskManagerIsAllowed(unittest.TestCase):
         risk = self._make_risk(broker, daily_loss=loss)
         self.assertFalse(risk.is_trading_allowed())
 
+    def test_daily_loss_status_contains_reason(self):
+        balance = 1_000_000.0
+        broker = _make_broker(balance=balance)
+        loss = balance * MAX_DAILY_LOSS_RATE
+        risk = self._make_risk(broker, daily_loss=loss)
+
+        status = risk.evaluate_trading_gate()
+
+        self.assertFalse(status.is_allowed)
+        self.assertTrue(status.stop_active)
+        self.assertEqual(status.reason_code, "daily_loss_limit")
+        self.assertIn("日次損失上限", status.reason)
+        self.assertEqual(status.daily_loss, loss)
+
+    def test_daily_loss_guard_can_be_disabled_by_env(self):
+        balance = 1_000_000.0
+        broker = _make_broker(balance=balance)
+        loss = balance * MAX_DAILY_LOSS_RATE * 3
+        risk = self._make_risk(broker, daily_loss=loss)
+
+        with patch.dict("os.environ", {"DISABLE_DAILY_LOSS_GUARD": "1"}, clear=False):
+            status = risk.evaluate_trading_gate()
+
+        self.assertTrue(status.is_allowed)
+        self.assertIsNone(status.daily_loss_limit)
+        risk._get_daily_realized_loss.assert_not_called()
+
+    def test_daily_loss_rate_can_be_overridden_by_env(self):
+        balance = 1_000_000.0
+        broker = _make_broker(balance=balance)
+        risk = self._make_risk(broker, daily_loss=15_000.0)
+
+        with patch.dict("os.environ", {"MAX_DAILY_LOSS_RATE": "0.01"}, clear=False):
+            status = risk.evaluate_trading_gate()
+
+        self.assertFalse(status.is_allowed)
+        self.assertEqual(status.daily_loss_limit, 10_000.0)
+
     def test_consecutive_loss_blocks(self):
         broker = _make_broker()
         risk = self._make_risk(broker, consecutive=MAX_CONSECUTIVE_LOSSES)

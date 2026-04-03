@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 
 from src.brokers.base import BrokerBase
+from src.domain.types import TradingGateStatus
 from src.services.order_execution_pipeline import (
     BUY_THRESHOLD,
     MAX_ORDERS_PER_RUN,
@@ -51,8 +52,28 @@ def _make_predictions(n_buy=3, n_sell=0):
 
 
 class TestRunDailyOrders(unittest.TestCase):
-    def _patch_pipeline(self, predictions, risk_allowed=True, calc_qty=100):
+    def _make_gate_status(
+        self,
+        is_allowed=True,
+        stop_active=False,
+        reason_code=None,
+        reason=None,
+        daily_loss=0.0,
+        daily_loss_limit=None,
+    ):
+        return TradingGateStatus(
+            is_allowed=is_allowed,
+            stop_active=stop_active,
+            reason_code=reason_code,
+            reason=reason,
+            daily_loss=daily_loss,
+            daily_loss_limit=daily_loss_limit,
+        )
+
+    def _patch_pipeline(self, predictions, risk_allowed=True, calc_qty=100, gate_status=None):
         """共通パッチャー群をまとめて返す"""
+        if gate_status is None:
+            gate_status = self._make_gate_status(is_allowed=risk_allowed)
         patches = [
             patch(
                 "src.services.order_execution_pipeline._load_latest_predictions",
@@ -62,11 +83,11 @@ class TestRunDailyOrders(unittest.TestCase):
                 "src.services.order_execution_pipeline._record_order",
             ),
             patch(
-                "src.services.risk_manager.RiskManager.is_trading_allowed",
-                return_value=risk_allowed,
+                "src.services.order_execution_pipeline.RiskManager.evaluate_trading_gate",
+                return_value=gate_status,
             ),
             patch(
-                "src.services.risk_manager.RiskManager.calc_position_size",
+                "src.services.order_execution_pipeline.RiskManager.calc_position_size",
                 return_value=calc_qty,
             ),
             patch(
@@ -108,6 +129,30 @@ class TestRunDailyOrders(unittest.TestCase):
         try:
             stats = run_daily_orders(broker, market="jp", mode="paper")
             self.assertEqual(stats["buy_orders"], 0)
+            broker.send_order.assert_not_called()
+        finally:
+            self._stop_patches(patch_list)
+
+    def test_risk_blocked_returns_stop_details(self):
+        broker = _make_broker()
+        predictions = _make_predictions(n_buy=3)
+        gate_status = self._make_gate_status(
+            is_allowed=False,
+            stop_active=True,
+            reason_code="daily_loss_limit",
+            reason="日次損失上限に到達: 損失=25000円 / 上限=20000円",
+            daily_loss=25_000.0,
+            daily_loss_limit=20_000.0,
+        )
+        patches = self._patch_pipeline(predictions, gate_status=gate_status)
+        _, patch_list = self._start_patches(patches)
+        try:
+            stats = run_daily_orders(broker, market="jp", mode="paper")
+            self.assertTrue(stats["trading_stopped"])
+            self.assertEqual(stats["reason_code"], "daily_loss_limit")
+            self.assertEqual(stats["daily_loss"], 25_000.0)
+            self.assertEqual(stats["daily_loss_limit"], 20_000.0)
+            self.assertIn("日次損失上限", stats["stop_reason"])
             broker.send_order.assert_not_called()
         finally:
             self._stop_patches(patch_list)

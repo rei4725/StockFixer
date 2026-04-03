@@ -14,10 +14,12 @@ DuckDB の最新予測結果を読み込み、RiskManager のゲートチェッ�
 """
 
 import uuid
+from typing import TypedDict
 
 import pandas as pd
 
 from src.brokers.base import BrokerBase, OrderSide, OrderType
+from src.domain.types import TradingGateStatus
 from src.services.risk_manager import RiskManager
 from src.utils.logger import get_logger
 
@@ -28,6 +30,18 @@ BUY_THRESHOLD = 0.005  # +0.5%
 SELL_THRESHOLD = -0.005  # -0.5%
 # 1回の実行で発注する最大銘柄数
 MAX_ORDERS_PER_RUN = 5
+
+
+class OrderExecutionStats(TypedDict):
+    buy_orders: int
+    sell_orders: int
+    skipped: int
+    errors: int
+    trading_stopped: bool
+    stop_reason: str | None
+    reason_code: str | None
+    daily_loss: float
+    daily_loss_limit: float | None
 
 
 def _get_con():
@@ -98,7 +112,11 @@ def _record_order(
     )
 
 
-def run_daily_orders(broker: BrokerBase, market: str = "jp", mode: str = "paper") -> dict:
+def run_daily_orders(
+    broker: BrokerBase,
+    market: str = "jp",
+    mode: str = "paper",
+) -> OrderExecutionStats:
     """
     日次自動発注メインエントリーポイント。
 
@@ -113,19 +131,54 @@ def run_daily_orders(broker: BrokerBase, market: str = "jp", mode: str = "paper"
     logger.info(f"=== 自動発注開始: market={market} mode={mode} broker={broker.broker_name} ===")
 
     risk = RiskManager(broker)
+    stats: OrderExecutionStats = {
+        "buy_orders": 0,
+        "sell_orders": 0,
+        "skipped": 0,
+        "errors": 0,
+        "trading_stopped": False,
+        "stop_reason": None,
+        "reason_code": None,
+        "daily_loss": 0.0,
+        "daily_loss_limit": None,
+    }
 
     # --- 当日取引可否チェック ---
-    if not risk.is_trading_allowed():
-        logger.warning("[exec] リスクチェック不合格 → 本日の発注をスキップ")
-        return {"buy_orders": 0, "sell_orders": 0, "skipped": 0, "errors": 0}
+    gate_status: TradingGateStatus = risk.evaluate_trading_gate()
+    if not gate_status.is_allowed:
+        logger.warning(
+            "[exec] リスクチェック不合格 → 本日の発注をスキップ: %s",
+            gate_status.reason or "理由未設定",
+        )
+        stats.update(
+            {
+                "trading_stopped": gate_status.stop_active,
+                "stop_reason": gate_status.reason,
+                "reason_code": gate_status.reason_code,
+                "daily_loss": gate_status.daily_loss,
+                "daily_loss_limit": gate_status.daily_loss_limit,
+            }
+        )
+        return stats
 
     predictions = _load_latest_predictions(market)
     if predictions.empty:
         logger.warning("[exec] 予測結果が存在しません。先に run_predict.py を実行してください。")
-        return {"buy_orders": 0, "sell_orders": 0, "skipped": 0, "errors": 0}
+        stats.update(
+            {
+                "daily_loss": gate_status.daily_loss,
+                "daily_loss_limit": gate_status.daily_loss_limit,
+            }
+        )
+        return stats
 
     held_symbols = _get_held_symbols(broker)
-    stats = {"buy_orders": 0, "sell_orders": 0, "skipped": 0, "errors": 0}
+    stats.update(
+        {
+            "daily_loss": gate_status.daily_loss,
+            "daily_loss_limit": gate_status.daily_loss_limit,
+        }
+    )
 
     # --- 決済シグナル: 保有株で売りシグナルが出ているものを先にクローズ ---
     sell_signals = predictions[
