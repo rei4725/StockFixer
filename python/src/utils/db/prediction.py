@@ -40,6 +40,7 @@ def save_prediction_results(predicted_at: str, results: list[PredictionResult]) 
         "avg_pred_price",
         "diff_ratio",
         "model_count",
+        "confidence_ratio",
     ]
     multi_horizon_cols = [
         "avg_pred_price_3d",

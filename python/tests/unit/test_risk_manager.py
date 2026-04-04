@@ -139,6 +139,14 @@ class TestRiskManagerCalcPositionSize(unittest.TestCase):
         qty_low = risk.calc_position_size("7203", 1000.0, win_rate=0.4, avg_win=0.02, avg_loss=0.01)
         self.assertGreaterEqual(qty_high, qty_low)
 
+    def test_lower_confidence_ratio_reduces_position_size(self):
+        risk = self._make_risk()
+        qty_high_conf = risk.calc_position_size("7203", 1000.0, confidence_ratio=1.0)
+        qty_low_conf = risk.calc_position_size("7203", 1000.0, confidence_ratio=0.4)
+
+        self.assertGreaterEqual(qty_high_conf, qty_low_conf)
+        self.assertGreater(qty_high_conf, 0)
+
 
 class TestRiskManagerPersistence(unittest.TestCase):
     """DB参照を伴う内部ヘルパーのテスト"""

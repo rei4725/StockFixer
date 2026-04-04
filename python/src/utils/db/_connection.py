@@ -146,6 +146,7 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
             avg_pred_price      DOUBLE,
             diff_ratio          DOUBLE,
             model_count         INTEGER,
+            confidence_ratio    DOUBLE,
             avg_pred_price_3d   DOUBLE,
             avg_pred_price_5d   DOUBLE,
             avg_pred_price_10d  DOUBLE,
@@ -166,6 +167,7 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
         ("diff_ratio_5d", "DOUBLE"),
         ("diff_ratio_10d", "DOUBLE"),
         ("confluence_score", "INTEGER"),
+        ("confidence_ratio", "DOUBLE"),
     ]:
         try:
             con.execute(f"ALTER TABLE prediction_results ADD COLUMN IF NOT EXISTS {col} {dtype}")
