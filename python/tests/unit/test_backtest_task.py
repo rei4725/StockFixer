@@ -5,7 +5,7 @@ import unittest
 
 import pandas as pd
 
-from src.backtest.task import BacktestTask, ReturnRegressionTask
+from src.backtest.task import BacktestTask, ReturnRegressionTask, _build_threshold_series
 
 
 def _make_price_df(close_prices: list, col="Close") -> pd.DataFrame:
@@ -109,6 +109,41 @@ class TestReturnRegressionTaskSignal(unittest.TestCase):
         pred = self._pred([0.01, -0.01, 0.001, -0.001])
         signal = task.make_signal(pred)
         self.assertTrue(set(signal.unique()).issubset({-1, 0, 1}))
+
+
+class TestAdaptiveThresholdSeries(unittest.TestCase):
+    def _pred(self, values: list[float]) -> pd.Series:
+        idx = pd.date_range("2024-01-01", periods=len(values), freq="D")
+        return pd.Series(values, index=idx)
+
+    def test_short_series_keeps_base_threshold(self):
+        pred = self._pred([0.001, 0.002, -0.001, 0.003])
+
+        threshold = _build_threshold_series(pred, base_threshold=0.005, window=20)
+
+        self.assertTrue((threshold == 0.005).all())
+
+    def test_high_volatility_expands_threshold(self):
+        pred = self._pred(
+            [0.001] * 20
+            + [0.020, -0.018, 0.022, -0.021, 0.019, -0.020, 0.018, -0.019, 0.017, 0.006]
+        )
+
+        threshold = _build_threshold_series(pred, base_threshold=0.005, window=20)
+
+        self.assertLess(threshold.iloc[19], 0.005)
+        self.assertGreater(threshold.iloc[-1], 0.005)
+
+    def test_make_signal_suppresses_borderline_buy_in_high_volatility(self):
+        pred = self._pred(
+            [0.001] * 20
+            + [0.020, -0.018, 0.022, -0.021, 0.019, -0.020, 0.018, -0.019, 0.017, 0.006]
+        )
+        task = ReturnRegressionTask(threshold=0.005, adaptive_window=20)
+
+        signal = task.make_signal(pred)
+
+        self.assertEqual(signal.iloc[-1], 0)
 
 
 class TestBacktestTaskProtocol(unittest.TestCase):

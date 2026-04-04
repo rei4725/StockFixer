@@ -14,6 +14,8 @@ from src.domain.types import TradingGateStatus
 from src.services.order_execution_pipeline import (
     BUY_THRESHOLD,
     MAX_ORDERS_PER_RUN,
+    _attach_dynamic_thresholds,
+    _compute_market_threshold_scale,
     run_daily_orders,
 )
 
@@ -27,7 +29,7 @@ def _make_broker(balance=1_000_000.0, positions=None):
     return broker
 
 
-def _make_predictions(n_buy=3, n_sell=0):
+def _make_predictions(n_buy=3, n_sell=0, confidence_ratio=1.0):
     """テスト用予測 DataFrame を生成する"""
     rows = []
     for i in range(n_buy):
@@ -37,6 +39,7 @@ def _make_predictions(n_buy=3, n_sell=0):
                 "symbol": f"720{i}",
                 "current_price": 1000.0 + i * 10,
                 "diff_ratio": BUY_THRESHOLD + 0.01 * (i + 1),
+                "confidence_ratio": confidence_ratio,
             }
         )
     for j in range(n_sell):
@@ -46,6 +49,7 @@ def _make_predictions(n_buy=3, n_sell=0):
                 "symbol": f"900{j}",
                 "current_price": 800.0,
                 "diff_ratio": -0.02,
+                "confidence_ratio": confidence_ratio,
             }
         )
     return pd.DataFrame(rows)
@@ -203,6 +207,162 @@ class TestRunDailyOrders(unittest.TestCase):
             self.assertGreater(stats["skipped"], 0)
         finally:
             self._stop_patches(patch_list)
+
+    def test_confidence_ratio_passed_to_position_size(self):
+        broker = _make_broker()
+        predictions = _make_predictions(n_buy=1, confidence_ratio=0.42)
+        patches = self._patch_pipeline(predictions)
+        mocks, patch_list = self._start_patches(patches)
+        try:
+            calc_size_mock = mocks[3]
+            run_daily_orders(broker, market="jp", mode="paper")
+
+            self.assertTrue(calc_size_mock.called)
+            self.assertAlmostEqual(calc_size_mock.call_args.kwargs["confidence_ratio"], 0.42)
+        finally:
+            self._stop_patches(patch_list)
+
+    @patch("src.services.order_execution_pipeline.get_optimal_params", return_value={})
+    def test_dynamic_buy_threshold_blocks_borderline_signal(self, mock_params):
+        broker = _make_broker()
+        predictions = pd.DataFrame(
+            [
+                {
+                    "market": "jp",
+                    "symbol": "7200",
+                    "current_price": 1000.0,
+                    "diff_ratio": 0.006,
+                    "confidence_ratio": 1.0,
+                },
+                {
+                    "market": "jp",
+                    "symbol": "7201",
+                    "current_price": 1000.0,
+                    "diff_ratio": 0.001,
+                    "confidence_ratio": 1.0,
+                },
+                {
+                    "market": "jp",
+                    "symbol": "7202",
+                    "current_price": 1000.0,
+                    "diff_ratio": 0.001,
+                    "confidence_ratio": 1.0,
+                },
+                {
+                    "market": "jp",
+                    "symbol": "7203",
+                    "current_price": 1000.0,
+                    "diff_ratio": 0.001,
+                    "confidence_ratio": 1.0,
+                },
+                {
+                    "market": "jp",
+                    "symbol": "7204",
+                    "current_price": 1000.0,
+                    "diff_ratio": 0.001,
+                    "confidence_ratio": 1.0,
+                },
+            ]
+        )
+        patches = self._patch_pipeline(predictions)
+        _, patch_list = self._start_patches(patches)
+        try:
+            stats = run_daily_orders(broker, market="jp", mode="paper")
+            self.assertEqual(stats["buy_orders"], 0)
+            broker.send_order.assert_not_called()
+        finally:
+            self._stop_patches(patch_list)
+
+    @patch(
+        "src.services.order_execution_pipeline.get_optimal_params", return_value={"threshold": 0.01}
+    )
+    def test_dynamic_sell_threshold_blocks_borderline_exit(self, mock_params):
+        broker = _make_broker(positions=[{"symbol": "9000", "qty": 100, "avg_price": 1000.0}])
+        predictions = pd.DataFrame(
+            [
+                {
+                    "market": "jp",
+                    "symbol": "9000",
+                    "current_price": 1000.0,
+                    "diff_ratio": -0.006,
+                    "confidence_ratio": 1.0,
+                },
+                {
+                    "market": "jp",
+                    "symbol": "9001",
+                    "current_price": 1000.0,
+                    "diff_ratio": -0.001,
+                    "confidence_ratio": 1.0,
+                },
+                {
+                    "market": "jp",
+                    "symbol": "9002",
+                    "current_price": 1000.0,
+                    "diff_ratio": -0.001,
+                    "confidence_ratio": 1.0,
+                },
+                {
+                    "market": "jp",
+                    "symbol": "9003",
+                    "current_price": 1000.0,
+                    "diff_ratio": -0.001,
+                    "confidence_ratio": 1.0,
+                },
+                {
+                    "market": "jp",
+                    "symbol": "9004",
+                    "current_price": 1000.0,
+                    "diff_ratio": -0.001,
+                    "confidence_ratio": 1.0,
+                },
+            ]
+        )
+        patches = self._patch_pipeline(predictions)
+        _, patch_list = self._start_patches(patches)
+        try:
+            stats = run_daily_orders(broker, market="jp", mode="paper")
+            self.assertEqual(stats["sell_orders"], 0)
+            broker.send_order.assert_not_called()
+        finally:
+            self._stop_patches(patch_list)
+
+
+class TestDynamicThresholdHelpers(unittest.TestCase):
+    def test_market_threshold_scale_expands_on_high_dispersion(self):
+        predictions = pd.DataFrame({"diff_ratio": [0.006, 0.001, 0.001, 0.001, 0.001]})
+
+        scale = _compute_market_threshold_scale(predictions)
+
+        self.assertGreater(scale, 1.0)
+
+    @patch("src.services.order_execution_pipeline.get_optimal_params")
+    def test_attach_dynamic_thresholds_uses_optimal_threshold(self, mock_params):
+        mock_params.side_effect = [{"threshold": 0.012}, {}]
+        predictions = pd.DataFrame(
+            [
+                {
+                    "market": "jp",
+                    "symbol": "7200",
+                    "current_price": 1000.0,
+                    "diff_ratio": 0.020,
+                    "confidence_ratio": 1.0,
+                },
+                {
+                    "market": "jp",
+                    "symbol": "7201",
+                    "current_price": 1000.0,
+                    "diff_ratio": 0.010,
+                    "confidence_ratio": 1.0,
+                },
+            ]
+        )
+
+        enriched = _attach_dynamic_thresholds(predictions)
+
+        self.assertAlmostEqual(enriched.loc[0, "base_threshold"], 0.012)
+        self.assertAlmostEqual(enriched.loc[1, "base_threshold"], BUY_THRESHOLD)
+        self.assertIn("effective_buy_threshold", enriched.columns)
+        self.assertIn("effective_sell_threshold", enriched.columns)
 
 
 if __name__ == "__main__":

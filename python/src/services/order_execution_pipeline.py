@@ -18,9 +18,10 @@ from typing import TypedDict
 
 import pandas as pd
 
-from config.settings import BUY_THRESHOLD, MAX_ORDERS_PER_RUN, SELL_THRESHOLD
+from config.settings import BUY_THRESHOLD, MAX_ORDERS_PER_RUN
 from src.brokers.base import BrokerBase, OrderSide, OrderType
 from src.domain.types import TradingGateStatus
+from src.services.prediction_pipeline import get_optimal_params
 from src.services.risk_manager import RiskManager
 from src.utils.db._connection import _db_connection
 from src.utils.logger import get_logger
@@ -29,6 +30,9 @@ logger = get_logger(__name__)
 
 # 発注対象スコアの閾値
 # BUY_THRESHOLD / SELL_THRESHOLD / MAX_ORDERS_PER_RUN は config/settings.py から取得
+_THRESHOLD_SCALE_MIN = 0.5
+_THRESHOLD_SCALE_MAX = 2.0
+_THRESHOLD_SCALE_MIN_ROWS = 5
 
 
 class OrderExecutionStats(TypedDict):
@@ -48,7 +52,7 @@ def _load_latest_predictions(market: str) -> pd.DataFrame:
     DuckDB から当日の最新予測結果を取得する。
 
     Returns:
-        columns: market, symbol, current_price, diff_ratio (desc order)
+        columns: market, symbol, current_price, diff_ratio, confidence_ratio (desc order)
     """
     with _db_connection() as con:
         return con.execute(
@@ -59,7 +63,12 @@ def _load_latest_predictions(market: str) -> pd.DataFrame:
                 WHERE market = ?
                 GROUP BY market, symbol
             )
-            SELECT pr.market, pr.symbol, pr.current_price, pr.diff_ratio
+            SELECT
+                pr.market,
+                pr.symbol,
+                pr.current_price,
+                pr.diff_ratio,
+                pr.confidence_ratio
             FROM prediction_results pr
             JOIN latest l
               ON pr.market = l.market AND pr.symbol = l.symbol AND pr.predicted_at = l.latest_at
@@ -68,6 +77,60 @@ def _load_latest_predictions(market: str) -> pd.DataFrame:
             """,
             [market],
         ).df()
+
+
+def _compute_market_threshold_scale(predictions: pd.DataFrame) -> float:
+    """当日の予測分布から実運用の閾値スケールを決定する。"""
+    if predictions.empty or "diff_ratio" not in predictions.columns:
+        return 1.0
+
+    abs_diff = pd.to_numeric(predictions["diff_ratio"], errors="coerce").abs().dropna()
+    if len(abs_diff) < _THRESHOLD_SCALE_MIN_ROWS:
+        return 1.0
+
+    median_abs = float(abs_diff.median())
+    dispersion = float(abs_diff.std())
+    if median_abs <= 0 or pd.isna(dispersion) or dispersion <= 0:
+        return 1.0
+
+    raw_scale = dispersion / median_abs
+    return float(min(_THRESHOLD_SCALE_MAX, max(_THRESHOLD_SCALE_MIN, raw_scale)))
+
+
+def _resolve_base_threshold(market: str, symbol: str) -> float:
+    """銘柄別の最適閾値を取得し、未設定時は既定値にフォールバックする。"""
+    params = get_optimal_params(market, symbol)
+    raw_threshold = params.get("threshold") if params else None
+    try:
+        threshold = abs(float(raw_threshold)) if raw_threshold is not None else 0.0
+    except (TypeError, ValueError):
+        threshold = 0.0
+
+    if threshold <= 0:
+        threshold = abs(BUY_THRESHOLD)
+    return threshold
+
+
+def _attach_dynamic_thresholds(predictions: pd.DataFrame) -> pd.DataFrame:
+    """予測結果に実運用用の動的閾値列を付与する。"""
+    if predictions.empty:
+        return predictions.copy()
+
+    scale = _compute_market_threshold_scale(predictions)
+    threshold_cache: dict[tuple[str, str], float] = {}
+
+    def _get_threshold(row: pd.Series) -> float:
+        key = (str(row["market"]), str(row["symbol"]))
+        if key not in threshold_cache:
+            threshold_cache[key] = _resolve_base_threshold(*key)
+        return threshold_cache[key]
+
+    enriched = predictions.copy()
+    enriched["base_threshold"] = enriched.apply(_get_threshold, axis=1)
+    enriched["threshold_scale"] = scale
+    enriched["effective_buy_threshold"] = enriched["base_threshold"] * scale
+    enriched["effective_sell_threshold"] = -enriched["effective_buy_threshold"]
+    return enriched
 
 
 def _get_held_symbols(broker: BrokerBase) -> set[str]:
@@ -164,6 +227,15 @@ def run_daily_orders(
         )
         return stats
 
+    predictions = _attach_dynamic_thresholds(predictions)
+    threshold_scale = float(predictions["threshold_scale"].iloc[0])
+    logger.info(
+        "[exec] 動的閾値適用: scale=%.3f buy_range=%.3f%%-%.3f%%",
+        threshold_scale,
+        predictions["effective_buy_threshold"].min() * 100,
+        predictions["effective_buy_threshold"].max() * 100,
+    )
+
     held_symbols = _get_held_symbols(broker)
     stats.update(
         {
@@ -174,11 +246,11 @@ def run_daily_orders(
 
     # --- 決済シグナル: 保有株で売りシグナルが出ているものを先にクローズ ---
     sell_signals = predictions[
-        (predictions["symbol"].isin(held_symbols)) & (predictions["diff_ratio"] <= SELL_THRESHOLD)
+        (predictions["symbol"].isin(held_symbols))
+        & (predictions["diff_ratio"] <= predictions["effective_sell_threshold"])
     ]
     for _, row in sell_signals.iterrows():
         symbol = row["symbol"]
-        current_price = float(row.get("current_price") or 0)
         try:
             # 保有全数を成行売り
             pos = next(
@@ -189,7 +261,10 @@ def run_daily_orders(
             qty = pos["qty"]
             result = broker.send_order(symbol, OrderSide.SELL, qty, order_type=OrderType.MARKET)
             _record_order(symbol, OrderSide.SELL, qty, result, broker, mode)
-            logger.info(f"[exec] 売り発注: {symbol} {qty}株 (予測変化率={row['diff_ratio']:.3%})")
+            logger.info(
+                f"[exec] 売り発注: {symbol} {qty}株 "
+                f"(予測変化率={row['diff_ratio']:.3%}, 閾値={row['effective_sell_threshold']:.3%})"
+            )
             stats["sell_orders"] += 1
         except Exception as e:
             logger.error(f"[exec] 売り注文エラー ({symbol}): {e}", exc_info=True)
@@ -197,7 +272,8 @@ def run_daily_orders(
 
     # --- 新規買いシグナル ---
     buy_signals = predictions[
-        (~predictions["symbol"].isin(held_symbols)) & (predictions["diff_ratio"] >= BUY_THRESHOLD)
+        (~predictions["symbol"].isin(held_symbols))
+        & (predictions["diff_ratio"] >= predictions["effective_buy_threshold"])
     ].head(MAX_ORDERS_PER_RUN)
 
     for _, row in buy_signals.iterrows():
@@ -222,7 +298,10 @@ def run_daily_orders(
         try:
             result = broker.send_order(symbol, OrderSide.BUY, qty, order_type=OrderType.MARKET)
             _record_order(symbol, OrderSide.BUY, qty, result, broker, mode)
-            logger.info(f"[exec] 買い発注: {symbol} {qty}株 @ 成行 (予測変化率={row['diff_ratio']:.3%})")
+            logger.info(
+                f"[exec] 買い発注: {symbol} {qty}株 @ 成行 "
+                f"(予測変化率={row['diff_ratio']:.3%}, 閾値={row['effective_buy_threshold']:.3%})"
+            )
             stats["buy_orders"] += 1
         except Exception as e:
             logger.error(f"[exec] 買い注文エラー ({symbol}): {e}", exc_info=True)
