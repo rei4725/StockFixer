@@ -18,18 +18,17 @@ from typing import TypedDict
 
 import pandas as pd
 
+from config.settings import BUY_THRESHOLD, MAX_ORDERS_PER_RUN, SELL_THRESHOLD
 from src.brokers.base import BrokerBase, OrderSide, OrderType
 from src.domain.types import TradingGateStatus
 from src.services.risk_manager import RiskManager
+from src.utils.db._connection import _db_connection
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-# 発注対象スコアの閾値（diff_ratio が この値以上でBuy対象）
-BUY_THRESHOLD = 0.005  # +0.5%
-SELL_THRESHOLD = -0.005  # -0.5%
-# 1回の実行で発注する最大銘柄数
-MAX_ORDERS_PER_RUN = 5
+# 発注対象スコアの閾値
+# BUY_THRESHOLD / SELL_THRESHOLD / MAX_ORDERS_PER_RUN は config/settings.py から取得
 
 
 class OrderExecutionStats(TypedDict):
@@ -44,12 +43,6 @@ class OrderExecutionStats(TypedDict):
     daily_loss_limit: float | None
 
 
-def _get_con():
-    from src.utils.db import get_connection
-
-    return get_connection()
-
-
 def _load_latest_predictions(market: str) -> pd.DataFrame:
     """
     DuckDB から当日の最新予測結果を取得する。
@@ -57,25 +50,24 @@ def _load_latest_predictions(market: str) -> pd.DataFrame:
     Returns:
         columns: market, symbol, current_price, diff_ratio (desc order)
     """
-    con = _get_con()
-    df = con.execute(
-        """
-        WITH latest AS (
-            SELECT market, symbol, MAX(predicted_at) AS latest_at
-            FROM prediction_results
-            WHERE market = ?
-            GROUP BY market, symbol
-        )
-        SELECT pr.market, pr.symbol, pr.current_price, pr.diff_ratio
-        FROM prediction_results pr
-        JOIN latest l
-          ON pr.market = l.market AND pr.symbol = l.symbol AND pr.predicted_at = l.latest_at
-        WHERE pr.diff_ratio IS NOT NULL
-        ORDER BY pr.diff_ratio DESC
-        """,
-        [market],
-    ).df()
-    return df
+    with _db_connection() as con:
+        return con.execute(
+            """
+            WITH latest AS (
+                SELECT market, symbol, MAX(predicted_at) AS latest_at
+                FROM prediction_results
+                WHERE market = ?
+                GROUP BY market, symbol
+            )
+            SELECT pr.market, pr.symbol, pr.current_price, pr.diff_ratio
+            FROM prediction_results pr
+            JOIN latest l
+              ON pr.market = l.market AND pr.symbol = l.symbol AND pr.predicted_at = l.latest_at
+            WHERE pr.diff_ratio IS NOT NULL
+            ORDER BY pr.diff_ratio DESC
+            """,
+            [market],
+        ).df()
 
 
 def _get_held_symbols(broker: BrokerBase) -> set[str]:
@@ -93,23 +85,23 @@ def _record_order(
     mode: str,
 ) -> None:
     """注文結果を orders テーブルに保存する"""
-    con = _get_con()
-    con.execute(
-        """
-        INSERT INTO orders
-            (order_id, symbol, side, qty, price, order_type, status, broker, mode, created_at)
-        VALUES (?, ?, ?, ?, 0.0, 10, ?, ?, ?, CURRENT_TIMESTAMP)
-        """,
-        [
-            order_result.get("order_id", str(uuid.uuid4())[:12]),
-            symbol,
-            int(side),
-            qty,
-            order_result.get("status", "unknown"),
-            broker.broker_name,
-            mode,
-        ],
-    )
+    with _db_connection() as con:
+        con.execute(
+            """
+            INSERT INTO orders
+                (order_id, symbol, side, qty, price, order_type, status, broker, mode, created_at)
+            VALUES (?, ?, ?, ?, 0.0, 10, ?, ?, ?, CURRENT_TIMESTAMP)
+            """,
+            [
+                order_result.get("order_id", str(uuid.uuid4())[:12]),
+                symbol,
+                int(side),
+                qty,
+                order_result.get("status", "unknown"),
+                broker.broker_name,
+                mode,
+            ],
+        )
 
 
 def run_daily_orders(

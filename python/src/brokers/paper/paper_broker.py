@@ -11,20 +11,15 @@ kabu STATION® API が利用できない環境（APIキー未取得・テスト�
 
 import uuid
 
+from config.settings import PAPER_INITIAL_BALANCE
 from src.brokers.base import BrokerBase, OrderSide, OrderType
 from src.utils import yf_client
+from src.utils.db._connection import _db_connection
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-# DuckDB へのアクセスは遅延インポート（循環参照防止）
-_INITIAL_BALANCE = 1_000_000.0  # 初期仮想残高: 100万円
-
-
-def _get_con():
-    from src.utils.db import get_connection
-
-    return get_connection()
+_INITIAL_BALANCE = PAPER_INITIAL_BALANCE
 
 
 class PaperBroker(BrokerBase):
@@ -59,22 +54,22 @@ class PaperBroker(BrokerBase):
         実際の約定は settle_pending_orders() が翌日の実行時に処理する。
         """
         order_id = str(uuid.uuid4())[:12]
-        con = _get_con()
-        con.execute(
-            """
-            INSERT INTO paper_orders
-                (order_id, symbol, side, qty, price, order_type, status, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP)
-            """,
-            [
-                order_id,
-                symbol.replace(".T", ""),
-                int(side),
-                qty,
-                price,
-                int(order_type),
-            ],
-        )
+        with _db_connection() as con:
+            con.execute(
+                """
+                INSERT INTO paper_orders
+                    (order_id, symbol, side, qty, price, order_type, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP)
+                """,
+                [
+                    order_id,
+                    symbol.replace(".T", ""),
+                    int(side),
+                    qty,
+                    price,
+                    int(order_type),
+                ],
+            )
         logger.info(
             f"[paper] 注文受付: order_id={order_id} symbol={symbol} "
             f"side={side.name} qty={qty} order_type={order_type.name}"
@@ -87,11 +82,11 @@ class PaperBroker(BrokerBase):
 
     def cancel_order(self, order_id: str) -> dict:
         """pending 状態の注文をキャンセルする"""
-        con = _get_con()
-        con.execute(
-            "UPDATE paper_orders SET status='cancelled' WHERE order_id=? AND status='pending'",
-            [order_id],
-        )
+        with _db_connection() as con:
+            con.execute(
+                "UPDATE paper_orders SET status='cancelled' WHERE order_id=? AND status='pending'",
+                [order_id],
+            )
         logger.info(f"[paper] 注文キャンセル: order_id={order_id}")
         return {
             "order_id": order_id,
@@ -107,11 +102,12 @@ class PaperBroker(BrokerBase):
         Returns:
             約定した注文のリスト
         """
-        con = _get_con()
-        rows = con.execute(
-            "SELECT order_id, symbol, side, qty, price, order_type "
-            "FROM paper_orders WHERE status='pending'"
-        ).fetchall()
+        # Phase 1: ペンディング注文を読み込む（接続をすぐに解放）
+        with _db_connection() as con:
+            rows = con.execute(
+                "SELECT order_id, symbol, side, qty, price, order_type "
+                "FROM paper_orders WHERE status='pending'"
+            ).fetchall()
 
         settled = []
         for order_id, symbol, side, qty, limit_price, order_type_val in rows:
@@ -136,20 +132,21 @@ class PaperBroker(BrokerBase):
                         fill_price = max(limit_price, open_price)
                     else:
                         logger.info(f"[paper] {symbol}: 指値未達、失効")
-                        con.execute(
-                            "UPDATE paper_orders SET status='expired' WHERE order_id=?",
-                            [order_id],
-                        )
+                        with _db_connection() as con:
+                            con.execute(
+                                "UPDATE paper_orders SET status='expired' WHERE order_id=?",
+                                [order_id],
+                            )
                         continue
 
-                # 残高・ポジション更新
-                self._apply_fill(con, order_id, symbol, side, qty, fill_price)
-
-                con.execute(
-                    "UPDATE paper_orders SET status='filled', "
-                    "fill_price=?, filled_at=CURRENT_TIMESTAMP WHERE order_id=?",
-                    [fill_price, order_id],
-                )
+                # Phase 2: 約定処理（接続を再取得）
+                with _db_connection() as con:
+                    self._apply_fill(con, order_id, symbol, side, qty, fill_price)
+                    con.execute(
+                        "UPDATE paper_orders SET status='filled', "
+                        "fill_price=?, filled_at=CURRENT_TIMESTAMP WHERE order_id=?",
+                        [fill_price, order_id],
+                    )
                 logger.info(
                     f"[paper] 約定: {symbol} {OrderSide(side).name} {qty}株 @ {fill_price:.1f}円"
                 )
@@ -222,10 +219,10 @@ class PaperBroker(BrokerBase):
 
     def get_positions(self) -> list[dict]:
         """保有ポジション一覧を返す（現在価格・含み損益つき）"""
-        con = _get_con()
-        rows = con.execute(
-            "SELECT symbol, qty, avg_price FROM paper_positions WHERE qty > 0"
-        ).fetchall()
+        with _db_connection() as con:
+            rows = con.execute(
+                "SELECT symbol, qty, avg_price FROM paper_positions WHERE qty > 0"
+            ).fetchall()
         if not rows:
             return []
 
@@ -266,14 +263,12 @@ class PaperBroker(BrokerBase):
                 "started_at": str | None,   # 最初の約定日時
             }
         """
-        con = _get_con()
-
-        # 実現損益（全売り約定の合計）
-        row = con.execute(
-            "SELECT SUM(realized_pnl), COUNT(*), MIN(filled_at) "
-            "FROM paper_orders WHERE status='filled' AND side=? AND realized_pnl IS NOT NULL",
-            [int(OrderSide.SELL)],
-        ).fetchone()
+        with _db_connection() as con:
+            row = con.execute(
+                "SELECT SUM(realized_pnl), COUNT(*), MIN(filled_at) "
+                "FROM paper_orders WHERE status='filled' AND side=? AND realized_pnl IS NOT NULL",
+                [int(OrderSide.SELL)],
+            ).fetchone()
         realized_pnl = float(row[0] or 0.0)
         trade_count = int(row[1] or 0)
         started_at = str(row[2]) if row[2] else None
@@ -295,21 +290,21 @@ class PaperBroker(BrokerBase):
 
     def get_balance(self) -> float:
         """現金余力（円）を返す"""
-        con = _get_con()
-        row = con.execute("SELECT balance FROM paper_balance LIMIT 1").fetchone()
+        with _db_connection() as con:
+            row = con.execute("SELECT balance FROM paper_balance LIMIT 1").fetchone()
         return float(row[0]) if row else _INITIAL_BALANCE
 
     def get_orders(self) -> list[dict]:
         """当日の注文一覧を返す"""
-        con = _get_con()
-        rows = con.execute(
-            """
-            SELECT order_id, symbol, side, qty, price, status
-            FROM paper_orders
-            WHERE DATE(created_at) = CURRENT_DATE
-            ORDER BY created_at DESC
-            """
-        ).fetchall()
+        with _db_connection() as con:
+            rows = con.execute(
+                """
+                SELECT order_id, symbol, side, qty, price, status
+                FROM paper_orders
+                WHERE DATE(created_at) = CURRENT_DATE
+                ORDER BY created_at DESC
+                """
+            ).fetchall()
         return [
             {
                 "order_id": oid,

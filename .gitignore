@@ -23,6 +23,11 @@ python/results/
 *.duckdb
 *.duckdb.wal
 
+# Coverage reports
+python/coverage.json
+.coverage
+htmlcov/
+
 # OS generated files
 .DS_Store
 Thumbs.db

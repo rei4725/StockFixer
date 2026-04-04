@@ -109,17 +109,27 @@ def print_summary(phase: str, results: list) -> None:
 
     Args:
         phase: 処理フェーズ名（例: "データ取得", "モデル作成"）
-        results: 結果リスト（各要素は {"status": "success"|"error"|"skip", ...}）
+        results: 結果リスト（FeatureLoadResult または dict）
     """
-    success = [r for r in results if r.get("status") == "success"]
-    errors = [r for r in results if r.get("status") == "error"]
-    skipped = [r for r in results if r.get("status") == "skip"]
+
+    def _get(obj, key, default=None):
+        """dataclass と dict の両方に対応して属性を取得"""
+        if hasattr(obj, key):
+            return getattr(obj, key)
+        if hasattr(obj, "get"):
+            return obj.get(key, default)
+        return default
+
+    success = [r for r in results if _get(r, "status") == "success"]
+    errors = [r for r in results if _get(r, "status") == "error"]
+    skipped = [r for r in results if _get(r, "status") == "skip"]
 
     logger.info(f"{phase} 結果サマリー 成功: {len(success)} / スキップ: {len(skipped)} / エラー: {len(errors)}")
 
     if errors:
         logger.warning(f"\n{phase} エラー詳細:")
         for e in errors:
-            logger.warning(
-                f"  - {e.get('market', '?')}/{e.get('symbol', '?')}: {e.get('error', 'unknown')}"
-            )
+            market = _get(e, "market", "?")
+            symbol = _get(e, "symbol", "?")
+            error = _get(e, "error", "unknown")
+            logger.warning(f"  - {market}/{symbol}: {error}")

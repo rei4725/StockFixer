@@ -57,14 +57,6 @@ class FeatureLoadResult:
     def is_success(self) -> bool:
         return self.status == "success" and self.X is not None
 
-    # batch_runner.print_summary が "status" / "market" / "symbol" キーに依存するため
-    # dict 互換のアクセスを提供する
-    def __getitem__(self, key: str):
-        return getattr(self, key)
-
-    def get(self, key: str, default=None):
-        return getattr(self, key, default)
-
 
 @dataclass
 class TrainingMetrics:

@@ -8,7 +8,7 @@ from src.domain.types import FeatureLoadResult, PredictionResult, TradingGateSta
 
 
 class TestFeatureLoadResult(unittest.TestCase):
-    def test_success_status_and_dict_like_access(self):
+    def test_success_status_and_attribute_access(self):
         result = FeatureLoadResult(
             status="success",
             market="jp",
@@ -18,9 +18,9 @@ class TestFeatureLoadResult(unittest.TestCase):
         )
 
         self.assertTrue(result.is_success)
-        self.assertEqual(result["market"], "jp")
-        self.assertEqual(result.get("symbol"), "7203")
-        self.assertIsNone(result.get("missing_key"))
+        self.assertEqual(result.market, "jp")
+        self.assertEqual(result.symbol, "7203")
+        self.assertIsNone(result.reason)
 
 
 class TestPredictionResult(unittest.TestCase):

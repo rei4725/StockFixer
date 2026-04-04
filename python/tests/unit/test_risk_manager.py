@@ -5,6 +5,7 @@
 """
 
 import unittest
+from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
 from src.brokers.base import BrokerBase, OrderSide
@@ -149,14 +150,17 @@ class TestRiskManagerPersistence(unittest.TestCase):
         mock_con = MagicMock()
         mock_con.execute.return_value.fetchone.return_value = (-1234.0,)
 
-        with patch("src.services.risk_manager._get_con", return_value=mock_con):
+        @contextmanager
+        def mock_db():
+            yield mock_con
+
+        with patch("src.services.risk_manager._db_connection", new=mock_db):
             daily_loss = risk._get_daily_realized_loss()
 
         self.assertEqual(daily_loss, 1234.0)
         query, params = mock_con.execute.call_args[0]
         self.assertIn("FROM paper_orders", query)
         self.assertEqual(params, [int(OrderSide.SELL)])
-        mock_con.close.assert_called_once()
 
     def test_consecutive_losses_uses_paper_orders(self):
         broker = _make_broker()
@@ -165,14 +169,17 @@ class TestRiskManagerPersistence(unittest.TestCase):
         mock_con = MagicMock()
         mock_con.execute.return_value.fetchall.return_value = [(-100.0,), (-50.0,), (20.0,)]
 
-        with patch("src.services.risk_manager._get_con", return_value=mock_con):
+        @contextmanager
+        def mock_db():
+            yield mock_con
+
+        with patch("src.services.risk_manager._db_connection", new=mock_db):
             consecutive = risk._get_consecutive_losses()
 
         self.assertEqual(consecutive, 2)
         query, params = mock_con.execute.call_args[0]
         self.assertIn("FROM paper_orders", query)
         self.assertEqual(params, [int(OrderSide.SELL), MAX_CONSECUTIVE_LOSSES])
-        mock_con.close.assert_called_once()
 
     def test_missing_trade_pnl_returns_zero_for_non_paper_broker(self):
         broker = _make_broker()
@@ -182,14 +189,17 @@ class TestRiskManagerPersistence(unittest.TestCase):
         mock_con = MagicMock()
         mock_con.execute.return_value.fetchone.return_value = (0,)
 
-        with patch("src.services.risk_manager._get_con", return_value=mock_con):
+        @contextmanager
+        def mock_db():
+            yield mock_con
+
+        with patch("src.services.risk_manager._db_connection", new=mock_db):
             daily_loss = risk._get_daily_realized_loss()
 
         self.assertEqual(daily_loss, 0.0)
         query, params = mock_con.execute.call_args[0]
         self.assertIn("information_schema.tables", query)
         self.assertEqual(params, ["trade_pnl"])
-        mock_con.close.assert_called_once()
 
 
 if __name__ == "__main__":

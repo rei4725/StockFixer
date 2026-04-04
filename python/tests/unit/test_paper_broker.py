@@ -5,6 +5,7 @@ DuckDB を一時ファイルに差し替えてテスト。yfinance 呼び出し�
 """
 
 import unittest
+from contextlib import contextmanager
 from unittest.mock import patch
 
 import duckdb
@@ -49,6 +50,11 @@ def _get_test_con():
     return _TEST_CON
 
 
+@contextmanager
+def _test_db_connection():
+    yield _TEST_CON
+
+
 class TestPaperBrokerOrder(unittest.TestCase):
     def setUp(self):
         # 各テスト前にテーブルをリセット
@@ -57,21 +63,21 @@ class TestPaperBrokerOrder(unittest.TestCase):
         _TEST_CON.execute("UPDATE paper_balance SET balance = 1000000.0")
         self.broker = PaperBroker()
 
-    @patch("src.brokers.paper.paper_broker._get_con", side_effect=_get_test_con)
-    def test_send_order_returns_pending(self, _mock):
+    @patch("src.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
+    def test_send_order_returns_pending(self, _mock=None):
         result = self.broker.send_order("7203", OrderSide.BUY, 100)
         self.assertEqual(result["status"], "pending")
         self.assertIn("order_id", result)
 
-    @patch("src.brokers.paper.paper_broker._get_con", side_effect=_get_test_con)
-    def test_send_order_saved_to_db(self, _mock):
+    @patch("src.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
+    def test_send_order_saved_to_db(self, _mock=None):
         self.broker.send_order("7203", OrderSide.BUY, 100)
         row = _TEST_CON.execute("SELECT status FROM paper_orders WHERE symbol='7203'").fetchone()
         self.assertIsNotNone(row)
         self.assertEqual(row[0], "pending")
 
-    @patch("src.brokers.paper.paper_broker._get_con", side_effect=_get_test_con)
-    def test_cancel_order(self, _mock):
+    @patch("src.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
+    def test_cancel_order(self, _mock=None):
         result = self.broker.send_order("7203", OrderSide.BUY, 100)
         order_id = result["order_id"]
         cancel = self.broker.cancel_order(order_id)
@@ -81,13 +87,13 @@ class TestPaperBrokerOrder(unittest.TestCase):
         ).fetchone()
         self.assertEqual(row[0], "cancelled")
 
-    @patch("src.brokers.paper.paper_broker._get_con", side_effect=_get_test_con)
-    def test_get_balance_initial(self, _mock):
+    @patch("src.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
+    def test_get_balance_initial(self, _mock=None):
         balance = self.broker.get_balance()
         self.assertEqual(balance, 1_000_000.0)
 
-    @patch("src.brokers.paper.paper_broker._get_con", side_effect=_get_test_con)
-    def test_get_positions_empty(self, _mock):
+    @patch("src.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
+    def test_get_positions_empty(self, _mock=None):
         positions = self.broker.get_positions()
         self.assertEqual(positions, [])
 
@@ -105,9 +111,9 @@ class TestPaperBrokerSettle(unittest.TestCase):
             index=pd.to_datetime(["2026-03-15"]),
         )
 
-    @patch("src.brokers.paper.paper_broker._get_con", side_effect=_get_test_con)
+    @patch("src.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
     @patch("src.brokers.paper.paper_broker.yf_client.download")
-    def test_settle_market_buy(self, mock_yf, _mock_con):
+    def test_settle_market_buy(self, mock_yf, _mock_con=None):
         mock_yf.return_value = self._mock_yf_download()
         self.broker.send_order("7203", OrderSide.BUY, 100)
         settled = self.broker.settle_pending_orders()
@@ -117,9 +123,9 @@ class TestPaperBrokerSettle(unittest.TestCase):
         balance = _TEST_CON.execute("SELECT balance FROM paper_balance").fetchone()[0]
         self.assertAlmostEqual(balance, 1_000_000.0 - 1000.0 * 100)
 
-    @patch("src.brokers.paper.paper_broker._get_con", side_effect=_get_test_con)
+    @patch("src.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
     @patch("src.brokers.paper.paper_broker.yf_client.download")
-    def test_settle_creates_position(self, mock_yf, _mock_con):
+    def test_settle_creates_position(self, mock_yf, _mock_con=None):
         mock_yf.return_value = self._mock_yf_download()
         self.broker.send_order("7203", OrderSide.BUY, 100)
         self.broker.settle_pending_orders()

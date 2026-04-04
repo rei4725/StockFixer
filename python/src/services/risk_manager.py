@@ -13,30 +13,26 @@ OrderExecutionPipeline が注文を送信する前にゲートチェックを行
 
 import os
 
+from config.settings import (
+    HALF_KELLY,
+    MAX_CONSECUTIVE_LOSSES,
+    MAX_DAILY_LOSS_RATE,
+    MAX_POSITION_RATE,
+    MAX_POSITIONS,
+)
 from src.brokers.base import BrokerBase, OrderSide
 from src.domain.types import TradingGateStatus
+from src.utils.db._connection import _db_connection
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-# --- リスクパラメータ（必要なら環境変数化） ---
-MAX_DAILY_LOSS_RATE = 0.02  # 残高の 2%
-MAX_POSITION_RATE = 0.10  # 残高の 10%
-MAX_CONSECUTIVE_LOSSES = 3  # 連続損失でその日停止
-MAX_POSITIONS = 10  # 最大保有銘柄数
-HALF_KELLY = 0.5  # Kelly 係数に掛ける安全係数
 DAILY_LOSS_RATE_ENV = "MAX_DAILY_LOSS_RATE"
 DISABLE_DAILY_LOSS_GUARD_ENV = "DISABLE_DAILY_LOSS_GUARD"
 
 
 class RiskError(Exception):
     """リスクチェックによる取引拒否"""
-
-
-def _get_con():
-    from src.utils.db import get_connection
-
-    return get_connection()
 
 
 class RiskManager:
@@ -242,8 +238,7 @@ class RiskManager:
 
     def _get_daily_realized_loss(self) -> float:
         """当日の確定損失合計（プラスが損失）を返す"""
-        con = _get_con()
-        try:
+        with _db_connection() as con:
             if self._broker.broker_name == "paper":
                 row = con.execute(
                     """
@@ -276,13 +271,10 @@ class RiskManager:
                 [self._broker.broker_name],
             ).fetchone()
             return abs(float(row[0])) if row else 0.0
-        finally:
-            con.close()
 
     def _get_consecutive_losses(self) -> int:
         """直近の連続損失回数を返す"""
-        con = _get_con()
-        try:
+        with _db_connection() as con:
             if self._broker.broker_name == "paper":
                 rows = con.execute(
                     """
@@ -323,5 +315,3 @@ class RiskManager:
                 else:
                     break
             return count
-        finally:
-            con.close()

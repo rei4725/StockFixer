@@ -82,6 +82,11 @@ StockFixer/
     │   ├── _deprecated/         # 廃止モジュール
     │   │   └── sbi/             # SBI証券連携（廃止）
     │   │
+    │   ├── brokers/             # 証券会社連携層
+    │   │   ├── base.py          # BrokerBase 抽象基底クラス（OrderSide / OrderType）
+    │   │   ├── paper/           # PaperBroker（仮想売買）
+    │   │   └── kabu/            # KabuBroker（kabu STATION® API）
+    │   │
     │   ┌── utils/               # ユーティリティ層（最下層）
     │   │   ├── logger.py        # 統一ロガーファクトリー（全レイヤーに供給）
     │   │   ├── db/              # DuckDB接続管理・CRUD（パッケージ）
@@ -132,11 +137,19 @@ StockFixer/
 │  - prediction_pipeline.py: 予測・ランキング集計 │
 │  - unified_model_pipeline.py: 統合モデル学習    │
 │  - batch_runner.py: 並列実行・共通バッチ処理    │
+│  - order_execution_pipeline.py: 発注オーケストレーション │
+│  - risk_manager.py: リスクゲートチェック        │
 └─────────────────────────────────────────────────┘
                         ↓
 ┌─────────────────────────────────────────────────┐
 │  models/strategy/backtest層                     │
 │  - AI予測、シグナル生成、バックテスト           │
+└─────────────────────────────────────────────────┘
+                        ↓
+┌─────────────────────────────────────────────────┐
+│  brokers層 (base.py / paper/ / kabu/)           │
+│  - 証券会社連携、注文・照会操作の抽象化         │
+│  - services層は BrokerBase のみを参照（DI）     │
 └─────────────────────────────────────────────────┘
                         ↓
 ┌─────────────────────────────────────────────────┐
@@ -154,8 +167,8 @@ StockFixer/
 │  - 汎用ユーティリティ・DBアクセス（最下層）        │
 └─────────────────────────────────────────────────┘
 
-> **domain層** (`src/domain/types.py`) は上記階層に横断的に適用される共有型定義であり、
-> どのレイヤーからも参照可能な特別な位置づけです。
+> **domain層** (`src/domain/types.py`) は上記階層に横断的に適用される共有型定義であり、どのレイヤーからも参照可能な特別な位置づけです。
+> **config/settings.py** は全層に共通な設定値を一元管理する。環境変数で上書き可能。
 ```
 
 ---
@@ -176,9 +189,26 @@ StockFixer/
 | `TrainingMetrics` | モデル学習指標 | `rmse`, `directional_accuracy`, `n_samples` |
 | `PredictionResult` | 単一銘柄の予測結果 | `market`, `symbol`, `current_price`, `avg_pred_price`, `diff_ratio`, `model_count` + 多ホライズンオプション |
 
-- `FeatureLoadResult` は `__getitem__` / `get()` でdict互換アクセスをサポート
 - `PredictionResult.to_dataframe(results)` でリスト → DataFrame 変換
 - `PredictionResult.from_dataframe_row(row)` でDBロード時に逆変換
+
+### config層
+
+#### `config/settings.py`
+- **全層共通の設定値を一元管理**する横断的モジュール
+- すべての定数が環境変数でオーバーライド可能（デフォルト値はコードで保持）
+
+| 定数 | デフォルト | 環境変数 | 用途 |
+|------|-----------|----------|------|
+| `MAX_DAILY_LOSS_RATE` | 0.02 | `MAX_DAILY_LOSS_RATE` | 日次損失上限（2%） |
+| `MAX_POSITION_RATE` | 0.10 | `MAX_POSITION_RATE` | ポジション上限（10%） |
+| `MAX_CONSECUTIVE_LOSSES` | 3 | `MAX_CONSECUTIVE_LOSSES` | 連続損失上限回数 |
+| `MAX_POSITIONS` | 10 | `MAX_POSITIONS` | 最大同時保有ポジション数 |
+| `HALF_KELLY` | 0.5 | `HALF_KELLY` | ハーフケリー係数 |
+| `BUY_THRESHOLD` | 0.005 | `BUY_THRESHOLD` | 買いシグナル閾値（+0.5%） |
+| `SELL_THRESHOLD` | -0.005 | `SELL_THRESHOLD` | 売りシグナル閾値（-0.5%） |
+| `MAX_ORDERS_PER_RUN` | 5 | `MAX_ORDERS_PER_RUN` | 1回の発注バッチ上限 |
+| `PAPER_INITIAL_BALANCE` | 1,000,000 | `PAPER_INITIAL_BALANCE` | ペーパートレード初期残高（円） |
 
 ### api層
 
@@ -253,6 +283,28 @@ StockFixer/
 - テクニカル分析結果とAI予測を組み合わせて売買シグナル生成
 - シグナル: `Buy` / `Sell` / `Hold`
 - 予測変化率 > 0.5% → Buy、< -0.5% → Sell
+
+### brokers層
+
+証券会社との連携を抽象化する層。`services` 層は具体的な証券会社実装に依存せず、
+`BrokerBase` インターフェースのみを参照することで **依存性逆転** を実現している。
+
+#### `base.py`
+- `BrokerBase`: 証券会社連携の抽象基底クラス（ABC）
+- `OrderSide(IntEnum)`: `BUY = 1` / `SELL = 2`
+- `OrderType(IntEnum)`: `MARKET = 10` / `LIMIT = 20`
+- 必須実装メソッド: `get_token()`, `send_order()`, `cancel_order()`, `get_balance()`, `get_orders()`, `get_positions()`
+
+#### `paper/paper_broker.py`（PaperBroker）
+- `BrokerBase` を継承した**仮想売買ブローカー**
+- DuckDB に注文・ポジション・残高を永続化する
+- `settle_pending_orders()`: 未決済注文をyfinance終値で自動約定
+  - Phase 1（読み込み）と Phase 2（書き込み）に分割し、yfinance取得中に接続を保持しない設計
+- 初期残高: `PAPER_INITIAL_BALANCE`（`config/settings.py` で管理、デフォルト 1,000,000 円）
+
+#### `kabu/`（KabuBroker）
+- `BrokerBase` を継承した **kabu STATION® API** 実装
+- 国内株リアル発注・照会に対応
 
 ### features層
 
