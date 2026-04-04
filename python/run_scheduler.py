@@ -12,6 +12,7 @@ Discord Botと同時に起動し、1プロセスで全ジョブを管理する�
   py run_scheduler.py --run-now paper        # 自動発注→約定処理を順番に即時実行して終了
   py run_scheduler.py --run-now optimization # 全銘柄バックテスト最適化を即時実行して終了
   py run_scheduler.py --run-now wf_report    # Walk-Forward比較レポートを即時実行して終了
+    py run_scheduler.py --run-now drift        # ドリフト監視と自動再学習を即時実行して終了
 """
 
 import argparse
@@ -99,6 +100,13 @@ def job_weekly_watchlist_refresh():
     from src.services.scheduler_pipeline import run_weekly_watchlist_refresh
 
     run_weekly_watchlist_refresh()
+
+
+def job_daily_drift_check():
+    """毎営業日実行: ドリフト監視と閾値超過銘柄の再学習"""
+    from src.services.scheduler_pipeline import run_daily_drift_check
+
+    run_daily_drift_check()
 
 
 # ── イベントリスナー ──────────────────────────────────
@@ -211,6 +219,17 @@ SCHEDULE_CONFIG = {
         "recovery_delay_minutes": 30,
         "max_executions_per_period": 1,
         "description": "毎週日曜 02:00 - ウォッチリスト自動更新",
+    },
+    "daily_drift_check": {
+        "func": job_daily_drift_check,
+        "trigger": "cron",
+        "period": "daily",
+        "day_of_week": "mon-fri",
+        "hour": 20,
+        "minute": 0,
+        "recovery_delay_minutes": 20,
+        "max_executions_per_period": 1,
+        "description": "毎営業日 20:00 - ドリフト監視と再学習トリガー",
     },
 }
 
@@ -340,9 +359,11 @@ def run_now(pipeline: str):
         queue_manager.run_job("weekly_walk_forward_report", reason="manual", force=True)
     elif pipeline == "watchlist":
         queue_manager.run_job("weekly_watchlist_refresh", reason="manual", force=True)
+    elif pipeline == "drift":
+        queue_manager.run_job("daily_drift_check", reason="manual", force=True)
     else:
         print(f"不明なパイプライン: {pipeline}")
-        print("使用可能: daily, weekly, paper, paper_report, optimization, wf_report, watchlist")
+        print("使用可能: daily, weekly, paper, paper_report, optimization, wf_report, watchlist, drift")
         sys.exit(1)
 
 
@@ -364,6 +385,7 @@ def main():
             "optimization",
             "wf_report",
             "watchlist",
+            "drift",
         ],
         help=(
             "指定パイプラインを即時実行して終了する（テスト用）。"
@@ -371,7 +393,8 @@ def main():
             "paper_report=ポジション・損益レポート送信、"
             "optimization=全銘柄最適化、"
             "wf_report=Walk-Forward比較レポート生成、"
-            "watchlist=ウォッチリスト自動更新"
+            "watchlist=ウォッチリスト自動更新、"
+            "drift=ドリフト監視と自動再学習"
         ),
     )
     args = parser.parse_args()

@@ -392,7 +392,7 @@ def run_daily_drift_check():
 
     # 銘柄別モデル再学習
     from src.services.batch_runner import load_target_symbols
-    from src.services.model_training_pipeline import train_models_for_symbol
+    from src.services.model_training_pipeline import train_models_for_symbol_task
 
     all_tasks = {(t.market, t.symbol): t for t in load_target_symbols()}
     success_count = 0
@@ -403,8 +403,14 @@ def run_daily_drift_check():
             continue
         try:
             logger.info(f"ドリフト再学習開始: {sym['market']}/{sym['symbol']}")
-            train_models_for_symbol(task)
-            success_count += 1
+            result = train_models_for_symbol_task(task)
+            if result.get("status") == "success":
+                success_count += 1
+            else:
+                logger.warning(
+                    f"ドリフト再学習スキップ/失敗 ({sym['market']}/{sym['symbol']}): "
+                    f"{result.get('reason') or result.get('error') or result.get('status')}"
+                )
         except Exception as e:
             logger.error(f"ドリフト再学習失敗 ({sym['market']}/{sym['symbol']}): {e}", exc_info=True)
 
