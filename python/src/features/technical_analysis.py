@@ -1,6 +1,8 @@
 import pandas as pd
 import ta
 
+from src.features.market_regime import get_market_regime
+
 # テクニカル指標のデフォルトパラメータ
 _DEFAULT_TA_PARAMS = {
     "macd_slow": 26,
@@ -166,33 +168,9 @@ def classify_regime(
     Returns:
         pd.Series[str]: 各日に "bull" / "bear" / "range" を付与したシリーズ（元の df と同インデックス）
     """
-    if df.empty or "Close" not in df.columns:
-        return pd.Series(dtype=str, index=df.index)
-
-    close = pd.Series(df["Close"].values, index=df.index, dtype=float)
-
-    # EMA（データ数が ema_window 未満のときは実際の長さを使用）
-    actual_window = min(ema_window, max(1, len(df) - 1))
-    ema: pd.Series = close.ewm(span=actual_window, adjust=False).mean()
-
-    # ATR（High / Low がなければ Close のみで簡易計算）
-    if "High" in df.columns and "Low" in df.columns:
-        high = pd.Series(df["High"].values, index=df.index, dtype=float)
-        low = pd.Series(df["Low"].values, index=df.index, dtype=float)
-        tr_parts: list[pd.Series] = [
-            (high - low),
-            (high - close.shift(1)).abs(),
-            (low - close.shift(1)).abs(),
-        ]
-        tr: pd.Series = pd.concat(tr_parts, axis=1).max(axis=1)
-    else:
-        tr = close.pct_change().abs()
-
-    atr: pd.Series = tr.rolling(window=atr_window, min_periods=1).mean()
-    vol_threshold = float(atr.quantile(vol_high_quantile))
-
-    regime = pd.Series("bear", index=df.index, dtype=str)
-    regime[close > ema] = "bull"
-    regime[atr >= vol_threshold] = "range"
-
-    return regime
+    return get_market_regime(
+        df,
+        ema_window=ema_window,
+        atr_window=atr_window,
+        vol_high_quantile=vol_high_quantile,
+    )

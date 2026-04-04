@@ -25,6 +25,7 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
+from src.features.market_regime import get_market_regime
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -104,6 +105,9 @@ def run_portfolio_backtest(
     )
 
     metrics = _compute_portfolio_metrics(equity_df, initial_cash)
+    equity_df, regime_metrics = _attach_regime_metrics(equity_df, close_matrix)
+    if regime_metrics:
+        metrics["regime_metrics"] = regime_metrics
 
     holdings_df = pd.DataFrame(holdings_records)
 
@@ -243,8 +247,24 @@ def print_portfolio_metrics(metrics: dict, market: str, top_n: int, rebalance_fr
     print(f"\n{'='*55}")
     print(f" {label}")
     print(f"{'='*55}")
+    regime_metrics = metrics.get("regime_metrics", {})
     for k, v in metrics.items():
+        if k == "regime_metrics":
+            continue
         print(f"  {k:25s}: {v}")
+    if regime_metrics:
+        print("  regime_metrics:")
+        for label in ("all", "bull", "bear", "range"):
+            leg = regime_metrics.get(label)
+            if not leg:
+                continue
+            print(
+                "    "
+                f"{label:5s} days={leg['days']:3d} "
+                f"return={leg['total_return']:.4f} "
+                f"sharpe={leg['sharpe_ratio']:.4f} "
+                f"hit={leg['hit_rate']:.4f}"
+            )
     print(f"{'='*55}")
 
 
@@ -518,4 +538,97 @@ def _compute_portfolio_metrics(equity_df: pd.DataFrame, initial_cash: float) -> 
         "sharpe_ratio": round(sharpe, 4),
         "max_drawdown": round(max_dd, 6),
         "days": len(equity_df),
+    }
+
+
+def _attach_regime_metrics(
+    equity_df: pd.DataFrame,
+    close_matrix: pd.DataFrame,
+) -> tuple[pd.DataFrame, dict[str, dict]]:
+    """ポートフォリオ日次損益にレジーム列を付与し、レジーム別メトリクスを返す。"""
+    if equity_df is None or equity_df.empty or close_matrix is None or close_matrix.empty:
+        return equity_df, {}
+
+    proxy_df = _build_market_proxy_frame(close_matrix)
+    if proxy_df.empty:
+        return equity_df, {}
+
+    regime_series = get_market_regime(proxy_df)
+    if regime_series.empty:
+        return equity_df, {}
+
+    enriched = equity_df.copy()
+    enriched["date"] = pd.to_datetime(enriched["date"])
+    if not isinstance(regime_series.index, pd.DatetimeIndex):
+        regime_series.index = pd.to_datetime(regime_series.index)
+
+    min_regime_date = regime_series.index.min()
+    enriched["regime"] = enriched["date"].map(
+        lambda d: regime_series.asof(d) if d >= min_regime_date else None
+    )
+    regime_metrics = _compute_regime_metrics(enriched)
+    enriched["date"] = enriched["date"].dt.strftime("%Y-%m-%d")
+    return enriched, regime_metrics
+
+
+def _build_market_proxy_frame(close_matrix: pd.DataFrame) -> pd.DataFrame:
+    """複数銘柄の終値行列から市場全体の簡易プロキシ価格を構築する。"""
+    if close_matrix is None or close_matrix.empty:
+        return pd.DataFrame()
+
+    aligned = close_matrix.sort_index().ffill()
+    proxy_df = pd.DataFrame(index=aligned.index)
+    proxy_df["Close"] = aligned.mean(axis=1, skipna=True)
+    proxy_df["High"] = aligned.max(axis=1, skipna=True)
+    proxy_df["Low"] = aligned.min(axis=1, skipna=True)
+    return proxy_df.dropna(subset=["Close"])
+
+
+def _compute_regime_metrics(equity_df: pd.DataFrame) -> dict[str, dict]:
+    results: dict[str, dict] = {"all": _compute_regime_leg_metrics(equity_df)}
+    if "regime" not in equity_df.columns:
+        return results
+
+    for label in ("bull", "bear", "range"):
+        leg = equity_df[equity_df["regime"] == label]
+        results[label] = _compute_regime_leg_metrics(leg)
+    return results
+
+
+def _compute_regime_leg_metrics(equity_leg: pd.DataFrame) -> dict:
+    if equity_leg is None or equity_leg.empty:
+        return {
+            "days": 0,
+            "total_return": 0.0,
+            "sharpe_ratio": 0.0,
+            "hit_rate": 0.0,
+            "max_drawdown": 0.0,
+        }
+
+    portfolio_values = pd.to_numeric(equity_leg["portfolio_value"], errors="coerce").dropna()
+    daily_returns = portfolio_values.pct_change().dropna()
+    daily_return_values = daily_returns.to_numpy(dtype=float, copy=False)
+    total_return = (
+        float(np.prod(1.0 + daily_return_values) - 1.0) if len(daily_return_values) else 0.0
+    )
+    sharpe_ratio = 0.0
+    if len(daily_return_values) >= 2:
+        daily_std = float(np.std(daily_return_values, ddof=1))
+        if daily_std > 0:
+            daily_mean = float(np.mean(daily_return_values))
+            sharpe_ratio = float(daily_mean / daily_std * math.sqrt(252))
+
+    hit_rate = float(np.mean(daily_return_values > 0)) if len(daily_return_values) else 0.0
+    curve = pd.Series(np.cumprod(1.0 + daily_return_values), index=daily_returns.index)
+    max_drawdown = 0.0
+    if not curve.empty:
+        roll_max = curve.cummax()
+        max_drawdown = float(((curve - roll_max) / roll_max).min())
+
+    return {
+        "days": int(len(equity_leg)),
+        "total_return": round(total_return, 6),
+        "sharpe_ratio": round(sharpe_ratio, 4),
+        "hit_rate": round(hit_rate, 4),
+        "max_drawdown": round(max_drawdown, 6),
     }
