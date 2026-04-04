@@ -18,6 +18,47 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+def _extract_mean_abs_shap_values(shap_values, feature_count: int) -> np.ndarray:
+    """SHAPの戻り値形式差分を吸収し、特徴量ごとの平均絶対寄与を返す。"""
+    values = getattr(shap_values, "values", shap_values)
+
+    if isinstance(values, list):
+        if not values:
+            raise ValueError("SHAP values list is empty")
+        per_output = [_extract_mean_abs_shap_values(item, feature_count) for item in values]
+        return np.mean(np.vstack(per_output), axis=0)
+
+    arr = np.asarray(values)
+    if arr.ndim == 0:
+        raise ValueError("SHAP values are scalar")
+
+    if arr.ndim == 1:
+        if arr.shape[0] != feature_count:
+            raise ValueError(
+                f"SHAP feature length mismatch: expected {feature_count}, got {arr.shape[0]}"
+            )
+        return np.abs(arr)
+
+    feature_axis = next(
+        (axis for axis in range(arr.ndim - 1, -1, -1) if arr.shape[axis] == feature_count),
+        None,
+    )
+    if feature_axis is None:
+        raise ValueError(
+            "Unable to locate feature axis in SHAP values "
+            f"shape={arr.shape}, feature_count={feature_count}"
+        )
+
+    reduce_axes = tuple(axis for axis in range(arr.ndim) if axis != feature_axis)
+    mean_abs = np.abs(arr).mean(axis=reduce_axes) if reduce_axes else np.abs(arr)
+    mean_abs = np.asarray(mean_abs).reshape(-1)
+    if mean_abs.shape[0] != feature_count:
+        raise ValueError(
+            f"SHAP summary length mismatch: expected {feature_count}, got {mean_abs.shape[0]}"
+        )
+    return mean_abs
+
+
 def load_features_for_training(market: str, symbol: str, horizon: int = 1) -> FeatureLoadResult:
     """
     学習用の特徴量データをDBから読み込む（DB書き込みなし、並列安全）。
@@ -121,8 +162,8 @@ def _compute_and_save_shap(
         explainer = shap.TreeExplainer(model.model)
         shap_arr = explainer.shap_values(X_sample)
 
-        # 各特徴量の平均絶対SHAP値を計算
-        mean_abs = np.abs(shap_arr).mean(axis=0)
+        # SHAP Explanation / list / ndarray の差分を吸収する
+        mean_abs = _extract_mean_abs_shap_values(shap_arr, feature_count=len(X_sample.columns))
         shap_df = pd.DataFrame({"feature": X_sample.columns.tolist(), "shap_mean": mean_abs})
         shap_df = shap_df.sort_values("shap_mean", ascending=False).reset_index(drop=True)
         shap_df["shap_rank"] = range(1, len(shap_df) + 1)

@@ -9,6 +9,7 @@ import pandas as pd
 from src.domain.types import FeatureLoadResult, TrainingMetrics
 from src.services.model_training_pipeline import (
     _compute_training_metrics,
+    _extract_mean_abs_shap_values,
     load_features_for_training,
     train_models_for_symbol,
     train_models_for_symbol_task,
@@ -154,6 +155,43 @@ class TestLoadFeaturesForTraining(unittest.TestCase):
                 self.assertNotIn("/", col)
 
 
+class _DummyExplanation:
+    def __init__(self, values):
+        self.values = values
+
+
+class TestExtractMeanAbsShapValues(unittest.TestCase):
+    """_extract_mean_abs_shap_values のテスト"""
+
+    def test_accepts_2d_numpy_array(self):
+        shap_values = np.array([[1.0, -2.0], [-3.0, 4.0]])
+
+        result = _extract_mean_abs_shap_values(shap_values, feature_count=2)
+
+        np.testing.assert_allclose(result, np.array([2.0, 3.0]))
+
+    def test_accepts_explanation_like_object(self):
+        shap_values = _DummyExplanation(np.array([[1.0, -3.0], [-1.0, 5.0]]))
+
+        result = _extract_mean_abs_shap_values(shap_values, feature_count=2)
+
+        np.testing.assert_allclose(result, np.array([1.0, 4.0]))
+
+    def test_accepts_list_outputs_and_averages_across_outputs(self):
+        shap_values = [
+            np.array([[1.0, -3.0], [-1.0, 5.0]]),
+            np.array([[2.0, -1.0], [-2.0, 7.0]]),
+        ]
+
+        result = _extract_mean_abs_shap_values(shap_values, feature_count=2)
+
+        np.testing.assert_allclose(result, np.array([1.5, 4.0]))
+
+    def test_raises_when_feature_axis_cannot_be_found(self):
+        with self.assertRaises(ValueError):
+            _extract_mean_abs_shap_values(np.array([[1.0, 2.0, 3.0]]), feature_count=2)
+
+
 class TestTrainModelsForSymbol(unittest.TestCase):
     """train_models_for_symbol 関数のテスト"""
 
@@ -221,6 +259,39 @@ class TestTrainModelsForSymbol(unittest.TestCase):
 
         self.assertEqual(mock_mm.create_model.call_count, 2)
         self.assertEqual(mock_mm.train_model.call_count, 2)
+
+    @patch("src.api.discord_utils.send_shap_notification")
+    @patch("src.services.model_training_pipeline._compute_and_save_shap")
+    @patch("src.services.model_training_pipeline.save_model_metrics")
+    @patch("src.services.model_training_pipeline.ModelManager")
+    @patch("src.services.model_training_pipeline.load_features_for_training")
+    def test_shap_notification_sent_for_each_trained_model(
+        self,
+        mock_load,
+        mock_mm_cls,
+        mock_save_metrics,
+        mock_compute_shap,
+        mock_send_shap,
+    ):
+        mock_load.return_value = self._make_feature_result()
+        dates = pd.date_range("2024-01-01", periods=100, freq="D")
+        mock_model = MagicMock()
+        mock_model.predict.return_value = pd.Series(np.zeros(100), index=dates)
+        mock_mm = MagicMock()
+        mock_mm.get_model.return_value = mock_model
+        mock_mm_cls.return_value = mock_mm
+        mock_compute_shap.return_value = pd.DataFrame(
+            {
+                "feature": ["f1", "f2"],
+                "shap_mean": [0.5, 0.1],
+                "shap_rank": [1, 2],
+            }
+        )
+
+        train_models_for_symbol("us", "AAPL")
+
+        self.assertEqual(mock_compute_shap.call_count, 2)
+        self.assertEqual(mock_send_shap.call_count, 2)
 
 
 class TestTrainModelsForSymbolTask(unittest.TestCase):
