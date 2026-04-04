@@ -25,8 +25,10 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
+from config.settings import MAX_SECTOR_POSITIONS
 from src.features.market_regime import get_market_regime
 from src.utils.logger import get_logger
+from src.utils.sector_constraints import filter_by_sector_cap, get_symbol_sector
 
 logger = get_logger(__name__)
 
@@ -47,6 +49,7 @@ def run_portfolio_backtest(
     fee_rate: float = 0.001,
     threshold: float = 0.0,
     ensemble: bool = False,
+    max_sector_positions: int = MAX_SECTOR_POSITIONS,
 ) -> tuple[pd.DataFrame, dict, pd.DataFrame]:
     """
     ポートフォリオバックテストを実行する。
@@ -62,6 +65,7 @@ def run_portfolio_backtest(
         fee_rate: 片道手数料率
         threshold: 買いシグナル発生の最低予測上昇率（0.0=制限なし）
         ensemble: XGBoost+LightGBM アンサンブルを使用
+        max_sector_positions: 同一セクターで許容する最大銘柄数（0 以下で無効）
 
     Returns:
         (equity_df, metrics, holdings_df)
@@ -102,12 +106,14 @@ def run_portfolio_backtest(
         top_n=top_n,
         initial_cash=initial_cash,
         fee_rate=fee_rate,
+        max_sector_positions=max_sector_positions,
     )
 
     metrics = _compute_portfolio_metrics(equity_df, initial_cash)
     equity_df, regime_metrics = _attach_regime_metrics(equity_df, close_matrix)
     if regime_metrics:
         metrics["regime_metrics"] = regime_metrics
+    metrics["max_sector_positions"] = max_sector_positions
 
     holdings_df = pd.DataFrame(holdings_records)
 
@@ -392,6 +398,7 @@ def _simulate_portfolio(
     top_n: int,
     initial_cash: float,
     fee_rate: float,
+    max_sector_positions: int,
 ) -> tuple[pd.DataFrame, list]:
     """
     ポートフォリオシミュレーションを実行する。
@@ -422,7 +429,10 @@ def _simulate_portfolio(
             scores_today = score_matrix.loc[date].dropna()
 
             # 上位 top_n を選択
-            top_candidates = scores_today.nlargest(top_n)
+            top_candidates = _limit_portfolio_candidates_by_sector(
+                scores_today.nlargest(top_n * 3),
+                max_sector_positions=max_sector_positions,
+            ).head(top_n)
             weights = _softmax_weights(top_candidates)
 
             if not weights.empty:
@@ -463,6 +473,7 @@ def _simulate_portfolio(
                             {
                                 "rebalance_date": date_str,
                                 "symbol": sym,
+                                "sector": _get_portfolio_symbol_sector(sym),
                                 "weight": float(w),
                                 "score": float(top_candidates.get(sym, 0)),
                                 "price": price,
@@ -508,6 +519,39 @@ def _simulate_portfolio(
 
     equity_df = pd.DataFrame(equity_rows)
     return equity_df, holdings_records
+
+
+def _get_portfolio_symbol_sector(sym_key: str) -> str:
+    market, symbol = _split_symbol_key(sym_key)
+    return get_symbol_sector(market, symbol)
+
+
+def _split_symbol_key(sym_key: str) -> tuple[str, str]:
+    if "_" not in sym_key:
+        return "jp", sym_key
+    return tuple(sym_key.split("_", 1))  # type: ignore[return-value]
+
+
+def _limit_portfolio_candidates_by_sector(
+    top_candidates: pd.Series,
+    max_sector_positions: int = MAX_SECTOR_POSITIONS,
+) -> pd.Series:
+    if top_candidates.empty or max_sector_positions <= 0:
+        return top_candidates.copy()
+
+    ordered_items = list(top_candidates.items())
+    selected_items = filter_by_sector_cap(
+        ordered_items,
+        max_sector_positions=max_sector_positions,
+        sector_getter=lambda item: _get_portfolio_symbol_sector(str(item[0])),
+    )
+    if not selected_items:
+        return top_candidates.iloc[0:0].copy()
+    return pd.Series(
+        data=[float(score) for _, score in selected_items],
+        index=[str(symbol) for symbol, _ in selected_items],
+        dtype=float,
+    )
 
 
 def _compute_portfolio_metrics(equity_df: pd.DataFrame, initial_cash: float) -> dict:

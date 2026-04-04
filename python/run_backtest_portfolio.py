@@ -22,6 +22,7 @@ import argparse
 import os
 import sys
 
+from config.settings import MAX_SECTOR_POSITIONS
 from src.services.portfolio_backtest import (
     plot_portfolio,
     print_portfolio_metrics,
@@ -110,6 +111,12 @@ def parse_args():
         action="store_true",
         help="バックテスト結果グラフ (PNG) を results/ に保存する",
     )
+    parser.add_argument(
+        "--max-sector-positions",
+        type=int,
+        default=MAX_SECTOR_POSITIONS,
+        help="同一セクターで許容する最大銘柄数。0 で制約無効",
+    )
 
     return parser.parse_args()
 
@@ -133,6 +140,7 @@ def _run_one(args, top_n: int, rebalance_freq: str) -> None:
         fee_rate=args.fee_rate,
         threshold=args.threshold,
         ensemble=args.ensemble,
+        max_sector_positions=args.max_sector_positions,
     )
 
     if equity_df.empty:

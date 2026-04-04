@@ -14,6 +14,7 @@ from src.domain.types import TradingGateStatus
 from src.services.order_execution_pipeline import (
     BUY_THRESHOLD,
     MAX_ORDERS_PER_RUN,
+    _apply_buy_sector_limit,
     _attach_dynamic_thresholds,
     _compute_market_threshold_scale,
     run_daily_orders,
@@ -363,6 +364,25 @@ class TestDynamicThresholdHelpers(unittest.TestCase):
         self.assertAlmostEqual(enriched.loc[1, "base_threshold"], BUY_THRESHOLD)
         self.assertIn("effective_buy_threshold", enriched.columns)
         self.assertIn("effective_sell_threshold", enriched.columns)
+
+
+class TestSectorLimitHelpers(unittest.TestCase):
+    @patch("src.services.order_execution_pipeline.get_symbol_sector")
+    def test_apply_buy_sector_limit_reduces_same_sector_concentration(self, mock_get_sector):
+        mock_get_sector.side_effect = ["Auto", "Auto", "Tech", "Bank"]
+        predictions = pd.DataFrame(
+            [
+                {"market": "jp", "symbol": "7200", "diff_ratio": 0.03, "current_price": 1000.0},
+                {"market": "jp", "symbol": "7201", "diff_ratio": 0.02, "current_price": 1000.0},
+                {"market": "jp", "symbol": "6758", "diff_ratio": 0.018, "current_price": 1000.0},
+                {"market": "jp", "symbol": "8306", "diff_ratio": 0.016, "current_price": 1000.0},
+            ]
+        )
+
+        limited = _apply_buy_sector_limit(predictions, max_sector_positions=1)
+
+        self.assertEqual(limited["symbol"].tolist(), ["7200", "6758", "8306"])
+        self.assertEqual(limited["sector"].tolist(), ["Auto", "Tech", "Bank"])
 
 
 if __name__ == "__main__":

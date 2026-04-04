@@ -18,13 +18,14 @@ from typing import TypedDict
 
 import pandas as pd
 
-from config.settings import BUY_THRESHOLD, MAX_ORDERS_PER_RUN
+from config.settings import BUY_THRESHOLD, MAX_ORDERS_PER_RUN, MAX_SECTOR_POSITIONS
 from src.brokers.base import BrokerBase, OrderSide, OrderType
 from src.domain.types import TradingGateStatus
 from src.services.prediction_pipeline import get_optimal_params
 from src.services.risk_manager import RiskManager
 from src.utils.db._connection import _db_connection
 from src.utils.logger import get_logger
+from src.utils.sector_constraints import filter_by_sector_cap, get_symbol_sector
 
 logger = get_logger(__name__)
 
@@ -131,6 +132,37 @@ def _attach_dynamic_thresholds(predictions: pd.DataFrame) -> pd.DataFrame:
     enriched["effective_buy_threshold"] = enriched["base_threshold"] * scale
     enriched["effective_sell_threshold"] = -enriched["effective_buy_threshold"]
     return enriched
+
+
+def _apply_buy_sector_limit(
+    predictions: pd.DataFrame,
+    max_sector_positions: int = MAX_SECTOR_POSITIONS,
+) -> pd.DataFrame:
+    """買い候補に同一セクター上限を適用する。"""
+    if predictions.empty or max_sector_positions <= 0:
+        return predictions.copy()
+
+    ordered_rows = list(predictions.sort_values("diff_ratio", ascending=False).iterrows())
+    sector_cache: dict[int, str] = {}
+
+    def _sector_getter(item: tuple[int, pd.Series]) -> str:
+        idx, row = item
+        if idx not in sector_cache:
+            sector_cache[idx] = get_symbol_sector(str(row["market"]), str(row["symbol"]))
+        return sector_cache[idx]
+
+    selected_rows = filter_by_sector_cap(
+        ordered_rows,
+        max_sector_positions=max_sector_positions,
+        sector_getter=_sector_getter,
+    )
+    if not selected_rows:
+        return predictions.iloc[0:0].copy()
+
+    selected_index = [idx for idx, _ in selected_rows]
+    limited = predictions.loc[selected_index].copy()
+    limited["sector"] = [sector_cache[idx] for idx, _ in selected_rows]
+    return limited
 
 
 def _get_held_symbols(broker: BrokerBase) -> set[str]:
@@ -271,10 +303,11 @@ def run_daily_orders(
             stats["errors"] += 1
 
     # --- 新規買いシグナル ---
-    buy_signals = predictions[
+    buy_candidates = predictions[
         (~predictions["symbol"].isin(held_symbols))
         & (predictions["diff_ratio"] >= predictions["effective_buy_threshold"])
-    ].head(MAX_ORDERS_PER_RUN)
+    ]
+    buy_signals = _apply_buy_sector_limit(buy_candidates).head(MAX_ORDERS_PER_RUN)
 
     for _, row in buy_signals.iterrows():
         symbol = row["symbol"]
@@ -300,7 +333,8 @@ def run_daily_orders(
             _record_order(symbol, OrderSide.BUY, qty, result, broker, mode)
             logger.info(
                 f"[exec] 買い発注: {symbol} {qty}株 @ 成行 "
-                f"(予測変化率={row['diff_ratio']:.3%}, 閾値={row['effective_buy_threshold']:.3%})"
+                f"(予測変化率={row['diff_ratio']:.3%}, 閾値={row['effective_buy_threshold']:.3%}, "
+                f"sector={row.get('sector', 'N/A')})"
             )
             stats["buy_orders"] += 1
         except Exception as e:

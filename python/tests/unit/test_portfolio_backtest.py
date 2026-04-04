@@ -3,7 +3,10 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from src.services.portfolio_backtest import _attach_regime_metrics
+from src.services.portfolio_backtest import (
+    _attach_regime_metrics,
+    _limit_portfolio_candidates_by_sector,
+)
 
 
 class TestPortfolioBacktestRegimeMetrics(unittest.TestCase):
@@ -39,6 +42,22 @@ class TestPortfolioBacktestRegimeMetrics(unittest.TestCase):
         self.assertEqual(regime_metrics["range"]["days"], 2)
         self.assertIn("all", regime_metrics)
         self.assertIn("hit_rate", regime_metrics["bull"])
+
+
+class TestPortfolioBacktestSectorLimit(unittest.TestCase):
+    @patch("src.services.portfolio_backtest.get_symbol_sector")
+    def test_limit_portfolio_candidates_by_sector_caps_same_sector(self, mock_get_sector):
+        mock_get_sector.side_effect = ["Auto", "Auto", "Tech", "Bank"]
+        top_candidates = pd.Series(
+            [0.04, 0.03, 0.025, 0.02],
+            index=["jp_7203", "jp_7267", "jp_6758", "jp_8306"],
+            dtype=float,
+        )
+
+        limited = _limit_portfolio_candidates_by_sector(top_candidates, max_sector_positions=1)
+
+        self.assertEqual(limited.index.tolist(), ["jp_7203", "jp_6758", "jp_8306"])
+        self.assertEqual(limited.tolist(), [0.04, 0.025, 0.02])
 
 
 if __name__ == "__main__":

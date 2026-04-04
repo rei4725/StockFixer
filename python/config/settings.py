@@ -55,6 +55,9 @@ SELL_THRESHOLD: float = _float("SELL_THRESHOLD", -0.005)
 #: 1回の実行で発注する最大銘柄数
 MAX_ORDERS_PER_RUN: int = _int("MAX_ORDERS_PER_RUN", 5)
 
+#: 同一セクターで同時に許容する最大銘柄数。0 以下で無効
+MAX_SECTOR_POSITIONS: int = _int("MAX_SECTOR_POSITIONS", 3)
+
 # ---------------------------------------------------------------------------
 # ペーパートレード（paper_broker.py）
 # ---------------------------------------------------------------------------
