@@ -3,6 +3,11 @@ import ta
 
 from src.features.market_regime import get_market_regime
 
+_MULTI_TIMEFRAME_RULES = {
+    "weekly": "W-FRI",
+    "monthly": "ME",
+}
+
 # テクニカル指標のデフォルトパラメータ
 _DEFAULT_TA_PARAMS = {
     "macd_slow": 26,
@@ -53,7 +58,50 @@ def create_basic_lag_features(
     return X, y
 
 
-def add_technical_indicators(df: pd.DataFrame, params: dict = None) -> pd.DataFrame:
+def _resample_ohlcv(df: pd.DataFrame, rule: str) -> pd.DataFrame:
+    if df.empty:
+        return df.copy()
+
+    agg_map = {
+        "Open": "first",
+        "High": "max",
+        "Low": "min",
+        "Close": "last",
+    }
+    if "Volume" in df.columns:
+        agg_map["Volume"] = "sum"
+
+    resampled = df[list(agg_map.keys())].resample(rule).agg(agg_map)  # type: ignore[arg-type]
+    return resampled.dropna(subset=["Open", "High", "Low", "Close"])
+
+
+def _add_multi_timeframe_features(df: pd.DataFrame, params: dict) -> pd.DataFrame:
+    if not isinstance(df.index, pd.DatetimeIndex) or df.empty:
+        return df
+
+    enriched = df.copy()
+    for prefix, rule in _MULTI_TIMEFRAME_RULES.items():
+        resampled = _resample_ohlcv(df, rule)
+        if resampled.empty:
+            continue
+
+        tf_df = add_technical_indicators(resampled, params=params, timeframe=prefix)
+        tf_features = pd.DataFrame(index=tf_df.index)
+        tf_features[f"{prefix}_close_vs_ema_fast"] = tf_df["Close"] / tf_df["ema_fast"] - 1.0
+        tf_features[f"{prefix}_close_vs_ema_slow"] = tf_df["Close"] / tf_df["ema_slow"] - 1.0
+        tf_features[f"{prefix}_ema_gap"] = tf_df["ema_fast"] / tf_df["ema_slow"] - 1.0
+        tf_features[f"{prefix}_rsi"] = tf_df["rsi"]
+        tf_features[f"{prefix}_macd_diff"] = tf_df["macd_diff"]
+
+        aligned = tf_features.reindex(enriched.index, method="ffill")
+        enriched = pd.concat([enriched, aligned], axis=1)
+
+    return enriched
+
+
+def add_technical_indicators(
+    df: pd.DataFrame, params: dict = None, timeframe: str = "1d"
+) -> pd.DataFrame:
     """
      DataFrameにテクニカル指標を追加する
 
@@ -62,12 +110,24 @@ def add_technical_indicators(df: pd.DataFrame, params: dict = None) -> pd.DataFr
          params (dict, optional): テクニカル指標のパラメータ辞書。
              省略時は `_DEFAULT_TA_PARAMS` のデフォルト値を使用。
              例: {"rsi_window": 21, "bb_window": 14}
+         timeframe (str): 入力時間軸。日足(`1d`)時は週足・月足のトレンド特徴量も追加する。
 
      Returns:
          pd.DataFrame: テクニカル指標が追加されたDataFrame
     """
     p = {**_DEFAULT_TA_PARAMS, **(params or {})}
     df = df.copy()
+    row_count = max(len(df), 1)
+    macd_slow = max(2, min(int(p["macd_slow"]), row_count))
+    macd_fast = max(1, min(int(p["macd_fast"]), macd_slow - 1))
+    macd_sign = max(1, min(int(p["macd_sign"]), macd_slow))
+    ema_fast_window = max(1, min(int(p["ema_fast"]), row_count))
+    ema_slow_window = max(1, min(int(p["ema_slow"]), row_count))
+    atr_window = max(1, min(int(p["atr_window"]), row_count))
+    rsi_window = max(1, min(int(p["rsi_window"]), row_count))
+    bb_window = max(1, min(int(p["bb_window"]), row_count))
+    stoch_window = max(1, min(int(p["stoch_window"]), row_count))
+    stoch_smooth = max(1, min(int(p["stoch_smooth"]), stoch_window))
 
     # MultiIndex列をフラット化（yfinanceやCSV読み込み時の対策）
     if isinstance(df.columns, pd.MultiIndex):
@@ -84,9 +144,9 @@ def add_technical_indicators(df: pd.DataFrame, params: dict = None) -> pd.DataFr
     # MACD
     macd = ta.trend.MACD(
         close=df["Close"],
-        window_slow=p["macd_slow"],
-        window_fast=p["macd_fast"],
-        window_sign=p["macd_sign"],
+        window_slow=macd_slow,
+        window_fast=macd_fast,
+        window_sign=macd_sign,
         fillna=True,
     )
     df["macd"] = macd.macd()
@@ -95,25 +155,23 @@ def add_technical_indicators(df: pd.DataFrame, params: dict = None) -> pd.DataFr
 
     # EMA
     df["ema_fast"] = ta.trend.EMAIndicator(
-        close=df["Close"], window=p["ema_fast"], fillna=True
+        close=df["Close"], window=ema_fast_window, fillna=True
     ).ema_indicator()
     df["ema_slow"] = ta.trend.EMAIndicator(
-        close=df["Close"], window=p["ema_slow"], fillna=True
+        close=df["Close"], window=ema_slow_window, fillna=True
     ).ema_indicator()
 
     # ATR
     df["atr"] = ta.volatility.AverageTrueRange(
-        high=df["High"], low=df["Low"], close=df["Close"], window=p["atr_window"], fillna=True
+        high=df["High"], low=df["Low"], close=df["Close"], window=atr_window, fillna=True
     ).average_true_range()
 
     # RSI
-    df["rsi"] = ta.momentum.RSIIndicator(
-        close=df["Close"], window=p["rsi_window"], fillna=True
-    ).rsi()
+    df["rsi"] = ta.momentum.RSIIndicator(close=df["Close"], window=rsi_window, fillna=True).rsi()
 
     # Bollinger Bands
     bb = ta.volatility.BollingerBands(
-        close=df["Close"], window=p["bb_window"], window_dev=p["bb_dev"], fillna=True
+        close=df["Close"], window=bb_window, window_dev=p["bb_dev"], fillna=True
     )
     df["bb_upper"] = bb.bollinger_hband()
     df["bb_middle"] = bb.bollinger_mavg()
@@ -125,8 +183,8 @@ def add_technical_indicators(df: pd.DataFrame, params: dict = None) -> pd.DataFr
         high=df["High"],
         low=df["Low"],
         close=df["Close"],
-        window=p["stoch_window"],
-        smooth_window=p["stoch_smooth"],
+        window=stoch_window,
+        smooth_window=stoch_smooth,
         fillna=True,
     )
     df["stoch_k"] = stoch.stoch()
@@ -142,6 +200,9 @@ def add_technical_indicators(df: pd.DataFrame, params: dict = None) -> pd.DataFr
         df["day_of_week"] = df.index.dayofweek
         df["month"] = df.index.month
         df["is_month_end"] = df.index.is_month_end.astype(int)
+
+    if timeframe == "1d":
+        df = _add_multi_timeframe_features(df, p)
 
     return df
 

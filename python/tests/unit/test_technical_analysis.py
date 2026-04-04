@@ -79,6 +79,39 @@ class TestTechnicalAnalysis(unittest.TestCase):
         self.assertTrue(df_with_ind["month"].between(1, 12).all())
         self.assertTrue(df_with_ind["is_month_end"].isin([0, 1]).all())
 
+    def test_add_technical_indicators_adds_multi_timeframe_features(self):
+        dates = pd.date_range("2023-01-01", periods=90, freq="D")
+        df = pd.DataFrame(
+            {
+                "Open": np.linspace(100, 140, 90).astype(float),
+                "High": np.linspace(101, 142, 90).astype(float),
+                "Low": np.linspace(99, 138, 90).astype(float),
+                "Close": np.linspace(100, 141, 90).astype(float),
+                "Volume": np.random.randint(1000, 3000, 90).astype(int),
+            },
+            index=dates,
+        )
+
+        df_with_ind = technical_analysis.add_technical_indicators(df.copy())
+
+        expected_cols = [
+            "weekly_close_vs_ema_fast",
+            "weekly_close_vs_ema_slow",
+            "weekly_ema_gap",
+            "weekly_rsi",
+            "weekly_macd_diff",
+            "monthly_close_vs_ema_fast",
+            "monthly_close_vs_ema_slow",
+            "monthly_ema_gap",
+            "monthly_rsi",
+            "monthly_macd_diff",
+        ]
+        for col in expected_cols:
+            self.assertIn(col, df_with_ind.columns)
+
+        tail = df_with_ind.tail(10)
+        self.assertFalse(tail[expected_cols].isnull().any().any())
+
 
 class TestMarketRegime(unittest.TestCase):
     def test_get_market_regime_identifies_bull_market(self):
