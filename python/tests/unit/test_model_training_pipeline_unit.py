@@ -8,6 +8,8 @@ import pandas as pd
 
 from src.domain.types import FeatureLoadResult, TrainingMetrics
 from src.services.model_training_pipeline import (
+    _apply_feature_exclusions,
+    _build_feature_selection_frame,
     _compute_training_metrics,
     _extract_mean_abs_shap_values,
     load_features_for_training,
@@ -168,6 +170,17 @@ class TestLoadFeaturesForTraining(unittest.TestCase):
         self.assertLess(len(result.X), len(df))
         self.assertNotIn(pd.Timestamp("2024-01-10"), result.X.index)
 
+    @patch("src.services.model_training_pipeline.load_excluded_features")
+    @patch("src.services.model_training_pipeline.load_stock_features")
+    def test_load_features_applies_saved_exclusions(self, mock_load, mock_excluded):
+        mock_load.return_value = self._make_stock_features_df()
+        mock_excluded.return_value = ["volume"]
+
+        result = load_features_for_training("us", "AAPL", horizon=1)
+
+        self.assertTrue(result.is_success)
+        self.assertNotIn("volume", result.X.columns)
+
 
 class _DummyExplanation:
     def __init__(self, values):
@@ -204,6 +217,32 @@ class TestExtractMeanAbsShapValues(unittest.TestCase):
     def test_raises_when_feature_axis_cannot_be_found(self):
         with self.assertRaises(ValueError):
             _extract_mean_abs_shap_values(np.array([[1.0, 2.0, 3.0]]), feature_count=2)
+
+
+class TestFeatureSelectionHelpers(unittest.TestCase):
+    def test_apply_feature_exclusions_drops_matching_columns(self):
+        X = pd.DataFrame({"f1": [1, 2], "f2": [3, 4], "f3": [5, 6]})
+
+        with patch(
+            "src.services.model_training_pipeline.load_excluded_features", return_value=["f2"]
+        ):
+            filtered = _apply_feature_exclusions(X, "us", "AAPL")
+
+        self.assertEqual(filtered.columns.tolist(), ["f1", "f3"])
+
+    def test_build_feature_selection_frame_preserves_protected_feature(self):
+        X = pd.DataFrame({f"f{i}": [i, i + 1] for i in range(12)})
+
+        selection_df = _build_feature_selection_frame(
+            X,
+            importance_mean=np.array([1.0] + [0.5] * 10 + [-1.0]),
+            importance_std=np.zeros(12),
+            protected_features={"f11"},
+        )
+
+        row = selection_df.loc[selection_df["feature"] == "f11"].iloc[0]
+        self.assertTrue(row["protected_by_shap"])
+        self.assertFalse(row["is_excluded"])
 
 
 class TestTrainModelsForSymbol(unittest.TestCase):

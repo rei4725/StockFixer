@@ -321,6 +321,23 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
         )
     """
     )
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS feature_selection_log (
+            market             VARCHAR NOT NULL,
+            symbol             VARCHAR NOT NULL,
+            model_name         VARCHAR NOT NULL,
+            trained_at         VARCHAR NOT NULL,
+            feature            VARCHAR NOT NULL,
+            importance_mean    DOUBLE NOT NULL,
+            importance_std     DOUBLE NOT NULL,
+            importance_rank    INTEGER NOT NULL,
+            is_excluded        BOOLEAN NOT NULL DEFAULT FALSE,
+            protected_by_shap  BOOLEAN NOT NULL DEFAULT FALSE,
+            PRIMARY KEY (market, symbol, model_name, trained_at, feature)
+        )
+    """
+    )
 
 
 def init_tables() -> None:

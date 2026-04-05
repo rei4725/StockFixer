@@ -47,12 +47,14 @@ from src.utils.db.market_data import (  # noqa: F401
 # --- prediction_results / model_metrics / prediction_accuracy ---
 from src.utils.db.prediction import (  # noqa: F401
     load_drift_summary,
+    load_excluded_features,
     load_latest_prediction_timestamp,
     load_paper_real_diff_summary,
     load_prediction_accuracy,
     load_prediction_markets,
     load_prediction_results,
     load_shap_latest,
+    save_feature_selection,
     save_model_metrics,
     save_prediction_accuracy,
     save_prediction_results,

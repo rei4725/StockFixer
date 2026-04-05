@@ -73,6 +73,18 @@ LIMIT_ORDER_LOOKBACK_DAYS: int = _int("LIMIT_ORDER_LOOKBACK_DAYS", 5)
 #: 決算発表日の前後何営業日を学習データから除外するか
 EARNINGS_MASK_WINDOW_DAYS: int = _int("EARNINGS_MASK_WINDOW_DAYS", 3)
 
+#: 次回学習で自動除外候補にする特徴量の下位割合
+FEATURE_SELECTION_DROP_RATIO: float = _float("FEATURE_SELECTION_DROP_RATIO", 0.2)
+
+#: 自動特徴量選択後に最低限残す特徴量数
+FEATURE_SELECTION_MIN_FEATURES: int = _int("FEATURE_SELECTION_MIN_FEATURES", 10)
+
+#: Permutation Importance の繰り返し回数
+PERMUTATION_IMPORTANCE_REPEATS: int = _int("PERMUTATION_IMPORTANCE_REPEATS", 5)
+
+#: SHAP 上位何件を自動除外から保護するか
+FEATURE_SELECTION_PROTECT_TOP_SHAP: int = _int("FEATURE_SELECTION_PROTECT_TOP_SHAP", 10)
+
 # ---------------------------------------------------------------------------
 # ペーパートレード（paper_broker.py）
 # ---------------------------------------------------------------------------

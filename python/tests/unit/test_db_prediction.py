@@ -11,12 +11,14 @@ import src.utils.db as db_module
 from src.domain.types import PredictionResult, TrainingMetrics
 from src.utils.db.prediction import (
     load_drift_summary,
+    load_excluded_features,
     load_latest_prediction_timestamp,
     load_paper_real_diff_summary,
     load_prediction_accuracy,
     load_prediction_markets,
     load_prediction_results,
     load_shap_latest,
+    save_feature_selection,
     save_model_metrics,
     save_prediction_accuracy,
     save_prediction_results,
@@ -250,6 +252,44 @@ class TestLoadPredictionMarkets(_TmpDbTestCase):
 
         markets = load_prediction_markets("20260403_120000")
         self.assertEqual(markets, sorted(markets))
+
+
+class TestFeatureSelection(_TmpDbTestCase):
+    def test_save_and_load_excluded_features(self):
+        selection_df = pd.DataFrame(
+            {
+                "feature": ["f1", "f2", "f3"],
+                "importance_mean": [0.10, 0.03, -0.01],
+                "importance_std": [0.01, 0.01, 0.02],
+                "importance_rank": [1, 2, 3],
+                "is_excluded": [False, False, True],
+                "protected_by_shap": [False, False, False],
+            }
+        )
+        save_feature_selection("us", "AAPL", "StockXGBoostModel", "20260405_120000", selection_df)
+        save_feature_selection("us", "AAPL", "StockLightGBMModel", "20260405_120000", selection_df)
+
+        excluded = load_excluded_features("us", "AAPL")
+
+        self.assertEqual(excluded, ["f3"])
+
+    def test_protected_feature_is_not_excluded(self):
+        selection_df = pd.DataFrame(
+            {
+                "feature": ["f1", "f2"],
+                "importance_mean": [0.03, -0.01],
+                "importance_std": [0.01, 0.02],
+                "importance_rank": [1, 2],
+                "is_excluded": [False, True],
+                "protected_by_shap": [False, True],
+            }
+        )
+        save_feature_selection("us", "AAPL", "StockXGBoostModel", "20260405_120000", selection_df)
+        save_feature_selection("us", "AAPL", "StockLightGBMModel", "20260405_120000", selection_df)
+
+        excluded = load_excluded_features("us", "AAPL")
+
+        self.assertEqual(excluded, [])
 
 
 class TestSaveModelMetrics(_TmpDbTestCase):

@@ -604,3 +604,79 @@ def load_shap_latest(
                 f"load_shap_latest 失敗 [{market}_{symbol}/{model_name}]: {e}", exc_info=True
             )
             return pd.DataFrame()
+
+
+def save_feature_selection(
+    market: str,
+    symbol: str,
+    model_name: str,
+    trained_at: str,
+    selection_df: pd.DataFrame,
+) -> None:
+    """Permutation Importance に基づく特徴量選択結果を保存する。"""
+    save_df = selection_df.copy()
+    save_df["market"] = market
+    save_df["symbol"] = symbol
+    save_df["model_name"] = model_name
+    save_df["trained_at"] = trained_at
+
+    with _db_connection() as con:
+        con.execute(
+            "DELETE FROM feature_selection_log "
+            "WHERE market = ? AND symbol = ? AND model_name = ? AND trained_at = ?",
+            [market, symbol, model_name, trained_at],
+        )
+        con.execute(
+            """
+            INSERT INTO feature_selection_log (
+                market, symbol, model_name, trained_at, feature,
+                importance_mean, importance_std, importance_rank,
+                is_excluded, protected_by_shap
+            )
+            SELECT market, symbol, model_name, trained_at, feature,
+                   importance_mean, importance_std, importance_rank,
+                   is_excluded, protected_by_shap
+            FROM save_df
+            """
+        )
+
+
+def load_excluded_features(
+    market: str,
+    symbol: str,
+    require_all_models: bool = True,
+) -> list[str]:
+    """直近の特徴量選択結果から次回学習で除外する特徴量名を返す。"""
+    with _db_connection() as con:
+        latest = con.execute(
+            "SELECT MAX(trained_at) FROM feature_selection_log WHERE market = ? AND symbol = ?",
+            [market, symbol],
+        ).fetchone()[0]
+        if latest is None:
+            return []
+
+        rows = con.execute(
+            """
+            SELECT feature, is_excluded, protected_by_shap
+            FROM feature_selection_log
+            WHERE market = ? AND symbol = ? AND trained_at = ?
+            """,
+            [market, symbol, latest],
+        ).fetchall()
+
+    by_feature: dict[str, list[tuple[bool, bool]]] = {}
+    for feature, is_excluded, protected_by_shap in rows:
+        by_feature.setdefault(str(feature), []).append((bool(is_excluded), bool(protected_by_shap)))
+
+    excluded_features: list[str] = []
+    for feature, values in by_feature.items():
+        if any(protected for _excluded, protected in values):
+            continue
+        if require_all_models:
+            should_exclude = all(excluded for excluded, _protected in values)
+        else:
+            should_exclude = any(excluded for excluded, _protected in values)
+        if should_exclude:
+            excluded_features.append(feature)
+
+    return sorted(excluded_features)

@@ -9,16 +9,43 @@ from datetime import datetime
 
 import numpy as np
 import pandas as pd
+from sklearn.inspection import permutation_importance
 
-from config.settings import EARNINGS_MASK_WINDOW_DAYS
+from config.settings import (
+    EARNINGS_MASK_WINDOW_DAYS,
+    FEATURE_SELECTION_DROP_RATIO,
+    FEATURE_SELECTION_MIN_FEATURES,
+    FEATURE_SELECTION_PROTECT_TOP_SHAP,
+    PERMUTATION_IMPORTANCE_REPEATS,
+)
 from src.data.data_loader import get_earnings_dates
 from src.domain.types import FeatureLoadResult, TrainingMetrics
 from src.features.technical_analysis import add_earnings_flag
 from src.models.model_manager import ModelManager
-from src.utils.db import load_stock_features, save_model_metrics, save_shap_values
+from src.utils.db import (
+    load_excluded_features,
+    load_stock_features,
+    save_feature_selection,
+    save_model_metrics,
+    save_shap_values,
+)
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+def _apply_feature_exclusions(X: pd.DataFrame, market: str, symbol: str) -> pd.DataFrame:
+    excluded = load_excluded_features(market, symbol)
+    if not excluded:
+        return X
+
+    remaining = [col for col in X.columns if col not in excluded]
+    if not remaining:
+        logger.warning("特徴量除外後に列が空になるため元の特徴量を維持: %s/%s", market, symbol)
+        return X
+
+    logger.info("特徴量自動除外を適用: %s/%s %d列", market, symbol, len(excluded))
+    return X[remaining].copy()
 
 
 def _mask_earnings_rows(df: pd.DataFrame, market: str, symbol: str) -> pd.DataFrame:
@@ -139,6 +166,8 @@ def load_features_for_training(market: str, symbol: str, horizon: int = 1) -> Fe
             df_feat = add_technical_indicators(raw)
             X, y = create_basic_lag_features(df_feat, target_horizon=horizon)
 
+        X = _apply_feature_exclusions(X, market, symbol)
+
         # 特徴量名の正規化
         def normalize_col(col):
             return re.sub(r"[^0-9a-zA-Z_]", "_", str(col))
@@ -159,6 +188,73 @@ def _compute_training_metrics(y_true: pd.Series, y_pred: pd.Series) -> TrainingM
     return TrainingMetrics(
         rmse=rmse, directional_accuracy=directional_accuracy, n_samples=len(y_true)
     )
+
+
+def _build_feature_selection_frame(
+    X: pd.DataFrame,
+    importance_mean: np.ndarray,
+    importance_std: np.ndarray,
+    protected_features: set[str] | None = None,
+) -> pd.DataFrame:
+    protected_features = protected_features or set()
+    selection_df = (
+        pd.DataFrame(
+            {
+                "feature": X.columns.tolist(),
+                "importance_mean": importance_mean,
+                "importance_std": importance_std,
+            }
+        )
+        .sort_values(["importance_mean", "feature"], ascending=[False, True])
+        .reset_index(drop=True)
+    )
+    selection_df["importance_rank"] = range(1, len(selection_df) + 1)
+
+    max_exclusions = max(0, len(selection_df) - FEATURE_SELECTION_MIN_FEATURES)
+    exclude_count = min(int(len(selection_df) * FEATURE_SELECTION_DROP_RATIO), max_exclusions)
+    excluded = (
+        set(selection_df.tail(exclude_count)["feature"].tolist()) if exclude_count > 0 else set()
+    )
+    selection_df["protected_by_shap"] = selection_df["feature"].isin(protected_features)
+    selection_df["is_excluded"] = (
+        selection_df["feature"].isin(excluded) & ~selection_df["protected_by_shap"]
+    )
+    return selection_df
+
+
+def _compute_and_save_permutation_importance(
+    model,
+    X: pd.DataFrame,
+    y: pd.Series,
+    market: str,
+    symbol: str,
+    model_name: str,
+    trained_at: str,
+    protected_features: set[str] | None = None,
+) -> pd.DataFrame:
+    """Permutation Importance を計算し、次回学習用の除外候補を保存する。"""
+    if X.empty or len(X.columns) <= FEATURE_SELECTION_MIN_FEATURES:
+        return pd.DataFrame()
+
+    sample_size = min(len(X), 200)
+    X_eval = X.tail(sample_size)
+    y_eval = y.reindex(X_eval.index)
+    result = permutation_importance(
+        model.model,
+        X_eval,
+        y_eval,
+        n_repeats=PERMUTATION_IMPORTANCE_REPEATS,
+        random_state=42,
+        scoring="neg_mean_squared_error",
+    )
+    selection_df = _build_feature_selection_frame(
+        X_eval,
+        importance_mean=result.importances_mean,
+        importance_std=result.importances_std,
+        protected_features=protected_features,
+    )
+    save_feature_selection(market, symbol, model_name, trained_at, selection_df)
+    return selection_df
 
 
 def _compute_and_save_shap(
@@ -271,12 +367,27 @@ def train_models_for_symbol(market: str, symbol: str, horizon: int = 1) -> dict:
                 shap_top_bottom = _compute_and_save_shap(
                     model, X, market, symbol, model_name, trained_at
                 )
+                protected_features = set(
+                    shap_top_bottom.nsmallest(FEATURE_SELECTION_PROTECT_TOP_SHAP, "shap_rank")[
+                        "feature"
+                    ].tolist()
+                )
                 if not shap_top_bottom.empty:
                     from src.api.discord_utils import send_shap_notification
 
                     send_shap_notification(market, symbol, model_name, shap_top_bottom)
+                _compute_and_save_permutation_importance(
+                    model,
+                    X,
+                    y,
+                    market,
+                    symbol,
+                    model_name,
+                    trained_at,
+                    protected_features=protected_features,
+                )
             except Exception as e:
-                logger.warning(f"SHAP通知スキップ [{market}_{symbol}/{model_name}]: {e}")
+                logger.warning(f"SHAP/特徴量選択スキップ [{market}_{symbol}/{model_name}]: {e}")
 
         logger.info(f"[モデル作成完了] {market}/{symbol} (horizon={horizon}d)")
         return {"market": market, "symbol": symbol, "status": "success"}

@@ -93,6 +93,15 @@ class TestPrepareUnifiedFeatures(unittest.TestCase):
         # market_encoded列が存在することのみ確認
         self.assertIn("market_encoded", X.columns)
 
+    @patch("src.services.unified_model_pipeline.load_excluded_features")
+    def test_prepare_unified_features_applies_exclusions(self, mock_excluded):
+        df = _make_df()
+        mock_excluded.return_value = ["rsi"]
+
+        X, _ = self._fn(df)
+
+        self.assertNotIn("rsi", X.columns)
+
 
 class TestUnifiedEarningsMask(unittest.TestCase):
     @patch("src.services.unified_model_pipeline.get_earnings_dates")

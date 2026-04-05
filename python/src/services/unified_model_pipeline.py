@@ -5,15 +5,22 @@
 """
 
 import os
+from datetime import datetime
 from typing import Tuple
 
 import pandas as pd
+from sklearn.inspection import permutation_importance
 
-from config.settings import EARNINGS_MASK_WINDOW_DAYS
+from config.settings import (
+    EARNINGS_MASK_WINDOW_DAYS,
+    FEATURE_SELECTION_DROP_RATIO,
+    FEATURE_SELECTION_MIN_FEATURES,
+    PERMUTATION_IMPORTANCE_REPEATS,
+)
 from src.data.data_loader import get_earnings_dates
 from src.features.technical_analysis import add_earnings_flag
 from src.utils.data_path_utils import ensure_dir, get_models_dir
-from src.utils.db import load_all_stock_features
+from src.utils.db import load_all_stock_features, load_excluded_features, save_feature_selection
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -69,6 +76,58 @@ def load_all_stock_data(data_dir: str = None) -> pd.DataFrame:
     return _mask_earnings_rows_for_unified(df)
 
 
+def _apply_unified_feature_exclusions(X: pd.DataFrame) -> pd.DataFrame:
+    excluded = load_excluded_features("unified", "all", require_all_models=False)
+    if not excluded:
+        return X
+
+    remaining = [col for col in X.columns if col not in excluded]
+    return X[remaining].copy() if remaining else X
+
+
+def _compute_and_save_unified_feature_selection(model, X: pd.DataFrame, y: pd.Series) -> None:
+    if X.empty or len(X.columns) <= FEATURE_SELECTION_MIN_FEATURES:
+        return
+
+    sample_size = min(len(X), 200)
+    X_eval = X.tail(sample_size)
+    y_eval = y.reindex(X_eval.index)
+    result = permutation_importance(
+        model.model,
+        X_eval,
+        y_eval,
+        n_repeats=PERMUTATION_IMPORTANCE_REPEATS,
+        random_state=42,
+        scoring="neg_mean_squared_error",
+    )
+    selection_df = (
+        pd.DataFrame(
+            {
+                "feature": X_eval.columns.tolist(),
+                "importance_mean": result.importances_mean,
+                "importance_std": result.importances_std,
+            }
+        )
+        .sort_values(["importance_mean", "feature"], ascending=[False, True])
+        .reset_index(drop=True)
+    )
+    selection_df["importance_rank"] = range(1, len(selection_df) + 1)
+    max_exclusions = max(0, len(selection_df) - FEATURE_SELECTION_MIN_FEATURES)
+    exclude_count = min(int(len(selection_df) * FEATURE_SELECTION_DROP_RATIO), max_exclusions)
+    excluded = (
+        set(selection_df.tail(exclude_count)["feature"].tolist()) if exclude_count > 0 else set()
+    )
+    selection_df["is_excluded"] = selection_df["feature"].isin(excluded)
+    selection_df["protected_by_shap"] = False
+    save_feature_selection(
+        "unified",
+        "all",
+        model.model_name,
+        datetime.now().strftime("%Y%m%d_%H%M%S"),
+        selection_df,
+    )
+
+
 def prepare_unified_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:
     """
     統合モデル用の特徴量を準備する
@@ -104,6 +163,8 @@ def prepare_unified_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]
     valid_idx = X.notna().all(axis=1) & y.notna()
     X = X[valid_idx]
     y = y[valid_idx]
+
+    X = _apply_unified_feature_exclusions(X)
 
     return X, y
 
@@ -146,6 +207,8 @@ def train_unified_model(
             logger.warning("OHLCVデータが見つかりません。")
             return
 
+    X = _apply_unified_feature_exclusions(X)
+
     logger.info(f"特徴量数: {len(X.columns)}, サンプル数: {len(X)}")
 
     # モデル作成・学習
@@ -153,6 +216,7 @@ def train_unified_model(
     mm = ModelManager(model_dir=save_dir)
     model = mm.create_model(model_type, model_name)
     model.train(X, y)
+    _compute_and_save_unified_feature_selection(model, X, y)
 
     # 保存（unified/ディレクトリに保存）
     logger.info("4. モデル保存中...")
