@@ -242,10 +242,13 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
         """
         CREATE TABLE IF NOT EXISTS paper_orders (
             order_id     VARCHAR NOT NULL PRIMARY KEY,
+            market       VARCHAR,
+            predicted_at VARCHAR,
             symbol       VARCHAR NOT NULL,
             side         INTEGER NOT NULL,
             qty          INTEGER NOT NULL,
             price        DOUBLE,
+            signal_price DOUBLE,
             order_type   INTEGER NOT NULL,
             status       VARCHAR NOT NULL DEFAULT 'pending',
             fill_price   DOUBLE,
@@ -264,6 +267,13 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
     ]
     if "realized_pnl" not in existing_cols:
         con.execute("ALTER TABLE paper_orders ADD COLUMN realized_pnl DOUBLE")
+    for col, dtype in [
+        ("market", "VARCHAR"),
+        ("predicted_at", "VARCHAR"),
+        ("signal_price", "DOUBLE"),
+    ]:
+        if col not in existing_cols:
+            con.execute(f"ALTER TABLE paper_orders ADD COLUMN {col} {dtype}")
     con.execute(
         """
         CREATE TABLE IF NOT EXISTS paper_positions (
@@ -285,6 +295,29 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
             shap_mean   DOUBLE NOT NULL,
             shap_rank   INTEGER NOT NULL,
             PRIMARY KEY (market, symbol, model_name, trained_at, feature)
+        )
+    """
+    )
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS paper_real_diff (
+            market          VARCHAR NOT NULL,
+            symbol          VARCHAR NOT NULL,
+            predicted_at    VARCHAR NOT NULL,
+            side            INTEGER NOT NULL,
+            signal_price    DOUBLE,
+            paper_order_id  VARCHAR,
+            real_order_id   VARCHAR,
+            paper_price     DOUBLE,
+            real_price      DOUBLE,
+            paper_slippage  DOUBLE,
+            real_slippage   DOUBLE,
+            price_diff      DOUBLE,
+            paper_filled_at TIMESTAMP,
+            real_checked_at TIMESTAMP,
+            created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (market, symbol, predicted_at, side)
         )
     """
     )

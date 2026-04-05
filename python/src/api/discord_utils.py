@@ -265,7 +265,9 @@ def send_drift_alert(summary_df, horizon: int = 1, threshold: float = 0.45) -> b
     return send_webhook_text(message)
 
 
-def send_weekly_report(accuracy_df=None, horizon: int = 1) -> bool:
+def send_weekly_report(
+    accuracy_df=None, horizon: int = 1, diff_summary: Optional[dict] = None
+) -> bool:
     """
     週次パフォーマンスレポートを Discord Webhook に送信する。
 
@@ -280,7 +282,7 @@ def send_weekly_report(accuracy_df=None, horizon: int = 1) -> bool:
     """
     import pandas as pd
 
-    from src.utils.db import load_drift_summary
+    from src.utils.db import load_drift_summary, load_paper_real_diff_summary
 
     if accuracy_df is None or (isinstance(accuracy_df, pd.DataFrame) and accuracy_df.empty):
         accuracy_df = load_drift_summary(horizon=horizon)
@@ -309,6 +311,27 @@ def send_weekly_report(accuracy_df=None, horizon: int = 1) -> bool:
     # 全体サマリー
     mean_acc = accuracy_df["direction_accuracy"].mean()
     lines.append(f"\n**全体平均正解率**: {mean_acc:.1%} ({len(accuracy_df)}銘柄)")
+
+    if diff_summary is None:
+        diff_summary = load_paper_real_diff_summary(recent_days=7)
+    if diff_summary.get("tracked_count", 0) > 0:
+        lines.append("\n**paper/real 乖離サマリー（直近7日）**")
+        lines.append(
+            "• "
+            f"tracked={diff_summary['tracked_count']}件, "
+            f"comparable={diff_summary['comparable_count']}件"
+        )
+        lines.append(
+            "• "
+            f"平均paper slippage={diff_summary['avg_paper_slippage']:.3%}, "
+            f"平均real slippage={diff_summary['avg_real_slippage']:.3%}"
+        )
+        lines.append(
+            "• "
+            f"平均価格差={diff_summary['avg_abs_price_diff']:.3f}, "
+            f"平均乖離率={diff_summary['avg_abs_diff_ratio']:.3%}, "
+            f"最大価格差={diff_summary['max_abs_price_diff']:.3f}"
+        )
 
     message = "\n".join(lines)
     # Discord の 2000 文字制限に対応した分割送信

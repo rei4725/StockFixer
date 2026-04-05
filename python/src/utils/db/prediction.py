@@ -1,10 +1,11 @@
 """
-prediction_results / model_metrics / prediction_accuracy テーブルの CRUD 操作
+prediction_results / model_metrics / prediction_accuracy / paper_real_diff テーブルの CRUD 操作
 
 予測結果・モデル精度指標・予測精度追跡データを管理する。
 """
 
-from typing import Optional
+from datetime import datetime, timedelta
+from typing import Any, Optional
 
 import pandas as pd
 
@@ -179,6 +180,148 @@ def load_prediction_markets(predicted_at: str = None) -> list:
         except Exception as e:
             logger.error(f"予測マーケット一覧取得失敗: {e}", exc_info=True)
             return []
+
+
+def upsert_paper_real_diff(
+    market: str,
+    symbol: str,
+    predicted_at: str,
+    side: int,
+    signal_price: float,
+    mode: str,
+    order_id: str,
+    actual_price: float | None = None,
+    checked_at: datetime | None = None,
+) -> None:
+    """paper / real の価格差追跡テーブルを更新する。"""
+    checked_at = checked_at or datetime.now()
+    with _db_connection() as con:
+        row = con.execute(
+            """
+            SELECT signal_price, paper_order_id, real_order_id, paper_price, real_price,
+                   paper_slippage, real_slippage, paper_filled_at, real_checked_at, created_at
+            FROM paper_real_diff
+            WHERE market = ? AND symbol = ? AND predicted_at = ? AND side = ?
+            """,
+            [market, symbol, predicted_at, side],
+        ).fetchone()
+
+        merged: dict[str, Any] = {
+            "signal_price": signal_price,
+            "paper_order_id": None,
+            "real_order_id": None,
+            "paper_price": None,
+            "real_price": None,
+            "paper_slippage": None,
+            "real_slippage": None,
+            "paper_filled_at": None,
+            "real_checked_at": None,
+            "created_at": checked_at,
+        }
+        if row:
+            merged.update(
+                {
+                    "signal_price": float(row[0]) if row[0] is not None else signal_price,
+                    "paper_order_id": row[1],
+                    "real_order_id": row[2],
+                    "paper_price": row[3],
+                    "real_price": row[4],
+                    "paper_slippage": row[5],
+                    "real_slippage": row[6],
+                    "paper_filled_at": row[7],
+                    "real_checked_at": row[8],
+                    "created_at": row[9] or checked_at,
+                }
+            )
+
+        merged["signal_price"] = signal_price
+        if mode == "paper":
+            merged["paper_order_id"] = order_id
+            if actual_price is not None:
+                merged["paper_price"] = actual_price
+                merged["paper_slippage"] = (
+                    (actual_price - signal_price) / signal_price if signal_price else None
+                )
+                merged["paper_filled_at"] = checked_at
+        else:
+            merged["real_order_id"] = order_id
+            if actual_price is not None:
+                merged["real_price"] = actual_price
+                merged["real_slippage"] = (
+                    (actual_price - signal_price) / signal_price if signal_price else None
+                )
+                merged["real_checked_at"] = checked_at
+
+        price_diff = None
+        if merged["paper_price"] is not None and merged["real_price"] is not None:
+            price_diff = float(merged["real_price"]) - float(merged["paper_price"])
+
+        con.execute(
+            "DELETE FROM paper_real_diff WHERE market = ? AND symbol = ? "
+            "AND predicted_at = ? AND side = ?",
+            [market, symbol, predicted_at, side],
+        )
+        con.execute(
+            """
+            INSERT INTO paper_real_diff (
+                market, symbol, predicted_at, side, signal_price,
+                paper_order_id, real_order_id, paper_price, real_price,
+                paper_slippage, real_slippage, price_diff,
+                paper_filled_at, real_checked_at, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """,
+            [
+                market,
+                symbol,
+                predicted_at,
+                side,
+                merged["signal_price"],
+                merged["paper_order_id"],
+                merged["real_order_id"],
+                merged["paper_price"],
+                merged["real_price"],
+                merged["paper_slippage"],
+                merged["real_slippage"],
+                price_diff,
+                merged["paper_filled_at"],
+                merged["real_checked_at"],
+                merged["created_at"],
+            ],
+        )
+
+
+def load_paper_real_diff_summary(recent_days: int = 7) -> dict:
+    """直近期間の paper / real 乖離サマリーを返す。"""
+    since = datetime.now() - timedelta(days=recent_days)
+    with _db_connection() as con:
+        row = con.execute(
+            """
+            SELECT
+                COUNT(*) AS tracked_count,
+                COUNT(*) FILTER (
+                    WHERE paper_price IS NOT NULL AND real_price IS NOT NULL
+                ) AS comparable_count,
+                AVG(paper_slippage) AS avg_paper_slippage,
+                AVG(real_slippage) AS avg_real_slippage,
+                AVG(ABS(price_diff)) AS avg_abs_price_diff,
+                AVG(ABS(price_diff / NULLIF(signal_price, 0))) AS avg_abs_diff_ratio,
+                MAX(ABS(price_diff)) AS max_abs_price_diff
+            FROM paper_real_diff
+            WHERE COALESCE(paper_filled_at, real_checked_at, created_at) >= ?
+            """,
+            [since],
+        ).fetchone()
+
+    return {
+        "tracked_count": int(row[0] or 0),
+        "comparable_count": int(row[1] or 0),
+        "avg_paper_slippage": float(row[2] or 0.0),
+        "avg_real_slippage": float(row[3] or 0.0),
+        "avg_abs_price_diff": float(row[4] or 0.0),
+        "avg_abs_diff_ratio": float(row[5] or 0.0),
+        "max_abs_price_diff": float(row[6] or 0.0),
+    }
 
 
 # ---------------------------------------------------------------------------

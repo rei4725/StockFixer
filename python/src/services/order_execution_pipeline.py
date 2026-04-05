@@ -23,6 +23,7 @@ from src.brokers.base import BrokerBase, OrderSide, OrderType
 from src.domain.types import TradingGateStatus
 from src.services.prediction_pipeline import get_optimal_params
 from src.services.risk_manager import RiskManager
+from src.utils.db import upsert_paper_real_diff
 from src.utils.db._connection import _db_connection
 from src.utils.logger import get_logger
 from src.utils.sector_constraints import filter_by_sector_cap, get_symbol_sector
@@ -53,7 +54,8 @@ def _load_latest_predictions(market: str) -> pd.DataFrame:
     DuckDB から当日の最新予測結果を取得する。
 
     Returns:
-        columns: market, symbol, current_price, diff_ratio, confidence_ratio (desc order)
+        columns: market, symbol, predicted_at, current_price, diff_ratio,
+        confidence_ratio (desc order)
     """
     with _db_connection() as con:
         return con.execute(
@@ -67,6 +69,7 @@ def _load_latest_predictions(market: str) -> pd.DataFrame:
             SELECT
                 pr.market,
                 pr.symbol,
+                pr.predicted_at,
                 pr.current_price,
                 pr.diff_ratio,
                 pr.confidence_ratio
@@ -171,10 +174,67 @@ def _get_held_symbols(broker: BrokerBase) -> set[str]:
     return {p["symbol"].replace(".T", "") for p in positions if p.get("qty", 0) > 0}
 
 
+def _link_paper_order_metadata(
+    order_id: str,
+    market: str,
+    predicted_at: str,
+    signal_price: float,
+) -> None:
+    with _db_connection() as con:
+        con.execute(
+            """
+            UPDATE paper_orders
+            SET market = ?, predicted_at = ?, signal_price = ?
+            WHERE order_id = ?
+            """,
+            [market, predicted_at, signal_price, order_id],
+        )
+
+
+def _sync_live_execution_diffs(broker: BrokerBase) -> None:
+    for order in broker.get_orders():
+        order_id = str(order.get("order_id") or "")
+        price = order.get("price")
+        if not order_id or price in (None, ""):
+            continue
+        try:
+            actual_price = float(price)
+        except (TypeError, ValueError):
+            continue
+        if actual_price <= 0:
+            continue
+
+        with _db_connection() as con:
+            row = con.execute(
+                """
+                SELECT market, symbol, predicted_at, side, signal_price
+                FROM paper_real_diff
+                WHERE real_order_id = ?
+                """,
+                [order_id],
+            ).fetchone()
+        if row is None:
+            continue
+
+        upsert_paper_real_diff(
+            market=str(row[0]),
+            symbol=str(row[1]),
+            predicted_at=str(row[2]),
+            side=int(row[3]),
+            signal_price=float(row[4] or 0.0),
+            mode="live",
+            order_id=order_id,
+            actual_price=actual_price,
+        )
+
+
 def _record_order(
+    market: str,
+    predicted_at: str,
     symbol: str,
     side: OrderSide,
     qty: int,
+    signal_price: float,
     order_result: dict,
     broker: BrokerBase,
     mode: str,
@@ -197,6 +257,24 @@ def _record_order(
                 mode,
             ],
         )
+
+    order_id = str(order_result.get("order_id", ""))
+    if mode == "paper" and order_id:
+        _link_paper_order_metadata(order_id, market, predicted_at, signal_price)
+
+    fill_price_raw = order_result.get("fill_price")
+    fill_price = float(fill_price_raw) if isinstance(fill_price_raw, (int, float)) else None
+
+    upsert_paper_real_diff(
+        market=market,
+        symbol=symbol,
+        predicted_at=predicted_at,
+        side=int(side),
+        signal_price=signal_price,
+        mode=mode,
+        order_id=order_id,
+        actual_price=fill_price,
+    )
 
 
 def run_daily_orders(
@@ -258,6 +336,9 @@ def run_daily_orders(
             }
         )
         return stats
+    if "predicted_at" not in predictions.columns:
+        predictions = predictions.copy()
+        predictions["predicted_at"] = ""
 
     predictions = _attach_dynamic_thresholds(predictions)
     threshold_scale = float(predictions["threshold_scale"].iloc[0])
@@ -292,7 +373,17 @@ def run_daily_orders(
                 continue
             qty = pos["qty"]
             result = broker.send_order(symbol, OrderSide.SELL, qty, order_type=OrderType.MARKET)
-            _record_order(symbol, OrderSide.SELL, qty, result, broker, mode)
+            _record_order(
+                market=str(row["market"]),
+                predicted_at=str(row["predicted_at"]),
+                symbol=symbol,
+                side=OrderSide.SELL,
+                qty=qty,
+                signal_price=float(row.get("current_price") or 0.0),
+                order_result=result,
+                broker=broker,
+                mode=mode,
+            )
             logger.info(
                 f"[exec] 売り発注: {symbol} {qty}株 "
                 f"(予測変化率={row['diff_ratio']:.3%}, 閾値={row['effective_sell_threshold']:.3%})"
@@ -330,7 +421,17 @@ def run_daily_orders(
 
         try:
             result = broker.send_order(symbol, OrderSide.BUY, qty, order_type=OrderType.MARKET)
-            _record_order(symbol, OrderSide.BUY, qty, result, broker, mode)
+            _record_order(
+                market=str(row["market"]),
+                predicted_at=str(row["predicted_at"]),
+                symbol=symbol,
+                side=OrderSide.BUY,
+                qty=qty,
+                signal_price=current_price,
+                order_result=result,
+                broker=broker,
+                mode=mode,
+            )
             logger.info(
                 f"[exec] 買い発注: {symbol} {qty}株 @ 成行 "
                 f"(予測変化率={row['diff_ratio']:.3%}, 閾値={row['effective_buy_threshold']:.3%}, "
@@ -345,4 +446,6 @@ def run_daily_orders(
         f"=== 自動発注完了: 買い={stats['buy_orders']} 売り={stats['sell_orders']} "
         f"スキップ={stats['skipped']} エラー={stats['errors']} ==="
     )
+    if mode == "live":
+        _sync_live_execution_diffs(broker)
     return stats

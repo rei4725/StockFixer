@@ -19,9 +19,11 @@ _TEST_CON = duckdb.connect(":memory:")
 _TEST_CON.execute(
     """
     CREATE TABLE IF NOT EXISTS paper_orders (
-        order_id VARCHAR, symbol VARCHAR, side INTEGER, qty INTEGER,
-        price DOUBLE, order_type INTEGER, fill_price DOUBLE,
+        order_id VARCHAR, market VARCHAR, predicted_at VARCHAR,
+        symbol VARCHAR, side INTEGER, qty INTEGER,
+        price DOUBLE, signal_price DOUBLE, order_type INTEGER, fill_price DOUBLE,
         status VARCHAR DEFAULT 'pending',
+        realized_pnl DOUBLE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         filled_at TIMESTAMP
     )
@@ -134,6 +136,25 @@ class TestPaperBrokerSettle(unittest.TestCase):
         ).fetchone()
         self.assertIsNotNone(pos)
         self.assertEqual(pos[0], 100)
+
+    @patch("src.brokers.paper.paper_broker.upsert_paper_real_diff")
+    @patch("src.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
+    @patch("src.brokers.paper.paper_broker.yf_client.download")
+    def test_settle_updates_paper_real_diff(self, mock_yf, mock_upsert):
+        mock_yf.return_value = self._mock_yf_download()
+        result = self.broker.send_order("7203", OrderSide.BUY, 100)
+        _TEST_CON.execute(
+            "UPDATE paper_orders SET market='jp', predicted_at='20260405_085000', "
+            "signal_price=995.0 WHERE order_id=?",
+            [result["order_id"]],
+        )
+
+        self.broker.settle_pending_orders()
+
+        mock_upsert.assert_called_once()
+        self.assertEqual(mock_upsert.call_args.kwargs["market"], "jp")
+        self.assertEqual(mock_upsert.call_args.kwargs["symbol"], "7203")
+        self.assertAlmostEqual(mock_upsert.call_args.kwargs["actual_price"], 1000.0)
 
 
 if __name__ == "__main__":

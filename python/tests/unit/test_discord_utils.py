@@ -5,7 +5,11 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from src.api.discord_utils import send_daily_order_completion, send_shap_notification
+from src.api.discord_utils import (
+    send_daily_order_completion,
+    send_shap_notification,
+    send_weekly_report,
+)
 
 
 class TestSendDailyOrderCompletion(unittest.TestCase):
@@ -81,6 +85,39 @@ class TestSendShapNotification(unittest.TestCase):
 
         self.assertFalse(result)
         mock_send.assert_not_called()
+
+
+class TestSendWeeklyReport(unittest.TestCase):
+    @patch("src.api.discord_utils.send_webhook_text", return_value=True)
+    def test_appends_paper_real_diff_section(self, mock_send):
+        accuracy_df = pd.DataFrame(
+            [
+                {
+                    "market": "jp",
+                    "symbol": "7203",
+                    "direction_accuracy": 0.55,
+                    "mean_abs_error": 0.012,
+                    "n_samples": 20,
+                }
+            ]
+        )
+        diff_summary = {
+            "tracked_count": 4,
+            "comparable_count": 2,
+            "avg_paper_slippage": 0.001,
+            "avg_real_slippage": 0.002,
+            "avg_abs_price_diff": 3.5,
+            "avg_abs_diff_ratio": 0.0035,
+            "max_abs_price_diff": 7.0,
+        }
+
+        result = send_weekly_report(accuracy_df=accuracy_df, horizon=1, diff_summary=diff_summary)
+
+        self.assertTrue(result)
+        sent_text = "\n".join(call.args[0] for call in mock_send.call_args_list)
+        self.assertIn("paper/real 乖離サマリー", sent_text)
+        self.assertIn("tracked=4件, comparable=2件", sent_text)
+        self.assertIn("平均価格差=3.500", sent_text)
 
 
 if __name__ == "__main__":

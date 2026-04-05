@@ -128,10 +128,11 @@ def run_weekly_report():
     logger.info("=== 週次レポート生成開始 ===")
     try:
         from src.api.discord_utils import send_weekly_report
-        from src.utils.db import load_drift_summary
+        from src.utils.db import load_drift_summary, load_paper_real_diff_summary
 
         summary = load_drift_summary(horizon=1)
-        send_weekly_report(accuracy_df=summary, horizon=1)
+        diff_summary = load_paper_real_diff_summary(recent_days=7)
+        send_weekly_report(accuracy_df=summary, horizon=1, diff_summary=diff_summary)
         logger.info("=== 週次レポート送信完了 ===")
     except Exception as e:
         logger.error(f"週次レポート生成失敗: {e}", exc_info=True)

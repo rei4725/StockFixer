@@ -12,6 +12,7 @@ from src.domain.types import PredictionResult, TrainingMetrics
 from src.utils.db.prediction import (
     load_drift_summary,
     load_latest_prediction_timestamp,
+    load_paper_real_diff_summary,
     load_prediction_accuracy,
     load_prediction_markets,
     load_prediction_results,
@@ -20,6 +21,7 @@ from src.utils.db.prediction import (
     save_prediction_accuracy,
     save_prediction_results,
     save_shap_values,
+    upsert_paper_real_diff,
 )
 
 
@@ -539,6 +541,71 @@ class TestLoadShapLatest(_TmpDbTestCase):
         result = load_shap_latest("us", "AAPL", "StockXGBoostModel")
         for col in ["feature", "shap_mean", "shap_rank", "trained_at"]:
             self.assertIn(col, result.columns)
+
+
+class TestPaperRealDiff(_TmpDbTestCase):
+    def test_upsert_paper_then_live_populates_diff(self):
+        upsert_paper_real_diff(
+            market="jp",
+            symbol="7203",
+            predicted_at="20260405_085000",
+            side=1,
+            signal_price=1000.0,
+            mode="paper",
+            order_id="paper-1",
+            actual_price=1005.0,
+        )
+        upsert_paper_real_diff(
+            market="jp",
+            symbol="7203",
+            predicted_at="20260405_085000",
+            side=1,
+            signal_price=1000.0,
+            mode="live",
+            order_id="real-1",
+            actual_price=1008.0,
+        )
+
+        with db_module._db_connection() as con:
+            row = con.execute(
+                "SELECT paper_price, real_price, price_diff, paper_slippage, real_slippage "
+                "FROM paper_real_diff WHERE market='jp' AND symbol='7203'"
+            ).fetchone()
+
+        self.assertEqual(row[0], 1005.0)
+        self.assertEqual(row[1], 1008.0)
+        self.assertAlmostEqual(row[2], 3.0)
+        self.assertAlmostEqual(row[3], 0.005)
+        self.assertAlmostEqual(row[4], 0.008)
+
+    def test_load_paper_real_diff_summary_returns_aggregates(self):
+        upsert_paper_real_diff(
+            market="jp",
+            symbol="7203",
+            predicted_at="20260405_085000",
+            side=1,
+            signal_price=1000.0,
+            mode="paper",
+            order_id="paper-1",
+            actual_price=1005.0,
+        )
+        upsert_paper_real_diff(
+            market="jp",
+            symbol="7203",
+            predicted_at="20260405_085000",
+            side=1,
+            signal_price=1000.0,
+            mode="live",
+            order_id="real-1",
+            actual_price=995.0,
+        )
+
+        summary = load_paper_real_diff_summary(recent_days=30)
+
+        self.assertEqual(summary["tracked_count"], 1)
+        self.assertEqual(summary["comparable_count"], 1)
+        self.assertAlmostEqual(summary["avg_abs_price_diff"], 10.0)
+        self.assertAlmostEqual(summary["avg_abs_diff_ratio"], 0.01)
 
 
 if __name__ == "__main__":

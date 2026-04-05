@@ -14,6 +14,7 @@ import uuid
 from config.settings import PAPER_INITIAL_BALANCE
 from src.brokers.base import BrokerBase, OrderSide, OrderType
 from src.utils import yf_client
+from src.utils.db import upsert_paper_real_diff
 from src.utils.db._connection import _db_connection
 from src.utils.logger import get_logger
 
@@ -105,12 +106,23 @@ class PaperBroker(BrokerBase):
         # Phase 1: ペンディング注文を読み込む（接続をすぐに解放）
         with _db_connection() as con:
             rows = con.execute(
-                "SELECT order_id, symbol, side, qty, price, order_type "
+                "SELECT order_id, market, predicted_at, symbol, side, qty, price, "
+                "signal_price, order_type "
                 "FROM paper_orders WHERE status='pending'"
             ).fetchall()
 
         settled = []
-        for order_id, symbol, side, qty, limit_price, order_type_val in rows:
+        for (
+            order_id,
+            market,
+            predicted_at,
+            symbol,
+            side,
+            qty,
+            limit_price,
+            signal_price,
+            order_type_val,
+        ) in rows:
             ticker = f"{symbol}.T"
             try:
                 hist = yf_client.download(ticker, period="2d", interval="1d")
@@ -146,6 +158,17 @@ class PaperBroker(BrokerBase):
                         "UPDATE paper_orders SET status='filled', "
                         "fill_price=?, filled_at=CURRENT_TIMESTAMP WHERE order_id=?",
                         [fill_price, order_id],
+                    )
+                if market and predicted_at and signal_price is not None:
+                    upsert_paper_real_diff(
+                        market=str(market),
+                        symbol=str(symbol),
+                        predicted_at=str(predicted_at),
+                        side=int(side),
+                        signal_price=float(signal_price),
+                        mode="paper",
+                        order_id=str(order_id),
+                        actual_price=fill_price,
                     )
                 logger.info(
                     f"[paper] 約定: {symbol} {OrderSide(side).name} {qty}株 @ {fill_price:.1f}円"

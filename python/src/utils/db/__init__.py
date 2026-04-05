@@ -48,6 +48,7 @@ from src.utils.db.market_data import (  # noqa: F401
 from src.utils.db.prediction import (  # noqa: F401
     load_drift_summary,
     load_latest_prediction_timestamp,
+    load_paper_real_diff_summary,
     load_prediction_accuracy,
     load_prediction_markets,
     load_prediction_results,
@@ -56,6 +57,7 @@ from src.utils.db.prediction import (  # noqa: F401
     save_prediction_accuracy,
     save_prediction_results,
     save_shap_values,
+    upsert_paper_real_diff,
 )
 
 # --- stock_features ---

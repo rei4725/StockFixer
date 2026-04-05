@@ -186,7 +186,7 @@
 | R-101 | DONE | - | 2026-08-02 | 2026-04-04 | `features/market_regime.py` を追加し、portfolio backtest の equity CSV に regime 列と regime 別サマリーを追加 |
 | R-102 | DONE | - | 2026-08-09 | 2026-04-04 | セクター上限を order execution / portfolio backtest に追加し、`MAX_SECTOR_POSITIONS` と CLI 引数で比較可能化 |
 | R-106 | DONE | - | 2026-08-16 | 2026-04-04 | 日足特徴量生成時に weekly / monthly トレンド特徴量を追加し、既存 pipeline 全体で利用可能化 |
-| R-107 | TODO | - | 2026-08-23 | - | paper/real 乖離集計テーブルを DuckDB に追加 |
+| R-107 | DONE | - | 2026-08-23 | 2026-04-05 | `paper_real_diff` を DuckDB に追加し、発注時参照価格・paper約定・live注文価格の自動集計と週次Discord要約を接続 |
 | R-103 | TODO | - | 2026-08-30 | - | |
 | R-110 | TODO | - | 2026-09-06 | - | yfinance earnings_dates + フラグ特徴量またはマスク処理 |
 
@@ -236,3 +236,4 @@
 - 2026-04-04: R-101 を完了。`features/market_regime.py` を新設し、portfolio backtest の日次エクイティに regime 列と regime 別成績サマリーを追加。互換ラッパーとユニットテストも整備
 - 2026-04-04: R-102 を完了。`MAX_SECTOR_POSITIONS` を追加し、order execution と portfolio backtest の候補選定に同一セクター上限を実装。CLI 比較用オプションとユニットテストも追加
 - 2026-04-04: R-106 を完了。`add_technical_indicators()` に週足・月足の内部リサンプリングを追加し、weekly / monthly のトレンド特徴量を学習・予測・バックテスト経路へ自動反映。ユニットテストを追加
+- 2026-04-05: R-107 を完了。`paper_real_diff` テーブルを追加し、order execution の参照価格保存、paper 約定時のスリッページ更新、live 注文価格同期、週次 Discord レポートへの乖離サマリー追記を実装
