@@ -9,13 +9,14 @@ from unittest.mock import MagicMock, patch
 
 import pandas as pd
 
-from src.brokers.base import BrokerBase
+from src.brokers.base import BrokerBase, OrderSide, OrderType
 from src.domain.types import TradingGateStatus
 from src.services.order_execution_pipeline import (
     BUY_THRESHOLD,
     MAX_ORDERS_PER_RUN,
     _apply_buy_sector_limit,
     _attach_dynamic_thresholds,
+    _choose_order_params,
     _compute_market_threshold_scale,
     run_daily_orders,
 )
@@ -86,6 +87,10 @@ class TestRunDailyOrders(unittest.TestCase):
             ),
             patch(
                 "src.services.order_execution_pipeline._record_order",
+            ),
+            patch(
+                "src.services.order_execution_pipeline._choose_order_params",
+                return_value=(OrderType.MARKET, 0.0, "market"),
             ),
             patch(
                 "src.services.order_execution_pipeline.RiskManager.evaluate_trading_gate",
@@ -215,7 +220,7 @@ class TestRunDailyOrders(unittest.TestCase):
         patches = self._patch_pipeline(predictions)
         mocks, patch_list = self._start_patches(patches)
         try:
-            calc_size_mock = mocks[3]
+            calc_size_mock = mocks[4]
             run_daily_orders(broker, market="jp", mode="paper")
 
             self.assertTrue(calc_size_mock.called)
@@ -364,6 +369,141 @@ class TestDynamicThresholdHelpers(unittest.TestCase):
         self.assertAlmostEqual(enriched.loc[1, "base_threshold"], BUY_THRESHOLD)
         self.assertIn("effective_buy_threshold", enriched.columns)
         self.assertIn("effective_sell_threshold", enriched.columns)
+
+
+class TestExecutionOrderTypeHelpers(unittest.TestCase):
+    @patch("src.services.order_execution_pipeline.yf_client.download")
+    def test_choose_order_params_switches_to_limit_on_low_volume(self, mock_download):
+        mock_download.return_value = pd.DataFrame(
+            {
+                "High": [101.0] * 5,
+                "Low": [99.0] * 5,
+                "Close": [100.0] * 5,
+                "Volume": [100_000] * 5,
+            }
+        )
+
+        order_type, price, reason = _choose_order_params("jp", "7203", OrderSide.BUY, 1000.0)
+
+        self.assertEqual(order_type, OrderType.LIMIT)
+        self.assertGreater(price, 1000.0)
+        self.assertIn("low_volume", reason)
+
+    @patch("src.services.order_execution_pipeline.yf_client.download")
+    def test_choose_order_params_keeps_market_when_liquid(self, mock_download):
+        mock_download.return_value = pd.DataFrame(
+            {
+                "High": [100.3] * 5,
+                "Low": [99.7] * 5,
+                "Close": [100.0] * 5,
+                "Volume": [2_000_000] * 5,
+            }
+        )
+
+        order_type, price, reason = _choose_order_params("jp", "7203", OrderSide.SELL, 1000.0)
+
+        self.assertEqual(order_type, OrderType.MARKET)
+        self.assertEqual(price, 0.0)
+        self.assertEqual(reason, "market")
+
+
+class TestExecutionOrderTypeFlow(unittest.TestCase):
+    @patch("src.services.order_execution_pipeline._record_order")
+    @patch(
+        "src.services.order_execution_pipeline._choose_order_params",
+        return_value=(OrderType.LIMIT, 1001.0, "low_volume=100000"),
+    )
+    @patch(
+        "src.services.order_execution_pipeline.RiskManager.evaluate_trading_gate",
+        return_value=TradingGateStatus(
+            is_allowed=True,
+            stop_active=False,
+            reason_code=None,
+            reason=None,
+            daily_loss=0.0,
+            daily_loss_limit=None,
+        ),
+    )
+    @patch(
+        "src.services.risk_manager.RiskManager._get_daily_realized_loss",
+        return_value=0.0,
+    )
+    @patch(
+        "src.services.risk_manager.RiskManager._get_consecutive_losses",
+        return_value=0,
+    )
+    @patch("src.services.order_execution_pipeline.RiskManager.calc_position_size", return_value=100)
+    @patch(
+        "src.services.order_execution_pipeline._load_latest_predictions",
+        return_value=pd.DataFrame(
+            [
+                {
+                    "market": "jp",
+                    "symbol": "7203",
+                    "predicted_at": "20260405_090000",
+                    "current_price": 1000.0,
+                    "diff_ratio": 0.03,
+                    "confidence_ratio": 1.0,
+                },
+                {
+                    "market": "jp",
+                    "symbol": "7204",
+                    "predicted_at": "20260405_090000",
+                    "current_price": 1000.0,
+                    "diff_ratio": 0.001,
+                    "confidence_ratio": 1.0,
+                },
+                {
+                    "market": "jp",
+                    "symbol": "7205",
+                    "predicted_at": "20260405_090000",
+                    "current_price": 1000.0,
+                    "diff_ratio": 0.001,
+                    "confidence_ratio": 1.0,
+                },
+                {
+                    "market": "jp",
+                    "symbol": "7206",
+                    "predicted_at": "20260405_090000",
+                    "current_price": 1000.0,
+                    "diff_ratio": 0.001,
+                    "confidence_ratio": 1.0,
+                },
+                {
+                    "market": "jp",
+                    "symbol": "7207",
+                    "predicted_at": "20260405_090000",
+                    "current_price": 1000.0,
+                    "diff_ratio": 0.001,
+                    "confidence_ratio": 1.0,
+                },
+            ]
+        ),
+    )
+    def test_run_daily_orders_uses_limit_when_switch_rule_matches(
+        self,
+        _mock_predictions,
+        _mock_qty,
+        _mock_consecutive,
+        _mock_loss,
+        _mock_gate,
+        mock_choose,
+        mock_record,
+    ):
+        broker = _make_broker()
+
+        stats = run_daily_orders(broker, market="jp", mode="paper")
+
+        self.assertEqual(stats["buy_orders"], 1)
+        broker.send_order.assert_called_once_with(
+            "7203",
+            OrderSide.BUY,
+            100,
+            price=1001.0,
+            order_type=OrderType.LIMIT,
+        )
+        self.assertTrue(mock_choose.called)
+        self.assertEqual(mock_record.call_args.kwargs["order_type"], OrderType.LIMIT)
 
 
 class TestSectorLimitHelpers(unittest.TestCase):

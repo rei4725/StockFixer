@@ -18,11 +18,21 @@ from typing import TypedDict
 
 import pandas as pd
 
-from config.settings import BUY_THRESHOLD, MAX_ORDERS_PER_RUN, MAX_SECTOR_POSITIONS
+from config.settings import (
+    BUY_THRESHOLD,
+    LIMIT_ORDER_AVG_VOLUME_THRESHOLD,
+    LIMIT_ORDER_LOOKBACK_DAYS,
+    LIMIT_ORDER_PRICE_BUFFER,
+    LIMIT_ORDER_SPREAD_PROXY_THRESHOLD,
+    MAX_ORDERS_PER_RUN,
+    MAX_SECTOR_POSITIONS,
+)
 from src.brokers.base import BrokerBase, OrderSide, OrderType
 from src.domain.types import TradingGateStatus
 from src.services.prediction_pipeline import get_optimal_params
 from src.services.risk_manager import RiskManager
+from src.utils import yf_client
+from src.utils.data_path_utils import get_ticker
 from src.utils.db import upsert_paper_real_diff
 from src.utils.db._connection import _db_connection
 from src.utils.logger import get_logger
@@ -228,6 +238,58 @@ def _sync_live_execution_diffs(broker: BrokerBase) -> None:
         )
 
 
+def _load_execution_metrics(market: str, symbol: str) -> tuple[float | None, float | None]:
+    ticker = get_ticker(market, symbol)
+    hist = yf_client.download(ticker, period=f"{LIMIT_ORDER_LOOKBACK_DAYS + 2}d", interval="1d")
+    if hist.empty:
+        return None, None
+
+    recent = hist.tail(LIMIT_ORDER_LOOKBACK_DAYS).copy()
+    if recent.empty:
+        return None, None
+
+    avg_volume = None
+    if "Volume" in recent.columns:
+        volume_series = pd.to_numeric(recent["Volume"], errors="coerce").dropna()
+        if not volume_series.empty:
+            avg_volume = float(volume_series.mean())
+
+    spread_proxy = None
+    if {"High", "Low", "Close"}.issubset(recent.columns):
+        close = pd.to_numeric(recent["Close"], errors="coerce")
+        high = pd.to_numeric(recent["High"], errors="coerce")
+        low = pd.to_numeric(recent["Low"], errors="coerce")
+        range_ratio = ((high - low) / close.replace(0, pd.NA)).dropna()
+        if not range_ratio.empty:
+            spread_proxy = float(range_ratio.mean())
+
+    return avg_volume, spread_proxy
+
+
+def _choose_order_params(
+    market: str,
+    symbol: str,
+    side: OrderSide,
+    current_price: float,
+) -> tuple[OrderType, float, str]:
+    avg_volume, spread_proxy = _load_execution_metrics(market, symbol)
+
+    reasons: list[str] = []
+    if avg_volume is not None and avg_volume < LIMIT_ORDER_AVG_VOLUME_THRESHOLD:
+        reasons.append(f"low_volume={avg_volume:.0f}")
+    if spread_proxy is not None and spread_proxy > LIMIT_ORDER_SPREAD_PROXY_THRESHOLD:
+        reasons.append(f"wide_range={spread_proxy:.3%}")
+
+    if not reasons:
+        return OrderType.MARKET, 0.0, "market"
+
+    buffer = current_price * LIMIT_ORDER_PRICE_BUFFER
+    limit_price = (
+        current_price + buffer if side == OrderSide.BUY else max(0.0, current_price - buffer)
+    )
+    return OrderType.LIMIT, limit_price, ", ".join(reasons)
+
+
 def _record_order(
     market: str,
     predicted_at: str,
@@ -235,6 +297,8 @@ def _record_order(
     side: OrderSide,
     qty: int,
     signal_price: float,
+    order_price: float,
+    order_type: OrderType,
     order_result: dict,
     broker: BrokerBase,
     mode: str,
@@ -245,13 +309,15 @@ def _record_order(
             """
             INSERT INTO orders
                 (order_id, symbol, side, qty, price, order_type, status, broker, mode, created_at)
-            VALUES (?, ?, ?, ?, 0.0, 10, ?, ?, ?, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             """,
             [
                 order_result.get("order_id", str(uuid.uuid4())[:12]),
                 symbol,
                 int(side),
                 qty,
+                order_price,
+                int(order_type),
                 order_result.get("status", "unknown"),
                 broker.broker_name,
                 mode,
@@ -372,7 +438,19 @@ def run_daily_orders(
             if pos is None or pos["qty"] <= 0:
                 continue
             qty = pos["qty"]
-            result = broker.send_order(symbol, OrderSide.SELL, qty, order_type=OrderType.MARKET)
+            order_type, order_price, order_reason = _choose_order_params(
+                market=str(row["market"]),
+                symbol=symbol,
+                side=OrderSide.SELL,
+                current_price=float(row.get("current_price") or 0.0),
+            )
+            result = broker.send_order(
+                symbol,
+                OrderSide.SELL,
+                qty,
+                price=order_price,
+                order_type=order_type,
+            )
             _record_order(
                 market=str(row["market"]),
                 predicted_at=str(row["predicted_at"]),
@@ -380,12 +458,14 @@ def run_daily_orders(
                 side=OrderSide.SELL,
                 qty=qty,
                 signal_price=float(row.get("current_price") or 0.0),
+                order_price=order_price,
+                order_type=order_type,
                 order_result=result,
                 broker=broker,
                 mode=mode,
             )
             logger.info(
-                f"[exec] 売り発注: {symbol} {qty}株 "
+                f"[exec] 売り発注: {symbol} {qty}株 @ {order_type.name}({order_reason}) "
                 f"(予測変化率={row['diff_ratio']:.3%}, 閾値={row['effective_sell_threshold']:.3%})"
             )
             stats["sell_orders"] += 1
@@ -420,7 +500,19 @@ def run_daily_orders(
             continue
 
         try:
-            result = broker.send_order(symbol, OrderSide.BUY, qty, order_type=OrderType.MARKET)
+            order_type, order_price, order_reason = _choose_order_params(
+                market=str(row["market"]),
+                symbol=symbol,
+                side=OrderSide.BUY,
+                current_price=current_price,
+            )
+            result = broker.send_order(
+                symbol,
+                OrderSide.BUY,
+                qty,
+                price=order_price,
+                order_type=order_type,
+            )
             _record_order(
                 market=str(row["market"]),
                 predicted_at=str(row["predicted_at"]),
@@ -428,12 +520,14 @@ def run_daily_orders(
                 side=OrderSide.BUY,
                 qty=qty,
                 signal_price=current_price,
+                order_price=order_price,
+                order_type=order_type,
                 order_result=result,
                 broker=broker,
                 mode=mode,
             )
             logger.info(
-                f"[exec] 買い発注: {symbol} {qty}株 @ 成行 "
+                f"[exec] 買い発注: {symbol} {qty}株 @ {order_type.name}({order_reason}) "
                 f"(予測変化率={row['diff_ratio']:.3%}, 閾値={row['effective_buy_threshold']:.3%}, "
                 f"sector={row.get('sector', 'N/A')})"
             )
