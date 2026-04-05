@@ -10,12 +10,40 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 
+from config.settings import EARNINGS_MASK_WINDOW_DAYS
+from src.data.data_loader import get_earnings_dates
 from src.domain.types import FeatureLoadResult, TrainingMetrics
+from src.features.technical_analysis import add_earnings_flag
 from src.models.model_manager import ModelManager
 from src.utils.db import load_stock_features, save_model_metrics, save_shap_values
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+def _mask_earnings_rows(df: pd.DataFrame, market: str, symbol: str) -> pd.DataFrame:
+    if df is None or df.empty:
+        return df
+
+    work = df.copy()
+    has_date_column = "date" in work.columns
+    if has_date_column:
+        date_index = pd.DatetimeIndex(pd.to_datetime(work["date"], errors="coerce"))
+    elif isinstance(work.index, pd.DatetimeIndex):
+        date_index = pd.DatetimeIndex(work.index)
+    else:
+        return work
+
+    if pd.Series(date_index).isna().all():
+        return work
+
+    work.index = date_index
+    earnings_dates = get_earnings_dates(market, symbol)
+    work = add_earnings_flag(work, earnings_dates, lookaround_days=EARNINGS_MASK_WINDOW_DAYS)
+    work = work[work["earnings_flag"] == 0].copy()
+    if has_date_column:
+        work["date"] = work.index
+    return work.drop(columns=["earnings_flag"], errors="ignore")
 
 
 def _extract_mean_abs_shap_values(shap_values, feature_count: int) -> np.ndarray:
@@ -82,6 +110,8 @@ def load_features_for_training(market: str, symbol: str, horizon: int = 1) -> Fe
                     status="skip", market=market, symbol=symbol, reason="データなし"
                 )
 
+            df = _mask_earnings_rows(df, market, symbol)
+
             exclude_cols = ["y", "market", "symbol", "date"]
             feature_cols = [c for c in df.columns if c not in exclude_cols]
             X = df[feature_cols]
@@ -104,6 +134,8 @@ def load_features_for_training(market: str, symbol: str, horizon: int = 1) -> Fe
                 )
 
             # load_raw_ohlcv はすでに先頭大文字列名（Open/High/Low/Close/Volume）で返す
+            earnings_dates = get_earnings_dates(market, symbol)
+            raw = add_earnings_flag(raw, earnings_dates, lookaround_days=EARNINGS_MASK_WINDOW_DAYS)
             df_feat = add_technical_indicators(raw)
             X, y = create_basic_lag_features(df_feat, target_horizon=horizon)
 

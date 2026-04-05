@@ -2,10 +2,39 @@ from datetime import datetime, timedelta
 from typing import Optional, Union
 
 import pandas as pd
+import yfinance as yf
 
 from src.utils import yf_client
 from src.utils.data_path_utils import get_ticker
 from src.utils.db import load_raw_ohlcv, load_stock_features
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
+
+def get_earnings_dates(market: str, symbol: str, limit: int = 12) -> pd.DatetimeIndex:
+    """yfinance から決算日一覧を取得して返す。取得失敗時は空配列。"""
+    ticker = get_ticker(market, symbol)
+    try:
+        ticker_obj = yf.Ticker(ticker)
+        getter = getattr(ticker_obj, "get_earnings_dates", None)
+        if callable(getter):
+            earnings_df = getter(limit=limit)
+        else:
+            earnings_df = getattr(ticker_obj, "earnings_dates", pd.DataFrame())
+
+        if earnings_df is None or len(earnings_df) == 0:
+            return pd.DatetimeIndex([])
+
+        raw_dates = earnings_df.index if isinstance(earnings_df, pd.DataFrame) else earnings_df
+        dates = pd.DatetimeIndex(pd.to_datetime(raw_dates, errors="coerce"))
+        if dates.tz is not None:
+            dates = dates.tz_localize(None)
+        dates = dates.dropna().normalize().unique().sort_values()
+        return pd.DatetimeIndex(dates)
+    except Exception as exc:
+        logger.warning(f"決算日取得失敗 [{market}/{symbol}]: {exc}")
+        return pd.DatetimeIndex([])
 
 
 def get_raw_ohlcv_from_db(

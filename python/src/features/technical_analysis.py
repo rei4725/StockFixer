@@ -42,7 +42,11 @@ def create_basic_lag_features(
     """
     df = df.copy()
     if feature_cols is None:
-        feature_cols = df.select_dtypes(include=[float, int]).columns
+        feature_cols = [
+            c for c in df.select_dtypes(include=[float, int]).columns if c != "earnings_flag"
+        ]
+    else:
+        feature_cols = [c for c in feature_cols if c != "earnings_flag"]
     # pd.concat で一括追加することで DataFrame の断片化警告を回避
     new_cols: dict = {}
     for col in feature_cols:
@@ -52,10 +56,45 @@ def create_basic_lag_features(
     new_cols["target"] = (df["Close"].shift(-target_horizon) - df["Close"]) / df["Close"]
     df = pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
     df = df.dropna()
+    if "earnings_flag" in df.columns:
+        df = df[df["earnings_flag"] == 0]
     lag_feature_cols = [f"{col}_lag{lag}" for col in feature_cols for lag in range(1, n_lags + 1)]
     X = df[lag_feature_cols]
     y = df["target"]
     return X, y
+
+
+def add_earnings_flag(
+    df: pd.DataFrame,
+    earnings_dates: pd.DatetimeIndex | list | tuple,
+    lookaround_days: int = 3,
+) -> pd.DataFrame:
+    """決算日前後の営業日に earnings_flag=1 を付与する。"""
+    enriched = df.copy()
+    enriched["earnings_flag"] = 0
+
+    if not isinstance(enriched.index, pd.DatetimeIndex) or len(enriched) == 0:
+        return enriched
+
+    dates = pd.DatetimeIndex(pd.to_datetime(earnings_dates, errors="coerce"))
+    if len(dates) == 0:
+        return enriched
+    if dates.tz is not None:
+        dates = dates.tz_localize(None)
+
+    flagged_dates: set[pd.Timestamp] = set()
+    for earnings_date in dates.dropna().normalize():
+        window = pd.bdate_range(
+            earnings_date - pd.offsets.BDay(lookaround_days),
+            earnings_date + pd.offsets.BDay(lookaround_days),
+        )
+        flagged_dates.update(pd.Timestamp(day).normalize() for day in window)
+
+    normalized_index = pd.DatetimeIndex(enriched.index)
+    if normalized_index.tz is not None:
+        normalized_index = normalized_index.tz_localize(None)
+    enriched["earnings_flag"] = normalized_index.normalize().isin(flagged_dates).astype(int)
+    return enriched
 
 
 def _resample_ohlcv(df: pd.DataFrame, rule: str) -> pd.DataFrame:

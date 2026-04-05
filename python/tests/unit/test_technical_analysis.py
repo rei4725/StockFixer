@@ -112,6 +112,29 @@ class TestTechnicalAnalysis(unittest.TestCase):
         tail = df_with_ind.tail(10)
         self.assertFalse(tail[expected_cols].isnull().any().any())
 
+    def test_add_earnings_flag_marks_business_day_window(self):
+        earnings_dates = pd.DatetimeIndex([pd.Timestamp("2023-01-10")])
+
+        flagged = technical_analysis.add_earnings_flag(
+            self.df.copy(), earnings_dates, lookaround_days=1
+        )
+
+        self.assertEqual(flagged.loc["2023-01-09", "earnings_flag"], 1)
+        self.assertEqual(flagged.loc["2023-01-10", "earnings_flag"], 1)
+        self.assertEqual(flagged.loc["2023-01-11", "earnings_flag"], 1)
+        self.assertEqual(flagged.loc["2023-01-12", "earnings_flag"], 0)
+
+    def test_create_basic_lag_features_drops_earnings_flag_rows(self):
+        df = technical_analysis.add_earnings_flag(
+            self.df.copy(), pd.DatetimeIndex([pd.Timestamp("2023-01-10")]), lookaround_days=1
+        )
+
+        X, y = technical_analysis.create_basic_lag_features(df, n_lags=2)
+
+        self.assertNotIn("earnings_flag_lag1", X.columns)
+        self.assertNotIn(pd.Timestamp("2023-01-10"), X.index)
+        self.assertEqual(len(X), len(y))
+
 
 class TestMarketRegime(unittest.TestCase):
     def test_get_market_regime_identifies_bull_market(self):

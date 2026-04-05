@@ -154,6 +154,20 @@ class TestLoadFeaturesForTraining(unittest.TestCase):
                 self.assertNotIn("-", col)
                 self.assertNotIn("/", col)
 
+    @patch("src.services.model_training_pipeline.get_earnings_dates")
+    @patch("src.services.model_training_pipeline.load_stock_features")
+    def test_horizon1_masks_earnings_window_rows(self, mock_load, mock_get_earnings):
+        df = self._make_stock_features_df(periods=20)
+        df.loc[:, "date"] = df.index
+        mock_load.return_value = df
+        mock_get_earnings.return_value = pd.DatetimeIndex([pd.Timestamp("2024-01-10")])
+
+        result = load_features_for_training("us", "AAPL", horizon=1)
+
+        self.assertTrue(result.is_success)
+        self.assertLess(len(result.X), len(df))
+        self.assertNotIn(pd.Timestamp("2024-01-10"), result.X.index)
+
 
 class _DummyExplanation:
     def __init__(self, values):

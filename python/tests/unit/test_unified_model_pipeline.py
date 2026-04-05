@@ -1,6 +1,7 @@
 """unified_model_pipeline の純粋関数テスト"""
 
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
@@ -91,6 +92,24 @@ class TestPrepareUnifiedFeatures(unittest.TestCase):
         # market列がある場合は上書きしない（コードの仕様）
         # market_encoded列が存在することのみ確認
         self.assertIn("market_encoded", X.columns)
+
+
+class TestUnifiedEarningsMask(unittest.TestCase):
+    @patch("src.services.unified_model_pipeline.get_earnings_dates")
+    def test_mask_earnings_rows_for_unified_removes_flagged_rows(self, mock_get_earnings):
+        from src.services.unified_model_pipeline import _mask_earnings_rows_for_unified
+
+        df = _make_df(n=10)
+        df["market"] = "us"
+        df["symbol"] = "AAPL"
+        df["date"] = pd.date_range("2026-01-01", periods=10, freq="B")
+        mock_get_earnings.return_value = pd.DatetimeIndex([pd.Timestamp("2026-01-07")])
+
+        masked = _mask_earnings_rows_for_unified(df)
+
+        self.assertLess(len(masked), len(df))
+        self.assertNotIn(pd.Timestamp("2026-01-07"), pd.to_datetime(masked["date"]).tolist())
+        self.assertNotIn("earnings_flag", masked.columns)
 
 
 class TestLoadUnifiedModel(unittest.TestCase):

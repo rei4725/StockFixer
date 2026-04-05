@@ -70,6 +70,9 @@ LIMIT_ORDER_PRICE_BUFFER: float = _float("LIMIT_ORDER_PRICE_BUFFER", 0.001)
 #: 執行方式判定に使う履歴本数
 LIMIT_ORDER_LOOKBACK_DAYS: int = _int("LIMIT_ORDER_LOOKBACK_DAYS", 5)
 
+#: 決算発表日の前後何営業日を学習データから除外するか
+EARNINGS_MASK_WINDOW_DAYS: int = _int("EARNINGS_MASK_WINDOW_DAYS", 3)
+
 # ---------------------------------------------------------------------------
 # ペーパートレード（paper_broker.py）
 # ---------------------------------------------------------------------------

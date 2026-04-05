@@ -188,7 +188,7 @@
 | R-106 | DONE | - | 2026-08-16 | 2026-04-04 | 日足特徴量生成時に weekly / monthly トレンド特徴量を追加し、既存 pipeline 全体で利用可能化 |
 | R-107 | DONE | - | 2026-08-23 | 2026-04-05 | `paper_real_diff` を DuckDB に追加し、発注時参照価格・paper約定・live注文価格の自動集計と週次Discord要約を接続 |
 | R-103 | DONE | - | 2026-08-30 | 2026-04-05 | 直近出来高と日次レンジ proxy で MARKET/LIMIT を自動切替し、注文記録へ order_type / price を保存 |
-| R-110 | TODO | - | 2026-09-06 | - | yfinance earnings_dates + フラグ特徴量またはマスク処理 |
+| R-110 | DONE | - | 2026-09-06 | 2026-04-05 | `earnings_dates` を学習時に取得し、決算前後3営業日を銘柄別学習・統合学習・多ホライズン特徴量生成から除外 |
 
 | R-208 | TODO | - | 2026-10-05 | - | R-105 SHAP 知見をフィードバックして相乗効果 |
 | R-211 | TODO | - | 2026-10-12 | - | experiment_runs テーブル設計・R-206/R-207 のインフラ共有 |
@@ -238,3 +238,4 @@
 - 2026-04-04: R-106 を完了。`add_technical_indicators()` に週足・月足の内部リサンプリングを追加し、weekly / monthly のトレンド特徴量を学習・予測・バックテスト経路へ自動反映。ユニットテストを追加
 - 2026-04-05: R-107 を完了。`paper_real_diff` テーブルを追加し、order execution の参照価格保存、paper 約定時のスリッページ更新、live 注文価格同期、週次 Discord レポートへの乖離サマリー追記を実装
 - 2026-04-05: R-103 を完了。`order_execution_pipeline.py` に出来高・日次レンジ proxy に基づく MARKET/LIMIT 自動切替を追加し、注文記録に `order_type` / `price` を保持。切替ルールのユニットテストも追加
+- 2026-04-05: R-110 を完了。`data_loader.get_earnings_dates()` と `technical_analysis.add_earnings_flag()` を追加し、決算前後3営業日を銘柄別学習・統合学習・多ホライズンのラグ特徴量生成から除外。関連ユニットテストを追加

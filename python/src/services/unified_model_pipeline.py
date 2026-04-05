@@ -9,11 +9,42 @@ from typing import Tuple
 
 import pandas as pd
 
+from config.settings import EARNINGS_MASK_WINDOW_DAYS
+from src.data.data_loader import get_earnings_dates
+from src.features.technical_analysis import add_earnings_flag
 from src.utils.data_path_utils import ensure_dir, get_models_dir
 from src.utils.db import load_all_stock_features
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+def _mask_earnings_rows_for_unified(df: pd.DataFrame) -> pd.DataFrame:
+    if (
+        df.empty
+        or "date" not in df.columns
+        or "market" not in df.columns
+        or "symbol" not in df.columns
+    ):
+        return df
+
+    masked_frames: list[pd.DataFrame] = []
+    removed_count = 0
+    for (market, symbol), group in df.groupby(["market", "symbol"], sort=False):
+        work = group.copy()
+        date_index = pd.DatetimeIndex(pd.to_datetime(work["date"], errors="coerce"))
+        work.index = date_index
+        earnings_dates = get_earnings_dates(str(market), str(symbol))
+        work = add_earnings_flag(work, earnings_dates, lookaround_days=EARNINGS_MASK_WINDOW_DAYS)
+        before = len(work)
+        work = work[work["earnings_flag"] == 0].copy()
+        removed_count += before - len(work)
+        work["date"] = work.index
+        masked_frames.append(work.drop(columns=["earnings_flag"], errors="ignore"))
+
+    if removed_count > 0:
+        logger.info(f"統合学習用に決算近傍データを除外: {removed_count}行")
+    return pd.concat(masked_frames, ignore_index=True) if masked_frames else df.iloc[0:0].copy()
 
 
 def load_all_stock_data(data_dir: str = None) -> pd.DataFrame:
@@ -35,7 +66,7 @@ def load_all_stock_data(data_dir: str = None) -> pd.DataFrame:
         n_symbols = df.groupby(["market", "symbol"]).ngroups
         logger.info(f"全銘柄データ読み込み: {len(df)}行, {n_symbols}銘柄")
 
-    return df
+    return _mask_earnings_rows_for_unified(df)
 
 
 def prepare_unified_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:
