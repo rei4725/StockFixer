@@ -15,6 +15,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from src.utils.data_path_utils import ensure_dir, get_results_dir
+from src.utils.japan_time import isoformat_utc
 
 logger = logging.getLogger("scheduler")
 
@@ -83,8 +84,8 @@ class SchedulerQueueManager:
                     "reason": reason,
                     "status": "skipped_limit",
                     "period_key": period_key,
-                    "started_at": now.isoformat(),
-                    "finished_at": now.isoformat(),
+                    "started_at": isoformat_utc(now),
+                    "finished_at": isoformat_utc(now),
                     "duration_seconds": 0.0,
                     "error": None,
                 }
@@ -118,8 +119,8 @@ class SchedulerQueueManager:
                     "reason": reason,
                     "status": status,
                     "period_key": period_key,
-                    "started_at": started_at.isoformat(),
-                    "finished_at": finished_at.isoformat(),
+                    "started_at": isoformat_utc(started_at),
+                    "finished_at": isoformat_utc(finished_at),
                     "duration_seconds": duration_seconds,
                     "error": error_message,
                 }

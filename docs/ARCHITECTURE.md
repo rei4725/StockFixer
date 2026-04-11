@@ -30,6 +30,13 @@ StockFixer（コードネーム: CuteStock）は、**株式自動売買システ
 - 売買シグナル生成
 - Discord Botによる予測結果の通知
 
+### 時刻処理ポリシー
+
+- 内部処理の日時は UTC を基準とし、timezone-aware な値で扱う。
+- 永続化するタイムスタンプ（ジョブ実行時刻、監視更新時刻、生成時刻など）は UTC の ISO 8601 形式を優先する。
+- ユーザー向け表示は API 層で日本時間へ変換し、`src/utils/japan_time.py` を経由して整形する。
+- Asia/Tokyo が必要なのは「営業日判定」「スケジュール時刻判定」などの業務ロジックであり、保存形式とは分離して扱う。
+
 ---
 
 ## ディレクトリ構成
@@ -216,6 +223,12 @@ StockFixer/
 - Discord Botの実装
 - `/forecast` コマンドで全マーケットのTop10・ワースト10を送信
 - 計算処理は事前実行されたDB上の予測結果を参照
+- API 層は Discord 入出力と表示整形に限定し、DB・モデル・状態ファイルの参照は services 層へ委譲する
+
+#### `services/discord_query_service.py`
+- Discord API 層向けの問い合わせ専用サービス
+- 予測結果、ウォッチリスト予測、signal 用スナップショット、scheduler 状態を取得する
+- API 層へは dataclass を返し、`dict` や生 `DataFrame` 依存を減らす
 
 ### services層
 

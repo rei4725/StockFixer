@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 from datetime import datetime
@@ -121,3 +122,16 @@ def test_get_missed_past_periods_skips_non_scheduled_days(tmp_path):
     now = datetime(2026, 3, 9, 8, 0, tzinfo=manager.tz)
     missed = manager.get_missed_past_periods("daily_pipeline", lookback_days=1, now=now)
     assert "2026-03-08" not in missed
+
+
+def test_run_job_persists_timestamps_in_utc(tmp_path):
+    counter = {}
+    state_path = tmp_path / "scheduler_queue_state.json"
+    manager = SchedulerQueueManager(_build_config(counter), state_file_path=str(state_path))
+
+    assert manager.run_job("daily_pipeline", reason="scheduled") is True
+
+    saved = json.loads(state_path.read_text(encoding="utf-8"))
+    event = saved["events"][-1]
+    assert event["started_at"].endswith("+00:00")
+    assert event["finished_at"].endswith("+00:00")

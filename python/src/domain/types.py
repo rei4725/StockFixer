@@ -180,3 +180,75 @@ class PredictionResult:
             confluence_score=_opt_int("confluence_score"),
             confidence_ratio=_opt_float("confidence_ratio"),
         )
+
+
+@dataclass
+class MarketPredictionSnapshot:
+    """Discord などの表示用にまとめた市場別予測スナップショット。"""
+
+    market: str
+    top_results: list[PredictionResult] = field(default_factory=list)
+    worst_results: list[PredictionResult] = field(default_factory=list)
+
+
+@dataclass
+class WatchlistPredictionRow:
+    """ウォッチリスト表示用の1行。"""
+
+    symbol: str
+    current_price: Optional[float]
+    avg_pred_price: Optional[float]
+    diff_ratio: Optional[float]
+
+    @classmethod
+    def to_dataframe(cls, rows: list[WatchlistPredictionRow]) -> pd.DataFrame:
+        return pd.DataFrame(
+            [
+                {
+                    "symbol": row.symbol,
+                    "current_price": row.current_price,
+                    "avg_pred_price": row.avg_pred_price,
+                    "diff_ratio": row.diff_ratio,
+                }
+                for row in rows
+            ]
+        )
+
+
+@dataclass
+class WatchlistPredictionView:
+    """ウォッチリスト表示の取得結果。"""
+
+    rows: list[WatchlistPredictionRow] = field(default_factory=list)
+    error_message: Optional[str] = None
+
+    @property
+    def is_success(self) -> bool:
+        return self.error_message is None
+
+
+@dataclass
+class ShapFeatureContribution:
+    """SHAP 説明の1特徴量。"""
+
+    feature: str
+    shap_value: float
+
+
+@dataclass
+class SignalSnapshot:
+    """Discord signal コマンド向けの予測スナップショット。"""
+
+    prediction: PredictionResult
+    shap_direction: Optional[str] = None
+    top_features: list[ShapFeatureContribution] = field(default_factory=list)
+
+
+@dataclass
+class SchedulerJobStatus:
+    """スケジューラ状態表示用のジョブステータス。"""
+
+    job_id: str
+    label: str
+    last_run_at: Optional[str]
+    status: str

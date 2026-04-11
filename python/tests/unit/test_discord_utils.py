@@ -1,13 +1,16 @@
 """ユニットテスト: discord_utils"""
 
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 
+from src.api.discord_text import split_text_chunks
 from src.api.discord_utils import (
     send_daily_order_completion,
     send_shap_notification,
+    send_webhook_notification,
+    send_webhook_text_chunked,
     send_weekly_report,
 )
 
@@ -26,6 +29,7 @@ class TestSendDailyOrderCompletion(unittest.TestCase):
         self.assertIn("モード: paper", message)
         self.assertIn("買い注文: 2 件", message)
         self.assertIn("売り注文: 1 件", message)
+        self.assertIn("JST", message)
         self.assertNotIn("停止理由:", message)
         self.assertEqual(color, 0x00BFFF)
 
@@ -49,7 +53,38 @@ class TestSendDailyOrderCompletion(unittest.TestCase):
         self.assertEqual(title, "⚠️ 自動発注停止")
         self.assertIn("停止理由: 日次損失上限に到達", message)
         self.assertIn("当日損失: 25000 円 / 上限: 20000 円", message)
+        self.assertIn("JST", message)
         self.assertEqual(color, 0xFF9900)
+
+
+class TestSendWebhookNotification(unittest.TestCase):
+    @patch("src.api.discord_utils._post_webhook")
+    @patch("src.api.discord_utils.isoformat_jst", return_value="2026-04-06T09:30:45+09:00")
+    def test_embed_timestamp_uses_jst_isoformat(self, mock_isoformat, mock_post):
+        mock_response = MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_post.return_value = mock_response
+
+        result = send_webhook_notification("title", "message")
+
+        self.assertTrue(result)
+        mock_isoformat.assert_called_once_with()
+        payload = mock_post.call_args.kwargs["json_payload"]
+        self.assertEqual(payload["embeds"][0]["timestamp"], "2026-04-06T09:30:45+09:00")
+
+
+class TestChunkedTextHelpers(unittest.TestCase):
+    def test_split_text_chunks_preserves_lines_when_possible(self):
+        chunks = split_text_chunks("a\nb\nc", limit=3, preserve_lines=True)
+
+        self.assertEqual(chunks, ["a\nb", "c"])
+
+    @patch("src.api.discord_utils.send_webhook_text", return_value=True)
+    def test_send_webhook_text_chunked_sends_all_chunks(self, mock_send):
+        result = send_webhook_text_chunked("12345", limit=2, preserve_lines=False)
+
+        self.assertTrue(result)
+        self.assertEqual([call.args[0] for call in mock_send.call_args_list], ["12", "34", "5"])
 
 
 class TestSendShapNotification(unittest.TestCase):

@@ -6,12 +6,91 @@ Webhookを使用したDiscord通知機能
 
 import logging
 import os
-from datetime import datetime
 from typing import Optional
 
 import requests
 
+from src.api.discord_formatters import convert_df_for_discord, get_market_emoji
+from src.api.discord_notification_specs import (
+    DAILY_PIPELINE_COMPLETION,
+    DAILY_PIPELINE_ERROR,
+    DAILY_SETTLE_COMPLETION,
+    WEEKLY_TRAINING_COMPLETION,
+    NotificationSpec,
+    get_daily_order_spec,
+    get_optimization_spec,
+    get_walk_forward_report_spec,
+)
+from src.api.discord_text import DISCORD_TEXT_LIMIT, DISCORD_WIDE_TEXT_LIMIT, split_text_chunks
+from src.domain.types import PredictionResult
+from src.services.discord_query_service import get_latest_market_prediction_snapshots
+from src.utils.japan_time import format_jst, format_jst_from_iso, isoformat_jst
+
 logger = logging.getLogger(__name__)
+
+DISCORD_DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S JST"
+DISCORD_MINUTE_FORMAT = "%Y-%m-%d %H:%M JST"
+DISCORD_DATE_FORMAT = "%Y/%m/%d"
+
+
+def _get_webhook_url() -> str | None:
+    webhook_url = os.getenv("DISCORD_WEBHOOK_URL")
+    if not webhook_url:
+        logger.warning("DISCORD_WEBHOOK_URLが環境変数に設定されていません。Webhook通知をスキップします。")
+        return None
+    return webhook_url
+
+
+def _post_webhook(
+    *,
+    json_payload: dict | None = None,
+    data_payload: dict | None = None,
+    files=None,
+    timeout: int = 10,
+):
+    webhook_url = _get_webhook_url()
+    if not webhook_url:
+        return None
+    response = requests.post(
+        webhook_url, json=json_payload, data=data_payload, files=files, timeout=timeout
+    )
+    response.raise_for_status()
+    return response
+
+
+def send_webhook_text_chunked(
+    text: str,
+    *,
+    limit: int = DISCORD_TEXT_LIMIT,
+    preserve_lines: bool = True,
+) -> bool:
+    success = True
+    for chunk in split_text_chunks(text, limit=limit, preserve_lines=preserve_lines):
+        if not send_webhook_text(chunk):
+            success = False
+    return success
+
+
+def send_text_file_chunked(
+    file_path: str,
+    *,
+    limit: int = DISCORD_TEXT_LIMIT,
+    preserve_lines: bool = False,
+) -> bool:
+    try:
+        with open(file_path, encoding="utf-8") as file_handle:
+            return send_webhook_text_chunked(
+                file_handle.read(),
+                limit=limit,
+                preserve_lines=preserve_lines,
+            )
+    except OSError as exc:
+        logger.error(f"テキストファイル送信失敗: {exc}")
+        return False
+
+
+def send_status_notification(spec: NotificationSpec, lines: list[str]) -> bool:
+    return send_webhook_notification(spec.title, "\n".join(lines), color=spec.color)
 
 
 def send_webhook_notification(
@@ -30,12 +109,6 @@ def send_webhook_notification(
     Returns:
         成功時True、失敗時False
     """
-    webhook_url = os.getenv("DISCORD_WEBHOOK_URL")
-
-    if not webhook_url:
-        logger.warning("DISCORD_WEBHOOK_URLが環境変数に設定されていません。" "Webhook通知をスキップします。")
-        return False
-
     try:
         embed_data = {
             "embeds": [
@@ -43,12 +116,14 @@ def send_webhook_notification(
                     "title": title,
                     "description": message,
                     "color": color,
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": isoformat_jst(),
                 }
             ]
         }
 
-        response = requests.post(webhook_url, json=embed_data, timeout=10)
+        response = _post_webhook(json_payload=embed_data, timeout=10)
+        if response is None:
+            return False
         response.raise_for_status()
 
         logger.info(f"Discord通知送信成功: {title}")
@@ -69,15 +144,11 @@ def send_webhook_text(text: str) -> bool:
     Returns:
         成功時True、失敗時False
     """
-    webhook_url = os.getenv("DISCORD_WEBHOOK_URL")
-
-    if not webhook_url:
-        logger.warning("DISCORD_WEBHOOK_URLが環境変数に設定されていません。" "Webhook通知をスキップします。")
-        return False
-
     try:
         payload = {"content": text}
-        response = requests.post(webhook_url, json=payload, timeout=10)
+        response = _post_webhook(json_payload=payload, timeout=10)
+        if response is None:
+            return False
         response.raise_for_status()
 
         logger.info("Discord通知送信成功: テキストメッセージ")
@@ -104,18 +175,9 @@ def send_daily_pipeline_completion(
     Returns:
         成功時True、失敗時False
     """
-    from src.api.discord_bot import convert_df_for_discord
-    from src.utils.db import (
-        load_latest_prediction_timestamp,
-        load_prediction_markets,
-        load_prediction_results,
-    )
-
     # 1. 完了メッセージを送信
-    title = "✅ 日次パイプライン完了"
-
     message_lines = [
-        f"時刻: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"時刻: {format_jst(fmt=DISCORD_DATETIME_FORMAT)}",
     ]
 
     if data_count is not None:
@@ -125,47 +187,38 @@ def send_daily_pipeline_completion(
         markets_str = "、".join(prediction_markets)
         message_lines.append(f"予測市場: {markets_str}")
 
-    message = "\n".join(message_lines)
-
-    success = send_webhook_notification(title, message, color=0x00FF00)
+    success = send_status_notification(DAILY_PIPELINE_COMPLETION, message_lines)
 
     # 2. 予測結果テーブルを送信（マーケット単位でTop→Worst、1メッセージにまとめる）
-    _MARKET_EMOJI = {"JP": "🇯🇵", "NASDAQ": "🇺🇸", "US": "🇺🇸"}
     if include_forecast:
         try:
-            latest_ts = load_latest_prediction_timestamp()
-            if latest_ts:
-                markets = load_prediction_markets(latest_ts)
+            latest_ts, snapshots = get_latest_market_prediction_snapshots()
+            if latest_ts and snapshots:
+                ts_label = latest_ts[:16] if len(latest_ts) >= 16 else latest_ts
+                parts = [f"📊 予測結果 — {ts_label}\n{'━' * 28}"]
 
-                if markets:
-                    ts_label = latest_ts[:16] if len(latest_ts) >= 16 else latest_ts
-                    parts = [f"📊 予測結果 — {ts_label}\n{'━' * 28}"]
+                for snapshot in snapshots:
+                    emoji = get_market_emoji(snapshot.market)
+                    parts.append(f"\n{emoji} {snapshot.market}")
 
-                    # マーケット単位で上位10 → 下位10の順に出力
-                    for market in sorted(markets):
-                        emoji = _MARKET_EMOJI.get(market, "🌐")
-                        parts.append(f"\n{emoji} {market}")
-
-                        df_top = load_prediction_results(
-                            predicted_at=latest_ts, market=market, top_n=10
+                    if snapshot.top_results:
+                        df_top = convert_df_for_discord(
+                            PredictionResult.to_dataframe(snapshot.top_results)
                         )
-                        if df_top is not None and not df_top.empty:
-                            df_top = convert_df_for_discord(df_top)
-                            parts.append(f"📈 上位10銘柄\n```\n{df_top.to_string(index=False)}\n```")
+                        parts.append(f"📈 上位10銘柄\n```\n{df_top.to_string(index=False)}\n```")
 
-                        df_worst = load_prediction_results(
-                            predicted_at=latest_ts, market=market, worst_n=10
+                    if snapshot.worst_results:
+                        df_worst = convert_df_for_discord(
+                            PredictionResult.to_dataframe(snapshot.worst_results)
                         )
-                        if df_worst is not None and not df_worst.empty:
-                            df_worst = convert_df_for_discord(df_worst)
-                            parts.append(f"📉 下位10銘柄\n```\n{df_worst.to_string(index=False)}\n```")
+                        parts.append(f"📉 下位10銘柄\n```\n{df_worst.to_string(index=False)}\n```")
 
-                    if len(parts) > 1:
-                        msg = "\n".join(parts)
-                        # Discordメッセージ長制限対応（超過時のみ分割）
-                        max_length = 3800
-                        for i in range(0, len(msg), max_length):
-                            send_webhook_text(msg[i : i + max_length])
+                if len(parts) > 1:
+                    send_webhook_text_chunked(
+                        "\n".join(parts),
+                        limit=DISCORD_WIDE_TEXT_LIMIT,
+                        preserve_lines=False,
+                    )
 
         except Exception as e:
             logger.error(f"予測結果テーブル送信失敗: {e}")
@@ -183,11 +236,9 @@ def send_daily_pipeline_error(error_message: str) -> bool:
     Returns:
         成功時True、失敗時False
     """
-    title = "❌ 日次パイプライン失敗"
+    message = f"エラー: {error_message}\n時刻: {format_jst(fmt=DISCORD_DATETIME_FORMAT)}"
 
-    message = f"エラー: {error_message}\n時刻: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-
-    return send_webhook_notification(title, message, color=0xFF0000)
+    return send_status_notification(DAILY_PIPELINE_ERROR, message.split("\n"))
 
 
 def send_webhook_file(file_path: str, title: str = "") -> bool:
@@ -201,11 +252,6 @@ def send_webhook_file(file_path: str, title: str = "") -> bool:
     Returns:
         成功時True、失敗時False
     """
-    webhook_url = os.getenv("DISCORD_WEBHOOK_URL")
-    if not webhook_url:
-        logger.warning("DISCORD_WEBHOOK_URLが環境変数に設定されていません。ファイル送信をスキップします。")
-        return False
-
     if not os.path.exists(file_path):
         logger.warning(f"送信対象ファイルが存在しません: {file_path}")
         return False
@@ -214,12 +260,13 @@ def send_webhook_file(file_path: str, title: str = "") -> bool:
         with open(file_path, "rb") as f:
             filename = os.path.basename(file_path)
             payload = {"content": title} if title else {}
-            response = requests.post(
-                webhook_url,
-                data=payload,
+            response = _post_webhook(
+                data_payload=payload,
                 files={"file": (filename, f)},
                 timeout=30,
             )
+        if response is None:
+            return False
         response.raise_for_status()
         logger.info(f"Discordファイル送信成功: {filename}")
         return True
@@ -261,8 +308,7 @@ def send_drift_alert(summary_df, horizon: int = 1, threshold: float = 0.45) -> b
             f"• `{row['market']}/{row['symbol']}` " f"正解率={acc:.1%}, 平均誤差={err:.4f}, N={n}"
         )
 
-    message = "\n".join(lines)
-    return send_webhook_text(message)
+    return send_webhook_text("\n".join(lines))
 
 
 def send_weekly_report(
@@ -291,9 +337,7 @@ def send_weekly_report(
         logger.info("週次レポート: 精度データなし")
         return False
 
-    from datetime import datetime
-
-    now = datetime.now().strftime("%Y/%m/%d")
+    now = format_jst(fmt=DISCORD_DATE_FORMAT)
     lines = [f"**[週次パフォーマンスレポート] {now} (horizon={horizon}d)**\n"]
 
     # 方向正解率でソート（低い順 = 要注意銘柄を先頭に）
@@ -333,24 +377,7 @@ def send_weekly_report(
             f"最大価格差={diff_summary['max_abs_price_diff']:.3f}"
         )
 
-    message = "\n".join(lines)
-    # Discord の 2000 文字制限に対応した分割送信
-    chunks: list[str] = []
-    current = ""
-    for line in message.split("\n"):
-        if len(current) + len(line) + 1 > 1900:
-            chunks.append(current)
-            current = line
-        else:
-            current = (current + "\n" + line) if current else line
-    if current:
-        chunks.append(current)
-
-    success = True
-    for chunk in chunks:
-        if not send_webhook_text(chunk):
-            success = False
-    return success
+    return send_webhook_text_chunked("\n".join(lines))
 
 
 def send_weekly_training_completion(models: list) -> bool:
@@ -363,10 +390,9 @@ def send_weekly_training_completion(models: list) -> bool:
     Returns:
         成功時 True、失敗時 False
     """
-    title = "✅ 週次モデル学習完了"
     models_str = "\n".join(f"• {m}" for m in models)
-    message = f"時刻: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n" f"学習済みモデル:\n{models_str}"
-    return send_webhook_notification(title, message, color=0x00FF00)
+    message = f"時刻: {format_jst(fmt=DISCORD_DATETIME_FORMAT)}\n" f"学習済みモデル:\n{models_str}"
+    return send_status_notification(WEEKLY_TRAINING_COMPLETION, message.split("\n"))
 
 
 def send_daily_order_completion(
@@ -393,9 +419,9 @@ def send_daily_order_completion(
     Returns:
         成功時 True、失敗時 False
     """
-    title = "⚠️ 自動発注停止" if trading_stopped else "✅ 自動発注完了"
+    spec = get_daily_order_spec(trading_stopped=trading_stopped)
     lines = [
-        f"時刻: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"時刻: {format_jst(fmt=DISCORD_DATETIME_FORMAT)}",
         f"モード: {mode}",
         f"買い注文: {buy_orders} 件",
         f"売り注文: {sell_orders} 件",
@@ -404,9 +430,7 @@ def send_daily_order_completion(
         lines.append(f"停止理由: {stop_reason or 'リスクガードにより停止'}")
         if daily_loss is not None and daily_loss_limit is not None:
             lines.append(f"当日損失: {daily_loss:.0f} 円 / 上限: {daily_loss_limit:.0f} 円")
-    message = "\n".join(lines)
-    color = 0xFF9900 if trading_stopped else 0x00BFFF
-    return send_webhook_notification(title, message, color=color)
+    return send_status_notification(spec, lines)
 
 
 def send_daily_settle_completion(settled_count: int) -> bool:
@@ -419,9 +443,8 @@ def send_daily_settle_completion(settled_count: int) -> bool:
     Returns:
         成功時 True、失敗時 False
     """
-    title = "✅ 約定処理完了"
-    message = f"時刻: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n" f"約定件数: {settled_count} 件"
-    return send_webhook_notification(title, message, color=0x00BFFF)
+    message = f"時刻: {format_jst(fmt=DISCORD_DATETIME_FORMAT)}\n" f"約定件数: {settled_count} 件"
+    return send_status_notification(DAILY_SETTLE_COMPLETION, message.split("\n"))
 
 
 def send_optimization_completion(success: int, failed: int) -> bool:
@@ -435,16 +458,15 @@ def send_optimization_completion(success: int, failed: int) -> bool:
     Returns:
         成功時 True、失敗時 False
     """
-    title = "✅ 週次バックテスト最適化完了"
+    spec = get_optimization_spec(failed=failed)
     status_icon = "⚠️" if failed > 0 else "✅"
     message = (
-        f"時刻: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"時刻: {format_jst(fmt=DISCORD_DATETIME_FORMAT)}\n"
         f"成功: {success} 銘柄\n"
         f"失敗: {failed} 銘柄 {status_icon if failed > 0 else ''}\n"
         f"最適パラメータを `config/optimal_params.json` に保存しました"
     )
-    color = 0x00FF00 if failed == 0 else 0xFFAA00
-    return send_webhook_notification(title, message, color=color)
+    return send_status_notification(spec, message.split("\n"))
 
 
 def send_paper_trade_position_report(positions: list[dict], summary: dict) -> bool:
@@ -461,7 +483,7 @@ def send_paper_trade_position_report(positions: list[dict], summary: dict) -> bo
     Returns:
         成功時 True、失敗時 False
     """
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now_str = format_jst(fmt=DISCORD_DATETIME_FORMAT)
 
     # ── ポジション一覧 ──────────────────────────────────
     if positions:
@@ -504,17 +526,9 @@ def send_paper_trade_position_report(positions: list[dict], summary: dict) -> bo
         f"• 通算損益　　: `{total:+,.0f}円` {total_icon}  ({return_rate:+.2f}%)",
         f"• 現在残高　　: `{balance:,.0f}円`",
         f"• 取引回数　　: `{trade_count}回`",
-        f"• 運用開始日　: `{started_at}`",
+        f"• 運用開始日　: `{format_jst_from_iso(started_at, fallback='-')}`",
     ]
-    message = "\n".join(summary_lines)
-
-    # 2000文字制限対応で分割送信
-    success = True
-    max_len = 1900
-    for i in range(0, len(message), max_len):
-        if not send_webhook_text(message[i : i + max_len]):
-            success = False
-    return success
+    return send_webhook_text_chunked("\n".join(summary_lines), preserve_lines=False)
 
 
 def send_walk_forward_report_completion(result: dict) -> bool:
@@ -536,23 +550,18 @@ def send_walk_forward_report_completion(result: dict) -> bool:
     markdown_path = result.get("markdown_path")
     previous_path = result.get("previous_path")
 
-    status_icon = "⚠️" if failed_count > 0 else "✅"
-    title = f"{status_icon} Walk-Forward 比較レポート完了"
+    spec = get_walk_forward_report_spec(failed_count=failed_count)
     message_lines = [
-        f"時刻: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"時刻: {format_jst(fmt=DISCORD_DATETIME_FORMAT)}",
         f"成功: {success_count} 銘柄 / 失敗: {failed_count} 銘柄 / 合計: {total_count} 銘柄",
         f"前回比較: {previous_path if previous_path else 'なし（初回実行）'}",
     ]
-    color = 0x00FF00 if failed_count == 0 else 0xFFAA00
-    ok = send_webhook_notification(title, "\n".join(message_lines), color=color)
+    ok = send_status_notification(spec, message_lines)
 
     if markdown_path:
         try:
-            md_text = open(markdown_path, encoding="utf-8").read()
-            max_len = 1900
-            for i in range(0, len(md_text), max_len):
-                if not send_webhook_text(md_text[i : i + max_len]):
-                    ok = False
+            if not send_text_file_chunked(markdown_path, preserve_lines=False):
+                ok = False
         except Exception as e:
             logger.error(f"Walk-Forwardレポートテキスト送信失敗: {e}")
             ok = False
@@ -577,13 +586,11 @@ def send_watchlist_update_report(diffs) -> bool:
         logger.info("ウォッチリスト変更なし。Discord通知をスキップします。")
         return True
 
-    lines = [f"🔄 **ウォッチリスト更新** — {datetime.now().strftime('%Y-%m-%d %H:%M')}"]
+    lines = [f"🔄 **ウォッチリスト更新** — {format_jst(fmt=DISCORD_MINUTE_FORMAT)}"]
     lines.append("━" * 28)
 
-    _MARKET_EMOJI = {"us": "🇺🇸", "jp": "🇯🇵"}
-
     for diff in diffs:
-        emoji = _MARKET_EMOJI.get(diff.market.lower(), "🌐")
+        emoji = get_market_emoji(diff.market)
         lines.append(f"\n{emoji} **{diff.market.upper()}**")
 
         if diff.added:
@@ -604,13 +611,7 @@ def send_watchlist_update_report(diffs) -> bool:
         total_after = len(diff.kept) + len(diff.added)
         lines.append(f"📋 合計: {total_after}銘柄")
 
-    message = "\n".join(lines)
-    max_len = 1900
-    success = True
-    for i in range(0, len(message), max_len):
-        if not send_webhook_text(message[i : i + max_len]):
-            success = False
-    return success
+    return send_webhook_text_chunked("\n".join(lines), preserve_lines=False)
 
 
 def send_shap_notification(
@@ -652,13 +653,7 @@ def send_shap_notification(
     for _, row in bottom_df.iterrows():
         lines.append(f"  #{int(row['shap_rank']):>3} `{row['feature']}` — {row['shap_mean']:.6f}")
 
-    message = "\n".join(lines)
-    max_len = 1900
-    success = True
-    for i in range(0, len(message), max_len):
-        if not send_webhook_text(message[i : i + max_len]):
-            success = False
-    return success
+    return send_webhook_text_chunked("\n".join(lines), preserve_lines=False)
 
 
 def send_drift_retrain_notification(
@@ -679,9 +674,7 @@ def send_drift_retrain_notification(
     if not triggered_symbols:
         return False
 
-    from datetime import datetime
-
-    now = datetime.now().strftime("%Y/%m/%d %H:%M")
+    now = format_jst(fmt="%Y/%m/%d %H:%M JST")
     lines = [
         f"**[ドリフト検知・自動再学習トリガー] {now}**",
         f"MAE閾値={mae_threshold:.2%} / Hit Rate閾値={hit_rate_threshold:.0%}",
