@@ -1,9 +1,123 @@
+from __future__ import annotations
+
 import unittest
 
 import numpy as np
 import pandas as pd
 
 import src.strategy.signal_generator as signal_generator_module
+from src.strategy.signal_generator import (
+    apply_multi_horizon_score_column,
+    compute_multi_horizon_score,
+)
+
+# ---------------------------------------------------------------------------
+# R-212: compute_multi_horizon_score
+# ---------------------------------------------------------------------------
+
+
+class TestComputeMultiHorizonScore(unittest.TestCase):
+    def test_single_horizon_returns_diff_ratio(self):
+        """3d/5d/10d がない場合は 1d の diff_ratio をそのまま返す"""
+        score = compute_multi_horizon_score(diff_ratio_1d=0.05)
+        self.assertAlmostEqual(score, 0.05)
+
+    def test_multi_horizon_weighted_average(self):
+        """全ホライズンが揃っている場合は重み付き平均になる（confluence なし）"""
+        # 全ホライズンが同じ値 → 重み付き平均も同じ値
+        score = compute_multi_horizon_score(0.04, 0.04, 0.04, 0.04)
+        self.assertAlmostEqual(score, 0.04, places=6)
+
+    def test_confluence_boost_amplifies_score(self):
+        """confluence_score が大きいほどスコアが増幅される"""
+        base = compute_multi_horizon_score(0.03, confluence_score=0)
+        boosted = compute_multi_horizon_score(0.03, confluence_score=3)
+        self.assertGreater(boosted, base)
+
+    def test_negative_score_with_confluence(self):
+        """売りシグナル（負値）でも confluence でさらに負方向に増幅される"""
+        base = compute_multi_horizon_score(-0.03, confluence_score=0)
+        boosted = compute_multi_horizon_score(-0.03, confluence_score=2)
+        self.assertLess(boosted, base)
+
+    def test_partial_horizons_weight_normalized(self):
+        """一部ホライズンが None のとき残りの重みが正規化される"""
+        # 1d(0.4)=0.02, 3d(0.3)=0.06 のみ有効 → 正規化後: 0.4/0.7*0.02 + 0.3/0.7*0.06
+        score = compute_multi_horizon_score(0.02, diff_ratio_3d=0.06)
+        expected = (0.4 / 0.7) * 0.02 + (0.3 / 0.7) * 0.06
+        self.assertAlmostEqual(score, expected, places=6)
+
+    def test_mixed_direction_reduces_score(self):
+        """方向が混ざっている場合（confluence=0）はスコアが方向を薄める"""
+        # 1d 上昇, 3d 下落 → 統合スコアは 1d のみより小さくなる
+        score_1d_only = compute_multi_horizon_score(0.05)
+        score_mixed = compute_multi_horizon_score(0.05, diff_ratio_3d=-0.05)
+        self.assertGreater(score_1d_only, score_mixed)
+
+    def test_returns_float(self):
+        score = compute_multi_horizon_score(0.01, 0.02, 0.03, 0.04, confluence_score=2)
+        self.assertIsInstance(score, float)
+
+
+class TestApplyMultiHorizonScoreColumn(unittest.TestCase):
+    def _make_df(self, **kwargs) -> pd.DataFrame:
+        base = {
+            "market": "jp",
+            "symbol": "7203",
+            "diff_ratio": 0.03,
+        }
+        base.update(kwargs)
+        return pd.DataFrame([base])
+
+    def test_adds_multi_horizon_score_column(self):
+        df = self._make_df()
+        result = apply_multi_horizon_score_column(df)
+        self.assertIn("multi_horizon_score", result.columns)
+
+    def test_score_equals_diff_ratio_when_no_horizons(self):
+        """多ホライズン列がない場合は 1d の diff_ratio と等しい"""
+        df = self._make_df()
+        result = apply_multi_horizon_score_column(df)
+        self.assertAlmostEqual(result["multi_horizon_score"].iloc[0], 0.03)
+
+    def test_score_uses_all_horizons(self):
+        """多ホライズン列が全て揃っている場合は統合スコアが計算される"""
+        df = self._make_df(
+            diff_ratio_3d=0.06,
+            diff_ratio_5d=0.09,
+            diff_ratio_10d=0.12,
+            confluence_score=3,
+        )
+        result = apply_multi_horizon_score_column(df)
+        # confluence ボーナスにより diff_ratio (0.03) より高くなるはず
+        self.assertGreater(result["multi_horizon_score"].iloc[0], 0.03)
+
+    def test_does_not_mutate_original(self):
+        """元の DataFrame を変更しないこと"""
+        df = self._make_df()
+        original_cols = list(df.columns)
+        apply_multi_horizon_score_column(df)
+        self.assertEqual(list(df.columns), original_cols)
+
+    def test_handles_none_and_nan_in_horizon_cols(self):
+        """None や NaN の列があっても安全に動作すること"""
+        import numpy as np
+
+        df = self._make_df(diff_ratio_3d=float("nan"), diff_ratio_5d=None)
+        result = apply_multi_horizon_score_column(df)
+        score = result["multi_horizon_score"].iloc[0]
+        self.assertFalse(np.isnan(score))
+
+    def test_multiple_rows(self):
+        rows = [
+            {"market": "jp", "symbol": "7203", "diff_ratio": 0.05, "confluence_score": 2},
+            {"market": "jp", "symbol": "6758", "diff_ratio": -0.03, "confluence_score": 1},
+        ]
+        df = pd.DataFrame(rows)
+        result = apply_multi_horizon_score_column(df)
+        self.assertEqual(len(result), 2)
+        self.assertGreater(result["multi_horizon_score"].iloc[0], 0)
+        self.assertLess(result["multi_horizon_score"].iloc[1], 0)
 
 
 class TestSignalGenerator(unittest.TestCase):

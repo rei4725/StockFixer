@@ -198,7 +198,7 @@
 |---|---|---|---|---|
 | R-203 | DONE | 2026-04-12 | 2026-04-12 | monthly_report_pipeline / run_monthly_report.py / /monthlyreport コマンド実装完了 |
 | R-211 | DONE | 2026-10-12 | 2026-04-13 | experiment_runs DDL追加・db/experiment.py CRUD・model_training_pipeline run_id自動記録実装完了 |
-| R-212 | TODO | 2026-11-02 | - | PredictionResult の 3d/5d/10d フィールドを活用した統合シグナルロジック |
+| R-212 | DONE | 2026-11-02 | 2026-04-12 | compute_multi_horizon_score / apply_multi_horizon_score_column 実装・order_execution_pipeline の buy/sell 判定を統合スコアへ移行 |
 | R-213 | TODO | 2026-11-09 | - | 相対出来高比・出来高移動平均乖離率を add_technical_indicators() に追加 |
 | R-214 | TODO | 2026-11-16 | - | 予測変動量閾値による発注スキップロジックを order_execution_pipeline に追加 |
 | R-215 | TODO | 2026-11-23 | - | Worst10 空売りシグナルの PaperBroker 検証 |

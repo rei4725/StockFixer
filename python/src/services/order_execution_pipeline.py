@@ -31,6 +31,7 @@ from src.brokers.base import BrokerBase, OrderSide, OrderType
 from src.domain.types import TradingGateStatus
 from src.services.prediction_pipeline import get_optimal_params
 from src.services.risk_manager import RiskManager
+from src.strategy.signal_generator import apply_multi_horizon_score_column
 from src.utils import yf_client
 from src.utils.data_path_utils import get_ticker
 from src.utils.db import upsert_paper_real_diff
@@ -65,7 +66,8 @@ def _load_latest_predictions(market: str) -> pd.DataFrame:
 
     Returns:
         columns: market, symbol, predicted_at, current_price, diff_ratio,
-        confidence_ratio (desc order)
+        confidence_ratio, diff_ratio_3d, diff_ratio_5d, diff_ratio_10d,
+        confluence_score (desc order by diff_ratio)
     """
     with _db_connection() as con:
         return con.execute(
@@ -82,7 +84,11 @@ def _load_latest_predictions(market: str) -> pd.DataFrame:
                 pr.predicted_at,
                 pr.current_price,
                 pr.diff_ratio,
-                pr.confidence_ratio
+                pr.confidence_ratio,
+                pr.diff_ratio_3d,
+                pr.diff_ratio_5d,
+                pr.diff_ratio_10d,
+                pr.confluence_score
             FROM prediction_results pr
             JOIN latest l
               ON pr.market = l.market AND pr.symbol = l.symbol AND pr.predicted_at = l.latest_at
@@ -155,7 +161,10 @@ def _apply_buy_sector_limit(
     if predictions.empty or max_sector_positions <= 0:
         return predictions.copy()
 
-    ordered_rows = list(predictions.sort_values("diff_ratio", ascending=False).iterrows())
+    score_col = (
+        "multi_horizon_score" if "multi_horizon_score" in predictions.columns else "diff_ratio"
+    )
+    ordered_rows = list(predictions.sort_values(score_col, ascending=False).iterrows())
     sector_cache: dict[int, str] = {}
 
     def _sector_getter(item: tuple[int, pd.Series]) -> str:
@@ -407,6 +416,7 @@ def run_daily_orders(
         predictions["predicted_at"] = ""
 
     predictions = _attach_dynamic_thresholds(predictions)
+    predictions = apply_multi_horizon_score_column(predictions)
     threshold_scale = float(predictions["threshold_scale"].iloc[0])
     logger.info(
         "[exec] 動的閾値適用: scale=%.3f buy_range=%.3f%%-%.3f%%",
@@ -426,7 +436,7 @@ def run_daily_orders(
     # --- 決済シグナル: 保有株で売りシグナルが出ているものを先にクローズ ---
     sell_signals = predictions[
         (predictions["symbol"].isin(held_symbols))
-        & (predictions["diff_ratio"] <= predictions["effective_sell_threshold"])
+        & (predictions["multi_horizon_score"] <= predictions["effective_sell_threshold"])
     ]
     for _, row in sell_signals.iterrows():
         symbol = row["symbol"]
@@ -466,7 +476,8 @@ def run_daily_orders(
             )
             logger.info(
                 f"[exec] 売り発注: {symbol} {qty}株 @ {order_type.name}({order_reason}) "
-                f"(予測変化率={row['diff_ratio']:.3%}, 閾値={row['effective_sell_threshold']:.3%})"
+                f"(1d変化率={row['diff_ratio']:.3%}, 統合スコア={row['multi_horizon_score']:.3%}, "
+                f"閾値={row['effective_sell_threshold']:.3%})"
             )
             stats["sell_orders"] += 1
         except Exception as e:
@@ -476,7 +487,7 @@ def run_daily_orders(
     # --- 新規買いシグナル ---
     buy_candidates = predictions[
         (~predictions["symbol"].isin(held_symbols))
-        & (predictions["diff_ratio"] >= predictions["effective_buy_threshold"])
+        & (predictions["multi_horizon_score"] >= predictions["effective_buy_threshold"])
     ]
     buy_signals = _apply_buy_sector_limit(buy_candidates).head(MAX_ORDERS_PER_RUN)
 
@@ -528,8 +539,8 @@ def run_daily_orders(
             )
             logger.info(
                 f"[exec] 買い発注: {symbol} {qty}株 @ {order_type.name}({order_reason}) "
-                f"(予測変化率={row['diff_ratio']:.3%}, 閾値={row['effective_buy_threshold']:.3%}, "
-                f"sector={row.get('sector', 'N/A')})"
+                f"(1d変化率={row['diff_ratio']:.3%}, 統合スコア={row['multi_horizon_score']:.3%}, "
+                f"閾値={row['effective_buy_threshold']:.3%}, sector={row.get('sector', 'N/A')})"
             )
             stats["buy_orders"] += 1
         except Exception as e:
