@@ -23,8 +23,10 @@ from src.domain.types import FeatureLoadResult, TrainingMetrics
 from src.features.technical_analysis import add_earnings_flag
 from src.models.model_manager import ModelManager
 from src.utils.db import (
+    generate_run_id,
     load_excluded_features,
     load_stock_features,
+    save_experiment_run,
     save_feature_selection,
     save_model_metrics,
     save_shap_values,
@@ -346,21 +348,41 @@ def train_models_for_symbol(market: str, symbol: str, horizon: int = 1) -> dict:
             ("XGBoostModel", f"StockXGBoostModel{suffix}"),
             ("LightGBMModel", f"StockLightGBMModel{suffix}"),
         ]:
+            run_id = generate_run_id()
             model_manager.create_model(model_type, model_name)
             model_manager.train_model(model_name, X, y, market=market, symbol=symbol)
             # 学習後in-sample精度計測・DB記録
+            saved_metrics = None
             try:
                 model = model_manager.get_model(model_name)
                 y_pred = model.predict(X)
-                metrics = _compute_training_metrics(y, y_pred)
-                save_model_metrics(market, symbol, model_name, trained_at, metrics)
+                saved_metrics = _compute_training_metrics(y, y_pred)
+                save_model_metrics(market, symbol, model_name, trained_at, saved_metrics)
                 logger.debug(
                     f"[精度記録] {market}/{symbol}/{model_name}: "
-                    f"RMSE={metrics.rmse:.6f}, "
-                    f"方向正解率={metrics.directional_accuracy:.2%}"
+                    f"RMSE={saved_metrics.rmse:.6f}, "
+                    f"方向正解率={saved_metrics.directional_accuracy:.2%}"
                 )
             except Exception as e:
                 logger.warning(f"精度指標保存スキップ [{market}_{symbol}/{model_name}]: {e}")
+            # 実験ランを experiment_runs テーブルへ記録
+            try:
+                save_experiment_run(
+                    run_id=run_id,
+                    market=market,
+                    symbol=symbol,
+                    model_name=model_name,
+                    trained_at=trained_at,
+                    horizon=horizon,
+                    rmse=saved_metrics.rmse if saved_metrics else None,
+                    directional_accuracy=(
+                        saved_metrics.directional_accuracy if saved_metrics else None
+                    ),
+                    n_samples=saved_metrics.n_samples if saved_metrics else None,
+                    feature_names=list(X.columns),
+                )
+            except Exception as e:
+                logger.warning(f"実験ラン保存スキップ [{market}_{symbol}/{model_name}]: {e}")
             # SHAP特徴量寄与の計算・保存・Discord通知
             try:
                 model = model_manager.get_model(model_name)

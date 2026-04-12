@@ -9,6 +9,7 @@ DuckDB データベースアクセスパッケージ
     stock_features.py  - stock_features テーブル操作
     prediction.py      - prediction_results / model_metrics / prediction_accuracy テーブル操作
     market_data.py     - market_data_raw テーブル操作
+    experiment.py      - experiment_runs テーブル操作（R-211 実験トラッキング）
 """
 
 import sys
@@ -35,6 +36,14 @@ from src.utils.db._connection import (  # noqa: F401
     get_connection,
     get_readonly_connection,
     init_tables,
+)
+
+# --- experiment_runs ---
+from src.utils.db.experiment import (  # noqa: F401
+    generate_run_id,
+    load_best_run,
+    load_experiment_runs,
+    save_experiment_run,
 )
 
 # --- market_data_raw ---

@@ -197,7 +197,7 @@
 | ID | ステータス | 期限 | 更新日 | メモ |
 |---|---|---|---|---|
 | R-203 | DONE | 2026-04-12 | 2026-04-12 | monthly_report_pipeline / run_monthly_report.py / /monthlyreport コマンド実装完了 |
-| R-211 | TODO | 2026-10-12 | - | experiment_runs テーブル設計・R-206/R-207 のインフラ共有 |
+| R-211 | DONE | 2026-10-12 | 2026-04-13 | experiment_runs DDL追加・db/experiment.py CRUD・model_training_pipeline run_id自動記録実装完了 |
 | R-212 | TODO | 2026-11-02 | - | PredictionResult の 3d/5d/10d フィールドを活用した統合シグナルロジック |
 | R-213 | TODO | 2026-11-09 | - | 相対出来高比・出来高移動平均乖離率を add_technical_indicators() に追加 |
 | R-214 | TODO | 2026-11-16 | - | 予測変動量閾値による発注スキップロジックを order_execution_pipeline に追加 |

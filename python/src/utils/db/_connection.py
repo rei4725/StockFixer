@@ -339,6 +339,26 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
     """
     )
 
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS experiment_runs (
+            run_id               VARCHAR NOT NULL PRIMARY KEY,
+            market               VARCHAR NOT NULL,
+            symbol               VARCHAR NOT NULL,
+            model_name           VARCHAR NOT NULL,
+            trained_at           VARCHAR NOT NULL,
+            horizon              INTEGER NOT NULL DEFAULT 1,
+            rmse                 DOUBLE,
+            directional_accuracy DOUBLE,
+            n_samples            INTEGER,
+            n_features           INTEGER,
+            feature_hash         VARCHAR,
+            params_json          VARCHAR,
+            created_at           TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    """
+    )
+
 
 def init_tables() -> None:
     """外部から明示的にテーブル初期化する場合に使用"""
