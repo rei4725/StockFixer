@@ -10,6 +10,7 @@ import pandas as pd
 
 from src.domain.types import (
     MarketPredictionSnapshot,
+    MonthlyReportSummary,
     PredictionResult,
     SchedulerJobStatus,
     ShapFeatureContribution,
@@ -159,3 +160,10 @@ def get_scheduler_job_statuses(state_file_path: str | None = None) -> list[Sched
         )
         for job_id, label in job_labels.items()
     ]
+
+
+def get_monthly_report_summary(target_month: str | None = None) -> MonthlyReportSummary:
+    """月次KPIサマリーを取得する。Discord /monthlyreport コマンド向け。"""
+    from src.services.monthly_report_pipeline import run_monthly_report
+
+    return run_monthly_report(target_month=target_month)

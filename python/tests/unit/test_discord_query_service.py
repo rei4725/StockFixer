@@ -105,6 +105,53 @@ class TestDiscordQueryService(unittest.TestCase):
         self.assertEqual(statuses[0].job_id, "daily_pipeline")
         self.assertEqual(statuses[0].status, "success")
 
+    # ------------------------------------------------------------------
+    # get_monthly_report_summary
+    # ------------------------------------------------------------------
+
+    @patch("src.services.monthly_report_pipeline.run_monthly_report")
+    def test_get_monthly_report_summary_delegates_to_pipeline(self, mock_run):
+        from src.domain.types import MonthlyReportSummary
+        from src.services.discord_query_service import get_monthly_report_summary
+
+        expected = MonthlyReportSummary(
+            generated_at="2026-04-12T00:00:00",
+            target_month="2026-04",
+            net_return=0.03,
+            max_drawdown=-0.10,
+            sharpe_ratio=1.1,
+            hit_rate=0.6,
+            avg_slippage=0.001,
+            symbol_count=10,
+            wf_snapshot_file="wf_summary_20260401.csv",
+        )
+        mock_run.return_value = expected
+
+        result = get_monthly_report_summary("2026-04")
+
+        mock_run.assert_called_once_with(target_month="2026-04")
+        self.assertEqual(result.target_month, "2026-04")
+        self.assertAlmostEqual(result.net_return, 0.03)
+
+    @patch("src.services.monthly_report_pipeline.run_monthly_report")
+    def test_get_monthly_report_summary_passes_none_when_month_omitted(self, mock_run):
+        from src.domain.types import MonthlyReportSummary
+        from src.services.discord_query_service import get_monthly_report_summary
+
+        mock_run.return_value = MonthlyReportSummary(
+            generated_at="2026-04-12T00:00:00",
+            target_month="2026-04",
+            net_return=None,
+            max_drawdown=None,
+            sharpe_ratio=None,
+            hit_rate=None,
+            avg_slippage=None,
+        )
+
+        get_monthly_report_summary()
+
+        mock_run.assert_called_once_with(target_month=None)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,16 +1,19 @@
 """ユニットテスト: discord_bot の純粋関数"""
 
+import asyncio
 import unittest
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.api.discord_bot import (
     TOP10_LABEL,
+    build_monthly_report_lines,
     build_prediction_table_text,
     build_ranked_stock_message,
     build_scheduler_status_lines,
     build_signal_lines,
     determine_signal_label,
 )
-from src.domain.types import PredictionResult, SchedulerJobStatus
+from src.domain.types import MonthlyReportSummary, PredictionResult, SchedulerJobStatus
 
 
 class TestDiscordBotHelpers(unittest.TestCase):
@@ -83,6 +86,129 @@ class TestDiscordBotHelpers(unittest.TestCase):
         self.assertIn("日次 (daily_pipeline)", message)
         self.assertIn("2026-04-06 09:30:00 JST", message)
         self.assertIn("[状態: success]", message)
+
+    # ------------------------------------------------------------------
+    # build_monthly_report_lines
+    # ------------------------------------------------------------------
+
+    def _make_summary(self, **kwargs):
+        defaults = dict(
+            generated_at="2026-04-12T10:00:00",
+            target_month="2026-04",
+            net_return=0.04,
+            max_drawdown=-0.10,
+            sharpe_ratio=1.2,
+            hit_rate=0.65,
+            avg_slippage=0.001,
+            symbol_count=15,
+            wf_snapshot_file="wf_summary_20260401.csv",
+        )
+        defaults.update(kwargs)
+        return MonthlyReportSummary(**defaults)
+
+    def test_build_monthly_report_lines_contains_header(self):
+        lines = build_monthly_report_lines(self._make_summary())
+        text = "\n".join(lines)
+        self.assertIn("=== 月次KPIレポート 2026-04 ===", text)
+
+    def test_build_monthly_report_lines_formats_kpis_as_percent(self):
+        lines = build_monthly_report_lines(self._make_summary(net_return=0.04, max_drawdown=-0.10))
+        text = "\n".join(lines)
+        self.assertIn("4.00%", text)
+        self.assertIn("-10.00%", text)
+
+    def test_build_monthly_report_lines_shows_sharpe_achievement(self):
+        # sharpe >= 1.0 → 達成
+        lines_ok = build_monthly_report_lines(self._make_summary(sharpe_ratio=1.2))
+        self.assertIn("達成", "\n".join(lines_ok))
+
+        # sharpe < 1.0 → 未達
+        lines_ng = build_monthly_report_lines(self._make_summary(sharpe_ratio=0.8))
+        self.assertIn("未達", "\n".join(lines_ng))
+
+    def test_build_monthly_report_lines_shows_mdd_achievement(self):
+        # |mdd| <= 0.15 → 達成
+        lines_ok = build_monthly_report_lines(self._make_summary(max_drawdown=-0.10))
+        self.assertIn("達成", "\n".join(lines_ok))
+
+        # |mdd| > 0.15 → 未達
+        lines_ng = build_monthly_report_lines(self._make_summary(max_drawdown=-0.20))
+        self.assertIn("未達", "\n".join(lines_ng))
+
+    def test_build_monthly_report_lines_handles_none_kpis(self):
+        lines = build_monthly_report_lines(
+            self._make_summary(
+                net_return=None,
+                max_drawdown=None,
+                sharpe_ratio=None,
+                hit_rate=None,
+                avg_slippage=None,
+            )
+        )
+        text = "\n".join(lines)
+        self.assertIn("データなし", text)
+
+    def test_build_monthly_report_lines_shows_meta_info(self):
+        lines = build_monthly_report_lines(self._make_summary())
+        text = "\n".join(lines)
+        self.assertIn("15", text)
+        self.assertIn("wf_summary_20260401.csv", text)
+        self.assertIn("2026-04-12T10:00:00"[:19], text)
+
+    # ------------------------------------------------------------------
+    # handle_monthlyreport_command (async)
+    # ------------------------------------------------------------------
+
+    @patch("src.api.discord_bot.get_monthly_report_summary")
+    def test_handle_monthlyreport_command_sends_code_block(self, mock_get):
+        from src.api.discord_bot import handle_monthlyreport_command
+
+        mock_get.return_value = self._make_summary()
+
+        message = MagicMock()
+        message.content = "/monthlyreport"
+        message.channel = MagicMock()
+        message.channel.send = AsyncMock()
+
+        asyncio.run(handle_monthlyreport_command(message))
+
+        mock_get.assert_called_once_with(None)
+        calls = message.channel.send.call_args_list
+        full_text = " ".join(str(c) for c in calls)
+        self.assertIn("月次KPIレポート", full_text)
+
+    @patch("src.api.discord_bot.get_monthly_report_summary")
+    def test_handle_monthlyreport_command_passes_month_arg(self, mock_get):
+        from src.api.discord_bot import handle_monthlyreport_command
+
+        mock_get.return_value = self._make_summary(target_month="2026-03")
+
+        message = MagicMock()
+        message.content = "/monthlyreport 2026-03"
+        message.channel = MagicMock()
+        message.channel.send = AsyncMock()
+
+        asyncio.run(handle_monthlyreport_command(message))
+
+        mock_get.assert_called_once_with("2026-03")
+
+    @patch(
+        "src.api.discord_bot.get_monthly_report_summary",
+        side_effect=Exception("DB error"),
+    )
+    def test_handle_monthlyreport_command_sends_error_on_exception(self, _mock):
+        from src.api.discord_bot import handle_monthlyreport_command
+
+        message = MagicMock()
+        message.content = "/monthlyreport"
+        message.channel = MagicMock()
+        message.channel.send = AsyncMock()
+
+        asyncio.run(handle_monthlyreport_command(message))
+
+        calls = message.channel.send.call_args_list
+        full_text = " ".join(str(c) for c in calls)
+        self.assertIn("失敗", full_text)
 
 
 if __name__ == "__main__":

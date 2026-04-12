@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from src.api.discord_formatters import convert_df_for_discord
 from src.api.discord_text import DISCORD_TEXT_LIMIT, split_text_chunks
 from src.domain.types import (
+    MonthlyReportSummary,
     PredictionResult,
     SchedulerJobStatus,
     WatchlistPredictionRow,
@@ -15,6 +16,7 @@ from src.domain.types import (
 )
 from src.services.discord_query_service import (
     get_latest_market_prediction_snapshots,
+    get_monthly_report_summary,
     get_ranked_prediction_results,
     get_scheduler_job_statuses,
     get_signal_snapshot,
@@ -217,6 +219,65 @@ async def handle_signal_command(message, parts: list):
     await message.channel.send(msg)
 
 
+def build_monthly_report_lines(summary: MonthlyReportSummary) -> list[str]:
+    def _fmt_pct(val: float | None) -> str:
+        return f"{val * 100:.2f}%" if val is not None else "データなし"
+
+    def _fmt_f2(val: float | None) -> str:
+        return f"{val:.4f}" if val is not None else "データなし"
+
+    target_kpi = (
+        "達成" if (summary.sharpe_ratio is not None and summary.sharpe_ratio >= 1.0) else "未達"
+    )
+    mdd_kpi = (
+        "達成" if (summary.max_drawdown is not None and abs(summary.max_drawdown) <= 0.15) else "未達"
+    )
+
+    lines = [
+        f"=== 月次KPIレポート {summary.target_month} ===",
+        "",
+        "【最重要KPI】",
+        f"  Net Return   : {_fmt_pct(summary.net_return)}",
+        f"  Max Drawdown : {_fmt_pct(summary.max_drawdown)}  (目標: 15%以下  → {mdd_kpi})",
+        f"  Sharpe Ratio : {_fmt_f2(summary.sharpe_ratio)}  (目標: 1.0以上  → {target_kpi})",
+        "",
+        "【補助KPI】",
+        f"  Hit Rate     : {_fmt_pct(summary.hit_rate)}  (直近30日)",
+        f"  Avg Slippage : {_fmt_pct(summary.avg_slippage)}  (直近30日)",
+        "",
+        "【メタ情報】",
+        f"  対象銘柄数   : {summary.symbol_count or 'N/A'}",
+        f"  WFスナップ   : {summary.wf_snapshot_file or 'N/A'}",
+        f"  生成日時     : {summary.generated_at[:19]}",
+    ]
+    return lines
+
+
+async def handle_monthlyreport_command(message):
+    """
+    /monthlyreport [YYYY-MM]
+    月次KPIサマリーを表示する。
+    """
+    parts = message.content.split()
+    target_month = parts[1] if len(parts) >= 2 else None
+
+    await message.channel.send(
+        escape_markdown("月次レポートを集計中..."),
+        allowed_mentions=None,
+    )
+    try:
+        summary = get_monthly_report_summary(target_month)
+    except Exception as e:
+        await message.channel.send(
+            escape_markdown(f"月次レポートの取得に失敗しました: {e}"),
+            allowed_mentions=None,
+        )
+        return
+
+    msg = "```text\n" + "\n".join(build_monthly_report_lines(summary)) + "\n```"
+    await send_chunked_channel_message(message.channel, msg)
+
+
 async def handle_status_command(message):
     """
     /status
@@ -262,6 +323,8 @@ async def on_message(message):
             await handle_signal_command(message, parts)
         elif command == "/status":
             await handle_status_command(message)
+        elif command == "/monthlyreport":
+            await handle_monthlyreport_command(message)
         else:
             await message.channel.send(
                 escape_markdown(f"受信: {message.content}"), allowed_mentions=None
