@@ -346,6 +346,6 @@ def fetch_cross_asset_features(start_date: str, end_date: str) -> "Optional[pd.D
     if not frames:
         return None
 
-    result = pd.concat(frames, axis=1)
+    result = pd.concat(frames, axis=1, sort=False)
     result.sort_index(inplace=True)
     return result
