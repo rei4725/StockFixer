@@ -221,7 +221,7 @@ def upsert_paper_real_diff(
         if row:
             merged.update(
                 {
-                    "signal_price": float(row[0]) if row[0] is not None else signal_price,
+                    "signal_price": (float(row[0]) if row[0] is not None else signal_price),
                     "paper_order_id": row[1],
                     "real_order_id": row[2],
                     "paper_price": row[3],
@@ -368,6 +368,47 @@ def save_model_metrics(
         f"RMSE={metrics.rmse:.6f}, "
         f"方向正解率={metrics.directional_accuracy:.2%}"
     )
+
+
+def load_model_weights(
+    market: str,
+    symbol: str,
+    model_names: list[str],
+) -> list[float]:
+    """
+    model_metrics テーブルからモデルごとの最新 directional_accuracy を取得し、
+    ソフトマックス正規化した重みリストを返す。
+
+    データが不足している場合は均等重みを返す。
+
+    Args:
+        market: マーケット識別子
+        symbol: 銘柄シンボル
+        model_names: 重みを求めるモデル名リスト（predict_single_stock の model_types と対応）
+
+    Returns:
+        len(model_names) と同じ長さのfloatリスト（合計1.0）
+    """
+    accs: list[float] = []
+    with _db_connection() as con:
+        for name in model_names:
+            row = con.execute(
+                "SELECT directional_accuracy FROM model_metrics "
+                "WHERE market = ? AND symbol = ? AND model_name = ? "
+                "ORDER BY trained_at DESC LIMIT 1",
+                [market, symbol, name],
+            ).fetchone()
+            accs.append(float(row[0]) if row and row[0] is not None else 0.5)
+
+    if not accs or all(a == accs[0] for a in accs):
+        n = len(accs) if accs else len(model_names)
+        return [1.0 / n] * n
+
+    import math
+
+    exps = [math.exp(a * 10) for a in accs]
+    total = sum(exps)
+    return [e / total for e in exps]
 
 
 # ---------------------------------------------------------------------------
@@ -601,7 +642,8 @@ def load_shap_latest(
             )
         except Exception as e:
             logger.error(
-                f"load_shap_latest 失敗 [{market}_{symbol}/{model_name}]: {e}", exc_info=True
+                f"load_shap_latest 失敗 [{market}_{symbol}/{model_name}]: {e}",
+                exc_info=True,
             )
             return pd.DataFrame()
 

@@ -61,7 +61,7 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
         if len(df) < _MIN_ROWS:
             logger.error(f"[backtest] データ行数不足: {market}/{symbol} " f"（{len(df)}行 < 最低{_MIN_ROWS}行）")
             sys.exit(1)
-        X, y = create_basic_lag_features(df, n_lags=5)
+        X, y = create_basic_lag_features(df, n_lags=10)
         if X is None or X.empty:
             nan_cols = df.isnull().sum()
             nan_cols = nan_cols[nan_cols > 0]
@@ -100,7 +100,7 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
         if len(df) < _MIN_ROWS:
             logger.error(f"[backtest] データ行数不足: {market}/{symbol} " f"（{len(df)}行 < 最低{_MIN_ROWS}行）")
             sys.exit(1)
-        X, y = create_basic_lag_features(df, n_lags=5)
+        X, y = create_basic_lag_features(df, n_lags=10)
         if X is None or X.empty:
             nan_cols = df.isnull().sum()
             nan_cols = nan_cols[nan_cols > 0]

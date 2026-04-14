@@ -21,11 +21,12 @@ _DEFAULT_TA_PARAMS = {
     "bb_dev": 2,
     "stoch_window": 14,
     "stoch_smooth": 3,
+    "volume_ma_window": 20,
 }
 
 
 def create_basic_lag_features(
-    df: pd.DataFrame, n_lags: int = 5, feature_cols=None, target_horizon: int = 1
+    df: pd.DataFrame, n_lags: int = 10, feature_cols=None, target_horizon: int = 1
 ):
     """
     指定した数値列（または全数値列）について、過去n日分のラグ特徴量を作成する
@@ -233,6 +234,15 @@ def add_technical_indicators(
     df["obv"] = ta.volume.OnBalanceVolumeIndicator(
         close=df["Close"], volume=df["Volume"], fillna=True
     ).on_balance_volume()
+
+    # 出来高プロファイル特徴量（R-213）
+    vol_ma_window = max(2, min(int(p["volume_ma_window"]), row_count))
+    vol_ma = df["Volume"].rolling(window=vol_ma_window, min_periods=1).mean()
+    df["volume_ratio"] = df["Volume"] / vol_ma.replace(0, float("nan"))
+    df["volume_ratio"] = df["volume_ratio"].fillna(1.0)
+    df["volume_price_trend"] = df["Volume"] * (df["Close"].pct_change().fillna(0))
+    df["volume_ma_deviation"] = df["Volume"] / vol_ma.replace(0, float("nan")) - 1.0
+    df["volume_ma_deviation"] = df["volume_ma_deviation"].fillna(0.0)
 
     # 季節性特徴量（DatetimeIndexの場合のみ付与）
     if isinstance(df.index, pd.DatetimeIndex):

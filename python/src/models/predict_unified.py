@@ -14,7 +14,7 @@ import yfinance as yf
 
 from src.domain.types import PredictionResult
 from src.utils.data_path_utils import get_ticker
-from src.utils.db import get_all_symbols, load_stock_features
+from src.utils.db import get_all_symbols, load_model_weights, load_stock_features
 
 # yfinanceの警告を抑制
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -150,6 +150,7 @@ def predict_with_unified_model(
 
     # 各モデルで予測（キャッシュされたモデルを使用）
     pred_prices = []
+    succeeded_model_names = []
     for model_name in model_types:
         try:
             model = get_cached_model(model_name)
@@ -179,6 +180,7 @@ def predict_with_unified_model(
             # 変化率から絶対価格を計算
             pred_price = current_price * (1 + pred_return)
             pred_prices.append(pred_price)
+            succeeded_model_names.append(model_name)
         except Exception:
             # エラーは静かにスキップ（並列処理時のログ抑制）
             continue
@@ -186,7 +188,9 @@ def predict_with_unified_model(
     if not pred_prices:
         return None
 
-    avg_pred_price = sum(pred_prices) / len(pred_prices)
+    # model_metrics の directional_accuracy をソフトマックス重みでアンサンブル（R-202）
+    weights = load_model_weights(market, symbol, succeeded_model_names)
+    avg_pred_price = float(sum(p * w for p, w in zip(pred_prices, weights)))
     diff_ratio = (avg_pred_price - current_price) / current_price
 
     return PredictionResult(

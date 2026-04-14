@@ -1,4 +1,4 @@
-# weekly_redeploy.ps1
+﻿# weekly_redeploy.ps1
 # Windowsタスクスケジューラから毎週土曜 04:00 に呼び出される
 # 処理: git pull -> UnitTest -> docker-compose up --build -> 結果ログ
 
@@ -32,16 +32,35 @@ try {
 
     # --- UnitTest（失敗時はデプロイ中断） ---
     Write-Log "[test] python -m pytest tests/unit -v"
-    $testExitCode = 0
+    $testHasFailed = $false
     Push-Location (Join-Path $repoDir "python")
     try {
-        & $pythonExe -m pytest tests/unit -v 2>&1 | ForEach-Object { Write-Log "  [test] $_" }
-        $testExitCode = $LASTEXITCODE
+        # Out-String -Stream で ErrorRecord を含む全オブジェクトを文字列化してから処理
+        & $pythonExe -m pytest tests/unit -v 2>&1 | Out-String -Stream | ForEach-Object {
+            Write-Log "  [test] $_"
+            # pytest のサマリー行パターン: "1 failed, 3 passed" または "5 failed"
+            if ($_ -match "\d+ failed") { $testHasFailed = $true }
+        }
     } finally {
         Pop-Location
     }
-    Write-Log "[test] 完了 (exit=$testExitCode)"
-    if ($testExitCode -ne 0) { throw "UnitTest が失敗しました。デプロイを中断します (exit=$testExitCode)" }
+    Write-Log "[test] 完了"
+    if ($testHasFailed) { throw "UnitTest が失敗しました。デプロイを中断します" }
+
+    # --- E2E テスト（失敗時はデプロイ中断） ---
+    Write-Log "[e2e] python -m pytest tests/e2e -v --timeout=300 -m 'not slow'"
+    $e2eHasFailed = $false
+    Push-Location (Join-Path $repoDir "python")
+    try {
+        & $pythonExe -m pytest tests/e2e -v --timeout=300 -m "not slow" 2>&1 | Out-String -Stream | ForEach-Object {
+            Write-Log "  [e2e] $_"
+            if ($_ -match "\d+ failed") { $e2eHasFailed = $true }
+        }
+    } finally {
+        Pop-Location
+    }
+    Write-Log "[e2e] 完了"
+    if ($e2eHasFailed) { throw "E2E テストが失敗しました。デプロイを中断します" }
 
     # --- ビルド引数セット ---
     $env:VERSION    = (Get-Content (Join-Path $repoDir "VERSION")).Trim()

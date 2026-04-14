@@ -8,10 +8,12 @@ import pandas as pd
 import yfinance as yf
 
 from src.data import data_loader
+from src.data.data_loader import fetch_cross_asset_features
 from src.domain.types import PredictionResult
 from src.features.technical_analysis import add_technical_indicators, create_basic_lag_features
 from src.models.model_manager import ModelManager
-from src.utils.data_path_utils import get_models_subdir, get_ticker
+from src.utils.data_path_utils import get_models_subdir, get_ticker, normalize_col
+from src.utils.db import load_model_weights
 
 # yfinanceの警告を抑制
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -90,9 +92,31 @@ def _run_single_model_prediction(
         (pred_price, pred_return) のタプル。失敗時は None。
     """
     df_feat = add_technical_indicators(df)
+
+    # クロスアセット特徴量を付与（学習パイプラインと一致させる R-306）
+    try:
+        start_str = pd.DatetimeIndex(df_feat.index).min().strftime("%Y-%m-%d")
+        end_str = pd.DatetimeIndex(df_feat.index).max().strftime("%Y-%m-%d")
+        cross_asset = fetch_cross_asset_features(start_str, end_str)
+        if cross_asset is not None and not cross_asset.empty:
+            feat_idx = df_feat.index
+            if isinstance(feat_idx, pd.DatetimeIndex) and feat_idx.tz is not None:
+                df_feat.index = feat_idx.tz_localize(None)
+            df_feat = df_feat.join(cross_asset, how="left")
+            for col in cross_asset.columns:
+                if col in df_feat.columns:
+                    df_feat[col] = df_feat[col].ffill().bfill()
+    except Exception:
+        pass
+
     X, _ = create_basic_lag_features(df_feat)
     if X.empty:
         return None
+    # 学習パイプラインと同じ特徴量名正規化・market_encoded 付与
+    X = X.copy()
+    X.columns = [normalize_col(c) for c in X.columns]
+    market_codes = {"us": 0, "jp": 1}
+    X["market_encoded"] = market_codes.get(market, -1)
     latest_X = X.iloc[[-1]]
     mm = ModelManager()
     model_name = os.path.splitext(os.path.basename(model_path))[0]
@@ -115,9 +139,13 @@ def _build_prediction_result(
     current_price: "float | None",
     pred_prices: list,
     pred_returns: list,
+    model_names: "list[str] | None" = None,
 ) -> "PredictionResult | None":
     """
     複数モデルの予測を集計して PredictionResult を構築する（純粋関数）。
+
+    model_metrics テーブルの directional_accuracy をソフトマックス変換して重み付き平均を計算する。
+    メトリクスが取得できない場合は単純平均にフォールバックする。
 
     Args:
         market: マーケット識別子
@@ -125,13 +153,23 @@ def _build_prediction_result(
         current_price: 現在価格
         pred_prices: 各モデルの予測絶対価格リスト
         pred_returns: 各モデルの予測変化率リスト
+        model_names: モデルファイルのベース名リスト（重み取得に使用）
 
     Returns:
         集計済み PredictionResult。pred_prices が空の場合は None。
     """
     if not pred_prices or current_price is None:
         return None
-    avg_pred_price = sum(pred_prices) / len(pred_prices)
+
+    # model_names があれば DB から重みを取得、なければ均等重み
+    if model_names and len(model_names) == len(pred_prices):
+        names = [os.path.splitext(n)[0] for n in model_names]
+        weights = load_model_weights(market, symbol, names)
+    else:
+        n = len(pred_prices)
+        weights = [1.0 / n] * n
+
+    avg_pred_price = float(sum(p * w for p, w in zip(pred_prices, weights)))
     diff_ratio = (avg_pred_price - current_price) / current_price
     model_std = float(np.std(pred_returns)) if len(pred_returns) > 1 else 0.0
     confidence_ratio = 1.0 / (1.0 + model_std)
@@ -163,6 +201,7 @@ def predict_single_stock(
 
     pred_prices = []
     pred_returns = []
+    succeeded_model_types = []
     current_price = None
     for model_type in resolved_model_types:
         model_path = os.path.join(get_models_subdir(market, symbol), model_type)
@@ -192,12 +231,15 @@ def predict_single_stock(
             pred_price, pred_return = result
             pred_prices.append(pred_price)
             pred_returns.append(pred_return)
+            succeeded_model_types.append(model_type)
         except Exception as e:
             print(f"[{symbol}] エラー: {e}")
             traceback.print_exc()
             continue
 
-    return _build_prediction_result(market, symbol, current_price, pred_prices, pred_returns)
+    return _build_prediction_result(
+        market, symbol, current_price, pred_prices, pred_returns, succeeded_model_types
+    )
 
 
 def predict_single_stock_multi_horizon(
@@ -302,7 +344,11 @@ def explain_prediction_shap(
         X, _ = create_basic_lag_features(df_feat, target_horizon=horizon)
         if X.empty:
             return None
-
+        # 学習パイプラインと同じ特徴量名正規化・market_encoded 付与
+        X = X.copy()
+        X.columns = [normalize_col(c) for c in X.columns]
+        market_codes = {"us": 0, "jp": 1}
+        X["market_encoded"] = market_codes.get(market, -1)
         latest_X = X.iloc[[-1]]
 
         mm = ModelManager()

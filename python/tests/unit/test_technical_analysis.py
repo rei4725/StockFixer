@@ -25,7 +25,7 @@ class TestTechnicalAnalysis(unittest.TestCase):
 
     def test_create_basic_lag_features_default(self):
         X, y = technical_analysis.create_basic_lag_features(self.df)
-        n_lags = 5
+        n_lags = 10
         num_features = len(self.df.select_dtypes(include=[float, int]).columns)
         self.assertEqual(X.shape[1], num_features * n_lags)
         self.assertEqual(len(X), len(y))

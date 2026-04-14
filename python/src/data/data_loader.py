@@ -89,7 +89,10 @@ def get_stock_data_from_db(
 
 
 def get_stock_data_from_file(
-    market: str, symbol: str, start_date: Union[str, datetime], end_date: Union[str, datetime]
+    market: str,
+    symbol: str,
+    start_date: Union[str, datetime],
+    end_date: Union[str, datetime],
 ) -> pd.DataFrame:
     """
     DBから株価データを取得する（後方互換のため関数名を維持）
@@ -107,7 +110,10 @@ def get_stock_data_from_file(
 
 
 def get_stock_data(
-    market: str, ticker: str, start_date: Union[str, datetime], end_date: Union[str, datetime]
+    market: str,
+    ticker: str,
+    start_date: Union[str, datetime],
+    end_date: Union[str, datetime],
 ) -> pd.DataFrame:
     """
     指定されたマーケット・ティッカーの株価データを取得する（リトライ対応）
@@ -283,3 +289,63 @@ def merge_market_data(db_data: pd.DataFrame, fresh_data: pd.DataFrame) -> pd.Dat
     merged = pd.concat([db_data_copy, new_rows]).drop_duplicates().sort_index()
 
     return merged
+
+
+# ---------------------------------------------------------------------------
+# クロスアセット特徴量（R-306）
+# ---------------------------------------------------------------------------
+
+# 取得するクロスアセットティッカーの定義
+_CROSS_ASSET_TICKERS: dict[str, str] = {
+    "vix_close": "^VIX",  # 市場恐怖指数
+    "usdjpy_close": "JPY=X",  # USD/JPY 為替レート
+    "tnx_close": "^TNX",  # 米国10年債利回り
+}
+
+
+def fetch_cross_asset_features(start_date: str, end_date: str) -> "Optional[pd.DataFrame]":
+    """
+    VIX / USD/JPY / 米国10年債利回りを yfinance から取得し、
+    日付インデックス付きの DataFrame として返す（R-306）。
+
+    取得失敗したティッカーは列ごとスキップし、全部失敗した場合のみ None を返す。
+
+    Args:
+        start_date: 取得開始日（YYYY-MM-DD）
+        end_date: 取得終了日（YYYY-MM-DD）
+
+    Returns:
+        カラム: vix_close, usdjpy_close, tnx_close（取得できたもの）
+        全部失敗時は None
+    """
+    import warnings
+
+    frames: list[pd.Series] = []
+    for col_name, ticker in _CROSS_ASSET_TICKERS.items():
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                hist = yf_client.ticker_history(
+                    ticker,
+                    start=start_date,
+                    end=(pd.to_datetime(end_date) + timedelta(days=1)).strftime("%Y-%m-%d"),
+                )
+            if hist is None or hist.empty or "Close" not in hist.columns:
+                continue
+            close = hist["Close"]
+            if isinstance(close, pd.DataFrame):
+                close = close.iloc[:, 0]
+            close = close.rename(col_name)
+            # タイムゾーン除去
+            close.index = pd.DatetimeIndex(close.index).tz_localize(None)
+            frames.append(close)
+        except Exception as e:
+            logger.debug(f"クロスアセット取得スキップ [{ticker}]: {e}")
+            continue
+
+    if not frames:
+        return None
+
+    result = pd.concat(frames, axis=1)
+    result.sort_index(inplace=True)
+    return result

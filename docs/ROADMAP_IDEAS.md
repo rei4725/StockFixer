@@ -199,12 +199,12 @@
 | R-203 | DONE | 2026-04-12 | 2026-04-12 | monthly_report_pipeline / run_monthly_report.py / /monthlyreport コマンド実装完了 |
 | R-211 | DONE | 2026-10-12 | 2026-04-13 | experiment_runs DDL追加・db/experiment.py CRUD・model_training_pipeline run_id自動記録実装完了 |
 | R-212 | DONE | 2026-11-02 | 2026-04-12 | compute_multi_horizon_score / apply_multi_horizon_score_column 実装・order_execution_pipeline の buy/sell 判定を統合スコアへ移行 |
-| R-213 | TODO | 2026-11-09 | - | 相対出来高比・出来高移動平均乖離率を add_technical_indicators() に追加 |
+| R-213 | DONE | 2026-11-09 | 2026-04-14 | volume_ratio / volume_price_trend / volume_ma_deviation を add_technical_indicators() に追加。モデル再学習が必要。 |
 | R-214 | TODO | 2026-11-16 | - | 予測変動量閾値による発注スキップロジックを order_execution_pipeline に追加 |
 | R-215 | TODO | 2026-11-23 | - | Worst10 空売りシグナルの PaperBroker 検証 |
 | R-205 | TODO | 2026-11-30 | - | 歴史的クラッシュ期間リストを docs に整備 |
 | R-201 | TODO | 2026-10-26 | - | |
-| R-202 | TODO | 2026-11-02 | - | |
+| R-202 | DONE | 2026-11-02 | 2026-04-14 | model_metrics テーブルの directional_accuracy を使い softmax 重み付きアンサンブルを実装（predict_single_stock / predict_unified）。 |
 | R-206 | TODO | 2026-11-09 | - | R-004 Walk-Forward と連動 |
 | R-207 | TODO | 2026-11-16 | - | |
 | R-209 | TODO | 2026-11-30 | - | index_membership_history テーブルを DuckDB に追加 |
@@ -215,7 +215,7 @@
 | R-303 | TODO | 2027-03-15 | - | DuckDB と月次レポートを集約する監視ダッシュボードを整備 |
 | R-304 | TODO | 2027-04-12 | - | 外部配信向け read-only API と公開条件を分離設計 |
 | R-305 | TODO | 2027-01-25 | - | R-101 market_regime.py のシグナル生成接続 |
-| R-306 | TODO | 2027-02-01 | - | yfinance で ^VIX / JPY=X / ^TNX を追加取得 |
+| R-306 | DONE | 2027-02-01 | 2026-04-14 | fetch_cross_asset_features() を data_loader.py に追加し、data_pipeline / predict_single_stock で結合。モデル再学習が必要。 |
 | R-307 | TODO | 2027-02-08 | - | RiskManager に DD 段階別縮小関数を追加 |
 | R-308 | TODO | 2027-02-22 | - | R-107 スリッページ実測値と比較する分割発注ロジック |
 | R-401 | TODO | 2027-Q2 | - | |

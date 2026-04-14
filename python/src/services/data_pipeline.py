@@ -11,6 +11,7 @@ from typing import Optional
 import pandas as pd
 
 from src.data.data_loader import (
+    fetch_cross_asset_features,
     get_raw_ohlcv_from_db,
     get_stock_data,
     merge_market_data,
@@ -123,6 +124,18 @@ def fetch_stock_data_with_features(
     # テクニカル指標を追加
     df = add_technical_indicators(df)
 
+    # クロスアセット特徴量を結合（R-306：VIX / USD/JPY / 米国10年債利回り）
+    cross_asset = fetch_cross_asset_features(start_date, end_date)
+    if cross_asset is not None and not cross_asset.empty:
+        df_idx = df.index
+        if isinstance(df_idx, pd.DatetimeIndex) and df_idx.tz is not None:
+            df.index = df_idx.tz_localize(None)
+        df = df.join(cross_asset, how="left")
+        for col in cross_asset.columns:
+            if col in df.columns:
+                df[col] = df[col].ffill().bfill()
+        logger.debug(f"クロスアセット特徴量を付与: {list(cross_asset.columns)} ({market}/{symbol})")
+
     # 部分的なNaN値を前方/後方補完（OHLCV欠損日等によるdropna行数増大を防ぐ）
     nan_before = int(df.isnull().sum().sum())
     if nan_before > 0:
@@ -137,7 +150,7 @@ def fetch_stock_data_with_features(
         return None
 
     logger.info(f"特徴量生成（全数値列ラグ特徴量）... {market}/{symbol} ({len(df)}行)")
-    X, y = create_basic_lag_features(df, n_lags=5, feature_cols=None)
+    X, y = create_basic_lag_features(df, n_lags=10, feature_cols=None)
     if X is None or X.empty or y is None:
         # dropna後に空になった場合の詳細診断
         nan_cols = df.isnull().sum()
