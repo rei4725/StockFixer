@@ -41,11 +41,13 @@ try {
             # pytest のサマリー行パターン: "1 failed, 3 passed" または "5 failed"
             if ($_ -match "\d+ failed") { $testHasFailed = $true }
         }
+        # 収集エラー(exit=2)や内部エラー(exit=3)も確実に検知
+        if ($LASTEXITCODE -ne 0) { $testHasFailed = $true }
     } finally {
         Pop-Location
     }
-    Write-Log "[test] 完了"
-    if ($testHasFailed) { throw "UnitTest が失敗しました。デプロイを中断します" }
+    Write-Log "[test] 完了 (exit=$LASTEXITCODE)"
+    if ($testHasFailed) { throw "UnitTest が失敗しました。デプロイを中断します (exit=$LASTEXITCODE)" }
 
     # --- E2E テスト（失敗時はデプロイ中断） ---
     Write-Log "[e2e] python -m pytest tests/e2e -v --timeout=300 -m 'not slow'"
@@ -56,11 +58,14 @@ try {
             Write-Log "  [e2e] $_"
             if ($_ -match "\d+ failed") { $e2eHasFailed = $true }
         }
+        # exit=1(failed) / exit=2(collection error) / exit=3(internal error) を検知
+        # exit=5(no tests collected) は問題なしとみなす
+        if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 5) { $e2eHasFailed = $true }
     } finally {
         Pop-Location
     }
-    Write-Log "[e2e] 完了"
-    if ($e2eHasFailed) { throw "E2E テストが失敗しました。デプロイを中断します" }
+    Write-Log "[e2e] 完了 (exit=$LASTEXITCODE)"
+    if ($e2eHasFailed) { throw "E2E テストが失敗しました。デプロイを中断します (exit=$LASTEXITCODE)" }
 
     # --- ビルド引数セット ---
     $env:VERSION    = (Get-Content (Join-Path $repoDir "VERSION")).Trim()
