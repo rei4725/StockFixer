@@ -50,6 +50,19 @@ class SchedulerQueueManager:
     def now(self) -> datetime:
         return datetime.now(self.tz)
 
+    def _emit_job_log(self, level: str, phase: str, **fields: Any) -> None:
+        """集計しやすいJSON 1行形式でジョブログを出力する。"""
+        payload = {
+            "event": "scheduler_job",
+            "phase": phase,
+            **fields,
+        }
+        message = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        if level == "error":
+            logger.error(message)
+        else:
+            logger.info(message)
+
     def run_job(
         self, job_id: str, reason: str, force: bool = False, period_key: str | None = None
     ) -> bool:
@@ -72,7 +85,14 @@ class SchedulerQueueManager:
             period_key = self._build_period_key(config, now)
 
         if job_id in self._in_progress_jobs:
-            logger.info(f"ジョブ '{job_id}' は実行中のためスキップします")
+            self._emit_job_log(
+                "info",
+                "skip",
+                job_id=job_id,
+                reason=reason,
+                period_key=period_key,
+                status="skipped_in_progress",
+            )
             return False
 
         current_count = self.get_execution_count(job_id, period_key)
@@ -90,9 +110,15 @@ class SchedulerQueueManager:
                     "error": None,
                 }
             )
-            logger.info(
-                f"ジョブ '{job_id}' は実行回数上限に達したためスキップしました "
-                f"(period={period_key}, count={current_count}, limit={max_executions})"
+            self._emit_job_log(
+                "info",
+                "skip",
+                job_id=job_id,
+                reason=reason,
+                period_key=period_key,
+                status="skipped_limit",
+                current_count=current_count,
+                max_executions=max_executions,
             )
             return False
 
@@ -101,18 +127,49 @@ class SchedulerQueueManager:
         status = "success"
         error_message = None
 
+        self._emit_job_log(
+            "info",
+            "start",
+            job_id=job_id,
+            reason=reason,
+            period_key=period_key,
+            force=force,
+        )
+
         try:
             config["func"]()
-            logger.info(f"ジョブ '{job_id}' 実行完了 (reason={reason})")
             return True
         except Exception as exc:
             status = "error"
             error_message = str(exc)
-            logger.error(f"ジョブ '{job_id}' 実行失敗 (reason={reason}): {exc}")
             raise
         finally:
             finished_at = self.now()
             duration_seconds = (finished_at - started_at).total_seconds()
+            rounded_duration = round(duration_seconds, 3)
+
+            if status == "success":
+                self._emit_job_log(
+                    "info",
+                    "finish",
+                    job_id=job_id,
+                    reason=reason,
+                    period_key=period_key,
+                    status="success",
+                    duration_seconds=rounded_duration,
+                )
+            else:
+                self._emit_job_log(
+                    "error",
+                    "finish",
+                    job_id=job_id,
+                    reason=reason,
+                    period_key=period_key,
+                    status="error",
+                    duration_seconds=rounded_duration,
+                    error=error_message,
+                )
+
             self._append_event(
                 {
                     "job_id": job_id,

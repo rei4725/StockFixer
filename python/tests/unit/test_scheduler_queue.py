@@ -3,6 +3,8 @@ import os
 import sys
 from datetime import datetime
 
+import pytest
+
 # プロジェクトルートをパスに追加
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
@@ -135,3 +137,75 @@ def test_run_job_persists_timestamps_in_utc(tmp_path):
     event = saved["events"][-1]
     assert event["started_at"].endswith("+00:00")
     assert event["finished_at"].endswith("+00:00")
+
+
+def test_run_job_logs_start_and_finish_with_duration(tmp_path, caplog):
+    counter = {}
+    state_path = tmp_path / "scheduler_queue_state.json"
+    manager = SchedulerQueueManager(_build_config(counter), state_file_path=str(state_path))
+
+    with caplog.at_level("INFO", logger="scheduler"):
+        assert manager.run_job("daily_pipeline", reason="scheduled") is True
+
+    payloads = [
+        json.loads(record.getMessage()) for record in caplog.records if record.name == "scheduler"
+    ]
+
+    assert any(
+        p.get("event") == "scheduler_job"
+        and p.get("phase") == "start"
+        and p.get("job_id") == "daily_pipeline"
+        for p in payloads
+    )
+    assert any(
+        p.get("event") == "scheduler_job"
+        and p.get("phase") == "finish"
+        and p.get("job_id") == "daily_pipeline"
+        and p.get("status") == "success"
+        and "duration_seconds" in p
+        for p in payloads
+    )
+
+
+def test_run_job_logs_failure_with_duration(tmp_path, caplog):
+    def _failing_func():
+        raise RuntimeError("intentional failure")
+
+    config = {
+        "daily_pipeline": {
+            "func": _failing_func,
+            "period": "daily",
+            "day_of_week": "mon-fri",
+            "hour": 19,
+            "minute": 0,
+            "recovery_delay_minutes": 10,
+            "max_executions_per_period": 1,
+        }
+    }
+
+    state_path = tmp_path / "scheduler_queue_state.json"
+    manager = SchedulerQueueManager(config, state_file_path=str(state_path))
+
+    with caplog.at_level("INFO", logger="scheduler"):
+        with pytest.raises(RuntimeError, match="intentional failure"):
+            manager.run_job("daily_pipeline", reason="manual", force=True)
+
+    payloads = [
+        json.loads(record.getMessage()) for record in caplog.records if record.name == "scheduler"
+    ]
+
+    assert any(
+        p.get("event") == "scheduler_job"
+        and p.get("phase") == "start"
+        and p.get("job_id") == "daily_pipeline"
+        for p in payloads
+    )
+    assert any(
+        p.get("event") == "scheduler_job"
+        and p.get("phase") == "finish"
+        and p.get("job_id") == "daily_pipeline"
+        and p.get("status") == "error"
+        and p.get("error") == "intentional failure"
+        and "duration_seconds" in p
+        for p in payloads
+    )
