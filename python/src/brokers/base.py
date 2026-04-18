@@ -11,7 +11,9 @@ from enum import IntEnum
 
 class OrderSide(IntEnum):
     BUY = 1
-    SELL = 2
+    SELL = 2  # ロング決済
+    SHORT = 3  # 新規空売り（R-215）
+    SHORT_COVER = 4  # 空売り返済（R-215）
 
 
 class OrderType(IntEnum):

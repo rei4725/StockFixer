@@ -157,6 +157,9 @@ def plot_portfolio(
     rebalance_freq: str = "weekly",
 ) -> str:
     """ポートフォリオ結果グラフ（エクイティ + 銘柄寄与 + ターンオーバー）を PNG 保存する。"""
+    if equity_df is None or equity_df.empty:
+        return ""
+
     try:
         import matplotlib
 
@@ -165,9 +168,6 @@ def plot_portfolio(
         import matplotlib.pyplot as plt
     except ImportError:
         raise ImportError("matplotlib がインストールされていません。")
-
-    if equity_df is None or equity_df.empty:
-        return ""
 
     equity_df = equity_df.copy()
     equity_df["date"] = pd.to_datetime(equity_df["date"])

@@ -112,6 +112,19 @@ class TestLightGBMModel(unittest.TestCase):
 
         self.assertEqual(len(result), 1)
 
+    def test_train_with_eval_set_completes_without_error(self):
+        """eval_set を指定した early stopping 付き学習が例外なく完了すること"""
+        from src.models.lightgbm_model import LightGBMModel
+
+        X, y = _make_xy(periods=200)
+        X_train, y_train = X.iloc[:160], y.iloc[:160]
+        X_val, y_val = X.iloc[160:], y.iloc[160:]
+
+        model = LightGBMModel()
+        model.train(X_train, y_train, eval_set=[(X_val, y_val)])
+        result = model.predict(X_val)
+        self.assertEqual(len(result), len(X_val))
+
 
 class TestXGBoostModel(unittest.TestCase):
     """XGBoostModel のユニットテスト"""
@@ -191,6 +204,19 @@ class TestXGBoostModel(unittest.TestCase):
         result = model.predict(self.X.iloc[[-1]])
 
         self.assertEqual(len(result), 1)
+
+    def test_train_with_eval_set_completes_without_error(self):
+        """eval_set を指定した early stopping 付き学習が例外なく完了すること"""
+        from src.models.xgboost_model import XGBoostModel
+
+        X, y = _make_xy(periods=200)
+        X_train, y_train = X.iloc[:160], y.iloc[:160]
+        X_val, y_val = X.iloc[160:], y.iloc[160:]
+
+        model = XGBoostModel()
+        model.train(X_train, y_train, eval_set=[(X_val, y_val)])
+        result = model.predict(X_val)
+        self.assertEqual(len(result), len(X_val))
 
 
 class TestBaseModelSaveLoad(unittest.TestCase):

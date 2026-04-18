@@ -22,6 +22,7 @@ from src.data.data_loader import get_earnings_dates
 from src.domain.types import FeatureLoadResult, TrainingMetrics
 from src.features.technical_analysis import add_earnings_flag
 from src.models.model_manager import ModelManager
+from src.services.batch_runner import load_target_symbols
 from src.utils.db import (
     generate_run_id,
     load_excluded_features,
@@ -340,6 +341,19 @@ def train_models_for_symbol(market: str, symbol: str, horizon: int = 1) -> dict:
         # horizon > 1 の場合はモデル名にサフィックスを付与
         suffix = f"_{horizon}d" if horizon > 1 else ""
 
+        # 時系列順に 80/20 分割（バリデーション: 直近 20%）
+        n_total = len(X)
+        n_val = max(int(n_total * 0.2), min(30, n_total // 3))
+        if n_total - n_val >= 100:
+            X_train, y_train = X.iloc[:-n_val], y.iloc[:-n_val]
+            X_val, y_val = X.iloc[-n_val:], y.iloc[-n_val:]
+            train_extra: dict = {"eval_set": [(X_val, y_val)]}
+        else:
+            # データ不足時は分割なしで学習（正則化のみ有効）
+            X_train, y_train = X, y
+            X_val, y_val = X, y
+            train_extra = {}
+
         # ModelManagerは各呼び出しで新規作成
         model_manager = ModelManager()
         trained_at = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -350,18 +364,20 @@ def train_models_for_symbol(market: str, symbol: str, horizon: int = 1) -> dict:
         ]:
             run_id = generate_run_id()
             model_manager.create_model(model_type, model_name)
-            model_manager.train_model(model_name, X, y, market=market, symbol=symbol)
-            # 学習後in-sample精度計測・DB記録
+            model_manager.train_model(
+                model_name, X_train, y_train, market=market, symbol=symbol, **train_extra
+            )
+            # 学習後 out-of-sample 精度計測・DB記録
             saved_metrics = None
             try:
                 model = model_manager.get_model(model_name)
-                y_pred = model.predict(X)
-                saved_metrics = _compute_training_metrics(y, y_pred)
+                y_pred = model.predict(X_val)
+                saved_metrics = _compute_training_metrics(y_val, y_pred)
                 save_model_metrics(market, symbol, model_name, trained_at, saved_metrics)
                 logger.debug(
                     f"[精度記録] {market}/{symbol}/{model_name}: "
                     f"RMSE={saved_metrics.rmse:.6f}, "
-                    f"方向正解率={saved_metrics.directional_accuracy:.2%}"
+                    f"方向正解率={saved_metrics.directional_accuracy:.2%} (OOS)"
                 )
             except Exception as e:
                 logger.warning(f"精度指標保存スキップ [{market}_{symbol}/{model_name}]: {e}")
@@ -524,3 +540,64 @@ def run_model_batch(horizon: int = 1):
     final_results = train_results.copy()
     final_results += [r for r in load_results if r.status in ("error", "skip")]
     print_summary("モデル作成", final_results)
+
+
+def _train_models_for_horizon(horizon: int, max_workers: int = 3) -> list:
+    """
+    指定ホライズンの全銘柄モデルを学習する（機能テスト対応シンプル実装）。
+
+    Args:
+        horizon: 予測ホライズン（営業日）
+        max_workers: 並列ワーカー数（現在は逐次処理）
+
+    Returns:
+        list[dict]: 各銘柄の学習結果サマリー
+    """
+    symbols = load_target_symbols()
+    if not symbols:
+        logger.warning("対象銘柄がありません。")
+        return []
+
+    results = []
+    for sym in symbols:
+        try:
+            loaded = load_features_for_training(sym.market, sym.symbol, horizon=horizon)
+            if not loaded.is_success:
+                logger.debug(f"[学習スキップ] {sym.market}/{sym.symbol}: {loaded.status}")
+                results.append(
+                    {"market": sym.market, "symbol": sym.symbol, "status": loaded.status}
+                )
+                continue
+            result = train_models_for_symbol(sym.market, sym.symbol, horizon=horizon)
+            results.append(result)
+        except Exception as e:
+            logger.error(f"[学習エラー] {sym.market}/{sym.symbol}: {e}", exc_info=True)
+            results.append(
+                {
+                    "market": sym.market,
+                    "symbol": sym.symbol,
+                    "status": "error",
+                    "error": str(e),
+                }
+            )
+
+    return results
+
+
+def train_all_models(horizons: list | None = None, max_workers: int = 3) -> None:
+    """
+    複数ホライズンで全銘柄のモデルを学習する。
+
+    Args:
+        horizons: 学習対象ホライズンのリスト（例: [1, 3, 7]）。None のとき [1] を使用。
+        max_workers: 並列ワーカー数
+    """
+    if horizons is None:
+        horizons = [1]
+
+    for horizon in horizons:
+        try:
+            logger.info(f"[全銘柄学習開始] horizon={horizon}d")
+            _train_models_for_horizon(horizon, max_workers=max_workers)
+        except Exception as e:
+            logger.error(f"[ホライズン学習エラー] horizon={horizon}: {e}", exc_info=True)

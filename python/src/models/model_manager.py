@@ -84,6 +84,7 @@ class ModelManager:
         market: str = None,
         symbol: str = None,
         auto_save: bool = True,
+        **train_kwargs,
     ):
         """
         指定されたモデルを学習させる。
@@ -94,9 +95,10 @@ class ModelManager:
             market (str, optional): 市場名。
             symbol (str, optional): 銘柄コードやティッカー。
             auto_save (bool): Trueの場合、学習完了後に自動保存する（デフォルト: True）。
+            **train_kwargs: model.train() に渡す追加引数（eval_set 等）。
         """
         model = self.get_model(model_name)
-        model.train(X, y)
+        model.train(X, y, **train_kwargs)
         if auto_save:
             self.save_model(model_name, market=market, symbol=symbol)
 

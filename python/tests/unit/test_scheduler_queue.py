@@ -209,3 +209,122 @@ def test_run_job_logs_failure_with_duration(tmp_path, caplog):
         and "duration_seconds" in p
         for p in payloads
     )
+
+
+def test_in_progress_job_is_skipped(tmp_path):
+    """実行中のジョブは2回目の run_job でスキップされること"""
+    state_path = tmp_path / "state.json"
+    import threading
+
+    barrier = threading.Barrier(2)
+    released = threading.Event()
+
+    def slow_func():
+        barrier.wait()  # テストスレッドと同期
+        released.wait()  # 解放まで待機
+
+    config = {
+        "slow_job": {
+            "func": slow_func,
+            "period": "daily",
+            "day_of_week": "*",
+            "hour": 8,
+            "minute": 0,
+            "max_executions_per_period": 5,
+        }
+    }
+    manager = SchedulerQueueManager(config, state_file_path=str(state_path))
+
+    # 別スレッドでジョブを実行開始
+    t = threading.Thread(target=lambda: manager.run_job("slow_job", "background"))
+    t.start()
+    barrier.wait()  # slow_func が実行開始するまで待つ
+
+    # この時点でジョブは _in_progress_jobs にある → スキップされるはず
+    result = manager.run_job("slow_job", reason="concurrent", force=True)
+    # force=True でも in_progress は優先
+    assert result is False
+
+    released.set()
+    t.join()
+
+
+def test_weekly_period_key(tmp_path):
+    """weekly ジョブの period_key が ISO 週番号形式になること"""
+    from zoneinfo import ZoneInfo
+
+    state_path = tmp_path / "state.json"
+    config = {
+        "weekly_job": {
+            "func": lambda: None,
+            "period": "weekly",
+            "day_of_week": "sat",
+            "hour": 10,
+            "minute": 0,
+        }
+    }
+    manager = SchedulerQueueManager(config, state_file_path=str(state_path))
+    tz = ZoneInfo("Asia/Tokyo")
+    dt = datetime(2026, 1, 3, 10, 0, 0, tzinfo=tz)  # 2026-01-03 は土曜
+    key = manager._build_period_key(config["weekly_job"], dt)
+    assert key.startswith("2026-W")
+
+
+def test_is_scheduled_day_wildcard(tmp_path):
+    """day_of_week='*' のとき全日が対象になること"""
+    from zoneinfo import ZoneInfo
+
+    state_path = tmp_path / "state.json"
+    config = {
+        "any_day": {
+            "func": lambda: None,
+            "period": "daily",
+            "day_of_week": "*",
+            "hour": 8,
+            "minute": 0,
+        }
+    }
+    manager = SchedulerQueueManager(config, state_file_path=str(state_path))
+    tz = ZoneInfo("Asia/Tokyo")
+    for day in range(7):
+        dt = datetime(2026, 1, 5 + day, 10, 0, 0, tzinfo=tz)
+        assert manager._is_scheduled_day(config["any_day"], dt) is True
+
+
+def test_load_state_with_invalid_json(tmp_path):
+    """不正な JSON の場合、空イベントリストで初期化されること"""
+    state_path = tmp_path / "state.json"
+    state_path.write_text("not valid json", encoding="utf-8")
+    config = {"job": {"func": lambda: None, "period": "daily", "hour": 8, "minute": 0}}
+    manager = SchedulerQueueManager(config, state_file_path=str(state_path))
+    assert manager._state == {"events": []}
+
+
+def test_load_state_with_non_dict_state(tmp_path):
+    """JSON がリスト形式の場合も空イベントリストで初期化されること"""
+    state_path = tmp_path / "state.json"
+    state_path.write_text('["not", "a", "dict"]', encoding="utf-8")
+    config = {"job": {"func": lambda: None, "period": "daily", "hour": 8, "minute": 0}}
+    manager = SchedulerQueueManager(config, state_file_path=str(state_path))
+    assert manager._state == {"events": []}
+
+
+def test_run_job_error_propagates(tmp_path):
+    """func が例外を出した場合、例外が再送出されること"""
+    state_path = tmp_path / "state.json"
+
+    def failing_func():
+        raise ValueError("意図的なエラー")
+
+    config = {
+        "fail_job": {
+            "func": failing_func,
+            "period": "daily",
+            "day_of_week": "*",
+            "hour": 8,
+            "minute": 0,
+        }
+    }
+    manager = SchedulerQueueManager(config, state_file_path=str(state_path))
+    with pytest.raises(ValueError, match="意図的なエラー"):
+        manager.run_job("fail_job", reason="test")

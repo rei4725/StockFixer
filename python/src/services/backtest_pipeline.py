@@ -155,9 +155,9 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
                     ).fetchdf()
                 if not raw_dates.empty:
                     ts_series = pd.to_datetime(raw_dates["ts"])
-                    # create_basic_lag_features(n_lags=5, target=1) で先頭5行・末尾1行が除去される
-                    # 位置合わせ: raw_dates[5:-1] が stock_features の行数と一致する想定
-                    n_lags_assumed = 5
+                    # create_basic_lag_features(n_lags=10, target=1) で先頭10行・末尾1行が除去される
+                    # 位置合わせ: raw_dates[10:-1] が stock_features の行数と一致する想定
+                    n_lags_assumed = 10
                     expected_start = n_lags_assumed
                     expected_end = len(ts_series) - 1  # target shift -1
                     aligned = ts_series.iloc[expected_start:expected_end].values
@@ -194,6 +194,7 @@ def run_backtest_single(
     atr_min_fraction: float = 0.1,
     atr_max_fraction: float = 1.0,
     ensemble: bool = False,
+    apply_min_change_filter: bool = False,
 ) -> Tuple[pd.DataFrame, dict, pd.Series]:
     """
     単一学習/検証期間のバックテストを実行する。

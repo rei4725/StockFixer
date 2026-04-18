@@ -211,11 +211,23 @@ def train_unified_model(
 
     logger.info(f"特徴量数: {len(X.columns)}, サンプル数: {len(X)}")
 
+    # 時系列順に 80/20 分割（バリデーション: 直近 20%）
+    n_val = max(int(len(X) * 0.2), 500)
+    if len(X) - n_val >= 1000:
+        X_train_u = X.iloc[:-n_val]
+        y_train_u = y.iloc[:-n_val]
+        X_val_u = X.iloc[-n_val:]
+        y_val_u = y.iloc[-n_val:]
+        train_eval_set = [(X_val_u, y_val_u)]
+    else:
+        X_train_u, y_train_u = X, y
+        train_eval_set = None
+
     # モデル作成・学習
     logger.info(f"3. モデル学習中 ({model_type})...")
     mm = ModelManager(model_dir=save_dir)
     model = mm.create_model(model_type, model_name)
-    model.train(X, y)
+    model.train(X_train_u, y_train_u, eval_set=train_eval_set)
     _compute_and_save_unified_feature_selection(model, X, y)
 
     # 保存（unified/ディレクトリに保存）

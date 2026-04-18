@@ -46,6 +46,9 @@ HALF_KELLY: float = _float("HALF_KELLY", 0.5)
 # 自動発注（order_execution_pipeline.py）
 # ---------------------------------------------------------------------------
 
+#: 発注スキップの最小変動閾値（R-214）。この絶対値未満の diff_ratio は発注しない
+MIN_CHANGE_RATIO: float = _float("MIN_CHANGE_RATIO", 0.003)  # 0.3%
+
 #: 予測変化率がこれ以上なら買いシグナル
 BUY_THRESHOLD: float = _float("BUY_THRESHOLD", 0.005)
 
