@@ -43,6 +43,27 @@ class TestPredictionResult(unittest.TestCase):
         self.assertEqual(restored.confluence_score, 80)
         self.assertAlmostEqual(restored.diff_ratio, 0.02)
 
+    def test_to_dataframe_includes_multi_horizon_optional_fields(self):
+        result = PredictionResult(
+            market="us",
+            symbol="AAPL",
+            current_price=150.0,
+            avg_pred_price=153.0,
+            diff_ratio=0.02,
+            model_count=3,
+            avg_pred_price_3d=151.0,
+            avg_pred_price_5d=152.0,
+            avg_pred_price_10d=154.0,
+            diff_ratio_3d=0.006,
+            diff_ratio_5d=0.013,
+            diff_ratio_10d=0.026,
+        )
+
+        df = PredictionResult.to_dataframe([result])
+
+        self.assertIn("avg_pred_price_3d", df.columns)
+        self.assertIn("diff_ratio_10d", df.columns)
+
 
 class TestTradingGateStatus(unittest.TestCase):
     def test_defaults_are_safe(self):
