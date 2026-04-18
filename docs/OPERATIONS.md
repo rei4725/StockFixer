@@ -304,23 +304,39 @@ docker exec -e DISABLE_DAILY_LOSS_GUARD=1 stockfixer python run_scheduler.py --r
 
 コンテナ起動時に `run_scheduler.py --with-bot` が実行され、以下のジョブが自動で動作する。
 
+### 運用方針
+> メインPCで稼動するため、**平日夜〜休日は負荷の高い処理を入れない**。重い週次処理は平日深夜（01:00〜）に曜日分散し、土日は完全フリー。
+
+### ジョブ一覧
+
 | ジョブ | スケジュール | 内容 |
 |---|---|---|
-| `daily_pipeline` | 平日 19:00 | データ取得（バッチ） → 予測（Top10/Worst10） |
-| `weekly_model_training` | 土曜 03:00 | 統合モデル再学習（XGBoost + LightGBM） |
+| `daily_pipeline` | 平日 07:30 | データ取得（バッチ） → 予測（Top10/Worst10） → Discord通知 |
+| `daily_auto_order` | 平日 08:50 | ペーパートレード注文発注 |
+| `daily_settle_orders` | 平日 09:05 | pending 注文の約定処理 |
+| `daily_paper_trade_report` | 平日 15:30 | ペーパートレード損益レポート Discord 送信 |
+| `daily_drift_check` | 平日 16:00 | ドリフト監視・閾値超過銘柄の再学習 |
+| `weekly_model_training` | 火曜 01:00 | 統合モデル再学習（XGBoost + LightGBM） |
+| `weekly_optimization` | 水曜 01:00 | 全銘柄バックテスト最適化 |
+| `weekly_walk_forward_report` | 木曜 01:00 | Walk-Forward 比較レポート生成 |
+| `weekly_report` | 木曜 02:00 | パフォーマンスレポート Discord 送信 |
+| `weekly_watchlist_refresh` | 金曜 01:00 | ウォッチリスト自動更新（S&P500 / 日経225 差分同期） |
 
 ---
 
 ## 週次自動再デプロイ（Windowsタスクスケジューラ）
 
-毎週土曜 04:00 に `weekly_redeploy.ps1` が自動実行され、コードの最新化・Dockerイメージ再ビルド・コンテナ再起動を行う。
+毎週月曜 02:00 に `weekly_redeploy.ps1` が自動実行され、コードの最新化・Dockerイメージ再ビルド・コンテナ再起動を行う。
 
 ### 実行フロー
 
 ```
-土曜 03:00  weekly_model_training（APScheduler・コンテナ内）
-    ↓ 約30〜60分で完了
-土曜 04:00  weekly_redeploy.ps1（Windowsタスクスケジューラ）
+火曜 01:00  weekly_model_training（APScheduler・コンテナ内）
+水曜 01:00  weekly_optimization（APScheduler・コンテナ内）
+木曜 01:00  weekly_walk_forward_report（APScheduler・コンテナ内）
+金曜 01:00  weekly_watchlist_refresh（APScheduler・コンテナ内）
+
+月曜 02:00  weekly_redeploy.ps1（Windowsタスクスケジューラ）
     1. git pull origin feature/training
     2. VERSION / BUILD_DATE / GIT_COMMIT を環境変数にセット
     3. docker-compose up -d --build

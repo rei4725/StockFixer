@@ -1,5 +1,5 @@
 ﻿# weekly_redeploy.ps1
-# Windowsタスクスケジューラから毎週土曜 04:00 に呼び出される
+# Windowsタスクスケジューラから毎週月曜 02:00 に呼び出される
 # 処理: git pull -> UnitTest -> docker-compose up --build -> 結果ログ
 
 $repoDir = "C:\src\StockFixer"
