@@ -359,6 +359,39 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
     """
     )
 
+    # R-214: 発注実行サマリーテーブル
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS order_run_summary (
+            run_id            VARCHAR   NOT NULL PRIMARY KEY,
+            market            VARCHAR   NOT NULL,
+            mode              VARCHAR   NOT NULL,
+            run_at            TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            buy_orders        INTEGER   NOT NULL DEFAULT 0,
+            sell_orders       INTEGER   NOT NULL DEFAULT 0,
+            short_orders      INTEGER   NOT NULL DEFAULT 0,
+            skipped           INTEGER   NOT NULL DEFAULT 0,
+            skipped_min_change INTEGER  NOT NULL DEFAULT 0,
+            total_turnover    DOUBLE    NOT NULL DEFAULT 0.0,
+            min_change_ratio  DOUBLE
+        )
+    """
+    )
+
+    # R-215: 空売りポジションテーブル
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS paper_short_positions (
+            symbol            VARCHAR   NOT NULL PRIMARY KEY,
+            qty               INTEGER   NOT NULL,
+            avg_short_price   DOUBLE    NOT NULL,
+            unrealized_pnl    DOUBLE,
+            opened_at         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    """
+    )
+
 
 def init_tables() -> None:
     """外部から明示的にテーブル初期化する場合に使用"""
