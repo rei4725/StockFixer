@@ -1,7 +1,8 @@
 """unified_model_pipeline の純粋関数テスト"""
 
+import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
@@ -136,3 +137,135 @@ class TestLoadUnifiedModel(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------------------
+# 追加テスト: load_all_stock_data / _apply_unified_feature_exclusions / train_unified_model
+# ---------------------------------------------------------------------------
+
+
+class TestLoadAllStockData(unittest.TestCase):
+    """load_all_stock_data のテスト"""
+
+    @patch("src.services.unified_model_pipeline.load_all_stock_features")
+    @patch("src.services.unified_model_pipeline._mask_earnings_rows_for_unified")
+    def test_returns_dataframe_with_required_columns(self, mock_mask, mock_load):
+        """必要なカラムを持つ DataFrame が返ること"""
+        from src.services.unified_model_pipeline import load_all_stock_data
+
+        df = pd.DataFrame(
+            {
+                "close_lag1": [100.0, 101.0],
+                "rsi": [50.0, 55.0],
+                "y": [0.01, -0.01],
+                "market": ["jp", "jp"],
+                "symbol": ["7203", "7203"],
+            }
+        )
+        mock_load.return_value = df
+        mock_mask.return_value = df  # mask をバイパス
+
+        result = load_all_stock_data()
+
+        self.assertIsInstance(result, pd.DataFrame)
+        self.assertFalse(result.empty)
+        mock_mask.assert_called_once()
+
+    @patch("src.services.unified_model_pipeline.load_all_stock_features")
+    def test_returns_empty_dataframe_when_no_data(self, mock_load):
+        """データがない場合は空の DataFrame が返ること"""
+        from src.services.unified_model_pipeline import load_all_stock_data
+
+        mock_load.return_value = pd.DataFrame()
+
+        result = load_all_stock_data()
+
+        self.assertIsInstance(result, pd.DataFrame)
+        self.assertTrue(result.empty)
+
+
+class TestApplyUnifiedFeatureExclusions(unittest.TestCase):
+    """_apply_unified_feature_exclusions のテスト"""
+
+    @patch("src.services.unified_model_pipeline.load_excluded_features")
+    def test_removes_excluded_columns(self, mock_excluded):
+        """除外リストに含まれる列が削除されること"""
+        from src.services.unified_model_pipeline import _apply_unified_feature_exclusions
+
+        mock_excluded.return_value = ["rsi", "volume_ma_deviation"]
+        df = pd.DataFrame(
+            {
+                "close_lag1": [100.0],
+                "rsi": [50.0],
+                "volume_ma_deviation": [1.0],
+                "y": [0.01],
+            }
+        )
+
+        result = _apply_unified_feature_exclusions(df)
+
+        self.assertNotIn("rsi", result.columns)
+        self.assertNotIn("volume_ma_deviation", result.columns)
+        self.assertIn("close_lag1", result.columns)
+
+    @patch("src.services.unified_model_pipeline.load_excluded_features")
+    def test_returns_same_df_when_no_exclusions(self, mock_excluded):
+        """除外リストが空の場合は元の DataFrame と同じ列を持つこと"""
+        from src.services.unified_model_pipeline import _apply_unified_feature_exclusions
+
+        mock_excluded.return_value = []
+        df = pd.DataFrame({"close_lag1": [100.0], "y": [0.01]})
+
+        result = _apply_unified_feature_exclusions(df)
+
+        self.assertEqual(set(result.columns), set(df.columns))
+
+
+class TestTrainUnifiedModel(unittest.TestCase):
+    """train_unified_model のテスト"""
+
+    @patch("src.services.unified_model_pipeline._compute_and_save_unified_feature_selection")
+    @patch("src.services.unified_model_pipeline._apply_unified_feature_exclusions")
+    @patch("src.models.model_manager.ModelManager")
+    @patch("src.services.unified_model_pipeline.prepare_unified_features")
+    @patch("src.services.unified_model_pipeline.load_all_stock_data")
+    def test_train_creates_and_saves_model(
+        self, mock_load, mock_prepare, mock_mm_cls, mock_apply, mock_compute
+    ):
+        """モデルが作成・学習・保存されること"""
+        from src.services.unified_model_pipeline import train_unified_model
+
+        n = 20
+        raw_df = pd.DataFrame(
+            {
+                "close_lag1": [float(i) for i in range(100, 100 + n)],
+                "y": [0.01] * n,
+                "market": ["jp"] * n,
+                "symbol": ["7203"] * n,
+            }
+        )
+        mock_load.return_value = raw_df
+
+        X = pd.DataFrame(
+            {
+                "close_lag1": [float(i) for i in range(100, 100 + n)],
+                "market_encoded": [1] * n,
+            }
+        )
+        y = pd.Series([0.01] * n)
+        mock_prepare.return_value = (X, y)
+        mock_apply.return_value = X  # exclusion をバイパス
+
+        mock_mm = mock_mm_cls.return_value
+        mock_model = mock_mm.create_model.return_value
+
+        with tempfile.TemporaryDirectory() as tmp:
+            train_unified_model(
+                model_type="XGBoostModel",
+                model_name="TestUnifiedModel",
+                save_dir=tmp,
+            )
+
+        mock_mm.create_model.assert_called_once_with("XGBoostModel", "TestUnifiedModel")
+        mock_model.train.assert_called_once()
+        mock_model.save_model.assert_called_once()

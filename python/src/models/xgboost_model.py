@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import pandas as pd
 import xgboost as xgb
 from sklearn.exceptions import NotFittedError
@@ -17,17 +19,42 @@ class XGBoostModel(BaseModel):
 
     def __init__(self, model_name: str = "XGBoostModel", **kwargs):
         super().__init__(model_name)
-        self.model = xgb.XGBRegressor(**kwargs)
+        defaults: dict = {
+            "n_estimators": 500,
+            "max_depth": 4,
+            "learning_rate": 0.05,
+            "subsample": 0.8,
+            "colsample_bytree": 0.8,
+            "min_child_weight": 5,
+            "reg_alpha": 0.1,
+            "reg_lambda": 1.0,
+            "random_state": 42,
+            "tree_method": "hist",
+            "verbosity": 0,
+        }
+        defaults.update(kwargs)
+        self.model = xgb.XGBRegressor(**defaults)
 
-    def train(self, X: pd.DataFrame, y: pd.Series):
+    def train(
+        self,
+        X: pd.DataFrame,
+        y: pd.Series,
+        eval_set: list | None = None,
+    ):
         """
         XGBoostモデルを学習させる。
         Args:
-            X (pd.DataFrame): 特徴量データ。
-            y (pd.Series): ターゲット変数。
+            X (pd.DataFrame): 特徴量データ（学習用）。
+            y (pd.Series): ターゲット変数（学習用）。
+            eval_set: 検証データリスト。指定時は early stopping を有効化する。
+                      例: [(X_val, y_val)]
         """
         logger.info(f"{self.model_name} の学習を開始します...")
-        self.model.fit(X, y)
+        fit_kwargs: dict = {"verbose": False}
+        if eval_set is not None:
+            self.model.set_params(early_stopping_rounds=50)
+            fit_kwargs["eval_set"] = eval_set
+        self.model.fit(X, y, **fit_kwargs)
         logger.info(f"{self.model_name} の学習が完了しました。")
 
     def predict(self, X: pd.DataFrame) -> pd.Series:

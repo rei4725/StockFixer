@@ -273,5 +273,188 @@ class TestRunSingleModelPrediction(unittest.TestCase):
         self.assertAlmostEqual(pred_return, 0.07)
 
 
+# ──────────────────────────────────────────────────────────────────
+# predict_single_stock  （os.path.exists / data_loader をモック）
+# ──────────────────────────────────────────────────────────────────
+
+
+class TestPredictSingleStock(unittest.TestCase):
+    """predict_single_stock のテスト"""
+
+    def _make_df(self, n=50):
+        return pd.DataFrame(
+            {
+                "Close": np.linspace(1000, 1100, n),
+                "Open": np.linspace(1000, 1100, n),
+                "High": np.linspace(1010, 1110, n),
+                "Low": np.linspace(990, 1090, n),
+                "Volume": np.ones(n) * 1000,
+            }
+        )
+
+    @patch("src.models.predict_single_stock.load_model_weights")
+    @patch("src.models.predict_single_stock._run_single_model_prediction")
+    @patch("src.models.predict_single_stock._fetch_current_price")
+    @patch("src.models.predict_single_stock.data_loader")
+    @patch("src.models.predict_single_stock.os.path.exists")
+    def test_returns_prediction_result_when_models_exist(
+        self, mock_exists, mock_loader, mock_price, mock_run, mock_weights
+    ):
+        """モデルが存在する場合、PredictionResult が返ること"""
+        from src.models.predict_single_stock import predict_single_stock
+
+        mock_exists.return_value = True
+        mock_loader.get_stock_data.return_value = self._make_df()
+        mock_price.return_value = 1100.0
+        mock_run.return_value = (1150.0, 0.045)
+        mock_weights.return_value = [0.5, 0.5]
+
+        result = predict_single_stock("jp", "7203")
+        self.assertIsNotNone(result)
+        self.assertIsInstance(result, PredictionResult)
+        self.assertEqual(result.symbol, "7203")
+        self.assertEqual(result.market, "jp")
+
+    @patch("src.models.predict_single_stock.os.path.exists")
+    def test_returns_none_when_no_models(self, mock_exists):
+        """モデルが存在しない場合 None が返ること"""
+        from src.models.predict_single_stock import predict_single_stock
+
+        mock_exists.return_value = False
+        result = predict_single_stock("jp", "7203")
+        self.assertIsNone(result)
+
+    @patch("src.models.predict_single_stock.data_loader")
+    @patch("src.models.predict_single_stock.os.path.exists")
+    def test_returns_none_when_features_empty(self, mock_exists, mock_loader):
+        """特徴量データが空の場合 None が返ること"""
+        from src.models.predict_single_stock import predict_single_stock
+
+        mock_exists.return_value = True
+        mock_loader.get_stock_data.return_value = pd.DataFrame()
+        result = predict_single_stock("jp", "7203")
+        self.assertIsNone(result)
+
+    @patch("src.models.predict_single_stock._fetch_current_price")
+    @patch("src.models.predict_single_stock.data_loader")
+    @patch("src.models.predict_single_stock.os.path.exists")
+    def test_returns_none_when_price_none(self, mock_exists, mock_loader, mock_price):
+        """現在値が取得できない場合 None が返ること"""
+        from src.models.predict_single_stock import predict_single_stock
+
+        mock_exists.return_value = True
+        mock_loader.get_stock_data.return_value = self._make_df()
+        mock_price.return_value = None
+        result = predict_single_stock("jp", "7203")
+        self.assertIsNone(result)
+
+    @patch("src.models.predict_single_stock.load_model_weights")
+    @patch("src.models.predict_single_stock._run_single_model_prediction")
+    @patch("src.models.predict_single_stock._fetch_current_price")
+    @patch("src.models.predict_single_stock.data_loader")
+    @patch("src.models.predict_single_stock.os.path.exists")
+    def test_continues_on_model_exception(
+        self, mock_exists, mock_loader, mock_price, mock_run, mock_weights
+    ):
+        """モデル予測で例外が出ても次のモデルに続くこと"""
+        from src.models.predict_single_stock import predict_single_stock
+
+        mock_exists.return_value = True
+        mock_loader.get_stock_data.return_value = self._make_df()
+        mock_price.return_value = 1100.0
+        # horizon=1 → 2モデル: XGBoost が例外、LightGBM が成功
+        mock_run.side_effect = [Exception("モデルエラー"), (1150.0, 0.045)]
+        mock_weights.return_value = [1.0]
+
+        result = predict_single_stock("jp", "7203")
+        # 2番目のモデルで成功するので PredictionResult が返る
+        self.assertIsNotNone(result)
+        self.assertIsInstance(result, PredictionResult)
+
+
+# ──────────────────────────────────────────────────────────────────
+# predict_single_stock_multi_horizon  （predict_single_stock をモック）
+# ──────────────────────────────────────────────────────────────────
+
+
+class TestPredictSingleStockMultiHorizon(unittest.TestCase):
+    """predict_single_stock_multi_horizon のテスト"""
+
+    def _make_result(self, diff_ratio=0.05):
+        return PredictionResult(
+            market="jp",
+            symbol="7203",
+            current_price=1000.0,
+            avg_pred_price=1000.0 * (1 + diff_ratio),
+            diff_ratio=diff_ratio,
+            model_count=2,
+        )
+
+    @patch("src.models.predict_single_stock.predict_single_stock")
+    def test_returns_prediction_result_with_horizons(self, mock_predict):
+        """各ホライズンで成功した場合 PredictionResult が返ること"""
+        from src.models.predict_single_stock import predict_single_stock_multi_horizon
+
+        mock_predict.return_value = self._make_result()
+        result = predict_single_stock_multi_horizon("jp", "7203", horizons=[1, 3, 5])
+
+        self.assertIsNotNone(result)
+        self.assertIsInstance(result, PredictionResult)
+        self.assertEqual(result.symbol, "7203")
+
+    @patch("src.models.predict_single_stock.predict_single_stock")
+    def test_returns_none_when_all_horizons_fail(self, mock_predict):
+        """全ホライズンが None を返した場合 None が返ること"""
+        from src.models.predict_single_stock import predict_single_stock_multi_horizon
+
+        mock_predict.return_value = None
+        result = predict_single_stock_multi_horizon("jp", "7203", horizons=[1, 3, 5])
+        self.assertIsNone(result)
+
+    @patch("src.models.predict_single_stock.predict_single_stock")
+    def test_multi_horizon_fields_populated(self, mock_predict):
+        """3d/5d/10d フィールドが結果に含まれること"""
+        from src.models.predict_single_stock import predict_single_stock_multi_horizon
+
+        def _side(market, symbol, horizon=1, **kwargs):
+            return self._make_result(diff_ratio=0.05 * horizon)
+
+        mock_predict.side_effect = _side
+        result = predict_single_stock_multi_horizon("jp", "7203", horizons=[1, 3, 5, 10])
+
+        self.assertIsNotNone(result)
+        self.assertIsNotNone(result.avg_pred_price_3d)
+        self.assertIsNotNone(result.avg_pred_price_5d)
+        self.assertIsNotNone(result.avg_pred_price_10d)
+
+    @patch("src.models.predict_single_stock.predict_single_stock")
+    def test_confluence_score_all_upward(self, mock_predict):
+        """全ホライズンが上昇予測のとき confluence_score がホライズン数と一致すること"""
+        from src.models.predict_single_stock import predict_single_stock_multi_horizon
+
+        mock_predict.return_value = self._make_result(diff_ratio=0.05)
+        result = predict_single_stock_multi_horizon("jp", "7203", horizons=[1, 3, 5])
+
+        self.assertIsNotNone(result)
+        self.assertIsNotNone(result.confluence_score)
+        self.assertGreaterEqual(result.confluence_score, 0)
+        self.assertEqual(result.confluence_score, 3)  # 3ホライズン全て一致
+
+    @patch("src.models.predict_single_stock.predict_single_stock")
+    def test_base_horizon_is_1_when_available(self, mock_predict):
+        """horizon=1 の結果が base として使われること"""
+        from src.models.predict_single_stock import predict_single_stock_multi_horizon
+
+        def _side(market, symbol, horizon=1, **kwargs):
+            return self._make_result(diff_ratio=0.01 * horizon)
+
+        mock_predict.side_effect = _side
+        result = predict_single_stock_multi_horizon("jp", "7203", horizons=[1, 3])
+
+        self.assertIsNotNone(result)
+        # horizon=1 の diff_ratio は 0.01
+        self.assertAlmostEqual(result.diff_ratio, 0.01)
+
+
 if __name__ == "__main__":
     unittest.main()

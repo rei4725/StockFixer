@@ -55,6 +55,7 @@ class PaperBroker(BrokerBase):
         実際の約定は settle_pending_orders() が翌日の実行時に処理する。
         """
         order_id = str(uuid.uuid4())[:12]
+        sym = symbol.replace(".T", "")
         with _db_connection() as con:
             con.execute(
                 """
@@ -62,15 +63,33 @@ class PaperBroker(BrokerBase):
                     (order_id, symbol, side, qty, price, order_type, status, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP)
                 """,
-                [
-                    order_id,
-                    symbol.replace(".T", ""),
-                    int(side),
-                    qty,
-                    price,
-                    int(order_type),
-                ],
+                [order_id, sym, int(side), qty, price, int(order_type)],
             )
+            if side == OrderSide.SHORT:
+                # paper_short_positions に即時仮登録（加重平均単価更新）
+                existing_short = con.execute(
+                    "SELECT qty, avg_short_price FROM paper_short_positions WHERE symbol=?",
+                    [sym],
+                ).fetchone()
+                if existing_short:
+                    old_qty, old_avg = existing_short
+                    new_qty = old_qty + qty
+                    new_avg = (old_avg * old_qty + price * qty) / new_qty
+                    con.execute(
+                        "UPDATE paper_short_positions SET qty=?, avg_short_price=?, "
+                        "updated_at=CURRENT_TIMESTAMP WHERE symbol=?",
+                        [new_qty, new_avg, sym],
+                    )
+                else:
+                    con.execute(
+                        "INSERT INTO paper_short_positions "
+                        "(symbol, qty, avg_short_price, opened_at, updated_at) "
+                        "VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                        [sym, qty, price],
+                    )
+            elif side == OrderSide.SHORT_COVER:
+                # SHORT_COVER は settle_pending_orders() で実現損益を確定する（pending 記録のみ）
+                pass
         logger.info(
             f"[paper] 注文受付: order_id={order_id} symbol={symbol} "
             f"side={side.name} qty={qty} order_type={order_type.name}"
@@ -142,6 +161,10 @@ class PaperBroker(BrokerBase):
                         fill_price = min(limit_price, open_price)
                     elif side == int(OrderSide.SELL) and high_price >= limit_price:
                         fill_price = max(limit_price, open_price)
+                    elif side == int(OrderSide.SHORT) and high_price >= limit_price:
+                        fill_price = max(limit_price, open_price)
+                    elif side == int(OrderSide.SHORT_COVER) and low_price <= limit_price:
+                        fill_price = min(limit_price, open_price)
                     else:
                         logger.info(f"[paper] {symbol}: 指値未達、失効")
                         with _db_connection() as con:
@@ -214,7 +237,7 @@ class PaperBroker(BrokerBase):
                     "(symbol, qty, avg_price, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
                     [symbol, qty, fill_price],
                 )
-        else:  # SELL
+        elif side == int(OrderSide.SELL):
             proceeds = qty * fill_price
             con.execute("UPDATE paper_balance SET balance = balance + ?", [proceeds])
             if existing:
@@ -235,10 +258,93 @@ class PaperBroker(BrokerBase):
                 "UPDATE paper_orders SET realized_pnl=? WHERE order_id=?",
                 [realized_pnl, order_id],
             )
+        elif side == int(OrderSide.SHORT):
+            # 空売り新規: send_order で仮登録済みの avg_short_price を実際の約定値段で上書きする
+            existing_short = con.execute(
+                "SELECT qty, avg_short_price FROM paper_short_positions WHERE symbol=?",
+                [symbol],
+            ).fetchone()
+            if existing_short:
+                old_qty, old_avg = existing_short
+                # 今回約定分のみで avg を再計算（send_order の仮登録を fill_price で補正）
+                new_avg = ((old_avg * old_qty) - (old_avg - fill_price) * qty) / old_qty
+                con.execute(
+                    "UPDATE paper_short_positions SET avg_short_price=?, "
+                    "updated_at=CURRENT_TIMESTAMP WHERE symbol=?",
+                    [new_avg, symbol],
+                )
+            else:
+                con.execute(
+                    "INSERT INTO paper_short_positions "
+                    "(symbol, qty, avg_short_price, opened_at, updated_at) "
+                    "VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                    [symbol, qty, fill_price],
+                )
+        elif side == int(OrderSide.SHORT_COVER):
+            # 空売り返済: paper_short_positions から qty を減算し実現損益を記録
+            existing_short = con.execute(
+                "SELECT qty, avg_short_price FROM paper_short_positions WHERE symbol=?",
+                [symbol],
+            ).fetchone()
+            if existing_short:
+                old_qty, old_avg = existing_short
+                new_qty = old_qty - qty
+                if new_qty <= 0:
+                    con.execute("DELETE FROM paper_short_positions WHERE symbol=?", [symbol])
+                else:
+                    con.execute(
+                        "UPDATE paper_short_positions SET qty=?, "
+                        "updated_at=CURRENT_TIMESTAMP WHERE symbol=?",
+                        [new_qty, symbol],
+                    )
+            else:
+                old_avg = fill_price  # ポジション不明時はPnL=0扱い
+            realized_pnl = (old_avg - fill_price) * qty
+            con.execute(
+                "UPDATE paper_orders SET realized_pnl=? WHERE order_id=?",
+                [realized_pnl, order_id],
+            )
 
     # ------------------------------------------------------------------
     # 照会
     # ------------------------------------------------------------------
+
+    def get_short_positions(self) -> list[dict]:
+        """保有中の空売りポジション一覧を返す。
+
+        Returns:
+            list[dict]: [{"symbol": str, "qty": int, "avg_short_price": float,
+                          "current_price": float, "unrealized_pnl": float | None}]
+        """
+        with _db_connection() as con:
+            rows = con.execute(
+                "SELECT symbol, qty, avg_short_price FROM paper_short_positions WHERE qty > 0"
+            ).fetchall()
+        if not rows:
+            return []
+
+        results = []
+        for sym, qty, avg_short in rows:
+            ticker = f"{sym}.T"
+            current_price = avg_short  # フォールバック
+            try:
+                hist = yf_client.download(ticker, period="2d", interval="1d")
+                if not hist.empty:
+                    current_price = float(hist["Close"].iloc[-1])
+            except Exception:
+                logger.warning("[paper] %s: 株価取得失敗（フォールバック値を使用）", sym, exc_info=True)
+            # 空売りの未実現損益: 売り単価 - 現在価格が正なら利益
+            unrealized_pnl = (avg_short - current_price) * qty
+            results.append(
+                {
+                    "symbol": sym,
+                    "qty": qty,
+                    "avg_short_price": avg_short,
+                    "current_price": current_price,
+                    "unrealized_pnl": unrealized_pnl,
+                }
+            )
+        return results
 
     def get_positions(self) -> list[dict]:
         """保有ポジション一覧を返す（現在価格・含み損益つき）"""
@@ -258,7 +364,7 @@ class PaperBroker(BrokerBase):
                 if not hist.empty:
                     current_price = float(hist["Close"].iloc[-1])
             except Exception:
-                pass
+                logger.warning("[paper] %s: 株価取得失敗（フォールバック値を使用）", sym, exc_info=True)
             unrealized_pnl = (current_price - avg) * qty
             results.append(
                 {

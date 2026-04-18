@@ -12,58 +12,69 @@ logger = get_logger(__name__)
 
 def run_daily_pipeline():
     """
-    毎日実行: データ取得 → 予測 → ドリフト監視 → Discord通知用CSV出力
+    毎日実行: データ取得 → 予測 → 精度チェック → ドリフト監視 → Discord通知用CSV出力
 
     流れ:
         1. 全マーケットのデータを取得（バッチ）
         2. Top10/Worst10の予測を実行
-        3. 日次ドリフトチェック（閾値超過銘柄を自動再学習）
-        4. Discord通知
+        3. 前日予測の精度チェック（prediction_accuracy テーブルへ記録）
+        4. 日次ドリフトチェック（閾値超過銘柄を自動再学習）
+        5. Discord通知
     """
     logger.info("=== 日次パイプライン開始 ===")
 
     from src.api.discord_utils import send_daily_pipeline_completion, send_daily_pipeline_error
 
     # 1. データ取得（バッチ）
-    logger.info("[1/3] データ取得開始")
+    logger.info("[1/4] データ取得開始")
     from src.services.data_pipeline import run_data_batch
 
     try:
         run_data_batch()
-        logger.info("[1/3] データ取得完了")
+        logger.info("[1/4] データ取得完了")
     except Exception as e:
-        logger.error(f"[1/3] データ取得失敗: {e}")
+        logger.error(f"[1/4] データ取得失敗: {e}")
         send_daily_pipeline_error(f"データ取得失敗: {e}")
         raise
 
     # 2. 予測（Top10/Worst10）
-    logger.info("[2/3] 予測開始")
+    logger.info("[2/4] 予測開始")
     from src.services.prediction_pipeline import output_top_worst_results, predict_all_unified
 
     try:
         output_rows = predict_all_unified()
         output_top_worst_results(output_rows, mode="unified")
-        logger.info("[2/3] 予測完了")
+        logger.info("[2/4] 予測完了")
     except Exception as e:
-        logger.error(f"[2/3] 予測失敗: {e}")
+        logger.error(f"[2/4] 予測失敗: {e}")
         send_daily_pipeline_error(f"予測失敗: {e}")
         raise
 
-    # 3. 日次ドリフトチェック（非致命的：失敗しても後続処理を継続）
-    logger.info("[3/3] 日次ドリフトチェック開始")
+    # 3. 前日予測の精度チェック（非致命的：失敗しても後続処理を継続）
+    logger.info("[3/4] 予測精度チェック開始")
+    try:
+        from src.services.prediction_pipeline import run_accuracy_check
+
+        run_accuracy_check(horizon=1)
+        logger.info("[3/4] 予測精度チェック完了")
+    except Exception as e:
+        logger.error(f"[3/4] 予測精度チェック失敗: {e}", exc_info=True)
+
+    # 4. 日次ドリフトチェック（非致命的：失敗しても後続処理を継続）
+    logger.info("[4/4] 日次ドリフトチェック開始")
     try:
         run_daily_drift_check()
-        logger.info("[3/3] 日次ドリフトチェック完了")
+        logger.info("[4/4] 日次ドリフトチェック完了")
     except Exception as e:
-        logger.error(f"[3/3] 日次ドリフトチェック失敗: {e}", exc_info=True)
+        logger.error(f"[4/4] 日次ドリフトチェック失敗: {e}", exc_info=True)
 
-    # 4. Discord通知
-    logger.info("[4/4] Discord通知送信")
+    # 5. Discord通知
+    logger.info("[5/5] Discord通知送信")
     try:
         send_daily_pipeline_completion()
-        logger.info("[4/4] Discord通知完了")
+        logger.info("[5/5] Discord通知完了")
     except Exception as e:
-        logger.error(f"[4/4] Discord通知失敗: {e}")
+        logger.error(f"[5/5] Discord通知失敗: {e}")
         raise
 
     logger.info("=== 日次パイプライン完了 ===")
@@ -136,7 +147,6 @@ def run_weekly_report():
         logger.info("=== 週次レポート送信完了 ===")
     except Exception as e:
         logger.error(f"週次レポート生成失敗: {e}", exc_info=True)
-        raise
 
 
 def run_daily_auto_order():
@@ -259,6 +269,7 @@ def run_weekly_optimization():
 
     from src.services.backtest_optimize_pipeline import run_optimize_batch
 
+    success, failed = 0, 0
     try:
         results = run_optimize_batch(
             model_type="XGBoostModel",
@@ -273,7 +284,6 @@ def run_weekly_optimization():
         logger.info(f"=== 週次バックテスト最適化完了: 成功={success}, 失敗={failed} ===")
     except Exception as e:
         logger.error(f"週次バックテスト最適化失敗: {e}", exc_info=True)
-        raise
 
     # Discord 完了通知
     try:
@@ -292,6 +302,7 @@ def run_weekly_walk_forward_report():
     前回スナップショットとの差分レポートを保存する。
     """
     logger.info("=== 週次 Walk-Forward 比較レポート開始 ===")
+    result: dict = {}
     try:
         from src.services.walk_forward_report_pipeline import run_walk_forward_comparison_report
 
@@ -305,11 +316,10 @@ def run_weekly_walk_forward_report():
         )
         logger.info(
             "=== 週次 Walk-Forward 比較レポート完了: "
-            f"success={result['success']} failed={result['failed']} total={result['total']} ==="
+            f"success={result.get('success')} failed={result.get('failed')} total={result.get('total')} ==="
         )
     except Exception as e:
         logger.error(f"Walk-Forward 比較レポート生成失敗: {e}", exc_info=True)
-        raise
 
     # Discord 完了通知
     try:
@@ -338,7 +348,6 @@ def run_weekly_watchlist_refresh():
         logger.info("=== 週次ウォッチリスト更新完了 ===")
     except Exception as e:
         logger.error(f"ウォッチリスト更新失敗: {e}", exc_info=True)
-        raise
 
 
 def run_daily_drift_check():

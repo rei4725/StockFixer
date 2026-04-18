@@ -211,5 +211,141 @@ class TestDiscordBotHelpers(unittest.TestCase):
         self.assertIn("失敗", full_text)
 
 
+class TestHandleForecastCommand(unittest.TestCase):
+    def _make_message(self):
+        message = MagicMock()
+        message.channel = MagicMock()
+        message.channel.send = AsyncMock()
+        return message
+
+    @patch("src.api.discord_bot.get_latest_market_prediction_snapshots")
+    def test_calls_snapshot_service(self, mock_get):
+        from src.api.discord_bot import handle_forecast_command
+
+        mock_get.return_value = (None, [])
+        asyncio.run(handle_forecast_command(self._make_message()))
+        mock_get.assert_called_once()
+
+    @patch("src.api.discord_bot.get_latest_market_prediction_snapshots")
+    def test_no_result_when_ts_is_none(self, mock_get):
+        from src.api.discord_bot import handle_forecast_command
+
+        mock_get.return_value = (None, [])
+        message = self._make_message()
+        asyncio.run(handle_forecast_command(message))
+        message.channel.send.assert_called_once()
+        self.assertIn("見つかりませんでした", str(message.channel.send.call_args))
+
+    @patch("src.api.discord_bot.get_latest_market_prediction_snapshots")
+    def test_no_result_when_snapshots_empty(self, mock_get):
+        from src.api.discord_bot import handle_forecast_command
+
+        mock_get.return_value = ("2026-04-18T09:00:00", [])
+        message = self._make_message()
+        asyncio.run(handle_forecast_command(message))
+        message.channel.send.assert_called_once()
+        self.assertIn("見つかりませんでした", str(message.channel.send.call_args))
+
+    @patch("src.api.discord_bot.get_latest_market_prediction_snapshots")
+    def test_sends_top_and_worst_tables(self, mock_get):
+        from src.api.discord_bot import handle_forecast_command
+        from src.domain.types import MarketPredictionSnapshot
+
+        snapshot = MarketPredictionSnapshot(
+            market="JP",
+            top_results=[
+                PredictionResult(
+                    market="jp",
+                    symbol="7203",
+                    current_price=1000.0,
+                    avg_pred_price=1015.0,
+                    diff_ratio=0.015,
+                    model_count=2,
+                )
+            ],
+            worst_results=[
+                PredictionResult(
+                    market="jp",
+                    symbol="9984",
+                    current_price=5000.0,
+                    avg_pred_price=4900.0,
+                    diff_ratio=-0.02,
+                    model_count=2,
+                )
+            ],
+        )
+        mock_get.return_value = ("2026-04-18T09:00:00", [snapshot])
+        message = self._make_message()
+        asyncio.run(handle_forecast_command(message))
+        self.assertGreaterEqual(message.channel.send.call_count, 2)
+        all_text = " ".join(str(c) for c in message.channel.send.call_args_list)
+        self.assertIn("7203", all_text)
+        self.assertIn("9984", all_text)
+
+    @patch("src.api.discord_bot.get_latest_market_prediction_snapshots")
+    def test_skips_empty_top_results(self, mock_get):
+        from src.api.discord_bot import handle_forecast_command
+        from src.domain.types import MarketPredictionSnapshot
+
+        snapshot = MarketPredictionSnapshot(market="JP", top_results=[], worst_results=[])
+        mock_get.return_value = ("2026-04-18T09:00:00", [snapshot])
+        message = self._make_message()
+        asyncio.run(handle_forecast_command(message))
+        message.channel.send.assert_not_called()
+
+
+class TestHandleWatchnextCommand(unittest.TestCase):
+    def _make_message(self):
+        message = MagicMock()
+        message.channel = MagicMock()
+        message.channel.send = AsyncMock()
+        return message
+
+    @patch("src.api.discord_bot.get_watchlist_prediction_view")
+    def test_sends_watchlist_table_on_success(self, mock_get):
+        from src.api.discord_bot import handle_watchnext_command
+        from src.domain.types import WatchlistPredictionRow, WatchlistPredictionView
+
+        view = WatchlistPredictionView(
+            rows=[
+                WatchlistPredictionRow(
+                    symbol="7203",
+                    current_price=1000.0,
+                    avg_pred_price=1015.0,
+                    diff_ratio=0.015,
+                )
+            ]
+        )
+        mock_get.return_value = view
+        message = self._make_message()
+        asyncio.run(handle_watchnext_command(message))
+        message.channel.send.assert_called()
+        self.assertIn("7203", str(message.channel.send.call_args))
+
+    @patch("src.api.discord_bot.get_watchlist_prediction_view")
+    def test_sends_error_text_on_failure(self, mock_get):
+        from src.api.discord_bot import handle_watchnext_command
+        from src.domain.types import WatchlistPredictionView
+
+        view = WatchlistPredictionView(error_message="DB接続エラー")
+        mock_get.return_value = view
+        message = self._make_message()
+        asyncio.run(handle_watchnext_command(message))
+        message.channel.send.assert_called()
+        self.assertIn("DB接続エラー", str(message.channel.send.call_args))
+
+    @patch("src.api.discord_bot.get_watchlist_prediction_view")
+    def test_sends_default_error_when_error_message_empty(self, mock_get):
+        from src.api.discord_bot import handle_watchnext_command
+        from src.domain.types import WatchlistPredictionView
+
+        view = WatchlistPredictionView(error_message="")
+        mock_get.return_value = view
+        message = self._make_message()
+        asyncio.run(handle_watchnext_command(message))
+        message.channel.send.assert_called()
+        self.assertIn("エラー", str(message.channel.send.call_args))
+
+
 if __name__ == "__main__":
     unittest.main()
