@@ -9,6 +9,7 @@ import pandas as pd
 
 import src.utils.data_path_utils as path_utils
 import src.utils.db as db_module
+from src.domain.types import PredictionResult
 from src.services.prediction_pipeline import find_model_files, output_top_worst_results
 
 
@@ -85,21 +86,21 @@ class TestOutputTopWorstResults(unittest.TestCase):
             os.rmdir(self.tmp_dir)
 
     def _make_rows(self, n=15, market="us"):
-        """テスト用予測結果DataFrameリストを生成する"""
+        """テスト用予測結果 PredictionResult リストを生成する"""
         rows = []
         for i in range(n):
+            current = 100.0 + i
+            diff = i - n // 2
+            avg_pred = current + diff
+            diff_ratio = diff / current
             rows.append(
-                pd.DataFrame(
-                    [
-                        {
-                            "market": market,
-                            "symbol": f"SYM{i:03d}",
-                            "current_price": 100.0 + i,
-                            "avg_pred_price": 100.0 + i + (i - n // 2),
-                            "diff_ratio": (i - n // 2) / 100.0,
-                            "model_count": 2,
-                        }
-                    ]
+                PredictionResult(
+                    market=market,
+                    symbol=f"SYM{i:03d}",
+                    current_price=current,
+                    avg_pred_price=avg_pred,
+                    diff_ratio=diff_ratio,
+                    model_count=2,
                 )
             )
         return rows

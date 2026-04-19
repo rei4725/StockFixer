@@ -141,11 +141,32 @@ mcp_gitkraken_git_worktree(
 
 ## Common Workflows
 
+### 作業開始前の必須手順（スキップ禁止）
+1. **fetch** でリモートの最新状態を取得する
+```
+mcp_gitkraken_git_fetch(
+    directory="c:\\src\\StockFixer"
+)
+```
+2. **status / branch -vv** で現在のブランチと追跡状況を確認する
+```
+mcp_gitkraken_git_status(directory="c:\\src\\StockFixer")
+mcp_gitkraken_git_branch(directory="c:\\src\\StockFixer", action="list")
+```
+3. ベースブランチ（`feature/training`）が最新でない場合は pull して同期する
+```
+mcp_gitkraken_git_pull(directory="c:\\src\\StockFixer")
+```
+4. 作業ブランチが既に存在する場合は checkout → pull してから作業を再開する
+
+> **なぜ必要か**: fetch なしで作業すると古い状態にコミットを積み、後から大量のコンフリクト解消が発生する。特に複数 PR が並行するときに顕著。
+
 ### 新機能開発開始
-1. `git_status` で現在の状態確認
-2. `git_branch` (action="create") で新規ブランチ作成
-3. `git_checkout` でブランチ切り替え
-4. コード変更後、`git_add_or_commit` でコミット
+1. 上記「作業開始前の必須手順」を実行する
+2. `git_status` で現在の状態確認
+3. `git_branch` (action="create") で新規ブランチ作成
+4. `git_checkout` でブランチ切り替え
+5. コード変更後、`git_add_or_commit` でコミット
 
 ### コード変更前の確認
 1. `git_status` で変更ファイル確認

@@ -96,9 +96,17 @@ run_*.py → api層 → services層 → models/strategy/backtest層 → features
 - エラーハンドリングを適切に実装
 - コメントは必要な箇所にのみ付ける
 
+### 作業開始前の必須手順
+- **開発作業を始める前に必ず以下を実行すること（スキップ禁止）**
+  1. `git fetch` でリモートの最新状態を取得する
+  2. 現在のブランチと追跡状況を確認する（`git status` または `git branch -vv`）
+  3. ベースブランチが最新でない場合は `git pull` で同期してから作業ブランチを切る
+  4. 作業ブランチが既に存在する場合はそのブランチに checkout してから pull する
+- この手順を省略すると、古い状態にコミットを積んで後からコンフリクト解消が発生する
+
 ### Python開発ルール
 - Pythonコマンドは `py` を推奨、仮想環境は `py -m venv .venv`
-- ライブラリインストールは `pip install -r requirements.txt`
+- ライブラリインストールは `pip install -r requirements.txt` および `pip install -r requirements-dev.txt`
 - Windowsではパス区切りに `\` を使用
 - モジュール化で再利用性・可読性向上、`__init__.py` 配置でimportエラー防止
 - importパスは `python/` からの絶対パス指定で統一

@@ -1,6 +1,6 @@
 """batch_runner モジュールのユニットテスト"""
 
-import csv
+import json
 import os
 import tempfile
 import unittest
@@ -12,44 +12,35 @@ from src.services.batch_runner import load_target_symbols, print_summary, run_pa
 class TestLoadTargetSymbols(unittest.TestCase):
     """load_target_symbols 関数のテスト"""
 
-    def _create_csv(self, rows):
-        """テスト用CSVファイルを作成し、パスを返す"""
-        tmp = tempfile.NamedTemporaryFile(
-            mode="w", suffix=".csv", delete=False, encoding="utf-8", newline=""
-        )
-        writer = csv.DictWriter(tmp, fieldnames=["市場", "銘柄コード"])
-        writer.writeheader()
-        for row in rows:
-            writer.writerow(row)
+    def _create_json(self, data):
+        """テスト用 watchlist.json ファイルを作成し、パスを返す"""
+        tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8")
+        json.dump(data, tmp)
         tmp.close()
         return tmp.name
 
-    def test_reads_csv_correctly(self):
-        """CSVから銘柄リストが正しく読み込まれることを確認"""
-        csv_path = self._create_csv(
-            [
-                {"市場": "us", "銘柄コード": "AAPL"},
-                {"市場": "jp", "銘柄コード": "7203"},
-            ]
-        )
+    def test_reads_json_correctly(self):
+        """watchlist.json から銘柄リストが正しく読み込まれることを確認"""
+        json_path = self._create_json({"us": ["AAPL"], "jp": ["7203"]})
         try:
-            with patch("src.services.batch_runner.get_watchlist_path", return_value=csv_path):
+            with patch("src.services.batch_runner.get_watchlist_path", return_value=json_path):
                 result = load_target_symbols()
             self.assertEqual(len(result), 2)
-            self.assertEqual(result[0], {"market": "us", "symbol": "AAPL"})
-            self.assertEqual(result[1], {"market": "jp", "symbol": "7203"})
+            symbols = {(t.market, t.symbol) for t in result}
+            self.assertIn(("us", "AAPL"), symbols)
+            self.assertIn(("jp", "7203"), symbols)
         finally:
-            os.remove(csv_path)
+            os.remove(json_path)
 
-    def test_empty_csv(self):
-        """空のCSVでは空リストが返ることを確認"""
-        csv_path = self._create_csv([])
+    def test_empty_json(self):
+        """空の watchlist.json では空リストが返ることを確認"""
+        json_path = self._create_json({})
         try:
-            with patch("src.services.batch_runner.get_watchlist_path", return_value=csv_path):
+            with patch("src.services.batch_runner.get_watchlist_path", return_value=json_path):
                 result = load_target_symbols()
             self.assertEqual(result, [])
         finally:
-            os.remove(csv_path)
+            os.remove(json_path)
 
 
 class TestRunParallel(unittest.TestCase):
@@ -107,31 +98,30 @@ class TestPrintSummary(unittest.TestCase):
             {"status": "error", "market": "jp", "symbol": "7203", "error": "timeout"},
             {"status": "skip", "market": "jp", "symbol": "9984"},
         ]
-        # 出力をキャプチャして内容を検証
-        with patch("builtins.print") as mock_print:
+        with self.assertLogs("src.services.batch_runner", level="INFO") as cm:
             print_summary("テスト", results)
-            output = " ".join(str(c) for c in mock_print.call_args_list)
-            self.assertIn("成功: 2", output)
-            self.assertIn("エラー: 1", output)
-            self.assertIn("スキップ: 1", output)
+        output = "\n".join(cm.output)
+        self.assertIn("成功: 2", output)
+        self.assertIn("エラー: 1", output)
+        self.assertIn("スキップ: 1", output)
 
     def test_error_detail_shown(self):
         """エラー詳細が出力に含まれることを確認"""
         results = [
             {"status": "error", "market": "us", "symbol": "BAD", "error": "connection failed"},
         ]
-        with patch("builtins.print") as mock_print:
+        with self.assertLogs("src.services.batch_runner", level="WARNING") as cm:
             print_summary("エラーテスト", results)
-            output = " ".join(str(c) for c in mock_print.call_args_list)
-            self.assertIn("connection failed", output)
+        output = "\n".join(cm.output)
+        self.assertIn("connection failed", output)
 
     def test_no_error_no_detail(self):
         """エラーがなければエラー詳細セクションが出ないことを確認"""
         results = [{"status": "success"}]
-        with patch("builtins.print") as mock_print:
+        with self.assertLogs("src.services.batch_runner", level="INFO") as cm:
             print_summary("成功のみ", results)
-            output = " ".join(str(c) for c in mock_print.call_args_list)
-            self.assertNotIn("エラー詳細", output)
+        output = "\n".join(cm.output)
+        self.assertNotIn("エラー詳細", output)
 
 
 if __name__ == "__main__":

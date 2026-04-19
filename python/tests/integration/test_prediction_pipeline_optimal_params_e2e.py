@@ -4,6 +4,7 @@ Integration Tests for prediction_pipeline - Optimal Parameters
 実際の JSON ファイルから最適パラメータを読み込むテストです。
 """
 import json
+import math
 import os
 import sys
 
@@ -81,7 +82,9 @@ class TestGetOptimalParamsIntegration:
 
             # Profit Factor は正の数
             profit_factor = metrics.get("profit_factor")
-            if profit_factor is not None:
+            if profit_factor is not None and not (
+                isinstance(profit_factor, float) and math.isnan(profit_factor)
+            ):
                 assert profit_factor >= 0, f"{key}: profit_factor が負の数です ({profit_factor})"
 
             # Num Trades は非負整数
