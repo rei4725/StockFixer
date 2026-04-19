@@ -85,7 +85,7 @@ def send_text_file_chunked(
                 preserve_lines=preserve_lines,
             )
     except OSError as exc:
-        logger.error(f"テキストファイル送信失敗: {exc}", exc_info=True)
+        logger.error("テキストファイル送信失敗: %s", exc, exc_info=True)
         return False
 
 
@@ -126,11 +126,11 @@ def send_webhook_notification(
             return False
         response.raise_for_status()
 
-        logger.info(f"Discord通知送信成功: {title}")
+        logger.info("Discord通知送信成功: %s", title)
         return True
 
     except requests.exceptions.RequestException as e:
-        logger.error(f"Discord通知送信失敗: {e}", exc_info=True)
+        logger.error("Discord通知送信失敗: %s", e, exc_info=True)
         return False
 
 
@@ -155,7 +155,7 @@ def send_webhook_text(text: str) -> bool:
         return True
 
     except requests.exceptions.RequestException as e:
-        logger.error(f"Discord通知送信失敗: {e}", exc_info=True)
+        logger.error("Discord通知送信失敗: %s", e, exc_info=True)
         return False
 
 
@@ -221,7 +221,7 @@ def send_daily_pipeline_completion(
                     )
 
         except Exception as e:
-            logger.error(f"予測結果テーブル送信失敗: {e}")
+            logger.error("予測結果テーブル送信失敗: %s", e)
 
     return success
 
@@ -253,7 +253,7 @@ def send_webhook_file(file_path: str, title: str = "") -> bool:
         成功時True、失敗時False
     """
     if not os.path.exists(file_path):
-        logger.warning(f"送信対象ファイルが存在しません: {file_path}")
+        logger.warning("送信対象ファイルが存在しません: %s", file_path)
         return False
 
     try:
@@ -268,10 +268,10 @@ def send_webhook_file(file_path: str, title: str = "") -> bool:
         if response is None:
             return False
         response.raise_for_status()
-        logger.info(f"Discordファイル送信成功: {filename}")
+        logger.info("Discordファイル送信成功: %s", filename)
         return True
     except requests.exceptions.RequestException as e:
-        logger.error(f"Discordファイル送信失敗: {e}")
+        logger.error("Discordファイル送信失敗: %s", e)
         return False
 
 
@@ -296,7 +296,7 @@ def send_drift_alert(summary_df, horizon: int = 1, threshold: float = 0.45) -> b
 
     drift_rows = summary_df[summary_df["direction_accuracy"] <= threshold]
     if drift_rows.empty:
-        logger.info(f"ドリフト警告なし (horizon={horizon}d, 閾値={threshold:.0%})")
+        logger.info("ドリフト警告なし (horizon=%sd, 閾値=%.0f%%)", horizon, threshold * 100)
         return False
 
     lines = [f"**[モデルドリフト警告] horizon={horizon}d (方向正解率 ≤ {threshold:.0%})**\n"]
@@ -563,7 +563,7 @@ def send_walk_forward_report_completion(result: dict) -> bool:
             if not send_text_file_chunked(markdown_path, preserve_lines=False):
                 ok = False
         except Exception as e:
-            logger.error(f"Walk-Forwardレポートテキスト送信失敗: {e}")
+            logger.error("Walk-Forwardレポートテキスト送信失敗: %s", e)
             ok = False
 
     return ok

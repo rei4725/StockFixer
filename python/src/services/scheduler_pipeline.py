@@ -33,7 +33,7 @@ def run_daily_pipeline():
         run_data_batch()
         logger.info("[1/4] データ取得完了")
     except Exception as e:
-        logger.error(f"[1/4] データ取得失敗: {e}", exc_info=True)
+        logger.error("[1/4] データ取得失敗: %s", e, exc_info=True)
         send_daily_pipeline_error(f"データ取得失敗: {e}")
         raise
 
@@ -46,7 +46,7 @@ def run_daily_pipeline():
         output_top_worst_results(output_rows, mode="unified")
         logger.info("[2/4] 予測完了")
     except Exception as e:
-        logger.error(f"[2/4] 予測失敗: {e}", exc_info=True)
+        logger.error("[2/4] 予測失敗: %s", e, exc_info=True)
         send_daily_pipeline_error(f"予測失敗: {e}")
         raise
 
@@ -58,7 +58,7 @@ def run_daily_pipeline():
         run_accuracy_check(horizon=1)
         logger.info("[3/4] 予測精度チェック完了")
     except Exception as e:
-        logger.error(f"[3/4] 予測精度チェック失敗: {e}", exc_info=True)
+        logger.error("[3/4] 予測精度チェック失敗: %s", e, exc_info=True)
 
     # 4. 日次ドリフトチェック（非致命的：失敗しても後続処理を継続）
     logger.info("[4/4] 日次ドリフトチェック開始")
@@ -66,7 +66,7 @@ def run_daily_pipeline():
         run_daily_drift_check()
         logger.info("[4/4] 日次ドリフトチェック完了")
     except Exception as e:
-        logger.error(f"[4/4] 日次ドリフトチェック失敗: {e}", exc_info=True)
+        logger.error("[4/4] 日次ドリフトチェック失敗: %s", e, exc_info=True)
 
     # 5. Discord通知
     logger.info("[5/5] Discord通知送信")
@@ -74,7 +74,7 @@ def run_daily_pipeline():
         send_daily_pipeline_completion()
         logger.info("[5/5] Discord通知完了")
     except Exception as e:
-        logger.error(f"[5/5] Discord通知失敗: {e}", exc_info=True)
+        logger.error("[5/5] Discord通知失敗: %s", e, exc_info=True)
         raise
 
     logger.info("=== 日次パイプライン完了 ===")
@@ -96,11 +96,11 @@ def run_weekly_training():
     for model_type in ["XGBoostModel", "LightGBMModel"]:
         model_name = f"UnifiedStock{model_type.replace('Model', '')}"
         try:
-            logger.info(f"学習開始: {model_name}")
+            logger.info("学習開始: %s", model_name)
             train_unified_model(model_type=model_type, model_name=model_name)
-            logger.info(f"学習完了: {model_name}")
+            logger.info("学習完了: %s", model_name)
         except Exception as e:
-            logger.error(f"学習失敗 ({model_name}): {e}", exc_info=True)
+            logger.error("学習失敗 (%s): %s", model_name, e, exc_info=True)
             raise
 
     # 予測精度チェック & ドリフト警告
@@ -112,7 +112,7 @@ def run_weekly_training():
         summary = run_accuracy_check(horizon=1)
         send_drift_alert(summary, horizon=1)
     except Exception as e:
-        logger.error(f"予測精度チェック失敗: {e}", exc_info=True)
+        logger.error("予測精度チェック失敗: %s", e, exc_info=True)
 
     # Discord 完了通知
     try:
@@ -124,7 +124,7 @@ def run_weekly_training():
         ]
         send_weekly_training_completion(trained_models)
     except Exception as e:
-        logger.error(f"週次学習完了通知失敗: {e}", exc_info=True)
+        logger.error("週次学習完了通知失敗: %s", e, exc_info=True)
 
     logger.info("=== 週次モデル学習完了 ===")
 
@@ -146,7 +146,7 @@ def run_weekly_report():
         send_weekly_report(accuracy_df=summary, horizon=1, diff_summary=diff_summary)
         logger.info("=== 週次レポート送信完了 ===")
     except Exception as e:
-        logger.error(f"週次レポート生成失敗: {e}", exc_info=True)
+        logger.error("週次レポート生成失敗: %s", e, exc_info=True)
 
 
 def run_daily_auto_order():
@@ -161,7 +161,7 @@ def run_daily_auto_order():
     from src.services.order_execution_pipeline import run_daily_orders
 
     mode = os.environ.get("AUTO_TRADE_MODE", "paper")
-    logger.info(f"=== 自動発注開始 (mode={mode}) ===")
+    logger.info("=== 自動発注開始 (mode=%s) ===", mode)
 
     if mode == "live":
         from src.brokers.kabu.kabu_client import KabuBroker
@@ -172,9 +172,9 @@ def run_daily_auto_order():
 
     try:
         stats = run_daily_orders(broker=broker, market="jp", mode=mode)
-        logger.info(f"=== 自動発注完了: 買い={stats['buy_orders']} 売り={stats['sell_orders']} ===")
+        logger.info("=== 自動発注完了: 買い=%s 売り=%s ===", stats["buy_orders"], stats["sell_orders"])
     except Exception as e:
-        logger.error(f"自動発注失敗: {e}", exc_info=True)
+        logger.error("自動発注失敗: %s", e, exc_info=True)
         raise
 
     # Discord 完了通知
@@ -191,7 +191,7 @@ def run_daily_auto_order():
             daily_loss_limit=stats.get("daily_loss_limit"),
         )
     except Exception as e:
-        logger.error(f"自動発注完了通知失敗: {e}", exc_info=True)
+        logger.error("自動発注完了通知失敗: %s", e, exc_info=True)
 
 
 def run_daily_settle_orders():
@@ -212,9 +212,9 @@ def run_daily_settle_orders():
     try:
         broker = PaperBroker()
         settled = broker.settle_pending_orders()
-        logger.info(f"=== 約定処理完了: {len(settled)} 件 ===")
+        logger.info("=== 約定処理完了: %s 件 ===", len(settled))
     except Exception as e:
-        logger.error(f"約定処理失敗: {e}", exc_info=True)
+        logger.error("約定処理失敗: %s", e, exc_info=True)
         raise
 
     # Discord 完了通知
@@ -223,7 +223,7 @@ def run_daily_settle_orders():
 
         send_daily_settle_completion(settled_count=len(settled))
     except Exception as e:
-        logger.error(f"約定処理完了通知失敗: {e}", exc_info=True)
+        logger.error("約定処理完了通知失敗: %s", e, exc_info=True)
 
 
 def run_daily_paper_trade_report():
@@ -252,7 +252,7 @@ def run_daily_paper_trade_report():
         send_paper_trade_position_report(positions, summary)
         logger.info("=== ペーパートレード損益レポート送信完了 ===")
     except Exception as e:
-        logger.error(f"ペーパートレードレポート送信失敗: {e}", exc_info=True)
+        logger.error("ペーパートレードレポート送信失敗: %s", e, exc_info=True)
 
 
 def run_weekly_optimization():
@@ -281,9 +281,9 @@ def run_weekly_optimization():
         )
         success = sum(1 for r in results if not r.get("error"))
         failed = len(results) - success
-        logger.info(f"=== 週次バックテスト最適化完了: 成功={success}, 失敗={failed} ===")
+        logger.info("=== 週次バックテスト最適化完了: 成功=%s, 失敗=%s ===", success, failed)
     except Exception as e:
-        logger.error(f"週次バックテスト最適化失敗: {e}", exc_info=True)
+        logger.error("週次バックテスト最適化失敗: %s", e, exc_info=True)
 
     # Discord 完了通知
     try:
@@ -291,7 +291,7 @@ def run_weekly_optimization():
 
         send_optimization_completion(success=success, failed=failed)
     except Exception as e:
-        logger.error(f"週次最適化完了通知失敗: {e}", exc_info=True)
+        logger.error("週次最適化完了通知失敗: %s", e, exc_info=True)
 
 
 def run_weekly_walk_forward_report():
@@ -321,7 +321,7 @@ def run_weekly_walk_forward_report():
             result.get("total"),
         )
     except Exception as e:
-        logger.error(f"Walk-Forward 比較レポート生成失敗: {e}", exc_info=True)
+        logger.error("Walk-Forward 比較レポート生成失敗: %s", e, exc_info=True)
 
     # Discord 完了通知
     try:
@@ -329,7 +329,7 @@ def run_weekly_walk_forward_report():
 
         send_walk_forward_report_completion(result)
     except Exception as e:
-        logger.error(f"Walk-Forward レポート通知失敗: {e}", exc_info=True)
+        logger.error("Walk-Forward レポート通知失敗: %s", e, exc_info=True)
 
 
 def run_weekly_watchlist_refresh():
@@ -349,7 +349,7 @@ def run_weekly_watchlist_refresh():
         send_watchlist_update_report(diffs)
         logger.info("=== 週次ウォッチリスト更新完了 ===")
     except Exception as e:
-        logger.error(f"ウォッチリスト更新失敗: {e}", exc_info=True)
+        logger.error("ウォッチリスト更新失敗: %s", e, exc_info=True)
 
 
 def run_daily_drift_check():
@@ -392,7 +392,7 @@ def run_daily_drift_check():
     triggered_list = triggered[
         ["market", "symbol", "mean_abs_error", "direction_accuracy"]
     ].to_dict("records")
-    logger.warning(f"ドリフト検知: {len(triggered_list)} 銘柄が閾値超過 → 自動再学習開始")
+    logger.warning("ドリフト検知: %s 銀柄が閾値超過 → 自動再学習開始", len(triggered_list))
 
     # Discord 通知（再学習開始前）
     try:
@@ -400,7 +400,7 @@ def run_daily_drift_check():
 
         send_drift_retrain_notification(triggered_list, mae_threshold, hit_rate_threshold)
     except Exception as e:
-        logger.error(f"ドリフト通知失敗: {e}", exc_info=True)
+        logger.error("ドリフト通知失敗: %s", e, exc_info=True)
 
     # 銘柄別モデル再学習
     from src.services.batch_runner import load_target_symbols
@@ -411,10 +411,10 @@ def run_daily_drift_check():
     for sym in triggered_list:
         task = all_tasks.get((sym["market"], sym["symbol"]))
         if task is None:
-            logger.warning(f"ドリフト再学習: タスクが見つかりません ({sym['market']}/{sym['symbol']})")
+            logger.warning("ドリフト再学習: タスクが見つかりません (%s/%s)", sym["market"], sym["symbol"])
             continue
         try:
-            logger.info(f"ドリフト再学習開始: {sym['market']}/{sym['symbol']}")
+            logger.info("ドリフト再学習開始: %s/%s", sym["market"], sym["symbol"])
             result = train_models_for_symbol_task(task)
             if result.get("status") == "success":
                 success_count += 1
@@ -424,6 +424,6 @@ def run_daily_drift_check():
                     f"{result.get('reason') or result.get('error') or result.get('status')}"
                 )
         except Exception as e:
-            logger.error(f"ドリフト再学習失敗 ({sym['market']}/{sym['symbol']}): {e}", exc_info=True)
+            logger.error("ドリフト再学習失敗 (%s/%s): %s", sym["market"], sym["symbol"], e, exc_info=True)
 
-    logger.info(f"=== 日次ドリフトチェック完了: 再学習={success_count}/{len(triggered_list)} 件 ===")
+    logger.info("=== 日次ドリフトチェック完了: 再学習=%s/%s 件 ===", success_count, len(triggered_list))

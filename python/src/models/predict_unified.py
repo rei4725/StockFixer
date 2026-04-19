@@ -71,14 +71,14 @@ def preload_models(model_types: List[str] = None):
     if model_types is None:
         model_types = ["UnifiedStockXGBoost", "UnifiedStockLightGBM"]
 
-    print(f"モデルを事前ロード中: {model_types}")
+    logger.info("モデルを事前ロード中: %s", model_types)
     for model_name in model_types:
         model = get_cached_model(model_name)
         if model is not None:
-            print(f"  - {model_name}: ロード完了")
+            logger.info("  - %s: ロード完了", model_name)
         else:
-            print(f"  - {model_name}: 見つかりません")
-    print("モデルの事前ロード完了")
+            logger.info("  - %s: 見つかりません", model_name)
+    logger.info("モデルの事前ロード完了")
 
 
 def predict_with_unified_model(

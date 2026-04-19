@@ -152,7 +152,7 @@ async def handle_forecast_command(message):
 
 @bot.event
 async def on_ready():
-    print(f"Bot起動完了: {bot.user}")
+    logger.info("Bot起動完了: %s", bot.user)
 
 
 def build_watchlist_prediction_text(view: WatchlistPredictionView) -> str:
@@ -341,6 +341,6 @@ async def on_message(message):
 
 if __name__ == "__main__":
     if not TOKEN:
-        print("DISCORD_BOT_TOKEN環境変数が設定されていません。")
+        logger.critical("DISCORD_BOT_TOKEN環境変数が設定されていません。")
     else:
         bot.run(TOKEN)
