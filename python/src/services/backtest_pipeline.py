@@ -166,7 +166,7 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
                         df.index = pd.DatetimeIndex(aligned, name="Date")
                         logger.debug(f"[backtest] market_data_raw から日付を補完: {market}/{symbol}")
             except Exception as e:
-                logger.debug(f"[backtest] 日付補完スキップ: {e}")
+                logger.debug(f"[backtest] 日付補完スキップ: {e}", exc_info=True)
 
         return df
 

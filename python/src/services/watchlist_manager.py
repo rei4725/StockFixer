@@ -151,7 +151,7 @@ def verify_symbol_active(symbol: str, market: str) -> bool:
             logger.info(f"非アクティブ確認: {ticker_str} (データなし)")
         return active
     except Exception as e:
-        logger.warning(f"銘柄確認失敗: {ticker_str}: {e}")
+        logger.warning(f"銀柄確認失敗: {ticker_str}: {e}", exc_info=True)
         return False
 
 

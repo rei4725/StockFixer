@@ -226,7 +226,7 @@ def run_walk_forward_comparison_report(
         try:
             prev_df = pd.read_csv(previous_path)
         except Exception as exc:
-            logger.warning(f"前回サマリー読込失敗: {previous_path}: {exc}")
+            logger.warning(f"前回サマリー読込失敗: {previous_path}: {exc}", exc_info=True)
 
     comparison_df = _build_comparison(current_df, prev_df)
     comparison_path = report_dir / f"wf_comparison_{ts}.csv"
