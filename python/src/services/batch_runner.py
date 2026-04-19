@@ -90,7 +90,7 @@ def run_parallel(
                 _m = getattr(task, "market", None) or task.get("market", "?")
                 _s = getattr(task, "symbol", None) or task.get("symbol", "?")
                 task_label = f"{_m}/{_s}"
-                logger.error(f"[未処理エラー] {task_label}: {e}")
+                logger.error(f"[未処理エラー] {task_label}: {e}", exc_info=True)
                 results.append(
                     {
                         "market": getattr(task, "market", None) or task.get("market", "?"),

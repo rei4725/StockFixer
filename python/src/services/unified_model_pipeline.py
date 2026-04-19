@@ -287,7 +287,7 @@ def _load_all_ohlcv_for_unified(horizon: int) -> Tuple[pd.DataFrame, pd.Series]:
             all_X.append(X_sym)
             all_y.append(y_sym)
         except Exception as e:
-            logger.warning(f"OHLCV特徴量生成スキップ [{market}/{symbol}]: {e}")
+            logger.warning(f"OHLCV特徴量生成スキップ [{market}/{symbol}]: {e}", exc_info=True)
 
     if not all_X:
         return pd.DataFrame(), pd.Series(dtype=float)

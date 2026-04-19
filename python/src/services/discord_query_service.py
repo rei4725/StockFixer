@@ -24,6 +24,9 @@ from src.utils.db import (
     load_prediction_markets,
     load_prediction_results,
 )
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def _to_prediction_results(df: pd.DataFrame | None) -> list[PredictionResult]:
@@ -102,6 +105,7 @@ def get_watchlist_prediction_view() -> WatchlistPredictionView:
                     )
                 )
     except Exception as exc:
+        logger.error("監視対象予測処理で例外発生", exc_info=True)
         return WatchlistPredictionView(error_message=f"[エラー] 監視対象予測処理で例外: {exc}")
 
     return WatchlistPredictionView(rows=rows)

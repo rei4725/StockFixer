@@ -306,7 +306,7 @@ def _compute_and_save_shap(
         bottom = shap_df.tail(top_n)
         return pd.concat([top, bottom], ignore_index=True).drop_duplicates(subset=["feature"])
     except Exception as e:
-        logger.warning(f"SHAP計算スキップ [{market}_{symbol}/{model_name}]: {e}")
+        logger.warning(f"SHAP計算スキップ [{market}_{symbol}/{model_name}]: {e}", exc_info=True)
         return pd.DataFrame()
 
 
@@ -380,7 +380,7 @@ def train_models_for_symbol(market: str, symbol: str, horizon: int = 1) -> dict:
                     f"方向正解率={saved_metrics.directional_accuracy:.2%} (OOS)"
                 )
             except Exception as e:
-                logger.warning(f"精度指標保存スキップ [{market}_{symbol}/{model_name}]: {e}")
+                logger.warning(f"精度指標保存スキップ [{market}_{symbol}/{model_name}]: {e}", exc_info=True)
             # 実験ランを experiment_runs テーブルへ記録
             try:
                 save_experiment_run(
@@ -398,7 +398,7 @@ def train_models_for_symbol(market: str, symbol: str, horizon: int = 1) -> dict:
                     feature_names=list(X.columns),
                 )
             except Exception as e:
-                logger.warning(f"実験ラン保存スキップ [{market}_{symbol}/{model_name}]: {e}")
+                logger.warning(f"実験ラン保存スキップ [{market}_{symbol}/{model_name}]: {e}", exc_info=True)
             # SHAP特徴量寄与の計算・保存・Discord通知
             try:
                 model = model_manager.get_model(model_name)
@@ -425,7 +425,9 @@ def train_models_for_symbol(market: str, symbol: str, horizon: int = 1) -> dict:
                     protected_features=protected_features,
                 )
             except Exception as e:
-                logger.warning(f"SHAP/特徴量選択スキップ [{market}_{symbol}/{model_name}]: {e}")
+                logger.warning(
+                    f"SHAP/特徴量選択スキップ [{market}_{symbol}/{model_name}]: {e}", exc_info=True
+                )
 
         logger.info(f"[モデル作成完了] {market}/{symbol} (horizon={horizon}d)")
         return {"market": market, "symbol": symbol, "status": "success"}
@@ -525,7 +527,9 @@ def run_model_batch(horizon: int = 1):
                     metrics = _compute_training_metrics(r.y, y_pred)
                     save_model_metrics(market, symbol, model_name, trained_at, metrics)
                 except Exception as me:
-                    logger.warning(f"精度指標保存スキップ [{market}_{symbol}/{model_name}]: {me}")
+                    logger.warning(
+                        f"精度指標保存スキップ [{market}_{symbol}/{model_name}]: {me}", exc_info=True
+                    )
             logger.info(f"[モデル作成完了] {market}/{symbol}")
             train_results.append({"market": market, "symbol": symbol, "status": "success"})
         except Exception as e:

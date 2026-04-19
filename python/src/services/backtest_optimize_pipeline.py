@@ -17,6 +17,9 @@ import pandas as pd
 
 from src.services.backtest_pipeline import run_backtest_walk_forward
 from src.utils.data_path_utils import ensure_dir, get_results_dir
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def _frange(start: float, stop: float, step: float) -> list[float]:
@@ -190,7 +193,7 @@ def run_optimization(
                 summary["ensemble"] = ensemble
                 all_results.append(summary)
         except Exception as e:
-            print(f"  エラー: {e}")
+            logger.warning(f"最適化エラー: {symbol}", exc_info=True)
             all_results.append(
                 {
                     "threshold": threshold,
@@ -405,7 +408,7 @@ def save_optimal_params_json(
             with open(json_path, "r", encoding="utf-8") as f:
                 all_params = json.load(f)
         except Exception as e:
-            print(f"既存JSONの読み込みエラー（空として初期化）: {e}")
+            logger.warning(f"既存JSONの読み込みエラー（空として初期化）: {e}", exc_info=True)
 
     # マーケット・シンボルをキーに保存
     key = f"{market}_{symbol}"
@@ -450,7 +453,7 @@ def get_optimal_params(
         key = f"{market}_{symbol}"
         return all_params.get(key)
     except Exception as e:
-        print(f"JSONの読み込みエラー: {e}")
+        logger.error(f"JSONの読み込みエラー: {e}", exc_info=True)
         return None
 
 

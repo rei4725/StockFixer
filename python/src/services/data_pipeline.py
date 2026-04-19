@@ -106,7 +106,7 @@ def fetch_stock_data_with_features(
                 try:
                     save_raw_ohlcv(market, symbol, df)
                 except Exception as e:
-                    logger.error(f"Raw OHLCV保存エラー（処理継続）: {e}")
+                    logger.error(f"Raw OHLCV保存エラー（処理継続）: {e}", exc_info=True)
     else:
         # DBデータで十分
         if df is not None and not df.empty:
@@ -280,7 +280,7 @@ def run_data_batch(fetch_only: bool = False):
                 try:
                     save_raw_ohlcv(market, symbol, raw_data)
                 except Exception as e:
-                    logger.error(f"[Raw保存エラー] {market}/{symbol}: {e}")
+                    logger.error(f"[Raw保存エラー] {market}/{symbol}: {e}", exc_info=True)
             save_features_to_db(market, symbol, data)
             db_results.append({"market": market, "symbol": symbol, "status": "success"})
         except Exception as e:

@@ -64,7 +64,7 @@ def get_optimal_params(market: str, symbol: str) -> dict:
             )
         return params
     except Exception as e:
-        logger.error(f"[{market}_{symbol}] 最適パラメータ読み込みエラー: {e}")
+        logger.error(f"[{market}_{symbol}] 最適パラメータ読み込みエラー: {e}", exc_info=True)
         return {}
 
 
