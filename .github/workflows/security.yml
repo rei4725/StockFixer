@@ -38,11 +38,11 @@ jobs:
 
       - name: Audit requirements.txt
         run: |
-          pip-audit -r requirements.txt --strict --output json -o pip-audit-prod.json || echo "VULN_FOUND=true" >> $GITHUB_ENV
+          pip-audit -r requirements.txt --strict --format json -o pip-audit-prod.json || echo "VULN_FOUND=true" >> $GITHUB_ENV
 
       - name: Audit requirements-dev.txt
         run: |
-          pip-audit -r requirements-dev.txt --strict --output json -o pip-audit-dev.json || echo "VULN_DEV_FOUND=true" >> $GITHUB_ENV
+          pip-audit -r requirements-dev.txt --strict --format json -o pip-audit-dev.json || echo "VULN_DEV_FOUND=true" >> $GITHUB_ENV
 
       - name: Write summary
         if: always()
