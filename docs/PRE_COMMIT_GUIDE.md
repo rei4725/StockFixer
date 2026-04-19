@@ -18,11 +18,13 @@ cd C:\src\StockFixer\python
 
 # 仮想環境が有効化済みの場合
 pip install -r requirements.txt
+pip install -r requirements-dev.txt
 
 # 仮想環境がない場合
 py -m venv .venv
 .\.venv\Scripts\Activate
 pip install -r requirements.txt
+pip install -r requirements-dev.txt
 ```
 
 #### 2. Pre-commit hooksの登録

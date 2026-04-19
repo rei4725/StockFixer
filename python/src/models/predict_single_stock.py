@@ -1,6 +1,5 @@
 import logging
 import os
-import traceback
 import warnings
 
 import numpy as np
@@ -14,6 +13,9 @@ from src.features.technical_analysis import add_technical_indicators, create_bas
 from src.models.model_manager import ModelManager
 from src.utils.data_path_utils import get_models_subdir, get_ticker, normalize_col
 from src.utils.db import load_model_weights
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 # yfinanceの警告を抑制
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -60,7 +62,9 @@ def _fetch_current_price(market: str, symbol: str, df: pd.DataFrame) -> "float |
         if not hist.empty:
             return float(hist["Close"].iloc[-1])
     except Exception:
-        pass
+        logger.warning(
+            "yfinance現在価格取得失敗（フォールバック使用）: market=%s symbol=%s", market, symbol, exc_info=True
+        )
     # yfinance失敗時はdfの末尾を使用（fallback）
     try:
         close_col = df["Close"]
@@ -68,6 +72,7 @@ def _fetch_current_price(market: str, symbol: str, df: pd.DataFrame) -> "float |
             close_col = close_col.iloc[:, 0]
         return float(close_col.iloc[-1])
     except Exception:
+        logger.warning("df末尾Close取得失敗: market=%s symbol=%s", market, symbol, exc_info=True)
         return None
 
 
@@ -107,7 +112,7 @@ def _run_single_model_prediction(
                 if col in df_feat.columns:
                     df_feat[col] = df_feat[col].ffill().bfill()
     except Exception:
-        pass
+        logger.warning("クロスアセット特徴量付与スキップ: market=%s symbol=%s", market, symbol, exc_info=True)
 
     X, _ = create_basic_lag_features(df_feat)
     if X.empty:
@@ -232,9 +237,8 @@ def predict_single_stock(
             pred_prices.append(pred_price)
             pred_returns.append(pred_return)
             succeeded_model_types.append(model_type)
-        except Exception as e:
-            print(f"[{symbol}] エラー: {e}")
-            traceback.print_exc()
+        except Exception:
+            logger.error("[%s] 予測エラー: model=%s", symbol, model_type, exc_info=True)
             continue
 
     return _build_prediction_result(
@@ -381,7 +385,6 @@ def explain_prediction_shap(
                 {"feature": name, "shap_value": float(val)} for name, val in pairs[:top_n]
             ],
         }
-    except Exception as e:
-        print(f"[{symbol}] SHAP計算エラー: {e}")
-        traceback.print_exc()
+    except Exception:
+        logger.error("[%s] SHAP計算エラー: horizon=%s", symbol, horizon, exc_info=True)
         return None
