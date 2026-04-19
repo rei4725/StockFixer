@@ -15,6 +15,9 @@ import yfinance as yf
 from src.domain.types import PredictionResult
 from src.utils.data_path_utils import get_ticker
 from src.utils.db import get_all_symbols, load_model_weights, load_stock_features
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 # yfinanceの警告を抑制
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -40,6 +43,7 @@ def load_feature_data(market: str, symbol: str) -> Optional[pd.DataFrame]:
         df = load_stock_features(market, symbol)
         return df
     except Exception:
+        logger.warning("特徴量データ読み込み失敗: market=%s symbol=%s", market, symbol, exc_info=True)
         return None
 
 
@@ -137,6 +141,7 @@ def predict_with_unified_model(
             else:
                 current_price = float(df["y"].iloc[-2]) if len(df) > 1 else float(df["y"].iloc[-1])
     except Exception:
+        logger.warning("現在価格取得失敗（フォールバック使用）: market=%s symbol=%s", market, symbol, exc_info=True)
         # エラー時はフォールバック
         if "Close_lag1" in df.columns:
             current_price = float(df["Close_lag1"].iloc[-1])
@@ -182,7 +187,9 @@ def predict_with_unified_model(
             pred_prices.append(pred_price)
             succeeded_model_names.append(model_name)
         except Exception:
-            # エラーは静かにスキップ（並列処理時のログ抑制）
+            logger.warning(
+                "モデル予測スキップ: model=%s market=%s symbol=%s", model_name, market, symbol, exc_info=True
+            )
             continue
 
     if not pred_prices:
@@ -238,6 +245,7 @@ def predict_all_with_unified_model(
         try:
             return predict_with_unified_model(market, symbol, model_types=model_types)
         except Exception:
+            logger.warning("銘柄予測失敗: market=%s symbol=%s", market, symbol, exc_info=True)
             return None
 
     results = []

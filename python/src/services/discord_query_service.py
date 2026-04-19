@@ -91,7 +91,7 @@ def get_watchlist_prediction_view() -> WatchlistPredictionView:
                     diff_ratio = (
                         float(record["avg_pred_price"]) - float(record["current_price"])
                     ) / float(record["current_price"])
-                except Exception:
+                except (ValueError, TypeError, ZeroDivisionError, KeyError):
                     diff_ratio = None
                 rows.append(
                     WatchlistPredictionRow(

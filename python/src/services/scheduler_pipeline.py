@@ -33,7 +33,7 @@ def run_daily_pipeline():
         run_data_batch()
         logger.info("[1/4] データ取得完了")
     except Exception as e:
-        logger.error(f"[1/4] データ取得失敗: {e}")
+        logger.error(f"[1/4] データ取得失敗: {e}", exc_info=True)
         send_daily_pipeline_error(f"データ取得失敗: {e}")
         raise
 
@@ -46,7 +46,7 @@ def run_daily_pipeline():
         output_top_worst_results(output_rows, mode="unified")
         logger.info("[2/4] 予測完了")
     except Exception as e:
-        logger.error(f"[2/4] 予測失敗: {e}")
+        logger.error(f"[2/4] 予測失敗: {e}", exc_info=True)
         send_daily_pipeline_error(f"予測失敗: {e}")
         raise
 
@@ -74,7 +74,7 @@ def run_daily_pipeline():
         send_daily_pipeline_completion()
         logger.info("[5/5] Discord通知完了")
     except Exception as e:
-        logger.error(f"[5/5] Discord通知失敗: {e}")
+        logger.error(f"[5/5] Discord通知失敗: {e}", exc_info=True)
         raise
 
     logger.info("=== 日次パイプライン完了 ===")
@@ -100,7 +100,7 @@ def run_weekly_training():
             train_unified_model(model_type=model_type, model_name=model_name)
             logger.info(f"学習完了: {model_name}")
         except Exception as e:
-            logger.error(f"学習失敗 ({model_name}): {e}")
+            logger.error(f"学習失敗 ({model_name}): {e}", exc_info=True)
             raise
 
     # 予測精度チェック & ドリフト警告
@@ -315,8 +315,10 @@ def run_weekly_walk_forward_report():
             slippage=0.0,
         )
         logger.info(
-            "=== 週次 Walk-Forward 比較レポート完了: "
-            f"success={result.get('success')} failed={result.get('failed')} total={result.get('total')} ==="
+            "=== 週次 Walk-Forward 比較レポート完了: " "success=%s failed=%s total=%s ===",
+            result.get("success"),
+            result.get("failed"),
+            result.get("total"),
         )
     except Exception as e:
         logger.error(f"Walk-Forward 比較レポート生成失敗: {e}", exc_info=True)

@@ -38,7 +38,7 @@ def convert_df_for_discord(df: pd.DataFrame) -> pd.DataFrame:
             df["予想変化率"] = (df["予想終値"].astype(float) - df["現在値"].astype(float)) / df["現在値"].astype(
                 float
             )
-        except Exception:
+        except (ValueError, TypeError, ZeroDivisionError):
             df["予想変化率"] = ""
     if "現在値" in df.columns:
         df["現在値"] = df["現在値"].apply(
@@ -55,7 +55,7 @@ def convert_df_for_discord(df: pd.DataFrame) -> pd.DataFrame:
                 ratio = float(value)
                 sign = "+" if ratio >= 0 else ""
                 return f"{sign}{ratio * 100:.2g}%"
-            except Exception:
+            except (ValueError, TypeError):
                 return value
 
         df["予想変化率"] = df["予想変化率"].apply(format_percent)

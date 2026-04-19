@@ -85,7 +85,7 @@ def send_text_file_chunked(
                 preserve_lines=preserve_lines,
             )
     except OSError as exc:
-        logger.error(f"テキストファイル送信失敗: {exc}")
+        logger.error(f"テキストファイル送信失敗: {exc}", exc_info=True)
         return False
 
 
@@ -130,7 +130,7 @@ def send_webhook_notification(
         return True
 
     except requests.exceptions.RequestException as e:
-        logger.error(f"Discord通知送信失敗: {e}")
+        logger.error(f"Discord通知送信失敗: {e}", exc_info=True)
         return False
 
 
@@ -155,7 +155,7 @@ def send_webhook_text(text: str) -> bool:
         return True
 
     except requests.exceptions.RequestException as e:
-        logger.error(f"Discord通知送信失敗: {e}")
+        logger.error(f"Discord通知送信失敗: {e}", exc_info=True)
         return False
 
 
