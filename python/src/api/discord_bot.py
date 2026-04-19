@@ -23,6 +23,9 @@ from src.services.discord_query_service import (
     get_watchlist_prediction_view,
 )
 from src.utils.japan_time import format_jst_from_iso
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")
@@ -149,7 +152,7 @@ async def handle_forecast_command(message):
 
 @bot.event
 async def on_ready():
-    print(f"Bot起動完了: {bot.user}")
+    logger.info("Bot起動完了: %s", bot.user)
 
 
 def build_watchlist_prediction_text(view: WatchlistPredictionView) -> str:
@@ -331,13 +334,13 @@ async def on_message(message):
             )
 
         await bot.process_commands(message)
-    except Exception as e:
+    except Exception:
         await message.channel.send(escape_markdown("エラーが発生しました"), allowed_mentions=None)
-        print(f"Error in on_message: {e}")
+        logger.error("Error in on_message", exc_info=True)
 
 
 if __name__ == "__main__":
     if not TOKEN:
-        print("DISCORD_BOT_TOKEN環境変数が設定されていません。")
+        logger.critical("DISCORD_BOT_TOKEN環境変数が設定されていません。")
     else:
         bot.run(TOKEN)

@@ -1,15 +1,22 @@
-# StockFixer 収益改善ロードマップ
+# StockFixer ロードマップ
 
-> 更新日: 2026-04-11  
-> 正本: このドキュメントで収益改善施策の優先度・進捗を管理する
+> 更新日: 2026-04-19  
+> 正本: このドキュメントで**収益改善施策**と**非機能改善施策（NF）**の優先度・進捗を管理する
 
 ---
 
 ## 1. 目的
 
+### 収益改善（R-xxx）
 - 目的1: 手数料・スリッページ控除後の実現可能な収益を継続的に向上する
 - 目的2: 最大ドローダウンを抑え、運用停止リスクを下げる
 - 目的3: 予測精度偏重ではなく、執行品質とリスク制御を含めて最適化する
+
+### 非機能改善（NF-xxx）
+- 目的4: CI/CD パイプラインと品質ゲートを強化し、デグレ検出を自動化する
+- 目的5: 監視・可観測性を向上し、障害の検知と原因特定を迅速化する
+- 目的6: コード品質・例外設計・型安全性を高め、保守コストを低減する
+- 目的7: 運用制度（Runbook・ADR・API仕様）を整備し、属人化を排除する
 
 ---
 
@@ -44,11 +51,21 @@
 | Avg Slippage | 約定スリッページ平均 | 前期比で改善 |
 | Stop Trigger Rate | 日次損失上限発動率 | 異常増加時に原因調査 |
 
+### 3.3 非機能KPI
+
+| KPI | 定義 | 目標 |
+|---|---|---|
+| CI Pass Rate | GHA パイプライン成功率 | 95% 以上 |
+| Test Coverage | pytest --cov カバレッジ | 80% 維持（現状維持） |
+| Broad Except Count | `except Exception` の件数 | services/brokers/models 層でゼロ |
+| Health Check Uptime | /health エンドポイント疎通率 | 99% 以上 |
+| Deploy Lead Time | コミット → 本番反映のリードタイム | weekly_redeploy で自動計測 |
+
 ---
 
 ## 4. 優先順位（2026-04-11 時点）
 
-### 現在の優先順
+### 現在の優先順（収益改善）
 
 1. R-203 月次レポート自動化（DOING）
 2. R-211 実験トラッキング基盤
@@ -65,13 +82,39 @@
 13. R-209 サバイバーシップバイアス補正
 14. R-204 収益化機能 PoC
 
-### 優先順の考え方
+### 現在の優先順（非機能改善）
+
+1. NF-101 `requirements-dev.txt` 分離（低コスト・即効）
+2. NF-102 broad `except Exception` 撲滅（services/brokers/models 層）
+3. NF-201 GHA Integration/E2E テスト追加
+4. NF-202 依存脆弱性スキャン（pip-audit）
+5. NF-203 SAST スキャン（bandit）
+6. NF-301 `/health` エンドポイント実装
+7. NF-302 構造化ログ（JSON 形式）
+8. NF-303 アラートルール定義
+9. NF-401 カスタム例外階層整備
+10. NF-402 Pylint 有効化
+11. NF-403 DB マイグレーション戦略正式化
+12. NF-501 デプロイ Runbook 作成
+13. NF-502 障害対応フロー（Incident Response）文書化
+14. NF-503 ADR（Architecture Decision Records）導入
+15. NF-504 API 仕様書（OpenAPI）整備
+
+### 優先順の考え方（収益改善）
 
 - R-203 DOING を仕上げながら R-211 で run 単位比較基盤を整える
 - R-211 完了後、既存データをそのまま使える低コスト施策（R-212〜R-215）を短期で投入する
 - R-210・R-205 でコスト・下方リスクをリアル寄りに補正した後、R-206・R-207 で改善サイクルを定型化する
 - R-201・R-202・R-209 は基盤整備後に特徴量やモデルを拡張するフェーズで着手する
 - R-204 は内部KPIが安定してから着手し、外部提供を後回しにする
+
+### 優先順の考え方（非機能改善）
+
+- NF-101・NF-102 は変更量が小さく即着手可能。収益施策と並行できる
+- NF-201〜NF-203 はCIパイプライン強化セット。NF-101 完了後に着手
+- NF-301〜NF-303 は監視基盤セット。R-303 運用ダッシュボードの前提として整備する
+- NF-401〜NF-403 はコード品質セット。リファクタリングコストが高いため中期で段階投入
+- NF-501〜NF-504 は制度整備セット。実装よりもドキュメント作業が中心。隙間時間に進める
 
 ### Issue 対応表
 
@@ -85,6 +128,11 @@
 | R-302 | #34 |
 | R-303 | #32 |
 | R-304 | #33 |
+| NF-101 | （Issue未採番） |
+| NF-102 | （Issue未採番） |
+| NF-201 | （Issue未採番） |
+| NF-202 | （Issue未採番） |
+| NF-301 | （Issue未採番） |
 
 ---
 
@@ -168,6 +216,100 @@
 
 ---
 
+---
+
+## NF 非機能改善ロードマップ
+
+---
+
+## NF-Phase 1: 即効・低コスト（Q4 2026 Sprint 1〜2 並行）
+
+### 到達目標
+
+- Dockerイメージから開発用ツールを排除し、本番攻撃面を縮小する
+- services/brokers/models 層のサイレント障害を排除し、エラー追跡を可能にする
+
+### 実施項目
+
+| ID | 施策 | 優先度 | 完了条件 |
+|---|---|---|---|
+| NF-101 | `requirements-dev.txt` 分離 | P1 | black/isort/flake8/mypy/pytest 等の開発依存を分離し、Dockerfile は requirements.txt のみ参照する |
+| NF-102 | broad `except Exception` 撲滅 | P1 | services・brokers・models 層で `except Exception: pass` または `except Exception:` をゼロにし、具体的な例外型 + `logger.error(..., exc_info=True)` に置換する |
+
+---
+
+## NF-Phase 2: CI/CD パイプライン強化（Q4 2026 Sprint 2〜3）
+
+### 到達目標
+
+- PR 時に Integration / E2E テストが自動実行され、デグレを即検出できる
+- 依存パッケージの既知 CVE と Python コードの危険パターンを CI で自動検出する
+
+### 実施項目
+
+| ID | 施策 | 優先度 | 完了条件 |
+|---|---|---|---|
+| NF-201 | GHA Integration/E2E テスト追加 | P2 | `.github/workflows/` に integration-tests.yml を追加し、PR 時に `tests/integration/` と `tests/e2e/` を実行する |
+| NF-202 | 依存脆弱性スキャン（pip-audit） | P2 | GHA で `pip-audit` を実行し、HIGH 以上の CVE があればパイプラインを FAIL にする |
+| NF-203 | SAST スキャン（bandit） | P2 | GHA で `bandit -r src/ -ll` を実行し、HIGH severity の検出でパイプラインを FAIL にする |
+
+---
+
+## NF-Phase 3: 監視・可観測性（Q4 2026 Sprint 4 〜 Q1 2027 Sprint 1）
+
+### 到達目標
+
+- コンテナの死活と業務的な健全性を1エンドポイントで確認できる
+- ログを構造化し、将来の集約基盤（ELK/Loki）への移行コストを最小化する
+- Discord 通知を「条件付きアラート」化し、通知疲れを防ぐ
+
+### 実施項目
+
+| ID | 施策 | 優先度 | 完了条件 |
+|---|---|---|---|
+| NF-301 | `/health` エンドポイント実装 | P2 | Flask に `/health` を追加し、DB 接続・スケジューラ最終実行時刻・直近予測実行時刻を JSON で返す。Docker HEALTHCHECK がこのエンドポイントを叩く |
+| NF-302 | 構造化ログ（JSON 形式） | P2 | `logger.py` に JSON フォーマッタを追加し、`LOG_FORMAT=json` 環境変数で切替可能にする |
+| NF-303 | アラートルール定義 | P2 | 「日次パイプライン N 回連続失敗」「日次損失上限 3 日連続発動」等の条件をコード化し、条件非成立時はサマリーのみ Discord 送信する |
+
+---
+
+## NF-Phase 4: コード品質・保守性（Q1 2027）
+
+### 到達目標
+
+- カスタム例外階層でエラー制御を層別に整理し、横断的なエラーハンドリングを可能にする
+- 型安全性を強化し、実行時バグの発生率を下げる
+- DB スキーマ変更を追跡可能にし、ロールバックを安全に行えるようにする
+
+### 実施項目
+
+| ID | 施策 | 優先度 | 完了条件 |
+|---|---|---|---|
+| NF-401 | カスタム例外階層整備 | P3 | `src/domain/exceptions.py` に `StockFixerError` 基底クラスと `DataFetchError` / `ModelTrainingError` / `BrokerError` / `PipelineError` を定義し、各層で使用する |
+| NF-402 | Pylint 有効化 | P3 | `.pre-commit-config.yaml` の pylint コメントアウトを解除し、Git バージョン問題を解消してフックを有効化する |
+| NF-403 | DB マイグレーション戦略正式化 | P3 | `src/utils/db/migrations/` ディレクトリに連番 SQL ファイルを配置し、起動時にバージョンチェック + 未適用マイグレーションを自動実行する |
+
+---
+
+## NF-Phase 5: 運用制度・ドキュメント（Q1〜Q2 2027）
+
+### 到達目標
+
+- デプロイ・障害対応の手順を属人化から脱却させる
+- 設計判断の根拠を記録し、将来の変更コストを下げる
+- 外部向け API の仕様を明文化し、R-304 収益化 PoC の前提を整える
+
+### 実施項目
+
+| ID | 施策 | 優先度 | 完了条件 |
+|---|---|---|---|
+| NF-501 | デプロイ Runbook 作成 | P3 | `docs/RUNBOOK_DEPLOY.md` に「正常デプロイ」「ロールバック」「手動デプロイ」「バージョン切り戻し」の手順を記載する |
+| NF-502 | 障害対応フロー文書化 | P3 | `docs/INCIDENT_RESPONSE.md` に障害レベル定義（P1〜P3）・エスカレーションフロー・ポストモーテムテンプレートを記載する |
+| NF-503 | ADR 導入 | P3 | `docs/adr/` ディレクトリを作成し、「DuckDB 採用理由」「short-lived connection 採用理由」等の過去決定を遡及的に記録する |
+| NF-504 | API 仕様書（OpenAPI）整備 | P3 | Flask エンドポイントと Discord コマンド仕様を `docs/API_SPEC.md` にまとめる。R-304 着手前に完了する |
+
+---
+
 ## Q2 2027+（拡張・収益多様化フェーズ）
 
 ### 到達目標
@@ -192,12 +334,32 @@
 
 ## 6. 進捗ボード
 
-### アクティブ施策
+### アクティブ施策（収益改善）
 
 | ID | ステータス | 期限 | 更新日 | メモ |
 |---|---|---|---|---|
 | R-203 | DONE | 2026-04-12 | 2026-04-12 | monthly_report_pipeline / run_monthly_report.py / /monthlyreport コマンド実装完了 |
 | R-211 | DONE | 2026-10-12 | 2026-04-13 | experiment_runs DDL追加・db/experiment.py CRUD・model_training_pipeline run_id自動記録実装完了 |
+
+### アクティブ施策（非機能改善）
+
+| ID | ステータス | 期限 | 更新日 | メモ |
+|---|---|---|---|---|
+| NF-101 | TODO | 2026-04-26 | - | requirements-dev.txt を作成し Dockerfile の COPY を requirements.txt のみに変更 |
+| NF-102 | TODO | 2026-04-26 | - | services/brokers/models 層の broad except を置換 |
+| NF-201 | TODO | 2026-10-31 | - | .github/workflows/integration-tests.yml 追加 |
+| NF-202 | TODO | 2026-10-31 | - | GHA に pip-audit ステップ追加 |
+| NF-203 | TODO | 2026-11-07 | - | GHA に bandit ステップ追加 |
+| NF-301 | TODO | 2026-11-30 | - | Flask /health エンドポイント実装、Docker HEALTHCHECK 更新 |
+| NF-302 | TODO | 2026-12-07 | - | logger.py に JSON フォーマッタ追加、LOG_FORMAT 環境変数対応 |
+| NF-303 | TODO | 2026-12-14 | - | 条件付きアラートルール定義 |
+| NF-401 | TODO | 2027-01-25 | - | src/domain/exceptions.py 作成 |
+| NF-402 | TODO | 2027-02-01 | - | pylint 有効化（Git バージョン問題解消） |
+| NF-403 | TODO | 2027-02-15 | - | src/utils/db/migrations/ ディレクトリ + マイグレーションランナー実装 |
+| NF-501 | TODO | 2027-01-18 | - | docs/RUNBOOK_DEPLOY.md 作成 |
+| NF-502 | TODO | 2027-02-08 | - | docs/INCIDENT_RESPONSE.md 作成 |
+| NF-503 | TODO | 2027-03-01 | - | docs/adr/ ディレクトリ作成・過去ADR遡及記録 |
+| NF-504 | TODO | 2027-03-15 | - | docs/API_SPEC.md 作成（R-304 の前提） |
 | R-212 | DONE | 2026-11-02 | 2026-04-12 | compute_multi_horizon_score / apply_multi_horizon_score_column 実装・order_execution_pipeline の buy/sell 判定を統合スコアへ移行 |
 | R-213 | DONE | 2026-11-09 | 2026-04-14 | volume_ratio / volume_price_trend / volume_ma_deviation を add_technical_indicators() に追加。モデル再学習が必要。 |
 | R-214 | TODO | 2026-11-16 | - | 予測変動量閾値による発注スキップロジックを order_execution_pipeline に追加 |
@@ -228,6 +390,8 @@
 
 ステータス定義：TODO / DOING / BLOCKED / DONE（KPI評価済み）
 
+> **非機能施策の完了判定**: 収益KPIではなく、完了条件欄に記載した技術的な受け入れ基準を満たした時点で DONE とする
+
 ---
 
 ### 完了済みアーカイブ
@@ -254,13 +418,22 @@
 
 ## 7. 実行ルール
 
+### 共通
 - 新規施策は必ず ID を採番してから着手する
 - 実装に着手する施策は原則として対応する GitHub Issue を持つ
 - ロードマップ側には Issue のフル URL を多用せず、Issue 番号または対応表で参照する
-- 完了判定は「実装完了」ではなく「KPI評価完了」で行う
 - 施策中止時は理由をメモし、類似施策の再検討条件を残す
-- 毎週1回、進捗ボードとKPIトレンドを更新する
+- 毎週1回、進捗ボードと KPI トレンドを更新する
 - 完了済み施策は「完了済みアーカイブ」へ移動し、本文から詳細を削除する
+
+### 収益改善施策（R-xxx）
+- 完了判定は「実装完了」ではなく「KPI評価完了」で行う
+
+### 非機能改善施策（NF-xxx）
+- ID採番ルール: `NF-1xx` CI/CD、`NF-2xx` 即効品質、`NF-3xx` 監視、`NF-4xx` コード品質、`NF-5xx` 制度文書
+- 完了判定は各施策の「完了条件」欄に記載した技術的受け入れ基準で行う
+- 収益施策のスプリントと並行着手を原則とし、収益施策の遅延要因にしない
+- NF-Phase 1（NF-101/102）は他フェーズに先行して即着手する
 
 ---
 
@@ -270,3 +443,4 @@
 - 2026-04-11: R-203 の前提整備として Discord API 層と時刻処理ポリシーを整備
 - 2026-04-11: 完了済み施策をアーカイブに圧縮し、未着手・実施中施策のみ詳細表示に再構成
 - 2026-04-11: 収益改善追加施策として R-212〜R-215（Q4 2026 即効・低コスト）、R-305〜R-308（Q1 2027 中期）、R-401〜R-407（Q2 2027+ 長期）を追加
+- 2026-04-19: 非機能改善施策（NF-101〜NF-504）を新設。CI/CD・監視・コード品質・制度文書の5フェーズ15施策を追加
