@@ -1,0 +1,135 @@
+name: Security Scan
+
+on:
+  pull_request:
+    paths:
+      - "python/requirements*.txt"
+      - "python/src/**"
+      - ".github/workflows/security.yml"
+  push:
+    branches:
+      - feature/training
+    paths:
+      - "python/requirements*.txt"
+      - "python/src/**"
+      - ".github/workflows/security.yml"
+  schedule:
+    - cron: "0 9 * * 1"
+
+jobs:
+  pip-audit:
+    name: Dependency Vulnerability Scan (pip-audit)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: python
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Audit requirements.txt
+        run: |
+          pip-audit -r requirements.txt --strict --format json -o pip-audit-prod.json || echo "VULN_FOUND=true" >> $GITHUB_ENV
+
+      - name: Audit requirements-dev.txt
+        run: |
+          pip-audit -r requirements-dev.txt --strict --format json -o pip-audit-dev.json || echo "VULN_DEV_FOUND=true" >> $GITHUB_ENV
+
+      - name: Write summary
+        if: always()
+        run: |
+          echo "## pip-audit Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f pip-audit-prod.json ]; then
+            echo "### requirements.txt" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            cat pip-audit-prod.json >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ -f pip-audit-dev.json ]; then
+            echo "### requirements-dev.txt" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            cat pip-audit-dev.json >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Fail if vulnerabilities found
+        if: env.VULN_FOUND == 'true' || env.VULN_DEV_FOUND == 'true'
+        run: |
+          echo "::error::Vulnerabilities detected. See summary for details."
+          exit 1
+
+  bandit:
+    name: SAST Scan (bandit)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: python
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install bandit
+        run: pip install bandit
+
+      - name: Run bandit scan
+        run: |
+          bandit -r src/ --exclude src/_deprecated --format json -o bandit-report.json || true
+
+      - name: Parse results and set exit code
+        run: |
+          python - << 'EOF'
+          import json, sys, os
+
+          with open("bandit-report.json") as f:
+              report = json.load(f)
+
+          results = report.get("results", [])
+          high    = [r for r in results if r["issue_severity"] == "HIGH"]
+          medium  = [r for r in results if r["issue_severity"] == "MEDIUM"]
+
+          summary = os.environ.get("GITHUB_STEP_SUMMARY", "/dev/null")
+          with open(summary, "a") as s:
+              s.write("## Bandit SAST Results\n\n")
+              if medium:
+                  s.write(f"### :warning: MEDIUM severity ({len(medium)} findings)\n\n")
+                  for r in medium:
+                      s.write(f"- `{r['filename']}:{r['line_number']}` — {r['test_id']}: {r['issue_text']}\n")
+                  s.write("\n")
+              if high:
+                  s.write(f"### :x: HIGH severity ({len(high)} findings)\n\n")
+                  for r in high:
+                      s.write(f"- `{r['filename']}:{r['line_number']}` — {r['test_id']}: {r['issue_text']}\n")
+              if not high and not medium:
+                  s.write(":white_check_mark: No issues found.\n")
+
+          if high:
+              print(f"::error::bandit detected {len(high)} HIGH severity issue(s). Failing.")
+              sys.exit(1)
+          elif medium:
+              print(f"::warning::{len(medium)} MEDIUM severity issue(s) found (not failing).")
+          else:
+              print("No issues found.")
+          EOF
+
+      - name: Upload bandit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-report
+          path: python/bandit-report.json

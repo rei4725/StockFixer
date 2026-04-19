@@ -28,6 +28,12 @@ python/coverage.json
 .coverage
 htmlcov/
 
+# Security scan reports
+bandit-report/
+
+# Pytest temporary files
+python/.pytest_tmp/
+
 # OS generated files
 .DS_Store
 Thumbs.db

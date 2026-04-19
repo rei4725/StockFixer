@@ -1,0 +1,76 @@
+name: Integration / E2E Tests
+
+on:
+  pull_request:
+    paths:
+      - "python/**"
+      - ".github/workflows/integration-tests.yml"
+  push:
+    branches:
+      - feature/training
+    paths:
+      - "python/**"
+      - ".github/workflows/integration-tests.yml"
+
+jobs:
+  integration-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: python
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Run integration tests
+        run: python -m pytest tests/integration/ -v --timeout=120
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-logs
+          path: python/logs/
+
+  e2e-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: python
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Run E2E tests (not slow)
+        run: python -m pytest tests/e2e/ -v --timeout=60 -m "not slow"
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-test-logs
+          path: python/logs/
