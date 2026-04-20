@@ -41,7 +41,7 @@ MAX_POSITIONS: int = _int("MAX_POSITIONS", 10)
 
 from config.trading_policy import KELLY_CAP as _KELLY_CAP  # noqa: E402
 
-#: Kelly 基準に掛ける安全係数（ハーフケリー = 0.5）
+#: Kelly 基準に掛ける安全係数（プロファイル依存、moderate 時 = 0.375）
 HALF_KELLY: float = _float("HALF_KELLY", _KELLY_CAP / 2)
 
 # ---------------------------------------------------------------------------

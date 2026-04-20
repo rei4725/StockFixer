@@ -9,7 +9,7 @@ import os
 
 _VALID_PROFILES = {"conservative", "moderate", "aggressive"}
 
-_PROFILE_DEFAULTS: dict[str, dict] = {
+_PROFILE_DEFAULTS: dict[str, dict[str, float]] = {
     "conservative": {
         "MAX_ACCEPTABLE_DRAWDOWN": 0.10,
         "KELLY_CAP": 0.50,
@@ -31,14 +31,24 @@ _PROFILE_DEFAULTS: dict[str, dict] = {
 }
 
 
-def _strict_float(env: str, default: float) -> float:
+def _strict_float(
+    env: str,
+    default: float,
+    min_val: float = 0.0,
+    max_val: float = float("inf"),
+) -> float:
+    import math
+
     val = os.getenv(env, "").strip()
     if not val:
         return default
     try:
-        return float(val)
+        result = float(val)
     except ValueError:
         raise ValueError(f"環境変数 {env}='{val}' を float に変換できません")
+    if math.isnan(result) or math.isinf(result) or not (min_val <= result <= max_val):
+        raise ValueError(f"環境変数 {env}={result} は範囲外です（{min_val} ≤ x ≤ {max_val}）")
+    return result
 
 
 _raw_profile = os.getenv("RISK_PROFILE", "moderate").strip().lower()
@@ -49,10 +59,15 @@ RISK_PROFILE: str = _raw_profile
 _defaults = _PROFILE_DEFAULTS[RISK_PROFILE]
 
 MAX_ACCEPTABLE_DRAWDOWN: float = _strict_float(
-    "MAX_ACCEPTABLE_DRAWDOWN", _defaults["MAX_ACCEPTABLE_DRAWDOWN"]
+    "MAX_ACCEPTABLE_DRAWDOWN", _defaults["MAX_ACCEPTABLE_DRAWDOWN"], min_val=0.0, max_val=1.0
 )
-KELLY_CAP: float = _strict_float("KELLY_CAP", _defaults["KELLY_CAP"])
+KELLY_CAP: float = _strict_float("KELLY_CAP", _defaults["KELLY_CAP"], min_val=0.0, max_val=1.0)
 HIGH_CONFIDENCE_POSITION_CAP: float = _strict_float(
-    "HIGH_CONFIDENCE_POSITION_CAP", _defaults["HIGH_CONFIDENCE_POSITION_CAP"]
+    "HIGH_CONFIDENCE_POSITION_CAP",
+    _defaults["HIGH_CONFIDENCE_POSITION_CAP"],
+    min_val=0.0,
+    max_val=1.0,
 )
-MIN_SHARPE_TO_TRADE: float = _strict_float("MIN_SHARPE_TO_TRADE", _defaults["MIN_SHARPE_TO_TRADE"])
+MIN_SHARPE_TO_TRADE: float = _strict_float(
+    "MIN_SHARPE_TO_TRADE", _defaults["MIN_SHARPE_TO_TRADE"], min_val=0.0, max_val=10.0
+)

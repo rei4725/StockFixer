@@ -57,6 +57,15 @@ class TestTradingPolicyProfileOverride(unittest.TestCase):
             with self.assertRaises(ValueError):
                 importlib.reload(tp)
 
+    def tearDown(self):
+        import config.trading_policy as _tp
+
+        with patch.dict("os.environ", {"RISK_PROFILE": "moderate"}, clear=False):
+            try:
+                importlib.reload(_tp)
+            except Exception:
+                pass
+
 
 class TestTradingPolicyIndividualOverride(unittest.TestCase):
     def _load(self, env: dict):
@@ -76,6 +85,29 @@ class TestTradingPolicyIndividualOverride(unittest.TestCase):
         with patch.dict("os.environ", {"KELLY_CAP": "not_a_number"}, clear=False):
             with self.assertRaises(ValueError):
                 importlib.reload(tp)
+
+    def test_kelly_cap_out_of_range_raises_value_error(self):
+        import config.trading_policy as tp
+
+        with patch.dict("os.environ", {"KELLY_CAP": "1.5"}, clear=False):
+            with self.assertRaises(ValueError):
+                importlib.reload(tp)
+
+    def test_kelly_cap_nan_raises_value_error(self):
+        import config.trading_policy as tp
+
+        with patch.dict("os.environ", {"KELLY_CAP": "nan"}, clear=False):
+            with self.assertRaises(ValueError):
+                importlib.reload(tp)
+
+    def tearDown(self):
+        import config.trading_policy as _tp
+
+        with patch.dict("os.environ", {"RISK_PROFILE": "moderate"}, clear=False):
+            try:
+                importlib.reload(_tp)
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":
