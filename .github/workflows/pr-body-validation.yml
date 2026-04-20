@@ -59,7 +59,8 @@ jobs:
             if [[ "$value" =~ ^(tbd|todo|n/a|na|未入力|未記入|未設定|入力してください|-+)$ ]]; then
               return 0
             fi
-            if [[ "$value" =~ ^[<\[].*[>\]]$ ]]; then
+            # Avoid bash parser ambiguity with '<' inside [[ ... =~ ... ]].
+            if [[ "$value" == \<*\> || "$value" == \[*\] ]]; then
               return 0
             fi
             return 1
