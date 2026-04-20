@@ -96,6 +96,13 @@ run_*.py → api層 → services層 → models/strategy/backtest層 → features
 - エラーハンドリングを適切に実装
 - コメントは必要な箇所にのみ付ける
 
+### バージョン判定・PR記載ルール（必須）
+- バージョン判定の正本は `docs/VERSIONING_POLICY.md` とする
+- PR本文には `version_impact` と `version_rationale` を必須記載とする
+- PR作成時は `VERSION` を更新するか、未更新の場合は不要理由を必ず記載する
+- `version_impact` が `major` / `minor` / `patch` の場合は `VERSION` 更新必須
+- `version_impact` が `none` の場合のみ `VERSION` 未更新を許可する
+
 ### 作業開始前の必須手順
 - **開発作業を始める前に必ず以下を実行すること（スキップ禁止）**
   1. `git fetch` でリモートの最新状態を取得する
@@ -210,3 +217,4 @@ run_*.py → api層 → services層 → models/strategy/backtest層 → features
 ## 参照ドキュメント
 - `docs/PROJECT_OVERVIEW.md` - システム構成・アーキテクチャ図
 - `docs/ARCHITECTURE.md` - 詳細アーキテクチャ・レイヤー構造・データフロー
+- `docs/VERSIONING_POLICY.md` - version_impact 判定・VERSION更新要件（正本）

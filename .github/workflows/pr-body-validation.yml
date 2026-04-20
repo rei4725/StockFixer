@@ -1,0 +1,138 @@
+name: PR Body Validation
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+jobs:
+  validate-pr-body:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate required sections
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          raw_body="${PR_BODY:-}"
+          if [ -z "$raw_body" ]; then
+            echo "PR body is empty"
+            exit 1
+          fi
+
+          # Strip HTML comments to prevent template comments from affecting validation.
+          body=$(perl -0777 -pe 's/<!--.*?-->//gs' <<< "$raw_body" | tr -d '\r')
+
+          require_section() {
+            local name="$1"
+            if ! grep -Eiq "^##[[:space:]]+${name}[[:space:]]*$" <<< "$body"; then
+              echo "Missing section: ## ${name}"
+              exit 1
+            fi
+          }
+
+          extract_section() {
+            local name="$1"
+            awk -v target="$name" '
+              BEGIN { in_target=0 }
+              $0 ~ "^##[[:space:]]+" target "[[:space:]]*$" { in_target=1; next }
+              $0 ~ "^##[[:space:]]+" {
+                if (in_target == 1) {
+                  exit
+                }
+              }
+              in_target == 1 { print }
+            ' <<< "$body"
+          }
+
+          first_non_empty_line() {
+            sed -E 's/^[[:space:]]+|[[:space:]]+$//g' <<< "$1" | awk 'NF { print; exit }'
+          }
+
+          is_placeholder_or_empty() {
+            local value
+            value=$(tr '[:upper:]' '[:lower:]' <<< "${1:-}" | xargs)
+            if [ -z "$value" ]; then
+              return 0
+            fi
+            if [[ "$value" =~ ^(tbd|todo|n/a|na|未入力|未記入|未設定|入力してください|-+)$ ]]; then
+              return 0
+            fi
+            if [[ "$value" =~ ^[<\[].*[>\]]$ ]]; then
+              return 0
+            fi
+            return 1
+          }
+
+          extract_kv_value() {
+            local section="$1"
+            local key="$2"
+            sed -nE "s/^[[:space:]-]*${key}:[[:space:]]*(.*)$/\1/ip" <<< "$section" | head -n1 | xargs
+          }
+
+          require_section "version_impact"
+          require_section "version_rationale"
+          require_section "VERSION 更新"
+          require_section "VERSION 未更新理由"
+
+          impact_section=$(extract_section "version_impact")
+          impact=$(tr '[:upper:]' '[:lower:]' <<< "$(first_non_empty_line "$impact_section")" | xargs)
+          if is_placeholder_or_empty "$impact"; then
+            echo "version_impact is required"
+            exit 1
+          fi
+          if ! [[ "$impact" =~ ^(major|minor|patch|none)$ ]]; then
+            echo "version_impact must be exactly one of: major/minor/patch/none"
+            exit 1
+          fi
+
+          rationale_section=$(extract_section "version_rationale")
+          rationale=$(first_non_empty_line "$rationale_section")
+          if is_placeholder_or_empty "$rationale"; then
+            echo "version_rationale is required"
+            exit 1
+          fi
+
+          version_section=$(extract_section "VERSION 更新")
+          version_update_required=$(tr '[:upper:]' '[:lower:]' <<< "$(extract_kv_value "$version_section" "version_update_required")" | xargs)
+          if ! [[ "$version_update_required" =~ ^(yes|no)$ ]]; then
+            echo "Missing or invalid: version_update_required: yes|no"
+            exit 1
+          fi
+
+          version_before=$(extract_kv_value "$version_section" "version_before")
+          version_after=$(extract_kv_value "$version_section" "version_after")
+
+          if [[ "$impact" =~ ^(major|minor|patch)$ ]]; then
+            if [ "$version_update_required" != "yes" ]; then
+              echo "version_impact is ${impact}, so version_update_required must be yes"
+              exit 1
+            fi
+
+            if is_placeholder_or_empty "$version_before" || is_placeholder_or_empty "$version_after"; then
+              echo "version_before/version_after are required for major/minor/patch"
+              exit 1
+            fi
+
+            if [[ ! "$version_before" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || [[ ! "$version_after" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "version_before/version_after must be SemVer numbers like 1.2.3"
+              exit 1
+            fi
+
+            if [ "$version_before" = "$version_after" ]; then
+              echo "version_before and version_after must be different for major/minor/patch"
+              exit 1
+            fi
+          fi
+
+          if [ "$version_update_required" = "no" ]; then
+            reason_section=$(extract_section "VERSION 未更新理由")
+            reason=$(first_non_empty_line "$reason_section")
+            if is_placeholder_or_empty "$reason"; then
+              echo "VERSION 未更新理由 is required when version_update_required is no"
+              exit 1
+            fi
+          fi
+
+          echo "PR body validation passed"
