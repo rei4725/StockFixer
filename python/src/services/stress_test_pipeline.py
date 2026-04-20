@@ -1,4 +1,4 @@
-"""
+﻿"""
 ストレステストパイプライン
 
 コロナショック / リーマンショックなど、歴史的暴落期間を対象に
@@ -10,11 +10,13 @@ run_stress_test.py はこのモジュールの関数を呼び出すラッパー�
 from __future__ import annotations
 
 import os
+from datetime import datetime
 from typing import Optional
 
 import pandas as pd
 
-from src.domain.types import StressTestResult
+from src.domain.types import StressTestResult, SymbolTask
+from src.services.backtest_pipeline import run_backtest_single
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -117,8 +119,6 @@ def run_stress_test_single(
     logger.info(f"[stress_test] 開始: {market}/{symbol} シナリオ={label} ({start_date}~{end_date})")
 
     try:
-        from src.services.backtest_pipeline import run_backtest_single
-
         result_df, metrics, _ = run_backtest_single(
             market=market,
             symbol=symbol,
@@ -166,7 +166,7 @@ def run_stress_test_single(
 
 
 def run_stress_test_batch(
-    targets: list[dict],
+    targets: list[SymbolTask],
     scenarios: Optional[list[str]] = None,
     model_type: str = "XGBoostModel",
     source: str = "api",
@@ -176,7 +176,7 @@ def run_stress_test_batch(
     """複数銘柄・複数シナリオのストレステストをバッチ実行する。
 
     Args:
-        targets: [{"market": "jp", "symbol": "7203"}, ...] 形式のリスト
+        targets: SymbolTask のリスト
         scenarios: 実行するシナリオキーのリスト（None なら全シナリオ）
         model_type: モデルタイプ
         source: データソース
@@ -194,8 +194,8 @@ def run_stress_test_batch(
     done = 0
 
     for target in targets:
-        market = target["market"]
-        symbol = target["symbol"]
+        market = target.market
+        symbol = target.symbol
         for scenario_name in scenarios:
             done += 1
             logger.info(f"[stress_test] バッチ {done}/{total}: {market}/{symbol} {scenario_name}")
@@ -252,8 +252,6 @@ def save_stress_test_results(
         for r in results
     ]
     df = pd.DataFrame(rows)
-    from datetime import datetime
-
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filepath = os.path.join(output_dir, f"stress_test_{timestamp}.csv")
     df.to_csv(filepath, index=False, encoding="utf-8-sig")

@@ -10,12 +10,13 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from src.domain.types import StressTestResult
+from src.domain.types import StressTestResult, SymbolTask
 from src.services.stress_test_pipeline import (
     MDD_THRESHOLD,
     STRESS_SCENARIOS,
     _compute_max_consecutive_losses,
     print_stress_test_summary,
+    run_stress_test_batch,
     run_stress_test_single,
     save_stress_test_results,
 )
@@ -182,7 +183,7 @@ class TestRunStressTestSingleMock:
             }
         )
 
-    @patch("src.services.backtest_pipeline.run_backtest_single")
+    @patch("src.services.stress_test_pipeline.run_backtest_single")
     def test_run_stress_test_single_mock(self, mock_backtest):
         """run_backtest_single をモックして StressTestResult 変換を検証する"""
         from src.services.stress_test_pipeline import run_stress_test_single
@@ -224,7 +225,7 @@ class TestRunStressTestSingleMock:
         )
         assert result is None
 
-    @patch("src.services.backtest_pipeline.run_backtest_single")
+    @patch("src.services.stress_test_pipeline.run_backtest_single")
     def test_run_stress_test_single_backtest_failure(self, mock_backtest):
         """バックテストが例外を投げた場合 None が返ること"""
         mock_backtest.side_effect = RuntimeError("データ取得失敗")
@@ -309,3 +310,71 @@ class TestPrintStressTestSummarySmoke:
         print_stress_test_summary([])
         captured = capsys.readouterr()
         assert "結果がありません" in captured.out
+
+
+class TestRunStressTestBatch:
+    """run_stress_test_batch のモックテスト"""
+
+    def _make_symbol_tasks(self):
+        return [
+            SymbolTask(market="jp", symbol="7203"),
+            SymbolTask(market="us", symbol="AAPL"),
+        ]
+
+    @patch("src.services.stress_test_pipeline.run_stress_test_single")
+    def test_batch_returns_all_results(self, mock_single):
+        """全銘柄・全シナリオの結果が返ること"""
+        mock_single.return_value = StressTestResult(
+            market="jp",
+            symbol="7203",
+            scenario_name="corona",
+            period_start="2020-02-01",
+            period_end="2020-03-31",
+            mdd=-0.08,
+            sharpe_ratio=1.0,
+            total_return=0.05,
+            win_rate=0.6,
+            num_trades=4,
+            max_consecutive_losses=1,
+            mdd_pass=True,
+        )
+        targets = self._make_symbol_tasks()
+        results = run_stress_test_batch(targets=targets)
+
+        # 2銘柄 × 2シナリオ = 4件
+        assert len(results) == 4
+        assert mock_single.call_count == 4
+
+    @patch("src.services.stress_test_pipeline.run_stress_test_single")
+    def test_batch_skips_failed_results(self, mock_single):
+        """run_stress_test_single が None を返した銘柄はスキップされること"""
+        mock_single.return_value = None
+        targets = [SymbolTask(market="jp", symbol="7203")]
+        results = run_stress_test_batch(targets=targets)
+
+        assert results == []
+
+    @patch("src.services.stress_test_pipeline.run_stress_test_single")
+    def test_batch_default_all_scenarios(self, mock_single):
+        """scenarios=None のとき全シナリオ（corona + lehman）が実行されること"""
+        mock_single.return_value = None
+        targets = [SymbolTask(market="jp", symbol="7203")]
+        run_stress_test_batch(targets=targets, scenarios=None)
+
+        called_scenarios = [call.kwargs["scenario_name"] for call in mock_single.call_args_list]
+        assert set(called_scenarios) == {"corona", "lehman"}
+
+    @patch("src.services.stress_test_pipeline.run_stress_test_single")
+    def test_batch_single_scenario_filter(self, mock_single):
+        """scenarios=[corona] のとき corona のみ実行されること"""
+        mock_single.return_value = None
+        targets = [SymbolTask(market="jp", symbol="7203")]
+        run_stress_test_batch(targets=targets, scenarios=["corona"])
+
+        assert mock_single.call_count == 1
+        assert mock_single.call_args.kwargs["scenario_name"] == "corona"
+
+    def test_batch_empty_targets(self):
+        """空ターゲットでは空リストが返ること"""
+        results = run_stress_test_batch(targets=[])
+        assert results == []

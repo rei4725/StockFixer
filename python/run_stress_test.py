@@ -22,6 +22,7 @@ import argparse
 import os
 import sys
 
+from src.domain.types import SymbolTask
 from src.services.stress_test_pipeline import (
     print_stress_test_summary,
     run_stress_test_batch,
@@ -85,9 +86,9 @@ if __name__ == "__main__":
 
         # 対象銘柄リスト構築
         if args.symbols:
-            targets = [{"market": args.market, "symbol": s} for s in args.symbols]
+            targets = [SymbolTask(market=args.market, symbol=s) for s in args.symbols]
         elif args.symbol:
-            targets = [{"market": args.market, "symbol": args.symbol}]
+            targets = [SymbolTask(market=args.market, symbol=args.symbol)]
         else:
             logger.critical("--symbol または --symbols を指定してください")
             sys.exit(1)
