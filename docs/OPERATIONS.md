@@ -8,6 +8,17 @@ StockFixer の Docker ビルド・デプロイ・日常運用に関する手順�
 - 運用手順の変更が必要になった場合のみ、本書へ運用コマンドや手順を追記する
 - 設計方針の変更が必要になった場合は `docs/ARCHITECTURE.md` を更新する
 
+## バージョン判定運用
+
+PR 作成前に以下を必ず実施する。
+
+1. 変更内容の `version_impact` を判定する
+2. 判定理由 (`version_rationale`) を記録する
+3. `version_impact` が `major` / `minor` / `patch` の場合は `VERSION` を更新する
+4. `version_impact` が `none` の場合は `VERSION` 未更新理由を PR に明記する
+
+判定基準の詳細と例外条件は `docs/VERSIONING_POLICY.md` を正本として参照する。
+
 ## 時刻運用ポリシー
 
 - ログ、状態ファイル、内部イベント時刻は UTC 保存を基本とする。

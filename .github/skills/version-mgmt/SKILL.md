@@ -7,6 +7,15 @@ compatibility: "Git 2.0+, Docker, docker-compose。プロジェクトルート�
 ## Goal
 Git タグベースのセマンティックバージョニングでプロジェクトのバージョンを管理し、Dockerイメージと連動させる。
 
+## Source Of Truth
+
+バージョン判定の正本は `docs/VERSIONING_POLICY.md` とする。
+
+- 本スキルで `version_impact` を判定する際は、必ず正本の判定基準に従う
+- PR本文には `version_impact` / `version_rationale` / `version_update_required` を記載する
+- `version_impact` が `major` / `minor` / `patch` の場合は `VERSION` 更新必須
+- `version_impact` が `none` の場合のみ `VERSION` 未更新を許可し、未更新理由を記載する
+
 ## バージョン体系
 
 ### セマンティックバージョニング（SemVer）
@@ -227,6 +236,12 @@ Release v1.2.3: 変更内容の要約
 | バグ修正、ドキュメント更新 | PATCH | v1.0.0 → v1.0.1 |
 | 新しい銘柄追加、新機能 | MINOR | v1.0.0 → v1.1.0 |
 | DB スキーマ変更、API 仕様変更 | MAJOR | v1.0.0 → v2.0.0 |
+
+### `none` の条件
+- 以下をすべて満たす場合のみ `version_impact: none` を選択できる
+  - 外部向けの挙動（API/CLI/設定/DBスキーマ）に変更がない
+  - 実行結果に影響するロジック変更がない
+  - 変更が docs / コメント / テスト / CI 設定調整などに限定される
 
 ## Troubleshooting
 
