@@ -1,6 +1,6 @@
 # StockFixer ロードマップ
 
-> 更新日: 2026-04-19  
+> 更新日: 2026-04-21  
 > 正本: このドキュメントで**収益改善施策**と**非機能改善施策（NF）**の優先度・進捗を管理する
 
 ---
@@ -87,11 +87,11 @@
 
 ### 現在の優先順（非機能改善）
 
-1. NF-101 `requirements-dev.txt` 分離（低コスト・即効）
-2. NF-102 broad `except Exception` 撲滅（services/brokers/models 層）
-3. NF-201 GHA Integration/E2E テスト追加
-4. NF-202 依存脆弱性スキャン（pip-audit）
-5. NF-203 SAST スキャン（bandit）
+1. ~~NF-101 `requirements-dev.txt` 分離（低コスト・即効）~~ ✅ 完了
+2. ~~NF-102 broad `except Exception` 撲滅（services/brokers/models 層）~~ ✅ 完了
+3. ~~NF-201 GHA Integration/E2E テスト追加~~ ✅ 完了
+4. ~~NF-202 依存脆弱性スキャン（pip-audit）~~ ✅ 完了
+5. ~~NF-203 SAST スキャン（bandit）~~ ✅ 完了
 6. NF-301 `/health` エンドポイント実装
 7. NF-302 構造化ログ（JSON 形式）
 8. NF-303 アラートルール定義
@@ -233,36 +233,36 @@
 
 ---
 
-## NF-Phase 1: 即効・低コスト（Q4 2026 Sprint 1〜2 並行）
+## NF-Phase 1: 即効・低コスト（Q4 2026 Sprint 1〜2 並行）✅ COMPLETE
 
 ### 到達目標
 
-- Dockerイメージから開発用ツールを排除し、本番攻撃面を縮小する
-- services/brokers/models 層のサイレント障害を排除し、エラー追跡を可能にする
+- Dockerイメージから開発用ツールを排除し、本番攻撃面を縮小する ✅
+- services/brokers/models 層のサイレント障害を排除し、エラー追跡を可能にする ✅
 
 ### 実施項目
 
-| ID | 施策 | 優先度 | 完了条件 |
-|---|---|---|---|
-| NF-101 | `requirements-dev.txt` 分離 | P1 | black/isort/flake8/mypy/pytest 等の開発依存を分離し、Dockerfile は requirements.txt のみ参照する |
-| NF-102 | broad `except Exception` 撲滅 | P1 | services・brokers・models 層で `except Exception: pass` または `except Exception:` をゼロにし、具体的な例外型 + `logger.error(..., exc_info=True)` に置換する |
+| ID | 施策 | 優先度 | ステータス | 完了日 | 完了条件 |
+|---|---|---|---|---|---|
+| NF-101 | `requirements-dev.txt` 分離 | P1 | DONE | 2026-04-21 | black/isort/flake8/mypy/pytest 等の開発依存を分離し、Dockerfile は requirements.txt のみ参照する |
+| NF-102 | broad `except Exception` 撲滅 | P1 | DONE | 2026-04-21 | services・brokers・models 層で `except Exception: pass` または `except Exception:` をゼロにし、具体的な例外型 + `logger.error(..., exc_info=True)` に置換する |
 
 ---
 
-## NF-Phase 2: CI/CD パイプライン強化（Q4 2026 Sprint 2〜3）
+## NF-Phase 2: CI/CD パイプライン強化（Q4 2026 Sprint 2〜3）✅ COMPLETE
 
 ### 到達目標
 
-- PR 時に Integration / E2E テストが自動実行され、デグレを即検出できる
-- 依存パッケージの既知 CVE と Python コードの危険パターンを CI で自動検出する
+- PR 時に Integration / E2E テストが自動実行され、デグレを即検出できる ✅
+- 依存パッケージの既知 CVE と Python コードの危険パターンを CI で自動検出する ✅
 
 ### 実施項目
 
-| ID | 施策 | 優先度 | 完了条件 |
-|---|---|---|---|
-| NF-201 | GHA Integration/E2E テスト追加 | P2 | `.github/workflows/` に integration-tests.yml を追加し、PR 時に `tests/integration/` と `tests/e2e/` を実行する |
-| NF-202 | 依存脆弱性スキャン（pip-audit） | P2 | GHA で `pip-audit` を実行し、HIGH 以上の CVE があればパイプラインを FAIL にする |
-| NF-203 | SAST スキャン（bandit） | P2 | GHA で `bandit -r src/ -ll` を実行し、HIGH severity の検出でパイプラインを FAIL にする |
+| ID | 施策 | 優先度 | ステータス | 完了日 | 完了条件 |
+|---|---|---|---|---|---|
+| NF-201 | GHA Integration/E2E テスト追加 | P2 | DONE | 2026-04-21 | `.github/workflows/` に integration-tests.yml を追加し、PR 時に `tests/integration/` と `tests/e2e/` を実行する |
+| NF-202 | 依存脆弱性スキャン（pip-audit） | P2 | DONE | 2026-04-21 | GHA で `pip-audit` を実行し、HIGH 以上の CVE があればパイプラインを FAIL にする |
+| NF-203 | SAST スキャン（bandit） | P2 | DONE | 2026-04-21 | GHA で `bandit -r src/ -ll` を実行し、HIGH severity の検出でパイプラインを FAIL にする |
 
 ---
 
@@ -356,11 +356,11 @@
 
 | ID | ステータス | 期限 | 更新日 | メモ |
 |---|---|---|---|---|
-| NF-101 | TODO | 2026-04-26 | - | requirements-dev.txt を作成し Dockerfile の COPY を requirements.txt のみに変更 |
-| NF-102 | TODO | 2026-04-26 | - | services/brokers/models 層の broad except を置換 |
-| NF-201 | TODO | 2026-10-31 | - | .github/workflows/integration-tests.yml 追加 |
-| NF-202 | TODO | 2026-10-31 | - | GHA に pip-audit ステップ追加 |
-| NF-203 | TODO | 2026-11-07 | - | GHA に bandit ステップ追加 |
+| NF-101 | DONE | 2026-04-21 | 2026-04-21 | requirements-dev.txt を作成し Dockerfile の COPY を requirements.txt のみに変更 |
+| NF-102 | DONE | 2026-04-21 | 2026-04-21 | services/brokers/models 層の broad except を置換 |
+| NF-201 | DONE | 2026-10-31 | 2026-04-21 | integration-tests.yml による統合テスト自動実行を確認済み |
+| NF-202 | DONE | 2026-10-31 | 2026-04-21 | pip-audit JSON パース統一・GITHUB_STEP_SUMMARY 出力・全脆弱性 FAIL |
+| NF-203 | DONE | 2026-11-07 | 2026-04-21 | bandit -ll フラグ・HIGH のみ FAIL・MEDIUM は warning・GITHUB_STEP_SUMMARY 出力 |
 | NF-301 | TODO | 2026-11-30 | - | Flask /health エンドポイント実装、Docker HEALTHCHECK 更新 |
 | NF-302 | TODO | 2026-12-07 | - | logger.py に JSON フォーマッタ追加、LOG_FORMAT 環境変数対応 |
 | NF-303 | TODO | 2026-12-14 | - | 条件付きアラートルール定義 |
@@ -426,6 +426,12 @@
 | R-109 | モデル信頼度によるポジション加減（confidence_ratio） | 2026-04-04 |
 | R-110 | 決算カレンダー回避フィルター（±3営業日マスク） | 2026-04-05 |
 | R-208 | 特徴量選択の自動化（Permutation Importance・SHAP保護） | 2026-04-05 |
+| NF-101 | `requirements-dev.txt` 分離（本番依存と開発ツールの分離） | 2026-04-21 |
+| NF-102 | broad `except Exception` 撲滅・ロギング改善 | 2026-04-21 |
+| NF-201 | GHA Integration/E2E テスト追加（integration-tests.yml 確認） | 2026-04-21 |
+| NF-202 | 依存脆弱性スキャン（pip-audit JSON パース統一・GITHUB_STEP_SUMMARY 出力） | 2026-04-21 |
+| NF-203 | SAST スキャン（bandit -ll 追加・HIGH のみ FAIL・MEDIUM は warning） | 2026-04-21 |
+| R-214 | 予測変動量閾値スキップロジック（MIN_CHANGE_RATIO・save_order_run_summary 接続） | 2026-04-21 |
 
 ---
 
