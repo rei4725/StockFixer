@@ -1,6 +1,6 @@
 # StockFixer ロードマップ
 
-> 更新日: 2026-04-19  
+> 更新日: 2026-04-21  
 > 正本: このドキュメントで**収益改善施策**と**非機能改善施策（NF）**の優先度・進捗を管理する
 
 ---
@@ -84,8 +84,8 @@
 
 ### 現在の優先順（非機能改善）
 
-1. NF-101 `requirements-dev.txt` 分離（低コスト・即効）
-2. NF-102 broad `except Exception` 撲滅（services/brokers/models 層）
+1. ~~NF-101 `requirements-dev.txt` 分離（低コスト・即効）~~ ✅ 完了
+2. ~~NF-102 broad `except Exception` 撲滅（services/brokers/models 層）~~ ✅ 完了
 3. NF-201 GHA Integration/E2E テスト追加
 4. NF-202 依存脆弱性スキャン（pip-audit）
 5. NF-203 SAST スキャン（bandit）
@@ -222,19 +222,19 @@
 
 ---
 
-## NF-Phase 1: 即効・低コスト（Q4 2026 Sprint 1〜2 並行）
+## NF-Phase 1: 即効・低コスト（Q4 2026 Sprint 1〜2 並行）✅ COMPLETE
 
 ### 到達目標
 
-- Dockerイメージから開発用ツールを排除し、本番攻撃面を縮小する
-- services/brokers/models 層のサイレント障害を排除し、エラー追跡を可能にする
+- Dockerイメージから開発用ツールを排除し、本番攻撃面を縮小する ✅
+- services/brokers/models 層のサイレント障害を排除し、エラー追跡を可能にする ✅
 
 ### 実施項目
 
-| ID | 施策 | 優先度 | 完了条件 |
-|---|---|---|---|
-| NF-101 | `requirements-dev.txt` 分離 | P1 | black/isort/flake8/mypy/pytest 等の開発依存を分離し、Dockerfile は requirements.txt のみ参照する |
-| NF-102 | broad `except Exception` 撲滅 | P1 | services・brokers・models 層で `except Exception: pass` または `except Exception:` をゼロにし、具体的な例外型 + `logger.error(..., exc_info=True)` に置換する |
+| ID | 施策 | 優先度 | ステータス | 完了日 | 完了条件 |
+|---|---|---|---|---|---|
+| NF-101 | `requirements-dev.txt` 分離 | P1 | DONE | 2026-04-21 | black/isort/flake8/mypy/pytest 等の開発依存を分離し、Dockerfile は requirements.txt のみ参照する |
+| NF-102 | broad `except Exception` 撲滅 | P1 | DONE | 2026-04-21 | services・brokers・models 層で `except Exception: pass` または `except Exception:` をゼロにし、具体的な例外型 + `logger.error(..., exc_info=True)` に置換する |
 
 ---
 
@@ -345,8 +345,8 @@
 
 | ID | ステータス | 期限 | 更新日 | メモ |
 |---|---|---|---|---|
-| NF-101 | TODO | 2026-04-26 | - | requirements-dev.txt を作成し Dockerfile の COPY を requirements.txt のみに変更 |
-| NF-102 | TODO | 2026-04-26 | - | services/brokers/models 層の broad except を置換 |
+| NF-101 | DONE | 2026-04-21 | 2026-04-21 | requirements-dev.txt を作成し Dockerfile の COPY を requirements.txt のみに変更 |
+| NF-102 | DONE | 2026-04-21 | 2026-04-21 | services/brokers/models 層の broad except を置換 |
 | NF-201 | TODO | 2026-10-31 | - | .github/workflows/integration-tests.yml 追加 |
 | NF-202 | TODO | 2026-10-31 | - | GHA に pip-audit ステップ追加 |
 | NF-203 | TODO | 2026-11-07 | - | GHA に bandit ステップ追加 |
@@ -413,6 +413,8 @@
 | R-109 | モデル信頼度によるポジション加減（confidence_ratio） | 2026-04-04 |
 | R-110 | 決算カレンダー回避フィルター（±3営業日マスク） | 2026-04-05 |
 | R-208 | 特徴量選択の自動化（Permutation Importance・SHAP保護） | 2026-04-05 |
+| NF-101 | `requirements-dev.txt` 分離（本番依存と開発ツールの分離） | 2026-04-21 |
+| NF-102 | broad `except Exception` 撲滅・ロギング改善 | 2026-04-21 |
 
 ---
 
@@ -444,3 +446,4 @@
 - 2026-04-11: 完了済み施策をアーカイブに圧縮し、未着手・実施中施策のみ詳細表示に再構成
 - 2026-04-11: 収益改善追加施策として R-212〜R-215（Q4 2026 即効・低コスト）、R-305〜R-308（Q1 2027 中期）、R-401〜R-407（Q2 2027+ 長期）を追加
 - 2026-04-19: 非機能改善施策（NF-101〜NF-504）を新設。CI/CD・監視・コード品質・制度文書の5フェーズ15施策を追加
+- **2026-04-21**: NF-101（requirements-dev.txt分離）・NF-102（except Exception撲滅）完了
