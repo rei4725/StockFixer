@@ -13,6 +13,9 @@ import pandas as pd
 from sklearn.model_selection import TimeSeriesSplit
 
 from src.backtest.task import BacktestTask, ReturnRegressionTask
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class WalkForwardValidator:
@@ -130,7 +133,7 @@ class WalkForwardValidator:
                 metrics["val_rows"] = len(val_df)
                 all_results.append(metrics)
             except Exception as e:
-                print(f"  [Fold {fold_idx+1}] エラー: {e}")
+                logger.error("[walk_forward] Fold %d エラー: %s", fold_idx + 1, e, exc_info=True)
                 all_results.append(
                     {
                         "fold": fold_idx + 1,

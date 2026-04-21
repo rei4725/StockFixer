@@ -33,7 +33,7 @@ def get_earnings_dates(market: str, symbol: str, limit: int = 12) -> pd.Datetime
         dates = dates.dropna().normalize().unique().sort_values()
         return pd.DatetimeIndex(dates)
     except Exception as exc:
-        logger.warning(f"決算日取得失敗 [{market}/{symbol}]: {exc}")
+        logger.warning(f"決算日取得失敗 [{market}/{symbol}]: {exc}", exc_info=True)
         return pd.DatetimeIndex([])
 
 
@@ -340,7 +340,7 @@ def fetch_cross_asset_features(start_date: str, end_date: str) -> "Optional[pd.D
             close.index = pd.DatetimeIndex(close.index).tz_localize(None)
             frames.append(close)
         except Exception as e:
-            logger.debug(f"クロスアセット取得スキップ [{ticker}]: {e}")
+            logger.debug(f"クロスアセット取得スキップ [{ticker}]: {e}", exc_info=True)
             continue
 
     if not frames:
