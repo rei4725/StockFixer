@@ -172,7 +172,7 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
         try:
             con.execute(f"ALTER TABLE prediction_results ADD COLUMN IF NOT EXISTS {col} {dtype}")
         except Exception:
-            pass  # DuckDB バージョンによっては IF NOT EXISTS 未対応のため握りつぶす
+            logger.debug("ALTER TABLE スキップ（DuckDB互換）: col=%s", col, exc_info=True)
     con.execute(
         """
         CREATE TABLE IF NOT EXISTS market_data_raw (

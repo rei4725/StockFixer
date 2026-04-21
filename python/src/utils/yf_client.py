@@ -95,8 +95,8 @@ def download(
     try:
         df = with_retry(_do)
         return _normalize(df)
-    except Exception as e:
-        logger.warning(f"[yf_client] download 失敗 ticker={ticker}: {e}")
+    except Exception:
+        logger.warning("[yf_client] download 失敗 ticker=%s", ticker, exc_info=True)
         return pd.DataFrame()
 
 
@@ -134,6 +134,6 @@ def ticker_history(
     try:
         df = with_retry(_do)
         return _normalize(df)
-    except Exception as e:
-        logger.warning(f"[yf_client] ticker_history 失敗 ticker={ticker}: {e}")
+    except Exception:
+        logger.warning("[yf_client] ticker_history 失敗 ticker=%s", ticker, exc_info=True)
         return pd.DataFrame()
