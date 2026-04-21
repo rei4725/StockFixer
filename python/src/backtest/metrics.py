@@ -14,6 +14,10 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
 
 def compute_metrics(
     trade_log: pd.DataFrame,
@@ -360,6 +364,7 @@ def fetch_benchmark_returns(
             "end": str(close.index[-1].date()),
         }
     except Exception:
+        logger.warning("ベンチマーク総リターン計算失敗: ticker=%s", ticker, exc_info=True)
         return {"ticker": ticker, "total_return": None, "start": start, "end": end}
 
 

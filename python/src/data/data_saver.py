@@ -13,6 +13,9 @@ import pandas as pd
 from src.data.data_loader import get_stock_data
 from src.utils.data_path_utils import get_ticker
 from src.utils.db import upsert_raw_ohlcv, upsert_stock_features
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def save_raw_ohlcv(
@@ -103,21 +106,28 @@ def save_raw_stock_data(
                 market, symbol, "1900-01-01", datetime.now().strftime("%Y-%m-%d")
             )
             if df_all is None or df_all.empty:
-                print(f"{symbol} のデータが取得できませんでした。")
+                logger.warning("データが取得できませんでした: symbol=%s", symbol)
                 return None
             start_date = df_all.index.min().strftime("%Y-%m-%d")
-        except Exception as e:
-            print(f"{symbol} のデータ取得でエラー: {e}")
+        except Exception:
+            logger.error("データ取得エラー: symbol=%s", symbol, exc_info=True)
             return None
         end_date = datetime.now().strftime("%Y-%m-%d")
 
     # 市場ごとにティッカーを補正
     ticker = get_ticker(market, symbol)
 
-    print(f"データ取得: market={market}, symbol={symbol}, ticker={ticker}, {start_date}～{end_date}")
+    logger.info(
+        "データ取得: market=%s, symbol=%s, ticker=%s, %s～%s",
+        market,
+        symbol,
+        ticker,
+        start_date,
+        end_date,
+    )
     df = get_stock_data(market, ticker, start_date, end_date)
     if df is None or df.empty:
-        print("データが取得できませんでした。")
+        logger.warning("データが取得できませんでした: market=%s, symbol=%s", market, symbol)
         return None
 
     # DBに保存
