@@ -450,7 +450,7 @@ def run_daily_orders(
         if abs(float(row.get("diff_ratio") or 0.0)) < MIN_CHANGE_RATIO:
             logger.info(
                 "[exec] %s: diff_ratio=%.3f%% < min_change=%.3f%% → スキップ",
-                row.get("symbol", "?"),
+                symbol,
                 float(row.get("diff_ratio") or 0) * 100,
                 MIN_CHANGE_RATIO * 100,
             )
