@@ -186,6 +186,48 @@ mcp_gitkraken_git_pull(directory="c:\\src\\StockFixer")
 4. `git_add_or_commit` (action="commit") でコミット
 5. `git_push` でリモートに反映
 
+### PR作成前のボディ検証チェック（必須）
+
+PR を作成・更新する前に、以下のセクションが **すべて** 含まれていることを確認すること。
+不足があると `PR Body Validation` CI が失敗する。
+
+| セクション見出し | 必須条件 |
+|---|---|
+| `## version_impact` | `major` / `minor` / `patch` / `none` のいずれか1語 |
+| `## version_rationale` | 空・プレースホルダー不可。変更根拠を1文以上記述 |
+| `## VERSION 更新` | `version_update_required: yes` または `version_update_required: no` を含む |
+| `## VERSION 未更新理由` | **常に見出しが必要**（`version_update_required: yes` の場合は「該当なし」等で可） |
+
+**`version_update_required` と `version_impact` の対応ルール:**
+
+| version_impact | version_update_required | VERSION 未更新理由 |
+|---|---|---|
+| major / minor / patch | `yes` 必須 | 見出しのみ（「該当なし」等でOK） |
+| none | `no` 必須 | 未更新理由を必ず記述 |
+
+**PR ボディテンプレート（コピー用）:**
+```markdown
+## version_impact
+
+minor
+
+## version_rationale
+
+（変更根拠を記述）
+
+## VERSION 更新
+
+- version_update_required: yes
+- version_before: X.Y.Z
+- version_after: X.Y.Z
+
+## VERSION 未更新理由
+
+（該当なし。version_update_required: yes のため不要）
+```
+
+> **なぜ必要か**: CI の `validate-pr-body` ジョブは4つのセクション見出しを `require_section` で常時チェックする。`version_update_required: yes` でも `## VERSION 未更新理由` 見出しが存在しないと失敗する。
+
 ### PRマージ前の必須確認（手動運用）
 1. GitHub の PR 画面で Actions タブを開く
 2. `Unit Tests` ワークフローが最新コミットで `Success` になっていることを確認
