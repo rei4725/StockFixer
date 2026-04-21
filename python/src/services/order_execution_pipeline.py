@@ -26,6 +26,7 @@ from config.settings import (
     LIMIT_ORDER_SPREAD_PROXY_THRESHOLD,
     MAX_ORDERS_PER_RUN,
     MAX_SECTOR_POSITIONS,
+    MIN_CHANGE_RATIO,
 )
 from src.brokers.base import BrokerBase, OrderSide, OrderType
 from src.domain.types import TradingGateStatus
@@ -36,6 +37,7 @@ from src.utils import yf_client
 from src.utils.data_path_utils import get_ticker
 from src.utils.db import upsert_paper_real_diff
 from src.utils.db._connection import _db_connection
+from src.utils.db.prediction import save_order_run_summary
 from src.utils.logger import get_logger
 from src.utils.sector_constraints import filter_by_sector_cap, get_symbol_sector
 
@@ -52,12 +54,14 @@ class OrderExecutionStats(TypedDict):
     buy_orders: int
     sell_orders: int
     skipped: int
+    skipped_min_change: int
     errors: int
     trading_stopped: bool
     stop_reason: str | None
     reason_code: str | None
     daily_loss: float
     daily_loss_limit: float | None
+    total_turnover: float
 
 
 def _load_latest_predictions(market: str) -> pd.DataFrame:
@@ -375,12 +379,14 @@ def run_daily_orders(
         "buy_orders": 0,
         "sell_orders": 0,
         "skipped": 0,
+        "skipped_min_change": 0,
         "errors": 0,
         "trading_stopped": False,
         "stop_reason": None,
         "reason_code": None,
         "daily_loss": 0.0,
         "daily_loss_limit": None,
+        "total_turnover": 0.0,
     }
 
     # --- 当日取引可否チェック ---
@@ -440,6 +446,17 @@ def run_daily_orders(
     ]
     for _, row in sell_signals.iterrows():
         symbol = row["symbol"]
+        # 予測変動量が閾値未満 → 発注スキップ（R-214）
+        if abs(float(row.get("diff_ratio") or 0.0)) < MIN_CHANGE_RATIO:
+            logger.info(
+                "[exec] %s: diff_ratio=%.3f%% < min_change=%.3f%% → スキップ",
+                symbol,
+                float(row.get("diff_ratio") or 0) * 100,
+                MIN_CHANGE_RATIO * 100,
+            )
+            stats["skipped_min_change"] += 1
+            stats["skipped"] += 1
+            continue
         try:
             # 保有全数を成行売り
             pos = next(
@@ -480,6 +497,7 @@ def run_daily_orders(
                 f"閾値={row['effective_sell_threshold']:.3%})"
             )
             stats["sell_orders"] += 1
+            stats["total_turnover"] += float(row.get("current_price") or 0.0) * qty
         except Exception as e:
             logger.error(f"[exec] 売り注文エラー ({symbol}): {e}", exc_info=True)
             stats["errors"] += 1
@@ -494,6 +512,18 @@ def run_daily_orders(
     for _, row in buy_signals.iterrows():
         symbol = row["symbol"]
         current_price = float(row.get("current_price") or 0)
+
+        # 予測変動量が閾値未満 → 発注スキップ（R-214）
+        if abs(float(row.get("diff_ratio") or 0.0)) < MIN_CHANGE_RATIO:
+            logger.info(
+                "[exec] %s: diff_ratio=%.3f%% < min_change=%.3f%% → スキップ",
+                symbol,
+                float(row.get("diff_ratio") or 0) * 100,
+                MIN_CHANGE_RATIO * 100,
+            )
+            stats["skipped_min_change"] += 1
+            stats["skipped"] += 1
+            continue
 
         if current_price <= 0:
             logger.warning(f"[exec] {symbol}: 現在値が取得できないためスキップ")
@@ -543,6 +573,7 @@ def run_daily_orders(
                 f"閾値={row['effective_buy_threshold']:.3%}, sector={row.get('sector', 'N/A')})"
             )
             stats["buy_orders"] += 1
+            stats["total_turnover"] += current_price * qty
         except Exception as e:
             logger.error(f"[exec] 買い注文エラー ({symbol}): {e}", exc_info=True)
             stats["errors"] += 1
@@ -553,4 +584,21 @@ def run_daily_orders(
     )
     if mode == "live":
         _sync_live_execution_diffs(broker)
+    # 発注サマリーを保存（R-214）
+    _run_id = str(uuid.uuid4())[:12]
+    try:
+        save_order_run_summary(
+            run_id=_run_id,
+            market=market,
+            mode=mode,
+            buy_orders=stats["buy_orders"],
+            sell_orders=stats["sell_orders"],
+            short_orders=0,
+            skipped=stats["skipped"],
+            skipped_min_change=stats["skipped_min_change"],
+            total_turnover=stats["total_turnover"],
+            min_change_ratio=MIN_CHANGE_RATIO,
+        )
+    except Exception:
+        logger.error("[exec] order_run_summary 保存失敗", exc_info=True)
     return stats
