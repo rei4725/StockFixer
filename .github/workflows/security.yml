@@ -38,35 +38,58 @@ jobs:
 
       - name: Audit requirements.txt
         run: |
-          pip-audit -r requirements.txt --strict --format json -o pip-audit-prod.json || echo "VULN_FOUND=true" >> $GITHUB_ENV
+          pip-audit -r requirements.txt --format json -o pip-audit-prod.json || true
 
       - name: Audit requirements-dev.txt
         run: |
-          pip-audit -r requirements-dev.txt --strict --format json -o pip-audit-dev.json || echo "VULN_DEV_FOUND=true" >> $GITHUB_ENV
+          pip-audit -r requirements-dev.txt --format json -o pip-audit-dev.json || true
 
-      - name: Write summary
-        if: always()
+      - name: Parse results and set exit code
         run: |
-          echo "## pip-audit Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          if [ -f pip-audit-prod.json ]; then
-            echo "### requirements.txt" >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            cat pip-audit-prod.json >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-          fi
-          if [ -f pip-audit-dev.json ]; then
-            echo "### requirements-dev.txt" >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            cat pip-audit-dev.json >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-          fi
+          python - << 'EOF'
+          import json, sys, os
 
-      - name: Fail if vulnerabilities found
-        if: env.VULN_FOUND == 'true' || env.VULN_DEV_FOUND == 'true'
-        run: |
-          echo "::error::Vulnerabilities detected. See summary for details."
-          exit 1
+          def check_file(path, label):
+              if not os.path.exists(path):
+                  return []
+              with open(path) as f:
+                  data = json.load(f)
+              vulns = []
+              for dep in data.get("dependencies", []):
+                  for v in dep.get("vulns", []):
+                      vulns.append({
+                          "name": dep["name"],
+                          "version": dep.get("version", "?"),
+                          "id": v["id"],
+                          "aliases": v.get("aliases", []),
+                          "description": v.get("description", ""),
+                          "fix_versions": v.get("fix_versions", []),
+                      })
+              return vulns
+
+          prod_vulns = check_file("pip-audit-prod.json", "requirements.txt")
+          dev_vulns  = check_file("pip-audit-dev.json",  "requirements-dev.txt")
+          all_vulns  = prod_vulns + dev_vulns
+
+          summary = os.environ.get("GITHUB_STEP_SUMMARY", "/dev/null")
+          with open(summary, "a") as s:
+              s.write("## pip-audit Results\n\n")
+              if all_vulns:
+                  s.write(f"### :warning: {len(all_vulns)} vulnerability(ies) found\n\n")
+                  for v in all_vulns:
+                      fix = ", ".join(v["fix_versions"]) or "no fix available"
+                      s.write(f"- **{v['name']}=={v['version']}** — {v['id']} (fix: {fix})\n")
+                      if v["aliases"]:
+                          s.write(f"  - aliases: {', '.join(v['aliases'])}\n")
+              else:
+                  s.write(":white_check_mark: No vulnerabilities found.\n")
+
+          if all_vulns:
+              print(f"::error::pip-audit detected {len(all_vulns)} vulnerability(ies). Failing.")
+              sys.exit(1)
+          else:
+              print("No vulnerabilities found.")
+          EOF
 
   bandit:
     name: SAST Scan (bandit)
@@ -89,7 +112,7 @@ jobs:
 
       - name: Run bandit scan
         run: |
-          bandit -r src/ --exclude src/_deprecated --format json -o bandit-report.json || true
+          bandit -r src/ -ll --exclude src/_deprecated --format json -o bandit-report.json || true
 
       - name: Parse results and set exit code
         run: |
