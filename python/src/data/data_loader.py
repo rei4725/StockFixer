@@ -339,8 +339,8 @@ def fetch_cross_asset_features(start_date: str, end_date: str) -> "Optional[pd.D
             # タイムゾーン除去
             close.index = pd.DatetimeIndex(close.index).tz_localize(None)
             frames.append(close)
-        except Exception as e:
-            logger.debug(f"クロスアセット取得スキップ [{ticker}]: {e}", exc_info=True)
+        except Exception:
+            logger.debug("クロスアセット取得スキップ [%s]", ticker, exc_info=True)
             continue
 
     if not frames:

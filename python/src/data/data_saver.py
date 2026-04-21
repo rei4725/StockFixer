@@ -117,10 +117,17 @@ def save_raw_stock_data(
     # 市場ごとにティッカーを補正
     ticker = get_ticker(market, symbol)
 
-    print(f"データ取得: market={market}, symbol={symbol}, ticker={ticker}, {start_date}～{end_date}")
+    logger.info(
+        "データ取得: market=%s, symbol=%s, ticker=%s, %s～%s",
+        market,
+        symbol,
+        ticker,
+        start_date,
+        end_date,
+    )
     df = get_stock_data(market, ticker, start_date, end_date)
     if df is None or df.empty:
-        print("データが取得できませんでした。")
+        logger.warning("データが取得できませんでした: market=%s, symbol=%s", market, symbol)
         return None
 
     # DBに保存

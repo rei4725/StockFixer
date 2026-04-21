@@ -116,7 +116,13 @@ class WalkForwardValidator:
 
             fold_start = val_df.index[0]
             fold_end = val_df.index[-1]
-            print(f"\n[Fold {fold_idx+1}/{self.n_splits}] 検証期間: {fold_start} ～ {fold_end}")
+            logger.info(
+                "[walk_forward] Fold %d/%d 検証期間: %s → %s",
+                fold_idx + 1,
+                self.n_splits,
+                fold_start,
+                fold_end,
+            )
 
             try:
                 metrics = self._run_fold(
@@ -133,7 +139,7 @@ class WalkForwardValidator:
                 metrics["val_rows"] = len(val_df)
                 all_results.append(metrics)
             except Exception as e:
-                logger.error("[walk_forward] Fold %d エラー: %s", fold_idx + 1, e, exc_info=True)
+                logger.error("[walk_forward] Fold %d エラー", fold_idx + 1, exc_info=True)
                 all_results.append(
                     {
                         "fold": fold_idx + 1,
