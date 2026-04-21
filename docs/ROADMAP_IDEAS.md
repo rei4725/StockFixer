@@ -71,7 +71,7 @@
 2. R-211 実験トラッキング基盤
 3. R-212 マルチホライズン統合シグナル ★新規
 4. R-213 出来高プロファイル特徴量 ★新規
-5. R-214 リバランス頻度最適化 ★新規
+5. ~~R-214 リバランス頻度最適化~~ ✅ 完了
 6. R-215 ショートサイド活用 ★新規
 7. R-210 動的スリッページモデル
 8. R-205 ストレステスト（歴史的クラッシュ再現）
@@ -362,7 +362,7 @@
 | NF-504 | TODO | 2027-03-15 | - | docs/API_SPEC.md 作成（R-304 の前提） |
 | R-212 | DONE | 2026-11-02 | 2026-04-12 | compute_multi_horizon_score / apply_multi_horizon_score_column 実装・order_execution_pipeline の buy/sell 判定を統合スコアへ移行 |
 | R-213 | DONE | 2026-11-09 | 2026-04-14 | volume_ratio / volume_price_trend / volume_ma_deviation を add_technical_indicators() に追加。モデル再学習が必要。 |
-| R-214 | TODO | 2026-11-16 | - | 予測変動量閾値による発注スキップロジックを order_execution_pipeline に追加 |
+| R-214 | DONE | 2026-11-16 | 2026-04-21 | MIN_CHANGE_RATIO スキップロジック・OrderExecutionStats 拡張・save_order_run_summary 接続完了 |
 | R-215 | TODO | 2026-11-23 | - | Worst10 空売りシグナルの PaperBroker 検証 |
 | R-205 | TODO | 2026-11-30 | - | 歴史的クラッシュ期間リストを docs に整備 |
 | R-201 | TODO | 2026-10-26 | - | |
@@ -418,6 +418,7 @@
 | NF-201 | GHA Integration/E2E テスト追加（integration-tests.yml 確認） | 2026-04-21 |
 | NF-202 | 依存脆弱性スキャン（pip-audit JSON パース統一・GITHUB_STEP_SUMMARY 出力） | 2026-04-21 |
 | NF-203 | SAST スキャン（bandit -ll 追加・HIGH のみ FAIL・MEDIUM は warning） | 2026-04-21 |
+| R-214 | 予測変動量閾値スキップロジック（MIN_CHANGE_RATIO・save_order_run_summary 接続） | 2026-04-21 |
 
 ---
 
@@ -451,3 +452,4 @@
 - 2026-04-19: 非機能改善施策（NF-101〜NF-504）を新設。CI/CD・監視・コード品質・制度文書の5フェーズ15施策を追加
 - **2026-04-21**: NF-101（requirements-dev.txt分離）・NF-102（except Exception撲滅）完了
 - **2026-04-21**: NF-201（GHA Integration テスト確認）・NF-202（pip-audit強化）・NF-203（bandit -ll追加）完了
+- **2026-04-21**: R-214（予測変動量閾値スキップロジック）完了
