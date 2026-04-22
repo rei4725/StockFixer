@@ -229,7 +229,7 @@ class TestDiffWatchlist(unittest.TestCase):
 class TestRunWatchlistRefresh(unittest.TestCase):
     """run_watchlist_refresh のテスト"""
 
-    @patch("src.utils.db.save_index_membership_snapshot")
+    @patch("src.services.watchlist_manager.save_index_membership_snapshot")
     @patch("src.services.watchlist_manager.apply_watchlist_update")
     @patch("src.services.watchlist_manager.diff_watchlist")
     @patch("src.services.watchlist_manager.fetch_index_symbols")
@@ -251,9 +251,9 @@ class TestRunWatchlistRefresh(unittest.TestCase):
         result = run_watchlist_refresh()
         assert isinstance(result, list)
         mock_apply.assert_called_once()
-        assert mock_save_snapshot.call_count >= 1
+        self.assertEqual(mock_save_snapshot.call_count, 2)
 
-    @patch("src.utils.db.save_index_membership_snapshot")
+    @patch("src.services.watchlist_manager.save_index_membership_snapshot")
     @patch("src.services.watchlist_manager.apply_watchlist_update")
     @patch("src.services.watchlist_manager.diff_watchlist")
     @patch("src.services.watchlist_manager.fetch_index_symbols")
