@@ -91,6 +91,12 @@ def parse_args():
         metavar="N",
         help="最終最適化からN日以内の銘柄をスキップ（例: 7 → 1週間以内は再実行しない）",
     )
+    parser.add_argument(
+        "--as-of-date",
+        type=str,
+        default=None,
+        help="対象銘柄をこの日付時点の指数構成に固定する（YYYY-MM-DD）",
+    )
     return parser.parse_args()
 
 
@@ -112,6 +118,7 @@ def main():
         max_workers=args.max_workers,
         sort_by=args.sort_by,
         skip_days=args.skip_days,
+        as_of_date=args.as_of_date,
     )
 
     success = [r for r in results if r["status"] == "success"]

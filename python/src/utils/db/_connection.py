@@ -195,6 +195,19 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
     )
     con.execute(
         """
+        CREATE TABLE IF NOT EXISTS index_membership_history (
+            market        VARCHAR NOT NULL,
+            symbol        VARCHAR NOT NULL,
+            index_name    VARCHAR NOT NULL,
+            snapshot_date DATE NOT NULL,
+            source        VARCHAR NOT NULL DEFAULT 'wikipedia',
+            fetched_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (market, symbol, snapshot_date)
+        )
+    """
+    )
+    con.execute(
+        """
         CREATE TABLE IF NOT EXISTS model_metrics (
             market               VARCHAR NOT NULL,
             symbol               VARCHAR NOT NULL,

@@ -448,6 +448,15 @@ class TestRunOptimizeBatch(unittest.TestCase):
         results = run_optimize_batch(model_type="XGBoostModel")
         self.assertEqual(results, [])
 
+    @patch("src.services.batch_runner.load_target_symbols")
+    def test_passes_as_of_date_to_symbol_loader(self, mock_symbols):
+        """as_of_date が load_target_symbols に渡されること"""
+        from src.services.backtest_optimize_pipeline import run_optimize_batch
+
+        mock_symbols.return_value = []
+        run_optimize_batch(model_type="XGBoostModel", as_of_date="2025-06-30")
+        mock_symbols.assert_called_once_with(as_of_date="2025-06-30")
+
 
 if __name__ == "__main__":
     unittest.main()

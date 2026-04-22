@@ -478,6 +478,7 @@ def run_optimize_batch(
     max_workers: int = 3,
     sort_by: str = "sharpe_ratio",
     skip_days: Optional[int] = None,
+    as_of_date: Optional[str] = None,
 ) -> list[dict]:
     """
     ウォッチリストの全銘柄に対してバックテスト最適化をバッチ実行する。
@@ -506,6 +507,7 @@ def run_optimize_batch(
         max_workers: 並列数
         sort_by: 最適パラメータ選定基準
         skip_days: 最終最適化からこの日数以内ならスキップ（None=常に実行）
+        as_of_date: YYYY-MM-DD。指定時は当日時点の指数構成銘柄を対象にする。
 
     Returns:
         各銘柄の結果サマリー list[dict]
@@ -517,7 +519,7 @@ def run_optimize_batch(
 
     logger = get_logger(__name__)
 
-    symbols = load_target_symbols()
+    symbols = load_target_symbols(as_of_date=as_of_date)
     if not symbols:
         logger.warning("対象銘柄がありません。")
         return []

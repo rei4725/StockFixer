@@ -229,11 +229,12 @@ class TestDiffWatchlist(unittest.TestCase):
 class TestRunWatchlistRefresh(unittest.TestCase):
     """run_watchlist_refresh のテスト"""
 
+    @patch("src.services.watchlist_manager.save_index_membership_snapshot")
     @patch("src.services.watchlist_manager.apply_watchlist_update")
     @patch("src.services.watchlist_manager.diff_watchlist")
     @patch("src.services.watchlist_manager.fetch_index_symbols")
     @patch("src.services.watchlist_manager._load_watchlist")
-    def test_runs_for_all_markets(self, mock_load, mock_fetch, mock_diff, mock_apply):
+    def test_runs_for_all_markets(self, mock_load, mock_fetch, mock_diff, mock_apply, mock_save_snapshot):
         """全マーケットに対して更新フローが実行されること"""
         from src.services.watchlist_manager import WatchlistDiff, run_watchlist_refresh
 
@@ -250,12 +251,16 @@ class TestRunWatchlistRefresh(unittest.TestCase):
         result = run_watchlist_refresh()
         assert isinstance(result, list)
         mock_apply.assert_called_once()
+        self.assertEqual(mock_save_snapshot.call_count, 2)
 
+    @patch("src.services.watchlist_manager.save_index_membership_snapshot")
     @patch("src.services.watchlist_manager.apply_watchlist_update")
     @patch("src.services.watchlist_manager.diff_watchlist")
     @patch("src.services.watchlist_manager.fetch_index_symbols")
     @patch("src.services.watchlist_manager._load_watchlist")
-    def test_runs_for_specified_markets(self, mock_load, mock_fetch, mock_diff, mock_apply):
+    def test_runs_for_specified_markets(
+        self, mock_load, mock_fetch, mock_diff, mock_apply, mock_save_snapshot
+    ):
         """markets 引数で対象マーケットを絞れること"""
         from src.services.watchlist_manager import WatchlistDiff, run_watchlist_refresh
 
@@ -266,3 +271,4 @@ class TestRunWatchlistRefresh(unittest.TestCase):
         )
         result = run_watchlist_refresh(markets=["jp"])
         assert len(result) <= 1
+        mock_save_snapshot.assert_called_once()

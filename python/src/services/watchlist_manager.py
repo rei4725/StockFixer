@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
 
+from src.utils.db import save_index_membership_snapshot
 from src.utils.data_path_utils import get_watchlist_audit_log_path, get_watchlist_path
 from src.utils.logger import get_logger
 
@@ -332,6 +333,10 @@ def run_watchlist_refresh(markets: Optional[list[str]] = None) -> list[Watchlist
         if not fetched:
             logger.warning(f"[{market}] 指数銘柄の取得に失敗したためスキップ")
             continue
+        try:
+            save_index_membership_snapshot(market=market, symbols=fetched)
+        except Exception as e:
+            logger.error(f"[{market}] 指数構成銘柄履歴の保存失敗: {e}", exc_info=True)
 
         diff = diff_watchlist(current, fetched, market)
         diffs.append(diff)
