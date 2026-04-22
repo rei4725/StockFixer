@@ -42,8 +42,7 @@ def load_target_symbols(as_of_date: Optional[str] = None) -> list[SymbolTask]:
                 logger.info(f"過去構成銘柄を使用: as_of_date={as_of_date}, 件数={len(rows)}")
                 return [SymbolTask(market=market, symbol=symbol) for market, symbol in rows]
             logger.warning(
-                f"index_membership_history に as_of_date={as_of_date} のデータがないため"
-                " watchlist.json を使用します"
+                f"index_membership_history に as_of_date={as_of_date} のデータがないため watchlist.json を使用します"
             )
         except Exception as e:
             logger.warning(
