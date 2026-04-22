@@ -165,6 +165,7 @@ def run_walk_forward_comparison_report(
     slippage: float = 0.0,
     ensemble: bool = False,
     limit_symbols: Optional[int] = None,
+    as_of_date: Optional[str] = None,
 ) -> dict:
     """
     標準条件で Walk-Forward 検証を全銘柄実行し、比較レポートを保存する。
@@ -172,7 +173,7 @@ def run_walk_forward_comparison_report(
     Returns:
         保存先情報を含む辞書
     """
-    targets = load_target_symbols()
+    targets = load_target_symbols(as_of_date=as_of_date)
     if limit_symbols is not None:
         targets = targets[:limit_symbols]
 

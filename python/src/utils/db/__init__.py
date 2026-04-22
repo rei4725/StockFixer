@@ -9,6 +9,7 @@ DuckDB データベースアクセスパッケージ
     stock_features.py  - stock_features テーブル操作
     prediction.py      - prediction_results / model_metrics / prediction_accuracy テーブル操作
     market_data.py     - market_data_raw テーブル操作
+    index_membership.py - index_membership_history テーブル操作
     experiment.py      - experiment_runs テーブル操作（R-211 実験トラッキング）
 """
 
@@ -51,6 +52,12 @@ from src.utils.db.market_data import (  # noqa: F401
     load_all_raw_ohlcv_symbols,
     load_raw_ohlcv,
     upsert_raw_ohlcv,
+)
+
+# --- index_membership_history ---
+from src.utils.db.index_membership import (  # noqa: F401
+    load_index_membership_symbols_as_of,
+    save_index_membership_snapshot,
 )
 
 # --- prediction_results / model_metrics / prediction_accuracy ---

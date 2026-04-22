@@ -54,6 +54,7 @@ class TestDB(unittest.TestCase):
         table_names = {row[0] for row in tables}
         self.assertIn("stock_features", table_names)
         self.assertIn("prediction_results", table_names)
+        self.assertIn("index_membership_history", table_names)
 
     def test_upsert_and_load_stock_features(self):
         """stock_features の upsert と load が正しく動作することを確認"""
