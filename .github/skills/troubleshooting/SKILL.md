@@ -65,6 +65,46 @@ StockFixerで発生しやすいエラーの原因特定と解決を迅速に行�
 2. importパスは `python/` からの絶対パスで統一（例: `from src.utils.db import ...`）
 3. 各ディレクトリに `__init__.py` が配置されているか確認
 
+### pip-audit CI FAIL（依存脆弱性スキャン）
+**症状**: GitHub Actions の `Dependency Vulnerability Scan (pip-audit)` が失敗する
+**原因**: `requirements.txt` または `requirements-dev.txt` に既知のCVEを持つパッケージが含まれている
+**対処**:
+1. **ローカルで脆弱性を確認**（`python/` ディレクトリで実行）:
+   ```powershell
+   cd C:\src\StockFixer\python
+   pip install pip-audit
+   pip-audit -r requirements.txt
+   pip-audit -r requirements-dev.txt
+   ```
+2. 出力に含まれるパッケージ名と修正バージョンを確認する
+3. 該当パッケージを `requirements*.txt` で修正バージョン以上に更新する:
+   ```
+   # 例: yfinance の脆弱性が報告された場合
+   yfinance>=1.3.0
+   ```
+4. `pip install -r requirements.txt` で更新を適用し、動作確認してから push する
+
+> **注意**: `--strict` フラグが有効な場合、脆弱性がなくてもパッケージのメタデータが取得できないと FAIL することがある。その場合は FAIL しているパッケージ名を確認して手動で調査する。
+
+### bandit CI FAIL（SASTスキャン）
+**症状**: GitHub Actions の `SAST Scan (bandit)` が失敗する（HIGH severity 検出）
+**原因**: `python/src/` 以下のコードに bandit が HIGH リスクと判定するパターンがある
+**対処**:
+1. **ローカルで bandit を実行**（`python/` ディレクトリで実行）:
+   ```powershell
+   cd C:\src\StockFixer\python
+   pip install bandit
+   bandit -r src/ --exclude src/_deprecated -ll
+   ```
+2. `HIGH` と表示されている箇所のファイルパスと行番号を確認する
+3. 指摘内容に応じてコードを修正する（例: シェルインジェクション → `subprocess` の `shell=False`）
+4. 誤検知の場合は `# nosec` コメントで抑制できる（必ず理由をコメントで明記する）:
+   ```python
+   result = subprocess.run(cmd, shell=True)  # nosec B602 - cmdは内部で生成される固定値
+   ```
+
+> **ポイント**: MEDIUM は CI FAIL しない（`::warning::` で通知のみ）。HIGH のみブロックされる。
+
 ## References
 - [db.py](../../../python/src/utils/db.py)
 - [data_path_utils.py](../../../python/src/utils/data_path_utils.py)
