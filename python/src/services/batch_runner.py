@@ -10,6 +10,7 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, TimeoutE
 from typing import Callable, Optional
 
 from src.domain.types import SymbolTask
+from src.utils.db import load_index_membership_symbols_as_of
 from src.utils.data_path_utils import get_watchlist_path
 from src.utils.logger import get_logger
 
@@ -35,8 +36,6 @@ def load_target_symbols(as_of_date: Optional[str] = None) -> list[SymbolTask]:
     """
     if as_of_date:
         try:
-            from src.utils.db import load_index_membership_symbols_as_of
-
             rows = load_index_membership_symbols_as_of(as_of_date)
             if rows:
                 logger.info(f"過去構成銘柄を使用: as_of_date={as_of_date}, 件数={len(rows)}")

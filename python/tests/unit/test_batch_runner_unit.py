@@ -103,7 +103,7 @@ class TestLoadTargetSymbols(unittest.TestCase):
 
         self.assertEqual(result[0].horizon, 1)
 
-    @patch("src.utils.db.load_index_membership_symbols_as_of")
+    @patch("src.services.batch_runner.load_index_membership_symbols_as_of")
     def test_as_of_date_loads_from_index_membership_history(self, mock_load_history):
         """as_of_date 指定時は index_membership_history を優先すること"""
         mock_load_history.return_value = [("us", "AAPL"), ("jp", "7203")]
@@ -116,7 +116,7 @@ class TestLoadTargetSymbols(unittest.TestCase):
         self.assertIn(("jp", "7203"), symbols)
         mock_load_history.assert_called_once_with("2025-01-31")
 
-    @patch("src.utils.db.load_index_membership_symbols_as_of")
+    @patch("src.services.batch_runner.load_index_membership_symbols_as_of")
     @patch("src.services.batch_runner.get_watchlist_path")
     def test_as_of_date_falls_back_to_watchlist_when_history_empty(self, mock_path, mock_load_history):
         """履歴が空のとき watchlist.json にフォールバックすること"""

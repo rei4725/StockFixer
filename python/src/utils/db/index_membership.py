@@ -19,6 +19,15 @@ INDEX_NAME_BY_MARKET = {
 }
 
 
+def _normalize_symbol(symbol: str, market: str) -> str:
+    value = str(symbol).strip()
+    if not value:
+        return ""
+    if market == "us":
+        return value.upper()
+    return value
+
+
 def save_index_membership_snapshot(
     market: str,
     symbols: list[str],
@@ -41,7 +50,8 @@ def save_index_membership_snapshot(
         return 0
 
     normalized_market = market.lower()
-    unique_symbols = sorted({str(s).upper() for s in symbols if str(s).strip()})
+    unique_symbols = sorted({_normalize_symbol(s, normalized_market) for s in symbols})
+    unique_symbols = [s for s in unique_symbols if s]
     if not unique_symbols:
         return 0
 
