@@ -39,8 +39,10 @@ MAX_CONSECUTIVE_LOSSES: int = _int("MAX_CONSECUTIVE_LOSSES", 3)
 #: 最大保有銘柄数
 MAX_POSITIONS: int = _int("MAX_POSITIONS", 10)
 
-#: Kelly 基準に掛ける安全係数（ハーフケリー = 0.5）
-HALF_KELLY: float = _float("HALF_KELLY", 0.5)
+from config.trading_policy import KELLY_CAP as _KELLY_CAP  # noqa: E402
+
+#: Kelly 基準に掛ける安全係数（プロファイル依存、moderate 時 = 0.375）
+HALF_KELLY: float = _float("HALF_KELLY", _KELLY_CAP / 2)
 
 # ---------------------------------------------------------------------------
 # 自動発注（order_execution_pipeline.py）

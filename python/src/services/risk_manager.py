@@ -20,6 +20,10 @@ from config.settings import (
     MAX_POSITION_RATE,
     MAX_POSITIONS,
 )
+from config.trading_policy import (  # noqa: F401  # R-307/R-219 でポジションキャップ・DD制御に使用予定
+    HIGH_CONFIDENCE_POSITION_CAP,
+    MAX_ACCEPTABLE_DRAWDOWN,
+)
 from src.brokers.base import BrokerBase, OrderSide
 from src.domain.types import TradingGateStatus
 from src.utils.db._connection import _db_connection
