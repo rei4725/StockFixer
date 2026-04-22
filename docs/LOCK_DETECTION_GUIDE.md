@@ -390,3 +390,22 @@ self.danger_patterns["my_pattern"] = {
 - [DOCKER_DB_ARCHITECTURE.md](../DOCKER_DB_ARCHITECTURE.md) - バッチ差分更新の実装ポリシー
 - [PRE_COMMIT_GUIDE.md](../PRE_COMMIT_GUIDE.md) - Pre-commit フック全体ガイド
 - [copilot-instructions.md](../.github/copilot-instructions.md) - レイヤー構造・禁止事項
+---
+
+## プロセス間競合（Docker スケジューラー + 手動実行）
+
+### 競合発生パターン
+| パターン | 状況 | リスク |
+|---|---|---|
+| スケジューラー稼働中に `run_*.py` を手動実行 | 2プロセスが同一DBに読み書き接続を試みる | CRITICAL |
+| `docker exec` + `run_*.py` のほぼ同時実行 | 同上 | CRITICAL |
+
+### 再現手順
+1. `docker compose up -d` でスケジューラーを起動
+2. スケジューラーが日次パイプライン実行中（ログで確認）に
+3. ホストから `py run_data_creation.py --batch` を実行
+4. `IOException: Could not set lock on file` が発生する
+
+### 対策（filelock mutex）
+`_db_connection()` が FileLock を取得してから DuckDB に接続するため、
+同一マシン上の複数プロセスが直列化され競合しない。

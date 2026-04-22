@@ -501,4 +501,29 @@ docker builder prune -f
 
 ---
 
+## DuckDB ロック競合エラー
+
+### 症状
+- エラーメッセージ: `IOException: Could not set lock on file 'python/data/stockfixer.duckdb'`
+- または: `RuntimeError: DuckDB書き込みロック取得タイムアウト`
+- スケジューラー稼働中に手動スクリプトを実行したときに発生
+
+### 原因
+複数の Python プロセスが同時に DuckDB の読み書き接続を取得しようとしている。
+
+### 復旧手順
+1. 実行中の run_*.py を中断する（Ctrl+C）
+2. スケジューラーのジョブが完了するまで待機（`docker compose logs -f` で確認）
+3. ロックファイルが残っている場合は削除する:
+   ```powershell
+   Remove-Item python\data\stockfixer.duckdb.lock -ErrorAction SilentlyContinue
+   ```
+4. 再実行する
+
+### 予防
+- `docs/RUNBOOK_DEPLOY.md` の「単一プロセス制約」に従う
+- スケジューラー稼働中の手動実行は `docker exec` 経由で直列に行う
+
+---
+
 *Last updated: 2026-03-16*
