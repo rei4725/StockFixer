@@ -113,6 +113,25 @@ class TestDbConnectionContextManager(unittest.TestCase):
                 with mod._db_connection():
                     pass
 
+    def test_filelock_released_on_db_connection_failure(self):
+        """全リトライ失敗時（con is None）でも FileLock.release() が呼ばれることを検証"""
+        import src.utils.db._connection as mod
+
+        mock_lock_instance = MagicMock()
+
+        with (
+            patch("src.utils.db._connection.ensure_dir"),
+            patch("src.utils.db._connection.get_data_dir", return_value="/tmp"),
+            patch("src.utils.db._connection.get_db_path", return_value="/tmp/test.db"),
+            patch("duckdb.connect", side_effect=duckdb.IOException("DB locked")),
+            patch("src.utils.db._connection.FileLock", return_value=mock_lock_instance),
+        ):
+            with self.assertRaises(duckdb.IOException):
+                with mod._db_connection():
+                    pass
+
+        mock_lock_instance.release.assert_called_once()
+
 
 class TestGetConnection(unittest.TestCase):
     """get_connection() 非推奨関数のテスト"""

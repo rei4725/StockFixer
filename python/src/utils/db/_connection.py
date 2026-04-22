@@ -61,7 +61,7 @@ def _db_connection() -> Generator[duckdb.DuckDBPyConnection, None, None]:
         file_lock.acquire()
     except FileLockTimeout:
         raise RuntimeError(
-            f"DuckDB書き込みロック取得タイムアウト ({_FILELOCK_TIMEOUT}秒): " f"別プロセスがDBを使用中です。{lock_path}"
+            f"DuckDB書き込みロック取得タイムアウト ({_FILELOCK_TIMEOUT}秒): 別プロセスがDBを使用中です。{lock_path}"
         )
 
     con = None
@@ -76,11 +76,9 @@ def _db_connection() -> Generator[duckdb.DuckDBPyConnection, None, None]:
                 logger.warning(f"DB接続待機中 ({attempt + 1}/{_RETRY_COUNT}): {e}")
                 time.sleep(_RETRY_DELAY)
 
-    if con is None:
-        file_lock.release()
-        raise last_exc
-
     try:
+        if con is None:
+            raise last_exc
         # テーブル初期化: プロセス起動後の初回接続時のみ実行（ダブルチェックロッキング）
         if not _tables_initialized:
             with _init_lock:
@@ -89,7 +87,8 @@ def _db_connection() -> Generator[duckdb.DuckDBPyConnection, None, None]:
                     _tables_initialized = True
         yield con
     finally:
-        con.close()
+        if con is not None:
+            con.close()
         file_lock.release()
 
 
