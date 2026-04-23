@@ -16,6 +16,8 @@ from threading import Lock
 from typing import Generator
 
 import duckdb
+from filelock import FileLock
+from filelock import Timeout as FileLockTimeout
 
 from src.utils.data_path_utils import ensure_dir, get_data_dir, get_db_path
 from src.utils.logger import get_logger
@@ -26,6 +28,7 @@ logger = get_logger(__name__)
 _RETRY_COUNT = 10  # ロック衝突時の最大リトライ回数
 _RETRY_DELAY = 1.0  # リトライ間隔（秒）
 _DB_CONFIG = {"threads": "4", "memory_limit": "2GB"}
+_FILELOCK_TIMEOUT = 120.0  # プロセス間mutex タイムアウト（秒）
 
 _init_lock = Lock()  # テーブル初期化の二重実行防止
 _tables_initialized = False  # プロセス内でのテーブル初期化済みフラグ
@@ -51,6 +54,15 @@ def _db_connection() -> Generator[duckdb.DuckDBPyConnection, None, None]:
 
     ensure_dir(get_data_dir())
     db_path = get_db_path()
+    lock_path = db_path + ".lock"
+
+    file_lock = FileLock(lock_path, timeout=_FILELOCK_TIMEOUT)
+    try:
+        file_lock.acquire()
+    except FileLockTimeout:
+        raise RuntimeError(
+            f"DuckDB書き込みロック取得タイムアウト ({_FILELOCK_TIMEOUT}秒): 別プロセスがDBを使用中です。{lock_path}"
+        )
 
     con = None
     last_exc: Exception = RuntimeError("DB接続に失敗しました")
@@ -64,10 +76,9 @@ def _db_connection() -> Generator[duckdb.DuckDBPyConnection, None, None]:
                 logger.warning(f"DB接続待機中 ({attempt + 1}/{_RETRY_COUNT}): {e}")
                 time.sleep(_RETRY_DELAY)
 
-    if con is None:
-        raise last_exc
-
     try:
+        if con is None:
+            raise last_exc
         # テーブル初期化: プロセス起動後の初回接続時のみ実行（ダブルチェックロッキング）
         if not _tables_initialized:
             with _init_lock:
@@ -76,7 +87,9 @@ def _db_connection() -> Generator[duckdb.DuckDBPyConnection, None, None]:
                     _tables_initialized = True
         yield con
     finally:
-        con.close()
+        if con is not None:
+            con.close()
+        file_lock.release()
 
 
 def get_connection() -> duckdb.DuckDBPyConnection:
