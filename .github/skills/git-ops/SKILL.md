@@ -234,6 +234,22 @@ minor
 3. 失敗時はログを確認して修正コミットを push し、再実行結果を確認
 4. `Unit Tests` が成功するまでマージしない
 
+### requirements*.txt 変更時の追加手順（PR前に必須）
+`requirements.txt` または `requirements-dev.txt` を変更した場合は、PR 作成前にローカルで脆弱性スキャンを実行すること。
+CI でのみ検出すると手戻りが発生するため、必ずローカルで事前確認する。
+
+```powershell
+cd C:\src\StockFixer\python
+pip install pip-audit
+pip-audit -r requirements.txt
+pip-audit -r requirements-dev.txt
+```
+
+- 脆弱性が報告された場合: 修正バージョン以上に更新してから PR を作成する
+- 問題なければそのまま PR を作成する
+
+> **なぜ必要か**: `security.yml` は PR 時に pip-audit を実行して脆弱性検出でCI FAILする。ローカル確認をスキップすると、PR作成後に修正コミットが増えてレビューが汚れる。
+
 ### 一時的に別作業が必要な場合
 1. `git_stash` で現在の変更を退避
 2. 別作業実施

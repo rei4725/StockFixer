@@ -27,7 +27,9 @@ def get_symbol_sector(market: str, symbol: str) -> str:
     try:
         info = yf.Ticker(ticker).info or {}
     except Exception as exc:
-        logger.warning("[sector] sector lookup failed: %s/%s: %s", market, symbol, exc)
+        logger.warning(
+            "[sector] sector lookup failed: %s/%s: %s", market, symbol, exc, exc_info=True
+        )
         return _normalize_sector(None, f"{market}:{symbol}")
 
     sector = info.get("sector") or info.get("industry")

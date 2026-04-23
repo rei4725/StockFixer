@@ -103,6 +103,34 @@ class TestLoadTargetSymbols(unittest.TestCase):
 
         self.assertEqual(result[0].horizon, 1)
 
+    @patch("src.services.batch_runner.load_index_membership_symbols_as_of")
+    def test_as_of_date_loads_from_index_membership_history(self, mock_load_history):
+        """as_of_date 指定時は index_membership_history を優先すること"""
+        mock_load_history.return_value = [("us", "AAPL"), ("jp", "7203")]
+
+        result = load_target_symbols(as_of_date="2025-01-31")
+
+        self.assertEqual(len(result), 2)
+        symbols = {(t.market, t.symbol) for t in result}
+        self.assertIn(("us", "AAPL"), symbols)
+        self.assertIn(("jp", "7203"), symbols)
+        mock_load_history.assert_called_once_with("2025-01-31")
+
+    @patch("src.services.batch_runner.load_index_membership_symbols_as_of")
+    @patch("src.services.batch_runner.get_watchlist_path")
+    def test_as_of_date_falls_back_to_watchlist_when_history_empty(self, mock_path, mock_load_history):
+        """履歴が空のとき watchlist.json にフォールバックすること"""
+        mock_load_history.return_value = []
+        with tempfile.TemporaryDirectory() as tmp:
+            p = self._write_watchlist(tmp, {"us": ["MSFT"]})
+            mock_path.return_value = p
+
+            result = load_target_symbols(as_of_date="2025-01-31")
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].market, "us")
+        self.assertEqual(result[0].symbol, "MSFT")
+
 
 class TestRunParallel(unittest.TestCase):
     """run_parallel 関数のテスト"""

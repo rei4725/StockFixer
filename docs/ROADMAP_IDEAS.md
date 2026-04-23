@@ -1,6 +1,6 @@
 # StockFixer ロードマップ
 
-> 更新日: 2026-04-19  
+> 更新日: 2026-04-21  
 > 正本: このドキュメントで**収益改善施策**と**非機能改善施策（NF）**の優先度・進捗を管理する
 
 ---
@@ -67,28 +67,31 @@
 
 ### 現在の優先順（収益改善）
 
-1. R-203 月次レポート自動化（DOING）
-2. R-211 実験トラッキング基盤
-3. R-212 マルチホライズン統合シグナル ★新規
-4. R-213 出来高プロファイル特徴量 ★新規
-5. R-214 リバランス頻度最適化 ★新規
-6. R-215 ショートサイド活用 ★新規
-7. R-210 動的スリッページモデル
-8. R-205 ストレステスト（歴史的クラッシュ再現）
-9. R-206 Optuna による自動ハイパーパラメータ探索
-10. R-207 シャドーモード A/B テスト基盤
-11. R-201 マクロ指標・イベント特徴量強化
-12. R-202 アンサンブル重み最適化
-13. R-209 サバイバーシップバイアス補正
-14. R-204 収益化機能 PoC
+1. R-203 月次レポート自動化（DONE）
+2. R-211 実験トラッキング基盤（DONE）
+3. R-205 ストレステスト（歴史的クラッシュ再現）★前倒し（高リスク根拠確立）
+4. R-212 マルチホライズン統合シグナル（DONE）
+5. R-213 出来高プロファイル特徴量（DONE）
+6. R-215 ショートサイド活用
+7. R-216 BT最適パラメータ自動ロード ★新規（高リスク方針の中核）
+8. R-217 Kelly実績更新（BT実測値を calc_position_size へ反映） ★新規
+9. R-307 ドローダウン適応型資本配分 ★前倒し（高確信度集中投資の前提）
+10. R-206 Optuna による自動ハイパーパラメータ探索
+11. R-210 動的スリッページモデル
+12. R-214 リバランス頻度最適化 ★後ろ倒し（高リスク方針と逆行）
+13. R-201 マクロ指標・イベント特徴量強化
+14. R-202 アンサンブル重み最適化（DONE）
+15. R-207 シャドーモード A/B テスト基盤
+16. R-209 サバイバーシップバイアス補正
+17. R-204 収益化機能 PoC
 
 ### 現在の優先順（非機能改善）
 
-1. NF-101 `requirements-dev.txt` 分離（低コスト・即効）
-2. NF-102 broad `except Exception` 撲滅（services/brokers/models 層）
-3. NF-201 GHA Integration/E2E テスト追加
-4. NF-202 依存脆弱性スキャン（pip-audit）
-5. NF-203 SAST スキャン（bandit）
+1. ~~NF-101 `requirements-dev.txt` 分離（低コスト・即効）~~ ✅ 完了
+2. ~~NF-102 broad `except Exception` 撲滅（services/brokers/models 層）~~ ✅ 完了
+3. ~~NF-201 GHA Integration/E2E テスト追加~~ ✅ 完了
+4. ~~NF-202 依存脆弱性スキャン（pip-audit）~~ ✅ 完了
+5. ~~NF-203 SAST スキャン（bandit）~~ ✅ 完了
 6. NF-301 `/health` エンドポイント実装
 7. NF-302 構造化ログ（JSON 形式）
 8. NF-303 アラートルール定義
@@ -102,10 +105,14 @@
 
 ### 優先順の考え方（収益改善）
 
-- R-203 DOING を仕上げながら R-211 で run 単位比較基盤を整える
-- R-211 完了後、既存データをそのまま使える低コスト施策（R-212〜R-215）を短期で投入する
-- R-210・R-205 でコスト・下方リスクをリアル寄りに補正した後、R-206・R-207 で改善サイクルを定型化する
-- R-201・R-202・R-209 は基盤整備後に特徴量やモデルを拡張するフェーズで着手する
+- R-203・R-211・R-212・R-213・R-202 は完了済み。次フェーズへ移行する
+- **高リスク方針への転換**: BT検証に裏打ちされた根拠のもと、積極的なポジション集中・Kelly比率引き上げを目指す
+- R-205 を最初に実施し「取れるリスクの上限」を統計的に確立してから攻勢に出る
+- R-216・R-217 で BT最適パラメータ・実測 Kelly を実運用に自動フィードバックし、高リスク方針の実装基盤を整える
+- R-307 を Q1 2027 から Q4 Sprint 4 に前倒しし、高確信度銘柄への集中投資ロジックを年内に投入する
+- R-214 は Turnover 削減（＝リスク低減方向）のため優先度を下げ、高リスク施策の後段に回す
+- R-210 でコスト推定を精緻化した後、R-206 で改善サイクルを定型化する
+- R-201・R-209 は基盤整備後に特徴量やモデルを拡張するフェーズで着手する
 - R-204 は内部KPIが安定してから着手し、外部提供を後回しにする
 
 ### 優先順の考え方（非機能改善）
@@ -154,34 +161,38 @@
 | R-211 | 実験トラッキング基盤 | P2 | 学習ごとにパラメータ・メトリクス・特徴量来歴をDuckDBに自動記録 |
 | R-212 | マルチホライズン統合シグナル | P2 | 1d/3d/5d/10dを時間軸で重み付け統合し、単独シグナルより Hit Rate が向上 |
 | R-213 | 出来高プロファイル特徴量 | P2 | 相対出来高比・出来高移動平均乖離率を追加し学習・予測パイプラインへ反映 |
-| R-214 | リバランス頻度最適化 | P2 | 予測変動量が閾値未満の場合は発注スキップし Turnover 前期比 -20% を検証 |
+| R-205 | ストレステスト（歴史的クラッシュ） | P1 | コロナ/リーマン期間でMDD 15% 以下を検証し、許容リスク上限を統計的に確立する |
 | R-215 | ショートサイド活用 | P2 | Worst10の空売りシグナルをPaperBrokerで検証し下落局面の収益機会を定量評価 |
-| R-205 | ストレステスト（歴史的クラッシュ） | P2 | コロナ/リーマン期間でMDD 15% 以下を検証 |
+| R-216 | BT最適パラメータ自動ロード | P1 | `optimal_params.json` を `SignalGenerator` / `RiskManager` が自動参照し、BT検証済みの閾値・SL・TPを実運用に反映する |
+| R-217 | Kelly実績更新（BT実測値フィードバック） | P1 | バックテスト実測の `win_rate`/`avg_win`/`avg_loss` を `calc_position_size` に渡し、固定デフォルト値を廃止する |
+| R-307 | ドローダウン適応型資本配分 | P2 | DD進行中に資本量を非線形縮小し、回復期に段階的増加する関数を RiskManager に追加（Q1 2027 から前倒し） |
 | R-201 | マクロ/イベント特徴量強化 | P2 | 特徴量寄与分析を記録 |
 | R-202 | アンサンブル重み最適化 | P2 | 単純平均よりKPI改善 |
 | R-206 | Optuna 自動ハイパーパラメータ探索 | P2 | 週次 Walk-Forward 連動でパラメータ自動更新 |
 | R-207 | シャドーモード A/B テスト基盤 | P2 | 新旧モデルを並行記録し定量評価後に切り替え |
 | R-209 | サバイバーシップバイアス補正 | P2 | index_membership_history テーブルを DuckDB に追加 |
 | R-210 | 動的スリッページモデル | P2 | 出来高・注文サイズ連動の市場インパクトモデルを導入 |
+| R-214 | リバランス頻度最適化 | P3 | 予測変動量が閾値未満の場合は発注スキップし Turnover 前期比 -20% を検証（高リスク方針と逆行するため後段） |
 | R-204 | 収益化機能PoC | P2 | 有料配信またはAPIのPoC完了 |
 
 ### Q4 実行順序
 
-1. R-203 仕上げ（DOING）と並行して R-211 を着手し、run 単位追跡を先に整える
-2. R-211 完了後すぐに R-212〜R-215 を短期投入（既存データ活用のため低コスト）
-3. R-210 で paper/real 乖離データをバックテストへ還元する
-4. R-205 でクラッシュ耐性を確認し、R-206・R-207 で改善サイクルを定型化する
-5. R-201・R-202・R-209 は基盤整備後の精度改善テーマとして後段に置く
-6. R-204 は内部KPIの安定後に PoC 判断を行う
+1. R-203・R-211・R-212・R-213・R-202 は完了済み
+2. R-205 で許容リスク上限（MDD・連敗分布）を統計的に確立し、高リスク方針の根拠を得る
+3. R-215 でショートサイド収益機会を確認しつつ、R-216・R-217 で BT→実運用フィードバックループを構築する
+4. R-307 で高確信度銘柄への集中投資ロジックと DD 適応縮小を同時整備し、R-206 で改善サイクルを定型化する
+5. R-210 で paper/real 乖離データをバックテストへ還元する
+6. R-214・R-201・R-209 は基盤整備後の精度改善テーマとして後段に置く
+7. R-204 は内部KPIの安定後に PoC 判断を行う
 
 ### Q4 スプリント案
 
 | Sprint | 主施策 | 完了条件 |
 |---|---|---|
-| Sprint 1 | R-203 / R-211 | 月次サマリー自動生成 + run_id が学習成果物と紐づく |
-| Sprint 2 | R-212 / R-213 | 単独シグナルとA/B比較可能 + 出来高特徴量が学習に反映 |
-| Sprint 3 | R-214 / R-215 | Turnover削減確認 + 下落局面収益の定量評価 |
-| Sprint 4 | R-210 / R-205 | スリッページ推定値参照 + MDD 15%以下確認 |
+| Sprint 1 | R-203 / R-211 | 月次サマリー自動生成 + run_id が学習成果物と紐づく（完了済み） |
+| Sprint 2 | R-212 / R-213 / **R-205** | 完了済み施策に加え、コロナ/リーマン期間で許容MDD上限を統計的に確認 |
+| Sprint 3 | R-215 / **R-216** / **R-217** | ショートサイド定量評価 + BT最適パラメータ自動適用 + Kelly実績フィードバック |
+| Sprint 4 | **R-307** / R-206 / R-210 | 高確信度集中投資ロジック + Optuna自動更新 + スリッページ推定値参照 |
 
 ---
 
@@ -222,36 +233,36 @@
 
 ---
 
-## NF-Phase 1: 即効・低コスト（Q4 2026 Sprint 1〜2 並行）
+## NF-Phase 1: 即効・低コスト（Q4 2026 Sprint 1〜2 並行）✅ COMPLETE
 
 ### 到達目標
 
-- Dockerイメージから開発用ツールを排除し、本番攻撃面を縮小する
-- services/brokers/models 層のサイレント障害を排除し、エラー追跡を可能にする
+- Dockerイメージから開発用ツールを排除し、本番攻撃面を縮小する ✅
+- services/brokers/models 層のサイレント障害を排除し、エラー追跡を可能にする ✅
 
 ### 実施項目
 
-| ID | 施策 | 優先度 | 完了条件 |
-|---|---|---|---|
-| NF-101 | `requirements-dev.txt` 分離 | P1 | black/isort/flake8/mypy/pytest 等の開発依存を分離し、Dockerfile は requirements.txt のみ参照する |
-| NF-102 | broad `except Exception` 撲滅 | P1 | services・brokers・models 層で `except Exception: pass` または `except Exception:` をゼロにし、具体的な例外型 + `logger.error(..., exc_info=True)` に置換する |
+| ID | 施策 | 優先度 | ステータス | 完了日 | 完了条件 |
+|---|---|---|---|---|---|
+| NF-101 | `requirements-dev.txt` 分離 | P1 | DONE | 2026-04-21 | black/isort/flake8/mypy/pytest 等の開発依存を分離し、Dockerfile は requirements.txt のみ参照する |
+| NF-102 | broad `except Exception` 撲滅 | P1 | DONE | 2026-04-21 | services・brokers・models 層で `except Exception: pass` または `except Exception:` をゼロにし、具体的な例外型 + `logger.error(..., exc_info=True)` に置換する |
 
 ---
 
-## NF-Phase 2: CI/CD パイプライン強化（Q4 2026 Sprint 2〜3）
+## NF-Phase 2: CI/CD パイプライン強化（Q4 2026 Sprint 2〜3）✅ COMPLETE
 
 ### 到達目標
 
-- PR 時に Integration / E2E テストが自動実行され、デグレを即検出できる
-- 依存パッケージの既知 CVE と Python コードの危険パターンを CI で自動検出する
+- PR 時に Integration / E2E テストが自動実行され、デグレを即検出できる ✅
+- 依存パッケージの既知 CVE と Python コードの危険パターンを CI で自動検出する ✅
 
 ### 実施項目
 
-| ID | 施策 | 優先度 | 完了条件 |
-|---|---|---|---|
-| NF-201 | GHA Integration/E2E テスト追加 | P2 | `.github/workflows/` に integration-tests.yml を追加し、PR 時に `tests/integration/` と `tests/e2e/` を実行する |
-| NF-202 | 依存脆弱性スキャン（pip-audit） | P2 | GHA で `pip-audit` を実行し、HIGH 以上の CVE があればパイプラインを FAIL にする |
-| NF-203 | SAST スキャン（bandit） | P2 | GHA で `bandit -r src/ -ll` を実行し、HIGH severity の検出でパイプラインを FAIL にする |
+| ID | 施策 | 優先度 | ステータス | 完了日 | 完了条件 |
+|---|---|---|---|---|---|
+| NF-201 | GHA Integration/E2E テスト追加 | P2 | DONE | 2026-04-21 | `.github/workflows/` に integration-tests.yml を追加し、PR 時に `tests/integration/` と `tests/e2e/` を実行する |
+| NF-202 | 依存脆弱性スキャン（pip-audit） | P2 | DONE | 2026-04-21 | GHA で `pip-audit` を実行し、HIGH 以上の CVE があればパイプラインを FAIL にする |
+| NF-203 | SAST スキャン（bandit） | P2 | DONE | 2026-04-21 | GHA で `bandit -r src/ -ll` を実行し、HIGH severity の検出でパイプラインを FAIL にする |
 
 ---
 
@@ -345,11 +356,11 @@
 
 | ID | ステータス | 期限 | 更新日 | メモ |
 |---|---|---|---|---|
-| NF-101 | TODO | 2026-04-26 | - | requirements-dev.txt を作成し Dockerfile の COPY を requirements.txt のみに変更 |
-| NF-102 | TODO | 2026-04-26 | - | services/brokers/models 層の broad except を置換 |
-| NF-201 | TODO | 2026-10-31 | - | .github/workflows/integration-tests.yml 追加 |
-| NF-202 | TODO | 2026-10-31 | - | GHA に pip-audit ステップ追加 |
-| NF-203 | TODO | 2026-11-07 | - | GHA に bandit ステップ追加 |
+| NF-101 | DONE | 2026-04-21 | 2026-04-21 | requirements-dev.txt を作成し Dockerfile の COPY を requirements.txt のみに変更 |
+| NF-102 | DONE | 2026-04-21 | 2026-04-21 | services/brokers/models 層の broad except を置換 |
+| NF-201 | DONE | 2026-10-31 | 2026-04-21 | integration-tests.yml による統合テスト自動実行を確認済み |
+| NF-202 | DONE | 2026-10-31 | 2026-04-21 | pip-audit JSON パース統一・GITHUB_STEP_SUMMARY 出力・全脆弱性 FAIL |
+| NF-203 | DONE | 2026-11-07 | 2026-04-21 | bandit -ll フラグ・HIGH のみ FAIL・MEDIUM は warning・GITHUB_STEP_SUMMARY 出力 |
 | NF-301 | TODO | 2026-11-30 | - | Flask /health エンドポイント実装、Docker HEALTHCHECK 更新 |
 | NF-302 | TODO | 2026-12-07 | - | logger.py に JSON フォーマッタ追加、LOG_FORMAT 環境変数対応 |
 | NF-303 | TODO | 2026-12-14 | - | 条件付きアラートルール定義 |
@@ -362,6 +373,11 @@
 | NF-504 | TODO | 2027-03-15 | - | docs/API_SPEC.md 作成（R-304 の前提） |
 | R-212 | DONE | 2026-11-02 | 2026-04-12 | compute_multi_horizon_score / apply_multi_horizon_score_column 実装・order_execution_pipeline の buy/sell 判定を統合スコアへ移行 |
 | R-213 | DONE | 2026-11-09 | 2026-04-14 | volume_ratio / volume_price_trend / volume_ma_deviation を add_technical_indicators() に追加。モデル再学習が必要。 |
+| R-205 | TODO | 2026-11-02 | - | 歴史的クラッシュ期間リストを docs に整備、許容MDD上限を統計的に確立（高リスク方針の根拠和り） |
+| R-215 | TODO | 2026-11-09 | - | Worst10 空売りシグナルの PaperBroker 検証 |
+| R-216 | TODO | 2026-11-16 | - | `optimal_params.json` を `SignalGenerator` / `RiskManager` が自動参照、BT検証済みの閾値・SL・TPを実運用に反映（高リスク方針の実装基盤） |
+| R-217 | TODO | 2026-11-16 | - | バックテスト実測の `win_rate`/`avg_win`/`avg_loss` を `calc_position_size` に渡し、固定デフォルト値を廃止（Kelly実績化） |
+| R-214 | TODO | 2026-12-14 | - | 予測変動量閾値による発注スキップロジックを order_execution_pipeline に追加（高リスク方針と逆行するため後回し） |
 | R-214 | TODO | 2026-11-16 | - | 予測変動量閾値による発注スキップロジックを order_execution_pipeline に追加 |
 | R-215 | TODO | 2026-11-23 | - | Worst10 空売りシグナルの PaperBroker 検証 |
 | R-205 | DONE | 2026-11-30 | 2026-04-23 | stress_test_pipeline.py 実装・統合テスト・CLIスモークテスト追加。コロナ/リーマンシナリオ対応。 |
@@ -378,7 +394,7 @@
 | R-304 | TODO | 2027-04-12 | - | 外部配信向け read-only API と公開条件を分離設計 |
 | R-305 | TODO | 2027-01-25 | - | R-101 market_regime.py のシグナル生成接続 |
 | R-306 | DONE | 2027-02-01 | 2026-04-14 | fetch_cross_asset_features() を data_loader.py に追加し、data_pipeline / predict_single_stock で結合。モデル再学習が必要。 |
-| R-307 | TODO | 2027-02-08 | - | RiskManager に DD 段階別縮小関数を追加 |
+| R-307 | TODO | 2026-12-07 | - | RiskManager に DD 段階別縮小関数を追加（Q1 2027 から Q4 Sprint 4 に前倒し） |
 | R-308 | TODO | 2027-02-22 | - | R-107 スリッページ実測値と比較する分割発注ロジック |
 | R-401 | TODO | 2027-Q2 | - | |
 | R-402 | TODO | 2027-Q2 | - | |
@@ -413,6 +429,12 @@
 | R-109 | モデル信頼度によるポジション加減（confidence_ratio） | 2026-04-04 |
 | R-110 | 決算カレンダー回避フィルター（±3営業日マスク） | 2026-04-05 |
 | R-208 | 特徴量選択の自動化（Permutation Importance・SHAP保護） | 2026-04-05 |
+| NF-101 | `requirements-dev.txt` 分離（本番依存と開発ツールの分離） | 2026-04-21 |
+| NF-102 | broad `except Exception` 撲滅・ロギング改善 | 2026-04-21 |
+| NF-201 | GHA Integration/E2E テスト追加（integration-tests.yml 確認） | 2026-04-21 |
+| NF-202 | 依存脆弱性スキャン（pip-audit JSON パース統一・GITHUB_STEP_SUMMARY 出力） | 2026-04-21 |
+| NF-203 | SAST スキャン（bandit -ll 追加・HIGH のみ FAIL・MEDIUM は warning） | 2026-04-21 |
+| R-214 | 予測変動量閾値スキップロジック（MIN_CHANGE_RATIO・save_order_run_summary 接続） | 2026-04-21 |
 
 ---
 
@@ -443,4 +465,5 @@
 - 2026-04-11: R-203 の前提整備として Discord API 層と時刻処理ポリシーを整備
 - 2026-04-11: 完了済み施策をアーカイブに圧縮し、未着手・実施中施策のみ詳細表示に再構成
 - 2026-04-11: 収益改善追加施策として R-212〜R-215（Q4 2026 即効・低コスト）、R-305〜R-308（Q1 2027 中期）、R-401〜R-407（Q2 2027+ 長期）を追加
-- 2026-04-19: 非機能改善施策（NF-101〜NF-504）を新設。CI/CD・監視・コード品質・制度文書の5フェーズ15施策を追加
+- 2026-04-19: 非機能改善施策（NF-101～NF-504）を新設。CI/CD・監視・コード品質・制度文書の5フェーズ15施策を追加
+- 2026-04-20: 高リスク方針への転換に伴う優先度見直し。R-205・R-307を前倒し、R-216（BT最適パラメータ自動ロード）・R-217（Kelly実績更新）を新規追加。R-214（リバランス頻度最適化）を低優先度に後回し。Q4スプリント案を再構成

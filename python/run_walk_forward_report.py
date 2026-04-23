@@ -25,6 +25,12 @@ def parse_args():
     parser.add_argument("--slippage", type=float, default=0.0)
     parser.add_argument("--ensemble", action="store_true")
     parser.add_argument("--limit-symbols", type=int, default=None, help="テスト用に対象銘柄数を制限")
+    parser.add_argument(
+        "--as-of-date",
+        type=str,
+        default=None,
+        help="対象銘柄をこの日付時点の指数構成に固定する（YYYY-MM-DD）",
+    )
     return parser.parse_args()
 
 
@@ -40,6 +46,7 @@ def main():
         slippage=args.slippage,
         ensemble=args.ensemble,
         limit_symbols=args.limit_symbols,
+        as_of_date=args.as_of_date,
     )
 
     logger.info("Walk-Forward比較レポート生成完了")

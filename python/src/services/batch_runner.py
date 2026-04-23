@@ -7,9 +7,10 @@
 
 import json
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, TimeoutError, as_completed
-from typing import Callable
+from typing import Callable, Optional
 
 from src.domain.types import SymbolTask
+from src.utils.db import load_index_membership_symbols_as_of
 from src.utils.data_path_utils import get_watchlist_path
 from src.utils.logger import get_logger
 
@@ -19,16 +20,35 @@ logger = get_logger(__name__)
 DEFAULT_TASK_TIMEOUT = 300
 
 
-def load_target_symbols() -> list[SymbolTask]:
+def load_target_symbols(as_of_date: Optional[str] = None) -> list[SymbolTask]:
     """
     config/watchlist.json から対象銘柄リストを読み込む
 
     フォーマット:
         {"us": ["AAPL", "MSFT", ...], "jp": ["7203", "9984", ...]}
 
+    Args:
+        as_of_date: YYYY-MM-DD。指定時は index_membership_history から
+            指定日以前で最新の指数構成銘柄を読み込む。
+
     Returns:
         list[SymbolTask]: SymbolTask(市場, 銘柄コード) のリスト
     """
+    if as_of_date:
+        try:
+            rows = load_index_membership_symbols_as_of(as_of_date)
+            if rows:
+                logger.info(f"過去構成銘柄を使用: as_of_date={as_of_date}, 件数={len(rows)}")
+                return [SymbolTask(market=market, symbol=symbol) for market, symbol in rows]
+            logger.warning(
+                f"index_membership_history に as_of_date={as_of_date} のデータがないため watchlist.json を使用します"
+            )
+        except Exception as e:
+            logger.warning(
+                f"index_membership_history 読み込み失敗（watchlistへフォールバック）: {e}",
+                exc_info=True,
+            )
+
     json_path = get_watchlist_path()
     with open(json_path, encoding="utf-8") as f:
         data = json.load(f)

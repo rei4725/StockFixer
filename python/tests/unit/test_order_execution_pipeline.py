@@ -14,6 +14,7 @@ from src.domain.types import TradingGateStatus
 from src.services.order_execution_pipeline import (
     BUY_THRESHOLD,
     MAX_ORDERS_PER_RUN,
+    MIN_CHANGE_RATIO,
     _apply_buy_sector_limit,
     _attach_dynamic_thresholds,
     _choose_order_params,
@@ -107,6 +108,9 @@ class TestRunDailyOrders(unittest.TestCase):
             patch(
                 "src.services.risk_manager.RiskManager._get_consecutive_losses",
                 return_value=0,
+            ),
+            patch(
+                "src.services.order_execution_pipeline.save_order_run_summary",
             ),
         ]
         return patches
@@ -329,6 +333,116 @@ class TestRunDailyOrders(unittest.TestCase):
             stats = run_daily_orders(broker, market="jp", mode="paper")
             self.assertEqual(stats["sell_orders"], 0)
             broker.send_order.assert_not_called()
+        finally:
+            self._stop_patches(patch_list)
+
+    def test_skipped_min_change_below_threshold(self):
+        """diff_ratio が MIN_CHANGE_RATIO 未満の買いシグナルは skipped_min_change にカウントされる"""
+        small_dr = MIN_CHANGE_RATIO * 0.5  # 閾値の半分 → スキップ対象
+        predictions_base = pd.DataFrame(
+            [
+                {
+                    "market": "jp",
+                    "symbol": "7200",
+                    "current_price": 1000.0,
+                    "diff_ratio": small_dr,
+                    "confidence_ratio": 1.0,
+                }
+            ]
+        )
+
+        def _mock_attach(df):
+            result = df.copy()
+            result["base_threshold"] = 0.001
+            result["threshold_scale"] = 1.0
+            result["effective_buy_threshold"] = 0.001
+            result["effective_sell_threshold"] = -0.001
+            return result
+
+        def _mock_score(df):
+            result = df.copy()
+            result["multi_horizon_score"] = result["diff_ratio"]
+            return result
+
+        broker = _make_broker()
+        patches = self._patch_pipeline(predictions_base)
+        patches += [
+            patch(
+                "src.services.order_execution_pipeline._attach_dynamic_thresholds",
+                side_effect=_mock_attach,
+            ),
+            patch(
+                "src.services.order_execution_pipeline.apply_multi_horizon_score_column",
+                side_effect=_mock_score,
+            ),
+        ]
+        _, patch_list = self._start_patches(patches)
+        try:
+            stats = run_daily_orders(broker, market="jp", mode="paper")
+            self.assertEqual(stats["skipped_min_change"], 1)
+            self.assertGreater(stats["skipped"], 0)
+            self.assertEqual(stats["buy_orders"], 0)
+        finally:
+            self._stop_patches(patch_list)
+
+    def test_skipped_min_change_above_threshold(self):
+        """diff_ratio が MIN_CHANGE_RATIO 以上の買いシグナルはスキップされない"""
+        large_dr = MIN_CHANGE_RATIO * 2.0  # 閾値の2倍 → スキップしない
+        predictions_base = pd.DataFrame(
+            [
+                {
+                    "market": "jp",
+                    "symbol": "7200",
+                    "current_price": 1000.0,
+                    "diff_ratio": large_dr,
+                    "confidence_ratio": 1.0,
+                }
+            ]
+        )
+
+        def _mock_attach(df):
+            result = df.copy()
+            result["base_threshold"] = 0.001
+            result["threshold_scale"] = 1.0
+            result["effective_buy_threshold"] = 0.001
+            result["effective_sell_threshold"] = -0.001
+            return result
+
+        def _mock_score(df):
+            result = df.copy()
+            result["multi_horizon_score"] = result["diff_ratio"]
+            return result
+
+        broker = _make_broker()
+        patches = self._patch_pipeline(predictions_base)
+        patches += [
+            patch(
+                "src.services.order_execution_pipeline._attach_dynamic_thresholds",
+                side_effect=_mock_attach,
+            ),
+            patch(
+                "src.services.order_execution_pipeline.apply_multi_horizon_score_column",
+                side_effect=_mock_score,
+            ),
+        ]
+        _, patch_list = self._start_patches(patches)
+        try:
+            stats = run_daily_orders(broker, market="jp", mode="paper")
+            self.assertEqual(stats["skipped_min_change"], 0)
+            self.assertEqual(stats["buy_orders"], 1)
+        finally:
+            self._stop_patches(patch_list)
+
+    def test_save_order_run_summary_called(self):
+        """run_daily_orders 実行後に save_order_run_summary が呼ばれる"""
+        broker = _make_broker()
+        predictions = _make_predictions(n_buy=1)
+        patches = self._patch_pipeline(predictions)
+        mocks, patch_list = self._start_patches(patches)
+        try:
+            run_daily_orders(broker, market="jp", mode="paper")
+            mock_save = mocks[-1]  # save_order_run_summary は _patch_pipeline の最後
+            mock_save.assert_called_once()
         finally:
             self._stop_patches(patch_list)
 
