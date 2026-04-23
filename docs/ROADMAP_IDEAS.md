@@ -378,6 +378,9 @@
 | R-216 | TODO | 2026-11-16 | - | `optimal_params.json` を `SignalGenerator` / `RiskManager` が自動参照、BT検証済みの閾値・SL・TPを実運用に反映（高リスク方針の実装基盤） |
 | R-217 | TODO | 2026-11-16 | - | バックテスト実測の `win_rate`/`avg_win`/`avg_loss` を `calc_position_size` に渡し、固定デフォルト値を廃止（Kelly実績化） |
 | R-214 | TODO | 2026-12-14 | - | 予測変動量閾値による発注スキップロジックを order_execution_pipeline に追加（高リスク方針と逆行するため後回し） |
+| R-214 | TODO | 2026-11-16 | - | 予測変動量閾値による発注スキップロジックを order_execution_pipeline に追加 |
+| R-215 | TODO | 2026-11-23 | - | Worst10 空売りシグナルの PaperBroker 検証 |
+| R-205 | DONE | 2026-11-30 | 2026-04-23 | stress_test_pipeline.py 実装・統合テスト・CLIスモークテスト追加。コロナ/リーマンシナリオ対応。 |
 | R-201 | TODO | 2026-10-26 | - | |
 | R-202 | DONE | 2026-11-02 | 2026-04-14 | model_metrics テーブルの directional_accuracy を使い softmax 重み付きアンサンブルを実装（predict_single_stock / predict_unified）。 |
 | R-206 | TODO | 2026-11-09 | - | R-004 Walk-Forward と連動 |

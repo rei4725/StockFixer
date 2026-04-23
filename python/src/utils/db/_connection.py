@@ -65,18 +65,18 @@ def _db_connection() -> Generator[duckdb.DuckDBPyConnection, None, None]:
         )
 
     con = None
-    last_exc: Exception = RuntimeError("DB接続に失敗しました")
-    for attempt in range(_RETRY_COUNT):
-        try:
-            con = duckdb.connect(db_path, config=_DB_CONFIG)
-            break
-        except (duckdb.IOException, duckdb.BinderException) as e:
-            last_exc = e
-            if attempt < _RETRY_COUNT - 1:
-                logger.warning(f"DB接続待機中 ({attempt + 1}/{_RETRY_COUNT}): {e}")
-                time.sleep(_RETRY_DELAY)
-
     try:
+        last_exc: Exception = RuntimeError("DB接続に失敗しました")
+        for attempt in range(_RETRY_COUNT):
+            try:
+                con = duckdb.connect(db_path, config=_DB_CONFIG)
+                break
+            except (duckdb.IOException, duckdb.BinderException) as e:
+                last_exc = e
+                if attempt < _RETRY_COUNT - 1:
+                    logger.warning(f"DB接続待機中 ({attempt + 1}/{_RETRY_COUNT}): {e}")
+                    time.sleep(_RETRY_DELAY)
+
         if con is None:
             raise last_exc
         # テーブル初期化: プロセス起動後の初回接続時のみ実行（ダブルチェックロッキング）
