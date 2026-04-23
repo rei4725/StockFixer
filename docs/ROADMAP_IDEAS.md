@@ -364,7 +364,7 @@
 | R-213 | DONE | 2026-11-09 | 2026-04-14 | volume_ratio / volume_price_trend / volume_ma_deviation を add_technical_indicators() に追加。モデル再学習が必要。 |
 | R-214 | TODO | 2026-11-16 | - | 予測変動量閾値による発注スキップロジックを order_execution_pipeline に追加 |
 | R-215 | TODO | 2026-11-23 | - | Worst10 空売りシグナルの PaperBroker 検証 |
-| R-205 | TODO | 2026-11-30 | - | 歴史的クラッシュ期間リストを docs に整備 |
+| R-205 | DONE | 2026-11-30 | 2026-04-23 | stress_test_pipeline.py 実装・統合テスト・CLIスモークテスト追加。コロナ/リーマンシナリオ対応。 |
 | R-201 | TODO | 2026-10-26 | - | |
 | R-202 | DONE | 2026-11-02 | 2026-04-14 | model_metrics テーブルの directional_accuracy を使い softmax 重み付きアンサンブルを実装（predict_single_stock / predict_unified）。 |
 | R-206 | TODO | 2026-11-09 | - | R-004 Walk-Forward と連動 |

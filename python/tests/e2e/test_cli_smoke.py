@@ -39,6 +39,7 @@ class TestCLIHelp:
         "run_backtest.py",
         "run_backtest_optimize.py",
         "run_scheduler.py",
+        "run_stress_test.py",
     ]
 
     @pytest.mark.parametrize("script", SCRIPTS)
@@ -89,6 +90,7 @@ class TestCLIImport:
         "run_predict.py",
         "run_backtest.py",
         "run_scheduler.py",
+        "run_stress_test.py",
     ]
 
     @pytest.mark.parametrize("script", SCRIPTS)
@@ -152,6 +154,25 @@ class TestCLIActualRun:
 
     @pytest.mark.slow
     @pytest.mark.timeout(120)
+    def test_stress_test_missing_required_arg(self):
+        """
+        run_stress_test.py を必須引数なしで実行するとエラー終了すること。
+        --symbol / --symbols が必須のため exit code 1 が期待値。
+        """
+        script = os.path.join(_PYTHON_DIR, "run_stress_test.py")
+        if not os.path.exists(script):
+            pytest.skip("run_stress_test.py が存在しない")
+        result = subprocess.run(
+            [sys.executable, script],
+            capture_output=True,
+            text=True,
+            cwd=_PYTHON_DIR,
+        )
+        # --symbol / --symbols なしは sys.exit(1) で終了
+        assert result.returncode != 0, "必須引数なしなのに exit 0 が返った（引数チェックが機能していない可能性）"
+
+    @pytest.mark.slow
+    @pytest.mark.timeout(120)
     def test_no_traceback_in_help_output(self):
         """
         すべての run_*.py --help 出力に Traceback が含まれないこと。
@@ -191,6 +212,7 @@ class TestCLIFilesExist:
         "run_backtest.py",
         "run_scheduler.py",
         "run_discord_bot.py",
+        "run_stress_test.py",
     ]
 
     @pytest.mark.parametrize("script", REQUIRED_SCRIPTS)
