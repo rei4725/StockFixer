@@ -271,5 +271,125 @@ class TestDB(unittest.TestCase):
         self.assertAlmostEqual(loaded["RSI"].iloc[0], 55.0)
 
 
+class TestExperimentRunsIntegration(unittest.TestCase):
+    """experiment_runs テーブルの統合テスト（実DB使用・R-211）"""
+
+    def setUp(self):
+        """各テスト前に一時DBで初期化"""
+        db_module.close_connection()
+        self.tmp_dir = tempfile.mkdtemp()
+        self.tmp_db = os.path.join(self.tmp_dir, "test_experiment.duckdb")
+        self._orig_get_db_path = path_utils.get_db_path
+        path_utils.get_db_path = lambda: self.tmp_db
+        db_module.get_db_path = lambda: self.tmp_db
+        db_module._tables_initialized = False
+
+    def tearDown(self):
+        """各テスト後にDBをクリーンアップ"""
+        db_module.close_connection()
+        path_utils.get_db_path = self._orig_get_db_path
+        db_module.get_db_path = self._orig_get_db_path
+        if os.path.exists(self.tmp_db):
+            os.remove(self.tmp_db)
+        wal_path = self.tmp_db + ".wal"
+        if os.path.exists(wal_path):
+            os.remove(wal_path)
+        if os.path.exists(self.tmp_dir):
+            os.rmdir(self.tmp_dir)
+
+    def test_save_and_load_experiment_run(self):
+        """実DBでsave_experiment_run → load_experiment_runsの往復確認"""
+        run_id = "integration-run-001"
+        db_module.save_experiment_run(
+            run_id=run_id,
+            market="jp",
+            symbol="7203",
+            model_name="StockXGBoostModel",
+            trained_at="20260314_120000",
+            horizon=1,
+            rmse=0.012,
+            directional_accuracy=0.58,
+            n_samples=500,
+            feature_names=["close", "volume", "sma5"],
+            params={"learning_rate": 0.05, "n_estimators": 200},
+        )
+
+        df = db_module.load_experiment_runs(market="jp", symbol="7203")
+
+        self.assertEqual(len(df), 1)
+        row = df.iloc[0]
+        self.assertEqual(row["run_id"], run_id)
+        self.assertEqual(row["market"], "jp")
+        self.assertEqual(row["symbol"], "7203")
+        self.assertEqual(row["model_name"], "StockXGBoostModel")
+        self.assertAlmostEqual(row["rmse"], 0.012)
+        self.assertAlmostEqual(row["directional_accuracy"], 0.58)
+        self.assertEqual(int(row["n_samples"]), 500)
+        self.assertEqual(int(row["n_features"]), 3)
+        self.assertEqual(len(str(row["feature_hash"])), 16)
+
+    def test_load_best_run_by_directional_accuracy(self):
+        """複数ランを保存してload_best_runが最良ランを正しく返すか確認"""
+        runs = [
+            ("run-da-low", 0.55),
+            ("run-da-high", 0.70),
+            ("run-da-mid", 0.62),
+        ]
+        for i, (run_id, da) in enumerate(runs):
+            db_module.save_experiment_run(
+                run_id=run_id,
+                market="us",
+                symbol="AAPL",
+                model_name="StockXGBoostModel",
+                trained_at=f"2026031{i}_120000",
+                directional_accuracy=da,
+            )
+
+        best = db_module.load_best_run(
+            market="us",
+            symbol="AAPL",
+            model_name="StockXGBoostModel",
+            metric="directional_accuracy",
+        )
+
+        self.assertIsNotNone(best)
+        self.assertAlmostEqual(best["directional_accuracy"], 0.70)
+        self.assertEqual(best["run_id"], "run-da-high")
+
+    def test_load_best_run_returns_none_when_empty(self):
+        """空テーブルでload_best_runがNoneを返すか確認"""
+        result = db_module.load_best_run(
+            market="us",
+            symbol="MSFT",
+            model_name="StockXGBoostModel",
+        )
+        self.assertIsNone(result)
+
+    def test_run_id_uniqueness_constraint(self):
+        """同一run_idでのINSERT OR REPLACE動作確認（レコードが上書きされること）"""
+        run_id = "run-overwrite-test"
+        db_module.save_experiment_run(
+            run_id=run_id,
+            market="jp",
+            symbol="6758",
+            model_name="StockLightGBMModel",
+            trained_at="20260314_120000",
+            directional_accuracy=0.55,
+        )
+        # 同じrun_idで上書き保存（directional_accuracyを更新）
+        db_module.save_experiment_run(
+            run_id=run_id,
+            market="jp",
+            symbol="6758",
+            model_name="StockLightGBMModel",
+            trained_at="20260314_120000",
+            directional_accuracy=0.65,
+        )
+
+        df = db_module.load_experiment_runs(market="jp", symbol="6758")
+        self.assertEqual(len(df), 1)
+        self.assertAlmostEqual(df.iloc[0]["directional_accuracy"], 0.65)
+
+
 if __name__ == "__main__":
     unittest.main()

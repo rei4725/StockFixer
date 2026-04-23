@@ -13,6 +13,7 @@ StockFixer が使用する DuckDB データベース（`python/data/stockfixer.d
 | `stock_features` | 特徴量データ（テクニカル指標＋ラグ特徴量＋ターゲット） | 銘柄×日付行 |
 | `prediction_results` | 予測結果 | 銘柄×予測実行日時 |
 | `market_data_raw` | 生OHLCVデータ | 銘柄×日付×時間軸 |
+| `experiment_runs` | 実験トラッキング（モデル学習・WF実行の記録） | 実験ラン単位（run_id） |
 
 ---
 
@@ -158,6 +159,43 @@ yfinance から取得した生の OHLCV データを格納するテーブル。`
 | `close` | `Close` |
 | `volume` | `Volume` |
 | `adj_close` | `Adj Close` |
+
+---
+
+## experiment_runs
+
+モデル学習・Walk-Forward 実行ごとに実験メタデータを記録するテーブル（R-211 実験トラッキング基盤）。  
+R-206（Optuna ハイパーパラメータ最適化）・R-207（A/B テスト）のインフラ共有テーブルとして機能する。  
+`INSERT OR REPLACE` により同一 `run_id` の再実行時は上書きされる。
+
+### 列定義
+
+| 列名 | 型 | NULL | デフォルト | 説明 |
+|------|-----|------|-----------|------|
+| `run_id` | VARCHAR | NOT NULL | — | 一意の実験ID（UUID v4）。`generate_run_id()` で生成 |
+| `market` | VARCHAR | NOT NULL | — | マーケット識別子（`jp`, `us`） |
+| `symbol` | VARCHAR | NOT NULL | — | 銘柄コード（`7203`, `AAPL`） |
+| `model_name` | VARCHAR | NOT NULL | — | モデル名（`StockXGBoostModel`, `StockLightGBMModel` 等） |
+| `trained_at` | VARCHAR | NOT NULL | — | 学習日時文字列（`YYYYMMDD_HHMMSS` 形式） |
+| `horizon` | INTEGER | NOT NULL | `1` | 予測ホライズン（営業日） |
+| `rmse` | DOUBLE | NULL可 | — | 学習データでの RMSE |
+| `directional_accuracy` | DOUBLE | NULL可 | — | 方向正解率（0.0〜1.0）。WF実行時は `win_rate` を格納 |
+| `n_samples` | INTEGER | NULL可 | — | 学習サンプル数 |
+| `n_features` | INTEGER | NULL可 | — | 使用特徴量数 |
+| `feature_hash` | VARCHAR | NULL可 | — | 特徴量セットのハッシュ（SHA-256 先頭16文字）。特徴量来歴トラッキング用 |
+| `params_json` | VARCHAR | NULL可 | — | モデルハイパーパラメータ等を JSON 文字列で格納 |
+| `created_at` | TIMESTAMP | NOT NULL | `CURRENT_TIMESTAMP` | レコード作成日時 |
+
+**主キー**: `(run_id)`
+
+### CRUD操作
+
+| 操作 | 関数 | 説明 |
+|------|------|------|
+| INSERT | `save_experiment_run(run_id, market, symbol, model_name, trained_at, ...)` | `INSERT OR REPLACE`（べき等） |
+| SELECT | `load_experiment_runs(market, symbol, model_name, limit)` | created_at 降順。フィルタは全て省略可 |
+| 最良ラン取得 | `load_best_run(market, symbol, model_name, metric)` | `directional_accuracy`（大きい順）または `rmse`（小さい順）で1件取得 |
+| ID生成 | `generate_run_id()` | UUID v4 文字列を返す |
 
 ---
 
