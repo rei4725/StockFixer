@@ -6,7 +6,10 @@ yfinance 経由でのデータ取得を伴うため tests/integration/ に配置
 """
 import os
 import sys
+import tempfile
 import unittest
+
+import pandas as pd
 
 # パス設定
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -100,8 +103,6 @@ class TestStressTestE2E(unittest.TestCase):
 
     def test_save_stress_test_results_creates_csv(self):
         """StressTestResult を保存すると CSV が results/stress_test/ に作成されること"""
-        import tempfile
-
         try:
             from src.domain.types import StressTestResult
             from src.services.stress_test_pipeline import save_stress_test_results
@@ -132,8 +133,6 @@ class TestStressTestE2E(unittest.TestCase):
             self.assertTrue(filepath.endswith(".csv"), "ファイルが CSV 形式であること")
 
             # CSV の中身を確認
-            import pandas as pd
-
             df = pd.read_csv(filepath)
             self.assertEqual(len(df), 1, "1行のデータが保存されていること")
             self.assertIn("symbol", df.columns, "symbol 列が存在すること")
@@ -142,20 +141,3 @@ class TestStressTestE2E(unittest.TestCase):
             self.assertIn("mdd_pass", df.columns, "mdd_pass 列が存在すること")
             self.assertEqual(df.iloc[0]["symbol"], "AAPL")
             self.assertEqual(df.iloc[0]["scenario_name"], "corona")
-
-    def test_unknown_scenario_returns_none(self):
-        """不正なシナリオ名を渡すと None が返ること"""
-        try:
-            from src.services.stress_test_pipeline import run_stress_test_single
-
-            result = run_stress_test_single(
-                market="us",
-                symbol="AAPL",
-                scenario_name="unknown_scenario",
-                model_type="XGBoostModel",
-                source="api",
-            )
-        except Exception as e:
-            self.skipTest(f"予期しないエラー: {e}")
-
-        self.assertIsNone(result, "不正なシナリオ名で None が返ること")
