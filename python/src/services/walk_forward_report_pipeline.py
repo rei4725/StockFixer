@@ -16,6 +16,7 @@ import pandas as pd
 from src.services.backtest_pipeline import run_backtest_walk_forward
 from src.services.batch_runner import load_target_symbols
 from src.utils.data_path_utils import ensure_dir, get_results_dir
+from src.utils.db.experiment import generate_run_id, save_experiment_run
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -211,6 +212,25 @@ def run_walk_forward_comparison_report(
 
             summary = _summarize_wf_result(wf_df, market=market, symbol=symbol)
             rows.append(summary)
+            # 実験記録（R-211）: WF実行ごとにパフォーマンスを記録する
+            save_experiment_run(
+                run_id=generate_run_id(),
+                market=market,
+                symbol=symbol,
+                model_name=model_type,
+                trained_at=ts,
+                directional_accuracy=summary.get("win_rate"),
+                params={
+                    "n_splits": n_splits,
+                    "threshold": threshold,
+                    "initial_cash": initial_cash,
+                    "fee_rate": fee_rate,
+                    "slippage": slippage,
+                    "ensemble": ensemble,
+                    "total_return": summary.get("total_return"),
+                    "sharpe_ratio": summary.get("sharpe_ratio"),
+                },
+            )
             logger.info(f"[WF] 実行完了: {market}/{symbol}")
         except Exception as exc:
             failed += 1
