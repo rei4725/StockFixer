@@ -281,6 +281,12 @@ class TestLoadBestRun(unittest.TestCase):
             result = load_best_run("jp", "7203", "StockXGBoostModel")
         self.assertIsNone(result)
 
+    def test_raises_on_invalid_metric(self):
+        with self.assertRaises(ValueError):
+            load_best_run(
+                "jp", "7203", "StockXGBoostModel", metric="DROP TABLE experiment_runs; --"
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

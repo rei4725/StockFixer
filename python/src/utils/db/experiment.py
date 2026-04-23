@@ -20,6 +20,8 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+_ALLOWED_METRICS = frozenset({"directional_accuracy", "rmse"})
+
 
 def generate_run_id() -> str:
     """一意の run_id を生成する（UUID v4）。"""
@@ -155,6 +157,8 @@ def load_best_run(
     Returns:
         最良ランの dict、なければ None
     """
+    if metric not in _ALLOWED_METRICS:
+        raise ValueError(f"metric must be one of {sorted(_ALLOWED_METRICS)}, got: {metric!r}")
     order = "DESC" if metric == "directional_accuracy" else "ASC"
     with _db_connection() as con:
         try:
