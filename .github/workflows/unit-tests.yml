@@ -7,7 +7,7 @@ on:
       - ".github/workflows/unit-tests.yml"
   push:
     branches:
-      - feature/training
+      - develop
     paths:
       - "python/**"
       - ".github/workflows/unit-tests.yml"

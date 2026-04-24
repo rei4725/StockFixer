@@ -370,7 +370,7 @@ docker exec -e DISABLE_DAILY_LOSS_GUARD=1 stockfixer python run_scheduler.py --r
 金曜 01:00  weekly_watchlist_refresh（APScheduler・コンテナ内）
 
 月曜 02:00  weekly_redeploy.ps1（Windowsタスクスケジューラ）
-    1. git pull origin feature/training
+    1. git pull origin develop
     2. VERSION / BUILD_DATE / GIT_COMMIT を環境変数にセット
     3. docker-compose up -d --build
     4. コンテナ起動確認

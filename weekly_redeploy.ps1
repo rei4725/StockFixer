@@ -25,8 +25,8 @@ try {
     }
 
     # --- git pull ---
-    Write-Log "[git] git pull origin feature/training"
-    git pull origin feature/training 2>&1 | ForEach-Object { Write-Log "  [git] $_" }
+    Write-Log "[git] git pull origin develop"
+    git pull origin develop 2>&1 | ForEach-Object { Write-Log "  [git] $_" }
     Write-Log "[git] 完了 (exit=$LASTEXITCODE)"
     if ($LASTEXITCODE -ne 0) { throw "git pull が失敗しました (exit=$LASTEXITCODE)" }
 
