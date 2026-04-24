@@ -71,3 +71,8 @@ HIGH_CONFIDENCE_POSITION_CAP: float = _strict_float(
 MIN_SHARPE_TO_TRADE: float = _strict_float(
     "MIN_SHARPE_TO_TRADE", _defaults["MIN_SHARPE_TO_TRADE"], min_val=0.0, max_val=10.0
 )
+
+# Kelly 入力パラメータ（BT実績値が取得できない場合のフォールバック）
+DEFAULT_WIN_RATE: float = 0.55
+DEFAULT_AVG_WIN: float = 0.015
+DEFAULT_AVG_LOSS: float = 0.008

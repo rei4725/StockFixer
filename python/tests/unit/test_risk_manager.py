@@ -271,5 +271,113 @@ class TestRiskManagerOptimalParamsAutoLoad(unittest.TestCase):
         self.assertTrue(risk.is_trading_allowed())
 
 
+# ---------------------------------------------------------------------------
+# R-217: RiskManager BT実績Kelly値フィードバック
+# ---------------------------------------------------------------------------
+
+
+class TestRiskManagerKellyBtFeedback(unittest.TestCase):
+    """RiskManager がBT実績Kelly値をロード・参照するテスト"""
+
+    _MOCK_TARGET = "src.services.risk_manager.get_optimal_params"
+
+    def test_kelly_params_loaded_from_metrics(self):
+        """metrics に win_rate/avg_win/avg_loss があればインスタンス属性にセットされる"""
+        params = {
+            "stop_loss_pct": None,
+            "take_profit_pct": None,
+            "metrics": {
+                "win_rate": 0.62,
+                "avg_win": 0.021,
+                "avg_loss": 0.011,
+            },
+        }
+        with patch(self._MOCK_TARGET, return_value=params):
+            risk = RiskManager(_make_broker(), market="jp", symbol="7203")
+
+        self.assertAlmostEqual(risk.kelly_win_rate, 0.62)
+        self.assertAlmostEqual(risk.kelly_avg_win, 0.021)
+        self.assertAlmostEqual(risk.kelly_avg_loss, 0.011)
+
+    def test_kelly_params_fallback_when_json_not_found(self):
+        """JSON が存在しない（None）場合はデフォルト値が使われる"""
+        from config.trading_policy import DEFAULT_AVG_LOSS, DEFAULT_AVG_WIN, DEFAULT_WIN_RATE
+
+        with patch(self._MOCK_TARGET, return_value=None):
+            risk = RiskManager(_make_broker(), market="jp", symbol="9999")
+
+        self.assertAlmostEqual(risk.kelly_win_rate, DEFAULT_WIN_RATE)
+        self.assertAlmostEqual(risk.kelly_avg_win, DEFAULT_AVG_WIN)
+        self.assertAlmostEqual(risk.kelly_avg_loss, DEFAULT_AVG_LOSS)
+
+    def test_kelly_params_fallback_when_no_market_symbol(self):
+        """market/symbol 未指定の場合もデフォルト値が使われる"""
+        from config.trading_policy import DEFAULT_AVG_LOSS, DEFAULT_AVG_WIN, DEFAULT_WIN_RATE
+
+        with patch(self._MOCK_TARGET) as mock_fn:
+            risk = RiskManager(_make_broker())
+
+        mock_fn.assert_not_called()
+        self.assertAlmostEqual(risk.kelly_win_rate, DEFAULT_WIN_RATE)
+        self.assertAlmostEqual(risk.kelly_avg_win, DEFAULT_AVG_WIN)
+        self.assertAlmostEqual(risk.kelly_avg_loss, DEFAULT_AVG_LOSS)
+
+    def test_explicit_args_override_instance_attributes(self):
+        """calc_position_size に明示的に引数を渡すとインスタンス属性より優先される"""
+        params = {
+            "stop_loss_pct": None,
+            "take_profit_pct": None,
+            "metrics": {"win_rate": 0.62, "avg_win": 0.021, "avg_loss": 0.011},
+        }
+        with patch(self._MOCK_TARGET, return_value=params):
+            risk = RiskManager(_make_broker(balance=1_000_000.0), market="jp", symbol="7203")
+
+        # 明示的に低い勝率を指定 → インスタンス属性の 0.62 より少ない株数になるはず
+        qty_explicit = risk.calc_position_size(
+            "7203", 1000.0, win_rate=0.4, avg_win=0.01, avg_loss=0.01
+        )
+        qty_instance = risk.calc_position_size("7203", 1000.0)
+
+        self.assertGreater(qty_instance, qty_explicit)
+
+    def test_avg_win_fallback_when_key_missing_in_old_format(self):
+        """旧形式（avg_win/avg_loss キー不在）でもデフォルト値にフォールバックする"""
+        from config.trading_policy import DEFAULT_AVG_LOSS, DEFAULT_AVG_WIN
+
+        params = {
+            "stop_loss_pct": None,
+            "take_profit_pct": None,
+            "metrics": {
+                "win_rate": 0.58,
+                # avg_win / avg_loss キーなし（旧形式）
+            },
+        }
+        with patch(self._MOCK_TARGET, return_value=params):
+            risk = RiskManager(_make_broker(), market="jp", symbol="7203")
+
+        self.assertAlmostEqual(risk.kelly_win_rate, 0.58)
+        self.assertAlmostEqual(risk.kelly_avg_win, DEFAULT_AVG_WIN)
+        self.assertAlmostEqual(risk.kelly_avg_loss, DEFAULT_AVG_LOSS)
+
+    def test_none_args_use_instance_kelly_attributes(self):
+        """win_rate=None のとき self.kelly_win_rate が使われる（結果確認）"""
+        params = {
+            "stop_loss_pct": None,
+            "take_profit_pct": None,
+            "metrics": {"win_rate": 0.70, "avg_win": 0.025, "avg_loss": 0.010},
+        }
+        with patch(self._MOCK_TARGET, return_value=params):
+            risk = RiskManager(_make_broker(balance=1_000_000.0), market="jp", symbol="7203")
+
+        # None を明示 → インスタンス属性 (0.70) を使用
+        qty_none = risk.calc_position_size("7203", 1000.0, win_rate=None)
+        # 直接値を渡す（同値）
+        qty_direct = risk.calc_position_size(
+            "7203", 1000.0, win_rate=0.70, avg_win=0.025, avg_loss=0.010
+        )
+
+        self.assertEqual(qty_none, qty_direct)
+
+
 if __name__ == "__main__":
     unittest.main()

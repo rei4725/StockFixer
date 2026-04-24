@@ -65,7 +65,7 @@ def compute_metrics(
     total_return = (final_cash - initial_cash) / initial_cash
 
     # 取引ペア（buy/sell）を抽出して勝率・Profit Factor を計算
-    wins, losses = _extract_trade_pnl(trade_log)
+    wins, losses, win_returns, loss_returns = _extract_trade_pnl(trade_log)
     trade_pnls = wins + losses
     num_trades = len(wins) + len(losses)
     win_rate = len(wins) / num_trades if num_trades > 0 else 0.0
@@ -73,6 +73,9 @@ def compute_metrics(
     gross_profit = sum(w for w in wins if w > 0)
     gross_loss = abs(sum(loss for loss in losses if loss < 0))
     profit_factor = gross_profit / gross_loss if gross_loss > 0 else math.inf
+
+    avg_win = float(np.mean(win_returns)) if win_returns else 0.0
+    avg_loss = float(np.mean(loss_returns)) if loss_returns else 0.0
 
     # --- Sharpe ratio（取引ごとのリターン列から） ---
     sharpe = _sharpe_ratio(trade_pnls, risk_free_rate, trading_days_per_year)
@@ -117,6 +120,8 @@ def compute_metrics(
         if not position_values.empty
         else 0.0,
         "atr_fallback_trades": atr_fallback_trades,
+        "avg_win": round(avg_win, 6),
+        "avg_loss": round(avg_loss, 6),
     }
 
 
@@ -137,19 +142,29 @@ def _empty_metrics(initial_cash: float) -> dict:
         "max_position_fraction": 0.0,
         "avg_position_value": 0.0,
         "atr_fallback_trades": 0,
+        "avg_win": 0.0,
+        "avg_loss": 0.0,
     }
 
 
-def _extract_trade_pnl(trade_log: pd.DataFrame) -> tuple[list[float], list[float]]:
+def _extract_trade_pnl(
+    trade_log: pd.DataFrame,
+) -> tuple[list[float], list[float], list[float], list[float]]:
     """
-    Buy → sell のペアから各トレードの損益を抽出する。
+    Buy → sell のペアから各トレードの損益とリターン率を抽出する。
 
     Returns:
-        (wins, losses): 正の損益リスト、負の損益リスト
+        (wins, losses, win_returns, loss_returns):
+            wins: 正の損益リスト
+            losses: 負の損益リスト
+            win_returns: 勝ちトレードのリターン率リスト
+            loss_returns: 負けトレードのリターン率リスト（絶対値）
     """
     buys: list[dict] = []
     wins: list[float] = []
     losses: list[float] = []
+    win_returns: list[float] = []
+    loss_returns: list[float] = []
 
     for _, row in trade_log.iterrows():
         action = row.get("action", "")
@@ -158,9 +173,15 @@ def _extract_trade_pnl(trade_log: pd.DataFrame) -> tuple[list[float], list[float
         elif action in ("sell", "final_sell", "stop_loss", "take_profit") and buys:
             buy = buys.pop(0)
             pnl = (row["price"] - buy["price"]) * buy["qty"]
-            (wins if pnl >= 0 else losses).append(pnl)
+            ret = (row["price"] - buy["price"]) / buy["price"] if buy["price"] > 0 else 0.0
+            if pnl >= 0:
+                wins.append(pnl)
+                win_returns.append(ret)
+            else:
+                losses.append(pnl)
+                loss_returns.append(abs(ret))
 
-    return wins, losses
+    return wins, losses, win_returns, loss_returns
 
 
 def compute_cost_comparison_metrics(

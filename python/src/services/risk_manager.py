@@ -22,6 +22,9 @@ from config.settings import (
     MAX_POSITIONS,
 )
 from config.trading_policy import (  # noqa: F401  # R-307/R-219 でポジションキャップ・DD制御に使用予定
+    DEFAULT_AVG_LOSS,
+    DEFAULT_AVG_WIN,
+    DEFAULT_WIN_RATE,
     HIGH_CONFIDENCE_POSITION_CAP,
     MAX_ACCEPTABLE_DRAWDOWN,
 )
@@ -54,6 +57,11 @@ class RiskManager:
         self.stop_loss_pct: Optional[float] = None
         self.take_profit_pct: Optional[float] = None
 
+        # Kelly 入力パラメータ（BT実績値をロード、なければデフォルト値）
+        self.kelly_win_rate: float = DEFAULT_WIN_RATE
+        self.kelly_avg_win: float = DEFAULT_AVG_WIN
+        self.kelly_avg_loss: float = DEFAULT_AVG_LOSS
+
         if market is not None and symbol is not None:
             params = get_optimal_params(market, symbol)
             if params is not None:
@@ -64,6 +72,16 @@ class RiskManager:
                 logger.debug(
                     f"[{market}_{symbol}] optimal_params.json から SL/TP を自動ロード: "
                     f"stop_loss_pct={self.stop_loss_pct}, take_profit_pct={self.take_profit_pct}"
+                )
+                raw_metrics = params.get("metrics")
+                metrics = raw_metrics if isinstance(raw_metrics, dict) else {}
+                self.kelly_win_rate = float(metrics.get("win_rate", DEFAULT_WIN_RATE))
+                self.kelly_avg_win = float(metrics.get("avg_win", DEFAULT_AVG_WIN))
+                self.kelly_avg_loss = float(metrics.get("avg_loss", DEFAULT_AVG_LOSS))
+                logger.debug(
+                    f"[{market}_{symbol}] BT実績Kelly値をロード: "
+                    f"win_rate={self.kelly_win_rate}, avg_win={self.kelly_avg_win}, "
+                    f"avg_loss={self.kelly_avg_loss}"
                 )
             else:
                 logger.warning(
@@ -163,9 +181,9 @@ class RiskManager:
         self,
         symbol: str,
         price: float,
-        win_rate: float = 0.55,
-        avg_win: float = 0.015,
-        avg_loss: float = 0.008,
+        win_rate: Optional[float] = None,
+        avg_win: Optional[float] = None,
+        avg_loss: Optional[float] = None,
         confidence_ratio: float = 1.0,
     ) -> int:
         """
@@ -174,16 +192,29 @@ class RiskManager:
         Args:
             symbol: 銘柄コード
             price: 発注価格（成行時は現在値を渡す）
-            win_rate: 勝率（バックテスト実績 or デフォルト 55%）
-            avg_win: 平均利益率（デフォルト 1.5%）
-            avg_loss: 平均損失率（デフォルト 0.8%）
+            win_rate: 勝率（バックテスト実績 or デフォルト 55%）。None の場合は BT実績値を参照。
+            avg_win: 平均利益率（デフォルト 1.5%）。None の場合は BT実績値を参照。
+            avg_loss: 平均損失率（デフォルト 0.8%）。None の場合は BT実績値を参照。
             confidence_ratio: モデル信頼度係数（1/(1+model_std)）。1.0=最大信頼度。
                               モデル間分散が大きいほど小さくなり、ポジションを縮小する。
 
         Returns:
             発注株数（1株未満は切り捨て、0 になる場合は 0）
         """
+        if win_rate is None:
+            win_rate = self.kelly_win_rate
+        if avg_win is None:
+            avg_win = self.kelly_avg_win
+        if avg_loss is None:
+            avg_loss = self.kelly_avg_loss
+
         balance = self._broker.get_balance()
+
+        if avg_win == 0.0 or avg_loss == 0.0:
+            logger.warning(
+                f"[{symbol}] Kelly計算: avg_win={avg_win}, avg_loss={avg_loss} "
+                "のいずれかが0.0です。ポジションサイズが0になる可能性があります"
+            )
 
         # Kelly 比率
         if avg_win <= 0 or avg_loss <= 0:

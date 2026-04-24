@@ -133,7 +133,7 @@ class TestMetricsHelpers:
             }
         )
 
-        wins, losses = _extract_trade_pnl(trade_log)
+        wins, losses = _extract_trade_pnl(trade_log)[:2]
 
         # Trade 1: 100→110 (勝ち)
         # Trade 2: 105→100 (負け)
@@ -431,9 +431,9 @@ class TestPrintBacktestMetrics:
 # ---------------------------------------------------------------------------
 
 
-import tempfile
-import unittest
-from pathlib import Path
+import tempfile  # noqa: E402
+import unittest  # noqa: E402
+from pathlib import Path  # noqa: E402
 
 
 class TestEnsemblePredict(unittest.TestCase):
