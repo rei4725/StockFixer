@@ -210,5 +210,66 @@ class TestRiskManagerPersistence(unittest.TestCase):
         self.assertEqual(params, ["trade_pnl"])
 
 
+# ---------------------------------------------------------------------------
+# R-216: RiskManager optimal_params.json 自動ロード
+# ---------------------------------------------------------------------------
+
+
+class TestRiskManagerOptimalParamsAutoLoad(unittest.TestCase):
+    """RiskManager.__init__ が optimal_params.json を自動ロードするテスト"""
+
+    _MOCK_TARGET = "src.services.risk_manager.get_optimal_params"
+
+    def test_stop_loss_and_take_profit_loaded_from_json(self):
+        """market/symbol を指定すると JSON の stop_loss_pct/take_profit_pct が設定される"""
+        params = {"threshold": 0.01, "stop_loss_pct": 0.03, "take_profit_pct": 0.07}
+        with patch(self._MOCK_TARGET, return_value=params) as mock_fn:
+            risk = RiskManager(_make_broker(), market="jp", symbol="7203")
+        mock_fn.assert_called_once_with("jp", "7203")
+        self.assertAlmostEqual(risk.stop_loss_pct, 0.03)
+        self.assertAlmostEqual(risk.take_profit_pct, 0.07)
+
+    def test_stop_loss_take_profit_none_when_json_not_found(self):
+        """JSON が存在しない（None が返る）場合は stop_loss_pct/take_profit_pct は None"""
+        with patch(self._MOCK_TARGET, return_value=None):
+            risk = RiskManager(_make_broker(), market="jp", symbol="9999")
+        self.assertIsNone(risk.stop_loss_pct)
+        self.assertIsNone(risk.take_profit_pct)
+
+    def test_stop_loss_take_profit_null_in_json(self):
+        """JSON にキーが存在しても値が null の場合は None になる"""
+        params = {"threshold": 0.005, "stop_loss_pct": None, "take_profit_pct": None}
+        with patch(self._MOCK_TARGET, return_value=params):
+            risk = RiskManager(_make_broker(), market="us", symbol="AAPL")
+        self.assertIsNone(risk.stop_loss_pct)
+        self.assertIsNone(risk.take_profit_pct)
+
+    def test_no_json_load_when_market_symbol_not_given(self):
+        """market/symbol を指定しない場合は get_optimal_params が呼ばれない"""
+        with patch(self._MOCK_TARGET) as mock_fn:
+            risk = RiskManager(_make_broker())
+        mock_fn.assert_not_called()
+        self.assertIsNone(risk.stop_loss_pct)
+        self.assertIsNone(risk.take_profit_pct)
+
+    def test_no_json_load_when_only_symbol_given(self):
+        """symbol のみ指定（market なし）の場合は get_optimal_params が呼ばれない"""
+        with patch(self._MOCK_TARGET) as mock_fn:
+            risk = RiskManager(_make_broker(), symbol="7203")
+        mock_fn.assert_not_called()
+        self.assertIsNone(risk.stop_loss_pct)
+        self.assertIsNone(risk.take_profit_pct)
+
+    def test_existing_gate_check_unaffected_by_market_symbol(self):
+        """market/symbol を渡してもゲートチェックの動作が変わらない"""
+        broker = _make_broker()
+        params = {"stop_loss_pct": 0.03, "take_profit_pct": 0.07}
+        with patch(self._MOCK_TARGET, return_value=params):
+            risk = RiskManager(broker, market="jp", symbol="7203")
+        risk._get_daily_realized_loss = MagicMock(return_value=0.0)
+        risk._get_consecutive_losses = MagicMock(return_value=0)
+        self.assertTrue(risk.is_trading_allowed())
+
+
 if __name__ == "__main__":
     unittest.main()

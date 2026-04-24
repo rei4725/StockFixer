@@ -12,6 +12,7 @@ OrderExecutionPipeline が注文を送信する前にゲートチェックを行
 """
 
 import os
+from typing import Optional
 
 from config.settings import (
     HALF_KELLY,
@@ -28,6 +29,7 @@ from src.brokers.base import BrokerBase, OrderSide
 from src.domain.types import TradingGateStatus
 from src.utils.db._connection import _db_connection
 from src.utils.logger import get_logger
+from src.utils.optimal_params_loader import get_optimal_params
 
 logger = get_logger(__name__)
 
@@ -40,8 +42,34 @@ class RiskError(Exception):
 
 
 class RiskManager:
-    def __init__(self, broker: BrokerBase):
+    def __init__(
+        self,
+        broker: BrokerBase,
+        market: Optional[str] = None,
+        symbol: Optional[str] = None,
+    ):
         self._broker = broker
+        # TODO: stop_loss_pct / take_profit_pct は現在 RiskManager 内で未使用（Dead Attribute）。
+        #       将来の SL/TP チェックロジック（R-307 等）で参照予定。
+        self.stop_loss_pct: Optional[float] = None
+        self.take_profit_pct: Optional[float] = None
+
+        if market is not None and symbol is not None:
+            params = get_optimal_params(market, symbol)
+            if params is not None:
+                v = params.get("stop_loss_pct")
+                self.stop_loss_pct = float(v) if v is not None else None
+                v = params.get("take_profit_pct")
+                self.take_profit_pct = float(v) if v is not None else None
+                logger.debug(
+                    f"[{market}_{symbol}] optimal_params.json から SL/TP を自動ロード: "
+                    f"stop_loss_pct={self.stop_loss_pct}, take_profit_pct={self.take_profit_pct}"
+                )
+            else:
+                logger.warning(
+                    f"[{market}_{symbol}] optimal_params.json が見つからないか未登録のため "
+                    f"stop_loss_pct/take_profit_pct はデフォルト値 (None) を使用します"
+                )
 
     # ------------------------------------------------------------------
     # メインゲートチェック
