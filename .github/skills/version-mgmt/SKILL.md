@@ -193,7 +193,7 @@ docker-compose up -d --build
 Write-Host "Built image: stockfixer:$($env:VERSION)"
 
 # 7. コミット & タグをリモートにプッシュ
-git push origin feature/training
+git push origin develop
 git push origin $newVersion
 Write-Host "Pushed tag: $newVersion"
 ```

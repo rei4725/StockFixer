@@ -39,7 +39,7 @@ powershell -ExecutionPolicy Bypass -File C:\src\StockFixer\weekly_redeploy.ps1
 ```
 
 > `weekly_redeploy.ps1` の処理内容:
-> 1. `git pull origin feature/training`
+> 1. `git pull origin develop`
 > 2. `python -m pytest tests/unit -v` を実行（失敗時は即中断）
 > 3. `VERSION` / `GIT_COMMIT` / `BUILD_DATE` を環境変数にセット
 > 4. `docker-compose up -d --build`

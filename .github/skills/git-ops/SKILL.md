@@ -34,7 +34,7 @@ mcp_gitkraken_git_log_or_diff(
 mcp_gitkraken_git_log_or_diff(
     directory="c:\\src\\StockFixer",
     action="diff",
-    revision_range="main..feature/training"
+    revision_range="main..develop"
 )
 ```
 - `revision_range`: 比較範囲（例: "HEAD", "main..feature", "abc123", "HEAD~5..HEAD"）
@@ -153,7 +153,7 @@ mcp_gitkraken_git_fetch(
 mcp_gitkraken_git_status(directory="c:\\src\\StockFixer")
 mcp_gitkraken_git_branch(directory="c:\\src\\StockFixer", action="list")
 ```
-3. ベースブランチ（`feature/training`）が最新でない場合は pull して同期する
+3. ベースブランチ（`develop`）が最新でない場合は pull して同期する
 ```
 mcp_gitkraken_git_pull(directory="c:\\src\\StockFixer")
 ```
@@ -315,10 +315,10 @@ git reset --hard HEAD~1
 git fetch origin
 
 # 現在のブランチにマージ
-git merge origin/feature/training
+git merge origin/develop
 
 # または rebase
-git rebase origin/feature/training
+git rebase origin/develop
 ```
 
 ## References

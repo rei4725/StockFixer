@@ -7,7 +7,7 @@ on:
       - ".github/workflows/integration-tests.yml"
   push:
     branches:
-      - feature/training
+      - develop
     paths:
       - "python/**"
       - ".github/workflows/integration-tests.yml"

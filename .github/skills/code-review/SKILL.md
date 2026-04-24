@@ -128,7 +128,7 @@ mypy....................................................................Failed
 git diff HEAD~1
 
 # または特定ブランチとの差分
-git diff origin/feature/training..HEAD
+git diff origin/develop..HEAD
 ```
 
 #### 3-2. レビューチェックリスト
