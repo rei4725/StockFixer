@@ -174,6 +174,8 @@ def run_optimization(
                     "max_position_fraction",
                     "avg_position_value",
                     "atr_fallback_trades",
+                    "avg_win",
+                    "avg_loss",
                 ]
                 available = [c for c in numeric_cols if c in wf_df.columns]
                 # None値をnp.nanに変換して平均計算可能にする
@@ -393,6 +395,8 @@ def save_optimal_params_json(
             "num_trades": (
                 int(best_row.get("num_trades", 0)) if pd.notna(best_row.get("num_trades")) else 0
             ),
+            "avg_win": float(best_row.get("avg_win", 0.0)),
+            "avg_loss": float(best_row.get("avg_loss", 0.0)),
         },
     }
 

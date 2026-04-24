@@ -185,7 +185,7 @@ class TestExtractTradePnl(unittest.TestCase):
                 {"action": "sell", "price": 110.0, "qty": 10, "cash": 1000},
             ]
         )
-        wins, losses = _extract_trade_pnl(log)
+        wins, losses = _extract_trade_pnl(log)[:2]
         self.assertEqual(len(wins), 1)
         self.assertEqual(len(losses), 0)
         self.assertAlmostEqual(wins[0], 100.0)
@@ -197,13 +197,13 @@ class TestExtractTradePnl(unittest.TestCase):
                 {"action": "sell", "price": 90.0, "qty": 10, "cash": 800},
             ]
         )
-        wins, losses = _extract_trade_pnl(log)
+        wins, losses = _extract_trade_pnl(log)[:2]
         self.assertEqual(len(wins), 0)
         self.assertEqual(len(losses), 1)
         self.assertAlmostEqual(losses[0], -100.0)
 
     def test_no_trades(self):
-        wins, losses = _extract_trade_pnl(pd.DataFrame())
+        wins, losses = _extract_trade_pnl(pd.DataFrame())[:2]
         self.assertEqual(wins, [])
         self.assertEqual(losses, [])
 
@@ -214,7 +214,7 @@ class TestExtractTradePnl(unittest.TestCase):
                 {"action": "final_sell", "price": 120.0, "qty": 5, "cash": 1050},
             ]
         )
-        wins, losses = _extract_trade_pnl(log)
+        wins, losses = _extract_trade_pnl(log)[:2]
         self.assertEqual(len(wins), 1)
 
 
