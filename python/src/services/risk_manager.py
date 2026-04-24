@@ -73,7 +73,8 @@ class RiskManager:
                     f"[{market}_{symbol}] optimal_params.json から SL/TP を自動ロード: "
                     f"stop_loss_pct={self.stop_loss_pct}, take_profit_pct={self.take_profit_pct}"
                 )
-                metrics = params.get("metrics", {})
+                raw_metrics = params.get("metrics")
+                metrics = raw_metrics if isinstance(raw_metrics, dict) else {}
                 self.kelly_win_rate = float(metrics.get("win_rate", DEFAULT_WIN_RATE))
                 self.kelly_avg_win = float(metrics.get("avg_win", DEFAULT_AVG_WIN))
                 self.kelly_avg_loss = float(metrics.get("avg_loss", DEFAULT_AVG_LOSS))
@@ -208,6 +209,12 @@ class RiskManager:
             avg_loss = self.kelly_avg_loss
 
         balance = self._broker.get_balance()
+
+        if avg_win == 0.0 or avg_loss == 0.0:
+            logger.warning(
+                f"[{symbol}] Kelly計算: avg_win={avg_win}, avg_loss={avg_loss} "
+                "のいずれかが0.0です。ポジションサイズが0になる可能性があります"
+            )
 
         # Kelly 比率
         if avg_win <= 0 or avg_loss <= 0:

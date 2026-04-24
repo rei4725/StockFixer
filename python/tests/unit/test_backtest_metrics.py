@@ -453,5 +453,111 @@ class TestComputeMetricsBoundary:
         assert dd == pytest.approx(expected_dd, abs=1e-8)
 
 
+class TestComputeMetricsAvgWinLoss:
+    """avg_win / avg_loss の数値精度テスト"""
+
+    def test_single_win_avg_win(self):
+        """100→110 の勝ちトレード1件: avg_win == 0.1"""
+        initial_cash = 1_000_000
+        log = _trade_log(
+            [
+                {
+                    "date": "2024-01-02",
+                    "action": "buy",
+                    "price": 100.0,
+                    "qty": 100,
+                    "cash": 990_000,
+                },
+                {
+                    "date": "2024-01-10",
+                    "action": "sell",
+                    "price": 110.0,
+                    "qty": 100,
+                    "cash": 1_001_000,
+                },
+            ]
+        )
+        metrics = compute_metrics(log, initial_cash)
+        assert metrics["avg_win"] == pytest.approx(0.1)
+
+    def test_single_loss_avg_loss(self):
+        """100→95 の負けトレード1件: avg_loss == 0.05"""
+        initial_cash = 1_000_000
+        log = _trade_log(
+            [
+                {
+                    "date": "2024-01-02",
+                    "action": "buy",
+                    "price": 100.0,
+                    "qty": 100,
+                    "cash": 990_000,
+                },
+                {
+                    "date": "2024-01-10",
+                    "action": "sell",
+                    "price": 95.0,
+                    "qty": 100,
+                    "cash": 999_500,
+                },
+            ]
+        )
+        metrics = compute_metrics(log, initial_cash)
+        assert metrics["avg_loss"] == pytest.approx(0.05)
+
+    def test_all_wins_avg_loss_zero(self):
+        """全トレードが勝ちの場合、avg_loss == 0.0"""
+        initial_cash = 1_000_000
+        log = _trade_log(
+            [
+                {
+                    "date": "2024-01-02",
+                    "action": "buy",
+                    "price": 100.0,
+                    "qty": 100,
+                    "cash": 990_000,
+                },
+                {
+                    "date": "2024-01-10",
+                    "action": "sell",
+                    "price": 110.0,
+                    "qty": 100,
+                    "cash": 1_001_000,
+                },
+            ]
+        )
+        metrics = compute_metrics(log, initial_cash)
+        assert metrics["avg_loss"] == 0.0
+
+    def test_all_losses_avg_win_zero(self):
+        """全トレードが負けの場合、avg_win == 0.0"""
+        initial_cash = 1_000_000
+        log = _trade_log(
+            [
+                {
+                    "date": "2024-01-02",
+                    "action": "buy",
+                    "price": 100.0,
+                    "qty": 100,
+                    "cash": 990_000,
+                },
+                {
+                    "date": "2024-01-10",
+                    "action": "sell",
+                    "price": 90.0,
+                    "qty": 100,
+                    "cash": 999_000,
+                },
+            ]
+        )
+        metrics = compute_metrics(log, initial_cash)
+        assert metrics["avg_win"] == 0.0
+
+    def test_no_trades_avg_win_avg_loss_zero(self):
+        """トレードなし: avg_win == 0.0、avg_loss == 0.0"""
+        metrics = compute_metrics(pd.DataFrame(), initial_cash=1_000_000)
+        assert metrics["avg_win"] == 0.0
+        assert metrics["avg_loss"] == 0.0
+
+
 if __name__ == "__main__":
     unittest.main()
