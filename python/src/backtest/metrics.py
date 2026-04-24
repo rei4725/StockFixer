@@ -45,7 +45,14 @@ def compute_metrics(
 
     # --- equity curve（決済後のキャッシュ推移）---
     # buy直後はキャッシュが激減するため sell 系時点のキャッシュのみを使う
-    sell_actions = ["sell", "final_sell", "stop_loss", "take_profit"]
+    sell_actions = [
+        "sell",
+        "final_sell",
+        "stop_loss",
+        "take_profit",
+        "short_cover",
+        "final_short_cover",
+    ]
     if "action" in trade_log.columns:
         sell_log = trade_log[trade_log["action"].isin(sell_actions)]
     else:
@@ -288,7 +295,14 @@ def plot_backtest(
         return ""
 
     # --- equity curve 構築 ---
-    sell_actions = ["sell", "final_sell", "stop_loss", "take_profit"]
+    sell_actions = [
+        "sell",
+        "final_sell",
+        "stop_loss",
+        "take_profit",
+        "short_cover",
+        "final_short_cover",
+    ]
     sell_log = (
         trade_log[trade_log["action"].isin(sell_actions)]
         if "action" in trade_log.columns

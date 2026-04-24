@@ -20,6 +20,7 @@ import pandas as pd
 
 from config.settings import (
     BUY_THRESHOLD,
+    ENABLE_SHORT_SIDE,
     LIMIT_ORDER_AVG_VOLUME_THRESHOLD,
     LIMIT_ORDER_LOOKBACK_DAYS,
     LIMIT_ORDER_PRICE_BUFFER,
@@ -53,6 +54,7 @@ _THRESHOLD_SCALE_MIN_ROWS = 5
 class OrderExecutionStats(TypedDict):
     buy_orders: int
     sell_orders: int
+    short_orders: int
     skipped: int
     skipped_min_change: int
     errors: int
@@ -378,6 +380,7 @@ def run_daily_orders(
     stats: OrderExecutionStats = {
         "buy_orders": 0,
         "sell_orders": 0,
+        "short_orders": 0,
         "skipped": 0,
         "skipped_min_change": 0,
         "errors": 0,
@@ -578,9 +581,142 @@ def run_daily_orders(
             logger.error(f"[exec] 買い注文エラー ({symbol}): {e}", exc_info=True)
             stats["errors"] += 1
 
+    # --- ショートサイド処理（R-215）: ENABLE_SHORT_SIDE=True かつ PaperBroker のみ ---
+    if ENABLE_SHORT_SIDE and broker.broker_name == "paper":
+        # ショートポジション保有銘柄で買いシグナルが出ていれば SHORT_COVER
+        try:
+            short_positions = broker.get_short_positions()
+        except AttributeError:
+            short_positions = []
+            logger.warning("[exec] get_short_positions() が未実装のため SHORT_COVER をスキップ")
+
+        short_held_symbols = {p["symbol"] for p in short_positions if p.get("qty", 0) > 0}
+        cover_signals = predictions[
+            (predictions["symbol"].isin(short_held_symbols))
+            & (predictions["multi_horizon_score"] >= predictions["effective_buy_threshold"])
+        ]
+        for _, row in cover_signals.iterrows():
+            symbol = row["symbol"]
+            try:
+                pos = next((p for p in short_positions if p["symbol"] == symbol), None)
+                if pos is None or pos["qty"] <= 0:
+                    continue
+                qty = pos["qty"]
+                current_price = float(row.get("current_price") or 0.0)
+                order_type, order_price, order_reason = _choose_order_params(
+                    market=str(row["market"]),
+                    symbol=symbol,
+                    side=OrderSide.SHORT_COVER,
+                    current_price=current_price,
+                )
+                result = broker.send_order(
+                    symbol,
+                    OrderSide.SHORT_COVER,
+                    qty,
+                    price=order_price,
+                    order_type=order_type,
+                )
+                _record_order(
+                    market=str(row["market"]),
+                    predicted_at=str(row["predicted_at"]),
+                    symbol=symbol,
+                    side=OrderSide.SHORT_COVER,
+                    qty=qty,
+                    signal_price=current_price,
+                    order_price=order_price,
+                    order_type=order_type,
+                    order_result=result,
+                    broker=broker,
+                    mode=mode,
+                )
+                logger.info(
+                    f"[exec] SHORT_COVER発注: {symbol} {qty}株 @ {order_type.name}({order_reason}) "
+                    f"(統合スコア={row['multi_horizon_score']:.3%})"
+                )
+                stats["short_orders"] += 1
+                stats["total_turnover"] += current_price * qty
+            except Exception as e:
+                logger.error(f"[exec] SHORT_COVER注文エラー ({symbol}): {e}", exc_info=True)
+                stats["errors"] += 1
+
+        # 非保有かつ売りシグナルの銘柄に新規ショートエントリー
+        short_entry_candidates = predictions[
+            (~predictions["symbol"].isin(held_symbols))
+            & (~predictions["symbol"].isin(short_held_symbols))
+            & (predictions["multi_horizon_score"] <= predictions["effective_sell_threshold"])
+        ].head(MAX_ORDERS_PER_RUN)
+
+        for _, row in short_entry_candidates.iterrows():
+            symbol = row["symbol"]
+            current_price = float(row.get("current_price") or 0)
+
+            if abs(float(row.get("diff_ratio") or 0.0)) < MIN_CHANGE_RATIO:
+                logger.info(
+                    "[exec] %s: diff_ratio=%.3f%% < min_change=%.3f%% → ショートスキップ",
+                    symbol,
+                    float(row.get("diff_ratio") or 0) * 100,
+                    MIN_CHANGE_RATIO * 100,
+                )
+                stats["skipped_min_change"] += 1
+                stats["skipped"] += 1
+                continue
+
+            if current_price <= 0:
+                logger.warning(f"[exec] {symbol}: 現在値が取得できないためショートスキップ")
+                stats["skipped"] += 1
+                continue
+
+            qty = risk.calc_position_size(
+                symbol,
+                current_price,
+                confidence_ratio=float(row.get("confidence_ratio") or 1.0),
+            )
+            if qty <= 0:
+                logger.info(f"[exec] {symbol}: 発注株数 0 → ショートスキップ（残高不足or上限）")
+                stats["skipped"] += 1
+                continue
+
+            try:
+                order_type, order_price, order_reason = _choose_order_params(
+                    market=str(row["market"]),
+                    symbol=symbol,
+                    side=OrderSide.SHORT,
+                    current_price=current_price,
+                )
+                result = broker.send_order(
+                    symbol,
+                    OrderSide.SHORT,
+                    qty,
+                    price=order_price,
+                    order_type=order_type,
+                )
+                _record_order(
+                    market=str(row["market"]),
+                    predicted_at=str(row["predicted_at"]),
+                    symbol=symbol,
+                    side=OrderSide.SHORT,
+                    qty=qty,
+                    signal_price=current_price,
+                    order_price=order_price,
+                    order_type=order_type,
+                    order_result=result,
+                    broker=broker,
+                    mode=mode,
+                )
+                logger.info(
+                    f"[exec] ショート発注: {symbol} {qty}株 @ {order_type.name}({order_reason}) "
+                    f"(1d変化率={row['diff_ratio']:.3%}, 統合スコア={row['multi_horizon_score']:.3%}, "
+                    f"閾値={row['effective_sell_threshold']:.3%})"
+                )
+                stats["short_orders"] += 1
+                stats["total_turnover"] += current_price * qty
+            except Exception as e:
+                logger.error(f"[exec] ショート注文エラー ({symbol}): {e}", exc_info=True)
+                stats["errors"] += 1
+
     logger.info(
         f"=== 自動発注完了: 買い={stats['buy_orders']} 売り={stats['sell_orders']} "
-        f"スキップ={stats['skipped']} エラー={stats['errors']} ==="
+        f"ショート={stats['short_orders']} スキップ={stats['skipped']} エラー={stats['errors']} ==="
     )
     if mode == "live":
         _sync_live_execution_diffs(broker)
@@ -593,7 +729,7 @@ def run_daily_orders(
             mode=mode,
             buy_orders=stats["buy_orders"],
             sell_orders=stats["sell_orders"],
-            short_orders=0,
+            short_orders=stats["short_orders"],
             skipped=stats["skipped"],
             skipped_min_change=stats["skipped_min_change"],
             total_turnover=stats["total_turnover"],

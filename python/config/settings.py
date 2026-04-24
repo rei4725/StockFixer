@@ -96,3 +96,11 @@ FEATURE_SELECTION_PROTECT_TOP_SHAP: int = _int("FEATURE_SELECTION_PROTECT_TOP_SH
 
 #: ペーパートレードの初期仮想残高（円）
 PAPER_INITIAL_BALANCE: float = _float("PAPER_INITIAL_BALANCE", 1_000_000.0)
+
+# ---------------------------------------------------------------------------
+# ショートサイド（R-215）
+# ---------------------------------------------------------------------------
+
+#: ショートサイド（空売り）機能を有効にする。False の場合は従来のロングのみ動作を維持
+#: PaperBroker 検証時のみ True に設定する（本番利用は要注意）
+ENABLE_SHORT_SIDE: bool = os.getenv("ENABLE_SHORT_SIDE", "").strip().lower() in ("1", "true", "yes")

@@ -350,6 +350,7 @@ def run_backtest_walk_forward(
     atr_min_fraction: float = 0.1,
     atr_max_fraction: float = 1.0,
     ensemble: bool = False,
+    enable_short: bool = False,
 ) -> Tuple[None, None, pd.DataFrame]:
     """
     Walk-Forward バックテストを実行する。
@@ -409,6 +410,7 @@ def run_backtest_walk_forward(
         atr_min_fraction=atr_min_fraction,
         atr_max_fraction=atr_max_fraction,
         ensemble=ensemble,
+        enable_short=enable_short,
     )
 
     results_df = wfv.run(model_name=model_name, task=task)

@@ -639,5 +639,183 @@ class TestSectorLimitHelpers(unittest.TestCase):
         self.assertEqual(limited["sector"].tolist(), ["Auto", "Tech", "Bank"])
 
 
+class TestShortSide(unittest.TestCase):
+    """R-215: ENABLE_SHORT_SIDE=True 時のショートサイド処理テスト"""
+
+    def _make_gate_status(self, is_allowed=True):
+        return TradingGateStatus(
+            is_allowed=is_allowed,
+            stop_active=False,
+            reason_code=None,
+            reason=None,
+            daily_loss=0.0,
+            daily_loss_limit=None,
+        )
+
+    def _make_short_predictions(self):
+        """売りシグナル（強い下落予測）の予測DataFrameを返す"""
+        return pd.DataFrame(
+            [
+                {
+                    "market": "jp",
+                    "symbol": "8001",
+                    "predicted_at": "20260405_090000",
+                    "current_price": 2000.0,
+                    "diff_ratio": -0.03,
+                    "confidence_ratio": 1.0,
+                    "diff_ratio_3d": -0.02,
+                    "diff_ratio_5d": -0.02,
+                    "diff_ratio_10d": -0.01,
+                    "confluence_score": 0.5,
+                },
+            ]
+        )
+
+    @patch("src.services.order_execution_pipeline.ENABLE_SHORT_SIDE", True)
+    def test_short_order_placed_when_enabled(self):
+        """ENABLE_SHORT_SIDE=True かつ PaperBroker で売りシグナル → SHORT 発注"""
+        broker = _make_broker()
+        broker.broker_name = "paper"
+        broker.get_short_positions = MagicMock(return_value=[])
+        predictions = self._make_short_predictions()
+
+        patches = [
+            patch(
+                "src.services.order_execution_pipeline._load_latest_predictions",
+                return_value=predictions,
+            ),
+            patch("src.services.order_execution_pipeline._record_order"),
+            patch(
+                "src.services.order_execution_pipeline._choose_order_params",
+                return_value=(OrderType.MARKET, 0.0, "market"),
+            ),
+            patch(
+                "src.services.order_execution_pipeline.RiskManager.evaluate_trading_gate",
+                return_value=self._make_gate_status(),
+            ),
+            patch(
+                "src.services.order_execution_pipeline.RiskManager.calc_position_size",
+                return_value=50,
+            ),
+            patch(
+                "src.services.risk_manager.RiskManager._get_daily_realized_loss",
+                return_value=0.0,
+            ),
+            patch(
+                "src.services.risk_manager.RiskManager._get_consecutive_losses",
+                return_value=0,
+            ),
+            patch("src.services.order_execution_pipeline.save_order_run_summary"),
+        ]
+        for p in patches:
+            p.start()
+        try:
+            stats = run_daily_orders(broker, market="jp", mode="paper")
+            self.assertGreater(stats["short_orders"], 0)
+            broker.send_order.assert_called_once_with(
+                "8001",
+                OrderSide.SHORT,
+                50,
+                price=0.0,
+                order_type=OrderType.MARKET,
+            )
+        finally:
+            for p in patches:
+                p.stop()
+
+    @patch("src.services.order_execution_pipeline.ENABLE_SHORT_SIDE", False)
+    def test_no_short_order_when_disabled(self):
+        """ENABLE_SHORT_SIDE=False では売りシグナルがあっても SHORT 発注しない"""
+        broker = _make_broker()
+        broker.broker_name = "paper"
+        predictions = self._make_short_predictions()
+
+        patches = [
+            patch(
+                "src.services.order_execution_pipeline._load_latest_predictions",
+                return_value=predictions,
+            ),
+            patch("src.services.order_execution_pipeline._record_order"),
+            patch(
+                "src.services.order_execution_pipeline._choose_order_params",
+                return_value=(OrderType.MARKET, 0.0, "market"),
+            ),
+            patch(
+                "src.services.order_execution_pipeline.RiskManager.evaluate_trading_gate",
+                return_value=self._make_gate_status(),
+            ),
+            patch(
+                "src.services.order_execution_pipeline.RiskManager.calc_position_size",
+                return_value=50,
+            ),
+            patch(
+                "src.services.risk_manager.RiskManager._get_daily_realized_loss",
+                return_value=0.0,
+            ),
+            patch(
+                "src.services.risk_manager.RiskManager._get_consecutive_losses",
+                return_value=0,
+            ),
+            patch("src.services.order_execution_pipeline.save_order_run_summary"),
+        ]
+        for p in patches:
+            p.start()
+        try:
+            stats = run_daily_orders(broker, market="jp", mode="paper")
+            self.assertEqual(stats["short_orders"], 0)
+            broker.send_order.assert_not_called()
+        finally:
+            for p in patches:
+                p.stop()
+
+    @patch("src.services.order_execution_pipeline.ENABLE_SHORT_SIDE", True)
+    def test_short_orders_counted_in_stats(self):
+        """short_orders カウントが stats に正しく反映される"""
+        broker = _make_broker()
+        broker.broker_name = "paper"
+        broker.get_short_positions = MagicMock(return_value=[])
+        predictions = self._make_short_predictions()
+
+        patches = [
+            patch(
+                "src.services.order_execution_pipeline._load_latest_predictions",
+                return_value=predictions,
+            ),
+            patch("src.services.order_execution_pipeline._record_order"),
+            patch(
+                "src.services.order_execution_pipeline._choose_order_params",
+                return_value=(OrderType.MARKET, 0.0, "market"),
+            ),
+            patch(
+                "src.services.order_execution_pipeline.RiskManager.evaluate_trading_gate",
+                return_value=self._make_gate_status(),
+            ),
+            patch(
+                "src.services.order_execution_pipeline.RiskManager.calc_position_size",
+                return_value=30,
+            ),
+            patch(
+                "src.services.risk_manager.RiskManager._get_daily_realized_loss",
+                return_value=0.0,
+            ),
+            patch(
+                "src.services.risk_manager.RiskManager._get_consecutive_losses",
+                return_value=0,
+            ),
+            patch("src.services.order_execution_pipeline.save_order_run_summary"),
+        ]
+        mocks = [p.start() for p in patches]
+        try:
+            stats = run_daily_orders(broker, market="jp", mode="paper")
+            self.assertEqual(stats["short_orders"], 1)
+            # save_order_run_summary には short_orders=1 が渡される
+            mock_save = mocks[-1]
+            call_kwargs = mock_save.call_args.kwargs
+            self.assertEqual(call_kwargs["short_orders"], 1)
+        finally:
+            for p in patches:
+                p.stop()
+
+
 if __name__ == "__main__":
     unittest.main()
