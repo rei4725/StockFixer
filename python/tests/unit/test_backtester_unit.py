@@ -603,6 +603,40 @@ class TestBacktesterShortSimulation:
         expected_return = 200_000 / 1_000_000  # = 0.2
         assert abs(metrics["short_return"] - expected_return) < 0.0001
 
+    def test_short_pnl_calculation_with_fee(self):
+        """ショートPnL計算: fee=0.001/slip=0.001 → notionalベース計算の検証
+
+        initial_cash=1_002_000 にすることで qty=10000 が確定し、
+        期待値 = 100*10000*(1-0.002) - 80*10000*(1+0.002) = 998_000 - 801_600 = 196_400 となる。
+        """
+        idx = pd.date_range("2024-01-01", periods=3, freq="B")
+        df = pd.DataFrame({"Close": [100.0, 90.0, 80.0]}, index=idx)
+        signal = pd.Series([-1, 0, 1], index=idx)
+
+        # unit_cost = 100 * (1 + 0.001 + 0.001) = 100.2
+        # qty = int(1_002_000 // 100.2) = 10000
+        bt = Backtester(
+            model_manager=MagicMock(),
+            signal_generator=MagicMock(),
+            data_loader=MagicMock(),
+            start_date=None,
+            end_date=None,
+            market="jp",
+            symbol="7203",
+            initial_cash=1_002_000,
+            fee_rate=0.001,
+            slippage=0.001,
+            enable_short=True,
+        )
+        _, metrics = bt.simulate_trading(df, signal)
+
+        # entry=100, exit=80, qty=10000, fee=0.001, slip=0.001
+        # net_pnl = 100*10000*(1-0.002) - 80*10000*(1+0.002)
+        #         = 998_000 - 801_600 = 196_400
+        expected_net_pnl = 196_400
+        expected_return = expected_net_pnl / 1_002_000
+        assert abs(metrics["short_return"] - expected_return) < 0.0001
+
     def test_short_disabled_no_short_trades(self):
         """enable_short=False の場合はショートトレードが発生しない"""
         idx = pd.date_range("2024-01-01", periods=4, freq="B")

@@ -633,7 +633,7 @@ def run_daily_orders(
                     f"[exec] SHORT_COVER発注: {symbol} {qty}株 @ {order_type.name}({order_reason}) "
                     f"(統合スコア={row['multi_horizon_score']:.3%})"
                 )
-                stats["sell_orders"] += 1
+                stats["short_orders"] += 1
                 stats["total_turnover"] += current_price * qty
             except Exception as e:
                 logger.error(f"[exec] SHORT_COVER注文エラー ({symbol}): {e}", exc_info=True)

@@ -216,8 +216,9 @@ def _to_markdown_summary(comparison_df: pd.DataFrame, previous_path: Optional[Pa
 
             lines.append("## ロング単独 vs ロング+ショート 比較（全銘柄平均）")
             lines.append("")
-            lines.append("| 指標 | ロング単独 | ロング+ショート |")
+            lines.append("| 指標 | total_return（ロング+ショート合算） | ロング+ショート |")
             lines.append("|------|-----------|----------------|")
+            # total_returnにはショートPnL（cashベース）を含む合算値
             lines.append(f"| total_return | {long_return:.6f} | {combined_return:.6f} |")
             lines.append(f"| sharpe_ratio | {long_sharpe:.4f} | N/A（未計算）|")
             lines.append(f"| max_drawdown | {long_mdd:.6f} | N/A（未計算）|")

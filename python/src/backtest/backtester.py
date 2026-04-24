@@ -177,8 +177,12 @@ class Backtester:
             # シグナルに基づく売買
             # ショートカバー: 買いシグナル + ショートポジション保有
             if sig == 1 and self.enable_short and short_position > 0:
+                # エントリー売り: short_price * qty * (1 - fee - slip)
+                # カバー買い: price * qty * (1 + fee + slip)
+                net_pnl = short_price * short_position * (
+                    1 - self.fee_rate - self.slippage
+                ) - price * short_position * (1 + self.fee_rate + self.slippage)
                 pnl = (short_price - price) * short_position
-                net_pnl = pnl * (1 - self.fee_rate - self.slippage)
                 cash += net_pnl
                 cash_gross += pnl
                 short_trade_log.append(
@@ -299,8 +303,12 @@ class Backtester:
         # 最終日に未決済ショートを強制返済
         if self.enable_short and short_position > 0:
             price = df.iloc[-1][close_col]
+            # エントリー売り: short_price * qty * (1 - fee - slip)
+            # カバー買い: price * qty * (1 + fee + slip)
+            net_pnl = short_price * short_position * (
+                1 - self.fee_rate - self.slippage
+            ) - price * short_position * (1 + self.fee_rate + self.slippage)
             pnl = (short_price - price) * short_position
-            net_pnl = pnl * (1 - self.fee_rate - self.slippage)
             cash += net_pnl
             cash_gross += pnl
             short_trade_log.append(
