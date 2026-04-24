@@ -33,6 +33,8 @@ _REPORT_METRICS = [
     "win_rate",
     "profit_factor",
     "num_trades",
+    "short_return",
+    "short_num_trades",
 ]
 
 
@@ -89,6 +91,8 @@ def _build_comparison(current_df: pd.DataFrame, prev_df: Optional[pd.DataFrame])
         "win_rate",
         "profit_factor",
         "num_trades",
+        "short_return",
+        "short_num_trades",
     ]
     for metric in delta_metrics:
         cur = f"{metric}_current"
@@ -152,6 +156,74 @@ def _to_markdown_summary(comparison_df: pd.DataFrame, previous_path: Optional[Pa
         for key, value in overall.items():
             lines.append(f"- {key}: {value:.6f}")
         lines.append("")
+
+    # ロング単独 vs ロング+ショートの比較セクション
+    short_return_col = next(
+        (c for c in ["short_return_current", "short_return"] if c in comparison_df.columns),
+        None,
+    )
+    if short_return_col is not None:
+        short_df = comparison_df.copy()
+        short_return_series = pd.to_numeric(short_df[short_return_col], errors="coerce").fillna(0)
+        has_short = short_return_series.abs().sum() > 0
+
+        if has_short:
+            long_only_return_col = next(
+                (c for c in ["total_return_current", "total_return"] if c in short_df.columns),
+                None,
+            )
+            long_sharpe_col = next(
+                (c for c in ["sharpe_ratio_current", "sharpe_ratio"] if c in short_df.columns),
+                None,
+            )
+            long_mdd_col = next(
+                (c for c in ["max_drawdown_current", "max_drawdown"] if c in short_df.columns),
+                None,
+            )
+
+            long_return = (
+                pd.to_numeric(short_df[long_only_return_col], errors="coerce").mean()
+                if long_only_return_col
+                else 0.0
+            )
+            long_sharpe = (
+                pd.to_numeric(short_df[long_sharpe_col], errors="coerce").mean()
+                if long_sharpe_col
+                else 0.0
+            )
+            long_mdd = (
+                pd.to_numeric(short_df[long_mdd_col], errors="coerce").mean()
+                if long_mdd_col
+                else 0.0
+            )
+
+            short_return_mean = float(short_return_series.mean())
+            combined_return = long_return + short_return_mean
+
+            short_num_col = next(
+                (
+                    c
+                    for c in ["short_num_trades_current", "short_num_trades"]
+                    if c in short_df.columns
+                ),
+                None,
+            )
+            short_num_mean = (
+                pd.to_numeric(short_df[short_num_col], errors="coerce").mean()
+                if short_num_col
+                else 0.0
+            )
+
+            lines.append("## ロング単独 vs ロング+ショート 比較（全銘柄平均）")
+            lines.append("")
+            lines.append("| 指標 | ロング単独 | ロング+ショート |")
+            lines.append("|------|-----------|----------------|")
+            lines.append(f"| total_return | {long_return:.6f} | {combined_return:.6f} |")
+            lines.append(f"| sharpe_ratio | {long_sharpe:.4f} | N/A（未計算）|")
+            lines.append(f"| max_drawdown | {long_mdd:.6f} | N/A（未計算）|")
+            lines.append(f"| short_return（平均） | 0.0 | {short_return_mean:.6f} |")
+            lines.append(f"| short_num_trades（平均） | 0 | {short_num_mean:.1f} |")
+            lines.append("")
 
     return "\n".join(lines)
 

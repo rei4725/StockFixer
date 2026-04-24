@@ -27,6 +27,7 @@ class Backtester:
         atr_multiplier: float = 1.0,
         atr_min_fraction: float = 0.1,
         atr_max_fraction: float = 1.0,
+        enable_short: bool = False,
     ):
         self.model_manager = model_manager
         self.signal_generator = signal_generator
@@ -46,6 +47,7 @@ class Backtester:
         self.atr_multiplier = atr_multiplier
         self.atr_min_fraction = max(0.0, atr_min_fraction)
         self.atr_max_fraction = min(1.0, max(0.0, atr_max_fraction))
+        self.enable_short = enable_short
 
     def run(
         self,
@@ -119,6 +121,9 @@ class Backtester:
         cash_gross = self.initial_cash
         position = 0
         position_price = 0.0
+        short_position = 0
+        short_price = 0.0
+        short_trade_log: list[dict] = []
         trade_log = []
 
         close_col = "Close" if "Close" in df.columns else "close"
@@ -170,7 +175,33 @@ class Backtester:
                     continue
 
             # シグナルに基づく売買
-            if sig == 1 and position == 0:
+            # ショートカバー: 買いシグナル + ショートポジション保有
+            if sig == 1 and self.enable_short and short_position > 0:
+                pnl = (short_price - price) * short_position
+                net_pnl = pnl * (1 - self.fee_rate - self.slippage)
+                cash += net_pnl
+                cash_gross += pnl
+                short_trade_log.append(
+                    {
+                        "entry_price": short_price,
+                        "exit_price": price,
+                        "qty": short_position,
+                        "pnl": net_pnl,
+                    }
+                )
+                trade_log.append(
+                    {
+                        "date": date,
+                        "action": "short_cover",
+                        "price": price,
+                        "qty": short_position,
+                        "cash": cash,
+                        "cash_gross": cash_gross,
+                    }
+                )
+                short_position = 0
+                short_price = 0.0
+            elif sig == 1 and position == 0:
                 # Buy
                 atr_value = df.loc[date, "atr"] if "atr" in df.columns else None
                 position_details = self._calc_position_details(
@@ -205,7 +236,7 @@ class Backtester:
                         }
                     )
             elif sig == -1 and position > 0:
-                # Sell
+                # Sell (ロング決済)
                 proceeds = position * price * (1 - self.fee_rate - self.slippage)
                 proceeds_gross = position * price
                 cash += proceeds
@@ -222,6 +253,29 @@ class Backtester:
                 )
                 position = 0
                 position_price = 0.0
+            elif sig == -1 and self.enable_short and position == 0 and short_position == 0:
+                # ショートエントリー: 売りシグナル + ロングポジション非保有 + ショート非保有
+                atr_value = df.loc[date, "atr"] if "atr" in df.columns else None
+                position_details = self._calc_position_details(
+                    cash,
+                    price,
+                    pred.get(date) if pred is not None else None,
+                    atr_value=atr_value,
+                )
+                qty = position_details["qty"]
+                if qty > 0:
+                    short_position = qty
+                    short_price = price
+                    trade_log.append(
+                        {
+                            "date": date,
+                            "action": "short",
+                            "price": price,
+                            "qty": qty,
+                            "cash": cash,
+                            "cash_gross": cash_gross,
+                        }
+                    )
 
         # 最終日に未決済ポジションを強制決済
         if position > 0:
@@ -242,8 +296,44 @@ class Backtester:
             )
             position = 0
 
+        # 最終日に未決済ショートを強制返済
+        if self.enable_short and short_position > 0:
+            price = df.iloc[-1][close_col]
+            pnl = (short_price - price) * short_position
+            net_pnl = pnl * (1 - self.fee_rate - self.slippage)
+            cash += net_pnl
+            cash_gross += pnl
+            short_trade_log.append(
+                {
+                    "entry_price": short_price,
+                    "exit_price": price,
+                    "qty": short_position,
+                    "pnl": net_pnl,
+                }
+            )
+            trade_log.append(
+                {
+                    "date": df.index[-1],
+                    "action": "final_short_cover",
+                    "price": price,
+                    "qty": short_position,
+                    "cash": cash,
+                    "cash_gross": cash_gross,
+                }
+            )
+            short_position = 0
+
         result_df = pd.DataFrame(trade_log)
         metrics = compute_cost_comparison_metrics(result_df, self.initial_cash)
+        # ショートメトリクスを追加
+        if short_trade_log:
+            metrics["short_return"] = round(
+                sum(t["pnl"] for t in short_trade_log) / self.initial_cash, 6
+            )
+            metrics["short_num_trades"] = len(short_trade_log)
+        else:
+            metrics["short_return"] = 0.0
+            metrics["short_num_trades"] = 0
         return result_df, metrics
 
     def _calc_qty(

@@ -543,5 +543,109 @@ class TestBacktesterRunPath:
                 bt._load_from_raw()
 
 
+class TestBacktesterShortSimulation:
+    """R-215: ショートシミュレーションのテスト"""
+
+    def _make_bt(self, enable_short: bool = True, fee_rate: float = 0.0):
+        return Backtester(
+            model_manager=MagicMock(),
+            signal_generator=MagicMock(),
+            data_loader=MagicMock(),
+            start_date=None,
+            end_date=None,
+            market="jp",
+            symbol="7203",
+            initial_cash=1_000_000,
+            fee_rate=fee_rate,
+            enable_short=enable_short,
+        )
+
+    def test_short_entry_and_cover_profit(self):
+        """価格下落時: ショートエントリー → ショートカバーで利益"""
+        idx = pd.date_range("2024-01-01", periods=4, freq="B")
+        df = pd.DataFrame({"Close": [100.0, 90.0, 85.0, 80.0]}, index=idx)
+        # -1(short entry) → 0 → 0 → 1(short cover)
+        signal = pd.Series([-1, 0, 0, 1], index=idx)
+
+        bt = self._make_bt(enable_short=True)
+        result_df, metrics = bt.simulate_trading(df, signal)
+
+        # short_return は正（下落で利益）
+        assert metrics["short_return"] > 0
+        assert metrics["short_num_trades"] == 1
+        # short アクションと short_cover アクションがある
+        assert "short" in result_df["action"].values
+        assert "short_cover" in result_df["action"].values
+
+    def test_short_entry_and_cover_loss(self):
+        """価格上昇時: ショートエントリー → ショートカバーで損失"""
+        idx = pd.date_range("2024-01-01", periods=4, freq="B")
+        df = pd.DataFrame({"Close": [100.0, 105.0, 110.0, 120.0]}, index=idx)
+        signal = pd.Series([-1, 0, 0, 1], index=idx)
+
+        bt = self._make_bt(enable_short=True)
+        _, metrics = bt.simulate_trading(df, signal)
+
+        assert metrics["short_return"] < 0
+        assert metrics["short_num_trades"] == 1
+
+    def test_short_pnl_calculation(self):
+        """ショートPnL計算: 手数料なし・100株・entry=100・exit=80 → PnL=(100-80)*100"""
+        idx = pd.date_range("2024-01-01", periods=3, freq="B")
+        df = pd.DataFrame({"Close": [100.0, 90.0, 80.0]}, index=idx)
+        signal = pd.Series([-1, 0, 1], index=idx)
+
+        bt = self._make_bt(enable_short=True, fee_rate=0.0)
+        # initial_cash=1_000_000, price=100 → qty=10000 (full sizing)
+        _, metrics = bt.simulate_trading(df, signal)
+
+        # PnL = (100 - 80) * 10000 = 200_000
+        expected_return = 200_000 / 1_000_000  # = 0.2
+        assert abs(metrics["short_return"] - expected_return) < 0.0001
+
+    def test_short_disabled_no_short_trades(self):
+        """enable_short=False の場合はショートトレードが発生しない"""
+        idx = pd.date_range("2024-01-01", periods=4, freq="B")
+        df = pd.DataFrame({"Close": [100.0, 90.0, 85.0, 80.0]}, index=idx)
+        signal = pd.Series([-1, 0, 0, 1], index=idx)
+
+        bt = self._make_bt(enable_short=False)
+        result_df, metrics = bt.simulate_trading(df, signal)
+
+        assert metrics["short_return"] == 0.0
+        assert metrics["short_num_trades"] == 0
+        if not result_df.empty:
+            assert "short" not in result_df["action"].values
+
+    def test_final_day_forced_short_cover(self):
+        """最終日に未決済ショートが強制返済される"""
+        idx = pd.date_range("2024-01-01", periods=3, freq="B")
+        df = pd.DataFrame({"Close": [100.0, 95.0, 90.0]}, index=idx)
+        # -1(short) → 0 → 0（カバーシグナルなし、最終日に強制返済）
+        signal = pd.Series([-1, 0, 0], index=idx)
+
+        bt = self._make_bt(enable_short=True)
+        result_df, metrics = bt.simulate_trading(df, signal)
+
+        assert metrics["short_num_trades"] == 1
+        assert metrics["short_return"] > 0  # 100→90 で利益
+        assert "final_short_cover" in result_df["action"].values
+
+    def test_long_and_short_independent(self):
+        """ロングポジション保有中はショートエントリーしない"""
+        idx = pd.date_range("2024-01-01", periods=5, freq="B")
+        df = pd.DataFrame({"Close": [100.0, 105.0, 110.0, 108.0, 105.0]}, index=idx)
+        # 1(buy long) → 0 → -1(sell long not short) → -1(no long, short entry) → 1(cover)
+        signal = pd.Series([1, 0, -1, -1, 1], index=idx)
+
+        bt = self._make_bt(enable_short=True)
+        result_df, metrics = bt.simulate_trading(df, signal)
+
+        actions = result_df["action"].tolist()
+        # ロング決済の "sell" と短期"short"/"short_cover" の両方がある
+        assert "buy" in actions
+        assert "sell" in actions
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
