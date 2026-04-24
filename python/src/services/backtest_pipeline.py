@@ -301,7 +301,7 @@ def run_backtest_single(
     # シミュレーション
     backtester = Backtester(
         model_manager=mm,
-        signal_generator=SignalGenerator(),
+        signal_generator=SignalGenerator(market=market, symbol=symbol),
         data_loader=None,
         start_date=None,
         end_date=None,
@@ -394,7 +394,7 @@ def run_backtest_walk_forward(
         market=market,
         symbol=symbol,
         model_manager=mm,
-        signal_generator=SignalGenerator(),
+        signal_generator=SignalGenerator(market=market, symbol=symbol),
         initial_cash=initial_cash,
         fee_rate=fee_rate,
         slippage=slippage,

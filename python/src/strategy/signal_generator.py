@@ -1,7 +1,14 @@
 ﻿from __future__ import annotations
 
+from typing import Optional
+
 import numpy as np
 import pandas as pd
+
+from src.utils.logger import get_logger
+from src.utils.optimal_params_loader import get_optimal_params
+
+logger = get_logger(__name__)
 
 # ---------------------------------------------------------------------------
 # R-212: マルチホライズン統合シグナルスコア
@@ -112,13 +119,36 @@ def _opt_int(row: pd.Series, col: str) -> int | None:
 
 
 class SignalGenerator:
-    def __init__(self, base_threshold: float = 0.005):
+    def __init__(
+        self,
+        base_threshold: float = 0.005,
+        market: Optional[str] = None,
+        symbol: Optional[str] = None,
+    ):
         """
         Args:
             base_threshold: 基準シグナル閾値（デフォルト ±0.5%）。
                             rolling_std が渡された場合はボラ比率で動的スケーリングされる。
+            market: マーケット識別子（例: "jp", "us"）。
+                    symbol と合わせて指定すると optimal_params.json から threshold を自動ロードする。
+            symbol: 銘柄シンボル（例: "7203", "AAPL"）。
         """
-        self.base_threshold = base_threshold
+        if market is not None and symbol is not None:
+            params = get_optimal_params(market, symbol)
+            if params is not None and "threshold" in params:
+                self.base_threshold = float(params["threshold"])
+                logger.debug(
+                    f"[{market}_{symbol}] optimal_params.json から threshold を自動ロード: "
+                    f"{self.base_threshold}"
+                )
+            else:
+                logger.warning(
+                    f"[{market}_{symbol}] optimal_params.json が見つからないか threshold が未設定のため "
+                    f"デフォルト値 {base_threshold} を使用します"
+                )
+                self.base_threshold = base_threshold
+        else:
+            self.base_threshold = base_threshold
 
     def generate_signal(
         self,
