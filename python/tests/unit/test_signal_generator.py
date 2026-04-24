@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+import unittest.mock
 
 import numpy as np
 import pandas as pd
@@ -277,6 +278,69 @@ class TestSignalGenerator(unittest.TestCase):
             self.dummy_data, sell_prediction, rolling_std=rolling_std_nan
         )
         self.assertTrue(all(signals == "Sell"))
+
+
+# ---------------------------------------------------------------------------
+# R-216: SignalGenerator optimal_params.json 自動ロード
+# ---------------------------------------------------------------------------
+
+
+class TestSignalGeneratorOptimalParamsAutoLoad(unittest.TestCase):
+    """SignalGenerator.__init__ が optimal_params.json を自動ロードするテスト"""
+
+    _MOCK_TARGET = "src.strategy.signal_generator.get_optimal_params"
+
+    def test_threshold_loaded_from_json_when_market_symbol_given(self):
+        """market/symbol を指定すると JSON の threshold が base_threshold に反映される"""
+        params = {"threshold": 0.012, "stop_loss_pct": 0.03, "take_profit_pct": 0.05}
+        with unittest.mock.patch(self._MOCK_TARGET, return_value=params) as mock_fn:
+            sg = signal_generator_module.SignalGenerator(market="jp", symbol="7203")
+        mock_fn.assert_called_once_with("jp", "7203")
+        self.assertAlmostEqual(sg.base_threshold, 0.012)
+
+    def test_fallback_to_default_when_json_not_found(self):
+        """JSON が存在しない（None が返る）場合は base_threshold デフォルト値を使用する"""
+        with unittest.mock.patch(self._MOCK_TARGET, return_value=None):
+            sg = signal_generator_module.SignalGenerator(
+                base_threshold=0.007, market="jp", symbol="9999"
+            )
+        self.assertAlmostEqual(sg.base_threshold, 0.007)
+
+    def test_fallback_when_threshold_key_missing_in_json(self):
+        """JSON にキーが存在しても threshold フィールドがない場合はデフォルト値を使用する"""
+        params = {"stop_loss_pct": 0.03}  # threshold キーなし
+        with unittest.mock.patch(self._MOCK_TARGET, return_value=params):
+            sg = signal_generator_module.SignalGenerator(
+                base_threshold=0.008, market="us", symbol="AAPL"
+            )
+        self.assertAlmostEqual(sg.base_threshold, 0.008)
+
+    def test_no_json_load_when_market_symbol_not_given(self):
+        """market/symbol を指定しない場合は get_optimal_params が呼ばれない"""
+        with unittest.mock.patch(self._MOCK_TARGET) as mock_fn:
+            sg = signal_generator_module.SignalGenerator()
+        mock_fn.assert_not_called()
+        self.assertAlmostEqual(sg.base_threshold, 0.005)
+
+    def test_no_json_load_when_only_market_given(self):
+        """market のみ指定（symbol なし）の場合は get_optimal_params が呼ばれない"""
+        with unittest.mock.patch(self._MOCK_TARGET) as mock_fn:
+            sg = signal_generator_module.SignalGenerator(market="jp")
+        mock_fn.assert_not_called()
+        self.assertAlmostEqual(sg.base_threshold, 0.005)
+
+    def test_generate_signal_uses_loaded_threshold(self):
+        """自動ロードされた threshold でシグナル生成が正しく機能する"""
+        # threshold=0.015 の場合、0.01 は閾値未満なので Hold になる
+        params = {"threshold": 0.015}
+        with unittest.mock.patch(self._MOCK_TARGET, return_value=params):
+            sg = signal_generator_module.SignalGenerator(market="jp", symbol="7203")
+
+        dates = pd.date_range(start="2023-01-01", periods=5, freq="D")
+        data = pd.DataFrame({"RSI": [50.0] * 5}, index=dates)
+        prediction = pd.Series([0.01] * 5, index=dates)  # 0.01 < 0.015 → Hold
+        signals = sg.generate_signal(data, prediction)
+        self.assertTrue(all(signals == "Hold"))
 
 
 if __name__ == "__main__":
