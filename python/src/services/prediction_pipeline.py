@@ -244,13 +244,24 @@ def predict_all_unified_multi_horizon(
     return output_rows
 
 
-def output_top_worst_results(output_rows: list[PredictionResult], mode="individual"):
+def output_top_worst_results(
+    output_rows: list[PredictionResult],
+    mode="individual",
+    shadow_mode: bool = False,
+    model_version: str = "production",
+):
     """
     予測結果からTop10/Worst10を出力し、全結果をDBに保存する
+
+    シャドーモード時は model_version を各 PredictionResult に付与して保存する。
+    production / challenger 両バージョンを同一テーブルに共存させることで、
+    一定期間後の定量評価（Sharpe / Hit Rate）に使用する。
 
     Args:
         output_rows: predict_all_*の戻り値（list[PredictionResult]）
         mode: "individual" or "unified"
+        shadow_mode: True のとき model_version を付与する
+        model_version: モデルバージョンラベル（デフォルト "production"）
     """
     if not output_rows:
         logger.warning("有効な結果がありませんでした。")
@@ -258,8 +269,24 @@ def output_top_worst_results(output_rows: list[PredictionResult], mode="individu
 
     now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
 
+    if shadow_mode:
+        # model_version を付与（未設定の行のみ上書きする）
+        tagged_rows = []
+        for r in output_rows:
+            if r.model_version is None:
+                from dataclasses import replace
+                tagged_rows.append(replace(r, model_version=model_version))
+            else:
+                tagged_rows.append(r)
+        save_rows = tagged_rows
+        logger.info(
+            f"シャドーモード予測実行: model_version={model_version}, {len(save_rows)}銘柄"
+        )
+    else:
+        save_rows = output_rows
+
     # 全予測結果をDBに保存（Delete-Insert）
-    save_prediction_results(now_str, output_rows)
+    save_prediction_results(now_str, save_rows)
 
     # 表示用 DataFrame変換（ログ出力用）
     df_result = PredictionResult.to_dataframe(output_rows)
