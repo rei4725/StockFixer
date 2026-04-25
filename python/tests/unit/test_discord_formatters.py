@@ -1,4 +1,4 @@
-"""discord_formatters モジュールのユニットテスト"""
+﻿"""discord_formatters モジュールのユニットテスト"""
 import unittest
 
 import pandas as pd
