@@ -1,7 +1,6 @@
 """discord_formatters モジュールのユニットテスト"""
 import unittest
 
-import numpy as np
 import pandas as pd
 
 
@@ -95,3 +94,36 @@ class TestConvertDfForDiscord(unittest.TestCase):
         result = convert_df_for_discord(df)
         # floor(150.9999 * 1000) / 1000 = 150.999
         assert float(result["現在値"].iloc[0]) == 150.999
+
+    def test_zero_current_price_falls_back_to_empty_ratio(self):
+        """current_price=0 のとき ZeroDivisionError をキャッチして予想変化率が '' になること"""
+        from src.api.discord_formatters import convert_df_for_discord
+
+        df = pd.DataFrame(
+            {
+                "symbol": ["7203"],
+                "current_price": [0.0],
+                "avg_pred_price": [2550.0],
+            }
+        )
+        result = convert_df_for_discord(df)
+        # (2550 - 0) / 0 → ZeroDivisionError → fallback to ""
+        # format_percent("") → float("") → ValueError → return ""
+        assert result["予想変化率"].iloc[0] == ""
+
+    def test_format_percent_with_non_numeric_value(self):
+        """diff_ratio が非数値文字列のとき format_percent がそのまま返すこと"""
+        from src.api.discord_formatters import convert_df_for_discord
+
+        df = pd.DataFrame(
+            {
+                "symbol": ["7203"],
+                "current_price": [2500.0],
+                "avg_pred_price": [2550.0],
+                "diff_ratio": ["invalid"],
+            }
+        )
+        result = convert_df_for_discord(df)
+        # diff_ratio="invalid" → renamed to 予想変化率
+        # format_percent("invalid") → float("invalid") → ValueError → return "invalid"
+        assert result["予想変化率"].iloc[0] == "invalid"
