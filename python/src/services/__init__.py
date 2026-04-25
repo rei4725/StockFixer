@@ -13,6 +13,7 @@ from src.services.prediction_pipeline import (
     predict_all_individual,
     predict_all_unified,
 )
+from src.services.shadow_evaluation_pipeline import evaluate_shadow_models, run_shadow_prediction
 
 __all__ = [
     "save_stock_data_with_features",
@@ -23,4 +24,6 @@ __all__ = [
     "load_target_symbols",
     "run_parallel",
     "print_summary",
+    "evaluate_shadow_models",
+    "run_shadow_prediction",
 ]

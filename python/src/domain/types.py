@@ -116,6 +116,9 @@ class PredictionResult:
     confluence_score: Optional[int] = None
     confidence_ratio: Optional[float] = None  # 1/(1+model_std); 1.0=最大信頼度（モデル間分散が小さい）
 
+    # A/B テスト（シャドーモード）
+    model_version: Optional[str] = None  # "production" / "challenger" / 任意バージョン文字列
+
     # ------------------------------------------------------------------
     # 変換メソッド（変換知識はここに1箇所）
     # ------------------------------------------------------------------
@@ -149,6 +152,8 @@ class PredictionResult:
                 row["confluence_score"] = r.confluence_score
             if r.confidence_ratio is not None:
                 row["confidence_ratio"] = r.confidence_ratio
+            if r.model_version is not None:
+                row["model_version"] = r.model_version
             rows.append(row)
         return pd.DataFrame(rows) if rows else pd.DataFrame()
 
@@ -163,6 +168,10 @@ class PredictionResult:
         def _opt_int(key: str) -> Optional[int]:
             val = row.get(key)
             return int(val) if val is not None and not pd.isna(val) else None
+
+        def _opt_str(key: str) -> Optional[str]:
+            val = row.get(key)
+            return str(val) if val is not None and not pd.isna(val) else None
 
         return cls(
             market=str(row["market"]),
@@ -179,6 +188,7 @@ class PredictionResult:
             diff_ratio_10d=_opt_float("diff_ratio_10d"),
             confluence_score=_opt_int("confluence_score"),
             confidence_ratio=_opt_float("confidence_ratio"),
+            model_version=_opt_str("model_version"),
         )
 
 

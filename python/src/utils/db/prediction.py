@@ -24,7 +24,10 @@ logger = get_logger(__name__)
 def save_prediction_results(predicted_at: str, results: list[PredictionResult]) -> None:
     """
     予測結果を DB に保存する（Delete-Insert 方式）。
-    対象銘柄の既存データを削除してから挿入する。
+    対象銘柄・モデルバージョンの既存データを削除してから挿入する。
+
+    シャドーモード利用時は model_version フィールドを設定することで、
+    production / challenger 両バージョンを同一テーブルに共存させられる。
 
     Args:
         predicted_at: 予測実行日時 (例: "20260213_142903")
@@ -33,10 +36,17 @@ def save_prediction_results(predicted_at: str, results: list[PredictionResult]) 
     save_df = PredictionResult.to_dataframe(results)
     save_df["predicted_at"] = predicted_at
 
+    # model_version が設定されていない行は 'production' をデフォルト値として使う
+    if "model_version" not in save_df.columns:
+        save_df["model_version"] = "production"
+    else:
+        save_df["model_version"] = save_df["model_version"].fillna("production")
+
     base_cols = [
         "market",
         "symbol",
         "predicted_at",
+        "model_version",
         "current_price",
         "avg_pred_price",
         "diff_ratio",
@@ -61,11 +71,11 @@ def save_prediction_results(predicted_at: str, results: list[PredictionResult]) 
             save_df[c] = None
 
     with _db_connection() as con:
-        pairs = save_df[["market", "symbol"]].drop_duplicates()
+        pairs = save_df[["market", "symbol", "model_version"]].drop_duplicates()
         for _, row in pairs.iterrows():
             con.execute(
-                "DELETE FROM prediction_results WHERE market = ? AND symbol = ?",
-                [row["market"], row["symbol"]],
+                "DELETE FROM prediction_results WHERE market = ? AND symbol = ? AND model_version = ?",
+                [row["market"], row["symbol"], row["model_version"]],
             )
         col_str = ", ".join(cols)
         con.register("_save_df_temp", save_df)
@@ -797,4 +807,56 @@ def load_turnover_comparison(market: str, limit: int = 30) -> pd.DataFrame:
             ).fetchdf()
         except Exception as e:
             logger.error(f"load_turnover_comparison 失敗: {e}", exc_info=True)
+            return pd.DataFrame()
+
+
+# ---------------------------------------------------------------------------
+# shadow_mode (R-207 A/B テスト)
+# ---------------------------------------------------------------------------
+
+
+def load_shadow_comparison(
+    market: str = None,
+    symbol: str = None,
+    production_version: str = "production",
+    challenger_version: str = "challenger",
+    limit: int = 1000,
+) -> pd.DataFrame:
+    """
+    シャドーモードの production / challenger 両バージョンの予測結果を取得する。
+
+    prediction_accuracy テーブルに実績が記録されていない場合は prediction_results から
+    最新のスナップショットを返す。
+
+    Args:
+        market: マーケットフィルタ（None なら全マーケット）
+        symbol: 銘柄フィルタ（None なら全銘柄）
+        production_version: 本番バージョンのラベル（デフォルト "production"）
+        challenger_version: チャレンジャーバージョンのラベル（デフォルト "challenger"）
+        limit: 取得件数上限
+
+    Returns:
+        pd.DataFrame: 全列 + model_version 列を含む予測結果
+    """
+    query = """
+        SELECT * FROM prediction_results
+        WHERE model_version IN (?, ?)
+    """
+    params: list = [production_version, challenger_version]
+
+    if market is not None:
+        query += " AND market = ?"
+        params.append(market)
+    if symbol is not None:
+        query += " AND symbol = ?"
+        params.append(symbol)
+
+    query += " ORDER BY predicted_at DESC LIMIT ?"
+    params.append(int(limit))
+
+    with _db_connection() as con:
+        try:
+            return con.execute(query, params).fetchdf()
+        except Exception as e:
+            logger.error(f"load_shadow_comparison 失敗: {e}", exc_info=True)
             return pd.DataFrame()
