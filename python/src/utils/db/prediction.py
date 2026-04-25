@@ -851,8 +851,8 @@ def load_shadow_comparison(
         query += " AND symbol = ?"
         params.append(symbol)
 
-    query += " ORDER BY predicted_at DESC"
-    query += f" LIMIT {int(limit)}"
+    query += " ORDER BY predicted_at DESC LIMIT ?"
+    params.append(int(limit))
 
     with _db_connection() as con:
         try:

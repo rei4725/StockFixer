@@ -4,7 +4,9 @@ import os
 import tempfile
 import unittest
 from dataclasses import replace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
+
+import pandas as pd
 
 import src.utils.data_path_utils as path_utils
 import src.utils.db as db_module
@@ -245,8 +247,6 @@ class TestOutputTopWorstResultsShadowMode(unittest.TestCase):
 
     def test_shadow_mode_tags_model_version(self):
         """shadow_mode=True のとき model_version が付与されて保存されること"""
-        from unittest.mock import MagicMock, patch
-
         results = [PredictionResult("us", "AAPL", 100.0, 102.0, 0.02, 2)]
         saved_calls = []
 

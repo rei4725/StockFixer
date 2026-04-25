@@ -169,6 +169,10 @@ class PredictionResult:
             val = row.get(key)
             return int(val) if val is not None and not pd.isna(val) else None
 
+        def _opt_str(key: str) -> Optional[str]:
+            val = row.get(key)
+            return str(val) if val is not None and not pd.isna(val) else None
+
         return cls(
             market=str(row["market"]),
             symbol=str(row["symbol"]),
@@ -184,7 +188,7 @@ class PredictionResult:
             diff_ratio_10d=_opt_float("diff_ratio_10d"),
             confluence_score=_opt_int("confluence_score"),
             confidence_ratio=_opt_float("confidence_ratio"),
-            model_version=str(row["model_version"]) if row.get("model_version") is not None and not pd.isna(row.get("model_version")) else None,
+            model_version=_opt_str("model_version"),
         )
 
 

@@ -18,6 +18,7 @@ import math
 from datetime import datetime
 from typing import Optional
 
+import numpy as np
 import pandas as pd
 
 from src.utils.db._connection import _db_connection
@@ -62,10 +63,9 @@ def _compute_sharpe(df: pd.DataFrame) -> Optional[float]:
     if len(valid) < 2:
         return None
 
-    # 予測方向に従った実現リターン
-    returns = valid["actual_ratio"] * valid["predicted_ratio"].apply(
-        lambda x: 1.0 if x >= 0 else -1.0
-    )
+    # 予測方向に従った実現リターン（ゼロの場合は正方向として扱う）
+    signs = np.where(valid["predicted_ratio"] >= 0, 1.0, -1.0)
+    returns = valid["actual_ratio"] * signs
     mean_ret = returns.mean()
     std_ret = returns.std(ddof=1)
     if std_ret == 0 or math.isnan(std_ret):
