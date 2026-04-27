@@ -1,15 +1,6 @@
-﻿# ---------------------------------------------------------------------------
-# 後方互換 shim（Backward-compatibility shim）
-#
-# 実装は src.services.prediction.shadow_evaluation_pipeline に移動しました。
-# 新規コードは新パスを使用してください:
-#   from src.services.prediction.shadow_evaluation_pipeline import ...
-#
-# このファイルを直接編集しないでください。
-# ---------------------------------------------------------------------------
+# 後方互換 shim — フェーズ4で削除予定
+# 実装本体は src.prediction.shadow_evaluation に移動済み
 import importlib
 import sys
 
-sys.modules[__name__] = importlib.import_module(
-    "src.services.prediction.shadow_evaluation_pipeline"
-)
+sys.modules[__name__] = importlib.import_module("src.prediction.shadow_evaluation")
