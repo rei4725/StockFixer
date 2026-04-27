@@ -17,6 +17,8 @@ assert _SPEC is not None and _SPEC.loader is not None
 _MODULE = util.module_from_spec(_SPEC)
 sys.modules["src.services.backtest_pipeline"] = _MODULE
 _SPEC.loader.exec_module(_MODULE)
+# shim が sys.modules を実モジュールに差し替える場合を考慮して再取得
+_MODULE = sys.modules["src.services.backtest_pipeline"]
 print_backtest_metrics = _MODULE.print_backtest_metrics
 
 

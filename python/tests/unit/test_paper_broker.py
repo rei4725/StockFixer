@@ -12,7 +12,7 @@ import duckdb
 import pandas as pd
 
 from src.brokers.base import OrderSide
-from src.brokers.paper.paper_broker import PaperBroker
+from src.trading.brokers.paper.paper_broker import PaperBroker
 
 # テスト用インメモリ DB
 _TEST_CON = duckdb.connect(":memory:")
@@ -77,20 +77,20 @@ class TestPaperBrokerOrder(unittest.TestCase):
         _TEST_CON.execute("UPDATE paper_balance SET balance = 1000000.0")
         self.broker = PaperBroker()
 
-    @patch("src.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
+    @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
     def test_send_order_returns_pending(self, _mock=None):
         result = self.broker.send_order("7203", OrderSide.BUY, 100)
         self.assertEqual(result["status"], "pending")
         self.assertIn("order_id", result)
 
-    @patch("src.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
+    @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
     def test_send_order_saved_to_db(self, _mock=None):
         self.broker.send_order("7203", OrderSide.BUY, 100)
         row = _TEST_CON.execute("SELECT status FROM paper_orders WHERE symbol='7203'").fetchone()
         self.assertIsNotNone(row)
         self.assertEqual(row[0], "pending")
 
-    @patch("src.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
+    @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
     def test_cancel_order(self, _mock=None):
         result = self.broker.send_order("7203", OrderSide.BUY, 100)
         order_id = result["order_id"]
@@ -101,12 +101,12 @@ class TestPaperBrokerOrder(unittest.TestCase):
         ).fetchone()
         self.assertEqual(row[0], "cancelled")
 
-    @patch("src.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
+    @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
     def test_get_balance_initial(self, _mock=None):
         balance = self.broker.get_balance()
         self.assertEqual(balance, 1_000_000.0)
 
-    @patch("src.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
+    @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
     def test_get_positions_empty(self, _mock=None):
         positions = self.broker.get_positions()
         self.assertEqual(positions, [])
@@ -125,8 +125,8 @@ class TestPaperBrokerSettle(unittest.TestCase):
             index=pd.to_datetime(["2026-03-15"]),
         )
 
-    @patch("src.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
-    @patch("src.brokers.paper.paper_broker.yf_client.download")
+    @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
+    @patch("src.trading.brokers.paper.paper_broker.yf_client.download")
     def test_settle_market_buy(self, mock_yf, _mock_con=None):
         mock_yf.return_value = self._mock_yf_download()
         self.broker.send_order("7203", OrderSide.BUY, 100)
@@ -137,8 +137,8 @@ class TestPaperBrokerSettle(unittest.TestCase):
         balance = _TEST_CON.execute("SELECT balance FROM paper_balance").fetchone()[0]
         self.assertAlmostEqual(balance, 1_000_000.0 - 1000.0 * 100)
 
-    @patch("src.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
-    @patch("src.brokers.paper.paper_broker.yf_client.download")
+    @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
+    @patch("src.trading.brokers.paper.paper_broker.yf_client.download")
     def test_settle_creates_position(self, mock_yf, _mock_con=None):
         mock_yf.return_value = self._mock_yf_download()
         self.broker.send_order("7203", OrderSide.BUY, 100)
@@ -149,9 +149,9 @@ class TestPaperBrokerSettle(unittest.TestCase):
         self.assertIsNotNone(pos)
         self.assertEqual(pos[0], 100)
 
-    @patch("src.brokers.paper.paper_broker.upsert_paper_real_diff")
-    @patch("src.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
-    @patch("src.brokers.paper.paper_broker.yf_client.download")
+    @patch("src.trading.brokers.paper.paper_broker.upsert_paper_real_diff")
+    @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
+    @patch("src.trading.brokers.paper.paper_broker.yf_client.download")
     def test_settle_updates_paper_real_diff(self, mock_yf, mock_upsert):
         mock_yf.return_value = self._mock_yf_download()
         result = self.broker.send_order("7203", OrderSide.BUY, 100)
@@ -183,20 +183,20 @@ class TestPaperBrokerShort(unittest.TestCase):
             index=pd.to_datetime(["2026-03-15"]),
         )
 
-    @patch("src.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
+    @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
     def test_send_short_order_returns_pending(self):
         result = self.broker.send_order("7203", OrderSide.SHORT, 100, price=1500.0)
         self.assertEqual(result["status"], "pending")
         self.assertIn("order_id", result)
 
-    @patch("src.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
+    @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
     def test_send_short_order_saved_with_side3(self):
         self.broker.send_order("7203", OrderSide.SHORT, 100, price=1500.0)
         row = _TEST_CON.execute("SELECT side FROM paper_orders WHERE symbol='7203'").fetchone()
         self.assertIsNotNone(row)
         self.assertEqual(row[0], 3)
 
-    @patch("src.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
+    @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
     def test_send_short_order_creates_short_position(self):
         """send_order(SHORT) で paper_short_positions に即時仮登録されること"""
         self.broker.send_order("7203", OrderSide.SHORT, 100, price=1500.0)
@@ -207,7 +207,7 @@ class TestPaperBrokerShort(unittest.TestCase):
         self.assertEqual(pos[0], 100)
         self.assertAlmostEqual(pos[1], 1500.0)
 
-    @patch("src.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
+    @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
     def test_send_short_order_weighted_avg_update(self):
         """既存ポジションがあれば加重平均単価が更新されること"""
         _TEST_CON.execute(
@@ -221,8 +221,8 @@ class TestPaperBrokerShort(unittest.TestCase):
         self.assertEqual(pos[0], 200)
         self.assertAlmostEqual(pos[1], 1300.0)  # (1200*100 + 1400*100) / 200
 
-    @patch("src.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
-    @patch("src.brokers.paper.paper_broker.yf_client.download")
+    @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
+    @patch("src.trading.brokers.paper.paper_broker.yf_client.download")
     def test_settle_short_updates_position_to_fill_price(self, mock_yf):
         """settle 後に paper_short_positions が実際の約定値段で更新されること"""
         mock_yf.return_value = self._mock_yf_download()
@@ -239,8 +239,8 @@ class TestPaperBrokerShort(unittest.TestCase):
         self.assertEqual(pos[0], 100)
         self.assertAlmostEqual(pos[1], 1000.0)
 
-    @patch("src.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
-    @patch("src.brokers.paper.paper_broker.yf_client.download")
+    @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
+    @patch("src.trading.brokers.paper.paper_broker.yf_client.download")
     def test_settle_short_cover_computes_realized_pnl(self, mock_yf):
         """SHORT_COVER の約定で realized_pnl が正しく計算されること"""
         mock_yf.return_value = self._mock_yf_download()
@@ -258,8 +258,8 @@ class TestPaperBrokerShort(unittest.TestCase):
         # realized_pnl = (avg_short_price - fill_price) * qty = (1200 - 1000) * 100
         self.assertAlmostEqual(row[0], 20000.0)
 
-    @patch("src.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
-    @patch("src.brokers.paper.paper_broker.yf_client.download")
+    @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
+    @patch("src.trading.brokers.paper.paper_broker.yf_client.download")
     def test_settle_short_cover_reduces_position(self, mock_yf):
         """SHORT_COVER 約定後に paper_short_positions の qty が減少すること"""
         mock_yf.return_value = self._mock_yf_download()
@@ -275,8 +275,8 @@ class TestPaperBrokerShort(unittest.TestCase):
         self.assertIsNotNone(pos)
         self.assertEqual(pos[0], 100)
 
-    @patch("src.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
-    @patch("src.brokers.paper.paper_broker.yf_client.download")
+    @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
+    @patch("src.trading.brokers.paper.paper_broker.yf_client.download")
     def test_settle_short_cover_full_removes_position(self, mock_yf):
         """全数量返済で paper_short_positions レコードが削除されること"""
         mock_yf.return_value = self._mock_yf_download()
@@ -291,8 +291,8 @@ class TestPaperBrokerShort(unittest.TestCase):
         ).fetchone()
         self.assertIsNone(pos)
 
-    @patch("src.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
-    @patch("src.brokers.paper.paper_broker.yf_client.download")
+    @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
+    @patch("src.trading.brokers.paper.paper_broker.yf_client.download")
     def test_get_short_positions(self, mock_yf):
         """get_short_positions が paper_short_positions を正しく返すこと"""
         mock_yf.return_value = self._mock_yf_download()
@@ -307,7 +307,7 @@ class TestPaperBrokerShort(unittest.TestCase):
         self.assertAlmostEqual(positions[0]["avg_short_price"], 1200.0)
         self.assertIn("unrealized_pnl", positions[0])
 
-    @patch("src.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
+    @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
     def test_get_short_positions_empty(self):
         positions = self.broker.get_short_positions()
         self.assertEqual(positions, [])
@@ -329,14 +329,14 @@ class TestPaperBrokerGetBalance(unittest.TestCase):
         _TEST_CON.execute("UPDATE paper_balance SET balance = 1000000.0")
         self.broker = PaperBroker()
 
-    @patch("src.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
+    @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
     def test_get_balance_returns_current_value(self):
         _TEST_CON.execute("UPDATE paper_balance SET balance = 500000.0")
         balance = self.broker.get_balance()
         self.assertAlmostEqual(balance, 500000.0)
         _TEST_CON.execute("UPDATE paper_balance SET balance = 1000000.0")
 
-    @patch("src.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
+    @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
     def test_get_balance_returns_initial_when_table_empty(self):
         _TEST_CON.execute("DELETE FROM paper_balance")
         balance = self.broker.get_balance()
@@ -353,17 +353,17 @@ class TestPaperBrokerGetOrders(unittest.TestCase):
         _TEST_CON.execute("UPDATE paper_balance SET balance = 1000000.0")
         self.broker = PaperBroker()
 
-    @patch("src.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
+    @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
     def test_get_orders_returns_list(self):
         result = self.broker.get_orders()
         self.assertIsInstance(result, list)
 
-    @patch("src.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
+    @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
     def test_get_orders_empty_when_no_orders(self):
         result = self.broker.get_orders()
         self.assertEqual(result, [])
 
-    @patch("src.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
+    @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
     def test_get_orders_contains_todays_order(self):
         self.broker.send_order("7203", OrderSide.BUY, 100, price=1000.0)
         orders = self.broker.get_orders()
@@ -372,7 +372,7 @@ class TestPaperBrokerGetOrders(unittest.TestCase):
         self.assertEqual(orders[0]["side"], int(OrderSide.BUY))
         self.assertEqual(orders[0]["status"], "pending")
 
-    @patch("src.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
+    @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
     def test_get_orders_includes_required_keys(self):
         self.broker.send_order("9984", OrderSide.SELL, 50, price=2000.0)
         orders = self.broker.get_orders()
@@ -395,8 +395,8 @@ class TestPaperBrokerGetPositionsAdditional(unittest.TestCase):
             index=pd.to_datetime(["2026-03-15"]),
         )
 
-    @patch("src.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
-    @patch("src.brokers.paper.paper_broker.yf_client.download")
+    @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
+    @patch("src.trading.brokers.paper.paper_broker.yf_client.download")
     def test_get_positions_returns_position_with_pnl(self, mock_yf):
         mock_yf.return_value = self._mock_df()
         _TEST_CON.execute(
@@ -410,8 +410,8 @@ class TestPaperBrokerGetPositionsAdditional(unittest.TestCase):
         self.assertIn("unrealized_pnl", positions[0])
         self.assertAlmostEqual(positions[0]["unrealized_pnl"], 2000.0)
 
-    @patch("src.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
-    @patch("src.brokers.paper.paper_broker.yf_client.download")
+    @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
+    @patch("src.trading.brokers.paper.paper_broker.yf_client.download")
     def test_get_positions_fallback_on_yf_error(self, mock_yf):
         mock_yf.side_effect = Exception("yfinance error")
         _TEST_CON.execute(
@@ -429,19 +429,19 @@ class TestPaperBrokerGetPnlSummary(unittest.TestCase):
         _TEST_CON.execute("UPDATE paper_balance SET balance = 1000000.0")
         self.broker = PaperBroker()
 
-    @patch("src.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
+    @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
     def test_get_pnl_summary_returns_dict(self):
         result = self.broker.get_pnl_summary()
         self.assertIsInstance(result, dict)
 
-    @patch("src.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
+    @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
     def test_get_pnl_summary_zero_when_no_trades(self):
         result = self.broker.get_pnl_summary()
         self.assertAlmostEqual(result["realized_pnl"], 0.0)
         self.assertEqual(result["trade_count"], 0)
         self.assertIsNone(result["started_at"])
 
-    @patch("src.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
+    @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
     def test_get_pnl_summary_contains_balance(self):
         result = self.broker.get_pnl_summary()
         self.assertAlmostEqual(result["balance"], 1000000.0)
@@ -449,7 +449,7 @@ class TestPaperBrokerGetPnlSummary(unittest.TestCase):
 
         self.assertAlmostEqual(result["initial_balance"], PAPER_INITIAL_BALANCE)
 
-    @patch("src.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
+    @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
     def test_get_pnl_summary_required_keys(self):
         result = self.broker.get_pnl_summary()
         for key in (
@@ -463,7 +463,7 @@ class TestPaperBrokerGetPnlSummary(unittest.TestCase):
         ):
             self.assertIn(key, result)
 
-    @patch("src.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
+    @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
     def test_get_pnl_summary_with_filled_sell_order(self):
         _TEST_CON.execute(
             """
@@ -479,7 +479,7 @@ class TestPaperBrokerGetPnlSummary(unittest.TestCase):
         self.assertEqual(result["trade_count"], 1)
         self.assertIsNotNone(result["started_at"])
 
-    @patch("src.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
+    @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
     def test_get_pnl_summary_total_pnl_equals_realized_plus_unrealized(self):
         result = self.broker.get_pnl_summary()
         self.assertAlmostEqual(
