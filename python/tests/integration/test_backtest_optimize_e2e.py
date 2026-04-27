@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 class TestBacktestOptimizeE2E(unittest.TestCase):
     """バックテスト最適化パイプラインのEnd-to-Endテスト"""
 
+    @pytest.mark.timeout(300)
     @unittest.skipIf(not __import__("importlib").util.find_spec("xgboost"), "XGBoost not available")
     def test_optimization_metrics_dtype_fix(self):
         """
