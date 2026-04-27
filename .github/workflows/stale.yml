@@ -1,0 +1,53 @@
+name: Stale Issue / PR Management
+
+on:
+  schedule:
+    # 毎日 01:00 UTC に実行
+    - cron: "0 1 * * *"
+  workflow_dispatch:
+
+jobs:
+  stale:
+    name: Mark and close stale issues and PRs
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/stale@v9
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+          # ── Issue 設定 ──────────────────────────────────────────
+          days-before-issue-stale: 30
+          days-before-issue-close: 7
+          stale-issue-label: "stale"
+          stale-issue-message: >
+            このIssueは30日間更新がないため `stale` ラベルを付けました。
+            7日以内に反応がない場合は自動クローズされます。
+            引き続き対応が必要な場合はコメントを追加してください。
+          close-issue-message: >
+            7日間更新がなかったため自動クローズしました。
+            必要であれば再オープンしてください。
+
+          # ── PR 設定 ─────────────────────────────────────────────
+          days-before-pr-stale: 14
+          days-before-pr-close: 7
+          stale-pr-label: "stale"
+          stale-pr-message: >
+            このPRは14日間更新がないため `stale` ラベルを付けました。
+            7日以内に反応がない場合は自動クローズされます。
+          close-pr-message: >
+            7日間更新がなかったため自動クローズしました。
+            必要であれば再オープンしてください。
+
+          # ── 除外設定 ────────────────────────────────────────────
+          # 以下のラベルが付いているものはstale対象外
+          exempt-issue-labels: "pinned,security,bug,in-progress"
+          exempt-pr-labels: "pinned,security,in-progress,do-not-stale"
+
+          # draft PRはstaleにしない
+          exempt-draft-pr: true
+
+          # 1回の実行で処理する最大件数（API制限対策）
+          operations-per-run: 30

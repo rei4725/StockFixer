@@ -95,13 +95,6 @@ def job_weekly_walk_forward_report():
     run_weekly_walk_forward_report()
 
 
-def job_weekly_watchlist_refresh():
-    """週次実行: ウォッチリスト自動更新（S&P500 / 日経225 との差分同期）"""
-    from src.services.scheduler_pipeline import run_weekly_watchlist_refresh
-
-    run_weekly_watchlist_refresh()
-
-
 def job_daily_drift_check():
     """毎営業日実行: ドリフト監視と閾値超過銘柄の再学習"""
     from src.services.scheduler_pipeline import run_daily_drift_check
@@ -208,17 +201,6 @@ SCHEDULE_CONFIG = {
         "recovery_delay_minutes": 30,
         "max_executions_per_period": 1,
         "description": "毎週木曜 01:00 - Walk-Forward 比較レポート生成",
-    },
-    "weekly_watchlist_refresh": {
-        "func": job_weekly_watchlist_refresh,
-        "trigger": "cron",
-        "period": "weekly",
-        "day_of_week": "fri",
-        "hour": 1,
-        "minute": 0,
-        "recovery_delay_minutes": 30,
-        "max_executions_per_period": 1,
-        "description": "毎週金曜 01:00 - ウォッチリスト自動更新",
     },
     "daily_drift_check": {
         "func": job_daily_drift_check,

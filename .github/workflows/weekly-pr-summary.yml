@@ -1,0 +1,70 @@
+name: Weekly PR Summary → Discord
+
+on:
+  schedule:
+    # 毎週月曜 08:00 JST (= 23:00 UTC 日曜)
+    - cron: "0 23 * * 0"
+  workflow_dispatch:
+
+jobs:
+  pr-summary:
+    name: Collect last week's PRs and notify Discord
+    runs-on: ubuntu-latest
+    steps:
+      - name: Collect merged PRs (last 7 days)
+        id: collect
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          since=$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)
+          echo "Collecting PRs merged since: $since"
+
+          prs=$(gh pr list \
+            --repo "${{ github.repository }}" \
+            --state merged \
+            --limit 50 \
+            --json number,title,author,mergedAt,url \
+            --jq --argjson since "\"$since\"" \
+            '[.[] | select(.mergedAt >= $since)]')
+
+          count=$(echo "$prs" | jq 'length')
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+
+          # Discord メッセージ組み立て（2000文字以内）
+          if [ "$count" -eq 0 ]; then
+            message="**StockFixer 週次PRサマリー**\n先週マージされたPRはありませんでした。"
+          else
+            lines="**StockFixer 週次PRサマリー** — 先週のマージ: ${count}件\n"
+            while IFS= read -r pr; do
+              num=$(echo "$pr"   | jq -r '.number')
+              title=$(echo "$pr" | jq -r '.title')
+              author=$(echo "$pr"| jq -r '.author.login')
+              url=$(echo "$pr"   | jq -r '.url')
+              lines+="• #${num} ${title} (@${author}) ${url}\n"
+            done < <(echo "$prs" | jq -c '.[]')
+            message="$lines"
+          fi
+
+          # 改行をリテラル \n にエスケープしてGitHub Output に渡す
+          {
+            echo "message<<ENDOFMESSAGE"
+            echo -e "$message"
+            echo "ENDOFMESSAGE"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Send to Discord
+        if: env.DISCORD_WEBHOOK_URL != ''
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          set -euo pipefail
+
+          # 2000文字で切り捨て
+          content=$(echo "${{ steps.collect.outputs.message }}" | head -c 1990)
+
+          payload=$(jq -n --arg content "$content" '{content: $content}')
+          curl -fsSL -X POST "$DISCORD_WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d "$payload"

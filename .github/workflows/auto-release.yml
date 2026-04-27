@@ -1,0 +1,76 @@
+name: Auto Release on VERSION change
+
+on:
+  push:
+    branches:
+      - develop
+    paths:
+      - "VERSION"
+
+jobs:
+  create-release:
+    name: Tag and create GitHub Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read VERSION
+        id: ver
+        run: |
+          version=$(cat VERSION | tr -d '[:space:]')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Check if tag already exists
+        id: tag_check
+        run: |
+          if git tag --list | grep -qx "${{ steps.ver.outputs.tag }}"; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Collect changelog (commits since last tag)
+        if: steps.tag_check.outputs.exists == 'false'
+        id: changelog
+        run: |
+          last_tag=$(git tag --sort=-creatordate | head -n 1)
+          if [ -z "$last_tag" ]; then
+            range="HEAD"
+          else
+            range="${last_tag}..HEAD"
+          fi
+
+          log=$(git log "$range" --pretty=format:"- %s (%h)" --no-merges | head -50)
+          if [ -z "$log" ]; then
+            log="- (変更履歴なし)"
+          fi
+
+          {
+            echo "log<<ENDOFLOG"
+            echo "$log"
+            echo "ENDOFLOG"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create tag and GitHub Release
+        if: steps.tag_check.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${{ steps.ver.outputs.tag }}"
+          version="${{ steps.ver.outputs.version }}"
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$tag" -m "Release $tag"
+          git push origin "$tag"
+
+          gh release create "$tag" \
+            --title "Release $version" \
+            --notes "${{ steps.changelog.outputs.log }}" \
+            --draft

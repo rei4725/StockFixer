@@ -1,0 +1,125 @@
+name: Weekly Watchlist Refresh
+
+on:
+  schedule:
+    # 毎週金曜 01:00 JST (= 木曜 16:00 UTC)
+    - cron: "0 16 * * 4"
+  workflow_dispatch:
+
+jobs:
+  watchlist-refresh:
+    name: Sync watchlist.json with S&P500 / Nikkei225
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # PRブランチを作成するためtokenが必要
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        working-directory: python
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run watchlist refresh
+        id: refresh
+        working-directory: python
+        run: |
+          python - << 'EOF'
+          import json
+          import os
+          import sys
+
+          sys.path.insert(0, ".")
+
+          from src.services.watchlist_manager import run_watchlist_refresh
+
+          try:
+              diffs = run_watchlist_refresh()
+          except Exception as e:
+              print(f"::error::ウォッチリスト更新失敗: {e}", flush=True)
+              raise
+
+          # GitHub Step Summary 出力
+          summary_path = os.environ.get("GITHUB_STEP_SUMMARY", "/dev/null")
+          with open(summary_path, "a", encoding="utf-8") as f:
+              f.write("## Watchlist Refresh Results\n\n")
+              if not any(d.has_changes for d in diffs):
+                  f.write("変更なし — watchlist.json はすでに最新です。\n")
+              else:
+                  for d in diffs:
+                      if not d.has_changes:
+                          continue
+                      f.write(f"### {d.market.upper()}\n")
+                      if d.added:
+                          f.write(f"- **追加** ({len(d.added)}): {', '.join(d.added[:20])}")
+                          f.write(" …他" if len(d.added) > 20 else "")
+                          f.write("\n")
+                      if d.removed:
+                          f.write(f"- **削除** ({len(d.removed)}): {', '.join(d.removed[:20])}")
+                          f.write(" …他" if len(d.removed) > 20 else "")
+                          f.write("\n")
+                      if d.removed_unverified:
+                          f.write(f"- **保留** ({len(d.removed_unverified)}): {', '.join(d.removed_unverified[:20])}\n")
+
+          print("::notice::ウォッチリスト更新スクリプト完了", flush=True)
+          EOF
+
+      - name: Check for changes
+        id: diff
+        run: |
+          git diff --quiet python/config/watchlist.json || echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Create PR if watchlist.json changed
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          date_str=$(date -u +%Y%m%d)
+          branch="chore/watchlist-refresh-${date_str}"
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git checkout -b "$branch"
+          git add python/config/watchlist.json
+          # 監査ログも変更されていれば含める
+          git diff --cached --quiet python/config/watchlist_audit_log.json 2>/dev/null \
+            || git add python/config/watchlist_audit_log.json 2>/dev/null || true
+          git commit -m "chore: weekly watchlist refresh (${date_str})"
+          git push origin "$branch"
+
+          gh pr create \
+            --base develop \
+            --head "$branch" \
+            --title "chore: weekly watchlist refresh ${date_str}" \
+            --body "## 変更内容
+
+          GitHub Actions による週次ウォッチリスト自動更新。
+          S&P500 / 日経225 の最新構成銘柄と \`watchlist.json\` を同期した。
+
+          ## version_impact
+          none
+
+          ## version_rationale
+          watchlist.json の自動同期はデータ設定変更であり、プロダクションコードへの変更は含まない。
+
+          ## VERSION 更新
+          - version_update_required: no"
+
+      - name: No changes
+        if: steps.diff.outputs.changed != 'true'
+        run: echo "watchlist.json に変更なし。PRは作成しません。"
