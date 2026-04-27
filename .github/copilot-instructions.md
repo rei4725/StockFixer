@@ -81,7 +81,7 @@ run_*.py → api層 → services層 → models/strategy/backtest層 → features
 **禁止事項:**
 - ビジネスロジック・データ変換・条件分岐の実装
 - モデル・DB・外部APIへの直接アクセス
-- `import` で features層・data層・utils層を直接参照すること
+- `import` で features層・data層・utils層を直接参照すること（`src.utils.logger` のみ例外）
 
 ロジックが必要な場合は `src/services/` にパイプライン関数を作成し、`run_*.py` からはそれを呼び出すだけにする。
 
