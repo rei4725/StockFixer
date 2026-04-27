@@ -9,6 +9,7 @@ import sys
 import unittest
 
 import pandas as pd
+import pytest
 
 # パス設定
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -81,6 +82,7 @@ class TestBacktestOptimizeE2E(unittest.TestCase):
         except Exception as e:
             self.fail(f"最適化実行に失敗: {e}")
 
+    @pytest.mark.timeout(300)
     @unittest.skipIf(not __import__("importlib").util.find_spec("xgboost"), "XGBoost not available")
     def test_optimization_with_risk_parameters(self):
         """
