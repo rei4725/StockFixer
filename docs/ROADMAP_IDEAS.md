@@ -102,6 +102,7 @@
 13. NF-502 障害対応フロー（Incident Response）文書化
 14. NF-503 ADR（Architecture Decision Records）導入
 15. NF-504 API 仕様書（OpenAPI）整備
+16. **NF-601〜605 DDD アーキテクチャ移行**（詳細: [DDD_ARCHITECTURE.md](DDD_ARCHITECTURE.md)）
 
 ### 優先順の考え方（収益改善）
 
@@ -122,6 +123,7 @@
 - NF-301〜NF-303 は監視基盤セット。R-303 運用ダッシュボードの前提として整備する
 - NF-401〜NF-403 はコード品質セット。リファクタリングコストが高いため中期で段階投入
 - NF-501〜NF-504 は制度整備セット。実装よりもドキュメント作業が中心。隙間時間に進める
+- NF-601〜NF-605 は DDD 移行セット。NF-Phase 3（監視）・NF-Phase 4（コード品質）完了後に着手する。フェーズ 0（NF-601）は完了済み
 
 ### Issue 対応表
 
@@ -321,7 +323,36 @@
 
 ---
 
-## Q2 2027+（拡張・収益多様化フェーズ）
+## NF-Phase 6: DDD アーキテクチャ移行（Q2〜Q3 2027）
+
+### 到達目標
+
+- 技術レイヤー分割から Bounded Context（ドメイン駆動）構成への段階移行を完了する
+- 機能追加・修正の変更範囲が 1 BC 内で完結する状態を達成する
+- `domain/types.py` の神ファイルを解体し、型の責務を各 BC に帰属させる
+
+詳細設計・移行ステップは **[docs/DDD_ARCHITECTURE.md](DDD_ARCHITECTURE.md)** を参照。
+
+### 実施項目
+
+| ID | 施策 | 優先度 | フェーズ | 完了条件 |
+|---|---|---|---|---|
+| NF-601 | DDD フェーズ0: 現状整理・方針合意 | P2 | Phase 0 | DDD_ARCHITECTURE.md 作成・合意完了（✅ 2026-04-27 完了） |
+| NF-602 | DDD フェーズ1: 型の分散・utils 整理 | P2 | Phase 1 | `domain/types.py` の型を各 BC に移動し re-export で互換維持。全テストグリーン |
+| NF-603 | DDD フェーズ2: BC 境界確立 | P2 | Phase 2 | `brokers/`→`trading/`・`features/`→`analysis/`・`api/`→`reporting/` 移動。全テストグリーン |
+| NF-604 | DDD フェーズ3: 大規模再構成 | P3 | Phase 3 | `models/`→`prediction/`・`data/`→`market_data/`・`services/`解体。全テストグリーン |
+| NF-605 | DDD フェーズ4: import パス統一・仕上げ | P3 | Phase 4 | re-export 互換削除・`domain/` 削除・linter クリーン |
+
+### 優先順の考え方
+
+- NF-601 は 2026-04-27 完了済み
+- NF-602 は影響範囲が限定的（import 修正数少）で即着手可能。NF-Phase 3〜4 完了後に着手を推奨
+- NF-603 は `features/` の影響箇所が多いため、全テストグリーンを確認しながら 1 PR ずつ進める
+- NF-604・NF-605 は大規模変更のため、収益改善施策（R 系）が安定した Q3 2027 以降に実施する
+
+---
+
+
 
 ### 到達目標
 

@@ -53,34 +53,58 @@ StockFixer/
     │
     ├── src/                     # ソースコード
     │   ├── api/                 # API・外部インターフェース層
-    │   │   ├── discord_bot.py   # Discord Bot
-    │   │   └── discord_utils.py # Discord通知ユーティリティ
+    │   │   ├── discord_bot.py           # Discord Bot
+    │   │   ├── discord_formatters.py    # Discord 表示フォーマッター
+    │   │   ├── discord_notification_specs.py # 通知仕様定義
+    │   │   ├── discord_text.py          # Discord テキスト定数
+    │   │   └── discord_utils.py         # Discord通知ユーティリティ
     │   │
     │   ├── domain/              # ドメイン型定義層（全層共通）
     │   │   └── types.py         # 共有データクラス（SymbolTask / FeatureLoadResult / TrainingMetrics / PredictionResult）
     │   │
-    │   ├── services/            # オーケストレーション層
+    │   ├── services/            # オーケストレーション層（ドメイン別サブパッケージ構成）
+    │   │   ├── backtest/        # バックテスト関連パイプライン
+    │   │   │   ├── backtest_optimize_pipeline.py # パラメータ最適化
+    │   │   │   ├── backtest_pipeline.py          # 単一バックテスト
+    │   │   │   ├── portfolio_backtest.py          # ポートフォリオBT
+    │   │   │   ├── stress_test_pipeline.py        # ストレステスト
+    │   │   │   └── walk_forward_report_pipeline.py# Walk-Forward レポート
+    │   │   ├── prediction/      # 予測関連パイプライン
+    │   │   │   ├── prediction_pipeline.py         # 全銘柄予測・ランキング
+    │   │   │   ├── shadow_evaluation_pipeline.py  # シャドーモード評価
+    │   │   │   └── unified_model_pipeline.py      # 統合モデル学習
+    │   │   ├── reporting/       # レポーティング・通知
+    │   │   │   ├── discord_query_service.py       # Discord 向けクエリサービス
+    │   │   │   └── monthly_report_pipeline.py     # 月次レポート
+    │   │   ├── trading/         # 取引実行・リスク管理
+    │   │   │   ├── order_execution_pipeline.py    # 発注オーケストレーション
+    │   │   │   └── risk_manager.py                # リスクゲートチェック
+    │   │   ├── training/        # モデル学習
+    │   │   │   └── model_training_pipeline.py     # 銘柄別モデル学習
+    │   │   ├── watchlist/       # ウォッチリスト管理
+    │   │   │   └── watchlist_manager.py           # ウォッチリストCRUD
+    │   │   ├── batch_runner.py   # バッチ実行共通ユーティリティ
     │   │   ├── data_pipeline.py  # データ取得〜特徴量生成パイプライン
-    │   │   ├── model_training_pipeline.py # 銘柄別モデル学習パイプライン
-    │   │   ├── prediction_pipeline.py # 予測・Top10/Worst10集計パイプライン
-    │   │   ├── unified_model_pipeline.py # 統合モデル学習パイプライン
-    │   │   └── batch_runner.py   # バッチ実行ユーティリティ
+    │   │   ├── scheduler_pipeline.py # スケジューラジョブ定義
+    │   │   └── scheduler_queue.py    # ジョブキュー管理
     │   │
     │   ├── models/              # AI予測モデル層
     │   │   ├── base_model.py    # モデル基底クラス（抽象）
     │   │   ├── xgboost_model.py # XGBoost実装
     │   │   ├── lightgbm_model.py# LightGBM実装
     │   │   ├── model_manager.py # モデル管理クラス
-    │   │   └── predict_single_stock.py # 単一銘柄予測
+    │   │   ├── predict_single_stock.py # 単一銘柄予測（銘柄別モデル）
+    │   │   └── predict_unified.py      # 統合モデルによる予測
     │   │
     │   ├── strategy/            # シグナル生成層
     │   │   └── signal_generator.py # 売買シグナル生成
     │   │
     │   ├── backtest/            # バックテスト層
-    │   │   └── backtester.py    # バックテスト実行
+    │   │   └── backtester.py    # バックテスト実行エンジン
     │   │
     │   ├── features/            # 特徴量生成層
-    │   │   └── technical_analysis.py # テクニカル指標・ラグ特徴量
+    │   │   ├── technical_analysis.py # テクニカル指標・ラグ特徴量
+    │   │   └── market_regime.py      # マーケットレジーム判定
     │   │
     │   ├── data/                # データ取得・保存層
     │   │   ├── data_loader.py   # 株価データ取得
@@ -94,11 +118,16 @@ StockFixer/
     │   │   ├── paper/           # PaperBroker（仮想売買）
     │   │   └── kabu/            # KabuBroker（kabu STATION® API）
     │   │
-    │   ┌── utils/               # ユーティリティ層（最下層）
-    │   │   ├── logger.py        # 統一ロガーファクトリー（全レイヤーに供給）
-    │   │   ├── db/              # DuckDB接続管理・CRUD（パッケージ）
-    │   │   ├── data_path_utils.py # パス・ティッカー補正
-    │   │   └── df_to_string.py  # DataFrame整形
+    │   └── utils/               # ユーティリティ層（最下層）
+    │       ├── logger.py             # 統一ロガーファクトリー（全レイヤーに供給）
+    │       ├── db/                   # DuckDB接続管理・CRUD（パッケージ）
+    │       ├── data_path_utils.py    # パス・ティッカー補正
+    │       ├── df_to_string.py       # DataFrame整形
+    │       ├── japan_time.py         # 日本時間変換ユーティリティ
+    │       ├── yf_client.py          # yfinance ラッパー
+    │       ├── retry_helper.py       # リトライデコレータ
+    │       ├── sector_constraints.py # セクター制約定義
+    │       └── optimal_params_loader.py # 最適パラメータ読込
     │
     ├── data/                    # 株価データ保存先
     │   └── stockfixer.duckdb    # DuckDBデータベースファイル
@@ -232,6 +261,20 @@ StockFixer/
 
 ### services層
 
+services 層はドメイン別に **6 つのサブパッケージ**に整理されています。
+各サブパッケージが 1 つのドメイン関心事を担い、上位の `run_*.py` やスケジューラからのみ呼ばれます。
+
+| サブパッケージ | 責務 |
+|--------------|------|
+| `backtest/` | バックテスト・Walk-Forward・ストレステスト・最適化 |
+| `prediction/` | 全銘柄予測・統合モデル学習・シャドーモード評価 |
+| `reporting/` | 月次レポート・Discord 向けクエリサービス |
+| `trading/` | 発注オーケストレーション・リスクゲートチェック |
+| `training/` | 銘柄別モデル学習パイプライン |
+| `watchlist/` | ウォッチリスト CRUD |
+
+サブパッケージに属さない共通モジュール：
+
 #### `data_pipeline.py`
 - **データ取得 → 特徴量生成 → 保存** の一連の処理を統合
 - `save_stock_data_with_features()`: 銘柄データ取得から特徴量付きDB保存まで
@@ -284,13 +327,10 @@ StockFixer/
   - `predict_with_model()`: 予測実行
   - `save_model()` / `load_model()`: 永続化
 
-#### `predict_single_stock.py`
-- 単一銘柄の予測を実行し `PredictionResult` を返す
-- 複数モデルの予測値を平均化してバイアス低減
-- `predict_single_stock()` → `PredictionResult | None`
-- `predict_single_stock_multi_horizon()` → `PredictionResult | None`（多ホライズンフィールド付き）
+#### `predict_unified.py`
+- 統合モデル（全銘柄データを結合して学習したモデル）による予測を実行し `PredictionResult` を返す
 
-### strategy層
+
 
 #### `signal_generator.py`
 - テクニカル分析結果とAI予測を組み合わせて売買シグナル生成
@@ -365,6 +405,21 @@ StockFixer/
 - `get_ticker()`: 市場別ティッカー補正（日本株は `.T` 付与）
 - `get_db_path()`: DuckDBファイルパス取得
 
+#### `yf_client.py`
+- yfinance の呼び出しラッパー（リトライ・エラーハンドリング統合）
+
+#### `japan_time.py`
+- 日本時間変換・表示フォーマット（全表示側はこれを経由する）
+
+#### `retry_helper.py`
+- 外部 API 呼び出し向けリトライデコレータ
+
+#### `optimal_params_loader.py`
+- バックテスト最適化で生成した `optimal_params.json` の読込ユーティリティ
+
+#### `sector_constraints.py`
+- セクター別投資制約定義
+
 #### `csv_io.py`
 - DataFrameのCSV入出力ユーティリティ（非推奨・後方互換のため残置）
 
@@ -429,9 +484,17 @@ StockFixer/
 | `run_unified_model_training.py` | 統合モデルの学習 | `--model-type`, `--no-both` |
 | `run_predict.py` | 株価予測（3モード統合） | `--mode single\|watchlist\|top10` |
 | `run_backtest.py` | バックテスト実行 | `--market`, `--symbol`, `--start`, `--end` |
-| `run_backtest_optimize.py` | バックテストパラメータ最適化 | `--market`, `--symbol`, `--batch` |
+| `run_backtest_optimize.py` | バックテストパラメータ最適化（単一銘柄） | `--market`, `--symbol` |
+| `run_backtest_optimize_batch.py` | バックテストパラメータ最適化（バッチ） | `--batch` |
+| `run_backtest_portfolio.py` | ポートフォリオバックテスト | — |
+| `run_backtest_ui.py` | バックテスト結果の UI 表示 | — |
+| `run_stress_test.py` | ストレステスト（歴史的クラッシュ再現） | `--market`, `--symbol` |
+| `run_walk_forward_report.py` | Walk-Forward 比較レポート生成 | — |
+| `run_auto_trade.py` | 自動発注・約定処理 | — |
+| `run_monthly_report.py` | 月次レポート生成 | — |
 | `run_discord_bot.py` | Discord Botの起動 | — |
 | `run_ticker_list.py` | S&P500/NASDAQ100銘柄リスト取得 | — |
+| `run_scheduler.py` | スケジューラ起動・即時実行 | `--with-bot`, `--run-now <job>` |
 
 ---
 
@@ -505,6 +568,16 @@ StockFixer/
 - `.env` で機密情報を管理
 - 認証情報のハードコーディング禁止
 - ログに認証情報を含めない
+
+### 8. 今後の方向性（DDD 移行）
+
+現在の構成は **技術レイヤー分割** を基本としているが、`services/` 配下は既にドメイン別サブパッケージに整理されており、DDD（ドメイン駆動設計）への移行を段階的に進めることが決定している。
+
+ターゲット構成・移行スケジュール・判断根拠は以下のドキュメントを参照のこと。
+
+> 📄 **[docs/DDD_ARCHITECTURE.md](DDD_ARCHITECTURE.md)** — DDD 目標アーキテクチャと移行計画
+
+
 
 ---
 

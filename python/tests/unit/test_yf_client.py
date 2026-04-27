@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pandas as pd
 
-from src.utils.yf_client import _normalize, download, ticker_history
+from src.market_data.yf_client import _normalize, download, ticker_history
 
 
 class TestNormalize(unittest.TestCase):
@@ -93,7 +93,7 @@ class TestNormalize(unittest.TestCase):
 class TestDownload(unittest.TestCase):
     """download 関数のテスト"""
 
-    @patch("src.utils.yf_client.with_retry")
+    @patch("src.market_data.yf_client.with_retry")
     def test_period_mode_returns_normalized_df(self, mock_retry):
         """period 指定で正規化済み DataFrame が返ること"""
         mock_df = pd.DataFrame(
@@ -107,7 +107,7 @@ class TestDownload(unittest.TestCase):
         self.assertFalse(result.empty)
         self.assertIn("Close", result.columns)
 
-    @patch("src.utils.yf_client.with_retry")
+    @patch("src.market_data.yf_client.with_retry")
     def test_start_end_mode_returns_normalized_df(self, mock_retry):
         """start/end 指定で正規化済み DataFrame が返ること"""
         mock_df = pd.DataFrame(
@@ -120,7 +120,7 @@ class TestDownload(unittest.TestCase):
 
         self.assertFalse(result.empty)
 
-    @patch("src.utils.yf_client.with_retry")
+    @patch("src.market_data.yf_client.with_retry")
     def test_exception_returns_empty_df(self, mock_retry):
         """例外発生時は空 DataFrame が返ること"""
         mock_retry.side_effect = Exception("network error")
@@ -130,7 +130,7 @@ class TestDownload(unittest.TestCase):
         self.assertTrue(result.empty)
         self.assertIsInstance(result, pd.DataFrame)
 
-    @patch("src.utils.yf_client.with_retry")
+    @patch("src.market_data.yf_client.with_retry")
     def test_multiindex_result_normalized(self, mock_retry):
         """MultiIndex カラムを返す場合も正規化されること"""
         multi_idx = pd.MultiIndex.from_tuples([("Close", "AAPL"), ("Open", "AAPL")])
@@ -145,7 +145,7 @@ class TestDownload(unittest.TestCase):
 
         self.assertFalse(isinstance(result.columns, pd.MultiIndex))
 
-    @patch("src.utils.yf_client.with_retry")
+    @patch("src.market_data.yf_client.with_retry")
     def test_tz_aware_result_normalized(self, mock_retry):
         """tz-aware インデックスが tz-naive に変換されること"""
         idx = pd.date_range("2024-01-01", periods=2, tz="UTC")
@@ -156,7 +156,7 @@ class TestDownload(unittest.TestCase):
 
         self.assertIsNone(result.index.tzinfo)
 
-    @patch("src.utils.yf_client.with_retry")
+    @patch("src.market_data.yf_client.with_retry")
     def test_empty_df_from_yfinance_returns_empty(self, mock_retry):
         """yfinance が空 DataFrame を返した場合は空のまま返ること"""
         mock_retry.return_value = pd.DataFrame()
@@ -169,8 +169,8 @@ class TestDownload(unittest.TestCase):
 class TestTickerHistory(unittest.TestCase):
     """ticker_history 関数のテスト"""
 
-    @patch("src.utils.yf_client.with_retry")
-    @patch("src.utils.yf_client.yf")
+    @patch("src.market_data.yf_client.with_retry")
+    @patch("src.market_data.yf_client.yf")
     def test_returns_normalized_df(self, mock_yf, mock_retry):
         """正常時は正規化済み DataFrame が返ること"""
         mock_yf.Ticker.return_value = MagicMock()
@@ -185,8 +185,8 @@ class TestTickerHistory(unittest.TestCase):
         self.assertFalse(result.empty)
         self.assertIn("Close", result.columns)
 
-    @patch("src.utils.yf_client.with_retry")
-    @patch("src.utils.yf_client.yf")
+    @patch("src.market_data.yf_client.with_retry")
+    @patch("src.market_data.yf_client.yf")
     def test_exception_returns_empty(self, mock_yf, mock_retry):
         """例外発生時は空 DataFrame が返ること"""
         mock_yf.Ticker.return_value = MagicMock()
@@ -197,8 +197,8 @@ class TestTickerHistory(unittest.TestCase):
         self.assertTrue(result.empty)
         self.assertIsInstance(result, pd.DataFrame)
 
-    @patch("src.utils.yf_client.with_retry")
-    @patch("src.utils.yf_client.yf")
+    @patch("src.market_data.yf_client.with_retry")
+    @patch("src.market_data.yf_client.yf")
     def test_ticker_object_created(self, mock_yf, mock_retry):
         """Ticker オブジェクトが正しいシンボルで生成されること"""
         mock_yf.Ticker.return_value = MagicMock()
@@ -210,8 +210,8 @@ class TestTickerHistory(unittest.TestCase):
 
         mock_yf.Ticker.assert_called_once_with("AAPL")
 
-    @patch("src.utils.yf_client.with_retry")
-    @patch("src.utils.yf_client.yf")
+    @patch("src.market_data.yf_client.with_retry")
+    @patch("src.market_data.yf_client.yf")
     def test_tz_aware_index_normalized(self, mock_yf, mock_retry):
         """tz-aware なインデックスが tz-naive に変換されること"""
         mock_yf.Ticker.return_value = MagicMock()
@@ -222,8 +222,8 @@ class TestTickerHistory(unittest.TestCase):
 
         self.assertIsNone(result.index.tzinfo)
 
-    @patch("src.utils.yf_client.with_retry")
-    @patch("src.utils.yf_client.yf")
+    @patch("src.market_data.yf_client.with_retry")
+    @patch("src.market_data.yf_client.yf")
     def test_empty_df_from_yfinance(self, mock_yf, mock_retry):
         """yfinance が空 DataFrame を返した場合は空のまま返ること"""
         mock_yf.Ticker.return_value = MagicMock()
