@@ -9,9 +9,6 @@ import argparse
 import sys
 
 from src.services.walk_forward_report_pipeline import run_walk_forward_comparison_report
-from src.utils.logger import get_logger
-
-logger = get_logger(__name__)
 
 
 def parse_args():
@@ -49,16 +46,16 @@ def main():
         as_of_date=args.as_of_date,
     )
 
-    logger.info("Walk-Forward比較レポート生成完了")
-    logger.info(f"summary: {result['summary_path']}")
-    logger.info(f"comparison: {result['comparison_path']}")
-    logger.info(f"markdown: {result['markdown_path']}")
-    logger.info(f"success={result['success']} failed={result['failed']} total={result['total']}")
+    print("Walk-Forward比較レポート生成完了")
+    print(f"summary: {result['summary_path']}")
+    print(f"comparison: {result['comparison_path']}")
+    print(f"markdown: {result['markdown_path']}")
+    print(f"success={result['success']} failed={result['failed']} total={result['total']}")
 
 
 if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        logger.critical(f"Walk-Forward比較レポート 異常終了: {e}", exc_info=True)
+        print(f"Walk-Forward比較レポート 異常終了: {e}", file=sys.stderr)
         sys.exit(1)
