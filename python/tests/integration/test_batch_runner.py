@@ -98,7 +98,7 @@ class TestPrintSummary(unittest.TestCase):
             {"status": "error", "market": "jp", "symbol": "7203", "error": "timeout"},
             {"status": "skip", "market": "jp", "symbol": "9984"},
         ]
-        with self.assertLogs("src.services.batch_runner", level="INFO") as cm:
+        with self.assertLogs("src.watchlist.batch_runner", level="INFO") as cm:
             print_summary("テスト", results)
         output = "\n".join(cm.output)
         self.assertIn("成功: 2", output)
@@ -110,7 +110,7 @@ class TestPrintSummary(unittest.TestCase):
         results = [
             {"status": "error", "market": "us", "symbol": "BAD", "error": "connection failed"},
         ]
-        with self.assertLogs("src.services.batch_runner", level="WARNING") as cm:
+        with self.assertLogs("src.watchlist.batch_runner", level="WARNING") as cm:
             print_summary("エラーテスト", results)
         output = "\n".join(cm.output)
         self.assertIn("connection failed", output)
@@ -118,7 +118,7 @@ class TestPrintSummary(unittest.TestCase):
     def test_no_error_no_detail(self):
         """エラーがなければエラー詳細セクションが出ないことを確認"""
         results = [{"status": "success"}]
-        with self.assertLogs("src.services.batch_runner", level="INFO") as cm:
+        with self.assertLogs("src.watchlist.batch_runner", level="INFO") as cm:
             print_summary("成功のみ", results)
         output = "\n".join(cm.output)
         self.assertNotIn("エラー詳細", output)
