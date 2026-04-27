@@ -7,6 +7,7 @@ Walk-Forward 比較レポート実行スクリプト（CLIラッパー）
 
 import argparse
 import sys
+import traceback
 
 from src.services.walk_forward_report_pipeline import run_walk_forward_comparison_report
 
@@ -58,4 +59,5 @@ if __name__ == "__main__":
         main()
     except Exception as e:
         print(f"Walk-Forward比較レポート 異常終了: {e}", file=sys.stderr)
+        traceback.print_exc()
         sys.exit(1)
