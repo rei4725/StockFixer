@@ -1,4 +1,4 @@
-"""scheduler_pipeline モジュールのユニットテスト"""
+﻿"""scheduler_pipeline モジュールのユニットテスト"""
 
 import os
 import tempfile
@@ -35,7 +35,7 @@ class TestRunDailyPipeline(unittest.TestCase):
         if os.path.exists(self.tmp_dir):
             os.rmdir(self.tmp_dir)
 
-    @patch("src.api.discord_utils.send_daily_pipeline_completion")
+    @patch("src.reporting.discord.discord_utils.send_daily_pipeline_completion")
     @patch("src.services.prediction_pipeline.output_top_worst_results")
     @patch("src.services.prediction_pipeline.predict_all_unified")
     @patch("src.services.data_pipeline.run_data_batch")
@@ -57,7 +57,7 @@ class TestRunDailyPipeline(unittest.TestCase):
         # 完了通知が送られたことを確認
         mock_send_completion.assert_called_once()
 
-    @patch("src.api.discord_utils.send_daily_pipeline_error")
+    @patch("src.reporting.discord.discord_utils.send_daily_pipeline_error")
     @patch("src.services.prediction_pipeline.output_top_worst_results")
     @patch("src.services.prediction_pipeline.predict_all_unified")
     @patch("src.services.data_pipeline.run_data_batch")
@@ -80,7 +80,7 @@ class TestRunDailyPipeline(unittest.TestCase):
         # 予測は実行されないはず
         mock_predict.assert_not_called()
 
-    @patch("src.api.discord_utils.send_daily_pipeline_error")
+    @patch("src.reporting.discord.discord_utils.send_daily_pipeline_error")
     @patch("src.services.prediction_pipeline.output_top_worst_results")
     @patch("src.services.prediction_pipeline.predict_all_unified")
     @patch("src.services.data_pipeline.run_data_batch")
@@ -101,7 +101,7 @@ class TestRunDailyPipeline(unittest.TestCase):
         # エラー通知が送られたことを確認
         mock_send_error.assert_called_once()
 
-    @patch("src.api.discord_utils.send_daily_pipeline_completion")
+    @patch("src.reporting.discord.discord_utils.send_daily_pipeline_completion")
     @patch("src.services.prediction_pipeline.output_top_worst_results")
     @patch("src.services.prediction_pipeline.predict_all_unified")
     @patch("src.services.data_pipeline.run_data_batch")

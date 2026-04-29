@@ -207,7 +207,6 @@ class TestSoftmaxWeights(unittest.TestCase):
 
     def test_outputs_sum_to_one(self):
         """softmax の合計が 1.0 になること"""
-        import numpy as np
         import pandas as pd
 
         from src.services.portfolio_backtest import _softmax_weights

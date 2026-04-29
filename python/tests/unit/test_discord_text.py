@@ -2,7 +2,7 @@
 
 import unittest
 
-from src.api.discord_text import split_text_chunks
+from src.reporting.discord.discord_text import split_text_chunks
 
 
 class TestSplitTextChunks(unittest.TestCase):

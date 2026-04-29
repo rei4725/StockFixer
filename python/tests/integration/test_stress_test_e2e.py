@@ -37,7 +37,7 @@ class TestStressTestE2E(unittest.TestCase):
         """コロナシナリオで StressTestResult が返ること"""
         self._skip_if_no_xgboost()
         try:
-            from src.domain.types import StressTestResult
+            from src.backtest.types import StressTestResult
             from src.services.stress_test_pipeline import run_stress_test_single
 
             result = run_stress_test_single(
@@ -62,7 +62,7 @@ class TestStressTestE2E(unittest.TestCase):
         """リーマンショックシナリオで StressTestResult が返ること"""
         self._skip_if_no_xgboost()
         try:
-            from src.domain.types import StressTestResult
+            from src.backtest.types import StressTestResult
             from src.services.stress_test_pipeline import run_stress_test_single
 
             result = run_stress_test_single(
@@ -108,7 +108,7 @@ class TestStressTestE2E(unittest.TestCase):
     def test_save_stress_test_results_creates_csv(self):
         """StressTestResult を保存すると CSV が results/stress_test/ に作成されること"""
         try:
-            from src.domain.types import StressTestResult
+            from src.backtest.types import StressTestResult
             from src.services.stress_test_pipeline import save_stress_test_results
         except ImportError as e:
             self.skipTest(f"インポートエラー: {e}")

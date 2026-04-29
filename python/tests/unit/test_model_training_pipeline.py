@@ -17,7 +17,7 @@ class TestComputeTrainingMetrics(unittest.TestCase):
         )
 
     def test_returns_training_metrics(self):
-        from src.domain.types import TrainingMetrics
+        from src.prediction.types import TrainingMetrics
 
         result = self._fn([0.01, 0.02, -0.01], [0.01, 0.02, -0.01])
         self.assertIsInstance(result, TrainingMetrics)

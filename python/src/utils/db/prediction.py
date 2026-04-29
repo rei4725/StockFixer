@@ -9,7 +9,7 @@ from typing import Any, Optional
 
 import pandas as pd
 
-from src.domain.types import PredictionResult, TrainingMetrics
+from src.prediction.types import PredictionResult, TrainingMetrics
 from src.utils.db._connection import _db_connection
 from src.utils.logger import get_logger
 
@@ -74,7 +74,8 @@ def save_prediction_results(predicted_at: str, results: list[PredictionResult]) 
         pairs = save_df[["market", "symbol", "model_version"]].drop_duplicates()
         for _, row in pairs.iterrows():
             con.execute(
-                "DELETE FROM prediction_results WHERE market = ? AND symbol = ? AND model_version = ?",
+                "DELETE FROM prediction_results WHERE market = ? AND symbol = ?"
+                " AND model_version = ?",
                 [row["market"], row["symbol"], row["model_version"]],
             )
         col_str = ", ".join(cols)

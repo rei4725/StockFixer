@@ -1,6 +1,8 @@
 """data_pipeline モジュールのユニットテスト"""
 
+import glob
 import os
+import shutil
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -33,11 +35,11 @@ class _TmpDbTestCase(unittest.TestCase):
         db_module.close_connection()
         path_utils.get_db_path = self._orig_get_db_path
         db_module.get_db_path = self._orig_get_db_path
-        for path in (self.tmp_db, self.tmp_db + ".wal"):
+        for path in glob.glob(self.tmp_db + "*"):
             if os.path.exists(path):
                 os.remove(path)
         if os.path.exists(self.tmp_dir):
-            os.rmdir(self.tmp_dir)
+            shutil.rmtree(self.tmp_dir, ignore_errors=True)
 
     def _make_ohlcv(self, periods=60):
         """テスト用OHLCVデータを生成する（ラグ特徴量・テクニカル指標生成に十分な行数）"""
@@ -254,10 +256,7 @@ class TestRunDataBatch(_TmpDbTestCase):
 
     def _make_phase1_data(self):
         """フェーズ1の成功データを生成するヘルパー"""
-        from src.features.technical_analysis import (
-            add_technical_indicators,
-            create_basic_lag_features,
-        )
+        from src.analysis.technical import add_technical_indicators, create_basic_lag_features
 
         df = self._make_ohlcv(60)
         df = add_technical_indicators(df)

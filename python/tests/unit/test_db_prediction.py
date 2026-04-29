@@ -1,6 +1,8 @@
 """db/prediction モジュールのユニットテスト（一時DB使用）"""
 
+import glob
 import os
+import shutil
 import tempfile
 import unittest
 
@@ -8,7 +10,7 @@ import pandas as pd
 
 import src.utils.data_path_utils as path_utils
 import src.utils.db as db_module
-from src.domain.types import PredictionResult, TrainingMetrics
+from src.prediction.types import PredictionResult, TrainingMetrics
 from src.utils.db.prediction import (
     load_drift_summary,
     load_excluded_features,
@@ -43,11 +45,11 @@ class _TmpDbTestCase(unittest.TestCase):
         db_module.close_connection()
         path_utils.get_db_path = self._orig_get_db_path
         db_module.get_db_path = self._orig_get_db_path
-        for path in (self.tmp_db, self.tmp_db + ".wal"):
+        for path in glob.glob(self.tmp_db + "*"):
             if os.path.exists(path):
                 os.remove(path)
         if os.path.exists(self.tmp_dir):
-            os.rmdir(self.tmp_dir)
+            shutil.rmtree(self.tmp_dir, ignore_errors=True)
 
     def _make_results(self, market="us", symbol="AAPL", n=1):
         return [

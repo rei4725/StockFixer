@@ -10,7 +10,6 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 
 from src.brokers.base import BrokerBase, OrderSide, OrderType
-from src.domain.types import TradingGateStatus
 from src.services.order_execution_pipeline import (
     BUY_THRESHOLD,
     MAX_ORDERS_PER_RUN,
@@ -21,6 +20,7 @@ from src.services.order_execution_pipeline import (
     _compute_market_threshold_scale,
     run_daily_orders,
 )
+from src.trading.types import TradingGateStatus
 
 
 def _make_broker(balance=1_000_000.0, positions=None):

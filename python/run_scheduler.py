@@ -282,7 +282,7 @@ def _print_schedule():
 
 def run_with_bot():
     """Discord Botとスケジューラを同時に起動する"""
-    from src.api.discord_bot import TOKEN, bot
+    from src.reporting.discord.discord_bot import TOKEN, bot
 
     if not TOKEN:
         logger.error("DISCORD_BOT_TOKEN環境変数が設定されていません。")

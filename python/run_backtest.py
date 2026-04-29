@@ -262,7 +262,7 @@ def main():
         if chart_path:
             logger.info(f"グラフ保存: {chart_path}")
             if args.discord_chart:
-                from src.api.discord_utils import send_webhook_file
+                from src.reporting.discord.discord_utils import send_webhook_file
 
                 send_webhook_file(
                     chart_path,

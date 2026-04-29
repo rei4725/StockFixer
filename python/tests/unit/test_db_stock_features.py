@@ -1,6 +1,8 @@
 """db/stock_features モジュールのユニットテスト（一時DB使用）"""
 
+import glob
 import os
+import shutil
 import tempfile
 import unittest
 
@@ -34,11 +36,11 @@ class _TmpDbTestCase(unittest.TestCase):
         db_module.close_connection()
         path_utils.get_db_path = self._orig_get_db_path
         db_module.get_db_path = self._orig_get_db_path
-        for path in (self.tmp_db, self.tmp_db + ".wal"):
+        for path in glob.glob(self.tmp_db + "*"):
             if os.path.exists(path):
                 os.remove(path)
         if os.path.exists(self.tmp_dir):
-            os.rmdir(self.tmp_dir)
+            shutil.rmtree(self.tmp_dir, ignore_errors=True)
 
     def _make_df(self, n=5, extra_cols=None):
         """DatetimeIndex付きの簡単な特徴量DataFrameを作成する"""

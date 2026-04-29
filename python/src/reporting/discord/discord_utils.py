@@ -10,7 +10,7 @@ from typing import Optional
 
 import requests
 
-from src.domain.types import PredictionResult
+from src.prediction.types import PredictionResult
 from src.reporting.discord.discord_formatters import convert_df_for_discord, get_market_emoji
 from src.reporting.discord.discord_notification_specs import (
     DAILY_PIPELINE_COMPLETION,

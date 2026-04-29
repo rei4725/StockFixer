@@ -3,7 +3,6 @@ import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
-import numpy as np
 import pandas as pd
 
 # shap が未インストールの場合はモック

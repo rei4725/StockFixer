@@ -19,9 +19,10 @@ from config.settings import (
     PERMUTATION_IMPORTANCE_REPEATS,
 )
 from src.analysis.technical import add_earnings_flag
-from src.domain.types import FeatureLoadResult, TrainingMetrics
+from src.analysis.types import FeatureLoadResult
 from src.market_data.loader import get_earnings_dates
 from src.prediction.manager import ModelManager
+from src.prediction.types import TrainingMetrics
 from src.services.batch_runner import load_target_symbols
 from src.utils.db import (
     generate_run_id,
@@ -148,10 +149,7 @@ def load_features_for_training(market: str, symbol: str, horizon: int = 1) -> Fe
             y = df["y"]
         else:
             # 多ホライズンパス: market_data_raw から OHLCV を取得して再計算
-            from src.features.technical_analysis import (
-                add_technical_indicators,
-                create_basic_lag_features,
-            )
+            from src.analysis.technical import add_technical_indicators, create_basic_lag_features
             from src.utils.db import load_raw_ohlcv
 
             raw = load_raw_ohlcv(market, symbol)
@@ -411,7 +409,7 @@ def train_models_for_symbol(market: str, symbol: str, horizon: int = 1) -> dict:
                     ].tolist()
                 )
                 if not shap_top_bottom.empty:
-                    from src.api.discord_utils import send_shap_notification
+                    from src.reporting.discord.discord_utils import send_shap_notification
 
                     send_shap_notification(market, symbol, model_name, shap_top_bottom)
                 _compute_and_save_permutation_importance(
@@ -446,7 +444,7 @@ def train_models_for_symbol_task(task) -> dict:
     Returns:
         dict: train_models_for_symbolの戻り値  (batch_runner.print_summary 互換)
     """
-    from src.domain.types import SymbolTask
+    from src.watchlist.types import SymbolTask
 
     if isinstance(task, SymbolTask):
         return train_models_for_symbol(task.market, task.symbol, task.horizon)
@@ -470,7 +468,7 @@ def run_model_batch(horizon: int = 1):
 
     def _load_features_task(task) -> FeatureLoadResult:
         """バッチランナー用: DB読み込みのみ（並列安全）"""
-        from src.domain.types import SymbolTask
+        from src.watchlist.types import SymbolTask
 
         if isinstance(task, SymbolTask):
             return load_features_for_training(task.market, task.symbol, horizon=task.horizon)
@@ -484,7 +482,7 @@ def run_model_batch(horizon: int = 1):
         return
 
     # horizon 情報をタスクに付与
-    from src.domain.types import SymbolTask
+    from src.watchlist.types import SymbolTask
 
     tasks = [
         (

@@ -80,7 +80,7 @@ class Backtester:
             )
 
         # 2. 特徴量生成（テクニカル指標付与）
-        from src.features.technical_analysis import add_technical_indicators
+        from src.analysis.technical import add_technical_indicators
 
         df = add_technical_indicators(df)
 

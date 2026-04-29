@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from src.domain.types import StressTestResult, SymbolTask
+from src.backtest.types import StressTestResult
 from src.services.stress_test_pipeline import (
     MDD_THRESHOLD,
     STRESS_SCENARIOS,
@@ -20,6 +20,7 @@ from src.services.stress_test_pipeline import (
     run_stress_test_single,
     save_stress_test_results,
 )
+from src.watchlist.types import SymbolTask
 
 
 class TestStressScenarios:

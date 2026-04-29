@@ -10,7 +10,7 @@ import pandas as pd
 
 import src.utils.data_path_utils as path_utils
 import src.utils.db as db_module
-from src.domain.types import FeatureLoadResult
+from src.analysis.types import FeatureLoadResult
 from src.services.model_training_pipeline import (
     train_models_for_symbol,
     train_models_for_symbol_task,

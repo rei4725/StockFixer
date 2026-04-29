@@ -1,4 +1,4 @@
-"""
+﻿"""
 E2E テスト共通 fixture
 
 テスト専用の孤立環境（一時 DuckDB + 一時モデルディレクトリ）を構築し、
@@ -124,9 +124,13 @@ def e2e_db_env(e2e_ohlcv, tmp_path_factory):
             return_value=models_dir,
         ),
         # Discord 送信を抑制（SHAP / 学習完了通知）
-        mock.patch("src.api.discord_utils.send_shap_notification", return_value=None),
-        mock.patch("src.api.discord_utils.send_daily_pipeline_completion", return_value=None),
-        mock.patch("src.api.discord_utils.send_daily_pipeline_error", return_value=None),
+        mock.patch("src.reporting.discord.discord_utils.send_shap_notification", return_value=None),
+        mock.patch(
+            "src.reporting.discord.discord_utils.send_daily_pipeline_completion", return_value=None
+        ),
+        mock.patch(
+            "src.reporting.discord.discord_utils.send_daily_pipeline_error", return_value=None
+        ),
         # クロスアセット特徴量をモックして学習/予測で特徴量数を一致させる（R-306）
         mock.patch("src.models.predict_single_stock.fetch_cross_asset_features", return_value=None),
         mock.patch("src.services.data_pipeline.fetch_cross_asset_features", return_value=None),
@@ -176,6 +180,7 @@ def _generate_and_save_features(market: str, symbol: str, df: pd.DataFrame) -> N
     （yfinance 呼び出しを完全に回避するため）。
     """
     from src.features.technical_analysis import add_technical_indicators, create_basic_lag_features
+
     from src.utils.data_path_utils import normalize_col
     from src.utils.db import upsert_stock_features
 

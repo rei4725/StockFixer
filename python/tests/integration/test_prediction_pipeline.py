@@ -9,7 +9,7 @@ import pandas as pd
 
 import src.utils.data_path_utils as path_utils
 import src.utils.db as db_module
-from src.domain.types import PredictionResult
+from src.prediction.types import PredictionResult
 from src.services.prediction_pipeline import find_model_files, output_top_worst_results
 
 

@@ -255,7 +255,7 @@ def _load_all_ohlcv_for_unified(horizon: int) -> Tuple[pd.DataFrame, pd.Series]:
     """
     import re
 
-    from src.features.technical_analysis import add_technical_indicators, create_basic_lag_features
+    from src.analysis.technical import add_technical_indicators, create_basic_lag_features
     from src.utils.db import load_all_raw_ohlcv_symbols, load_raw_ohlcv
 
     all_X = []

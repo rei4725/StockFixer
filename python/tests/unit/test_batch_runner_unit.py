@@ -6,8 +6,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from src.domain.types import SymbolTask
 from src.services.batch_runner import load_target_symbols, print_summary, run_parallel
+from src.watchlist.types import SymbolTask
 
 
 class TestLoadTargetSymbols(unittest.TestCase):
@@ -118,7 +118,9 @@ class TestLoadTargetSymbols(unittest.TestCase):
 
     @patch("src.services.batch_runner.load_index_membership_symbols_as_of")
     @patch("src.services.batch_runner.get_watchlist_path")
-    def test_as_of_date_falls_back_to_watchlist_when_history_empty(self, mock_path, mock_load_history):
+    def test_as_of_date_falls_back_to_watchlist_when_history_empty(
+        self, mock_path, mock_load_history
+    ):
         """履歴が空のとき watchlist.json にフォールバックすること"""
         mock_load_history.return_value = []
         with tempfile.TemporaryDirectory() as tmp:

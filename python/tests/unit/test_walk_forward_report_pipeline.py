@@ -173,8 +173,8 @@ class TestRunWalkForwardComparisonReport:
 
     def test_runs_for_each_symbol(self, tmp_path):
         """各銘柄でバックテストが実行され、結果辞書が返ること"""
-        from src.domain.types import SymbolTask
         from src.services.walk_forward_report_pipeline import run_walk_forward_comparison_report
+        from src.watchlist.types import SymbolTask
 
         reports_dir = tmp_path / "backtest" / "walk_forward_reports"
         reports_dir.mkdir(parents=True, exist_ok=True)
@@ -212,18 +212,26 @@ class TestRunWalkForwardComparisonReport:
 
     def test_passes_as_of_date_to_symbol_loader(self, tmp_path):
         """as_of_date が load_target_symbols に渡されること"""
-        from src.domain.types import SymbolTask
         from src.services.walk_forward_report_pipeline import run_walk_forward_comparison_report
+        from src.watchlist.types import SymbolTask
 
         reports_dir = tmp_path / "backtest" / "walk_forward_reports"
         reports_dir.mkdir(parents=True, exist_ok=True)
-        wf_df = pd.DataFrame({"total_return": [0.01], "sharpe_ratio": [1.0], "max_drawdown": [-0.02]})
+        wf_df = pd.DataFrame(
+            {"total_return": [0.01], "sharpe_ratio": [1.0], "max_drawdown": [-0.02]}
+        )
 
         with (
             patch("src.services.walk_forward_report_pipeline.load_target_symbols") as mock_symbols,
             patch("src.services.walk_forward_report_pipeline.run_backtest_walk_forward") as mock_wf,
-            patch("src.services.walk_forward_report_pipeline.get_results_dir", return_value=str(tmp_path)),
-            patch("src.services.walk_forward_report_pipeline.ensure_dir", return_value=str(reports_dir)),
+            patch(
+                "src.services.walk_forward_report_pipeline.get_results_dir",
+                return_value=str(tmp_path),
+            ),
+            patch(
+                "src.services.walk_forward_report_pipeline.ensure_dir",
+                return_value=str(reports_dir),
+            ),
         ):
             mock_symbols.return_value = [SymbolTask(market="us", symbol="AAPL")]
             mock_wf.return_value = (None, None, wf_df)

@@ -1,6 +1,7 @@
 """LightGBMModel / XGBoostModel のユニットテスト"""
 
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -235,9 +236,7 @@ class TestBaseModelSaveLoad(unittest.TestCase):
         self.tmp_dir = tempfile.mkdtemp()
 
     def tearDown(self):
-        for f in os.listdir(self.tmp_dir):
-            os.remove(os.path.join(self.tmp_dir, f))
-        os.rmdir(self.tmp_dir)
+        shutil.rmtree(self.tmp_dir, ignore_errors=True)
 
     def test_get_model_name(self):
         """get_model_name がコンストラクタで設定した名前を返すこと"""

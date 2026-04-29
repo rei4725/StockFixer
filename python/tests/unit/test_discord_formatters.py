@@ -1,42 +1,41 @@
 """discord_formatters モジュールのユニットテスト"""
 import unittest
 
-import numpy as np
 import pandas as pd
 
 
 class TestNormalizeMarketCode(unittest.TestCase):
     def test_lowercased_input(self):
-        from src.api.discord_formatters import normalize_market_code
+        from src.reporting.discord.discord_formatters import normalize_market_code
 
         assert normalize_market_code("jp") == "JP"
 
     def test_trimmed_whitespace(self):
-        from src.api.discord_formatters import normalize_market_code
+        from src.reporting.discord.discord_formatters import normalize_market_code
 
         assert normalize_market_code("  nasdaq  ") == "NASDAQ"
 
 
 class TestGetMarketEmoji(unittest.TestCase):
     def test_jp_market(self):
-        from src.api.discord_formatters import get_market_emoji
+        from src.reporting.discord.discord_formatters import get_market_emoji
 
         assert get_market_emoji("JP") == "🇯🇵"
 
     def test_nasdaq_market(self):
-        from src.api.discord_formatters import get_market_emoji
+        from src.reporting.discord.discord_formatters import get_market_emoji
 
         assert get_market_emoji("nasdaq") == "🇺🇸"
 
     def test_unknown_market(self):
-        from src.api.discord_formatters import get_market_emoji
+        from src.reporting.discord.discord_formatters import get_market_emoji
 
         assert get_market_emoji("UNKNOWN") == "🌐"
 
 
 class TestConvertDfForDiscord(unittest.TestCase):
     def test_renames_columns(self):
-        from src.api.discord_formatters import convert_df_for_discord
+        from src.reporting.discord.discord_formatters import convert_df_for_discord
 
         df = pd.DataFrame(
             {
@@ -52,7 +51,7 @@ class TestConvertDfForDiscord(unittest.TestCase):
 
     def test_computes_diff_ratio_when_missing(self):
         """予想変化率カラムがない場合に自動計算されること"""
-        from src.api.discord_formatters import convert_df_for_discord
+        from src.reporting.discord.discord_formatters import convert_df_for_discord
 
         df = pd.DataFrame(
             {
@@ -68,7 +67,7 @@ class TestConvertDfForDiscord(unittest.TestCase):
 
     def test_format_percent_negative(self):
         """マイナス変化率が正しく符号付きで出力されること"""
-        from src.api.discord_formatters import convert_df_for_discord
+        from src.reporting.discord.discord_formatters import convert_df_for_discord
 
         df = pd.DataFrame(
             {
@@ -83,7 +82,7 @@ class TestConvertDfForDiscord(unittest.TestCase):
 
     def test_truncates_price_values(self):
         """価格値が小数第3位で切り捨てられること"""
-        from src.api.discord_formatters import convert_df_for_discord
+        from src.reporting.discord.discord_formatters import convert_df_for_discord
 
         df = pd.DataFrame(
             {

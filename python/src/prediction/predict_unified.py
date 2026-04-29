@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 import yfinance as yf
 
-from src.domain.types import PredictionResult
+from src.prediction.types import PredictionResult
 from src.utils.data_path_utils import get_ticker
 from src.utils.db import get_all_symbols, load_model_weights, load_stock_features
 from src.utils.logger import get_logger

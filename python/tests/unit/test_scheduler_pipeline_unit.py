@@ -1,4 +1,4 @@
-"""ユニットテスト: scheduler_pipeline の自動発注連携"""
+﻿"""ユニットテスト: scheduler_pipeline の自動発注連携"""
 
 import sys
 import unittest
@@ -7,12 +7,12 @@ from unittest.mock import MagicMock, patch
 
 import pandas as pd
 
-from src.domain.types import SymbolTask
 from src.services.scheduler_pipeline import run_daily_auto_order, run_daily_drift_check
+from src.watchlist.types import SymbolTask
 
 
 class TestRunDailyAutoOrder(unittest.TestCase):
-    @patch("src.api.discord_utils.send_daily_order_completion")
+    @patch("src.reporting.discord.discord_utils.send_daily_order_completion")
     @patch("src.services.order_execution_pipeline.run_daily_orders")
     @patch("src.brokers.paper.paper_broker.PaperBroker")
     def test_paper_mode_forwards_stop_fields_to_notification(
@@ -48,7 +48,7 @@ class TestRunDailyAutoOrder(unittest.TestCase):
             daily_loss_limit=20_000.0,
         )
 
-    @patch("src.api.discord_utils.send_daily_order_completion")
+    @patch("src.reporting.discord.discord_utils.send_daily_order_completion")
     @patch("src.services.order_execution_pipeline.run_daily_orders")
     def test_live_mode_uses_kabu_broker(
         self,
@@ -82,7 +82,7 @@ class TestRunDailyAutoOrder(unittest.TestCase):
 class TestRunDailyDriftCheck(unittest.TestCase):
     @patch("src.services.model_training_pipeline.train_models_for_symbol_task")
     @patch("src.services.batch_runner.load_target_symbols")
-    @patch("src.api.discord_utils.send_drift_retrain_notification")
+    @patch("src.reporting.discord.discord_utils.send_drift_retrain_notification")
     @patch("src.utils.db.load_drift_summary")
     def test_retrain_runs_for_triggered_symbols(
         self,
@@ -120,7 +120,7 @@ class TestRunDailyDriftCheck(unittest.TestCase):
 
     @patch("src.services.model_training_pipeline.train_models_for_symbol_task")
     @patch("src.services.batch_runner.load_target_symbols")
-    @patch("src.api.discord_utils.send_drift_retrain_notification")
+    @patch("src.reporting.discord.discord_utils.send_drift_retrain_notification")
     @patch("src.utils.db.load_drift_summary")
     def test_no_retrain_when_summary_is_empty(
         self,
@@ -139,7 +139,7 @@ class TestRunDailyDriftCheck(unittest.TestCase):
 
     @patch("src.services.model_training_pipeline.train_models_for_symbol_task")
     @patch("src.services.batch_runner.load_target_symbols")
-    @patch("src.api.discord_utils.send_drift_retrain_notification")
+    @patch("src.reporting.discord.discord_utils.send_drift_retrain_notification")
     @patch("src.utils.db.load_drift_summary")
     def test_no_retrain_when_no_symbol_crosses_threshold(
         self,
@@ -178,7 +178,7 @@ if __name__ == "__main__":
 class TestRunWeeklyReport(unittest.TestCase):
     """run_weekly_report のテスト"""
 
-    @patch("src.api.discord_utils.send_weekly_report")
+    @patch("src.reporting.discord.discord_utils.send_weekly_report")
     @patch("src.utils.db.load_paper_real_diff_summary")
     @patch("src.utils.db.load_drift_summary")
     def test_calls_send_weekly_report(self, mock_drift, mock_diff, mock_send):
@@ -191,7 +191,7 @@ class TestRunWeeklyReport(unittest.TestCase):
         run_weekly_report()
         mock_send.assert_called_once()
 
-    @patch("src.api.discord_utils.send_weekly_report")
+    @patch("src.reporting.discord.discord_utils.send_weekly_report")
     @patch("src.utils.db.load_paper_real_diff_summary")
     @patch("src.utils.db.load_drift_summary")
     def test_exception_does_not_propagate(self, mock_drift, mock_diff, mock_send):
@@ -204,7 +204,7 @@ class TestRunWeeklyReport(unittest.TestCase):
 class TestRunDailySettle(unittest.TestCase):
     """run_daily_settle_orders のテスト"""
 
-    @patch("src.api.discord_utils.send_daily_settle_completion")
+    @patch("src.reporting.discord.discord_utils.send_daily_settle_completion")
     @patch("src.brokers.paper.paper_broker.PaperBroker")
     def test_paper_mode_calls_settle(self, mock_broker_cls, mock_send):
         from unittest.mock import patch as _patch
@@ -217,7 +217,7 @@ class TestRunDailySettle(unittest.TestCase):
             run_daily_settle_orders()
         mock_broker.settle_pending_orders.assert_called()
 
-    @patch("src.api.discord_utils.send_daily_settle_completion")
+    @patch("src.reporting.discord.discord_utils.send_daily_settle_completion")
     def test_live_mode_is_skipped(self, mock_send):
         from unittest.mock import patch as _patch
 
@@ -231,7 +231,7 @@ class TestRunDailySettle(unittest.TestCase):
 class TestRunWeeklyWalkForwardReport(unittest.TestCase):
     """run_weekly_walk_forward_report のテスト"""
 
-    @patch("src.api.discord_utils.send_walk_forward_report_completion")
+    @patch("src.reporting.discord.discord_utils.send_walk_forward_report_completion")
     @patch("src.services.walk_forward_report_pipeline.run_walk_forward_comparison_report")
     def test_sends_completion_notification(self, mock_run, mock_send):
         from src.services.scheduler_pipeline import run_weekly_walk_forward_report
@@ -240,7 +240,7 @@ class TestRunWeeklyWalkForwardReport(unittest.TestCase):
         run_weekly_walk_forward_report()
         mock_send.assert_called_once()
 
-    @patch("src.api.discord_utils.send_walk_forward_report_completion")
+    @patch("src.reporting.discord.discord_utils.send_walk_forward_report_completion")
     @patch("src.services.walk_forward_report_pipeline.run_walk_forward_comparison_report")
     def test_exception_does_not_propagate(self, mock_run, mock_send):
         from src.services.scheduler_pipeline import run_weekly_walk_forward_report
@@ -252,7 +252,7 @@ class TestRunWeeklyWalkForwardReport(unittest.TestCase):
 class TestRunWeeklyWatchlistRefresh(unittest.TestCase):
     """run_weekly_watchlist_refresh のテスト"""
 
-    @patch("src.api.discord_utils.send_watchlist_update_report")
+    @patch("src.reporting.discord.discord_utils.send_watchlist_update_report")
     @patch("src.services.watchlist_manager.run_watchlist_refresh")
     def test_sends_update_report(self, mock_refresh, mock_send):
         from src.services.scheduler_pipeline import run_weekly_watchlist_refresh
@@ -261,7 +261,7 @@ class TestRunWeeklyWatchlistRefresh(unittest.TestCase):
         run_weekly_watchlist_refresh()
         mock_send.assert_called_once()
 
-    @patch("src.api.discord_utils.send_watchlist_update_report")
+    @patch("src.reporting.discord.discord_utils.send_watchlist_update_report")
     @patch("src.services.watchlist_manager.run_watchlist_refresh")
     def test_exception_does_not_propagate(self, mock_refresh, mock_send):
         from src.services.scheduler_pipeline import run_weekly_watchlist_refresh
@@ -273,7 +273,7 @@ class TestRunWeeklyWatchlistRefresh(unittest.TestCase):
 class TestRunWeeklyOptimization(unittest.TestCase):
     """run_weekly_optimization のテスト"""
 
-    @patch("src.api.discord_utils.send_optimization_completion")
+    @patch("src.reporting.discord.discord_utils.send_optimization_completion")
     @patch("src.services.backtest_optimize_pipeline.run_optimize_batch")
     def test_sends_completion_notification(self, mock_run, mock_send):
         from src.services.scheduler_pipeline import run_weekly_optimization
@@ -282,7 +282,7 @@ class TestRunWeeklyOptimization(unittest.TestCase):
         run_weekly_optimization()
         mock_send.assert_called_once()
 
-    @patch("src.api.discord_utils.send_optimization_completion")
+    @patch("src.reporting.discord.discord_utils.send_optimization_completion")
     @patch("src.services.backtest_optimize_pipeline.run_optimize_batch")
     def test_exception_does_not_propagate(self, mock_run, mock_send):
         from src.services.scheduler_pipeline import run_weekly_optimization
@@ -294,7 +294,7 @@ class TestRunWeeklyOptimization(unittest.TestCase):
 class TestRunDailyPaperTradeReport(unittest.TestCase):
     """run_daily_paper_trade_report のテスト"""
 
-    @patch("src.api.discord_utils.send_paper_trade_position_report")
+    @patch("src.reporting.discord.discord_utils.send_paper_trade_position_report")
     @patch("src.brokers.paper.paper_broker.PaperBroker")
     def test_paper_mode_sends_report(self, mock_broker_cls, mock_send):
         from unittest.mock import patch as _patch
@@ -317,8 +317,8 @@ class TestRunDailyPaperTradeReport(unittest.TestCase):
 class TestRunDailyPipeline:
     """run_daily_pipeline のテスト"""
 
-    @patch("src.api.discord_utils.send_daily_pipeline_error")
-    @patch("src.api.discord_utils.send_daily_pipeline_completion")
+    @patch("src.reporting.discord.discord_utils.send_daily_pipeline_error")
+    @patch("src.reporting.discord.discord_utils.send_daily_pipeline_completion")
     @patch("src.services.scheduler_pipeline.run_daily_drift_check")
     @patch("src.services.prediction_pipeline.run_accuracy_check")
     @patch("src.services.prediction_pipeline.output_top_worst_results")
@@ -350,8 +350,8 @@ class TestRunDailyPipeline:
         mock_output.assert_called_once()
         mock_notify.assert_called_once()
 
-    @patch("src.api.discord_utils.send_daily_pipeline_error")
-    @patch("src.api.discord_utils.send_daily_pipeline_completion")
+    @patch("src.reporting.discord.discord_utils.send_daily_pipeline_error")
+    @patch("src.reporting.discord.discord_utils.send_daily_pipeline_completion")
     @patch("src.services.scheduler_pipeline.run_daily_drift_check")
     @patch("src.services.prediction_pipeline.run_accuracy_check")
     @patch("src.services.prediction_pipeline.output_top_worst_results")
@@ -368,8 +368,6 @@ class TestRunDailyPipeline:
         mock_error,
     ):
         """精度チェックが失敗しても後続ステップが実行されること"""
-        import pytest
-
         from src.services.scheduler_pipeline import run_daily_pipeline
 
         mock_predict.return_value = []
@@ -383,7 +381,7 @@ class TestRunDailyPipeline:
         mock_drift.assert_called_once()
         mock_notify.assert_called_once()
 
-    @patch("src.api.discord_utils.send_daily_pipeline_error")
+    @patch("src.reporting.discord.discord_utils.send_daily_pipeline_error")
     @patch("src.services.data_pipeline.run_data_batch")
     def test_data_step_failure_propagates(self, mock_data, mock_error):
         """データ取得ステップが失敗すると例外が伝播すること"""
@@ -394,15 +392,15 @@ class TestRunDailyPipeline:
         mock_data.side_effect = RuntimeError("データ取得失敗")
         mock_error.return_value = None
 
-        with pytest.raises(Exception):
+        with pytest.raises(RuntimeError):
             run_daily_pipeline()
 
 
 class TestRunWeeklyTraining:
     """run_weekly_training のテスト"""
 
-    @patch("src.api.discord_utils.send_weekly_training_completion")
-    @patch("src.api.discord_utils.send_drift_alert")
+    @patch("src.reporting.discord.discord_utils.send_weekly_training_completion")
+    @patch("src.reporting.discord.discord_utils.send_drift_alert")
     @patch("src.services.prediction_pipeline.run_accuracy_check")
     @patch("src.services.unified_model_pipeline.train_unified_model")
     def test_weekly_training_calls_train_and_notify(

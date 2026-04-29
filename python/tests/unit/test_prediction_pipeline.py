@@ -162,7 +162,7 @@ class TestPredictAllIndividual(unittest.TestCase):
     @patch("src.services.prediction_pipeline.predict_single_stock")
     def test_returns_list_of_prediction_results(self, mock_predict, mock_find):
         """predict_single_stock の結果リストが返ること"""
-        from src.domain.types import PredictionResult
+        from src.prediction.types import PredictionResult
         from src.services.prediction_pipeline import predict_all_individual
 
         mock_find.return_value = [("jp", "7203", "/models/jp_7203/XGB.joblib")]
@@ -195,7 +195,7 @@ class TestPredictAllIndividual(unittest.TestCase):
     @patch("src.services.prediction_pipeline.predict_single_stock")
     def test_handles_prediction_exception(self, mock_predict, mock_find):
         """予測中に例外が発生しても他の銘柄の処理は継続すること"""
-        from src.domain.types import PredictionResult
+        from src.prediction.types import PredictionResult
         from src.services.prediction_pipeline import predict_all_individual
 
         mock_find.return_value = [
@@ -230,7 +230,7 @@ class TestOutputTopWorstResults(unittest.TestCase):
     @patch("src.services.prediction_pipeline.save_prediction_results")
     def test_saves_results_to_db(self, mock_save):
         """save_prediction_results が呼ばれること"""
-        from src.domain.types import PredictionResult
+        from src.prediction.types import PredictionResult
         from src.services.prediction_pipeline import output_top_worst_results
 
         results = [
@@ -264,9 +264,7 @@ class TestPredictAllUnified(unittest.TestCase):
     @patch("src.models.predict_unified.predict_with_unified_model")
     def test_returns_list_of_prediction_results(self, mock_predict, mock_preload, mock_symbols):
         """統合モデルで全銘柄の予測結果リストが返ること"""
-        import pandas as pd
-
-        from src.domain.types import PredictionResult
+        from src.prediction.types import PredictionResult
         from src.services.prediction_pipeline import predict_all_unified
 
         mock_symbols.return_value = [("jp", "7203")]
@@ -388,7 +386,7 @@ class TestPredictAllUnifiedMultiHorizon(unittest.TestCase):
     @patch("src.models.predict_unified.predict_with_unified_model")
     def test_multi_horizon_returns_results(self, mock_predict, mock_preload, mock_symbols):
         """複数ホライズン（[1, 7]）で予測結果リストが返ること"""
-        from src.domain.types import PredictionResult
+        from src.prediction.types import PredictionResult
         from src.services.prediction_pipeline import predict_all_unified_multi_horizon
 
         mock_symbols.return_value = [("jp", "7203")]
@@ -429,7 +427,7 @@ class TestPredictAllUnifiedMultiHorizon(unittest.TestCase):
     @patch("src.models.predict_unified.predict_with_unified_model")
     def test_single_horizon_works(self, mock_predict, mock_preload, mock_symbols):
         """ホライズンが1つだけでも正常動作すること"""
-        from src.domain.types import PredictionResult
+        from src.prediction.types import PredictionResult
         from src.services.prediction_pipeline import predict_all_unified_multi_horizon
 
         mock_symbols.return_value = [("us", "AAPL")]

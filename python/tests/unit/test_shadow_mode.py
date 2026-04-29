@@ -1,6 +1,8 @@
 """シャドーモード A/B テスト基盤（R-207）のユニットテスト"""
 
+import glob
 import os
+import shutil
 import tempfile
 import unittest
 from dataclasses import replace
@@ -10,11 +12,8 @@ import pandas as pd
 
 import src.utils.data_path_utils as path_utils
 import src.utils.db as db_module
-from src.domain.types import PredictionResult
-from src.utils.db.prediction import (
-    load_shadow_comparison,
-    save_prediction_results,
-)
+from src.prediction.types import PredictionResult
+from src.utils.db.prediction import load_shadow_comparison, save_prediction_results
 
 
 class _TmpDbTestCase(unittest.TestCase):
@@ -33,11 +32,11 @@ class _TmpDbTestCase(unittest.TestCase):
         db_module.close_connection()
         path_utils.get_db_path = self._orig_get_db_path
         db_module.get_db_path = self._orig_get_db_path
-        for path in (self.tmp_db, self.tmp_db + ".wal"):
+        for path in glob.glob(self.tmp_db + "*"):
             if os.path.exists(path):
                 os.remove(path)
         if os.path.exists(self.tmp_dir):
-            os.rmdir(self.tmp_dir)
+            shutil.rmtree(self.tmp_dir, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------
@@ -77,8 +76,6 @@ class TestPredictionResultModelVersion(unittest.TestCase):
 
     def test_from_dataframe_row_reads_model_version(self):
         """from_dataframe_row が model_version を正しく復元すること"""
-        import pandas as pd
-
         row = pd.Series(
             {
                 "market": "us",
@@ -95,8 +92,6 @@ class TestPredictionResultModelVersion(unittest.TestCase):
 
     def test_from_dataframe_row_handles_none_model_version(self):
         """from_dataframe_row が model_version=None を正しく扱うこと"""
-        import pandas as pd
-
         row = pd.Series(
             {
                 "market": "us",
@@ -121,16 +116,12 @@ class TestSavePredictionResultsWithModelVersion(_TmpDbTestCase):
 
     def test_production_and_challenger_coexist(self):
         """production / challenger 両バージョンが同一テーブルに共存できること"""
-        prod = PredictionResult(
-            "us", "AAPL", 100.0, 102.0, 0.02, 2, model_version="production"
-        )
-        chal = PredictionResult(
-            "us", "AAPL", 100.0, 103.0, 0.03, 2, model_version="challenger"
-        )
+        prod = PredictionResult("us", "AAPL", 100.0, 102.0, 0.02, 2, model_version="production")
+        chal = PredictionResult("us", "AAPL", 100.0, 103.0, 0.03, 2, model_version="challenger")
         save_prediction_results("20260403_120000", [prod])
         save_prediction_results("20260403_120000", [chal])
 
-        from src.utils.db.prediction import load_prediction_results
+        from src.utils.db.prediction import load_prediction_results  # noqa: F401
 
         # model_version なしのクエリでは全バージョン取得（デフォルト動作は変更なし）
         # shadow_comparison で両バージョンを取得できること
@@ -145,12 +136,8 @@ class TestSavePredictionResultsWithModelVersion(_TmpDbTestCase):
 
     def test_delete_does_not_remove_other_version(self):
         """production を再保存しても challenger が削除されないこと"""
-        prod = PredictionResult(
-            "us", "AAPL", 100.0, 102.0, 0.02, 2, model_version="production"
-        )
-        chal = PredictionResult(
-            "us", "AAPL", 100.0, 103.0, 0.03, 2, model_version="challenger"
-        )
+        prod = PredictionResult("us", "AAPL", 100.0, 102.0, 0.02, 2, model_version="production")
+        chal = PredictionResult("us", "AAPL", 100.0, 103.0, 0.03, 2, model_version="challenger")
         save_prediction_results("20260403_120000", [prod])
         save_prediction_results("20260403_120000", [chal])
 
@@ -294,9 +281,7 @@ class TestOutputTopWorstResultsShadowMode(unittest.TestCase):
     def test_shadow_mode_preserves_existing_version(self):
         """shadow_mode=True でも既に model_version が設定済みの行は上書きしないこと"""
         results = [
-            PredictionResult(
-                "us", "AAPL", 100.0, 102.0, 0.02, 2, model_version="custom_version"
-            )
+            PredictionResult("us", "AAPL", 100.0, 102.0, 0.02, 2, model_version="custom_version")
         ]
         saved_calls = []
 
@@ -424,9 +409,7 @@ class TestEvaluateShadowModels(_TmpDbTestCase):
             challenger_version="chal_v1",
         )
         self.assertAlmostEqual(result["challenger_hit_rate"], 0.875, places=3)
-        self.assertGreater(
-            result["challenger_hit_rate"], result["production_hit_rate"]
-        )
+        self.assertGreater(result["challenger_hit_rate"], result["production_hit_rate"])
         self.assertTrue(result["challenger_wins"])
 
     def test_n_counts_match_inserted_rows(self):
@@ -481,27 +464,23 @@ class TestComputeMetrics(unittest.TestCase):
     """_compute_hit_rate / _compute_sharpe のユニットテスト"""
 
     def test_hit_rate_all_correct(self):
-        import pandas as pd
         from src.services.shadow_evaluation_pipeline import _compute_hit_rate
 
         df = pd.DataFrame({"direction_match": [True, True, True, True]})
         self.assertAlmostEqual(_compute_hit_rate(df), 1.0)
 
     def test_hit_rate_all_wrong(self):
-        import pandas as pd
         from src.services.shadow_evaluation_pipeline import _compute_hit_rate
 
         df = pd.DataFrame({"direction_match": [False, False, False]})
         self.assertAlmostEqual(_compute_hit_rate(df), 0.0)
 
     def test_hit_rate_returns_none_on_empty(self):
-        import pandas as pd
         from src.services.shadow_evaluation_pipeline import _compute_hit_rate
 
         self.assertIsNone(_compute_hit_rate(pd.DataFrame()))
 
     def test_sharpe_positive_when_all_correct(self):
-        import pandas as pd
         from src.services.shadow_evaluation_pipeline import _compute_sharpe
 
         df = pd.DataFrame(
@@ -515,16 +494,12 @@ class TestComputeMetrics(unittest.TestCase):
         self.assertGreater(sharpe, 0)
 
     def test_sharpe_returns_none_on_insufficient_data(self):
-        import pandas as pd
         from src.services.shadow_evaluation_pipeline import _compute_sharpe
 
-        df = pd.DataFrame(
-            {"predicted_ratio": [0.02], "actual_ratio": [0.03]}
-        )
+        df = pd.DataFrame({"predicted_ratio": [0.02], "actual_ratio": [0.03]})
         self.assertIsNone(_compute_sharpe(df))
 
     def test_sharpe_returns_none_on_empty(self):
-        import pandas as pd
         from src.services.shadow_evaluation_pipeline import _compute_sharpe
 
         self.assertIsNone(_compute_sharpe(pd.DataFrame()))
@@ -540,7 +515,7 @@ class TestRunShadowPrediction(unittest.TestCase):
 
     def test_calls_both_predict_fns(self):
         """production / challenger の両予測関数が呼ばれること"""
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
 
         prod_result = [PredictionResult("us", "AAPL", 100.0, 102.0, 0.02, 2)]
         chal_result = [PredictionResult("us", "AAPL", 100.0, 103.0, 0.03, 2)]
@@ -565,7 +540,7 @@ class TestRunShadowPrediction(unittest.TestCase):
 
     def test_uses_same_fn_when_no_challenger_fn(self):
         """challenger_predict_fn が None のとき predict_fn を2回呼ぶこと"""
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
 
         result_data = [PredictionResult("us", "AAPL", 100.0, 102.0, 0.02, 2)]
         fn = MagicMock(return_value=result_data)

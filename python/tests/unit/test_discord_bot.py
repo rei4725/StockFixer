@@ -1,10 +1,12 @@
-"""ユニットテスト: discord_bot の純粋関数"""
+﻿"""ユニットテスト: discord_bot の純粋関数"""
 
 import asyncio
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.api.discord_bot import (
+from src.orchestration.types import SchedulerJobStatus
+from src.prediction.types import PredictionResult
+from src.reporting.discord.discord_bot import (
     TOP10_LABEL,
     build_monthly_report_lines,
     build_prediction_table_text,
@@ -13,7 +15,7 @@ from src.api.discord_bot import (
     build_signal_lines,
     determine_signal_label,
 )
-from src.domain.types import MonthlyReportSummary, PredictionResult, SchedulerJobStatus
+from src.reporting.types import MonthlyReportSummary
 
 
 class TestDiscordBotHelpers(unittest.TestCase):
@@ -159,9 +161,9 @@ class TestDiscordBotHelpers(unittest.TestCase):
     # handle_monthlyreport_command (async)
     # ------------------------------------------------------------------
 
-    @patch("src.api.discord_bot.get_monthly_report_summary")
+    @patch("src.reporting.discord.discord_bot.get_monthly_report_summary")
     def test_handle_monthlyreport_command_sends_code_block(self, mock_get):
-        from src.api.discord_bot import handle_monthlyreport_command
+        from src.reporting.discord.discord_bot import handle_monthlyreport_command
 
         mock_get.return_value = self._make_summary()
 
@@ -177,9 +179,9 @@ class TestDiscordBotHelpers(unittest.TestCase):
         full_text = " ".join(str(c) for c in calls)
         self.assertIn("月次KPIレポート", full_text)
 
-    @patch("src.api.discord_bot.get_monthly_report_summary")
+    @patch("src.reporting.discord.discord_bot.get_monthly_report_summary")
     def test_handle_monthlyreport_command_passes_month_arg(self, mock_get):
-        from src.api.discord_bot import handle_monthlyreport_command
+        from src.reporting.discord.discord_bot import handle_monthlyreport_command
 
         mock_get.return_value = self._make_summary(target_month="2026-03")
 
@@ -193,11 +195,11 @@ class TestDiscordBotHelpers(unittest.TestCase):
         mock_get.assert_called_once_with("2026-03")
 
     @patch(
-        "src.api.discord_bot.get_monthly_report_summary",
+        "src.reporting.discord.discord_bot.get_monthly_report_summary",
         side_effect=Exception("DB error"),
     )
     def test_handle_monthlyreport_command_sends_error_on_exception(self, _mock):
-        from src.api.discord_bot import handle_monthlyreport_command
+        from src.reporting.discord.discord_bot import handle_monthlyreport_command
 
         message = MagicMock()
         message.content = "/monthlyreport"
@@ -218,17 +220,17 @@ class TestHandleForecastCommand(unittest.TestCase):
         message.channel.send = AsyncMock()
         return message
 
-    @patch("src.api.discord_bot.get_latest_market_prediction_snapshots")
+    @patch("src.reporting.discord.discord_bot.get_latest_market_prediction_snapshots")
     def test_calls_snapshot_service(self, mock_get):
-        from src.api.discord_bot import handle_forecast_command
+        from src.reporting.discord.discord_bot import handle_forecast_command
 
         mock_get.return_value = (None, [])
         asyncio.run(handle_forecast_command(self._make_message()))
         mock_get.assert_called_once()
 
-    @patch("src.api.discord_bot.get_latest_market_prediction_snapshots")
+    @patch("src.reporting.discord.discord_bot.get_latest_market_prediction_snapshots")
     def test_no_result_when_ts_is_none(self, mock_get):
-        from src.api.discord_bot import handle_forecast_command
+        from src.reporting.discord.discord_bot import handle_forecast_command
 
         mock_get.return_value = (None, [])
         message = self._make_message()
@@ -236,9 +238,9 @@ class TestHandleForecastCommand(unittest.TestCase):
         message.channel.send.assert_called_once()
         self.assertIn("見つかりませんでした", str(message.channel.send.call_args))
 
-    @patch("src.api.discord_bot.get_latest_market_prediction_snapshots")
+    @patch("src.reporting.discord.discord_bot.get_latest_market_prediction_snapshots")
     def test_no_result_when_snapshots_empty(self, mock_get):
-        from src.api.discord_bot import handle_forecast_command
+        from src.reporting.discord.discord_bot import handle_forecast_command
 
         mock_get.return_value = ("2026-04-18T09:00:00", [])
         message = self._make_message()
@@ -246,10 +248,10 @@ class TestHandleForecastCommand(unittest.TestCase):
         message.channel.send.assert_called_once()
         self.assertIn("見つかりませんでした", str(message.channel.send.call_args))
 
-    @patch("src.api.discord_bot.get_latest_market_prediction_snapshots")
+    @patch("src.reporting.discord.discord_bot.get_latest_market_prediction_snapshots")
     def test_sends_top_and_worst_tables(self, mock_get):
-        from src.api.discord_bot import handle_forecast_command
-        from src.domain.types import MarketPredictionSnapshot
+        from src.reporting.discord.discord_bot import handle_forecast_command
+        from src.reporting.types import MarketPredictionSnapshot
 
         snapshot = MarketPredictionSnapshot(
             market="JP",
@@ -282,10 +284,10 @@ class TestHandleForecastCommand(unittest.TestCase):
         self.assertIn("7203", all_text)
         self.assertIn("9984", all_text)
 
-    @patch("src.api.discord_bot.get_latest_market_prediction_snapshots")
+    @patch("src.reporting.discord.discord_bot.get_latest_market_prediction_snapshots")
     def test_skips_empty_top_results(self, mock_get):
-        from src.api.discord_bot import handle_forecast_command
-        from src.domain.types import MarketPredictionSnapshot
+        from src.reporting.discord.discord_bot import handle_forecast_command
+        from src.reporting.types import MarketPredictionSnapshot
 
         snapshot = MarketPredictionSnapshot(market="JP", top_results=[], worst_results=[])
         mock_get.return_value = ("2026-04-18T09:00:00", [snapshot])
@@ -301,10 +303,10 @@ class TestHandleWatchnextCommand(unittest.TestCase):
         message.channel.send = AsyncMock()
         return message
 
-    @patch("src.api.discord_bot.get_watchlist_prediction_view")
+    @patch("src.reporting.discord.discord_bot.get_watchlist_prediction_view")
     def test_sends_watchlist_table_on_success(self, mock_get):
-        from src.api.discord_bot import handle_watchnext_command
-        from src.domain.types import WatchlistPredictionRow, WatchlistPredictionView
+        from src.reporting.discord.discord_bot import handle_watchnext_command
+        from src.watchlist.types import WatchlistPredictionRow, WatchlistPredictionView
 
         view = WatchlistPredictionView(
             rows=[
@@ -322,10 +324,10 @@ class TestHandleWatchnextCommand(unittest.TestCase):
         message.channel.send.assert_called()
         self.assertIn("7203", str(message.channel.send.call_args))
 
-    @patch("src.api.discord_bot.get_watchlist_prediction_view")
+    @patch("src.reporting.discord.discord_bot.get_watchlist_prediction_view")
     def test_sends_error_text_on_failure(self, mock_get):
-        from src.api.discord_bot import handle_watchnext_command
-        from src.domain.types import WatchlistPredictionView
+        from src.reporting.discord.discord_bot import handle_watchnext_command
+        from src.watchlist.types import WatchlistPredictionView
 
         view = WatchlistPredictionView(error_message="DB接続エラー")
         mock_get.return_value = view
@@ -334,10 +336,10 @@ class TestHandleWatchnextCommand(unittest.TestCase):
         message.channel.send.assert_called()
         self.assertIn("DB接続エラー", str(message.channel.send.call_args))
 
-    @patch("src.api.discord_bot.get_watchlist_prediction_view")
+    @patch("src.reporting.discord.discord_bot.get_watchlist_prediction_view")
     def test_sends_default_error_when_error_message_empty(self, mock_get):
-        from src.api.discord_bot import handle_watchnext_command
-        from src.domain.types import WatchlistPredictionView
+        from src.reporting.discord.discord_bot import handle_watchnext_command
+        from src.watchlist.types import WatchlistPredictionView
 
         view = WatchlistPredictionView(error_message="")
         mock_get.return_value = view

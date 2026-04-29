@@ -23,7 +23,10 @@ def run_daily_pipeline():
     """
     logger.info("=== 日次パイプライン開始 ===")
 
-    from src.api.discord_utils import send_daily_pipeline_completion, send_daily_pipeline_error
+    from src.reporting.discord.discord_utils import (
+        send_daily_pipeline_completion,
+        send_daily_pipeline_error,
+    )
 
     # 1. データ取得（バッチ）
     logger.info("[1/4] データ取得開始")
@@ -106,7 +109,7 @@ def run_weekly_training():
     # 予測精度チェック & ドリフト警告
     logger.info("予測精度チェック開始")
     try:
-        from src.api.discord_utils import send_drift_alert
+        from src.reporting.discord.discord_utils import send_drift_alert
         from src.services.prediction_pipeline import run_accuracy_check
 
         summary = run_accuracy_check(horizon=1)
@@ -116,7 +119,7 @@ def run_weekly_training():
 
     # Discord 完了通知
     try:
-        from src.api.discord_utils import send_weekly_training_completion
+        from src.reporting.discord.discord_utils import send_weekly_training_completion
 
         trained_models = [
             "UnifiedStockXGBoost",
@@ -138,7 +141,7 @@ def run_weekly_report():
     """
     logger.info("=== 週次レポート生成開始 ===")
     try:
-        from src.api.discord_utils import send_weekly_report
+        from src.reporting.discord.discord_utils import send_weekly_report
         from src.utils.db import load_drift_summary, load_paper_real_diff_summary
 
         summary = load_drift_summary(horizon=1)
@@ -179,7 +182,7 @@ def run_daily_auto_order():
 
     # Discord 完了通知
     try:
-        from src.api.discord_utils import send_daily_order_completion
+        from src.reporting.discord.discord_utils import send_daily_order_completion
 
         send_daily_order_completion(
             buy_orders=stats["buy_orders"],
@@ -219,7 +222,7 @@ def run_daily_settle_orders():
 
     # Discord 完了通知
     try:
-        from src.api.discord_utils import send_daily_settle_completion
+        from src.reporting.discord.discord_utils import send_daily_settle_completion
 
         send_daily_settle_completion(settled_count=len(settled))
     except Exception as e:
@@ -243,8 +246,8 @@ def run_daily_paper_trade_report():
 
     logger.info("=== ペーパートレード損益レポート送信開始 ===")
     try:
-        from src.api.discord_utils import send_paper_trade_position_report
         from src.brokers.paper.paper_broker import PaperBroker
+        from src.reporting.discord.discord_utils import send_paper_trade_position_report
 
         broker = PaperBroker()
         positions = broker.get_positions()
@@ -287,7 +290,7 @@ def run_weekly_optimization():
 
     # Discord 完了通知
     try:
-        from src.api.discord_utils import send_optimization_completion
+        from src.reporting.discord.discord_utils import send_optimization_completion
 
         send_optimization_completion(success=success, failed=failed)
     except Exception as e:
@@ -325,7 +328,7 @@ def run_weekly_walk_forward_report():
 
     # Discord 完了通知
     try:
-        from src.api.discord_utils import send_walk_forward_report_completion
+        from src.reporting.discord.discord_utils import send_walk_forward_report_completion
 
         send_walk_forward_report_completion(result)
     except Exception as e:
@@ -342,7 +345,7 @@ def run_weekly_watchlist_refresh():
     """
     logger.info("=== 週次ウォッチリスト更新開始 ===")
     try:
-        from src.api.discord_utils import send_watchlist_update_report
+        from src.reporting.discord.discord_utils import send_watchlist_update_report
         from src.services.watchlist_manager import run_watchlist_refresh
 
         diffs = run_watchlist_refresh()
@@ -396,7 +399,7 @@ def run_daily_drift_check():
 
     # Discord 通知（再学習開始前）
     try:
-        from src.api.discord_utils import send_drift_retrain_notification
+        from src.reporting.discord.discord_utils import send_drift_retrain_notification
 
         send_drift_retrain_notification(triggered_list, mae_threshold, hit_rate_threshold)
     except Exception as e:

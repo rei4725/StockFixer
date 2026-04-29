@@ -6,11 +6,11 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
+from src.analysis.technical import add_technical_indicators, create_basic_lag_features
 from src.data import data_loader
 from src.data.data_loader import fetch_cross_asset_features
-from src.domain.types import PredictionResult
-from src.features.technical_analysis import add_technical_indicators, create_basic_lag_features
 from src.prediction.manager import ModelManager
+from src.prediction.types import PredictionResult
 from src.utils.data_path_utils import get_models_subdir, get_ticker, normalize_col
 from src.utils.db import load_model_weights
 from src.utils.logger import get_logger

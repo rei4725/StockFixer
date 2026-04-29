@@ -111,7 +111,7 @@ class TestDiscordQueryService(unittest.TestCase):
 
     @patch("src.services.monthly_report_pipeline.run_monthly_report")
     def test_get_monthly_report_summary_delegates_to_pipeline(self, mock_run):
-        from src.domain.types import MonthlyReportSummary
+        from src.reporting.types import MonthlyReportSummary
         from src.services.discord_query_service import get_monthly_report_summary
 
         expected = MonthlyReportSummary(
@@ -135,7 +135,7 @@ class TestDiscordQueryService(unittest.TestCase):
 
     @patch("src.services.monthly_report_pipeline.run_monthly_report")
     def test_get_monthly_report_summary_passes_none_when_month_omitted(self, mock_run):
-        from src.domain.types import MonthlyReportSummary
+        from src.reporting.types import MonthlyReportSummary
         from src.services.discord_query_service import get_monthly_report_summary
 
         mock_run.return_value = MonthlyReportSummary(

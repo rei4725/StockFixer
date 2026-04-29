@@ -1,7 +1,7 @@
 """Unit tests for watchlist_manager.py"""
 
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pandas as pd
 
@@ -234,7 +234,9 @@ class TestRunWatchlistRefresh(unittest.TestCase):
     @patch("src.services.watchlist_manager.diff_watchlist")
     @patch("src.services.watchlist_manager.fetch_index_symbols")
     @patch("src.services.watchlist_manager._load_watchlist")
-    def test_runs_for_all_markets(self, mock_load, mock_fetch, mock_diff, mock_apply, mock_save_snapshot):
+    def test_runs_for_all_markets(
+        self, mock_load, mock_fetch, mock_diff, mock_apply, mock_save_snapshot
+    ):
         """全マーケットに対して更新フローが実行されること"""
         from src.services.watchlist_manager import WatchlistDiff, run_watchlist_refresh
 

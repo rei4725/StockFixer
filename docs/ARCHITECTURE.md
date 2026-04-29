@@ -203,7 +203,7 @@ StockFixer/
 │  - 汎用ユーティリティ・DBアクセス（最下層）        │
 └─────────────────────────────────────────────────┘
 
-> **domain層** (`src/domain/types.py`) は上記階層に横断的に適用される共有型定義であり、どのレイヤーからも参照可能な特別な位置づけです。
+> **共有型定義** は各 Bounded Context の `types.py` に配置され（例: `src.watchlist.types.SymbolTask`、`src.analysis.types.FeatureLoadResult`）、BC をまたぐデータ受け渡しにはこれらを直接 import します。
 > **config/settings.py** は全層に共通な設定値を一元管理する。環境変数で上書き可能。
 ```
 
@@ -211,22 +211,20 @@ StockFixer/
 
 ## 各モジュールの詳細
 
-### domain層
+### 共有型（Bounded Context 内 types.py）
 
-#### `domain/types.py`
-- **全レイヤー共通の型定義**を一元管理する特別な層
-- `dict` / 生 `pd.DataFrame` を排除し、型安全なデータクラスで置き換える
-- **定義されている型**:
+DDDフェーズ4完了により、共有型は各 BC の `types.py` に分散配置されました。
 
-| クラス | 説明 | 主なフィールド |
-|--------|------|----------------|
-| `SymbolTask` | バッチ実行の単位タスク | `market`, `symbol`, `horizon` |
-| `FeatureLoadResult` | 特徴量ロード結果 | `status`, `market`, `symbol`, `X`, `y`, `reason`, `error` / `is_success` プロパティ |
-| `TrainingMetrics` | モデル学習指標 | `rmse`, `directional_accuracy`, `n_samples` |
-| `PredictionResult` | 単一銘柄の予測結果 | `market`, `symbol`, `current_price`, `avg_pred_price`, `diff_ratio`, `model_count` + 多ホライズンオプション |
+| クラス | 配置先モジュール | 説明 |
+|--------|----------------|------|
+| `SymbolTask` | `src.watchlist.types` | バッチ実行の単位タスク。`market`, `symbol`, `horizon` |
+| `FeatureLoadResult` | `src.analysis.types` | 特徴量ロード結果。`is_success` プロパティで判定 |
+| `TrainingMetrics` | `src.prediction.types` | モデル学習指標。`rmse`, `directional_accuracy`, `n_samples` |
+| `PredictionResult` | `src.prediction.types` | 単一銘柄の予測結果。`to_dataframe(results)` で DataFrame 変換 |
 
 - `PredictionResult.to_dataframe(results)` でリスト → DataFrame 変換
 - `PredictionResult.from_dataframe_row(row)` でDBロード時に逆変換
+- ML ライブラリ（XGBoost / LightGBM）に渡す特徴量行列 `X` は `pd.DataFrame` のまま維持（型付け対象外）
 
 ### config層
 
@@ -558,8 +556,8 @@ services 層はドメイン別に **6 つのサブパッケージ**に整理さ�
 - モデルファイルはjoblib形式でファイルシステムに保存
 - 設定用CSV（データ取得対象.csv等）はそのまま維持
 
-### 6. 型安全なデータ受け渡し（domain型）
-- `src/domain/types.py` が全レイヤー共通の **Single Source of Truth**
+### 6. 型安全なデータ受け渡し（BC 内 types.py）
+- 各 Bounded Context の `types.py` が **Single Source of Truth**（`src.watchlist.types`・`src.analysis.types`・`src.prediction.types` 等）
 - `dict` / 生 `pd.DataFrame` 返却を廃止し、意図を明示する dataclass に置き換えた
 - ML ライブラリ（XGBoost / LightGBM）が直接必要とする特徴量行列 `X` のみ `pd.DataFrame` のまま維持
 - `FeatureLoadResult` の dict 互換メソッドにより、既存コードへの影響を最小化
