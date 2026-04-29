@@ -52,7 +52,7 @@ def get_cached_model(model_name: str):
     キャッシュからモデルを取得（なければロード）
     スレッドセーフな実装
     """
-    from src.services.unified_model_pipeline import load_unified_model
+    from src.prediction.unified_model_pipeline import load_unified_model
 
     with _model_cache_lock:
         if model_name not in _model_cache:

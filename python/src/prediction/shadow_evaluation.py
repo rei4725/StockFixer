@@ -266,7 +266,7 @@ def run_shadow_prediction(
     Returns:
         dict: production_count, challenger_count
     """
-    from src.services.prediction_pipeline import output_top_worst_results
+    from src.prediction.prediction_pipeline import output_top_worst_results
 
     logger.info(f"シャドー予測開始: {production_version} / {challenger_version}")
 

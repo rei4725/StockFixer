@@ -340,7 +340,7 @@ def _run_backtest(
     atr_multiplier=1.0,
 ):
     """パラメータが変わらない限りキャッシュされる。"""
-    from src.services.backtest_pipeline import run_backtest_single
+    from src.backtest.pipeline import run_backtest_single
 
     result_df, metrics, price_series = run_backtest_single(
         market=market,
@@ -538,7 +538,7 @@ def _run_portfolio(
     pf_threshold,
 ):
     """ポートフォリオバックテストをキャッシュ付きで実行する。"""
-    from src.services.portfolio_backtest import run_portfolio_backtest
+    from src.backtest.portfolio import run_portfolio_backtest
 
     market_arg = None if pf_market == "all" else pf_market
     equity_df, metrics, holdings_df = run_portfolio_backtest(
@@ -926,7 +926,7 @@ def _run_walk_forward(
     atr_multiplier=1.0,
 ):
     """Walk-Forward 検証をキャッシュ付きで実行する。"""
-    from src.services.backtest_pipeline import run_backtest_walk_forward
+    from src.backtest.pipeline import run_backtest_walk_forward
 
     _, _, wf_df = run_backtest_walk_forward(
         market=market,
@@ -969,7 +969,7 @@ def _run_optimization(
     optimize_risk,
 ):
     """パラメータ最適化をキャッシュ付きで実行する。"""
-    from src.services.backtest_optimize_pipeline import run_optimization
+    from src.backtest.optimizer import run_optimization
 
     result_df = run_optimization(
         market=market,

@@ -1,25 +1,6 @@
-"""Unit Test: backtest_pipeline.print_backtest_metrics output"""
+"""Unit Test: backtest/pipeline.print_backtest_metrics output"""
 
-import sys
-import types
-from importlib import util
-from pathlib import Path
-
-_MODULE_PATH = Path(__file__).resolve().parents[2] / "src" / "services" / "backtest_pipeline.py"
-# services.__init__ の重い import を避けつつ、coverage が同名モジュールとして認識できるようにする
-if "src.services" not in sys.modules:
-    pkg = types.ModuleType("src.services")
-    pkg.__path__ = [str(_MODULE_PATH.parent)]
-    sys.modules["src.services"] = pkg
-
-_SPEC = util.spec_from_file_location("src.services.backtest_pipeline", _MODULE_PATH)
-assert _SPEC is not None and _SPEC.loader is not None
-_MODULE = util.module_from_spec(_SPEC)
-sys.modules["src.services.backtest_pipeline"] = _MODULE
-_SPEC.loader.exec_module(_MODULE)
-# shim が sys.modules を実モジュールに差し替える場合を考慮して再取得
-_MODULE = sys.modules["src.services.backtest_pipeline"]
-print_backtest_metrics = _MODULE.print_backtest_metrics
+from src.backtest.pipeline import print_backtest_metrics
 
 
 def test_print_backtest_metrics_with_gross(capsys):

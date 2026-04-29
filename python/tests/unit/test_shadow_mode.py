@@ -241,10 +241,10 @@ class TestOutputTopWorstResultsShadowMode(unittest.TestCase):
             saved_calls.append((predicted_at, rows))
 
         with patch(
-            "src.services.prediction_pipeline.save_prediction_results",
+            "src.prediction.prediction_pipeline.save_prediction_results",
             side_effect=mock_save,
         ):
-            from src.services.prediction_pipeline import output_top_worst_results
+            from src.prediction.prediction_pipeline import output_top_worst_results
 
             output_top_worst_results(
                 results,
@@ -267,10 +267,10 @@ class TestOutputTopWorstResultsShadowMode(unittest.TestCase):
             saved_calls.append((predicted_at, rows))
 
         with patch(
-            "src.services.prediction_pipeline.save_prediction_results",
+            "src.prediction.prediction_pipeline.save_prediction_results",
             side_effect=mock_save,
         ):
-            from src.services.prediction_pipeline import output_top_worst_results
+            from src.prediction.prediction_pipeline import output_top_worst_results
 
             output_top_worst_results(results, shadow_mode=False)
 
@@ -289,10 +289,10 @@ class TestOutputTopWorstResultsShadowMode(unittest.TestCase):
             saved_calls.append((predicted_at, rows))
 
         with patch(
-            "src.services.prediction_pipeline.save_prediction_results",
+            "src.prediction.prediction_pipeline.save_prediction_results",
             side_effect=mock_save,
         ):
-            from src.services.prediction_pipeline import output_top_worst_results
+            from src.prediction.prediction_pipeline import output_top_worst_results
 
             output_top_worst_results(
                 results,
@@ -312,10 +312,10 @@ class TestOutputTopWorstResultsShadowMode(unittest.TestCase):
             saved_calls.append((predicted_at, rows))
 
         with patch(
-            "src.services.prediction_pipeline.save_prediction_results",
+            "src.prediction.prediction_pipeline.save_prediction_results",
             side_effect=mock_save,
         ):
-            from src.services.prediction_pipeline import output_top_worst_results
+            from src.prediction.prediction_pipeline import output_top_worst_results
 
             output_top_worst_results([], shadow_mode=True, model_version="challenger")
 
@@ -339,7 +339,7 @@ class TestEvaluateShadowModels(_TmpDbTestCase):
 
     def test_returns_dict_with_expected_keys(self):
         """戻り値が期待するキーを持つこと"""
-        from src.services.shadow_evaluation_pipeline import evaluate_shadow_models
+        from src.prediction.shadow_evaluation import evaluate_shadow_models
 
         # accuracy データなし
         result = evaluate_shadow_models(
@@ -360,14 +360,14 @@ class TestEvaluateShadowModels(_TmpDbTestCase):
 
     def test_challenger_wins_false_when_no_data(self):
         """accuracy データがない場合は challenger_wins=False"""
-        from src.services.shadow_evaluation_pipeline import evaluate_shadow_models
+        from src.prediction.shadow_evaluation import evaluate_shadow_models
 
         result = evaluate_shadow_models()
         self.assertFalse(result["challenger_wins"])
 
     def test_challenger_wins_true_when_better(self):
         """challenger が production より Hit Rate / Sharpe ともに高い場合 True"""
-        from src.services.shadow_evaluation_pipeline import evaluate_shadow_models
+        from src.prediction.shadow_evaluation import evaluate_shadow_models
 
         # production: hit_rate=0.5
         prod_rows = [
@@ -414,7 +414,7 @@ class TestEvaluateShadowModels(_TmpDbTestCase):
 
     def test_n_counts_match_inserted_rows(self):
         """n_production / n_challenger が挿入件数と一致すること"""
-        from src.services.shadow_evaluation_pipeline import evaluate_shadow_models
+        from src.prediction.shadow_evaluation import evaluate_shadow_models
 
         prod_rows = [
             {
@@ -442,7 +442,7 @@ class TestEvaluateShadowModels(_TmpDbTestCase):
 
     def test_records_to_experiment_runs(self):
         """評価結果が experiment_runs テーブルに記録されること"""
-        from src.services.shadow_evaluation_pipeline import evaluate_shadow_models
+        from src.prediction.shadow_evaluation import evaluate_shadow_models
         from src.utils.db.experiment import load_experiment_runs
 
         evaluate_shadow_models(
@@ -464,24 +464,24 @@ class TestComputeMetrics(unittest.TestCase):
     """_compute_hit_rate / _compute_sharpe のユニットテスト"""
 
     def test_hit_rate_all_correct(self):
-        from src.services.shadow_evaluation_pipeline import _compute_hit_rate
+        from src.prediction.shadow_evaluation import _compute_hit_rate
 
         df = pd.DataFrame({"direction_match": [True, True, True, True]})
         self.assertAlmostEqual(_compute_hit_rate(df), 1.0)
 
     def test_hit_rate_all_wrong(self):
-        from src.services.shadow_evaluation_pipeline import _compute_hit_rate
+        from src.prediction.shadow_evaluation import _compute_hit_rate
 
         df = pd.DataFrame({"direction_match": [False, False, False]})
         self.assertAlmostEqual(_compute_hit_rate(df), 0.0)
 
     def test_hit_rate_returns_none_on_empty(self):
-        from src.services.shadow_evaluation_pipeline import _compute_hit_rate
+        from src.prediction.shadow_evaluation import _compute_hit_rate
 
         self.assertIsNone(_compute_hit_rate(pd.DataFrame()))
 
     def test_sharpe_positive_when_all_correct(self):
-        from src.services.shadow_evaluation_pipeline import _compute_sharpe
+        from src.prediction.shadow_evaluation import _compute_sharpe
 
         df = pd.DataFrame(
             {
@@ -494,13 +494,13 @@ class TestComputeMetrics(unittest.TestCase):
         self.assertGreater(sharpe, 0)
 
     def test_sharpe_returns_none_on_insufficient_data(self):
-        from src.services.shadow_evaluation_pipeline import _compute_sharpe
+        from src.prediction.shadow_evaluation import _compute_sharpe
 
         df = pd.DataFrame({"predicted_ratio": [0.02], "actual_ratio": [0.03]})
         self.assertIsNone(_compute_sharpe(df))
 
     def test_sharpe_returns_none_on_empty(self):
-        from src.services.shadow_evaluation_pipeline import _compute_sharpe
+        from src.prediction.shadow_evaluation import _compute_sharpe
 
         self.assertIsNone(_compute_sharpe(pd.DataFrame()))
 
@@ -524,9 +524,9 @@ class TestRunShadowPrediction(unittest.TestCase):
         chal_fn = MagicMock(return_value=chal_result)
 
         with patch(
-            "src.services.prediction_pipeline.save_prediction_results",
+            "src.prediction.prediction_pipeline.save_prediction_results",
         ):
-            from src.services.shadow_evaluation_pipeline import run_shadow_prediction
+            from src.prediction.shadow_evaluation import run_shadow_prediction
 
             result = run_shadow_prediction(
                 predict_fn=prod_fn,
@@ -546,9 +546,9 @@ class TestRunShadowPrediction(unittest.TestCase):
         fn = MagicMock(return_value=result_data)
 
         with patch(
-            "src.services.prediction_pipeline.save_prediction_results",
+            "src.prediction.prediction_pipeline.save_prediction_results",
         ):
-            from src.services.shadow_evaluation_pipeline import run_shadow_prediction
+            from src.prediction.shadow_evaluation import run_shadow_prediction
 
             run_shadow_prediction(predict_fn=fn, challenger_predict_fn=None)
 

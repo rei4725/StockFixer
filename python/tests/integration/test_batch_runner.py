@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
-from src.services.batch_runner import load_target_symbols, print_summary, run_parallel
+from src.watchlist.batch_runner import load_target_symbols, print_summary, run_parallel
 
 
 class TestLoadTargetSymbols(unittest.TestCase):
@@ -23,7 +23,7 @@ class TestLoadTargetSymbols(unittest.TestCase):
         """watchlist.json から銘柄リストが正しく読み込まれることを確認"""
         json_path = self._create_json({"us": ["AAPL"], "jp": ["7203"]})
         try:
-            with patch("src.services.batch_runner.get_watchlist_path", return_value=json_path):
+            with patch("src.watchlist.batch_runner.get_watchlist_path", return_value=json_path):
                 result = load_target_symbols()
             self.assertEqual(len(result), 2)
             symbols = {(t.market, t.symbol) for t in result}
@@ -36,7 +36,7 @@ class TestLoadTargetSymbols(unittest.TestCase):
         """空の watchlist.json では空リストが返ることを確認"""
         json_path = self._create_json({})
         try:
-            with patch("src.services.batch_runner.get_watchlist_path", return_value=json_path):
+            with patch("src.watchlist.batch_runner.get_watchlist_path", return_value=json_path):
                 result = load_target_symbols()
             self.assertEqual(result, [])
         finally:
@@ -59,7 +59,7 @@ class TestRunParallel(unittest.TestCase):
 
     def test_uses_thread_pool_by_default(self):
         """デフォルトでThreadPoolExecutorを使用することを確認"""
-        with patch("src.services.batch_runner.ThreadPoolExecutor") as mock_thread:
+        with patch("src.watchlist.batch_runner.ThreadPoolExecutor") as mock_thread:
             mock_executor = MagicMock()
             mock_executor.__enter__ = MagicMock(return_value=mock_executor)
             mock_executor.__exit__ = MagicMock(return_value=False)

@@ -225,7 +225,7 @@ def run_data_batch(fetch_only: bool = False):
     fetch_only=True:
       フェーズ1のみ実行（DB保存しない）
     """
-    from src.services.batch_runner import load_target_symbols, print_summary, run_parallel
+    from src.watchlist.batch_runner import load_target_symbols, print_summary, run_parallel
 
     # バッチ取得の並列数（yfinance API制限を考慮）
     MAX_DATA_WORKERS = 3

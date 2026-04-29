@@ -1,28 +1,8 @@
-"""Unit Test: backtest_optimize_pipeline print output"""
-
-import sys
-import types
-from importlib import util
-from pathlib import Path
+"""Unit Test: backtest/optimizer print output"""
 
 import pandas as pd
 
-_MODULE_PATH = (
-    Path(__file__).resolve().parents[2] / "src" / "services" / "backtest_optimize_pipeline.py"
-)
-if "src.services" not in sys.modules:
-    pkg = types.ModuleType("src.services")
-    pkg.__path__ = [str(_MODULE_PATH.parent)]
-    sys.modules["src.services"] = pkg
-
-_SPEC = util.spec_from_file_location("src.services.backtest_optimize_pipeline", _MODULE_PATH)
-assert _SPEC is not None and _SPEC.loader is not None
-_MODULE = util.module_from_spec(_SPEC)
-sys.modules["src.services.backtest_optimize_pipeline"] = _MODULE
-_SPEC.loader.exec_module(_MODULE)
-# shim が sys.modules を実モジュールに差し替える場合を考慮して再取得
-_MODULE = sys.modules["src.services.backtest_optimize_pipeline"]
-print_optimization_results = _MODULE.print_optimization_results
+from src.backtest.optimizer import print_optimization_results
 
 
 def test_print_optimization_results_includes_gross_and_cost_columns(capsys):

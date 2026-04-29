@@ -10,8 +10,7 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from src.backtest.types import StressTestResult
-from src.services.stress_test_pipeline import (
+from src.backtest.stress_test import (
     MDD_THRESHOLD,
     STRESS_SCENARIOS,
     _compute_max_consecutive_losses,
@@ -20,6 +19,7 @@ from src.services.stress_test_pipeline import (
     run_stress_test_single,
     save_stress_test_results,
 )
+from src.backtest.types import StressTestResult
 from src.watchlist.types import SymbolTask
 
 
@@ -184,10 +184,10 @@ class TestRunStressTestSingleMock:
             }
         )
 
-    @patch("src.services.stress_test_pipeline.run_backtest_single")
+    @patch("src.backtest.stress_test.run_backtest_single")
     def test_run_stress_test_single_mock(self, mock_backtest):
         """run_backtest_single をモックして StressTestResult 変換を検証する"""
-        from src.services.stress_test_pipeline import run_stress_test_single
+        from src.backtest.stress_test import run_stress_test_single
 
         trade_log = self._make_mock_trade_log()
         mock_metrics = {
@@ -226,7 +226,7 @@ class TestRunStressTestSingleMock:
         )
         assert result is None
 
-    @patch("src.services.stress_test_pipeline.run_backtest_single")
+    @patch("src.backtest.stress_test.run_backtest_single")
     def test_run_stress_test_single_backtest_failure(self, mock_backtest):
         """バックテストが例外を投げた場合 None が返ること"""
         mock_backtest.side_effect = RuntimeError("データ取得失敗")
@@ -260,7 +260,7 @@ class TestSaveStressTestResultsMock:
             )
         ]
 
-    @patch("src.services.stress_test_pipeline.os.makedirs")
+    @patch("src.backtest.stress_test.os.makedirs")
     @patch("pandas.DataFrame.to_csv")
     def test_save_stress_test_results_mock(self, mock_to_csv, mock_makedirs):
         """to_csv が呼ばれ、返り値がファイルパス文字列であること"""
@@ -322,7 +322,7 @@ class TestRunStressTestBatch:
             SymbolTask(market="us", symbol="AAPL"),
         ]
 
-    @patch("src.services.stress_test_pipeline.run_stress_test_single")
+    @patch("src.backtest.stress_test.run_stress_test_single")
     def test_batch_returns_all_results(self, mock_single):
         """全銘柄・全シナリオの結果が返ること"""
         mock_single.return_value = StressTestResult(
@@ -346,7 +346,7 @@ class TestRunStressTestBatch:
         assert len(results) == 4
         assert mock_single.call_count == 4
 
-    @patch("src.services.stress_test_pipeline.run_stress_test_single")
+    @patch("src.backtest.stress_test.run_stress_test_single")
     def test_batch_skips_failed_results(self, mock_single):
         """run_stress_test_single が None を返した銘柄はスキップされること"""
         mock_single.return_value = None
@@ -355,7 +355,7 @@ class TestRunStressTestBatch:
 
         assert results == []
 
-    @patch("src.services.stress_test_pipeline.run_stress_test_single")
+    @patch("src.backtest.stress_test.run_stress_test_single")
     def test_batch_default_all_scenarios(self, mock_single):
         """scenarios=None のとき全シナリオ（corona + lehman）が実行されること"""
         mock_single.return_value = None
@@ -365,7 +365,7 @@ class TestRunStressTestBatch:
         called_scenarios = [call.kwargs["scenario_name"] for call in mock_single.call_args_list]
         assert set(called_scenarios) == {"corona", "lehman"}
 
-    @patch("src.services.stress_test_pipeline.run_stress_test_single")
+    @patch("src.backtest.stress_test.run_stress_test_single")
     def test_batch_single_scenario_filter(self, mock_single):
         """scenarios=[corona] のとき corona のみ実行されること"""
         mock_single.return_value = None

@@ -27,7 +27,7 @@ from src.reporting.discord.discord_text import (
     DISCORD_WIDE_TEXT_LIMIT,
     split_text_chunks,
 )
-from src.services.discord_query_service import get_latest_market_prediction_snapshots
+from src.reporting.query_service import get_latest_market_prediction_snapshots
 from src.utils.japan_time import format_jst, format_jst_from_iso, isoformat_jst
 
 logger = logging.getLogger(__name__)

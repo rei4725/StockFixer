@@ -1,12 +1,11 @@
 """
-Unit Tests for prediction_pipeline.get_optimal_params()
+Unit Tests for prediction/prediction_pipeline.get_optimal_params()
 
 最適パラメータの JSON 読込機能をテストします。
 """
 import json
 import os
 import sys
-from unittest.mock import patch
 
 import pytest
 
@@ -68,26 +67,16 @@ class TestGetOptimalParams:
 
     def test_get_optimal_params_jp_1332(self, mock_config_json):
         """jp/1332 のパラメータ読込テスト"""
-        with patch("src.services.prediction_pipeline.os.path.dirname") as mock_dirname:
-            # パスモック設定
-            config_dir = os.path.dirname(mock_config_json)
-            mock_dirname.side_effect = [
-                os.path.dirname(os.path.dirname(config_dir)),  # __file__ をシミュレート
-                config_dir,  # config_dir の親ディレクトリ
-            ]
+        with open(mock_config_json, "r", encoding="utf-8") as f:
+            all_params = json.load(f)
 
-            # 直接 JSON パス指定で実行（ユニットテスト用）
-            with open(mock_config_json, "r", encoding="utf-8") as f:
-                all_params = json.load(f)
+        params = all_params.get("jp_1332", {})
 
-            params = all_params.get("jp_1332", {})
-
-            # 検証
-            assert params is not None
-            assert params["threshold"] == 0.0
-            assert params["metrics"]["sharpe_ratio"] > 0.2
-            assert params["metrics"]["win_rate"] > 0.5
-            assert params["metrics"]["profit_factor"] > 1.0
+        assert params is not None
+        assert params["threshold"] == 0.0
+        assert params["metrics"]["sharpe_ratio"] > 0.2
+        assert params["metrics"]["win_rate"] > 0.5
+        assert params["metrics"]["profit_factor"] > 1.0
 
     def test_get_optimal_params_jp_1333(self, mock_config_json):
         """jp/1333 のパラメータ読込テスト"""

@@ -1,6 +1,0 @@
-# 後方互換 shim — フェーズ4で削除予定
-# 実装本体は src.market_data.pipeline に移動済み
-import importlib
-import sys
-
-sys.modules[__name__] = importlib.import_module("src.market_data.pipeline")

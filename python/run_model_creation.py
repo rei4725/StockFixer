@@ -9,7 +9,7 @@
 import argparse
 import sys
 
-from src.services.model_training_pipeline import run_model_batch, train_models_for_symbol
+from src.prediction.training_pipeline import run_model_batch, train_models_for_symbol
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)

@@ -22,7 +22,7 @@ Walk-Forward検証で実行し、最適パラメータを特定する。
 import argparse
 import sys
 
-from src.services.backtest_optimize_pipeline import (
+from src.backtest.optimizer import (
     print_optimization_results,
     run_optimization,
     save_optimal_params_json,

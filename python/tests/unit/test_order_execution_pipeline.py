@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 
 from src.brokers.base import BrokerBase, OrderSide, OrderType
-from src.services.order_execution_pipeline import (
+from src.trading.execution import (
     BUY_THRESHOLD,
     MAX_ORDERS_PER_RUN,
     MIN_CHANGE_RATIO,
@@ -83,34 +83,34 @@ class TestRunDailyOrders(unittest.TestCase):
             gate_status = self._make_gate_status(is_allowed=risk_allowed)
         patches = [
             patch(
-                "src.services.order_execution_pipeline._load_latest_predictions",
+                "src.trading.execution._load_latest_predictions",
                 return_value=predictions,
             ),
             patch(
-                "src.services.order_execution_pipeline._record_order",
+                "src.trading.execution._record_order",
             ),
             patch(
-                "src.services.order_execution_pipeline._choose_order_params",
+                "src.trading.execution._choose_order_params",
                 return_value=(OrderType.MARKET, 0.0, "market"),
             ),
             patch(
-                "src.services.order_execution_pipeline.RiskManager.evaluate_trading_gate",
+                "src.trading.execution.RiskManager.evaluate_trading_gate",
                 return_value=gate_status,
             ),
             patch(
-                "src.services.order_execution_pipeline.RiskManager.calc_position_size",
+                "src.trading.execution.RiskManager.calc_position_size",
                 return_value=calc_qty,
             ),
             patch(
-                "src.services.risk_manager.RiskManager._get_daily_realized_loss",
+                "src.trading.risk_manager.RiskManager._get_daily_realized_loss",
                 return_value=0.0,
             ),
             patch(
-                "src.services.risk_manager.RiskManager._get_consecutive_losses",
+                "src.trading.risk_manager.RiskManager._get_consecutive_losses",
                 return_value=0,
             ),
             patch(
-                "src.services.order_execution_pipeline.save_order_run_summary",
+                "src.trading.execution.save_order_run_summary",
             ),
         ]
         return patches
@@ -232,7 +232,7 @@ class TestRunDailyOrders(unittest.TestCase):
         finally:
             self._stop_patches(patch_list)
 
-    @patch("src.services.order_execution_pipeline.get_optimal_params", return_value={})
+    @patch("src.trading.execution.get_optimal_params", return_value={})
     def test_dynamic_buy_threshold_blocks_borderline_signal(self, mock_params):
         broker = _make_broker()
         predictions = pd.DataFrame(
@@ -283,9 +283,7 @@ class TestRunDailyOrders(unittest.TestCase):
         finally:
             self._stop_patches(patch_list)
 
-    @patch(
-        "src.services.order_execution_pipeline.get_optimal_params", return_value={"threshold": 0.01}
-    )
+    @patch("src.trading.execution.get_optimal_params", return_value={"threshold": 0.01})
     def test_dynamic_sell_threshold_blocks_borderline_exit(self, mock_params):
         broker = _make_broker(positions=[{"symbol": "9000", "qty": 100, "avg_price": 1000.0}])
         predictions = pd.DataFrame(
@@ -368,11 +366,11 @@ class TestRunDailyOrders(unittest.TestCase):
         patches = self._patch_pipeline(predictions_base)
         patches += [
             patch(
-                "src.services.order_execution_pipeline._attach_dynamic_thresholds",
+                "src.trading.execution._attach_dynamic_thresholds",
                 side_effect=_mock_attach,
             ),
             patch(
-                "src.services.order_execution_pipeline.apply_multi_horizon_score_column",
+                "src.trading.execution.apply_multi_horizon_score_column",
                 side_effect=_mock_score,
             ),
         ]
@@ -417,11 +415,11 @@ class TestRunDailyOrders(unittest.TestCase):
         patches = self._patch_pipeline(predictions_base)
         patches += [
             patch(
-                "src.services.order_execution_pipeline._attach_dynamic_thresholds",
+                "src.trading.execution._attach_dynamic_thresholds",
                 side_effect=_mock_attach,
             ),
             patch(
-                "src.services.order_execution_pipeline.apply_multi_horizon_score_column",
+                "src.trading.execution.apply_multi_horizon_score_column",
                 side_effect=_mock_score,
             ),
         ]
@@ -455,7 +453,7 @@ class TestDynamicThresholdHelpers(unittest.TestCase):
 
         self.assertGreater(scale, 1.0)
 
-    @patch("src.services.order_execution_pipeline.get_optimal_params")
+    @patch("src.trading.execution.get_optimal_params")
     def test_attach_dynamic_thresholds_uses_optimal_threshold(self, mock_params):
         mock_params.side_effect = [{"threshold": 0.012}, {}]
         predictions = pd.DataFrame(
@@ -486,7 +484,7 @@ class TestDynamicThresholdHelpers(unittest.TestCase):
 
 
 class TestExecutionOrderTypeHelpers(unittest.TestCase):
-    @patch("src.services.order_execution_pipeline.yf_client.download")
+    @patch("src.trading.execution.yf_client.download")
     def test_choose_order_params_switches_to_limit_on_low_volume(self, mock_download):
         mock_download.return_value = pd.DataFrame(
             {
@@ -503,7 +501,7 @@ class TestExecutionOrderTypeHelpers(unittest.TestCase):
         self.assertGreater(price, 1000.0)
         self.assertIn("low_volume", reason)
 
-    @patch("src.services.order_execution_pipeline.yf_client.download")
+    @patch("src.trading.execution.yf_client.download")
     def test_choose_order_params_keeps_market_when_liquid(self, mock_download):
         mock_download.return_value = pd.DataFrame(
             {
@@ -522,13 +520,13 @@ class TestExecutionOrderTypeHelpers(unittest.TestCase):
 
 
 class TestExecutionOrderTypeFlow(unittest.TestCase):
-    @patch("src.services.order_execution_pipeline._record_order")
+    @patch("src.trading.execution._record_order")
     @patch(
-        "src.services.order_execution_pipeline._choose_order_params",
+        "src.trading.execution._choose_order_params",
         return_value=(OrderType.LIMIT, 1001.0, "low_volume=100000"),
     )
     @patch(
-        "src.services.order_execution_pipeline.RiskManager.evaluate_trading_gate",
+        "src.trading.execution.RiskManager.evaluate_trading_gate",
         return_value=TradingGateStatus(
             is_allowed=True,
             stop_active=False,
@@ -539,16 +537,16 @@ class TestExecutionOrderTypeFlow(unittest.TestCase):
         ),
     )
     @patch(
-        "src.services.risk_manager.RiskManager._get_daily_realized_loss",
+        "src.trading.risk_manager.RiskManager._get_daily_realized_loss",
         return_value=0.0,
     )
     @patch(
-        "src.services.risk_manager.RiskManager._get_consecutive_losses",
+        "src.trading.risk_manager.RiskManager._get_consecutive_losses",
         return_value=0,
     )
-    @patch("src.services.order_execution_pipeline.RiskManager.calc_position_size", return_value=100)
+    @patch("src.trading.execution.RiskManager.calc_position_size", return_value=100)
     @patch(
-        "src.services.order_execution_pipeline._load_latest_predictions",
+        "src.trading.execution._load_latest_predictions",
         return_value=pd.DataFrame(
             [
                 {
@@ -621,7 +619,7 @@ class TestExecutionOrderTypeFlow(unittest.TestCase):
 
 
 class TestSectorLimitHelpers(unittest.TestCase):
-    @patch("src.services.order_execution_pipeline.get_symbol_sector")
+    @patch("src.trading.execution.get_symbol_sector")
     def test_apply_buy_sector_limit_reduces_same_sector_concentration(self, mock_get_sector):
         mock_get_sector.side_effect = ["Auto", "Auto", "Tech", "Bank"]
         predictions = pd.DataFrame(
@@ -671,7 +669,7 @@ class TestShortSide(unittest.TestCase):
             ]
         )
 
-    @patch("src.services.order_execution_pipeline.ENABLE_SHORT_SIDE", True)
+    @patch("src.trading.execution.ENABLE_SHORT_SIDE", True)
     def test_short_order_placed_when_enabled(self):
         """ENABLE_SHORT_SIDE=True かつ PaperBroker で売りシグナル → SHORT 発注"""
         broker = _make_broker()
@@ -681,31 +679,31 @@ class TestShortSide(unittest.TestCase):
 
         patches = [
             patch(
-                "src.services.order_execution_pipeline._load_latest_predictions",
+                "src.trading.execution._load_latest_predictions",
                 return_value=predictions,
             ),
-            patch("src.services.order_execution_pipeline._record_order"),
+            patch("src.trading.execution._record_order"),
             patch(
-                "src.services.order_execution_pipeline._choose_order_params",
+                "src.trading.execution._choose_order_params",
                 return_value=(OrderType.MARKET, 0.0, "market"),
             ),
             patch(
-                "src.services.order_execution_pipeline.RiskManager.evaluate_trading_gate",
+                "src.trading.execution.RiskManager.evaluate_trading_gate",
                 return_value=self._make_gate_status(),
             ),
             patch(
-                "src.services.order_execution_pipeline.RiskManager.calc_position_size",
+                "src.trading.execution.RiskManager.calc_position_size",
                 return_value=50,
             ),
             patch(
-                "src.services.risk_manager.RiskManager._get_daily_realized_loss",
+                "src.trading.risk_manager.RiskManager._get_daily_realized_loss",
                 return_value=0.0,
             ),
             patch(
-                "src.services.risk_manager.RiskManager._get_consecutive_losses",
+                "src.trading.risk_manager.RiskManager._get_consecutive_losses",
                 return_value=0,
             ),
-            patch("src.services.order_execution_pipeline.save_order_run_summary"),
+            patch("src.trading.execution.save_order_run_summary"),
         ]
         for p in patches:
             p.start()
@@ -723,7 +721,7 @@ class TestShortSide(unittest.TestCase):
             for p in patches:
                 p.stop()
 
-    @patch("src.services.order_execution_pipeline.ENABLE_SHORT_SIDE", False)
+    @patch("src.trading.execution.ENABLE_SHORT_SIDE", False)
     def test_no_short_order_when_disabled(self):
         """ENABLE_SHORT_SIDE=False では売りシグナルがあっても SHORT 発注しない"""
         broker = _make_broker()
@@ -732,31 +730,31 @@ class TestShortSide(unittest.TestCase):
 
         patches = [
             patch(
-                "src.services.order_execution_pipeline._load_latest_predictions",
+                "src.trading.execution._load_latest_predictions",
                 return_value=predictions,
             ),
-            patch("src.services.order_execution_pipeline._record_order"),
+            patch("src.trading.execution._record_order"),
             patch(
-                "src.services.order_execution_pipeline._choose_order_params",
+                "src.trading.execution._choose_order_params",
                 return_value=(OrderType.MARKET, 0.0, "market"),
             ),
             patch(
-                "src.services.order_execution_pipeline.RiskManager.evaluate_trading_gate",
+                "src.trading.execution.RiskManager.evaluate_trading_gate",
                 return_value=self._make_gate_status(),
             ),
             patch(
-                "src.services.order_execution_pipeline.RiskManager.calc_position_size",
+                "src.trading.execution.RiskManager.calc_position_size",
                 return_value=50,
             ),
             patch(
-                "src.services.risk_manager.RiskManager._get_daily_realized_loss",
+                "src.trading.risk_manager.RiskManager._get_daily_realized_loss",
                 return_value=0.0,
             ),
             patch(
-                "src.services.risk_manager.RiskManager._get_consecutive_losses",
+                "src.trading.risk_manager.RiskManager._get_consecutive_losses",
                 return_value=0,
             ),
-            patch("src.services.order_execution_pipeline.save_order_run_summary"),
+            patch("src.trading.execution.save_order_run_summary"),
         ]
         for p in patches:
             p.start()
@@ -768,7 +766,7 @@ class TestShortSide(unittest.TestCase):
             for p in patches:
                 p.stop()
 
-    @patch("src.services.order_execution_pipeline.ENABLE_SHORT_SIDE", True)
+    @patch("src.trading.execution.ENABLE_SHORT_SIDE", True)
     def test_short_orders_counted_in_stats(self):
         """short_orders カウントが stats に正しく反映される"""
         broker = _make_broker()
@@ -778,31 +776,31 @@ class TestShortSide(unittest.TestCase):
 
         patches = [
             patch(
-                "src.services.order_execution_pipeline._load_latest_predictions",
+                "src.trading.execution._load_latest_predictions",
                 return_value=predictions,
             ),
-            patch("src.services.order_execution_pipeline._record_order"),
+            patch("src.trading.execution._record_order"),
             patch(
-                "src.services.order_execution_pipeline._choose_order_params",
+                "src.trading.execution._choose_order_params",
                 return_value=(OrderType.MARKET, 0.0, "market"),
             ),
             patch(
-                "src.services.order_execution_pipeline.RiskManager.evaluate_trading_gate",
+                "src.trading.execution.RiskManager.evaluate_trading_gate",
                 return_value=self._make_gate_status(),
             ),
             patch(
-                "src.services.order_execution_pipeline.RiskManager.calc_position_size",
+                "src.trading.execution.RiskManager.calc_position_size",
                 return_value=30,
             ),
             patch(
-                "src.services.risk_manager.RiskManager._get_daily_realized_loss",
+                "src.trading.risk_manager.RiskManager._get_daily_realized_loss",
                 return_value=0.0,
             ),
             patch(
-                "src.services.risk_manager.RiskManager._get_consecutive_losses",
+                "src.trading.risk_manager.RiskManager._get_consecutive_losses",
                 return_value=0,
             ),
-            patch("src.services.order_execution_pipeline.save_order_run_summary"),
+            patch("src.trading.execution.save_order_run_summary"),
         ]
         mocks = [p.start() for p in patches]
         try:

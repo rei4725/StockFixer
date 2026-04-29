@@ -29,7 +29,7 @@ import argparse
 import os
 import sys
 
-from src.services.backtest_pipeline import (
+from src.backtest.pipeline import (
     print_backtest_metrics,
     run_backtest_single,
     run_backtest_walk_forward,

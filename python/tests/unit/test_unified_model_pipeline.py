@@ -29,7 +29,7 @@ class TestPrepareUnifiedFeatures(unittest.TestCase):
     """prepare_unified_features のテスト（純粋関数）"""
 
     def _fn(self, df):
-        from src.services.unified_model_pipeline import prepare_unified_features
+        from src.prediction.unified_model_pipeline import prepare_unified_features
 
         return prepare_unified_features(df)
 
@@ -94,7 +94,7 @@ class TestPrepareUnifiedFeatures(unittest.TestCase):
         # market_encoded列が存在することのみ確認
         self.assertIn("market_encoded", X.columns)
 
-    @patch("src.services.unified_model_pipeline.load_excluded_features")
+    @patch("src.prediction.unified_model_pipeline.load_excluded_features")
     def test_prepare_unified_features_applies_exclusions(self, mock_excluded):
         df = _make_df()
         mock_excluded.return_value = ["rsi"]
@@ -105,9 +105,9 @@ class TestPrepareUnifiedFeatures(unittest.TestCase):
 
 
 class TestUnifiedEarningsMask(unittest.TestCase):
-    @patch("src.services.unified_model_pipeline.get_earnings_dates")
+    @patch("src.prediction.unified_model_pipeline.get_earnings_dates")
     def test_mask_earnings_rows_for_unified_removes_flagged_rows(self, mock_get_earnings):
-        from src.services.unified_model_pipeline import _mask_earnings_rows_for_unified
+        from src.prediction.unified_model_pipeline import _mask_earnings_rows_for_unified
 
         df = _make_df(n=10)
         df["market"] = "us"
@@ -128,7 +128,7 @@ class TestLoadUnifiedModel(unittest.TestCase):
     def test_raises_when_model_not_found(self):
         import tempfile
 
-        from src.services.unified_model_pipeline import load_unified_model
+        from src.prediction.unified_model_pipeline import load_unified_model
 
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(FileNotFoundError):
@@ -147,11 +147,11 @@ if __name__ == "__main__":
 class TestLoadAllStockData(unittest.TestCase):
     """load_all_stock_data のテスト"""
 
-    @patch("src.services.unified_model_pipeline.load_all_stock_features")
-    @patch("src.services.unified_model_pipeline._mask_earnings_rows_for_unified")
+    @patch("src.prediction.unified_model_pipeline.load_all_stock_features")
+    @patch("src.prediction.unified_model_pipeline._mask_earnings_rows_for_unified")
     def test_returns_dataframe_with_required_columns(self, mock_mask, mock_load):
         """必要なカラムを持つ DataFrame が返ること"""
-        from src.services.unified_model_pipeline import load_all_stock_data
+        from src.prediction.unified_model_pipeline import load_all_stock_data
 
         df = pd.DataFrame(
             {
@@ -171,10 +171,10 @@ class TestLoadAllStockData(unittest.TestCase):
         self.assertFalse(result.empty)
         mock_mask.assert_called_once()
 
-    @patch("src.services.unified_model_pipeline.load_all_stock_features")
+    @patch("src.prediction.unified_model_pipeline.load_all_stock_features")
     def test_returns_empty_dataframe_when_no_data(self, mock_load):
         """データがない場合は空の DataFrame が返ること"""
-        from src.services.unified_model_pipeline import load_all_stock_data
+        from src.prediction.unified_model_pipeline import load_all_stock_data
 
         mock_load.return_value = pd.DataFrame()
 
@@ -187,10 +187,10 @@ class TestLoadAllStockData(unittest.TestCase):
 class TestApplyUnifiedFeatureExclusions(unittest.TestCase):
     """_apply_unified_feature_exclusions のテスト"""
 
-    @patch("src.services.unified_model_pipeline.load_excluded_features")
+    @patch("src.prediction.unified_model_pipeline.load_excluded_features")
     def test_removes_excluded_columns(self, mock_excluded):
         """除外リストに含まれる列が削除されること"""
-        from src.services.unified_model_pipeline import _apply_unified_feature_exclusions
+        from src.prediction.unified_model_pipeline import _apply_unified_feature_exclusions
 
         mock_excluded.return_value = ["rsi", "volume_ma_deviation"]
         df = pd.DataFrame(
@@ -208,10 +208,10 @@ class TestApplyUnifiedFeatureExclusions(unittest.TestCase):
         self.assertNotIn("volume_ma_deviation", result.columns)
         self.assertIn("close_lag1", result.columns)
 
-    @patch("src.services.unified_model_pipeline.load_excluded_features")
+    @patch("src.prediction.unified_model_pipeline.load_excluded_features")
     def test_returns_same_df_when_no_exclusions(self, mock_excluded):
         """除外リストが空の場合は元の DataFrame と同じ列を持つこと"""
-        from src.services.unified_model_pipeline import _apply_unified_feature_exclusions
+        from src.prediction.unified_model_pipeline import _apply_unified_feature_exclusions
 
         mock_excluded.return_value = []
         df = pd.DataFrame({"close_lag1": [100.0], "y": [0.01]})
@@ -224,16 +224,16 @@ class TestApplyUnifiedFeatureExclusions(unittest.TestCase):
 class TestTrainUnifiedModel(unittest.TestCase):
     """train_unified_model のテスト"""
 
-    @patch("src.services.unified_model_pipeline._compute_and_save_unified_feature_selection")
-    @patch("src.services.unified_model_pipeline._apply_unified_feature_exclusions")
+    @patch("src.prediction.unified_model_pipeline._compute_and_save_unified_feature_selection")
+    @patch("src.prediction.unified_model_pipeline._apply_unified_feature_exclusions")
     @patch("src.models.model_manager.ModelManager")
-    @patch("src.services.unified_model_pipeline.prepare_unified_features")
-    @patch("src.services.unified_model_pipeline.load_all_stock_data")
+    @patch("src.prediction.unified_model_pipeline.prepare_unified_features")
+    @patch("src.prediction.unified_model_pipeline.load_all_stock_data")
     def test_train_creates_and_saves_model(
         self, mock_load, mock_prepare, mock_mm_cls, mock_apply, mock_compute
     ):
         """モデルが作成・学習・保存されること"""
-        from src.services.unified_model_pipeline import train_unified_model
+        from src.prediction.unified_model_pipeline import train_unified_model
 
         n = 20
         raw_df = pd.DataFrame(

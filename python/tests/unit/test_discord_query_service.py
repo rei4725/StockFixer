@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from src.services.discord_query_service import (
+from src.reporting.query_service import (
     get_latest_market_prediction_snapshots,
     get_scheduler_job_statuses,
     get_signal_snapshot,
@@ -14,10 +14,10 @@ from src.services.discord_query_service import (
 
 
 class TestDiscordQueryService(unittest.TestCase):
-    @patch("src.services.discord_query_service.load_prediction_results")
-    @patch("src.services.discord_query_service.load_prediction_markets", return_value=["JP"])
+    @patch("src.reporting.query_service.load_prediction_results")
+    @patch("src.reporting.query_service.load_prediction_markets", return_value=["JP"])
     @patch(
-        "src.services.discord_query_service.load_latest_prediction_timestamp",
+        "src.reporting.query_service.load_latest_prediction_timestamp",
         return_value="2026-04-06T00:00:00+00:00",
     )
     def test_get_latest_market_prediction_snapshots_builds_market_snapshots(
@@ -109,10 +109,10 @@ class TestDiscordQueryService(unittest.TestCase):
     # get_monthly_report_summary
     # ------------------------------------------------------------------
 
-    @patch("src.services.monthly_report_pipeline.run_monthly_report")
+    @patch("src.reporting.monthly.run_monthly_report")
     def test_get_monthly_report_summary_delegates_to_pipeline(self, mock_run):
+        from src.reporting.query_service import get_monthly_report_summary
         from src.reporting.types import MonthlyReportSummary
-        from src.services.discord_query_service import get_monthly_report_summary
 
         expected = MonthlyReportSummary(
             generated_at="2026-04-12T00:00:00",
@@ -133,10 +133,10 @@ class TestDiscordQueryService(unittest.TestCase):
         self.assertEqual(result.target_month, "2026-04")
         self.assertAlmostEqual(result.net_return, 0.03)
 
-    @patch("src.services.monthly_report_pipeline.run_monthly_report")
+    @patch("src.reporting.monthly.run_monthly_report")
     def test_get_monthly_report_summary_passes_none_when_month_omitted(self, mock_run):
+        from src.reporting.query_service import get_monthly_report_summary
         from src.reporting.types import MonthlyReportSummary
-        from src.services.discord_query_service import get_monthly_report_summary
 
         mock_run.return_value = MonthlyReportSummary(
             generated_at="2026-04-12T00:00:00",

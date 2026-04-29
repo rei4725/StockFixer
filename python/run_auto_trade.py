@@ -78,7 +78,7 @@ if __name__ == "__main__":
             for s in settled:
                 print(f"  {s['symbol']} {s['qty']}株 @ {s['fill_price']:.1f}円")
         else:
-            from src.services.order_execution_pipeline import run_daily_orders
+            from src.trading.execution import run_daily_orders
 
             stats = run_daily_orders(broker=broker, market=args.market, mode=args.mode)
             print(

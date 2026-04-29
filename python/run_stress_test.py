@@ -22,7 +22,7 @@ import argparse
 import os
 import sys
 
-from src.services.stress_test_pipeline import (
+from src.backtest.stress_test import (
     print_stress_test_summary,
     run_stress_test_batch,
     save_stress_test_results,

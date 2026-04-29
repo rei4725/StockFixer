@@ -14,10 +14,10 @@ from typing import Optional
 import pandas as pd
 
 from src.backtest.pipeline import run_backtest_walk_forward
-from src.services.batch_runner import load_target_symbols
 from src.utils.data_path_utils import ensure_dir, get_results_dir
 from src.utils.db.experiment import generate_run_id, save_experiment_run
 from src.utils.logger import get_logger
+from src.watchlist.batch_runner import load_target_symbols
 
 logger = get_logger(__name__)
 

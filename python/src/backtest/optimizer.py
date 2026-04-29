@@ -522,8 +522,8 @@ def run_optimize_batch(
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    from src.services.batch_runner import load_target_symbols
     from src.utils.logger import get_logger
+    from src.watchlist.batch_runner import load_target_symbols
 
     logger = get_logger(__name__)
 

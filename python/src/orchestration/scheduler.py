@@ -30,7 +30,7 @@ def run_daily_pipeline():
 
     # 1. データ取得（バッチ）
     logger.info("[1/4] データ取得開始")
-    from src.services.data_pipeline import run_data_batch
+    from src.market_data.pipeline import run_data_batch
 
     try:
         run_data_batch()
@@ -42,7 +42,7 @@ def run_daily_pipeline():
 
     # 2. 予測（Top10/Worst10）
     logger.info("[2/4] 予測開始")
-    from src.services.prediction_pipeline import output_top_worst_results, predict_all_unified
+    from src.prediction.prediction_pipeline import output_top_worst_results, predict_all_unified
 
     try:
         output_rows = predict_all_unified()
@@ -56,7 +56,7 @@ def run_daily_pipeline():
     # 3. 前日予測の精度チェック（非致命的：失敗しても後続処理を継続）
     logger.info("[3/4] 予測精度チェック開始")
     try:
-        from src.services.prediction_pipeline import run_accuracy_check
+        from src.prediction.prediction_pipeline import run_accuracy_check
 
         run_accuracy_check(horizon=1)
         logger.info("[3/4] 予測精度チェック完了")
@@ -94,7 +94,7 @@ def run_weekly_training():
     """
     logger.info("=== 週次モデル学習開始 ===")
 
-    from src.services.unified_model_pipeline import train_unified_model
+    from src.prediction.unified_model_pipeline import train_unified_model
 
     for model_type in ["XGBoostModel", "LightGBMModel"]:
         model_name = f"UnifiedStock{model_type.replace('Model', '')}"
@@ -109,8 +109,8 @@ def run_weekly_training():
     # 予測精度チェック & ドリフト警告
     logger.info("予測精度チェック開始")
     try:
+        from src.prediction.prediction_pipeline import run_accuracy_check
         from src.reporting.discord.discord_utils import send_drift_alert
-        from src.services.prediction_pipeline import run_accuracy_check
 
         summary = run_accuracy_check(horizon=1)
         send_drift_alert(summary, horizon=1)
@@ -161,7 +161,7 @@ def run_daily_auto_order():
     import os
 
     from src.brokers.paper.paper_broker import PaperBroker
-    from src.services.order_execution_pipeline import run_daily_orders
+    from src.trading.execution import run_daily_orders
 
     mode = os.environ.get("AUTO_TRADE_MODE", "paper")
     logger.info("=== 自動発注開始 (mode=%s) ===", mode)
@@ -270,7 +270,7 @@ def run_weekly_optimization():
     """
     logger.info("=== 週次バックテスト最適化開始 ===")
 
-    from src.services.backtest_optimize_pipeline import run_optimize_batch
+    from src.backtest.optimizer import run_optimize_batch
 
     success, failed = 0, 0
     try:
@@ -307,7 +307,7 @@ def run_weekly_walk_forward_report():
     logger.info("=== 週次 Walk-Forward 比較レポート開始 ===")
     result: dict = {}
     try:
-        from src.services.walk_forward_report_pipeline import run_walk_forward_comparison_report
+        from src.backtest.walk_forward_report import run_walk_forward_comparison_report
 
         result = run_walk_forward_comparison_report(
             model_type="XGBoostModel",
@@ -346,7 +346,7 @@ def run_weekly_watchlist_refresh():
     logger.info("=== 週次ウォッチリスト更新開始 ===")
     try:
         from src.reporting.discord.discord_utils import send_watchlist_update_report
-        from src.services.watchlist_manager import run_watchlist_refresh
+        from src.services.watchlist.watchlist_manager import run_watchlist_refresh
 
         diffs = run_watchlist_refresh()
         send_watchlist_update_report(diffs)
@@ -406,8 +406,8 @@ def run_daily_drift_check():
         logger.error("ドリフト通知失敗: %s", e, exc_info=True)
 
     # 銘柄別モデル再学習
-    from src.services.batch_runner import load_target_symbols
-    from src.services.model_training_pipeline import train_models_for_symbol_task
+    from src.prediction.training_pipeline import train_models_for_symbol_task
+    from src.watchlist.batch_runner import load_target_symbols
 
     all_tasks = {(t.market, t.symbol): t for t in load_target_symbols()}
     success_count = 0

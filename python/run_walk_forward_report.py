@@ -8,7 +8,7 @@ Walk-Forward 比較レポート実行スクリプト（CLIラッパー）
 import argparse
 import sys
 
-from src.services.walk_forward_report_pipeline import run_walk_forward_comparison_report
+from src.backtest.walk_forward_report import run_walk_forward_comparison_report
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)

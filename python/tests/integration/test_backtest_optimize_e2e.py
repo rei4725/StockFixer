@@ -27,7 +27,7 @@ class TestBacktestOptimizeE2E(unittest.TestCase):
         profit_factor が None と数値の混在データを正しく平均計算できることを検証。
         """
         try:
-            from src.services.backtest_optimize_pipeline import run_optimization
+            from src.backtest.optimizer import run_optimization
 
             # グリッドサーチを最小限（1-2パラメータ）で実行
             result_df = run_optimization(
@@ -92,7 +92,7 @@ class TestBacktestOptimizeE2E(unittest.TestCase):
         複数リスク管理パラメータの組み合わせでも型エラーが発生しないことを検証。
         """
         try:
-            from src.services.backtest_optimize_pipeline import run_optimization
+            from src.backtest.optimizer import run_optimization
 
             result_df = run_optimization(
                 market="jp",

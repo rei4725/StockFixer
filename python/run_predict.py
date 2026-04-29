@@ -10,7 +10,7 @@
 import argparse
 import sys
 
-from src.services.prediction_pipeline import (
+from src.prediction.prediction_pipeline import (
     output_top_worst_results,
     predict_all_individual,
     predict_all_unified,

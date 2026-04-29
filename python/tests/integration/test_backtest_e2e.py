@@ -72,7 +72,7 @@ class TestBacktestPipelineE2E(unittest.TestCase):
     def test_backtest_single_runs_without_error(self):
         """単一期間バックテストが実行可能なことを確認"""
         try:
-            from src.services.backtest_pipeline import print_backtest_metrics, run_backtest_single
+            from src.backtest.pipeline import print_backtest_metrics, run_backtest_single
 
             result_df, metrics, wf_df = run_backtest_single(
                 market="jp",
@@ -113,7 +113,7 @@ class TestBacktestPipelineE2E(unittest.TestCase):
     def test_backtest_walk_forward_runs_without_error(self):
         """Walk-Forward バックテストが実行可能なことを確認"""
         try:
-            from src.services.backtest_pipeline import run_backtest_walk_forward
+            from src.backtest.pipeline import run_backtest_walk_forward
 
             _, _, wf_df = run_backtest_walk_forward(
                 market="jp",

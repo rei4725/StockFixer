@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from src.services.batch_runner import load_target_symbols, print_summary, run_parallel
+from src.watchlist.batch_runner import load_target_symbols, print_summary, run_parallel
 from src.watchlist.types import SymbolTask
 
 
@@ -19,7 +19,7 @@ class TestLoadTargetSymbols(unittest.TestCase):
             json.dump(data, f)
         return path
 
-    @patch("src.services.batch_runner.get_watchlist_path")
+    @patch("src.watchlist.batch_runner.get_watchlist_path")
     def test_returns_symbol_task_list(self, mock_path):
         """JSON から SymbolTask リストが生成されること"""
         with tempfile.TemporaryDirectory() as tmp:
@@ -31,7 +31,7 @@ class TestLoadTargetSymbols(unittest.TestCase):
         self.assertEqual(len(result), 3)
         self.assertTrue(all(isinstance(t, SymbolTask) for t in result))
 
-    @patch("src.services.batch_runner.get_watchlist_path")
+    @patch("src.watchlist.batch_runner.get_watchlist_path")
     def test_markets_correctly_assigned(self, mock_path):
         """各 SymbolTask に正しい market が設定されること"""
         with tempfile.TemporaryDirectory() as tmp:
@@ -44,7 +44,7 @@ class TestLoadTargetSymbols(unittest.TestCase):
         self.assertIn("us", markets)
         self.assertIn("jp", markets)
 
-    @patch("src.services.batch_runner.get_watchlist_path")
+    @patch("src.watchlist.batch_runner.get_watchlist_path")
     def test_symbol_correctly_assigned(self, mock_path):
         """各 SymbolTask に正しい symbol が設定されること"""
         with tempfile.TemporaryDirectory() as tmp:
@@ -56,7 +56,7 @@ class TestLoadTargetSymbols(unittest.TestCase):
         self.assertEqual(result[0].market, "jp")
         self.assertEqual(result[0].symbol, "9984")
 
-    @patch("src.services.batch_runner.get_watchlist_path")
+    @patch("src.watchlist.batch_runner.get_watchlist_path")
     def test_empty_market_returns_empty_list(self, mock_path):
         """銘柄なしマーケットは空リストを返すこと"""
         with tempfile.TemporaryDirectory() as tmp:
@@ -67,7 +67,7 @@ class TestLoadTargetSymbols(unittest.TestCase):
 
         self.assertEqual(result, [])
 
-    @patch("src.services.batch_runner.get_watchlist_path")
+    @patch("src.watchlist.batch_runner.get_watchlist_path")
     def test_empty_json_returns_empty_list(self, mock_path):
         """空の JSON オブジェクトは空リストを返すこと"""
         with tempfile.TemporaryDirectory() as tmp:
@@ -78,7 +78,7 @@ class TestLoadTargetSymbols(unittest.TestCase):
 
         self.assertEqual(result, [])
 
-    @patch("src.services.batch_runner.get_watchlist_path")
+    @patch("src.watchlist.batch_runner.get_watchlist_path")
     def test_multiple_symbols_in_market(self, mock_path):
         """1 マーケットに複数銘柄が含まれる場合、全件が生成されること"""
         with tempfile.TemporaryDirectory() as tmp:
@@ -92,7 +92,7 @@ class TestLoadTargetSymbols(unittest.TestCase):
         self.assertIn("AAPL", symbols)
         self.assertIn("AMZN", symbols)
 
-    @patch("src.services.batch_runner.get_watchlist_path")
+    @patch("src.watchlist.batch_runner.get_watchlist_path")
     def test_default_horizon_is_one(self, mock_path):
         """SymbolTask のデフォルト horizon は 1 であること"""
         with tempfile.TemporaryDirectory() as tmp:
@@ -103,7 +103,7 @@ class TestLoadTargetSymbols(unittest.TestCase):
 
         self.assertEqual(result[0].horizon, 1)
 
-    @patch("src.services.batch_runner.load_index_membership_symbols_as_of")
+    @patch("src.watchlist.batch_runner.load_index_membership_symbols_as_of")
     def test_as_of_date_loads_from_index_membership_history(self, mock_load_history):
         """as_of_date 指定時は index_membership_history を優先すること"""
         mock_load_history.return_value = [("us", "AAPL"), ("jp", "7203")]
@@ -116,8 +116,8 @@ class TestLoadTargetSymbols(unittest.TestCase):
         self.assertIn(("jp", "7203"), symbols)
         mock_load_history.assert_called_once_with("2025-01-31")
 
-    @patch("src.services.batch_runner.load_index_membership_symbols_as_of")
-    @patch("src.services.batch_runner.get_watchlist_path")
+    @patch("src.watchlist.batch_runner.load_index_membership_symbols_as_of")
+    @patch("src.watchlist.batch_runner.get_watchlist_path")
     def test_as_of_date_falls_back_to_watchlist_when_history_empty(
         self, mock_path, mock_load_history
     ):

@@ -23,7 +23,6 @@ from src.analysis.types import FeatureLoadResult
 from src.market_data.loader import get_earnings_dates
 from src.prediction.manager import ModelManager
 from src.prediction.types import TrainingMetrics
-from src.services.batch_runner import load_target_symbols
 from src.utils.db import (
     generate_run_id,
     load_excluded_features,
@@ -34,6 +33,7 @@ from src.utils.db import (
     save_shap_values,
 )
 from src.utils.logger import get_logger
+from src.watchlist.batch_runner import load_target_symbols
 
 logger = get_logger(__name__)
 
@@ -461,7 +461,7 @@ def run_model_batch(horizon: int = 1):
     Args:
         horizon: 予測ホライズン（営業日）。1=翌日（デフォルト）。
     """
-    from src.services.batch_runner import load_target_symbols, print_summary, run_parallel
+    from src.watchlist.batch_runner import load_target_symbols, print_summary, run_parallel
 
     # バッチ作成の並列数（CPU数に応じて調整）
     MAX_MODEL_WORKERS = 3

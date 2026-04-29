@@ -8,7 +8,7 @@
 import argparse
 import sys
 
-from src.services.unified_model_pipeline import train_unified_model
+from src.prediction.unified_model_pipeline import train_unified_model
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)

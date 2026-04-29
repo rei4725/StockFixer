@@ -18,7 +18,7 @@ class TestFrange(unittest.TestCase):
 
     def test_basic_range_includes_stop(self):
         """start から stop まで step 刻みの値を生成すること（stop を含む）"""
-        from src.services.backtest_optimize_pipeline import _frange
+        from src.backtest.optimizer import _frange
 
         result = _frange(0.0, 0.04, 0.01)
         self.assertEqual(len(result), 5)
@@ -27,7 +27,7 @@ class TestFrange(unittest.TestCase):
 
     def test_single_value_when_step_exceeds_range(self):
         """step が range を超える場合は 1 要素のみ"""
-        from src.services.backtest_optimize_pipeline import _frange
+        from src.backtest.optimizer import _frange
 
         result = _frange(0.0, 0.01, 0.05)
         self.assertEqual(len(result), 1)
@@ -35,14 +35,14 @@ class TestFrange(unittest.TestCase):
 
     def test_empty_when_start_exceeds_stop(self):
         """start > stop で空リスト"""
-        from src.services.backtest_optimize_pipeline import _frange
+        from src.backtest.optimizer import _frange
 
         result = _frange(0.05, 0.01, 0.01)
         self.assertEqual(result, [])
 
     def test_values_are_rounded(self):
         """値が round(val, 6) で丸められていること"""
-        from src.services.backtest_optimize_pipeline import _frange
+        from src.backtest.optimizer import _frange
 
         result = _frange(0.0, 0.03, 0.01)
         for v in result:
@@ -50,7 +50,7 @@ class TestFrange(unittest.TestCase):
 
     def test_three_step_range(self):
         """0.01 刻みで 3 値が生成されること"""
-        from src.services.backtest_optimize_pipeline import _frange
+        from src.backtest.optimizer import _frange
 
         result = _frange(0.01, 0.02, 0.005)
         # [0.01, 0.015, 0.02] → 3 要素
@@ -69,28 +69,28 @@ class TestParseGridValues(unittest.TestCase):
 
     def test_uses_provided_values(self):
         """指定した values がそのまま返ること"""
-        from src.services.backtest_optimize_pipeline import _parse_grid_values
+        from src.backtest.optimizer import _parse_grid_values
 
         result = _parse_grid_values([0.02, 0.03, 0.04], 0.01)
         self.assertEqual(result, [0.02, 0.03, 0.04])
 
     def test_uses_default_when_empty(self):
         """values が空のとき default が返ること"""
-        from src.services.backtest_optimize_pipeline import _parse_grid_values
+        from src.backtest.optimizer import _parse_grid_values
 
         result = _parse_grid_values([], 0.01)
         self.assertEqual(result, [0.01])
 
     def test_uses_default_when_none(self):
         """values が None のとき default が返ること"""
-        from src.services.backtest_optimize_pipeline import _parse_grid_values
+        from src.backtest.optimizer import _parse_grid_values
 
         result = _parse_grid_values(None, 0.02)
         self.assertEqual(result, [0.02])
 
     def test_values_are_converted_to_float(self):
         """整数値が float に変換されること"""
-        from src.services.backtest_optimize_pipeline import _parse_grid_values
+        from src.backtest.optimizer import _parse_grid_values
 
         result = _parse_grid_values([1, 2, 3], 0.0)
         self.assertTrue(all(isinstance(v, float) for v in result))
@@ -106,14 +106,14 @@ class TestGetOptimalParams(unittest.TestCase):
 
     def test_returns_none_when_file_missing(self):
         """ファイルが存在しない場合 None が返ること"""
-        from src.services.backtest_optimize_pipeline import get_optimal_params
+        from src.backtest.optimizer import get_optimal_params
 
         result = get_optimal_params("jp", "7203", json_path="/nonexistent/params.json")
         self.assertIsNone(result)
 
     def test_returns_params_when_key_exists(self):
         """JSON ファイルにシンボルキーがある場合パラメータが返ること"""
-        from src.services.backtest_optimize_pipeline import get_optimal_params
+        from src.backtest.optimizer import get_optimal_params
 
         params = {"threshold": 0.02, "fee_rate": 0.001}
         with tempfile.NamedTemporaryFile(
@@ -131,7 +131,7 @@ class TestGetOptimalParams(unittest.TestCase):
 
     def test_returns_none_when_key_not_found(self):
         """JSON ファイルにシンボルキーがない場合 None が返ること"""
-        from src.services.backtest_optimize_pipeline import get_optimal_params
+        from src.backtest.optimizer import get_optimal_params
 
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".json", delete=False, encoding="utf-8"
@@ -155,7 +155,7 @@ class TestSaveOptimizationResults(unittest.TestCase):
 
     def test_saves_csv_file(self):
         """最適化結果が CSV として保存されること"""
-        from src.services.backtest_optimize_pipeline import save_optimization_results
+        from src.backtest.optimizer import save_optimization_results
 
         result_df = pd.DataFrame(
             {
@@ -167,7 +167,7 @@ class TestSaveOptimizationResults(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             with patch(
-                "src.services.backtest_optimize_pipeline.get_results_dir",
+                "src.backtest.optimizer.get_results_dir",
                 return_value=tmp_dir,
             ):
                 path = save_optimization_results(result_df, "jp", "7203")
@@ -177,7 +177,7 @@ class TestSaveOptimizationResults(unittest.TestCase):
 
     def test_saved_csv_is_readable(self):
         """保存した CSV が読み込み可能であること"""
-        from src.services.backtest_optimize_pipeline import save_optimization_results
+        from src.backtest.optimizer import save_optimization_results
 
         result_df = pd.DataFrame(
             {
@@ -188,7 +188,7 @@ class TestSaveOptimizationResults(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             with patch(
-                "src.services.backtest_optimize_pipeline.get_results_dir",
+                "src.backtest.optimizer.get_results_dir",
                 return_value=tmp_dir,
             ):
                 path = save_optimization_results(result_df, "jp", "7203")
@@ -227,10 +227,10 @@ class TestRunOptimization(unittest.TestCase):
             }
         )
 
-    @patch("src.services.backtest_optimize_pipeline.run_backtest_walk_forward")
+    @patch("src.backtest.optimizer.run_backtest_walk_forward")
     def test_returns_dataframe_with_results(self, mock_wf):
         """最適化結果が DataFrame として返ること"""
-        from src.services.backtest_optimize_pipeline import run_optimization
+        from src.backtest.optimizer import run_optimization
 
         mock_wf.return_value = (None, None, self._make_wf_df())
 
@@ -246,10 +246,10 @@ class TestRunOptimization(unittest.TestCase):
         self.assertGreaterEqual(len(result), 1)
         self.assertIn("threshold", result.columns)
 
-    @patch("src.services.backtest_optimize_pipeline.run_backtest_walk_forward")
+    @patch("src.backtest.optimizer.run_backtest_walk_forward")
     def test_returns_dataframe_on_all_errors(self, mock_wf):
         """全パラメータでエラーが発生しても DataFrame が返ること（エラー列を含む）"""
-        from src.services.backtest_optimize_pipeline import run_optimization
+        from src.backtest.optimizer import run_optimization
 
         mock_wf.side_effect = Exception("バックテストエラー")
 
@@ -265,10 +265,10 @@ class TestRunOptimization(unittest.TestCase):
         self.assertGreaterEqual(len(result), 1)
         self.assertIn("error", result.columns)
 
-    @patch("src.services.backtest_optimize_pipeline.run_backtest_walk_forward")
+    @patch("src.backtest.optimizer.run_backtest_walk_forward")
     def test_parameter_combinations_count(self, mock_wf):
         """閾値数 × ストップロス数 のパラメータ組み合わせが生成されること"""
-        from src.services.backtest_optimize_pipeline import run_optimization
+        from src.backtest.optimizer import run_optimization
 
         mock_wf.return_value = (None, None, self._make_wf_df())
 
@@ -282,10 +282,10 @@ class TestRunOptimization(unittest.TestCase):
         )
         self.assertEqual(len(result), 2)
 
-    @patch("src.services.backtest_optimize_pipeline.run_backtest_walk_forward")
+    @patch("src.backtest.optimizer.run_backtest_walk_forward")
     def test_threshold_column_values_match_input(self, mock_wf):
         """結果の threshold 列が指定した閾値と一致すること"""
-        from src.services.backtest_optimize_pipeline import run_optimization
+        from src.backtest.optimizer import run_optimization
 
         mock_wf.return_value = (None, None, self._make_wf_df())
 
@@ -333,11 +333,11 @@ class TestSaveOptimalParamsJson(unittest.TestCase):
         """最適パラメータが JSON ファイルに保存されること"""
         from unittest.mock import mock_open as mopen
 
-        from src.services.backtest_optimize_pipeline import save_optimal_params_json
+        from src.backtest.optimizer import save_optimal_params_json
 
         m = mopen()
         with patch("os.path.exists", return_value=False), patch(
-            "src.services.backtest_optimize_pipeline.ensure_dir"
+            "src.backtest.optimizer.ensure_dir"
         ), patch("builtins.open", m):
             path = save_optimal_params_json(
                 self._make_result_df(), "jp", "7203", sort_by="sharpe_ratio"
@@ -349,7 +349,7 @@ class TestSaveOptimalParamsJson(unittest.TestCase):
 
     def test_returns_empty_on_empty_df(self):
         """DataFrame が空の場合、空文字列が返ること"""
-        from src.services.backtest_optimize_pipeline import save_optimal_params_json
+        from src.backtest.optimizer import save_optimal_params_json
 
         result = save_optimal_params_json(pd.DataFrame(), "jp", "7203")
         self.assertEqual(result, "")
@@ -358,7 +358,7 @@ class TestSaveOptimalParamsJson(unittest.TestCase):
         """既存 JSON と結果が統合されること"""
         import json as _json
 
-        from src.services.backtest_optimize_pipeline import save_optimal_params_json
+        from src.backtest.optimizer import save_optimal_params_json
 
         existing_data = {"jp_AAPL": {"threshold": 0.01}}
         captured: dict = {}
@@ -368,7 +368,7 @@ class TestSaveOptimalParamsJson(unittest.TestCase):
 
         m = mock_open(read_data=_json.dumps(existing_data))
         with patch("os.path.exists", return_value=True), patch(
-            "src.services.backtest_optimize_pipeline.ensure_dir"
+            "src.backtest.optimizer.ensure_dir"
         ), patch("builtins.open", m), patch("json.dump", side_effect=fake_dump):
             path = save_optimal_params_json(
                 self._make_result_df(), "jp", "7203", sort_by="sharpe_ratio"
@@ -391,13 +391,13 @@ class TestSaveOptimalParamsJson(unittest.TestCase):
 class TestRunOptimizeBatch(unittest.TestCase):
     """run_optimize_batch のテスト"""
 
-    @patch("src.services.backtest_optimize_pipeline.save_optimal_params_json")
-    @patch("src.services.backtest_optimize_pipeline.save_optimization_results")
-    @patch("src.services.backtest_optimize_pipeline.run_optimization")
-    @patch("src.services.batch_runner.load_target_symbols")
+    @patch("src.backtest.optimizer.save_optimal_params_json")
+    @patch("src.backtest.optimizer.save_optimization_results")
+    @patch("src.backtest.optimizer.run_optimization")
+    @patch("src.watchlist.batch_runner.load_target_symbols")
     def test_returns_list_of_results(self, mock_symbols, mock_run, mock_save, mock_json):
         """全銘柄の結果リストが返ること"""
-        from src.services.backtest_optimize_pipeline import run_optimize_batch
+        from src.backtest.optimizer import run_optimize_batch
         from src.watchlist.types import SymbolTask
 
         mock_symbols.return_value = [
@@ -412,13 +412,13 @@ class TestRunOptimizeBatch(unittest.TestCase):
         self.assertIsInstance(results, list)
         self.assertEqual(len(results), 2)
 
-    @patch("src.services.backtest_optimize_pipeline.save_optimal_params_json")
-    @patch("src.services.backtest_optimize_pipeline.save_optimization_results")
-    @patch("src.services.backtest_optimize_pipeline.run_optimization")
-    @patch("src.services.batch_runner.load_target_symbols")
+    @patch("src.backtest.optimizer.save_optimal_params_json")
+    @patch("src.backtest.optimizer.save_optimization_results")
+    @patch("src.backtest.optimizer.run_optimization")
+    @patch("src.watchlist.batch_runner.load_target_symbols")
     def test_handles_single_symbol_error(self, mock_symbols, mock_run, mock_save, mock_json):
         """1銘柄でエラーが出ても他の銘柄が処理されること"""
-        from src.services.backtest_optimize_pipeline import run_optimize_batch
+        from src.backtest.optimizer import run_optimize_batch
         from src.watchlist.types import SymbolTask
 
         mock_symbols.return_value = [
@@ -438,19 +438,19 @@ class TestRunOptimizeBatch(unittest.TestCase):
         statuses = [r.get("status") for r in results]
         self.assertIn("error", statuses)
 
-    @patch("src.services.batch_runner.load_target_symbols")
+    @patch("src.watchlist.batch_runner.load_target_symbols")
     def test_returns_empty_on_no_symbols(self, mock_symbols):
         """銘柄がない場合、空リストが返ること"""
-        from src.services.backtest_optimize_pipeline import run_optimize_batch
+        from src.backtest.optimizer import run_optimize_batch
 
         mock_symbols.return_value = []
         results = run_optimize_batch(model_type="XGBoostModel")
         self.assertEqual(results, [])
 
-    @patch("src.services.batch_runner.load_target_symbols")
+    @patch("src.watchlist.batch_runner.load_target_symbols")
     def test_passes_as_of_date_to_symbol_loader(self, mock_symbols):
         """as_of_date が load_target_symbols に渡されること"""
-        from src.services.backtest_optimize_pipeline import run_optimize_batch
+        from src.backtest.optimizer import run_optimize_batch
 
         mock_symbols.return_value = []
         run_optimize_batch(model_type="XGBoostModel", as_of_date="2025-06-30")

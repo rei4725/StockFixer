@@ -293,8 +293,8 @@ def _build_signal_matrix(
 
     学習データは train_ratio で分割し、テスト期間の予測のみ収録する。
     """
+    from src.backtest.pipeline import _ensemble_predict, load_features
     from src.models.model_manager import ModelManager
-    from src.services.backtest_pipeline import _ensemble_predict, load_features
 
     score_dict: dict[str, pd.Series] = {}
     close_dict: dict[str, pd.Series] = {}
