@@ -5,16 +5,11 @@ from discord.ext import commands
 from discord.utils import escape_markdown
 from dotenv import load_dotenv
 
-from src.domain.types import (
-    MonthlyReportSummary,
-    PredictionResult,
-    SchedulerJobStatus,
-    WatchlistPredictionRow,
-    WatchlistPredictionView,
-)
+from src.orchestration.types import SchedulerJobStatus
+from src.prediction.types import PredictionResult
 from src.reporting.discord.discord_formatters import convert_df_for_discord
 from src.reporting.discord.discord_text import DISCORD_TEXT_LIMIT, split_text_chunks
-from src.services.discord_query_service import (
+from src.reporting.query_service import (
     get_latest_market_prediction_snapshots,
     get_monthly_report_summary,
     get_ranked_prediction_results,
@@ -22,8 +17,10 @@ from src.services.discord_query_service import (
     get_signal_snapshot,
     get_watchlist_prediction_view,
 )
+from src.reporting.types import MonthlyReportSummary
 from src.utils.japan_time import format_jst_from_iso
 from src.utils.logger import get_logger
+from src.watchlist.types import WatchlistPredictionRow, WatchlistPredictionView
 
 logger = get_logger(__name__)
 
