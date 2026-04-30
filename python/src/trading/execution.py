@@ -281,6 +281,29 @@ def _load_execution_metrics(market: str, symbol: str) -> tuple[float | None, flo
     return avg_volume, spread_proxy
 
 
+def _resolve_kelly_params(
+    market: str, symbol: str
+) -> tuple[float | None, float | None, float | None]:
+    """BT実績の Kelly 入力値を optimal_params.json から取得する。
+    未登録・値が 0 以下・NaN の場合は None を返し、RiskManager のデフォルト値を使用させる。
+
+    Returns:
+        (win_rate, avg_win, avg_loss) — 各値が使用不能な場合は None
+    """
+    params = get_optimal_params(market, symbol)
+    metrics = params.get("metrics", {}) if params else {}
+
+    def _extract(key: str) -> float | None:
+        v = metrics.get(key)
+        try:
+            fv = float(v)
+        except (TypeError, ValueError):
+            return None
+        return fv if fv > 0.0 else None
+
+    return _extract("win_rate"), _extract("avg_win"), _extract("avg_loss")
+
+
 def _choose_order_params(
     market: str,
     symbol: str,
@@ -377,6 +400,7 @@ def run_daily_orders(
     logger.info(f"=== 自動発注開始: market={market} mode={mode} broker={broker.broker_name} ===")
 
     risk = RiskManager(broker)
+    risk.update_peak_balance()  # R-307: DD基準値を発注前に更新
     stats: OrderExecutionStats = {
         "buy_orders": 0,
         "sell_orders": 0,
@@ -533,9 +557,15 @@ def run_daily_orders(
             stats["skipped"] += 1
             continue
 
+        kelly_win_rate, kelly_avg_win, kelly_avg_loss = _resolve_kelly_params(
+            str(row["market"]), symbol
+        )
         qty = risk.calc_position_size(
             symbol,
             current_price,
+            win_rate=kelly_win_rate,
+            avg_win=kelly_avg_win,
+            avg_loss=kelly_avg_loss,
             confidence_ratio=float(row.get("confidence_ratio") or 1.0),
         )
         if qty <= 0:
@@ -666,9 +696,15 @@ def run_daily_orders(
                 stats["skipped"] += 1
                 continue
 
+            kelly_win_rate, kelly_avg_win, kelly_avg_loss = _resolve_kelly_params(
+                str(row["market"]), symbol
+            )
             qty = risk.calc_position_size(
                 symbol,
                 current_price,
+                win_rate=kelly_win_rate,
+                avg_win=kelly_avg_win,
+                avg_loss=kelly_avg_loss,
                 confidence_ratio=float(row.get("confidence_ratio") or 1.0),
             )
             if qty <= 0:
