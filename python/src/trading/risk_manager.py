@@ -21,11 +21,10 @@ from config.settings import (
     MAX_POSITION_RATE,
     MAX_POSITIONS,
 )
-from config.trading_policy import (  # noqa: F401  # R-307/R-219 でポジションキャップ・DD制御に使用予定
+from config.trading_policy import (
     DEFAULT_AVG_LOSS,
     DEFAULT_AVG_WIN,
     DEFAULT_WIN_RATE,
-    HIGH_CONFIDENCE_POSITION_CAP,
     MAX_ACCEPTABLE_DRAWDOWN,
 )
 from src.trading.brokers.base import BrokerBase, OrderSide
@@ -38,6 +37,27 @@ logger = get_logger(__name__)
 
 DAILY_LOSS_RATE_ENV = "MAX_DAILY_LOSS_RATE"
 DISABLE_DAILY_LOSS_GUARD_ENV = "DISABLE_DAILY_LOSS_GUARD"
+
+
+def compute_dd_capital_scale(dd_ratio: float, max_dd: float) -> float:
+    """DD 進行率に応じたポジションスケール係数を返す（非線形縮小・R-307）。
+
+    - DD ≤ 0          : scale = 1.0（縮小なし）
+    - DD = max_dd     : scale = 0.25（最大縮小）
+    - 回復期          : DD が減れば scale も自動回復（関数の対称性）
+
+    Args:
+        dd_ratio: 現在のドローダウン率 (0.0〜1.0)
+        max_dd: 許容最大ドローダウン率（設定値）
+
+    Returns:
+        ポジションスケール係数 [0.25, 1.0]
+    """
+    if dd_ratio <= 0.0 or max_dd <= 0.0:
+        return 1.0
+    t = min(1.0, dd_ratio / max_dd)
+    scale = 1.0 - 0.75 * (t**2)
+    return max(0.25, float(scale))
 
 
 class RiskError(Exception):
@@ -238,15 +258,52 @@ class RiskManager:
         confidence_ratio = max(0.0, min(confidence_ratio, 1.0))
         qty = int(qty * confidence_ratio)
 
+        # R-307: DD適応型スケール（DD進行中は非線形縮小）
+        dd_ratio = self.get_current_dd_ratio()
+        dd_scale = compute_dd_capital_scale(dd_ratio, MAX_ACCEPTABLE_DRAWDOWN)
+        if dd_scale < 1.0:
+            logger.info(
+                f"[risk] {symbol}: DD適応縮小 dd={dd_ratio:.1%} "
+                f"max_dd={MAX_ACCEPTABLE_DRAWDOWN:.1%} scale={dd_scale:.2f}"
+            )
+        qty = int(qty * dd_scale)
+
         # 最低単元（日本株は原則 100 株単位）
         lot = 100
         qty = (qty // lot) * lot
 
         logger.debug(
             f"[risk] {symbol}: balance={balance:.0f} kelly={kelly:.3f} "
-            f"invest={invest_amount:.0f} confidence={confidence_ratio:.3f} qty={qty}"
+            f"invest={invest_amount:.0f} confidence={confidence_ratio:.3f} "
+            f"dd_scale={dd_scale:.2f} qty={qty}"
         )
         return qty
+
+    # ------------------------------------------------------------------
+    # R-307: DD適応型資本配分
+    # ------------------------------------------------------------------
+
+    def update_peak_balance(self) -> None:
+        """現在残高が過去最高値を超えた場合に peak_balance を更新する。
+        run_daily_orders の先頭で呼び出すこと。
+        """
+        current = self._broker.get_balance()
+        with _db_connection() as con:
+            row = con.execute("SELECT peak_balance FROM dd_state WHERE id = 1").fetchone()
+            if row is None:
+                con.execute("INSERT INTO dd_state (id, peak_balance) VALUES (1, ?)", [current])
+            elif current > float(row[0]):
+                con.execute("UPDATE dd_state SET peak_balance = ? WHERE id = 1", [current])
+
+    def get_current_dd_ratio(self) -> float:
+        """現在のドローダウン率（peak_balance との差分比）を返す。"""
+        current = self._broker.get_balance()
+        with _db_connection() as con:
+            row = con.execute("SELECT peak_balance FROM dd_state WHERE id = 1").fetchone()
+        if row is None or float(row[0]) <= 0:
+            return 0.0
+        peak = float(row[0])
+        return max(0.0, (peak - current) / peak)
 
     # ------------------------------------------------------------------
     # 内部ヘルパー
@@ -308,12 +365,12 @@ class RiskManager:
                     SELECT COALESCE(SUM(realized_pnl), 0.0)
                     FROM paper_orders
                     WHERE status = 'filled'
-                      AND side = ?
+                      AND side IN (?, ?)
                       AND filled_at IS NOT NULL
                       AND DATE(filled_at) = CURRENT_DATE
                       AND realized_pnl < 0
                     """,
-                    [int(OrderSide.SELL)],
+                    [int(OrderSide.SELL), int(OrderSide.SHORT_COVER)],
                 ).fetchone()
                 return abs(float(row[0])) if row else 0.0
 
@@ -344,12 +401,12 @@ class RiskManager:
                     SELECT realized_pnl
                     FROM paper_orders
                     WHERE status = 'filled'
-                      AND side = ?
+                      AND side IN (?, ?)
                       AND realized_pnl IS NOT NULL
                     ORDER BY filled_at DESC
                     LIMIT ?
                     """,
-                    [int(OrderSide.SELL), MAX_CONSECUTIVE_LOSSES],
+                    [int(OrderSide.SELL), int(OrderSide.SHORT_COVER), MAX_CONSECUTIVE_LOSSES],
                 ).fetchall()
             else:
                 if not self._table_exists(con, "trade_pnl"):

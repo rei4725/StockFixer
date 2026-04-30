@@ -168,7 +168,7 @@ class TestRiskManagerPersistence(unittest.TestCase):
         self.assertEqual(daily_loss, 1234.0)
         query, params = mock_con.execute.call_args[0]
         self.assertIn("FROM paper_orders", query)
-        self.assertEqual(params, [int(OrderSide.SELL)])
+        self.assertEqual(params, [int(OrderSide.SELL), int(OrderSide.SHORT_COVER)])
 
     def test_consecutive_losses_uses_paper_orders(self):
         broker = _make_broker()
@@ -187,7 +187,9 @@ class TestRiskManagerPersistence(unittest.TestCase):
         self.assertEqual(consecutive, 2)
         query, params = mock_con.execute.call_args[0]
         self.assertIn("FROM paper_orders", query)
-        self.assertEqual(params, [int(OrderSide.SELL), MAX_CONSECUTIVE_LOSSES])
+        self.assertEqual(
+            params, [int(OrderSide.SELL), int(OrderSide.SHORT_COVER), MAX_CONSECUTIVE_LOSSES]
+        )
 
     def test_missing_trade_pnl_returns_zero_for_non_paper_broker(self):
         broker = _make_broker()
