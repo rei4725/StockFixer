@@ -42,7 +42,7 @@ try {
     try {
         & $pythonExe -m pytest tests/unit/test_data_pipeline.py tests/unit/test_db_market_data.py tests/unit/test_db_prediction.py tests/unit/test_db_stock_features.py tests/unit/test_shadow_mode.py tests/unit/test_lgbm_xgb_models.py -q --tb=short --basetemp=$smokeBaseTemp 2>&1 | Out-String -Stream | ForEach-Object {
             Write-Log "  [smoke] $_"
-            if ($_ -match "\d+ failed") { $smokeHasFailed = $true }
+            if ($_ -match "\d+ failed") { $script:smokeHasFailed = $true }
         }
         if ($LASTEXITCODE -ne 0) { $smokeHasFailed = $true }
     } finally {
@@ -60,7 +60,7 @@ try {
         & $pythonExe -m pytest tests/unit -v --basetemp=$unitBaseTemp 2>&1 | Out-String -Stream | ForEach-Object {
             Write-Log "  [test] $_"
             # pytest のサマリー行パターン: "1 failed, 3 passed" または "5 failed"
-            if ($_ -match "\d+ failed") { $testHasFailed = $true }
+            if ($_ -match "\d+ failed") { $script:testHasFailed = $true }
         }
         # 収集エラー(exit=2)や内部エラー(exit=3)も確実に検知
         if ($LASTEXITCODE -ne 0) { $testHasFailed = $true }
@@ -77,7 +77,7 @@ try {
     try {
         & $pythonExe -m pytest tests/e2e -v --timeout=300 -m "not slow" --basetemp=$e2eBaseTemp 2>&1 | Out-String -Stream | ForEach-Object {
             Write-Log "  [e2e] $_"
-            if ($_ -match "\d+ failed") { $e2eHasFailed = $true }
+            if ($_ -match "\d+ failed") { $script:e2eHasFailed = $true }
         }
         # exit=1(failed) / exit=2(collection error) / exit=3(internal error) を検知
         # exit=5(no tests collected) は問題なしとみなす
