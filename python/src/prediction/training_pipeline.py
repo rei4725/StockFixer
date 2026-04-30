@@ -355,6 +355,7 @@ def train_models_for_symbol(market: str, symbol: str, horizon: int = 1) -> dict:
         # ModelManagerは各呼び出しで新規作成
         model_manager = ModelManager()
         trained_at = datetime.now().strftime("%Y%m%d_%H%M%S")
+        shap_results: list[dict] = []
 
         for model_type, model_name in [
             ("XGBoostModel", f"StockXGBoostModel{suffix}"),
@@ -397,7 +398,7 @@ def train_models_for_symbol(market: str, symbol: str, horizon: int = 1) -> dict:
                 )
             except Exception as e:
                 logger.warning(f"実験ラン保存スキップ [{market}_{symbol}/{model_name}]: {e}", exc_info=True)
-            # SHAP特徴量寄与の計算・保存・Discord通知
+            # SHAP特徴量寄与の計算・保存
             try:
                 model = model_manager.get_model(model_name)
                 shap_top_bottom = _compute_and_save_shap(
@@ -409,9 +410,14 @@ def train_models_for_symbol(market: str, symbol: str, horizon: int = 1) -> dict:
                     ].tolist()
                 )
                 if not shap_top_bottom.empty:
-                    from src.reporting.discord.discord_utils import send_shap_notification
-
-                    send_shap_notification(market, symbol, model_name, shap_top_bottom)
+                    shap_results.append(
+                        {
+                            "market": market,
+                            "symbol": symbol,
+                            "model_name": model_name,
+                            "shap_top_bottom": shap_top_bottom,
+                        }
+                    )
                 _compute_and_save_permutation_importance(
                     model,
                     X,
@@ -428,7 +434,12 @@ def train_models_for_symbol(market: str, symbol: str, horizon: int = 1) -> dict:
                 )
 
         logger.info(f"[モデル作成完了] {market}/{symbol} (horizon={horizon}d)")
-        return {"market": market, "symbol": symbol, "status": "success"}
+        return {
+            "market": market,
+            "symbol": symbol,
+            "status": "success",
+            "shap_results": shap_results,
+        }
     except Exception as e:
         logger.error(f"[モデル作成エラー] {market}/{symbol}: {e}", exc_info=True)
         return {"market": market, "symbol": symbol, "status": "error", "error": str(e)}

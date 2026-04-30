@@ -268,20 +268,40 @@ def run_weekly_optimization():
         1. ウォッチリスト全銘柄のグリッドサーチ（並列数3）
         2. 最適パラメータを config/optimal_params.json に保存
     """
+    import os
+
     logger.info("=== 週次バックテスト最適化開始 ===")
 
-    from src.backtest.optimizer import run_optimize_batch
+    use_optuna = os.getenv("USE_OPTUNA", "").strip().lower() in ("1", "true", "yes")
+    n_trials = int(os.getenv("OPTUNA_N_TRIALS", "50"))
 
     success, failed = 0, 0
     try:
-        results = run_optimize_batch(
-            model_type="XGBoostModel",
-            ensemble=False,
-            source="file",
-            n_splits=5,
-            max_workers=3,
-            sort_by="sharpe_ratio",
-        )
+        if use_optuna:
+            from src.backtest.optimizer import run_optuna_batch
+
+            logger.info("最適化エンジン: Optuna (n_trials=%d)", n_trials)
+            results = run_optuna_batch(
+                model_type="XGBoostModel",
+                ensemble=False,
+                source="file",
+                n_splits=5,
+                n_trials=n_trials,
+                max_workers=3,
+                sort_by="sharpe_ratio",
+            )
+        else:
+            from src.backtest.optimizer import run_optimize_batch
+
+            logger.info("最適化エンジン: グリッドサーチ")
+            results = run_optimize_batch(
+                model_type="XGBoostModel",
+                ensemble=False,
+                source="file",
+                n_splits=5,
+                max_workers=3,
+                sort_by="sharpe_ratio",
+            )
         success = sum(1 for r in results if not r.get("error"))
         failed = len(results) - success
         logger.info("=== 週次バックテスト最適化完了: 成功=%s, 失敗=%s ===", success, failed)
@@ -411,6 +431,7 @@ def run_daily_drift_check():
 
     all_tasks = {(t.market, t.symbol): t for t in load_target_symbols()}
     success_count = 0
+    all_shap_results: list = []
     for sym in triggered_list:
         task = all_tasks.get((sym["market"], sym["symbol"]))
         if task is None:
@@ -421,6 +442,7 @@ def run_daily_drift_check():
             result = train_models_for_symbol_task(task)
             if result.get("status") == "success":
                 success_count += 1
+                all_shap_results.extend(result.get("shap_results", []))
             else:
                 logger.warning(
                     f"ドリフト再学習スキップ/失敗 ({sym['market']}/{sym['symbol']}): "
@@ -430,3 +452,12 @@ def run_daily_drift_check():
             logger.error("ドリフト再学習失敗 (%s/%s): %s", sym["market"], sym["symbol"], e, exc_info=True)
 
     logger.info("=== 日次ドリフトチェック完了: 再学習=%s/%s 件 ===", success_count, len(triggered_list))
+
+    # SHAP サマリーをまとめて 1 通送信
+    if all_shap_results:
+        try:
+            from src.reporting.discord.discord_utils import send_shap_batch_summary
+
+            send_shap_batch_summary(all_shap_results)
+        except Exception as e:
+            logger.error("SHAP サマリー通知失敗: %s", e, exc_info=True)

@@ -622,3 +622,171 @@ def run_optimize_batch(
 
     logger.info(f"全銘柄最適化バッチ完了: 成功={success_count} / スキップ={skip_count} / エラー={error_count}")
     return summary
+
+
+# ---------------------------------------------------------------------------
+# R-206: Optuna 自動ハイパーパラメータ探索
+# ---------------------------------------------------------------------------
+
+
+def run_optuna_optimization(
+    market: str,
+    symbol: str,
+    model_type: str = "XGBoostModel",
+    ensemble: bool = False,
+    source: str = "file",
+    n_splits: int = 5,
+    initial_cash: float = 1_000_000,
+    fee_rate: float = 0.001,
+    slippage: float = 0.0,
+    n_trials: int = 50,
+    sort_by: str = "sharpe_ratio",
+) -> pd.DataFrame:
+    """
+    Optuna TPE サンプラーによるハイパーパラメータ探索。
+
+    グリッドサーチより少ない試行回数で高品質な最適値を見つける。
+    結果は ``run_optimization`` と同形式の DataFrame で返すため、
+    ``save_optimal_params_json`` にそのまま渡せる。
+
+    Args:
+        market: マーケット識別子
+        symbol: 銘柄シンボル
+        n_trials: Optuna 試行回数（デフォルト 50）
+        sort_by: 最適化指標（デフォルト "sharpe_ratio"）
+        その他: ``run_optimization`` と同様
+
+    Returns:
+        各試行の結果 DataFrame（threshold / metrics 列を含む）
+    """
+    try:
+        import optuna
+
+        optuna.logging.set_verbosity(optuna.logging.WARNING)
+    except ImportError:
+        logger.error("optuna が未インストールです。pip install optuna を実行してください。")
+        return pd.DataFrame()
+
+    _minimize = sort_by in {"max_drawdown", "cost_impact_return", "cost_impact_cash"}
+
+    def _objective(trial: "optuna.Trial") -> float:
+        threshold = trial.suggest_float("threshold", 0.0, 0.02, step=0.001)
+        try:
+            _, _, wf_df = run_backtest_walk_forward(
+                market=market,
+                symbol=symbol,
+                model_type=model_type,
+                threshold=threshold,
+                source=source,
+                n_splits=n_splits,
+                initial_cash=initial_cash,
+                fee_rate=fee_rate,
+                slippage=slippage,
+                ensemble=ensemble,
+            )
+            if wf_df is None or wf_df.empty or sort_by not in wf_df.columns:
+                return float("-inf") if not _minimize else float("inf")
+            val = float(wf_df[sort_by].mean())
+            return -val if _minimize else val
+        except Exception:
+            return float("-inf") if not _minimize else float("inf")
+
+    study = optuna.create_study(
+        direction="maximize",
+        sampler=optuna.samplers.TPESampler(seed=42),
+    )
+    logger.info(f"[{market}/{symbol}] Optuna最適化開始: n_trials={n_trials}")
+    study.optimize(_objective, n_trials=n_trials, show_progress_bar=False)
+    logger.info(f"[{market}/{symbol}] Optuna最適化完了: best_value={study.best_value:.4f}")
+
+    # 結果を run_optimization 互換の DataFrame に変換
+    rows = []
+    for trial in study.trials:
+        if trial.value is None:
+            continue
+        raw_metric = -trial.value if _minimize else trial.value
+        row: Dict[str, Any] = dict(trial.params)
+        row[sort_by] = raw_metric
+        rows.append(row)
+
+    return pd.DataFrame(rows)
+
+
+def run_optuna_batch(
+    model_type: str = "XGBoostModel",
+    ensemble: bool = False,
+    source: str = "file",
+    n_splits: int = 5,
+    n_trials: int = 50,
+    max_workers: int = 3,
+    sort_by: str = "sharpe_ratio",
+    as_of_date: Optional[str] = None,
+) -> list[dict]:
+    """
+    ウォッチリスト全銘柄に Optuna 最適化をバッチ実行し、
+    optimal_params.json を更新する（週次スケジューラから呼び出す）。
+
+    Args:
+        n_trials: 銘柄ごとの Optuna 試行回数
+        max_workers: 並列数
+        その他: ``run_optuna_optimization`` と同様
+
+    Returns:
+        各銘柄の結果サマリー list[dict]
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    from src.watchlist.batch_runner import load_target_symbols
+
+    symbols = load_target_symbols(as_of_date=as_of_date)
+    if not symbols:
+        logger.warning("対象銘柄がありません。")
+        return []
+
+    logger.info(f"Optunaバッチ最適化開始: {len(symbols)}銘柄 / n_trials={n_trials} / 並列={max_workers}")
+
+    def _task(task) -> dict:
+        m = getattr(task, "market", None) or task["market"]
+        s = getattr(task, "symbol", None) or task["symbol"]
+        try:
+            result_df = run_optuna_optimization(
+                market=m,
+                symbol=s,
+                model_type=model_type,
+                ensemble=ensemble,
+                source=source,
+                n_splits=n_splits,
+                n_trials=n_trials,
+                sort_by=sort_by,
+            )
+            return {"market": m, "symbol": s, "status": "success", "result_df": result_df}
+        except Exception as e:
+            logger.error(f"[{m}/{s}] Optuna最適化エラー: {e}", exc_info=True)
+            return {"market": m, "symbol": s, "status": "error", "error": str(e)}
+
+    # フェーズ1: 並列最適化
+    results = []
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(_task, t): t for t in symbols}
+        for future in as_completed(futures):
+            results.append(future.result())
+
+    # フェーズ2: 逐次保存
+    summary, success, error = [], 0, 0
+    for res in results:
+        m, s = res["market"], res["symbol"]
+        if res["status"] != "success":
+            summary.append({"market": m, "symbol": s, "status": "error", "error": res.get("error")})
+            error += 1
+            continue
+        try:
+            save_optimal_params_json(res["result_df"], m, s, sort_by=sort_by)
+            summary.append({"market": m, "symbol": s, "status": "success"})
+            success += 1
+        except Exception as e:
+            logger.error(f"[{m}/{s}] 保存エラー: {e}", exc_info=True)
+            summary.append({"market": m, "symbol": s, "status": "error", "error": str(e)})
+            error += 1
+
+    logger.info(f"Optunaバッチ最適化完了: 成功={success} / エラー={error}")
+    return summary

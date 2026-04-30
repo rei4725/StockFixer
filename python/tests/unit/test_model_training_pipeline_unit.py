@@ -312,7 +312,6 @@ class TestTrainModelsForSymbol(unittest.TestCase):
         self.assertEqual(mock_mm.create_model.call_count, 2)
         self.assertEqual(mock_mm.train_model.call_count, 2)
 
-    @patch("src.reporting.discord.discord_utils.send_shap_notification")
     @patch("src.prediction.training_pipeline._compute_and_save_shap")
     @patch("src.prediction.training_pipeline.save_model_metrics")
     @patch("src.prediction.training_pipeline.ModelManager")
@@ -323,7 +322,6 @@ class TestTrainModelsForSymbol(unittest.TestCase):
         mock_mm_cls,
         mock_save_metrics,
         mock_compute_shap,
-        mock_send_shap,
     ):
         mock_load.return_value = self._make_feature_result()
         dates = pd.date_range("2024-01-01", periods=100, freq="D")
@@ -340,10 +338,18 @@ class TestTrainModelsForSymbol(unittest.TestCase):
             }
         )
 
-        train_models_for_symbol("us", "AAPL")
+        result = train_models_for_symbol("us", "AAPL")
 
+        # SHAP計算はモデルごと（XGBoost + LightGBM）に2回実行される
         self.assertEqual(mock_compute_shap.call_count, 2)
-        self.assertEqual(mock_send_shap.call_count, 2)
+        # 個別Discord通知ではなく、shap_resultsとして戻り値に集約される
+        self.assertIn("shap_results", result)
+        self.assertEqual(len(result["shap_results"]), 2)
+        for entry in result["shap_results"]:
+            self.assertEqual(entry["market"], "us")
+            self.assertEqual(entry["symbol"], "AAPL")
+            self.assertIn("model_name", entry)
+            self.assertFalse(entry["shap_top_bottom"].empty)
 
 
 class TestTrainModelsForSymbolTask(unittest.TestCase):

@@ -660,6 +660,47 @@ def send_shap_notification(
     return send_webhook_text_chunked("\n".join(lines), preserve_lines=False)
 
 
+def send_shap_batch_summary(shap_results: list) -> bool:
+    """
+    複数銘柄の学習後に SHAP 特徴量寄与をまとめて 1 通で Discord に送信する。
+
+    Args:
+        shap_results: train_models_for_symbol の戻り値 dict の "shap_results" リストを
+            連結したもの。各エントリは
+            {"market": str, "symbol": str, "model_name": str, "shap_top_bottom": pd.DataFrame}
+
+    Returns:
+        送信成功時 True
+    """
+    import pandas as pd
+
+    if not shap_results:
+        return False
+
+    now = format_jst(fmt="%Y/%m/%d %H:%M JST")
+    lines = [f"**[SHAP 特徴量寄与サマリー] {now}** ({len(shap_results)} モデル)"]
+
+    for entry in shap_results:
+        market = entry.get("market", "?")
+        symbol = entry.get("symbol", "?")
+        model_name = entry.get("model_name", "?")
+        shap_df = entry.get("shap_top_bottom")
+        if not isinstance(shap_df, pd.DataFrame) or shap_df.empty:
+            continue
+        sorted_df = shap_df.sort_values("shap_rank")
+        top3 = sorted_df.head(3)
+        lines.append(f"\n**{market}/{symbol}** `{model_name}`")
+        for _, row in top3.iterrows():
+            lines.append(
+                f"  #{int(row['shap_rank']):>3} `{row['feature']}` — {row['shap_mean']:.6f}"
+            )
+
+    if len(lines) <= 1:
+        return False
+
+    return send_webhook_text_chunked("\n".join(lines), preserve_lines=False)
+
+
 def send_drift_retrain_notification(
     triggered_symbols: list, mae_threshold: float, hit_rate_threshold: float
 ) -> bool:
