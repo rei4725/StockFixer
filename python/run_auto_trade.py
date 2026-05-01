@@ -30,7 +30,7 @@ def _build_broker(mode: str):
     if mode == "live":
         import os
 
-        from src.brokers.kabu.kabu_client import KabuBroker
+        from src.trading.brokers.kabu.kabu_client import KabuBroker
 
         api_password = os.environ.get("KABU_API_PASSWORD")
         if not api_password:
@@ -40,7 +40,7 @@ def _build_broker(mode: str):
             sys.exit(1)
         return KabuBroker(api_password=api_password)
     else:
-        from src.brokers.paper.paper_broker import PaperBroker
+        from src.trading.brokers.paper.paper_broker import PaperBroker
 
         return PaperBroker()
 

@@ -8,7 +8,7 @@
 import argparse
 import sys
 
-from src.prediction.unified_model_pipeline import train_unified_model
+from src.prediction.unified_model_pipeline import train_unified_models_batch
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -40,22 +40,13 @@ def main():
         help="予測ホライズン（営業日）。複数指定可（例: --horizons 1 3 5 10）",
     )
     args = parser.parse_args()
-    args.both = not args.no_both
 
-    for horizon in args.horizons:
-        suffix = f"_{horizon}d" if horizon > 1 else ""
-        logger.info(f"=== 統合モデル学習: horizon={horizon}d ===")
-
-        if args.both:
-            for model_type in ["XGBoostModel", "LightGBMModel"]:
-                short = model_type.replace("Model", "")
-                model_name = f"UnifiedStock{short}{suffix}"
-                logger.info(f"学習開始: {model_name}")
-                train_unified_model(model_type=model_type, model_name=model_name, horizon=horizon)
-        else:
-            short = args.model_type.replace("Model", "")
-            model_name = args.model_name or f"UnifiedStock{short}{suffix}"
-            train_unified_model(model_type=args.model_type, model_name=model_name, horizon=horizon)
+    train_unified_models_batch(
+        horizons=args.horizons,
+        both=not args.no_both,
+        model_type=args.model_type,
+        model_name=args.model_name,
+    )
 
 
 if __name__ == "__main__":

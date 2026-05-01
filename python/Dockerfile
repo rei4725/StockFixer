@@ -37,9 +37,9 @@ ENV PYTHONIOENCODING=utf-8
 ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
 
-# ヘルスチェック（プロセス生存確認）
-HEALTHCHECK --interval=60s --timeout=10s --retries=3 \
-    CMD python -c "import os, signal; os.kill(1, signal.SIG_DFL)" || exit 1
+# ヘルスチェック（/health エンドポイントを叩いて DB 接続と業務状態を確認）
+HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --retries=3 \
+    CMD python -c "import urllib.request, sys; r=urllib.request.urlopen('http://localhost:5100/health',timeout=8); sys.exit(0 if r.status==200 else 1)" || exit 1
 
 # デフォルトコマンド: スケジューラ + Discord Bot
 CMD ["python", "run_scheduler.py", "--with-bot"]
