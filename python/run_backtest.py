@@ -29,7 +29,8 @@ import argparse
 import os
 import sys
 
-from src.services.backtest_pipeline import (
+from src.backtest.pipeline import (
+    fetch_benchmark_for_result,
     print_backtest_metrics,
     run_backtest_single,
     run_backtest_walk_forward,
@@ -223,19 +224,9 @@ def main():
         # ベンチマーク比較
         benchmark_info = None
         if args.benchmark != "none" and metrics and result_df is not None and not result_df.empty:
-            from src.backtest.metrics import BENCHMARK_TICKERS, fetch_benchmark_returns
-
-            bm_ticker = BENCHMARK_TICKERS.get(args.benchmark, args.benchmark)
-            bm_start = (
-                str(result_df["date"].min())[:10]
-                if "date" in result_df.columns
-                else args.start_date
+            benchmark_info = fetch_benchmark_for_result(
+                result_df, args.benchmark, args.start_date, args.end_date
             )
-            bm_end = (
-                str(result_df["date"].max())[:10] if "date" in result_df.columns else args.end_date
-            )
-            if bm_start and bm_end:
-                benchmark_info = fetch_benchmark_returns(bm_ticker, bm_start, bm_end)
 
         print_backtest_metrics(
             metrics,
@@ -262,7 +253,7 @@ def main():
         if chart_path:
             logger.info(f"グラフ保存: {chart_path}")
             if args.discord_chart:
-                from src.api.discord_utils import send_webhook_file
+                from src.reporting.discord.discord_utils import send_webhook_file
 
                 send_webhook_file(
                     chart_path,

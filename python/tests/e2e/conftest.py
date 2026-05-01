@@ -1,4 +1,4 @@
-"""
+﻿"""
 E2E テスト共通 fixture
 
 テスト専用の孤立環境（一時 DuckDB + 一時モデルディレクトリ）を構築し、
@@ -124,12 +124,16 @@ def e2e_db_env(e2e_ohlcv, tmp_path_factory):
             return_value=models_dir,
         ),
         # Discord 送信を抑制（SHAP / 学習完了通知）
-        mock.patch("src.api.discord_utils.send_shap_notification", return_value=None),
-        mock.patch("src.api.discord_utils.send_daily_pipeline_completion", return_value=None),
-        mock.patch("src.api.discord_utils.send_daily_pipeline_error", return_value=None),
+        mock.patch("src.reporting.discord.discord_utils.send_shap_notification", return_value=None),
+        mock.patch(
+            "src.reporting.discord.discord_utils.send_daily_pipeline_completion", return_value=None
+        ),
+        mock.patch(
+            "src.reporting.discord.discord_utils.send_daily_pipeline_error", return_value=None
+        ),
         # クロスアセット特徴量をモックして学習/予測で特徴量数を一致させる（R-306）
         mock.patch("src.models.predict_single_stock.fetch_cross_asset_features", return_value=None),
-        mock.patch("src.services.data_pipeline.fetch_cross_asset_features", return_value=None),
+        mock.patch("src.market_data.pipeline.fetch_cross_asset_features", return_value=None),
     ]
     for p in patchers:
         p.start()
@@ -175,7 +179,7 @@ def _generate_and_save_features(market: str, symbol: str, df: pd.DataFrame) -> N
     data_pipeline.fetch_stock_data_with_features と同等の処理を直接実行する
     （yfinance 呼び出しを完全に回避するため）。
     """
-    from src.features.technical_analysis import add_technical_indicators, create_basic_lag_features
+    from src.analysis.technical import add_technical_indicators, create_basic_lag_features
     from src.utils.data_path_utils import normalize_col
     from src.utils.db import upsert_stock_features
 
@@ -208,7 +212,7 @@ def _train_models(market: str, symbol: str) -> None:
     stock_features からデータを読み込み XGBoost / LightGBM を学習する。
     決算日データ取得（yfinance）・Discord 送信はモック不要（呼び出し側でパッチ済み）。
     """
-    from src.services.model_training_pipeline import train_models_for_symbol
+    from src.prediction.training_pipeline import train_models_for_symbol
 
     # get_earnings_dates は yfinance を呼ぶが、失敗時は空配列を返すため
     # 明示的なモックなしでも安全に動作する

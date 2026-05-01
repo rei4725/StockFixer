@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Callable, Optional
 
 import pandas as pd
 
@@ -28,6 +28,7 @@ class Backtester:
         atr_min_fraction: float = 0.1,
         atr_max_fraction: float = 1.0,
         enable_short: bool = False,
+        slippage_fn: Optional[Callable[[int, float, float], float]] = None,
     ):
         self.model_manager = model_manager
         self.signal_generator = signal_generator
@@ -48,6 +49,13 @@ class Backtester:
         self.atr_min_fraction = max(0.0, atr_min_fraction)
         self.atr_max_fraction = min(1.0, max(0.0, atr_max_fraction))
         self.enable_short = enable_short
+        self.slippage_fn = slippage_fn  # R-210: 動的スリッページ関数 (qty, price, avg_vol) -> rate
+
+    def _get_slippage(self, qty: int, price: float, volume: float = 0.0) -> float:
+        """有効スリッページ率を返す。slippage_fn が設定されていれば動的モデルを使用する（R-210）。"""
+        if self.slippage_fn is not None and volume > 0:
+            return self.slippage_fn(qty, price, volume)
+        return self.slippage
 
     def run(
         self,
@@ -80,7 +88,7 @@ class Backtester:
             )
 
         # 2. 特徴量生成（テクニカル指標付与）
-        from src.features.technical_analysis import add_technical_indicators
+        from src.analysis.technical import add_technical_indicators
 
         df = add_technical_indicators(df)
 

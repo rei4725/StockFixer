@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pandas as pd
 
-from src.domain.types import PredictionResult
+from src.prediction.types import PredictionResult
 
 # ──────────────────────────────────────────────────────────────────
 # ヘルパー

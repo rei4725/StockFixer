@@ -1,6 +1,6 @@
 import sys
 
-from src.api.discord_bot import TOKEN, bot
+from src.reporting.discord.discord_bot import TOKEN, bot
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)

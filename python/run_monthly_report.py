@@ -8,7 +8,7 @@ Walk-Forward レポートおよび DuckDB から集計して標準出力へ表�
 import argparse
 import sys
 
-from src.services.monthly_report_pipeline import run_monthly_report
+from src.reporting.monthly import run_monthly_report
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)

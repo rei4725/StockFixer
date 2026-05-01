@@ -3,7 +3,6 @@ import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
-import numpy as np
 import pandas as pd
 
 # shap が未インストールの場合はモック
@@ -70,7 +69,7 @@ class TestGetCachedModel(unittest.TestCase):
 
         mod._model_cache.clear()
 
-    @patch("src.services.unified_model_pipeline.load_unified_model")
+    @patch("src.prediction.unified_model_pipeline.load_unified_model")
     def test_loads_model_on_first_call(self, mock_load):
         """初回呼び出しでモデルがロードされること"""
         from src.models.predict_unified import get_cached_model
@@ -82,7 +81,7 @@ class TestGetCachedModel(unittest.TestCase):
         self.assertIsNotNone(result)
         mock_load.assert_called_once_with("XGBoostModel")
 
-    @patch("src.services.unified_model_pipeline.load_unified_model")
+    @patch("src.prediction.unified_model_pipeline.load_unified_model")
     def test_returns_cached_model_on_second_call(self, mock_load):
         """2回目以降の呼び出しでキャッシュが使われること（load は1回のみ）"""
         from src.models.predict_unified import get_cached_model
@@ -95,7 +94,7 @@ class TestGetCachedModel(unittest.TestCase):
         # モデルロードは1回のみ（2回目はキャッシュから返す）
         mock_load.assert_called_once()
 
-    @patch("src.services.unified_model_pipeline.load_unified_model")
+    @patch("src.prediction.unified_model_pipeline.load_unified_model")
     def test_returns_none_when_load_fails(self, mock_load):
         """モデルロード失敗時（FileNotFoundError）は None が返ること"""
         from src.models.predict_unified import get_cached_model
@@ -104,7 +103,7 @@ class TestGetCachedModel(unittest.TestCase):
         result = get_cached_model("NonExistentModel")
         self.assertIsNone(result)
 
-    @patch("src.services.unified_model_pipeline.load_unified_model")
+    @patch("src.prediction.unified_model_pipeline.load_unified_model")
     def test_caches_none_on_load_failure(self, mock_load):
         """ロード失敗時も None がキャッシュされ、再ロードされないこと"""
         from src.models.predict_unified import get_cached_model

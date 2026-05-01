@@ -420,6 +420,15 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
     """
     )
 
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS dd_state (
+            id            INTEGER PRIMARY KEY,
+            peak_balance  DOUBLE  NOT NULL
+        )
+    """
+    )
+
 
 def init_tables() -> None:
     """外部から明示的にテーブル初期化する場合に使用"""

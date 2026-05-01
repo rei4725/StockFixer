@@ -6,7 +6,7 @@ import unittest
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import src.utils.data_path_utils as path_utils  # noqa: E402
 import src.utils.db as db_module  # noqa: E402
-from src.api.discord_bot import get_top10_diff_stocks_message  # noqa: E402
+from src.reporting.discord.discord_bot import get_top10_diff_stocks_message  # noqa: E402
 
 
 class TestGetTop10DiffStocksMessage(unittest.TestCase):
@@ -33,7 +33,7 @@ class TestGetTop10DiffStocksMessage(unittest.TestCase):
             os.rmdir(self.tmp_dir)
 
     def test_normal(self):
-        from src.domain.types import PredictionResult
+        from src.prediction.types import PredictionResult
         from src.utils.db import save_prediction_results
 
         results = [

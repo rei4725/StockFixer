@@ -31,7 +31,7 @@ logger = get_logger(__name__)
 
 def _build_queue_manager():
     """キュー方式ジョブ管理を初期化する"""
-    from src.services.scheduler_queue import SchedulerQueueManager
+    from src.orchestration.scheduler_queue import SchedulerQueueManager
 
     manager = SchedulerQueueManager(SCHEDULE_CONFIG)
     logger.info(f"キュー状態ログ: {manager.state_file_path}")
@@ -41,63 +41,63 @@ def _build_queue_manager():
 # ── ジョブ定義 ────────────────────────────────────────
 def job_daily_pipeline():
     """毎日実行: データ取得 → 予測 → Discord通知用CSV出力"""
-    from src.services.scheduler_pipeline import run_daily_pipeline
+    from src.orchestration.scheduler import run_daily_pipeline
 
     run_daily_pipeline()
 
 
 def job_weekly_model_training():
     """週次実行: 統合モデル再学習 + 予測精度チェック"""
-    from src.services.scheduler_pipeline import run_weekly_training
+    from src.orchestration.scheduler import run_weekly_training
 
     run_weekly_training()
 
 
 def job_weekly_report():
     """週次実行: パフォーマンスレポート Discord 送信"""
-    from src.services.scheduler_pipeline import run_weekly_report
+    from src.orchestration.scheduler import run_weekly_report
 
     run_weekly_report()
 
 
 def job_daily_auto_order():
     """毎営業日 8:50 - ペーパートレード注文発注（前日予測シグナルを使用）"""
-    from src.services.scheduler_pipeline import run_daily_auto_order
+    from src.orchestration.scheduler import run_daily_auto_order
 
     run_daily_auto_order()
 
 
 def job_daily_settle_orders():
     """毎営業日 9:05 - ペーパートレード pending 注文を当日始値で約定処理"""
-    from src.services.scheduler_pipeline import run_daily_settle_orders
+    from src.orchestration.scheduler import run_daily_settle_orders
 
     run_daily_settle_orders()
 
 
 def job_daily_paper_trade_report():
     """毎営業日 15:30 - ペーパートレードポジション・損益レポートを Discord に送信"""
-    from src.services.scheduler_pipeline import run_daily_paper_trade_report
+    from src.orchestration.scheduler import run_daily_paper_trade_report
 
     run_daily_paper_trade_report()
 
 
 def job_weekly_optimization():
     """週次実行: 全銘柄バックテスト最適化 → 最適パラメータ更新"""
-    from src.services.scheduler_pipeline import run_weekly_optimization
+    from src.orchestration.scheduler import run_weekly_optimization
 
     run_weekly_optimization()
 
 
 def job_weekly_walk_forward_report():
     """週次実行: Walk-Forward 比較レポート生成"""
-    from src.services.scheduler_pipeline import run_weekly_walk_forward_report
+    from src.orchestration.scheduler import run_weekly_walk_forward_report
 
     run_weekly_walk_forward_report()
 
 
 def job_daily_drift_check():
     """毎営業日実行: ドリフト監視と閾値超過銘柄の再学習"""
-    from src.services.scheduler_pipeline import run_daily_drift_check
+    from src.orchestration.scheduler import run_daily_drift_check
 
     run_daily_drift_check()
 
@@ -280,9 +280,19 @@ def _print_schedule():
     print("=" * 60 + "\n")
 
 
+def _start_health_server() -> None:
+    """ヘルスチェックサーバーをデーモンスレッドで起動する"""
+    import os
+
+    from src.api.health import start_health_server
+
+    port = int(os.getenv("HEALTH_PORT", "5100"))
+    start_health_server(port=port)
+
+
 def run_with_bot():
     """Discord Botとスケジューラを同時に起動する"""
-    from src.api.discord_bot import TOKEN, bot
+    from src.reporting.discord.discord_bot import TOKEN, bot
 
     if not TOKEN:
         logger.error("DISCORD_BOT_TOKEN環境変数が設定されていません。")
@@ -297,6 +307,7 @@ def run_with_bot():
     _print_schedule()
     print("  Discord Bot と同時起動中\n")
 
+    _start_health_server()
     scheduler.start()
     try:
         bot.run(TOKEN)
@@ -312,6 +323,7 @@ def run_scheduler_only():
     scheduler.add_listener(_job_listener, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR)
 
     _print_schedule()
+    _start_health_server()
 
     try:
         scheduler.start()

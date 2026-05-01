@@ -6,7 +6,7 @@ AI モデル学習・予測パイプラインで使用するドメイン型。
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 import pandas as pd
@@ -57,7 +57,7 @@ class PredictionResult:
     # ------------------------------------------------------------------
 
     @classmethod
-    def to_dataframe(cls, results: list[PredictionResult]) -> pd.DataFrame:
+    def to_dataframe(cls, results: list["PredictionResult"]) -> pd.DataFrame:
         """PredictionResult のリストを保存・集計用 DataFrame に変換する。"""
         rows = []
         for r in results:
@@ -123,3 +123,20 @@ class PredictionResult:
             confidence_ratio=_opt_float("confidence_ratio"),
             model_version=_opt_str("model_version"),
         )
+
+
+@dataclass
+class ShapFeatureContribution:
+    """SHAP 説明の1特徴量。"""
+
+    feature: str
+    shap_value: float
+
+
+@dataclass
+class SignalSnapshot:
+    """Discord signal コマンド向けの予測スナップショット。"""
+
+    prediction: PredictionResult
+    shap_direction: Optional[str] = None
+    top_features: list[ShapFeatureContribution] = field(default_factory=list)

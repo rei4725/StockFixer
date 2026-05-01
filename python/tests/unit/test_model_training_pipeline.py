@@ -9,7 +9,7 @@ class TestComputeTrainingMetrics(unittest.TestCase):
     """_compute_training_metrics のテスト（純粋関数）"""
 
     def _fn(self, y_true, y_pred):
-        from src.services.model_training_pipeline import _compute_training_metrics
+        from src.prediction.training_pipeline import _compute_training_metrics
 
         return _compute_training_metrics(
             pd.Series(y_true, dtype=float),
@@ -17,7 +17,7 @@ class TestComputeTrainingMetrics(unittest.TestCase):
         )
 
     def test_returns_training_metrics(self):
-        from src.domain.types import TrainingMetrics
+        from src.prediction.types import TrainingMetrics
 
         result = self._fn([0.01, 0.02, -0.01], [0.01, 0.02, -0.01])
         self.assertIsInstance(result, TrainingMetrics)

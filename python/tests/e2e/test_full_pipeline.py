@@ -16,7 +16,6 @@ Cat3: 1銘柄フル結合テスト
 import os
 from unittest.mock import patch
 
-import pandas as pd
 import pytest
 
 pytestmark = pytest.mark.timeout(300)
@@ -196,7 +195,6 @@ class TestPrediction:
     def test_prediction_result_saved_to_db(self, e2e_db_env):
         """予測結果を DB へ保存できること。"""
         import src.utils.db._connection as _conn
-        from src.domain.types import PredictionResult
         from src.models.predict_single_stock import predict_single_stock
         from src.utils.db import save_prediction_results
 

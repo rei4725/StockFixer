@@ -38,14 +38,13 @@ python/
 ├── Dockerfile                  # Docker設定
 ├── データ取得対象.csv           # 対象銘柄リスト
 ├── src/
-│   ├── api/                    # API・Discord Bot（最上位層）
+│   ├── api/                    # API・Discord Bot（最上位層） ※旧パス・削除済み
 │   ├── services/               # オーケストレーション層（データパイプライン等）
-│   ├── domain/                 # ドメイン型定義（全層共通）
-│   │   └── types.py            # SymbolTask / FeatureLoadResult / TrainingMetrics / PredictionResult
-│   ├── backtest/               # バックテスト
+│   ├── domain/                 # ドメイン型定義 ※旧パス・削除済み（各BC の types.py に移行）
+│   ├── backtest/               # バックテスト BC
 │   ├── models/                 # AI予測モデル
 │   ├── strategy/               # シグナル生成
-│   ├── features/               # テクニカル分析・特徴量生成
+│   ├── features/               # テクニカル分析・特徴量生成 ※旧パス・削除済み（analysis BC に移行）
 │   ├── data/                   # データ取得・保存（生データのみ）
 │   ├── sbi/                    # SBI証券連携（Flask非依存）
 │   └── utils/                  # ユーティリティ（最下位層）
@@ -171,11 +170,11 @@ run_*.py → api層 → services層 → models/strategy/backtest層 → features
 - 予測値は直近データの翌営業日終値
 
 ### ドメイン型（型安全なデータ受け渡し）
-- 層をまたぐデータは `src/domain/types.py` の dataclass で受け渡す（`dict` / 生 `pd.DataFrame` 返却禁止）
-- `SymbolTask`: バッチ実行の単位タスク。`batch_runner.load_target_symbols()` が返す
-- `FeatureLoadResult`: `load_features_for_training()` の戻り値。`is_success` プロパティで判定する
-- `TrainingMetrics`: `_compute_training_metrics()` の戻り値。`save_model_metrics()` に直接渡す
-- `PredictionResult`: `predict_single_stock()` / `predict_with_unified_model()` の戻り値
+- 層をまたぐデータは各 **Bounded Context の `types.py`** の dataclass で受け渡す（`dict` / 生 `pd.DataFrame` 返却禁止）
+- `SymbolTask`: `src.watchlist.types`。バッチ実行の単位タスク。`batch_runner.load_target_symbols()` が返す
+- `FeatureLoadResult`: `src.analysis.types`。`load_features_for_training()` の戻り値。`is_success` プロパティで判定する
+- `TrainingMetrics`: `src.prediction.types`。`_compute_training_metrics()` の戻り値。`save_model_metrics()` に直接渡す
+- `PredictionResult`: `src.prediction.types`。`predict_single_stock()` / `predict_with_unified_model()` の戻り値
   - 複数件をまとめて渡すとき → `PredictionResult.to_dataframe(results)` で DataFrame 変換
   - `save_prediction_results(predicted_at, results: list[PredictionResult])` でDB保存
 - ML ライブラリ（XGBoost / LightGBM）に渡す特徴量行列 `X` は `pd.DataFrame` のまま維持（型付け対象外）

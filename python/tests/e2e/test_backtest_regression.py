@@ -45,7 +45,7 @@ class TestBacktestRegressionBasic:
     @pytest.fixture(scope="class")
     def backtest_result(self, e2e_db_env):
         """e2e DB に対して run_backtest_single を実行して結果を返す（クラス全体で共有）。"""
-        from src.services.backtest_pipeline import run_backtest_single
+        from src.backtest.pipeline import run_backtest_single
 
         result_df, metrics, price_series = run_backtest_single(
             market=e2e_db_env["market"],
@@ -116,7 +116,7 @@ class TestBacktestRegression:
 
     @pytest.fixture(scope="class")
     def metrics(self, e2e_db_env):
-        from src.services.backtest_pipeline import run_backtest_single
+        from src.backtest.pipeline import run_backtest_single
 
         _, metrics, _ = run_backtest_single(
             market=e2e_db_env["market"],
@@ -158,7 +158,7 @@ class TestWalkForwardBasic:
     @pytest.mark.timeout(300)
     def test_walk_forward_completes(self, e2e_db_env):
         """Walk-Forward バックテストが例外なく完走すること。"""
-        from src.services.backtest_pipeline import run_backtest_walk_forward
+        from src.backtest.pipeline import run_backtest_walk_forward
 
         _, _, wf_df = run_backtest_walk_forward(
             market=e2e_db_env["market"],
@@ -174,7 +174,7 @@ class TestWalkForwardBasic:
     @pytest.mark.timeout(300)
     def test_walk_forward_result_has_fold_column(self, e2e_db_env):
         """Walk-Forward の結果に fold コラムが存在すること。"""
-        from src.services.backtest_pipeline import run_backtest_walk_forward
+        from src.backtest.pipeline import run_backtest_walk_forward
 
         _, _, wf_df = run_backtest_walk_forward(
             market=e2e_db_env["market"],
@@ -219,7 +219,7 @@ class TestProductionBacktestRegression:
             pytest.skip("本番 DB が存在しないためスキップ")
 
         market, symbol = key.split("_", 1)
-        from src.services.backtest_pipeline import run_backtest_single
+        from src.backtest.pipeline import run_backtest_single
 
         try:
             _, metrics, _ = run_backtest_single(

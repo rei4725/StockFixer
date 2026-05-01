@@ -98,11 +98,16 @@
 9. NF-401 カスタム例外階層整備
 10. NF-402 Pylint 有効化
 11. NF-403 DB マイグレーション戦略正式化
-12. NF-501 デプロイ Runbook 作成
-13. NF-502 障害対応フロー（Incident Response）文書化
-14. NF-503 ADR（Architecture Decision Records）導入
-15. NF-504 API 仕様書（OpenAPI）整備
-16. **NF-601〜605 DDD アーキテクチャ移行**（詳細: [DDD_ARCHITECTURE.md](DDD_ARCHITECTURE.md)）
+12. NF-404 services 層サブパッケージ化（DDD移行後の整理）
+13. NF-405 yfinance データソース抽象化
+14. NF-406 PredictionResult 型強化
+15. NF-407 batch_runner エラー集約構造化
+16. NF-408 import アーキテクチャ lint（CI） ★新規（#108/#112 根本解決）
+17. NF-501 デプロイ Runbook 作成
+18. NF-502 障害対応フロー（Incident Response）文書化
+19. NF-503 ADR（Architecture Decision Records）導入
+20. NF-504 API 仕様書（OpenAPI）整備
+21. **NF-601〜605 DDD アーキテクチャ移行**（詳細: [DDD_ARCHITECTURE.md](DDD_ARCHITECTURE.md)）
 
 ### 優先順の考え方（収益改善）
 
@@ -142,6 +147,14 @@
 | NF-201 | （Issue未採番） |
 | NF-202 | （Issue未採番） |
 | NF-301 | （Issue未採番） |
+| NF-404 | #69 |
+| NF-405 | #70 |
+| NF-406 | #72 |
+| NF-407 | #71 |
+| NF-408 | #108 / #112 |
+| R-408 | #80 |
+| R-409 | #82 |
+| R-410 | #83 |
 
 ---
 
@@ -218,6 +231,9 @@
 | R-306 | クロスアセット相関特徴量 | P3 | USD/JPY・VIX・米国債利回りを特徴量に追加し、Hit Rate または Sharpe が改善 |
 | R-307 | ドローダウン適応型資本配分 | P3 | DD進行中に資本量を非線形縮小し、回復期に段階的増加する関数を RiskManager に追加 |
 | R-308 | 分割エントリー/エグジット | P3 | 予測確信度に応じて2〜3分割で約定し、スリッページ実測値（R-107）と比較検証 |
+| R-408 | 予測信頼区間の可視化と活用 | P3 | Quantile Regression で予測の上下幅を算出し、信頼区間をシグナル生成・ポジションサイジングに活用する（Issue #80） |
+| R-409 | 引け前サマリー通知（15:00 アラート） | P3 | 15:00 時点の保有ポジションを再評価し、引け前に Discord へサマリーを自動送信する。R-303 の前段として実用価値が高い（Issue #82） |
+| R-410 | ドリフト監視閾値の動的設定 UI | P3 | ドリフト監視の閾値を Discord コマンドで動的に変更・確認できるようにし、運用中の調整を即時反映する（Issue #83） |
 
 ### Q1 2027 の方針
 
@@ -293,6 +309,8 @@
 - カスタム例外階層でエラー制御を層別に整理し、横断的なエラーハンドリングを可能にする
 - 型安全性を強化し、実行時バグの発生率を下げる
 - DB スキーマ変更を追跡可能にし、ロールバックを安全に行えるようにする
+- `services/` の肥大化を解消し、各機能の変更範囲を明確にする
+- `run_*.py` のアーキテクチャ違反を CI で自動検出し、レイヤー規約を機械的に守れるようにする
 
 ### 実施項目
 
@@ -301,6 +319,11 @@
 | NF-401 | カスタム例外階層整備 | P3 | `src/domain/exceptions.py` に `StockFixerError` 基底クラスと `DataFetchError` / `ModelTrainingError` / `BrokerError` / `PipelineError` を定義し、各層で使用する |
 | NF-402 | Pylint 有効化 | P3 | `.pre-commit-config.yaml` の pylint コメントアウトを解除し、Git バージョン問題を解消してフックを有効化する |
 | NF-403 | DB マイグレーション戦略正式化 | P3 | `src/utils/db/migrations/` ディレクトリに連番 SQL ファイルを配置し、起動時にバージョンチェック + 未適用マイグレーションを自動実行する |
+| NF-404 | services 層サブパッケージ化 | P3 | `src/services/` を機能別サブパッケージに分割し、16 ファイル超のフラット構造を解消する（Issue #69） |
+| NF-405 | yfinance データソース抽象化 | P3 | `DataSourceBase` を定義し、yfinance 実装を差し替え可能にしてテスト容易性を向上する（Issue #70） |
+| NF-406 | PredictionResult 型強化 | P3 | `PredictionResult` のマルチホライズンフィールドを `Optional` ではなく専用型に変更し、型安全性を向上する（Issue #72） |
+| NF-407 | batch_runner エラー集約構造化 | P3 | `BatchResult` 型を導入し、バッチ実行の成功/失敗を構造化して集約・通知できるようにする（Issue #71） |
+| NF-408 | import アーキテクチャ lint（CI） | P3 | `run_*.py → src.utils 直接 import` 等のレイヤー違反を CI で自動検出し、#108/#112 を根本解決する |
 
 ---
 
@@ -392,12 +415,17 @@
 | NF-201 | DONE | 2026-10-31 | 2026-04-21 | integration-tests.yml による統合テスト自動実行を確認済み |
 | NF-202 | DONE | 2026-10-31 | 2026-04-21 | pip-audit JSON パース統一・GITHUB_STEP_SUMMARY 出力・全脆弱性 FAIL |
 | NF-203 | DONE | 2026-11-07 | 2026-04-21 | bandit -ll フラグ・HIGH のみ FAIL・MEDIUM は warning・GITHUB_STEP_SUMMARY 出力 |
-| NF-301 | TODO | 2026-11-30 | - | Flask /health エンドポイント実装、Docker HEALTHCHECK 更新 |
+| NF-301 | DONE | 2026-11-30 | 2026-04-30 | src/api/health.py に Flask /health 追加。DB接続・スケジューラ最終実行時刻・直近予測時刻を JSON 返却。run_scheduler.py に start_health_server() 組込み。Dockerfile HEALTHCHECK を /health 叩く形式に更新 |
 | NF-302 | TODO | 2026-12-07 | - | logger.py に JSON フォーマッタ追加、LOG_FORMAT 環境変数対応 |
 | NF-303 | TODO | 2026-12-14 | - | 条件付きアラートルール定義 |
 | NF-401 | TODO | 2027-01-25 | - | src/domain/exceptions.py 作成 |
 | NF-402 | TODO | 2027-02-01 | - | pylint 有効化（Git バージョン問題解消） |
 | NF-403 | TODO | 2027-02-15 | - | src/utils/db/migrations/ ディレクトリ + マイグレーションランナー実装 |
+| NF-404 | TODO | 2027-02-22 | - | services/ サブパッケージ化（#69） |
+| NF-405 | TODO | 2027-03-01 | - | DataSourceBase 導入・yfinance 抽象化（#70） |
+| NF-406 | TODO | 2027-03-08 | - | PredictionResult マルチホライズン型強化（#72） |
+| NF-407 | TODO | 2027-03-08 | - | BatchResult 導入・バッチエラー集約（#71） |
+| NF-408 | TODO | 2027-03-15 | - | import レイヤー違反 CI lint チェック（#108/#112 根本解決） |
 | NF-501 | TODO | 2027-01-18 | - | docs/RUNBOOK_DEPLOY.md 作成 |
 | NF-502 | TODO | 2027-02-08 | - | docs/INCIDENT_RESPONSE.md 作成 |
 | NF-503 | TODO | 2027-03-01 | - | docs/adr/ ディレクトリ作成・過去ADR遡及記録 |
@@ -405,19 +433,19 @@
 | R-212 | DONE | 2026-11-02 | 2026-04-12 | compute_multi_horizon_score / apply_multi_horizon_score_column 実装・order_execution_pipeline の buy/sell 判定を統合スコアへ移行 |
 | R-213 | DONE | 2026-11-09 | 2026-04-14 | volume_ratio / volume_price_trend / volume_ma_deviation を add_technical_indicators() に追加。モデル再学習が必要。 |
 | R-205 | TODO | 2026-11-02 | - | 歴史的クラッシュ期間リストを docs に整備、許容MDD上限を統計的に確立（高リスク方針の根拠和り） |
-| R-215 | TODO | 2026-11-09 | - | Worst10 空売りシグナルの PaperBroker 検証 |
-| R-216 | TODO | 2026-11-16 | - | `optimal_params.json` を `SignalGenerator` / `RiskManager` が自動参照、BT検証済みの閾値・SL・TPを実運用に反映（高リスク方針の実装基盤） |
-| R-217 | TODO | 2026-11-16 | - | バックテスト実測の `win_rate`/`avg_win`/`avg_loss` を `calc_position_size` に渡し、固定デフォルト値を廃止（Kelly実績化） |
+| R-215 | DONE | 2026-11-09 | 2026-04-30 | paper_broker.get_pnl_summary / RiskManager._get_daily_realized_loss / _get_consecutive_losses に SHORT_COVER を追加。ショートサイドPnLが正確に日次損失・連続損失に反映される |
+| R-216 | DONE | 2026-11-16 | 2026-04-30 | execution.py に _resolve_kelly_params を追加し、buy/short 両ループで BT実績 win_rate/avg_win/avg_loss を calc_position_size に渡す。optimal_params.json 未登録銘柄はデフォルト値にフォールバック |
+| R-217 | DONE | 2026-11-16 | 2026-04-30 | optimizer.py save_optimal_params_json の metrics に avg_win/avg_loss がすでに実装済みを確認。次回 run_backtest_optimize.py 実行時から自動反映 |
 | R-214 | TODO | 2026-12-14 | - | 予測変動量閾値による発注スキップロジックを order_execution_pipeline に追加（高リスク方針と逆行するため後回し） |
 | R-214 | TODO | 2026-11-16 | - | 予測変動量閾値による発注スキップロジックを order_execution_pipeline に追加 |
 | R-215 | TODO | 2026-11-23 | - | Worst10 空売りシグナルの PaperBroker 検証 |
 | R-205 | DONE | 2026-11-30 | 2026-04-23 | stress_test_pipeline.py 実装・統合テスト・CLIスモークテスト追加。コロナ/リーマンシナリオ対応。 |
 | R-201 | TODO | 2026-10-26 | - | |
 | R-202 | DONE | 2026-11-02 | 2026-04-14 | model_metrics テーブルの directional_accuracy を使い softmax 重み付きアンサンブルを実装（predict_single_stock / predict_unified）。 |
-| R-206 | TODO | 2026-11-09 | - | R-004 Walk-Forward と連動 |
+| R-206 | DONE | 2026-11-09 | 2026-04-30 | optimizer.py に run_optuna_optimization / run_optuna_batch 追加。scheduler.py に USE_OPTUNA / OPTUNA_N_TRIALS 環境変数対応。requirements.txt に optuna>=3.6.0 追加 |
 | R-207 | TODO | 2026-11-16 | - | |
 | R-209 | TODO | 2026-11-30 | - | index_membership_history テーブルを DuckDB に追加 |
-| R-210 | TODO | 2026-12-07 | - | R-107 paper/real 乖離データでパラメータ推定 |
+| R-210 | DONE | 2026-12-07 | 2026-04-30 | backtest/slippage.py 新規作成（平方根市場インパクトモデル・calibrate_alpha・make_slippage_fn）。backtester.py に slippage_fn パラメータと _get_slippage() ヘルパー追加 |
 | R-204 | TODO | 2026-12-14 | - | |
 | R-301 | TODO | 2027-01-18 | - | 資本配分を単銘柄判定からポートフォリオ最適化へ拡張 |
 | R-302 | TODO | 2027-02-15 | - | shadow 成績と本番成績の比較による昇格ゲートを実装 |
@@ -425,7 +453,7 @@
 | R-304 | TODO | 2027-04-12 | - | 外部配信向け read-only API と公開条件を分離設計 |
 | R-305 | TODO | 2027-01-25 | - | R-101 market_regime.py のシグナル生成接続 |
 | R-306 | DONE | 2027-02-01 | 2026-04-14 | fetch_cross_asset_features() を data_loader.py に追加し、data_pipeline / predict_single_stock で結合。モデル再学習が必要。 |
-| R-307 | TODO | 2026-12-07 | - | RiskManager に DD 段階別縮小関数を追加（Q1 2027 から Q4 Sprint 4 に前倒し） |
+| R-307 | DONE | 2026-12-07 | 2026-04-30 | compute_dd_capital_scale 純粋関数・update_peak_balance・get_current_dd_ratio を risk_manager.py に追加。dd_state テーブルを _connection.py DDL に追加。execution.py の run_daily_orders 先頭で update_peak_balance() 呼び出し |
 | R-308 | TODO | 2027-02-22 | - | R-107 スリッページ実測値と比較する分割発注ロジック |
 | R-401 | TODO | 2027-Q2 | - | |
 | R-402 | TODO | 2027-Q2 | - | |
@@ -434,6 +462,9 @@
 | R-405 | TODO | 2027-Q2 | - | |
 | R-406 | TODO | 2027-Q2 | - | |
 | R-407 | TODO | 2027-Q2 | - | |
+| R-408 | TODO | 2027-Q2 | - | Quantile Regression 信頼区間の可視化と活用（#80） |
+| R-409 | TODO | 2027-01-25 | - | 引け前サマリー通知 15:00 ポジション再評価（#82） |
+| R-410 | TODO | 2027-02-08 | - | ドリフト監視閾値 Discord コマンド UI（#83） |
 
 ステータス定義：TODO / DOING / BLOCKED / DONE（KPI評価済み）
 
@@ -466,6 +497,13 @@
 | NF-202 | 依存脆弱性スキャン（pip-audit JSON パース統一・GITHUB_STEP_SUMMARY 出力） | 2026-04-21 |
 | NF-203 | SAST スキャン（bandit -ll 追加・HIGH のみ FAIL・MEDIUM は warning） | 2026-04-21 |
 | R-214 | 予測変動量閾値スキップロジック（MIN_CHANGE_RATIO・save_order_run_summary 接続） | 2026-04-21 |
+| R-215 | ショートサイド活用（SHORT_COVER PnL を日次損失・連続損失・get_pnl_summary に反映） | 2026-04-30 |
+| R-216 | BT最適パラメータ自動ロード（_resolve_kelly_params 追加・buy/short 両ループで実績 Kelly 適用） | 2026-04-30 |
+| R-217 | Kelly実績更新（optimizer.py metrics に avg_win/avg_loss は実装済みを確認） | 2026-04-30 |
+| R-307 | ドローダウン適応型資本配分（compute_dd_capital_scale・update_peak_balance・dd_state テーブル追加） | 2026-04-30 |
+| R-206 | Optuna 自動ハイパーパラメータ探索（run_optuna_batch・USE_OPTUNA 環境変数・optuna 依存追加） | 2026-04-30 |
+| R-210 | 動的スリッページモデル（slippage.py 新規・平方根市場インパクト・backtester.py 統合） | 2026-04-30 |
+| NF-301 | /health エンドポイント実装（DB接続・スケジューラ最終実行時刻・直近予測時刻 JSON 返却・Docker HEALTHCHECK 更新） | 2026-04-30 |
 
 ---
 
@@ -498,3 +536,4 @@
 - 2026-04-11: 収益改善追加施策として R-212〜R-215（Q4 2026 即効・低コスト）、R-305〜R-308（Q1 2027 中期）、R-401〜R-407（Q2 2027+ 長期）を追加
 - 2026-04-19: 非機能改善施策（NF-101～NF-504）を新設。CI/CD・監視・コード品質・制度文書の5フェーズ15施策を追加
 - 2026-04-20: 高リスク方針への転換に伴う優先度見直し。R-205・R-307を前倒し、R-216（BT最適パラメータ自動ロード）・R-217（Kelly実績更新）を新規追加。R-214（リバランス頻度最適化）を低優先度に後回し。Q4スプリント案を再構成
+- 2026-04-30: Sprint 3完了（R-215/R-216/R-217）・Sprint 4完了（R-307/R-206/R-210）・NF-301完了（Flask /health エンドポイント・Docker HEALTHCHECK 更新）

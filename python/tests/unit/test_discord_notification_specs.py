@@ -2,7 +2,7 @@
 
 import unittest
 
-from src.api.discord_notification_specs import (
+from src.reporting.discord.discord_notification_specs import (
     COLOR_CAUTION,
     COLOR_INFO,
     COLOR_WARNING,

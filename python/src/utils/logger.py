@@ -14,13 +14,22 @@
     logger.error("エラー発生", exc_info=True)
 
 ログレベルは環境変数 LOG_LEVEL（デフォルト: INFO）で制御可能。
+
+【機密値マスキング】
+以下の条件を満たす環境変数の値はログ出力前に自動的に ***REDACTED*** へ置換される。
+  - 変数名が DISCORD_, TOKEN, SECRET, PASSWORD, WEBHOOK, API_KEY, AUTH,
+    CREDENTIAL のいずれかを含む
+  - 値の長さが 8 文字以上（短すぎる値による誤検知を防止）
+例外トレースバック内の機密値も対象。
 """
 
 import io
 import logging
 import os
+import re
 import sys
 from logging.handlers import RotatingFileHandler
+from typing import Optional
 
 _LOG_FORMAT = "[%(asctime)s.%(msecs)03d] [%(levelname)-5s] [%(name)s] %(message)s"
 _DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
@@ -30,6 +39,66 @@ _PYTHON_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 _LOG_DIR = os.path.join(_PYTHON_ROOT, "logs")
 
 _root_configured = False
+
+# ── 機密値マスキング ─────────────────────────────────────────────────────────
+_MASK_PLACEHOLDER = "***REDACTED***"
+_MIN_MASK_LENGTH = 8
+
+# 機密性が高い環境変数名のキーワード（大文字で比較）
+_SENSITIVE_KEY_WORDS = (
+    "DISCORD_",
+    "TOKEN",
+    "SECRET",
+    "PASSWORD",
+    "WEBHOOK",
+    "API_KEY",
+    "AUTH",
+    "CREDENTIAL",
+)
+
+
+def _collect_sensitive_values() -> list:
+    """
+    環境変数から機密値を収集して返す。
+
+    - 変数名が _SENSITIVE_KEY_WORDS のいずれかを含むもののみ対象
+    - 長さが _MIN_MASK_LENGTH 未満の値は除外（誤検知防止）
+    - 長い値を先に置換するため降順ソート（部分文字列の誤置換防止）
+    """
+    values = []
+    for key, val in os.environ.items():
+        if len(val) < _MIN_MASK_LENGTH:
+            continue
+        upper_key = key.upper()
+        if any(kw in upper_key for kw in _SENSITIVE_KEY_WORDS):
+            values.append(val)
+    return sorted(set(values), key=len, reverse=True)
+
+
+class _MaskingFormatter(logging.Formatter):
+    """
+    機密値をログ出力前にマスクするフォーマッター。
+    super().format() で生成した最終文字列（例外トレースバック含む）に対して
+    一括置換するため、あらゆる出力経路をカバーできる。
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        sensitive = _collect_sensitive_values()
+        if sensitive:
+            pattern = "|".join(re.escape(v) for v in sensitive)
+            self._pattern: Optional[re.Pattern] = re.compile(pattern)
+        else:
+            self._pattern = None
+
+    def format(self, record: logging.LogRecord) -> str:
+        formatted = super().format(record)
+        if self._pattern:
+            formatted = self._pattern.sub(_MASK_PLACEHOLDER, formatted)
+        return formatted
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 def _configure_root() -> None:
@@ -43,7 +112,7 @@ def _configure_root() -> None:
     log_level_name = os.environ.get("LOG_LEVEL", "INFO").upper()
     log_level = getattr(logging, log_level_name, logging.INFO)
 
-    formatter = logging.Formatter(_LOG_FORMAT, datefmt=_DATE_FORMAT)
+    formatter = _MaskingFormatter(_LOG_FORMAT, datefmt=_DATE_FORMAT)
 
     root = logging.getLogger()
     root.setLevel(log_level)

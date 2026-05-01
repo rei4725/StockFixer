@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from src.services.monthly_report_pipeline import (
+from src.reporting.monthly import (
     _compute_avg_slippage,
     _compute_hit_rate,
     _load_latest_wf_summary,
@@ -52,7 +52,7 @@ class TestMeanMetric(unittest.TestCase):
 class TestLoadLatestWfSummary(unittest.TestCase):
     def test_returns_none_when_no_csv_found(self):
         with patch(
-            "src.services.monthly_report_pipeline.get_results_dir",
+            "src.reporting.monthly.get_results_dir",
             return_value="/nonexistent/path",
         ):
             df, filename = _load_latest_wf_summary()
@@ -80,7 +80,7 @@ class TestLoadLatestWfSummary(unittest.TestCase):
             sample_df.to_csv(csv_path, index=False)
 
             with patch(
-                "src.services.monthly_report_pipeline.get_results_dir",
+                "src.reporting.monthly.get_results_dir",
                 return_value=tmpdir,
             ):
                 df, filename = _load_latest_wf_summary()
@@ -96,13 +96,13 @@ class TestLoadLatestWfSummary(unittest.TestCase):
 
 
 class TestComputeHitRate(unittest.TestCase):
-    @patch("src.services.monthly_report_pipeline.load_prediction_accuracy")
+    @patch("src.reporting.monthly.load_prediction_accuracy")
     def test_returns_none_when_table_empty(self, mock_load):
         mock_load.return_value = pd.DataFrame()
         result = _compute_hit_rate()
         self.assertIsNone(result)
 
-    @patch("src.services.monthly_report_pipeline.load_prediction_accuracy")
+    @patch("src.reporting.monthly.load_prediction_accuracy")
     def test_calculates_mean_direction_match(self, mock_load):
         mock_load.return_value = pd.DataFrame(
             {
@@ -113,7 +113,7 @@ class TestComputeHitRate(unittest.TestCase):
         result = _compute_hit_rate()
         self.assertAlmostEqual(result, 0.75)
 
-    @patch("src.services.monthly_report_pipeline.load_prediction_accuracy")
+    @patch("src.reporting.monthly.load_prediction_accuracy")
     def test_filters_by_checked_at(self, mock_load):
         now = datetime.now()
         old_date = "2020-01-01"
@@ -135,20 +135,20 @@ class TestComputeHitRate(unittest.TestCase):
 
 
 class TestComputeAvgSlippage(unittest.TestCase):
-    @patch("src.services.monthly_report_pipeline.load_paper_real_diff_summary")
+    @patch("src.reporting.monthly.load_paper_real_diff_summary")
     def test_returns_slippage_from_summary(self, mock_summary):
         mock_summary.return_value = {"avg_paper_slippage": 0.002}
         result = _compute_avg_slippage()
         self.assertAlmostEqual(result, 0.002)
 
-    @patch("src.services.monthly_report_pipeline.load_paper_real_diff_summary")
+    @patch("src.reporting.monthly.load_paper_real_diff_summary")
     def test_returns_none_when_key_missing(self, mock_summary):
         mock_summary.return_value = {}
         result = _compute_avg_slippage()
         self.assertIsNone(result)
 
     @patch(
-        "src.services.monthly_report_pipeline.load_paper_real_diff_summary",
+        "src.reporting.monthly.load_paper_real_diff_summary",
         side_effect=Exception("DB error"),
     )
     def test_returns_none_on_exception(self, _mock):
@@ -162,10 +162,10 @@ class TestComputeAvgSlippage(unittest.TestCase):
 
 
 class TestRunMonthlyReport(unittest.TestCase):
-    @patch("src.services.monthly_report_pipeline._compute_avg_slippage", return_value=0.001)
-    @patch("src.services.monthly_report_pipeline._compute_hit_rate", return_value=0.6)
+    @patch("src.reporting.monthly._compute_avg_slippage", return_value=0.001)
+    @patch("src.reporting.monthly._compute_hit_rate", return_value=0.6)
     @patch(
-        "src.services.monthly_report_pipeline._load_latest_wf_summary",
+        "src.reporting.monthly._load_latest_wf_summary",
         return_value=(
             pd.DataFrame(
                 [
@@ -200,10 +200,10 @@ class TestRunMonthlyReport(unittest.TestCase):
         self.assertEqual(summary.symbol_count, 2)
         self.assertEqual(summary.wf_snapshot_file, "wf_summary_20260401.csv")
 
-    @patch("src.services.monthly_report_pipeline._compute_avg_slippage", return_value=None)
-    @patch("src.services.monthly_report_pipeline._compute_hit_rate", return_value=None)
+    @patch("src.reporting.monthly._compute_avg_slippage", return_value=None)
+    @patch("src.reporting.monthly._compute_hit_rate", return_value=None)
     @patch(
-        "src.services.monthly_report_pipeline._load_latest_wf_summary",
+        "src.reporting.monthly._load_latest_wf_summary",
         return_value=(None, None),
     )
     def test_returns_none_kpis_when_no_data(self, _mock_wf, _mock_hit, _mock_slip):
@@ -217,10 +217,10 @@ class TestRunMonthlyReport(unittest.TestCase):
         self.assertIsNone(summary.symbol_count)
         self.assertIsNone(summary.wf_snapshot_file)
 
-    @patch("src.services.monthly_report_pipeline._compute_avg_slippage", return_value=None)
-    @patch("src.services.monthly_report_pipeline._compute_hit_rate", return_value=None)
+    @patch("src.reporting.monthly._compute_avg_slippage", return_value=None)
+    @patch("src.reporting.monthly._compute_hit_rate", return_value=None)
     @patch(
-        "src.services.monthly_report_pipeline._load_latest_wf_summary",
+        "src.reporting.monthly._load_latest_wf_summary",
         return_value=(None, None),
     )
     def test_uses_current_month_when_not_specified(self, _mock_wf, _mock_hit, _mock_slip):

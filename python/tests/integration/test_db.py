@@ -10,7 +10,7 @@ import pandas as pd
 
 import src.utils.data_path_utils as path_utils
 import src.utils.db as db_module
-from src.domain.types import PredictionResult
+from src.prediction.types import PredictionResult
 
 
 class TestDB(unittest.TestCase):

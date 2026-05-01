@@ -1,4 +1,4 @@
-"""scheduler_pipeline モジュールのユニットテスト"""
+﻿"""scheduler_pipeline モジュールのユニットテスト"""
 
 import os
 import tempfile
@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import src.utils.data_path_utils as path_utils
 import src.utils.db as db_module
-from src.services.scheduler_pipeline import run_daily_pipeline, run_weekly_training
+from src.orchestration.scheduler import run_daily_pipeline, run_weekly_training
 
 
 class TestRunDailyPipeline(unittest.TestCase):
@@ -35,10 +35,10 @@ class TestRunDailyPipeline(unittest.TestCase):
         if os.path.exists(self.tmp_dir):
             os.rmdir(self.tmp_dir)
 
-    @patch("src.api.discord_utils.send_daily_pipeline_completion")
-    @patch("src.services.prediction_pipeline.output_top_worst_results")
-    @patch("src.services.prediction_pipeline.predict_all_unified")
-    @patch("src.services.data_pipeline.run_data_batch")
+    @patch("src.reporting.discord.discord_utils.send_daily_pipeline_completion")
+    @patch("src.prediction.prediction_pipeline.output_top_worst_results")
+    @patch("src.prediction.prediction_pipeline.predict_all_unified")
+    @patch("src.market_data.pipeline.run_data_batch")
     def test_daily_pipeline_success(
         self,
         mock_run_batch,
@@ -57,10 +57,10 @@ class TestRunDailyPipeline(unittest.TestCase):
         # 完了通知が送られたことを確認
         mock_send_completion.assert_called_once()
 
-    @patch("src.api.discord_utils.send_daily_pipeline_error")
-    @patch("src.services.prediction_pipeline.output_top_worst_results")
-    @patch("src.services.prediction_pipeline.predict_all_unified")
-    @patch("src.services.data_pipeline.run_data_batch")
+    @patch("src.reporting.discord.discord_utils.send_daily_pipeline_error")
+    @patch("src.prediction.prediction_pipeline.output_top_worst_results")
+    @patch("src.prediction.prediction_pipeline.predict_all_unified")
+    @patch("src.market_data.pipeline.run_data_batch")
     def test_daily_pipeline_data_fetch_error(
         self,
         mock_run_batch,
@@ -80,10 +80,10 @@ class TestRunDailyPipeline(unittest.TestCase):
         # 予測は実行されないはず
         mock_predict.assert_not_called()
 
-    @patch("src.api.discord_utils.send_daily_pipeline_error")
-    @patch("src.services.prediction_pipeline.output_top_worst_results")
-    @patch("src.services.prediction_pipeline.predict_all_unified")
-    @patch("src.services.data_pipeline.run_data_batch")
+    @patch("src.reporting.discord.discord_utils.send_daily_pipeline_error")
+    @patch("src.prediction.prediction_pipeline.output_top_worst_results")
+    @patch("src.prediction.prediction_pipeline.predict_all_unified")
+    @patch("src.market_data.pipeline.run_data_batch")
     def test_daily_pipeline_prediction_error(
         self,
         mock_run_batch,
@@ -101,10 +101,10 @@ class TestRunDailyPipeline(unittest.TestCase):
         # エラー通知が送られたことを確認
         mock_send_error.assert_called_once()
 
-    @patch("src.api.discord_utils.send_daily_pipeline_completion")
-    @patch("src.services.prediction_pipeline.output_top_worst_results")
-    @patch("src.services.prediction_pipeline.predict_all_unified")
-    @patch("src.services.data_pipeline.run_data_batch")
+    @patch("src.reporting.discord.discord_utils.send_daily_pipeline_completion")
+    @patch("src.prediction.prediction_pipeline.output_top_worst_results")
+    @patch("src.prediction.prediction_pipeline.predict_all_unified")
+    @patch("src.market_data.pipeline.run_data_batch")
     def test_daily_pipeline_notification_error(
         self,
         mock_run_batch,
@@ -127,7 +127,7 @@ class TestRunDailyPipeline(unittest.TestCase):
 class TestRunWeeklyTraining(unittest.TestCase):
     """run_weekly_training 関数のテスト"""
 
-    @patch("src.services.unified_model_pipeline.train_unified_model")
+    @patch("src.prediction.unified_model_pipeline.train_unified_model")
     def test_weekly_training_success(self, mock_train):
         """週次学習が正常に完了することを確認"""
         # 実行
@@ -143,7 +143,7 @@ class TestRunWeeklyTraining(unittest.TestCase):
         self.assertEqual(calls[1][1]["model_type"], "LightGBMModel")
         self.assertEqual(calls[1][1]["model_name"], "UnifiedStockLightGBM")
 
-    @patch("src.services.unified_model_pipeline.train_unified_model")
+    @patch("src.prediction.unified_model_pipeline.train_unified_model")
     def test_weekly_training_xgboost_error(self, mock_train):
         """XGBoost学習エラーが発生した場合を確認"""
         mock_train.side_effect = Exception("学習失敗")
@@ -155,7 +155,7 @@ class TestRunWeeklyTraining(unittest.TestCase):
         # train_unified_modelがエラーで呼ばれたことを確認
         mock_train.assert_called_once()
 
-    @patch("src.services.unified_model_pipeline.train_unified_model")
+    @patch("src.prediction.unified_model_pipeline.train_unified_model")
     def test_weekly_training_lightgbm_error(self, mock_train):
         """LightGBM学習エラーが発生した場合を確認"""
         # XGBoostは成功、LightGBMで失敗

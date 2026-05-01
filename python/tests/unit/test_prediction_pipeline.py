@@ -30,12 +30,12 @@ class TestGetOptimalParams(unittest.TestCase):
     """get_optimal_params のテスト（JSON ファイルをモック）"""
 
     def test_returns_empty_when_file_not_exists(self):
-        from src.services.prediction_pipeline import get_optimal_params
+        from src.prediction.prediction_pipeline import get_optimal_params
 
         with tempfile.TemporaryDirectory() as tmp:
             # json ファイルを作らない
             nonexistent = Path(tmp) / "config" / "optimal_params.json"
-            with patch("src.services.prediction_pipeline.Path") as MockPath:
+            with patch("src.prediction.prediction_pipeline.Path") as MockPath:
                 # chaining: Path(__file__).parents[2] / "config"
                 mock_chain = MockPath.return_value
                 chained = mock_chain.parents.__getitem__.return_value
@@ -44,7 +44,7 @@ class TestGetOptimalParams(unittest.TestCase):
         self.assertEqual(result, {})
 
     def test_returns_matching_params(self):
-        from src.services.prediction_pipeline import get_optimal_params
+        from src.prediction.prediction_pipeline import get_optimal_params
 
         with tempfile.TemporaryDirectory() as tmp:
             config_dir = Path(tmp) / "config"
@@ -53,14 +53,14 @@ class TestGetOptimalParams(unittest.TestCase):
             data = {"us_AAPL": {"threshold": 0.02, "metrics": {"sharpe_ratio": 1.5}}}
             json_path.write_text(json.dumps(data), encoding="utf-8")
 
-            with patch("src.services.prediction_pipeline.Path") as MockPath:
+            with patch("src.prediction.prediction_pipeline.Path") as MockPath:
                 parents_mock = MockPath.return_value.parents.__getitem__.return_value
                 parents_mock.__truediv__.return_value.__truediv__.return_value = json_path
                 result = get_optimal_params("us", "AAPL")
         self.assertEqual(result.get("threshold"), 0.02)
 
     def test_returns_empty_when_symbol_missing(self):
-        from src.services.prediction_pipeline import get_optimal_params
+        from src.prediction.prediction_pipeline import get_optimal_params
 
         with tempfile.TemporaryDirectory() as tmp:
             config_dir = Path(tmp) / "config"
@@ -69,14 +69,14 @@ class TestGetOptimalParams(unittest.TestCase):
             data = {"us_GOOG": {"threshold": 0.01}}
             json_path.write_text(json.dumps(data), encoding="utf-8")
 
-            with patch("src.services.prediction_pipeline.Path") as MockPath:
+            with patch("src.prediction.prediction_pipeline.Path") as MockPath:
                 parents_mock = MockPath.return_value.parents.__getitem__.return_value
                 parents_mock.__truediv__.return_value.__truediv__.return_value = json_path
                 result = get_optimal_params("us", "AAPL")
         self.assertEqual(result, {})
 
     def test_returns_empty_on_invalid_json(self):
-        from src.services.prediction_pipeline import get_optimal_params
+        from src.prediction.prediction_pipeline import get_optimal_params
 
         with tempfile.TemporaryDirectory() as tmp:
             config_dir = Path(tmp) / "config"
@@ -84,7 +84,7 @@ class TestGetOptimalParams(unittest.TestCase):
             json_path = config_dir / "optimal_params.json"
             json_path.write_text("not-json", encoding="utf-8")
 
-            with patch("src.services.prediction_pipeline.Path") as MockPath:
+            with patch("src.prediction.prediction_pipeline.Path") as MockPath:
                 parents_mock = MockPath.return_value.parents.__getitem__.return_value
                 parents_mock.__truediv__.return_value.__truediv__.return_value = json_path
                 result = get_optimal_params("us", "AAPL")
@@ -102,7 +102,7 @@ class TestFindModelFiles(unittest.TestCase):
             open(os.path.join(folder_path, model_name), "w").close()
 
     def test_finds_matching_models(self):
-        from src.services.prediction_pipeline import find_model_files
+        from src.prediction.prediction_pipeline import find_model_files
 
         with tempfile.TemporaryDirectory() as tmp:
             self._setup_model_dir(tmp, [("us_AAPL", "StockXGBoostModel.joblib")])
@@ -113,7 +113,7 @@ class TestFindModelFiles(unittest.TestCase):
         self.assertEqual(symbol, "AAPL")
 
     def test_returns_empty_when_no_match(self):
-        from src.services.prediction_pipeline import find_model_files
+        from src.prediction.prediction_pipeline import find_model_files
 
         with tempfile.TemporaryDirectory() as tmp:
             self._setup_model_dir(tmp, [("us_AAPL", "OtherModel.joblib")])
@@ -121,7 +121,7 @@ class TestFindModelFiles(unittest.TestCase):
         self.assertEqual(result, [])
 
     def test_finds_multiple_symbols(self):
-        from src.services.prediction_pipeline import find_model_files
+        from src.prediction.prediction_pipeline import find_model_files
 
         with tempfile.TemporaryDirectory() as tmp:
             self._setup_model_dir(
@@ -138,7 +138,7 @@ class TestFindModelFiles(unittest.TestCase):
         self.assertIn("jp", markets)
 
     def test_returns_correct_path(self):
-        from src.services.prediction_pipeline import find_model_files
+        from src.prediction.prediction_pipeline import find_model_files
 
         with tempfile.TemporaryDirectory() as tmp:
             self._setup_model_dir(tmp, [("us_AAPL", "StockXGBoostModel.joblib")])
@@ -147,7 +147,7 @@ class TestFindModelFiles(unittest.TestCase):
             self.assertTrue(os.path.exists(path))
 
     def test_custom_model_name(self):
-        from src.services.prediction_pipeline import find_model_files
+        from src.prediction.prediction_pipeline import find_model_files
 
         with tempfile.TemporaryDirectory() as tmp:
             self._setup_model_dir(tmp, [("us_AAPL", "StockLightGBMModel.joblib")])
@@ -158,12 +158,12 @@ class TestFindModelFiles(unittest.TestCase):
 class TestPredictAllIndividual(unittest.TestCase):
     """predict_all_individual のテスト"""
 
-    @patch("src.services.prediction_pipeline.find_model_files")
-    @patch("src.services.prediction_pipeline.predict_single_stock")
+    @patch("src.prediction.prediction_pipeline.find_model_files")
+    @patch("src.prediction.prediction_pipeline.predict_single_stock")
     def test_returns_list_of_prediction_results(self, mock_predict, mock_find):
         """predict_single_stock の結果リストが返ること"""
-        from src.domain.types import PredictionResult
-        from src.services.prediction_pipeline import predict_all_individual
+        from src.prediction.prediction_pipeline import predict_all_individual
+        from src.prediction.types import PredictionResult
 
         mock_find.return_value = [("jp", "7203", "/models/jp_7203/XGB.joblib")]
         mock_predict.return_value = PredictionResult(
@@ -180,10 +180,10 @@ class TestPredictAllIndividual(unittest.TestCase):
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0].symbol, "7203")
 
-    @patch("src.services.prediction_pipeline.find_model_files")
+    @patch("src.prediction.prediction_pipeline.find_model_files")
     def test_returns_empty_when_no_models(self, mock_find):
         """モデルが存在しない場合は空リストが返ること"""
-        from src.services.prediction_pipeline import predict_all_individual
+        from src.prediction.prediction_pipeline import predict_all_individual
 
         mock_find.return_value = []
 
@@ -191,12 +191,12 @@ class TestPredictAllIndividual(unittest.TestCase):
 
         self.assertEqual(results, [])
 
-    @patch("src.services.prediction_pipeline.find_model_files")
-    @patch("src.services.prediction_pipeline.predict_single_stock")
+    @patch("src.prediction.prediction_pipeline.find_model_files")
+    @patch("src.prediction.prediction_pipeline.predict_single_stock")
     def test_handles_prediction_exception(self, mock_predict, mock_find):
         """予測中に例外が発生しても他の銘柄の処理は継続すること"""
-        from src.domain.types import PredictionResult
-        from src.services.prediction_pipeline import predict_all_individual
+        from src.prediction.prediction_pipeline import predict_all_individual
+        from src.prediction.types import PredictionResult
 
         mock_find.return_value = [
             ("jp", "7203", "/models/jp_7203/XGB.joblib"),
@@ -227,11 +227,11 @@ class TestPredictAllIndividual(unittest.TestCase):
 class TestOutputTopWorstResults(unittest.TestCase):
     """output_top_worst_results のテスト"""
 
-    @patch("src.services.prediction_pipeline.save_prediction_results")
+    @patch("src.prediction.prediction_pipeline.save_prediction_results")
     def test_saves_results_to_db(self, mock_save):
         """save_prediction_results が呼ばれること"""
-        from src.domain.types import PredictionResult
-        from src.services.prediction_pipeline import output_top_worst_results
+        from src.prediction.prediction_pipeline import output_top_worst_results
+        from src.prediction.types import PredictionResult
 
         results = [
             PredictionResult(
@@ -247,10 +247,10 @@ class TestOutputTopWorstResults(unittest.TestCase):
         output_top_worst_results(results)
         mock_save.assert_called_once()
 
-    @patch("src.services.prediction_pipeline.save_prediction_results")
+    @patch("src.prediction.prediction_pipeline.save_prediction_results")
     def test_no_save_when_empty(self, mock_save):
         """空リストの場合は save_prediction_results が呼ばれないこと"""
-        from src.services.prediction_pipeline import output_top_worst_results
+        from src.prediction.prediction_pipeline import output_top_worst_results
 
         output_top_worst_results([])
         mock_save.assert_not_called()
@@ -259,15 +259,13 @@ class TestOutputTopWorstResults(unittest.TestCase):
 class TestPredictAllUnified(unittest.TestCase):
     """predict_all_unified のテスト"""
 
-    @patch("src.services.prediction_pipeline.get_all_symbols")
+    @patch("src.prediction.prediction_pipeline.get_all_symbols")
     @patch("src.models.predict_unified.preload_models")
     @patch("src.models.predict_unified.predict_with_unified_model")
     def test_returns_list_of_prediction_results(self, mock_predict, mock_preload, mock_symbols):
         """統合モデルで全銘柄の予測結果リストが返ること"""
-        import pandas as pd
-
-        from src.domain.types import PredictionResult
-        from src.services.prediction_pipeline import predict_all_unified
+        from src.prediction.prediction_pipeline import predict_all_unified
+        from src.prediction.types import PredictionResult
 
         mock_symbols.return_value = [("jp", "7203")]
         mock_preload.return_value = None
@@ -284,23 +282,23 @@ class TestPredictAllUnified(unittest.TestCase):
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0].symbol, "7203")
 
-    @patch("src.services.prediction_pipeline.get_all_symbols")
+    @patch("src.prediction.prediction_pipeline.get_all_symbols")
     @patch("src.models.predict_unified.preload_models")
     def test_returns_empty_when_no_symbols(self, mock_preload, mock_symbols):
         """銘柄がない場合は空リストが返ること"""
-        from src.services.prediction_pipeline import predict_all_unified
+        from src.prediction.prediction_pipeline import predict_all_unified
 
         mock_symbols.return_value = []
         mock_preload.return_value = None
         results = predict_all_unified()
         self.assertEqual(results, [])
 
-    @patch("src.services.prediction_pipeline.get_all_symbols")
+    @patch("src.prediction.prediction_pipeline.get_all_symbols")
     @patch("src.models.predict_unified.preload_models")
     @patch("src.models.predict_unified.predict_with_unified_model")
     def test_predict_exception_returns_empty(self, mock_predict, mock_preload, mock_symbols):
         """予測中に例外が発生しても空リストが返ること（例外が伝播しない）"""
-        from src.services.prediction_pipeline import predict_all_unified
+        from src.prediction.prediction_pipeline import predict_all_unified
 
         mock_symbols.return_value = [("jp", "7203")]
         mock_preload.return_value = None
@@ -320,7 +318,7 @@ class TestRunAccuracyCheck(unittest.TestCase):
         """精度データが DB に保存されること"""
         import pandas as pd
 
-        from src.services.prediction_pipeline import run_accuracy_check
+        from src.prediction.prediction_pipeline import run_accuracy_check
 
         # predicted_at は YYYYMMDD_HHMMSS 形式
         mock_load.return_value = pd.DataFrame(
@@ -347,7 +345,7 @@ class TestRunAccuracyCheck(unittest.TestCase):
         """過去予測がない場合は正常終了して空 DataFrame が返ること"""
         import pandas as pd
 
-        from src.services.prediction_pipeline import run_accuracy_check
+        from src.prediction.prediction_pipeline import run_accuracy_check
 
         mock_load.return_value = pd.DataFrame()
         result = run_accuracy_check(horizon=1)
@@ -362,7 +360,7 @@ class TestRunAccuracyCheck(unittest.TestCase):
         """OHLCV が空の場合は save_prediction_accuracy が呼ばれないこと"""
         import pandas as pd
 
-        from src.services.prediction_pipeline import run_accuracy_check
+        from src.prediction.prediction_pipeline import run_accuracy_check
 
         mock_load.return_value = pd.DataFrame(
             {
@@ -383,13 +381,13 @@ class TestRunAccuracyCheck(unittest.TestCase):
 class TestPredictAllUnifiedMultiHorizon(unittest.TestCase):
     """predict_all_unified_multi_horizon のテスト"""
 
-    @patch("src.services.prediction_pipeline.get_all_symbols")
+    @patch("src.prediction.prediction_pipeline.get_all_symbols")
     @patch("src.models.predict_unified.preload_models")
     @patch("src.models.predict_unified.predict_with_unified_model")
     def test_multi_horizon_returns_results(self, mock_predict, mock_preload, mock_symbols):
         """複数ホライズン（[1, 7]）で予測結果リストが返ること"""
-        from src.domain.types import PredictionResult
-        from src.services.prediction_pipeline import predict_all_unified_multi_horizon
+        from src.prediction.prediction_pipeline import predict_all_unified_multi_horizon
+        from src.prediction.types import PredictionResult
 
         mock_symbols.return_value = [("jp", "7203")]
         mock_preload.return_value = None
@@ -412,11 +410,11 @@ class TestPredictAllUnifiedMultiHorizon(unittest.TestCase):
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0].symbol, "7203")
 
-    @patch("src.services.prediction_pipeline.get_all_symbols")
+    @patch("src.prediction.prediction_pipeline.get_all_symbols")
     @patch("src.models.predict_unified.preload_models")
     def test_empty_symbols_returns_empty(self, mock_preload, mock_symbols):
         """銘柄リストが空の場合は空リストが返ること"""
-        from src.services.prediction_pipeline import predict_all_unified_multi_horizon
+        from src.prediction.prediction_pipeline import predict_all_unified_multi_horizon
 
         mock_symbols.return_value = []
         mock_preload.return_value = None
@@ -424,13 +422,13 @@ class TestPredictAllUnifiedMultiHorizon(unittest.TestCase):
         results = predict_all_unified_multi_horizon(horizons=[1, 3])
         self.assertEqual(results, [])
 
-    @patch("src.services.prediction_pipeline.get_all_symbols")
+    @patch("src.prediction.prediction_pipeline.get_all_symbols")
     @patch("src.models.predict_unified.preload_models")
     @patch("src.models.predict_unified.predict_with_unified_model")
     def test_single_horizon_works(self, mock_predict, mock_preload, mock_symbols):
         """ホライズンが1つだけでも正常動作すること"""
-        from src.domain.types import PredictionResult
-        from src.services.prediction_pipeline import predict_all_unified_multi_horizon
+        from src.prediction.prediction_pipeline import predict_all_unified_multi_horizon
+        from src.prediction.types import PredictionResult
 
         mock_symbols.return_value = [("us", "AAPL")]
         mock_preload.return_value = None
@@ -449,12 +447,12 @@ class TestPredictAllUnifiedMultiHorizon(unittest.TestCase):
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0].symbol, "AAPL")
 
-    @patch("src.services.prediction_pipeline.get_all_symbols")
+    @patch("src.prediction.prediction_pipeline.get_all_symbols")
     @patch("src.models.predict_unified.preload_models")
     @patch("src.models.predict_unified.predict_with_unified_model")
     def test_exception_skips_symbol(self, mock_predict, mock_preload, mock_symbols):
         """予測中に例外が発生した銘柄はスキップされること"""
-        from src.services.prediction_pipeline import predict_all_unified_multi_horizon
+        from src.prediction.prediction_pipeline import predict_all_unified_multi_horizon
 
         mock_symbols.return_value = [("jp", "7203")]
         mock_preload.return_value = None
@@ -475,7 +473,7 @@ class TestRunAccuracyCheckAdditional(unittest.TestCase):
         """market が None の行はスキップされること"""
         import pandas as pd
 
-        from src.services.prediction_pipeline import run_accuracy_check
+        from src.prediction.prediction_pipeline import run_accuracy_check
 
         mock_load.return_value = pd.DataFrame(
             {
@@ -499,7 +497,7 @@ class TestRunAccuracyCheckAdditional(unittest.TestCase):
         """avg_pred_price が None の行はスキップされること"""
         import pandas as pd
 
-        from src.services.prediction_pipeline import run_accuracy_check
+        from src.prediction.prediction_pipeline import run_accuracy_check
 
         mock_load.return_value = pd.DataFrame(
             {
@@ -525,7 +523,7 @@ class TestRunAccuracyCheckAdditional(unittest.TestCase):
         """horizon=2 に対して将来データが1件しかない場合はスキップされること"""
         import pandas as pd
 
-        from src.services.prediction_pipeline import run_accuracy_check
+        from src.prediction.prediction_pipeline import run_accuracy_check
 
         mock_load.return_value = pd.DataFrame(
             {
@@ -554,7 +552,7 @@ class TestRunAccuracyCheckAdditional(unittest.TestCase):
         """複数銘柄の予測が一括で採点・保存されること"""
         import pandas as pd
 
-        from src.services.prediction_pipeline import run_accuracy_check
+        from src.prediction.prediction_pipeline import run_accuracy_check
 
         mock_load.return_value = pd.DataFrame(
             {

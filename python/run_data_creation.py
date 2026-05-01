@@ -9,7 +9,7 @@
 import argparse
 import sys
 
-from src.services.data_pipeline import (
+from src.market_data.pipeline import (
     fetch_stock_data_with_features,
     run_data_batch,
     save_stock_data_with_features,

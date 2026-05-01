@@ -9,8 +9,8 @@ import pandas as pd
 
 import src.utils.data_path_utils as path_utils
 import src.utils.db as db_module
-from src.domain.types import PredictionResult
-from src.services.prediction_pipeline import find_model_files, output_top_worst_results
+from src.prediction.prediction_pipeline import find_model_files, output_top_worst_results
+from src.prediction.types import PredictionResult
 
 
 class TestFindModelFiles(unittest.TestCase):
@@ -177,15 +177,15 @@ class TestRunPredictSingle(unittest.TestCase):
         if os.path.exists(self.tmp_dir):
             os.rmdir(self.tmp_dir)
 
-    @patch("src.services.prediction_pipeline.save_prediction_results")
-    @patch("src.services.prediction_pipeline.predict_single_stock")
+    @patch("src.prediction.prediction_pipeline.save_prediction_results")
+    @patch("src.prediction.prediction_pipeline.predict_single_stock")
     def test_predict_single_success(
         self,
         mock_predict,
         mock_save,
     ):
         """単一銘柄の予測が正常に完了することを確認"""
-        from src.services.prediction_pipeline import run_predict_single
+        from src.prediction.prediction_pipeline import run_predict_single
 
         # テスト用予測結果
         result_df = pd.DataFrame(
@@ -210,10 +210,10 @@ class TestRunPredictSingle(unittest.TestCase):
         # save_prediction_resultsが呼ばれたことを確認
         mock_save.assert_called_once()
 
-    @patch("src.services.prediction_pipeline.predict_single_stock")
+    @patch("src.prediction.prediction_pipeline.predict_single_stock")
     def test_predict_single_failure(self, mock_predict):
         """単一銘柄の予測に失敗した場合を確認"""
-        from src.services.prediction_pipeline import run_predict_single
+        from src.prediction.prediction_pipeline import run_predict_single
 
         mock_predict.return_value = None
 
@@ -249,9 +249,9 @@ class TestRunPredictWatchlist(unittest.TestCase):
         if os.path.exists(self.tmp_dir):
             os.rmdir(self.tmp_dir)
 
-    @patch("src.services.prediction_pipeline.save_prediction_results")
+    @patch("src.prediction.prediction_pipeline.save_prediction_results")
     @patch("src.utils.data_path_utils.get_monitor_list_path")
-    @patch("src.services.prediction_pipeline.predict_single_stock")
+    @patch("src.prediction.prediction_pipeline.predict_single_stock")
     def test_predict_watchlist_success(
         self,
         mock_predict,
@@ -261,7 +261,7 @@ class TestRunPredictWatchlist(unittest.TestCase):
         """監視リスト予測が正常に完了することを確認"""
         import tempfile
 
-        from src.services.prediction_pipeline import run_predict_watchlist
+        from src.prediction.prediction_pipeline import run_predict_watchlist
 
         # テスト用監視リストファイル
         watchlist_file = tempfile.NamedTemporaryFile(
@@ -299,7 +299,7 @@ class TestRunPredictWatchlist(unittest.TestCase):
         os.remove(watchlist_file.name)
 
     @patch("src.utils.data_path_utils.get_monitor_list_path")
-    @patch("src.services.prediction_pipeline.predict_single_stock")
+    @patch("src.prediction.prediction_pipeline.predict_single_stock")
     def test_predict_watchlist_all_failures(
         self,
         mock_predict,
@@ -308,7 +308,7 @@ class TestRunPredictWatchlist(unittest.TestCase):
         """監視リストの全銘柄の予測に失敗した場合を確認"""
         import tempfile
 
-        from src.services.prediction_pipeline import run_predict_watchlist
+        from src.prediction.prediction_pipeline import run_predict_watchlist
 
         # テスト用監視リストファイル
         watchlist_file = tempfile.NamedTemporaryFile(

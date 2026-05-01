@@ -33,6 +33,15 @@ bandit-report/
 
 # Pytest temporary files
 python/.pytest_tmp/
+python/.pytest_tmp_runs/
+
+# AI tool settings (local only)
+.claude/
+claude起動.bat
+
+# Patch artifacts
+*.rej
+*.orig
 
 # OS generated files
 .DS_Store

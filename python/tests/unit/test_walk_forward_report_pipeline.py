@@ -5,7 +5,7 @@ from unittest.mock import patch
 import pandas as pd
 import pytest
 
-from src.services.walk_forward_report_pipeline import _build_comparison, _summarize_wf_result
+from src.backtest.walk_forward_report import _build_comparison, _summarize_wf_result
 
 
 def test_summarize_wf_result_returns_mean_values():
@@ -72,14 +72,14 @@ class TestFindLatestSummaryCsv:
 
     def test_returns_none_when_no_csv(self, tmp_path):
         """CSV が存在しない場合は None が返ること"""
-        from src.services.walk_forward_report_pipeline import _find_latest_summary_csv
+        from src.backtest.walk_forward_report import _find_latest_summary_csv
 
         result = _find_latest_summary_csv(tmp_path)
         assert result is None
 
     def test_returns_latest_csv_when_multiple_exist(self, tmp_path):
         """複数 CSV がある場合は最新のものが返ること（名前の降順）"""
-        from src.services.walk_forward_report_pipeline import _find_latest_summary_csv
+        from src.backtest.walk_forward_report import _find_latest_summary_csv
 
         older = tmp_path / "wf_summary_20260101_120000.csv"
         newer = tmp_path / "wf_summary_20260201_120000.csv"
@@ -93,7 +93,7 @@ class TestFindLatestSummaryCsv:
 
     def test_returns_none_when_only_excluded(self, tmp_path):
         """唯一の CSV が exclude に一致する場合は None が返ること"""
-        from src.services.walk_forward_report_pipeline import _find_latest_summary_csv
+        from src.backtest.walk_forward_report import _find_latest_summary_csv
 
         csv = tmp_path / "wf_summary_20260101_120000.csv"
         csv.write_text("col\n1", encoding="utf-8")
@@ -107,7 +107,7 @@ class TestToMarkdownSummary:
 
     def test_returns_markdown_string(self):
         """Markdown 文字列が返ること"""
-        from src.services.walk_forward_report_pipeline import _to_markdown_summary
+        from src.backtest.walk_forward_report import _to_markdown_summary
 
         df = pd.DataFrame(
             [
@@ -129,7 +129,7 @@ class TestToMarkdownSummary:
 
     def test_handles_empty_dataframe(self):
         """空 DataFrame でも例外なく文字列が返ること"""
-        from src.services.walk_forward_report_pipeline import _to_markdown_summary
+        from src.backtest.walk_forward_report import _to_markdown_summary
 
         result = _to_markdown_summary(pd.DataFrame(), previous_path=None)
 
@@ -141,7 +141,7 @@ class TestNumericMean:
 
     def test_calculates_mean(self):
         """指定列の平均値が返ること"""
-        from src.services.walk_forward_report_pipeline import _numeric_mean
+        from src.backtest.walk_forward_report import _numeric_mean
 
         df = pd.DataFrame({"total_return": [0.01, 0.03, 0.02]})
         result = _numeric_mean(df, ["total_return"])
@@ -150,7 +150,7 @@ class TestNumericMean:
 
     def test_returns_empty_for_missing_column(self):
         """列が存在しない場合は空辞書が返ること"""
-        from src.services.walk_forward_report_pipeline import _numeric_mean
+        from src.backtest.walk_forward_report import _numeric_mean
 
         df = pd.DataFrame({"other": [1, 2]})
         result = _numeric_mean(df, ["nonexistent"])
@@ -159,7 +159,7 @@ class TestNumericMean:
 
     def test_calculates_mean_for_multiple_columns(self):
         """複数列の平均値が返ること"""
-        from src.services.walk_forward_report_pipeline import _numeric_mean
+        from src.backtest.walk_forward_report import _numeric_mean
 
         df = pd.DataFrame({"total_return": [0.01, 0.03], "sharpe_ratio": [1.0, 3.0]})
         result = _numeric_mean(df, ["total_return", "sharpe_ratio"])
@@ -173,8 +173,8 @@ class TestRunWalkForwardComparisonReport:
 
     def test_runs_for_each_symbol(self, tmp_path):
         """各銘柄でバックテストが実行され、結果辞書が返ること"""
-        from src.domain.types import SymbolTask
-        from src.services.walk_forward_report_pipeline import run_walk_forward_comparison_report
+        from src.backtest.walk_forward_report import run_walk_forward_comparison_report
+        from src.watchlist.types import SymbolTask
 
         reports_dir = tmp_path / "backtest" / "walk_forward_reports"
         reports_dir.mkdir(parents=True, exist_ok=True)
@@ -189,14 +189,14 @@ class TestRunWalkForwardComparisonReport:
         )
 
         with (
-            patch("src.services.walk_forward_report_pipeline.load_target_symbols") as mock_symbols,
-            patch("src.services.walk_forward_report_pipeline.run_backtest_walk_forward") as mock_wf,
+            patch("src.backtest.walk_forward_report.load_target_symbols") as mock_symbols,
+            patch("src.backtest.walk_forward_report.run_backtest_walk_forward") as mock_wf,
             patch(
-                "src.services.walk_forward_report_pipeline.get_results_dir",
+                "src.backtest.walk_forward_report.get_results_dir",
                 return_value=str(tmp_path),
             ),
             patch(
-                "src.services.walk_forward_report_pipeline.ensure_dir",
+                "src.backtest.walk_forward_report.ensure_dir",
                 return_value=str(reports_dir),
             ),
         ):
@@ -212,18 +212,26 @@ class TestRunWalkForwardComparisonReport:
 
     def test_passes_as_of_date_to_symbol_loader(self, tmp_path):
         """as_of_date が load_target_symbols に渡されること"""
-        from src.domain.types import SymbolTask
-        from src.services.walk_forward_report_pipeline import run_walk_forward_comparison_report
+        from src.backtest.walk_forward_report import run_walk_forward_comparison_report
+        from src.watchlist.types import SymbolTask
 
         reports_dir = tmp_path / "backtest" / "walk_forward_reports"
         reports_dir.mkdir(parents=True, exist_ok=True)
-        wf_df = pd.DataFrame({"total_return": [0.01], "sharpe_ratio": [1.0], "max_drawdown": [-0.02]})
+        wf_df = pd.DataFrame(
+            {"total_return": [0.01], "sharpe_ratio": [1.0], "max_drawdown": [-0.02]}
+        )
 
         with (
-            patch("src.services.walk_forward_report_pipeline.load_target_symbols") as mock_symbols,
-            patch("src.services.walk_forward_report_pipeline.run_backtest_walk_forward") as mock_wf,
-            patch("src.services.walk_forward_report_pipeline.get_results_dir", return_value=str(tmp_path)),
-            patch("src.services.walk_forward_report_pipeline.ensure_dir", return_value=str(reports_dir)),
+            patch("src.backtest.walk_forward_report.load_target_symbols") as mock_symbols,
+            patch("src.backtest.walk_forward_report.run_backtest_walk_forward") as mock_wf,
+            patch(
+                "src.backtest.walk_forward_report.get_results_dir",
+                return_value=str(tmp_path),
+            ),
+            patch(
+                "src.backtest.walk_forward_report.ensure_dir",
+                return_value=str(reports_dir),
+            ),
         ):
             mock_symbols.return_value = [SymbolTask(market="us", symbol="AAPL")]
             mock_wf.return_value = (None, None, wf_df)

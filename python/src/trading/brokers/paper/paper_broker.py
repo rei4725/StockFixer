@@ -395,8 +395,9 @@ class PaperBroker(BrokerBase):
         with _db_connection() as con:
             row = con.execute(
                 "SELECT SUM(realized_pnl), COUNT(*), MIN(filled_at) "
-                "FROM paper_orders WHERE status='filled' AND side=? AND realized_pnl IS NOT NULL",
-                [int(OrderSide.SELL)],
+                "FROM paper_orders WHERE status='filled' AND side IN (?, ?) "
+                "AND realized_pnl IS NOT NULL",
+                [int(OrderSide.SELL), int(OrderSide.SHORT_COVER)],
             ).fetchone()
         realized_pnl = float(row[0] or 0.0)
         trade_count = int(row[1] or 0)

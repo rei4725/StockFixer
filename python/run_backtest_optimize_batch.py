@@ -22,7 +22,7 @@ r"""
 import argparse
 import sys
 
-from src.services.backtest_optimize_pipeline import run_optimize_batch
+from src.backtest.optimizer import run_optimize_batch
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)

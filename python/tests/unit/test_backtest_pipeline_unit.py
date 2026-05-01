@@ -202,8 +202,8 @@ class TestLoadFeaturesRawSource:
     """load_features(source='raw') のテスト"""
 
     @patch("src.data.data_loader.get_raw_ohlcv_from_db")
-    @patch("src.features.technical_analysis.add_technical_indicators")
-    @patch("src.features.technical_analysis.create_basic_lag_features")
+    @patch("src.analysis.technical.add_technical_indicators")
+    @patch("src.analysis.technical.create_basic_lag_features")
     def test_load_features_raw_returns_dataframe(self, mock_lag, mock_ti, mock_raw):
         """source='raw' で DataFrame が返ること"""
         n = 35
@@ -225,7 +225,7 @@ class TestLoadFeaturesRawSource:
         y_series = pd.Series([0.01] * 25, index=dates[:25])
         mock_lag.return_value = (X_df, y_series)
 
-        from src.services.backtest_pipeline import load_features
+        from src.backtest.pipeline import load_features
 
         result = load_features("jp", "7203", "raw")
 
@@ -238,7 +238,7 @@ class TestLoadFeaturesRawSource:
         """空データの場合は SystemExit が発生すること"""
         mock_raw.return_value = pd.DataFrame()
 
-        from src.services.backtest_pipeline import load_features
+        from src.backtest.pipeline import load_features
 
         with pytest.raises(SystemExit):
             load_features("jp", "7203", "raw")
@@ -261,7 +261,7 @@ class TestLoadFeaturesFileSource:
         )
         mock_load.return_value = df
 
-        from src.services.backtest_pipeline import load_features
+        from src.backtest.pipeline import load_features
 
         result = load_features("jp", "7203", "file")
 
@@ -280,7 +280,7 @@ class TestLoadFeaturesFileSource:
         )
         mock_load.return_value = df
 
-        from src.services.backtest_pipeline import load_features
+        from src.backtest.pipeline import load_features
 
         result = load_features("jp", "7203", "file")
 
@@ -291,7 +291,7 @@ class TestLoadFeaturesFileSource:
         """空データの場合は SystemExit が発生すること"""
         mock_load.return_value = pd.DataFrame()
 
-        from src.services.backtest_pipeline import load_features
+        from src.backtest.pipeline import load_features
 
         with pytest.raises(SystemExit):
             load_features("jp", "7203", "file")
@@ -300,7 +300,7 @@ class TestLoadFeaturesFileSource:
 class TestRunBacktestSingle:
     """run_backtest_single() のテスト"""
 
-    @patch("src.services.backtest_pipeline.load_features")
+    @patch("src.backtest.pipeline.load_features")
     @patch("src.models.model_manager.ModelManager")
     @patch("src.backtest.backtester.Backtester")
     @patch("src.strategy.signal_generator.SignalGenerator")
@@ -330,7 +330,7 @@ class TestRunBacktestSingle:
             {"total_return": 0.01, "sharpe_ratio": 0.5, "num_trades": 2},
         )
 
-        from src.services.backtest_pipeline import run_backtest_single
+        from src.backtest.pipeline import run_backtest_single
 
         result_df, metrics, price = run_backtest_single("jp", "7203")
 
@@ -339,8 +339,8 @@ class TestRunBacktestSingle:
         mock_mm.train_model.assert_called_once()
         mock_bt_instance.simulate_trading.assert_called_once()
 
-    @patch("src.services.backtest_pipeline.load_features")
-    @patch("src.services.backtest_pipeline._ensemble_predict")
+    @patch("src.backtest.pipeline.load_features")
+    @patch("src.backtest.pipeline._ensemble_predict")
     @patch("src.models.model_manager.ModelManager")
     @patch("src.backtest.backtester.Backtester")
     @patch("src.strategy.signal_generator.SignalGenerator")
@@ -370,7 +370,7 @@ class TestRunBacktestSingle:
             {"total_return": 0.02},
         )
 
-        from src.services.backtest_pipeline import run_backtest_single
+        from src.backtest.pipeline import run_backtest_single
 
         run_backtest_single("jp", "7203", ensemble=True)
 
@@ -382,7 +382,7 @@ class TestPrintBacktestMetrics:
 
     def test_print_backtest_metrics_no_error(self):
         """メトリクス辞書を渡しても例外が発生しないこと"""
-        from src.services.backtest_pipeline import print_backtest_metrics
+        from src.backtest.pipeline import print_backtest_metrics
 
         metrics = {
             "total_return": 0.05,
@@ -398,13 +398,13 @@ class TestPrintBacktestMetrics:
 
     def test_print_backtest_metrics_empty_does_nothing(self):
         """空辞書を渡しても例外が発生しないこと"""
-        from src.services.backtest_pipeline import print_backtest_metrics
+        from src.backtest.pipeline import print_backtest_metrics
 
         print_backtest_metrics({})
 
     def test_print_backtest_metrics_with_gross(self, capsys):
         """gross フィールドがある場合も正常に出力されること"""
-        from src.services.backtest_pipeline import print_backtest_metrics
+        from src.backtest.pipeline import print_backtest_metrics
 
         metrics = {
             "total_return": 0.05,
@@ -441,7 +441,7 @@ class TestEnsemblePredict(unittest.TestCase):
 
     def test_returns_averaged_predictions(self):
         """XGBoost と LightGBM の平均予測値が返ること"""
-        from src.services.backtest_pipeline import _ensemble_predict
+        from src.backtest.pipeline import _ensemble_predict
 
         mock_mm = MagicMock()
         mock_mm.predict_with_model.side_effect = [
@@ -461,7 +461,7 @@ class TestEnsemblePredict(unittest.TestCase):
 
     def test_uses_test_index(self):
         """返り値の index が X_test の index と一致すること"""
-        from src.services.backtest_pipeline import _ensemble_predict
+        from src.backtest.pipeline import _ensemble_predict
 
         dates = pd.date_range("2024-01-01", periods=3, freq="B")
         mock_mm = MagicMock()
@@ -480,7 +480,7 @@ class TestEnsemblePredict(unittest.TestCase):
 
     def test_calls_create_model_for_both_types(self):
         """XGBoost と LightGBM の create_model が呼ばれること"""
-        from src.services.backtest_pipeline import _ensemble_predict
+        from src.backtest.pipeline import _ensemble_predict
 
         mock_mm = MagicMock()
         mock_mm.predict_with_model.side_effect = [
@@ -504,7 +504,7 @@ class TestSaveBacktestResults(unittest.TestCase):
 
     def test_saves_trade_log_csv(self):
         """単一期間バックテストの取引ログが CSV として保存されること"""
-        from src.services.backtest_pipeline import save_backtest_results
+        from src.backtest.pipeline import save_backtest_results
 
         trade_log = pd.DataFrame(
             {
@@ -527,7 +527,7 @@ class TestSaveBacktestResults(unittest.TestCase):
 
     def test_saves_walk_forward_csv(self):
         """Walk-Forward 結果が CSV として保存されること"""
-        from src.services.backtest_pipeline import save_backtest_results
+        from src.backtest.pipeline import save_backtest_results
 
         wf_df = pd.DataFrame(
             {
@@ -546,7 +546,7 @@ class TestSaveBacktestResults(unittest.TestCase):
 
     def test_does_nothing_when_all_none(self):
         """result_df, wf_df ともに None の場合は CSV が作成されないこと"""
-        from src.services.backtest_pipeline import save_backtest_results
+        from src.backtest.pipeline import save_backtest_results
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             with patch("src.utils.data_path_utils.get_results_dir", return_value=tmp_dir):
@@ -566,8 +566,8 @@ class TestLoadFeaturesApiSource(unittest.TestCase):
     """load_features(source='api') のテスト"""
 
     @patch("src.utils.data_path_utils.get_ticker")
-    @patch("src.features.technical_analysis.create_basic_lag_features")
-    @patch("src.features.technical_analysis.add_technical_indicators")
+    @patch("src.analysis.technical.create_basic_lag_features")
+    @patch("src.analysis.technical.add_technical_indicators")
     @patch("src.data.data_loader.get_stock_data")
     def test_api_source_calls_get_stock_data(self, mock_yf, mock_ti, mock_lag, mock_ticker):
         """source='api' では get_stock_data が呼ばれること"""
@@ -594,7 +594,7 @@ class TestLoadFeaturesApiSource(unittest.TestCase):
         y = pd.Series(np.random.randn(n - 5), index=dates[: n - 5])
         mock_lag.return_value = (feat_df, y)
 
-        from src.services.backtest_pipeline import load_features
+        from src.backtest.pipeline import load_features
 
         result = load_features("jp", "7203", "api")
 
@@ -609,14 +609,14 @@ class TestLoadFeaturesApiSource(unittest.TestCase):
         mock_ticker.return_value = "7203.T"
         mock_yf.return_value = pd.DataFrame()
 
-        from src.services.backtest_pipeline import load_features
+        from src.backtest.pipeline import load_features
 
         with pytest.raises(SystemExit):
             load_features("jp", "7203", "api")
 
     @patch("src.utils.data_path_utils.get_ticker")
-    @patch("src.features.technical_analysis.create_basic_lag_features")
-    @patch("src.features.technical_analysis.add_technical_indicators")
+    @patch("src.analysis.technical.create_basic_lag_features")
+    @patch("src.analysis.technical.add_technical_indicators")
     @patch("src.data.data_loader.get_stock_data")
     def test_api_source_result_has_close_column(self, mock_yf, mock_ti, mock_lag, mock_ticker):
         """source='api' の結果に Close 列が含まれること"""
@@ -643,7 +643,7 @@ class TestLoadFeaturesApiSource(unittest.TestCase):
         y = pd.Series(np.random.randn(n - 5), index=dates[: n - 5])
         mock_lag.return_value = (feat_df, y)
 
-        from src.services.backtest_pipeline import load_features
+        from src.backtest.pipeline import load_features
 
         result = load_features("jp", "7203", "api")
 
@@ -661,7 +661,7 @@ class TestPrintBacktestMetricsAdditional:
 
     def test_none_win_rate_and_drawdown_no_error(self):
         """win_rate, max_drawdown が None でも例外が発生しないこと"""
-        from src.services.backtest_pipeline import print_backtest_metrics
+        from src.backtest.pipeline import print_backtest_metrics
 
         metrics = {
             "total_return": 0.01,
@@ -676,7 +676,7 @@ class TestPrintBacktestMetricsAdditional:
 
     def test_avg_position_fraction_is_printed(self, capsys):
         """avg_position_fraction フィールドがある場合に出力されること"""
-        from src.services.backtest_pipeline import print_backtest_metrics
+        from src.backtest.pipeline import print_backtest_metrics
 
         metrics = {
             "total_return": 0.05,
@@ -697,7 +697,7 @@ class TestPrintBacktestMetricsAdditional:
 
     def test_benchmark_alpha_is_printed(self, capsys):
         """benchmark データがある場合にアルファ情報が出力されること"""
-        from src.services.backtest_pipeline import print_backtest_metrics
+        from src.backtest.pipeline import print_backtest_metrics
 
         metrics = {
             "total_return": 0.10,
@@ -724,7 +724,7 @@ class TestSaveBacktestResultsAdditional(unittest.TestCase):
 
     def test_auto_creates_output_directory(self):
         """保存先ディレクトリが存在しなくても自動作成されること"""
-        from src.services.backtest_pipeline import save_backtest_results
+        from src.backtest.pipeline import save_backtest_results
 
         trade_log = pd.DataFrame(
             {
@@ -744,7 +744,7 @@ class TestSaveBacktestResultsAdditional(unittest.TestCase):
 
     def test_empty_result_df_does_not_create_csv(self):
         """空 DataFrame を渡した場合は CSV が作成されないこと"""
-        from src.services.backtest_pipeline import save_backtest_results
+        from src.backtest.pipeline import save_backtest_results
 
         empty_df = pd.DataFrame()
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -764,7 +764,7 @@ class TestRunBacktestWalkForward(unittest.TestCase):
     @patch("src.backtest.walk_forward.WalkForwardValidator")
     def test_returns_walk_forward_results(self, mock_wfv_cls, mock_sg, mock_mm_cls):
         """WalkForwardValidator の実行結果が (None, None, wf_df) として返ること"""
-        from src.services.backtest_pipeline import run_backtest_walk_forward
+        from src.backtest.pipeline import run_backtest_walk_forward
 
         expected_df = pd.DataFrame(
             {
@@ -786,7 +786,7 @@ class TestRunBacktestWalkForward(unittest.TestCase):
     @patch("src.backtest.walk_forward.WalkForwardValidator")
     def test_ensemble_skips_create_model(self, mock_wfv_cls, mock_sg, mock_mm_cls):
         """ensemble=True の場合は create_model が呼ばれないこと"""
-        from src.services.backtest_pipeline import run_backtest_walk_forward
+        from src.backtest.pipeline import run_backtest_walk_forward
 
         mock_wfv_cls.return_value.run.return_value = pd.DataFrame({"split": [0]})
 
@@ -799,7 +799,7 @@ class TestRunBacktestWalkForward(unittest.TestCase):
     @patch("src.backtest.walk_forward.WalkForwardValidator")
     def test_non_ensemble_calls_create_model(self, mock_wfv_cls, mock_sg, mock_mm_cls):
         """ensemble=False の場合は create_model が呼ばれること"""
-        from src.services.backtest_pipeline import run_backtest_walk_forward
+        from src.backtest.pipeline import run_backtest_walk_forward
 
         mock_wfv_cls.return_value.run.return_value = pd.DataFrame({"split": [0]})
 
@@ -812,7 +812,7 @@ class TestRunBacktestWalkForward(unittest.TestCase):
     @patch("src.backtest.walk_forward.WalkForwardValidator")
     def test_lightgbm_model_type(self, mock_wfv_cls, mock_sg, mock_mm_cls):
         """LightGBMModel 指定でも正常動作すること"""
-        from src.services.backtest_pipeline import run_backtest_walk_forward
+        from src.backtest.pipeline import run_backtest_walk_forward
 
         mock_wfv_cls.return_value.run.return_value = pd.DataFrame({"split": [0]})
 

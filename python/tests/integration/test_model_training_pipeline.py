@@ -10,11 +10,8 @@ import pandas as pd
 
 import src.utils.data_path_utils as path_utils
 import src.utils.db as db_module
-from src.domain.types import FeatureLoadResult
-from src.services.model_training_pipeline import (
-    train_models_for_symbol,
-    train_models_for_symbol_task,
-)
+from src.analysis.types import FeatureLoadResult
+from src.prediction.training_pipeline import train_models_for_symbol, train_models_for_symbol_task
 
 
 class TestTrainModelsForSymbol(unittest.TestCase):
@@ -52,13 +49,13 @@ class TestTrainModelsForSymbol(unittest.TestCase):
     def test_skip_with_empty_data(self):
         """DBに空データがある場合にskipステータスが返ることを確認"""
         with patch(
-            "src.services.model_training_pipeline.load_stock_features", return_value=pd.DataFrame()
+            "src.prediction.training_pipeline.load_stock_features", return_value=pd.DataFrame()
         ):
             result = train_models_for_symbol("us", "EMPTY")
         self.assertEqual(result["status"], "skip")
 
-    @patch("src.services.model_training_pipeline.ModelManager")
-    @patch("src.services.model_training_pipeline.load_stock_features")
+    @patch("src.prediction.training_pipeline.ModelManager")
+    @patch("src.prediction.training_pipeline.load_stock_features")
     def test_success_trains_both_models(self, mock_load, mock_mm_cls):
         """正常なデータでXGBoostとLightGBMの両方が学習されることを確認"""
         # テスト用DataFrameを返す
@@ -82,8 +79,8 @@ class TestTrainModelsForSymbol(unittest.TestCase):
         # train_modelが2回呼ばれる
         self.assertEqual(mock_mm.train_model.call_count, 2)
 
-    @patch("src.services.model_training_pipeline.ModelManager")
-    @patch("src.services.model_training_pipeline.load_stock_features")
+    @patch("src.prediction.training_pipeline.ModelManager")
+    @patch("src.prediction.training_pipeline.load_stock_features")
     def test_error_returns_error_status(self, mock_load, mock_mm_cls):
         """学習中に例外が発生した場合にerrorステータスが返ることを確認"""
         df = pd.DataFrame(
@@ -101,8 +98,8 @@ class TestTrainModelsForSymbol(unittest.TestCase):
         self.assertEqual(result["status"], "error")
         self.assertIn("学習エラー", result["error"])
 
-    @patch("src.services.model_training_pipeline.ModelManager")
-    @patch("src.services.model_training_pipeline.load_stock_features")
+    @patch("src.prediction.training_pipeline.ModelManager")
+    @patch("src.prediction.training_pipeline.load_stock_features")
     def test_excludes_string_columns(self, mock_load, mock_mm_cls):
         """market, symbol, y列が特徴量から除外されることを確認"""
         df = pd.DataFrame(
@@ -132,7 +129,7 @@ class TestTrainModelsForSymbolTask(unittest.TestCase):
 
     def test_unpacks_dict_correctly(self):
         """dict引数が正しく展開されて呼び出されることを確認"""
-        with patch("src.services.model_training_pipeline.train_models_for_symbol") as mock_fn:
+        with patch("src.prediction.training_pipeline.train_models_for_symbol") as mock_fn:
             mock_fn.return_value = {"status": "success"}
             result = train_models_for_symbol_task({"market": "jp", "symbol": "7203"})
             mock_fn.assert_called_once_with("jp", "7203", 1)
@@ -164,9 +161,9 @@ class TestRunModelBatch(unittest.TestCase):
         if os.path.exists(self.tmp_dir):
             os.rmdir(self.tmp_dir)
 
-    @patch("src.services.batch_runner.load_target_symbols")
-    @patch("src.services.batch_runner.run_parallel")
-    @patch("src.services.batch_runner.print_summary")
+    @patch("src.watchlist.batch_runner.load_target_symbols")
+    @patch("src.watchlist.batch_runner.run_parallel")
+    @patch("src.watchlist.batch_runner.print_summary")
     def test_batch_success(
         self,
         mock_print_summary,
@@ -174,7 +171,7 @@ class TestRunModelBatch(unittest.TestCase):
         mock_load_symbols,
     ):
         """バッチ処理が正常に完了することを確認"""
-        from src.services.model_training_pipeline import run_model_batch
+        from src.prediction.training_pipeline import run_model_batch
 
         # テスト用シンボル
         mock_load_symbols.return_value = [
@@ -200,15 +197,15 @@ class TestRunModelBatch(unittest.TestCase):
         # print_summaryが呼ばれたことを確認
         mock_print_summary.assert_called_once()
 
-    @patch("src.services.batch_runner.load_target_symbols")
-    @patch("src.services.batch_runner.print_summary")
+    @patch("src.watchlist.batch_runner.load_target_symbols")
+    @patch("src.watchlist.batch_runner.print_summary")
     def test_batch_no_symbols(
         self,
         mock_print_summary,
         mock_load_symbols,
     ):
         """対象銘柄がない場合を確認"""
-        from src.services.model_training_pipeline import run_model_batch
+        from src.prediction.training_pipeline import run_model_batch
 
         mock_load_symbols.return_value = []
 
@@ -218,10 +215,10 @@ class TestRunModelBatch(unittest.TestCase):
         # print_summaryは呼ばれないはず
         mock_print_summary.assert_not_called()
 
-    @patch("src.services.batch_runner.load_target_symbols")
-    @patch("src.services.batch_runner.run_parallel")
-    @patch("src.services.batch_runner.print_summary")
-    @patch("src.services.model_training_pipeline.ModelManager")
+    @patch("src.watchlist.batch_runner.load_target_symbols")
+    @patch("src.watchlist.batch_runner.run_parallel")
+    @patch("src.watchlist.batch_runner.print_summary")
+    @patch("src.prediction.training_pipeline.ModelManager")
     def test_batch_with_training_errors(
         self,
         mock_mm_cls,
@@ -230,7 +227,7 @@ class TestRunModelBatch(unittest.TestCase):
         mock_load_symbols,
     ):
         """フェーズ2で学習エラーが発生する場合を確認"""
-        from src.services.model_training_pipeline import run_model_batch
+        from src.prediction.training_pipeline import run_model_batch
 
         mock_load_symbols.return_value = [
             {"market": "us", "symbol": "TEST1"},
@@ -255,9 +252,9 @@ class TestRunModelBatch(unittest.TestCase):
         # print_summaryが呼ばれたことを確認（エラーサマリーを含む）
         mock_print_summary.assert_called_once()
 
-    @patch("src.services.batch_runner.load_target_symbols")
-    @patch("src.services.batch_runner.run_parallel")
-    @patch("src.services.batch_runner.print_summary")
+    @patch("src.watchlist.batch_runner.load_target_symbols")
+    @patch("src.watchlist.batch_runner.run_parallel")
+    @patch("src.watchlist.batch_runner.print_summary")
     def test_batch_with_load_errors(
         self,
         mock_print_summary,
@@ -265,7 +262,7 @@ class TestRunModelBatch(unittest.TestCase):
         mock_load_symbols,
     ):
         """フェーズ1でデータ読み込みエラーが発生する場合を確認"""
-        from src.services.model_training_pipeline import run_model_batch
+        from src.prediction.training_pipeline import run_model_batch
 
         mock_load_symbols.return_value = [
             {"market": "us", "symbol": "TEST1"},

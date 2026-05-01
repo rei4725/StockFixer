@@ -16,8 +16,9 @@ from typing import Optional
 import pandas as pd
 
 from src.backtest.pipeline import run_backtest_single
-from src.domain.types import StressTestResult, SymbolTask
+from src.backtest.types import StressTestResult
 from src.utils.logger import get_logger
+from src.watchlist.types import SymbolTask
 
 logger = get_logger(__name__)
 

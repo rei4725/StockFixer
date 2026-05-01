@@ -177,7 +177,7 @@ class WalkForwardValidator:
         X_val = val_df[feature_cols].dropna()
 
         if self.ensemble:
-            from src.services.backtest_pipeline import _ensemble_predict
+            from src.backtest.pipeline import _ensemble_predict
 
             pred = _ensemble_predict(
                 self.model_manager,
@@ -222,7 +222,7 @@ class WalkForwardValidator:
 
     def _load_features(self) -> Optional[pd.DataFrame]:
         """特徴量データを読み込む（source に応じてDB/API/Rawを使い分ける）"""
-        from src.services.backtest_pipeline import load_features
+        from src.backtest.pipeline import load_features
 
         return load_features(self.market, self.symbol, self.source)
 

@@ -26,7 +26,7 @@ import numpy as np
 import pandas as pd
 
 from config.settings import MAX_SECTOR_POSITIONS
-from src.features.market_regime import get_market_regime
+from src.analysis.market_regime import get_market_regime
 from src.utils.logger import get_logger
 from src.utils.sector_constraints import filter_by_sector_cap, get_symbol_sector
 
@@ -293,8 +293,8 @@ def _build_signal_matrix(
 
     学習データは train_ratio で分割し、テスト期間の予測のみ収録する。
     """
+    from src.backtest.pipeline import _ensemble_predict, load_features
     from src.models.model_manager import ModelManager
-    from src.services.backtest_pipeline import _ensemble_predict, load_features
 
     score_dict: dict[str, pd.Series] = {}
     close_dict: dict[str, pd.Series] = {}

@@ -3,6 +3,7 @@
 import contextlib
 import logging
 import os
+import sys
 import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
@@ -143,6 +144,109 @@ class TestConfigureRoot(unittest.TestCase):
                 finally:
                     root_logger.handlers[:] = original_handlers
                     logger_module._root_configured = True
+
+
+class TestMaskingFormatter(unittest.TestCase):
+    """_MaskingFormatter の機密値マスキングテスト"""
+
+    def _make_formatter(self, env_overrides: dict):
+        """env_overrides を適用した _MaskingFormatter を返す"""
+        from src.utils.logger import _DATE_FORMAT, _LOG_FORMAT, _MaskingFormatter
+
+        with patch.dict(os.environ, env_overrides, clear=False):
+            return _MaskingFormatter(_LOG_FORMAT, datefmt=_DATE_FORMAT)
+
+    def _format_msg(self, formatter, msg: str) -> str:
+        record = logging.LogRecord(
+            name="test",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg=msg,
+            args=(),
+            exc_info=None,
+        )
+        return formatter.format(record)
+
+    def test_webhook_url_is_masked(self):
+        """DISCORD_WEBHOOK_URL の値がログメッセージ中でマスクされること"""
+        secret = "https://discord.com/api/webhooks/123456/ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        formatter = self._make_formatter({"DISCORD_WEBHOOK_URL": secret})
+        result = self._format_msg(formatter, f"Error: {secret}")
+        self.assertNotIn(secret, result)
+        self.assertIn("***REDACTED***", result)
+
+    def test_token_is_masked(self):
+        """DISCORD_BOT_TOKEN の値がマスクされること"""
+        token = "MTIzNDU2Nzg5.ABCDEF.xyz-ABCDEFGHIJKLMNOPQ"
+        formatter = self._make_formatter({"DISCORD_BOT_TOKEN": token})
+        result = self._format_msg(formatter, f"token={token}")
+        self.assertNotIn(token, result)
+        self.assertIn("***REDACTED***", result)
+
+    def test_short_value_not_masked(self):
+        """8文字未満の値はマスク対象外であること"""
+        formatter = self._make_formatter({"DISCORD_WEBHOOK_URL": "short"})
+        result = self._format_msg(formatter, "short value here")
+        # "short" はマスクされない
+        self.assertIn("short", result)
+
+    def test_non_sensitive_env_not_masked(self):
+        """機密キーワードを含まない環境変数の値はマスクされないこと"""
+        formatter = self._make_formatter({"MY_REGULAR_VAR": "regularvalue123"})
+        result = self._format_msg(formatter, "regularvalue123 present")
+        self.assertIn("regularvalue123", result)
+
+    def test_exception_traceback_is_masked(self):
+        """例外トレースバック内の機密値もマスクされること"""
+        secret = "https://discord.com/api/webhooks/99999/SECRETTOKEN_ABCDEFGHIJKLMNOP"
+        formatter = self._make_formatter({"DISCORD_WEBHOOK_URL": secret})
+
+        try:
+            raise ValueError(f"HTTPError for url: {secret}")
+        except ValueError:
+            exc_info = sys.exc_info()
+
+        record = logging.LogRecord(
+            name="test",
+            level=logging.ERROR,
+            pathname="",
+            lineno=0,
+            msg="request failed",
+            args=(),
+            exc_info=exc_info,
+        )
+        result = formatter.format(record)
+        self.assertNotIn(secret, result)
+        self.assertIn("***REDACTED***", result)
+
+    def test_no_sensitive_env_no_pattern(self):
+        """機密環境変数が存在しない場合は _pattern が None でエラーなしにフォーマットされること"""
+        # 既存の機密変数を一時的に除去して確認
+        env_without_sensitive = {
+            k: v
+            for k, v in os.environ.items()
+            if not any(
+                kw in k.upper()
+                for kw in (
+                    "DISCORD_",
+                    "TOKEN",
+                    "SECRET",
+                    "PASSWORD",
+                    "WEBHOOK",
+                    "API_KEY",
+                    "AUTH",
+                    "CREDENTIAL",
+                )
+            )
+        }
+        from src.utils.logger import _DATE_FORMAT, _LOG_FORMAT, _MaskingFormatter
+
+        with patch.dict(os.environ, env_without_sensitive, clear=True):
+            formatter = _MaskingFormatter(_LOG_FORMAT, datefmt=_DATE_FORMAT)
+        self.assertIsNone(formatter._pattern)
+        result = self._format_msg(formatter, "normal message")
+        self.assertIn("normal message", result)
 
 
 if __name__ == "__main__":

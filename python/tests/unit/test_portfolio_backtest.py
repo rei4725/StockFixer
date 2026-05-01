@@ -4,10 +4,7 @@ from unittest.mock import patch
 import pandas as pd
 import pytest
 
-from src.services.portfolio_backtest import (
-    _attach_regime_metrics,
-    _limit_portfolio_candidates_by_sector,
-)
+from src.backtest.portfolio import _attach_regime_metrics, _limit_portfolio_candidates_by_sector
 
 
 class TestPortfolioBacktestRegimeMetrics(unittest.TestCase):
@@ -33,7 +30,7 @@ class TestPortfolioBacktestRegimeMetrics(unittest.TestCase):
             dtype=str,
         )
 
-        with patch("src.services.portfolio_backtest.get_market_regime", return_value=mocked_regime):
+        with patch("src.backtest.portfolio.get_market_regime", return_value=mocked_regime):
             enriched, regime_metrics = _attach_regime_metrics(equity_df, close_matrix)
 
         self.assertIn("regime", enriched.columns)
@@ -46,7 +43,7 @@ class TestPortfolioBacktestRegimeMetrics(unittest.TestCase):
 
 
 class TestPortfolioBacktestSectorLimit(unittest.TestCase):
-    @patch("src.services.portfolio_backtest.get_symbol_sector")
+    @patch("src.backtest.portfolio.get_symbol_sector")
     def test_limit_portfolio_candidates_by_sector_caps_same_sector(self, mock_get_sector):
         mock_get_sector.side_effect = ["Auto", "Auto", "Tech", "Bank"]
         top_candidates = pd.Series(
@@ -75,7 +72,7 @@ class TestBuildSignalMatrix:
 
     def test_returns_empty_on_empty_symbols(self):
         """銘柄リストが空の場合は空の DataFrame が返ること"""
-        from src.services.portfolio_backtest import _build_signal_matrix
+        from src.backtest.portfolio import _build_signal_matrix
 
         scores, prices = _build_signal_matrix(
             symbols=[],
@@ -94,7 +91,7 @@ class TestGetRebalanceDates:
 
     def test_returns_expected_rebalance_dates_weekly(self):
         """週次指定で正しくリバランス日が生成されること"""
-        from src.services.portfolio_backtest import _get_rebalance_dates
+        from src.backtest.portfolio import _get_rebalance_dates
 
         idx = pd.date_range("2026-01-05", periods=20, freq="B")
         dates = _get_rebalance_dates(idx, freq="weekly")
@@ -103,7 +100,7 @@ class TestGetRebalanceDates:
 
     def test_returns_all_dates_on_daily(self):
         """daily 指定は全日付が返ること"""
-        from src.services.portfolio_backtest import _get_rebalance_dates
+        from src.backtest.portfolio import _get_rebalance_dates
 
         idx = pd.date_range("2026-01-05", periods=5, freq="B")
         dates = _get_rebalance_dates(idx, freq="daily")
@@ -111,7 +108,7 @@ class TestGetRebalanceDates:
 
     def test_raises_on_invalid_freq(self):
         """未対応の freq 指定は ValueError が発生すること"""
-        from src.services.portfolio_backtest import _get_rebalance_dates
+        from src.backtest.portfolio import _get_rebalance_dates
 
         idx = pd.date_range("2026-01-05", periods=10, freq="B")
         with pytest.raises(ValueError):
@@ -123,7 +120,7 @@ class TestComputePortfolioMetrics:
 
     def test_returns_dict_with_expected_keys(self):
         """必要なキーを持つ辞書が返ること"""
-        from src.services.portfolio_backtest import _compute_portfolio_metrics
+        from src.backtest.portfolio import _compute_portfolio_metrics
 
         equity_df = pd.DataFrame(
             {
@@ -138,7 +135,7 @@ class TestComputePortfolioMetrics:
 
     def test_returns_empty_on_empty_dataframe(self):
         """空の DataFrame は空辞書が返ること"""
-        from src.services.portfolio_backtest import _compute_portfolio_metrics
+        from src.backtest.portfolio import _compute_portfolio_metrics
 
         metrics = _compute_portfolio_metrics(pd.DataFrame(), initial_cash=1000000.0)
         assert metrics == {}
@@ -149,7 +146,7 @@ class TestPrintPortfolioMetrics:
 
     def test_no_exception_on_valid_metrics(self):
         """有効なメトリクスで例外が発生しないこと"""
-        from src.services.portfolio_backtest import print_portfolio_metrics
+        from src.backtest.portfolio import print_portfolio_metrics
 
         metrics = {
             "total_return": 0.05,
@@ -161,7 +158,7 @@ class TestPrintPortfolioMetrics:
 
     def test_no_exception_on_empty_metrics(self):
         """空のメトリクスでも例外が発生しないこと"""
-        from src.services.portfolio_backtest import print_portfolio_metrics
+        from src.backtest.portfolio import print_portfolio_metrics
 
         print_portfolio_metrics({}, market="jp", top_n=5, rebalance_freq="weekly")
 
@@ -171,7 +168,7 @@ class TestSavePortfolioResults:
 
     def test_creates_csv_files(self, tmp_path):
         """CSV ファイルが作成されること"""
-        from src.services.portfolio_backtest import save_portfolio_results
+        from src.backtest.portfolio import save_portfolio_results
 
         equity_df = pd.DataFrame(
             {
@@ -207,10 +204,9 @@ class TestSoftmaxWeights(unittest.TestCase):
 
     def test_outputs_sum_to_one(self):
         """softmax の合計が 1.0 になること"""
-        import numpy as np
         import pandas as pd
 
-        from src.services.portfolio_backtest import _softmax_weights
+        from src.backtest.portfolio import _softmax_weights
 
         scores = pd.Series([0.1, 0.2, 0.05, 0.3])
         weights = _softmax_weights(scores)
@@ -220,7 +216,7 @@ class TestSoftmaxWeights(unittest.TestCase):
         """全スコアが負の場合は空の Series が返ること（正スコアのみ対象）"""
         import pandas as pd
 
-        from src.services.portfolio_backtest import _softmax_weights
+        from src.backtest.portfolio import _softmax_weights
 
         scores = pd.Series([-0.1, -0.2, -0.3])
         weights = _softmax_weights(scores)
@@ -230,7 +226,7 @@ class TestSoftmaxWeights(unittest.TestCase):
         """要素 1 個のスコアで 1.0 が返ること"""
         import pandas as pd
 
-        from src.services.portfolio_backtest import _softmax_weights
+        from src.backtest.portfolio import _softmax_weights
 
         scores = pd.Series([0.5])
         weights = _softmax_weights(scores)
@@ -251,10 +247,10 @@ class TestSimulatePortfolio(unittest.TestCase):
         close_data = {sym: rng.random(n_days) * 100 + 100 for sym in symbols}
         return pd.DataFrame(score_data, index=dates), pd.DataFrame(close_data, index=dates)
 
-    @patch("src.services.portfolio_backtest._get_portfolio_symbol_sector")
+    @patch("src.backtest.portfolio._get_portfolio_symbol_sector")
     def test_returns_equity_curve(self, mock_sector):
         """シミュレーション結果に portfolio_value 列が含まれること"""
-        from src.services.portfolio_backtest import _get_rebalance_dates, _simulate_portfolio
+        from src.backtest.portfolio import _get_rebalance_dates, _simulate_portfolio
 
         symbols = ["AAPL", "MSFT", "GOOG"]
         mock_sector.return_value = "Technology"
@@ -273,10 +269,10 @@ class TestSimulatePortfolio(unittest.TestCase):
         assert "portfolio_value" in equity_df.columns
         assert len(equity_df) > 0
 
-    @patch("src.services.portfolio_backtest._get_portfolio_symbol_sector")
+    @patch("src.backtest.portfolio._get_portfolio_symbol_sector")
     def test_holdings_records_are_list(self, mock_sector):
         """ホールディング記録がリストであること"""
-        from src.services.portfolio_backtest import _get_rebalance_dates, _simulate_portfolio
+        from src.backtest.portfolio import _get_rebalance_dates, _simulate_portfolio
 
         symbols = ["AAPL", "MSFT"]
         mock_sector.return_value = "Technology"
@@ -302,7 +298,7 @@ class TestPlotPortfolio(unittest.TestCase):
         """equity_df が空のとき空文字を返すこと"""
         import pandas as pd
 
-        from src.services.portfolio_backtest import plot_portfolio
+        from src.backtest.portfolio import plot_portfolio
 
         equity_df = pd.DataFrame()
         holdings_df = pd.DataFrame()
@@ -321,12 +317,12 @@ class TestBuildSignalMatrixAdditional(unittest.TestCase):
     """_build_signal_matrix の追加テスト"""
 
     @patch("src.models.model_manager.ModelManager")
-    @patch("src.services.backtest_pipeline.load_features")
+    @patch("src.backtest.pipeline.load_features")
     def test_builds_matrix_for_single_symbol(self, mock_load, mock_mm_cls):
         """1銘柄の予測スコアと価格マトリクスが構築されること"""
         import numpy as np
 
-        from src.services.portfolio_backtest import _build_signal_matrix
+        from src.backtest.portfolio import _build_signal_matrix
 
         n = 50
         dates = pd.date_range("2024-01-01", periods=n, freq="B")
@@ -360,12 +356,12 @@ class TestBuildSignalMatrixAdditional(unittest.TestCase):
         self.assertIn("jp_7203", score_matrix.columns)
 
     @patch("src.models.model_manager.ModelManager")
-    @patch("src.services.backtest_pipeline.load_features")
+    @patch("src.backtest.pipeline.load_features")
     def test_skips_symbol_with_insufficient_data(self, mock_load, mock_mm_cls):
         """データ不足の銘柄はスキップされること"""
         import numpy as np
 
-        from src.services.portfolio_backtest import _build_signal_matrix
+        from src.backtest.portfolio import _build_signal_matrix
 
         # 30行未満 → スキップ
         n = 10
@@ -393,10 +389,10 @@ class TestBuildSignalMatrixAdditional(unittest.TestCase):
         self.assertIsInstance(score_matrix, pd.DataFrame)
         self.assertTrue(score_matrix.empty)
 
-    @patch("src.services.backtest_pipeline.load_features")
+    @patch("src.backtest.pipeline.load_features")
     def test_skips_symbol_when_load_features_returns_empty(self, mock_load):
         """load_features が空 DataFrame を返す場合はスキップされること"""
-        from src.services.portfolio_backtest import _build_signal_matrix
+        from src.backtest.portfolio import _build_signal_matrix
 
         mock_load.return_value = pd.DataFrame()
 
@@ -424,7 +420,7 @@ class TestRunPortfolioBacktest(unittest.TestCase):
     @patch("src.utils.db.stock_features.get_all_symbols")
     def test_returns_empty_on_no_symbols(self, mock_symbols):
         """対象銘柄が存在しない場合に空の結果が返ること"""
-        from src.services.portfolio_backtest import run_portfolio_backtest
+        from src.backtest.portfolio import run_portfolio_backtest
 
         mock_symbols.return_value = []
         equity_df, metrics, holdings_df = run_portfolio_backtest(market="jp")
@@ -435,18 +431,18 @@ class TestRunPortfolioBacktest(unittest.TestCase):
     @patch("src.utils.db.stock_features.get_all_symbols")
     def test_market_filter_applied(self, mock_symbols):
         """market 引数でシンボルが絞り込まれること"""
-        from src.services.portfolio_backtest import run_portfolio_backtest
+        from src.backtest.portfolio import run_portfolio_backtest
 
         # us のみ → jp 指定では対象なし → 空結果
         mock_symbols.return_value = [("us", "AAPL"), ("us", "MSFT")]
         equity_df, metrics, holdings_df = run_portfolio_backtest(market="jp")
         self.assertTrue(equity_df.empty)
 
-    @patch("src.services.portfolio_backtest._attach_regime_metrics")
-    @patch("src.services.portfolio_backtest._compute_portfolio_metrics")
-    @patch("src.services.portfolio_backtest._simulate_portfolio")
-    @patch("src.services.portfolio_backtest._get_rebalance_dates")
-    @patch("src.services.portfolio_backtest._build_signal_matrix")
+    @patch("src.backtest.portfolio._attach_regime_metrics")
+    @patch("src.backtest.portfolio._compute_portfolio_metrics")
+    @patch("src.backtest.portfolio._simulate_portfolio")
+    @patch("src.backtest.portfolio._get_rebalance_dates")
+    @patch("src.backtest.portfolio._build_signal_matrix")
     @patch("src.utils.db.stock_features.get_all_symbols")
     def test_full_flow_returns_results(
         self,
@@ -460,7 +456,7 @@ class TestRunPortfolioBacktest(unittest.TestCase):
         """全サブ関数をモックして正常フローが通ること"""
         import numpy as np
 
-        from src.services.portfolio_backtest import run_portfolio_backtest
+        from src.backtest.portfolio import run_portfolio_backtest
 
         mock_symbols.return_value = [("jp", "7203"), ("jp", "9984")]
 
@@ -503,11 +499,11 @@ class TestRunPortfolioBacktest(unittest.TestCase):
         self.assertFalse(equity_df.empty)
         self.assertIn("total_return", metrics)
 
-    @patch("src.services.portfolio_backtest._build_signal_matrix")
+    @patch("src.backtest.portfolio._build_signal_matrix")
     @patch("src.utils.db.stock_features.get_all_symbols")
     def test_returns_empty_when_score_matrix_empty(self, mock_symbols, mock_build):
         """スコアマトリクスが空の場合に空結果が返ること"""
-        from src.services.portfolio_backtest import run_portfolio_backtest
+        from src.backtest.portfolio import run_portfolio_backtest
 
         mock_symbols.return_value = [("jp", "7203")]
         mock_build.return_value = (pd.DataFrame(), pd.DataFrame())

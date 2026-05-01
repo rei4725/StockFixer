@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
 from src.brokers.base import BrokerBase, OrderSide
-from src.services.risk_manager import (
+from src.trading.risk_manager import (
     MAX_CONSECUTIVE_LOSSES,
     MAX_DAILY_LOSS_RATE,
     MAX_POSITION_RATE,
@@ -162,13 +162,13 @@ class TestRiskManagerPersistence(unittest.TestCase):
         def mock_db():
             yield mock_con
 
-        with patch("src.services.risk_manager._db_connection", new=mock_db):
+        with patch("src.trading.risk_manager._db_connection", new=mock_db):
             daily_loss = risk._get_daily_realized_loss()
 
         self.assertEqual(daily_loss, 1234.0)
         query, params = mock_con.execute.call_args[0]
         self.assertIn("FROM paper_orders", query)
-        self.assertEqual(params, [int(OrderSide.SELL)])
+        self.assertEqual(params, [int(OrderSide.SELL), int(OrderSide.SHORT_COVER)])
 
     def test_consecutive_losses_uses_paper_orders(self):
         broker = _make_broker()
@@ -181,13 +181,15 @@ class TestRiskManagerPersistence(unittest.TestCase):
         def mock_db():
             yield mock_con
 
-        with patch("src.services.risk_manager._db_connection", new=mock_db):
+        with patch("src.trading.risk_manager._db_connection", new=mock_db):
             consecutive = risk._get_consecutive_losses()
 
         self.assertEqual(consecutive, 2)
         query, params = mock_con.execute.call_args[0]
         self.assertIn("FROM paper_orders", query)
-        self.assertEqual(params, [int(OrderSide.SELL), MAX_CONSECUTIVE_LOSSES])
+        self.assertEqual(
+            params, [int(OrderSide.SELL), int(OrderSide.SHORT_COVER), MAX_CONSECUTIVE_LOSSES]
+        )
 
     def test_missing_trade_pnl_returns_zero_for_non_paper_broker(self):
         broker = _make_broker()
@@ -201,7 +203,7 @@ class TestRiskManagerPersistence(unittest.TestCase):
         def mock_db():
             yield mock_con
 
-        with patch("src.services.risk_manager._db_connection", new=mock_db):
+        with patch("src.trading.risk_manager._db_connection", new=mock_db):
             daily_loss = risk._get_daily_realized_loss()
 
         self.assertEqual(daily_loss, 0.0)
@@ -218,7 +220,7 @@ class TestRiskManagerPersistence(unittest.TestCase):
 class TestRiskManagerOptimalParamsAutoLoad(unittest.TestCase):
     """RiskManager.__init__ が optimal_params.json を自動ロードするテスト"""
 
-    _MOCK_TARGET = "src.services.risk_manager.get_optimal_params"
+    _MOCK_TARGET = "src.trading.risk_manager.get_optimal_params"
 
     def test_stop_loss_and_take_profit_loaded_from_json(self):
         """market/symbol を指定すると JSON の stop_loss_pct/take_profit_pct が設定される"""
@@ -279,7 +281,7 @@ class TestRiskManagerOptimalParamsAutoLoad(unittest.TestCase):
 class TestRiskManagerKellyBtFeedback(unittest.TestCase):
     """RiskManager がBT実績Kelly値をロード・参照するテスト"""
 
-    _MOCK_TARGET = "src.services.risk_manager.get_optimal_params"
+    _MOCK_TARGET = "src.trading.risk_manager.get_optimal_params"
 
     def test_kelly_params_loaded_from_metrics(self):
         """metrics に win_rate/avg_win/avg_loss があればインスタンス属性にセットされる"""

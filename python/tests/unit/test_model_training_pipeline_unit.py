@@ -1,4 +1,4 @@
-"""model_training_pipeline モジュールのユニットテスト"""
+﻿"""model_training_pipeline モジュールのユニットテスト"""
 
 import unittest
 from unittest.mock import MagicMock, patch
@@ -6,8 +6,8 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pandas as pd
 
-from src.domain.types import FeatureLoadResult, TrainingMetrics
-from src.services.model_training_pipeline import (
+from src.analysis.types import FeatureLoadResult
+from src.prediction.training_pipeline import (
     _apply_feature_exclusions,
     _build_feature_selection_frame,
     _compute_training_metrics,
@@ -16,6 +16,7 @@ from src.services.model_training_pipeline import (
     train_models_for_symbol,
     train_models_for_symbol_task,
 )
+from src.prediction.types import TrainingMetrics
 
 
 class TestComputeTrainingMetrics(unittest.TestCase):
@@ -77,7 +78,7 @@ class TestLoadFeaturesForTraining(unittest.TestCase):
             index=dates,
         )
 
-    @patch("src.services.model_training_pipeline.load_stock_features")
+    @patch("src.prediction.training_pipeline.load_stock_features")
     def test_success_with_valid_data(self, mock_load):
         """DBにデータがある場合は status=success で X/y が付与されること"""
         mock_load.return_value = self._make_stock_features_df()
@@ -91,7 +92,7 @@ class TestLoadFeaturesForTraining(unittest.TestCase):
         self.assertEqual(result.market, "us")
         self.assertEqual(result.symbol, "AAPL")
 
-    @patch("src.services.model_training_pipeline.load_stock_features")
+    @patch("src.prediction.training_pipeline.load_stock_features")
     def test_skip_when_data_is_none(self, mock_load):
         """load_stock_features が None を返した場合は status=skip"""
         mock_load.return_value = None
@@ -101,7 +102,7 @@ class TestLoadFeaturesForTraining(unittest.TestCase):
         self.assertEqual(result.status, "skip")
         self.assertFalse(result.is_success)
 
-    @patch("src.services.model_training_pipeline.load_stock_features")
+    @patch("src.prediction.training_pipeline.load_stock_features")
     def test_skip_when_empty_df(self, mock_load):
         """空の DataFrame が返ってきた場合は status=skip"""
         mock_load.return_value = pd.DataFrame()
@@ -110,7 +111,7 @@ class TestLoadFeaturesForTraining(unittest.TestCase):
 
         self.assertEqual(result.status, "skip")
 
-    @patch("src.services.model_training_pipeline.load_stock_features")
+    @patch("src.prediction.training_pipeline.load_stock_features")
     def test_error_on_exception(self, mock_load):
         """DB例外時は status=error で error フィールドにメッセージが入ること"""
         mock_load.side_effect = RuntimeError("db connection error")
@@ -121,7 +122,7 @@ class TestLoadFeaturesForTraining(unittest.TestCase):
         self.assertIsNotNone(result.error)
         self.assertIn("db connection error", result.error)
 
-    @patch("src.services.model_training_pipeline.load_stock_features")
+    @patch("src.prediction.training_pipeline.load_stock_features")
     def test_exclude_cols_not_in_X(self, mock_load):
         """y / market / symbol / date カラムは X から除外されること"""
         mock_load.return_value = self._make_stock_features_df()
@@ -132,7 +133,7 @@ class TestLoadFeaturesForTraining(unittest.TestCase):
             for col in ("y", "market", "symbol", "date"):
                 self.assertNotIn(col, result.X.columns)
 
-    @patch("src.services.model_training_pipeline.load_stock_features")
+    @patch("src.prediction.training_pipeline.load_stock_features")
     def test_feature_column_names_normalized(self, mock_load):
         """特徴量カラム名に含まれる非英数字が '_' に置換されること"""
         dates = pd.date_range("2024-01-01", periods=50, freq="D")
@@ -156,8 +157,8 @@ class TestLoadFeaturesForTraining(unittest.TestCase):
                 self.assertNotIn("-", col)
                 self.assertNotIn("/", col)
 
-    @patch("src.services.model_training_pipeline.get_earnings_dates")
-    @patch("src.services.model_training_pipeline.load_stock_features")
+    @patch("src.prediction.training_pipeline.get_earnings_dates")
+    @patch("src.prediction.training_pipeline.load_stock_features")
     def test_horizon1_masks_earnings_window_rows(self, mock_load, mock_get_earnings):
         df = self._make_stock_features_df(periods=20)
         df.loc[:, "date"] = df.index
@@ -170,8 +171,8 @@ class TestLoadFeaturesForTraining(unittest.TestCase):
         self.assertLess(len(result.X), len(df))
         self.assertNotIn(pd.Timestamp("2024-01-10"), result.X.index)
 
-    @patch("src.services.model_training_pipeline.load_excluded_features")
-    @patch("src.services.model_training_pipeline.load_stock_features")
+    @patch("src.prediction.training_pipeline.load_excluded_features")
+    @patch("src.prediction.training_pipeline.load_stock_features")
     def test_load_features_applies_saved_exclusions(self, mock_load, mock_excluded):
         mock_load.return_value = self._make_stock_features_df()
         mock_excluded.return_value = ["volume"]
@@ -223,9 +224,7 @@ class TestFeatureSelectionHelpers(unittest.TestCase):
     def test_apply_feature_exclusions_drops_matching_columns(self):
         X = pd.DataFrame({"f1": [1, 2], "f2": [3, 4], "f3": [5, 6]})
 
-        with patch(
-            "src.services.model_training_pipeline.load_excluded_features", return_value=["f2"]
-        ):
+        with patch("src.prediction.training_pipeline.load_excluded_features", return_value=["f2"]):
             filtered = _apply_feature_exclusions(X, "us", "AAPL")
 
         self.assertEqual(filtered.columns.tolist(), ["f1", "f3"])
@@ -254,9 +253,9 @@ class TestTrainModelsForSymbol(unittest.TestCase):
         y = pd.Series(np.random.randn(n) * 0.01, index=dates)
         return FeatureLoadResult(status="success", market=market, symbol=symbol, X=X, y=y)
 
-    @patch("src.services.model_training_pipeline.save_model_metrics")
-    @patch("src.services.model_training_pipeline.ModelManager")
-    @patch("src.services.model_training_pipeline.load_features_for_training")
+    @patch("src.prediction.training_pipeline.save_model_metrics")
+    @patch("src.prediction.training_pipeline.ModelManager")
+    @patch("src.prediction.training_pipeline.load_features_for_training")
     def test_success_returns_success_dict(self, mock_load, mock_mm_cls, mock_save_metrics):
         """正常完了時は status=success の dict が返ること"""
         mock_load.return_value = self._make_feature_result()
@@ -273,7 +272,7 @@ class TestTrainModelsForSymbol(unittest.TestCase):
         self.assertEqual(result["market"], "us")
         self.assertEqual(result["symbol"], "AAPL")
 
-    @patch("src.services.model_training_pipeline.load_features_for_training")
+    @patch("src.prediction.training_pipeline.load_features_for_training")
     def test_skip_propagated_from_load(self, mock_load):
         """load_features_for_training が skip を返した場合、skip が伝搬すること"""
         mock_load.return_value = FeatureLoadResult(
@@ -285,7 +284,7 @@ class TestTrainModelsForSymbol(unittest.TestCase):
         self.assertEqual(result["status"], "skip")
         self.assertEqual(result["market"], "us")
 
-    @patch("src.services.model_training_pipeline.load_features_for_training")
+    @patch("src.prediction.training_pipeline.load_features_for_training")
     def test_exception_returns_error(self, mock_load):
         """予期しない例外発生時は status=error が返ること"""
         mock_load.side_effect = RuntimeError("unexpected failure")
@@ -295,9 +294,9 @@ class TestTrainModelsForSymbol(unittest.TestCase):
         self.assertEqual(result["status"], "error")
         self.assertIn("error", result)
 
-    @patch("src.services.model_training_pipeline.save_model_metrics")
-    @patch("src.services.model_training_pipeline.ModelManager")
-    @patch("src.services.model_training_pipeline.load_features_for_training")
+    @patch("src.prediction.training_pipeline.save_model_metrics")
+    @patch("src.prediction.training_pipeline.ModelManager")
+    @patch("src.prediction.training_pipeline.load_features_for_training")
     def test_model_manager_create_called_twice(self, mock_load, mock_mm_cls, mock_save_metrics):
         """XGBoost / LightGBM の 2 モデルが作成されること"""
         mock_load.return_value = self._make_feature_result()
@@ -313,18 +312,16 @@ class TestTrainModelsForSymbol(unittest.TestCase):
         self.assertEqual(mock_mm.create_model.call_count, 2)
         self.assertEqual(mock_mm.train_model.call_count, 2)
 
-    @patch("src.api.discord_utils.send_shap_notification")
-    @patch("src.services.model_training_pipeline._compute_and_save_shap")
-    @patch("src.services.model_training_pipeline.save_model_metrics")
-    @patch("src.services.model_training_pipeline.ModelManager")
-    @patch("src.services.model_training_pipeline.load_features_for_training")
+    @patch("src.prediction.training_pipeline._compute_and_save_shap")
+    @patch("src.prediction.training_pipeline.save_model_metrics")
+    @patch("src.prediction.training_pipeline.ModelManager")
+    @patch("src.prediction.training_pipeline.load_features_for_training")
     def test_shap_notification_sent_for_each_trained_model(
         self,
         mock_load,
         mock_mm_cls,
         mock_save_metrics,
         mock_compute_shap,
-        mock_send_shap,
     ):
         mock_load.return_value = self._make_feature_result()
         dates = pd.date_range("2024-01-01", periods=100, freq="D")
@@ -341,19 +338,27 @@ class TestTrainModelsForSymbol(unittest.TestCase):
             }
         )
 
-        train_models_for_symbol("us", "AAPL")
+        result = train_models_for_symbol("us", "AAPL")
 
+        # SHAP計算はモデルごと（XGBoost + LightGBM）に2回実行される
         self.assertEqual(mock_compute_shap.call_count, 2)
-        self.assertEqual(mock_send_shap.call_count, 2)
+        # 個別Discord通知ではなく、shap_resultsとして戻り値に集約される
+        self.assertIn("shap_results", result)
+        self.assertEqual(len(result["shap_results"]), 2)
+        for entry in result["shap_results"]:
+            self.assertEqual(entry["market"], "us")
+            self.assertEqual(entry["symbol"], "AAPL")
+            self.assertIn("model_name", entry)
+            self.assertFalse(entry["shap_top_bottom"].empty)
 
 
 class TestTrainModelsForSymbolTask(unittest.TestCase):
     """train_models_for_symbol_task 関数のテスト"""
 
-    @patch("src.services.model_training_pipeline.train_models_for_symbol")
+    @patch("src.prediction.training_pipeline.train_models_for_symbol")
     def test_accepts_symbol_task(self, mock_train):
         """SymbolTask を渡せること"""
-        from src.domain.types import SymbolTask
+        from src.watchlist.types import SymbolTask
 
         mock_train.return_value = {"status": "success", "market": "us", "symbol": "AAPL"}
         task = SymbolTask(market="us", symbol="AAPL", horizon=1)
@@ -363,7 +368,7 @@ class TestTrainModelsForSymbolTask(unittest.TestCase):
         mock_train.assert_called_once_with("us", "AAPL", 1)
         self.assertEqual(result["status"], "success")
 
-    @patch("src.services.model_training_pipeline.train_models_for_symbol")
+    @patch("src.prediction.training_pipeline.train_models_for_symbol")
     def test_accepts_dict_task(self, mock_train):
         """dict 形式のタスクを渡せること"""
         mock_train.return_value = {"status": "success", "market": "jp", "symbol": "7203"}
@@ -373,7 +378,7 @@ class TestTrainModelsForSymbolTask(unittest.TestCase):
 
         mock_train.assert_called_once_with("jp", "7203", 3)
 
-    @patch("src.services.model_training_pipeline.train_models_for_symbol")
+    @patch("src.prediction.training_pipeline.train_models_for_symbol")
     def test_dict_task_default_horizon(self, mock_train):
         """dict に horizon キーがない場合は horizon=1 がデフォルトであること"""
         mock_train.return_value = {"status": "success", "market": "us", "symbol": "MSFT"}
@@ -386,12 +391,12 @@ class TestTrainModelsForSymbolTask(unittest.TestCase):
 class TestComputeAndSaveShap(unittest.TestCase):
     """_compute_and_save_shap のテスト"""
 
-    @patch("src.services.model_training_pipeline.save_shap_values")
+    @patch("src.prediction.training_pipeline.save_shap_values")
     def test_saves_shap_values_to_db(self, mock_save):
         """SHAP 値が DB に保存されること"""
         import sys
 
-        from src.services.model_training_pipeline import _compute_and_save_shap
+        from src.prediction.training_pipeline import _compute_and_save_shap
 
         mock_shap = MagicMock()
         mock_explainer_inst = MagicMock()
@@ -416,7 +421,7 @@ class TestComputeAndSaveShap(unittest.TestCase):
         """SHAP 計算エラー時も例外が外に伝播しないこと"""
         import sys
 
-        from src.services.model_training_pipeline import _compute_and_save_shap
+        from src.prediction.training_pipeline import _compute_and_save_shap
 
         mock_shap = MagicMock()
         mock_shap.TreeExplainer.side_effect = Exception("SHAP計算エラー")
@@ -432,12 +437,12 @@ class TestComputeAndSaveShap(unittest.TestCase):
 
         self.assertIsInstance(result, pd.DataFrame)
 
-    @patch("src.services.model_training_pipeline.save_shap_values")
+    @patch("src.prediction.training_pipeline.save_shap_values")
     def test_returns_top_and_bottom_features(self, mock_save):
         """上位・下位 N 件の特徴量 DataFrame が返ること"""
         import sys
 
-        from src.services.model_training_pipeline import _compute_and_save_shap
+        from src.prediction.training_pipeline import _compute_and_save_shap
 
         n_features = 8
         mock_shap = MagicMock()
@@ -461,16 +466,16 @@ class TestComputeAndSaveShap(unittest.TestCase):
 class TestLoadFeaturesForTrainingHorizon(unittest.TestCase):
     """load_features_for_training の horizon > 1 テスト"""
 
-    @patch("src.services.model_training_pipeline.get_earnings_dates")
-    @patch("src.services.model_training_pipeline.add_earnings_flag")
-    @patch("src.features.technical_analysis.create_basic_lag_features")
-    @patch("src.features.technical_analysis.add_technical_indicators")
+    @patch("src.prediction.training_pipeline.get_earnings_dates")
+    @patch("src.prediction.training_pipeline.add_earnings_flag")
+    @patch("src.analysis.technical.create_basic_lag_features")
+    @patch("src.analysis.technical.add_technical_indicators")
     @patch("src.utils.db.load_raw_ohlcv")
     def test_horizon_3_uses_raw_ohlcv(
         self, mock_raw, mock_ti, mock_lag, mock_add_earnings, mock_earnings_dates
     ):
         """horizon=3 では market_data_raw からデータを読み込むこと"""
-        from src.services.model_training_pipeline import load_features_for_training
+        from src.prediction.training_pipeline import load_features_for_training
 
         n = 50
         df = pd.DataFrame(
@@ -499,19 +504,19 @@ class TestLoadFeaturesForTrainingHorizon(unittest.TestCase):
         )
         mock_lag.return_value = (X, y)
 
-        result = load_features_for_training("jp", "7203", horizon=3)
+        load_features_for_training("jp", "7203", horizon=3)
         mock_raw.assert_called_once_with("jp", "7203")
 
-    @patch("src.services.model_training_pipeline.get_earnings_dates")
-    @patch("src.services.model_training_pipeline.add_earnings_flag")
-    @patch("src.features.technical_analysis.create_basic_lag_features")
-    @patch("src.features.technical_analysis.add_technical_indicators")
+    @patch("src.prediction.training_pipeline.get_earnings_dates")
+    @patch("src.prediction.training_pipeline.add_earnings_flag")
+    @patch("src.analysis.technical.create_basic_lag_features")
+    @patch("src.analysis.technical.add_technical_indicators")
     @patch("src.utils.db.load_raw_ohlcv")
     def test_horizon_3_returns_success(
         self, mock_raw, mock_ti, mock_lag, mock_add_earnings, mock_earnings_dates
     ):
         """horizon=3 で正常データがあれば status=success が返ること"""
-        from src.services.model_training_pipeline import load_features_for_training
+        from src.prediction.training_pipeline import load_features_for_training
 
         n = 50
         df = pd.DataFrame(
@@ -547,7 +552,7 @@ class TestLoadFeaturesForTrainingHorizon(unittest.TestCase):
     @patch("src.utils.db.load_raw_ohlcv")
     def test_horizon_3_skip_when_ohlcv_none(self, mock_raw):
         """horizon=3 で OHLCV が None の場合は status=skip が返ること"""
-        from src.services.model_training_pipeline import load_features_for_training
+        from src.prediction.training_pipeline import load_features_for_training
 
         mock_raw.return_value = None
 
@@ -564,40 +569,41 @@ class TestLoadFeaturesForTrainingHorizon(unittest.TestCase):
 class TestRunModelBatch(unittest.TestCase):
     """run_model_batch のテスト"""
 
-    @patch("src.services.batch_runner.run_parallel")
-    @patch("src.services.batch_runner.load_target_symbols")
+    @patch("src.watchlist.batch_runner.run_parallel")
+    @patch("src.watchlist.batch_runner.load_target_symbols")
     def test_returns_early_when_no_symbols(self, mock_symbols, mock_parallel):
         """銘柄がない場合、早期リターンすること（run_parallel 未呼び出し）"""
-        from src.services.model_training_pipeline import run_model_batch
+        from src.prediction.training_pipeline import run_model_batch
 
         mock_symbols.return_value = []
         run_model_batch(horizon=1)  # 例外なし
         mock_parallel.assert_not_called()
 
-    @patch("src.services.batch_runner.print_summary")
-    @patch("src.services.batch_runner.run_parallel")
-    @patch("src.services.batch_runner.load_target_symbols")
+    @patch("src.watchlist.batch_runner.print_summary")
+    @patch("src.watchlist.batch_runner.run_parallel")
+    @patch("src.watchlist.batch_runner.load_target_symbols")
     def test_runs_parallel_when_symbols_available(self, mock_symbols, mock_parallel, mock_print):
         """銘柄がある場合、run_parallel が呼ばれること"""
-        from src.domain.types import SymbolTask
-        from src.services.model_training_pipeline import run_model_batch
+        from src.prediction.training_pipeline import run_model_batch
+        from src.watchlist.types import SymbolTask
 
         mock_symbols.return_value = [SymbolTask(market="jp", symbol="7203")]
         mock_parallel.return_value = []
         run_model_batch(horizon=1)
         mock_parallel.assert_called_once()
 
-    @patch("src.services.batch_runner.print_summary")
-    @patch("src.services.model_training_pipeline.save_model_metrics")
-    @patch("src.services.model_training_pipeline.ModelManager")
-    @patch("src.services.batch_runner.run_parallel")
-    @patch("src.services.batch_runner.load_target_symbols")
+    @patch("src.watchlist.batch_runner.print_summary")
+    @patch("src.prediction.training_pipeline.save_model_metrics")
+    @patch("src.prediction.training_pipeline.ModelManager")
+    @patch("src.watchlist.batch_runner.run_parallel")
+    @patch("src.watchlist.batch_runner.load_target_symbols")
     def test_trains_models_for_successful_loads(
         self, mock_symbols, mock_parallel, mock_mm_cls, mock_save, mock_print
     ):
         """成功した特徴量ロードに対してモデルが学習されること"""
-        from src.domain.types import FeatureLoadResult, SymbolTask
-        from src.services.model_training_pipeline import run_model_batch
+        from src.analysis.types import FeatureLoadResult
+        from src.prediction.training_pipeline import run_model_batch
+        from src.watchlist.types import SymbolTask
 
         mock_symbols.return_value = [SymbolTask(market="jp", symbol="7203")]
 
@@ -617,13 +623,13 @@ class TestRunModelBatch(unittest.TestCase):
         self.assertGreaterEqual(mock_mm.create_model.call_count, 2)
         self.assertGreaterEqual(mock_mm.train_model.call_count, 2)
 
-    @patch("src.services.batch_runner.print_summary")
-    @patch("src.services.batch_runner.run_parallel")
-    @patch("src.services.batch_runner.load_target_symbols")
+    @patch("src.watchlist.batch_runner.print_summary")
+    @patch("src.watchlist.batch_runner.run_parallel")
+    @patch("src.watchlist.batch_runner.load_target_symbols")
     def test_horizon_attached_to_tasks(self, mock_symbols, mock_parallel, mock_print):
         """horizon パラメータが SymbolTask に付与されること"""
-        from src.domain.types import SymbolTask
-        from src.services.model_training_pipeline import run_model_batch
+        from src.prediction.training_pipeline import run_model_batch
+        from src.watchlist.types import SymbolTask
 
         mock_symbols.return_value = [SymbolTask(market="jp", symbol="7203")]
         mock_parallel.return_value = []
@@ -649,10 +655,10 @@ class TestRunModelBatch(unittest.TestCase):
 class TestTrainAllModels(unittest.TestCase):
     """train_all_models のテスト"""
 
-    @patch("src.services.model_training_pipeline._train_models_for_horizon")
+    @patch("src.prediction.training_pipeline._train_models_for_horizon")
     def test_calls_train_for_each_horizon(self, mock_train):
         """各 horizon に対して _train_models_for_horizon が呼ばれること"""
-        from src.services.model_training_pipeline import train_all_models
+        from src.prediction.training_pipeline import train_all_models
 
         train_all_models(horizons=[1, 7])
         self.assertEqual(mock_train.call_count, 2)
@@ -660,19 +666,19 @@ class TestTrainAllModels(unittest.TestCase):
         self.assertIn(1, calls)
         self.assertIn(7, calls)
 
-    @patch("src.services.model_training_pipeline._train_models_for_horizon")
+    @patch("src.prediction.training_pipeline._train_models_for_horizon")
     def test_exception_per_horizon_does_not_stop_others(self, mock_train):
         """1つの horizon で例外が出ても他の horizon が実行されること"""
-        from src.services.model_training_pipeline import train_all_models
+        from src.prediction.training_pipeline import train_all_models
 
         mock_train.side_effect = [Exception("学習エラー"), None]
         train_all_models(horizons=[1, 7])
         self.assertEqual(mock_train.call_count, 2)
 
-    @patch("src.services.model_training_pipeline._train_models_for_horizon")
+    @patch("src.prediction.training_pipeline._train_models_for_horizon")
     def test_default_horizon_is_1(self, mock_train):
         """引数なしでは horizon=1 が使われること"""
-        from src.services.model_training_pipeline import train_all_models
+        from src.prediction.training_pipeline import train_all_models
 
         train_all_models()
         mock_train.assert_called_once_with(1, max_workers=3)
@@ -686,13 +692,14 @@ class TestTrainAllModels(unittest.TestCase):
 class TestTrainModelsForHorizon(unittest.TestCase):
     """_train_models_for_horizon のテスト"""
 
-    @patch("src.services.model_training_pipeline.train_models_for_symbol")
-    @patch("src.services.model_training_pipeline.load_features_for_training")
-    @patch("src.services.model_training_pipeline.load_target_symbols")
+    @patch("src.prediction.training_pipeline.train_models_for_symbol")
+    @patch("src.prediction.training_pipeline.load_features_for_training")
+    @patch("src.prediction.training_pipeline.load_target_symbols")
     def test_trains_when_features_available(self, mock_symbols, mock_load, mock_train):
         """特徴量が存在する場合にモデルが学習されること"""
-        from src.domain.types import FeatureLoadResult, SymbolTask
-        from src.services.model_training_pipeline import _train_models_for_horizon
+        from src.analysis.types import FeatureLoadResult
+        from src.prediction.training_pipeline import _train_models_for_horizon
+        from src.watchlist.types import SymbolTask
 
         mock_symbols.return_value = [SymbolTask(market="jp", symbol="7203")]
         X = pd.DataFrame({"close_lag1": np.random.randn(100)})
@@ -705,13 +712,14 @@ class TestTrainModelsForHorizon(unittest.TestCase):
         _train_models_for_horizon(horizon=1, max_workers=1)
         mock_train.assert_called_once_with("jp", "7203", horizon=1)
 
-    @patch("src.services.model_training_pipeline.train_models_for_symbol")
-    @patch("src.services.model_training_pipeline.load_features_for_training")
-    @patch("src.services.model_training_pipeline.load_target_symbols")
+    @patch("src.prediction.training_pipeline.train_models_for_symbol")
+    @patch("src.prediction.training_pipeline.load_features_for_training")
+    @patch("src.prediction.training_pipeline.load_target_symbols")
     def test_skips_when_features_unavailable(self, mock_symbols, mock_load, mock_train):
         """特徴量がない場合はスキップされること（例外なし）"""
-        from src.domain.types import FeatureLoadResult, SymbolTask
-        from src.services.model_training_pipeline import _train_models_for_horizon
+        from src.analysis.types import FeatureLoadResult
+        from src.prediction.training_pipeline import _train_models_for_horizon
+        from src.watchlist.types import SymbolTask
 
         mock_symbols.return_value = [SymbolTask(market="jp", symbol="7203")]
         mock_load.return_value = FeatureLoadResult(
@@ -721,22 +729,23 @@ class TestTrainModelsForHorizon(unittest.TestCase):
         _train_models_for_horizon(horizon=1, max_workers=1)  # 例外なし
         mock_train.assert_not_called()
 
-    @patch("src.services.model_training_pipeline.load_target_symbols")
+    @patch("src.prediction.training_pipeline.load_target_symbols")
     def test_returns_empty_when_no_symbols(self, mock_symbols):
         """銘柄がない場合、空リストが返ること"""
-        from src.services.model_training_pipeline import _train_models_for_horizon
+        from src.prediction.training_pipeline import _train_models_for_horizon
 
         mock_symbols.return_value = []
         results = _train_models_for_horizon(horizon=1)
         self.assertEqual(results, [])
 
-    @patch("src.services.model_training_pipeline.train_models_for_symbol")
-    @patch("src.services.model_training_pipeline.load_features_for_training")
-    @patch("src.services.model_training_pipeline.load_target_symbols")
+    @patch("src.prediction.training_pipeline.train_models_for_symbol")
+    @patch("src.prediction.training_pipeline.load_features_for_training")
+    @patch("src.prediction.training_pipeline.load_target_symbols")
     def test_exception_in_one_symbol_continues_others(self, mock_symbols, mock_load, mock_train):
         """1銘柄でエラーが出ても残りが処理されること"""
-        from src.domain.types import FeatureLoadResult, SymbolTask
-        from src.services.model_training_pipeline import _train_models_for_horizon
+        from src.analysis.types import FeatureLoadResult
+        from src.prediction.training_pipeline import _train_models_for_horizon
+        from src.watchlist.types import SymbolTask
 
         mock_symbols.return_value = [
             SymbolTask(market="jp", symbol="7203"),

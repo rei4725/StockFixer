@@ -301,7 +301,7 @@ class TestFetchCrossAssetFeatures(unittest.TestCase):
         mock_yf_client.ticker_history.return_value = df
         # 例外なしで処理されること（Close が DataFrame になるので iloc[:,0] が呼ばれる）
         try:
-            result = fetch_cross_asset_features("2024-01-01", "2024-01-31")
+            fetch_cross_asset_features("2024-01-01", "2024-01-31")
         except Exception:
             pass  # フォールバックエラーも OK（ここではカバレッジが目的）
 
