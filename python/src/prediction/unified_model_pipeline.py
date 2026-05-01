@@ -299,6 +299,51 @@ def _load_all_ohlcv_for_unified(horizon: int) -> Tuple[pd.DataFrame, pd.Series]:
     return X[valid], y[valid]
 
 
+def make_unified_model_name(model_type: str, horizon: int) -> str:
+    """統合モデルの標準命名規則に従いモデル名を返す。
+
+    Args:
+        model_type: "XGBoostModel" or "LightGBMModel"
+        horizon: 予測ホライズン（営業日）
+
+    Returns:
+        例: "UnifiedStockXGB", "UnifiedStockLGB_3d"
+    """
+    short = model_type.replace("Model", "")
+    suffix = f"_{horizon}d" if horizon > 1 else ""
+    return f"UnifiedStock{short}{suffix}"
+
+
+def train_unified_models_batch(
+    horizons: list,
+    both: bool = True,
+    model_type: str = "XGBoostModel",
+    model_name: str = None,
+) -> None:
+    """指定ホライズン × モデルタイプの組み合わせで統合モデルを一括学習する。
+
+    Args:
+        horizons: 予測ホライズンリスト（例: [1, 3, 5, 10]）
+        both: True のとき XGBoost + LightGBM の両モデルを学習
+        model_type: both=False のとき使用するモデルタイプ
+        model_name: both=False かつ horizon=1 のとき使用するモデル名（省略時は命名規則に従う）
+    """
+    for horizon in horizons:
+        logger.info(f"=== 統合モデル学習: horizon={horizon}d ===")
+        if both:
+            for mt in ["XGBoostModel", "LightGBMModel"]:
+                name = make_unified_model_name(mt, horizon)
+                logger.info(f"学習開始: {name}")
+                train_unified_model(model_type=mt, model_name=name, horizon=horizon)
+        else:
+            name = (
+                model_name
+                if (model_name and horizon == 1)
+                else make_unified_model_name(model_type, horizon)
+            )
+            train_unified_model(model_type=model_type, model_name=name, horizon=horizon)
+
+
 def load_unified_model(model_name: str = "UnifiedStockModel", model_dir: str = None):
     """
     統合モデルをロードする

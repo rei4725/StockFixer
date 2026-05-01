@@ -280,6 +280,16 @@ def _print_schedule():
     print("=" * 60 + "\n")
 
 
+def _start_health_server() -> None:
+    """ヘルスチェックサーバーをデーモンスレッドで起動する"""
+    import os
+
+    from src.api.health import start_health_server
+
+    port = int(os.getenv("HEALTH_PORT", "5100"))
+    start_health_server(port=port)
+
+
 def run_with_bot():
     """Discord Botとスケジューラを同時に起動する"""
     from src.reporting.discord.discord_bot import TOKEN, bot
@@ -297,6 +307,7 @@ def run_with_bot():
     _print_schedule()
     print("  Discord Bot と同時起動中\n")
 
+    _start_health_server()
     scheduler.start()
     try:
         bot.run(TOKEN)
@@ -312,6 +323,7 @@ def run_scheduler_only():
     scheduler.add_listener(_job_listener, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR)
 
     _print_schedule()
+    _start_health_server()
 
     try:
         scheduler.start()

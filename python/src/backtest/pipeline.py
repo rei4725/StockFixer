@@ -503,6 +503,34 @@ def print_backtest_metrics(
     print(f"{'='*50}")
 
 
+def fetch_benchmark_for_result(
+    result_df: pd.DataFrame,
+    benchmark_name: str,
+    fallback_start: Optional[str] = None,
+    fallback_end: Optional[str] = None,
+) -> Optional[dict]:
+    """
+    バックテスト結果 DataFrame からベンチマーク比較データを取得する。
+
+    Args:
+        result_df: バックテスト結果 DataFrame（date 列推奨）
+        benchmark_name: ベンチマーク識別子 ("n225", "sp500" など)
+        fallback_start: result_df に date 列がない場合の開始日
+        fallback_end: result_df に date 列がない場合の終了日
+
+    Returns:
+        fetch_benchmark_returns が返す辞書、または None
+    """
+    from src.backtest.metrics import BENCHMARK_TICKERS, fetch_benchmark_returns
+
+    bm_ticker = BENCHMARK_TICKERS.get(benchmark_name, benchmark_name)
+    bm_start = str(result_df["date"].min())[:10] if "date" in result_df.columns else fallback_start
+    bm_end = str(result_df["date"].max())[:10] if "date" in result_df.columns else fallback_end
+    if bm_start and bm_end:
+        return fetch_benchmark_returns(bm_ticker, bm_start, bm_end)
+    return None
+
+
 # --- internal helpers ---
 
 
