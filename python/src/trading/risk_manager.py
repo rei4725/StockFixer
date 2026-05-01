@@ -21,10 +21,11 @@ from config.settings import (
     MAX_POSITION_RATE,
     MAX_POSITIONS,
 )
-from config.trading_policy import (
+from config.trading_policy import (  # noqa: F401  # R-307/R-219 でポジションキャップ・DD制御に使用予定
     DEFAULT_AVG_LOSS,
     DEFAULT_AVG_WIN,
     DEFAULT_WIN_RATE,
+    HIGH_CONFIDENCE_POSITION_CAP,
     MAX_ACCEPTABLE_DRAWDOWN,
 )
 from src.trading.brokers.base import BrokerBase, OrderSide
