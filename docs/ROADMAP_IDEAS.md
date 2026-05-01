@@ -415,7 +415,7 @@
 | NF-201 | DONE | 2026-10-31 | 2026-04-21 | integration-tests.yml による統合テスト自動実行を確認済み |
 | NF-202 | DONE | 2026-10-31 | 2026-04-21 | pip-audit JSON パース統一・GITHUB_STEP_SUMMARY 出力・全脆弱性 FAIL |
 | NF-203 | DONE | 2026-11-07 | 2026-04-21 | bandit -ll フラグ・HIGH のみ FAIL・MEDIUM は warning・GITHUB_STEP_SUMMARY 出力 |
-| NF-301 | TODO | 2026-11-30 | - | Flask /health エンドポイント実装、Docker HEALTHCHECK 更新 |
+| NF-301 | DONE | 2026-11-30 | 2026-04-30 | src/api/health.py に Flask /health 追加。DB接続・スケジューラ最終実行時刻・直近予測時刻を JSON 返却。run_scheduler.py に start_health_server() 組込み。Dockerfile HEALTHCHECK を /health 叩く形式に更新 |
 | NF-302 | TODO | 2026-12-07 | - | logger.py に JSON フォーマッタ追加、LOG_FORMAT 環境変数対応 |
 | NF-303 | TODO | 2026-12-14 | - | 条件付きアラートルール定義 |
 | NF-401 | TODO | 2027-01-25 | - | src/domain/exceptions.py 作成 |
@@ -442,10 +442,10 @@
 | R-205 | DONE | 2026-11-30 | 2026-04-23 | stress_test_pipeline.py 実装・統合テスト・CLIスモークテスト追加。コロナ/リーマンシナリオ対応。 |
 | R-201 | TODO | 2026-10-26 | - | |
 | R-202 | DONE | 2026-11-02 | 2026-04-14 | model_metrics テーブルの directional_accuracy を使い softmax 重み付きアンサンブルを実装（predict_single_stock / predict_unified）。 |
-| R-206 | TODO | 2026-11-09 | - | R-004 Walk-Forward と連動 |
+| R-206 | DONE | 2026-11-09 | 2026-04-30 | optimizer.py に run_optuna_optimization / run_optuna_batch 追加。scheduler.py に USE_OPTUNA / OPTUNA_N_TRIALS 環境変数対応。requirements.txt に optuna>=3.6.0 追加 |
 | R-207 | TODO | 2026-11-16 | - | |
 | R-209 | TODO | 2026-11-30 | - | index_membership_history テーブルを DuckDB に追加 |
-| R-210 | TODO | 2026-12-07 | - | R-107 paper/real 乖離データでパラメータ推定 |
+| R-210 | DONE | 2026-12-07 | 2026-04-30 | backtest/slippage.py 新規作成（平方根市場インパクトモデル・calibrate_alpha・make_slippage_fn）。backtester.py に slippage_fn パラメータと _get_slippage() ヘルパー追加 |
 | R-204 | TODO | 2026-12-14 | - | |
 | R-301 | TODO | 2027-01-18 | - | 資本配分を単銘柄判定からポートフォリオ最適化へ拡張 |
 | R-302 | TODO | 2027-02-15 | - | shadow 成績と本番成績の比較による昇格ゲートを実装 |
@@ -453,7 +453,7 @@
 | R-304 | TODO | 2027-04-12 | - | 外部配信向け read-only API と公開条件を分離設計 |
 | R-305 | TODO | 2027-01-25 | - | R-101 market_regime.py のシグナル生成接続 |
 | R-306 | DONE | 2027-02-01 | 2026-04-14 | fetch_cross_asset_features() を data_loader.py に追加し、data_pipeline / predict_single_stock で結合。モデル再学習が必要。 |
-| R-307 | TODO | 2026-12-07 | - | RiskManager に DD 段階別縮小関数を追加（Q1 2027 から Q4 Sprint 4 に前倒し） |
+| R-307 | DONE | 2026-12-07 | 2026-04-30 | compute_dd_capital_scale 純粋関数・update_peak_balance・get_current_dd_ratio を risk_manager.py に追加。dd_state テーブルを _connection.py DDL に追加。execution.py の run_daily_orders 先頭で update_peak_balance() 呼び出し |
 | R-308 | TODO | 2027-02-22 | - | R-107 スリッページ実測値と比較する分割発注ロジック |
 | R-401 | TODO | 2027-Q2 | - | |
 | R-402 | TODO | 2027-Q2 | - | |
@@ -500,6 +500,10 @@
 | R-215 | ショートサイド活用（SHORT_COVER PnL を日次損失・連続損失・get_pnl_summary に反映） | 2026-04-30 |
 | R-216 | BT最適パラメータ自動ロード（_resolve_kelly_params 追加・buy/short 両ループで実績 Kelly 適用） | 2026-04-30 |
 | R-217 | Kelly実績更新（optimizer.py metrics に avg_win/avg_loss は実装済みを確認） | 2026-04-30 |
+| R-307 | ドローダウン適応型資本配分（compute_dd_capital_scale・update_peak_balance・dd_state テーブル追加） | 2026-04-30 |
+| R-206 | Optuna 自動ハイパーパラメータ探索（run_optuna_batch・USE_OPTUNA 環境変数・optuna 依存追加） | 2026-04-30 |
+| R-210 | 動的スリッページモデル（slippage.py 新規・平方根市場インパクト・backtester.py 統合） | 2026-04-30 |
+| NF-301 | /health エンドポイント実装（DB接続・スケジューラ最終実行時刻・直近予測時刻 JSON 返却・Docker HEALTHCHECK 更新） | 2026-04-30 |
 
 ---
 
@@ -532,3 +536,4 @@
 - 2026-04-11: 収益改善追加施策として R-212〜R-215（Q4 2026 即効・低コスト）、R-305〜R-308（Q1 2027 中期）、R-401〜R-407（Q2 2027+ 長期）を追加
 - 2026-04-19: 非機能改善施策（NF-101～NF-504）を新設。CI/CD・監視・コード品質・制度文書の5フェーズ15施策を追加
 - 2026-04-20: 高リスク方針への転換に伴う優先度見直し。R-205・R-307を前倒し、R-216（BT最適パラメータ自動ロード）・R-217（Kelly実績更新）を新規追加。R-214（リバランス頻度最適化）を低優先度に後回し。Q4スプリント案を再構成
+- 2026-04-30: Sprint 3完了（R-215/R-216/R-217）・Sprint 4完了（R-307/R-206/R-210）・NF-301完了（Flask /health エンドポイント・Docker HEALTHCHECK 更新）

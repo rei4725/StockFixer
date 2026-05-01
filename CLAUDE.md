@@ -76,29 +76,32 @@ docker-compose logs -f stockfixer
 ```
 run_*.py          CLI entry points — argument parsing only, NO business logic
     ↓
-api/              Discord Bot + HTTP endpoints
+api/              HTTP health endpoints
+orchestration/    APScheduler wiring — calls into bounded contexts
     ↓
-services/         Orchestration layer — domain-driven bounded contexts
-    ↓
-models/ strategy/ backtest/ features/ brokers/   Domain logic
-    ↓
-data/             yfinance data loading
+backtest/  prediction/  trading/  reporting/  watchlist/  market_data/
+          Bounded contexts — each owns its own types.py and pipelines
     ↓
 utils/            DB, logging, retry, path helpers
 ```
 
-### Bounded Contexts in `services/`
+> **Legacy modules** (未整理 — 将来 BC に吸収予定):
+> `src/data/`, `src/models/`, `src/analysis/`, `src/strategy/`, `src/features/`
+> `src/brokers/` は `src/trading/brokers/` への後方互換 re-export shim — 削除予定
 
-Each subdirectory under `src/services/` is a bounded context with its own `types.py`:
+### Bounded Contexts (`src/<context>/`)
 
-| Context | Responsibility |
-|---|---|
-| `backtest/` | Backtesting pipelines |
-| `prediction/` | Forecast pipelines + ranking |
-| `trading/` | Order execution |
-| `training/` | Model learning |
-| `reporting/` | Discord notifications |
-| `watchlist/` | Symbol CRUD |
+各 BC は `src/` 直下に配置され、それぞれ `types.py` を持つ:
+
+| Context | 実パス | Responsibility |
+|---|---|---|
+| `backtest/` | `src/backtest/` | Backtesting pipelines |
+| `prediction/` | `src/prediction/` | Forecast pipelines + ranking + model training |
+| `trading/` | `src/trading/` | Order execution |
+| `reporting/` | `src/reporting/` | Discord notifications |
+| `watchlist/` | `src/watchlist/` | Symbol CRUD |
+| `market_data/` | `src/market_data/` | yfinance data loading + feature engineering |
+| `orchestration/` | `src/orchestration/` | Scheduler wiring (APScheduler) |
 
 ### Key Data Types (defined in each BC's `types.py`)
 
@@ -109,21 +112,21 @@ Each subdirectory under `src/services/` is a bounded context with its own `types
 
 ### Broker Abstraction
 
-`src/brokers/base.py` defines `BrokerBase`. Two implementations:
-- `brokers/paper/` — DuckDB-backed paper trading (default)
-- `brokers/kabu/` — Kabu Station API for real trades
+`src/trading/brokers/base.py` defines `BrokerBase`. Two implementations:
+- `trading/brokers/paper/` — DuckDB-backed paper trading (default)
+- `trading/brokers/kabu/` — Kabu Station API for real trades
 
 Brokers are injected into services; never referenced concretely from above layers.
 
 ### Pipelines
 
-Defined in `services/`:
-- `data_pipeline.py` — fetch → technical analysis → DuckDB
-- `model_training_pipeline.py` — train per-symbol XGBoost/LightGBM
-- `unified_model_pipeline.py` — train ensemble across all symbols
-- `prediction_pipeline.py` — predict + rank top10/worst10
-- `backtest_optimize_pipeline.py` — grid search for optimal parameters
-- `scheduler_pipeline.py` — wires APScheduler daily/weekly jobs
+各 BC 配下に配置:
+- `market_data/pipeline.py` — fetch → technical analysis → DuckDB
+- `prediction/training_pipeline.py` — train per-symbol XGBoost/LightGBM
+- `prediction/unified_model_pipeline.py` — train ensemble across all symbols
+- `prediction/prediction_pipeline.py` — predict + rank top10/worst10
+- `backtest/pipeline.py` — backtesting execution
+- `orchestration/scheduler.py` — wires APScheduler daily/weekly jobs
 
 ### Storage
 
@@ -186,7 +189,7 @@ pip-audit -r requirements-dev.txt
 ## Key Rules
 
 - **`run_*.py` files** are CLI wrappers only: parse args, call service layer, print results. No business logic, data transforms, or direct DB access.
-- **Strict layering**: upper layers import lower ones, never the reverse. `models/` does not know about `services/`.
+- **Strict layering**: upper layers import lower ones, never the reverse. BC modules (`backtest/`, `prediction/` 等) do not import from `orchestration/` or `api/`.
 - **Types over dicts**: use dataclass types from each BC's `types.py`, not raw dicts.
 - **Logging**: all modules use `get_logger(__name__)` from the unified factory in `utils/`. Never use bare `except: pass` — always `logger.error("...", exc_info=True)`.
 - **Time**: UTC internally, display as `Asia/Tokyo`.
@@ -197,7 +200,7 @@ pip-audit -r requirements-dev.txt
 
 ## Configuration
 
-All constants live in `src/config/settings.py` with environment variable overrides via `.env`:
+All constants live in `python/config/settings.py` with environment variable overrides via `.env`:
 
 | Variable | Default |
 |---|---|
