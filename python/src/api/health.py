@@ -1,0 +1,124 @@
+"""
+Flask /health エンドポイント（NF-301）
+
+DB接続・スケジューラ最終実行時刻・直近予測実行時刻を JSON で返す。
+Docker HEALTHCHECK から叩かれることを想定。
+
+起動:
+    port = int(os.getenv("HEALTH_PORT", "5100"))
+    start_health_server(port=port)   # daemon thread として起動
+"""
+
+import json
+import os
+import threading
+from datetime import datetime, timezone
+from typing import Any
+
+from flask import Flask, Response, jsonify
+
+from src.utils.data_path_utils import get_results_dir
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
+app = Flask(__name__)
+app.config["JSON_SORT_KEYS"] = False
+
+
+# ---------------------------------------------------------------------------
+# ヘルパー
+# ---------------------------------------------------------------------------
+
+
+def _check_db() -> tuple[str, str | None]:
+    """DB接続を確認する。(status, error_msg) を返す。"""
+    try:
+        from src.utils.db._connection import get_readonly_connection
+
+        con = get_readonly_connection()
+        try:
+            con.execute("SELECT 1").fetchone()
+        finally:
+            con.close()
+        return "ok", None
+    except Exception as exc:
+        return "error", str(exc)
+
+
+def _load_scheduler_last_runs() -> dict[str, str | None]:
+    """スケジューラ状態ファイルから各ジョブの最終成功実行時刻を返す。"""
+    state_path = os.path.join(get_results_dir(), "scheduler_queue_state.json")
+    if not os.path.exists(state_path):
+        return {}
+
+    try:
+        with open(state_path, "r", encoding="utf-8") as f:
+            state = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+    latest: dict[str, str | None] = {}
+    for event in state.get("events", []):
+        if event.get("status") != "success":
+            continue
+        job_id = event.get("job_id")
+        finished_at = event.get("finished_at")
+        if job_id and finished_at:
+            if job_id not in latest or finished_at > latest[job_id]:
+                latest[job_id] = finished_at
+
+    return latest
+
+
+def _get_last_prediction_at() -> str | None:
+    """prediction_results テーブルから直近の予測実行時刻を返す。"""
+    try:
+        from src.utils.db._connection import get_readonly_connection
+
+        con = get_readonly_connection()
+        try:
+            row = con.execute("SELECT MAX(predicted_at) FROM prediction_results").fetchone()
+        finally:
+            con.close()
+        return row[0] if row and row[0] else None
+    except Exception as exc:
+        logger.warning("last_prediction_at 取得失敗: %s", exc)
+        return None
+
+
+# ---------------------------------------------------------------------------
+# エンドポイント
+# ---------------------------------------------------------------------------
+
+
+@app.route("/health")
+def health() -> tuple[Response, int]:
+    db_status, db_error = _check_db()
+
+    payload: dict[str, Any] = {
+        "status": "ok" if db_status == "ok" else "degraded",
+        "db": db_status if db_error is None else f"error: {db_error}",
+        "scheduler_last_runs": _load_scheduler_last_runs(),
+        "last_prediction_at": _get_last_prediction_at(),
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    http_status = 200 if db_status == "ok" else 503
+    return jsonify(payload), http_status
+
+
+# ---------------------------------------------------------------------------
+# サーバー起動
+# ---------------------------------------------------------------------------
+
+
+def start_health_server(port: int = 5100) -> None:
+    """Flask health サーバーをデーモンスレッドで起動する。"""
+
+    def _run() -> None:
+        logger.info("Health サーバー起動: port=%d", port)
+        app.run(host="0.0.0.0", port=port, use_reloader=False, threaded=True)
+
+    thread = threading.Thread(target=_run, daemon=True, name="health-server")
+    thread.start()
