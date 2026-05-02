@@ -23,6 +23,8 @@ from __future__ import annotations
 import math
 from typing import Callable
 
+import duckdb
+
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -61,7 +63,7 @@ def estimate_slippage(
     return float(alpha * math.sqrt(participation_rate))
 
 
-def calibrate_alpha(con, min_samples: int = 10) -> float:
+def calibrate_alpha(con: duckdb.DuckDBPyConnection, min_samples: int = 10) -> float:
     """
     paper_real_diff テーブルの実績スリッページから alpha を推定する。
 
@@ -140,7 +142,9 @@ def make_slippage_fn(alpha: float = _DEFAULT_ALPHA) -> Callable[[int, float, flo
     return _fn
 
 
-def get_calibrated_slippage_fn(con) -> Callable[[int, float, float], float]:
+def get_calibrated_slippage_fn(
+    con: duckdb.DuckDBPyConnection,
+) -> Callable[[int, float, float], float]:
     """
     paper_real_diff から alpha を校正したスリッページ関数を返す。
 

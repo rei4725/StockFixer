@@ -12,7 +12,7 @@ OrderExecutionPipeline が注文を送信する前にゲートチェックを行
 """
 
 import os
-from typing import Optional
+from typing import Any, Optional
 
 from config.settings import (
     HALF_KELLY,
@@ -311,7 +311,7 @@ class RiskManager:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _table_exists(con, table_name: str) -> bool:
+    def _table_exists(con: Any, table_name: str) -> bool:
         row = con.execute(
             """
             SELECT COUNT(*)

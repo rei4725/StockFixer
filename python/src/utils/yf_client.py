@@ -12,4 +12,5 @@ yfinance クライアントラッパー（後方互換 re-export）
 """
 
 # re-export: 実装は market_data.yf_client に移行済み
-from src.market_data.yf_client import download, ticker_history  # noqa: F401
+from src.market_data.yf_client import download as download  # noqa: F401
+from src.market_data.yf_client import ticker_history as ticker_history  # noqa: F401

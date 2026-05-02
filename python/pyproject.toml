@@ -1,0 +1,18 @@
+[tool.mypy]
+# グローバル設定（既存の pre-commit args と同一）
+ignore_missing_imports = true
+implicit_optional = true
+follow_imports = "silent"
+explicit_package_bases = true
+
+# src/trading・src/backtest BC のみ段階的に strict を有効化（Issue #155）
+[[tool.mypy.overrides]]
+module = [
+    "src.trading",
+    "src.trading.*",
+    "src.backtest",
+    "src.backtest.*",
+]
+strict = true
+ignore_missing_imports = true
+implicit_optional = true

@@ -459,7 +459,7 @@ def get_optimal_params(
         with open(json_path, "r", encoding="utf-8") as f:
             all_params = json.load(f)
         key = f"{market}_{symbol}"
-        return all_params.get(key)
+        return dict(all_params[key]) if key in all_params else None
     except Exception as e:
         logger.error(f"JSONの読み込みエラー: {e}", exc_info=True)
         return None
@@ -487,7 +487,7 @@ def run_optimize_batch(
     sort_by: str = "sharpe_ratio",
     skip_days: Optional[int] = None,
     as_of_date: Optional[str] = None,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """
     ウォッチリストの全銘柄に対してバックテスト最適化をバッチ実行する。
 
@@ -534,7 +534,7 @@ def run_optimize_batch(
 
     logger.info(f"全銘柄最適化バッチ開始: {len(symbols)}銘柄 / 並列数={max_workers}")
 
-    def _optimize_task(task) -> dict:
+    def _optimize_task(task: Any) -> dict[str, Any]:
         market = getattr(task, "market", None) or task["market"]
         symbol = getattr(task, "symbol", None) or task["symbol"]
 
@@ -721,7 +721,7 @@ def run_optuna_batch(
     max_workers: int = 3,
     sort_by: str = "sharpe_ratio",
     as_of_date: Optional[str] = None,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """
     ウォッチリスト全銘柄に Optuna 最適化をバッチ実行し、
     optimal_params.json を更新する（週次スケジューラから呼び出す）。
@@ -732,7 +732,7 @@ def run_optuna_batch(
         その他: ``run_optuna_optimization`` と同様
 
     Returns:
-        各銘柄の結果サマリー list[dict]
+        各銘柄の結果サマリー list[dict[str, Any]]
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -745,7 +745,7 @@ def run_optuna_batch(
 
     logger.info(f"Optunaバッチ最適化開始: {len(symbols)}銘柄 / n_trials={n_trials} / 並列={max_workers}")
 
-    def _task(task) -> dict:
+    def _task(task: Any) -> dict[str, Any]:
         m = getattr(task, "market", None) or task["market"]
         s = getattr(task, "symbol", None) or task["symbol"]
         try:

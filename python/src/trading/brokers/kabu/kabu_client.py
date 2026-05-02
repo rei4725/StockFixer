@@ -9,6 +9,7 @@ APIパスワードは環境変数 KABU_API_PASSWORD から取得する。
 
 import os
 from datetime import datetime, timedelta
+from typing import Any
 
 import httpx
 
@@ -77,7 +78,7 @@ class KabuBroker(BrokerBase):
         qty: int,
         price: float = 0.0,
         order_type: OrderType = OrderType.MARKET,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """
         現物株式の注文を発注する（東証・現物・特定口座）。
 
@@ -119,7 +120,7 @@ class KabuBroker(BrokerBase):
         logger.info(f"[kabu] 注文受付: order_id={order_id}")
         return {"order_id": order_id, "status": "accepted", "message": str(data)}
 
-    def cancel_order(self, order_id: str) -> dict:
+    def cancel_order(self, order_id: str) -> dict[str, Any]:
         """注文をキャンセルする"""
         token = self.get_token()
         body = {
@@ -140,7 +141,7 @@ class KabuBroker(BrokerBase):
     # 照会
     # ------------------------------------------------------------------
 
-    def get_positions(self) -> list[dict]:
+    def get_positions(self) -> list[dict[str, Any]]:
         """保有ポジション一覧を返す"""
         token = self.get_token()
         resp = httpx.get(
@@ -172,7 +173,7 @@ class KabuBroker(BrokerBase):
         resp.raise_for_status()
         return float(resp.json().get("StockAccountWallet", 0.0))
 
-    def get_orders(self) -> list[dict]:
+    def get_orders(self) -> list[dict[str, Any]]:
         """当日の注文一覧を返す"""
         token = self.get_token()
         resp = httpx.get(

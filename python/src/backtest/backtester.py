@@ -1,4 +1,4 @@
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 import pandas as pd
 
@@ -9,16 +9,16 @@ from src.backtest.task import BacktestTask, ReturnRegressionTask
 class Backtester:
     def __init__(
         self,
-        model_manager,
-        signal_generator,
-        data_loader,
-        start_date,
-        end_date,
-        market,
-        symbol,
-        initial_cash=1_000_000,
-        fee_rate=0.0,
-        slippage=0.0,
+        model_manager: Any,
+        signal_generator: Any,
+        data_loader: Any,
+        start_date: Any,
+        end_date: Any,
+        market: str,
+        symbol: str,
+        initial_cash: float = 1_000_000,
+        fee_rate: float = 0.0,
+        slippage: float = 0.0,
         stop_loss_pct: Optional[float] = None,
         take_profit_pct: Optional[float] = None,
         position_sizing: str = "full",
@@ -63,7 +63,7 @@ class Backtester:
         model_type: Optional[str] = None,
         source: str = "file",
         task: Optional[BacktestTask] = None,
-    ):
+    ) -> tuple[pd.DataFrame, dict[str, Any]]:
         """
         バックテストを実行する。
 
@@ -111,7 +111,7 @@ class Backtester:
 
     def simulate_trading(
         self, df: pd.DataFrame, signal: pd.Series, pred: Optional[pd.Series] = None
-    ):
+    ) -> tuple[pd.DataFrame, dict[str, Any]]:
         """
         仮想売買シミュレーションを実行する。
 
@@ -131,7 +131,7 @@ class Backtester:
         position_price = 0.0
         short_position = 0
         short_price = 0.0
-        short_trade_log: list[dict] = []
+        short_trade_log: list[dict[str, Any]] = []
         trade_log = []
 
         close_col = "Close" if "Close" in df.columns else "close"
@@ -359,7 +359,7 @@ class Backtester:
         pred_value: Optional[float] = None,
         atr_value: Optional[float] = None,
     ) -> int:
-        return self._calc_position_details(cash, price, pred_value, atr_value)["qty"]
+        return int(self._calc_position_details(cash, price, pred_value, atr_value)["qty"])
 
     def _calc_position_details(
         self,
@@ -367,7 +367,7 @@ class Backtester:
         price: float,
         pred_value: Optional[float] = None,
         atr_value: Optional[float] = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """
         ポジションサイジングに基づいて購入数量を算出する。
 
@@ -457,7 +457,7 @@ class Backtester:
         atr_stop_distance: Optional[float] = None,
         atr_risk_amount: Optional[float] = None,
         atr_fallback_used: bool = False,
-    ) -> dict:
+    ) -> dict[str, Any]:
         position_value = max(0, qty) * unit_cost
         position_fraction = position_value / cash if cash > 0 else 0.0
         return {
@@ -472,7 +472,7 @@ class Backtester:
 
     def _load_from_raw(self) -> pd.DataFrame:
         """market_data_raw テーブルからOHLCVを取得する"""
-        from src.data.data_loader import get_raw_ohlcv_from_db
+        from src.market_data.loader import get_raw_ohlcv_from_db
 
         df = get_raw_ohlcv_from_db(self.market, self.symbol, self.start_date, self.end_date)
         if df is None or df.empty:

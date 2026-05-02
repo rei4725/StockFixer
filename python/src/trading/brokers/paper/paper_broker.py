@@ -10,6 +10,7 @@ kabu STATION® API が利用できない環境（APIキー未取得・テスト�
 """
 
 import uuid
+from typing import Any
 
 from config.settings import PAPER_INITIAL_BALANCE
 from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
@@ -49,7 +50,7 @@ class PaperBroker(BrokerBase):
         qty: int,
         price: float = 0.0,
         order_type: OrderType = OrderType.MARKET,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """
         注文を DuckDB に記録し、翌営業日始値で仮約定させる。
         実際の約定は settle_pending_orders() が翌日の実行時に処理する。
@@ -100,7 +101,7 @@ class PaperBroker(BrokerBase):
             "message": "paper order queued",
         }
 
-    def cancel_order(self, order_id: str) -> dict:
+    def cancel_order(self, order_id: str) -> dict[str, Any]:
         """pending 状態の注文をキャンセルする"""
         with _db_connection() as con:
             con.execute(
@@ -114,7 +115,7 @@ class PaperBroker(BrokerBase):
             "message": "paper order cancelled",
         }
 
-    def settle_pending_orders(self) -> list[dict]:
+    def settle_pending_orders(self) -> list[dict[str, Any]]:
         """
         pending 状態の注文を yfinance の当日始値で約定処理する。
         スケジューラーから市場開始直後（9:05 頃）に呼び出す。
@@ -211,7 +212,7 @@ class PaperBroker(BrokerBase):
         return settled
 
     def _apply_fill(
-        self, con, order_id: str, symbol: str, side: int, qty: int, fill_price: float
+        self, con: Any, order_id: str, symbol: str, side: int, qty: int, fill_price: float
     ) -> None:
         """約定に合わせてポジションと残高を更新する"""
         existing = con.execute(
@@ -309,7 +310,7 @@ class PaperBroker(BrokerBase):
     # 照会
     # ------------------------------------------------------------------
 
-    def get_short_positions(self) -> list[dict]:
+    def get_short_positions(self) -> list[dict[str, Any]]:
         """保有中の空売りポジション一覧を返す。
 
         Returns:
@@ -346,7 +347,7 @@ class PaperBroker(BrokerBase):
             )
         return results
 
-    def get_positions(self) -> list[dict]:
+    def get_positions(self) -> list[dict[str, Any]]:
         """保有ポジション一覧を返す（現在価格・含み損益つき）"""
         with _db_connection() as con:
             rows = con.execute(
@@ -377,7 +378,7 @@ class PaperBroker(BrokerBase):
             )
         return results
 
-    def get_pnl_summary(self) -> dict:
+    def get_pnl_summary(self) -> dict[str, Any]:
         """
         損益サマリーを返す。
 
@@ -399,9 +400,15 @@ class PaperBroker(BrokerBase):
                 "AND realized_pnl IS NOT NULL",
                 [int(OrderSide.SELL), int(OrderSide.SHORT_COVER)],
             ).fetchone()
-        realized_pnl = float(row[0] or 0.0)
-        trade_count = int(row[1] or 0)
-        started_at = str(row[2]) if row[2] else None
+        # SUM/COUNT クエリは必ず 1 行を返すが fetchone() の型は Optional なので明示ガード
+        if row is None:
+            realized_pnl = 0.0
+            trade_count = 0
+            started_at = None
+        else:
+            realized_pnl = float(row[0] or 0.0)
+            trade_count = int(row[1] or 0)
+            started_at = str(row[2]) if row[2] else None
 
         # 含み損益（現在ポジションから計算）
         positions = self.get_positions()
@@ -424,7 +431,7 @@ class PaperBroker(BrokerBase):
             row = con.execute("SELECT balance FROM paper_balance LIMIT 1").fetchone()
         return float(row[0]) if row else _INITIAL_BALANCE
 
-    def get_orders(self) -> list[dict]:
+    def get_orders(self) -> list[dict[str, Any]]:
         """当日の注文一覧を返す"""
         with _db_connection() as con:
             rows = con.execute(

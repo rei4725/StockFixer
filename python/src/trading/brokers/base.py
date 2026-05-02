@@ -7,6 +7,7 @@ services 層は BrokerBase のみを参照し、具体的な証券会社に依�
 
 from abc import ABC, abstractmethod
 from enum import IntEnum
+from typing import Any
 
 
 class OrderSide(IntEnum):
@@ -39,7 +40,7 @@ class BrokerBase(ABC):
         qty: int,
         price: float = 0.0,
         order_type: OrderType = OrderType.MARKET,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """
         注文を発注する。
 
@@ -55,11 +56,11 @@ class BrokerBase(ABC):
         """
 
     @abstractmethod
-    def cancel_order(self, order_id: str) -> dict:
+    def cancel_order(self, order_id: str) -> dict[str, Any]:
         """注文をキャンセルする"""
 
     @abstractmethod
-    def get_positions(self) -> list[dict]:
+    def get_positions(self) -> list[dict[str, Any]]:
         """
         保有ポジション一覧を返す。
 
@@ -72,5 +73,9 @@ class BrokerBase(ABC):
         """現金余力（円）を返す"""
 
     @abstractmethod
-    def get_orders(self) -> list[dict]:
+    def get_orders(self) -> list[dict[str, Any]]:
         """当日の注文一覧を返す"""
+
+    def get_short_positions(self) -> list[dict[str, Any]]:
+        """保有中の空売りポジション一覧を返す。未実装の Broker 実装では空リストを返す。"""
+        return []

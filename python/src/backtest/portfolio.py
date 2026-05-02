@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import math
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
@@ -50,7 +50,7 @@ def run_portfolio_backtest(
     threshold: float = 0.0,
     ensemble: bool = False,
     max_sector_positions: int = MAX_SECTOR_POSITIONS,
-) -> tuple[pd.DataFrame, dict, pd.DataFrame]:
+) -> tuple[pd.DataFrame, dict[str, Any], pd.DataFrame]:
     """
     ポートフォリオバックテストを実行する。
 
@@ -122,7 +122,7 @@ def run_portfolio_backtest(
 
 def save_portfolio_results(
     equity_df: pd.DataFrame,
-    metrics: dict,
+    metrics: dict[str, Any],
     holdings_df: pd.DataFrame,
     market: str,
     top_n: int,
@@ -150,8 +150,8 @@ def save_portfolio_results(
 def plot_portfolio(
     equity_df: pd.DataFrame,
     holdings_df: pd.DataFrame,
-    metrics: dict,
-    output_dir: str = None,
+    metrics: dict[str, Any],
+    output_dir: Optional[str] = None,
     market: str = "",
     top_n: int = 5,
     rebalance_freq: str = "weekly",
@@ -219,7 +219,9 @@ def plot_portfolio(
         ax3.set_ylabel("ターンオーバー率 (%)")
         ax3.set_xlabel("リバランス日")
         ax3.set_title("リバランスごとのターンオーバー")
-        ax3.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
+        ax3.xaxis.set_major_formatter(  # type: ignore[no-untyped-call]
+            mdates.DateFormatter("%Y-%m")
+        )
         plt.setp(ax3.xaxis.get_majorticklabels(), rotation=30, ha="right")
         ax3.grid(True, alpha=0.3, axis="y")
     else:
@@ -232,7 +234,7 @@ def plot_portfolio(
         f"MaxDD: {metrics.get('max_drawdown', 0):.2%}",
     ]
     fig.text(0.5, 0.005, "  |  ".join(info_parts), ha="center", fontsize=9)
-    plt.tight_layout(rect=[0, 0.03, 1, 0.96])
+    plt.tight_layout(rect=(0, 0.03, 1, 0.96))
 
     import os
 
@@ -249,7 +251,9 @@ def plot_portfolio(
     return output_path
 
 
-def print_portfolio_metrics(metrics: dict, market: str, top_n: int, rebalance_freq: str) -> None:
+def print_portfolio_metrics(
+    metrics: dict[str, Any], market: str, top_n: int, rebalance_freq: str
+) -> None:
     """ポートフォリオメトリクスを標準出力に表示する。"""
     if not metrics:
         return
@@ -298,7 +302,7 @@ def _build_signal_matrix(
     学習データは train_ratio で分割し、テスト期間の予測のみ収録する。
     """
     from src.backtest.pipeline import _ensemble_predict, load_features
-    from src.models.model_manager import ModelManager
+    from src.prediction.manager import ModelManager
 
     score_dict: dict[str, pd.Series] = {}
     close_dict: dict[str, pd.Series] = {}
@@ -370,7 +374,7 @@ def _build_signal_matrix(
     return score_matrix, close_matrix
 
 
-def _get_rebalance_dates(index: pd.DatetimeIndex, freq: str) -> list:
+def _get_rebalance_dates(index: pd.DatetimeIndex, freq: str) -> list[Any]:
     """リバランス日のリストを返す。"""
     if freq == "daily":
         return list(index)
@@ -398,12 +402,12 @@ def _softmax_weights(scores: pd.Series) -> pd.Series:
 def _simulate_portfolio(
     score_matrix: pd.DataFrame,
     close_matrix: pd.DataFrame,
-    rebalance_dates: list,
+    rebalance_dates: list[Any],
     top_n: int,
     initial_cash: float,
     fee_rate: float,
     max_sector_positions: int,
-) -> tuple[pd.DataFrame, list]:
+) -> tuple[pd.DataFrame, list[dict[str, Any]]]:
     """
     ポートフォリオシミュレーションを実行する。
 
@@ -414,15 +418,15 @@ def _simulate_portfolio(
 
     cash = initial_cash
     # {symbol: {"qty": int, "price": float}}
-    holdings: dict[str, dict] = {}
+    holdings: dict[str, dict[str, Any]] = {}
     prev_symbols: set[str] = set()
-    holdings_records: list[dict] = []
+    holdings_records: list[dict[str, Any]] = []
 
-    equity_rows: list[dict] = []
+    equity_rows: list[dict[str, Any]] = []
 
     # 等分戦略の基準として全銘柄を均等保有したシリーズ（簡易近似）
     eq_cash = initial_cash
-    eq_holdings: dict[str, dict] = {}
+    eq_holdings: dict[str, dict[str, Any]] = {}
 
     for date in score_matrix.index:
         date_str = str(date)[:10]
@@ -558,7 +562,7 @@ def _limit_portfolio_candidates_by_sector(
     )
 
 
-def _compute_portfolio_metrics(equity_df: pd.DataFrame, initial_cash: float) -> dict:
+def _compute_portfolio_metrics(equity_df: pd.DataFrame, initial_cash: float) -> dict[str, Any]:
     """ポートフォリオ用メトリクスを計算する。"""
     if equity_df is None or equity_df.empty:
         return {}
@@ -592,7 +596,7 @@ def _compute_portfolio_metrics(equity_df: pd.DataFrame, initial_cash: float) -> 
 def _attach_regime_metrics(
     equity_df: pd.DataFrame,
     close_matrix: pd.DataFrame,
-) -> tuple[pd.DataFrame, dict[str, dict]]:
+) -> tuple[pd.DataFrame, dict[str, dict[str, Any]]]:
     """ポートフォリオ日次損益にレジーム列を付与し、レジーム別メトリクスを返す。"""
     if equity_df is None or equity_df.empty or close_matrix is None or close_matrix.empty:
         return equity_df, {}
@@ -632,8 +636,8 @@ def _build_market_proxy_frame(close_matrix: pd.DataFrame) -> pd.DataFrame:
     return proxy_df.dropna(subset=["Close"])
 
 
-def _compute_regime_metrics(equity_df: pd.DataFrame) -> dict[str, dict]:
-    results: dict[str, dict] = {"all": _compute_regime_leg_metrics(equity_df)}
+def _compute_regime_metrics(equity_df: pd.DataFrame) -> dict[str, dict[str, Any]]:
+    results: dict[str, dict[str, Any]] = {"all": _compute_regime_leg_metrics(equity_df)}
     if "regime" not in equity_df.columns:
         return results
 
@@ -643,7 +647,7 @@ def _compute_regime_metrics(equity_df: pd.DataFrame) -> dict[str, dict]:
     return results
 
 
-def _compute_regime_leg_metrics(equity_leg: pd.DataFrame) -> dict:
+def _compute_regime_leg_metrics(equity_leg: pd.DataFrame) -> dict[str, Any]:
     if equity_leg is None or equity_leg.empty:
         return {
             "days": 0,

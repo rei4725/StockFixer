@@ -12,4 +12,6 @@
 """
 
 # re-export: 実装は strategy.optimal_params_loader に移行済み
-from src.strategy.optimal_params_loader import get_optimal_params  # noqa: F401
+from src.strategy.optimal_params_loader import (  # noqa: F401
+    get_optimal_params as get_optimal_params,
+)

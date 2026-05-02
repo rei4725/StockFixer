@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import pandas as pd
 
@@ -38,17 +38,17 @@ _REPORT_METRICS = [
 ]
 
 
-def _numeric_mean(df: pd.DataFrame, columns: list[str]) -> dict:
+def _numeric_mean(df: pd.DataFrame, columns: list[str]) -> dict[str, Any]:
     available = [c for c in columns if c in df.columns]
     if not available:
         return {}
     work = df[available].copy()
     for col in work.columns:
         work[col] = pd.to_numeric(work[col], errors="coerce")
-    return work.mean().to_dict()
+    return {str(k): v for k, v in work.mean().to_dict().items()}
 
 
-def _summarize_wf_result(wf_df: pd.DataFrame, market: str, symbol: str) -> dict:
+def _summarize_wf_result(wf_df: pd.DataFrame, market: str, symbol: str) -> dict[str, Any]:
     summary = _numeric_mean(wf_df, _REPORT_METRICS)
     summary["market"] = market
     summary["symbol"] = symbol
@@ -240,7 +240,7 @@ def run_walk_forward_comparison_report(
     ensemble: bool = False,
     limit_symbols: Optional[int] = None,
     as_of_date: Optional[str] = None,
-) -> dict:
+) -> dict[str, Any]:
     """
     標準条件で Walk-Forward 検証を全銘柄実行し、比較レポートを保存する。
 
@@ -256,7 +256,7 @@ def run_walk_forward_comparison_report(
         ensure_dir(str(Path(get_results_dir()) / "backtest" / "walk_forward_reports"))
     )
 
-    rows: list[dict] = []
+    rows: list[dict[str, Any]] = []
     failed = 0
 
     for task in targets:
