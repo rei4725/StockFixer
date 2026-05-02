@@ -9,7 +9,7 @@ import os
 import re
 import sys
 from datetime import datetime
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
 
 import pandas as pd
 
@@ -38,7 +38,7 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
         from datetime import datetime, timedelta
 
         from src.analysis.technical import add_technical_indicators, create_basic_lag_features
-        from src.data.data_loader import get_stock_data
+        from src.market_data.loader import get_stock_data
         from src.utils.data_path_utils import get_ticker
 
         end = datetime.now().strftime("%Y-%m-%d")
@@ -75,7 +75,7 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
 
     elif source == "raw":
         from src.analysis.technical import add_technical_indicators, create_basic_lag_features
-        from src.data.data_loader import get_raw_ohlcv_from_db
+        from src.market_data.loader import get_raw_ohlcv_from_db
 
         df = get_raw_ohlcv_from_db(market, symbol)
         if df is None or df.empty:
@@ -189,7 +189,7 @@ def run_backtest_single(
     atr_max_fraction: float = 1.0,
     ensemble: bool = False,
     apply_min_change_filter: bool = False,
-) -> Tuple[pd.DataFrame, dict, pd.Series]:
+) -> Tuple[pd.DataFrame, dict[str, Any], pd.Series]:
     """
     単一学習/検証期間のバックテストを実行する。
 
@@ -221,7 +221,7 @@ def run_backtest_single(
         (result_df, metrics, None) のタプル
     """
     from src.backtest.backtester import Backtester
-    from src.models.model_manager import ModelManager
+    from src.prediction.manager import ModelManager
     from src.strategy.signal_generator import SignalGenerator
 
     task = _build_task(task_name, threshold)
@@ -375,7 +375,7 @@ def run_backtest_walk_forward(
         (None, None, wf_df) のタプル
     """
     from src.backtest.walk_forward import WalkForwardValidator
-    from src.models.model_manager import ModelManager
+    from src.prediction.manager import ModelManager
     from src.strategy.signal_generator import SignalGenerator
 
     task = _build_task(task_name, threshold)
@@ -413,7 +413,7 @@ def run_backtest_walk_forward(
 
 def save_backtest_results(
     result_df: Optional[pd.DataFrame],
-    metrics: Optional[dict],
+    metrics: Optional[dict[str, Any]],
     wf_df: Optional[pd.DataFrame],
     market: str,
     symbol: str,
@@ -447,7 +447,7 @@ def save_backtest_results(
 
 
 def print_backtest_metrics(
-    metrics: dict, label: str = "", benchmark: Optional[dict] = None
+    metrics: dict[str, Any], label: str = "", benchmark: Optional[dict[str, Any]] = None
 ) -> None:
     """
     バックテストメトリクスを標準出力に表示する。
@@ -508,7 +508,7 @@ def fetch_benchmark_for_result(
     benchmark_name: str,
     fallback_start: Optional[str] = None,
     fallback_end: Optional[str] = None,
-) -> Optional[dict]:
+) -> Optional[dict[str, Any]]:
     """
     バックテスト結果 DataFrame からベンチマーク比較データを取得する。
 
@@ -534,7 +534,7 @@ def fetch_benchmark_for_result(
 # --- internal helpers ---
 
 
-def _build_task(task_name: str, threshold: float):
+def _build_task(task_name: str, threshold: float) -> Any:
     from src.backtest.task import ReturnRegressionTask
 
     if task_name == "return_regression":
@@ -543,7 +543,7 @@ def _build_task(task_name: str, threshold: float):
 
 
 def _ensemble_predict(
-    mm,
+    mm: Any,
     X_train: pd.DataFrame,
     y_train: pd.Series,
     X_test: pd.DataFrame,

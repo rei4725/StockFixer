@@ -7,7 +7,7 @@ Walk-Forward Validation
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 import pandas as pd
 from sklearn.model_selection import TimeSeriesSplit
@@ -42,8 +42,8 @@ class WalkForwardValidator:
         self,
         market: str,
         symbol: str,
-        model_manager,
-        signal_generator,
+        model_manager: Any,
+        signal_generator: Any,
         initial_cash: float = 1_000_000,
         fee_rate: float = 0.0,
         slippage: float = 0.0,
@@ -162,7 +162,7 @@ class WalkForwardValidator:
         model_name: str,
         model_type: Optional[str],
         task: BacktestTask,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """1折分の学習→予測→シミュレーションを実行する"""
         from src.backtest.backtester import Backtester
 

@@ -14,7 +14,7 @@ DuckDB の最新予測結果を読み込み、RiskManager のゲートチェッ�
 """
 
 import uuid
-from typing import TypedDict
+from typing import Any, TypedDict
 
 import pandas as pd
 
@@ -223,7 +223,7 @@ def _sync_live_execution_diffs(broker: BrokerBase) -> None:
         if not order_id or price in (None, ""):
             continue
         try:
-            actual_price = float(price)
+            actual_price = float(price)  # type: ignore[arg-type]
         except (TypeError, ValueError):
             continue
         if actual_price <= 0:
@@ -296,7 +296,7 @@ def _resolve_kelly_params(
     def _extract(key: str) -> float | None:
         v = metrics.get(key)
         try:
-            fv = float(v)
+            fv = float(v)  # type: ignore[arg-type]
         except (TypeError, ValueError):
             return None
         return fv if fv > 0.0 else None
@@ -337,7 +337,7 @@ def _record_order(
     signal_price: float,
     order_price: float,
     order_type: OrderType,
-    order_result: dict,
+    order_result: dict[str, Any],
     broker: BrokerBase,
     mode: str,
 ) -> None:

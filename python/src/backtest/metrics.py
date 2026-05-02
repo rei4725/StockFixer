@@ -10,6 +10,7 @@ from __future__ import annotations
 import math
 import os
 from datetime import datetime
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -25,7 +26,7 @@ def compute_metrics(
     risk_free_rate: float = 0.0,
     trading_days_per_year: int = 252,
     cash_column: str = "cash",
-) -> dict:
+) -> dict[str, Any]:
     """
     取引ログから主要メトリクスを一括計算する。
 
@@ -135,7 +136,7 @@ def compute_metrics(
 # --- internal helpers ---
 
 
-def _empty_metrics(initial_cash: float) -> dict:
+def _empty_metrics(initial_cash: float) -> dict[str, Any]:
     return {
         "final_cash": initial_cash,
         "total_return": 0.0,
@@ -167,7 +168,7 @@ def _extract_trade_pnl(
             win_returns: 勝ちトレードのリターン率リスト
             loss_returns: 負けトレードのリターン率リスト（絶対値）
     """
-    buys: list[dict] = []
+    buys: list[dict[str, Any]] = []
     wins: list[float] = []
     losses: list[float] = []
     win_returns: list[float] = []
@@ -196,7 +197,7 @@ def compute_cost_comparison_metrics(
     initial_cash: float,
     risk_free_rate: float = 0.0,
     trading_days_per_year: int = 252,
-) -> dict:
+) -> dict[str, Any]:
     """控除後（net）と控除前（gross）のKPI比較を返す。"""
     net = compute_metrics(
         trade_log=trade_log,
@@ -261,7 +262,7 @@ def _max_drawdown(equity: pd.Series) -> float:
 
 def plot_backtest(
     trade_log: pd.DataFrame,
-    metrics: dict,
+    metrics: dict[str, Any],
     output_dir: str,
     market: str = "",
     symbol: str = "",
@@ -342,7 +343,7 @@ def plot_backtest(
     ax2.set_ylabel("ドローダウン (%)")
     ax2.set_xlabel("日付")
     ax2.grid(True, alpha=0.3)
-    ax2.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
+    ax2.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))  # type: ignore[no-untyped-call]
     plt.setp(ax2.xaxis.get_majorticklabels(), rotation=30, ha="right")
 
     # 指標サマリー
@@ -354,7 +355,7 @@ def plot_backtest(
         f"Win Rate: {metrics.get('win_rate', 0):.1%}",
     ]
     fig.text(0.5, 0.01, "  |  ".join(info_parts), ha="center", fontsize=9)
-    plt.tight_layout(rect=[0, 0.04, 1, 0.97])
+    plt.tight_layout(rect=(0, 0.04, 1, 0.97))
 
     os.makedirs(output_dir, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -369,7 +370,7 @@ def fetch_benchmark_returns(
     ticker: str,
     start: str,
     end: str,
-) -> dict:
+) -> dict[str, Any]:
     """
     ベンチマーク指数の期間リターンを取得する。
 
@@ -417,7 +418,7 @@ def compute_metrics_by_regime(
     initial_cash: float,
     ema_window: int = 200,
     atr_window: int = 14,
-) -> dict[str, dict]:
+) -> dict[str, dict[str, Any]]:
     """
     バックテスト取引ログをレジーム別（bull / bear / range）に分割し、各指標を返す。
 
@@ -436,7 +437,7 @@ def compute_metrics_by_regime(
     """
     from src.analysis.technical import classify_regime
 
-    results: dict[str, dict] = {}
+    results: dict[str, dict[str, Any]] = {}
 
     # 全件合算メトリクス
     results["all"] = compute_metrics(trade_log, initial_cash)

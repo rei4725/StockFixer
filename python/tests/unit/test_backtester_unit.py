@@ -534,9 +534,9 @@ class TestBacktesterRunPath:
             symbol="7203",
         )
 
-        fake_loader = types.ModuleType("src.data.data_loader")
+        fake_loader = types.ModuleType("src.market_data.loader")
         fake_loader.get_raw_ohlcv_from_db = lambda *_a, **_k: pd.DataFrame()
-        with patch.dict(sys.modules, {"src.data.data_loader": fake_loader}):
+        with patch.dict(sys.modules, {"src.market_data.loader": fake_loader}):
             with pytest.raises(ValueError):
                 bt._load_from_raw()
 

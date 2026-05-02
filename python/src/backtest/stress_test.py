@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import os
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 import pandas as pd
 
@@ -60,7 +60,7 @@ def _compute_max_consecutive_losses(trade_log: pd.DataFrame) -> int:
         return 0
 
     sell_actions = {"sell", "final_sell", "stop_loss", "take_profit"}
-    buys: list[dict] = []
+    buys: list[dict[str, Any]] = []
     max_streak = 0
     current_streak = 0
 
