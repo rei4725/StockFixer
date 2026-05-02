@@ -32,7 +32,7 @@ jobs:
         run: docker build -t stockfixer:scan ./python
 
       - name: Trivy scan — MEDIUM (warn only)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: stockfixer:scan
           format: table
@@ -42,7 +42,7 @@ jobs:
           ignore-unfixed: true
 
       - name: Trivy scan — HIGH/CRITICAL (CI fail gate)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: stockfixer:scan
           format: table
@@ -53,7 +53,7 @@ jobs:
 
       - name: Trivy full image scan — OS+library (weekly report)
         if: always() && github.event_name == 'schedule'
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: stockfixer:scan
           format: sarif
