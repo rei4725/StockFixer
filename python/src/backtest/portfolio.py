@@ -151,7 +151,7 @@ def plot_portfolio(
     equity_df: pd.DataFrame,
     holdings_df: pd.DataFrame,
     metrics: dict,
-    output_dir: str,
+    output_dir: str = None,
     market: str = "",
     top_n: int = 5,
     rebalance_freq: str = "weekly",
@@ -236,6 +236,10 @@ def plot_portfolio(
 
     import os
 
+    if output_dir is None:
+        from src.utils.data_path_utils import get_results_dir
+
+        output_dir = os.path.join(get_results_dir(), "backtest", "portfolio")
     os.makedirs(output_dir, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"portfolio_{market or 'all'}_{rebalance_freq}_top{top_n}_{ts}.png"

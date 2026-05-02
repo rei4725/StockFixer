@@ -19,7 +19,6 @@ r"""
 """
 
 import argparse
-import os
 import sys
 
 from config.settings import MAX_SECTOR_POSITIONS
@@ -161,14 +160,10 @@ def _run_one(args, top_n: int, rebalance_freq: str) -> None:
     )
 
     if args.save_chart:
-        from src.utils.data_path_utils import get_results_dir
-
-        out_dir = os.path.join(get_results_dir(), "backtest", "portfolio")
         chart_path = plot_portfolio(
             equity_df=equity_df,
             holdings_df=holdings_df,
             metrics=metrics,
-            output_dir=out_dir,
             market=market_label,
             top_n=top_n,
             rebalance_freq=rebalance_freq,
