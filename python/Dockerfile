@@ -12,7 +12,8 @@ LABEL org.opencontainers.image.title="StockFixer" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.revision="${GIT_COMMIT}" \
-      org.opencontainers.image.source="https://github.com/rei4725/StockFixer"
+      org.opencontainers.image.source="https://github.com/rei4725/StockFixer" \
+      org.opencontainers.image.sbom="https://github.com/rei4725/StockFixer/releases/download/v${VERSION}/sbom.json"
 
 # 作業ディレクトリの設定
 WORKDIR /app

@@ -74,3 +74,23 @@ jobs:
             --title "Release $version" \
             --notes "${{ steps.changelog.outputs.log }}" \
             --draft
+
+      - name: Set up Python
+        if: steps.tag_check.outputs.exists == 'false'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Generate SBOM
+        if: steps.tag_check.outputs.exists == 'false'
+        run: |
+          pip install --quiet -r python/requirements.txt
+          pip install --quiet cyclonedx-bom
+          cyclonedx-py environment -o sbom.json
+
+      - name: Upload SBOM to release
+        if: steps.tag_check.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ steps.ver.outputs.tag }}" sbom.json --clobber
