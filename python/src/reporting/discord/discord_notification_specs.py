@@ -29,6 +29,8 @@ OPTIMIZATION_COMPLETION = NotificationSpec("✅ 週次バックテスト最適�
 OPTIMIZATION_COMPLETION_WITH_ERRORS = NotificationSpec("✅ 週次バックテスト最適化完了", COLOR_CAUTION)
 WALK_FORWARD_REPORT_COMPLETION = NotificationSpec("✅ Walk-Forward 比較レポート完了", COLOR_SUCCESS)
 WALK_FORWARD_REPORT_WITH_ERRORS = NotificationSpec("⚠️ Walk-Forward 比較レポート完了", COLOR_CAUTION)
+DB_MAINTENANCE_COMPLETION = NotificationSpec("✅ DB メンテナンス完了", COLOR_SUCCESS)
+DB_MAINTENANCE_ERROR = NotificationSpec("❌ DB メンテナンス失敗", COLOR_ERROR)
 
 
 def get_daily_order_spec(*, trading_stopped: bool) -> NotificationSpec:

@@ -102,6 +102,13 @@ def job_daily_drift_check():
     run_daily_drift_check()
 
 
+def job_weekly_db_maintenance():
+    """週次実行 (土曜 03:00): DuckDB CHECKPOINT + VACUUM"""
+    from src.orchestration.scheduler import run_weekly_db_maintenance
+
+    run_weekly_db_maintenance()
+
+
 # ── イベントリスナー ──────────────────────────────────
 def _job_listener(event):
     """ジョブ実行結果のログ出力"""
@@ -212,6 +219,17 @@ SCHEDULE_CONFIG = {
         "recovery_delay_minutes": 20,
         "max_executions_per_period": 1,
         "description": "毎営業日 16:00 - ドリフト監視と再学習トリガー",
+    },
+    "weekly_db_maintenance": {
+        "func": job_weekly_db_maintenance,
+        "trigger": "cron",
+        "period": "weekly",
+        "day_of_week": "sat",
+        "hour": 3,
+        "minute": 0,
+        "recovery_delay_minutes": 30,
+        "max_executions_per_period": 1,
+        "description": "毎週土曜 03:00 - DuckDB CHECKPOINT + VACUUM",
     },
 }
 
@@ -355,9 +373,14 @@ def run_now(pipeline: str):
         queue_manager.run_job("weekly_watchlist_refresh", reason="manual", force=True)
     elif pipeline == "drift":
         queue_manager.run_job("daily_drift_check", reason="manual", force=True)
+    elif pipeline == "db_maintenance":
+        queue_manager.run_job("weekly_db_maintenance", reason="manual", force=True)
     else:
         print(f"不明なパイプライン: {pipeline}")
-        print("使用可能: daily, weekly, paper, paper_report, optimization, wf_report, watchlist, drift")
+        print(
+            "使用可能: daily, weekly, paper, paper_report, optimization,"
+            " wf_report, watchlist, drift, db_maintenance"
+        )
         sys.exit(1)
 
 
@@ -380,6 +403,7 @@ def main():
             "wf_report",
             "watchlist",
             "drift",
+            "db_maintenance",
         ],
         help=(
             "指定パイプラインを即時実行して終了する（テスト用）。"
