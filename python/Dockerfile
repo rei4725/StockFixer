@@ -26,7 +26,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # 依存関係のインストール（キャッシュ効率化のため先にコピー）
 COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip>=25.3 && \
+RUN pip install --no-cache-dir --upgrade \
+        "pip>=25.3" \
+        "jaraco.context>=6.1.0" \
+        "wheel>=0.46.2" && \
     pip install --no-cache-dir -r requirements.txt
 
 # アプリケーションコードのコピー
