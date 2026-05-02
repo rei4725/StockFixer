@@ -1,106 +1,89 @@
 """
 アプリケーション設定値の一元管理
 
-環境変数でオーバーライド可能。すべての数値設定はここから取得する。
+pydantic-settings の BaseSettings で env 変数を型安全に読み込み、
+パース失敗・型不正は起動時に即時例外で fail させる。
+
+既存コードとの互換のため、`from config.settings import MAX_DAILY_LOSS_RATE`
+のような module-level 定数アクセスを維持する。
 """
 
-import os
+from typing import Optional
+
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from config.trading_policy import KELLY_CAP as _KELLY_CAP
 
 
-def _float(env: str, default: float) -> float:
-    val = os.getenv(env, "")
-    try:
-        return float(val) if val.strip() else default
-    except ValueError:
-        return default
+class Settings(BaseSettings):
+    """環境変数から読み込まれるアプリケーション設定。"""
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        case_sensitive=True,
+    )
+
+    # ---------- リスク管理（risk_manager.py） ----------
+    MAX_DAILY_LOSS_RATE: float = Field(default=0.02)
+    MAX_POSITION_RATE: float = Field(default=0.10)
+    MAX_CONSECUTIVE_LOSSES: int = Field(default=3)
+    MAX_POSITIONS: int = Field(default=10)
+    HALF_KELLY: Optional[float] = Field(default=None)
+
+    # ---------- 自動発注（order_execution_pipeline.py） ----------
+    MIN_CHANGE_RATIO: float = Field(default=0.003)
+    BUY_THRESHOLD: float = Field(default=0.005)
+    SELL_THRESHOLD: float = Field(default=-0.005)
+    MAX_ORDERS_PER_RUN: int = Field(default=5)
+    MAX_SECTOR_POSITIONS: int = Field(default=3)
+    LIMIT_ORDER_AVG_VOLUME_THRESHOLD: int = Field(default=500_000)
+    LIMIT_ORDER_SPREAD_PROXY_THRESHOLD: float = Field(default=0.01)
+    LIMIT_ORDER_PRICE_BUFFER: float = Field(default=0.001)
+    LIMIT_ORDER_LOOKBACK_DAYS: int = Field(default=5)
+    EARNINGS_MASK_WINDOW_DAYS: int = Field(default=3)
+    FEATURE_SELECTION_DROP_RATIO: float = Field(default=0.2)
+    FEATURE_SELECTION_MIN_FEATURES: int = Field(default=10)
+    PERMUTATION_IMPORTANCE_REPEATS: int = Field(default=5)
+    FEATURE_SELECTION_PROTECT_TOP_SHAP: int = Field(default=10)
+
+    # ---------- ペーパートレード（paper_broker.py） ----------
+    PAPER_INITIAL_BALANCE: float = Field(default=1_000_000.0)
+
+    # ---------- ショートサイド（R-215） ----------
+    ENABLE_SHORT_SIDE: bool = Field(default=False)
 
 
-def _int(env: str, default: int) -> int:
-    val = os.getenv(env, "")
-    try:
-        return int(val) if val.strip() else default
-    except ValueError:
-        return default
-
-
-# ---------------------------------------------------------------------------
-# リスク管理（risk_manager.py）
-# ---------------------------------------------------------------------------
-
-#: 1日の最大損失率（口座残高に対する割合）。0 以下でガード無効
-MAX_DAILY_LOSS_RATE: float = _float("MAX_DAILY_LOSS_RATE", 0.02)
-
-#: 1銘柄の最大ポジション率（口座残高に対する割合）
-MAX_POSITION_RATE: float = _float("MAX_POSITION_RATE", 0.10)
-
-#: 当日の連続損失回数の上限（超過でその日の取引停止）
-MAX_CONSECUTIVE_LOSSES: int = _int("MAX_CONSECUTIVE_LOSSES", 3)
-
-#: 最大保有銘柄数
-MAX_POSITIONS: int = _int("MAX_POSITIONS", 10)
-
-from config.trading_policy import KELLY_CAP as _KELLY_CAP  # noqa: E402
-
-#: Kelly 基準に掛ける安全係数（プロファイル依存、moderate 時 = 0.375）
-HALF_KELLY: float = _float("HALF_KELLY", _KELLY_CAP / 2)
-
-# ---------------------------------------------------------------------------
-# 自動発注（order_execution_pipeline.py）
-# ---------------------------------------------------------------------------
-
-#: 発注スキップの最小変動閾値（R-214）。この絶対値未満の diff_ratio は発注しない
-MIN_CHANGE_RATIO: float = _float("MIN_CHANGE_RATIO", 0.003)  # 0.3%
-
-#: 予測変化率がこれ以上なら買いシグナル
-BUY_THRESHOLD: float = _float("BUY_THRESHOLD", 0.005)
-
-#: 予測変化率がこれ以下なら売りシグナル
-SELL_THRESHOLD: float = _float("SELL_THRESHOLD", -0.005)
-
-#: 1回の実行で発注する最大銘柄数
-MAX_ORDERS_PER_RUN: int = _int("MAX_ORDERS_PER_RUN", 5)
-
-#: 同一セクターで同時に許容する最大銘柄数。0 以下で無効
-MAX_SECTOR_POSITIONS: int = _int("MAX_SECTOR_POSITIONS", 3)
-
-#: 指値へ切り替える平均出来高の閾値（直近数日平均）。これ未満なら低流動性扱い
-LIMIT_ORDER_AVG_VOLUME_THRESHOLD: int = _int("LIMIT_ORDER_AVG_VOLUME_THRESHOLD", 500_000)
-
-#: 指値へ切り替える日次レンジ率の閾値。板スプレッド未取得時の proxy として使う
-LIMIT_ORDER_SPREAD_PROXY_THRESHOLD: float = _float("LIMIT_ORDER_SPREAD_PROXY_THRESHOLD", 0.01)
-
-#: 指値価格バッファ率。買いは加算、売りは減算
-LIMIT_ORDER_PRICE_BUFFER: float = _float("LIMIT_ORDER_PRICE_BUFFER", 0.001)
-
-#: 執行方式判定に使う履歴本数
-LIMIT_ORDER_LOOKBACK_DAYS: int = _int("LIMIT_ORDER_LOOKBACK_DAYS", 5)
-
-#: 決算発表日の前後何営業日を学習データから除外するか
-EARNINGS_MASK_WINDOW_DAYS: int = _int("EARNINGS_MASK_WINDOW_DAYS", 3)
-
-#: 次回学習で自動除外候補にする特徴量の下位割合
-FEATURE_SELECTION_DROP_RATIO: float = _float("FEATURE_SELECTION_DROP_RATIO", 0.2)
-
-#: 自動特徴量選択後に最低限残す特徴量数
-FEATURE_SELECTION_MIN_FEATURES: int = _int("FEATURE_SELECTION_MIN_FEATURES", 10)
-
-#: Permutation Importance の繰り返し回数
-PERMUTATION_IMPORTANCE_REPEATS: int = _int("PERMUTATION_IMPORTANCE_REPEATS", 5)
-
-#: SHAP 上位何件を自動除外から保護するか
-FEATURE_SELECTION_PROTECT_TOP_SHAP: int = _int("FEATURE_SELECTION_PROTECT_TOP_SHAP", 10)
+settings = Settings()
 
 # ---------------------------------------------------------------------------
-# ペーパートレード（paper_broker.py）
+# 後方互換: 既存コードは `from config.settings import XXX` で import している
+# ため、Settings インスタンスの値を module-level 定数として再エクスポートする。
 # ---------------------------------------------------------------------------
 
-#: ペーパートレードの初期仮想残高（円）
-PAPER_INITIAL_BALANCE: float = _float("PAPER_INITIAL_BALANCE", 1_000_000.0)
+MAX_DAILY_LOSS_RATE: float = settings.MAX_DAILY_LOSS_RATE
+MAX_POSITION_RATE: float = settings.MAX_POSITION_RATE
+MAX_CONSECUTIVE_LOSSES: int = settings.MAX_CONSECUTIVE_LOSSES
+MAX_POSITIONS: int = settings.MAX_POSITIONS
+HALF_KELLY: float = settings.HALF_KELLY if settings.HALF_KELLY is not None else _KELLY_CAP / 2
 
-# ---------------------------------------------------------------------------
-# ショートサイド（R-215）
-# ---------------------------------------------------------------------------
+MIN_CHANGE_RATIO: float = settings.MIN_CHANGE_RATIO
+BUY_THRESHOLD: float = settings.BUY_THRESHOLD
+SELL_THRESHOLD: float = settings.SELL_THRESHOLD
+MAX_ORDERS_PER_RUN: int = settings.MAX_ORDERS_PER_RUN
+MAX_SECTOR_POSITIONS: int = settings.MAX_SECTOR_POSITIONS
+LIMIT_ORDER_AVG_VOLUME_THRESHOLD: int = settings.LIMIT_ORDER_AVG_VOLUME_THRESHOLD
+LIMIT_ORDER_SPREAD_PROXY_THRESHOLD: float = settings.LIMIT_ORDER_SPREAD_PROXY_THRESHOLD
+LIMIT_ORDER_PRICE_BUFFER: float = settings.LIMIT_ORDER_PRICE_BUFFER
+LIMIT_ORDER_LOOKBACK_DAYS: int = settings.LIMIT_ORDER_LOOKBACK_DAYS
+EARNINGS_MASK_WINDOW_DAYS: int = settings.EARNINGS_MASK_WINDOW_DAYS
+FEATURE_SELECTION_DROP_RATIO: float = settings.FEATURE_SELECTION_DROP_RATIO
+FEATURE_SELECTION_MIN_FEATURES: int = settings.FEATURE_SELECTION_MIN_FEATURES
+PERMUTATION_IMPORTANCE_REPEATS: int = settings.PERMUTATION_IMPORTANCE_REPEATS
+FEATURE_SELECTION_PROTECT_TOP_SHAP: int = settings.FEATURE_SELECTION_PROTECT_TOP_SHAP
 
-#: ショートサイド（空売り）機能を有効にする。False の場合は従来のロングのみ動作を維持
-#: PaperBroker 検証時のみ True に設定する（本番利用は要注意）
-ENABLE_SHORT_SIDE: bool = os.getenv("ENABLE_SHORT_SIDE", "").strip().lower() in ("1", "true", "yes")
+PAPER_INITIAL_BALANCE: float = settings.PAPER_INITIAL_BALANCE
+
+ENABLE_SHORT_SIDE: bool = settings.ENABLE_SHORT_SIDE
