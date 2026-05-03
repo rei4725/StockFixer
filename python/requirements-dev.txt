@@ -4,11 +4,11 @@
 # テスト
 pytest>=8.0.0
 pytest-timeout==2.4.0
-pytest-cov==7.0.0
+pytest-cov==7.1.0
 
 # 型チェック
-mypy==1.19.1
-types-requests==2.32.4.20260107
+mypy==1.20.2
+types-requests==2.33.0.20260503
 types-PyYAML==6.0.12.20250915
 types-tabulate==0.10.0.20260308
 
@@ -19,7 +19,7 @@ black==26.3.1
 isort==8.0.1
 
 # pre-commit
-pre-commit==4.5.1
+pre-commit==4.6.0
 
 # セキュリティスキャン
 pip-audit>=2.7.0
