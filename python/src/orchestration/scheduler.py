@@ -375,6 +375,64 @@ def run_weekly_watchlist_refresh():
         logger.error("ウォッチリスト更新失敗: %s", e, exc_info=True)
 
 
+def run_weekly_db_maintenance() -> None:
+    """
+    週次 DB メンテナンス（土曜 03:00）: CHECKPOINT → VACUUM を実行する。
+
+    実行内容:
+        1. CHECKPOINT — WAL をメインファイルへフラッシュ
+        2. VACUUM     — 削除済み領域を回収してファイルサイズを縮小
+    実行前後の DB ファイルサイズと所要時間を Discord に通知する。
+    """
+    import os
+    import time
+
+    from src.reporting.discord.discord_utils import send_db_maintenance_completion
+    from src.utils.data_path_utils import get_db_path
+    from src.utils.db import _db_connection
+
+    logger.info("=== 週次 DB メンテナンス開始 ===")
+    db_path = get_db_path()
+
+    def _mb(path: str) -> float:
+        try:
+            return os.path.getsize(path) / (1024 * 1024)
+        except OSError:
+            return 0.0
+
+    size_before = _mb(db_path)
+    start = time.monotonic()
+    error_msg = None
+
+    try:
+        with _db_connection() as con:
+            con.execute("CHECKPOINT")
+            con.execute("VACUUM")
+        logger.info("週次 DB メンテナンス: CHECKPOINT + VACUUM 完了")
+    except Exception as e:
+        logger.error("週次 DB メンテナンス失敗: %s", e, exc_info=True)
+        error_msg = str(e)
+
+    elapsed = time.monotonic() - start
+    size_after = _mb(db_path)
+    logger.info(
+        "=== 週次 DB メンテナンス完了: %.1f 秒, %.2f MB → %.2f MB ===",
+        elapsed,
+        size_before,
+        size_after,
+    )
+
+    try:
+        send_db_maintenance_completion(
+            elapsed_seconds=elapsed,
+            size_before_mb=size_before,
+            size_after_mb=size_after,
+            error=error_msg,
+        )
+    except Exception as e:
+        logger.error("DB メンテナンス通知失敗: %s", e, exc_info=True)
+
+
 def run_daily_drift_check():
     """
     日次ドリフト監視: 直近 20 営業日の MAE / Hit Rate を監視し、閾値超過銘柄を自動再学習する。
