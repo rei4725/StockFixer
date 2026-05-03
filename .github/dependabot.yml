@@ -1,0 +1,72 @@
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: "/python"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    labels:
+      - dependencies
+    groups:
+      # minor/patch はグループ化、major は個別 PR となる
+      python-runtime:
+        patterns:
+          - "Flask"
+          - "Werkzeug"
+          - "urllib3"
+          - "tabulate"
+          - "python-dotenv"
+          - "yfinance"
+          - "scikit-learn"
+          - "lightgbm"
+          - "xgboost"
+          - "requests"
+          - "httpx"
+          - "matplotlib"
+          - "shap"
+          - "numba"
+          - "llvmlite"
+          - "pandas"
+          - "lxml"
+          - "discord.py"
+          - "ta"
+          - "duckdb"
+          - "apscheduler"
+          - "streamlit"
+          - "plotly"
+          - "filelock"
+          - "optuna"
+          - "pydantic-settings"
+        update-types:
+          - minor
+          - patch
+      python-dev:
+        patterns:
+          - "pytest"
+          - "pytest-*"
+          - "mypy"
+          - "types-*"
+          - "pylint"
+          - "flake8"
+          - "black"
+          - "isort"
+          - "pre-commit"
+          - "pip-audit"
+          - "bandit"
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    labels:
+      - dependencies
+    groups:
+      github-actions:
+        update-types:
+          - minor
+          - patch
