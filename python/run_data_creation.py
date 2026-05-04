@@ -9,6 +9,7 @@
 import argparse
 import sys
 
+import src.market_data.yf_client as yf_client
 from src.market_data.pipeline import (
     fetch_stock_data_with_features,
     run_data_batch,
@@ -53,7 +54,11 @@ def main():
     parser.add_argument("--start_date", type=str, default=None, help="開始日（YYYY-MM-DD）")
     parser.add_argument("--end_date", type=str, default=None, help="終了日（YYYY-MM-DD）")
     parser.add_argument("--fetch-only", action="store_true", help="データ取得と特徴量生成のみ（DB保存しない）")
+    parser.add_argument("--no-cache", action="store_true", help="キャッシュを無効化して強制再取得する")
     args = parser.parse_args()
+
+    if args.no_cache:
+        yf_client.set_no_cache(True)
 
     if args.batch:
         run_data_batch(fetch_only=args.fetch_only)
