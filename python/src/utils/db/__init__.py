@@ -80,6 +80,9 @@ from src.utils.db.prediction import (  # noqa: F401
 )
 from src.utils.db.prediction import upsert_paper_real_diff as upsert_paper_real_diff  # noqa: F401
 
+# --- data_quality_log ---
+from src.utils.db.quality_log import insert_quality_log  # noqa: F401
+
 # --- stock_features ---
 from src.utils.db.stock_features import upsert_stock_features  # noqa: F401
 from src.utils.db.stock_features import (  # noqa: F401

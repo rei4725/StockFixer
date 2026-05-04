@@ -16,6 +16,8 @@ from src.reporting.discord.discord_notification_specs import (
     DAILY_PIPELINE_COMPLETION,
     DAILY_PIPELINE_ERROR,
     DAILY_SETTLE_COMPLETION,
+    DB_MAINTENANCE_COMPLETION,
+    DB_MAINTENANCE_ERROR,
     WEEKLY_TRAINING_COMPLETION,
     NotificationSpec,
     get_daily_order_spec,
@@ -699,6 +701,42 @@ def send_shap_batch_summary(shap_results: list) -> bool:
         return False
 
     return send_webhook_text_chunked("\n".join(lines), preserve_lines=False)
+
+
+def send_db_maintenance_completion(
+    elapsed_seconds: float,
+    size_before_mb: float,
+    size_after_mb: float,
+    error: Optional[str] = None,
+) -> bool:
+    """
+    DB メンテナンス（CHECKPOINT / VACUUM）完了通知を Discord に送信する。
+
+    Args:
+        elapsed_seconds: 処理時間（秒）
+        size_before_mb: 実行前 DB ファイルサイズ（MB）
+        size_after_mb: 実行後 DB ファイルサイズ（MB）
+        error: エラーメッセージ（None なら成功）
+
+    Returns:
+        成功時 True、失敗時 False
+    """
+    if error:
+        spec = DB_MAINTENANCE_ERROR
+        lines = [
+            f"時刻: {format_jst(fmt=DISCORD_DATETIME_FORMAT)}",
+            f"エラー: {error}",
+        ]
+    else:
+        spec = DB_MAINTENANCE_COMPLETION
+        diff_mb = size_after_mb - size_before_mb
+        diff_str = f"{diff_mb:+.2f} MB"
+        lines = [
+            f"時刻: {format_jst(fmt=DISCORD_DATETIME_FORMAT)}",
+            f"処理時間: {elapsed_seconds:.1f} 秒",
+            f"DBサイズ: {size_before_mb:.2f} MB → {size_after_mb:.2f} MB ({diff_str})",
+        ]
+    return send_status_notification(spec, lines)
 
 
 def send_drift_retrain_notification(
