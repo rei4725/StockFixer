@@ -32,6 +32,7 @@ from src.reporting.discord.discord_text import (
 from src.reporting.discord import rate_limiter as _rate_limiter
 from src.reporting.query_service import get_latest_market_prediction_snapshots
 from src.utils.japan_time import format_jst, format_jst_from_iso, isoformat_jst
+from src.utils.run_context import get_run_id
 
 logger = logging.getLogger(__name__)
 
@@ -130,16 +131,16 @@ def send_webhook_notification(
             except requests.exceptions.RequestException as e:
                 logger.error("抑止サマリー送信失敗: %s", e, exc_info=True)
 
-        embed_data = {
-            "embeds": [
-                {
-                    "title": title,
-                    "description": message,
-                    "color": color,
-                    "timestamp": isoformat_jst(),
-                }
-            ]
+        run_id = get_run_id()
+        embed: dict = {
+            "title": title,
+            "description": message,
+            "color": color,
+            "timestamp": isoformat_jst(),
         }
+        if run_id:
+            embed["footer"] = {"text": f"run_id: {run_id}"}
+        embed_data = {"embeds": [embed]}
 
         response = _post_webhook(json_payload=embed_data, timeout=10)
         if response is None:
