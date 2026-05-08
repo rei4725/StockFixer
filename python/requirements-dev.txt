@@ -22,5 +22,5 @@ isort==8.0.1
 pre-commit==4.5.1
 
 # セキュリティスキャン
-pip-audit>=2.7.0
+pip-audit>=2.10.0
 bandit>=1.8.0
