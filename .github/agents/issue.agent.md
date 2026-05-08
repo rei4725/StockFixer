@@ -31,6 +31,22 @@ tools:
 - #tool:ms-vscode.vscode-websearchforcopilot/websearch: ウェブ検索
 - `gh`: GitHub リポジトリの操作
 
+## アーキテクチャ違反の検出ルール
+
+ローカルリポジトリのコード状況を確認する際（手順3）は、以下のパターンも検索し、発見した場合は Issue を自動起票してください。
+
+| 検出パターン | 推奨移行先 | ラベル |
+|---|---|---|
+| `from src.data.` | `src.market_data` | `architecture-violation`, `auto-ok` |
+| `from src.models.` | `src.prediction` | `architecture-violation`, `auto-ok` |
+| `from src.brokers.` | `src.trading.brokers` | `architecture-violation`, `auto-ok` |
+| `from src.analysis.` | `src.market_data`（推奨） | `architecture-violation`, `auto-ok` |
+| `from src.strategy.` | `src.trading`（推奨） | `architecture-violation`, `auto-ok` |
+| `from src.services.` | 各 BC 直下（`src.prediction` / `src.trading` 等） | `architecture-violation`, `auto-ok` |
+
+自動起票する際は必ず `architecture-violation` と `auto-ok` ラベルを付与してください。
+静的検出は `.github/hooks/check_arch_violation.py` でも実施されます。
+
 ## ドキュメント
 - `docs/`
 - `README.md`
