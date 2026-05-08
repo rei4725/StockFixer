@@ -2,7 +2,7 @@
 # インストール: pip install -r requirements-dev.txt
 
 # テスト
-pytest>=8.0.0
+pytest>=9.0.3
 pytest-timeout==2.4.0
 pytest-cov==7.0.0
 
