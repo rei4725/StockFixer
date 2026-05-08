@@ -6,6 +6,7 @@ yfinance の API を安全にラップし、以下を一元処理する:
 - タイムゾーン情報の除去（DuckDB への保存で tz-naive が必要）
 - 全 NaN 行の除去
 - リトライ・指数バックオフ（レート制限・ネットワークエラー対応）
+- in-memory + disk キャッシュ（同日中の重複 fetch 回避）
 
 このモジュールを経由することで、呼び出し元は正規化済みの DataFrame のみを受け取り、
 yfinance のバージョン差異を意識しない。
@@ -21,17 +22,125 @@ yfinance のバージョン差異を意識しない。
 
     # Ticker.history() 方式（並列取得時のスレッドセーフ版）
     df = yf_client.ticker_history("7203.T", start="2024-01-01", end="2024-12-31")
+
+    # キャッシュ無効化（--no-cache フラグ対応）
+    yf_client.set_no_cache(True)
 """
+
+import pickle
+import re
+import threading
+import time
+from pathlib import Path
 
 import pandas as pd
 import yfinance as yf
 
+from src.utils.data_path_utils import get_data_dir
 from src.utils.logger import get_logger
 from src.utils.retry_helper import with_retry
 
 logger = get_logger(__name__)
 
+# ---------------------------------------------------------------------------
+# キャッシュ層（同一日重複 fetch 回避、#149）
+# ---------------------------------------------------------------------------
+_TTL_SHORT: float = 15 * 60       # 15分: 当日以降のデータ（未確定）
+_TTL_LONG: float = 7 * 24 * 3600  # 7日: 過去データ（終値確定済み）
 
+_memory_cache: dict[str, tuple[pd.DataFrame, float]] = {}
+_cache_lock = threading.Lock()
+_no_cache: bool = False
+
+
+def set_no_cache(flag: bool = True) -> None:
+    """キャッシュを無効化/有効化する（--no-cache フラグ対応）。"""
+    global _no_cache
+    _no_cache = flag
+
+
+def clear_cache() -> None:
+    """インメモリ + ディスクキャッシュを全削除する。"""
+    global _memory_cache
+    with _cache_lock:
+        _memory_cache = {}
+    cache_dir = Path(get_data_dir()) / "yf_cache"
+    if cache_dir.exists():
+        for f in cache_dir.glob("*.pkl"):
+            try:
+                f.unlink()
+            except Exception:
+                pass
+
+
+def _cache_key(ticker: str, start: str | None, end: str | None, interval: str) -> str:
+    return f"{ticker}|{start}|{end}|{interval}"
+
+
+def _cache_ttl(end: str | None) -> float:
+    """end が今日より前なら長い TTL、当日以降なら短い TTL を返す。"""
+    if end is None:
+        return _TTL_SHORT
+    try:
+        end_dt = pd.to_datetime(end).normalize()
+        today = pd.Timestamp.now().normalize()
+        if end_dt < today:
+            return _TTL_LONG
+    except Exception:
+        pass
+    return _TTL_SHORT
+
+
+def _get_cache_path(key: str) -> Path:
+    cache_dir = Path(get_data_dir()) / "yf_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    safe_key = re.sub(r"[^a-zA-Z0-9._-]", "_", key)
+    return cache_dir / f"{safe_key}.pkl"
+
+
+def _cache_get(key: str) -> pd.DataFrame | None:
+    now = time.time()
+    with _cache_lock:
+        entry = _memory_cache.get(key)
+    if entry is not None:
+        df, expiry = entry
+        if now < expiry:
+            logger.debug("[yf_cache] memory hit key=%s", key)
+            return df
+        with _cache_lock:
+            _memory_cache.pop(key, None)
+    # disk fallback
+    path = _get_cache_path(key)
+    if path.exists():
+        try:
+            with open(path, "rb") as fh:
+                df, expiry = pickle.load(fh)
+            if now < expiry:
+                with _cache_lock:
+                    _memory_cache[key] = (df, expiry)
+                logger.debug("[yf_cache] disk hit key=%s", key)
+                return df
+            path.unlink(missing_ok=True)
+        except Exception:
+            pass
+    return None
+
+
+def _cache_set(key: str, df: pd.DataFrame, ttl: float) -> None:
+    expiry = time.time() + ttl
+    with _cache_lock:
+        _memory_cache[key] = (df, expiry)
+    path = _get_cache_path(key)
+    try:
+        with open(path, "wb") as fh:
+            pickle.dump((df, expiry), fh)
+    except Exception:
+        pass  # ディスクキャッシュはベストエフォート
+
+
+# ---------------------------------------------------------------------------
+# 正規化
+# ---------------------------------------------------------------------------
 def _normalize(df: pd.DataFrame) -> pd.DataFrame:
     """
     yf.download() / Ticker.history() が返す DataFrame を正規化する。
@@ -56,6 +165,9 @@ def _normalize(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
 def download(
     ticker: str,
     *,
@@ -82,6 +194,14 @@ def download(
     Returns:
         正規化済み OHLCV DataFrame。取得失敗時は空 DataFrame。
     """
+    # period 指定は相対時間なのでキャッシュ対象外
+    cache_key: str | None = None
+    if not _no_cache and period is None and start is not None:
+        cache_key = _cache_key(ticker, start, end, interval)
+        cached = _cache_get(cache_key)
+        if cached is not None:
+            return cached
+
     kw: dict = dict(interval=interval, auto_adjust=auto_adjust, progress=progress, **kwargs)
     if period is not None:
         kw["period"] = period
@@ -94,10 +214,15 @@ def download(
 
     try:
         df = with_retry(_do)
-        return _normalize(df)
+        result = _normalize(df)
     except Exception:
         logger.warning("[yf_client] download 失敗 ticker=%s", ticker, exc_info=True)
         return pd.DataFrame()
+
+    if cache_key is not None and not result.empty:
+        _cache_set(cache_key, result, _cache_ttl(end))
+
+    return result
 
 
 def ticker_history(
@@ -124,6 +249,14 @@ def ticker_history(
     Returns:
         正規化済み OHLCV DataFrame。取得失敗時は空 DataFrame。
     """
+    interval = str(kwargs.get("interval", "1d"))
+    cache_key: str | None = None
+    if not _no_cache:
+        cache_key = _cache_key(ticker, start, end, interval)
+        cached = _cache_get(cache_key)
+        if cached is not None:
+            return cached
+
     ticker_obj = yf.Ticker(ticker)
 
     def _do() -> pd.DataFrame:
@@ -133,7 +266,12 @@ def ticker_history(
 
     try:
         df = with_retry(_do)
-        return _normalize(df)
+        result = _normalize(df)
     except Exception:
         logger.warning("[yf_client] ticker_history 失敗 ticker=%s", ticker, exc_info=True)
         return pd.DataFrame()
+
+    if cache_key is not None and not result.empty:
+        _cache_set(cache_key, result, _cache_ttl(end))
+
+    return result
