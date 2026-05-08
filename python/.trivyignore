@@ -1,0 +1,16 @@
+# trivy スキャン除外設定
+#
+# 以下の CVE はベースイメージ (python:3.11-slim) のレイヤーに含まれる旧バージョンに
+# 起因するもので、実際のインストールバージョンは修正済み (pip upgrade で上書き済み)。
+# - jaraco.context: Dockerfile で 6.1.2 をインストール (修正バージョン: 6.1.0)
+# - wheel: Dockerfile で 0.47.0 をインストール (修正バージョン: 0.46.2)
+#
+# 参考: pip show jaraco.context wheel で実際のバージョンを確認済み
+
+# CVE-2026-23949: jaraco.context path traversal via malicious tar archives
+# Base image layer contains 5.3.0, but pip upgrade installs 6.1.2 (fixed: >=6.1.0)
+CVE-2026-23949
+
+# CVE-2026-24049: wheel privilege escalation via malicious wheel file
+# Base image layer contains 0.45.1, but pip upgrade installs 0.47.0 (fixed: >=0.46.2)
+CVE-2026-24049

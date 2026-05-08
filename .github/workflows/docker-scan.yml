@@ -1,0 +1,69 @@
+name: Docker Image Scan (trivy)
+
+on:
+  pull_request:
+    paths:
+      - "python/Dockerfile"
+      - "python/requirements.txt"
+      - ".github/workflows/docker-scan.yml"
+  push:
+    branches:
+      - develop
+    paths:
+      - "python/Dockerfile"
+      - "python/requirements.txt"
+      - ".github/workflows/docker-scan.yml"
+  schedule:
+    - cron: "0 10 * * 1"
+
+jobs:
+  trivy:
+    name: Docker Image Vulnerability Scan (trivy)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t stockfixer:scan ./python
+
+      - name: Trivy scan — MEDIUM (warn only)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: stockfixer:scan
+          format: table
+          exit-code: "0"
+          severity: MEDIUM
+          vuln-type: library
+          ignore-unfixed: true
+
+      - name: Trivy scan — HIGH/CRITICAL (CI fail gate)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: stockfixer:scan
+          format: table
+          exit-code: "1"
+          severity: HIGH,CRITICAL
+          vuln-type: library
+          ignore-unfixed: true
+          trivyignores: python/.trivyignore
+      - name: Trivy full image scan — OS+library (weekly report)
+        if: always() && github.event_name == 'schedule'
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: stockfixer:scan
+          format: sarif
+          output: trivy-full.sarif
+          exit-code: "0"
+          severity: MEDIUM,HIGH,CRITICAL
+          vuln-type: os,library
+
+      - name: Upload full scan results to GitHub Security tab
+        if: always() && github.event_name == 'schedule'
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-full.sarif
