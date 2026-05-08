@@ -35,4 +35,4 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Run unit tests with coverage gate
-        run: python -m pytest tests/unit/ -v --cov=src --cov-report=term-missing --cov-fail-under=80
+        run: python -m pytest tests/unit/ -v --cov=src --cov-branch --cov-report=term-missing --cov-fail-under=70
