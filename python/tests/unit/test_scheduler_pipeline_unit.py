@@ -396,6 +396,68 @@ class TestRunDailyPipeline:
             run_daily_pipeline()
 
 
+class TestRunWeeklyDbMaintenance(unittest.TestCase):
+    """run_weekly_db_maintenance のテスト"""
+
+    @patch("src.reporting.discord.discord_utils.send_db_maintenance_completion")
+    @patch("src.utils.db._db_connection")
+    @patch("os.path.getsize", return_value=10 * 1024 * 1024)
+    def test_sends_completion_on_success(self, mock_size, mock_conn, mock_send):
+        from contextlib import contextmanager
+
+        from src.orchestration.scheduler import run_weekly_db_maintenance
+
+        mock_con = MagicMock()
+
+        @contextmanager
+        def fake_conn():
+            yield mock_con
+
+        mock_conn.side_effect = fake_conn
+
+        run_weekly_db_maintenance()
+
+        mock_con.execute.assert_any_call("CHECKPOINT")
+        mock_con.execute.assert_any_call("VACUUM")
+        mock_send.assert_called_once()
+        call_kwargs = mock_send.call_args.kwargs
+        self.assertIsNone(call_kwargs.get("error"))
+        self.assertAlmostEqual(call_kwargs["size_before_mb"], 10.0, places=1)
+
+    @patch("src.reporting.discord.discord_utils.send_db_maintenance_completion")
+    @patch("src.utils.db._db_connection")
+    @patch("os.path.getsize", return_value=10 * 1024 * 1024)
+    def test_sends_error_notification_on_failure(self, mock_size, mock_conn, mock_send):
+        from src.orchestration.scheduler import run_weekly_db_maintenance
+
+        mock_conn.side_effect = RuntimeError("DB locked")
+
+        run_weekly_db_maintenance()
+
+        mock_send.assert_called_once()
+        call_kwargs = mock_send.call_args.kwargs
+        self.assertIsNotNone(call_kwargs.get("error"))
+
+    @patch("src.reporting.discord.discord_utils.send_db_maintenance_completion")
+    @patch("src.utils.db._db_connection")
+    @patch("os.path.getsize", return_value=10 * 1024 * 1024)
+    def test_notification_failure_does_not_propagate(self, mock_size, mock_conn, mock_send):
+        from contextlib import contextmanager
+
+        from src.orchestration.scheduler import run_weekly_db_maintenance
+
+        mock_con = MagicMock()
+
+        @contextmanager
+        def fake_conn():
+            yield mock_con
+
+        mock_conn.side_effect = fake_conn
+        mock_send.side_effect = Exception("Webhook 失敗")
+
+        run_weekly_db_maintenance()  # 例外が外に出ないこと
+
+
 class TestRunWeeklyTraining:
     """run_weekly_training のテスト"""
 

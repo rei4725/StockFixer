@@ -76,7 +76,7 @@ class TestFetchStockDataWithFeatures(_TmpDbTestCase):
         )
 
         self.assertIsNotNone(result)
-        market, symbol, data, _raw = result
+        market, symbol, data, _raw, _quality = result
         self.assertEqual(market, "us")
         self.assertEqual(symbol, "AAPL")
         self.assertIn("y", data.columns)
@@ -290,13 +290,13 @@ class TestRunDataBatch(_TmpDbTestCase):
                 "market": "us",
                 "symbol": "TEST1",
                 "status": "success",
-                "data": ("us", "TEST1", data, None),
+                "data": ("us", "TEST1", data, None, None),
             },
             {
                 "market": "us",
                 "symbol": "TEST2",
                 "status": "success",
-                "data": ("us", "TEST2", data, None),
+                "data": ("us", "TEST2", data, None, None),
             },
         ]
 
@@ -343,7 +343,7 @@ class TestRunDataBatch(_TmpDbTestCase):
                 "market": "us",
                 "symbol": "TEST1",
                 "status": "success",
-                "data": ("us", "TEST1", data, None),
+                "data": ("us", "TEST1", data, None, None),
             },
             {"market": "us", "symbol": "TEST2", "status": "error", "error": "取得失敗"},
         ]

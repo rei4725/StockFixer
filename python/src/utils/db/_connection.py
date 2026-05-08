@@ -429,6 +429,19 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
     """
     )
 
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS data_quality_log (
+            market      VARCHAR NOT NULL,
+            symbol      VARCHAR NOT NULL,
+            check_name  VARCHAR NOT NULL,
+            level       VARCHAR NOT NULL,
+            detail      VARCHAR NOT NULL,
+            checked_at  VARCHAR NOT NULL
+        )
+    """
+    )
+
 
 def init_tables() -> None:
     """外部から明示的にテーブル初期化する場合に使用"""

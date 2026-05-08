@@ -18,6 +18,7 @@ from src.market_data.loader import (
     merge_market_data,
     should_fetch_fresh_data,
 )
+from src.market_data.quality_check import QualityCheckResult, run_quality_checks
 from src.market_data.saver import save_raw_ohlcv
 from src.utils.data_path_utils import get_ticker, normalize_col
 from src.utils.db import upsert_stock_features
@@ -121,6 +122,9 @@ def fetch_stock_data_with_features(
         logger.debug(f"全NaN列を除去: {all_nan_cols}")
         df = df.drop(columns=all_nan_cols)
 
+    # データ品質チェック（TA指標追加・NaN補完前の生OHLCVで実施）
+    quality_result = run_quality_checks(market, symbol, df)
+
     # テクニカル指標を追加
     df = add_technical_indicators(df)
 
@@ -174,10 +178,12 @@ def fetch_stock_data_with_features(
 
     data["y"] = y
 
-    return (market, symbol, data, raw_data_to_save)
+    return (market, symbol, data, raw_data_to_save, quality_result)
 
 
-def save_features_to_db(market: str, symbol: str, data) -> None:
+def save_features_to_db(
+    market: str, symbol: str, data, quality_result: QualityCheckResult = None
+) -> None:
     """
     特徴量DataFrameをDBに保存する（逐次実行用）。
 
@@ -185,9 +191,42 @@ def save_features_to_db(market: str, symbol: str, data) -> None:
         market: マーケット識別子
         symbol: 銘柄シンボル
         data: 特徴量DataFrame
+        quality_result: データ品質チェック結果（Noneの場合はスキップ）
     """
     upsert_stock_features(market, symbol, data)
     logger.info(f"DB保存完了: {market}_{symbol}")
+    if quality_result is not None and quality_result.issues:
+        _notify_quality_issues(market, symbol, quality_result)
+
+
+def _notify_quality_issues(market: str, symbol: str, quality_result: QualityCheckResult) -> None:
+    """品質チェック結果をDBに記録し、通知が必要なものを Discord に送る。"""
+    from src.reporting.discord.discord_utils import send_webhook_notification
+    from src.utils.db.quality_log import insert_quality_log
+
+    issues_dicts = [
+        {"check": i.check, "level": i.level, "detail": i.detail}
+        for i in quality_result.issues
+    ]
+    try:
+        insert_quality_log(market, symbol, issues_dicts)
+    except Exception as e:
+        logger.error(f"品質ログ記録エラー: {e}", exc_info=True)
+
+    # エラーまたは上場廃止疑い（zero_volume）のみ Discord 通知
+    notify_issues = [
+        i for i in quality_result.issues if i.level == "error" or i.check == "zero_volume"
+    ]
+    if not notify_issues:
+        return
+
+    color = 0xFF0000 if any(i.level == "error" for i in notify_issues) else 0xFFAA00
+    title = f"[データ品質] {market}/{symbol}"
+    message = "\n".join(f"・{i.detail}" for i in notify_issues)
+    try:
+        send_webhook_notification(title=title, message=message, color=color)
+    except Exception as e:
+        logger.error(f"品質チェック Discord通知エラー: {e}", exc_info=True)
 
 
 def save_stock_data_with_features(
@@ -210,8 +249,8 @@ def save_stock_data_with_features(
     result = fetch_stock_data_with_features(market, symbol, start_date, end_date)
     if result is None:
         return
-    _, _, data, _ = result
-    save_features_to_db(market, symbol, data)
+    _, _, data, _, quality_result = result
+    save_features_to_db(market, symbol, data, quality_result)
 
 
 def run_data_batch(fetch_only: bool = False):
@@ -274,14 +313,14 @@ def run_data_batch(fetch_only: bool = False):
 
     db_results = []
     for i, r in enumerate(success_data, 1):
-        market, symbol, data, raw_data = r["data"]
+        market, symbol, data, raw_data, quality_result = r["data"]
         try:
             if raw_data is not None and not raw_data.empty:
                 try:
                     save_raw_ohlcv(market, symbol, raw_data)
                 except Exception as e:
                     logger.error(f"[Raw保存エラー] {market}/{symbol}: {e}", exc_info=True)
-            save_features_to_db(market, symbol, data)
+            save_features_to_db(market, symbol, data, quality_result)
             db_results.append({"market": market, "symbol": symbol, "status": "success"})
         except Exception as e:
             logger.error(f"[DB書き込みエラー] {market}/{symbol}: {e}", exc_info=True)

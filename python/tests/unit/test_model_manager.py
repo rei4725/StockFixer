@@ -144,17 +144,17 @@ class TestModelManager(unittest.TestCase):
         model_name = "train_test_model"
         model_instance = self.model_manager.create_model("XGBoostModel", model_name)
 
-        # trainとsave_modelが呼び出されることを確認するためにモックを置き換える
-        # side_effectを設定して、元のMockBaseModelのメソッドも実行されるようにする
         original_train = model_instance.train
-        original_save_model = model_instance.save_model
         model_instance.train = MagicMock(side_effect=original_train)
-        model_instance.save_model = MagicMock(side_effect=original_save_model)
 
-        self.model_manager.train_model(model_name, self.dummy_X, self.dummy_y)
+        with patch("src.prediction.manager.joblib.dump") as mock_dump:
+            self.model_manager.train_model(model_name, self.dummy_X, self.dummy_y)
 
-        model_instance.train.assert_called_once_with(self.dummy_X, self.dummy_y)
-        model_instance.save_model.assert_called_once()
+            model_instance.train.assert_called_once_with(self.dummy_X, self.dummy_y)
+            mock_dump.assert_called_once()
+            saved_artifact = mock_dump.call_args[0][0]
+            self.assertIsInstance(saved_artifact, dict)
+            self.assertIn("model", saved_artifact)
         self.assertTrue(model_instance.trained)  # MockBaseModelのtrainedフラグも確認
 
     def test_predict_with_model(self):
@@ -172,64 +172,59 @@ class TestModelManager(unittest.TestCase):
         self.assertEqual(len(predictions), len(self.dummy_X))
 
     def test_save_model(self):
-        """モデルが指定パスに保存されることを確認する。"""
+        """モデルがartifact dict形式で指定パスに保存されることを確認する。"""
         model_name = "save_test_model"
-        model_instance = self.model_manager.create_model("XGBoostModel", model_name)
+        self.model_manager.create_model("XGBoostModel", model_name)
 
-        # save_modelが呼び出されることを確認するためにモックを置き換える
-        # side_effectを設定して、元のMockBaseModelのメソッドも実行されるようにする
-        original_save_model = model_instance.save_model
-        model_instance.save_model = MagicMock(side_effect=original_save_model)
+        with patch("src.prediction.manager.joblib.dump") as mock_dump:
+            self.model_manager.save_model(model_name)
 
-        self.model_manager.save_model(model_name)
-
-        expected_path = os.path.join(self.test_model_dir, f"{model_name}.joblib")
-        model_instance.save_model.assert_called_once_with(expected_path)
-        self.assertEqual(model_instance.saved_path, expected_path)  # MockBaseModelのsaved_pathも確認
+            expected_path = os.path.join(self.test_model_dir, f"{model_name}.joblib")
+            mock_dump.assert_called_once()
+            saved_artifact, saved_path = mock_dump.call_args[0]
+            self.assertIsInstance(saved_artifact, dict)
+            self.assertIn("model", saved_artifact)
+            self.assertIn("feature_hash", saved_artifact)
+            self.assertIn("git_sha", saved_artifact)
+            self.assertIn("trained_at", saved_artifact)
+            self.assertEqual(saved_path, expected_path)
 
     def test_load_model_existing_instance(self):
-        """既存インスタンスが正しくロードされることを確認する。"""
+        """既存インスタンスに新形式artifactが正しくロードされることを確認する。"""
         model_name = "load_test_model_existing"
         model_instance = self.model_manager.create_model("XGBoostModel", model_name)
 
-        # load_modelが呼び出されることを確認するためにモックを置き換える
-        # side_effectを設定して、元のMockBaseModelのメソッドも実行されるようにする
-        original_load_model = model_instance.load_model
-        model_instance.load_model = MagicMock(side_effect=original_load_model)
+        dummy_raw_model = MagicMock()
+        artifact = {
+            "model": dummy_raw_model,
+            "feature_hash": None,
+            "git_sha": "abc1234",
+            "trained_at": "2026-01-01T00:00:00+00:00",
+        }
 
-        # ダミーのモデルファイルを事前に作成
-        dummy_model_path = os.path.join(self.test_model_dir, f"{model_name}.joblib")
-        with open(dummy_model_path, "w") as f:
-            f.write("dummy model content")
+        with patch("src.prediction.manager.joblib.load", return_value=artifact):
+            self.model_manager.load_model(model_name)
 
-        self.model_manager.load_model(model_name)
-
-        model_instance.load_model.assert_called_once_with(dummy_model_path)
-        self.assertTrue(model_instance.trained)  # MockBaseModelのtrainedフラグも確認
+        self.assertEqual(model_instance.model, dummy_raw_model)
 
     def test_load_model_new_instance_with_type(self):
-        """タイプ指定で新しいインスタンスが正しくロードされることを確認する。"""
+        """タイプ指定で新しいインスタンスが作成され新形式artifactがロードされることを確認する。"""
         model_name = "load_test_model_new"
         model_type = "XGBoostModel"
 
-        # ダミーのモデルファイルを事前に作成
-        dummy_model_path = os.path.join(self.test_model_dir, f"{model_name}.joblib")
-        with open(dummy_model_path, "w") as f:
-            f.write("dummy model content")
+        dummy_raw_model = MagicMock()
+        artifact = {"model": dummy_raw_model, "feature_hash": None, "git_sha": "", "trained_at": ""}
 
-        # create_modelが呼び出されることを確認するためにモックを置き換える
-        with patch.object(
-            self.model_manager, "create_model", wraps=self.model_manager.create_model
-        ) as mock_create_model:
-            self.model_manager.load_model(model_name, model_type=model_type)
-            mock_create_model.assert_called_once_with(model_type, model_name)
+        with patch("src.prediction.manager.joblib.load", return_value=artifact):
+            with patch.object(
+                self.model_manager, "create_model", wraps=self.model_manager.create_model
+            ) as mock_create_model:
+                self.model_manager.load_model(model_name, model_type=model_type)
+                mock_create_model.assert_called_once_with(model_type, model_name)
 
-            loaded_model = self.model_manager.get_model(model_name)
-            self.assertIsInstance(loaded_model, MockBaseModel)
-            self.assertTrue(loaded_model.trained)  # MockBaseModelのtrainedフラグも確認
-            self.assertEqual(
-                loaded_model.loaded_path, dummy_model_path
-            )  # MockBaseModelのloaded_pathも確認
+        loaded_model = self.model_manager.get_model(model_name)
+        self.assertIsInstance(loaded_model, MockBaseModel)
+        self.assertEqual(loaded_model.model, dummy_raw_model)
 
     def test_load_model_new_instance_no_type_error(self):
         """model_type未指定でロード時にValueErrorが発生することを確認する。"""

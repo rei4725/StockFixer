@@ -24,7 +24,7 @@ def _compute_feature_hash(feature_columns: List[str]) -> str:
 def _get_git_sha() -> str:
     """現在の git commit SHA（short）を返す。取得できない場合は空文字列。"""
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 B607
             ["git", "rev-parse", "--short", "HEAD"],
             capture_output=True,
             text=True,
@@ -123,7 +123,9 @@ class ModelManager:
         model = self.get_model(model_name)
         model.train(X, y, **train_kwargs)
         if auto_save:
-            self.save_model(model_name, market=market, symbol=symbol, feature_columns=list(X.columns))
+            self.save_model(
+                model_name, market=market, symbol=symbol, feature_columns=list(X.columns)
+            )
 
     def predict_with_model(self, model_name: str, X: pd.DataFrame) -> pd.Series:
         """
@@ -159,7 +161,9 @@ class ModelManager:
 
         artifact = {
             "model": model.model,
-            "feature_hash": _compute_feature_hash(feature_columns) if feature_columns is not None else None,
+            "feature_hash": _compute_feature_hash(feature_columns)
+            if feature_columns is not None
+            else None,
             "git_sha": _get_git_sha(),
             "trained_at": datetime.now(timezone.utc).isoformat(),
         }
@@ -209,7 +213,8 @@ class ModelManager:
             )
             logger.info(
                 f"{model_name} モデルを {model_path} からロードしました。"
-                f" git_sha={artifact.get('git_sha', '')} trained_at={artifact.get('trained_at', '')}"
+                f" git_sha={artifact.get('git_sha', '')}"
+                f" trained_at={artifact.get('trained_at', '')}"
             )
         else:
             # 旧形式（後方互換）
@@ -237,7 +242,8 @@ class ModelManager:
         msg = (
             f"[特徴量不一致] モデル '{model_name}': "
             f"学習時ハッシュ={stored_hash} / 現在ハッシュ={current_hash} "
-            f"(git_sha={artifact.get('git_sha', 'unknown')}, trained_at={artifact.get('trained_at', 'unknown')})"
+            f"(git_sha={artifact.get('git_sha', 'unknown')},"
+            f" trained_at={artifact.get('trained_at', 'unknown')})"
         )
         logger.warning(msg)
         try:
