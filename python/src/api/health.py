@@ -92,6 +92,11 @@ def _get_last_prediction_at() -> str | None:
 # ---------------------------------------------------------------------------
 
 
+from src.api.metrics import register_routes as _register_metrics
+
+_register_metrics(app)
+
+
 @app.route("/health")
 def health() -> tuple[Response, int]:
     db_status, db_error = _check_db()
