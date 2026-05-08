@@ -35,7 +35,7 @@ def _make_price_df(n=30):
 
 class TestResolveModelTypes(unittest.TestCase):
     def _fn(self, horizon, model_types=None):
-        from src.models.predict_single_stock import _resolve_model_types
+        from src.prediction.predict_single import _resolve_model_types
 
         return _resolve_model_types(horizon, model_types)
 
@@ -73,7 +73,7 @@ class TestResolveModelTypes(unittest.TestCase):
 
 class TestFetchCurrentPrice(unittest.TestCase):
     def _fn(self, df, yf_hist=None, yf_raises=False):
-        from src.models.predict_single_stock import _fetch_current_price
+        from src.prediction.predict_single import _fetch_current_price
 
         mock_hist = pd.DataFrame({"Close": [123.45]}) if yf_hist is None else yf_hist
         mock_ticker = MagicMock()
@@ -82,8 +82,8 @@ class TestFetchCurrentPrice(unittest.TestCase):
         else:
             mock_ticker.history.return_value = mock_hist
 
-        with patch("src.models.predict_single_stock.yf.Ticker", return_value=mock_ticker), patch(
-            "src.models.predict_single_stock.get_ticker", return_value="AAPL"
+        with patch("src.prediction.predict_single.yf.Ticker", return_value=mock_ticker), patch(
+            "src.prediction.predict_single.get_ticker", return_value="AAPL"
         ):
             return _fetch_current_price("us", "AAPL", df)
 
@@ -111,14 +111,14 @@ class TestFetchCurrentPrice(unittest.TestCase):
         self.assertIsInstance(result, float)
 
     def test_returns_none_when_df_has_no_close_and_yf_fails(self):
-        from src.models.predict_single_stock import _fetch_current_price
+        from src.prediction.predict_single import _fetch_current_price
 
         df = pd.DataFrame({"Open": [100.0]})  # Closeなし
 
         mock_ticker = MagicMock()
         mock_ticker.history.side_effect = RuntimeError("err")
-        with patch("src.models.predict_single_stock.yf.Ticker", return_value=mock_ticker), patch(
-            "src.models.predict_single_stock.get_ticker", return_value="AAPL"
+        with patch("src.prediction.predict_single.yf.Ticker", return_value=mock_ticker), patch(
+            "src.prediction.predict_single.get_ticker", return_value="AAPL"
         ):
             result = _fetch_current_price("us", "AAPL", df)
         self.assertIsNone(result)
@@ -131,7 +131,7 @@ class TestFetchCurrentPrice(unittest.TestCase):
 
 class TestBuildPredictionResult(unittest.TestCase):
     def _fn(self, market, symbol, current, prices, returns):
-        from src.models.predict_single_stock import _build_prediction_result
+        from src.prediction.predict_single import _build_prediction_result
 
         return _build_prediction_result(market, symbol, current, prices, returns)
 
@@ -192,7 +192,7 @@ class TestBuildPredictionResult(unittest.TestCase):
 
 class TestRunSingleModelPrediction(unittest.TestCase):
     def _call(self, model_path, df, current_price=100.0, pred_return=0.05):
-        from src.models.predict_single_stock import _run_single_model_prediction
+        from src.prediction.predict_single import _run_single_model_prediction
 
         n = len(df)
         fake_X = pd.DataFrame({"f1": np.ones(n)}, index=df.index)
@@ -204,12 +204,12 @@ class TestRunSingleModelPrediction(unittest.TestCase):
         mock_mm.load_model.return_value = mock_model
 
         with patch(
-            "src.models.predict_single_stock.add_technical_indicators", return_value=df
+            "src.prediction.predict_single.add_technical_indicators", return_value=df
         ), patch(
-            "src.models.predict_single_stock.create_basic_lag_features",
+            "src.prediction.predict_single.create_basic_lag_features",
             return_value=(fake_X, fake_y),
         ), patch(
-            "src.models.predict_single_stock.ModelManager", return_value=mock_mm
+            "src.prediction.predict_single.ModelManager", return_value=mock_mm
         ):
             return _run_single_model_prediction(model_path, "us", "AAPL", df, current_price)
 
@@ -229,26 +229,26 @@ class TestRunSingleModelPrediction(unittest.TestCase):
         self.assertAlmostEqual(pred_return, 0.10)
 
     def test_returns_none_when_features_empty(self):
-        from src.models.predict_single_stock import _run_single_model_prediction
+        from src.prediction.predict_single import _run_single_model_prediction
 
         df = _make_price_df(5)
         empty_X = pd.DataFrame()
         empty_y = pd.Series(dtype=float)
 
         with patch(
-            "src.models.predict_single_stock.add_technical_indicators", return_value=df
+            "src.prediction.predict_single.add_technical_indicators", return_value=df
         ), patch(
-            "src.models.predict_single_stock.create_basic_lag_features",
+            "src.prediction.predict_single.create_basic_lag_features",
             return_value=(empty_X, empty_y),
         ), patch(
-            "src.models.predict_single_stock.ModelManager"
+            "src.prediction.predict_single.ModelManager"
         ):
             result = _run_single_model_prediction("path/model.joblib", "us", "AAPL", df, 100.0)
         self.assertIsNone(result)
 
     def test_handles_series_prediction(self):
         """model.predict が pd.Series を返すケース"""
-        from src.models.predict_single_stock import _run_single_model_prediction
+        from src.prediction.predict_single import _run_single_model_prediction
 
         df = _make_price_df()
         n = len(df)
@@ -261,12 +261,12 @@ class TestRunSingleModelPrediction(unittest.TestCase):
         mock_mm.load_model.return_value = mock_model
 
         with patch(
-            "src.models.predict_single_stock.add_technical_indicators", return_value=df
+            "src.prediction.predict_single.add_technical_indicators", return_value=df
         ), patch(
-            "src.models.predict_single_stock.create_basic_lag_features",
+            "src.prediction.predict_single.create_basic_lag_features",
             return_value=(fake_X, fake_y),
         ), patch(
-            "src.models.predict_single_stock.ModelManager", return_value=mock_mm
+            "src.prediction.predict_single.ModelManager", return_value=mock_mm
         ):
             result = _run_single_model_prediction("p/m.joblib", "us", "AAPL", df, 100.0)
         _, pred_return = result
@@ -292,16 +292,16 @@ class TestPredictSingleStock(unittest.TestCase):
             }
         )
 
-    @patch("src.models.predict_single_stock.load_model_weights")
-    @patch("src.models.predict_single_stock._run_single_model_prediction")
-    @patch("src.models.predict_single_stock._fetch_current_price")
-    @patch("src.models.predict_single_stock.data_loader")
-    @patch("src.models.predict_single_stock.os.path.exists")
+    @patch("src.prediction.predict_single.load_model_weights")
+    @patch("src.prediction.predict_single._run_single_model_prediction")
+    @patch("src.prediction.predict_single._fetch_current_price")
+    @patch("src.prediction.predict_single.data_loader")
+    @patch("src.prediction.predict_single.os.path.exists")
     def test_returns_prediction_result_when_models_exist(
         self, mock_exists, mock_loader, mock_price, mock_run, mock_weights
     ):
         """モデルが存在する場合、PredictionResult が返ること"""
-        from src.models.predict_single_stock import predict_single_stock
+        from src.prediction.predict_single import predict_single_stock
 
         mock_exists.return_value = True
         mock_loader.get_stock_data.return_value = self._make_df()
@@ -315,32 +315,32 @@ class TestPredictSingleStock(unittest.TestCase):
         self.assertEqual(result.symbol, "7203")
         self.assertEqual(result.market, "jp")
 
-    @patch("src.models.predict_single_stock.os.path.exists")
+    @patch("src.prediction.predict_single.os.path.exists")
     def test_returns_none_when_no_models(self, mock_exists):
         """モデルが存在しない場合 None が返ること"""
-        from src.models.predict_single_stock import predict_single_stock
+        from src.prediction.predict_single import predict_single_stock
 
         mock_exists.return_value = False
         result = predict_single_stock("jp", "7203")
         self.assertIsNone(result)
 
-    @patch("src.models.predict_single_stock.data_loader")
-    @patch("src.models.predict_single_stock.os.path.exists")
+    @patch("src.prediction.predict_single.data_loader")
+    @patch("src.prediction.predict_single.os.path.exists")
     def test_returns_none_when_features_empty(self, mock_exists, mock_loader):
         """特徴量データが空の場合 None が返ること"""
-        from src.models.predict_single_stock import predict_single_stock
+        from src.prediction.predict_single import predict_single_stock
 
         mock_exists.return_value = True
         mock_loader.get_stock_data.return_value = pd.DataFrame()
         result = predict_single_stock("jp", "7203")
         self.assertIsNone(result)
 
-    @patch("src.models.predict_single_stock._fetch_current_price")
-    @patch("src.models.predict_single_stock.data_loader")
-    @patch("src.models.predict_single_stock.os.path.exists")
+    @patch("src.prediction.predict_single._fetch_current_price")
+    @patch("src.prediction.predict_single.data_loader")
+    @patch("src.prediction.predict_single.os.path.exists")
     def test_returns_none_when_price_none(self, mock_exists, mock_loader, mock_price):
         """現在値が取得できない場合 None が返ること"""
-        from src.models.predict_single_stock import predict_single_stock
+        from src.prediction.predict_single import predict_single_stock
 
         mock_exists.return_value = True
         mock_loader.get_stock_data.return_value = self._make_df()
@@ -348,16 +348,16 @@ class TestPredictSingleStock(unittest.TestCase):
         result = predict_single_stock("jp", "7203")
         self.assertIsNone(result)
 
-    @patch("src.models.predict_single_stock.load_model_weights")
-    @patch("src.models.predict_single_stock._run_single_model_prediction")
-    @patch("src.models.predict_single_stock._fetch_current_price")
-    @patch("src.models.predict_single_stock.data_loader")
-    @patch("src.models.predict_single_stock.os.path.exists")
+    @patch("src.prediction.predict_single.load_model_weights")
+    @patch("src.prediction.predict_single._run_single_model_prediction")
+    @patch("src.prediction.predict_single._fetch_current_price")
+    @patch("src.prediction.predict_single.data_loader")
+    @patch("src.prediction.predict_single.os.path.exists")
     def test_continues_on_model_exception(
         self, mock_exists, mock_loader, mock_price, mock_run, mock_weights
     ):
         """モデル予測で例外が出ても次のモデルに続くこと"""
-        from src.models.predict_single_stock import predict_single_stock
+        from src.prediction.predict_single import predict_single_stock
 
         mock_exists.return_value = True
         mock_loader.get_stock_data.return_value = self._make_df()
@@ -390,10 +390,10 @@ class TestPredictSingleStockMultiHorizon(unittest.TestCase):
             model_count=2,
         )
 
-    @patch("src.models.predict_single_stock.predict_single_stock")
+    @patch("src.prediction.predict_single.predict_single_stock")
     def test_returns_prediction_result_with_horizons(self, mock_predict):
         """各ホライズンで成功した場合 PredictionResult が返ること"""
-        from src.models.predict_single_stock import predict_single_stock_multi_horizon
+        from src.prediction.predict_single import predict_single_stock_multi_horizon
 
         mock_predict.return_value = self._make_result()
         result = predict_single_stock_multi_horizon("jp", "7203", horizons=[1, 3, 5])
@@ -402,19 +402,19 @@ class TestPredictSingleStockMultiHorizon(unittest.TestCase):
         self.assertIsInstance(result, PredictionResult)
         self.assertEqual(result.symbol, "7203")
 
-    @patch("src.models.predict_single_stock.predict_single_stock")
+    @patch("src.prediction.predict_single.predict_single_stock")
     def test_returns_none_when_all_horizons_fail(self, mock_predict):
         """全ホライズンが None を返した場合 None が返ること"""
-        from src.models.predict_single_stock import predict_single_stock_multi_horizon
+        from src.prediction.predict_single import predict_single_stock_multi_horizon
 
         mock_predict.return_value = None
         result = predict_single_stock_multi_horizon("jp", "7203", horizons=[1, 3, 5])
         self.assertIsNone(result)
 
-    @patch("src.models.predict_single_stock.predict_single_stock")
+    @patch("src.prediction.predict_single.predict_single_stock")
     def test_multi_horizon_fields_populated(self, mock_predict):
         """3d/5d/10d フィールドが結果に含まれること"""
-        from src.models.predict_single_stock import predict_single_stock_multi_horizon
+        from src.prediction.predict_single import predict_single_stock_multi_horizon
 
         def _side(market, symbol, horizon=1, **kwargs):
             return self._make_result(diff_ratio=0.05 * horizon)
@@ -427,10 +427,10 @@ class TestPredictSingleStockMultiHorizon(unittest.TestCase):
         self.assertIsNotNone(result.avg_pred_price_5d)
         self.assertIsNotNone(result.avg_pred_price_10d)
 
-    @patch("src.models.predict_single_stock.predict_single_stock")
+    @patch("src.prediction.predict_single.predict_single_stock")
     def test_confluence_score_all_upward(self, mock_predict):
         """全ホライズンが上昇予測のとき confluence_score がホライズン数と一致すること"""
-        from src.models.predict_single_stock import predict_single_stock_multi_horizon
+        from src.prediction.predict_single import predict_single_stock_multi_horizon
 
         mock_predict.return_value = self._make_result(diff_ratio=0.05)
         result = predict_single_stock_multi_horizon("jp", "7203", horizons=[1, 3, 5])
@@ -440,10 +440,10 @@ class TestPredictSingleStockMultiHorizon(unittest.TestCase):
         self.assertGreaterEqual(result.confluence_score, 0)
         self.assertEqual(result.confluence_score, 3)  # 3ホライズン全て一致
 
-    @patch("src.models.predict_single_stock.predict_single_stock")
+    @patch("src.prediction.predict_single.predict_single_stock")
     def test_base_horizon_is_1_when_available(self, mock_predict):
         """horizon=1 の結果が base として使われること"""
-        from src.models.predict_single_stock import predict_single_stock_multi_horizon
+        from src.prediction.predict_single import predict_single_stock_multi_horizon
 
         def _side(market, symbol, horizon=1, **kwargs):
             return self._make_result(diff_ratio=0.01 * horizon)

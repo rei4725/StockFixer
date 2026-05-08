@@ -316,7 +316,7 @@ class TestPlotPortfolio(unittest.TestCase):
 class TestBuildSignalMatrixAdditional(unittest.TestCase):
     """_build_signal_matrix の追加テスト"""
 
-    @patch("src.models.model_manager.ModelManager")
+    @patch("src.prediction.manager.ModelManager")
     @patch("src.backtest.pipeline.load_features")
     def test_builds_matrix_for_single_symbol(self, mock_load, mock_mm_cls):
         """1銘柄の予測スコアと価格マトリクスが構築されること"""
@@ -355,7 +355,7 @@ class TestBuildSignalMatrixAdditional(unittest.TestCase):
         self.assertFalse(score_matrix.empty)
         self.assertIn("jp_7203", score_matrix.columns)
 
-    @patch("src.models.model_manager.ModelManager")
+    @patch("src.prediction.manager.ModelManager")
     @patch("src.backtest.pipeline.load_features")
     def test_skips_symbol_with_insufficient_data(self, mock_load, mock_mm_cls):
         """データ不足の銘柄はスキップされること"""
