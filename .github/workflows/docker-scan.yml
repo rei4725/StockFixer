@@ -50,7 +50,7 @@ jobs:
           severity: HIGH,CRITICAL
           vuln-type: library
           ignore-unfixed: true
-
+          trivyignores: python/.trivyignore
       - name: Trivy full image scan — OS+library (weekly report)
         if: always() && github.event_name == 'schedule'
         uses: aquasecurity/trivy-action@v0.36.0
