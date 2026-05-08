@@ -31,7 +31,7 @@ import sys
 from logging.handlers import RotatingFileHandler
 from typing import Optional
 
-_LOG_FORMAT = "[%(asctime)s.%(msecs)03d] [%(levelname)-5s] [%(name)s] %(message)s"
+_LOG_FORMAT = "[%(asctime)s.%(msecs)03d] [%(levelname)-5s] [%(name)s] [%(run_id)s] %(message)s"
 _DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 # python/ ルートディレクトリ（src/utils/logger.py から3階層上）
@@ -92,6 +92,10 @@ class _MaskingFormatter(logging.Formatter):
             self._pattern = None
 
     def format(self, record: logging.LogRecord) -> str:
+        if not hasattr(record, "run_id"):
+            from src.utils.run_context import get_run_id
+
+            record.run_id = get_run_id() or "-"
         formatted = super().format(record)
         if self._pattern:
             formatted = self._pattern.sub(_MASK_PLACEHOLDER, formatted)

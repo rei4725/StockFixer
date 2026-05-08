@@ -12,6 +12,7 @@ import pandas as pd
 from src.prediction.types import PredictionResult, TrainingMetrics
 from src.utils.db._connection import _db_connection
 from src.utils.logger import get_logger
+from src.utils.run_context import get_run_id
 
 logger = get_logger(__name__)
 
@@ -42,11 +43,14 @@ def save_prediction_results(predicted_at: str, results: list[PredictionResult]) 
     else:
         save_df["model_version"] = save_df["model_version"].fillna("production")
 
+    save_df["run_id"] = get_run_id()
+
     base_cols = [
         "market",
         "symbol",
         "predicted_at",
         "model_version",
+        "run_id",
         "current_price",
         "avg_pred_price",
         "diff_ratio",

@@ -21,6 +21,7 @@ from src.utils.data_path_utils import get_models_dir
 from src.utils.db import get_all_symbols, save_prediction_results
 from src.utils.df_to_string import df_to_pretty_string
 from src.utils.logger import get_logger
+from src.utils.run_context import new_run_context
 
 # yfinanceの警告を抑制
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -267,7 +268,9 @@ def output_top_worst_results(
         logger.warning("有効な結果がありませんでした。")
         return
 
+    run_ctx = new_run_context()
     now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    logger.info(f"予測パイプライン開始: run_id={run_ctx.run_id}")
 
     if shadow_mode:
         # model_version を付与（未設定の行のみ上書きする）
