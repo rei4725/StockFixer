@@ -29,6 +29,7 @@ from src.reporting.discord.discord_text import (
     DISCORD_WIDE_TEXT_LIMIT,
     split_text_chunks,
 )
+from src.reporting.discord import rate_limiter as _rate_limiter
 from src.reporting.query_service import get_latest_market_prediction_snapshots
 from src.utils.japan_time import format_jst, format_jst_from_iso, isoformat_jst
 
@@ -57,6 +58,7 @@ def _post_webhook(
     webhook_url = _get_webhook_url()
     if not webhook_url:
         return None
+    _rate_limiter.apply_rate_limit()
     response = requests.post(
         webhook_url, json=json_payload, data=data_payload, files=files, timeout=timeout
     )
@@ -116,6 +118,18 @@ def send_webhook_notification(
         成功時True、失敗時False
     """
     try:
+        should_send, suppression_summary = _rate_limiter.check_and_record(
+            f"{title}\n{message}"
+        )
+        if not should_send:
+            return True
+
+        if suppression_summary:
+            try:
+                _post_webhook(json_payload={"content": suppression_summary}, timeout=10)
+            except requests.exceptions.RequestException as e:
+                logger.error("抑止サマリー送信失敗: %s", e, exc_info=True)
+
         embed_data = {
             "embeds": [
                 {

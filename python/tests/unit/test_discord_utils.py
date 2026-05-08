@@ -265,9 +265,11 @@ class TestSendStatusNotification:
 class TestSendWebhookNotificationExtra:
     """send_webhook_notification の追加テスト"""
 
+    @patch("src.reporting.discord.rate_limiter.check_and_record", return_value=(True, None))
+    @patch("src.reporting.discord.rate_limiter.apply_rate_limit")
     @patch("src.reporting.discord.discord_utils._post_webhook")
     @patch("src.reporting.discord.discord_utils.isoformat_jst")
-    def test_returns_false_on_request_exception(self, mock_ts, mock_post):
+    def test_returns_false_on_request_exception(self, mock_ts, mock_post, _rl, _ded):
         """RequestException 時は False が返ること"""
         import requests
 
@@ -278,9 +280,11 @@ class TestSendWebhookNotificationExtra:
         result = send_webhook_notification("タイトル", "メッセージ")
         assert result is False
 
+    @patch("src.reporting.discord.rate_limiter.check_and_record", return_value=(True, None))
+    @patch("src.reporting.discord.rate_limiter.apply_rate_limit")
     @patch("src.reporting.discord.discord_utils._post_webhook")
     @patch("src.reporting.discord.discord_utils.isoformat_jst")
-    def test_returns_false_when_response_is_none(self, mock_ts, mock_post):
+    def test_returns_false_when_response_is_none(self, mock_ts, mock_post, _rl, _ded):
         """レスポンスが None の場合は False が返ること"""
         from src.reporting.discord.discord_utils import send_webhook_notification
 
