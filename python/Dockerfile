@@ -30,7 +30,9 @@ RUN pip install --no-cache-dir --upgrade "pip>=25.3" && \
     pip install --no-cache-dir -r requirements.txt && \
     pip install --no-cache-dir --upgrade \
         "jaraco.context>=6.1.0" \
-        "wheel>=0.46.2"
+        "wheel>=0.46.2" && \
+    echo "=== Installed versions ===" && \
+    pip show jaraco.context wheel 2>&1
 
 # アプリケーションコードのコピー
 COPY . .
