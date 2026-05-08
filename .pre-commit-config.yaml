@@ -125,6 +125,15 @@ repos:
   # src.data.* / src.models.* 等の廃止パス経由 import を検出
   - repo: local
     hooks:
+      - id: import-linter
+        name: Import Linter (layer / independence contracts)
+        entry: python .github/hooks/run_import_linter.py
+        language: python
+        additional_dependencies: ["import-linter>=2.0"]
+        stages: [pre-commit]
+        pass_filenames: false
+        files: ^python/src/.*\.py$
+
       - id: check-arch-violation
         name: Architecture Violation (legacy module imports)
         entry: python ./.github/hooks/check_arch_violation.py
