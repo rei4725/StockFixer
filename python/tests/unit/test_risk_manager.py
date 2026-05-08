@@ -8,7 +8,7 @@ import unittest
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
-from src.brokers.base import BrokerBase, OrderSide
+from src.trading.brokers.base import BrokerBase, OrderSide
 from src.trading.risk_manager import (
     MAX_CONSECUTIVE_LOSSES,
     MAX_DAILY_LOSS_RATE,

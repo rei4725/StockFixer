@@ -14,7 +14,7 @@ def _clear_mock_modules():
     """test_model_manager.py が sys.modules にセットしたモックを削除する"""
     from unittest.mock import MagicMock
 
-    for key in ("src.models.lightgbm_model", "src.models.xgboost_model"):
+    for key in ("src.prediction.models.lightgbm", "src.prediction.models.xgboost"):
         if key in sys.modules and isinstance(sys.modules[key], MagicMock):
             del sys.modules[key]
 
@@ -46,28 +46,28 @@ class TestLightGBMModel(unittest.TestCase):
 
     def test_init_default_name(self):
         """デフォルトのモデル名が 'LightGBMModel' であること"""
-        from src.models.lightgbm_model import LightGBMModel
+        from src.prediction.models.lightgbm import LightGBMModel
 
         model = LightGBMModel()
         self.assertEqual(model.model_name, "LightGBMModel")
 
     def test_init_custom_name(self):
         """カスタムモデル名が正しく設定されること"""
-        from src.models.lightgbm_model import LightGBMModel
+        from src.prediction.models.lightgbm import LightGBMModel
 
         model = LightGBMModel("MyLGBM")
         self.assertEqual(model.model_name, "MyLGBM")
 
     def test_train_completes_without_error(self):
         """train が例外なく完了すること"""
-        from src.models.lightgbm_model import LightGBMModel
+        from src.prediction.models.lightgbm import LightGBMModel
 
         model = LightGBMModel()
         model.train(self.X, self.y)
 
     def test_predict_returns_series(self):
         """predict が pd.Series を返すこと"""
-        from src.models.lightgbm_model import LightGBMModel
+        from src.prediction.models.lightgbm import LightGBMModel
 
         model = LightGBMModel()
         model.train(self.X, self.y)
@@ -77,7 +77,7 @@ class TestLightGBMModel(unittest.TestCase):
 
     def test_predict_length_matches_input(self):
         """predict の結果長さが入力 X と一致すること"""
-        from src.models.lightgbm_model import LightGBMModel
+        from src.prediction.models.lightgbm import LightGBMModel
 
         model = LightGBMModel()
         model.train(self.X, self.y)
@@ -87,7 +87,7 @@ class TestLightGBMModel(unittest.TestCase):
 
     def test_predict_index_matches_input(self):
         """predict の結果インデックスが入力 X と一致すること"""
-        from src.models.lightgbm_model import LightGBMModel
+        from src.prediction.models.lightgbm import LightGBMModel
 
         model = LightGBMModel()
         model.train(self.X, self.y)
@@ -97,7 +97,7 @@ class TestLightGBMModel(unittest.TestCase):
 
     def test_predict_before_train_raises_value_error(self):
         """train なしで predict を呼ぶと ValueError が送出されること"""
-        from src.models.lightgbm_model import LightGBMModel
+        from src.prediction.models.lightgbm import LightGBMModel
 
         model = LightGBMModel()
         with self.assertRaises(ValueError):
@@ -105,7 +105,7 @@ class TestLightGBMModel(unittest.TestCase):
 
     def test_predict_single_row(self):
         """1 行の X に対して predict が機能すること"""
-        from src.models.lightgbm_model import LightGBMModel
+        from src.prediction.models.lightgbm import LightGBMModel
 
         model = LightGBMModel()
         model.train(self.X, self.y)
@@ -115,7 +115,7 @@ class TestLightGBMModel(unittest.TestCase):
 
     def test_train_with_eval_set_completes_without_error(self):
         """eval_set を指定した early stopping 付き学習が例外なく完了すること"""
-        from src.models.lightgbm_model import LightGBMModel
+        from src.prediction.models.lightgbm import LightGBMModel
 
         X, y = _make_xy(periods=200)
         X_train, y_train = X.iloc[:160], y.iloc[:160]
@@ -139,28 +139,28 @@ class TestXGBoostModel(unittest.TestCase):
 
     def test_init_default_name(self):
         """デフォルトのモデル名が 'XGBoostModel' であること"""
-        from src.models.xgboost_model import XGBoostModel
+        from src.prediction.models.xgboost import XGBoostModel
 
         model = XGBoostModel()
         self.assertEqual(model.model_name, "XGBoostModel")
 
     def test_init_custom_name(self):
         """カスタムモデル名が正しく設定されること"""
-        from src.models.xgboost_model import XGBoostModel
+        from src.prediction.models.xgboost import XGBoostModel
 
         model = XGBoostModel("MyXGB")
         self.assertEqual(model.model_name, "MyXGB")
 
     def test_train_completes_without_error(self):
         """train が例外なく完了すること"""
-        from src.models.xgboost_model import XGBoostModel
+        from src.prediction.models.xgboost import XGBoostModel
 
         model = XGBoostModel()
         model.train(self.X, self.y)
 
     def test_predict_returns_series(self):
         """predict が pd.Series を返すこと"""
-        from src.models.xgboost_model import XGBoostModel
+        from src.prediction.models.xgboost import XGBoostModel
 
         model = XGBoostModel()
         model.train(self.X, self.y)
@@ -170,7 +170,7 @@ class TestXGBoostModel(unittest.TestCase):
 
     def test_predict_length_matches_input(self):
         """predict の結果長さが入力 X と一致すること"""
-        from src.models.xgboost_model import XGBoostModel
+        from src.prediction.models.xgboost import XGBoostModel
 
         model = XGBoostModel()
         model.train(self.X, self.y)
@@ -180,7 +180,7 @@ class TestXGBoostModel(unittest.TestCase):
 
     def test_predict_index_matches_input(self):
         """predict の結果インデックスが入力 X と一致すること"""
-        from src.models.xgboost_model import XGBoostModel
+        from src.prediction.models.xgboost import XGBoostModel
 
         model = XGBoostModel()
         model.train(self.X, self.y)
@@ -190,7 +190,7 @@ class TestXGBoostModel(unittest.TestCase):
 
     def test_predict_before_train_raises_value_error(self):
         """train なしで predict を呼ぶと ValueError が送出されること"""
-        from src.models.xgboost_model import XGBoostModel
+        from src.prediction.models.xgboost import XGBoostModel
 
         model = XGBoostModel()
         with self.assertRaises(ValueError):
@@ -198,7 +198,7 @@ class TestXGBoostModel(unittest.TestCase):
 
     def test_predict_single_row(self):
         """1 行の X に対して predict が機能すること"""
-        from src.models.xgboost_model import XGBoostModel
+        from src.prediction.models.xgboost import XGBoostModel
 
         model = XGBoostModel()
         model.train(self.X, self.y)
@@ -208,7 +208,7 @@ class TestXGBoostModel(unittest.TestCase):
 
     def test_train_with_eval_set_completes_without_error(self):
         """eval_set を指定した early stopping 付き学習が例外なく完了すること"""
-        from src.models.xgboost_model import XGBoostModel
+        from src.prediction.models.xgboost import XGBoostModel
 
         X, y = _make_xy(periods=200)
         X_train, y_train = X.iloc[:160], y.iloc[:160]
@@ -229,7 +229,7 @@ class TestBaseModelSaveLoad(unittest.TestCase):
 
     def setUp(self):
         self.X, self.y = _make_xy()
-        from src.models.lightgbm_model import LightGBMModel
+        from src.prediction.models.lightgbm import LightGBMModel
 
         self.model = LightGBMModel("TestLGBM")
         self.model.train(self.X, self.y)
@@ -248,7 +248,7 @@ class TestBaseModelSaveLoad(unittest.TestCase):
         self.model.save_model(path)
         self.assertTrue(os.path.exists(path))
 
-        from src.models.lightgbm_model import LightGBMModel
+        from src.prediction.models.lightgbm import LightGBMModel
 
         model2 = LightGBMModel("TestLGBM2")
         model2.load_model(path)
@@ -262,7 +262,7 @@ class TestBaseModelSaveLoad(unittest.TestCase):
         pred_before = self.model.predict(self.X)
         self.model.save_model(path)
 
-        from src.models.lightgbm_model import LightGBMModel
+        from src.prediction.models.lightgbm import LightGBMModel
 
         model2 = LightGBMModel()
         model2.load_model(path)

@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pandas as pd
 
-from src.brokers.base import BrokerBase, OrderSide, OrderType
+from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
 from src.trading.execution import (
     BUY_THRESHOLD,
     MAX_ORDERS_PER_RUN,

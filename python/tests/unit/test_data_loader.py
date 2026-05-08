@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from src.data.data_loader import (
+from src.market_data.loader import (
     get_latest_business_day,
     get_stock_data_auto,
     merge_market_data,
@@ -172,7 +172,7 @@ class TestMergeMarketData(unittest.TestCase):
 class TestGetStockDataAuto(unittest.TestCase):
     """get_stock_data_auto 関数のテスト"""
 
-    @patch("src.data.data_loader.get_stock_data_from_file")
+    @patch("src.market_data.loader.get_stock_data_from_file")
     def test_file_source_calls_from_file(self, mock_from_file):
         """source='file' のとき get_stock_data_from_file が呼ばれること"""
         mock_from_file.return_value = _make_ohlcv()
@@ -181,8 +181,8 @@ class TestGetStockDataAuto(unittest.TestCase):
 
         mock_from_file.assert_called_once()
 
-    @patch("src.data.data_loader.get_stock_data")
-    @patch("src.data.data_loader.get_ticker")
+    @patch("src.market_data.loader.get_stock_data")
+    @patch("src.market_data.loader.get_ticker")
     def test_api_source_calls_get_stock_data(self, mock_ticker, mock_get_stock):
         """source='api' のとき get_stock_data が呼ばれること"""
         mock_ticker.return_value = "AAPL"
@@ -201,20 +201,20 @@ class TestGetStockDataAuto(unittest.TestCase):
 class TestGetStockDataFromDb(unittest.TestCase):
     """get_stock_data_from_db 関数のテスト"""
 
-    @patch("src.data.data_loader.load_stock_features")
+    @patch("src.market_data.loader.load_stock_features")
     def test_raises_file_not_found_when_no_data(self, mock_load):
         """DB にデータがない場合 FileNotFoundError が送出されること"""
-        from src.data.data_loader import get_stock_data_from_db
+        from src.market_data.loader import get_stock_data_from_db
 
         mock_load.return_value = None
 
         with self.assertRaises(FileNotFoundError):
             get_stock_data_from_db("us", "AAPL")
 
-    @patch("src.data.data_loader.load_stock_features")
+    @patch("src.market_data.loader.load_stock_features")
     def test_returns_df_when_data_exists(self, mock_load):
         """DB にデータがある場合 DataFrame を返すこと"""
-        from src.data.data_loader import get_stock_data_from_db
+        from src.market_data.loader import get_stock_data_from_db
 
         dates = pd.date_range("2024-01-01", periods=10, freq="B")
         df = pd.DataFrame({"Date": dates, "Close": range(10)})
@@ -227,20 +227,20 @@ class TestGetStockDataFromDb(unittest.TestCase):
 class TestGetForexData(unittest.TestCase):
     """get_forex_data 関数のテスト"""
 
-    @patch("src.data.data_loader.yf_client")
+    @patch("src.market_data.loader.yf_client")
     def test_raises_when_empty_data(self, mock_yf_client):
         """データが空の場合は ValueError が発生すること"""
-        from src.data.data_loader import get_forex_data
+        from src.market_data.loader import get_forex_data
 
         mock_yf_client.download.return_value = pd.DataFrame()
 
         with self.assertRaises(ValueError):
             get_forex_data("JPY=X", "2024-01-01", "2024-06-01")
 
-    @patch("src.data.data_loader.yf_client")
+    @patch("src.market_data.loader.yf_client")
     def test_returns_df_when_data_exists(self, mock_yf_client):
         """正常時はデータを含む DataFrame が返ること"""
-        from src.data.data_loader import get_forex_data
+        from src.market_data.loader import get_forex_data
 
         mock_yf_client.download.return_value = pd.DataFrame(
             {"Close": [150.0]}, index=pd.date_range("2024-01-01", periods=1)
@@ -253,19 +253,19 @@ class TestGetForexData(unittest.TestCase):
 class TestFetchCrossAssetFeatures(unittest.TestCase):
     """fetch_cross_asset_features 関数のテスト"""
 
-    @patch("src.data.data_loader.yf_client")
+    @patch("src.market_data.loader.yf_client")
     def test_returns_none_when_all_fail(self, mock_yf_client):
         """全ティッカー取得失敗時に None が返ること（line 347）"""
-        from src.data.data_loader import fetch_cross_asset_features
+        from src.market_data.loader import fetch_cross_asset_features
 
         mock_yf_client.ticker_history.return_value = pd.DataFrame()  # 空 DataFrame → スキップ
         result = fetch_cross_asset_features("2024-01-01", "2024-03-31")
         assert result is None
 
-    @patch("src.data.data_loader.yf_client")
+    @patch("src.market_data.loader.yf_client")
     def test_returns_dataframe_on_success(self, mock_yf_client):
         """正常時に DataFrame が返ること"""
-        from src.data.data_loader import fetch_cross_asset_features
+        from src.market_data.loader import fetch_cross_asset_features
 
         n = 10
         dates = pd.date_range("2024-01-01", periods=n, freq="B")
@@ -274,20 +274,20 @@ class TestFetchCrossAssetFeatures(unittest.TestCase):
         result = fetch_cross_asset_features("2024-01-01", "2024-01-31")
         assert result is not None
 
-    @patch("src.data.data_loader.yf_client")
+    @patch("src.market_data.loader.yf_client")
     def test_handles_exception_per_ticker(self, mock_yf_client):
         """ティッカー取得例外はスキップされること（lines 342-344）"""
-        from src.data.data_loader import fetch_cross_asset_features
+        from src.market_data.loader import fetch_cross_asset_features
 
         mock_yf_client.ticker_history.side_effect = Exception("接続タイムアウト")
         # 例外なしで None が返ること
         result = fetch_cross_asset_features("2024-01-01", "2024-01-31")
         assert result is None
 
-    @patch("src.data.data_loader.yf_client")
+    @patch("src.market_data.loader.yf_client")
     def test_handles_dataframe_close_column(self, mock_yf_client):
         """Close 列が MultiIndex DataFrame の場合に iloc[:,0] が取られること（line 334）"""
-        from src.data.data_loader import fetch_cross_asset_features
+        from src.market_data.loader import fetch_cross_asset_features
 
         n = 5
         dates = pd.date_range("2024-01-01", periods=n, freq="B")

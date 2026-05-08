@@ -55,8 +55,8 @@ class TestDiscordQueryService(unittest.TestCase):
         self.assertEqual(snapshots[0].top_results[0].symbol, "7203")
         self.assertEqual(snapshots[0].worst_results, [])
 
-    @patch("src.models.predict_single_stock.explain_prediction_shap")
-    @patch("src.models.predict_single_stock.predict_single_stock")
+    @patch("src.prediction.predict_single.explain_prediction_shap")
+    @patch("src.prediction.predict_single.predict_single_stock")
     def test_get_signal_snapshot_maps_prediction_and_shap(
         self,
         mock_predict_single_stock,

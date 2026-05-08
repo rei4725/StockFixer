@@ -11,7 +11,7 @@ from unittest.mock import patch
 import duckdb
 import pandas as pd
 
-from src.brokers.base import OrderSide
+from src.trading.brokers.base import OrderSide
 from src.trading.brokers.paper.paper_broker import PaperBroker
 
 # テスト用インメモリ DB

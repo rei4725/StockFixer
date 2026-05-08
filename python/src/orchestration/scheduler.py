@@ -160,14 +160,14 @@ def run_daily_auto_order():
     """
     import os
 
-    from src.brokers.paper.paper_broker import PaperBroker
+    from src.trading.brokers.paper.paper_broker import PaperBroker
     from src.trading.execution import run_daily_orders
 
     mode = os.environ.get("AUTO_TRADE_MODE", "paper")
     logger.info("=== 自動発注開始 (mode=%s) ===", mode)
 
     if mode == "live":
-        from src.brokers.kabu.kabu_client import KabuBroker
+        from src.trading.brokers.kabu.kabu_client import KabuBroker
 
         broker = KabuBroker()
     else:
@@ -209,7 +209,7 @@ def run_daily_settle_orders():
         logger.info("live モードのため settle スキップ")
         return
 
-    from src.brokers.paper.paper_broker import PaperBroker
+    from src.trading.brokers.paper.paper_broker import PaperBroker
 
     logger.info("=== ペーパートレード約定処理開始 ===")
     try:
@@ -246,7 +246,7 @@ def run_daily_paper_trade_report():
 
     logger.info("=== ペーパートレード損益レポート送信開始 ===")
     try:
-        from src.brokers.paper.paper_broker import PaperBroker
+        from src.trading.brokers.paper.paper_broker import PaperBroker
         from src.reporting.discord.discord_utils import send_paper_trade_position_report
 
         broker = PaperBroker()

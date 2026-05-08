@@ -10,13 +10,13 @@ import pandas as pd
 
 # ModelManagerが依存するモジュールをモック
 # これにより、xgboostやlightgbmがインストールされていなくてもModelManagerをインポートできるようになる
-sys.modules["src.models.xgboost_model"] = MagicMock()
-sys.modules["src.models.lightgbm_model"] = MagicMock()
+sys.modules["src.prediction.models.xgboost"] = MagicMock()
+sys.modules["src.prediction.models.lightgbm"] = MagicMock()
 
-from src.models.base_model import BaseModel  # noqa: E402
+from src.prediction.models.base import BaseModel  # noqa: E402
 
 # モック後にModelManagerをインポート
-from src.models.model_manager import ModelManager  # noqa: E402
+from src.prediction.manager import ModelManager  # noqa: E402
 
 
 # BaseModelのモッククラス

@@ -292,7 +292,7 @@ class TestKabuBrokerSendOrder(unittest.TestCase):
     @patch("src.trading.brokers.kabu.kabu_client.httpx.post")
     def test_send_order_returns_dict_with_order_id(self, mock_post):
         """注文発注が order_id を含む辞書を返すこと"""
-        from src.brokers.base import OrderSide
+        from src.trading.brokers.base import OrderSide
 
         mock_response = MagicMock()
         mock_response.json.return_value = {"OrderId": "OID-001"}
@@ -309,7 +309,7 @@ class TestKabuBrokerSendOrder(unittest.TestCase):
     @patch("src.trading.brokers.kabu.kabu_client.httpx.post")
     def test_send_order_calls_sendorder_endpoint(self, mock_post):
         """POST リクエストが sendorder エンドポイントに送られること"""
-        from src.brokers.base import OrderSide
+        from src.trading.brokers.base import OrderSide
 
         mock_response = MagicMock()
         mock_response.json.return_value = {"OrderId": "OID-002"}
