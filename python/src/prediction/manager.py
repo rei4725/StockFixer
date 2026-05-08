@@ -18,7 +18,9 @@ logger = get_logger(__name__)
 
 def _compute_feature_hash(feature_columns: List[str]) -> str:
     """特徴量カラム順のMD5ハッシュを返す。"""
-    return hashlib.md5(",".join(feature_columns).encode()).hexdigest()
+    return hashlib.md5(
+        ",".join(feature_columns).encode(), usedforsecurity=False
+    ).hexdigest()  # nosec B324
 
 
 def _get_git_sha() -> str:
