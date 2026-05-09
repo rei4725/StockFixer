@@ -435,7 +435,7 @@ def compute_metrics_by_regime(
     Returns:
         dict: レジームラベル ("bull", "bear", "range", "all") をキーとする metrics dict
     """
-    from src.analysis.technical import classify_regime
+    from src.market_data.technical import classify_regime
 
     results: dict[str, dict[str, Any]] = {}
 

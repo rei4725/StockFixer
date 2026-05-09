@@ -8,23 +8,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 
-class TestServicesInit(unittest.TestCase):
-    """src.services.__init__ のカバレッジ確保テスト"""
-
-    def test_services_package_all_list(self):
-        """src.services.__all__ に必須エクスポートが含まれること"""
-        import importlib
-        import sys
-
-        # 既にキャッシュされていれば reload して確認
-        if "src.services" in sys.modules:
-            mod = sys.modules["src.services"]
-        else:
-            mod = importlib.import_module("src.services")
-        # __all__ はモックに影響されない
-        all_list = getattr(mod, "__all__", [])
-        assert "predict_all_individual" in all_list or len(all_list) >= 0  # 常に通る
-
 
 class TestGetOptimalParams(unittest.TestCase):
     """get_optimal_params のテスト（JSON ファイルをモック）"""
@@ -260,8 +243,8 @@ class TestPredictAllUnified(unittest.TestCase):
     """predict_all_unified のテスト"""
 
     @patch("src.prediction.prediction_pipeline.get_all_symbols")
-    @patch("src.models.predict_unified.preload_models")
-    @patch("src.models.predict_unified.predict_with_unified_model")
+    @patch("src.prediction.predict_unified.preload_models")
+    @patch("src.prediction.predict_unified.predict_with_unified_model")
     def test_returns_list_of_prediction_results(self, mock_predict, mock_preload, mock_symbols):
         """統合モデルで全銘柄の予測結果リストが返ること"""
         from src.prediction.prediction_pipeline import predict_all_unified
@@ -283,7 +266,7 @@ class TestPredictAllUnified(unittest.TestCase):
         self.assertEqual(results[0].symbol, "7203")
 
     @patch("src.prediction.prediction_pipeline.get_all_symbols")
-    @patch("src.models.predict_unified.preload_models")
+    @patch("src.prediction.predict_unified.preload_models")
     def test_returns_empty_when_no_symbols(self, mock_preload, mock_symbols):
         """銘柄がない場合は空リストが返ること"""
         from src.prediction.prediction_pipeline import predict_all_unified
@@ -294,8 +277,8 @@ class TestPredictAllUnified(unittest.TestCase):
         self.assertEqual(results, [])
 
     @patch("src.prediction.prediction_pipeline.get_all_symbols")
-    @patch("src.models.predict_unified.preload_models")
-    @patch("src.models.predict_unified.predict_with_unified_model")
+    @patch("src.prediction.predict_unified.preload_models")
+    @patch("src.prediction.predict_unified.predict_with_unified_model")
     def test_predict_exception_returns_empty(self, mock_predict, mock_preload, mock_symbols):
         """予測中に例外が発生しても空リストが返ること（例外が伝播しない）"""
         from src.prediction.prediction_pipeline import predict_all_unified
@@ -382,8 +365,8 @@ class TestPredictAllUnifiedMultiHorizon(unittest.TestCase):
     """predict_all_unified_multi_horizon のテスト"""
 
     @patch("src.prediction.prediction_pipeline.get_all_symbols")
-    @patch("src.models.predict_unified.preload_models")
-    @patch("src.models.predict_unified.predict_with_unified_model")
+    @patch("src.prediction.predict_unified.preload_models")
+    @patch("src.prediction.predict_unified.predict_with_unified_model")
     def test_multi_horizon_returns_results(self, mock_predict, mock_preload, mock_symbols):
         """複数ホライズン（[1, 7]）で予測結果リストが返ること"""
         from src.prediction.prediction_pipeline import predict_all_unified_multi_horizon
@@ -411,7 +394,7 @@ class TestPredictAllUnifiedMultiHorizon(unittest.TestCase):
         self.assertEqual(results[0].symbol, "7203")
 
     @patch("src.prediction.prediction_pipeline.get_all_symbols")
-    @patch("src.models.predict_unified.preload_models")
+    @patch("src.prediction.predict_unified.preload_models")
     def test_empty_symbols_returns_empty(self, mock_preload, mock_symbols):
         """銘柄リストが空の場合は空リストが返ること"""
         from src.prediction.prediction_pipeline import predict_all_unified_multi_horizon
@@ -423,8 +406,8 @@ class TestPredictAllUnifiedMultiHorizon(unittest.TestCase):
         self.assertEqual(results, [])
 
     @patch("src.prediction.prediction_pipeline.get_all_symbols")
-    @patch("src.models.predict_unified.preload_models")
-    @patch("src.models.predict_unified.predict_with_unified_model")
+    @patch("src.prediction.predict_unified.preload_models")
+    @patch("src.prediction.predict_unified.predict_with_unified_model")
     def test_single_horizon_works(self, mock_predict, mock_preload, mock_symbols):
         """ホライズンが1つだけでも正常動作すること"""
         from src.prediction.prediction_pipeline import predict_all_unified_multi_horizon
@@ -448,8 +431,8 @@ class TestPredictAllUnifiedMultiHorizon(unittest.TestCase):
         self.assertEqual(results[0].symbol, "AAPL")
 
     @patch("src.prediction.prediction_pipeline.get_all_symbols")
-    @patch("src.models.predict_unified.preload_models")
-    @patch("src.models.predict_unified.predict_with_unified_model")
+    @patch("src.prediction.predict_unified.preload_models")
+    @patch("src.prediction.predict_unified.predict_with_unified_model")
     def test_exception_skips_symbol(self, mock_predict, mock_preload, mock_symbols):
         """予測中に例外が発生した銘柄はスキップされること"""
         from src.prediction.prediction_pipeline import predict_all_unified_multi_horizon

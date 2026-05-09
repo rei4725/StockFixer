@@ -18,11 +18,10 @@ from config.settings import (
     FEATURE_SELECTION_PROTECT_TOP_SHAP,
     PERMUTATION_IMPORTANCE_REPEATS,
 )
-from src.analysis.technical import add_earnings_flag
-from src.analysis.types import FeatureLoadResult
+from src.market_data.technical import add_earnings_flag
 from src.market_data.loader import get_earnings_dates
 from src.prediction.manager import ModelManager
-from src.prediction.types import TrainingMetrics
+from src.prediction.types import FeatureLoadResult, TrainingMetrics
 from src.utils.db import (
     generate_run_id,
     load_excluded_features,
@@ -149,7 +148,7 @@ def load_features_for_training(market: str, symbol: str, horizon: int = 1) -> Fe
             y = df["y"]
         else:
             # 多ホライズンパス: market_data_raw から OHLCV を取得して再計算
-            from src.analysis.technical import add_technical_indicators, create_basic_lag_features
+            from src.market_data.technical import add_technical_indicators, create_basic_lag_features
             from src.utils.db import load_raw_ohlcv
 
             raw = load_raw_ohlcv(market, symbol)

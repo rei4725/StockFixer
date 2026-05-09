@@ -28,10 +28,10 @@ def _make_ohlcv(periods=60):
 class TestPredictSingleStockNoModel(unittest.TestCase):
     """モデルファイルが存在しない場合のテスト"""
 
-    @patch("src.models.predict_single_stock.get_models_subdir")
+    @patch("src.prediction.predict_single.get_models_subdir")
     def test_returns_none_when_no_model_files(self, mock_subdir):
         """モデルファイルが存在しない場合は None が返ること"""
-        from src.models.predict_single_stock import predict_single_stock
+        from src.prediction.predict_single import predict_single_stock
 
         with tempfile.TemporaryDirectory() as tmp:
             mock_subdir.return_value = tmp
@@ -39,10 +39,10 @@ class TestPredictSingleStockNoModel(unittest.TestCase):
 
         self.assertIsNone(result)
 
-    @patch("src.models.predict_single_stock.get_models_subdir")
+    @patch("src.prediction.predict_single.get_models_subdir")
     def test_returns_none_for_custom_model_types_not_existing(self, mock_subdir):
         """指定した model_types が存在しない場合は None が返ること"""
-        from src.models.predict_single_stock import predict_single_stock
+        from src.prediction.predict_single import predict_single_stock
 
         with tempfile.TemporaryDirectory() as tmp:
             mock_subdir.return_value = tmp
@@ -93,13 +93,13 @@ class TestPredictSingleStockWithMocks(unittest.TestCase):
         mock_mm.load_model.return_value = mock_model
         mock_mm_cls.return_value = mock_mm
 
-    @patch("src.models.predict_single_stock.ModelManager")
-    @patch("src.models.predict_single_stock.create_basic_lag_features")
-    @patch("src.models.predict_single_stock.add_technical_indicators")
-    @patch("src.models.predict_single_stock.yf")
-    @patch("src.models.predict_single_stock.data_loader")
-    @patch("src.models.predict_single_stock.os.path.exists")
-    @patch("src.models.predict_single_stock.get_models_subdir")
+    @patch("src.prediction.predict_single.ModelManager")
+    @patch("src.prediction.predict_single.create_basic_lag_features")
+    @patch("src.prediction.predict_single.add_technical_indicators")
+    @patch("src.prediction.predict_single.yf")
+    @patch("src.prediction.predict_single.data_loader")
+    @patch("src.prediction.predict_single.os.path.exists")
+    @patch("src.prediction.predict_single.get_models_subdir")
     def test_returns_prediction_result(
         self,
         mock_subdir,
@@ -111,7 +111,7 @@ class TestPredictSingleStockWithMocks(unittest.TestCase):
         mock_mm_cls,
     ):
         """正常時は PredictionResult が返ること"""
-        from src.models.predict_single_stock import predict_single_stock
+        from src.prediction.predict_single import predict_single_stock
 
         self._setup_mocks(
             mock_subdir,
@@ -128,13 +128,13 @@ class TestPredictSingleStockWithMocks(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertIsInstance(result, PredictionResult)
 
-    @patch("src.models.predict_single_stock.ModelManager")
-    @patch("src.models.predict_single_stock.create_basic_lag_features")
-    @patch("src.models.predict_single_stock.add_technical_indicators")
-    @patch("src.models.predict_single_stock.yf")
-    @patch("src.models.predict_single_stock.data_loader")
-    @patch("src.models.predict_single_stock.os.path.exists")
-    @patch("src.models.predict_single_stock.get_models_subdir")
+    @patch("src.prediction.predict_single.ModelManager")
+    @patch("src.prediction.predict_single.create_basic_lag_features")
+    @patch("src.prediction.predict_single.add_technical_indicators")
+    @patch("src.prediction.predict_single.yf")
+    @patch("src.prediction.predict_single.data_loader")
+    @patch("src.prediction.predict_single.os.path.exists")
+    @patch("src.prediction.predict_single.get_models_subdir")
     def test_result_fields_correct(
         self,
         mock_subdir,
@@ -146,7 +146,7 @@ class TestPredictSingleStockWithMocks(unittest.TestCase):
         mock_mm_cls,
     ):
         """PredictionResult の market/symbol/current_price が正しいこと"""
-        from src.models.predict_single_stock import predict_single_stock
+        from src.prediction.predict_single import predict_single_stock
 
         self._setup_mocks(
             mock_subdir,
@@ -166,13 +166,13 @@ class TestPredictSingleStockWithMocks(unittest.TestCase):
         self.assertEqual(result.symbol, "AAPL")
         self.assertAlmostEqual(result.current_price, 150.0, places=1)
 
-    @patch("src.models.predict_single_stock.ModelManager")
-    @patch("src.models.predict_single_stock.create_basic_lag_features")
-    @patch("src.models.predict_single_stock.add_technical_indicators")
-    @patch("src.models.predict_single_stock.yf")
-    @patch("src.models.predict_single_stock.data_loader")
-    @patch("src.models.predict_single_stock.os.path.exists")
-    @patch("src.models.predict_single_stock.get_models_subdir")
+    @patch("src.prediction.predict_single.ModelManager")
+    @patch("src.prediction.predict_single.create_basic_lag_features")
+    @patch("src.prediction.predict_single.add_technical_indicators")
+    @patch("src.prediction.predict_single.yf")
+    @patch("src.prediction.predict_single.data_loader")
+    @patch("src.prediction.predict_single.os.path.exists")
+    @patch("src.prediction.predict_single.get_models_subdir")
     def test_diff_ratio_calculated(
         self,
         mock_subdir,
@@ -184,7 +184,7 @@ class TestPredictSingleStockWithMocks(unittest.TestCase):
         mock_mm_cls,
     ):
         """diff_ratio = (avg_pred_price - current_price) / current_price であること"""
-        from src.models.predict_single_stock import predict_single_stock
+        from src.prediction.predict_single import predict_single_stock
 
         self._setup_mocks(
             mock_subdir,
@@ -204,13 +204,13 @@ class TestPredictSingleStockWithMocks(unittest.TestCase):
         expected_diff = (expected_pred_price - 100.0) / 100.0
         self.assertAlmostEqual(result.diff_ratio, expected_diff, places=4)
 
-    @patch("src.models.predict_single_stock.ModelManager")
-    @patch("src.models.predict_single_stock.create_basic_lag_features")
-    @patch("src.models.predict_single_stock.add_technical_indicators")
-    @patch("src.models.predict_single_stock.yf")
-    @patch("src.models.predict_single_stock.data_loader")
-    @patch("src.models.predict_single_stock.os.path.exists")
-    @patch("src.models.predict_single_stock.get_models_subdir")
+    @patch("src.prediction.predict_single.ModelManager")
+    @patch("src.prediction.predict_single.create_basic_lag_features")
+    @patch("src.prediction.predict_single.add_technical_indicators")
+    @patch("src.prediction.predict_single.yf")
+    @patch("src.prediction.predict_single.data_loader")
+    @patch("src.prediction.predict_single.os.path.exists")
+    @patch("src.prediction.predict_single.get_models_subdir")
     def test_model_count_reflects_model_types(
         self,
         mock_subdir,
@@ -222,7 +222,7 @@ class TestPredictSingleStockWithMocks(unittest.TestCase):
         mock_mm_cls,
     ):
         """model_count がモデル数と一致すること"""
-        from src.models.predict_single_stock import predict_single_stock
+        from src.prediction.predict_single import predict_single_stock
 
         self._setup_mocks(
             mock_subdir,
@@ -242,12 +242,12 @@ class TestPredictSingleStockWithMocks(unittest.TestCase):
 class TestPredictSingleStockEdgeCases(unittest.TestCase):
     """エッジケースのテスト"""
 
-    @patch("src.models.predict_single_stock.data_loader")
-    @patch("src.models.predict_single_stock.os.path.exists")
-    @patch("src.models.predict_single_stock.get_models_subdir")
+    @patch("src.prediction.predict_single.data_loader")
+    @patch("src.prediction.predict_single.os.path.exists")
+    @patch("src.prediction.predict_single.get_models_subdir")
     def test_returns_none_when_ohlcv_empty(self, mock_subdir, mock_exists, mock_data_loader):
         """OHLCV データが空の場合は None が返ること"""
-        from src.models.predict_single_stock import predict_single_stock
+        from src.prediction.predict_single import predict_single_stock
 
         mock_subdir.return_value = "/models/us_BAD"
         mock_exists.return_value = True
@@ -257,17 +257,17 @@ class TestPredictSingleStockEdgeCases(unittest.TestCase):
 
         self.assertIsNone(result)
 
-    @patch("src.models.predict_single_stock.create_basic_lag_features")
-    @patch("src.models.predict_single_stock.add_technical_indicators")
-    @patch("src.models.predict_single_stock.yf")
-    @patch("src.models.predict_single_stock.data_loader")
-    @patch("src.models.predict_single_stock.os.path.exists")
-    @patch("src.models.predict_single_stock.get_models_subdir")
+    @patch("src.prediction.predict_single.create_basic_lag_features")
+    @patch("src.prediction.predict_single.add_technical_indicators")
+    @patch("src.prediction.predict_single.yf")
+    @patch("src.prediction.predict_single.data_loader")
+    @patch("src.prediction.predict_single.os.path.exists")
+    @patch("src.prediction.predict_single.get_models_subdir")
     def test_returns_none_when_features_empty(
         self, mock_subdir, mock_exists, mock_data_loader, mock_yf, mock_tech, mock_lag
     ):
         """特徴量生成後に X が空の場合は None が返ること"""
-        from src.models.predict_single_stock import predict_single_stock
+        from src.prediction.predict_single import predict_single_stock
 
         mock_subdir.return_value = "/models/us_AAPL"
         mock_exists.return_value = True
@@ -284,15 +284,15 @@ class TestPredictSingleStockEdgeCases(unittest.TestCase):
 
         self.assertIsNone(result)
 
-    @patch("src.models.predict_single_stock.yf")
-    @patch("src.models.predict_single_stock.data_loader")
-    @patch("src.models.predict_single_stock.os.path.exists")
-    @patch("src.models.predict_single_stock.get_models_subdir")
+    @patch("src.prediction.predict_single.yf")
+    @patch("src.prediction.predict_single.data_loader")
+    @patch("src.prediction.predict_single.os.path.exists")
+    @patch("src.prediction.predict_single.get_models_subdir")
     def test_fallback_to_close_when_yf_fails(
         self, mock_subdir, mock_exists, mock_data_loader, mock_yf
     ):
         """yfinance での現在価格取得失敗時は Close 列からフォールバックすること"""
-        from src.models.predict_single_stock import predict_single_stock
+        from src.prediction.predict_single import predict_single_stock
 
         mock_subdir.return_value = "/models/us_AAPL"
         mock_exists.return_value = True
@@ -314,10 +314,10 @@ class TestPredictSingleStockEdgeCases(unittest.TestCase):
 class TestPredictSingleStockHorizon(unittest.TestCase):
     """horizon パラメータのテスト"""
 
-    @patch("src.models.predict_single_stock.get_models_subdir")
+    @patch("src.prediction.predict_single.get_models_subdir")
     def test_horizon1_default_model_types(self, mock_subdir):
         """horizon=1 では suffix なしのモデルファイルを使うこと"""
-        from src.models.predict_single_stock import predict_single_stock
+        from src.prediction.predict_single import predict_single_stock
 
         with tempfile.TemporaryDirectory() as tmp:
             mock_subdir.return_value = tmp
@@ -325,10 +325,10 @@ class TestPredictSingleStockHorizon(unittest.TestCase):
             # ファイルが存在しないので None が返る（モデルパス解決の確認は副次的）
         self.assertIsNone(result)
 
-    @patch("src.models.predict_single_stock.get_models_subdir")
+    @patch("src.prediction.predict_single.get_models_subdir")
     def test_horizon3_uses_3d_suffix(self, mock_subdir):
         """horizon=3 では _3d サフィックスのモデルファイルを使うこと"""
-        from src.models.predict_single_stock import predict_single_stock
+        from src.prediction.predict_single import predict_single_stock
 
         with tempfile.TemporaryDirectory() as tmp:
             mock_subdir.return_value = tmp

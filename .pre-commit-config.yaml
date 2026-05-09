@@ -121,7 +121,29 @@ repos:
         exclude: ^(tests/|\.github/hooks/)
         pass_filenames: true
 
-  # 9. コミットメッセージ検証 (commitlint スタイル)
+  # 9. アーキテクチャ違反検出 - 旧モジュール経由 import
+  # src.data.* / src.models.* 等の廃止パス経由 import を検出
+  - repo: local
+    hooks:
+      - id: import-linter
+        name: Import Linter (layer / independence contracts)
+        entry: python .github/hooks/run_import_linter.py
+        language: python
+        additional_dependencies: ["import-linter>=2.0"]
+        stages: [pre-commit]
+        pass_filenames: false
+        files: ^python/src/.*\.py$
+
+      - id: check-arch-violation
+        name: Architecture Violation (legacy module imports)
+        entry: python ./.github/hooks/check_arch_violation.py
+        language: python
+        stages: [pre-commit]
+        files: \.(py)$
+        exclude: ^(tests/|\.github/hooks/)
+        pass_filenames: true
+
+  # 10. コミットメッセージ検証 (commitlint スタイル)
   # コミットメッセージが "feat:", "fix:", "docs:" などで始まることを確認
   - repo: local
     hooks:

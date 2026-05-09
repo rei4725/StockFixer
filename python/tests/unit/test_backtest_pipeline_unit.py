@@ -201,9 +201,9 @@ if __name__ == "__main__":
 class TestLoadFeaturesRawSource:
     """load_features(source='raw') のテスト"""
 
-    @patch("src.data.data_loader.get_raw_ohlcv_from_db")
-    @patch("src.analysis.technical.add_technical_indicators")
-    @patch("src.analysis.technical.create_basic_lag_features")
+    @patch("src.market_data.loader.get_raw_ohlcv_from_db")
+    @patch("src.market_data.technical.add_technical_indicators")
+    @patch("src.market_data.technical.create_basic_lag_features")
     def test_load_features_raw_returns_dataframe(self, mock_lag, mock_ti, mock_raw):
         """source='raw' で DataFrame が返ること"""
         n = 35
@@ -233,7 +233,7 @@ class TestLoadFeaturesRawSource:
         assert not result.empty
         mock_raw.assert_called_once_with("jp", "7203")
 
-    @patch("src.data.data_loader.get_raw_ohlcv_from_db")
+    @patch("src.market_data.loader.get_raw_ohlcv_from_db")
     def test_load_features_raw_exits_on_empty(self, mock_raw):
         """空データの場合は SystemExit が発生すること"""
         mock_raw.return_value = pd.DataFrame()
@@ -301,9 +301,9 @@ class TestRunBacktestSingle:
     """run_backtest_single() のテスト"""
 
     @patch("src.backtest.pipeline.load_features")
-    @patch("src.models.model_manager.ModelManager")
+    @patch("src.prediction.manager.ModelManager")
     @patch("src.backtest.backtester.Backtester")
-    @patch("src.strategy.signal_generator.SignalGenerator")
+    @patch("src.trading.signal_generator.SignalGenerator")
     def test_run_backtest_single_returns_metrics(self, mock_sg, mock_bt, mock_mm_cls, mock_lf):
         """基本フローでメトリクス辞書が返ること"""
         n = 20
@@ -341,9 +341,9 @@ class TestRunBacktestSingle:
 
     @patch("src.backtest.pipeline.load_features")
     @patch("src.backtest.pipeline._ensemble_predict")
-    @patch("src.models.model_manager.ModelManager")
+    @patch("src.prediction.manager.ModelManager")
     @patch("src.backtest.backtester.Backtester")
-    @patch("src.strategy.signal_generator.SignalGenerator")
+    @patch("src.trading.signal_generator.SignalGenerator")
     def test_run_backtest_single_ensemble_mode(
         self, mock_sg, mock_bt, mock_mm_cls, mock_ep, mock_lf
     ):
@@ -566,9 +566,9 @@ class TestLoadFeaturesApiSource(unittest.TestCase):
     """load_features(source='api') のテスト"""
 
     @patch("src.utils.data_path_utils.get_ticker")
-    @patch("src.analysis.technical.create_basic_lag_features")
-    @patch("src.analysis.technical.add_technical_indicators")
-    @patch("src.data.data_loader.get_stock_data")
+    @patch("src.market_data.technical.create_basic_lag_features")
+    @patch("src.market_data.technical.add_technical_indicators")
+    @patch("src.market_data.loader.get_stock_data")
     def test_api_source_calls_get_stock_data(self, mock_yf, mock_ti, mock_lag, mock_ticker):
         """source='api' では get_stock_data が呼ばれること"""
         n = 50
@@ -603,7 +603,7 @@ class TestLoadFeaturesApiSource(unittest.TestCase):
         self.assertIsInstance(result, pd.DataFrame)
 
     @patch("src.utils.data_path_utils.get_ticker")
-    @patch("src.data.data_loader.get_stock_data")
+    @patch("src.market_data.loader.get_stock_data")
     def test_api_source_exits_on_empty_data(self, mock_yf, mock_ticker):
         """空データの場合 SystemExit が発生すること"""
         mock_ticker.return_value = "7203.T"
@@ -615,9 +615,9 @@ class TestLoadFeaturesApiSource(unittest.TestCase):
             load_features("jp", "7203", "api")
 
     @patch("src.utils.data_path_utils.get_ticker")
-    @patch("src.analysis.technical.create_basic_lag_features")
-    @patch("src.analysis.technical.add_technical_indicators")
-    @patch("src.data.data_loader.get_stock_data")
+    @patch("src.market_data.technical.create_basic_lag_features")
+    @patch("src.market_data.technical.add_technical_indicators")
+    @patch("src.market_data.loader.get_stock_data")
     def test_api_source_result_has_close_column(self, mock_yf, mock_ti, mock_lag, mock_ticker):
         """source='api' の結果に Close 列が含まれること"""
         n = 40
@@ -759,8 +759,8 @@ class TestSaveBacktestResultsAdditional(unittest.TestCase):
 class TestRunBacktestWalkForward(unittest.TestCase):
     """run_backtest_walk_forward のテスト（未カバー行 382-415）"""
 
-    @patch("src.models.model_manager.ModelManager")
-    @patch("src.strategy.signal_generator.SignalGenerator")
+    @patch("src.prediction.manager.ModelManager")
+    @patch("src.trading.signal_generator.SignalGenerator")
     @patch("src.backtest.walk_forward.WalkForwardValidator")
     def test_returns_walk_forward_results(self, mock_wfv_cls, mock_sg, mock_mm_cls):
         """WalkForwardValidator の実行結果が (None, None, wf_df) として返ること"""
@@ -781,8 +781,8 @@ class TestRunBacktestWalkForward(unittest.TestCase):
         pd.testing.assert_frame_equal(wf_df, expected_df)
         mock_wfv_cls.return_value.run.assert_called_once()
 
-    @patch("src.models.model_manager.ModelManager")
-    @patch("src.strategy.signal_generator.SignalGenerator")
+    @patch("src.prediction.manager.ModelManager")
+    @patch("src.trading.signal_generator.SignalGenerator")
     @patch("src.backtest.walk_forward.WalkForwardValidator")
     def test_ensemble_skips_create_model(self, mock_wfv_cls, mock_sg, mock_mm_cls):
         """ensemble=True の場合は create_model が呼ばれないこと"""
@@ -794,8 +794,8 @@ class TestRunBacktestWalkForward(unittest.TestCase):
 
         mock_mm_cls.return_value.create_model.assert_not_called()
 
-    @patch("src.models.model_manager.ModelManager")
-    @patch("src.strategy.signal_generator.SignalGenerator")
+    @patch("src.prediction.manager.ModelManager")
+    @patch("src.trading.signal_generator.SignalGenerator")
     @patch("src.backtest.walk_forward.WalkForwardValidator")
     def test_non_ensemble_calls_create_model(self, mock_wfv_cls, mock_sg, mock_mm_cls):
         """ensemble=False の場合は create_model が呼ばれること"""
@@ -807,8 +807,8 @@ class TestRunBacktestWalkForward(unittest.TestCase):
 
         mock_mm_cls.return_value.create_model.assert_called_once()
 
-    @patch("src.models.model_manager.ModelManager")
-    @patch("src.strategy.signal_generator.SignalGenerator")
+    @patch("src.prediction.manager.ModelManager")
+    @patch("src.trading.signal_generator.SignalGenerator")
     @patch("src.backtest.walk_forward.WalkForwardValidator")
     def test_lightgbm_model_type(self, mock_wfv_cls, mock_sg, mock_mm_cls):
         """LightGBMModel 指定でも正常動作すること"""

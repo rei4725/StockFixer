@@ -30,7 +30,7 @@ from config.settings import (
     MIN_CHANGE_RATIO,
 )
 from src.prediction.prediction_pipeline import get_optimal_params
-from src.strategy.signal_generator import apply_multi_horizon_score_column
+from src.trading.signal_generator import apply_multi_horizon_score_column
 from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
 from src.trading.risk_manager import RiskManager
 from src.trading.types import TradingGateStatus

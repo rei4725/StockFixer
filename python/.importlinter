@@ -1,0 +1,98 @@
+[importlinter]
+root_packages = src
+
+# ============================================================
+# Contract 1: レイヤー階層契約
+#   utils < BC群 < orchestration/api
+#   上位レイヤーが下位レイヤーを参照するのは合法。逆は禁止。
+#
+# ignore_imports: 既存違反（将来的な解消対象）を明示列挙。
+# 新規違反を追加する際は必ずレビューを経ること。
+# ============================================================
+[importlinter:contract:layers]
+name = Layered architecture (utils < BC < orchestration/api)
+type = layers
+layers =
+    src.api | src.orchestration
+    src.backtest | src.prediction | src.trading | src.reporting | src.watchlist | src.market_data
+    src.utils
+ignore_imports =
+    # --- BC → orchestration (reporting が scheduler ステータス型を参照) ---
+    src.reporting.query_service -> src.orchestration.types
+    src.reporting.discord.discord_bot -> src.orchestration.types
+    # --- utils → BC (後方互換 re-export shim — 将来削除予定) ---
+    src.utils.yf_client -> src.market_data.yf_client
+    src.utils.db.prediction -> src.prediction.types
+    # --- BC 間相互参照 (independence contract でも管理) ---
+    src.reporting.types -> src.prediction.types
+    src.reporting.query_service -> src.prediction.types
+    src.reporting.query_service -> src.prediction.predict_single
+    src.reporting.discord.discord_utils -> src.prediction.types
+    src.reporting.discord.discord_bot -> src.prediction.types
+    src.reporting.query_service -> src.watchlist.types
+    src.reporting.discord.discord_bot -> src.watchlist.types
+    src.backtest.pipeline -> src.prediction.manager
+    src.backtest.portfolio -> src.prediction.manager
+    src.backtest.pipeline -> src.market_data.loader
+    src.backtest.backtester -> src.market_data.loader
+    src.backtest.stress_test -> src.watchlist.types
+    src.backtest.walk_forward_report -> src.watchlist.batch_runner
+    src.backtest.optimizer -> src.watchlist.batch_runner
+    src.trading.execution -> src.prediction.prediction_pipeline
+    src.prediction.unified_model_pipeline -> src.market_data.loader
+    src.prediction.training_pipeline -> src.market_data.loader
+    src.prediction.training_pipeline -> src.watchlist.batch_runner
+    src.prediction.training_pipeline -> src.watchlist.types
+    src.prediction.manager -> src.reporting.discord.discord_utils
+    src.market_data.pipeline -> src.reporting.discord.discord_utils
+    src.market_data.pipeline -> src.watchlist.batch_runner
+
+# ============================================================
+# Contract 2: BC 独立性契約
+#   Bounded Context 同士は相互参照禁止（将来的解消が前提）。
+#   ignore_imports に追加する際は必ず理由コメントを付けること。
+# ============================================================
+[importlinter:contract:independence]
+name = BC independence (BCs must not import each other)
+type = independence
+modules =
+    src.backtest
+    src.prediction
+    src.trading
+    src.reporting
+    src.watchlist
+    src.market_data
+ignore_imports =
+    # --- reporting → prediction (予測結果をレポート表示) ---
+    src.reporting.types -> src.prediction.types
+    src.reporting.query_service -> src.prediction.types
+    src.reporting.query_service -> src.prediction.predict_single
+    src.reporting.discord.discord_utils -> src.prediction.types
+    src.reporting.discord.discord_bot -> src.prediction.types
+    # --- reporting → watchlist (ウォッチリスト銘柄の予測を表示) ---
+    src.reporting.query_service -> src.watchlist.types
+    src.reporting.discord.discord_bot -> src.watchlist.types
+    # --- backtest → prediction (バックテストが学習済みモデルを使用) ---
+    src.backtest.pipeline -> src.prediction.manager
+    src.backtest.portfolio -> src.prediction.manager
+    # --- backtest → market_data (バックテストが OHLCV データを取得) ---
+    src.backtest.pipeline -> src.market_data.loader
+    src.backtest.backtester -> src.market_data.loader
+    # --- backtest → watchlist (バッチバックテストがウォッチリストを反復) ---
+    src.backtest.stress_test -> src.watchlist.types
+    src.backtest.walk_forward_report -> src.watchlist.batch_runner
+    src.backtest.optimizer -> src.watchlist.batch_runner
+    # --- trading → prediction (発注ロジックが予測シグナルを参照) ---
+    src.trading.execution -> src.prediction.prediction_pipeline
+    # --- prediction → market_data (学習パイプラインが OHLCV を取得) ---
+    src.prediction.unified_model_pipeline -> src.market_data.loader
+    src.prediction.training_pipeline -> src.market_data.loader
+    # --- prediction → watchlist (バッチ学習がウォッチリストを反復) ---
+    src.prediction.training_pipeline -> src.watchlist.batch_runner
+    src.prediction.training_pipeline -> src.watchlist.types
+    # --- prediction → reporting (ドリフト検出時に Discord 通知) ---
+    src.prediction.manager -> src.reporting.discord.discord_utils
+    # --- market_data → reporting (データ収集完了時に Discord 通知) ---
+    src.market_data.pipeline -> src.reporting.discord.discord_utils
+    # --- market_data → watchlist (バッチデータ収集がウォッチリストを反復) ---
+    src.market_data.pipeline -> src.watchlist.batch_runner

@@ -226,7 +226,7 @@ class TestTrainUnifiedModel(unittest.TestCase):
 
     @patch("src.prediction.unified_model_pipeline._compute_and_save_unified_feature_selection")
     @patch("src.prediction.unified_model_pipeline._apply_unified_feature_exclusions")
-    @patch("src.models.model_manager.ModelManager")
+    @patch("src.prediction.manager.ModelManager")
     @patch("src.prediction.unified_model_pipeline.prepare_unified_features")
     @patch("src.prediction.unified_model_pipeline.load_all_stock_data")
     def test_train_creates_and_saves_model(

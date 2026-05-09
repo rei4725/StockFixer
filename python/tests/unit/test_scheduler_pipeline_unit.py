@@ -14,7 +14,7 @@ from src.watchlist.types import SymbolTask
 class TestRunDailyAutoOrder(unittest.TestCase):
     @patch("src.reporting.discord.discord_utils.send_daily_order_completion")
     @patch("src.trading.execution.run_daily_orders")
-    @patch("src.brokers.paper.paper_broker.PaperBroker")
+    @patch("src.trading.brokers.paper.paper_broker.PaperBroker")
     def test_paper_mode_forwards_stop_fields_to_notification(
         self,
         mock_paper_broker,
@@ -71,7 +71,7 @@ class TestRunDailyAutoOrder(unittest.TestCase):
         fake_kabu_module = SimpleNamespace(KabuBroker=mock_kabu_broker)
         with (
             patch.dict("os.environ", {"AUTO_TRADE_MODE": "live"}, clear=False),
-            patch.dict(sys.modules, {"src.brokers.kabu.kabu_client": fake_kabu_module}),
+            patch.dict(sys.modules, {"src.trading.brokers.kabu.kabu_client": fake_kabu_module}),
         ):
             run_daily_auto_order()
 
@@ -205,7 +205,7 @@ class TestRunDailySettle(unittest.TestCase):
     """run_daily_settle_orders のテスト"""
 
     @patch("src.reporting.discord.discord_utils.send_daily_settle_completion")
-    @patch("src.brokers.paper.paper_broker.PaperBroker")
+    @patch("src.trading.brokers.paper.paper_broker.PaperBroker")
     def test_paper_mode_calls_settle(self, mock_broker_cls, mock_send):
         from unittest.mock import patch as _patch
 
@@ -253,7 +253,7 @@ class TestRunWeeklyWatchlistRefresh(unittest.TestCase):
     """run_weekly_watchlist_refresh のテスト"""
 
     @patch("src.reporting.discord.discord_utils.send_watchlist_update_report")
-    @patch("src.services.watchlist.watchlist_manager.run_watchlist_refresh")
+    @patch("src.watchlist.manager.run_watchlist_refresh")
     def test_sends_update_report(self, mock_refresh, mock_send):
         from src.orchestration.scheduler import run_weekly_watchlist_refresh
 
@@ -262,7 +262,7 @@ class TestRunWeeklyWatchlistRefresh(unittest.TestCase):
         mock_send.assert_called_once()
 
     @patch("src.reporting.discord.discord_utils.send_watchlist_update_report")
-    @patch("src.services.watchlist.watchlist_manager.run_watchlist_refresh")
+    @patch("src.watchlist.manager.run_watchlist_refresh")
     def test_exception_does_not_propagate(self, mock_refresh, mock_send):
         from src.orchestration.scheduler import run_weekly_watchlist_refresh
 
@@ -295,7 +295,7 @@ class TestRunDailyPaperTradeReport(unittest.TestCase):
     """run_daily_paper_trade_report のテスト"""
 
     @patch("src.reporting.discord.discord_utils.send_paper_trade_position_report")
-    @patch("src.brokers.paper.paper_broker.PaperBroker")
+    @patch("src.trading.brokers.paper.paper_broker.PaperBroker")
     def test_paper_mode_sends_report(self, mock_broker_cls, mock_send):
         from unittest.mock import patch as _patch
 

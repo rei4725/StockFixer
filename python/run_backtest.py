@@ -26,11 +26,11 @@ r"""
 """
 
 import argparse
-import os
 import sys
 
 from src.backtest.pipeline import (
     fetch_benchmark_for_result,
+    plot_backtest_chart,
     print_backtest_metrics,
     run_backtest_single,
     run_backtest_walk_forward,
@@ -238,27 +238,14 @@ def main():
 
     # グラフ出力（--save-chart または --discord-chart 指定時）
     if (args.save_chart or args.discord_chart) and result_df is not None and not result_df.empty:
-        from src.backtest.metrics import plot_backtest
-        from src.utils.data_path_utils import get_results_dir
-
-        out_dir = os.path.join(get_results_dir(), "backtest", f"{args.market}_{args.symbol}")
-        chart_path = plot_backtest(
+        plot_backtest_chart(
             result_df,
-            metrics or {},
-            out_dir,
+            metrics,
             market=args.market,
             symbol=args.symbol,
             initial_cash=args.initial_cash,
+            send_discord=args.discord_chart,
         )
-        if chart_path:
-            logger.info(f"グラフ保存: {chart_path}")
-            if args.discord_chart:
-                from src.reporting.discord.discord_utils import send_webhook_file
-
-                send_webhook_file(
-                    chart_path,
-                    title=f"{args.market.upper()}/{args.symbol} バックテスト結果",
-                )
 
     logger.info("完了")
 
