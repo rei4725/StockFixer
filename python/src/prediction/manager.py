@@ -9,6 +9,7 @@ import pandas as pd
 
 from src.prediction.models.base import BaseModel
 from src.prediction.models.lightgbm import LightGBMModel
+from src.prediction.models.transformer_model import TransformerModel
 from src.prediction.models.xgboost import XGBoostModel
 from src.utils.data_path_utils import ensure_dir, get_models_dir, get_models_subdir
 from src.utils.logger import get_logger
@@ -50,6 +51,7 @@ class ModelManager:
         self._registered_models: Dict[str, Type[BaseModel]] = {
             "XGBoostModel": XGBoostModel,
             "LightGBMModel": LightGBMModel,
+            "TransformerModel": TransformerModel,
         }
 
     def register_model_type(self, name: str, model_class: Type[BaseModel]):
