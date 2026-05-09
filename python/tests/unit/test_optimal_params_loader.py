@@ -15,7 +15,7 @@ class TestGetOptimalParams(unittest.TestCase):
     """get_optimal_params() のファイルベーステスト"""
 
     def _get_fn(self):
-        from src.strategy.optimal_params_loader import get_optimal_params
+        from src.utils.optimal_params_loader import get_optimal_params
 
         return get_optimal_params
 
@@ -29,7 +29,7 @@ class TestGetOptimalParams(unittest.TestCase):
             path.write_text(json.dumps(data), encoding="utf-8")
 
             get_optimal_params = self._get_fn()
-            with patch("src.strategy.optimal_params_loader.OPTIMAL_PARAMS_PATH", path):
+            with patch("src.utils.optimal_params_loader.OPTIMAL_PARAMS_PATH", path):
                 result = get_optimal_params("jp", "7203")
 
         self.assertIsNotNone(result)
@@ -45,7 +45,7 @@ class TestGetOptimalParams(unittest.TestCase):
             missing_path = Path(d) / "does_not_exist.json"
 
             get_optimal_params = self._get_fn()
-            with patch("src.strategy.optimal_params_loader.OPTIMAL_PARAMS_PATH", missing_path):
+            with patch("src.utils.optimal_params_loader.OPTIMAL_PARAMS_PATH", missing_path):
                 result = get_optimal_params("jp", "7203")
 
         self.assertIsNone(result)
@@ -60,7 +60,7 @@ class TestGetOptimalParams(unittest.TestCase):
             path.write_text(json.dumps(data), encoding="utf-8")
 
             get_optimal_params = self._get_fn()
-            with patch("src.strategy.optimal_params_loader.OPTIMAL_PARAMS_PATH", path):
+            with patch("src.utils.optimal_params_loader.OPTIMAL_PARAMS_PATH", path):
                 result = get_optimal_params("jp", "9999")
 
         self.assertIsNone(result)
@@ -74,7 +74,7 @@ class TestGetOptimalParams(unittest.TestCase):
             path.write_text("{ invalid json !!!}", encoding="utf-8")
 
             get_optimal_params = self._get_fn()
-            with patch("src.strategy.optimal_params_loader.OPTIMAL_PARAMS_PATH", path):
+            with patch("src.utils.optimal_params_loader.OPTIMAL_PARAMS_PATH", path):
                 result = get_optimal_params("jp", "7203")
 
         self.assertIsNone(result)
