@@ -27,6 +27,8 @@ from config.trading_policy import (  # noqa: F401  # R-307/R-219 でポジショ
     DEFAULT_WIN_RATE,
     HIGH_CONFIDENCE_POSITION_CAP,
     MAX_ACCEPTABLE_DRAWDOWN,
+    VIX_POSITION_SCALE,
+    VIX_SPIKE_THRESHOLD,
 )
 from src.trading.brokers.base import BrokerBase, OrderSide
 from src.trading.types import TradingGateStatus
@@ -38,6 +40,41 @@ logger = get_logger(__name__)
 
 DAILY_LOSS_RATE_ENV = "MAX_DAILY_LOSS_RATE"
 DISABLE_DAILY_LOSS_GUARD_ENV = "DISABLE_DAILY_LOSS_GUARD"
+
+
+def fetch_latest_vix() -> Optional[float]:
+    """DuckDB の stock_features から最新の VIX 値を取得する（R-406）。
+
+    stock_features に vix_close 列が存在しない、またはデータがない場合は None を返す。
+    """
+    try:
+        with _db_connection() as con:
+            row = con.execute(
+                """
+                SELECT vix_close
+                FROM stock_features
+                WHERE vix_close IS NOT NULL
+                ORDER BY row_num DESC
+                LIMIT 1
+                """
+            ).fetchone()
+        if row is None:
+            return None
+        return float(row[0])
+    except Exception:
+        logger.warning("[risk] VIX の取得に失敗しました", exc_info=True)
+        return None
+
+
+def compute_vix_position_scale(vix: Optional[float]) -> float:
+    """VIX 水準に応じたポジションスケール係数を返す（R-406）。
+
+    - vix が None または閾値未満: scale = 1.0（縮小なし）
+    - vix >= VIX_SPIKE_THRESHOLD: scale = VIX_POSITION_SCALE（縮小）
+    """
+    if vix is None or vix < VIX_SPIKE_THRESHOLD:
+        return 1.0
+    return VIX_POSITION_SCALE
 
 
 def compute_dd_capital_scale(dd_ratio: float, max_dd: float) -> float:
@@ -268,6 +305,16 @@ class RiskManager:
                 f"max_dd={MAX_ACCEPTABLE_DRAWDOWN:.1%} scale={dd_scale:.2f}"
             )
         qty = int(qty * dd_scale)
+
+        # R-406: VIX 急騰時のポジション縮小
+        vix = fetch_latest_vix()
+        vix_scale = compute_vix_position_scale(vix)
+        if vix_scale < 1.0:
+            logger.info(
+                f"[risk] {symbol}: VIX急騰によるポジション縮小 "
+                f"vix={vix:.1f} threshold={VIX_SPIKE_THRESHOLD:.1f} scale={vix_scale:.2f}"
+            )
+        qty = int(qty * vix_scale)
 
         # 最低単元（日本株は原則 100 株単位）
         lot = 100
