@@ -6,8 +6,8 @@ import unittest.mock
 import numpy as np
 import pandas as pd
 
-import src.strategy.signal_generator as signal_generator_module
-from src.strategy.signal_generator import (
+import src.trading.signal_generator as signal_generator_module
+from src.trading.signal_generator import (
     apply_multi_horizon_score_column,
     compute_multi_horizon_score,
 )
@@ -288,7 +288,7 @@ class TestSignalGenerator(unittest.TestCase):
 class TestSignalGeneratorOptimalParamsAutoLoad(unittest.TestCase):
     """SignalGenerator.__init__ が optimal_params.json を自動ロードするテスト"""
 
-    _MOCK_TARGET = "src.strategy.signal_generator.get_optimal_params"
+    _MOCK_TARGET = "src.trading.signal_generator.get_optimal_params"
 
     def test_threshold_loaded_from_json_when_market_symbol_given(self):
         """market/symbol を指定すると JSON の threshold が base_threshold に反映される"""

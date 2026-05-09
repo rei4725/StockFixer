@@ -303,7 +303,7 @@ class TestRunBacktestSingle:
     @patch("src.backtest.pipeline.load_features")
     @patch("src.prediction.manager.ModelManager")
     @patch("src.backtest.backtester.Backtester")
-    @patch("src.strategy.signal_generator.SignalGenerator")
+    @patch("src.trading.signal_generator.SignalGenerator")
     def test_run_backtest_single_returns_metrics(self, mock_sg, mock_bt, mock_mm_cls, mock_lf):
         """基本フローでメトリクス辞書が返ること"""
         n = 20
@@ -343,7 +343,7 @@ class TestRunBacktestSingle:
     @patch("src.backtest.pipeline._ensemble_predict")
     @patch("src.prediction.manager.ModelManager")
     @patch("src.backtest.backtester.Backtester")
-    @patch("src.strategy.signal_generator.SignalGenerator")
+    @patch("src.trading.signal_generator.SignalGenerator")
     def test_run_backtest_single_ensemble_mode(
         self, mock_sg, mock_bt, mock_mm_cls, mock_ep, mock_lf
     ):
@@ -760,7 +760,7 @@ class TestRunBacktestWalkForward(unittest.TestCase):
     """run_backtest_walk_forward のテスト（未カバー行 382-415）"""
 
     @patch("src.prediction.manager.ModelManager")
-    @patch("src.strategy.signal_generator.SignalGenerator")
+    @patch("src.trading.signal_generator.SignalGenerator")
     @patch("src.backtest.walk_forward.WalkForwardValidator")
     def test_returns_walk_forward_results(self, mock_wfv_cls, mock_sg, mock_mm_cls):
         """WalkForwardValidator の実行結果が (None, None, wf_df) として返ること"""
@@ -782,7 +782,7 @@ class TestRunBacktestWalkForward(unittest.TestCase):
         mock_wfv_cls.return_value.run.assert_called_once()
 
     @patch("src.prediction.manager.ModelManager")
-    @patch("src.strategy.signal_generator.SignalGenerator")
+    @patch("src.trading.signal_generator.SignalGenerator")
     @patch("src.backtest.walk_forward.WalkForwardValidator")
     def test_ensemble_skips_create_model(self, mock_wfv_cls, mock_sg, mock_mm_cls):
         """ensemble=True の場合は create_model が呼ばれないこと"""
@@ -795,7 +795,7 @@ class TestRunBacktestWalkForward(unittest.TestCase):
         mock_mm_cls.return_value.create_model.assert_not_called()
 
     @patch("src.prediction.manager.ModelManager")
-    @patch("src.strategy.signal_generator.SignalGenerator")
+    @patch("src.trading.signal_generator.SignalGenerator")
     @patch("src.backtest.walk_forward.WalkForwardValidator")
     def test_non_ensemble_calls_create_model(self, mock_wfv_cls, mock_sg, mock_mm_cls):
         """ensemble=False の場合は create_model が呼ばれること"""
@@ -808,7 +808,7 @@ class TestRunBacktestWalkForward(unittest.TestCase):
         mock_mm_cls.return_value.create_model.assert_called_once()
 
     @patch("src.prediction.manager.ModelManager")
-    @patch("src.strategy.signal_generator.SignalGenerator")
+    @patch("src.trading.signal_generator.SignalGenerator")
     @patch("src.backtest.walk_forward.WalkForwardValidator")
     def test_lightgbm_model_type(self, mock_wfv_cls, mock_sg, mock_mm_cls):
         """LightGBMModel 指定でも正常動作すること"""
