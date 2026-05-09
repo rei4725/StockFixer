@@ -39,7 +39,7 @@ try {
     Write-Log "[pip] pip install -r requirements.txt -r requirements-dev.txt"
     Push-Location (Join-Path $repoDir "python")
     try {
-        & $pythonExe -m pip install -r requirements.txt -r requirements-dev.txt --quiet 2>&1 | Out-String -Stream | ForEach-Object { Write-Log "  [pip] $_" }
+        & $pythonExe -m pip install -r requirements.txt -r requirements-dev.txt --quiet --prefer-binary 2>&1 | Out-String -Stream | ForEach-Object { Write-Log "  [pip] $_" }
         if ($LASTEXITCODE -ne 0) { throw "pip install が失敗しました (exit=$LASTEXITCODE)" }
     } finally {
         Pop-Location
