@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 
 from src.analysis import technical as technical_analysis
-from src.analysis.market_regime import get_market_regime
+from src.market_data.market_regime import get_market_regime
 
 
 class TestTechnicalAnalysis(unittest.TestCase):

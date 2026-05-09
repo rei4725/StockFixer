@@ -26,7 +26,7 @@ import numpy as np
 import pandas as pd
 
 from config.settings import MAX_SECTOR_POSITIONS
-from src.analysis.market_regime import get_market_regime
+from src.market_data.market_regime import get_market_regime
 from src.utils.logger import get_logger
 from src.utils.sector_constraints import filter_by_sector_cap, get_symbol_sector
 
