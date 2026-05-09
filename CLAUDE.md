@@ -134,7 +134,7 @@ Brokers are injected into services; never referenced concretely from above layer
   - `stock_features` — (market, symbol, row_num) → OHLCV + indicators + lags
   - `prediction_results` — (run_timestamp, market, symbol) → predictions
 - **Models**: `python/models/` — joblib files per symbol
-- **Logs**: `python/logs/` — rotating INFO + ERROR logs
+- **Logs**: `Logs/` — rotating INFO + ERROR logs
 - **Results**: `python/results/` — backtest CSVs, `optimal_params.json`
 
 ---

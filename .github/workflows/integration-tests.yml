@@ -42,7 +42,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: integration-test-logs
-          path: python/logs/
+          path: Logs/
 
   e2e-test:
     runs-on: ubuntu-latest
@@ -73,4 +73,4 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: e2e-test-logs
-          path: python/logs/
+          path: Logs/

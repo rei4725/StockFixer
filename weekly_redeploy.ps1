@@ -3,7 +3,7 @@
 # 処理: git pull -> UnitTest -> docker-compose up --build -> 結果ログ
 
 $repoDir = "C:\src\StockFixer"
-$logDir  = Join-Path $repoDir "python\logs"
+$logDir  = Join-Path $repoDir "Logs"
 $logFile = Join-Path $logDir "redeploy.log"
 
 function Write-Log($msg) {
@@ -34,6 +34,17 @@ try {
     git pull origin develop 2>&1 | ForEach-Object { Write-Log "  [git] $_" }
     Write-Log "[git] 完了 (exit=$LASTEXITCODE)"
     if ($LASTEXITCODE -ne 0) { throw "git pull が失敗しました (exit=$LASTEXITCODE)" }
+
+    # --- 依存パッケージ同期（git pull 後に追加されたパッケージを確実にインストール） ---
+    Write-Log "[pip] pip install -r requirements.txt -r requirements-dev.txt"
+    Push-Location (Join-Path $repoDir "python")
+    try {
+        & $pythonExe -m pip install -r requirements.txt -r requirements-dev.txt --quiet 2>&1 | Out-String -Stream | ForEach-Object { Write-Log "  [pip] $_" }
+        if ($LASTEXITCODE -ne 0) { throw "pip install が失敗しました (exit=$LASTEXITCODE)" }
+    } finally {
+        Pop-Location
+    }
+    Write-Log "[pip] 完了 (exit=$LASTEXITCODE)"
 
     # --- Smoke Test（失敗時は全量テスト前に中断） ---
     Write-Log "[smoke] python -m pytest tests/unit/test_data_pipeline.py tests/unit/test_db_market_data.py tests/unit/test_db_prediction.py tests/unit/test_db_stock_features.py tests/unit/test_shadow_mode.py tests/unit/test_lgbm_xgb_models.py -q --tb=short --basetemp=$smokeBaseTemp"

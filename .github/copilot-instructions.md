@@ -208,7 +208,7 @@ run_*.py → api層 → services層 → models/strategy/backtest層 → features
 - 全モジュールで `from src.utils.logger import get_logger; logger = get_logger(__name__)` を使用
 - `logger.error("message", exc_info=True)` で例外スタックトレースをログに記録（`except Exception: pass` は禁止）
 - `run_*.py` は `if __name__ == "__main__":` 内を `try/except Exception` で囲み、`logger.critical(..., exc_info=True); sys.exit(1)` で終了
-- ログ出力先: `python/logs/stockfixer.log`（INFO以上）/ `python/logs/stockfixer_error.log`（ERROR以上）
+- ログ出力先: `Logs/stockfixer.log`（INFO以上）/ `Logs/stockfixer_error.log`（ERROR以上）
 - ログレベルは環境変数 `LOG_LEVEL` で制御（デフォルト: INFO）
 
 ---

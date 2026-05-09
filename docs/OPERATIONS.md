@@ -187,17 +187,17 @@ docker compose up -d
 
 | ファイル | 内容 | ローテーション |
 |---|---|---|
-| `python/logs/stockfixer.log` | 全ログ（INFO以上） | 10MB×5世代 |
-| `python/logs/stockfixer_error.log` | エラーのみ（ERROR以上） | 5MB×3世代 |
+| `Logs/stockfixer.log` | 全ログ（INFO以上） | 10MB×5世代 |
+| `Logs/stockfixer_error.log` | エラーのみ（ERROR以上） | 5MB×3世代 |
 
 ### ローカル実行時のログ確認
 
 ```powershell
 # 最新ログをリアルタイム監視
-Get-Content python\logs\stockfixer.log -Wait -Tail 50
+Get-Content Logs\stockfixer.log -Wait -Tail 50
 
 # エラーログのみ確認
-Get-Content python\logs\stockfixer_error.log -Tail 100
+Get-Content Logs\stockfixer_error.log -Tail 100
 ```
 
 ### Docker コンテナ内のログ確認
@@ -307,7 +307,7 @@ docker exec stockfixer python run_scheduler.py --run-now paper
 docker exec -e DISABLE_DAILY_LOSS_GUARD=1 stockfixer python run_scheduler.py --run-now paper
 ```
 
-停止時は `python/logs/stockfixer.log` に理由、損失額、上限額が出力され、Discord の自動発注通知も警告タイトルに切り替わる。
+停止時は `Logs/stockfixer.log` に理由、損失額、上限額が出力され、Discord の自動発注通知も警告タイトルに切り替わる。
 
 ---
 
@@ -335,7 +335,7 @@ docker exec -e DISABLE_DAILY_LOSS_GUARD=1 stockfixer python run_scheduler.py --r
 
 ### 各処理の目安時間（実測ログ）
 
-`python/logs/stockfixer.log*`（ローテーション含む）から開始/完了ログを突き合わせた実測値。
+`Logs/stockfixer.log*`（ローテーション含む）から開始/完了ログを突き合わせた実測値。
 集計期間は 2026-03-27 22:26:38 〜 2026-04-18 22:07:30（スケジュール変更前ログを含む）。
 
 | ジョブ | 目安時間 | 実測詳細 |
@@ -374,7 +374,7 @@ docker exec -e DISABLE_DAILY_LOSS_GUARD=1 stockfixer python run_scheduler.py --r
     2. VERSION / BUILD_DATE / GIT_COMMIT を環境変数にセット
     3. docker-compose up -d --build
     4. コンテナ起動確認
-    5. ログ出力 → python/logs/redeploy.log
+    5. ログ出力 → Logs/redeploy.log
 ```
 
 ### 関連ファイル
@@ -383,7 +383,7 @@ docker exec -e DISABLE_DAILY_LOSS_GUARD=1 stockfixer python run_scheduler.py --r
 |---|---|
 | `weekly_redeploy.ps1` | 再デプロイスクリプト本体（プロジェクトルート） |
 | `register_task.ps1` | タスクスケジューラ再登録用スクリプト（管理者権限必要） |
-| `python/logs/redeploy.log` | 実行ログ（UTF-8、追記形式） |
+| `Logs/redeploy.log` | 実行ログ（UTF-8、追記形式） |
 
 ### タスクスケジューラ確認
 
@@ -395,7 +395,7 @@ schtasks /query /tn "StockFixer Weekly Redeploy" /fo LIST
 schtasks /run /tn "StockFixer Weekly Redeploy"
 
 # ログ確認
-Get-Content C:\src\StockFixer\python\logs\redeploy.log -Tail 30
+Get-Content C:\src\StockFixer\Logs\redeploy.log -Tail 30
 ```
 
 ### タスク再登録（PCセットアップ時など）
@@ -495,7 +495,7 @@ docker builder prune -f
 | `python/data/` | `/app/data/` | DuckDB、銘柄別サブディレクトリ |
 | `python/models/` | `/app/models/` | 学習済みモデル（.joblib） |
 | `python/results/` | `/app/results/` | 予測結果 |
-| `python/logs/` | `/app/logs/` | ログファイル（stockfixer.log 等） |
+| `Logs/` | `/app/logs/` | ログファイル（stockfixer.log 等） |
 
 > `data/` `models/` `results/` `logs/` は `.dockerignore` でイメージから除外し、bind mount で永続化している。
 

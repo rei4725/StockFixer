@@ -16,7 +16,7 @@ __pycache__/
 .mypy_cache/
 python/data/
 python/models/
-python/logs/
+Logs/
 python/results/
 
 # DuckDB

@@ -17,7 +17,7 @@ services:
       - ./python/data:/app/data
       - ./python/models:/app/models
       - ./python/results:/app/results
-      - ./python/logs:/app/logs
+      - ./Logs:/app/logs
     logging:
       driver: json-file
       options:

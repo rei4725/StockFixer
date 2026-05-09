@@ -2,9 +2,9 @@
 統一ロガーファクトリー
 
 全レイヤーで使用する標準ロガーを提供する。
-- python/logs/stockfixer.log       : 全ログ（INFO以上、10MB × 5世代）
-- python/logs/stockfixer_error.log : エラーログ（ERROR以上、5MB × 3世代）
-- stderr                           : INFO以上をコンソール出力
+- Logs/stockfixer.log       : 全ログ（INFO以上、10MB × 5世代）
+- Logs/stockfixer_error.log : エラーログ（ERROR以上、5MB × 3世代）
+- stderr                    : INFO以上をコンソール出力
 
 使い方:
     from src.utils.logger import get_logger
@@ -34,9 +34,11 @@ from typing import Optional
 _LOG_FORMAT = "[%(asctime)s.%(msecs)03d] [%(levelname)-5s] [%(name)s] [%(run_id)s] %(message)s"
 _DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
-# python/ ルートディレクトリ（src/utils/logger.py から3階層上）
-_PYTHON_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-_LOG_DIR = os.path.join(_PYTHON_ROOT, "logs")
+# リポジトリルートディレクトリ（src/utils/logger.py から4階層上）
+_REPO_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
+_LOG_DIR = os.path.join(_REPO_ROOT, "Logs")
 
 _root_configured = False
 
