@@ -253,7 +253,7 @@ class TestRunWeeklyWatchlistRefresh(unittest.TestCase):
     """run_weekly_watchlist_refresh のテスト"""
 
     @patch("src.reporting.discord.discord_utils.send_watchlist_update_report")
-    @patch("src.services.watchlist.watchlist_manager.run_watchlist_refresh")
+    @patch("src.watchlist.manager.run_watchlist_refresh")
     def test_sends_update_report(self, mock_refresh, mock_send):
         from src.orchestration.scheduler import run_weekly_watchlist_refresh
 
@@ -262,7 +262,7 @@ class TestRunWeeklyWatchlistRefresh(unittest.TestCase):
         mock_send.assert_called_once()
 
     @patch("src.reporting.discord.discord_utils.send_watchlist_update_report")
-    @patch("src.services.watchlist.watchlist_manager.run_watchlist_refresh")
+    @patch("src.watchlist.manager.run_watchlist_refresh")
     def test_exception_does_not_propagate(self, mock_refresh, mock_send):
         from src.orchestration.scheduler import run_weekly_watchlist_refresh
 

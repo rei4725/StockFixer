@@ -8,23 +8,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 
-class TestServicesInit(unittest.TestCase):
-    """src.services.__init__ のカバレッジ確保テスト"""
-
-    def test_services_package_all_list(self):
-        """src.services.__all__ に必須エクスポートが含まれること"""
-        import importlib
-        import sys
-
-        # 既にキャッシュされていれば reload して確認
-        if "src.services" in sys.modules:
-            mod = sys.modules["src.services"]
-        else:
-            mod = importlib.import_module("src.services")
-        # __all__ はモックに影響されない
-        all_list = getattr(mod, "__all__", [])
-        assert "predict_all_individual" in all_list or len(all_list) >= 0  # 常に通る
-
 
 class TestGetOptimalParams(unittest.TestCase):
     """get_optimal_params のテスト（JSON ファイルをモック）"""
