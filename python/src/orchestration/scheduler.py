@@ -366,7 +366,7 @@ def run_weekly_watchlist_refresh():
     logger.info("=== 週次ウォッチリスト更新開始 ===")
     try:
         from src.reporting.discord.discord_utils import send_watchlist_update_report
-        from src.services.watchlist.watchlist_manager import run_watchlist_refresh
+        from src.watchlist.manager import run_watchlist_refresh
 
         diffs = run_watchlist_refresh()
         send_watchlist_update_report(diffs)
