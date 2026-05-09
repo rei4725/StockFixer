@@ -10,6 +10,7 @@ from typing import Optional
 
 import pandas as pd
 
+from src.features.sentiment_features import add_sentiment_features, fetch_news_sentiment
 from src.market_data.technical import add_technical_indicators, create_basic_lag_features
 from src.market_data.loader import (
     fetch_cross_asset_features,
@@ -139,6 +140,10 @@ def fetch_stock_data_with_features(
             if col in df.columns:
                 df[col] = df[col].ffill().bfill()
         logger.debug(f"クロスアセット特徴量を付与: {list(cross_asset.columns)} ({market}/{symbol})")
+
+    # センチメント特徴量を付与（R-404：ニュースセンチメントオルタナティブデータ）
+    sentiment_df = fetch_news_sentiment(symbol, start_date, end_date)
+    df = add_sentiment_features(df, sentiment_df=sentiment_df)
 
     # 部分的なNaN値を前方/後方補完（OHLCV欠損日等によるdropna行数増大を防ぐ）
     nan_before = int(df.isnull().sum().sum())
