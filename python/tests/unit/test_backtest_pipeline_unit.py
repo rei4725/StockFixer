@@ -202,8 +202,8 @@ class TestLoadFeaturesRawSource:
     """load_features(source='raw') のテスト"""
 
     @patch("src.market_data.loader.get_raw_ohlcv_from_db")
-    @patch("src.analysis.technical.add_technical_indicators")
-    @patch("src.analysis.technical.create_basic_lag_features")
+    @patch("src.market_data.technical.add_technical_indicators")
+    @patch("src.market_data.technical.create_basic_lag_features")
     def test_load_features_raw_returns_dataframe(self, mock_lag, mock_ti, mock_raw):
         """source='raw' で DataFrame が返ること"""
         n = 35
@@ -566,8 +566,8 @@ class TestLoadFeaturesApiSource(unittest.TestCase):
     """load_features(source='api') のテスト"""
 
     @patch("src.utils.data_path_utils.get_ticker")
-    @patch("src.analysis.technical.create_basic_lag_features")
-    @patch("src.analysis.technical.add_technical_indicators")
+    @patch("src.market_data.technical.create_basic_lag_features")
+    @patch("src.market_data.technical.add_technical_indicators")
     @patch("src.market_data.loader.get_stock_data")
     def test_api_source_calls_get_stock_data(self, mock_yf, mock_ti, mock_lag, mock_ticker):
         """source='api' では get_stock_data が呼ばれること"""
@@ -615,8 +615,8 @@ class TestLoadFeaturesApiSource(unittest.TestCase):
             load_features("jp", "7203", "api")
 
     @patch("src.utils.data_path_utils.get_ticker")
-    @patch("src.analysis.technical.create_basic_lag_features")
-    @patch("src.analysis.technical.add_technical_indicators")
+    @patch("src.market_data.technical.create_basic_lag_features")
+    @patch("src.market_data.technical.add_technical_indicators")
     @patch("src.market_data.loader.get_stock_data")
     def test_api_source_result_has_close_column(self, mock_yf, mock_ti, mock_lag, mock_ticker):
         """source='api' の結果に Close 列が含まれること"""

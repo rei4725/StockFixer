@@ -517,7 +517,7 @@ class TestBacktesterRunPath:
             fee_rate=0.0,
         )
 
-        with patch("src.analysis.technical.add_technical_indicators", side_effect=lambda x: x):
+        with patch("src.market_data.technical.add_technical_indicators", side_effect=lambda x: x):
             result_df, metrics = bt.run(model_name="dummy")
 
         assert isinstance(result_df, pd.DataFrame)

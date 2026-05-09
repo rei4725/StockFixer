@@ -256,7 +256,7 @@ class TestRunDataBatch(_TmpDbTestCase):
 
     def _make_phase1_data(self):
         """フェーズ1の成功データを生成するヘルパー"""
-        from src.analysis.technical import add_technical_indicators, create_basic_lag_features
+        from src.market_data.technical import add_technical_indicators, create_basic_lag_features
 
         df = self._make_ohlcv(60)
         df = add_technical_indicators(df)

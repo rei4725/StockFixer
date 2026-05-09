@@ -10,7 +10,7 @@ from typing import Optional
 
 import pandas as pd
 
-from src.analysis.technical import add_technical_indicators, create_basic_lag_features
+from src.market_data.technical import add_technical_indicators, create_basic_lag_features
 from src.market_data.loader import (
     fetch_cross_asset_features,
     get_raw_ohlcv_from_db,
