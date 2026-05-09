@@ -146,11 +146,11 @@ class TestPrediction:
 
     def test_predict_single_stock_returns_result(self, e2e_db_env):
         """predict_single_stock が None 以外の PredictionResult を返すこと。"""
-        from src.models.predict_single_stock import predict_single_stock
+        from src.prediction.predict_single import predict_single_stock
 
         # yfinance を呼ぶ data_loader.get_stock_data をモック
         with patch(
-            "src.models.predict_single_stock.data_loader.get_stock_data",
+            "src.prediction.predict_single.data_loader.get_stock_data",
             return_value=e2e_db_env["ohlcv"],
         ):
             result = predict_single_stock(
@@ -162,10 +162,10 @@ class TestPrediction:
 
     def test_prediction_result_has_valid_price(self, e2e_db_env):
         """予測終値が正の値であること。"""
-        from src.models.predict_single_stock import predict_single_stock
+        from src.prediction.predict_single import predict_single_stock
 
         with patch(
-            "src.models.predict_single_stock.data_loader.get_stock_data",
+            "src.prediction.predict_single.data_loader.get_stock_data",
             return_value=e2e_db_env["ohlcv"],
         ):
             result = predict_single_stock(
@@ -178,10 +178,10 @@ class TestPrediction:
 
     def test_prediction_result_diff_ratio_reasonable(self, e2e_db_env):
         """予測変化率が ±50% 以内の合理的な範囲であること。"""
-        from src.models.predict_single_stock import predict_single_stock
+        from src.prediction.predict_single import predict_single_stock
 
         with patch(
-            "src.models.predict_single_stock.data_loader.get_stock_data",
+            "src.prediction.predict_single.data_loader.get_stock_data",
             return_value=e2e_db_env["ohlcv"],
         ):
             result = predict_single_stock(
@@ -195,11 +195,11 @@ class TestPrediction:
     def test_prediction_result_saved_to_db(self, e2e_db_env):
         """予測結果を DB へ保存できること。"""
         import src.utils.db._connection as _conn
-        from src.models.predict_single_stock import predict_single_stock
+        from src.prediction.predict_single import predict_single_stock
         from src.utils.db import save_prediction_results
 
         with patch(
-            "src.models.predict_single_stock.data_loader.get_stock_data",
+            "src.prediction.predict_single.data_loader.get_stock_data",
             return_value=e2e_db_env["ohlcv"],
         ):
             result = predict_single_stock(

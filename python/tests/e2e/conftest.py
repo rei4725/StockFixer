@@ -104,15 +104,15 @@ def e2e_db_env(e2e_ohlcv, tmp_path_factory):
     # ---------------------------------------------------------------------
     patchers = [
         mock.patch(
-            "src.models.model_manager.get_models_subdir",
+            "src.prediction.manager.get_models_subdir",
             side_effect=_models_subdir,
         ),
         mock.patch(
-            "src.models.model_manager.get_models_dir",
+            "src.prediction.manager.get_models_dir",
             return_value=models_dir,
         ),
         mock.patch(
-            "src.models.predict_single_stock.get_models_subdir",
+            "src.prediction.predict_single.get_models_subdir",
             side_effect=_models_subdir,
         ),
         mock.patch(
@@ -132,7 +132,7 @@ def e2e_db_env(e2e_ohlcv, tmp_path_factory):
             "src.reporting.discord.discord_utils.send_daily_pipeline_error", return_value=None
         ),
         # クロスアセット特徴量をモックして学習/予測で特徴量数を一致させる（R-306）
-        mock.patch("src.models.predict_single_stock.fetch_cross_asset_features", return_value=None),
+        mock.patch("src.prediction.predict_single.fetch_cross_asset_features", return_value=None),
         mock.patch("src.market_data.pipeline.fetch_cross_asset_features", return_value=None),
     ]
     for p in patchers:
@@ -168,7 +168,7 @@ def e2e_db_env(e2e_ohlcv, tmp_path_factory):
 
 def _inject_raw_ohlcv(market: str, symbol: str, df: pd.DataFrame) -> None:
     """合成 OHLCV を market_data_raw テーブルへ直接 UPSERT する。"""
-    from src.data.data_saver import save_raw_ohlcv
+    from src.market_data.saver import save_raw_ohlcv
 
     save_raw_ohlcv(market, symbol, df)
 

@@ -58,7 +58,8 @@ class TestStockFeaturesQuality:
 
     def test_no_duplicate_rows(self, e2e_db_env):
         """(market, symbol, date) の重複行が存在しないこと。
-        \n        load_stock_features は market / symbol 列を drop して返すため、date 列のみで重複确認する。
+
+        load_stock_features は market / symbol 列を drop して返すため、date 列のみで重複确認する。
         """
         df = self._load(e2e_db_env)
         if "date" not in df.columns:
@@ -177,12 +178,12 @@ class TestPredictionResultsQuality:
         """
         from unittest.mock import patch
 
-        from src.models.predict_single_stock import predict_single_stock
+        from src.prediction.predict_single import predict_single_stock
         from src.utils.db import save_prediction_results
 
         # 予測を実行して保存（冪等: 既存行は DELETE-INSERT で置き換え）
         with patch(
-            "src.models.predict_single_stock.data_loader.get_stock_data",
+            "src.prediction.predict_single.data_loader.get_stock_data",
             return_value=e2e_db_env["ohlcv"],
         ):
             result = predict_single_stock(e2e_db_env["market"], e2e_db_env["symbol"])
@@ -242,7 +243,8 @@ class TestProductionDBQuality:
 
     def test_stock_features_no_nan(self, prod_db_conn):
         """本番 stock_features の数値列に NaN が存在しないこと（サンプル 1000 行）。
-        \n        lag 特徴量は時系列の先頭行が自然に NaN になるため除外する。
+
+        lag 特徴量は時系列の先頭行が自然に NaN になるため除外する。
         """
         try:
             df = prod_db_conn.execute("SELECT * FROM stock_features LIMIT 1000").fetchdf()
