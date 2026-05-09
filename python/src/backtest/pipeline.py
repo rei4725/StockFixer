@@ -222,7 +222,7 @@ def run_backtest_single(
     """
     from src.backtest.backtester import Backtester
     from src.prediction.manager import ModelManager
-    from src.strategy.signal_generator import SignalGenerator
+    from src.trading.signal_generator import SignalGenerator
 
     task = _build_task(task_name, threshold)
     model_name = model_name or f"Backtest{model_type}"
@@ -376,7 +376,7 @@ def run_backtest_walk_forward(
     """
     from src.backtest.walk_forward import WalkForwardValidator
     from src.prediction.manager import ModelManager
-    from src.strategy.signal_generator import SignalGenerator
+    from src.trading.signal_generator import SignalGenerator
 
     task = _build_task(task_name, threshold)
     model_name = model_name or f"Backtest{model_type}"
