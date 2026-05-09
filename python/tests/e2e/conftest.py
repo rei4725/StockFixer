@@ -179,7 +179,7 @@ def _generate_and_save_features(market: str, symbol: str, df: pd.DataFrame) -> N
     data_pipeline.fetch_stock_data_with_features と同等の処理を直接実行する
     （yfinance 呼び出しを完全に回避するため）。
     """
-    from src.analysis.technical import add_technical_indicators, create_basic_lag_features
+    from src.market_data.technical import add_technical_indicators, create_basic_lag_features
     from src.utils.data_path_utils import normalize_col
     from src.utils.db import upsert_stock_features
 

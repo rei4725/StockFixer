@@ -17,7 +17,7 @@ from config.settings import (
     FEATURE_SELECTION_MIN_FEATURES,
     PERMUTATION_IMPORTANCE_REPEATS,
 )
-from src.analysis.technical import add_earnings_flag
+from src.market_data.technical import add_earnings_flag
 from src.market_data.loader import get_earnings_dates
 from src.utils.data_path_utils import ensure_dir, get_models_dir
 from src.utils.db import load_all_stock_features, load_excluded_features, save_feature_selection
@@ -255,7 +255,7 @@ def _load_all_ohlcv_for_unified(horizon: int) -> Tuple[pd.DataFrame, pd.Series]:
     """
     import re
 
-    from src.analysis.technical import add_technical_indicators, create_basic_lag_features
+    from src.market_data.technical import add_technical_indicators, create_basic_lag_features
     from src.utils.db import load_all_raw_ohlcv_symbols, load_raw_ohlcv
 
     all_X = []

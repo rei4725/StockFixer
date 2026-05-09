@@ -468,8 +468,8 @@ class TestLoadFeaturesForTrainingHorizon(unittest.TestCase):
 
     @patch("src.prediction.training_pipeline.get_earnings_dates")
     @patch("src.prediction.training_pipeline.add_earnings_flag")
-    @patch("src.analysis.technical.create_basic_lag_features")
-    @patch("src.analysis.technical.add_technical_indicators")
+    @patch("src.market_data.technical.create_basic_lag_features")
+    @patch("src.market_data.technical.add_technical_indicators")
     @patch("src.utils.db.load_raw_ohlcv")
     def test_horizon_3_uses_raw_ohlcv(
         self, mock_raw, mock_ti, mock_lag, mock_add_earnings, mock_earnings_dates
@@ -509,8 +509,8 @@ class TestLoadFeaturesForTrainingHorizon(unittest.TestCase):
 
     @patch("src.prediction.training_pipeline.get_earnings_dates")
     @patch("src.prediction.training_pipeline.add_earnings_flag")
-    @patch("src.analysis.technical.create_basic_lag_features")
-    @patch("src.analysis.technical.add_technical_indicators")
+    @patch("src.market_data.technical.create_basic_lag_features")
+    @patch("src.market_data.technical.add_technical_indicators")
     @patch("src.utils.db.load_raw_ohlcv")
     def test_horizon_3_returns_success(
         self, mock_raw, mock_ti, mock_lag, mock_add_earnings, mock_earnings_dates
