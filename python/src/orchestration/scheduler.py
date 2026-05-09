@@ -519,3 +519,94 @@ def run_daily_drift_check():
             send_shap_batch_summary(all_shap_results)
         except Exception as e:
             logger.error("SHAP サマリー通知失敗: %s", e, exc_info=True)
+
+
+def run_weekly_rule_evaluation() -> None:
+    """
+    週次実行（日曜 02:00）: 全銘柄 × 全ルールをバックテストし
+    「最優秀ルール」を DuckDB に保存する。
+
+    判定基準: 勝率 50% 以上 AND 純利益プラス
+    完了後 Discord に評価サマリーを通知する。
+    """
+    import os
+
+    logger.info("=== 週次ルール評価開始 ===")
+    market = os.environ.get("RULE_EVAL_MARKET", "jp")
+    backtest_start = os.environ.get("RULE_EVAL_START", "2022-01-01")
+    backtest_end = os.environ.get("RULE_EVAL_END", "2025-01-01")
+
+    try:
+        from src.backtest.rule_selector import evaluate_all_symbols
+
+        summary = evaluate_all_symbols(
+            market=market,
+            backtest_start=backtest_start,
+            backtest_end=backtest_end,
+        )
+        logger.info(
+            "=== 週次ルール評価完了: 有効=%s/%s 銘柄 ===",
+            summary["effective"],
+            summary["evaluated"],
+        )
+    except Exception as e:
+        logger.error("週次ルール評価失敗: %s", e, exc_info=True)
+        raise
+
+    try:
+        from src.reporting.discord.discord_utils import send_rule_evaluation_completion
+
+        send_rule_evaluation_completion(
+            evaluated=summary["evaluated"],
+            effective=summary["effective"],
+            skipped=summary["skipped"],
+            market=market,
+        )
+    except Exception as e:
+        logger.error("ルール評価通知失敗: %s", e, exc_info=True)
+
+
+def run_daily_rule_signals() -> None:
+    """
+    日次実行（平日 16:00）: 有効ルールを持つ銘柄に当日シグナルを適用し
+    ペーパートレード注文を自動発行する。
+
+    フロー:
+        1. rule_best_by_symbol から有効銘柄を読み込む
+        2. 各銘柄の最新データにルールを適用して Buy/Sell/Hold を判定
+        3. ペーパートレード注文を PaperBroker 経由で発行
+        4. Discord にシグナルサマリーを通知
+    """
+    import os
+
+    logger.info("=== 日次ルールシグナルジョブ開始 ===")
+    market = os.environ.get("RULE_EVAL_MARKET", "jp")
+
+    try:
+        from src.prediction.rule_signal_pipeline import (
+            execute_rule_paper_trades,
+            run_rule_signal_pipeline,
+        )
+
+        signals = run_rule_signal_pipeline(market=market)
+        trade_stats = execute_rule_paper_trades(signals=signals, market=market)
+        logger.info(
+            "=== 日次ルールシグナル完了: BUY=%s SELL=%s ===",
+            trade_stats["buy_orders"],
+            trade_stats["sell_orders"],
+        )
+    except Exception as e:
+        logger.error("日次ルールシグナル失敗: %s", e, exc_info=True)
+        raise
+
+    try:
+        from src.reporting.discord.discord_utils import send_rule_daily_signals
+
+        send_rule_daily_signals(
+            signals=signals,
+            market=market,
+            buy_orders=trade_stats["buy_orders"],
+            sell_orders=trade_stats["sell_orders"],
+        )
+    except Exception as e:
+        logger.error("ルールシグナル通知失敗: %s", e, exc_info=True)

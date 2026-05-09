@@ -11,6 +11,7 @@ from typing import Optional
 import requests
 
 from src.prediction.types import PredictionResult
+from src.reporting.discord import rate_limiter as _rate_limiter
 from src.reporting.discord.discord_formatters import convert_df_for_discord, get_market_emoji
 from src.reporting.discord.discord_notification_specs import (
     DAILY_PIPELINE_COMPLETION,
@@ -29,7 +30,6 @@ from src.reporting.discord.discord_text import (
     DISCORD_WIDE_TEXT_LIMIT,
     split_text_chunks,
 )
-from src.reporting.discord import rate_limiter as _rate_limiter
 from src.reporting.query_service import get_latest_market_prediction_snapshots
 from src.utils.japan_time import format_jst, format_jst_from_iso, isoformat_jst
 from src.utils.run_context import get_run_id
@@ -119,9 +119,7 @@ def send_webhook_notification(
         成功時True、失敗時False
     """
     try:
-        should_send, suppression_summary = _rate_limiter.check_and_record(
-            f"{title}\n{message}"
-        )
+        should_send, suppression_summary = _rate_limiter.check_and_record(f"{title}\n{message}")
         if not should_send:
             return True
 
@@ -785,5 +783,69 @@ def send_drift_retrain_notification(
             f"MAE={sym.get('mean_abs_error', 0):.4f} "
             f"HitRate={sym.get('direction_accuracy', 0):.1%}"
         )
+
+    return send_webhook_text("\n".join(lines))
+
+
+# ---------------------------------------------------------------------------
+# ルールベーストレーディング通知
+# ---------------------------------------------------------------------------
+
+
+def send_rule_evaluation_completion(
+    evaluated: int,
+    effective: int,
+    skipped: int,
+    market: str,
+) -> bool:
+    """週次ルール評価完了通知を Discord に送信する。"""
+    now = format_jst(fmt="%Y/%m/%d %H:%M JST")
+    lines = [
+        f"**[ルール評価完了] {now}**",
+        f"マーケット: {market}",
+        f"評価銘柄数: {evaluated}",
+        f"有効ルール発見: {effective} 銘柄",
+        f"スキップ (有効ルールなし): {skipped} 銘柄",
+    ]
+    return send_webhook_text("\n".join(lines))
+
+
+def send_rule_daily_signals(
+    signals: list[dict],
+    market: str,
+    buy_orders: int,
+    sell_orders: int,
+) -> bool:
+    """ルールベース日次シグナル通知を Discord に送信する。"""
+    now = format_jst(fmt="%Y/%m/%d %H:%M JST")
+    buy_signals = [s for s in signals if s["signal"] == 1]
+    sell_signals = [s for s in signals if s["signal"] == -1]
+
+    lines = [
+        f"**[ルールシグナル] {now}  ({market})**",
+        f"BUY候補: {len(buy_signals)}銘柄  |  SELL候補: {len(sell_signals)}銘柄",
+        f"ペーパー発注: BUY={buy_orders}  SELL={sell_orders}",
+        "",
+    ]
+
+    if buy_signals:
+        lines.append("**BUY シグナル:**")
+        for s in buy_signals:
+            price_str = f"{s['price']:,.0f}円" if s.get("price") else "---"
+            lines.append(
+                f"  • `{s['symbol']}` [{s['rule']}]  " f"価格={price_str}  勝率={s['win_rate']:.1%}"
+            )
+
+    if sell_signals:
+        lines.append("")
+        lines.append("**SELL シグナル:**")
+        for s in sell_signals:
+            price_str = f"{s['price']:,.0f}円" if s.get("price") else "---"
+            lines.append(
+                f"  • `{s['symbol']}` [{s['rule']}]  " f"価格={price_str}  勝率={s['win_rate']:.1%}"
+            )
+
+    if not buy_signals and not sell_signals:
+        lines.append("本日はシグナルなし（全銘柄 HOLD）")
 
     return send_webhook_text("\n".join(lines))

@@ -109,6 +109,20 @@ def job_weekly_db_maintenance():
     run_weekly_db_maintenance()
 
 
+def job_weekly_rule_evaluation():
+    """週次実行 (日曜 02:00): 全銘柄 × 全ルールのバックテスト評価"""
+    from src.orchestration.scheduler import run_weekly_rule_evaluation
+
+    run_weekly_rule_evaluation()
+
+
+def job_daily_rule_signals():
+    """日次実行 (平日 16:30): 最優秀ルールによるシグナル生成 + ペーパートレード発注"""
+    from src.orchestration.scheduler import run_daily_rule_signals
+
+    run_daily_rule_signals()
+
+
 # ── イベントリスナー ──────────────────────────────────
 def _job_listener(event):
     """ジョブ実行結果のログ出力"""
@@ -230,6 +244,28 @@ SCHEDULE_CONFIG = {
         "recovery_delay_minutes": 30,
         "max_executions_per_period": 1,
         "description": "毎週土曜 03:00 - DuckDB CHECKPOINT + VACUUM",
+    },
+    "weekly_rule_evaluation": {
+        "func": job_weekly_rule_evaluation,
+        "trigger": "cron",
+        "period": "weekly",
+        "day_of_week": "sun",
+        "hour": 2,
+        "minute": 0,
+        "recovery_delay_minutes": 60,
+        "max_executions_per_period": 1,
+        "description": "毎週日曜 02:00 - 全銘柄ルールバックテスト評価",
+    },
+    "daily_rule_signals": {
+        "func": job_daily_rule_signals,
+        "trigger": "cron",
+        "period": "daily",
+        "day_of_week": "mon-fri",
+        "hour": 16,
+        "minute": 30,
+        "recovery_delay_minutes": 10,
+        "max_executions_per_period": 1,
+        "description": "毎営業日 16:30 - ルールシグナル生成 + ペーパートレード発注",
     },
 }
 
@@ -375,11 +411,15 @@ def run_now(pipeline: str):
         queue_manager.run_job("daily_drift_check", reason="manual", force=True)
     elif pipeline == "db_maintenance":
         queue_manager.run_job("weekly_db_maintenance", reason="manual", force=True)
+    elif pipeline == "rule_evaluate":
+        queue_manager.run_job("weekly_rule_evaluation", reason="manual", force=True)
+    elif pipeline == "rule_signals":
+        queue_manager.run_job("daily_rule_signals", reason="manual", force=True)
     else:
         print(f"不明なパイプライン: {pipeline}")
         print(
             "使用可能: daily, weekly, paper, paper_report, optimization,"
-            " wf_report, watchlist, drift, db_maintenance"
+            " wf_report, watchlist, drift, db_maintenance, rule_evaluate, rule_signals"
         )
         sys.exit(1)
 
@@ -404,6 +444,8 @@ def main():
             "watchlist",
             "drift",
             "db_maintenance",
+            "rule_evaluate",
+            "rule_signals",
         ],
         help=(
             "指定パイプラインを即時実行して終了する（テスト用）。"
