@@ -6,8 +6,21 @@ trading BC の型定義。
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
+
+
+@dataclass
+class CorrelationGateResult:
+    """相関ベースのポートフォリオリスクゲートの評価結果。"""
+
+    is_allowed: bool
+    enc: float
+    enc_threshold: float
+    avg_correlation: float
+    n_symbols: int
+    symbols: list[str] = field(default_factory=list)
+    reason: Optional[str] = None
 
 
 @dataclass

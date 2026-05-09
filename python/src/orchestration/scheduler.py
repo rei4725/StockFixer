@@ -196,6 +196,22 @@ def run_daily_auto_order():
     except Exception as e:
         logger.error("自動発注完了通知失敗: %s", e, exc_info=True)
 
+    # 相関リスク警告通知
+    if stats.get("correlation_blocked"):
+        try:
+            from config.settings import CORRELATION_ENC_THRESHOLD
+            from src.reporting.discord.discord_utils import send_correlation_alert
+
+            send_correlation_alert(
+                enc=stats.get("enc", 0.0),
+                enc_threshold=CORRELATION_ENC_THRESHOLD,
+                avg_correlation=stats.get("avg_correlation", 0.0),
+                n_symbols=stats.get("n_held_symbols", 0),
+                symbols=stats.get("held_symbols_list", []),
+            )
+        except Exception as e:
+            logger.error("相関リスク警告通知失敗: %s", e, exc_info=True)
+
 
 def run_daily_settle_orders():
     """
