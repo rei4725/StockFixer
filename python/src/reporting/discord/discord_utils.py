@@ -810,6 +810,43 @@ def send_rule_evaluation_completion(
     return send_webhook_text("\n".join(lines))
 
 
+def send_correlation_alert(
+    enc: float,
+    enc_threshold: float,
+    avg_correlation: float,
+    n_symbols: int,
+    symbols: list[str],
+) -> bool:
+    """相関リスク上昇による新規エントリーブロックを Discord に通知する。
+
+    Args:
+        enc: 実効分散度（ENC）の現在値
+        enc_threshold: ENC の閾値
+        avg_correlation: 保有銘柄間の平均絶対相関係数
+        n_symbols: 保有銘柄数
+        symbols: 保有銘柄コードのリスト
+
+    Returns:
+        送信成功時 True
+    """
+    now = format_jst(fmt=DISCORD_MINUTE_FORMAT)
+    lines = [
+        f"**[相関リスク警告] {now}**",
+        f"ENC={enc:.2f} < 閾値={enc_threshold:.2f}（新規エントリーをブロック）",
+        f"平均相関係数: {avg_correlation:.2f}",
+        f"保有銘柄数: {n_symbols}",
+    ]
+    if symbols:
+        syms = ", ".join(f"`{s}`" for s in symbols[:10])
+        lines.append(f"保有銘柄: {syms}")
+
+    return send_webhook_notification(
+        "相関リスク警告 — 分散度低下",
+        "\n".join(lines),
+        color=0xFF6600,
+    )
+
+
 def send_rule_daily_signals(
     signals: list[dict],
     market: str,

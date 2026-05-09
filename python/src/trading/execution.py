@@ -20,6 +20,8 @@ import pandas as pd
 
 from config.settings import (
     BUY_THRESHOLD,
+    CORRELATION_ENC_THRESHOLD,
+    CORRELATION_WINDOW_DAYS,
     ENABLE_SHORT_SIDE,
     LIMIT_ORDER_AVG_VOLUME_THRESHOLD,
     LIMIT_ORDER_LOOKBACK_DAYS,
@@ -32,6 +34,7 @@ from config.settings import (
 from src.prediction.prediction_pipeline import get_optimal_params
 from src.trading.signal_generator import apply_multi_horizon_score_column
 from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
+from src.trading.correlation_risk import evaluate_correlation_gate
 from src.trading.risk_manager import RiskManager
 from src.trading.types import TradingGateStatus
 from src.utils import yf_client
@@ -64,6 +67,11 @@ class OrderExecutionStats(TypedDict):
     daily_loss: float
     daily_loss_limit: float | None
     total_turnover: float
+    correlation_blocked: bool
+    enc: float
+    avg_correlation: float
+    n_held_symbols: int
+    held_symbols_list: list[str]
 
 
 def _load_latest_predictions(market: str) -> pd.DataFrame:
@@ -414,6 +422,11 @@ def run_daily_orders(
         "daily_loss": 0.0,
         "daily_loss_limit": None,
         "total_turnover": 0.0,
+        "correlation_blocked": False,
+        "enc": 0.0,
+        "avg_correlation": 0.0,
+        "n_held_symbols": 0,
+        "held_symbols_list": [],
     }
 
     # --- 当日取引可否チェック ---
@@ -459,10 +472,28 @@ def run_daily_orders(
     )
 
     held_symbols = _get_held_symbols(broker)
+    held_symbols_list = sorted(held_symbols)
     stats.update(
         {
             "daily_loss": gate_status.daily_loss,
             "daily_loss_limit": gate_status.daily_loss_limit,
+            "n_held_symbols": len(held_symbols),
+            "held_symbols_list": held_symbols_list,
+        }
+    )
+
+    # --- 相関ゲート: 保有銘柄間の相関上昇時に新規買いをブロック ---
+    corr_gate = evaluate_correlation_gate(
+        held_symbols_list,
+        market,
+        window=CORRELATION_WINDOW_DAYS,
+        enc_threshold=CORRELATION_ENC_THRESHOLD,
+    )
+    stats.update(
+        {
+            "correlation_blocked": not corr_gate.is_allowed,
+            "enc": corr_gate.enc,
+            "avg_correlation": corr_gate.avg_correlation,
         }
     )
 
@@ -530,11 +561,18 @@ def run_daily_orders(
             stats["errors"] += 1
 
     # --- 新規買いシグナル ---
-    buy_candidates = predictions[
-        (~predictions["symbol"].isin(held_symbols))
-        & (predictions["multi_horizon_score"] >= predictions["effective_buy_threshold"])
-    ]
-    buy_signals = _apply_buy_sector_limit(buy_candidates).head(MAX_ORDERS_PER_RUN)
+    if corr_gate.is_allowed:
+        buy_candidates = predictions[
+            (~predictions["symbol"].isin(held_symbols))
+            & (predictions["multi_horizon_score"] >= predictions["effective_buy_threshold"])
+        ]
+        buy_signals = _apply_buy_sector_limit(buy_candidates).head(MAX_ORDERS_PER_RUN)
+    else:
+        logger.warning(
+            "[exec] 相関ゲートにより新規買いをスキップ: %s",
+            corr_gate.reason or "ENC閾値未満",
+        )
+        buy_signals = predictions.iloc[0:0]  # 空 DataFrame
 
     for _, row in buy_signals.iterrows():
         symbol = row["symbol"]

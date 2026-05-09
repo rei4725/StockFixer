@@ -55,6 +55,10 @@ class Settings(BaseSettings):
     # ---------- ショートサイド（R-215） ----------
     ENABLE_SHORT_SIDE: bool = Field(default=False)
 
+    # ---------- 相関リスク管理（correlation_risk.py） ----------
+    CORRELATION_ENC_THRESHOLD: float = Field(default=2.0)
+    CORRELATION_WINDOW_DAYS: int = Field(default=20)
+
 
 settings = Settings()
 
@@ -87,3 +91,6 @@ FEATURE_SELECTION_PROTECT_TOP_SHAP: int = settings.FEATURE_SELECTION_PROTECT_TOP
 PAPER_INITIAL_BALANCE: float = settings.PAPER_INITIAL_BALANCE
 
 ENABLE_SHORT_SIDE: bool = settings.ENABLE_SHORT_SIDE
+
+CORRELATION_ENC_THRESHOLD: float = settings.CORRELATION_ENC_THRESHOLD
+CORRELATION_WINDOW_DAYS: int = settings.CORRELATION_WINDOW_DAYS
