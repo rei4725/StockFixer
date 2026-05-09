@@ -503,6 +503,48 @@ def print_backtest_metrics(
     print(f"{'='*50}")
 
 
+def plot_backtest_chart(
+    result_df: pd.DataFrame,
+    metrics: Optional[dict[str, Any]],
+    market: str,
+    symbol: str,
+    initial_cash: float,
+    send_discord: bool = False,
+) -> None:
+    """
+    バックテスト結果グラフを保存し、オプションで Discord に送信する。
+
+    Args:
+        result_df: バックテスト結果 DataFrame
+        metrics: メトリクス辞書
+        market: マーケット識別子
+        symbol: 銘柄シンボル
+        initial_cash: 初期資金
+        send_discord: True の場合 Discord Webhook に送信する
+    """
+    from src.backtest.metrics import plot_backtest
+    from src.utils.data_path_utils import get_results_dir
+
+    out_dir = os.path.join(get_results_dir(), "backtest", f"{market}_{symbol}")
+    chart_path = plot_backtest(
+        result_df,
+        metrics or {},
+        out_dir,
+        market=market,
+        symbol=symbol,
+        initial_cash=initial_cash,
+    )
+    if chart_path:
+        logger.info(f"グラフ保存: {chart_path}")
+        if send_discord:
+            from src.reporting.discord.discord_utils import send_webhook_file
+
+            send_webhook_file(
+                chart_path,
+                title=f"{market.upper()}/{symbol} バックテスト結果",
+            )
+
+
 def fetch_benchmark_for_result(
     result_df: pd.DataFrame,
     benchmark_name: str,
