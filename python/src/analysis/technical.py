@@ -1,7 +1,7 @@
 import pandas as pd
 import ta
 
-from src.analysis.market_regime import get_market_regime
+from src.market_data.market_regime import get_market_regime
 
 _MULTI_TIMEFRAME_RULES = {
     "weekly": "W-FRI",
