@@ -19,10 +19,9 @@ from config.settings import (
     PERMUTATION_IMPORTANCE_REPEATS,
 )
 from src.analysis.technical import add_earnings_flag
-from src.analysis.types import FeatureLoadResult
 from src.market_data.loader import get_earnings_dates
 from src.prediction.manager import ModelManager
-from src.prediction.types import TrainingMetrics
+from src.prediction.types import FeatureLoadResult, TrainingMetrics
 from src.utils.db import (
     generate_run_id,
     load_excluded_features,

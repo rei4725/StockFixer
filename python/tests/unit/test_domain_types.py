@@ -4,8 +4,7 @@ import unittest
 
 import pandas as pd
 
-from src.analysis.types import FeatureLoadResult
-from src.prediction.types import PredictionResult
+from src.prediction.types import FeatureLoadResult, PredictionResult
 from src.trading.types import TradingGateStatus
 
 
