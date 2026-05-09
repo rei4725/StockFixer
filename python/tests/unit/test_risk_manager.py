@@ -381,5 +381,128 @@ class TestRiskManagerKellyBtFeedback(unittest.TestCase):
         self.assertEqual(qty_none, qty_direct)
 
 
+# ---------------------------------------------------------------------------
+# R-406: VIX テールリスクヘッジ
+# ---------------------------------------------------------------------------
+
+
+class TestComputeVixPositionScale(unittest.TestCase):
+    """compute_vix_position_scale() の単体テスト"""
+
+    def test_none_vix_returns_one(self):
+        from src.trading.risk_manager import compute_vix_position_scale
+
+        self.assertAlmostEqual(compute_vix_position_scale(None), 1.0)
+
+    def test_vix_below_threshold_returns_one(self):
+        from src.trading.risk_manager import compute_vix_position_scale
+
+        self.assertAlmostEqual(compute_vix_position_scale(20.0), 1.0)
+
+    def test_vix_at_threshold_returns_scale(self):
+        from config.trading_policy import VIX_POSITION_SCALE, VIX_SPIKE_THRESHOLD
+        from src.trading.risk_manager import compute_vix_position_scale
+
+        scale = compute_vix_position_scale(VIX_SPIKE_THRESHOLD)
+        self.assertAlmostEqual(scale, VIX_POSITION_SCALE)
+
+    def test_vix_above_threshold_returns_scale(self):
+        from config.trading_policy import VIX_POSITION_SCALE
+        from src.trading.risk_manager import compute_vix_position_scale
+
+        scale = compute_vix_position_scale(50.0)
+        self.assertAlmostEqual(scale, VIX_POSITION_SCALE)
+        self.assertLess(scale, 1.0)
+
+
+class TestFetchLatestVix(unittest.TestCase):
+    """fetch_latest_vix() の DB アクセステスト"""
+
+    def test_returns_float_when_data_exists(self):
+        from contextlib import contextmanager
+
+        from src.trading.risk_manager import fetch_latest_vix
+
+        mock_con = MagicMock()
+        mock_con.execute.return_value.fetchone.return_value = (28.5,)
+
+        @contextmanager
+        def mock_db():
+            yield mock_con
+
+        with patch("src.trading.risk_manager._db_connection", new=mock_db):
+            vix = fetch_latest_vix()
+
+        self.assertAlmostEqual(vix, 28.5)
+
+    def test_returns_none_when_no_data(self):
+        from contextlib import contextmanager
+
+        from src.trading.risk_manager import fetch_latest_vix
+
+        mock_con = MagicMock()
+        mock_con.execute.return_value.fetchone.return_value = None
+
+        @contextmanager
+        def mock_db():
+            yield mock_con
+
+        with patch("src.trading.risk_manager._db_connection", new=mock_db):
+            vix = fetch_latest_vix()
+
+        self.assertIsNone(vix)
+
+    def test_returns_none_on_db_error(self):
+        from contextlib import contextmanager
+
+        from src.trading.risk_manager import fetch_latest_vix
+
+        @contextmanager
+        def mock_db_error():
+            raise RuntimeError("DB接続失敗")
+            yield  # noqa: unreachable
+
+        with patch("src.trading.risk_manager._db_connection", new=mock_db_error):
+            vix = fetch_latest_vix()
+
+        self.assertIsNone(vix)
+
+
+class TestCalcPositionSizeVixScale(unittest.TestCase):
+    """calc_position_size() が VIX スケールを適用するテスト"""
+
+    def _make_risk(self, balance=1_000_000.0):
+        broker = _make_broker(balance=balance)
+        risk = RiskManager(broker)
+        return risk
+
+    def test_high_vix_reduces_position_size(self):
+        from contextlib import contextmanager
+
+        risk = self._make_risk()
+
+        mock_con_normal = MagicMock()
+        mock_con_normal.execute.return_value.fetchone.return_value = None
+
+        mock_con_spike = MagicMock()
+        mock_con_spike.execute.return_value.fetchone.return_value = (50.0,)
+
+        @contextmanager
+        def db_no_vix():
+            yield mock_con_normal
+
+        @contextmanager
+        def db_high_vix():
+            yield mock_con_spike
+
+        with patch("src.trading.risk_manager._db_connection", new=db_no_vix):
+            qty_normal = risk.calc_position_size("AAPL", price=100.0)
+
+        with patch("src.trading.risk_manager._db_connection", new=db_high_vix):
+            qty_spike = risk.calc_position_size("AAPL", price=100.0)
+
+        self.assertGreaterEqual(qty_normal, qty_spike)
+
+
 if __name__ == "__main__":
     unittest.main()

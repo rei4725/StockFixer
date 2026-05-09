@@ -110,5 +110,56 @@ class TestTradingPolicyIndividualOverride(unittest.TestCase):
                 pass
 
 
+class TestVixHedgeDefaults(unittest.TestCase):
+    """R-406: VIX テールリスクヘッジパラメータのデフォルト値テスト"""
+
+    def _load(self, env: dict):
+        import config.trading_policy as tp
+
+        with patch.dict("os.environ", env, clear=False):
+            importlib.reload(tp)
+            return tp
+
+    def test_vix_spike_threshold_default(self):
+        tp = self._load({})
+        self.assertAlmostEqual(tp.VIX_SPIKE_THRESHOLD, 30.0)
+
+    def test_vix_position_scale_default(self):
+        tp = self._load({})
+        self.assertAlmostEqual(tp.VIX_POSITION_SCALE, 0.5)
+
+    def test_vix_hedge_enabled_default_false(self):
+        tp = self._load({})
+        self.assertFalse(tp.VIX_HEDGE_ENABLED)
+
+    def test_vix_spike_threshold_env_override(self):
+        tp = self._load({"VIX_SPIKE_THRESHOLD": "40.0"})
+        self.assertAlmostEqual(tp.VIX_SPIKE_THRESHOLD, 40.0)
+
+    def test_vix_position_scale_env_override(self):
+        tp = self._load({"VIX_POSITION_SCALE": "0.3"})
+        self.assertAlmostEqual(tp.VIX_POSITION_SCALE, 0.3)
+
+    def test_vix_hedge_enabled_via_env(self):
+        tp = self._load({"VIX_HEDGE_ENABLED": "true"})
+        self.assertTrue(tp.VIX_HEDGE_ENABLED)
+
+    def test_vix_spike_threshold_invalid_raises(self):
+        import config.trading_policy as tp
+
+        with patch.dict("os.environ", {"VIX_SPIKE_THRESHOLD": "not_a_number"}, clear=False):
+            with self.assertRaises(ValueError):
+                importlib.reload(tp)
+
+    def tearDown(self):
+        import config.trading_policy as _tp
+
+        with patch.dict("os.environ", {"RISK_PROFILE": "moderate"}, clear=False):
+            try:
+                importlib.reload(_tp)
+            except Exception:
+                pass
+
+
 if __name__ == "__main__":
     unittest.main()
