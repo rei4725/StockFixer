@@ -585,6 +585,37 @@ def run_weekly_rule_evaluation() -> None:
         logger.error("ルール評価通知失敗: %s", e, exc_info=True)
 
 
+def run_pre_close_alert() -> None:
+    """
+    毎営業日 15:00 実行: 保有ポジションを直近予測と照合し
+    利確/損切り推奨度を Discord に通知する（R-409）。
+    """
+    import os
+
+    mode = os.environ.get("AUTO_TRADE_MODE", "paper")
+    if mode == "live":
+        logger.info("live モードのため引け前アラートをスキップ")
+        return
+
+    logger.info("=== 引け前ポジション再評価アラート開始 ===")
+    try:
+        from src.trading.pre_close_alert_service import evaluate_positions
+
+        alerts = evaluate_positions()
+        logger.info("引け前アラート評価完了: %d件", len(alerts))
+    except Exception as e:
+        logger.error("引け前アラート評価失敗: %s", e, exc_info=True)
+        raise
+
+    try:
+        from src.reporting.discord.discord_utils import send_pre_close_alert
+
+        send_pre_close_alert(alerts)
+        logger.info("=== 引け前ポジション再評価アラート送信完了 ===")
+    except Exception as e:
+        logger.error("引け前アラート通知失敗: %s", e, exc_info=True)
+
+
 def run_daily_rule_signals() -> None:
     """
     日次実行（平日 16:00）: 有効ルールを持つ銘柄に当日シグナルを適用し
