@@ -381,7 +381,13 @@ def _choose_order_params(
     symbol: str,
     side: OrderSide,
     current_price: float,
-) -> tuple[OrderType, float, str]:
+) -> tuple[OrderType, float, str, str]:
+    """流動性指標から成行/指値・寄付/引けを自動判定する（R-103 拡張: R-405）。
+
+    Returns:
+        (OrderType, limit_price, reason_string, order_session)
+        order_session: "open"（寄付）または "close"（引け）
+    """
     avg_volume, spread_proxy = _load_execution_metrics(market, symbol)
 
     reasons: list[str] = []
@@ -391,13 +397,16 @@ def _choose_order_params(
         reasons.append(f"wide_range={spread_proxy:.3%}")
 
     if not reasons:
-        return OrderType.MARKET, 0.0, "market"
+        return OrderType.MARKET, 0.0, "market", "open"
 
+    # 低流動性 → 引け指値（引け時点で流動性が集まりやすく価格優位性が高い）
+    # 広スプレッドのみ → 寄付指値（寄付時の価格優位性を活用）
+    order_session = "close" if any("low_volume" in r for r in reasons) else "open"
     buffer = current_price * LIMIT_ORDER_PRICE_BUFFER
     limit_price = (
         current_price + buffer if side == OrderSide.BUY else max(0.0, current_price - buffer)
     )
-    return OrderType.LIMIT, limit_price, ", ".join(reasons)
+    return OrderType.LIMIT, limit_price, ", ".join(reasons), order_session
 
 
 def _record_order(
@@ -412,6 +421,7 @@ def _record_order(
     order_result: dict[str, Any],
     broker: BrokerBase,
     mode: str,
+    order_session: str = "open",
 ) -> None:
     """注文結果を orders テーブルに保存する"""
     with _db_connection() as con:
@@ -450,6 +460,7 @@ def _record_order(
         mode=mode,
         order_id=order_id,
         actual_price=fill_price,
+        order_session=order_session,
     )
 
 
@@ -599,7 +610,7 @@ def run_daily_orders(
             if pos is None or pos["qty"] <= 0:
                 continue
             qty = pos["qty"]
-            order_type, order_price, order_reason = _choose_order_params(
+            order_type, order_price, order_reason, order_session = _choose_order_params(
                 market=str(row["market"]),
                 symbol=symbol,
                 side=OrderSide.SELL,
@@ -624,6 +635,7 @@ def run_daily_orders(
                 order_result=result,
                 broker=broker,
                 mode=mode,
+                order_session=order_session,
             )
             logger.info(
                 f"[exec] 売り発注: {symbol} {qty}株 @ {order_type.name}({order_reason}) "
@@ -688,7 +700,7 @@ def run_daily_orders(
             continue
 
         try:
-            order_type, order_price, order_reason = _choose_order_params(
+            order_type, order_price, order_reason, order_session = _choose_order_params(
                 market=str(row["market"]),
                 symbol=symbol,
                 side=OrderSide.BUY,
@@ -713,6 +725,7 @@ def run_daily_orders(
                 order_result=result,
                 broker=broker,
                 mode=mode,
+                order_session=order_session,
             )
             logger.info(
                 f"[exec] 買い発注: {symbol} {qty}株 @ {order_type.name}({order_reason}) "
@@ -747,7 +760,7 @@ def run_daily_orders(
                     continue
                 qty = pos["qty"]
                 current_price = float(row.get("current_price") or 0.0)
-                order_type, order_price, order_reason = _choose_order_params(
+                order_type, order_price, order_reason, order_session = _choose_order_params(
                     market=str(row["market"]),
                     symbol=symbol,
                     side=OrderSide.SHORT_COVER,
@@ -772,6 +785,7 @@ def run_daily_orders(
                     order_result=result,
                     broker=broker,
                     mode=mode,
+                    order_session=order_session,
                 )
                 logger.info(
                     f"[exec] SHORT_COVER発注: {symbol} {qty}株 @ {order_type.name}({order_reason}) "
@@ -827,7 +841,7 @@ def run_daily_orders(
                 continue
 
             try:
-                order_type, order_price, order_reason = _choose_order_params(
+                order_type, order_price, order_reason, order_session = _choose_order_params(
                     market=str(row["market"]),
                     symbol=symbol,
                     side=OrderSide.SHORT,
@@ -852,6 +866,7 @@ def run_daily_orders(
                     order_result=result,
                     broker=broker,
                     mode=mode,
+                    order_session=order_session,
                 )
                 logger.info(
                     f"[exec] ショート発注: {symbol} {qty}株 @ {order_type.name}({order_reason}) "
