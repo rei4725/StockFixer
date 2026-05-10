@@ -123,6 +123,13 @@ def job_daily_rule_signals():
     run_daily_rule_signals()
 
 
+def job_pre_close_alert():
+    """毎営業日 15:00 - 引け前ポジション再評価アラート送信"""
+    from src.orchestration.scheduler import run_pre_close_alert
+
+    run_pre_close_alert()
+
+
 # ── イベントリスナー ──────────────────────────────────
 def _job_listener(event):
     """ジョブ実行結果のログ出力"""
@@ -266,6 +273,17 @@ SCHEDULE_CONFIG = {
         "recovery_delay_minutes": 10,
         "max_executions_per_period": 1,
         "description": "毎営業日 16:30 - ルールシグナル生成 + ペーパートレード発注",
+    },
+    "pre_close_alert": {
+        "func": job_pre_close_alert,
+        "trigger": "cron",
+        "period": "daily",
+        "day_of_week": "mon-fri",
+        "hour": 15,
+        "minute": 0,
+        "recovery_delay_minutes": 10,
+        "max_executions_per_period": 1,
+        "description": "毎営業日 15:00 - 引け前ポジション再評価アラート",
     },
 }
 
@@ -415,11 +433,14 @@ def run_now(pipeline: str):
         queue_manager.run_job("weekly_rule_evaluation", reason="manual", force=True)
     elif pipeline == "rule_signals":
         queue_manager.run_job("daily_rule_signals", reason="manual", force=True)
+    elif pipeline == "pre_close_alert":
+        queue_manager.run_job("pre_close_alert", reason="manual", force=True)
     else:
         print(f"不明なパイプライン: {pipeline}")
         print(
             "使用可能: daily, weekly, paper, paper_report, optimization,"
-            " wf_report, watchlist, drift, db_maintenance, rule_evaluate, rule_signals"
+            " wf_report, watchlist, drift, db_maintenance, rule_evaluate, rule_signals,"
+            " pre_close_alert"
         )
         sys.exit(1)
 
@@ -446,6 +467,7 @@ def main():
             "db_maintenance",
             "rule_evaluate",
             "rule_signals",
+            "pre_close_alert",
         ],
         help=(
             "指定パイプラインを即時実行して終了する（テスト用）。"

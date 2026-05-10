@@ -19,6 +19,7 @@ from src.reporting.discord.discord_notification_specs import (
     DAILY_SETTLE_COMPLETION,
     DB_MAINTENANCE_COMPLETION,
     DB_MAINTENANCE_ERROR,
+    PRE_CLOSE_ALERT,
     WEEKLY_TRAINING_COMPLETION,
     NotificationSpec,
     get_daily_order_spec,
@@ -886,3 +887,65 @@ def send_rule_daily_signals(
         lines.append("本日はシグナルなし（全銘柄 HOLD）")
 
     return send_webhook_text("\n".join(lines))
+
+
+def send_pre_close_alert(alerts: list) -> bool:
+    """
+    引け前ポジション再評価アラートを Discord に送信する。
+
+    Args:
+        alerts: evaluate_positions() の戻り値（PositionAlert のリスト）
+
+    Returns:
+        送信成功時 True
+    """
+    from src.trading.pre_close_alert_service import AlertType
+
+    now = format_jst(fmt=DISCORD_MINUTE_FORMAT)
+
+    if not alerts:
+        return send_status_notification(PRE_CLOSE_ALERT, [f"時刻: {now}", "保有ポジションなし"])
+
+    stop_loss = [a for a in alerts if a.alert_type == AlertType.STOP_LOSS]
+    take_profit = [a for a in alerts if a.alert_type == AlertType.TAKE_PROFIT]
+    hold = [a for a in alerts if a.alert_type == AlertType.HOLD]
+
+    lines = [
+        f"**[引け前ポジション再評価] {now}**",
+        f"保有: {len(alerts)}銘柄  |  損切り: {len(stop_loss)}  利確: {len(take_profit)}  保有継続: {len(hold)}",
+        "",
+    ]
+
+    if stop_loss:
+        lines.append("🔴 **損切り推奨（SL接近）**")
+        for a in stop_loss:
+            lines.append(
+                f"  • `{a.symbol}` "
+                f"現在値={a.current_price:,.0f}円 "
+                f"予測={a.avg_pred_price:,.0f}円({a.diff_ratio:+.1%}) "
+                f"含み損益={a.unrealized_pnl:+,.0f}円"
+            )
+
+    if take_profit:
+        lines.append("")
+        lines.append("🟡 **利確推奨（目標値超）**")
+        for a in take_profit:
+            lines.append(
+                f"  • `{a.symbol}` "
+                f"現在値={a.current_price:,.0f}円 "
+                f"予測={a.avg_pred_price:,.0f}円({a.diff_ratio:+.1%}) "
+                f"含み益={a.unrealized_pnl:+,.0f}円({a.hold_pnl_ratio:+.1%})"
+            )
+
+    if hold:
+        lines.append("")
+        lines.append("🟢 **保有継続**")
+        for a in hold:
+            lines.append(
+                f"  • `{a.symbol}` "
+                f"現在値={a.current_price:,.0f}円 "
+                f"予測={a.avg_pred_price:,.0f}円({a.diff_ratio:+.1%}) "
+                f"含み損益={a.unrealized_pnl:+,.0f}円"
+            )
+
+    return send_webhook_text_chunked("\n".join(lines), preserve_lines=False)
