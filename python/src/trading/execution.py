@@ -376,6 +376,32 @@ def _resolve_kelly_params(
     return _extract("win_rate"), _extract("avg_win"), _extract("avg_loss")
 
 
+# R-308: 分割エントリー/エグジット（確信度連動）
+_SPLIT_HIGH_CONFIDENCE = 0.80
+_SPLIT_LOW_CONFIDENCE = 0.50
+
+
+def _calc_split_ratio(confidence_ratio: float) -> float:
+    """確信度に応じた発注比率を返す（R-308）。
+
+    Returns:
+        1.0: confidence_ratio >= 0.80 → 全量発注
+        0.5: 0.50 <= confidence_ratio < 0.80 → 1/2 発注
+        0.0: confidence_ratio < 0.50 → 見送り
+    """
+    if confidence_ratio >= _SPLIT_HIGH_CONFIDENCE:
+        return 1.0
+    elif confidence_ratio >= _SPLIT_LOW_CONFIDENCE:
+        return 0.5
+    else:
+        return 0.0
+
+
+def _apply_split_qty(qty: int, split_ratio: float) -> int:
+    """分割比率を株数に適用し 100 株単位に丸める。"""
+    return max(100, int(qty * split_ratio // 100) * 100)
+
+
 def _choose_order_params(
     market: str,
     symbol: str,
@@ -422,6 +448,7 @@ def _record_order(
     broker: BrokerBase,
     mode: str,
     order_session: str = "open",
+    split_ratio: float = 1.0,
 ) -> None:
     """注文結果を orders テーブルに保存する"""
     with _db_connection() as con:
@@ -461,6 +488,7 @@ def _record_order(
         order_id=order_id,
         actual_price=fill_price,
         order_session=order_session,
+        split_ratio=split_ratio,
     )
 
 
@@ -683,6 +711,16 @@ def run_daily_orders(
             stats["skipped"] += 1
             continue
 
+        confidence = float(row.get("confidence_ratio") or 1.0)
+        split_ratio = _calc_split_ratio(confidence)
+        if split_ratio == 0.0:
+            logger.info(
+                "[exec] %s: confidence_ratio=%.3f < %.2f → 見送り (R-308)",
+                symbol, confidence, _SPLIT_LOW_CONFIDENCE,
+            )
+            stats["skipped"] += 1
+            continue
+
         kelly_win_rate, kelly_avg_win, kelly_avg_loss = _resolve_kelly_params(
             str(row["market"]), symbol
         )
@@ -692,12 +730,19 @@ def run_daily_orders(
             win_rate=kelly_win_rate,
             avg_win=kelly_avg_win,
             avg_loss=kelly_avg_loss,
-            confidence_ratio=float(row.get("confidence_ratio") or 1.0),
+            confidence_ratio=confidence,
         )
         if qty <= 0:
             logger.info(f"[exec] {symbol}: 発注株数 0 → スキップ（残高不足or上限）")
             stats["skipped"] += 1
             continue
+
+        if split_ratio < 1.0:
+            qty = _apply_split_qty(qty, split_ratio)
+            logger.info(
+                "[exec] %s: confidence_ratio=%.3f → %.0f%%発注 %d株 (R-308)",
+                symbol, confidence, split_ratio * 100, qty,
+            )
 
         try:
             order_type, order_price, order_reason, order_session = _choose_order_params(
@@ -726,11 +771,13 @@ def run_daily_orders(
                 broker=broker,
                 mode=mode,
                 order_session=order_session,
+                split_ratio=split_ratio,
             )
             logger.info(
                 f"[exec] 買い発注: {symbol} {qty}株 @ {order_type.name}({order_reason}) "
                 f"(1d変化率={row['diff_ratio']:.3%}, 統合スコア={row['multi_horizon_score']:.3%}, "
-                f"閾値={row['effective_buy_threshold']:.3%}, sector={row.get('sector', 'N/A')})"
+                f"閾値={row['effective_buy_threshold']:.3%}, sector={row.get('sector', 'N/A')}, "
+                f"split={split_ratio:.0%})"
             )
             stats["buy_orders"] += 1
             stats["total_turnover"] += current_price * qty
@@ -824,6 +871,16 @@ def run_daily_orders(
                 stats["skipped"] += 1
                 continue
 
+            confidence = float(row.get("confidence_ratio") or 1.0)
+            short_split_ratio = _calc_split_ratio(confidence)
+            if short_split_ratio == 0.0:
+                logger.info(
+                    "[exec] %s: confidence_ratio=%.3f < %.2f → ショート見送り (R-308)",
+                    symbol, confidence, _SPLIT_LOW_CONFIDENCE,
+                )
+                stats["skipped"] += 1
+                continue
+
             kelly_win_rate, kelly_avg_win, kelly_avg_loss = _resolve_kelly_params(
                 str(row["market"]), symbol
             )
@@ -833,12 +890,19 @@ def run_daily_orders(
                 win_rate=kelly_win_rate,
                 avg_win=kelly_avg_win,
                 avg_loss=kelly_avg_loss,
-                confidence_ratio=float(row.get("confidence_ratio") or 1.0),
+                confidence_ratio=confidence,
             )
             if qty <= 0:
                 logger.info(f"[exec] {symbol}: 発注株数 0 → ショートスキップ（残高不足or上限）")
                 stats["skipped"] += 1
                 continue
+
+            if short_split_ratio < 1.0:
+                qty = _apply_split_qty(qty, short_split_ratio)
+                logger.info(
+                    "[exec] %s: confidence_ratio=%.3f → %.0f%%ショート発注 %d株 (R-308)",
+                    symbol, confidence, short_split_ratio * 100, qty,
+                )
 
             try:
                 order_type, order_price, order_reason, order_session = _choose_order_params(
@@ -867,11 +931,12 @@ def run_daily_orders(
                     broker=broker,
                     mode=mode,
                     order_session=order_session,
+                    split_ratio=short_split_ratio,
                 )
                 logger.info(
                     f"[exec] ショート発注: {symbol} {qty}株 @ {order_type.name}({order_reason}) "
                     f"(1d変化率={row['diff_ratio']:.3%}, 統合スコア={row['multi_horizon_score']:.3%}, "
-                    f"閾値={row['effective_sell_threshold']:.3%})"
+                    f"閾値={row['effective_sell_threshold']:.3%}, split={short_split_ratio:.0%})"
                 )
                 stats["short_orders"] += 1
                 stats["total_turnover"] += current_price * qty

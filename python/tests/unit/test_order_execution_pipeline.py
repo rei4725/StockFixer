@@ -15,7 +15,9 @@ from src.trading.execution import (
     MAX_ORDERS_PER_RUN,
     MIN_CHANGE_RATIO,
     _apply_buy_sector_limit,
+    _apply_split_qty,
     _attach_dynamic_thresholds,
+    _calc_split_ratio,
     _choose_order_params,
     _compute_market_threshold_scale,
     run_daily_orders,
@@ -220,7 +222,8 @@ class TestRunDailyOrders(unittest.TestCase):
 
     def test_confidence_ratio_passed_to_position_size(self):
         broker = _make_broker()
-        predictions = _make_predictions(n_buy=1, confidence_ratio=0.42)
+        # R-308: 0.65 は半量発注レンジ（calc_position_size は呼ばれる）
+        predictions = _make_predictions(n_buy=1, confidence_ratio=0.65)
         patches = self._patch_pipeline(predictions)
         mocks, patch_list = self._start_patches(patches)
         try:
@@ -228,7 +231,7 @@ class TestRunDailyOrders(unittest.TestCase):
             run_daily_orders(broker, market="jp", mode="paper")
 
             self.assertTrue(calc_size_mock.called)
-            self.assertAlmostEqual(calc_size_mock.call_args.kwargs["confidence_ratio"], 0.42)
+            self.assertAlmostEqual(calc_size_mock.call_args.kwargs["confidence_ratio"], 0.65)
         finally:
             self._stop_patches(patch_list)
 
@@ -815,6 +818,127 @@ class TestShortSide(unittest.TestCase):
         finally:
             for p in patches:
                 p.stop()
+
+
+class TestSplitRatio(unittest.TestCase):
+    """R-308: 分割エントリー/エグジット（確信度連動）のテスト"""
+
+    def test_high_confidence_full_order(self):
+        self.assertEqual(_calc_split_ratio(0.80), 1.0)
+        self.assertEqual(_calc_split_ratio(0.90), 1.0)
+        self.assertEqual(_calc_split_ratio(1.00), 1.0)
+
+    def test_mid_confidence_half_order(self):
+        self.assertEqual(_calc_split_ratio(0.50), 0.5)
+        self.assertEqual(_calc_split_ratio(0.65), 0.5)
+        self.assertAlmostEqual(_calc_split_ratio(0.799), 0.5)
+
+    def test_low_confidence_skip(self):
+        self.assertEqual(_calc_split_ratio(0.49), 0.0)
+        self.assertEqual(_calc_split_ratio(0.00), 0.0)
+
+    def test_apply_split_qty_half(self):
+        self.assertEqual(_apply_split_qty(200, 0.5), 100)
+        self.assertEqual(_apply_split_qty(300, 0.5), 100)
+        self.assertEqual(_apply_split_qty(400, 0.5), 200)
+
+    def test_apply_split_qty_minimum_100(self):
+        self.assertEqual(_apply_split_qty(100, 0.5), 100)
+        self.assertEqual(_apply_split_qty(50, 0.5), 100)
+
+    def test_low_confidence_skipped_in_run(self):
+        """confidence_ratio < 0.50 の銘柄は発注されず skipped にカウントされる"""
+        broker = _make_broker()
+        predictions = _make_predictions(n_buy=2, confidence_ratio=0.30)
+        patches = self._patch_pipeline(predictions)
+        _, patch_list = self._start_patches(patches)
+        try:
+            stats = run_daily_orders(broker, market="jp", mode="paper")
+            self.assertEqual(stats["buy_orders"], 0)
+            self.assertGreater(stats["skipped"], 0)
+            broker.send_order.assert_not_called()
+        finally:
+            self._stop_patches(patch_list)
+
+    def test_mid_confidence_half_qty_ordered(self):
+        """confidence_ratio が 0.50〜0.80 のとき qty が半分（100株単位）で発注される"""
+        broker = _make_broker()
+        predictions = _make_predictions(n_buy=1, confidence_ratio=0.65)
+        patches = self._patch_pipeline(predictions, calc_qty=200)
+        _, patch_list = self._start_patches(patches)
+        try:
+            stats = run_daily_orders(broker, market="jp", mode="paper")
+            self.assertEqual(stats["buy_orders"], 1)
+            call_args = broker.send_order.call_args
+            sent_qty = call_args.args[2] if call_args.args else call_args.kwargs.get("qty")
+            self.assertEqual(sent_qty, 100)
+        finally:
+            self._stop_patches(patch_list)
+
+    def test_high_confidence_full_qty_ordered(self):
+        """confidence_ratio >= 0.80 のとき qty が変更されずに発注される"""
+        broker = _make_broker()
+        predictions = _make_predictions(n_buy=1, confidence_ratio=0.85)
+        patches = self._patch_pipeline(predictions, calc_qty=200)
+        _, patch_list = self._start_patches(patches)
+        try:
+            stats = run_daily_orders(broker, market="jp", mode="paper")
+            self.assertEqual(stats["buy_orders"], 1)
+            call_args = broker.send_order.call_args
+            sent_qty = call_args.args[2] if call_args.args else call_args.kwargs.get("qty")
+            self.assertEqual(sent_qty, 200)
+        finally:
+            self._stop_patches(patch_list)
+
+    def _make_gate_status(self, is_allowed=True):
+        return TradingGateStatus(
+            is_allowed=is_allowed,
+            stop_active=False,
+            reason_code=None,
+            reason=None,
+            daily_loss=0.0,
+            daily_loss_limit=None,
+        )
+
+    def _patch_pipeline(self, predictions, risk_allowed=True, calc_qty=100, gate_status=None):
+        if gate_status is None:
+            gate_status = self._make_gate_status(is_allowed=risk_allowed)
+        return [
+            patch(
+                "src.trading.execution._load_latest_predictions",
+                return_value=predictions,
+            ),
+            patch("src.trading.execution._record_order"),
+            patch(
+                "src.trading.execution._choose_order_params",
+                return_value=(OrderType.MARKET, 0.0, "market", "open"),
+            ),
+            patch(
+                "src.trading.execution.RiskManager.evaluate_trading_gate",
+                return_value=gate_status,
+            ),
+            patch(
+                "src.trading.execution.RiskManager.calc_position_size",
+                return_value=calc_qty,
+            ),
+            patch(
+                "src.trading.risk_manager.RiskManager._get_daily_realized_loss",
+                return_value=0.0,
+            ),
+            patch(
+                "src.trading.risk_manager.RiskManager._get_consecutive_losses",
+                return_value=0,
+            ),
+            patch("src.trading.execution.save_order_run_summary"),
+        ]
+
+    def _start_patches(self, patches):
+        mocks = [p.start() for p in patches]
+        return mocks, patches
+
+    def _stop_patches(self, patches):
+        for p in patches:
+            p.stop()
 
 
 if __name__ == "__main__":
