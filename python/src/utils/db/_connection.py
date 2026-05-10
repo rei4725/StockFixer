@@ -348,6 +348,7 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
             created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             order_session   VARCHAR,
+            split_ratio     DOUBLE,
             PRIMARY KEY (market, symbol, predicted_at, side)
         )
     """
@@ -361,6 +362,8 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
     ]
     if "order_session" not in prd_cols:
         con.execute("ALTER TABLE paper_real_diff ADD COLUMN order_session VARCHAR")
+    if "split_ratio" not in prd_cols:
+        con.execute("ALTER TABLE paper_real_diff ADD COLUMN split_ratio DOUBLE")
     con.execute(
         """
         CREATE TABLE IF NOT EXISTS feature_selection_log (

@@ -208,6 +208,7 @@ def upsert_paper_real_diff(
     actual_price: float | None = None,
     checked_at: datetime | None = None,
     order_session: str = "open",
+    split_ratio: float | None = None,
 ) -> None:
     """paper / real の価格差追跡テーブルを更新する。
 
@@ -219,7 +220,7 @@ def upsert_paper_real_diff(
             """
             SELECT signal_price, paper_order_id, real_order_id, paper_price, real_price,
                    paper_slippage, real_slippage, paper_filled_at, real_checked_at, created_at,
-                   order_session
+                   order_session, split_ratio
             FROM paper_real_diff
             WHERE market = ? AND symbol = ? AND predicted_at = ? AND side = ?
             """,
@@ -238,6 +239,7 @@ def upsert_paper_real_diff(
             "real_checked_at": None,
             "created_at": checked_at,
             "order_session": order_session,
+            "split_ratio": split_ratio,
         }
         if row:
             merged.update(
@@ -253,8 +255,11 @@ def upsert_paper_real_diff(
                     "real_checked_at": row[8],
                     "created_at": row[9] or checked_at,
                     "order_session": row[10] or order_session,
+                    "split_ratio": row[11] if len(row) > 11 else split_ratio,
                 }
             )
+        if split_ratio is not None:
+            merged["split_ratio"] = split_ratio
 
         merged["signal_price"] = signal_price
         if mode == "paper":
@@ -289,9 +294,10 @@ def upsert_paper_real_diff(
                 market, symbol, predicted_at, side, signal_price,
                 paper_order_id, real_order_id, paper_price, real_price,
                 paper_slippage, real_slippage, price_diff,
-                paper_filled_at, real_checked_at, created_at, updated_at, order_session
+                paper_filled_at, real_checked_at, created_at, updated_at, order_session,
+                split_ratio
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?)
             """,
             [
                 market,
@@ -310,6 +316,7 @@ def upsert_paper_real_diff(
                 merged["real_checked_at"],
                 merged["created_at"],
                 merged["order_session"],
+                merged.get("split_ratio"),
             ],
         )
 
