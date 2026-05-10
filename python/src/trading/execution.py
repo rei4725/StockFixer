@@ -13,6 +13,7 @@ DuckDB の最新予測結果を読み込み、RiskManager のゲートチェッ�
     6. orders テーブルに記録
 """
 
+import os
 import uuid
 from typing import Any, TypedDict
 
@@ -31,6 +32,7 @@ from config.settings import (
     MAX_SECTOR_POSITIONS,
     MIN_CHANGE_RATIO,
 )
+from src.prediction.models.exit_model import ExitModel
 from src.prediction.prediction_pipeline import get_optimal_params
 from src.trading.signal_generator import apply_multi_horizon_score_column
 from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
@@ -205,6 +207,68 @@ def _get_held_symbols(broker: BrokerBase) -> set[str]:
     """保有中の銘柄コードセットを返す"""
     positions = broker.get_positions()
     return {p["symbol"].replace(".T", "") for p in positions if p.get("qty", 0) > 0}
+
+
+# ML エグジットシグナルのエグジット確率閾値
+_ML_EXIT_PROB_THRESHOLD = 0.65
+
+
+def _load_exit_model(market: str) -> ExitModel | None:
+    """
+    保存済みの ExitModel を models/ から読み込む。
+
+    モデルファイルが存在しない場合は None を返し、固定閾値ロジックにフォールバックする。
+    モデルパス: {models_dir}/{market}_ExitModel.joblib
+    """
+    from src.utils.data_path_utils import get_models_dir
+
+    model_path = os.path.join(get_models_dir(), f"{market}_ExitModel.joblib")
+    if not os.path.exists(model_path):
+        logger.debug("[exit_model] 学習済み ExitModel が見つかりません: %s", model_path)
+        return None
+    try:
+        exit_model = ExitModel(model_name="ExitModel")
+        exit_model.load_model(model_path)
+        logger.info("[exit_model] ExitModel をロードしました: %s", model_path)
+        return exit_model
+    except Exception:
+        logger.error("[exit_model] ExitModel のロードに失敗しました: %s", model_path, exc_info=True)
+        return None
+
+
+def _compute_ml_exit_signals(
+    held_predictions: pd.DataFrame,
+    exit_model: ExitModel,
+    threshold: float = _ML_EXIT_PROB_THRESHOLD,
+) -> set[str]:
+    """
+    ML モデルで保有銘柄のエグジット確率を計算し、閾値超の銘柄セットを返す。
+
+    Args:
+        held_predictions: 保有中銘柄の予測 DataFrame（symbol 列を含む）
+        exit_model: 学習済み ExitModel
+        threshold: エグジット判定の確率閾値
+
+    Returns:
+        ML エグジットシグナルが発火した銘柄コードのセット
+    """
+    if held_predictions.empty:
+        return set()
+    try:
+        X = ExitModel.prepare_features(held_predictions)
+        proba = exit_model.predict(X)
+        exit_mask = proba >= threshold
+        triggered = set(held_predictions.loc[exit_mask.values, "symbol"].astype(str))
+        if triggered:
+            logger.info(
+                "[exit_model] ML エグジットシグナル発火: %s (threshold=%.2f)",
+                sorted(triggered),
+                threshold,
+            )
+        return triggered
+    except Exception:
+        logger.error("[exit_model] ML エグジット確率計算でエラー", exc_info=True)
+        return set()
 
 
 def _link_paper_order_metadata(
@@ -498,9 +562,21 @@ def run_daily_orders(
     )
 
     # --- 決済シグナル: 保有株で売りシグナルが出ているものを先にクローズ ---
+    # ML エグジットモデルが利用可能な場合、モデルのシグナルも売り判定に加える
+    exit_model = _load_exit_model(market)
+    held_predictions = predictions[predictions["symbol"].isin(held_symbols)]
+    ml_exit_symbols: set[str] = (
+        _compute_ml_exit_signals(held_predictions, exit_model)
+        if exit_model is not None
+        else set()
+    )
+
     sell_signals = predictions[
         (predictions["symbol"].isin(held_symbols))
-        & (predictions["multi_horizon_score"] <= predictions["effective_sell_threshold"])
+        & (
+            (predictions["multi_horizon_score"] <= predictions["effective_sell_threshold"])
+            | (predictions["symbol"].isin(ml_exit_symbols))
+        )
     ]
     for _, row in sell_signals.iterrows():
         symbol = row["symbol"]
