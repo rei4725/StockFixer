@@ -306,6 +306,76 @@ async def handle_status_command(message):
     await message.channel.send(msg)
 
 
+_DRIFT_THRESHOLD_USAGE = (
+    "使い方:\n"
+    "  /drift_threshold show            — 現在の閾値を表示\n"
+    "  /drift_threshold set mae <値>    — MAE 閾値を更新 (例: 0.03)\n"
+    "  /drift_threshold set hit_rate <値> — Hit Rate 閾値を更新 (例: 0.40)"
+)
+
+
+async def handle_drift_threshold_command(message, parts: list[str]) -> None:
+    """
+    /drift_threshold show
+    /drift_threshold set mae <value>
+    /drift_threshold set hit_rate <value>
+    """
+    import os
+
+    from src.utils.db.system_config import get_config_value, set_config_value
+
+    subcommand = parts[1] if len(parts) > 1 else ""
+
+    if subcommand == "show":
+        mae_default = os.environ.get("DRIFT_MAE_THRESHOLD", "0.02")
+        hr_default = os.environ.get("DRIFT_HIT_RATE_THRESHOLD", "0.45")
+        mae = get_config_value("drift.mae_threshold", mae_default)
+        hit_rate = get_config_value("drift.hit_rate_threshold", hr_default)
+        lines = [
+            "=== ドリフト監視閾値 ===",
+            f"MAE 閾値      : {mae}",
+            f"Hit Rate 閾値 : {hit_rate}",
+        ]
+        await message.channel.send("```text\n" + "\n".join(lines) + "\n```")
+        return
+
+    if subcommand == "set" and len(parts) >= 4:
+        kind = parts[2]
+        raw = parts[3]
+        try:
+            val = float(raw)
+        except ValueError:
+            await message.channel.send(
+                escape_markdown(f"値が数値ではありません: {raw}"), allowed_mentions=None
+            )
+            return
+        if val <= 0 or val >= 1:
+            await message.channel.send(
+                escape_markdown("値は 0 より大きく 1 未満にしてください。"), allowed_mentions=None
+            )
+            return
+        if kind == "mae":
+            set_config_value("drift.mae_threshold", str(val))
+            await message.channel.send(
+                escape_markdown(f"MAE 閾値を {val} に更新しました。"), allowed_mentions=None
+            )
+        elif kind == "hit_rate":
+            set_config_value("drift.hit_rate_threshold", str(val))
+            await message.channel.send(
+                escape_markdown(f"Hit Rate 閾値を {val} に更新しました。"), allowed_mentions=None
+            )
+        else:
+            await message.channel.send(
+                escape_markdown(f"不明なキー: {kind}\n" + _DRIFT_THRESHOLD_USAGE),
+                allowed_mentions=None,
+            )
+        return
+
+    await message.channel.send(
+        escape_markdown(_DRIFT_THRESHOLD_USAGE), allowed_mentions=None
+    )
+
+
 @bot.event
 async def on_message(message):
     try:
@@ -325,6 +395,8 @@ async def on_message(message):
             await handle_status_command(message)
         elif command == "/monthlyreport":
             await handle_monthlyreport_command(message)
+        elif command == "/drift_threshold":
+            await handle_drift_threshold_command(message, parts)
         else:
             await message.channel.send(
                 escape_markdown(f"受信: {message.content}"), allowed_mentions=None

@@ -84,6 +84,9 @@ from src.utils.db.prediction import load_open_close_advantage_summary as load_op
 # --- data_quality_log ---
 from src.utils.db.quality_log import insert_quality_log  # noqa: F401
 
+# --- system_config ---
+from src.utils.db.system_config import get_config_value, set_config_value  # noqa: F401
+
 # --- stock_features ---
 from src.utils.db.stock_features import upsert_stock_features  # noqa: F401
 from src.utils.db.stock_features import (  # noqa: F401
