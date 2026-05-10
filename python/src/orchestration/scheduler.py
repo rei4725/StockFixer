@@ -464,9 +464,12 @@ def run_daily_drift_check():
     import os
 
     from src.utils.db import load_drift_summary
+    from src.utils.db.system_config import get_config_value
 
-    mae_threshold = float(os.environ.get("DRIFT_MAE_THRESHOLD", "0.02"))
-    hit_rate_threshold = float(os.environ.get("DRIFT_HIT_RATE_THRESHOLD", "0.45"))
+    _mae_default = os.environ.get("DRIFT_MAE_THRESHOLD", "0.02")
+    _hr_default = os.environ.get("DRIFT_HIT_RATE_THRESHOLD", "0.45")
+    mae_threshold = float(get_config_value("drift.mae_threshold", _mae_default))
+    hit_rate_threshold = float(get_config_value("drift.hit_rate_threshold", _hr_default))
 
     logger.info(
         f"=== 日次ドリフトチェック開始 (MAE閾値={mae_threshold:.2%}, HitRate閾値={hit_rate_threshold:.0%}) ==="
