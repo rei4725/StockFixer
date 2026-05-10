@@ -27,6 +27,7 @@ import pandas as pd
 
 from config.settings import MAX_SECTOR_POSITIONS
 from src.market_data.market_regime import get_market_regime
+from src.trading.signal_generator import get_regime_sector_weight
 from src.utils.logger import get_logger
 from src.utils.sector_constraints import filter_by_sector_cap, get_symbol_sector
 
@@ -50,6 +51,7 @@ def run_portfolio_backtest(
     threshold: float = 0.0,
     ensemble: bool = False,
     max_sector_positions: int = MAX_SECTOR_POSITIONS,
+    use_sector_rotation: bool = False,
 ) -> tuple[pd.DataFrame, dict[str, Any], pd.DataFrame]:
     """
     ポートフォリオバックテストを実行する。
@@ -66,6 +68,7 @@ def run_portfolio_backtest(
         threshold: 買いシグナル発生の最低予測上昇率（0.0=制限なし）
         ensemble: XGBoost+LightGBM アンサンブルを使用
         max_sector_positions: 同一セクターで許容する最大銘柄数（0 以下で無効）
+        use_sector_rotation: True のとき市場レジームに応じてセクターウェイトを切り替える
 
     Returns:
         (equity_df, metrics, holdings_df)
@@ -107,6 +110,7 @@ def run_portfolio_backtest(
         initial_cash=initial_cash,
         fee_rate=fee_rate,
         max_sector_positions=max_sector_positions,
+        use_sector_rotation=use_sector_rotation,
     )
 
     metrics = _compute_portfolio_metrics(equity_df, initial_cash)
@@ -118,6 +122,76 @@ def run_portfolio_backtest(
     holdings_df = pd.DataFrame(holdings_records)
 
     return equity_df, metrics, holdings_df
+
+
+def compare_sector_rotation_kpi(
+    market: Optional[str] = None,
+    model_type: str = "XGBoostModel",
+    top_n: int = 5,
+    rebalance_freq: str = "weekly",
+    train_ratio: float = 0.8,
+    source: str = "file",
+    initial_cash: float = 1_000_000,
+    fee_rate: float = 0.001,
+    ensemble: bool = False,
+    max_sector_positions: int = MAX_SECTOR_POSITIONS,
+) -> dict[str, Any]:
+    """
+    セクターローテーション有効時/無効時の KPI を比較する。
+
+    シグナルマトリクスを一度だけ構築し、両シミュレーションに再利用する。
+
+    Returns:
+        {"rotation_off": metrics, "rotation_on": metrics, "kpi_diff": diff}
+        対象銘柄が存在しない場合やデータ不足の場合は空辞書
+    """
+    from src.utils.db.stock_features import get_all_symbols
+
+    all_symbols = get_all_symbols()
+    if market:
+        all_symbols = [(m, s) for m, s in all_symbols if m == market]
+    if not all_symbols:
+        logger.error(f"[セクターローテーション比較] 対象銘柄が見つかりません: market={market}")
+        return {}
+
+    score_matrix, close_matrix = _build_signal_matrix(
+        all_symbols, model_type, train_ratio, source, 0.0, ensemble
+    )
+    if score_matrix.empty:
+        logger.error("[セクターローテーション比較] スコアマトリクスが空です")
+        return {}
+
+    rebalance_dates = _get_rebalance_dates(pd.DatetimeIndex(score_matrix.index), rebalance_freq)
+
+    eq_off, _ = _simulate_portfolio(
+        score_matrix, close_matrix, rebalance_dates, top_n, initial_cash, fee_rate,
+        max_sector_positions, use_sector_rotation=False,
+    )
+    eq_on, _ = _simulate_portfolio(
+        score_matrix, close_matrix, rebalance_dates, top_n, initial_cash, fee_rate,
+        max_sector_positions, use_sector_rotation=True,
+    )
+
+    metrics_off = _compute_portfolio_metrics(eq_off, initial_cash)
+    metrics_on = _compute_portfolio_metrics(eq_on, initial_cash)
+
+    kpi_diff = {
+        "total_return_diff": round(
+            metrics_on.get("total_return", 0.0) - metrics_off.get("total_return", 0.0), 6
+        ),
+        "sharpe_diff": round(
+            metrics_on.get("sharpe_ratio", 0.0) - metrics_off.get("sharpe_ratio", 0.0), 4
+        ),
+        "max_drawdown_diff": round(
+            metrics_on.get("max_drawdown", 0.0) - metrics_off.get("max_drawdown", 0.0), 6
+        ),
+    }
+
+    return {
+        "rotation_off": metrics_off,
+        "rotation_on": metrics_on,
+        "kpi_diff": kpi_diff,
+    }
 
 
 def save_portfolio_results(
@@ -399,6 +473,15 @@ def _softmax_weights(scores: pd.Series) -> pd.Series:
     return exp_s / exp_s.sum()
 
 
+def _apply_sector_rotation(scores: pd.Series, regime: str) -> pd.Series:
+    """レジームに応じたセクターウェイト乗数をスコア Series に適用して返す。"""
+    result = scores.copy()
+    for sym in result.index:
+        sector = _get_portfolio_symbol_sector(str(sym))
+        result[sym] *= get_regime_sector_weight(regime, sector)
+    return result
+
+
 def _simulate_portfolio(
     score_matrix: pd.DataFrame,
     close_matrix: pd.DataFrame,
@@ -407,6 +490,7 @@ def _simulate_portfolio(
     initial_cash: float,
     fee_rate: float,
     max_sector_positions: int,
+    use_sector_rotation: bool = False,
 ) -> tuple[pd.DataFrame, list[dict[str, Any]]]:
     """
     ポートフォリオシミュレーションを実行する。
@@ -414,6 +498,13 @@ def _simulate_portfolio(
     毎リバランス日に Top-N 銘柄をスコア比例配分で保有し、
     日次の portfolio_value と equal_weight_value を記録する。
     """
+    # セクターローテーション用に市場レジームを事前計算
+    regime_series: Optional[pd.Series] = None
+    if use_sector_rotation:
+        proxy_df = _build_market_proxy_frame(close_matrix)
+        if not proxy_df.empty:
+            regime_series = get_market_regime(proxy_df)
+
     rebalance_set = set(str(d)[:10] for d in rebalance_dates)
 
     cash = initial_cash
@@ -435,6 +526,16 @@ def _simulate_portfolio(
         # ─ リバランス ─
         if date_str in rebalance_set:
             scores_today = score_matrix.loc[date].dropna()
+
+            # セクターローテーション: レジームに応じてスコアを調整
+            if use_sector_rotation and regime_series is not None:
+                date_ts = pd.Timestamp(date_str)
+                current_regime = "range"
+                if date_ts >= regime_series.index.min():
+                    raw = regime_series.asof(date_ts)
+                    if not pd.isna(raw):
+                        current_regime = str(raw)
+                scores_today = _apply_sector_rotation(scores_today, current_regime)
 
             # 上位 top_n を選択
             top_candidates = _limit_portfolio_candidates_by_sector(
