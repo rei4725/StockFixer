@@ -91,7 +91,7 @@ class TestRunDailyOrders(unittest.TestCase):
             ),
             patch(
                 "src.trading.execution._choose_order_params",
-                return_value=(OrderType.MARKET, 0.0, "market"),
+                return_value=(OrderType.MARKET, 0.0, "market", "open"),
             ),
             patch(
                 "src.trading.execution.RiskManager.evaluate_trading_gate",
@@ -495,11 +495,12 @@ class TestExecutionOrderTypeHelpers(unittest.TestCase):
             }
         )
 
-        order_type, price, reason = _choose_order_params("jp", "7203", OrderSide.BUY, 1000.0)
+        order_type, price, reason, session = _choose_order_params("jp", "7203", OrderSide.BUY, 1000.0)
 
         self.assertEqual(order_type, OrderType.LIMIT)
         self.assertGreater(price, 1000.0)
         self.assertIn("low_volume", reason)
+        self.assertEqual(session, "close")
 
     @patch("src.trading.execution.yf_client.download")
     def test_choose_order_params_keeps_market_when_liquid(self, mock_download):
@@ -512,18 +513,19 @@ class TestExecutionOrderTypeHelpers(unittest.TestCase):
             }
         )
 
-        order_type, price, reason = _choose_order_params("jp", "7203", OrderSide.SELL, 1000.0)
+        order_type, price, reason, session = _choose_order_params("jp", "7203", OrderSide.SELL, 1000.0)
 
         self.assertEqual(order_type, OrderType.MARKET)
         self.assertEqual(price, 0.0)
         self.assertEqual(reason, "market")
+        self.assertEqual(session, "open")
 
 
 class TestExecutionOrderTypeFlow(unittest.TestCase):
     @patch("src.trading.execution._record_order")
     @patch(
         "src.trading.execution._choose_order_params",
-        return_value=(OrderType.LIMIT, 1001.0, "low_volume=100000"),
+        return_value=(OrderType.LIMIT, 1001.0, "low_volume=100000", "close"),
     )
     @patch(
         "src.trading.execution.RiskManager.evaluate_trading_gate",
@@ -685,7 +687,7 @@ class TestShortSide(unittest.TestCase):
             patch("src.trading.execution._record_order"),
             patch(
                 "src.trading.execution._choose_order_params",
-                return_value=(OrderType.MARKET, 0.0, "market"),
+                return_value=(OrderType.MARKET, 0.0, "market", "open"),
             ),
             patch(
                 "src.trading.execution.RiskManager.evaluate_trading_gate",
@@ -736,7 +738,7 @@ class TestShortSide(unittest.TestCase):
             patch("src.trading.execution._record_order"),
             patch(
                 "src.trading.execution._choose_order_params",
-                return_value=(OrderType.MARKET, 0.0, "market"),
+                return_value=(OrderType.MARKET, 0.0, "market", "open"),
             ),
             patch(
                 "src.trading.execution.RiskManager.evaluate_trading_gate",
@@ -782,7 +784,7 @@ class TestShortSide(unittest.TestCase):
             patch("src.trading.execution._record_order"),
             patch(
                 "src.trading.execution._choose_order_params",
-                return_value=(OrderType.MARKET, 0.0, "market"),
+                return_value=(OrderType.MARKET, 0.0, "market", "open"),
             ),
             patch(
                 "src.trading.execution.RiskManager.evaluate_trading_gate",

@@ -207,14 +207,19 @@ def upsert_paper_real_diff(
     order_id: str,
     actual_price: float | None = None,
     checked_at: datetime | None = None,
+    order_session: str = "open",
 ) -> None:
-    """paper / real の価格差追跡テーブルを更新する。"""
+    """paper / real の価格差追跡テーブルを更新する。
+
+    order_session: "open"（寄付）または "close"（引け）。
+    """
     checked_at = checked_at or datetime.now()
     with _db_connection() as con:
         row = con.execute(
             """
             SELECT signal_price, paper_order_id, real_order_id, paper_price, real_price,
-                   paper_slippage, real_slippage, paper_filled_at, real_checked_at, created_at
+                   paper_slippage, real_slippage, paper_filled_at, real_checked_at, created_at,
+                   order_session
             FROM paper_real_diff
             WHERE market = ? AND symbol = ? AND predicted_at = ? AND side = ?
             """,
@@ -232,6 +237,7 @@ def upsert_paper_real_diff(
             "paper_filled_at": None,
             "real_checked_at": None,
             "created_at": checked_at,
+            "order_session": order_session,
         }
         if row:
             merged.update(
@@ -246,6 +252,7 @@ def upsert_paper_real_diff(
                     "paper_filled_at": row[7],
                     "real_checked_at": row[8],
                     "created_at": row[9] or checked_at,
+                    "order_session": row[10] or order_session,
                 }
             )
 
@@ -282,9 +289,9 @@ def upsert_paper_real_diff(
                 market, symbol, predicted_at, side, signal_price,
                 paper_order_id, real_order_id, paper_price, real_price,
                 paper_slippage, real_slippage, price_diff,
-                paper_filled_at, real_checked_at, created_at, updated_at
+                paper_filled_at, real_checked_at, created_at, updated_at, order_session
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
             """,
             [
                 market,
@@ -302,6 +309,7 @@ def upsert_paper_real_diff(
                 merged["paper_filled_at"],
                 merged["real_checked_at"],
                 merged["created_at"],
+                merged["order_session"],
             ],
         )
 
@@ -337,6 +345,46 @@ def load_paper_real_diff_summary(recent_days: int = 7) -> dict:
         "avg_abs_diff_ratio": float(row[5] or 0.0),
         "max_abs_price_diff": float(row[6] or 0.0),
     }
+
+
+def load_open_close_advantage_summary(recent_days: int = 30) -> dict[str, dict]:
+    """寄付 vs 引けの価格優位性をセッション別に集計する（R-405）。
+
+    Returns:
+        {"open": {...}, "close": {...}} — セッションがない場合は空辞書。
+        各値: count, avg_slippage, avg_abs_slippage, min_slippage, max_slippage
+    """
+    since = datetime.now() - timedelta(days=recent_days)
+    with _db_connection() as con:
+        rows = con.execute(
+            """
+            SELECT
+                COALESCE(order_session, 'open') AS session,
+                COUNT(*) AS cnt,
+                AVG(paper_slippage) AS avg_slippage,
+                AVG(ABS(paper_slippage)) AS avg_abs_slippage,
+                MIN(paper_slippage) AS min_slippage,
+                MAX(paper_slippage) AS max_slippage
+            FROM paper_real_diff
+            WHERE paper_price IS NOT NULL
+              AND COALESCE(paper_filled_at, created_at) >= ?
+            GROUP BY session
+            ORDER BY session
+            """,
+            [since],
+        ).fetchall()
+
+    result: dict[str, dict] = {}
+    for row in rows:
+        session = str(row[0])
+        result[session] = {
+            "count": int(row[1] or 0),
+            "avg_slippage": float(row[2] or 0.0),
+            "avg_abs_slippage": float(row[3] or 0.0),
+            "min_slippage": float(row[4] or 0.0),
+            "max_slippage": float(row[5] or 0.0),
+        }
+    return result
 
 
 # ---------------------------------------------------------------------------

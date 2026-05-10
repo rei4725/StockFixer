@@ -347,10 +347,20 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
             real_checked_at TIMESTAMP,
             created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            order_session   VARCHAR,
             PRIMARY KEY (market, symbol, predicted_at, side)
         )
     """
     )
+    # R-405: order_session カラムのマイグレーション（既存テーブル対応）
+    prd_cols = [
+        row[0]
+        for row in con.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_name='paper_real_diff'"
+        ).fetchall()
+    ]
+    if "order_session" not in prd_cols:
+        con.execute("ALTER TABLE paper_real_diff ADD COLUMN order_session VARCHAR")
     con.execute(
         """
         CREATE TABLE IF NOT EXISTS feature_selection_log (
