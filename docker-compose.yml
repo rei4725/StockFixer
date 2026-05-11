@@ -10,6 +10,8 @@ services:
     image: stockfixer:${VERSION:-dev}
     container_name: stockfixer
     restart: always
+    environment:
+      - LOG_FORMAT=json
     env_file:
       - ./python/.env
     volumes:

@@ -14,6 +14,7 @@
     logger.error("エラー発生", exc_info=True)
 
 ログレベルは環境変数 LOG_LEVEL（デフォルト: INFO）で制御可能。
+ログ形式は環境変数 LOG_FORMAT（json / 未設定）で制御可能。
 
 【機密値マスキング】
 以下の条件を満たす環境変数の値はログ出力前に自動的に ***REDACTED*** へ置換される。
@@ -23,7 +24,9 @@
 例外トレースバック内の機密値も対象。
 """
 
+import datetime
 import io
+import json
 import logging
 import os
 import re
@@ -104,6 +107,51 @@ class _MaskingFormatter(logging.Formatter):
         return formatted
 
 
+class JsonFormatter(logging.Formatter):
+    """
+    LOG_FORMAT=json のとき使用する JSON フォーマッター。
+    ELK / Loki 等のログ集約基盤への取り込みを前提とした1行 JSON を出力する。
+    機密値マスキングも _MaskingFormatter と同等に適用される。
+    """
+
+    def __init__(self):
+        super().__init__()
+        sensitive = _collect_sensitive_values()
+        if sensitive:
+            pattern = "|".join(re.escape(v) for v in sensitive)
+            self._pattern: Optional[re.Pattern] = re.compile(pattern)
+        else:
+            self._pattern = None
+
+    def format(self, record: logging.LogRecord) -> str:
+        if not hasattr(record, "run_id"):
+            from src.utils.run_context import get_run_id
+
+            record.run_id = get_run_id() or "-"
+
+        ts = datetime.datetime.fromtimestamp(record.created, tz=datetime.timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%S"
+        )
+        ts = f"{ts}.{int(record.msecs):03d}Z"
+
+        exc_info_str: Optional[str] = None
+        if record.exc_info:
+            exc_info_str = self.formatException(record.exc_info)
+
+        log_entry = {
+            "timestamp": ts,
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+            "exc_info": exc_info_str,
+        }
+
+        result = json.dumps(log_entry, ensure_ascii=False)
+        if self._pattern:
+            result = self._pattern.sub(_MASK_PLACEHOLDER, result)
+        return result
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -118,7 +166,11 @@ def _configure_root() -> None:
     log_level_name = os.environ.get("LOG_LEVEL", "INFO").upper()
     log_level = getattr(logging, log_level_name, logging.INFO)
 
-    formatter = _MaskingFormatter(_LOG_FORMAT, datefmt=_DATE_FORMAT)
+    log_format = os.environ.get("LOG_FORMAT", "").lower()
+    if log_format == "json":
+        formatter: logging.Formatter = JsonFormatter()
+    else:
+        formatter = _MaskingFormatter(_LOG_FORMAT, datefmt=_DATE_FORMAT)
 
     root = logging.getLogger()
     root.setLevel(log_level)
