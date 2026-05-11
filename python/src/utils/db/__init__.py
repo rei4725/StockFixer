@@ -25,6 +25,7 @@ import types
 #   db_module.get_db_path = lambda: "/tmp/test.duckdb"
 # ---------------------------------------------------------------------------
 from src.utils.db import _connection as _conn_module  # noqa: E402
+from src.utils.db.migration_runner import get_applied_migrations, run_migrations  # noqa: F401
 
 # --- 接続管理 ---
 from src.utils.db._connection import (  # noqa: F401
