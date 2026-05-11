@@ -24,7 +24,7 @@ pre-commit==4.6.0
 
 # セキュリティスキャン
 pip-audit>=2.10.0
-bandit>=1.8.0
+bandit>=1.9.4
 
 # 循環依存検出
 pydeps>=1.12.0
