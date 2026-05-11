@@ -1,0 +1,31 @@
+[MASTER]
+# 解析対象から除外するディレクトリ
+ignore=tests,__pycache__,.venv,venv
+
+# ソースルート（import 解決に使用）
+source-roots=.
+
+[FORMAT]
+max-line-length=100
+
+[MESSAGES CONTROL]
+# Phase 1: Convention(C), Refactoring(R), Warning(W) カテゴリを無効化
+# Phase 2 以降で .pylintrc を更新し段階的に有効化する
+#
+# 無効化理由:
+#   import-error (E0401): pre-commit / CI 環境で全依存パッケージが未インストールのため
+#   no-member   (E1101): pandas/DuckDB 等の動的属性アクセスで誤検知が多いため
+disable=
+    C,
+    R,
+    W,
+    import-error,
+    no-member
+
+[DESIGN]
+max-args=10
+max-attributes=10
+max-branches=15
+max-locals=20
+max-returns=6
+max-statements=60

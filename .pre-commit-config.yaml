@@ -77,23 +77,19 @@ repos:
           - pandas-stubs
         exclude: ^(tests/|.*_test\.py$|\.github/skills/)
 
-  # 6. Python コード品質メトリクス (Pylint) - オプション（軽量版）
-  # 本格的な Pylint 実行はCI/CDで行い、pre-commitでは軽量化版のみ実行
-  # NOTE: Gitバージョン問題があるため一時的に無効化
-  # - repo: https://github.com/PyCQA/pylint
-  #   rev: 3.0.3
-  #   hooks:
-  #     - id: pylint
-  #       args: [
-  #         --max-line-length=100,
-  #         --disable=all,
-  #         --enable=E0001,E0101,E0102,E0103,E0201,E0202,W0101,W0102,W0103,
-  #         --disable=missing-docstring,missing-module-docstring,
-  #         --disable=line-too-long,invalid-name
-  #       ]
-  #       exclude: ^(tests/|.*_test\.py$)
-  #       additional_dependencies:
-  #         - duckdb
+  # 6. Python コード品質メトリクス (Pylint) - Phase 1: エラー(E*)のみ
+  # .pylintrc で C/R/W カテゴリを無効化し、E カテゴリのみ有効化
+  # repo: local を使用して Git バージョン問題を回避
+  - repo: local
+    hooks:
+      - id: pylint
+        name: Pylint (errors only)
+        entry: python -m pylint
+        language: system
+        pass_filenames: false
+        args: [python/src/, --rcfile=python/.pylintrc]
+        files: ^python/src/.*\.py$
+        exclude: ^(tests/|.*_test\.py$|\.github/skills/)
 
   # 7. ロック問題検出 - DuckDB並行処理
   # DB write 競合、排他ロック漏れなどを検出
