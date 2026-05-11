@@ -17,8 +17,9 @@ class LightGBMModel(BaseModel):
     BaseModelを継承し、学習と予測のメソッドを実装する。
     """
 
-    def __init__(self, model_name: str = "LightGBMModel", **kwargs):
+    def __init__(self, model_name: str = "LightGBMModel", quantile: float | None = None, **kwargs):
         super().__init__(model_name)
+        self.quantile = quantile
         defaults: dict = {
             "n_estimators": 500,
             "max_depth": 4,
@@ -33,6 +34,9 @@ class LightGBMModel(BaseModel):
             "random_state": 42,
             "verbose": -1,
         }
+        if quantile is not None:
+            defaults["objective"] = "quantile"
+            defaults["alpha"] = float(quantile)
         defaults.update(kwargs)
         self.model = lgb.LGBMRegressor(**defaults)
 

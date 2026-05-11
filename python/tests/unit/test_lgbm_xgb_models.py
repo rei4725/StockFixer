@@ -220,6 +220,78 @@ class TestXGBoostModel(unittest.TestCase):
         self.assertEqual(len(result), len(X_val))
 
 
+class TestLightGBMModelQuantile(unittest.TestCase):
+    """LightGBMModel の quantile モードのテスト"""
+
+    @classmethod
+    def setUpClass(cls):
+        _clear_mock_modules()
+
+    def setUp(self):
+        self.X, self.y = _make_xy()
+
+    def test_quantile_init_sets_objective(self):
+        """quantile 指定時に objective が 'quantile' に設定されること"""
+        from src.prediction.models.lightgbm import LightGBMModel
+
+        model = LightGBMModel(quantile=0.1)
+        self.assertEqual(model.quantile, 0.1)
+        self.assertEqual(model.model.objective, "quantile")
+
+    def test_quantile_train_and_predict(self):
+        """quantile モデルが学習・予測できること"""
+        from src.prediction.models.lightgbm import LightGBMModel
+
+        q10 = LightGBMModel("LGBMq10", quantile=0.1)
+        q90 = LightGBMModel("LGBMq90", quantile=0.9)
+        q10.train(self.X, self.y)
+        q90.train(self.X, self.y)
+        pred_10 = q10.predict(self.X.iloc[[-1]])
+        pred_90 = q90.predict(self.X.iloc[[-1]])
+        self.assertEqual(len(pred_10), 1)
+        self.assertEqual(len(pred_90), 1)
+
+    def test_q10_leq_q90(self):
+        """P10 予測値が P90 予測値以下であること"""
+        from src.prediction.models.lightgbm import LightGBMModel
+
+        X, y = _make_xy(periods=200)
+        q10 = LightGBMModel("LGBMq10", quantile=0.1)
+        q90 = LightGBMModel("LGBMq90", quantile=0.9)
+        q10.train(X, y)
+        q90.train(X, y)
+        pred_10 = q10.predict(X.iloc[[-1]]).iloc[0]
+        pred_90 = q90.predict(X.iloc[[-1]]).iloc[0]
+        self.assertLessEqual(pred_10, pred_90)
+
+
+class TestXGBoostModelQuantile(unittest.TestCase):
+    """XGBoostModel の quantile モードのテスト"""
+
+    @classmethod
+    def setUpClass(cls):
+        _clear_mock_modules()
+
+    def setUp(self):
+        self.X, self.y = _make_xy()
+
+    def test_quantile_init_sets_attribute(self):
+        """quantile 指定時に self.quantile が設定されること"""
+        from src.prediction.models.xgboost import XGBoostModel
+
+        model = XGBoostModel(quantile=0.9)
+        self.assertEqual(model.quantile, 0.9)
+
+    def test_quantile_train_and_predict(self):
+        """quantile モデルが学習・予測できること"""
+        from src.prediction.models.xgboost import XGBoostModel
+
+        model = XGBoostModel("XGBq10", quantile=0.1)
+        model.train(self.X, self.y)
+        result = model.predict(self.X.iloc[[-1]])
+        self.assertEqual(len(result), 1)
+
+
 class TestBaseModelSaveLoad(unittest.TestCase):
     """BaseModel.save_model / load_model / get_model_name のテスト（LightGBMModel 経由）"""
 

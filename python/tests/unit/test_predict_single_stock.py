@@ -175,6 +175,32 @@ class TestBuildPredictionResult(unittest.TestCase):
         result_high_std = self._fn("us", "AAPL", 100.0, [120.0, 80.0], [0.20, -0.20])
         self.assertGreater(result_low_std.confidence_ratio, result_high_std.confidence_ratio)
 
+    def test_pred_lower_10_and_upper_90_are_set(self):
+        """pred_lower_10 / pred_upper_90 が設定されること"""
+        result = self._fn("us", "AAPL", 100.0, [105.0], [0.05])
+        self.assertIsNotNone(result.pred_lower_10)
+        self.assertIsNotNone(result.pred_upper_90)
+
+    def test_interval_ordering(self):
+        """pred_lower_10 < avg_pred_price < pred_upper_90 であること"""
+        result = self._fn("us", "AAPL", 100.0, [105.0], [0.05])
+        self.assertLess(result.pred_lower_10, result.avg_pred_price)
+        self.assertGreater(result.pred_upper_90, result.avg_pred_price)
+
+    def test_interval_wider_with_higher_std(self):
+        """モデル間分散が大きいほど信頼区間が広くなること"""
+        result_narrow = self._fn("us", "AAPL", 100.0, [105.0, 104.0], [0.05, 0.04])
+        result_wide = self._fn("us", "AAPL", 100.0, [120.0, 80.0], [0.20, -0.20])
+        width_narrow = result_narrow.pred_upper_90 - result_narrow.pred_lower_10
+        width_wide = result_wide.pred_upper_90 - result_wide.pred_lower_10
+        self.assertGreater(width_wide, width_narrow)
+
+    def test_single_model_uses_default_uncertainty(self):
+        """1モデルのとき std=0 でも信頼区間が設定されること"""
+        result = self._fn("us", "AAPL", 100.0, [105.0], [0.05])
+        # デフォルト 2% の不確実性が適用されるので幅 > 0
+        self.assertGreater(result.pred_upper_90 - result.pred_lower_10, 0.0)
+
     def test_returns_prediction_result_type(self):
         result = self._fn("jp", "7203", 2000.0, [2100.0], [0.05])
         self.assertIsInstance(result, PredictionResult)

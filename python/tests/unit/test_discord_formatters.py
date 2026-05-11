@@ -94,3 +94,52 @@ class TestConvertDfForDiscord(unittest.TestCase):
         result = convert_df_for_discord(df)
         # floor(150.9999 * 1000) / 1000 = 150.999
         assert float(result["現在値"].iloc[0]) == 150.999
+
+    def test_interval_column_shown_when_present(self):
+        """pred_lower_10 / pred_upper_90 がある場合に予想± 列が追加されること"""
+        from src.reporting.discord.discord_formatters import convert_df_for_discord
+
+        df = pd.DataFrame(
+            {
+                "symbol": ["AAPL"],
+                "current_price": [100.0],
+                "avg_pred_price": [105.0],
+                "diff_ratio": [0.05],
+                "pred_lower_10": [103.0],
+                "pred_upper_90": [107.0],
+            }
+        )
+        result = convert_df_for_discord(df)
+        assert "予想±" in result.columns
+
+    def test_interval_format(self):
+        """予想± 列が [+X.X%~+Y.Y%] 形式で出力されること"""
+        from src.reporting.discord.discord_formatters import convert_df_for_discord
+
+        df = pd.DataFrame(
+            {
+                "symbol": ["AAPL"],
+                "current_price": [100.0],
+                "avg_pred_price": [105.0],
+                "diff_ratio": [0.05],
+                "pred_lower_10": [103.0],
+                "pred_upper_90": [107.0],
+            }
+        )
+        result = convert_df_for_discord(df)
+        interval_text = str(result["予想±"].iloc[0])
+        assert "[" in interval_text and "~" in interval_text and "]" in interval_text
+
+    def test_interval_column_absent_when_not_present(self):
+        """pred_lower_10 / pred_upper_90 がない場合は予想± 列が出力されないこと"""
+        from src.reporting.discord.discord_formatters import convert_df_for_discord
+
+        df = pd.DataFrame(
+            {
+                "symbol": ["AAPL"],
+                "current_price": [100.0],
+                "avg_pred_price": [105.0],
+            }
+        )
+        result = convert_df_for_discord(df)
+        assert "予想±" not in result.columns

@@ -17,8 +17,9 @@ class XGBoostModel(BaseModel):
     BaseModelを継承し、学習と予測のメソッドを実装する。
     """
 
-    def __init__(self, model_name: str = "XGBoostModel", **kwargs):
+    def __init__(self, model_name: str = "XGBoostModel", quantile: float | None = None, **kwargs):
         super().__init__(model_name)
+        self.quantile = quantile
         defaults: dict = {
             "n_estimators": 500,
             "max_depth": 4,
@@ -32,6 +33,9 @@ class XGBoostModel(BaseModel):
             "tree_method": "hist",
             "verbosity": 0,
         }
+        if quantile is not None:
+            defaults["objective"] = "reg:quantileerror"
+            defaults["quantile_alpha"] = float(quantile)
         defaults.update(kwargs)
         self.model = xgb.XGBRegressor(**defaults)
 
