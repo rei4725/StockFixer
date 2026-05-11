@@ -80,6 +80,76 @@ class TestKabuBrokerGetToken(unittest.TestCase):
         self.assertEqual(token, "new_token")
         mock_post.assert_called_once()
 
+    @patch("src.trading.brokers.kabu.kabu_client.httpx.post")
+    def test_refreshes_token_within_buffer_window(self, mock_post):
+        """有効期限まで5分未満のトークンは事前更新されること"""
+        from src.trading.brokers.kabu.kabu_client import KabuBroker
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"Token": "refreshed_token"}
+        mock_response.raise_for_status = MagicMock()
+        mock_post.return_value = mock_response
+
+        broker = KabuBroker(api_password="test_password")
+        broker._token = "almost_expired_token"
+        broker._token_expires_at = datetime.now() + timedelta(seconds=100)  # バッファ(300s)以内
+
+        token = broker.get_token()
+        self.assertEqual(token, "refreshed_token")
+        mock_post.assert_called_once()
+
+    @patch("src.trading.brokers.kabu.kabu_client.httpx.post")
+    def test_raises_broker_error_after_all_retries_exhausted(self, mock_post):
+        """全リトライが失敗したとき BrokerError が raise されること"""
+        from src.trading.brokers.base import BrokerError
+        from src.trading.brokers.kabu.kabu_client import KabuBroker
+
+        error_response = MagicMock()
+        error_response.raise_for_status.side_effect = RuntimeError("HTTP 500")
+        mock_post.return_value = error_response
+
+        broker = KabuBroker(api_password="test_password")
+
+        with self.assertRaises(BrokerError):
+            broker.get_token()
+
+    @patch("src.trading.brokers.kabu.kabu_client.httpx.post")
+    def test_retries_once_on_first_failure_then_succeeds(self, mock_post):
+        """1回目の失敗後にリトライして成功すること"""
+        from src.trading.brokers.kabu.kabu_client import KabuBroker
+
+        error_response = MagicMock()
+        error_response.raise_for_status.side_effect = RuntimeError("timeout")
+
+        success_response = MagicMock()
+        success_response.json.return_value = {"Token": "retry_success_token"}
+        success_response.raise_for_status = MagicMock()
+
+        mock_post.side_effect = [error_response, success_response]
+
+        broker = KabuBroker(api_password="test_password")
+        token = broker.get_token()
+
+        self.assertEqual(token, "retry_success_token")
+        self.assertEqual(mock_post.call_count, 2)
+
+    @patch("src.trading.brokers.kabu.kabu_client.httpx.post")
+    def test_broker_error_call_count_matches_max_retries(self, mock_post):
+        """BrokerError 時の試行回数が _TOKEN_MAX_RETRIES に一致すること"""
+        from src.trading.brokers.base import BrokerError
+        from src.trading.brokers.kabu.kabu_client import KabuBroker, _TOKEN_MAX_RETRIES
+
+        error_response = MagicMock()
+        error_response.raise_for_status.side_effect = RuntimeError("server error")
+        mock_post.return_value = error_response
+
+        broker = KabuBroker(api_password="test_password")
+
+        with self.assertRaises(BrokerError):
+            broker.get_token()
+
+        self.assertEqual(mock_post.call_count, _TOKEN_MAX_RETRIES)
+
 
 # ──────────────────────────────────────────────────────────────────
 # KabuBroker.get_balance

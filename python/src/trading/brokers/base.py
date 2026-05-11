@@ -10,6 +10,10 @@ from enum import IntEnum
 from typing import Any
 
 
+class BrokerError(Exception):
+    """証券会社 API の操作失敗を表す例外"""
+
+
 class OrderSide(IntEnum):
     BUY = 1
     SELL = 2  # ロング決済
