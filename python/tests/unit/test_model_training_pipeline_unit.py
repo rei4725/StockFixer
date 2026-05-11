@@ -365,7 +365,7 @@ class TestTrainModelsForSymbolTask(unittest.TestCase):
 
         result = train_models_for_symbol_task(task)
 
-        mock_train.assert_called_once_with("us", "AAPL", 1)
+        mock_train.assert_called_once_with("us", "AAPL", 1, shadow_mode=False)
         self.assertEqual(result["status"], "success")
 
     @patch("src.prediction.training_pipeline.train_models_for_symbol")
@@ -376,7 +376,7 @@ class TestTrainModelsForSymbolTask(unittest.TestCase):
 
         train_models_for_symbol_task(task)
 
-        mock_train.assert_called_once_with("jp", "7203", 3)
+        mock_train.assert_called_once_with("jp", "7203", 3, shadow_mode=False)
 
     @patch("src.prediction.training_pipeline.train_models_for_symbol")
     def test_dict_task_default_horizon(self, mock_train):
@@ -385,7 +385,7 @@ class TestTrainModelsForSymbolTask(unittest.TestCase):
 
         train_models_for_symbol_task({"market": "us", "symbol": "MSFT"})
 
-        mock_train.assert_called_once_with("us", "MSFT", 1)
+        mock_train.assert_called_once_with("us", "MSFT", 1, shadow_mode=False)
 
 
 class TestComputeAndSaveShap(unittest.TestCase):
