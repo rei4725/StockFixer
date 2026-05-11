@@ -17,6 +17,7 @@ from src.prediction.training_pipeline import (
     train_models_for_symbol_task,
 )
 from src.prediction.types import TrainingMetrics
+from src.watchlist.types import BatchResult
 
 
 class TestComputeTrainingMetrics(unittest.TestCase):
@@ -588,7 +589,7 @@ class TestRunModelBatch(unittest.TestCase):
         from src.watchlist.types import SymbolTask
 
         mock_symbols.return_value = [SymbolTask(market="jp", symbol="7203")]
-        mock_parallel.return_value = []
+        mock_parallel.return_value = BatchResult(succeeded=[], failed=[], skipped=[])
         run_model_batch(horizon=1)
         mock_parallel.assert_called_once()
 
@@ -610,7 +611,7 @@ class TestRunModelBatch(unittest.TestCase):
         X = pd.DataFrame({"f1": np.random.randn(50), "f2": np.random.randn(50)})
         y = pd.Series(np.random.randn(50) * 0.01)
         load_result = FeatureLoadResult(status="success", market="jp", symbol="7203", X=X, y=y)
-        mock_parallel.return_value = [load_result]
+        mock_parallel.return_value = BatchResult(succeeded=[load_result], failed=[], skipped=[])
 
         mock_model = MagicMock()
         mock_model.predict.return_value = pd.Series(np.zeros(50))
@@ -632,7 +633,7 @@ class TestRunModelBatch(unittest.TestCase):
         from src.watchlist.types import SymbolTask
 
         mock_symbols.return_value = [SymbolTask(market="jp", symbol="7203")]
-        mock_parallel.return_value = []
+        mock_parallel.return_value = BatchResult(succeeded=[], failed=[], skipped=[])
 
         run_model_batch(horizon=5)
 

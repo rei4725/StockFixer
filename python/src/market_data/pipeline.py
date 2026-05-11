@@ -270,6 +270,7 @@ def run_data_batch(fetch_only: bool = False):
       フェーズ1のみ実行（DB保存しない）
     """
     from src.watchlist.batch_runner import load_target_symbols, print_summary, run_parallel
+    from src.watchlist.types import BatchFailure, BatchResult
 
     # バッチ取得の並列数（yfinance API制限を考慮）
     MAX_DATA_WORKERS = 3
@@ -300,7 +301,7 @@ def run_data_batch(fetch_only: bool = False):
         return
 
     # フェーズ1: データ取得＋特徴量生成（並列）
-    fetch_results = run_parallel(
+    batch_result = run_parallel(
         func=_fetch_only,
         tasks=symbols,
         max_workers=MAX_DATA_WORKERS,
@@ -309,11 +310,11 @@ def run_data_batch(fetch_only: bool = False):
 
     # fetch_only=True の場合はここで終了
     if fetch_only:
-        print_summary("データ取得（保存なし）", fetch_results)
+        print_summary("データ取得（保存なし）", batch_result)
         return
 
     # フェーズ2: DB書き込み（逐次） - DuckDB排他ロック制約のため直列実行
-    success_data = [r for r in fetch_results if r.get("status") == "success" and r.get("data")]
+    success_data = [r for r in batch_result.succeeded if r.get("data")]
     logger.info(f"DB書き込み開始（逐次） 対象件数: {len(success_data)}")
 
     db_results = []
@@ -336,6 +337,19 @@ def run_data_batch(fetch_only: bool = False):
             logger.info(f"  ... {i}/{len(success_data)} 件完了")
 
     # 最終サマリー（取得フェーズのエラー/スキップ + DB書き込み結果を統合）
-    final_results = db_results.copy()
-    final_results += [r for r in fetch_results if r.get("status") in ("error", "skip")]
-    print_summary("データ更新", final_results)
+    db_succeeded = [r for r in db_results if r.get("status") == "success"]
+    db_failed = [
+        BatchFailure(
+            market=r.get("market", "?"),
+            symbol=r.get("symbol", "?"),
+            error=r.get("error", "DB書き込みエラー"),
+        )
+        for r in db_results
+        if r.get("status") == "error"
+    ]
+    final_batch = BatchResult(
+        succeeded=db_succeeded,
+        failed=db_failed + batch_result.failed,
+        skipped=batch_result.skipped,
+    )
+    print_summary("データ更新", final_batch)

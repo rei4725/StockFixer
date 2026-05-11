@@ -486,6 +486,7 @@ def run_model_batch(horizon: int = 1):
         horizon: 予測ホライズン（営業日）。1=翌日（デフォルト）。
     """
     from src.watchlist.batch_runner import load_target_symbols, print_summary, run_parallel
+    from src.watchlist.types import BatchFailure, BatchResult
 
     # バッチ作成の並列数（CPU数に応じて調整）
     MAX_MODEL_WORKERS = 3
@@ -518,7 +519,7 @@ def run_model_batch(horizon: int = 1):
     ]
 
     # フェーズ1: データ読み込み（並列）
-    load_results = run_parallel(
+    batch_result = run_parallel(
         func=_load_features_task,
         tasks=tasks,
         max_workers=MAX_MODEL_WORKERS,
@@ -527,7 +528,7 @@ def run_model_batch(horizon: int = 1):
 
     # フェーズ2: モデル学習・保存（逐次）
     suffix = f"_{horizon}d" if horizon > 1 else ""
-    success_data = [r for r in load_results if r.is_success]
+    success_data = batch_result.succeeded
     logger.info(f"モデル学習開始（逐次）: 対象件数={len(success_data)} (horizon={horizon}d)")
 
     trained_at = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -563,9 +564,22 @@ def run_model_batch(horizon: int = 1):
             logger.info(f"  ... {i}/{len(success_data)} 件完了")
 
     # 最終サマリー
-    final_results = train_results.copy()
-    final_results += [r for r in load_results if r.status in ("error", "skip")]
-    print_summary("モデル作成", final_results)
+    train_succeeded = [r for r in train_results if r.get("status") == "success"]
+    train_failed = [
+        BatchFailure(
+            market=r.get("market", "?"),
+            symbol=r.get("symbol", "?"),
+            error=r.get("error", "モデル学習エラー"),
+        )
+        for r in train_results
+        if r.get("status") == "error"
+    ]
+    final_batch = BatchResult(
+        succeeded=train_succeeded,
+        failed=train_failed + batch_result.failed,
+        skipped=batch_result.skipped,
+    )
+    print_summary("モデル作成", final_batch)
 
 
 def _train_models_for_horizon(horizon: int, max_workers: int = 3) -> list:
