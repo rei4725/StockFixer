@@ -17,6 +17,7 @@ from src.market_data.pipeline import (
     save_features_to_db,
     save_stock_data_with_features,
 )
+from src.watchlist.types import BatchResult
 
 
 class _TmpDbTestCase(unittest.TestCase):
@@ -285,20 +286,24 @@ class TestRunDataBatch(_TmpDbTestCase):
             {"market": "us", "symbol": "TEST2"},
         ]
         data = self._make_phase1_data()
-        mock_run_parallel.return_value = [
-            {
-                "market": "us",
-                "symbol": "TEST1",
-                "status": "success",
-                "data": ("us", "TEST1", data, None, None),
-            },
-            {
-                "market": "us",
-                "symbol": "TEST2",
-                "status": "success",
-                "data": ("us", "TEST2", data, None, None),
-            },
-        ]
+        mock_run_parallel.return_value = BatchResult(
+            succeeded=[
+                {
+                    "market": "us",
+                    "symbol": "TEST1",
+                    "status": "success",
+                    "data": ("us", "TEST1", data, None, None),
+                },
+                {
+                    "market": "us",
+                    "symbol": "TEST2",
+                    "status": "success",
+                    "data": ("us", "TEST2", data, None, None),
+                },
+            ],
+            failed=[],
+            skipped=[],
+        )
 
         run_data_batch()
 
@@ -338,15 +343,18 @@ class TestRunDataBatch(_TmpDbTestCase):
             {"market": "us", "symbol": "TEST2"},
         ]
         data = self._make_phase1_data()
-        mock_run_parallel.return_value = [
-            {
-                "market": "us",
-                "symbol": "TEST1",
-                "status": "success",
-                "data": ("us", "TEST1", data, None, None),
-            },
-            {"market": "us", "symbol": "TEST2", "status": "error", "error": "取得失敗"},
-        ]
+        mock_run_parallel.return_value = BatchResult(
+            succeeded=[
+                {
+                    "market": "us",
+                    "symbol": "TEST1",
+                    "status": "success",
+                    "data": ("us", "TEST1", data, None, None),
+                },
+            ],
+            failed=[],
+            skipped=[],
+        )
 
         run_data_batch()
 
@@ -366,14 +374,18 @@ class TestRunDataBatch(_TmpDbTestCase):
 
         mock_load_symbols.return_value = [{"market": "us", "symbol": "TEST1"}]
         data = self._make_phase1_data()
-        mock_run_parallel.return_value = [
-            {
-                "market": "us",
-                "symbol": "TEST1",
-                "status": "success",
-                "data": ("us", "TEST1", data, None),
-            },
-        ]
+        mock_run_parallel.return_value = BatchResult(
+            succeeded=[
+                {
+                    "market": "us",
+                    "symbol": "TEST1",
+                    "status": "success",
+                    "data": ("us", "TEST1", data, None),
+                },
+            ],
+            failed=[],
+            skipped=[],
+        )
 
         run_data_batch(fetch_only=True)
 

@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import patch
 
 from src.watchlist.batch_runner import load_target_symbols, print_summary, run_parallel
-from src.watchlist.types import SymbolTask
+from src.watchlist.types import BatchFailure, BatchResult, SymbolTask
 
 
 class TestLoadTargetSymbols(unittest.TestCase):
@@ -135,10 +135,20 @@ class TestLoadTargetSymbols(unittest.TestCase):
 
 
 class TestRunParallel(unittest.TestCase):
-    """run_parallel 関数のテスト"""
+    """run_parallel 関数のテスト（BatchResult 返却）"""
+
+    def test_returns_batch_result(self):
+        """run_parallel が BatchResult を返すこと"""
+        tasks = [SymbolTask("us", "AAPL")]
+
+        def _success(task):
+            return {"market": task.market, "symbol": task.symbol, "status": "success"}
+
+        result = run_parallel(_success, tasks, max_workers=1)
+        self.assertIsInstance(result, BatchResult)
 
     def test_all_successful_tasks_collected(self):
-        """全タスク成功時に全件の結果が収集されること"""
+        """全タスク成功時に succeeded に全件が収集されること"""
         tasks = [
             SymbolTask("us", "AAPL"),
             SymbolTask("us", "MSFT"),
@@ -148,119 +158,170 @@ class TestRunParallel(unittest.TestCase):
         def _success(task):
             return {"market": task.market, "symbol": task.symbol, "status": "success"}
 
-        results = run_parallel(_success, tasks, max_workers=2)
+        result = run_parallel(_success, tasks, max_workers=2)
 
-        self.assertEqual(len(results), 3)
-        statuses = {r["status"] for r in results}
-        self.assertEqual(statuses, {"success"})
+        self.assertEqual(len(result.succeeded), 3)
+        self.assertEqual(len(result.failed), 0)
+        self.assertEqual(len(result.skipped), 0)
 
-    def test_error_task_captured_with_status_error(self):
-        """例外を投げるタスクが status=error として収集されること"""
+    def test_error_task_captured_in_failed(self):
+        """例外を投げるタスクが failed に BatchFailure として収集されること"""
         tasks = [SymbolTask("us", "BAD")]
 
         def _fail(task):
             raise ValueError("test error")
 
-        results = run_parallel(_fail, tasks, max_workers=1)
+        result = run_parallel(_fail, tasks, max_workers=1)
 
-        self.assertEqual(len(results), 1)
-        self.assertEqual(results[0]["status"], "error")
-        self.assertIn("error", results[0])
+        self.assertEqual(len(result.succeeded), 0)
+        self.assertEqual(len(result.failed), 1)
+        self.assertIsInstance(result.failed[0], BatchFailure)
 
-    def test_error_result_contains_market_symbol(self):
-        """エラー時の結果に market / symbol が含まれること"""
+    def test_failed_contains_market_symbol_error(self):
+        """BatchFailure に market / symbol / error が設定されること"""
         tasks = [SymbolTask("jp", "9984")]
 
         def _fail(task):
             raise RuntimeError("db error")
 
-        results = run_parallel(_fail, tasks, max_workers=1)
+        result = run_parallel(_fail, tasks, max_workers=1)
 
-        self.assertEqual(results[0]["market"], "jp")
-        self.assertEqual(results[0]["symbol"], "9984")
+        bf = result.failed[0]
+        self.assertEqual(bf.market, "jp")
+        self.assertEqual(bf.symbol, "9984")
+        self.assertIn("db error", bf.error)
 
-    def test_empty_tasks_returns_empty_list(self):
-        """タスクリストが空の場合は空リストが返ること"""
-        results = run_parallel(lambda t: t, [], max_workers=2)
-        self.assertEqual(results, [])
+    def test_empty_tasks_returns_empty_batch_result(self):
+        """タスクリストが空の場合は空の BatchResult が返ること"""
+        result = run_parallel(lambda t: t, [], max_workers=2)
+        self.assertIsInstance(result, BatchResult)
+        self.assertEqual(len(result.succeeded), 0)
+        self.assertEqual(len(result.failed), 0)
 
-    def test_mixed_success_and_error(self):
-        """成功とエラーが混在する場合、両方が収集されること"""
+    def test_skip_status_goes_to_skipped(self):
+        """status=="skip" を返すタスクが skipped に収集されること"""
+        tasks = [SymbolTask("us", "SKIP")]
+
+        def _skip(task):
+            return {"market": task.market, "symbol": task.symbol, "status": "skip"}
+
+        result = run_parallel(_skip, tasks, max_workers=1)
+
+        self.assertEqual(len(result.skipped), 1)
+        self.assertEqual(len(result.succeeded), 0)
+        self.assertEqual(len(result.failed), 0)
+
+    def test_error_status_return_goes_to_failed(self):
+        """関数が status=="error" を返した場合も failed に収集されること"""
+        tasks = [SymbolTask("us", "ERR")]
+
+        def _err(task):
+            return {"market": task.market, "symbol": task.symbol, "status": "error", "error": "内部エラー"}
+
+        result = run_parallel(_err, tasks, max_workers=1)
+
+        self.assertEqual(len(result.failed), 1)
+        self.assertEqual(len(result.succeeded), 0)
+        bf = result.failed[0]
+        self.assertEqual(bf.market, "us")
+        self.assertEqual(bf.symbol, "ERR")
+
+    def test_mixed_results_distributed_correctly(self):
+        """成功・エラー・スキップが正しく分類されること"""
 
         def _mixed(task):
             if task.symbol == "BAD":
                 raise ValueError("bad symbol")
+            if task.symbol == "SKIP":
+                return {"market": task.market, "symbol": task.symbol, "status": "skip"}
             return {"market": task.market, "symbol": task.symbol, "status": "success"}
 
-        tasks = [SymbolTask("us", "AAPL"), SymbolTask("us", "BAD")]
-        results = run_parallel(_mixed, tasks, max_workers=2)
+        tasks = [
+            SymbolTask("us", "AAPL"),
+            SymbolTask("us", "BAD"),
+            SymbolTask("us", "SKIP"),
+        ]
+        result = run_parallel(_mixed, tasks, max_workers=2)
 
-        self.assertEqual(len(results), 2)
-        statuses = {r["status"] for r in results}
-        self.assertIn("success", statuses)
-        self.assertIn("error", statuses)
+        self.assertEqual(len(result.succeeded), 1)
+        self.assertEqual(len(result.failed), 1)
+        self.assertEqual(len(result.skipped), 1)
 
     def test_thread_pool_used_by_default(self):
-        """デフォルト（use_process=False）は ThreadPoolExecutor が使われること"""
+        """デフォルト（use_process=False）で BatchResult が返ること"""
         tasks = [SymbolTask("us", "AAPL")]
-        call_log = []
 
         def _track(task):
-            call_log.append(task.symbol)
             return {"market": task.market, "symbol": task.symbol, "status": "success"}
 
-        results = run_parallel(_track, tasks, use_process=False)
-
-        self.assertEqual(len(results), 1)
-        self.assertIn("AAPL", call_log)
-
-    def test_result_count_matches_task_count(self):
-        """タスク数と結果数が一致すること"""
-        tasks = [SymbolTask("us", f"STOCK{i}") for i in range(5)]
-
-        def _success(task):
-            return {"market": task.market, "symbol": task.symbol, "status": "success"}
-
-        results = run_parallel(_success, tasks, max_workers=3)
-        self.assertEqual(len(results), 5)
+        result = run_parallel(_track, tasks, use_process=False)
+        self.assertEqual(len(result.succeeded), 1)
 
 
 class TestPrintSummary(unittest.TestCase):
-    """print_summary 関数のテスト"""
+    """print_summary 関数のテスト（BatchResult ベース）"""
 
-    def test_runs_without_error_on_mixed_results(self):
+    def _make_batch(self, succeeded=None, failed=None, skipped=None) -> BatchResult:
+        return BatchResult(
+            succeeded=succeeded or [],
+            failed=failed or [],
+            skipped=skipped or [],
+        )
+
+    @patch("src.watchlist.batch_runner.send_webhook_notification", create=True)
+    def test_runs_without_error_on_mixed_results(self, _mock_notify):
         """成功/エラー/スキップ混在でエラーなく実行されること"""
-        results = [
-            {"status": "success", "market": "us", "symbol": "AAPL"},
-            {"status": "error", "market": "us", "symbol": "BAD", "error": "test error"},
-            {"status": "skip", "market": "jp", "symbol": "1234"},
-        ]
-        print_summary("テスト処理", results)
+        batch = self._make_batch(
+            succeeded=[{"market": "us", "symbol": "AAPL", "status": "success"}],
+            failed=[BatchFailure(market="us", symbol="BAD", error="test error")],
+            skipped=[{"market": "jp", "symbol": "1234", "status": "skip"}],
+        )
+        print_summary("テスト処理", batch)
 
     def test_runs_without_error_on_all_success(self):
         """全成功でもエラーなく実行されること"""
-        results = [
-            {"status": "success", "market": "us", "symbol": "AAPL"},
-            {"status": "success", "market": "jp", "symbol": "7203"},
-        ]
-        print_summary("全成功処理", results)
+        batch = self._make_batch(
+            succeeded=[
+                {"market": "us", "symbol": "AAPL", "status": "success"},
+                {"market": "jp", "symbol": "7203", "status": "success"},
+            ],
+        )
+        print_summary("全成功処理", batch)
 
     def test_runs_without_error_on_empty_results(self):
-        """空リストでもエラーなく実行されること"""
-        print_summary("空処理", [])
+        """空の BatchResult でもエラーなく実行されること"""
+        print_summary("空処理", self._make_batch())
 
-    def test_runs_without_error_on_all_errors(self):
+    @patch("src.watchlist.batch_runner.send_webhook_notification", create=True)
+    def test_runs_without_error_on_all_errors(self, _mock_notify):
         """全エラーでもエラーなく実行されること"""
-        results = [
-            {"status": "error", "market": "us", "symbol": "BAD1", "error": "err1"},
-            {"status": "error", "market": "us", "symbol": "BAD2", "error": "err2"},
-        ]
-        print_summary("全エラー処理", results)
+        batch = self._make_batch(
+            failed=[
+                BatchFailure(market="us", symbol="BAD1", error="err1"),
+                BatchFailure(market="us", symbol="BAD2", error="err2"),
+            ],
+        )
+        print_summary("全エラー処理", batch)
 
-    def test_missing_optional_keys_no_crash(self):
-        """market / symbol / error キーが欠けていてもクラッシュしないこと"""
-        results = [{"status": "error"}]
-        print_summary("キー欠落処理", results)
+    @patch("src.reporting.discord.discord_utils.send_webhook_notification")
+    def test_discord_alert_sent_when_failures_exist(self, mock_notify):
+        """failed が存在するとき Discord 通知が試みられること"""
+        batch = self._make_batch(
+            failed=[BatchFailure(market="us", symbol="BAD", error="fail")],
+        )
+        print_summary("通知テスト", batch)
+        mock_notify.assert_called_once()
+
+    def test_no_discord_alert_when_no_failures(self):
+        """failed が空のとき Discord 通知が呼ばれないこと"""
+        batch = self._make_batch(
+            succeeded=[{"market": "us", "symbol": "AAPL", "status": "success"}],
+        )
+        with patch(
+            "src.reporting.discord.discord_utils.send_webhook_notification"
+        ) as mock_notify:
+            print_summary("成功のみ", batch)
+        mock_notify.assert_not_called()
 
 
 if __name__ == "__main__":

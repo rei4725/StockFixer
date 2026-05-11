@@ -12,7 +12,7 @@ from typing import Callable, Optional
 from src.utils.data_path_utils import get_watchlist_path
 from src.utils.db import load_index_membership_symbols_as_of
 from src.utils.logger import get_logger
-from src.watchlist.types import SymbolTask
+from src.watchlist.types import BatchFailure, BatchResult, SymbolTask
 
 logger = get_logger(__name__)
 
@@ -60,6 +60,21 @@ def load_target_symbols(as_of_date: Optional[str] = None) -> list[SymbolTask]:
     return symbols
 
 
+def _task_field(task, field: str, default: str = "?") -> str:
+    val = getattr(task, field, None)
+    if val is None and hasattr(task, "get"):
+        val = task.get(field)
+    return val if val is not None else default
+
+
+def _result_status(result) -> str:
+    if isinstance(result, dict):
+        return result.get("status", "success")
+    if hasattr(result, "status"):
+        return result.status
+    return "success"
+
+
 def run_parallel(
     func: Callable,
     tasks: list,
@@ -67,7 +82,7 @@ def run_parallel(
     use_process: bool = False,
     label: str = "処理",
     task_timeout: int = DEFAULT_TASK_TIMEOUT,
-) -> list:
+) -> BatchResult:
     """
     タスクを並列実行する汎用ランナー
 
@@ -80,12 +95,14 @@ def run_parallel(
         task_timeout: 個別タスクのタイムアウト（秒）。0で無制限。
 
     Returns:
-        list of dict: 各タスクの結果
+        BatchResult: 成功・失敗・スキップを分類した集約結果
     """
     logger.info(f"{label}開始（並列数: {max_workers}） 対象件数: {len(tasks)}")
 
     Executor = ProcessPoolExecutor if use_process else ThreadPoolExecutor
-    results = []
+    succeeded: list = []
+    failed: list = []
+    skipped: list = []
     timeout_val = task_timeout if task_timeout > 0 else None
     with Executor(max_workers=max_workers) as executor:
         futures = {executor.submit(func, task): task for task in tasks}
@@ -93,64 +110,68 @@ def run_parallel(
             task = futures[future]
             try:
                 result = future.result(timeout=timeout_val)
-                results.append(result)
+                status = _result_status(result)
+                if status == "skip":
+                    skipped.append(result)
+                elif status == "error":
+                    _m = _task_field(result, "market")
+                    _s = _task_field(result, "symbol")
+                    _e = (
+                        result.get("error", "unknown")
+                        if isinstance(result, dict)
+                        else getattr(result, "error", "unknown")
+                    )
+                    logger.error(f"[エラー結果] {_m}/{_s}: {_e}")
+                    failed.append(BatchFailure(market=_m, symbol=_s, error=str(_e)))
+                else:
+                    succeeded.append(result)
             except TimeoutError:
-                _m = getattr(task, "market", None) or task.get("market", "?")
-                _s = getattr(task, "symbol", None) or task.get("symbol", "?")
-                task_label = f"{_m}/{_s}"
-                logger.error(f"[タイムアウト] {task_label}: {task_timeout}秒超過")
-                results.append(
-                    {
-                        "market": getattr(task, "market", None) or task.get("market", "?"),
-                        "symbol": getattr(task, "symbol", None) or task.get("symbol", "?"),
-                        "status": "error",
-                        "error": f"タイムアウト（{task_timeout}秒）",
-                    }
+                _m = _task_field(task, "market")
+                _s = _task_field(task, "symbol")
+                logger.error(f"[タイムアウト] {_m}/{_s}: {task_timeout}秒超過")
+                failed.append(
+                    BatchFailure(market=_m, symbol=_s, error=f"タイムアウト（{task_timeout}秒）")
                 )
             except Exception as e:
-                _m = getattr(task, "market", None) or task.get("market", "?")
-                _s = getattr(task, "symbol", None) or task.get("symbol", "?")
-                task_label = f"{_m}/{_s}"
-                logger.error(f"[未処理エラー] {task_label}: {e}", exc_info=True)
-                results.append(
-                    {
-                        "market": getattr(task, "market", None) or task.get("market", "?"),
-                        "symbol": getattr(task, "symbol", None) or task.get("symbol", "?"),
-                        "status": "error",
-                        "error": str(e),
-                    }
-                )
+                _m = _task_field(task, "market")
+                _s = _task_field(task, "symbol")
+                logger.error(f"[未処理エラー] {_m}/{_s}: {e}", exc_info=True)
+                failed.append(BatchFailure(market=_m, symbol=_s, error=str(e)))
 
-    return results
+    return BatchResult(succeeded=succeeded, failed=failed, skipped=skipped)
 
 
-def print_summary(phase: str, results: list) -> None:
+def print_summary(phase: str, batch_result: BatchResult) -> None:
     """
-    バッチ処理の結果サマリーを出力する
+    バッチ処理の結果サマリーを出力し、失敗があれば Discord に通知する。
 
     Args:
         phase: 処理フェーズ名（例: "データ取得", "モデル作成"）
-        results: 結果リスト（FeatureLoadResult または dict）
+        batch_result: run_parallel() の返す BatchResult
     """
+    n_success = len(batch_result.succeeded)
+    n_skip = len(batch_result.skipped)
+    n_error = len(batch_result.failed)
 
-    def _get(obj, key, default=None):
-        """dataclass と dict の両方に対応して属性を取得"""
-        if hasattr(obj, key):
-            return getattr(obj, key)
-        if hasattr(obj, "get"):
-            return obj.get(key, default)
-        return default
+    logger.info(
+        f"{phase} 結果サマリー 成功: {n_success} / スキップ: {n_skip} / エラー: {n_error}"
+    )
 
-    success = [r for r in results if _get(r, "status") == "success"]
-    errors = [r for r in results if _get(r, "status") == "error"]
-    skipped = [r for r in results if _get(r, "status") == "skip"]
-
-    logger.info(f"{phase} 結果サマリー 成功: {len(success)} / スキップ: {len(skipped)} / エラー: {len(errors)}")
-
-    if errors:
+    if batch_result.failed:
         logger.warning(f"\n{phase} エラー詳細:")
-        for e in errors:
-            market = _get(e, "market", "?")
-            symbol = _get(e, "symbol", "?")
-            error = _get(e, "error", "unknown")
-            logger.warning(f"  - {market}/{symbol}: {error}")
+        for f in batch_result.failed:
+            logger.warning(f"  - {f.market}/{f.symbol}: {f.error}")
+
+        try:
+            from src.reporting.discord.discord_utils import send_webhook_notification
+
+            lines = [f"**[{phase} バッチエラー]** {n_error} 銘柄失敗"]
+            for f in batch_result.failed:
+                lines.append(f"• `{f.market}/{f.symbol}`: {f.error}")
+            send_webhook_notification(
+                title=f"{phase} バッチエラー",
+                message="\n".join(lines),
+                color=0xFF0000,
+            )
+        except Exception as e:
+            logger.error("バッチエラー Discord 通知失敗: %s", e, exc_info=True)

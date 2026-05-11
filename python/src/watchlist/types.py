@@ -58,3 +58,26 @@ class WatchlistPredictionView:
     @property
     def is_success(self) -> bool:
         return self.error_message is None
+
+
+@dataclass
+class BatchFailure:
+    """バッチ実行の単一失敗エントリ（例外 / タイムアウト起因）。"""
+
+    market: str
+    symbol: str
+    error: str
+
+
+@dataclass
+class BatchResult:
+    """run_parallel() の集約結果。
+
+    succeeded: 正常完了（status=="success"）した結果オブジェクトのリスト
+    failed:    例外・タイムアウト・status=="error" による失敗エントリのリスト
+    skipped:   status=="skip" として返された結果オブジェクトのリスト
+    """
+
+    succeeded: list = field(default_factory=list)
+    failed: list = field(default_factory=list)
+    skipped: list = field(default_factory=list)
