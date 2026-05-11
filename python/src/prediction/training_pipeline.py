@@ -307,20 +307,27 @@ def _compute_and_save_shap(
         return pd.DataFrame()
 
 
-def train_models_for_symbol(market: str, symbol: str, horizon: int = 1) -> dict:
+def train_models_for_symbol(
+    market: str, symbol: str, horizon: int = 1, shadow_mode: bool = False
+) -> dict:
     """
     単一銘柄に対してXGBoost・LightGBMモデルを学習・保存する
+
+    shadow_mode=True の場合はチャレンジャーモデル（Challenger* 名）として保存する。
+    本番モデル（Stock*）とは別ファイルに保存され、evaluate_shadow_models() で比較可能。
 
     Args:
         market: 市場名（例: "us", "jp"）
         symbol: 銘柄コード（例: "AAPL", "7203"）
         horizon: 予測ホライズン（営業日）。1=翌日（デフォルト）。
+        shadow_mode: True のときチャレンジャーモデルとして学習・保存する
 
     Returns:
         dict: {"market", "symbol", "status", ...}  (batch_runner.print_summary 互換)
     """
     try:
-        logger.info(f"[モデル作成開始] {market}/{symbol} (horizon={horizon}d)")
+        mode_label = "challenger" if shadow_mode else "production"
+        logger.info(f"[モデル作成開始] {market}/{symbol} (horizon={horizon}d, mode={mode_label})")
 
         # DBから特徴量データを取得
         loaded = load_features_for_training(market, symbol, horizon=horizon)
@@ -356,9 +363,12 @@ def train_models_for_symbol(market: str, symbol: str, horizon: int = 1) -> dict:
         trained_at = datetime.now().strftime("%Y%m%d_%H%M%S")
         shap_results: list[dict] = []
 
+        # shadow_mode のときはチャレンジャーモデル名プレフィックスを使用
+        name_prefix = "Challenger" if shadow_mode else "Stock"
+
         for model_type, model_name in [
-            ("XGBoostModel", f"StockXGBoostModel{suffix}"),
-            ("LightGBMModel", f"StockLightGBMModel{suffix}"),
+            ("XGBoostModel", f"{name_prefix}XGBoostModel{suffix}"),
+            ("LightGBMModel", f"{name_prefix}LightGBMModel{suffix}"),
         ]:
             run_id = generate_run_id()
             model_manager.create_model(model_type, model_name)
@@ -394,6 +404,7 @@ def train_models_for_symbol(market: str, symbol: str, horizon: int = 1) -> dict:
                     ),
                     n_samples=saved_metrics.n_samples if saved_metrics else None,
                     feature_names=list(X.columns),
+                    params={"role": mode_label},
                 )
             except Exception as e:
                 logger.warning(f"実験ラン保存スキップ [{market}_{symbol}/{model_name}]: {e}", exc_info=True)
@@ -444,12 +455,13 @@ def train_models_for_symbol(market: str, symbol: str, horizon: int = 1) -> dict:
         return {"market": market, "symbol": symbol, "status": "error", "error": str(e)}
 
 
-def train_models_for_symbol_task(task) -> dict:
+def train_models_for_symbol_task(task, shadow_mode: bool = False) -> dict:
     """
     バッチランナー用ラッパー（SymbolTask または dict を受け取る）
 
     Args:
         task: SymbolTask または {"market": str, "symbol": str, "horizon": int (省略可)}
+        shadow_mode: True のときチャレンジャーモデルとして学習・保存する
 
     Returns:
         dict: train_models_for_symbolの戻り値  (batch_runner.print_summary 互換)
@@ -457,8 +469,10 @@ def train_models_for_symbol_task(task) -> dict:
     from src.watchlist.types import SymbolTask
 
     if isinstance(task, SymbolTask):
-        return train_models_for_symbol(task.market, task.symbol, task.horizon)
-    return train_models_for_symbol(task["market"], task["symbol"], task.get("horizon", 1))
+        return train_models_for_symbol(task.market, task.symbol, task.horizon, shadow_mode=shadow_mode)
+    return train_models_for_symbol(
+        task["market"], task["symbol"], task.get("horizon", 1), shadow_mode=shadow_mode
+    )
 
 
 def run_model_batch(horizon: int = 1):

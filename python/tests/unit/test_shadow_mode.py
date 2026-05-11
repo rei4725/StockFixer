@@ -553,3 +553,222 @@ class TestRunShadowPrediction(unittest.TestCase):
             run_shadow_prediction(predict_fn=fn, challenger_predict_fn=None)
 
         self.assertEqual(fn.call_count, 2)
+
+
+# ---------------------------------------------------------------------------
+# train_models_for_symbol shadow_mode テスト
+# ---------------------------------------------------------------------------
+
+
+class TestTrainModelsForSymbolShadowMode(unittest.TestCase):
+    """train_models_for_symbol の shadow_mode 引数に関するテスト"""
+
+    def _make_fake_loaded(self):
+        import pandas as pd
+        from src.prediction.types import FeatureLoadResult
+
+        X = pd.DataFrame({"f1": [1.0, 2.0, 3.0] * 40, "f2": [0.1, 0.2, 0.3] * 40})
+        y = pd.Series([0.01, -0.01, 0.02] * 40)
+        return FeatureLoadResult(status="success", market="us", symbol="AAPL", X=X, y=y)
+
+    def test_shadow_mode_uses_challenger_model_names(self):
+        """shadow_mode=True のとき Challenger* モデル名で保存されること"""
+        from unittest.mock import call, patch
+
+        fake_loaded = self._make_fake_loaded()
+        saved_model_names = []
+
+        def fake_save(model_name, market, symbol, feature_columns=None):
+            saved_model_names.append(model_name)
+
+        with (
+            patch(
+                "src.prediction.training_pipeline.load_features_for_training",
+                return_value=fake_loaded,
+            ),
+            patch(
+                "src.prediction.training_pipeline.ModelManager"
+            ) as MockMgr,
+            patch("src.prediction.training_pipeline.save_model_metrics"),
+            patch("src.prediction.training_pipeline.save_experiment_run") as mock_exp,
+            patch("src.prediction.training_pipeline._compute_and_save_shap", return_value=pd.DataFrame()),
+            patch("src.prediction.training_pipeline._compute_and_save_permutation_importance"),
+        ):
+            mgr_instance = MockMgr.return_value
+            mgr_instance.get_model.return_value.predict.return_value = pd.Series([0.01] * len(fake_loaded.y))
+            mgr_instance.save_model.side_effect = fake_save
+
+            from src.prediction.training_pipeline import train_models_for_symbol
+
+            result = train_models_for_symbol("us", "AAPL", shadow_mode=True)
+
+        self.assertEqual(result["status"], "success")
+        # Challenger プレフィックスが使われること
+        for name in saved_model_names:
+            self.assertTrue(
+                name.startswith("Challenger"),
+                f"shadow_mode=True なのに Challenger 以外のモデル名: {name}",
+            )
+
+    def test_normal_mode_uses_stock_model_names(self):
+        """shadow_mode=False（デフォルト）のとき Stock* モデル名で保存されること"""
+        from unittest.mock import patch
+
+        fake_loaded = self._make_fake_loaded()
+        saved_model_names = []
+
+        def fake_save(model_name, market, symbol, feature_columns=None):
+            saved_model_names.append(model_name)
+
+        with (
+            patch(
+                "src.prediction.training_pipeline.load_features_for_training",
+                return_value=fake_loaded,
+            ),
+            patch(
+                "src.prediction.training_pipeline.ModelManager"
+            ) as MockMgr,
+            patch("src.prediction.training_pipeline.save_model_metrics"),
+            patch("src.prediction.training_pipeline.save_experiment_run"),
+            patch("src.prediction.training_pipeline._compute_and_save_shap", return_value=pd.DataFrame()),
+            patch("src.prediction.training_pipeline._compute_and_save_permutation_importance"),
+        ):
+            mgr_instance = MockMgr.return_value
+            mgr_instance.get_model.return_value.predict.return_value = pd.Series([0.01] * len(fake_loaded.y))
+            mgr_instance.save_model.side_effect = fake_save
+
+            from src.prediction.training_pipeline import train_models_for_symbol
+
+            result = train_models_for_symbol("us", "AAPL", shadow_mode=False)
+
+        self.assertEqual(result["status"], "success")
+        for name in saved_model_names:
+            self.assertTrue(
+                name.startswith("Stock"),
+                f"shadow_mode=False なのに Stock 以外のモデル名: {name}",
+            )
+
+    def test_shadow_mode_records_challenger_role_in_experiment_runs(self):
+        """shadow_mode=True のとき experiment_runs に role='challenger' が記録されること"""
+        from unittest.mock import patch
+
+        fake_loaded = self._make_fake_loaded()
+        experiment_calls = []
+
+        def capture_experiment(**kwargs):
+            experiment_calls.append(kwargs)
+
+        with (
+            patch(
+                "src.prediction.training_pipeline.load_features_for_training",
+                return_value=fake_loaded,
+            ),
+            patch("src.prediction.training_pipeline.ModelManager") as MockMgr,
+            patch("src.prediction.training_pipeline.save_model_metrics"),
+            patch(
+                "src.prediction.training_pipeline.save_experiment_run",
+                side_effect=lambda **kw: experiment_calls.append(kw),
+            ),
+            patch("src.prediction.training_pipeline._compute_and_save_shap", return_value=pd.DataFrame()),
+            patch("src.prediction.training_pipeline._compute_and_save_permutation_importance"),
+        ):
+            mgr_instance = MockMgr.return_value
+            mgr_instance.get_model.return_value.predict.return_value = pd.Series([0.01] * len(fake_loaded.y))
+
+            from src.prediction.training_pipeline import train_models_for_symbol
+
+            train_models_for_symbol("us", "AAPL", shadow_mode=True)
+
+        self.assertTrue(len(experiment_calls) > 0)
+        for call_kw in experiment_calls:
+            params = call_kw.get("params", {})
+            self.assertEqual(
+                params.get("role"), "challenger", f"role != 'challenger': {params}"
+            )
+
+
+# ---------------------------------------------------------------------------
+# promote_challenger_to_production テスト
+# ---------------------------------------------------------------------------
+
+
+class TestPromoteChallengerToProduction(unittest.TestCase):
+    """promote_challenger_to_production のテスト"""
+
+    def setUp(self):
+        import tempfile
+        self.tmp_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp_dir, ignore_errors=True)
+
+    def _make_model_dir(self, market, symbol):
+        model_dir = os.path.join(self.tmp_dir, "models", f"{market}_{symbol}")
+        os.makedirs(model_dir, exist_ok=True)
+        return model_dir
+
+    def test_copies_challenger_to_production(self):
+        """チャレンジャーファイルが本番名にコピーされること"""
+        import joblib
+        from unittest.mock import patch
+
+        model_dir = self._make_model_dir("us", "AAPL")
+        for name in ["ChallengerXGBoostModel", "ChallengerLightGBMModel"]:
+            joblib.dump({"model": "dummy"}, os.path.join(model_dir, f"{name}.joblib"))
+
+        with patch(
+            "src.prediction.shadow_evaluation.get_models_subdir",
+            return_value=model_dir,
+        ):
+            from src.prediction.shadow_evaluation import promote_challenger_to_production
+
+            result = promote_challenger_to_production("us", "AAPL")
+
+        self.assertEqual(result["dry_run"], False)
+        self.assertIn("StockXGBoostModel", result["promoted"])
+        self.assertIn("StockLightGBMModel", result["promoted"])
+        self.assertEqual(len(result["skipped"]), 0)
+        # コピー先ファイルが存在すること
+        self.assertTrue(os.path.exists(os.path.join(model_dir, "StockXGBoostModel.joblib")))
+        self.assertTrue(os.path.exists(os.path.join(model_dir, "StockLightGBMModel.joblib")))
+
+    def test_dry_run_does_not_copy(self):
+        """dry_run=True のときファイルがコピーされないこと"""
+        import joblib
+        from unittest.mock import patch
+
+        model_dir = self._make_model_dir("us", "AAPL")
+        joblib.dump({"model": "dummy"}, os.path.join(model_dir, "ChallengerXGBoostModel.joblib"))
+        joblib.dump({"model": "dummy"}, os.path.join(model_dir, "ChallengerLightGBMModel.joblib"))
+
+        with patch(
+            "src.prediction.shadow_evaluation.get_models_subdir",
+            return_value=model_dir,
+        ):
+            from src.prediction.shadow_evaluation import promote_challenger_to_production
+
+            result = promote_challenger_to_production("us", "AAPL", dry_run=True)
+
+        self.assertTrue(result["dry_run"])
+        # dry_run なので実ファイルはコピーされない
+        self.assertFalse(os.path.exists(os.path.join(model_dir, "StockXGBoostModel.joblib")))
+
+    def test_skips_missing_challenger_model(self):
+        """チャレンジャーファイルが存在しない場合は skipped に記録されること"""
+        from unittest.mock import patch
+
+        model_dir = self._make_model_dir("us", "AAPL")
+        # ファイルを作らない
+
+        with patch(
+            "src.prediction.shadow_evaluation.get_models_subdir",
+            return_value=model_dir,
+        ):
+            from src.prediction.shadow_evaluation import promote_challenger_to_production
+
+            result = promote_challenger_to_production("us", "AAPL")
+
+        self.assertEqual(len(result["promoted"]), 0)
+        self.assertIn("ChallengerXGBoostModel", result["skipped"])
+        self.assertIn("ChallengerLightGBMModel", result["skipped"])
