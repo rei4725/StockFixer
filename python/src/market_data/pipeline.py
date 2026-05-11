@@ -11,6 +11,7 @@ from typing import Optional
 import pandas as pd
 
 from src.features.sentiment_features import add_sentiment_features, fetch_news_sentiment
+from src.market_data.base import DataSourceBase
 from src.market_data.technical import add_technical_indicators, create_basic_lag_features
 from src.market_data.loader import (
     fetch_cross_asset_features,
@@ -34,6 +35,7 @@ def fetch_stock_data_with_features(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     defer_raw_save: bool = False,
+    data_source: Optional[DataSourceBase] = None,
 ) -> Optional[tuple]:
     """
     株価データを取得し特徴量を生成する（DB書き込みなし）。
@@ -77,7 +79,10 @@ def fetch_stock_data_with_features(
             # DB内有データ：差分更新ロジック
             fetch_start = (pd.to_datetime(db_latest_date) + timedelta(days=1)).strftime("%Y-%m-%d")
             logger.info(f"差分取得: {market}/{symbol} ({fetch_start}～{end_date})")
-            fresh_data = get_stock_data(market, ticker, fetch_start, end_date)
+            if data_source is not None:
+                fresh_data = data_source.get_stock_data(symbol, market, fetch_start, end_date)
+            else:
+                fresh_data = get_stock_data(market, ticker, fetch_start, end_date)
             if fresh_data is not None and not fresh_data.empty:
                 df = merge_market_data(df, fresh_data)
                 logger.info(f"差分マージ完了: {len(fresh_data)}行追加")
@@ -98,7 +103,10 @@ def fetch_stock_data_with_features(
                 f"market={market}, symbol={symbol}, ticker={ticker}, "
                 f"{start_date}～{end_date}"
             )
-            df = get_stock_data(market, ticker, start_date, end_date)
+            if data_source is not None:
+                df = data_source.get_stock_data(symbol, market, start_date, end_date)
+            else:
+                df = get_stock_data(market, ticker, start_date, end_date)
             if df is None or df.empty:
                 logger.warning("データが取得できませんでした。")
                 return None
