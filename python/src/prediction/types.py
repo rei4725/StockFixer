@@ -13,6 +13,18 @@ import pandas as pd
 
 
 @dataclass
+class HorizonResult:
+    """単一ホライズンの予測結果。
+
+    PredictionResult.horizons dict の値として使用する。
+    """
+
+    horizon_days: int
+    pred_price: float
+    diff_ratio: float
+
+
+@dataclass
 class TrainingMetrics:
     """モデル学習後の in-sample 評価指標。
 
@@ -56,6 +68,9 @@ class PredictionResult:
     # A/B テスト（シャドーモード）
     model_version: Optional[str] = None  # "production" / "challenger" / 任意バージョン文字列
 
+    # マルチホライズン集約（新設計: horizon_days → HorizonResult）
+    horizons: dict[int, HorizonResult] = field(default_factory=dict)
+
     # ------------------------------------------------------------------
     # 変換メソッド（変換知識はここに1箇所）
     # ------------------------------------------------------------------
@@ -95,6 +110,11 @@ class PredictionResult:
                 row["pred_upper_90"] = r.pred_upper_90
             if r.model_version is not None:
                 row["model_version"] = r.model_version
+            # horizons dict の内容をフラットカラムに展開（h=1 は主フィールドと重複するためスキップ）
+            for h, hr in r.horizons.items():
+                if h > 1:
+                    row[f"avg_pred_price_{h}d"] = hr.pred_price
+                    row[f"diff_ratio_{h}d"] = hr.diff_ratio
             rows.append(row)
         return pd.DataFrame(rows) if rows else pd.DataFrame()
 
@@ -114,6 +134,13 @@ class PredictionResult:
             val = row.get(key)
             return str(val) if val is not None and not pd.isna(val) else None
 
+        horizons_dict: dict[int, HorizonResult] = {}
+        for h in [3, 5, 10]:
+            pp = _opt_float(f"avg_pred_price_{h}d")
+            dr = _opt_float(f"diff_ratio_{h}d")
+            if pp is not None and dr is not None:
+                horizons_dict[h] = HorizonResult(horizon_days=h, pred_price=pp, diff_ratio=dr)
+
         return cls(
             market=str(row["market"]),
             symbol=str(row["symbol"]),
@@ -132,6 +159,7 @@ class PredictionResult:
             pred_lower_10=_opt_float("pred_lower_10"),
             pred_upper_90=_opt_float("pred_upper_90"),
             model_version=_opt_str("model_version"),
+            horizons=horizons_dict,
         )
 
 

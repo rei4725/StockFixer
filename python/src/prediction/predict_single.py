@@ -10,7 +10,7 @@ from src.market_data.technical import add_technical_indicators, create_basic_lag
 from src.market_data import loader as data_loader
 from src.market_data.loader import fetch_cross_asset_features
 from src.prediction.manager import ModelManager
-from src.prediction.types import PredictionResult
+from src.prediction.types import HorizonResult, PredictionResult
 from src.utils.data_path_utils import get_models_subdir, get_ticker, normalize_col
 from src.utils.db import load_model_weights
 from src.utils.logger import get_logger
@@ -286,6 +286,15 @@ def predict_single_stock_multi_horizon(
     base = results[base_h]
 
     base_dir = base.diff_ratio > 0
+    horizons_dict = {
+        h: HorizonResult(
+            horizon_days=h,
+            pred_price=results[h].avg_pred_price,
+            diff_ratio=results[h].diff_ratio,
+        )
+        for h in horizons
+        if h in results
+    }
     return PredictionResult(
         market=base.market,
         symbol=base.symbol,
@@ -302,6 +311,7 @@ def predict_single_stock_multi_horizon(
         confluence_score=sum(
             1 for h in horizons if h in results and (results[h].diff_ratio > 0) == base_dir
         ),
+        horizons=horizons_dict,
     )
 
 

@@ -467,6 +467,26 @@ class TestPredictSingleStockMultiHorizon(unittest.TestCase):
         self.assertEqual(result.confluence_score, 3)  # 3ホライズン全て一致
 
     @patch("src.prediction.predict_single.predict_single_stock")
+    def test_horizons_dict_populated(self, mock_predict):
+        """horizons dict に各ホライズンの HorizonResult が格納されること"""
+        from src.prediction.predict_single import predict_single_stock_multi_horizon
+        from src.prediction.types import HorizonResult
+
+        def _side(market, symbol, horizon=1, **kwargs):
+            return self._make_result(diff_ratio=0.05 * horizon)
+
+        mock_predict.side_effect = _side
+        result = predict_single_stock_multi_horizon("jp", "7203", horizons=[1, 3, 5, 10])
+
+        self.assertIsNotNone(result)
+        self.assertIn(1, result.horizons)
+        self.assertIn(3, result.horizons)
+        self.assertIn(5, result.horizons)
+        self.assertIn(10, result.horizons)
+        self.assertIsInstance(result.horizons[3], HorizonResult)
+        self.assertEqual(result.horizons[3].horizon_days, 3)
+
+    @patch("src.prediction.predict_single.predict_single_stock")
     def test_base_horizon_is_1_when_available(self, mock_predict):
         """horizon=1 の結果が base として使われること"""
         from src.prediction.predict_single import predict_single_stock_multi_horizon
