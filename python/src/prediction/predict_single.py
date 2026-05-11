@@ -178,6 +178,14 @@ def _build_prediction_result(
     diff_ratio = (avg_pred_price - current_price) / current_price
     model_std = float(np.std(pred_returns)) if len(pred_returns) > 1 else 0.0
     confidence_ratio = 1.0 / (1.0 + model_std)
+
+    # P10/P90 信頼区間: アンサンブル分散を使った正規分布近似（1.28σ ≈ 80%区間）
+    _DEFAULT_UNCERTAINTY = 0.02  # 単一モデル時のデフォルト不確実性 (2%)
+    spread = model_std * 1.28 if len(pred_returns) > 1 else _DEFAULT_UNCERTAINTY
+    avg_pred_return = diff_ratio
+    pred_lower_10 = float(current_price * (1.0 + avg_pred_return - spread))
+    pred_upper_90 = float(current_price * (1.0 + avg_pred_return + spread))
+
     return PredictionResult(
         market=market,
         symbol=symbol,
@@ -186,6 +194,8 @@ def _build_prediction_result(
         diff_ratio=float(diff_ratio),
         model_count=int(len(pred_prices)),
         confidence_ratio=confidence_ratio,
+        pred_lower_10=pred_lower_10,
+        pred_upper_90=pred_upper_90,
     )
 
 

@@ -31,7 +31,7 @@ def convert_df_for_discord(df: pd.DataFrame) -> pd.DataFrame:
         "diff_ratio": "予想変化率",
         "予想値": "予想終値",
     }
-    col_order = ["シンボル", "現在値", "予想終値", "予想変化率"]
+    col_order = ["シンボル", "現在値", "予想終値", "予想変化率", "予想±"]
     df = df.rename(columns=columns_map)
     if "現在値" in df.columns and "予想終値" in df.columns and "予想変化率" not in df.columns:
         try:
@@ -59,4 +59,22 @@ def convert_df_for_discord(df: pd.DataFrame) -> pd.DataFrame:
                 return value
 
         df["予想変化率"] = df["予想変化率"].apply(format_percent)
+
+    if "pred_lower_10" in df.columns and "pred_upper_90" in df.columns and "現在値" in df.columns:
+
+        def format_interval(row):
+            try:
+                lower = float(row["pred_lower_10"])
+                upper = float(row["pred_upper_90"])
+                current = float(row["現在値"])
+                if current <= 0:
+                    return ""
+                lower_pct = (lower - current) / current * 100
+                upper_pct = (upper - current) / current * 100
+                return f"[{lower_pct:+.1f}%~{upper_pct:+.1f}%]"
+            except (ValueError, TypeError, KeyError):
+                return ""
+
+        df["予想±"] = df.apply(format_interval, axis=1)
+
     return df[[column for column in col_order if column in df.columns]]

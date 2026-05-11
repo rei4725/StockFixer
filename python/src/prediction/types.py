@@ -49,6 +49,10 @@ class PredictionResult:
     confluence_score: Optional[int] = None
     confidence_ratio: Optional[float] = None  # 1/(1+model_std); 1.0=最大信頼度（モデル間分散が小さい）
 
+    # 信頼区間（Quantile Regression）
+    pred_lower_10: Optional[float] = None  # P10予測価格（下側10%分位点）
+    pred_upper_90: Optional[float] = None  # P90予測価格（上側90%分位点）
+
     # A/B テスト（シャドーモード）
     model_version: Optional[str] = None  # "production" / "challenger" / 任意バージョン文字列
 
@@ -85,6 +89,10 @@ class PredictionResult:
                 row["confluence_score"] = r.confluence_score
             if r.confidence_ratio is not None:
                 row["confidence_ratio"] = r.confidence_ratio
+            if r.pred_lower_10 is not None:
+                row["pred_lower_10"] = r.pred_lower_10
+            if r.pred_upper_90 is not None:
+                row["pred_upper_90"] = r.pred_upper_90
             if r.model_version is not None:
                 row["model_version"] = r.model_version
             rows.append(row)
@@ -121,6 +129,8 @@ class PredictionResult:
             diff_ratio_10d=_opt_float("diff_ratio_10d"),
             confluence_score=_opt_int("confluence_score"),
             confidence_ratio=_opt_float("confidence_ratio"),
+            pred_lower_10=_opt_float("pred_lower_10"),
+            pred_upper_90=_opt_float("pred_upper_90"),
             model_version=_opt_str("model_version"),
         )
 
