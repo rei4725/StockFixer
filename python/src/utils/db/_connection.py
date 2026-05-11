@@ -20,6 +20,7 @@ from filelock import FileLock
 from filelock import Timeout as FileLockTimeout
 
 from src.utils.data_path_utils import ensure_dir, get_data_dir, get_db_path
+from src.utils.db.migration_runner import run_migrations
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -84,6 +85,7 @@ def _db_connection() -> Generator[duckdb.DuckDBPyConnection, None, None]:
             with _init_lock:
                 if not _tables_initialized:
                     _init_tables(con)
+                    run_migrations(con)
                     _tables_initialized = True
         yield con
     finally:
