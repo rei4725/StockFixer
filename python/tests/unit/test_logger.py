@@ -1,6 +1,7 @@
 """src.utils.logger モジュールのユニットテスト"""
 
 import contextlib
+import json
 import logging
 import os
 import sys
@@ -247,6 +248,135 @@ class TestMaskingFormatter(unittest.TestCase):
         self.assertIsNone(formatter._pattern)
         result = self._format_msg(formatter, "normal message")
         self.assertIn("normal message", result)
+
+
+class TestJsonFormatter(unittest.TestCase):
+    """JsonFormatter のテスト"""
+
+    def _make_record(self, msg: str, exc_info=None) -> logging.LogRecord:
+        return logging.LogRecord(
+            name="test.module",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg=msg,
+            args=(),
+            exc_info=exc_info,
+        )
+
+    def _make_formatter(self, env_overrides: dict = None):
+        from src.utils.logger import JsonFormatter
+
+        env_overrides = env_overrides or {}
+        with patch.dict(os.environ, env_overrides, clear=False):
+            return JsonFormatter()
+
+    def test_output_is_valid_json(self):
+        """出力が valid JSON であること"""
+        formatter = self._make_formatter()
+        record = self._make_record("hello json")
+        result = formatter.format(record)
+        parsed = json.loads(result)
+        self.assertIsInstance(parsed, dict)
+
+    def test_required_fields_present(self):
+        """timestamp / level / logger / message / exc_info フィールドが含まれること"""
+        formatter = self._make_formatter()
+        record = self._make_record("required fields")
+        parsed = json.loads(formatter.format(record))
+        for field in ("timestamp", "level", "logger", "message", "exc_info"):
+            self.assertIn(field, parsed)
+
+    def test_field_values(self):
+        """各フィールドの値が正しいこと"""
+        formatter = self._make_formatter()
+        record = self._make_record("check values")
+        parsed = json.loads(formatter.format(record))
+        self.assertEqual(parsed["level"], "INFO")
+        self.assertEqual(parsed["logger"], "test.module")
+        self.assertEqual(parsed["message"], "check values")
+        self.assertIsNone(parsed["exc_info"])
+
+    def test_timestamp_format(self):
+        """timestamp が ISO 8601 形式（UTC, Z末尾）であること"""
+        import re as _re
+
+        formatter = self._make_formatter()
+        record = self._make_record("ts test")
+        parsed = json.loads(formatter.format(record))
+        self.assertRegex(parsed["timestamp"], r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$")
+
+    def test_exc_info_populated_on_exception(self):
+        """例外情報がある場合 exc_info フィールドに文字列が入ること"""
+        formatter = self._make_formatter()
+        try:
+            raise ValueError("test error")
+        except ValueError:
+            exc = sys.exc_info()
+        record = self._make_record("with exception", exc_info=exc)
+        parsed = json.loads(formatter.format(record))
+        self.assertIsNotNone(parsed["exc_info"])
+        self.assertIn("ValueError", parsed["exc_info"])
+
+    def test_sensitive_value_masked_in_json(self):
+        """機密値が JSON 出力内でマスクされること"""
+        secret = "https://discord.com/api/webhooks/99999/SUPERSECRETTOKEN_XYZ"
+        formatter = self._make_formatter({"DISCORD_WEBHOOK_URL": secret})
+        record = self._make_record(f"url={secret}")
+        result = formatter.format(record)
+        self.assertNotIn(secret, result)
+        self.assertIn("***REDACTED***", result)
+
+    def test_log_format_json_env_uses_json_formatter(self):
+        """LOG_FORMAT=json のとき _configure_root が JsonFormatter を使うこと"""
+        import contextlib
+        import tempfile
+
+        import src.utils.logger as logger_module
+        from src.utils.logger import JsonFormatter
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            with contextlib.ExitStack() as stack:
+                stack.enter_context(patch.dict(os.environ, {"LOG_FORMAT": "json"}))
+                stack.enter_context(
+                    patch(
+                        "src.utils.logger.RotatingFileHandler",
+                        return_value=MagicMock(spec=__import__("logging.handlers", fromlist=["RotatingFileHandler"]).RotatingFileHandler),
+                    )
+                )
+                stack.enter_context(
+                    patch(
+                        "src.utils.logger.logging.StreamHandler",
+                        return_value=MagicMock(spec=logging.StreamHandler),
+                    )
+                )
+                stack.enter_context(patch("src.utils.logger.io.TextIOWrapper", return_value=MagicMock()))
+                stack.enter_context(patch("src.utils.logger._LOG_DIR", tmp_dir))
+                stack.enter_context(patch("os.makedirs"))
+
+                logger_module._root_configured = False
+                root_logger = logging.getLogger()
+                original_handlers = root_logger.handlers[:]
+                root_logger.handlers.clear()
+                try:
+                    logger_module._configure_root()
+                    self.assertTrue(logger_module._root_configured)
+                    # いずれかのハンドラが JsonFormatter を使っていることを確認
+                    formatters = [h.setFormatter.call_args[0][0] for h in root_logger.handlers if hasattr(h, "setFormatter")]
+                    # モックを使っているので setFormatter の引数を確認
+                    set_formatter_calls = []
+                    for h in root_logger.handlers:
+                        if isinstance(h, MagicMock):
+                            for call in h.method_calls:
+                                if call[0] == "setFormatter":
+                                    set_formatter_calls.append(call[1][0])
+                    self.assertTrue(
+                        any(isinstance(f, JsonFormatter) for f in set_formatter_calls),
+                        "LOG_FORMAT=json のとき JsonFormatter が使われること",
+                    )
+                finally:
+                    root_logger.handlers[:] = original_handlers
+                    logger_module._root_configured = True
 
 
 if __name__ == "__main__":
