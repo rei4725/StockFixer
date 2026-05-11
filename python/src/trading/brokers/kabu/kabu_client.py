@@ -13,13 +13,15 @@ from typing import Any
 
 import httpx
 
-from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
+from src.trading.brokers.base import BrokerBase, BrokerError, OrderSide, OrderType
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 _BASE_URL = "http://localhost:18080/kabusapi"
 _TOKEN_TTL_SECONDS = 3600  # トークン有効期間（1時間）
+_TOKEN_REFRESH_BUFFER_SECONDS = 300  # 期限5分前に事前更新
+_TOKEN_MAX_RETRIES = 2  # 1回リトライ（初回 + 1回）
 
 
 class KabuBroker(BrokerBase):
@@ -46,26 +48,44 @@ class KabuBroker(BrokerBase):
     def get_token(self) -> str:
         """
         APIトークンを取得する。
-        キャッシュ済みかつ有効期限内であれば再利用する。
+        キャッシュ済みかつ期限まで5分超あれば再利用する。
+        取得失敗時は最大1回リトライし、それでも失敗すれば BrokerError を raise する。
         """
-        if self._token and datetime.now() < self._token_expires_at:
+        buffer = timedelta(seconds=_TOKEN_REFRESH_BUFFER_SECONDS)
+        if self._token and datetime.now() < self._token_expires_at - buffer:
             return self._token
 
         if not self._api_password:
             raise EnvironmentError(
-                "KABU_API_PASSWORD が設定されていません。" "環境変数を設定するか KabuBroker(api_password=...) で渡してください。"
+                "KABU_API_PASSWORD が設定されていません。"
+                "環境変数を設定するか KabuBroker(api_password=...) で渡してください。"
             )
 
-        resp = httpx.post(
-            f"{_BASE_URL}/token",
-            json={"APIPassword": self._api_password},
-            timeout=self._timeout,
-        )
-        resp.raise_for_status()
-        self._token = resp.json()["Token"]
-        self._token_expires_at = datetime.now() + timedelta(seconds=_TOKEN_TTL_SECONDS)
-        logger.info("kabu STATION® API トークンを取得しました")
-        return self._token
+        last_exc: Exception | None = None
+        for attempt in range(_TOKEN_MAX_RETRIES):
+            try:
+                resp = httpx.post(
+                    f"{_BASE_URL}/token",
+                    json={"APIPassword": self._api_password},
+                    timeout=self._timeout,
+                )
+                resp.raise_for_status()
+                self._token = resp.json()["Token"]
+                self._token_expires_at = datetime.now() + timedelta(seconds=_TOKEN_TTL_SECONDS)
+                logger.info("kabu STATION® API トークンを取得しました (attempt=%d)", attempt + 1)
+                return self._token
+            except Exception as exc:
+                last_exc = exc
+                logger.warning(
+                    "kabu STATION® API トークン取得失敗 (attempt=%d/%d): %s",
+                    attempt + 1,
+                    _TOKEN_MAX_RETRIES,
+                    exc,
+                )
+
+        raise BrokerError(
+            f"kabu STATION® API トークン取得に失敗しました ({_TOKEN_MAX_RETRIES}回試行): {last_exc}"
+        ) from last_exc
 
     # ------------------------------------------------------------------
     # 注文

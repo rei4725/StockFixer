@@ -35,12 +35,13 @@ from config.settings import (
 from src.prediction.models.exit_model import ExitModel
 from src.prediction.prediction_pipeline import get_optimal_params
 from src.trading.signal_generator import apply_multi_horizon_score_column
-from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
+from src.trading.brokers.base import BrokerBase, BrokerError, OrderSide, OrderType
 from src.trading.correlation_risk import evaluate_correlation_gate
 from src.trading.risk_manager import RiskManager
 from src.trading.types import TradingGateStatus
 from src.utils import yf_client
 from src.utils.data_path_utils import get_ticker
+from src.reporting.discord.discord_utils import send_webhook_notification
 from src.utils.db import upsert_paper_real_diff
 from src.utils.db._connection import _db_connection
 from src.utils.db.prediction import save_order_run_summary
@@ -509,6 +510,17 @@ def run_daily_orders(
         {"buy_orders": int, "sell_orders": int, "skipped": int, "errors": int}
     """
     logger.info(f"=== 自動発注開始: market={market} mode={mode} broker={broker.broker_name} ===")
+
+    try:
+        broker.get_token()
+    except BrokerError as e:
+        logger.error("[exec] トークン取得失敗。本日の発注をスキップします: %s", e, exc_info=True)
+        send_webhook_notification(
+            "kabu API トークンエラー",
+            f"トークン取得に失敗したため本日の発注をスキップします。\n{e}",
+            color=0xFF0000,
+        )
+        return stats
 
     risk = RiskManager(broker)
     risk.update_peak_balance()  # R-307: DD基準値を発注前に更新
