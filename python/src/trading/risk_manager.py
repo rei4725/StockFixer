@@ -30,6 +30,7 @@ from config.trading_policy import (  # noqa: F401  # R-307/R-219 でポジショ
     VIX_POSITION_SCALE,
     VIX_SPIKE_THRESHOLD,
 )
+from src.domain.exceptions import RiskError  # noqa: F401  # 後方互換のため re-export
 from src.trading.brokers.base import BrokerBase, OrderSide
 from src.trading.types import TradingGateStatus
 from src.utils.db._connection import _db_connection
@@ -96,10 +97,6 @@ def compute_dd_capital_scale(dd_ratio: float, max_dd: float) -> float:
     t = min(1.0, dd_ratio / max_dd)
     scale = 1.0 - 0.75 * (t**2)
     return max(0.25, float(scale))
-
-
-class RiskError(Exception):
-    """リスクチェックによる取引拒否"""
 
 
 class RiskManager:
