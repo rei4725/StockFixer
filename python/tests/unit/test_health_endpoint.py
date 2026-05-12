@@ -85,6 +85,40 @@ class TestHealthEndpoint:
         assert "checked_at" in data
         assert data["checked_at"]  # 空でない
 
+    def test_health_degraded_when_scheduler_stale(self, client):
+        """スケジューラ最終実行から30分以上経過で status=degraded・HTTP 200 を返す"""
+        from datetime import datetime, timedelta, timezone
+
+        stale_time = (datetime.now(timezone.utc) - timedelta(minutes=31)).isoformat()
+        runs = {"daily_pipeline": stale_time}
+        with (
+            patch("src.api.health._check_db", return_value=("ok", None)),
+            patch("src.api.health._load_scheduler_last_runs", return_value=runs),
+            patch("src.api.health._get_last_prediction_at", return_value=None),
+        ):
+            resp = client.get("/health")
+
+        data = resp.get_json()
+        assert data["status"] == "degraded"
+        assert resp.status_code == 200  # DB は ok なので HTTP 200
+
+    def test_health_ok_when_scheduler_recent(self, client):
+        """スケジューラ最終実行が30分以内なら status=ok を返す"""
+        from datetime import datetime, timedelta, timezone
+
+        recent_time = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+        runs = {"daily_pipeline": recent_time}
+        with (
+            patch("src.api.health._check_db", return_value=("ok", None)),
+            patch("src.api.health._load_scheduler_last_runs", return_value=runs),
+            patch("src.api.health._get_last_prediction_at", return_value=None),
+        ):
+            resp = client.get("/health")
+
+        data = resp.get_json()
+        assert data["status"] == "ok"
+        assert resp.status_code == 200
+
 
 class TestLoadSchedulerLastRuns:
     def test_returns_empty_when_no_file(self, tmp_path):

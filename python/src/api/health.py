@@ -20,6 +20,8 @@ from flask import Flask, Response, jsonify
 from src.utils.data_path_utils import get_results_dir
 from src.utils.logger import get_logger
 
+_SCHEDULER_STALE_SECS = 30 * 60  # 30分
+
 logger = get_logger(__name__)
 
 app = Flask(__name__)
@@ -102,11 +104,27 @@ _register_external_v1(app)
 @app.route("/health")
 def health() -> tuple[Response, int]:
     db_status, db_error = _check_db()
+    scheduler_runs = _load_scheduler_last_runs()
+
+    scheduler_stale = False
+    if scheduler_runs:
+        latest_ts = max(scheduler_runs.values())
+        if latest_ts:
+            try:
+                last_dt = datetime.fromisoformat(latest_ts)
+                if last_dt.tzinfo is None:
+                    last_dt = last_dt.replace(tzinfo=timezone.utc)
+                elapsed = (datetime.now(timezone.utc) - last_dt).total_seconds()
+                scheduler_stale = elapsed > _SCHEDULER_STALE_SECS
+            except ValueError:
+                pass
+
+    overall = "ok" if db_status == "ok" and not scheduler_stale else "degraded"
 
     payload: dict[str, Any] = {
-        "status": "ok" if db_status == "ok" else "degraded",
+        "status": overall,
         "db": db_status if db_error is None else f"error: {db_error}",
-        "scheduler_last_runs": _load_scheduler_last_runs(),
+        "scheduler_last_runs": scheduler_runs,
         "last_prediction_at": _get_last_prediction_at(),
         "checked_at": datetime.now(timezone.utc).isoformat(),
     }
