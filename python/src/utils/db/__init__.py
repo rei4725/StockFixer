@@ -81,6 +81,10 @@ from src.utils.db.prediction import (  # noqa: F401
 )
 from src.utils.db.prediction import upsert_paper_real_diff as upsert_paper_real_diff  # noqa: F401
 from src.utils.db.prediction import load_open_close_advantage_summary as load_open_close_advantage_summary  # noqa: F401
+from src.utils.db.prediction import (  # noqa: F401
+    load_weekly_accuracy_snapshots,
+    save_weekly_accuracy_snapshot,
+)
 
 # --- data_quality_log ---
 from src.utils.db.quality_log import insert_quality_log  # noqa: F401

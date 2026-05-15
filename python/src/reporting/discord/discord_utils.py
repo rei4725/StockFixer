@@ -338,6 +338,8 @@ def send_weekly_report(
     週次パフォーマンスレポートを Discord Webhook に送信する。
 
     直近の方向正解率・平均誤差を銘柄ごとに集計してレポートする。
+    前週スナップショットがあれば先週比変化・改善/悪化上位も表示する。
+    全体 Hit Rate が連続 N 週低下していた場合はアラートも送る。
 
     Args:
         accuracy_df: load_drift_summary() の戻り値 DataFrame（None の場合はDB から取得）
@@ -349,6 +351,7 @@ def send_weekly_report(
     import pandas as pd
 
     from src.utils.db import load_drift_summary, load_paper_real_diff_summary
+    from src.utils.db import load_weekly_accuracy_snapshots
 
     if accuracy_df is None or (isinstance(accuracy_df, pd.DataFrame) and accuracy_df.empty):
         accuracy_df = load_drift_summary(horizon=horizon)
@@ -375,6 +378,58 @@ def send_weekly_report(
     # 全体サマリー
     mean_acc = accuracy_df["direction_accuracy"].mean()
     lines.append(f"\n**全体平均正解率**: {mean_acc:.1%} ({len(accuracy_df)}銘柄)")
+
+    # 前週比較（週次スナップショットが 2 週分以上あれば）
+    snapshots = load_weekly_accuracy_snapshots(n_weeks=4)
+    if not snapshots.empty:
+        weeks = sorted(snapshots["week_start"].unique(), reverse=True)
+        if len(weeks) >= 2:
+            prev_week = weeks[1]
+            prev_df = snapshots[snapshots["week_start"] == prev_week][
+                ["market", "symbol", "direction_accuracy"]
+            ].rename(columns={"direction_accuracy": "prev_accuracy"})
+
+            merged = accuracy_df.merge(prev_df, on=["market", "symbol"], how="inner")
+            if not merged.empty:
+                merged["delta"] = merged["direction_accuracy"] - merged["prev_accuracy"]
+
+                top_improved = merged.nlargest(5, "delta")
+                top_worsened = merged.nsmallest(5, "delta")
+
+                lines.append(f"\n**前週比 Hit Rate 変化（比較週: {prev_week}）**")
+
+                lines.append("改善上位 5 銘柄:")
+                for _, r in top_improved.iterrows():
+                    sign = "+" if r["delta"] >= 0 else ""
+                    lines.append(
+                        f"• `{r['market']}/{r['symbol']}` "
+                        f"{r['prev_accuracy']:.1%} → {r['direction_accuracy']:.1%} "
+                        f"({sign}{r['delta']:.1%})"
+                    )
+
+                lines.append("悪化上位 5 銘柄:")
+                for _, r in top_worsened.iterrows():
+                    sign = "+" if r["delta"] >= 0 else ""
+                    lines.append(
+                        f"• `{r['market']}/{r['symbol']}` "
+                        f"{r['prev_accuracy']:.1%} → {r['direction_accuracy']:.1%} "
+                        f"({sign}{r['delta']:.1%})"
+                    )
+
+        # 全体 Hit Rate の週次トレンドで連続低下を検出（N=3 週）
+        _ALERT_CONSECUTIVE_DECLINE_WEEKS = 3
+        weekly_mean = (
+            snapshots.groupby("week_start")["direction_accuracy"].mean().sort_index(ascending=False)
+        )
+        if len(weekly_mean) >= _ALERT_CONSECUTIVE_DECLINE_WEEKS:
+            recent = weekly_mean.iloc[:_ALERT_CONSECUTIVE_DECLINE_WEEKS].tolist()
+            is_declining = all(recent[i] < recent[i + 1] for i in range(len(recent) - 1))
+            if is_declining:
+                weeks_str = ", ".join(weekly_mean.index[:_ALERT_CONSECUTIVE_DECLINE_WEEKS].tolist())
+                lines.append(
+                    f"\n⚠️ **アラート: 全体 Hit Rate が {_ALERT_CONSECUTIVE_DECLINE_WEEKS} 週連続で低下しています**"
+                    f" ({weeks_str})"
+                )
 
     if diff_summary is None:
         diff_summary = load_paper_real_diff_summary(recent_days=7)
