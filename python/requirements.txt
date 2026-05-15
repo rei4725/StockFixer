@@ -23,7 +23,7 @@ streamlit>=1.54.0
 plotly>=6.7.0
 filelock>=3.29.0
 optuna>=4.8.0
-pydantic-settings>=2.14.0
+pydantic-settings>=2.14.1
 prometheus-client>=0.20.0
 
 # セキュリティ修正: 脆弱性のある推移的依存関係を安全なバージョンに固定
