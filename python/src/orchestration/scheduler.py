@@ -262,8 +262,8 @@ def run_daily_paper_trade_report():
 
     logger.info("=== ペーパートレード損益レポート送信開始 ===")
     try:
-        from src.trading.brokers.paper.paper_broker import PaperBroker
         from src.reporting.discord.discord_utils import send_paper_trade_position_report
+        from src.trading.brokers.paper.paper_broker import PaperBroker
 
         broker = PaperBroker()
         positions = broker.get_positions()
@@ -614,6 +614,78 @@ def run_pre_close_alert() -> None:
         logger.info("=== 引け前ポジション再評価アラート送信完了 ===")
     except Exception as e:
         logger.error("引け前アラート通知失敗: %s", e, exc_info=True)
+
+
+def run_monthly_report_job() -> None:
+    """
+    月次実行（毎月1日 03:00）: 月次KPIレポートを生成・保存・Discord通知する。
+
+    手順:
+        1. Walk-Forward KPI を集計（Net Return / MDD / Sharpe）
+        2. Hit Rate / Avg Slippage を集計
+        3. paper/real 乖離・ドリフト状況を含む Markdown を results/monthly/ に保存
+        4. Discord に通知
+    """
+    from src.reporting.discord.discord_utils import send_monthly_report_notification
+    from src.reporting.monthly import run_monthly_report, save_monthly_report_to_file
+
+    logger.info("=== 月次レポート生成開始 ===")
+    try:
+        summary = run_monthly_report()
+        report_path = save_monthly_report_to_file(summary)
+        logger.info("=== 月次レポート保存完了: %s ===", report_path)
+    except Exception as e:
+        logger.error("月次レポート生成失敗: %s", e, exc_info=True)
+        raise
+
+    try:
+        send_monthly_report_notification(
+            target_month=summary.target_month,
+            net_return=summary.net_return,
+            max_drawdown=summary.max_drawdown,
+            sharpe_ratio=summary.sharpe_ratio,
+            hit_rate=summary.hit_rate,
+            avg_slippage=summary.avg_slippage,
+            symbol_count=summary.symbol_count,
+            report_path=report_path,
+        )
+    except Exception as e:
+        logger.error("月次レポート通知失敗: %s", e, exc_info=True)
+
+    logger.info("=== 月次レポート完了 ===")
+
+
+def run_daily_backup() -> None:
+    """
+    毎日深夜実行: DuckDB をタイムスタンプ付きディレクトリへコピーし、最大5世代を保持する。
+
+    手順:
+        1. CHECKPOINT で WAL をメインファイルへフラッシュ
+        2. data/backups/YYYYMMDD_HHMMSS/ へファイルコピー
+        3. 5世代超過分を古い順に削除
+        4. Discord に完了通知
+    """
+    from src.orchestration.backup_pipeline import run_db_backup
+    from src.reporting.discord.discord_utils import send_backup_completion
+
+    logger.info("=== 日次バックアップ開始 ===")
+    result = run_db_backup()
+
+    try:
+        send_backup_completion(
+            backup_path=result["backup_path"],
+            size_mb=result["size_mb"],
+            elapsed_seconds=result["elapsed_seconds"],
+            pruned_count=result["pruned_count"],
+            error=result["error"],
+        )
+    except Exception as e:
+        logger.error("バックアップ通知失敗: %s", e, exc_info=True)
+
+    if result["error"]:
+        raise RuntimeError(f"バックアップ失敗: {result['error']}")
+
+    logger.info("=== 日次バックアップ完了 ===")
 
 
 def run_daily_rule_signals() -> None:

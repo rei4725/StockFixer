@@ -1,4 +1,5 @@
 """src/api/external_v1.py の単体テスト"""
+import os
 from unittest.mock import patch
 
 import pytest
@@ -37,16 +38,12 @@ class TestExternalV1Auth:
 
     def test_invalid_api_key_returns_401(self, client):
         with patch("src.api.external_v1._load_api_keys", return_value=frozenset(["valid-key"])):
-            resp = client.get(
-                "/api/v1/predictions/top", headers={"X-API-Key": "bad-key"}
-            )
+            resp = client.get("/api/v1/predictions/top", headers={"X-API-Key": "bad-key"})
         assert resp.status_code == 401
 
     def test_empty_api_key_env_returns_401(self, client):
         with patch("src.api.external_v1._load_api_keys", return_value=frozenset()):
-            resp = client.get(
-                "/api/v1/predictions/top", headers={"X-API-Key": "any-key"}
-            )
+            resp = client.get("/api/v1/predictions/top", headers={"X-API-Key": "any-key"})
         assert resp.status_code == 401
 
     def test_valid_api_key_passes_auth(self, client):
@@ -63,9 +60,7 @@ class TestExternalV1Auth:
                 return_value=("2026-05-11T14:00:00", [snapshot]),
             ),
         ):
-            resp = client.get(
-                "/api/v1/predictions/top", headers={"X-API-Key": "test-key"}
-            )
+            resp = client.get("/api/v1/predictions/top", headers={"X-API-Key": "test-key"})
         assert resp.status_code == 200
 
 
@@ -75,16 +70,17 @@ class TestExternalV1RateLimit:
             patch("src.api.external_v1._load_api_keys", return_value=frozenset(["test-key"])),
             patch("src.api.external_v1._is_rate_limited", return_value=True),
         ):
-            resp = client.get(
-                "/api/v1/predictions/top", headers={"X-API-Key": "test-key"}
-            )
+            resp = client.get("/api/v1/predictions/top", headers={"X-API-Key": "test-key"})
         assert resp.status_code == 429
         assert resp.get_json()["error"] == "Too Many Requests"
 
     def test_not_rate_limited_under_threshold(self):
-        import time
-
-        from src.api.external_v1 import _MAX_REQUESTS_PER_MINUTE, _is_rate_limited, _rate_lock, _request_log
+        from src.api.external_v1 import (
+            _MAX_REQUESTS_PER_MINUTE,
+            _is_rate_limited,
+            _rate_lock,
+            _request_log,
+        )
 
         key = "__test_not_limited__"
         with _rate_lock:
@@ -96,7 +92,12 @@ class TestExternalV1RateLimit:
     def test_rate_limited_at_threshold(self):
         import time
 
-        from src.api.external_v1 import _MAX_REQUESTS_PER_MINUTE, _is_rate_limited, _rate_lock, _request_log
+        from src.api.external_v1 import (
+            _MAX_REQUESTS_PER_MINUTE,
+            _is_rate_limited,
+            _rate_lock,
+            _request_log,
+        )
 
         key = "__test_at_limit__"
         now = time.monotonic()
@@ -255,3 +256,223 @@ class TestToPublicDict:
         assert result["pred_lower_10"] is None
         assert result["pred_upper_90"] is None
         assert result["confluence_score"] is None
+
+
+# ---------------------------------------------------------------------------
+# R-304: /external/v1/* エンドポイントのテスト
+# ---------------------------------------------------------------------------
+
+_EXTERNAL_KEY = "ext-test-key"
+_EXTERNAL_KEY_ENV = {"EXTERNAL_API_KEY": _EXTERNAL_KEY}
+
+
+class TestExternalV1Auth304:
+    """EXTERNAL_API_KEY 未設定時に 503 が返ることを確認する。"""
+
+    def test_predictions_latest_no_key_configured_returns_503(self, client):
+        with patch.dict(os.environ, {"EXTERNAL_API_KEY": ""}, clear=False):
+            resp = client.get("/external/v1/predictions/latest", headers={"X-API-Key": "any"})
+        assert resp.status_code == 503
+
+    def test_monthly_report_no_key_configured_returns_503(self, client):
+        with patch.dict(os.environ, {"EXTERNAL_API_KEY": ""}, clear=False):
+            resp = client.get("/external/v1/monthly-report", headers={"X-API-Key": "any"})
+        assert resp.status_code == 503
+
+    def test_symbols_no_key_configured_returns_503(self, client):
+        with patch.dict(os.environ, {"EXTERNAL_API_KEY": ""}, clear=False):
+            resp = client.get("/external/v1/symbols", headers={"X-API-Key": "any"})
+        assert resp.status_code == 503
+
+    def test_predictions_latest_wrong_key_returns_401(self, client):
+        with patch.dict(os.environ, _EXTERNAL_KEY_ENV, clear=False):
+            resp = client.get("/external/v1/predictions/latest", headers={"X-API-Key": "wrong-key"})
+        assert resp.status_code == 401
+
+    def test_symbols_missing_header_returns_401(self, client):
+        with patch.dict(os.environ, _EXTERNAL_KEY_ENV, clear=False):
+            resp = client.get("/external/v1/symbols")
+        assert resp.status_code == 401
+
+
+class TestExternalV1PredictionsLatest:
+    def _get(self, client, extra_env=None):
+        env = {**_EXTERNAL_KEY_ENV, **(extra_env or {})}
+        with (
+            patch.dict(os.environ, env, clear=False),
+            patch("src.api.external_v1._is_rate_limited", return_value=False),
+        ):
+            return client.get(
+                "/external/v1/predictions/latest", headers={"X-API-Key": _EXTERNAL_KEY}
+            )
+
+    def test_returns_predictions_list(self, client):
+        mock_preds = [
+            {"market": "us", "symbol": "AAPL", "diff_ratio": 0.02, "prediction_date": "2026-05-15"}
+        ]
+        with patch("src.api.external_data_service.get_public_predictions", return_value=mock_preds):
+            resp = self._get(client)
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert "predictions" in data
+        assert data["count"] == 1
+        assert data["predictions"][0]["symbol"] == "AAPL"
+
+    def test_empty_predictions(self, client):
+        with patch("src.api.external_data_service.get_public_predictions", return_value=[]):
+            resp = self._get(client)
+        assert resp.status_code == 200
+        assert resp.get_json()["count"] == 0
+
+    def test_no_internal_fields_in_response(self, client):
+        mock_preds = [
+            {"market": "us", "symbol": "AAPL", "diff_ratio": 0.02, "prediction_date": "2026-05-15"}
+        ]
+        with patch("src.api.external_data_service.get_public_predictions", return_value=mock_preds):
+            resp = self._get(client)
+        item = resp.get_json()["predictions"][0]
+        assert "current_price" not in item
+        assert "avg_pred_price" not in item
+        assert "model_count" not in item
+
+
+class TestExternalV1MonthlyReport:
+    def _get(self, client):
+        with (
+            patch.dict(os.environ, _EXTERNAL_KEY_ENV, clear=False),
+            patch("src.api.external_v1._is_rate_limited", return_value=False),
+        ):
+            return client.get("/external/v1/monthly-report", headers={"X-API-Key": _EXTERNAL_KEY})
+
+    def test_returns_kpi_subset(self, client):
+        mock_report = {
+            "target_month": "2026-05",
+            "net_return": 0.05,
+            "max_drawdown": -0.08,
+            "sharpe_ratio": 1.2,
+            "hit_rate": 0.6,
+        }
+        with patch(
+            "src.api.external_data_service.get_public_monthly_report", return_value=mock_report
+        ):
+            resp = self._get(client)
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["target_month"] == "2026-05"
+        assert data["sharpe_ratio"] == pytest.approx(1.2)
+
+    def test_no_internal_fields_in_response(self, client):
+        mock_report = {
+            "target_month": "2026-05",
+            "net_return": 0.05,
+            "max_drawdown": -0.08,
+            "sharpe_ratio": 1.2,
+            "hit_rate": 0.6,
+        }
+        with patch(
+            "src.api.external_data_service.get_public_monthly_report", return_value=mock_report
+        ):
+            resp = self._get(client)
+        data = resp.get_json()
+        assert "avg_slippage" not in data
+        assert "wf_snapshot_file" not in data
+        assert "symbol_count" not in data
+
+    def test_report_unavailable_returns_503(self, client):
+        with patch("src.api.external_data_service.get_public_monthly_report", return_value=None):
+            resp = self._get(client)
+        assert resp.status_code == 503
+
+
+class TestExternalV1Symbols:
+    def _get(self, client):
+        with (
+            patch.dict(os.environ, _EXTERNAL_KEY_ENV, clear=False),
+            patch("src.api.external_v1._is_rate_limited", return_value=False),
+        ):
+            return client.get("/external/v1/symbols", headers={"X-API-Key": _EXTERNAL_KEY})
+
+    def test_returns_symbol_list(self, client):
+        mock_symbols = [
+            {"market": "us", "symbol": "AAPL"},
+            {"market": "jp", "symbol": "7203.T"},
+        ]
+        with patch("src.api.external_data_service.get_public_symbols", return_value=mock_symbols):
+            resp = self._get(client)
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["count"] == 2
+        assert data["symbols"][0]["symbol"] == "AAPL"
+
+    def test_empty_symbols(self, client):
+        with patch("src.api.external_data_service.get_public_symbols", return_value=[]):
+            resp = self._get(client)
+        assert resp.status_code == 200
+        assert resp.get_json()["count"] == 0
+
+    def test_rate_limited_returns_429(self, client):
+        with (
+            patch.dict(os.environ, _EXTERNAL_KEY_ENV, clear=False),
+            patch("src.api.external_v1._is_rate_limited", return_value=True),
+        ):
+            resp = client.get("/external/v1/symbols", headers={"X-API-Key": _EXTERNAL_KEY})
+        assert resp.status_code == 429
+
+
+class TestExternalDataService:
+    """external_data_service のユニットテスト（サービス層）。"""
+
+    def test_get_public_predictions_fields(self):
+        import pandas as pd
+
+        from src.api.external_data_service import get_public_predictions
+
+        mock_df = pd.DataFrame(
+            [
+                {
+                    "market": "us",
+                    "symbol": "AAPL",
+                    "current_price": 150.0,
+                    "avg_pred_price": 153.0,
+                    "diff_ratio": 0.02,
+                    "model_count": 3,
+                }
+            ]
+        )
+        with (
+            patch(
+                "src.utils.db.load_latest_prediction_timestamp",
+                return_value="2026-05-15T10:00:00",
+            ),
+            patch("src.utils.db.load_prediction_results", return_value=mock_df),
+        ):
+            results = get_public_predictions()
+
+        assert len(results) == 1
+        item = results[0]
+        assert item["market"] == "us"
+        assert item["symbol"] == "AAPL"
+        assert "diff_ratio" in item
+        assert "prediction_date" in item
+        # 内部フィールドが含まれないこと
+        assert "current_price" not in item
+        assert "avg_pred_price" not in item
+        assert "model_count" not in item
+
+    def test_get_public_predictions_no_timestamp(self):
+        from src.api.external_data_service import get_public_predictions
+
+        with patch("src.utils.db.load_latest_prediction_timestamp", return_value=None):
+            results = get_public_predictions()
+
+        assert results == []
+
+    def test_get_public_symbols_returns_market_symbol(self):
+        from src.api.external_data_service import get_public_symbols
+
+        with patch("src.utils.db.get_all_symbols", return_value=[("us", "AAPL"), ("jp", "7203.T")]):
+            results = get_public_symbols()
+
+        assert len(results) == 2
+        assert results[0] == {"market": "us", "symbol": "AAPL"}
+        assert results[1] == {"market": "jp", "symbol": "7203.T"}

@@ -17,8 +17,11 @@ from src.reporting.discord.discord_notification_specs import (
     DAILY_PIPELINE_COMPLETION,
     DAILY_PIPELINE_ERROR,
     DAILY_SETTLE_COMPLETION,
+    DB_BACKUP_COMPLETION,
+    DB_BACKUP_ERROR,
     DB_MAINTENANCE_COMPLETION,
     DB_MAINTENANCE_ERROR,
+    MONTHLY_REPORT_COMPLETION,
     PRE_CLOSE_ALERT,
     WEEKLY_TRAINING_COMPLETION,
     NotificationSpec,
@@ -751,6 +754,93 @@ def send_db_maintenance_completion(
             f"DBサイズ: {size_before_mb:.2f} MB → {size_after_mb:.2f} MB ({diff_str})",
         ]
     return send_status_notification(spec, lines)
+
+
+def send_backup_completion(
+    backup_path: str,
+    size_mb: float,
+    elapsed_seconds: float,
+    pruned_count: int,
+    error: Optional[str] = None,
+) -> bool:
+    """
+    DB バックアップ完了通知を Discord に送信する。
+
+    Args:
+        backup_path: バックアップ先ファイルパス
+        size_mb: バックアップファイルサイズ（MB）
+        elapsed_seconds: 処理時間（秒）
+        pruned_count: 削除した旧世代数
+        error: エラーメッセージ（None なら成功）
+
+    Returns:
+        成功時 True、失敗時 False
+    """
+    if error:
+        spec = DB_BACKUP_ERROR
+        lines = [
+            f"時刻: {format_jst(fmt=DISCORD_DATETIME_FORMAT)}",
+            f"エラー: {error}",
+        ]
+    else:
+        spec = DB_BACKUP_COMPLETION
+        lines = [
+            f"時刻: {format_jst(fmt=DISCORD_DATETIME_FORMAT)}",
+            f"処理時間: {elapsed_seconds:.1f} 秒",
+            f"サイズ: {size_mb:.2f} MB",
+            f"保存先: {backup_path}",
+            f"削除世代: {pruned_count} 件",
+        ]
+    return send_status_notification(spec, lines)
+
+
+def send_monthly_report_notification(
+    target_month: str,
+    net_return: Optional[float],
+    max_drawdown: Optional[float],
+    sharpe_ratio: Optional[float],
+    hit_rate: Optional[float],
+    avg_slippage: Optional[float],
+    symbol_count: Optional[int],
+    report_path: Optional[str] = None,
+) -> bool:
+    """
+    月次レポート生成完了通知を Discord に送信する（R-203）。
+
+    Args:
+        target_month: 対象年月 "YYYY-MM"
+        net_return:   Net Return（WF fold 平均）
+        max_drawdown: Max Drawdown（WF fold 平均）
+        sharpe_ratio: Sharpe Ratio（WF fold 平均）
+        hit_rate:     方向一致率（直近30日）
+        avg_slippage: 平均スリッページ
+        symbol_count: 集計銘柄数
+        report_path:  保存先 Markdown ファイルパス（任意）
+
+    Returns:
+        送信成功時 True、失敗時 False
+    """
+
+    def _fmt(val: Optional[float], pct: bool = False, decimals: int = 2) -> str:
+        if val is None:
+            return "N/A"
+        if pct:
+            return f"{val * 100:.{decimals}f}%"
+        return f"{val:.{decimals}f}"
+
+    lines = [
+        f"対象月: {target_month}",
+        f"時刻: {format_jst(fmt=DISCORD_DATETIME_FORMAT)}",
+        f"Net Return: {_fmt(net_return, pct=True)}",
+        f"Max Drawdown: {_fmt(max_drawdown, pct=True)}",
+        f"Sharpe Ratio: {_fmt(sharpe_ratio)}",
+        f"Hit Rate: {_fmt(hit_rate, pct=True)}",
+        f"Avg Slippage: {_fmt(avg_slippage, pct=True)}",
+        f"集計銘柄数: {symbol_count if symbol_count is not None else 'N/A'}",
+    ]
+    if report_path:
+        lines.append(f"保存先: {report_path}")
+    return send_status_notification(MONTHLY_REPORT_COMPLETION, lines)
 
 
 def send_drift_retrain_notification(

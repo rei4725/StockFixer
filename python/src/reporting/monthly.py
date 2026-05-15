@@ -20,7 +20,7 @@ import pandas as pd
 
 from src.reporting.types import MonthlyReportSummary
 from src.utils.data_path_utils import get_results_dir
-from src.utils.db import load_paper_real_diff_summary, load_prediction_accuracy
+from src.utils.db import load_drift_summary, load_paper_real_diff_summary, load_prediction_accuracy
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -139,3 +139,77 @@ def run_monthly_report(target_month: Optional[str] = None) -> MonthlyReportSumma
         f"HitRate={hit_rate} AvgSlippage={avg_slippage}"
     )
     return summary
+
+
+def save_monthly_report_to_file(summary: MonthlyReportSummary) -> str:
+    """
+    月次KPIサマリーを Markdown ファイルとして保存する（R-203）。
+
+    保存先: results/monthly/YYYY-MM_report.md
+
+    Args:
+        summary: run_monthly_report() が返す MonthlyReportSummary
+
+    Returns:
+        保存先ファイルパス
+    """
+    output_dir = Path(get_results_dir()) / "monthly"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / f"{summary.target_month}_report.md"
+
+    def _pct(val: Optional[float]) -> str:
+        return f"{val * 100:.2f}%" if val is not None else "N/A"
+
+    def _f2(val: Optional[float]) -> str:
+        return f"{val:.2f}" if val is not None else "N/A"
+
+    # paper/real 乖離サマリー
+    diff = load_paper_real_diff_summary(recent_days=30)
+    # ドリフトサマリー
+    drift_df = load_drift_summary(horizon=1, recent_n=30)
+    drift_count = 0
+    if drift_df is not None and not drift_df.empty:
+        drift_count = int(
+            (
+                (drift_df.get("mean_abs_error", pd.Series(dtype=float)) >= 0.02)
+                | (drift_df.get("direction_accuracy", pd.Series(dtype=float)) <= 0.45)
+            ).sum()
+        )
+
+    lines = [
+        f"# StockFixer 月次レポート {summary.target_month}",
+        "",
+        f"生成日時: {summary.generated_at}",
+        "",
+        "## KPI サマリー",
+        "",
+        "| 指標 | 値 |",
+        "|---|---|",
+        f"| Net Return | {_pct(summary.net_return)} |",
+        f"| Max Drawdown | {_pct(summary.max_drawdown)} |",
+        f"| Sharpe Ratio | {_f2(summary.sharpe_ratio)} |",
+        f"| Hit Rate | {_pct(summary.hit_rate)} |",
+        f"| Avg Slippage | {_pct(summary.avg_slippage)} |",
+        f"| 集計銘柄数 | {summary.symbol_count or 'N/A'} |",
+        f"| WF スナップショット | {summary.wf_snapshot_file or 'N/A'} |",
+        "",
+        "## paper/real 乖離（直近30日）",
+        "",
+        "| 指標 | 値 |",
+        "|---|---|",
+        f"| 追跡件数 | {diff['tracked_count']} |",
+        f"| 比較可能件数 | {diff['comparable_count']} |",
+        f"| 平均price乖離 | ¥{diff['avg_abs_price_diff']:.2f} |",
+        f"| 平均乖離率 | {diff['avg_abs_diff_ratio'] * 100:.4f}% |",
+        f"| Paper Slippage | {_pct(diff['avg_paper_slippage'])} |",
+        f"| Real Slippage | {_pct(diff['avg_real_slippage'])} |",
+        "",
+        "## ドリフト状況（直近30日）",
+        "",
+        f"閾値超過銘柄数: {drift_count}",
+        "",
+    ]
+
+    output_path.write_text("\n".join(lines), encoding="utf-8")
+    logger.info("月次レポートを保存: %s", output_path)
+    return str(output_path)

@@ -130,6 +130,20 @@ def job_pre_close_alert():
     run_pre_close_alert()
 
 
+def job_daily_backup():
+    """毎日 03:30 - DuckDB バックアップ（最大5世代保持）"""
+    from src.orchestration.scheduler import run_daily_backup
+
+    run_daily_backup()
+
+
+def job_monthly_report():
+    """毎月1日 03:00 - 月次KPIレポート生成・保存・Discord通知"""
+    from src.orchestration.scheduler import run_monthly_report_job
+
+    run_monthly_report_job()
+
+
 # ── イベントリスナー ──────────────────────────────────
 def _job_listener(event):
     """ジョブ実行結果のログ出力"""
@@ -285,6 +299,29 @@ SCHEDULE_CONFIG = {
         "max_executions_per_period": 1,
         "description": "毎営業日 15:00 - 引け前ポジション再評価アラート",
     },
+    "daily_backup": {
+        "func": job_daily_backup,
+        "trigger": "cron",
+        "period": "daily",
+        "day_of_week": "mon-sun",
+        "hour": 3,
+        "minute": 30,
+        "recovery_delay_minutes": 60,
+        "max_executions_per_period": 1,
+        "description": "毎日 03:30 - DuckDB バックアップ（最大5世代保持）",
+    },
+    "monthly_report": {
+        "func": job_monthly_report,
+        "trigger": "cron",
+        "period": "monthly",
+        "day_of_week": "mon-sun",
+        "day": 1,
+        "hour": 3,
+        "minute": 0,
+        "recovery_delay_minutes": 60,
+        "max_executions_per_period": 1,
+        "description": "毎月1日 03:00 - 月次KPIレポート生成・保存・Discord通知",
+    },
 }
 
 
@@ -295,12 +332,17 @@ def _register_jobs(scheduler, queue_manager):
         def _managed_runner(_job_id=job_id):
             queue_manager.run_job(_job_id, reason="scheduled")
 
+        cron_kwargs = {
+            "trigger": config["trigger"],
+            "day_of_week": config["day_of_week"],
+            "hour": config["hour"],
+            "minute": config["minute"],
+        }
+        if "day" in config:
+            cron_kwargs["day"] = config["day"]
         scheduler.add_job(
             _managed_runner,
-            trigger=config["trigger"],
-            day_of_week=config["day_of_week"],
-            hour=config["hour"],
-            minute=config["minute"],
+            **cron_kwargs,
             id=job_id,
             name=config["description"],
             misfire_grace_time=3600,  # 1時間以内なら遅延実行
@@ -435,6 +477,10 @@ def run_now(pipeline: str):
         queue_manager.run_job("daily_rule_signals", reason="manual", force=True)
     elif pipeline == "pre_close_alert":
         queue_manager.run_job("pre_close_alert", reason="manual", force=True)
+    elif pipeline == "backup":
+        queue_manager.run_job("daily_backup", reason="manual", force=True)
+    elif pipeline == "monthly_report":
+        queue_manager.run_job("monthly_report", reason="manual", force=True)
     else:
         print(f"不明なパイプライン: {pipeline}")
         print(
@@ -468,6 +514,8 @@ def main():
             "rule_evaluate",
             "rule_signals",
             "pre_close_alert",
+            "backup",
+            "monthly_report",
         ],
         help=(
             "指定パイプラインを即時実行して終了する（テスト用）。"

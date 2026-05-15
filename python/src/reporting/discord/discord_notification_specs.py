@@ -31,6 +31,9 @@ WALK_FORWARD_REPORT_COMPLETION = NotificationSpec("✅ Walk-Forward 比較レポ
 WALK_FORWARD_REPORT_WITH_ERRORS = NotificationSpec("⚠️ Walk-Forward 比較レポート完了", COLOR_CAUTION)
 DB_MAINTENANCE_COMPLETION = NotificationSpec("✅ DB メンテナンス完了", COLOR_SUCCESS)
 DB_MAINTENANCE_ERROR = NotificationSpec("❌ DB メンテナンス失敗", COLOR_ERROR)
+DB_BACKUP_COMPLETION = NotificationSpec("✅ DB バックアップ完了", COLOR_SUCCESS)
+DB_BACKUP_ERROR = NotificationSpec("❌ DB バックアップ失敗", COLOR_ERROR)
+MONTHLY_REPORT_COMPLETION = NotificationSpec("📊 月次レポート生成完了", COLOR_INFO)
 PRE_CLOSE_ALERT = NotificationSpec("📋 引け前ポジション再評価", COLOR_INFO)
 
 

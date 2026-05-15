@@ -444,6 +444,7 @@ def load_model_weights(
     market: str,
     symbol: str,
     model_names: list[str],
+    recent_n: int = 20,
 ) -> list[float]:
     """
     model_metrics テーブルからモデルごとの最新 directional_accuracy を取得し、
@@ -459,6 +460,39 @@ def load_model_weights(
     Returns:
         len(model_names) と同じ長さのfloatリスト（合計1.0）
     """
+    import math
+
+    n = len(model_names)
+    equal_weights = [1.0 / n] * n
+
+    # --- 1. Walk-Forward MAE 逆数重み (R-202) ---
+    maes: list[float | None] = []
+    with _db_connection() as con:
+        for name in model_names:
+            rows = con.execute(
+                "SELECT predicted_ratio, actual_ratio FROM prediction_accuracy "
+                "WHERE market = ? AND symbol = ? AND model_name = ? "
+                "AND predicted_ratio IS NOT NULL AND actual_ratio IS NOT NULL "
+                "ORDER BY predicted_at DESC LIMIT ?",
+                [market, symbol, name, recent_n],
+            ).fetchall()
+            if rows:
+                mae = sum(abs(r[0] - r[1]) for r in rows) / len(rows)
+                maes.append(mae)
+            else:
+                maes.append(None)
+
+    if all(m is not None for m in maes):
+        valid_maes = [m for m in maes if m is not None]
+        floored = [max(m, 1e-9) for m in valid_maes]
+        inv = [1.0 / m for m in floored]
+        total = sum(inv)
+        weights = [v / total for v in inv]
+        if all(abs(w - weights[0]) < 1e-9 for w in weights):
+            return equal_weights
+        return weights
+
+    # --- 2. directional_accuracy ソフトマックス重み ---
     accs: list[float] = []
     with _db_connection() as con:
         for name in model_names:
@@ -471,10 +505,7 @@ def load_model_weights(
             accs.append(float(row[0]) if row and row[0] is not None else 0.5)
 
     if not accs or all(a == accs[0] for a in accs):
-        n = len(accs) if accs else len(model_names)
-        return [1.0 / n] * n
-
-    import math
+        return equal_weights
 
     exps = [math.exp(a * 10) for a in accs]
     total = sum(exps)

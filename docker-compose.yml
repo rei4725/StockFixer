@@ -16,6 +16,7 @@ services:
       - ./python/.env
     volumes:
       # データ・モデル・結果をホスト側に永続化
+      # data/ には stockfixer.duckdb と backups/ サブディレクトリが含まれる
       - ./python/data:/app/data
       - ./python/models:/app/models
       - ./python/results:/app/results

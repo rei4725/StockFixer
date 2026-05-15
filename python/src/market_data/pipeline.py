@@ -10,9 +10,13 @@ from typing import Optional
 
 import pandas as pd
 
+from src.features.macro_features import (
+    add_event_flags,
+    add_macro_derived_features,
+    fetch_additional_macro_features,
+)
 from src.features.sentiment_features import add_sentiment_features, fetch_news_sentiment
 from src.market_data.base import DataSourceBase
-from src.market_data.technical import add_technical_indicators, create_basic_lag_features
 from src.market_data.loader import (
     fetch_cross_asset_features,
     get_raw_ohlcv_from_db,
@@ -22,6 +26,7 @@ from src.market_data.loader import (
 )
 from src.market_data.quality_check import QualityCheckResult, run_quality_checks
 from src.market_data.saver import save_raw_ohlcv
+from src.market_data.technical import add_technical_indicators, create_basic_lag_features
 from src.utils.data_path_utils import get_ticker, normalize_col
 from src.utils.db import upsert_stock_features
 from src.utils.logger import get_logger
@@ -149,6 +154,24 @@ def fetch_stock_data_with_features(
                 df[col] = df[col].ffill().bfill()
         logger.debug(f"クロスアセット特徴量を付与: {list(cross_asset.columns)} ({market}/{symbol})")
 
+    # 追加マクロ特徴量を結合（R-201：S&P500 / ドルインデックス / 金先物）
+    additional_macro = fetch_additional_macro_features(start_date, end_date)
+    if additional_macro is not None and not additional_macro.empty:
+        df_idx = df.index
+        if isinstance(df_idx, pd.DatetimeIndex) and df_idx.tz is not None:
+            df.index = df_idx.tz_localize(None)
+        df = df.join(additional_macro, how="left")
+        for col in additional_macro.columns:
+            if col in df.columns:
+                df[col] = df[col].ffill().bfill()
+        logger.debug("追加マクロ特徴量を付与: %s (%s/%s)", list(additional_macro.columns), market, symbol)
+
+    # 派生マクロ指標を追加（VIX MA / スパイクフラグ / 利回りモメンタム等）
+    df = add_macro_derived_features(df)
+
+    # イベントフラグを追加（決算シーズン / FOMC 開催週）
+    df = add_event_flags(df)
+
     # センチメント特徴量を付与（R-404：ニュースセンチメントオルタナティブデータ）
     sentiment_df = fetch_news_sentiment(symbol, start_date, end_date)
     df = add_sentiment_features(df, sentiment_df=sentiment_df)
@@ -218,8 +241,7 @@ def _notify_quality_issues(market: str, symbol: str, quality_result: QualityChec
     from src.utils.db.quality_log import insert_quality_log
 
     issues_dicts = [
-        {"check": i.check, "level": i.level, "detail": i.detail}
-        for i in quality_result.issues
+        {"check": i.check, "level": i.level, "detail": i.detail} for i in quality_result.issues
     ]
     try:
         insert_quality_log(market, symbol, issues_dicts)
