@@ -160,6 +160,20 @@ def run_weekly_report():
     except Exception as e:
         logger.error("週次レポート生成失敗: %s", e, exc_info=True)
 
+    # 外れ原因分析（非致命的）
+    logger.info("外れ原因分析開始")
+    try:
+        from src.prediction.miss_analysis import run_miss_analysis_batch
+        from src.reporting.discord.discord_utils import send_miss_analysis_summary
+        from src.utils.db import load_top_prediction_misses
+
+        miss_df = load_top_prediction_misses(horizon=1, top_n=10, since_days=30)
+        analysis_results = run_miss_analysis_batch(miss_df)
+        send_miss_analysis_summary(miss_df, analysis_results, since_days=30)
+        logger.info("外れ原因分析完了")
+    except Exception as e:
+        logger.error("外れ原因分析失敗: %s", e, exc_info=True)
+
 
 def run_daily_auto_order():
     """

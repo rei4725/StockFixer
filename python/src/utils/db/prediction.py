@@ -572,6 +572,50 @@ def load_prediction_accuracy(
             return pd.DataFrame()
 
 
+def load_top_prediction_misses(
+    horizon: int = 1,
+    top_n: int = 10,
+    since_days: int = 30,
+) -> pd.DataFrame:
+    """
+    直近 since_days 日の予測について外れ幅が大きい上位 top_n 件を返す。
+
+    外れ幅 = |predicted_ratio - actual_ratio|
+
+    Args:
+        horizon: 対象ホライズン
+        top_n: 返却件数上限
+        since_days: 対象期間（日数）
+
+    Returns:
+        pd.DataFrame: [market, symbol, model_name, predicted_at, horizon,
+                       predicted_ratio, actual_ratio, abs_error]
+        abs_error 降順でソート済み。actual_ratio / predicted_ratio が NULL のレコードは除外。
+    """
+    since = (datetime.now() - timedelta(days=since_days)).strftime("%Y%m%d")
+    with _db_connection() as con:
+        try:
+            return con.execute(
+                f"""
+                SELECT
+                    market, symbol, model_name, predicted_at, horizon,
+                    predicted_ratio, actual_ratio,
+                    ABS(predicted_ratio - actual_ratio) AS abs_error
+                FROM prediction_accuracy
+                WHERE horizon = ?
+                  AND actual_ratio IS NOT NULL
+                  AND predicted_ratio IS NOT NULL
+                  AND predicted_at >= ?
+                ORDER BY abs_error DESC
+                LIMIT {int(top_n)}
+                """,
+                [horizon, since],
+            ).fetchdf()
+        except Exception as e:
+            logger.error(f"load_top_prediction_misses 失敗: {e}", exc_info=True)
+            return pd.DataFrame()
+
+
 def load_drift_summary(horizon: int = 1, recent_n: int = 30) -> pd.DataFrame:
     """
     直近 recent_n 件の予測について銘柄ごとの方向正解率・平均誤差を集計する。

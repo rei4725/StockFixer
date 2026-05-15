@@ -295,6 +295,68 @@ def send_webhook_file(file_path: str, title: str = "") -> bool:
         return False
 
 
+def send_miss_analysis_summary(
+    miss_df,
+    analysis_results: dict,
+    since_days: int = 30,
+) -> bool:
+    """
+    予測外れ原因分析サマリーを Discord Webhook に送信する。
+
+    Args:
+        miss_df: load_top_prediction_misses() の戻り値 DataFrame
+        analysis_results: run_miss_analysis_batch() の戻り値辞書
+        since_days: 分析対象期間（日数）
+
+    Returns:
+        成功時 True、失敗時 False
+    """
+    import pandas as pd
+
+    if miss_df is None or (isinstance(miss_df, pd.DataFrame) and miss_df.empty):
+        logger.info("外れ原因分析: データなし — 通知をスキップ")
+        return True
+
+    now = format_jst(fmt=DISCORD_DATE_FORMAT)
+    lines = [f"**[予測外れ原因分析] {now} （直近{since_days}日）**\n"]
+
+    for _, row in miss_df.iterrows():
+        market = row["market"]
+        symbol = row["symbol"]
+        abs_err = row.get("abs_error", 0)
+        pred = row.get("predicted_ratio", 0)
+        actual = row.get("actual_ratio", 0)
+        sign = "+" if pred >= 0 else ""
+        actual_sign = "+" if actual >= 0 else ""
+        lines.append(
+            f"● `{market}/{symbol}` 外れ幅={abs_err:.2%}"
+            f"  予測={sign}{pred:.2%} / 実績={actual_sign}{actual:.2%}"
+        )
+        causes = analysis_results.get((market, symbol), [])
+        if causes:
+            cause_parts = [f"{c.feature}(rank#{c.shap_rank},{c.miss_count}回)" for c in causes[:3]]
+            lines.append(f"  主要因: {', '.join(cause_parts)}")
+
+    # 全銘柄横断の繰り返し外れ要因
+    from collections import Counter
+
+    feature_counts: Counter = Counter()
+    for causes in analysis_results.values():
+        for c in causes:
+            feature_counts[c.feature] += 1
+    repeat_features = [(f, n) for f, n in feature_counts.items() if n >= 3]
+    if repeat_features:
+        lines.append("")
+        repeat_strs = [f"{f}（{n}銘柄）" for f, n in sorted(repeat_features, key=lambda x: -x[1])]
+        lines.append(f"⚠️ 繰り返し外れ要因: {', '.join(repeat_strs)}")
+
+    return send_webhook_notification(
+        title="予測外れ原因分析",
+        message="\n".join(lines),
+        color=0xFF8C00,
+    )
+
+
 def send_drift_alert(summary_df, horizon: int = 1, threshold: float = 0.45) -> bool:
     """
     モデルドリフト警告を Discord Webhook に送信する。
