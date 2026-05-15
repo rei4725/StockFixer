@@ -141,10 +141,19 @@ def run_weekly_report():
     """
     logger.info("=== 週次レポート生成開始 ===")
     try:
+        from datetime import date, timedelta
+
         from src.reporting.discord.discord_utils import send_weekly_report
         from src.utils.db import load_drift_summary, load_paper_real_diff_summary
+        from src.utils.db import save_weekly_accuracy_snapshot
 
         summary = load_drift_summary(horizon=1)
+
+        # 今週月曜日を week_start として週次スナップショットを保存
+        today = date.today()
+        week_start = (today - timedelta(days=today.weekday())).isoformat()
+        save_weekly_accuracy_snapshot(week_start, summary)
+
         diff_summary = load_paper_real_diff_summary(recent_days=7)
         send_weekly_report(accuracy_df=summary, horizon=1, diff_summary=diff_summary)
         logger.info("=== 週次レポート送信完了 ===")
