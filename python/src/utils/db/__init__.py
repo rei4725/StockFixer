@@ -64,6 +64,7 @@ from src.utils.db.market_data import (  # noqa: F401
 # --- prediction_results / model_metrics / prediction_accuracy ---
 from src.utils.db.prediction import (  # noqa: F401
     load_drift_summary,
+    load_top_prediction_misses,
     load_excluded_features,
     load_latest_prediction_timestamp,
     load_model_weights,
