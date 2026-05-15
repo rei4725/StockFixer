@@ -84,12 +84,13 @@ repos:
     hooks:
       - id: pylint
         name: Pylint (errors only)
-        entry: python -m pylint
-        language: system
+        entry: pylint
+        language: python
         pass_filenames: false
         args: [python/src/, --rcfile=python/.pylintrc]
         files: ^python/src/.*\.py$
         exclude: ^(tests/|.*_test\.py$|\.github/skills/)
+        additional_dependencies: [pylint]
 
   # 7. ロック問題検出 - DuckDB並行処理
   # DB write 競合、排他ロック漏れなどを検出

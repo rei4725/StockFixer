@@ -381,6 +381,7 @@ class Backtester:
             購入数量と補助情報
         """
         unit_cost = price * (1 + self.fee_rate + self.slippage)
+        fallback_used: bool = False
         if unit_cost <= 0 or cash <= 0:
             return {
                 "qty": 0,

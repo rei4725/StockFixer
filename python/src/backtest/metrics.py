@@ -105,7 +105,13 @@ def compute_metrics(
         if "position_value" in buy_log.columns:
             position_values = pd.to_numeric(buy_log["position_value"], errors="coerce").dropna()
         if "atr_fallback_used" in buy_log.columns:
-            atr_fallback_trades = int(buy_log["atr_fallback_used"].fillna(False).astype(bool).sum())
+            atr_fallback_trades = int(
+                buy_log["atr_fallback_used"]
+                .fillna(False)
+                .infer_objects(copy=False)
+                .astype(bool)
+                .sum()
+            )
 
     return {
         "final_cash": round(final_cash, 2),

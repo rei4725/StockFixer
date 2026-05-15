@@ -286,7 +286,8 @@ def merge_market_data(db_data: pd.DataFrame, fresh_data: pd.DataFrame) -> pd.Dat
     new_rows = fresh_data_copy[fresh_data_copy.index > db_latest]
 
     # 既存データと新規データを結合
-    merged = pd.concat([db_data_copy, new_rows]).drop_duplicates().sort_index()
+    parts = [df for df in [db_data_copy, new_rows] if not df.empty]
+    merged = pd.concat(parts).drop_duplicates().sort_index() if parts else db_data_copy
 
     return merged
 
