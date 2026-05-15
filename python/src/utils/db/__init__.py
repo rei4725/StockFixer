@@ -66,6 +66,7 @@ from src.utils.db.prediction import (  # noqa: F401
     load_drift_summary,
     load_top_prediction_misses,
     load_excluded_features,
+    load_feature_exclusion_candidates,
     load_latest_prediction_timestamp,
     load_model_weights,
     load_paper_real_diff_summary,
