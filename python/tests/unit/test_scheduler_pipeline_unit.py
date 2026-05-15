@@ -137,6 +137,75 @@ class TestRunDailyDriftCheck(unittest.TestCase):
         mock_load_symbols.assert_not_called()
         mock_train.assert_not_called()
 
+    @patch("src.reporting.discord.discord_utils.send_feature_suggestion_notification")
+    @patch("src.utils.db.load_feature_exclusion_candidates")
+    @patch("src.prediction.training_pipeline.train_models_for_symbol_task")
+    @patch("src.watchlist.batch_runner.load_target_symbols")
+    @patch("src.reporting.discord.discord_utils.send_drift_retrain_notification")
+    @patch("src.utils.db.load_drift_summary")
+    def test_feature_suggestion_sent_after_successful_retrain(
+        self,
+        mock_load_summary,
+        mock_notify_drift,
+        mock_load_symbols,
+        mock_train,
+        mock_load_candidates,
+        mock_notify_suggestions,
+    ):
+        mock_load_summary.return_value = pd.DataFrame(
+            [
+                {
+                    "market": "jp",
+                    "symbol": "7203",
+                    "mean_abs_error": 0.03,
+                    "direction_accuracy": 0.40,
+                }
+            ]
+        )
+        mock_load_symbols.return_value = [SymbolTask(market="jp", symbol="7203")]
+        mock_train.return_value = {"status": "success", "shap_results": []}
+        mock_load_candidates.return_value = pd.DataFrame(
+            [{"feature": "rsi", "importance_mean": 0.001, "importance_rank": 50}]
+        )
+
+        run_daily_drift_check()
+
+        mock_load_candidates.assert_called_once_with("jp", "7203")
+        mock_notify_suggestions.assert_called_once()
+
+    @patch("src.reporting.discord.discord_utils.send_feature_suggestion_notification")
+    @patch("src.utils.db.load_feature_exclusion_candidates")
+    @patch("src.prediction.training_pipeline.train_models_for_symbol_task")
+    @patch("src.watchlist.batch_runner.load_target_symbols")
+    @patch("src.reporting.discord.discord_utils.send_drift_retrain_notification")
+    @patch("src.utils.db.load_drift_summary")
+    def test_feature_suggestion_not_sent_when_retrain_failed(
+        self,
+        mock_load_summary,
+        mock_notify_drift,
+        mock_load_symbols,
+        mock_train,
+        mock_load_candidates,
+        mock_notify_suggestions,
+    ):
+        mock_load_summary.return_value = pd.DataFrame(
+            [
+                {
+                    "market": "jp",
+                    "symbol": "7203",
+                    "mean_abs_error": 0.03,
+                    "direction_accuracy": 0.40,
+                }
+            ]
+        )
+        mock_load_symbols.return_value = [SymbolTask(market="jp", symbol="7203")]
+        mock_train.return_value = {"status": "error", "error": "学習失敗"}
+
+        run_daily_drift_check()
+
+        mock_load_candidates.assert_not_called()
+        mock_notify_suggestions.assert_not_called()
+
     @patch("src.prediction.training_pipeline.train_models_for_symbol_task")
     @patch("src.watchlist.batch_runner.load_target_symbols")
     @patch("src.reporting.discord.discord_utils.send_drift_retrain_notification")

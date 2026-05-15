@@ -905,6 +905,64 @@ def send_drift_retrain_notification(
     return send_webhook_text("\n".join(lines))
 
 
+def send_feature_suggestion_notification(
+    feature_suggestions: list,
+    global_threshold: int = 2,
+) -> bool:
+    """
+    ドリフト銘柄の特徴量除外提案を Discord Webhook に送信する。
+
+    Args:
+        feature_suggestions: [{"market": str, "symbol": str, "candidates": pd.DataFrame}]
+            candidates は feature, importance_mean, importance_rank 列を持つ DataFrame
+        global_threshold: グローバル警告の閾値（何銘柄以上で共通して除外候補か）
+
+    Returns:
+        送信成功時 True
+    """
+    from collections import Counter
+
+    import pandas as pd
+
+    if not feature_suggestions:
+        return False
+
+    now = format_jst(fmt=DISCORD_DATE_FORMAT)
+    lines = [
+        f"**[特徴量除外提案] {now}** — ドリフト銘柄 {len(feature_suggestions)} 銘柄",
+        "次回学習で除外候補となっている特徴量を確認してください。",
+        "",
+    ]
+
+    feature_counter: Counter = Counter()
+    for entry in feature_suggestions:
+        market = entry.get("market", "?")
+        symbol = entry.get("symbol", "?")
+        candidates_df = entry.get("candidates")
+        if not isinstance(candidates_df, pd.DataFrame) or candidates_df.empty:
+            lines.append(f"• `{market}/{symbol}` — 除外候補なし")
+            continue
+        lines.append(f"• `{market}/{symbol}` 除外候補 {len(candidates_df)} 件:")
+        for _, row in candidates_df.iterrows():
+            lines.append(
+                f"  - `{row['feature']}` "
+                f"(rank #{int(row['importance_rank'])}, mean={row['importance_mean']:.6f})"
+            )
+            feature_counter[row["feature"]] += 1
+
+    global_features = [(f, n) for f, n in feature_counter.items() if n >= global_threshold]
+    if global_features:
+        lines.append(f"\n⚠️ **グローバル除外候補** ({global_threshold}銘柄以上で共通):")
+        for feat, count in sorted(global_features, key=lambda x: -x[1]):
+            lines.append(f"  - `{feat}` ({count}銘柄で除外候補)")
+
+    return send_webhook_notification(
+        title="特徴量除外提案",
+        message="\n".join(lines),
+        color=0xFF8C00,
+    )
+
+
 # ---------------------------------------------------------------------------
 # ルールベーストレーディング通知
 # ---------------------------------------------------------------------------

@@ -532,6 +532,7 @@ def run_daily_drift_check():
     all_tasks = {(t.market, t.symbol): t for t in load_target_symbols()}
     success_count = 0
     all_shap_results: list = []
+    retrained_symbols: list = []
     for sym in triggered_list:
         task = all_tasks.get((sym["market"], sym["symbol"]))
         if task is None:
@@ -543,6 +544,7 @@ def run_daily_drift_check():
             if result.get("status") == "success":
                 success_count += 1
                 all_shap_results.extend(result.get("shap_results", []))
+                retrained_symbols.append(sym)
             else:
                 logger.warning(
                     f"ドリフト再学習スキップ/失敗 ({sym['market']}/{sym['symbol']}): "
@@ -561,6 +563,22 @@ def run_daily_drift_check():
             send_shap_batch_summary(all_shap_results)
         except Exception as e:
             logger.error("SHAP サマリー通知失敗: %s", e, exc_info=True)
+
+    # 特徴量除外提案通知（再学習成功銘柄の最新 Permutation Importance を通知）
+    if retrained_symbols:
+        try:
+            from src.reporting.discord.discord_utils import send_feature_suggestion_notification
+            from src.utils.db import load_feature_exclusion_candidates
+
+            feature_suggestions = []
+            for sym in retrained_symbols:
+                candidates = load_feature_exclusion_candidates(sym["market"], sym["symbol"])
+                feature_suggestions.append(
+                    {"market": sym["market"], "symbol": sym["symbol"], "candidates": candidates}
+                )
+            send_feature_suggestion_notification(feature_suggestions)
+        except Exception as e:
+            logger.error("特徴量除外提案通知失敗: %s", e, exc_info=True)
 
 
 def run_weekly_rule_evaluation() -> None:

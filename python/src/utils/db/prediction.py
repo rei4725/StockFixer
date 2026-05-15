@@ -867,6 +867,40 @@ def save_feature_selection(
         )
 
 
+def load_feature_exclusion_candidates(market: str, symbol: str) -> "pd.DataFrame":
+    """最新の Permutation Importance 結果から除外候補特徴量を返す。
+
+    Returns:
+        feature, importance_mean, importance_rank 列を持つ DataFrame (除外候補のみ)。
+        データなしのときは空 DataFrame。
+    """
+    import pandas as pd
+
+    with _db_connection() as con:
+        latest = con.execute(
+            "SELECT MAX(trained_at) FROM feature_selection_log WHERE market = ? AND symbol = ?",
+            [market, symbol],
+        ).fetchone()[0]
+        if latest is None:
+            return pd.DataFrame()
+        rows = con.execute(
+            """
+            SELECT feature,
+                   AVG(importance_mean) AS importance_mean,
+                   CAST(AVG(importance_rank) AS INTEGER) AS importance_rank
+            FROM feature_selection_log
+            WHERE market = ? AND symbol = ? AND trained_at = ?
+              AND is_excluded = TRUE AND protected_by_shap = FALSE
+            GROUP BY feature
+            ORDER BY importance_rank DESC
+            """,
+            [market, symbol, latest],
+        ).fetchall()
+    if not rows:
+        return pd.DataFrame()
+    return pd.DataFrame(rows, columns=["feature", "importance_mean", "importance_rank"])
+
+
 def load_excluded_features(
     market: str,
     symbol: str,
