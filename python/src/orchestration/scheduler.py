@@ -57,8 +57,10 @@ def run_daily_pipeline():
     logger.info("[3/4] 予測精度チェック開始")
     try:
         from src.prediction.prediction_pipeline import run_accuracy_check
+        from src.reporting.discord.discord_utils import send_accuracy_summary
 
-        run_accuracy_check(horizon=1)
+        summary = run_accuracy_check(horizon=1)
+        send_accuracy_summary(summary, horizon=1)
         logger.info("[3/4] 予測精度チェック完了")
     except Exception as e:
         logger.error("[3/4] 予測精度チェック失敗: %s", e, exc_info=True)

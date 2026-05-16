@@ -395,6 +395,39 @@ def send_drift_alert(summary_df, horizon: int = 1, threshold: float = 0.45) -> b
     return send_webhook_text("\n".join(lines))
 
 
+def send_accuracy_summary(summary_df, horizon: int = 1) -> bool:
+    """
+    予測精度サマリー（方向正解率・MAE）を Discord Webhook に送信する。
+
+    Args:
+        summary_df: load_drift_summary() の戻り値 (DataFrame)
+        horizon: 対象ホライズン（メッセージ表示用）
+
+    Returns:
+        送信成功時 True、送信不要または失敗時 False
+    """
+    import pandas as pd
+
+    if summary_df is None or (isinstance(summary_df, pd.DataFrame) and summary_df.empty):
+        logger.info("精度サマリー送信スキップ: データなし (horizon=%sd)", horizon)
+        return False
+
+    now = format_jst(fmt=DISCORD_DATE_FORMAT)
+    lines = [f"**[予測精度サマリー] {now} (horizon={horizon}d)**\n"]
+
+    df_sorted = summary_df.sort_values("direction_accuracy", ascending=True)
+    for _, row in df_sorted.iterrows():
+        acc = row.get("direction_accuracy", 0)
+        err = row.get("mean_abs_error", 0)
+        n = int(row.get("n_samples", 0))
+        lines.append(
+            f"• `{row['market']}/{row['symbol']}` "
+            f"正解率={acc:.1%}, 平均誤差={err:.4f}, N={n}"
+        )
+
+    return send_webhook_text("\n".join(lines))
+
+
 def send_weekly_report(
     accuracy_df=None, horizon: int = 1, diff_summary: Optional[dict] = None
 ) -> bool:
