@@ -1,8 +1,9 @@
 """
-外部向け予測シグナル API PoC エンドポイント（R-204）
+外部向け read-only API エンドポイント（R-304）
 
 公開経路:
   GET /api/v1/predictions/top?market=<jp|us>
+  GET /api/v1/reports/monthly?month=<YYYY-MM>
 
 認証:
   X-API-Key ヘッダー（環境変数 EXTERNAL_API_KEYS にカンマ区切りで設定）
@@ -10,9 +11,13 @@
 利用制限:
   1分間に EXTERNAL_API_MAX_RPM リクエスト（デフォルト 60）
 
-公開フィールド（内部情報を除外）:
-  market, symbol, current_price, avg_pred_price, diff_ratio,
-  pred_lower_10, pred_upper_90, confluence_score
+公開フィールド定義（内部情報除外方針）:
+  予測:  market, symbol, current_price, avg_pred_price, diff_ratio,
+         pred_lower_10, pred_upper_90, confluence_score
+         除外: model_count, confidence_ratio, model_version, 多ホライズン差分
+  月次:  target_month, generated_at, net_return, max_drawdown, sharpe_ratio,
+         hit_rate, symbol_count
+         除外: avg_slippage（内部執行コスト）, wf_snapshot_file（内部ファイル参照）
 """
 
 import os
@@ -33,7 +38,7 @@ logger = get_logger(__name__)
 
 _MAX_REQUESTS_PER_MINUTE = int(os.getenv("EXTERNAL_API_MAX_RPM", "60"))
 
-# 公開フィールド定義（内部実装詳細・秘密係数を除外）
+# 予測公開フィールド（内部実装詳細・秘密係数を除外）
 # 除外: model_count, confidence_ratio, model_version, avg_pred_price_3d/5d/10d, diff_ratio_3d/5d/10d
 _PUBLIC_PREDICTION_FIELDS = (
     "market",
@@ -44,6 +49,18 @@ _PUBLIC_PREDICTION_FIELDS = (
     "pred_lower_10",
     "pred_upper_90",
     "confluence_score",
+)
+
+# 月次レポート公開フィールド（内部執行コスト・内部ファイル参照を除外）
+# 除外: avg_slippage（ペーパー執行コスト詳細）, wf_snapshot_file（内部ファイル名）
+_PUBLIC_MONTHLY_FIELDS = (
+    "target_month",
+    "generated_at",
+    "net_return",
+    "max_drawdown",
+    "sharpe_ratio",
+    "hit_rate",
+    "symbol_count",
 )
 
 # ---------------------------------------------------------------------------
@@ -92,6 +109,11 @@ def _is_rate_limited(api_key: str) -> bool:
 def _to_public_dict(result: Any) -> dict:
     """PredictionResult から公開フィールドのみを抽出した dict を返す。"""
     return {field: getattr(result, field, None) for field in _PUBLIC_PREDICTION_FIELDS}
+
+
+def _to_public_monthly_dict(summary: Any) -> dict:
+    """MonthlyReportSummary から公開フィールドのみを抽出した dict を返す。"""
+    return {field: getattr(summary, field, None) for field in _PUBLIC_MONTHLY_FIELDS}
 
 
 # ---------------------------------------------------------------------------
@@ -145,3 +167,31 @@ def register_routes(flask_app: Flask) -> None:
             return jsonify({"error": "Internal Server Error"}), 500
 
     logger.info("/api/v1/predictions/top ルートを登録しました")
+
+    @flask_app.route("/api/v1/reports/monthly")
+    def external_v1_reports_monthly() -> tuple[Response, int]:
+        """月次KPIサマリーを外部向けに返す。
+
+        内部執行コスト・内部ファイル参照を除外した公開フィールドのみを返す。
+        ?month=YYYY-MM で対象月を指定可（省略時は当月）。
+        """
+        api_key = request.headers.get("X-API-Key")
+        if not _check_api_key(api_key):
+            return jsonify({"error": "Unauthorized"}), 401
+
+        if _is_rate_limited(api_key):  # type: ignore[arg-type]
+            return jsonify({"error": "Too Many Requests"}), 429
+
+        target_month = request.args.get("month")
+
+        try:
+            from src.reporting.query_service import get_monthly_report_summary
+
+            summary = get_monthly_report_summary(target_month=target_month)
+            return jsonify(_to_public_monthly_dict(summary)), 200
+
+        except Exception:
+            logger.error("月次レポートAPIエンドポイントで例外発生", exc_info=True)
+            return jsonify({"error": "Internal Server Error"}), 500
+
+    logger.info("/api/v1/reports/monthly ルートを登録しました")
