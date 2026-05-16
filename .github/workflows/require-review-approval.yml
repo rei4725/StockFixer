@@ -1,0 +1,51 @@
+name: Require Review Approval
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  pull_request_review:
+    types: [submitted, dismissed]
+
+jobs:
+  check-approval:
+    name: Check Review Approval
+    runs-on: ubuntu-latest
+    if: github.actor != 'dependabot[bot]'
+    steps:
+      - name: Check for at least 1 approved review
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: reviews } = await github.rest.pulls.listReviews({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request
+                ? context.payload.pull_request.number
+                : context.payload.review.pull_request_url.split('/').pop(),
+            });
+
+            const latestByUser = {};
+            for (const review of reviews) {
+              if (review.state !== 'COMMENTED') {
+                latestByUser[review.user.login] = review.state;
+              }
+            }
+
+            const approvals = Object.values(latestByUser).filter(s => s === 'APPROVED');
+            const changes   = Object.values(latestByUser).filter(s => s === 'CHANGES_REQUESTED');
+
+            core.info(`Approvals: ${approvals.length}, Changes requested: ${changes.length}`);
+
+            if (approvals.length === 0) {
+              core.setFailed(
+                'このPRには承認済みレビューが必要です。' +
+                'マージ前に少なくとも1名のレビュアーから承認を得てください。'
+              );
+            } else if (changes.length > 0) {
+              core.setFailed(
+                '変更要求が残っています。' +
+                'すべての変更要求を解決してから再度承認を得てください。'
+              );
+            } else {
+              core.info(`承認済み (${approvals.length}名)。マージ可能です。`);
+            }
