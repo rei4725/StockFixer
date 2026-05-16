@@ -59,6 +59,12 @@ class Settings(BaseSettings):
     CORRELATION_ENC_THRESHOLD: float = Field(default=2.0)
     CORRELATION_WINDOW_DAYS: int = Field(default=20)
 
+    # ---------- Claude トレーダー（claude_agent.py） ----------
+    CLAUDE_TRADER_ENABLED: bool = Field(default=False)
+    CLAUDE_TRADER_MODEL: str = Field(default="claude-opus-4-7")
+    CLAUDE_TRADER_THINKING_BUDGET: int = Field(default=5000)
+    CLAUDE_TRADER_MAX_TOKENS: int = Field(default=8192)
+
 
 settings = Settings()
 
@@ -94,3 +100,8 @@ ENABLE_SHORT_SIDE: bool = settings.ENABLE_SHORT_SIDE
 
 CORRELATION_ENC_THRESHOLD: float = settings.CORRELATION_ENC_THRESHOLD
 CORRELATION_WINDOW_DAYS: int = settings.CORRELATION_WINDOW_DAYS
+
+CLAUDE_TRADER_ENABLED: bool = settings.CLAUDE_TRADER_ENABLED
+CLAUDE_TRADER_MODEL: str = settings.CLAUDE_TRADER_MODEL
+CLAUDE_TRADER_THINKING_BUDGET: int = settings.CLAUDE_TRADER_THINKING_BUDGET
+CLAUDE_TRADER_MAX_TOKENS: int = settings.CLAUDE_TRADER_MAX_TOKENS
