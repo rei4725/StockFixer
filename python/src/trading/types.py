@@ -37,3 +37,28 @@ class TradingGateStatus:
     consecutive_loss_limit: Optional[int] = None
     position_count: int = 0
     max_positions: Optional[int] = None
+
+
+@dataclass
+class AllocationCandidate:
+    """資本配分エンジンへの入力。1銘柄分の予測スナップショット。"""
+
+    market: str
+    symbol: str
+    diff_ratio: float
+    confidence_ratio: float
+    sector: str = "UNKNOWN"
+
+
+@dataclass
+class AllocationResult:
+    """資本配分エンジンの出力。1銘柄の推奨保有比率。"""
+
+    market: str
+    symbol: str
+    weight: float
+    raw_score: float
+    confidence_ratio: float
+    sector: str
+    regime_scale: float
+    reason: Optional[str] = None
