@@ -21,11 +21,13 @@ from src.utils.db.prediction import (
     load_prediction_markets,
     load_prediction_results,
     load_shap_latest,
+    load_weekly_accuracy_snapshots,
     save_feature_selection,
     save_model_metrics,
     save_prediction_accuracy,
     save_prediction_results,
     save_shap_values,
+    save_weekly_accuracy_snapshot,
     upsert_paper_real_diff,
 )
 
@@ -688,6 +690,64 @@ class TestPaperRealDiff(_TmpDbTestCase):
         """約定なしのとき空辞書を返すこと"""
         result = load_open_close_advantage_summary(recent_days=30)
         self.assertEqual(result, {})
+
+
+class TestWeeklyAccuracySnapshot(_TmpDbTestCase):
+    """save_weekly_accuracy_snapshot / load_weekly_accuracy_snapshots のテスト"""
+
+    def _make_accuracy_df(self, market="us", symbol="AAPL", direction_accuracy=0.6, n=10):
+        return pd.DataFrame(
+            {
+                "market": [market],
+                "symbol": [symbol],
+                "direction_accuracy": [direction_accuracy],
+                "mean_abs_error": [0.02],
+                "n_samples": [n],
+            }
+        )
+
+    def test_save_and_load_roundtrip(self):
+        """保存した週次スナップショットを読み込めること"""
+        df = self._make_accuracy_df()
+        save_weekly_accuracy_snapshot("2026-05-11", df)
+
+        result = load_weekly_accuracy_snapshots(n_weeks=4)
+        self.assertFalse(result.empty)
+        self.assertEqual(result.iloc[0]["week_start"], "2026-05-11")
+        self.assertEqual(result.iloc[0]["symbol"], "AAPL")
+        self.assertAlmostEqual(result.iloc[0]["direction_accuracy"], 0.6)
+
+    def test_upsert_overwrites_same_week(self):
+        """同一 week_start への再保存で既存データが上書きされること"""
+        df1 = self._make_accuracy_df(direction_accuracy=0.5)
+        df2 = self._make_accuracy_df(direction_accuracy=0.7)
+        save_weekly_accuracy_snapshot("2026-05-11", df1)
+        save_weekly_accuracy_snapshot("2026-05-11", df2)
+
+        result = load_weekly_accuracy_snapshots(n_weeks=4)
+        rows = result[result["week_start"] == "2026-05-11"]
+        self.assertEqual(len(rows), 1)
+        self.assertAlmostEqual(rows.iloc[0]["direction_accuracy"], 0.7)
+
+    def test_n_weeks_limit(self):
+        """n_weeks で取得週数が制限されること"""
+        for i in range(5):
+            week = f"2026-0{i + 1}-02"
+            save_weekly_accuracy_snapshot(week, self._make_accuracy_df())
+
+        result = load_weekly_accuracy_snapshots(n_weeks=3)
+        self.assertLessEqual(result["week_start"].nunique(), 3)
+
+    def test_empty_df_is_noop(self):
+        """空の DataFrame を渡しても例外にならないこと"""
+        save_weekly_accuracy_snapshot("2026-05-11", pd.DataFrame())
+        result = load_weekly_accuracy_snapshots(n_weeks=4)
+        self.assertTrue(result.empty)
+
+    def test_load_returns_empty_when_no_data(self):
+        """データがないとき空 DataFrame を返すこと"""
+        result = load_weekly_accuracy_snapshots(n_weeks=4)
+        self.assertTrue(result.empty)
 
 
 if __name__ == "__main__":

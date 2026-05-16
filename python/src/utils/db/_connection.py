@@ -469,6 +469,22 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
     """
     )
 
+    # I-241: 週次精度スナップショット
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS accuracy_weekly_snapshots (
+            week_start         VARCHAR NOT NULL,
+            market             VARCHAR NOT NULL,
+            symbol             VARCHAR NOT NULL,
+            direction_accuracy DOUBLE,
+            mean_abs_error     DOUBLE,
+            n_samples          INTEGER,
+            snapshot_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (week_start, market, symbol)
+        )
+    """
+    )
+
 
 def init_tables() -> None:
     """外部から明示的にテーブル初期化する場合に使用"""

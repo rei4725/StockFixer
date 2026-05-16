@@ -57,8 +57,10 @@ def run_daily_pipeline():
     logger.info("[3/4] 予測精度チェック開始")
     try:
         from src.prediction.prediction_pipeline import run_accuracy_check
+        from src.reporting.discord.discord_utils import send_accuracy_summary
 
-        run_accuracy_check(horizon=1)
+        summary = run_accuracy_check(horizon=1)
+        send_accuracy_summary(summary, horizon=1)
         logger.info("[3/4] 予測精度チェック完了")
     except Exception as e:
         logger.error("[3/4] 予測精度チェック失敗: %s", e, exc_info=True)
@@ -141,15 +143,41 @@ def run_weekly_report():
     """
     logger.info("=== 週次レポート生成開始 ===")
     try:
+        from datetime import date, timedelta
+
         from src.reporting.discord.discord_utils import send_weekly_report
-        from src.utils.db import load_drift_summary, load_paper_real_diff_summary
+        from src.utils.db import (
+            load_drift_summary,
+            load_paper_real_diff_summary,
+            save_weekly_accuracy_snapshot,
+        )
 
         summary = load_drift_summary(horizon=1)
+
+        # 今週月曜日を week_start として週次スナップショットを保存
+        today = date.today()
+        week_start = (today - timedelta(days=today.weekday())).isoformat()
+        save_weekly_accuracy_snapshot(week_start, summary)
+
         diff_summary = load_paper_real_diff_summary(recent_days=7)
         send_weekly_report(accuracy_df=summary, horizon=1, diff_summary=diff_summary)
         logger.info("=== 週次レポート送信完了 ===")
     except Exception as e:
         logger.error("週次レポート生成失敗: %s", e, exc_info=True)
+
+    # 外れ原因分析（非致命的）
+    logger.info("外れ原因分析開始")
+    try:
+        from src.prediction.miss_analysis import run_miss_analysis_batch
+        from src.reporting.discord.discord_utils import send_miss_analysis_summary
+        from src.utils.db import load_top_prediction_misses
+
+        miss_df = load_top_prediction_misses(horizon=1, top_n=10, since_days=30)
+        analysis_results = run_miss_analysis_batch(miss_df)
+        send_miss_analysis_summary(miss_df, analysis_results, since_days=30)
+        logger.info("外れ原因分析完了")
+    except Exception as e:
+        logger.error("外れ原因分析失敗: %s", e, exc_info=True)
 
 
 def run_daily_auto_order():
@@ -449,6 +477,42 @@ def run_weekly_db_maintenance() -> None:
         logger.error("DB メンテナンス通知失敗: %s", e, exc_info=True)
 
 
+def run_weekly_shadow_evaluation() -> None:
+    """
+    週次実行: A/Bテスト（シャドーモード）評価
+
+    production / challenger 両モデルの Hit Rate / Sharpe を比較し、
+    challenger_wins=True のとき Discord に昇格候補を通知する。
+
+    手動承認後に promote_challenger_to_production() を実行することで
+    challenger を本番モデルへ昇格させることができる。
+    """
+    logger.info("=== 週次 A/Bテスト評価開始 ===")
+    result: dict = {}
+    try:
+        from src.prediction.shadow_evaluation import evaluate_shadow_models
+
+        result = evaluate_shadow_models()
+        logger.info(
+            "A/Bテスト評価完了: challenger_wins=%s (prod_hit=%s, chal_hit=%s)",
+            result["challenger_wins"],
+            result["production_hit_rate"],
+            result["challenger_hit_rate"],
+        )
+    except Exception as e:
+        logger.error("A/Bテスト評価失敗: %s", e, exc_info=True)
+        return
+
+    try:
+        from src.reporting.discord.discord_utils import send_shadow_evaluation_notification
+
+        send_shadow_evaluation_notification(result)
+    except Exception as e:
+        logger.error("A/Bテスト評価通知失敗: %s", e, exc_info=True)
+
+    logger.info("=== 週次 A/Bテスト評価完了 ===")
+
+
 def run_daily_drift_check():
     """
     日次ドリフト監視: 直近 20 営業日の MAE / Hit Rate を監視し、閾値超過銘柄を自動再学習する。
@@ -509,6 +573,7 @@ def run_daily_drift_check():
     all_tasks = {(t.market, t.symbol): t for t in load_target_symbols()}
     success_count = 0
     all_shap_results: list = []
+    retrained_symbols: list = []
     for sym in triggered_list:
         task = all_tasks.get((sym["market"], sym["symbol"]))
         if task is None:
@@ -520,6 +585,7 @@ def run_daily_drift_check():
             if result.get("status") == "success":
                 success_count += 1
                 all_shap_results.extend(result.get("shap_results", []))
+                retrained_symbols.append(sym)
             else:
                 logger.warning(
                     f"ドリフト再学習スキップ/失敗 ({sym['market']}/{sym['symbol']}): "
@@ -538,6 +604,22 @@ def run_daily_drift_check():
             send_shap_batch_summary(all_shap_results)
         except Exception as e:
             logger.error("SHAP サマリー通知失敗: %s", e, exc_info=True)
+
+    # 特徴量除外提案通知（再学習成功銘柄の最新 Permutation Importance を通知）
+    if retrained_symbols:
+        try:
+            from src.reporting.discord.discord_utils import send_feature_suggestion_notification
+            from src.utils.db import load_feature_exclusion_candidates
+
+            feature_suggestions = []
+            for sym in retrained_symbols:
+                candidates = load_feature_exclusion_candidates(sym["market"], sym["symbol"])
+                feature_suggestions.append(
+                    {"market": sym["market"], "symbol": sym["symbol"], "candidates": candidates}
+                )
+            send_feature_suggestion_notification(feature_suggestions)
+        except Exception as e:
+            logger.error("特徴量除外提案通知失敗: %s", e, exc_info=True)
 
 
 def run_weekly_rule_evaluation() -> None:

@@ -35,6 +35,8 @@ DB_BACKUP_COMPLETION = NotificationSpec("✅ DB バックアップ完了", COLOR
 DB_BACKUP_ERROR = NotificationSpec("❌ DB バックアップ失敗", COLOR_ERROR)
 MONTHLY_REPORT_COMPLETION = NotificationSpec("📊 月次レポート生成完了", COLOR_INFO)
 PRE_CLOSE_ALERT = NotificationSpec("📋 引け前ポジション再評価", COLOR_INFO)
+SHADOW_EVALUATION_CHALLENGER_WINS = NotificationSpec("🏆 A/Bテスト: Challenger 昇格候補", COLOR_WARNING)
+SHADOW_EVALUATION_NO_WINNER = NotificationSpec("ℹ️ A/Bテスト: 評価完了", COLOR_INFO)
 
 
 def get_daily_order_spec(*, trading_stopped: bool) -> NotificationSpec:

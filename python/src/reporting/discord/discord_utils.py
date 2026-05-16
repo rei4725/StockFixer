@@ -23,6 +23,8 @@ from src.reporting.discord.discord_notification_specs import (
     DB_MAINTENANCE_ERROR,
     MONTHLY_REPORT_COMPLETION,
     PRE_CLOSE_ALERT,
+    SHADOW_EVALUATION_CHALLENGER_WINS,
+    SHADOW_EVALUATION_NO_WINNER,
     WEEKLY_TRAINING_COMPLETION,
     NotificationSpec,
     get_daily_order_spec,
@@ -298,6 +300,68 @@ def send_webhook_file(file_path: str, title: str = "") -> bool:
         return False
 
 
+def send_miss_analysis_summary(
+    miss_df,
+    analysis_results: dict,
+    since_days: int = 30,
+) -> bool:
+    """
+    予測外れ原因分析サマリーを Discord Webhook に送信する。
+
+    Args:
+        miss_df: load_top_prediction_misses() の戻り値 DataFrame
+        analysis_results: run_miss_analysis_batch() の戻り値辞書
+        since_days: 分析対象期間（日数）
+
+    Returns:
+        成功時 True、失敗時 False
+    """
+    import pandas as pd
+
+    if miss_df is None or (isinstance(miss_df, pd.DataFrame) and miss_df.empty):
+        logger.info("外れ原因分析: データなし — 通知をスキップ")
+        return True
+
+    now = format_jst(fmt=DISCORD_DATE_FORMAT)
+    lines = [f"**[予測外れ原因分析] {now} （直近{since_days}日）**\n"]
+
+    for _, row in miss_df.iterrows():
+        market = row["market"]
+        symbol = row["symbol"]
+        abs_err = row.get("abs_error", 0)
+        pred = row.get("predicted_ratio", 0)
+        actual = row.get("actual_ratio", 0)
+        sign = "+" if pred >= 0 else ""
+        actual_sign = "+" if actual >= 0 else ""
+        lines.append(
+            f"● `{market}/{symbol}` 外れ幅={abs_err:.2%}"
+            f"  予測={sign}{pred:.2%} / 実績={actual_sign}{actual:.2%}"
+        )
+        causes = analysis_results.get((market, symbol), [])
+        if causes:
+            cause_parts = [f"{c.feature}(rank#{c.shap_rank},{c.miss_count}回)" for c in causes[:3]]
+            lines.append(f"  主要因: {', '.join(cause_parts)}")
+
+    # 全銘柄横断の繰り返し外れ要因
+    from collections import Counter
+
+    feature_counts: Counter = Counter()
+    for causes in analysis_results.values():
+        for c in causes:
+            feature_counts[c.feature] += 1
+    repeat_features = [(f, n) for f, n in feature_counts.items() if n >= 3]
+    if repeat_features:
+        lines.append("")
+        repeat_strs = [f"{f}（{n}銘柄）" for f, n in sorted(repeat_features, key=lambda x: -x[1])]
+        lines.append(f"⚠️ 繰り返し外れ要因: {', '.join(repeat_strs)}")
+
+    return send_webhook_notification(
+        title="予測外れ原因分析",
+        message="\n".join(lines),
+        color=0xFF8C00,
+    )
+
+
 def send_drift_alert(summary_df, horizon: int = 1, threshold: float = 0.45) -> bool:
     """
     モデルドリフト警告を Discord Webhook に送信する。
@@ -334,6 +398,38 @@ def send_drift_alert(summary_df, horizon: int = 1, threshold: float = 0.45) -> b
     return send_webhook_text("\n".join(lines))
 
 
+def send_accuracy_summary(summary_df, horizon: int = 1) -> bool:
+    """
+    予測精度サマリー（方向正解率・MAE）を Discord Webhook に送信する。
+
+    Args:
+        summary_df: load_drift_summary() の戻り値 (DataFrame)
+        horizon: 対象ホライズン（メッセージ表示用）
+
+    Returns:
+        送信成功時 True、送信不要または失敗時 False
+    """
+    import pandas as pd
+
+    if summary_df is None or (isinstance(summary_df, pd.DataFrame) and summary_df.empty):
+        logger.info("精度サマリー送信スキップ: データなし (horizon=%sd)", horizon)
+        return False
+
+    now = format_jst(fmt=DISCORD_DATE_FORMAT)
+    lines = [f"**[予測精度サマリー] {now} (horizon={horizon}d)**\n"]
+
+    df_sorted = summary_df.sort_values("direction_accuracy", ascending=True)
+    for _, row in df_sorted.iterrows():
+        acc = row.get("direction_accuracy", 0)
+        err = row.get("mean_abs_error", 0)
+        n = int(row.get("n_samples", 0))
+        lines.append(
+            f"• `{row['market']}/{row['symbol']}` " f"正解率={acc:.1%}, 平均誤差={err:.4f}, N={n}"
+        )
+
+    return send_webhook_text("\n".join(lines))
+
+
 def send_weekly_report(
     accuracy_df=None, horizon: int = 1, diff_summary: Optional[dict] = None
 ) -> bool:
@@ -341,6 +437,8 @@ def send_weekly_report(
     週次パフォーマンスレポートを Discord Webhook に送信する。
 
     直近の方向正解率・平均誤差を銘柄ごとに集計してレポートする。
+    前週スナップショットがあれば先週比変化・改善/悪化上位も表示する。
+    全体 Hit Rate が連続 N 週低下していた場合はアラートも送る。
 
     Args:
         accuracy_df: load_drift_summary() の戻り値 DataFrame（None の場合はDB から取得）
@@ -351,7 +449,11 @@ def send_weekly_report(
     """
     import pandas as pd
 
-    from src.utils.db import load_drift_summary, load_paper_real_diff_summary
+    from src.utils.db import (
+        load_drift_summary,
+        load_paper_real_diff_summary,
+        load_weekly_accuracy_snapshots,
+    )
 
     if accuracy_df is None or (isinstance(accuracy_df, pd.DataFrame) and accuracy_df.empty):
         accuracy_df = load_drift_summary(horizon=horizon)
@@ -378,6 +480,58 @@ def send_weekly_report(
     # 全体サマリー
     mean_acc = accuracy_df["direction_accuracy"].mean()
     lines.append(f"\n**全体平均正解率**: {mean_acc:.1%} ({len(accuracy_df)}銘柄)")
+
+    # 前週比較（週次スナップショットが 2 週分以上あれば）
+    snapshots = load_weekly_accuracy_snapshots(n_weeks=4)
+    if not snapshots.empty:
+        weeks = sorted(snapshots["week_start"].unique(), reverse=True)
+        if len(weeks) >= 2:
+            prev_week = weeks[1]
+            prev_df = snapshots[snapshots["week_start"] == prev_week][
+                ["market", "symbol", "direction_accuracy"]
+            ].rename(columns={"direction_accuracy": "prev_accuracy"})
+
+            merged = accuracy_df.merge(prev_df, on=["market", "symbol"], how="inner")
+            if not merged.empty:
+                merged["delta"] = merged["direction_accuracy"] - merged["prev_accuracy"]
+
+                top_improved = merged.nlargest(5, "delta")
+                top_worsened = merged.nsmallest(5, "delta")
+
+                lines.append(f"\n**前週比 Hit Rate 変化（比較週: {prev_week}）**")
+
+                lines.append("改善上位 5 銘柄:")
+                for _, r in top_improved.iterrows():
+                    sign = "+" if r["delta"] >= 0 else ""
+                    lines.append(
+                        f"• `{r['market']}/{r['symbol']}` "
+                        f"{r['prev_accuracy']:.1%} → {r['direction_accuracy']:.1%} "
+                        f"({sign}{r['delta']:.1%})"
+                    )
+
+                lines.append("悪化上位 5 銘柄:")
+                for _, r in top_worsened.iterrows():
+                    sign = "+" if r["delta"] >= 0 else ""
+                    lines.append(
+                        f"• `{r['market']}/{r['symbol']}` "
+                        f"{r['prev_accuracy']:.1%} → {r['direction_accuracy']:.1%} "
+                        f"({sign}{r['delta']:.1%})"
+                    )
+
+        # 全体 Hit Rate の週次トレンドで連続低下を検出（N=3 週）
+        _ALERT_CONSECUTIVE_DECLINE_WEEKS = 3
+        weekly_mean = (
+            snapshots.groupby("week_start")["direction_accuracy"].mean().sort_index(ascending=False)
+        )
+        if len(weekly_mean) >= _ALERT_CONSECUTIVE_DECLINE_WEEKS:
+            recent = weekly_mean.iloc[:_ALERT_CONSECUTIVE_DECLINE_WEEKS].tolist()
+            is_declining = all(recent[i] < recent[i + 1] for i in range(len(recent) - 1))
+            if is_declining:
+                weeks_str = ", ".join(weekly_mean.index[:_ALERT_CONSECUTIVE_DECLINE_WEEKS].tolist())
+                lines.append(
+                    f"\n⚠️ **アラート: 全体 Hit Rate が {_ALERT_CONSECUTIVE_DECLINE_WEEKS} 週連続で低下しています**"
+                    f" ({weeks_str})"
+                )
 
     if diff_summary is None:
         diff_summary = load_paper_real_diff_summary(recent_days=7)
@@ -878,6 +1032,64 @@ def send_drift_retrain_notification(
     return send_webhook_text("\n".join(lines))
 
 
+def send_feature_suggestion_notification(
+    feature_suggestions: list,
+    global_threshold: int = 2,
+) -> bool:
+    """
+    ドリフト銘柄の特徴量除外提案を Discord Webhook に送信する。
+
+    Args:
+        feature_suggestions: [{"market": str, "symbol": str, "candidates": pd.DataFrame}]
+            candidates は feature, importance_mean, importance_rank 列を持つ DataFrame
+        global_threshold: グローバル警告の閾値（何銘柄以上で共通して除外候補か）
+
+    Returns:
+        送信成功時 True
+    """
+    from collections import Counter
+
+    import pandas as pd
+
+    if not feature_suggestions:
+        return False
+
+    now = format_jst(fmt=DISCORD_DATE_FORMAT)
+    lines = [
+        f"**[特徴量除外提案] {now}** — ドリフト銘柄 {len(feature_suggestions)} 銘柄",
+        "次回学習で除外候補となっている特徴量を確認してください。",
+        "",
+    ]
+
+    feature_counter: Counter = Counter()
+    for entry in feature_suggestions:
+        market = entry.get("market", "?")
+        symbol = entry.get("symbol", "?")
+        candidates_df = entry.get("candidates")
+        if not isinstance(candidates_df, pd.DataFrame) or candidates_df.empty:
+            lines.append(f"• `{market}/{symbol}` — 除外候補なし")
+            continue
+        lines.append(f"• `{market}/{symbol}` 除外候補 {len(candidates_df)} 件:")
+        for _, row in candidates_df.iterrows():
+            lines.append(
+                f"  - `{row['feature']}` "
+                f"(rank #{int(row['importance_rank'])}, mean={row['importance_mean']:.6f})"
+            )
+            feature_counter[row["feature"]] += 1
+
+    global_features = [(f, n) for f, n in feature_counter.items() if n >= global_threshold]
+    if global_features:
+        lines.append(f"\n⚠️ **グローバル除外候補** ({global_threshold}銘柄以上で共通):")
+        for feat, count in sorted(global_features, key=lambda x: -x[1]):
+            lines.append(f"  - `{feat}` ({count}銘柄で除外候補)")
+
+    return send_webhook_notification(
+        title="特徴量除外提案",
+        message="\n".join(lines),
+        color=0xFF8C00,
+    )
+
+
 # ---------------------------------------------------------------------------
 # ルールベーストレーディング通知
 # ---------------------------------------------------------------------------
@@ -1039,3 +1251,42 @@ def send_pre_close_alert(alerts: list) -> bool:
             )
 
     return send_webhook_text_chunked("\n".join(lines), preserve_lines=False)
+
+
+def send_shadow_evaluation_notification(result: dict) -> bool:
+    """
+    A/B テスト（シャドーモード）評価結果を Discord Webhook に送信する。
+
+    challenger_wins=True のとき昇格候補として通知する。
+
+    Args:
+        result: evaluate_shadow_models() の戻り値
+
+    Returns:
+        成功時 True、失敗時 False
+    """
+    challenger_wins = result.get("challenger_wins", False)
+    spec = SHADOW_EVALUATION_CHALLENGER_WINS if challenger_wins else SHADOW_EVALUATION_NO_WINNER
+
+    def _fmt(v) -> str:
+        return f"{v:.3f}" if v is not None else "N/A"
+
+    prod_line = (
+        f"Production  — Hit Rate: {_fmt(result.get('production_hit_rate'))}"
+        f" / Sharpe: {_fmt(result.get('production_sharpe'))}"
+        f" (n={result.get('n_production', 0)})"
+    )
+    chal_line = (
+        f"Challenger  — Hit Rate: {_fmt(result.get('challenger_hit_rate'))}"
+        f" / Sharpe: {_fmt(result.get('challenger_sharpe'))}"
+        f" (n={result.get('n_challenger', 0)})"
+    )
+    lines = [
+        f"時刻: {format_jst(fmt=DISCORD_DATETIME_FORMAT)}",
+        prod_line,
+        chal_line,
+    ]
+    if challenger_wins:
+        lines.append("→ Challenger が上回りました。手動承認後に promote_challenger_to_production() を実行してください。")
+
+    return send_status_notification(spec, lines)

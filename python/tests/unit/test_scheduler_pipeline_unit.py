@@ -137,6 +137,75 @@ class TestRunDailyDriftCheck(unittest.TestCase):
         mock_load_symbols.assert_not_called()
         mock_train.assert_not_called()
 
+    @patch("src.reporting.discord.discord_utils.send_feature_suggestion_notification")
+    @patch("src.utils.db.load_feature_exclusion_candidates")
+    @patch("src.prediction.training_pipeline.train_models_for_symbol_task")
+    @patch("src.watchlist.batch_runner.load_target_symbols")
+    @patch("src.reporting.discord.discord_utils.send_drift_retrain_notification")
+    @patch("src.utils.db.load_drift_summary")
+    def test_feature_suggestion_sent_after_successful_retrain(
+        self,
+        mock_load_summary,
+        mock_notify_drift,
+        mock_load_symbols,
+        mock_train,
+        mock_load_candidates,
+        mock_notify_suggestions,
+    ):
+        mock_load_summary.return_value = pd.DataFrame(
+            [
+                {
+                    "market": "jp",
+                    "symbol": "7203",
+                    "mean_abs_error": 0.03,
+                    "direction_accuracy": 0.40,
+                }
+            ]
+        )
+        mock_load_symbols.return_value = [SymbolTask(market="jp", symbol="7203")]
+        mock_train.return_value = {"status": "success", "shap_results": []}
+        mock_load_candidates.return_value = pd.DataFrame(
+            [{"feature": "rsi", "importance_mean": 0.001, "importance_rank": 50}]
+        )
+
+        run_daily_drift_check()
+
+        mock_load_candidates.assert_called_once_with("jp", "7203")
+        mock_notify_suggestions.assert_called_once()
+
+    @patch("src.reporting.discord.discord_utils.send_feature_suggestion_notification")
+    @patch("src.utils.db.load_feature_exclusion_candidates")
+    @patch("src.prediction.training_pipeline.train_models_for_symbol_task")
+    @patch("src.watchlist.batch_runner.load_target_symbols")
+    @patch("src.reporting.discord.discord_utils.send_drift_retrain_notification")
+    @patch("src.utils.db.load_drift_summary")
+    def test_feature_suggestion_not_sent_when_retrain_failed(
+        self,
+        mock_load_summary,
+        mock_notify_drift,
+        mock_load_symbols,
+        mock_train,
+        mock_load_candidates,
+        mock_notify_suggestions,
+    ):
+        mock_load_summary.return_value = pd.DataFrame(
+            [
+                {
+                    "market": "jp",
+                    "symbol": "7203",
+                    "mean_abs_error": 0.03,
+                    "direction_accuracy": 0.40,
+                }
+            ]
+        )
+        mock_load_symbols.return_value = [SymbolTask(market="jp", symbol="7203")]
+        mock_train.return_value = {"status": "error", "error": "学習失敗"}
+
+        run_daily_drift_check()
+
+        mock_load_candidates.assert_not_called()
+        mock_notify_suggestions.assert_not_called()
+
     @patch("src.prediction.training_pipeline.train_models_for_symbol_task")
     @patch("src.watchlist.batch_runner.load_target_symbols")
     @patch("src.reporting.discord.discord_utils.send_drift_retrain_notification")
@@ -480,3 +549,78 @@ class TestRunWeeklyTraining:
 
         assert mock_train.call_count >= 1
         mock_notify.assert_called_once()
+
+
+class TestRunWeeklyShadowEvaluation(unittest.TestCase):
+    """run_weekly_shadow_evaluation のテスト"""
+
+    @patch("src.reporting.discord.discord_utils.send_shadow_evaluation_notification")
+    @patch("src.prediction.shadow_evaluation.evaluate_shadow_models")
+    def test_sends_notification_when_no_winner(self, mock_evaluate, mock_notify):
+        """challenger_wins=False のとき通知が送信されること"""
+        from src.orchestration.scheduler import run_weekly_shadow_evaluation
+
+        mock_evaluate.return_value = {
+            "production_hit_rate": 0.55,
+            "production_sharpe": 0.3,
+            "challenger_hit_rate": 0.50,
+            "challenger_sharpe": 0.2,
+            "challenger_wins": False,
+            "evaluated_at": "20260516_120000",
+            "n_production": 10,
+            "n_challenger": 10,
+        }
+        run_weekly_shadow_evaluation()
+        mock_notify.assert_called_once()
+        call_result = mock_notify.call_args.args[0]
+        self.assertFalse(call_result["challenger_wins"])
+
+    @patch("src.reporting.discord.discord_utils.send_shadow_evaluation_notification")
+    @patch("src.prediction.shadow_evaluation.evaluate_shadow_models")
+    def test_sends_notification_when_challenger_wins(self, mock_evaluate, mock_notify):
+        """challenger_wins=True のとき昇格候補通知が送信されること"""
+        from src.orchestration.scheduler import run_weekly_shadow_evaluation
+
+        mock_evaluate.return_value = {
+            "production_hit_rate": 0.50,
+            "production_sharpe": 0.2,
+            "challenger_hit_rate": 0.65,
+            "challenger_sharpe": 0.5,
+            "challenger_wins": True,
+            "evaluated_at": "20260516_120000",
+            "n_production": 10,
+            "n_challenger": 10,
+        }
+        run_weekly_shadow_evaluation()
+        mock_notify.assert_called_once()
+        call_result = mock_notify.call_args.args[0]
+        self.assertTrue(call_result["challenger_wins"])
+
+    @patch("src.reporting.discord.discord_utils.send_shadow_evaluation_notification")
+    @patch("src.prediction.shadow_evaluation.evaluate_shadow_models")
+    def test_evaluation_failure_does_not_propagate(self, mock_evaluate, mock_notify):
+        """evaluate_shadow_models が失敗しても例外が外に出ないこと"""
+        from src.orchestration.scheduler import run_weekly_shadow_evaluation
+
+        mock_evaluate.side_effect = Exception("DB エラー")
+        run_weekly_shadow_evaluation()  # 例外が外に出ないこと
+        mock_notify.assert_not_called()
+
+    @patch("src.reporting.discord.discord_utils.send_shadow_evaluation_notification")
+    @patch("src.prediction.shadow_evaluation.evaluate_shadow_models")
+    def test_notification_failure_does_not_propagate(self, mock_evaluate, mock_notify):
+        """通知が失敗しても例外が外に出ないこと"""
+        from src.orchestration.scheduler import run_weekly_shadow_evaluation
+
+        mock_evaluate.return_value = {
+            "production_hit_rate": None,
+            "production_sharpe": None,
+            "challenger_hit_rate": None,
+            "challenger_sharpe": None,
+            "challenger_wins": False,
+            "evaluated_at": "20260516_120000",
+            "n_production": 0,
+            "n_challenger": 0,
+        }
+        mock_notify.side_effect = Exception("Webhook 失敗")
+        run_weekly_shadow_evaluation()  # 例外が外に出ないこと

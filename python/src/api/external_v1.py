@@ -1,27 +1,23 @@
 """
-外部向け予測シグナル API エンドポイント（R-204 / R-304）
+外部向け read-only API エンドポイント（R-304）
 
 公開経路:
   GET /api/v1/predictions/top?market=<jp|us>
-  GET /external/v1/predictions/latest
-  GET /external/v1/monthly-report
-  GET /external/v1/symbols
+  GET /api/v1/reports/monthly?month=<YYYY-MM>
 
 認証:
   X-API-Key ヘッダー（環境変数 EXTERNAL_API_KEYS にカンマ区切りで設定）
-  /external/v1/* は EXTERNAL_API_KEY（単一キー）と照合
 
 利用制限:
   1分間に EXTERNAL_API_MAX_RPM リクエスト（デフォルト 60）
 
-公開フィールド（内部情報を除外）:
-  market, symbol, current_price, avg_pred_price, diff_ratio,
-  pred_lower_10, pred_upper_90, confluence_score
-
-除外情報（絶対に公開しない）:
-  paper_orders / paper_positions（注文・ポジション情報）
-  model_metrics / experiment_runs の生データ
-  .env / API キー / 内部設定値
+公開フィールド定義（内部情報除外方針）:
+  予測:  market, symbol, current_price, avg_pred_price, diff_ratio,
+         pred_lower_10, pred_upper_90, confluence_score
+         除外: model_count, confidence_ratio, model_version, 多ホライズン差分
+  月次:  target_month, generated_at, net_return, max_drawdown, sharpe_ratio,
+         hit_rate, symbol_count
+         除外: avg_slippage（内部執行コスト）, wf_snapshot_file（内部ファイル参照）
 """
 
 import os
@@ -42,7 +38,7 @@ logger = get_logger(__name__)
 
 _MAX_REQUESTS_PER_MINUTE = int(os.getenv("EXTERNAL_API_MAX_RPM", "60"))
 
-# 公開フィールド定義（内部実装詳細・秘密係数を除外）
+# 予測公開フィールド（内部実装詳細・秘密係数を除外）
 # 除外: model_count, confidence_ratio, model_version, avg_pred_price_3d/5d/10d, diff_ratio_3d/5d/10d
 _PUBLIC_PREDICTION_FIELDS = (
     "market",
@@ -53,6 +49,18 @@ _PUBLIC_PREDICTION_FIELDS = (
     "pred_lower_10",
     "pred_upper_90",
     "confluence_score",
+)
+
+# 月次レポート公開フィールド（内部執行コスト・内部ファイル参照を除外）
+# 除外: avg_slippage（ペーパー執行コスト詳細）, wf_snapshot_file（内部ファイル名）
+_PUBLIC_MONTHLY_FIELDS = (
+    "target_month",
+    "generated_at",
+    "net_return",
+    "max_drawdown",
+    "sharpe_ratio",
+    "hit_rate",
+    "symbol_count",
 )
 
 # ---------------------------------------------------------------------------
@@ -103,34 +111,9 @@ def _to_public_dict(result: Any) -> dict:
     return {field: getattr(result, field, None) for field in _PUBLIC_PREDICTION_FIELDS}
 
 
-# ---------------------------------------------------------------------------
-# R-304: 外部提供向け単一 API キー認証ヘルパー
-# ---------------------------------------------------------------------------
-
-
-def _check_external_api_key() -> tuple[int, str | None]:
-    """EXTERNAL_API_KEY 環境変数と X-API-Key ヘッダーを照合する。
-
-    Returns:
-        (http_status, api_key):
-            200 → 認証成功（api_key はリクエストのキー文字列）
-            401 → 認証失敗（キー不一致）
-            503 → EXTERNAL_API_KEY 未設定（エンドポイント無効）
-    """
-    expected = os.getenv("EXTERNAL_API_KEY", "").strip()
-    if not expected:
-        return 503, None
-    key = request.headers.get("X-API-Key", "")
-    if not key or key != expected:
-        return 401, None
-    return 200, key
-
-
-def _external_auth_response(status: int) -> tuple[Response, int]:
-    """認証エラーに対応するレスポンスを返す。"""
-    if status == 503:
-        return jsonify({"error": "Service Unavailable: API key not configured"}), 503
-    return jsonify({"error": "Unauthorized"}), 401
+def _to_public_monthly_dict(summary: Any) -> dict:
+    """MonthlyReportSummary から公開フィールドのみを抽出した dict を返す。"""
+    return {field: getattr(summary, field, None) for field in _PUBLIC_MONTHLY_FIELDS}
 
 
 # ---------------------------------------------------------------------------
@@ -185,85 +168,30 @@ def register_routes(flask_app: Flask) -> None:
 
     logger.info("/api/v1/predictions/top ルートを登録しました")
 
-    # -----------------------------------------------------------------------
-    # R-304: 外部提供向け read-only エンドポイント
-    # -----------------------------------------------------------------------
+    @flask_app.route("/api/v1/reports/monthly")
+    def external_v1_reports_monthly() -> tuple[Response, int]:
+        """月次KPIサマリーを外部向けに返す。
 
-    @flask_app.route("/external/v1/predictions/latest")
-    def external_v1_predictions_latest() -> tuple[Response, int]:
-        """最新予測結果（公開用サブセット）を返す。
-
-        認証: X-API-Key ヘッダー（EXTERNAL_API_KEY 環境変数と照合）。
-        未設定の場合は 503 を返す。
-        除外: 注文情報・内部評価値・モデル詳細。
+        内部執行コスト・内部ファイル参照を除外した公開フィールドのみを返す。
+        ?month=YYYY-MM で対象月を指定可（省略時は当月）。
         """
-        status, api_key = _check_external_api_key()
-        if status != 200:
-            return _external_auth_response(status)
+        api_key = request.headers.get("X-API-Key")
+        if not _check_api_key(api_key):
+            return jsonify({"error": "Unauthorized"}), 401
 
         if _is_rate_limited(api_key):  # type: ignore[arg-type]
             return jsonify({"error": "Too Many Requests"}), 429
 
-        try:
-            from src.api.external_data_service import get_public_predictions
-
-            limit = min(int(request.args.get("limit", "20")), 100)
-            results = get_public_predictions(limit=limit)
-            return jsonify({"predictions": results, "count": len(results)}), 200
-
-        except Exception:
-            logger.error("/external/v1/predictions/latest で例外発生", exc_info=True)
-            return jsonify({"error": "Internal Server Error"}), 500
-
-    @flask_app.route("/external/v1/monthly-report")
-    def external_v1_monthly_report() -> tuple[Response, int]:
-        """最新の月次 KPI（公開用サブセット）を返す。
-
-        認証: X-API-Key ヘッダー（EXTERNAL_API_KEY 環境変数と照合）。
-        未設定の場合は 503 を返す。
-        除外: avg_slippage・wf_snapshot_file などの内部運用情報。
-        """
-        status, api_key = _check_external_api_key()
-        if status != 200:
-            return _external_auth_response(status)
-
-        if _is_rate_limited(api_key):  # type: ignore[arg-type]
-            return jsonify({"error": "Too Many Requests"}), 429
+        target_month = request.args.get("month")
 
         try:
-            from src.api.external_data_service import get_public_monthly_report
+            from src.reporting.query_service import get_monthly_report_summary
 
-            report = get_public_monthly_report()
-            if report is None:
-                return jsonify({"error": "Report unavailable"}), 503
-            return jsonify(report), 200
+            summary = get_monthly_report_summary(target_month=target_month)
+            return jsonify(_to_public_monthly_dict(summary)), 200
 
         except Exception:
-            logger.error("/external/v1/monthly-report で例外発生", exc_info=True)
+            logger.error("月次レポートAPIエンドポイントで例外発生", exc_info=True)
             return jsonify({"error": "Internal Server Error"}), 500
 
-    @flask_app.route("/external/v1/symbols")
-    def external_v1_symbols() -> tuple[Response, int]:
-        """ウォッチリスト銘柄一覧（market, symbol のみ）を返す。
-
-        認証: X-API-Key ヘッダー（EXTERNAL_API_KEY 環境変数と照合）。
-        未設定の場合は 503 を返す。
-        """
-        status, api_key = _check_external_api_key()
-        if status != 200:
-            return _external_auth_response(status)
-
-        if _is_rate_limited(api_key):  # type: ignore[arg-type]
-            return jsonify({"error": "Too Many Requests"}), 429
-
-        try:
-            from src.api.external_data_service import get_public_symbols
-
-            symbols = get_public_symbols()
-            return jsonify({"symbols": symbols, "count": len(symbols)}), 200
-
-        except Exception:
-            logger.error("/external/v1/symbols で例外発生", exc_info=True)
-            return jsonify({"error": "Internal Server Error"}), 500
-
-    logger.info("/external/v1/* ルートを登録しました")
+    logger.info("/api/v1/reports/monthly ルートを登録しました")

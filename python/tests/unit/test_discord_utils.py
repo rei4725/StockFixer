@@ -473,3 +473,107 @@ class TestSendWeeklyReportExtra(unittest.TestCase):
         mock_load.return_value = pd.DataFrame()
         result = send_weekly_report(accuracy_df=None)
         self.assertFalse(result)
+
+
+class TestSendFeatureSuggestionNotification(unittest.TestCase):
+    @patch("src.reporting.discord.discord_utils.send_webhook_notification", return_value=True)
+    def test_sends_notification_with_candidates(self, mock_send):
+        from src.reporting.discord.discord_utils import send_feature_suggestion_notification
+
+        candidates = pd.DataFrame(
+            [
+                {"feature": "rsi", "importance_mean": 0.001, "importance_rank": 50},
+                {"feature": "macd", "importance_mean": 0.0005, "importance_rank": 49},
+            ]
+        )
+        result = send_feature_suggestion_notification(
+            [{"market": "jp", "symbol": "7203", "candidates": candidates}]
+        )
+        self.assertTrue(result)
+        mock_send.assert_called_once()
+        kwargs = mock_send.call_args.kwargs
+        self.assertIn("特徴量除外提案", kwargs["title"])
+        self.assertIn("rsi", kwargs["message"])
+        self.assertIn("macd", kwargs["message"])
+
+    @patch("src.reporting.discord.discord_utils.send_webhook_notification", return_value=True)
+    def test_global_warning_for_common_features(self, mock_send):
+        from src.reporting.discord.discord_utils import send_feature_suggestion_notification
+
+        candidates_df = pd.DataFrame(
+            [{"feature": "rsi", "importance_mean": 0.001, "importance_rank": 50}]
+        )
+        result = send_feature_suggestion_notification(
+            [
+                {"market": "jp", "symbol": "7203", "candidates": candidates_df},
+                {"market": "jp", "symbol": "7201", "candidates": candidates_df.copy()},
+            ],
+            global_threshold=2,
+        )
+        self.assertTrue(result)
+        message = mock_send.call_args.kwargs["message"]
+        self.assertIn("グローバル除外候補", message)
+        self.assertIn("rsi", message)
+
+    @patch("src.reporting.discord.discord_utils.send_webhook_notification")
+    def test_returns_false_for_empty_list(self, mock_send):
+        from src.reporting.discord.discord_utils import send_feature_suggestion_notification
+
+        result = send_feature_suggestion_notification([])
+        self.assertFalse(result)
+        mock_send.assert_not_called()
+
+    @patch("src.reporting.discord.discord_utils.send_webhook_notification", return_value=True)
+    def test_handles_empty_candidates_df(self, mock_send):
+        from src.reporting.discord.discord_utils import send_feature_suggestion_notification
+
+        result = send_feature_suggestion_notification(
+            [{"market": "us", "symbol": "AAPL", "candidates": pd.DataFrame()}]
+        )
+        self.assertTrue(result)
+        message = mock_send.call_args.kwargs["message"]
+        self.assertIn("除外候補なし", message)
+
+
+class TestSendAccuracySummary(unittest.TestCase):
+    """send_accuracy_summary のテスト"""
+
+    @patch("src.reporting.discord.discord_utils.send_webhook_text", return_value=True)
+    def test_sends_summary_with_valid_df(self, mock_send):
+        """有効な summary_df がある場合に通知が送信されること"""
+        from src.reporting.discord.discord_utils import send_accuracy_summary
+
+        summary_df = pd.DataFrame(
+            {
+                "market": ["jp", "us"],
+                "symbol": ["7203", "AAPL"],
+                "direction_accuracy": [0.6, 0.75],
+                "mean_abs_error": [0.01, 0.02],
+                "n_samples": [30, 20],
+            }
+        )
+        result = send_accuracy_summary(summary_df, horizon=1)
+        mock_send.assert_called_once()
+        self.assertTrue(result)
+        text = mock_send.call_args[0][0]
+        self.assertIn("予測精度サマリー", text)
+        self.assertIn("jp/7203", text)
+        self.assertIn("us/AAPL", text)
+
+    @patch("src.reporting.discord.discord_utils.send_webhook_text")
+    def test_returns_false_for_empty_df(self, mock_send):
+        """空 DataFrame の場合は False が返ること"""
+        from src.reporting.discord.discord_utils import send_accuracy_summary
+
+        result = send_accuracy_summary(pd.DataFrame())
+        mock_send.assert_not_called()
+        self.assertFalse(result)
+
+    @patch("src.reporting.discord.discord_utils.send_webhook_text")
+    def test_returns_false_for_none(self, mock_send):
+        """None を渡した場合は False が返ること"""
+        from src.reporting.discord.discord_utils import send_accuracy_summary
+
+        result = send_accuracy_summary(None)
+        mock_send.assert_not_called()
+        self.assertFalse(result)

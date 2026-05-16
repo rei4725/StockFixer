@@ -70,10 +70,6 @@ ignore_imports =
     src.backtest.pipeline -> src.trading.signal_generator
     src.trading.execution -> src.reporting.discord.discord_utils
     src.backtest.pipeline -> src.reporting.discord.discord_utils
-    # --- trading → market_data (資本配分エンジンがレジーム判定を参照) ---
-    src.trading.capital_allocator -> src.market_data.market_regime
-    # --- trading → market_data (資本配分エンジンがレジーム判定を参照) ---
-    src.trading.capital_allocator -> src.market_data.market_regime
 
 # ============================================================
 # Contract 2: BC 独立性契約
@@ -150,5 +146,3 @@ ignore_imports =
     src.backtest.pipeline -> src.trading.signal_generator
     src.trading.execution -> src.reporting.discord.discord_utils
     src.backtest.pipeline -> src.reporting.discord.discord_utils
-    # --- trading → market_data (資本配分エンジンがレジーム判定を参照) ---
-    src.trading.capital_allocator -> src.market_data.market_regime

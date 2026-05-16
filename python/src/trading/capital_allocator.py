@@ -1,368 +1,150 @@
 """
-資本配分エンジン（R-301）
+資本配分エンジン (R-301)
 
-複数候補銘柄の予測値・信頼度・相関・レジームを統合して
-ポートフォリオ全体の保有比率を最適化する。
-
-配分アルゴリズム:
-    1. 基本配分: prediction の diff_ratio（シグナル強度）に比例
-    2. 信頼度補正: prediction_accuracy の directional_accuracy で重み付け
-    3. 相関ペナルティ: 相関係数が高い銘柄ペアは配分を抑制
-    4. レジーム補正: bear レジームは配分を縮小（bull: 1.0, range: 0.8, bear: 0.5）
-    5. 制約適用: MAX_POSITION_RATE / MAX_POSITIONS / MAX_SECTOR_POSITIONS
-
-出力は `AllocationResult` dataclass のリストで、
-portfolio_backtest.py と order_execution_pipeline.py から再利用できる。
+複数候補銘柄に対して保有比率を一括計算する。
+信頼度・相関・レジーム・最大ポジション制約を統合し、
+portfolio_backtest および order_execution_pipeline の双方で再利用できる設計にする。
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import Optional
 
-import pandas as pd
-
 from config.settings import MAX_POSITION_RATE, MAX_POSITIONS, MAX_SECTOR_POSITIONS
-from src.utils.db._connection import _db_connection
+from src.trading.types import AllocationCandidate, AllocationResult
 from src.utils.logger import get_logger
-from src.utils.sector_constraints import filter_by_sector_cap, get_symbol_sector
+from src.utils.sector_constraints import filter_by_sector_cap
 
 logger = get_logger(__name__)
 
-# レジーム別のスケール係数
+# レジーム別のポジションスケール係数
 _REGIME_SCALE: dict[str, float] = {
     "bull": 1.0,
-    "range": 0.8,
-    "bear": 0.5,
-    "unknown": 0.8,
+    "range": 0.6,
+    "bear": 0.3,
 }
-
-# 相関ペナルティの感度: 相関係数がこの値を超えると配分を抑制し始める
-_CORR_PENALTY_THRESHOLD = 0.7
-_CORR_WINDOW_DAYS = 20
+_DEFAULT_REGIME_SCALE = 0.6
 
 
-@dataclass
-class AllocationResult:
-    """単一銘柄の配分結果。"""
+def _enc_corr_scale(n: int, avg_correlation: float) -> float:
+    """ENC ベースの相関縮小係数を返す。
 
-    market: str
-    symbol: str
-    weight: float  # 0.0〜1.0（ポートフォリオ比率、合計1.0以下）
-    position_size_ratio: float  # MAX_POSITION_RATE に対する比率
-    signal_strength: float  # diff_ratio（生のシグナル）
-    confidence: float  # directional_accuracy（0〜1）
-    regime: str  # "bull" / "bear" / "range" / "unknown"
-    sector: Optional[str] = None
-    allocation_reason: str = ""
-    allocated_capital: float = field(default=0.0, repr=False)  # 配分金額（円）
-
-
-def _load_confidence_map(market: str, symbols: list[str]) -> dict[str, float]:
-    """prediction_accuracy から銘柄ごとの方向正解率を取得する。
-
-    データが存在しない銘柄は 0.5（ランダム水準）を返す。
+    ENC = n / (1 + avg_corr * (n-1)) で実効分散度を測定し、
+    ENC/n (=0〜1) でポートフォリオ全体のウェイト予算を縮小する。
+    完全無相関 (avg_corr=0) のとき scale=1.0、完全相関 (avg_corr=1) のとき scale=1/n。
     """
-    if not symbols:
-        return {}
-
-    placeholders = ", ".join("?" * len(symbols))
-    query = f"""
-        WITH ranked AS (
-            SELECT symbol,
-                   AVG(CAST(direction_match AS INTEGER)) AS dir_acc,
-                   COUNT(*) AS n
-            FROM prediction_accuracy
-            WHERE market = ?
-              AND symbol IN ({placeholders})
-              AND horizon = 1
-            GROUP BY symbol
-        )
-        SELECT symbol, dir_acc, n FROM ranked
-    """
-    try:
-        with _db_connection() as con:
-            rows = con.execute(query, [market] + symbols).fetchall()
-    except Exception as e:
-        logger.error("信頼度データ取得失敗: %s", e, exc_info=True)
-        return {}
-
-    result: dict[str, float] = {}
-    for symbol, dir_acc, _n in rows:
-        result[symbol] = float(dir_acc) if dir_acc is not None else 0.5
-    return result
+    if n <= 1 or avg_correlation <= 0.0:
+        return 1.0
+    enc = n / (1.0 + avg_correlation * (n - 1))
+    return enc / n
 
 
-def _load_returns_for_corr(symbols: list[str], market: str) -> pd.DataFrame:
-    """stock_features から直近20日分のリターンを取得し、相関行列計算に使う。"""
-    if len(symbols) < 2:
-        return pd.DataFrame()
-
-    placeholders = ", ".join("?" * len(symbols))
-    query = f"""
-        WITH ranked AS (
-            SELECT symbol, row_num, close,
-                   ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY row_num DESC) AS rn
-            FROM stock_features
-            WHERE market = ?
-              AND symbol IN ({placeholders})
-              AND close IS NOT NULL
-        )
-        SELECT symbol, row_num, close
-        FROM ranked
-        WHERE rn <= ?
-        ORDER BY symbol, row_num
-    """
-    try:
-        with _db_connection() as con:
-            df = con.execute(query, [market] + symbols + [_CORR_WINDOW_DAYS + 1]).df()
-    except Exception as e:
-        logger.error("相関計算用データ取得失敗: %s", e, exc_info=True)
-        return pd.DataFrame()
-
-    if df.empty:
-        return pd.DataFrame()
-
-    pivot = df.pivot(index="row_num", columns="symbol", values="close")
-    returns = pivot.pct_change().dropna()
-    return returns
-
-
-def _detect_regime(market: str, regime_override: Optional[str]) -> str:
-    """市場レジームを判定する。
-
-    regime_override が指定された場合はその値を返す（テスト用）。
-    指定がなければ stock_features から代表銘柄のデータで get_market_regime を呼ぶ。
-    """
-    if regime_override is not None:
-        return regime_override
-
-    # stock_features に市場インデックスを格納していないため、
-    # 最も行数の多い銘柄のデータをプロキシとして使う。
-    query = """
-        SELECT symbol, COUNT(*) AS n
-        FROM stock_features
-        WHERE market = ?
-          AND close IS NOT NULL
-        GROUP BY symbol
-        ORDER BY n DESC
-        LIMIT 1
-    """
-    try:
-        with _db_connection() as con:
-            row = con.execute(query, [market]).fetchone()
-    except Exception as e:
-        logger.warning("レジーム判定用銘柄取得失敗: %s", e, exc_info=True)
-        return "unknown"
-
-    if row is None:
-        return "unknown"
-
-    proxy_symbol = row[0]
-    ohlcv_query = """
-        SELECT row_num AS "Date",
-               open AS "Open", high AS "High", low AS "Low",
-               close AS "Close", volume AS "Volume"
-        FROM stock_features
-        WHERE market = ? AND symbol = ?
-          AND close IS NOT NULL
-        ORDER BY row_num DESC
-        LIMIT 250
-    """
-    try:
-        with _db_connection() as con:
-            df = con.execute(ohlcv_query, [market, proxy_symbol]).df()
-    except Exception as e:
-        logger.warning("レジーム判定用データ取得失敗: %s", e, exc_info=True)
-        return "unknown"
-
-    if df.empty:
-        return "unknown"
-
-    from src.market_data.market_regime import get_market_regime
-
-    regimes = get_market_regime(df.sort_values("Date"))
-    if regimes.empty:
-        return "unknown"
-
-    latest_regime = str(regimes.iloc[-1])
-    logger.info("[allocator] 市場レジーム判定: market=%s regime=%s", market, latest_regime)
-    return latest_regime
-
-
-def _apply_correlation_penalty(
-    symbols: list[str],
-    weights: dict[str, float],
-    returns: pd.DataFrame,
-) -> dict[str, float]:
-    """相関係数が高い銘柄ペアの配分を抑制する。
-
-    相関が高い（> _CORR_PENALTY_THRESHOLD）ペアのうち、
-    重みが小さい方の銘柄の重みを比例的に削減する。
-    """
-    if returns.empty or len(returns.columns) < 2:
-        return weights
-
-    # 共通銘柄のみ対象
-    common = [s for s in symbols if s in returns.columns]
-    if len(common) < 2:
-        return weights
-
-    corr = returns[common].corr()
-    penalized = dict(weights)
-
-    for i, sym_a in enumerate(common):
-        for sym_b in common[i + 1 :]:
-            raw = corr.loc[sym_a, sym_b] if sym_a in corr.index else 0.0
-            corr_val = float(raw)  # type: ignore[arg-type]
-            if abs(corr_val) <= _CORR_PENALTY_THRESHOLD:
-                continue
-            # 超過分を線形スケールでペナルティ（最大50%削減）
-            excess = (abs(corr_val) - _CORR_PENALTY_THRESHOLD) / (1.0 - _CORR_PENALTY_THRESHOLD)
-            penalty_factor = 1.0 - 0.5 * excess
-            # 重みが小さい方を削減
-            if penalized.get(sym_a, 0.0) <= penalized.get(sym_b, 0.0):
-                penalized[sym_a] = penalized.get(sym_a, 0.0) * penalty_factor
-            else:
-                penalized[sym_b] = penalized.get(sym_b, 0.0) * penalty_factor
-
-    return penalized
-
-
-def compute_portfolio_allocation(
-    candidates: list[dict],
-    total_capital: float,
-    market: str = "jp",
-    regime_override: Optional[str] = None,
+def allocate_capital(
+    candidates: list[AllocationCandidate],
+    *,
+    market_regime: Optional[str] = None,
+    avg_correlation: float = 0.0,
+    max_positions: int = MAX_POSITIONS,
+    max_sector_positions: int = MAX_SECTOR_POSITIONS,
+    max_weight_per_symbol: float = MAX_POSITION_RATE,
+    min_diff_ratio: float = 0.0,
 ) -> list[AllocationResult]:
-    """候補銘柄リストからポートフォリオ配分を計算する。
+    """複数候補銘柄に対して推奨保有比率を一括計算する。
 
     Args:
-        candidates: [{"market": ..., "symbol": ..., "diff_ratio": ...}, ...]
-        total_capital: 総資本（円）
-        market: マーケット識別子（相関計算とレジーム判定に使用）
-        regime_override: 指定時はレジームをこの値で固定（テスト用）
+        candidates: 予測スナップショットのリスト。
+        market_regime: 市場レジーム ("bull" / "range" / "bear")。
+            None の場合は "range" 相当スケールを適用する。
+        avg_correlation: 候補銘柄間の平均絶対相関係数 [0, 1]。
+            correlation_risk.compute_enc を用いて事前計算した値を渡す。
+            高相関ほどポートフォリオ全体のウェイト総量を圧縮する。
+        max_positions: 最大保有銘柄数上限。
+        max_sector_positions: セクターごとの最大銘柄数。
+        max_weight_per_symbol: 1銘柄あたりの最大ウェイト [0, 1]。
+        min_diff_ratio: この値以下の diff_ratio を持つ候補を除外する。
 
     Returns:
-        list[AllocationResult]: 配分結果（weight 降順でソート）
+        AllocationResult のリスト（weight の降順）。
+        除外された銘柄は結果に含まれない。
     """
     if not candidates:
-        logger.warning("[allocator] 候補銘柄が空のため配分をスキップ")
         return []
 
-    # --- 1. 正のシグナルのみ対象にし、上位 MAX_POSITIONS に絞る ---
-    positive = [c for c in candidates if float(c.get("diff_ratio", 0.0)) > 0.0]
-    if not positive:
-        logger.info("[allocator] 正のシグナルを持つ候補銘柄がありません")
-        return []
-
-    positive.sort(key=lambda c: float(c["diff_ratio"]), reverse=True)
-    selected = positive[:MAX_POSITIONS]
-
-    symbols = [c["symbol"] for c in selected]
+    regime_scale = _REGIME_SCALE.get(market_regime or "", _DEFAULT_REGIME_SCALE)
     logger.info(
-        "[allocator] 候補銘柄数=%d / 配分対象=%d (MAX_POSITIONS=%d)",
+        "[allocator] 配分計算開始: candidates=%d regime=%s regime_scale=%.2f avg_corr=%.3f",
         len(candidates),
-        len(selected),
-        MAX_POSITIONS,
+        market_regime,
+        regime_scale,
+        avg_correlation,
     )
 
-    # --- 2. 信頼度マップを取得 ---
-    confidence_map = _load_confidence_map(market, symbols)
-    for sym in symbols:
-        if sym not in confidence_map:
-            confidence_map[sym] = 0.5  # データなしは中立
+    # ステップ1: 最小リターン閾値でフィルタ
+    filtered = [c for c in candidates if c.diff_ratio > min_diff_ratio]
+    if not filtered:
+        logger.info("[allocator] min_diff_ratio フィルタ後に候補なし")
+        return []
 
-    # --- 3. 相関計算用リターンを取得 ---
-    returns_df = _load_returns_for_corr(symbols, market)
+    # ステップ2: 生スコア = diff_ratio * confidence_ratio でソート
+    filtered.sort(key=lambda c: c.diff_ratio * c.confidence_ratio, reverse=True)
 
-    # --- 4. レジーム判定 ---
-    regime = _detect_regime(market, regime_override)
-    regime_scale = _REGIME_SCALE.get(regime, 0.8)
+    # ステップ3: セクター上限でフィルタ
+    filtered = filter_by_sector_cap(
+        filtered,
+        max_sector_positions=max_sector_positions,
+        sector_getter=lambda c: c.sector,
+    )
 
-    # --- 5. 基本スコア = diff_ratio × 信頼度 ---
-    raw_scores: dict[str, float] = {}
-    for c in selected:
-        sym = c["symbol"]
-        diff = max(0.0, float(c.get("diff_ratio", 0.0)))
-        conf = confidence_map.get(sym, 0.5)
-        raw_scores[sym] = diff * conf
+    # ステップ4: 最大ポジション数に絞る
+    filtered = filtered[:max_positions]
 
-    # --- 6. 相関ペナルティ適用 ---
-    penalized_scores = _apply_correlation_penalty(symbols, raw_scores, returns_df)
+    if not filtered:
+        logger.info("[allocator] ポジション制約フィルタ後に候補なし")
+        return []
 
-    # --- 7. レジームスケール適用 ---
-    scaled_scores: dict[str, float] = {
-        sym: score * regime_scale for sym, score in penalized_scores.items()
-    }
+    n = len(filtered)
 
-    # --- 8. 正規化（合計1.0）---
-    total_score = sum(scaled_scores.values())
+    # ステップ5: ポートフォリオ予算の計算
+    # ENC ベースの相関縮小: 高相関ほど総ウェイト上限を圧縮する
+    corr_scale = _enc_corr_scale(n, avg_correlation)
+    # レジーム縮小: 弱気相場ほど総ウェイトを圧縮する
+    # 最大予算 = 銘柄数 × 1銘柄上限 × 相関縮小 × レジーム縮小、ただし 1.0 を超えない
+    portfolio_budget = min(1.0, max_weight_per_symbol * n) * corr_scale * regime_scale
+
+    # ステップ6: raw_score で比例配分して予算内に収める
+    raw_scores = [max(0.0, c.diff_ratio * c.confidence_ratio) for c in filtered]
+    total_score = sum(raw_scores)
+
     if total_score <= 0.0:
-        logger.warning("[allocator] スコア合計がゼロのため均等配分にフォールバック")
-        n = len(selected)
-        normalized: dict[str, float] = {sym: 1.0 / n for sym in symbols}
-    else:
-        normalized = {sym: score / total_score for sym, score in scaled_scores.items()}
+        logger.warning("[allocator] 合計スコアが 0 のため配分不可")
+        return []
 
-    # --- 9. MAX_POSITION_RATE でキャップ ---
-    capped: dict[str, float] = {sym: min(w, MAX_POSITION_RATE) for sym, w in normalized.items()}
+    # スコア比例で予算を割り当て、1銘柄上限でキャップ
+    weights: list[float] = []
+    for score in raw_scores:
+        w = (score / total_score) * portfolio_budget
+        w = min(w, max_weight_per_symbol)
+        weights.append(w)
 
-    # --- 10. AllocationResult を生成し、セクター制約でフィルタ ---
     results: list[AllocationResult] = []
-    for c in selected:
-        sym = c["symbol"]
-        w = capped.get(sym, 0.0)
-        conf = confidence_map.get(sym, 0.5)
-        diff = float(c.get("diff_ratio", 0.0))
-        sector: Optional[str]
-        try:
-            sector = get_symbol_sector(market, sym)
-        except Exception:
-            sector = None
-
-        reason_parts = [
-            f"signal={diff:.4f}",
-            f"confidence={conf:.2f}",
-            f"regime={regime}(x{regime_scale:.1f})",
-        ]
-        if w < normalized.get(sym, w):
-            reason_parts.append(f"capped@MAX_POSITION_RATE={MAX_POSITION_RATE:.0%}")
-
+    for candidate, raw_score, weight in zip(filtered, raw_scores, weights):
         results.append(
             AllocationResult(
-                market=market,
-                symbol=sym,
-                weight=w,
-                position_size_ratio=w / MAX_POSITION_RATE if MAX_POSITION_RATE > 0 else 0.0,
-                signal_strength=diff,
-                confidence=conf,
-                regime=regime,
-                sector=sector,
-                allocation_reason=", ".join(reason_parts),
-                allocated_capital=w * total_capital,
+                market=candidate.market,
+                symbol=candidate.symbol,
+                weight=weight,
+                raw_score=raw_score,
+                confidence_ratio=candidate.confidence_ratio,
+                sector=candidate.sector,
+                regime_scale=regime_scale,
             )
         )
 
-    # セクター制約（sector が None の銘柄はスキップ）
-    if MAX_SECTOR_POSITIONS > 0:
-        with_sector = [r for r in results if r.sector and not r.sector.startswith("UNKNOWN:")]
-        without_sector = [r for r in results if not r.sector or r.sector.startswith("UNKNOWN:")]
-        filtered_sector = filter_by_sector_cap(
-            with_sector,
-            MAX_SECTOR_POSITIONS,
-            sector_getter=lambda r: r.sector or "",
-        )
-        results = filtered_sector + without_sector
-
-    # weight 降順でソート
     results.sort(key=lambda r: r.weight, reverse=True)
 
-    total_weight = sum(r.weight for r in results)
     logger.info(
-        "[allocator] 配分完了: %d銘柄 total_weight=%.3f regime=%s",
+        "[allocator] 配分完了: 銘柄数=%d 合計ウェイト=%.3f",
         len(results),
-        total_weight,
-        regime,
+        sum(r.weight for r in results),
     )
     return results
