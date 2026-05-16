@@ -32,6 +32,8 @@ WALK_FORWARD_REPORT_WITH_ERRORS = NotificationSpec("⚠️ Walk-Forward 比較�
 DB_MAINTENANCE_COMPLETION = NotificationSpec("✅ DB メンテナンス完了", COLOR_SUCCESS)
 DB_MAINTENANCE_ERROR = NotificationSpec("❌ DB メンテナンス失敗", COLOR_ERROR)
 PRE_CLOSE_ALERT = NotificationSpec("📋 引け前ポジション再評価", COLOR_INFO)
+SHADOW_EVALUATION_CHALLENGER_WINS = NotificationSpec("🏆 A/Bテスト: Challenger 昇格候補", COLOR_WARNING)
+SHADOW_EVALUATION_NO_WINNER = NotificationSpec("ℹ️ A/Bテスト: 評価完了", COLOR_INFO)
 
 
 def get_daily_order_spec(*, trading_stopped: bool) -> NotificationSpec:

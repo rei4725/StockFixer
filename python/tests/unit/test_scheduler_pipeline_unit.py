@@ -549,3 +549,78 @@ class TestRunWeeklyTraining:
 
         assert mock_train.call_count >= 1
         mock_notify.assert_called_once()
+
+
+class TestRunWeeklyShadowEvaluation(unittest.TestCase):
+    """run_weekly_shadow_evaluation のテスト"""
+
+    @patch("src.reporting.discord.discord_utils.send_shadow_evaluation_notification")
+    @patch("src.prediction.shadow_evaluation.evaluate_shadow_models")
+    def test_sends_notification_when_no_winner(self, mock_evaluate, mock_notify):
+        """challenger_wins=False のとき通知が送信されること"""
+        from src.orchestration.scheduler import run_weekly_shadow_evaluation
+
+        mock_evaluate.return_value = {
+            "production_hit_rate": 0.55,
+            "production_sharpe": 0.3,
+            "challenger_hit_rate": 0.50,
+            "challenger_sharpe": 0.2,
+            "challenger_wins": False,
+            "evaluated_at": "20260516_120000",
+            "n_production": 10,
+            "n_challenger": 10,
+        }
+        run_weekly_shadow_evaluation()
+        mock_notify.assert_called_once()
+        call_result = mock_notify.call_args.args[0]
+        self.assertFalse(call_result["challenger_wins"])
+
+    @patch("src.reporting.discord.discord_utils.send_shadow_evaluation_notification")
+    @patch("src.prediction.shadow_evaluation.evaluate_shadow_models")
+    def test_sends_notification_when_challenger_wins(self, mock_evaluate, mock_notify):
+        """challenger_wins=True のとき昇格候補通知が送信されること"""
+        from src.orchestration.scheduler import run_weekly_shadow_evaluation
+
+        mock_evaluate.return_value = {
+            "production_hit_rate": 0.50,
+            "production_sharpe": 0.2,
+            "challenger_hit_rate": 0.65,
+            "challenger_sharpe": 0.5,
+            "challenger_wins": True,
+            "evaluated_at": "20260516_120000",
+            "n_production": 10,
+            "n_challenger": 10,
+        }
+        run_weekly_shadow_evaluation()
+        mock_notify.assert_called_once()
+        call_result = mock_notify.call_args.args[0]
+        self.assertTrue(call_result["challenger_wins"])
+
+    @patch("src.reporting.discord.discord_utils.send_shadow_evaluation_notification")
+    @patch("src.prediction.shadow_evaluation.evaluate_shadow_models")
+    def test_evaluation_failure_does_not_propagate(self, mock_evaluate, mock_notify):
+        """evaluate_shadow_models が失敗しても例外が外に出ないこと"""
+        from src.orchestration.scheduler import run_weekly_shadow_evaluation
+
+        mock_evaluate.side_effect = Exception("DB エラー")
+        run_weekly_shadow_evaluation()  # 例外が外に出ないこと
+        mock_notify.assert_not_called()
+
+    @patch("src.reporting.discord.discord_utils.send_shadow_evaluation_notification")
+    @patch("src.prediction.shadow_evaluation.evaluate_shadow_models")
+    def test_notification_failure_does_not_propagate(self, mock_evaluate, mock_notify):
+        """通知が失敗しても例外が外に出ないこと"""
+        from src.orchestration.scheduler import run_weekly_shadow_evaluation
+
+        mock_evaluate.return_value = {
+            "production_hit_rate": None,
+            "production_sharpe": None,
+            "challenger_hit_rate": None,
+            "challenger_sharpe": None,
+            "challenger_wins": False,
+            "evaluated_at": "20260516_120000",
+            "n_production": 0,
+            "n_challenger": 0,
+        }
+        mock_notify.side_effect = Exception("Webhook 失敗")
+        run_weekly_shadow_evaluation()  # 例外が外に出ないこと
