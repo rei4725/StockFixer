@@ -472,6 +472,42 @@ def run_weekly_db_maintenance() -> None:
         logger.error("DB メンテナンス通知失敗: %s", e, exc_info=True)
 
 
+def run_weekly_shadow_evaluation() -> None:
+    """
+    週次実行: A/Bテスト（シャドーモード）評価
+
+    production / challenger 両モデルの Hit Rate / Sharpe を比較し、
+    challenger_wins=True のとき Discord に昇格候補を通知する。
+
+    手動承認後に promote_challenger_to_production() を実行することで
+    challenger を本番モデルへ昇格させることができる。
+    """
+    logger.info("=== 週次 A/Bテスト評価開始 ===")
+    result: dict = {}
+    try:
+        from src.prediction.shadow_evaluation import evaluate_shadow_models
+
+        result = evaluate_shadow_models()
+        logger.info(
+            "A/Bテスト評価完了: challenger_wins=%s (prod_hit=%s, chal_hit=%s)",
+            result["challenger_wins"],
+            result["production_hit_rate"],
+            result["challenger_hit_rate"],
+        )
+    except Exception as e:
+        logger.error("A/Bテスト評価失敗: %s", e, exc_info=True)
+        return
+
+    try:
+        from src.reporting.discord.discord_utils import send_shadow_evaluation_notification
+
+        send_shadow_evaluation_notification(result)
+    except Exception as e:
+        logger.error("A/Bテスト評価通知失敗: %s", e, exc_info=True)
+
+    logger.info("=== 週次 A/Bテスト評価完了 ===")
+
+
 def run_daily_drift_check():
     """
     日次ドリフト監視: 直近 20 営業日の MAE / Hit Rate を監視し、閾値超過銘柄を自動再学習する。

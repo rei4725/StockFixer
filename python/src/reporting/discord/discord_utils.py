@@ -20,6 +20,8 @@ from src.reporting.discord.discord_notification_specs import (
     DB_MAINTENANCE_COMPLETION,
     DB_MAINTENANCE_ERROR,
     PRE_CLOSE_ALERT,
+    SHADOW_EVALUATION_CHALLENGER_WINS,
+    SHADOW_EVALUATION_NO_WINNER,
     WEEKLY_TRAINING_COMPLETION,
     NotificationSpec,
     get_daily_order_spec,
@@ -1124,3 +1126,32 @@ def send_pre_close_alert(alerts: list) -> bool:
             )
 
     return send_webhook_text_chunked("\n".join(lines), preserve_lines=False)
+
+
+def send_shadow_evaluation_notification(result: dict) -> bool:
+    """
+    A/B テスト（シャドーモード）評価結果を Discord Webhook に送信する。
+
+    challenger_wins=True のとき昇格候補として通知する。
+
+    Args:
+        result: evaluate_shadow_models() の戻り値
+
+    Returns:
+        成功時 True、失敗時 False
+    """
+    challenger_wins = result.get("challenger_wins", False)
+    spec = SHADOW_EVALUATION_CHALLENGER_WINS if challenger_wins else SHADOW_EVALUATION_NO_WINNER
+
+    def _fmt(v) -> str:
+        return f"{v:.3f}" if v is not None else "N/A"
+
+    lines = [
+        f"時刻: {format_jst(fmt=DISCORD_DATETIME_FORMAT)}",
+        f"Production  — Hit Rate: {_fmt(result.get('production_hit_rate'))} / Sharpe: {_fmt(result.get('production_sharpe'))} (n={result.get('n_production', 0)})",
+        f"Challenger  — Hit Rate: {_fmt(result.get('challenger_hit_rate'))} / Sharpe: {_fmt(result.get('challenger_sharpe'))} (n={result.get('n_challenger', 0)})",
+    ]
+    if challenger_wins:
+        lines.append("→ Challenger が上回りました。手動承認後に promote_challenger_to_production() を実行してください。")
+
+    return send_status_notification(spec, lines)
