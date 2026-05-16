@@ -498,7 +498,9 @@ class TestExecutionOrderTypeHelpers(unittest.TestCase):
             }
         )
 
-        order_type, price, reason, session = _choose_order_params("jp", "7203", OrderSide.BUY, 1000.0)
+        order_type, price, reason, session = _choose_order_params(
+            "jp", "7203", OrderSide.BUY, 1000.0
+        )
 
         self.assertEqual(order_type, OrderType.LIMIT)
         self.assertGreater(price, 1000.0)
@@ -516,7 +518,9 @@ class TestExecutionOrderTypeHelpers(unittest.TestCase):
             }
         )
 
-        order_type, price, reason, session = _choose_order_params("jp", "7203", OrderSide.SELL, 1000.0)
+        order_type, price, reason, session = _choose_order_params(
+            "jp", "7203", OrderSide.SELL, 1000.0
+        )
 
         self.assertEqual(order_type, OrderType.MARKET)
         self.assertEqual(price, 0.0)

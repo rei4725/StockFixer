@@ -11,9 +11,7 @@ logger = get_logger(__name__)
 def get_config_value(key: str, default: Optional[str] = None) -> Optional[str]:
     """system_config テーブルから設定値を取得する。"""
     with _db_connection() as con:
-        row = con.execute(
-            "SELECT value FROM system_config WHERE key = ?", [key]
-        ).fetchone()
+        row = con.execute("SELECT value FROM system_config WHERE key = ?", [key]).fetchone()
     return row[0] if row else default
 
 

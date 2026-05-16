@@ -129,9 +129,7 @@ def run_parallel(
                 _m = _task_field(task, "market")
                 _s = _task_field(task, "symbol")
                 logger.error(f"[タイムアウト] {_m}/{_s}: {task_timeout}秒超過")
-                failed.append(
-                    BatchFailure(market=_m, symbol=_s, error=f"タイムアウト（{task_timeout}秒）")
-                )
+                failed.append(BatchFailure(market=_m, symbol=_s, error=f"タイムアウト（{task_timeout}秒）"))
             except Exception as e:
                 _m = _task_field(task, "market")
                 _s = _task_field(task, "symbol")
@@ -153,9 +151,7 @@ def print_summary(phase: str, batch_result: BatchResult) -> None:
     n_skip = len(batch_result.skipped)
     n_error = len(batch_result.failed)
 
-    logger.info(
-        f"{phase} 結果サマリー 成功: {n_success} / スキップ: {n_skip} / エラー: {n_error}"
-    )
+    logger.info(f"{phase} 結果サマリー 成功: {n_success} / スキップ: {n_skip} / エラー: {n_error}")
 
     if batch_result.failed:
         logger.warning(f"\n{phase} エラー詳細:")

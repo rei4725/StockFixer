@@ -59,13 +59,13 @@ def fetch_news_sentiment(
             "pageSize": 100,
             "apiKey": api_key,
         }
-        resp = requests.get(url, params=params, timeout=10)
+        resp = requests.get(url, params=params, timeout=10)  # type: ignore[arg-type]
         resp.raise_for_status()
         articles = resp.json().get("articles", [])
         if not articles:
             return None
 
-        records: dict[str, list] = {}
+        records: dict[str, list[str]] = {}
         for article in articles:
             published = article.get("publishedAt", "")[:10]
             if not published:
@@ -75,7 +75,13 @@ def fetch_news_sentiment(
         rows = []
         for date_str, titles in records.items():
             score = _score_titles(titles)
-            rows.append({"date": pd.Timestamp(date_str), "sentiment_score": score, "news_count": len(titles)})
+            rows.append(
+                {
+                    "date": pd.Timestamp(date_str),
+                    "sentiment_score": score,
+                    "news_count": len(titles),
+                }
+            )
 
         if not rows:
             return None

@@ -18,8 +18,8 @@ from config.settings import (
     FEATURE_SELECTION_PROTECT_TOP_SHAP,
     PERMUTATION_IMPORTANCE_REPEATS,
 )
-from src.market_data.technical import add_earnings_flag
 from src.market_data.loader import get_earnings_dates
+from src.market_data.technical import add_earnings_flag
 from src.prediction.manager import ModelManager
 from src.prediction.types import FeatureLoadResult, TrainingMetrics
 from src.utils.db import (
@@ -148,7 +148,10 @@ def load_features_for_training(market: str, symbol: str, horizon: int = 1) -> Fe
             y = df["y"]
         else:
             # 多ホライズンパス: market_data_raw から OHLCV を取得して再計算
-            from src.market_data.technical import add_technical_indicators, create_basic_lag_features
+            from src.market_data.technical import (
+                add_technical_indicators,
+                create_basic_lag_features,
+            )
             from src.utils.db import load_raw_ohlcv
 
             raw = load_raw_ohlcv(market, symbol)
@@ -469,7 +472,9 @@ def train_models_for_symbol_task(task, shadow_mode: bool = False) -> dict:
     from src.watchlist.types import SymbolTask
 
     if isinstance(task, SymbolTask):
-        return train_models_for_symbol(task.market, task.symbol, task.horizon, shadow_mode=shadow_mode)
+        return train_models_for_symbol(
+            task.market, task.symbol, task.horizon, shadow_mode=shadow_mode
+        )
     return train_models_for_symbol(
         task["market"], task["symbol"], task.get("horizon", 1), shadow_mode=shadow_mode
     )

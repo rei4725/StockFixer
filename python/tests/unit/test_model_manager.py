@@ -13,10 +13,9 @@ import pandas as pd
 sys.modules["src.prediction.models.xgboost"] = MagicMock()
 sys.modules["src.prediction.models.lightgbm"] = MagicMock()
 
-from src.prediction.models.base import BaseModel  # noqa: E402
-
 # モック後にModelManagerをインポート
 from src.prediction.manager import ModelManager  # noqa: E402
+from src.prediction.models.base import BaseModel  # noqa: E402
 
 
 # BaseModelのモッククラス

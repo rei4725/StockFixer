@@ -4,16 +4,12 @@ import os
 import shutil
 import tempfile
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import joblib
 import pandas as pd
 
-from src.prediction.manager import (
-    ModelManager,
-    _compute_feature_hash,
-    _get_git_sha,
-)
+from src.prediction.manager import ModelManager, _compute_feature_hash, _get_git_sha
 from src.prediction.models.base import BaseModel
 
 
@@ -153,7 +149,9 @@ class TestModelManagerLoadArtifact(unittest.TestCase):
     def test_load_logs_warning_on_hash_mismatch(self):
         """feature_hash 不一致時に logger.warning が呼ばれること"""
         cols_at_train = ["f1", "f2"]
-        self._save_dict_artifact("mismatch_model", feature_hash=_compute_feature_hash(cols_at_train))
+        self._save_dict_artifact(
+            "mismatch_model", feature_hash=_compute_feature_hash(cols_at_train)
+        )
         self.manager.create_model("MockModel", "mismatch_model")
 
         cols_at_predict = ["f1", "f2", "f3_new"]
@@ -167,11 +165,9 @@ class TestModelManagerLoadArtifact(unittest.TestCase):
         self._save_dict_artifact("match_model", feature_hash=_compute_feature_hash(cols))
         self.manager.create_model("MockModel", "match_model")
 
-        import logging
-
         with self.assertLogs("src.prediction.manager", level="DEBUG") as cm:
             self.manager.load_model("match_model", feature_columns=cols)
-        warning_lines = [l for l in cm.output if "WARNING" in l and "特徴量不一致" in l]
+        warning_lines = [line for line in cm.output if "WARNING" in line and "特徴量不一致" in line]
         self.assertEqual(len(warning_lines), 0)
 
     def test_load_no_warning_when_feature_columns_not_given(self):

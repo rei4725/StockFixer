@@ -29,8 +29,10 @@ class MockDataSource(DataSourceBase):
 
     def __init__(self, stock_df=None, forex_df=None):
         self._stock_df = stock_df if stock_df is not None else _make_ohlcv(60)
-        self._forex_df = forex_df if forex_df is not None else pd.DataFrame(
-            {"Close": [150.0]}, index=pd.date_range("2023-01-01", periods=1)
+        self._forex_df = (
+            forex_df
+            if forex_df is not None
+            else pd.DataFrame({"Close": [150.0]}, index=pd.date_range("2023-01-01", periods=1))
         )
         self.stock_calls: list[tuple] = []
         self.forex_calls: list[tuple] = []

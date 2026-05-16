@@ -8,13 +8,10 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date
 from typing import Any
 
-import pandas as pd
-
 import src.market_data.yf_client as yf_client
-from src.analysis.technical import add_technical_indicators
 from src.backtest.rules import (
     BollingerBandRule,
     EMAMomentumRule,
@@ -24,6 +21,7 @@ from src.backtest.rules import (
     VolatilityBreakoutRule,
     VolumeBreakoutRule,
 )
+from src.market_data.technical import add_technical_indicators
 from src.utils.data_path_utils import get_ticker
 from src.utils.db.rule_results import load_effective_rules, upsert_rule_signal
 from src.utils.logger import get_logger

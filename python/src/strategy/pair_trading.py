@@ -61,7 +61,7 @@ def select_correlated_pairs(
 
     for i in range(len(symbols)):
         for j in range(i + 1, len(symbols)):
-            c = float(corr.iloc[i, j])
+            c = float(corr.iloc[i, j])  # type: ignore[arg-type]
             if np.isfinite(c) and abs(c) >= corr_threshold:
                 pairs.append((symbols[i], symbols[j], c))
 
@@ -262,9 +262,7 @@ def backtest_pair(
 
     hedge_ratio, adf_stat, is_cointegrated = check_cointegration(price_a, price_b)
     if not is_cointegrated:
-        logger.info(
-            "[pair] %s/%s はコインテグレーションなし (ADF=%.4f)", symbol_a, symbol_b, adf_stat
-        )
+        logger.info("[pair] %s/%s はコインテグレーションなし (ADF=%.4f)", symbol_a, symbol_b, adf_stat)
         return None
 
     corr = float(price_a.corr(price_b))

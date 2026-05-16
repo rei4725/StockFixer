@@ -110,6 +110,7 @@ def load_prediction_results(
     top_n: int = None,
     worst_n: int = None,
     limit: int = None,
+    model_version: str = None,
 ) -> pd.DataFrame:
     """
     予測結果を DB から取得する。
@@ -120,6 +121,7 @@ def load_prediction_results(
         top_n: 上位 N 件のみ取得（diff_ratio 降順）
         worst_n: 下位 N 件のみ取得（diff_ratio 昇順）
         limit: 取得件数上限。predicted_at=None のときは全タイムスタンプ対象で N 件取得
+        model_version: モデルバージョンフィルタ（None なら全バージョン）
 
     Returns:
         予測結果 DataFrame
@@ -128,9 +130,15 @@ def load_prediction_results(
         # 全タイムスタンプから直近 N 件を取得（精度チェック用）
         query = "SELECT * FROM prediction_results"
         params: list = []
+        conditions = []
         if market is not None:
-            query += " WHERE market = ?"
+            conditions.append("market = ?")
             params.append(market)
+        if model_version is not None:
+            conditions.append("model_version = ?")
+            params.append(model_version)
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
         query += " ORDER BY predicted_at DESC"
         query += f" LIMIT {int(limit)}"
         with _db_connection() as con:
@@ -151,6 +159,10 @@ def load_prediction_results(
     if market is not None:
         query += " AND market = ?"
         params.append(market)
+
+    if model_version is not None:
+        query += " AND model_version = ?"
+        params.append(model_version)
 
     if worst_n is not None:
         query += " ORDER BY diff_ratio ASC LIMIT ?"

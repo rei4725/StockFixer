@@ -10,8 +10,8 @@ import pandas as pd
 
 import src.utils.data_path_utils as path_utils
 import src.utils.db as db_module
-from src.prediction.types import FeatureLoadResult
 from src.prediction.training_pipeline import train_models_for_symbol, train_models_for_symbol_task
+from src.prediction.types import FeatureLoadResult
 
 
 class TestTrainModelsForSymbol(unittest.TestCase):

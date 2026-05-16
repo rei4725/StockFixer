@@ -6,7 +6,7 @@ Walk-Forward で比較し、結果 DataFrame を返す。
 """
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 import pandas as pd
 
@@ -15,8 +15,8 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 # 固定 TP/SL のデフォルト値
-_DEFAULT_TAKE_PROFIT = 0.10   # 10% 利確
-_DEFAULT_STOP_LOSS = 0.05     # 5% 損切
+_DEFAULT_TAKE_PROFIT = 0.10  # 10% 利確
+_DEFAULT_STOP_LOSS = 0.05  # 5% 損切
 
 
 def compare_exit_strategies(
@@ -114,10 +114,24 @@ def _print_comparison(
 ) -> None:
     """比較結果のサマリーを標準出力に表示する。"""
     summary_cols = [
-        c for c in ["strategy", "fold", "val_start", "val_end", "total_return", "max_drawdown", "sharpe_ratio", "win_rate"]
+        c
+        for c in [
+            "strategy",
+            "fold",
+            "val_start",
+            "val_end",
+            "total_return",
+            "max_drawdown",
+            "sharpe_ratio",
+            "win_rate",
+        ]
         if c in result.columns
     ]
-    numeric_cols = [c for c in ["total_return", "max_drawdown", "sharpe_ratio", "win_rate"] if c in result.columns]
+    numeric_cols = [
+        c
+        for c in ["total_return", "max_drawdown", "sharpe_ratio", "win_rate"]
+        if c in result.columns
+    ]
 
     print("\n" + "=" * 70)
     print(f"エグジット戦略比較: 固定 TP/SL ({take_profit_pct:.0%}/{stop_loss_pct:.0%}) vs. ML エグジット")

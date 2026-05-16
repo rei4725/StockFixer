@@ -299,8 +299,6 @@ class TestJsonFormatter(unittest.TestCase):
 
     def test_timestamp_format(self):
         """timestamp が ISO 8601 形式（UTC, Z末尾）であること"""
-        import re as _re
-
         formatter = self._make_formatter()
         record = self._make_record("ts test")
         parsed = json.loads(formatter.format(record))
@@ -341,7 +339,11 @@ class TestJsonFormatter(unittest.TestCase):
                 stack.enter_context(
                     patch(
                         "src.utils.logger.RotatingFileHandler",
-                        return_value=MagicMock(spec=__import__("logging.handlers", fromlist=["RotatingFileHandler"]).RotatingFileHandler),
+                        return_value=MagicMock(
+                            spec=__import__(
+                                "logging.handlers", fromlist=["RotatingFileHandler"]
+                            ).RotatingFileHandler
+                        ),
                     )
                 )
                 stack.enter_context(
@@ -350,7 +352,9 @@ class TestJsonFormatter(unittest.TestCase):
                         return_value=MagicMock(spec=logging.StreamHandler),
                     )
                 )
-                stack.enter_context(patch("src.utils.logger.io.TextIOWrapper", return_value=MagicMock()))
+                stack.enter_context(
+                    patch("src.utils.logger.io.TextIOWrapper", return_value=MagicMock())
+                )
                 stack.enter_context(patch("src.utils.logger._LOG_DIR", tmp_dir))
                 stack.enter_context(patch("os.makedirs"))
 
@@ -361,8 +365,6 @@ class TestJsonFormatter(unittest.TestCase):
                 try:
                     logger_module._configure_root()
                     self.assertTrue(logger_module._root_configured)
-                    # いずれかのハンドラが JsonFormatter を使っていることを確認
-                    formatters = [h.setFormatter.call_args[0][0] for h in root_logger.handlers if hasattr(h, "setFormatter")]
                     # モックを使っているので setFormatter の引数を確認
                     set_formatter_calls = []
                     for h in root_logger.handlers:

@@ -5,7 +5,6 @@ import os
 import shutil
 import tempfile
 import unittest
-from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
@@ -14,7 +13,6 @@ import src.utils.data_path_utils as path_utils
 import src.utils.db as db_module
 from src.market_data.quality_check import (
     QualityCheckResult,
-    QualityIssue,
     _check_consecutive_missing,
     _check_nan_rate,
     _check_zero_volume,
@@ -75,7 +73,9 @@ class TestCheckConsecutiveMissing(unittest.TestCase):
     def test_consecutive_missing_above_threshold_returns_error(self):
         df = _make_ohlcv(60, nan_cols=[("Close", 10, 7)])  # 7日連続
         issues = _check_consecutive_missing(df, n_days=5)
-        self.assertTrue(any(i.check == "consecutive_missing" and i.level == "error" for i in issues))
+        self.assertTrue(
+            any(i.check == "consecutive_missing" and i.level == "error" for i in issues)
+        )
 
     def test_consecutive_missing_below_threshold_returns_empty(self):
         df = _make_ohlcv(60, nan_cols=[("Close", 10, 4)])  # 4日連続 < 閾値5

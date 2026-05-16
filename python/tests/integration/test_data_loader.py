@@ -7,7 +7,7 @@ import pandas as pd
 
 import src.utils.data_path_utils as path_utils
 import src.utils.db as db_module
-from src.data.data_loader import (
+from src.market_data.loader import (
     get_forex_data,
     get_stock_data,
     get_stock_data_auto,

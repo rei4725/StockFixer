@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 import pandas as pd
 
-from src.features.sentiment_features import add_sentiment_features, _score_titles
+from src.features.sentiment_features import _score_titles, add_sentiment_features
 
 
 def _make_ohlcv(n: int = 30) -> pd.DataFrame:

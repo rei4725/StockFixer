@@ -137,7 +137,7 @@ class TestKabuBrokerGetToken(unittest.TestCase):
     def test_broker_error_call_count_matches_max_retries(self, mock_post):
         """BrokerError 時の試行回数が _TOKEN_MAX_RETRIES に一致すること"""
         from src.trading.brokers.base import BrokerError
-        from src.trading.brokers.kabu.kabu_client import KabuBroker, _TOKEN_MAX_RETRIES
+        from src.trading.brokers.kabu.kabu_client import _TOKEN_MAX_RETRIES, KabuBroker
 
         error_response = MagicMock()
         error_response.raise_for_status.side_effect = RuntimeError("server error")

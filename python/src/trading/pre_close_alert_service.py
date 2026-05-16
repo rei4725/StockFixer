@@ -51,10 +51,7 @@ def evaluate_positions() -> list[PositionAlert]:
     import os
 
     from src.trading.brokers.paper.paper_broker import PaperBroker
-    from src.utils.db.prediction import (
-        load_latest_prediction_timestamp,
-        load_prediction_results,
-    )
+    from src.utils.db.prediction import load_latest_prediction_timestamp, load_prediction_results
 
     mode = os.environ.get("AUTO_TRADE_MODE", "paper")
     if mode == "live":

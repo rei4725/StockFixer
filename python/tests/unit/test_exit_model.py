@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import os
 import shutil
-import sys
 import tempfile
 import unittest
 
@@ -158,7 +157,9 @@ class TestExitModelMakeLabels(unittest.TestCase):
         # 価格が途中でピークを迎えるシリーズ
         n = 20
         prices = list(range(1, n + 1)) + list(range(n - 1, 0, -1))
-        close = pd.Series(prices[:30], index=pd.date_range("2024-01-01", periods=30, freq="D"), dtype=float)
+        close = pd.Series(
+            prices[:30], index=pd.date_range("2024-01-01", periods=30, freq="D"), dtype=float
+        )
         label = ExitModel.make_labels(close, lookahead=5, peak_ratio=0.98)
         # ピーク付近（インデックス 19 前後）は exit=1 になるはず
         non_na = label.dropna()

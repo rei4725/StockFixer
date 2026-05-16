@@ -37,9 +37,7 @@ class TestAlertTypeClassification(unittest.TestCase):
     def _run_with_one_position(self, position: dict, pred_df: pd.DataFrame) -> PositionAlert:
         with (
             patch.dict("os.environ", {"AUTO_TRADE_MODE": "paper"}, clear=False),
-            patch(
-                "src.trading.brokers.paper.paper_broker.PaperBroker"
-            ) as mock_broker_cls,
+            patch("src.trading.brokers.paper.paper_broker.PaperBroker") as mock_broker_cls,
             patch(
                 "src.utils.db.prediction.load_latest_prediction_timestamp",
                 return_value="20260101_150000",
@@ -60,7 +58,9 @@ class TestAlertTypeClassification(unittest.TestCase):
 
     def test_stop_loss_when_diff_ratio_below_threshold(self):
         pos = _make_position("7203", 100, 1000.0, 980.0)
-        pred = _make_pred_df("7203", avg_pred_price=970.0, diff_ratio=STOP_LOSS_PRED_THRESHOLD - 0.001)
+        pred = _make_pred_df(
+            "7203", avg_pred_price=970.0, diff_ratio=STOP_LOSS_PRED_THRESHOLD - 0.001
+        )
         alert = self._run_with_one_position(pos, pred)
         self.assertEqual(alert.alert_type, AlertType.STOP_LOSS)
 

@@ -371,7 +371,11 @@ def run_predict_watchlist():
         print(f"\n結果保存完了: run_timestamp={now_str}")
 
 
-def run_accuracy_check(horizon: int = 1) -> pd.DataFrame:
+def run_accuracy_check(
+    horizon: int = 1,
+    model_name: str = "unified",
+    model_version_filter: str = None,
+) -> pd.DataFrame:
     """
     過去の予測結果と実際の株価を照合し、精度を prediction_accuracy テーブルに保存する。
 
@@ -380,6 +384,8 @@ def run_accuracy_check(horizon: int = 1) -> pd.DataFrame:
 
     Args:
         horizon: チェック対象のホライズン（デフォルト 1 = 翌日予測を評価）
+        model_name: prediction_accuracy テーブルに記録するモデル名ラベル
+        model_version_filter: prediction_results の model_version でフィルタ（None なら全件）
 
     Returns:
         pd.DataFrame: 今回採点した行のサマリー
@@ -391,12 +397,15 @@ def run_accuracy_check(horizon: int = 1) -> pd.DataFrame:
         save_prediction_accuracy,
     )
 
-    logger.info(f"=== 予測精度チェック開始 (horizon={horizon}) ===")
+    logger.info(
+        f"=== 予測精度チェック開始 (horizon={horizon}, model_name={model_name}, "
+        f"model_version_filter={model_version_filter}) ==="
+    )
 
-    # 直近 90 日分の予測結果を取得
-    df_pred = load_prediction_results(limit=5000)
+    # 直近の予測結果を取得（model_version フィルタ付き）
+    df_pred = load_prediction_results(limit=5000, model_version=model_version_filter)
     if df_pred is None or df_pred.empty:
-        logger.info("予測結果が存在しません。")
+        logger.info("予測結果が存在しません（model_version=%s）。", model_version_filter)
         return pd.DataFrame()
 
     new_rows: list[dict] = []
@@ -445,7 +454,7 @@ def run_accuracy_check(horizon: int = 1) -> pd.DataFrame:
             {
                 "market": market,
                 "symbol": symbol,
-                "model_name": "unified",
+                "model_name": model_name,
                 "predicted_at": predicted_at_str,
                 "horizon": horizon,
                 "predicted_price": predicted_price,

@@ -10,11 +10,7 @@ from unittest.mock import MagicMock
 from hypothesis import HealthCheck, assume, given, settings
 from hypothesis import strategies as st
 
-from src.trading.risk_manager import (
-    MAX_POSITION_RATE,
-    RiskManager,
-    compute_dd_capital_scale,
-)
+from src.trading.risk_manager import MAX_POSITION_RATE, RiskManager, compute_dd_capital_scale
 
 # ---------------------------------------------------------------------------
 # compute_dd_capital_scale

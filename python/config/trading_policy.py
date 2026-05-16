@@ -79,13 +79,9 @@ DEFAULT_AVG_LOSS: float = 0.008
 
 # VIX テールリスクヘッジ設定（R-406）
 # VIX がこの閾値を超えたときにポジション縮小を適用する
-VIX_SPIKE_THRESHOLD: float = _strict_float(
-    "VIX_SPIKE_THRESHOLD", 30.0, min_val=10.0, max_val=100.0
-)
+VIX_SPIKE_THRESHOLD: float = _strict_float("VIX_SPIKE_THRESHOLD", 30.0, min_val=10.0, max_val=100.0)
 # VIX 急騰時のポジション縮小係数（1.0 = 縮小なし, 0.5 = 半減）
-VIX_POSITION_SCALE: float = _strict_float(
-    "VIX_POSITION_SCALE", 0.5, min_val=0.0, max_val=1.0
-)
+VIX_POSITION_SCALE: float = _strict_float("VIX_POSITION_SCALE", 0.5, min_val=0.0, max_val=1.0)
 # インバース ETF ヘッジ発注オプション（SH, SQQQ 等への連動発注を有効化）
 VIX_HEDGE_ENABLED: bool = os.getenv("VIX_HEDGE_ENABLED", "false").strip().lower() in {
     "1",

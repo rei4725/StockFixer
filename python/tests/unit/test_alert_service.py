@@ -6,9 +6,9 @@ import json
 import os
 import tempfile
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-from src.services.alert_service import (
+from src.utils.alert_service import (
     DRIFT_WARN_THRESHOLD,
     HEALTH_DEGRADED_THRESHOLD,
     LOSS_LIMIT_THRESHOLD,
@@ -25,7 +25,6 @@ from src.services.alert_service import (
     update_health_degraded_streak,
     update_loss_limit_streak,
 )
-
 
 # ---------------------------------------------------------------------------
 # ヘルパー
@@ -55,7 +54,6 @@ def _write_state(path: str, events: list[dict]) -> None:
 
 
 class TestCountConsecutivePipelineFailures(unittest.TestCase):
-
     def test_no_state_file_returns_zero(self):
         self.assertEqual(_count_consecutive_pipeline_failures("/nonexistent/path.json"), 0)
 
@@ -106,7 +104,11 @@ class TestCountConsecutivePipelineFailures(unittest.TestCase):
             path = fh.name
 
         events = [
-            {"job_id": "weekly_training", "status": "error", "finished_at": "2026-05-04T10:00:00+00:00"},
+            {
+                "job_id": "weekly_training",
+                "status": "error",
+                "finished_at": "2026-05-04T10:00:00+00:00",
+            },
             _pipeline_event("success", "2026-05-03T10:00:00+00:00"),
         ]
         _write_state(path, events)
@@ -117,7 +119,6 @@ class TestCountConsecutivePipelineFailures(unittest.TestCase):
 
 
 class TestCheckPipelineFailRule(unittest.TestCase):
-
     def _run_with_count(self, count: int) -> AlertResult:
         with patch(
             "src.services.alert_service._count_consecutive_pipeline_failures",
@@ -145,7 +146,6 @@ class TestCheckPipelineFailRule(unittest.TestCase):
 
 
 class TestLossLimitStreak(unittest.TestCase):
-
     def _mock_config(self, current_value: int):
         return patch(
             "src.services.alert_service._get_streak",
@@ -188,7 +188,6 @@ class TestLossLimitStreak(unittest.TestCase):
 
 
 class TestDriftWarnStreak(unittest.TestCase):
-
     def test_update_increments_when_warn(self):
         with (
             patch("src.services.alert_service._get_streak", return_value=0),
@@ -225,7 +224,6 @@ class TestDriftWarnStreak(unittest.TestCase):
 
 
 class TestHealthDegradedStreak(unittest.TestCase):
-
     def test_update_increments_when_degraded(self):
         with (
             patch("src.services.alert_service._get_streak", return_value=1),
@@ -245,13 +243,17 @@ class TestHealthDegradedStreak(unittest.TestCase):
         mock_set.assert_called_once()
 
     def test_check_below_threshold_not_triggered(self):
-        with patch("src.services.alert_service._get_streak", return_value=HEALTH_DEGRADED_THRESHOLD - 1):
+        with patch(
+            "src.services.alert_service._get_streak", return_value=HEALTH_DEGRADED_THRESHOLD - 1
+        ):
             result = check_health_degraded_rule()
         self.assertFalse(result.triggered)
         self.assertEqual(result.rule_id, "NF-303-4")
 
     def test_check_at_threshold_triggered(self):
-        with patch("src.services.alert_service._get_streak", return_value=HEALTH_DEGRADED_THRESHOLD):
+        with patch(
+            "src.services.alert_service._get_streak", return_value=HEALTH_DEGRADED_THRESHOLD
+        ):
             result = check_health_degraded_rule()
         self.assertTrue(result.triggered)
 
@@ -262,7 +264,6 @@ class TestHealthDegradedStreak(unittest.TestCase):
 
 
 class TestEvaluateAlertConditions(unittest.TestCase):
-
     def _all_ok_results(self) -> list[AlertResult]:
         return [
             AlertResult("NF-303-1", "A", False, 0, 2),
@@ -273,30 +274,66 @@ class TestEvaluateAlertConditions(unittest.TestCase):
 
     def test_returns_four_results(self):
         with (
-            patch("src.services.alert_service.check_pipeline_fail_rule", return_value=AlertResult("NF-303-1", "A", False, 0, 2)),
-            patch("src.services.alert_service.check_loss_limit_rule", return_value=AlertResult("NF-303-2", "B", False, 0, 3)),
-            patch("src.services.alert_service.check_drift_warn_rule", return_value=AlertResult("NF-303-3", "C", False, 0, 2)),
-            patch("src.services.alert_service.check_health_degraded_rule", return_value=AlertResult("NF-303-4", "D", False, 0, 2)),
+            patch(
+                "src.services.alert_service.check_pipeline_fail_rule",
+                return_value=AlertResult("NF-303-1", "A", False, 0, 2),
+            ),
+            patch(
+                "src.services.alert_service.check_loss_limit_rule",
+                return_value=AlertResult("NF-303-2", "B", False, 0, 3),
+            ),
+            patch(
+                "src.services.alert_service.check_drift_warn_rule",
+                return_value=AlertResult("NF-303-3", "C", False, 0, 2),
+            ),
+            patch(
+                "src.services.alert_service.check_health_degraded_rule",
+                return_value=AlertResult("NF-303-4", "D", False, 0, 2),
+            ),
         ):
             results = evaluate_alert_conditions()
         self.assertEqual(len(results), 4)
 
     def test_all_ok_no_triggered(self):
         with (
-            patch("src.services.alert_service.check_pipeline_fail_rule", return_value=AlertResult("NF-303-1", "A", False, 0, 2)),
-            patch("src.services.alert_service.check_loss_limit_rule", return_value=AlertResult("NF-303-2", "B", False, 0, 3)),
-            patch("src.services.alert_service.check_drift_warn_rule", return_value=AlertResult("NF-303-3", "C", False, 0, 2)),
-            patch("src.services.alert_service.check_health_degraded_rule", return_value=AlertResult("NF-303-4", "D", False, 0, 2)),
+            patch(
+                "src.services.alert_service.check_pipeline_fail_rule",
+                return_value=AlertResult("NF-303-1", "A", False, 0, 2),
+            ),
+            patch(
+                "src.services.alert_service.check_loss_limit_rule",
+                return_value=AlertResult("NF-303-2", "B", False, 0, 3),
+            ),
+            patch(
+                "src.services.alert_service.check_drift_warn_rule",
+                return_value=AlertResult("NF-303-3", "C", False, 0, 2),
+            ),
+            patch(
+                "src.services.alert_service.check_health_degraded_rule",
+                return_value=AlertResult("NF-303-4", "D", False, 0, 2),
+            ),
         ):
             results = evaluate_alert_conditions()
         self.assertFalse(any(r.triggered for r in results))
 
     def test_one_triggered(self):
         with (
-            patch("src.services.alert_service.check_pipeline_fail_rule", return_value=AlertResult("NF-303-1", "A", True, 3, 2)),
-            patch("src.services.alert_service.check_loss_limit_rule", return_value=AlertResult("NF-303-2", "B", False, 0, 3)),
-            patch("src.services.alert_service.check_drift_warn_rule", return_value=AlertResult("NF-303-3", "C", False, 0, 2)),
-            patch("src.services.alert_service.check_health_degraded_rule", return_value=AlertResult("NF-303-4", "D", False, 0, 2)),
+            patch(
+                "src.services.alert_service.check_pipeline_fail_rule",
+                return_value=AlertResult("NF-303-1", "A", True, 3, 2),
+            ),
+            patch(
+                "src.services.alert_service.check_loss_limit_rule",
+                return_value=AlertResult("NF-303-2", "B", False, 0, 3),
+            ),
+            patch(
+                "src.services.alert_service.check_drift_warn_rule",
+                return_value=AlertResult("NF-303-3", "C", False, 0, 2),
+            ),
+            patch(
+                "src.services.alert_service.check_health_degraded_rule",
+                return_value=AlertResult("NF-303-4", "D", False, 0, 2),
+            ),
         ):
             results = evaluate_alert_conditions()
         triggered = [r for r in results if r.triggered]
@@ -310,7 +347,6 @@ class TestEvaluateAlertConditions(unittest.TestCase):
 
 
 class TestRunConditionalNotification(unittest.TestCase):
-
     def test_sends_detail_when_triggered(self):
         results = [
             AlertResult("NF-303-1", "パイプライン失敗", True, 3, 2),
@@ -318,8 +354,9 @@ class TestRunConditionalNotification(unittest.TestCase):
             AlertResult("NF-303-3", "ドリフト", False, 0, 2),
             AlertResult("NF-303-4", "ヘルス", False, 0, 2),
         ]
-        with patch("src.services.alert_service._send_alert_detail", return_value=True) as mock_detail, \
-             patch("src.services.alert_service._send_daily_summary") as mock_summary:
+        with patch(
+            "src.services.alert_service._send_alert_detail", return_value=True
+        ) as mock_detail, patch("src.services.alert_service._send_daily_summary") as mock_summary:
             ok = run_conditional_notification(results=results)
 
         mock_detail.assert_called_once_with(results)
@@ -333,8 +370,9 @@ class TestRunConditionalNotification(unittest.TestCase):
             AlertResult("NF-303-3", "C", False, 0, 2),
             AlertResult("NF-303-4", "D", False, 0, 2),
         ]
-        with patch("src.services.alert_service._send_alert_detail") as mock_detail, \
-             patch("src.services.alert_service._send_daily_summary", return_value=True) as mock_summary:
+        with patch("src.services.alert_service._send_alert_detail") as mock_detail, patch(
+            "src.services.alert_service._send_daily_summary", return_value=True
+        ) as mock_summary:
             ok = run_conditional_notification(results=results)
 
         mock_summary.assert_called_once_with(results)
@@ -348,8 +386,9 @@ class TestRunConditionalNotification(unittest.TestCase):
             AlertResult("NF-303-3", "C", False, 0, 2),
             AlertResult("NF-303-4", "D", False, 0, 2),
         ]
-        with patch("src.services.alert_service.evaluate_alert_conditions", return_value=all_ok) as mock_eval, \
-             patch("src.services.alert_service._send_daily_summary", return_value=True):
+        with patch(
+            "src.services.alert_service.evaluate_alert_conditions", return_value=all_ok
+        ) as mock_eval, patch("src.services.alert_service._send_daily_summary", return_value=True):
             run_conditional_notification(results=None)
         mock_eval.assert_called_once()
 
@@ -360,7 +399,6 @@ class TestRunConditionalNotification(unittest.TestCase):
 
 
 class TestAlertResultDiscordLines(unittest.TestCase):
-
     def test_triggered_shows_alert(self):
         r = AlertResult("NF-303-1", "テスト", True, 3, 2)
         lines = r.as_discord_lines()

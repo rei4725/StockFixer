@@ -147,9 +147,7 @@ class TestRunMigrations(unittest.TestCase):
 
         tables = [
             row[0]
-            for row in con.execute(
-                "SELECT table_name FROM information_schema.tables"
-            ).fetchall()
+            for row in con.execute("SELECT table_name FROM information_schema.tables").fetchall()
         ]
         self.assertIn("schema_migrations", tables)
 

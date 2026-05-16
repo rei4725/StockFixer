@@ -572,6 +572,40 @@ def send_weekly_training_completion(models: list) -> bool:
     return send_status_notification(WEEKLY_TRAINING_COMPLETION, message.split("\n"))
 
 
+def send_promotion_result(promoted: bool, reason: str, criteria: dict) -> bool:
+    """
+    モデル昇格評価結果を Discord Webhook に送信する。
+
+    Args:
+        promoted: 実際に昇格が実行されたかどうか
+        reason: 判定理由サマリー文
+        criteria: 昇格基準の詳細 dict（promotion_gate.evaluate_promotion() の戻り値と同形式）
+
+    Returns:
+        成功時 True、失敗時 False
+    """
+    status = "昇格実行" if promoted else "見送り"
+    lines = [
+        f"**[週次] モデル昇格評価: {status}**",
+        f"時刻: {format_jst(fmt=DISCORD_DATETIME_FORMAT)}",
+        reason,
+        "```",
+    ]
+    criteria_labels = {
+        "net_return": "Net Return",
+        "mdd": "MDD",
+        "sharpe": "Sharpe",
+        "hit_rate": "Hit Rate",
+        "slippage": "Slippage",
+    }
+    for key, c in criteria.items():
+        label = criteria_labels.get(key, key)
+        mark = "OK" if c.get("passed") else "NG"
+        lines.append(f"[{mark}] {label}")
+    lines.append("```")
+    return send_webhook_text_chunked("\n".join(lines))
+
+
 def send_daily_order_completion(
     buy_orders: int,
     sell_orders: int,

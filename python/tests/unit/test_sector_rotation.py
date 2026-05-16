@@ -140,9 +140,14 @@ class TestSimulatePortfolioWithSectorRotation(unittest.TestCase):
         rebalance_dates = _get_rebalance_dates(score_matrix.index, "weekly")
 
         eq_df, holdings = _simulate_portfolio(
-            score_matrix, close_matrix, rebalance_dates,
-            top_n=2, initial_cash=1_000_000, fee_rate=0.001,
-            max_sector_positions=3, use_sector_rotation=True,
+            score_matrix,
+            close_matrix,
+            rebalance_dates,
+            top_n=2,
+            initial_cash=1_000_000,
+            fee_rate=0.001,
+            max_sector_positions=3,
+            use_sector_rotation=True,
         )
         self.assertIn("portfolio_value", eq_df.columns)
         self.assertGreater(len(eq_df), 0)
@@ -158,14 +163,24 @@ class TestSimulatePortfolioWithSectorRotation(unittest.TestCase):
         rebalance_dates = _get_rebalance_dates(score_matrix.index, "weekly")
 
         eq_off, _ = _simulate_portfolio(
-            score_matrix, close_matrix, rebalance_dates,
-            top_n=2, initial_cash=1_000_000, fee_rate=0.001,
-            max_sector_positions=3, use_sector_rotation=False,
+            score_matrix,
+            close_matrix,
+            rebalance_dates,
+            top_n=2,
+            initial_cash=1_000_000,
+            fee_rate=0.001,
+            max_sector_positions=3,
+            use_sector_rotation=False,
         )
         eq_on, _ = _simulate_portfolio(
-            score_matrix, close_matrix, rebalance_dates,
-            top_n=2, initial_cash=1_000_000, fee_rate=0.001,
-            max_sector_positions=3, use_sector_rotation=True,
+            score_matrix,
+            close_matrix,
+            rebalance_dates,
+            top_n=2,
+            initial_cash=1_000_000,
+            fee_rate=0.001,
+            max_sector_positions=3,
+            use_sector_rotation=True,
         )
         self.assertEqual(len(eq_off), len(eq_on))
         self.assertIn("portfolio_value", eq_on.columns)

@@ -164,12 +164,24 @@ def compare_sector_rotation_kpi(
     rebalance_dates = _get_rebalance_dates(pd.DatetimeIndex(score_matrix.index), rebalance_freq)
 
     eq_off, _ = _simulate_portfolio(
-        score_matrix, close_matrix, rebalance_dates, top_n, initial_cash, fee_rate,
-        max_sector_positions, use_sector_rotation=False,
+        score_matrix,
+        close_matrix,
+        rebalance_dates,
+        top_n,
+        initial_cash,
+        fee_rate,
+        max_sector_positions,
+        use_sector_rotation=False,
     )
     eq_on, _ = _simulate_portfolio(
-        score_matrix, close_matrix, rebalance_dates, top_n, initial_cash, fee_rate,
-        max_sector_positions, use_sector_rotation=True,
+        score_matrix,
+        close_matrix,
+        rebalance_dates,
+        top_n,
+        initial_cash,
+        fee_rate,
+        max_sector_positions,
+        use_sector_rotation=True,
     )
 
     metrics_off = _compute_portfolio_metrics(eq_off, initial_cash)

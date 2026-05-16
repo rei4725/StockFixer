@@ -5,7 +5,7 @@ DuckDB は MagicMock で差し替える。
 """
 
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
@@ -92,9 +92,7 @@ class TestEvaluateCorrelationGate(unittest.TestCase):
         df = pd.DataFrame({"A": np.diff(base), "B": np.diff(noise_b), "C": np.diff(noise_c)})
         mock_load.return_value = df
 
-        result = evaluate_correlation_gate(
-            ["A", "B", "C"], "jp", window=20, enc_threshold=2.0
-        )
+        result = evaluate_correlation_gate(["A", "B", "C"], "jp", window=20, enc_threshold=2.0)
         self.assertFalse(result.is_allowed)
         self.assertIsNotNone(result.reason)
         self.assertLess(result.enc, 2.0)
@@ -112,9 +110,7 @@ class TestEvaluateCorrelationGate(unittest.TestCase):
         )
         mock_load.return_value = df
 
-        result = evaluate_correlation_gate(
-            ["A", "B", "C"], "jp", window=20, enc_threshold=2.0
-        )
+        result = evaluate_correlation_gate(["A", "B", "C"], "jp", window=20, enc_threshold=2.0)
         self.assertTrue(result.is_allowed)
         self.assertGreaterEqual(result.enc, 2.0)
         self.assertIsNone(result.reason)
@@ -122,9 +118,7 @@ class TestEvaluateCorrelationGate(unittest.TestCase):
     @patch("src.trading.correlation_risk._load_recent_returns")
     def test_empty_returns_skips_gate(self, mock_load):
         mock_load.return_value = pd.DataFrame()
-        result = evaluate_correlation_gate(
-            ["A", "B"], "jp", window=20, enc_threshold=2.0
-        )
+        result = evaluate_correlation_gate(["A", "B"], "jp", window=20, enc_threshold=2.0)
         self.assertTrue(result.is_allowed)
         self.assertIsNotNone(result.reason)
 

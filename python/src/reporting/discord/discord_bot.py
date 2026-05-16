@@ -371,9 +371,7 @@ async def handle_drift_threshold_command(message, parts: list[str]) -> None:
             )
         return
 
-    await message.channel.send(
-        escape_markdown(_DRIFT_THRESHOLD_USAGE), allowed_mentions=None
-    )
+    await message.channel.send(escape_markdown(_DRIFT_THRESHOLD_USAGE), allowed_mentions=None)
 
 
 @bot.event

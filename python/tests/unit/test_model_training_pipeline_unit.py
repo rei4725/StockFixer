@@ -6,7 +6,6 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pandas as pd
 
-from src.prediction.types import FeatureLoadResult
 from src.prediction.training_pipeline import (
     _apply_feature_exclusions,
     _build_feature_selection_frame,
@@ -16,7 +15,7 @@ from src.prediction.training_pipeline import (
     train_models_for_symbol,
     train_models_for_symbol_task,
 )
-from src.prediction.types import TrainingMetrics
+from src.prediction.types import FeatureLoadResult, TrainingMetrics
 from src.watchlist.types import BatchResult
 
 
@@ -602,8 +601,8 @@ class TestRunModelBatch(unittest.TestCase):
         self, mock_symbols, mock_parallel, mock_mm_cls, mock_save, mock_print
     ):
         """成功した特徴量ロードに対してモデルが学習されること"""
-        from src.prediction.types import FeatureLoadResult
         from src.prediction.training_pipeline import run_model_batch
+        from src.prediction.types import FeatureLoadResult
         from src.watchlist.types import SymbolTask
 
         mock_symbols.return_value = [SymbolTask(market="jp", symbol="7203")]
@@ -698,8 +697,8 @@ class TestTrainModelsForHorizon(unittest.TestCase):
     @patch("src.prediction.training_pipeline.load_target_symbols")
     def test_trains_when_features_available(self, mock_symbols, mock_load, mock_train):
         """特徴量が存在する場合にモデルが学習されること"""
-        from src.prediction.types import FeatureLoadResult
         from src.prediction.training_pipeline import _train_models_for_horizon
+        from src.prediction.types import FeatureLoadResult
         from src.watchlist.types import SymbolTask
 
         mock_symbols.return_value = [SymbolTask(market="jp", symbol="7203")]
@@ -718,8 +717,8 @@ class TestTrainModelsForHorizon(unittest.TestCase):
     @patch("src.prediction.training_pipeline.load_target_symbols")
     def test_skips_when_features_unavailable(self, mock_symbols, mock_load, mock_train):
         """特徴量がない場合はスキップされること（例外なし）"""
-        from src.prediction.types import FeatureLoadResult
         from src.prediction.training_pipeline import _train_models_for_horizon
+        from src.prediction.types import FeatureLoadResult
         from src.watchlist.types import SymbolTask
 
         mock_symbols.return_value = [SymbolTask(market="jp", symbol="7203")]
@@ -744,8 +743,8 @@ class TestTrainModelsForHorizon(unittest.TestCase):
     @patch("src.prediction.training_pipeline.load_target_symbols")
     def test_exception_in_one_symbol_continues_others(self, mock_symbols, mock_load, mock_train):
         """1銘柄でエラーが出ても残りが処理されること"""
-        from src.prediction.types import FeatureLoadResult
         from src.prediction.training_pipeline import _train_models_for_horizon
+        from src.prediction.types import FeatureLoadResult
         from src.watchlist.types import SymbolTask
 
         mock_symbols.return_value = [

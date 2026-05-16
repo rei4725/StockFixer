@@ -8,7 +8,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 
-
 class TestGetOptimalParams(unittest.TestCase):
     """get_optimal_params のテスト（JSON ファイルをモック）"""
 

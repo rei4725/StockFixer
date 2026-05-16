@@ -299,7 +299,121 @@ def run_shadow_prediction(
 
 
 # ---------------------------------------------------------------------------
-# モデル昇格フロー
+# Unified モデル専用: Challenger 予測・昇格フロー
+# ---------------------------------------------------------------------------
+
+_UNIFIED_PRODUCTION_NAMES = ["UnifiedStockXGBoost", "UnifiedStockLightGBM"]
+_UNIFIED_CHALLENGER_NAMES = [
+    "UnifiedStockXGBoost_challenger",
+    "UnifiedStockLightGBM_challenger",
+]
+
+
+def predict_with_challenger_unified() -> list:
+    """Challenger unified モデルで全銘柄予測を実行し PredictionResult リストを返す。
+
+    UnifiedStockXGBoost_challenger / UnifiedStockLightGBM_challenger を使用する。
+    モデルファイルが存在しない場合は空リストを返す。
+
+    Returns:
+        list[PredictionResult]: 各銘柄の予測結果
+    """
+    import os
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    from src.prediction.predict_unified import get_cached_model, predict_with_unified_model
+    from src.utils.data_path_utils import get_models_dir
+    from src.utils.db import get_all_symbols
+
+    # challenger ファイルが存在するか確認
+    unified_dir = os.path.join(get_models_dir(), "unified")
+    missing = [
+        name
+        for name in _UNIFIED_CHALLENGER_NAMES
+        if not os.path.exists(os.path.join(unified_dir, f"{name}.joblib"))
+    ]
+    if missing:
+        logger.info(f"Challenger モデルが見つかりません（スキップ）: {missing}")
+        return []
+
+    # モデルをキャッシュに事前ロード
+    for name in _UNIFIED_CHALLENGER_NAMES:
+        get_cached_model(name)
+
+    all_keys = get_all_symbols()
+    logger.info(f"Challenger shadow 予測開始: {len(all_keys)} 銘柄")
+
+    def _predict(args):
+        market, symbol = args
+        try:
+            return predict_with_unified_model(market, symbol, model_types=_UNIFIED_CHALLENGER_NAMES)
+        except Exception:
+            logger.warning("Challenger 予測スキップ: market=%s symbol=%s", market, symbol, exc_info=True)
+            return None
+
+    results = []
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = {executor.submit(_predict, key): key for key in all_keys}
+        for future in as_completed(futures):
+            result = future.result()
+            if result is not None:
+                results.append(result)
+
+    logger.info(f"Challenger shadow 予測完了: {len(results)} 銘柄")
+    return results
+
+
+def promote_unified_challenger(dry_run: bool = False) -> dict:
+    """Challenger unified モデルファイルを production unified モデルファイルに昇格する。
+
+    UnifiedStockXGBoost_challenger.joblib → UnifiedStockXGBoost.joblib
+    UnifiedStockLightGBM_challenger.joblib → UnifiedStockLightGBM.joblib
+
+    evaluate_shadow_models() で challenger_wins=True かつ
+    evaluate_promotion() で eligible=True を確認してから呼び出すこと。
+
+    Args:
+        dry_run: True の場合はファイル操作を行わずログのみ出力する
+
+    Returns:
+        dict:
+            promoted: list[str] — 昇格に成功した production モデル名のリスト
+            skipped: list[str] — challenger ファイルが存在しなかった challenger 名
+            dry_run: bool
+    """
+    import os
+    import shutil
+
+    from src.utils.data_path_utils import get_models_dir
+
+    unified_dir = os.path.join(get_models_dir(), "unified")
+    promoted = []
+    skipped = []
+
+    for challenger_name, production_name in zip(
+        _UNIFIED_CHALLENGER_NAMES, _UNIFIED_PRODUCTION_NAMES
+    ):
+        src = os.path.join(unified_dir, f"{challenger_name}.joblib")
+        dst = os.path.join(unified_dir, f"{production_name}.joblib")
+
+        if not os.path.exists(src):
+            logger.warning(f"Challenger モデルが見つかりません: {src}")
+            skipped.append(challenger_name)
+            continue
+
+        if dry_run:
+            logger.info(f"[dry_run] 昇格スキップ: {challenger_name} -> {production_name}")
+        else:
+            shutil.copy2(src, dst)
+            logger.info(f"統合モデル昇格完了: {challenger_name} -> {production_name}")
+
+        promoted.append(production_name)
+
+    return {"promoted": promoted, "skipped": skipped, "dry_run": dry_run}
+
+
+# ---------------------------------------------------------------------------
+# モデル昇格フロー（銘柄別）
 # ---------------------------------------------------------------------------
 
 _PRODUCTION_MODEL_NAMES = ["StockXGBoostModel", "StockLightGBMModel"]

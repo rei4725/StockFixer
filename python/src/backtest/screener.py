@@ -8,12 +8,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
-import numpy as np
 import pandas as pd
 
 import src.market_data.yf_client as yf_client
-from src.analysis.technical import add_technical_indicators
+from src.market_data.technical import add_technical_indicators
 from src.utils.data_path_utils import get_ticker
 from src.utils.logger import get_logger
 
@@ -25,10 +25,10 @@ _WATCHLIST_PATH = Path(__file__).parent.parent.parent.parent / "config" / "watch
 def _load_watchlist_symbols(market: str) -> list[str]:
     with open(_WATCHLIST_PATH, encoding="utf-8") as f:
         data = json.load(f)
-    return data.get(market, [])
+    return list(data.get(market, []))
 
 
-def _calc_volatility_score(df: pd.DataFrame) -> dict[str, float]:
+def _calc_volatility_score(df: pd.DataFrame) -> dict[str, Any]:
     """ATR% と平均出来高からスコアを算出する。"""
     if df.empty or len(df) < 20:
         return {"avg_volume": 0.0, "avg_atr_pct": 0.0, "score": 0.0}
@@ -101,4 +101,4 @@ def screen_volatile_symbols(
             f"  ATR%={row['avg_atr_pct']:.3%}  score={row['score']:.3f}"
         )
 
-    return result["symbol"].tolist()
+    return list(result["symbol"].tolist())

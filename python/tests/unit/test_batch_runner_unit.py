@@ -216,7 +216,12 @@ class TestRunParallel(unittest.TestCase):
         tasks = [SymbolTask("us", "ERR")]
 
         def _err(task):
-            return {"market": task.market, "symbol": task.symbol, "status": "error", "error": "内部エラー"}
+            return {
+                "market": task.market,
+                "symbol": task.symbol,
+                "status": "error",
+                "error": "内部エラー",
+            }
 
         result = run_parallel(_err, tasks, max_workers=1)
 
@@ -317,9 +322,7 @@ class TestPrintSummary(unittest.TestCase):
         batch = self._make_batch(
             succeeded=[{"market": "us", "symbol": "AAPL", "status": "success"}],
         )
-        with patch(
-            "src.reporting.discord.discord_utils.send_webhook_notification"
-        ) as mock_notify:
+        with patch("src.reporting.discord.discord_utils.send_webhook_notification") as mock_notify:
             print_summary("成功のみ", batch)
         mock_notify.assert_not_called()
 

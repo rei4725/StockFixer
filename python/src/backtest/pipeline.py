@@ -37,8 +37,8 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
     if source == "api":
         from datetime import datetime, timedelta
 
-        from src.market_data.technical import add_technical_indicators, create_basic_lag_features
         from src.market_data.loader import get_stock_data
+        from src.market_data.technical import add_technical_indicators, create_basic_lag_features
         from src.utils.data_path_utils import get_ticker
 
         end = datetime.now().strftime("%Y-%m-%d")
@@ -74,8 +74,8 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
         return X
 
     elif source == "raw":
-        from src.market_data.technical import add_technical_indicators, create_basic_lag_features
         from src.market_data.loader import get_raw_ohlcv_from_db
+        from src.market_data.technical import add_technical_indicators, create_basic_lag_features
 
         df = get_raw_ohlcv_from_db(market, symbol)
         if df is None or df.empty:

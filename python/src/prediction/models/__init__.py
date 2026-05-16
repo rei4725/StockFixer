@@ -14,4 +14,11 @@ class ModelType(str, Enum):
     EXIT = "ExitModel"
 
 
-__all__ = ["BaseModel", "ExitModel", "LightGBMModel", "ModelType", "TransformerModel", "XGBoostModel"]
+__all__ = [
+    "BaseModel",
+    "ExitModel",
+    "LightGBMModel",
+    "ModelType",
+    "TransformerModel",
+    "XGBoostModel",
+]

@@ -2,8 +2,6 @@
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from src.reporting.discord.rate_limiter import DiscordRateLimiter
 
 
@@ -39,6 +37,7 @@ class TestDedupeCache:
         limiter = DiscordRateLimiter(ttl=0.01)
         limiter.check_and_record("エラー")
         import time
+
         time.sleep(0.02)
         should_send, _ = limiter.check_and_record("エラー")
         assert should_send is True
@@ -49,6 +48,7 @@ class TestDedupeCache:
         limiter.check_and_record("エラー")  # suppressed_count=1
         limiter.check_and_record("エラー")  # suppressed_count=2
         import time
+
         time.sleep(0.02)
         should_send, summary = limiter.check_and_record("エラー")
         assert should_send is True
@@ -59,6 +59,7 @@ class TestDedupeCache:
         limiter = DiscordRateLimiter(ttl=0.01)
         limiter.check_and_record("エラー")
         import time
+
         time.sleep(0.02)
         should_send, summary = limiter.check_and_record("エラー")
         assert should_send is True
@@ -68,6 +69,7 @@ class TestDedupeCache:
         limiter = DiscordRateLimiter(ttl=0.01)
         limiter.check_and_record("エラー")
         import time
+
         time.sleep(0.02)
         limiter.check_and_record("エラー")
         key = limiter._hash_message("エラー")
@@ -78,6 +80,7 @@ class TestRateLimit:
     def test_apply_rate_limit_sleeps_when_too_fast(self):
         limiter = DiscordRateLimiter(rate_interval=0.1)
         import time
+
         limiter.apply_rate_limit()
         start = time.monotonic()
         limiter.apply_rate_limit()
@@ -87,6 +90,7 @@ class TestRateLimit:
     def test_no_sleep_when_interval_elapsed(self):
         limiter = DiscordRateLimiter(rate_interval=0.01)
         import time
+
         limiter.apply_rate_limit()
         time.sleep(0.02)
         start = time.monotonic()
@@ -97,20 +101,28 @@ class TestRateLimit:
 
 class TestIntegrationWithSendWebhookNotification:
     @patch("src.reporting.discord.discord_utils._post_webhook")
-    @patch("src.reporting.discord.discord_utils.isoformat_jst", return_value="2026-01-01T00:00:00+09:00")
+    @patch(
+        "src.reporting.discord.discord_utils.isoformat_jst",
+        return_value="2026-01-01T00:00:00+09:00",
+    )
     @patch("src.reporting.discord.rate_limiter._limiter")
     def test_suppressed_notification_returns_true(self, mock_limiter, mock_ts, mock_post):
         from src.reporting.discord.discord_utils import send_webhook_notification
+
         mock_limiter.check_and_record.return_value = (False, None)
         result = send_webhook_notification("タイトル", "メッセージ")
         assert result is True
         mock_post.assert_not_called()
 
     @patch("src.reporting.discord.discord_utils._post_webhook")
-    @patch("src.reporting.discord.discord_utils.isoformat_jst", return_value="2026-01-01T00:00:00+09:00")
+    @patch(
+        "src.reporting.discord.discord_utils.isoformat_jst",
+        return_value="2026-01-01T00:00:00+09:00",
+    )
     @patch("src.reporting.discord.rate_limiter._limiter")
     def test_suppression_summary_is_sent_before_main(self, mock_limiter, mock_ts, mock_post):
         from src.reporting.discord.discord_utils import send_webhook_notification
+
         mock_response = MagicMock()
         mock_response.raise_for_status.return_value = None
         mock_post.return_value = mock_response
@@ -124,10 +136,14 @@ class TestIntegrationWithSendWebhookNotification:
         assert "通知抑止サマリー" in first_call.kwargs["json_payload"]["content"]
 
     @patch("src.reporting.discord.discord_utils._post_webhook")
-    @patch("src.reporting.discord.discord_utils.isoformat_jst", return_value="2026-01-01T00:00:00+09:00")
+    @patch(
+        "src.reporting.discord.discord_utils.isoformat_jst",
+        return_value="2026-01-01T00:00:00+09:00",
+    )
     @patch("src.reporting.discord.rate_limiter._limiter")
     def test_normal_send_without_summary(self, mock_limiter, mock_ts, mock_post):
         from src.reporting.discord.discord_utils import send_webhook_notification
+
         mock_response = MagicMock()
         mock_response.raise_for_status.return_value = None
         mock_post.return_value = mock_response

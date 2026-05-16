@@ -13,9 +13,9 @@ from typing import Any
 import pandas as pd
 
 import src.market_data.yf_client as yf_client
-from src.analysis.technical import add_technical_indicators
 from src.backtest.backtester import Backtester
 from src.backtest.rules.base import TradingRule
+from src.market_data.technical import add_technical_indicators
 from src.utils.data_path_utils import get_ticker
 from src.utils.logger import get_logger
 
@@ -183,8 +183,9 @@ def print_rule_ranking(
     initial_cash: float = 1_000_000,
 ) -> None:
     """バックテスト結果を勝率・総利益でランキング表示する。"""
+    rows: list[dict[str, Any]]
     if isinstance(results, pd.DataFrame):
-        rows = results.to_dict("records")
+        rows = results.to_dict("records")  # type: ignore[assignment]
     else:
         rows = results
 

@@ -565,6 +565,7 @@ class TestTrainModelsForSymbolShadowMode(unittest.TestCase):
 
     def _make_fake_loaded(self):
         import pandas as pd
+
         from src.prediction.types import FeatureLoadResult
 
         X = pd.DataFrame({"f1": [1.0, 2.0, 3.0] * 40, "f2": [0.1, 0.2, 0.3] * 40})
@@ -573,7 +574,7 @@ class TestTrainModelsForSymbolShadowMode(unittest.TestCase):
 
     def test_shadow_mode_uses_challenger_model_names(self):
         """shadow_mode=True のとき Challenger* モデル名で保存されること"""
-        from unittest.mock import call, patch
+        from unittest.mock import patch
 
         fake_loaded = self._make_fake_loaded()
         saved_model_names = []
@@ -586,16 +587,19 @@ class TestTrainModelsForSymbolShadowMode(unittest.TestCase):
                 "src.prediction.training_pipeline.load_features_for_training",
                 return_value=fake_loaded,
             ),
-            patch(
-                "src.prediction.training_pipeline.ModelManager"
-            ) as MockMgr,
+            patch("src.prediction.training_pipeline.ModelManager") as MockMgr,
             patch("src.prediction.training_pipeline.save_model_metrics"),
-            patch("src.prediction.training_pipeline.save_experiment_run") as mock_exp,
-            patch("src.prediction.training_pipeline._compute_and_save_shap", return_value=pd.DataFrame()),
+            patch("src.prediction.training_pipeline.save_experiment_run"),
+            patch(
+                "src.prediction.training_pipeline._compute_and_save_shap",
+                return_value=pd.DataFrame(),
+            ),
             patch("src.prediction.training_pipeline._compute_and_save_permutation_importance"),
         ):
             mgr_instance = MockMgr.return_value
-            mgr_instance.get_model.return_value.predict.return_value = pd.Series([0.01] * len(fake_loaded.y))
+            mgr_instance.get_model.return_value.predict.return_value = pd.Series(
+                [0.01] * len(fake_loaded.y)
+            )
             mgr_instance.save_model.side_effect = fake_save
 
             from src.prediction.training_pipeline import train_models_for_symbol
@@ -625,16 +629,19 @@ class TestTrainModelsForSymbolShadowMode(unittest.TestCase):
                 "src.prediction.training_pipeline.load_features_for_training",
                 return_value=fake_loaded,
             ),
-            patch(
-                "src.prediction.training_pipeline.ModelManager"
-            ) as MockMgr,
+            patch("src.prediction.training_pipeline.ModelManager") as MockMgr,
             patch("src.prediction.training_pipeline.save_model_metrics"),
             patch("src.prediction.training_pipeline.save_experiment_run"),
-            patch("src.prediction.training_pipeline._compute_and_save_shap", return_value=pd.DataFrame()),
+            patch(
+                "src.prediction.training_pipeline._compute_and_save_shap",
+                return_value=pd.DataFrame(),
+            ),
             patch("src.prediction.training_pipeline._compute_and_save_permutation_importance"),
         ):
             mgr_instance = MockMgr.return_value
-            mgr_instance.get_model.return_value.predict.return_value = pd.Series([0.01] * len(fake_loaded.y))
+            mgr_instance.get_model.return_value.predict.return_value = pd.Series(
+                [0.01] * len(fake_loaded.y)
+            )
             mgr_instance.save_model.side_effect = fake_save
 
             from src.prediction.training_pipeline import train_models_for_symbol
@@ -669,11 +676,16 @@ class TestTrainModelsForSymbolShadowMode(unittest.TestCase):
                 "src.prediction.training_pipeline.save_experiment_run",
                 side_effect=lambda **kw: experiment_calls.append(kw),
             ),
-            patch("src.prediction.training_pipeline._compute_and_save_shap", return_value=pd.DataFrame()),
+            patch(
+                "src.prediction.training_pipeline._compute_and_save_shap",
+                return_value=pd.DataFrame(),
+            ),
             patch("src.prediction.training_pipeline._compute_and_save_permutation_importance"),
         ):
             mgr_instance = MockMgr.return_value
-            mgr_instance.get_model.return_value.predict.return_value = pd.Series([0.01] * len(fake_loaded.y))
+            mgr_instance.get_model.return_value.predict.return_value = pd.Series(
+                [0.01] * len(fake_loaded.y)
+            )
 
             from src.prediction.training_pipeline import train_models_for_symbol
 
@@ -682,9 +694,7 @@ class TestTrainModelsForSymbolShadowMode(unittest.TestCase):
         self.assertTrue(len(experiment_calls) > 0)
         for call_kw in experiment_calls:
             params = call_kw.get("params", {})
-            self.assertEqual(
-                params.get("role"), "challenger", f"role != 'challenger': {params}"
-            )
+            self.assertEqual(params.get("role"), "challenger", f"role != 'challenger': {params}")
 
 
 # ---------------------------------------------------------------------------
@@ -697,10 +707,12 @@ class TestPromoteChallengerToProduction(unittest.TestCase):
 
     def setUp(self):
         import tempfile
+
         self.tmp_dir = tempfile.mkdtemp()
 
     def tearDown(self):
         import shutil
+
         shutil.rmtree(self.tmp_dir, ignore_errors=True)
 
     def _make_model_dir(self, market, symbol):
@@ -710,8 +722,9 @@ class TestPromoteChallengerToProduction(unittest.TestCase):
 
     def test_copies_challenger_to_production(self):
         """チャレンジャーファイルが本番名にコピーされること"""
-        import joblib
         from unittest.mock import patch
+
+        import joblib
 
         model_dir = self._make_model_dir("us", "AAPL")
         for name in ["ChallengerXGBoostModel", "ChallengerLightGBMModel"]:
@@ -735,8 +748,9 @@ class TestPromoteChallengerToProduction(unittest.TestCase):
 
     def test_dry_run_does_not_copy(self):
         """dry_run=True のときファイルがコピーされないこと"""
-        import joblib
         from unittest.mock import patch
+
+        import joblib
 
         model_dir = self._make_model_dir("us", "AAPL")
         joblib.dump({"model": "dummy"}, os.path.join(model_dir, "ChallengerXGBoostModel.joblib"))

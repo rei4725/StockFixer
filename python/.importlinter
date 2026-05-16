@@ -70,6 +70,10 @@ ignore_imports =
     src.backtest.pipeline -> src.trading.signal_generator
     src.trading.execution -> src.reporting.discord.discord_utils
     src.backtest.pipeline -> src.reporting.discord.discord_utils
+    src.backtest.rule_backtester -> src.market_data.technical
+    src.backtest.screener -> src.market_data.technical
+    src.prediction.rule_signal_pipeline -> src.market_data.technical
+    src.utils.alert_service -> src.reporting.discord.discord_utils
 
 # ============================================================
 # Contract 2: BC 独立性契約
@@ -146,3 +150,6 @@ ignore_imports =
     src.backtest.pipeline -> src.trading.signal_generator
     src.trading.execution -> src.reporting.discord.discord_utils
     src.backtest.pipeline -> src.reporting.discord.discord_utils
+    src.backtest.rule_backtester -> src.market_data.technical
+    src.backtest.screener -> src.market_data.technical
+    src.prediction.rule_signal_pipeline -> src.market_data.technical

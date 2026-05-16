@@ -25,42 +25,29 @@ class ArchViolationChecker:
     VIOLATION_PATTERNS = {
         "legacy_data": {
             "pattern": r"from\s+src\.data\.",
-            "message": (
-                "[arch-violation] from src.data.* は廃止パス。"
-                "src.market_data を使用してください。"
-            ),
+            "message": ("[arch-violation] from src.data.* は廃止パス。" "src.market_data を使用してください。"),
             "severity": "high",
         },
         "legacy_models": {
             "pattern": r"from\s+src\.models\.",
-            "message": (
-                "[arch-violation] from src.models.* は廃止パス。"
-                "src.prediction を使用してください。"
-            ),
+            "message": ("[arch-violation] from src.models.* は廃止パス。" "src.prediction を使用してください。"),
             "severity": "high",
         },
         "legacy_brokers": {
             "pattern": r"from\s+src\.brokers\.",
             "message": (
-                "[arch-violation] from src.brokers.* は廃止パス。"
-                "src.trading.brokers を使用してください。"
+                "[arch-violation] from src.brokers.* は廃止パス。" "src.trading.brokers を使用してください。"
             ),
             "severity": "high",
         },
         "legacy_analysis": {
             "pattern": r"from\s+src\.analysis\.",
-            "message": (
-                "[arch-violation] from src.analysis.* は廃止パス。"
-                "src.market_data を推奨します。"
-            ),
+            "message": ("[arch-violation] from src.analysis.* は廃止パス。" "src.market_data を推奨します。"),
             "severity": "high",
         },
         "legacy_strategy": {
             "pattern": r"from\s+src\.strategy\.",
-            "message": (
-                "[arch-violation] from src.strategy.* は廃止パス。"
-                "src.trading を推奨します。"
-            ),
+            "message": ("[arch-violation] from src.strategy.* は廃止パス。" "src.trading を推奨します。"),
             "severity": "high",
         },
         "legacy_services": {
@@ -76,7 +63,8 @@ class ArchViolationChecker:
     SEVERITY_RANK = {"critical": 3, "high": 2, "medium": 1, "low": 0}
 
     def check_file(self, filepath: str) -> List[Tuple[int, str, str]]:
-        """
+        """Return architecture violations found in the given file.
+
         Returns:
             [(line_num, message, severity), ...]
         """
