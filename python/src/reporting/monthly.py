@@ -18,6 +18,7 @@ from typing import Optional
 
 import pandas as pd
 
+from src.prediction.drift_monitor import check_weekly_hit_rate_drift
 from src.reporting.types import MonthlyReportSummary
 from src.utils.data_path_utils import get_results_dir
 from src.utils.db import load_drift_summary, load_paper_real_diff_summary, load_prediction_accuracy
@@ -176,6 +177,39 @@ def save_monthly_report_to_file(summary: MonthlyReportSummary) -> str:
             ).sum()
         )
 
+    # 週次 Hit Rate ドリフト
+    try:
+        from config.settings import DRIFT_ALERT_THRESHOLD, DRIFT_ALERT_WEEKS
+
+        drift_result = check_weekly_hit_rate_drift(
+            weeks=DRIFT_ALERT_WEEKS, threshold=DRIFT_ALERT_THRESHOLD
+        )
+    except Exception as e:
+        logger.error("週次 Hit Rate ドリフト検査失敗: %s", e, exc_info=True)
+        drift_result = None
+
+    def _drift_row(label: str, val) -> str:
+        return f"| {label} | {val} |"
+
+    weekly_lines = ["## 週次 Hit Rate トレンド", ""]
+    if drift_result is not None and drift_result.current_week is not None:
+        weekly_lines += [
+            "| 項目 | 値 |",
+            "|---|---|",
+            _drift_row("当週", drift_result.current_week),
+            _drift_row("当週 Hit Rate", _pct(drift_result.current_hit_rate)),
+            _drift_row(
+                f"過去 {drift_result.alert_weeks} 週平均 Hit Rate",
+                _pct(drift_result.avg_hit_rate),
+            ),
+            _drift_row("低下率", _pct(drift_result.drop_ratio)),
+            _drift_row("ドリフト検知", "**YES ⚠️**" if drift_result.is_drifted else "なし"),
+            _drift_row("アラート閾値", _pct(drift_result.alert_threshold)),
+            "",
+        ]
+    else:
+        weekly_lines += ["週次スナップショットデータなし（2 週分以上必要）", ""]
+
     lines = [
         f"# StockFixer 月次レポート {summary.target_month}",
         "",
@@ -193,6 +227,7 @@ def save_monthly_report_to_file(summary: MonthlyReportSummary) -> str:
         f"| 集計銘柄数 | {summary.symbol_count or 'N/A'} |",
         f"| WF スナップショット | {summary.wf_snapshot_file or 'N/A'} |",
         "",
+        *weekly_lines,
         "## paper/real 乖離（直近30日）",
         "",
         "| 指標 | 値 |",
