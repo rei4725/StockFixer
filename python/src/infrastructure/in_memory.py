@@ -83,12 +83,20 @@ class InMemoryMarketDataAdapter(MarketDataPort):
     def __init__(self) -> None:
         self._stock_data: dict[tuple[str, str], pd.DataFrame] = {}
         self._forex_data: dict[str, pd.DataFrame] = {}
+        self._ohlcv_data: dict[str, pd.DataFrame] = {}
+        self._latest_prices: dict[str, float] = {}
 
     def set_stock_data(self, symbol: str, market: str, df: pd.DataFrame) -> None:
         self._stock_data[(symbol, market)] = df
 
     def set_forex_data(self, pair: str, df: pd.DataFrame) -> None:
         self._forex_data[pair] = df
+
+    def set_ohlcv_data(self, symbol: str, df: pd.DataFrame) -> None:
+        self._ohlcv_data[symbol] = df
+
+    def set_latest_price(self, symbol: str, price: float) -> None:
+        self._latest_prices[symbol] = price
 
     def get_stock_data(
         self,
@@ -106,6 +114,12 @@ class InMemoryMarketDataAdapter(MarketDataPort):
         end_date: str,
     ) -> pd.DataFrame:
         return self._forex_data.get(pair, pd.DataFrame())
+
+    def get_ohlcv(self, symbol: str, period: str) -> pd.DataFrame:
+        return self._ohlcv_data.get(symbol, pd.DataFrame())
+
+    def get_latest_price(self, symbol: str) -> float:
+        return self._latest_prices.get(symbol, 0.0)
 
 
 class InMemoryBrokerAdapter(BrokerPort):

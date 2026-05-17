@@ -487,19 +487,28 @@ class TestDynamicThresholdHelpers(unittest.TestCase):
 
 
 class TestExecutionOrderTypeHelpers(unittest.TestCase):
-    @patch("src.trading.execution.yf_client.download")
-    def test_choose_order_params_switches_to_limit_on_low_volume(self, mock_download):
-        mock_download.return_value = pd.DataFrame(
-            {
-                "High": [101.0] * 5,
-                "Low": [99.0] * 5,
-                "Close": [100.0] * 5,
-                "Volume": [100_000] * 5,
-            }
+    def _make_adapter(self, volume: int, high: float, low: float, close: float = 100.0):
+        from src.infrastructure.in_memory import InMemoryMarketDataAdapter
+
+        adapter = InMemoryMarketDataAdapter()
+        adapter.set_ohlcv_data(
+            "7203.T",
+            pd.DataFrame(
+                {
+                    "High": [high] * 5,
+                    "Low": [low] * 5,
+                    "Close": [close] * 5,
+                    "Volume": [volume] * 5,
+                }
+            ),
         )
+        return adapter
+
+    def test_choose_order_params_switches_to_limit_on_low_volume(self):
+        adapter = self._make_adapter(volume=100_000, high=101.0, low=99.0)
 
         order_type, price, reason, session = _choose_order_params(
-            "jp", "7203", OrderSide.BUY, 1000.0
+            "jp", "7203", OrderSide.BUY, 1000.0, market_data=adapter
         )
 
         self.assertEqual(order_type, OrderType.LIMIT)
@@ -507,19 +516,11 @@ class TestExecutionOrderTypeHelpers(unittest.TestCase):
         self.assertIn("low_volume", reason)
         self.assertEqual(session, "close")
 
-    @patch("src.trading.execution.yf_client.download")
-    def test_choose_order_params_keeps_market_when_liquid(self, mock_download):
-        mock_download.return_value = pd.DataFrame(
-            {
-                "High": [100.3] * 5,
-                "Low": [99.7] * 5,
-                "Close": [100.0] * 5,
-                "Volume": [2_000_000] * 5,
-            }
-        )
+    def test_choose_order_params_keeps_market_when_liquid(self):
+        adapter = self._make_adapter(volume=2_000_000, high=100.3, low=99.7)
 
         order_type, price, reason, session = _choose_order_params(
-            "jp", "7203", OrderSide.SELL, 1000.0
+            "jp", "7203", OrderSide.SELL, 1000.0, market_data=adapter
         )
 
         self.assertEqual(order_type, OrderType.MARKET)

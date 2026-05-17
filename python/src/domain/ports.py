@@ -111,3 +111,11 @@ class MarketDataPort(ABC):
         end_date: str,
     ) -> pd.DataFrame:
         """為替レートデータを取得する"""
+
+    @abstractmethod
+    def get_ohlcv(self, symbol: str, period: str) -> pd.DataFrame:
+        """OHLCV データを相対期間で取得する（例: "7d", "1mo"）"""
+
+    @abstractmethod
+    def get_latest_price(self, symbol: str) -> float:
+        """最新終値を返す。取得失敗時は 0.0 を返す。"""

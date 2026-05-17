@@ -32,6 +32,7 @@ from config.settings import (
     MAX_SECTOR_POSITIONS,
     MIN_CHANGE_RATIO,
 )
+from src.domain.ports import MarketDataPort
 from src.prediction.models.exit_model import ExitModel
 from src.prediction.prediction_pipeline import get_optimal_params
 from src.reporting.discord.discord_utils import send_webhook_notification
@@ -40,7 +41,6 @@ from src.trading.correlation_risk import evaluate_correlation_gate
 from src.trading.risk_manager import RiskManager
 from src.trading.signal_generator import apply_multi_horizon_score_column
 from src.trading.types import TradingGateStatus
-from src.utils import yf_client
 from src.utils.data_path_utils import get_ticker
 from src.utils.db import upsert_paper_real_diff
 from src.utils.db._connection import _db_connection
@@ -326,9 +326,11 @@ def _sync_live_execution_diffs(broker: BrokerBase) -> None:
         )
 
 
-def _load_execution_metrics(market: str, symbol: str) -> tuple[float | None, float | None]:
+def _load_execution_metrics(
+    market: str, symbol: str, market_data: MarketDataPort
+) -> tuple[float | None, float | None]:
     ticker = get_ticker(market, symbol)
-    hist = yf_client.download(ticker, period=f"{LIMIT_ORDER_LOOKBACK_DAYS + 2}d", interval="1d")
+    hist = market_data.get_ohlcv(ticker, period=f"{LIMIT_ORDER_LOOKBACK_DAYS + 2}d")
     if hist.empty:
         return None, None
 
@@ -408,6 +410,7 @@ def _choose_order_params(
     symbol: str,
     side: OrderSide,
     current_price: float,
+    market_data: MarketDataPort,
 ) -> tuple[OrderType, float, str, str]:
     """流動性指標から成行/指値・寄付/引けを自動判定する（R-103 拡張: R-405）。
 
@@ -415,7 +418,7 @@ def _choose_order_params(
         (OrderType, limit_price, reason_string, order_session)
         order_session: "open"（寄付）または "close"（引け）
     """
-    avg_volume, spread_proxy = _load_execution_metrics(market, symbol)
+    avg_volume, spread_proxy = _load_execution_metrics(market, symbol, market_data)
 
     reasons: list[str] = []
     if avg_volume is not None and avg_volume < LIMIT_ORDER_AVG_VOLUME_THRESHOLD:
@@ -497,6 +500,7 @@ def run_daily_orders(
     broker: BrokerBase,
     market: str = "jp",
     mode: str = "paper",
+    market_data: MarketDataPort | None = None,
 ) -> OrderExecutionStats:
     """
     日次自動発注メインエントリーポイント。
@@ -509,6 +513,11 @@ def run_daily_orders(
     Returns:
         {"buy_orders": int, "sell_orders": int, "skipped": int, "errors": int}
     """
+    if market_data is None:
+        from src.infrastructure.yfinance_market_data_adapter import YFinanceMarketDataAdapter
+
+        market_data = YFinanceMarketDataAdapter()
+
     logger.info(f"=== 自動発注開始: market={market} mode={mode} broker={broker.broker_name} ===")
 
     stats: OrderExecutionStats = {
@@ -653,6 +662,7 @@ def run_daily_orders(
                 symbol=symbol,
                 side=OrderSide.SELL,
                 current_price=float(row.get("current_price") or 0.0),
+                market_data=market_data,
             )
             result = broker.send_order(
                 symbol,
@@ -765,6 +775,7 @@ def run_daily_orders(
                 symbol=symbol,
                 side=OrderSide.BUY,
                 current_price=current_price,
+                market_data=market_data,
             )
             result = broker.send_order(
                 symbol,
@@ -827,6 +838,7 @@ def run_daily_orders(
                     symbol=symbol,
                     side=OrderSide.SHORT_COVER,
                     current_price=current_price,
+                    market_data=market_data,
                 )
                 result = broker.send_order(
                     symbol,
@@ -930,6 +942,7 @@ def run_daily_orders(
                     symbol=symbol,
                     side=OrderSide.SHORT,
                     current_price=current_price,
+                    market_data=market_data,
                 )
                 result = broker.send_order(
                     symbol,
