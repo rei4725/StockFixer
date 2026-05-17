@@ -21,6 +21,7 @@ from src.reporting.discord.discord_notification_specs import (
     DB_BACKUP_ERROR,
     DB_MAINTENANCE_COMPLETION,
     DB_MAINTENANCE_ERROR,
+    HIT_RATE_DRIFT_ALERT,
     MONTHLY_REPORT_COMPLETION,
     PRE_CLOSE_ALERT,
     SHADOW_EVALUATION_CHALLENGER_WINS,
@@ -1127,6 +1128,39 @@ def send_feature_suggestion_notification(
 # ---------------------------------------------------------------------------
 # ルールベーストレーディング通知
 # ---------------------------------------------------------------------------
+
+
+def send_hit_rate_drift_alert(result) -> bool:
+    """
+    週次 Hit Rate ドリフト検知結果を Discord Webhook に送信する（R-274）。
+
+    is_drifted=False の場合は送信しない。
+
+    Args:
+        result: check_weekly_hit_rate_drift() が返す DriftMonitorResult
+
+    Returns:
+        送信成功時 True、送信不要または失敗時 False
+    """
+    if not result.is_drifted:
+        logger.info(
+            "Hit Rate ドリフト警告なし: week=%s drop=%.2f%%",
+            result.current_week,
+            (result.drop_ratio or 0) * 100,
+        )
+        return False
+
+    def _pct(val) -> str:
+        return f"{val * 100:.1f}%" if val is not None else "N/A"
+
+    lines = [
+        f"週: {result.current_week or 'N/A'}",
+        f"当週 Hit Rate: {_pct(result.current_hit_rate)}",
+        f"過去 {result.alert_weeks} 週平均: {_pct(result.avg_hit_rate)}",
+        f"低下率: {_pct(result.drop_ratio)} (閾値: {_pct(result.alert_threshold)})",
+        "再学習・モデル切り替えをご検討ください。",
+    ]
+    return send_status_notification(HIT_RATE_DRIFT_ALERT, lines)
 
 
 def send_rule_evaluation_completion(

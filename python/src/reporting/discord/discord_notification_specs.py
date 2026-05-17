@@ -37,6 +37,7 @@ MONTHLY_REPORT_COMPLETION = NotificationSpec("📊 月次レポート生成完�
 PRE_CLOSE_ALERT = NotificationSpec("📋 引け前ポジション再評価", COLOR_INFO)
 SHADOW_EVALUATION_CHALLENGER_WINS = NotificationSpec("🏆 A/Bテスト: Challenger 昇格候補", COLOR_WARNING)
 SHADOW_EVALUATION_NO_WINNER = NotificationSpec("ℹ️ A/Bテスト: 評価完了", COLOR_INFO)
+HIT_RATE_DRIFT_ALERT = NotificationSpec("⚠️ モデルドリフト検知: Hit Rate 低下", COLOR_WARNING)
 
 
 def get_daily_order_spec(*, trading_stopped: bool) -> NotificationSpec:

@@ -65,6 +65,10 @@ class Settings(BaseSettings):
     CLAUDE_TRADER_THINKING_BUDGET: int = Field(default=5000)
     CLAUDE_TRADER_MAX_TOKENS: int = Field(default=8192)
 
+    # ---------- モデルドリフト監視（R-274） ----------
+    DRIFT_ALERT_WEEKS: int = Field(default=4)
+    DRIFT_ALERT_THRESHOLD: float = Field(default=0.05)
+
 
 settings = Settings()
 
@@ -105,3 +109,6 @@ CLAUDE_TRADER_ENABLED: bool = settings.CLAUDE_TRADER_ENABLED
 CLAUDE_TRADER_MODEL: str = settings.CLAUDE_TRADER_MODEL
 CLAUDE_TRADER_THINKING_BUDGET: int = settings.CLAUDE_TRADER_THINKING_BUDGET
 CLAUDE_TRADER_MAX_TOKENS: int = settings.CLAUDE_TRADER_MAX_TOKENS
+
+DRIFT_ALERT_WEEKS: int = settings.DRIFT_ALERT_WEEKS
+DRIFT_ALERT_THRESHOLD: float = settings.DRIFT_ALERT_THRESHOLD
