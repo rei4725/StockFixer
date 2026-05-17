@@ -32,10 +32,9 @@ from config.settings import (
     MAX_SECTOR_POSITIONS,
     MIN_CHANGE_RATIO,
 )
-from src.domain.ports import MarketDataPort
+from src.domain.ports import AlertLevel, MarketDataPort, NotificationPort
 from src.prediction.models.exit_model import ExitModel
 from src.prediction.prediction_pipeline import get_optimal_params
-from src.reporting.discord.discord_utils import send_webhook_notification
 from src.trading.brokers.base import BrokerBase, BrokerError, OrderSide, OrderType
 from src.trading.correlation_risk import evaluate_correlation_gate
 from src.trading.risk_manager import RiskManager
@@ -501,6 +500,7 @@ def run_daily_orders(
     market: str = "jp",
     mode: str = "paper",
     market_data: MarketDataPort | None = None,
+    notifier: NotificationPort | None = None,
 ) -> OrderExecutionStats:
     """
     日次自動発注メインエントリーポイント。
@@ -543,11 +543,12 @@ def run_daily_orders(
         broker.get_token()
     except BrokerError as e:
         logger.error("[exec] トークン取得失敗。本日の発注をスキップします: %s", e, exc_info=True)
-        send_webhook_notification(
-            "kabu API トークンエラー",
-            f"トークン取得に失敗したため本日の発注をスキップします。\n{e}",
-            color=0xFF0000,
-        )
+        if notifier is not None:
+            notifier.send_alert(
+                "kabu API トークンエラー",
+                f"トークン取得に失敗したため本日の発注をスキップします。\n{e}",
+                level=AlertLevel.ERROR,
+            )
         return stats
 
     risk = RiskManager(broker)

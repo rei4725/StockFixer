@@ -8,7 +8,7 @@ from typing import Optional
 
 import requests
 
-from src.domain.ports import NotificationPort
+from src.domain.ports import AlertLevel, NotificationPort
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -38,3 +38,14 @@ class DiscordNotificationAdapter(NotificationPort):
         except Exception as e:
             logger.error(f"Discord 通知失敗: {e}", exc_info=True)
             return False
+
+    def send_alert(self, title: str, message: str, level: AlertLevel = AlertLevel.INFO) -> bool:
+        from src.reporting.discord.discord_utils import send_webhook_notification
+
+        _level_colors = {
+            AlertLevel.INFO: 0x00FF00,
+            AlertLevel.WARNING: 0xFFAA00,
+            AlertLevel.ERROR: 0xFF0000,
+        }
+        color = _level_colors.get(level, 0x00FF00)
+        return send_webhook_notification(title, message, color=color)
