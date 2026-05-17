@@ -1,0 +1,112 @@
+name: Performance Benchmark
+
+on:
+  pull_request:
+    paths:
+      - "python/**"
+      - ".github/workflows/perf-benchmark.yml"
+  push:
+    branches:
+      - develop
+    paths:
+      - "python/**"
+      - ".github/workflows/perf-benchmark.yml"
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: python
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Restore previous benchmark results
+        id: cache-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: python/tests/perf/benchmark_results.json
+          key: perf-benchmark-${{ github.ref }}-${{ github.sha }}
+          restore-keys: |
+            perf-benchmark-refs/heads/develop-
+            perf-benchmark-
+
+      - name: Copy baseline for comparison
+        shell: bash
+        run: |
+          if [ -f tests/perf/benchmark_results.json ]; then
+            cp tests/perf/benchmark_results.json tests/perf/benchmark_results_prev.json
+            echo "ベースライン benchmark_results_prev.json をコピーしました"
+          else
+            echo "ベースラインなし（初回実行）"
+          fi
+
+      - name: Run performance benchmarks with durations
+        shell: bash
+        run: |
+          python -m pytest tests/perf/ --durations=20 -v 2>&1 | tee perf_output.txt
+          echo "EXIT_CODE=${PIPESTATUS[0]}" >> "$GITHUB_ENV"
+
+      - name: Write benchmark results to Step Summary
+        if: always()
+        shell: bash
+        run: |
+          echo "## :stopwatch: パフォーマンスベンチマーク結果" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f tests/perf/benchmark_results.json ]; then
+            echo "### 計測結果 (benchmark_results.json)" >> "$GITHUB_STEP_SUMMARY"
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            cat tests/perf/benchmark_results.json >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### pytest --durations=20 出力" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          grep -E "slowest|PASSED|FAILED|ERROR|seconds" perf_output.txt | head -60 >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Check for performance regression
+        id: regression-check
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          python tests/perf/check_regression.py
+          echo "REGRESSION_FOUND=false" >> "$GITHUB_ENV"
+        continue-on-error: true
+
+      - name: Post regression warning comment on PR
+        if: github.event_name == 'pull_request' && steps.regression-check.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const warnFile = 'python/regression_warning.txt';
+            const body = fs.existsSync(warnFile)
+              ? fs.readFileSync(warnFile, 'utf8')
+              : '## ⚠️ パフォーマンスリグレッション検出\n\n前回比 20% 以上遅くなったベンチマークがあります。調査してください。';
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body,
+            });
+
+      - name: Save benchmark results to cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: python/tests/perf/benchmark_results.json
+          key: perf-benchmark-${{ github.ref }}-${{ github.sha }}
