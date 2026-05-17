@@ -5,9 +5,16 @@
 """
 
 from abc import ABC, abstractmethod
+from enum import Enum
 from typing import Any, Optional
 
 import pandas as pd
+
+
+class AlertLevel(Enum):
+    INFO = "info"
+    WARNING = "warning"
+    ERROR = "error"
 
 
 class BrokerPort(ABC):
@@ -88,6 +95,10 @@ class NotificationPort(ABC):
     @abstractmethod
     def send_message(self, message: str, webhook_url: Optional[str] = None) -> bool:
         """メッセージを送信する。成功時 True を返す。"""
+
+    @abstractmethod
+    def send_alert(self, title: str, message: str, level: AlertLevel = AlertLevel.INFO) -> bool:
+        """アラートを送信する。成功時 True を返す。"""
 
 
 class MarketDataPort(ABC):

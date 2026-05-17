@@ -8,6 +8,7 @@ from typing import Any, Optional
 import pandas as pd
 
 from src.domain.ports import (
+    AlertLevel,
     BrokerPort,
     MarketDataPort,
     NotificationPort,
@@ -68,12 +69,29 @@ class InMemoryNotificationAdapter(NotificationPort):
 
     def __init__(self) -> None:
         self.sent_messages: list[dict] = []
+        self.sent_alerts: list[dict] = []
         self.should_fail: bool = False
 
     def send_message(self, message: str, webhook_url: Optional[str] = None) -> bool:
         if self.should_fail:
             return False
         self.sent_messages.append({"message": message, "webhook_url": webhook_url})
+        return True
+
+    def send_alert(self, title: str, message: str, level: AlertLevel = AlertLevel.INFO) -> bool:
+        if self.should_fail:
+            return False
+        self.sent_alerts.append({"title": title, "message": message, "level": level})
+        return True
+
+
+class NullNotificationAdapter(NotificationPort):
+    """何も送信しない通知アダプター（テスト・無効化用）"""
+
+    def send_message(self, message: str, webhook_url: Optional[str] = None) -> bool:
+        return True
+
+    def send_alert(self, title: str, message: str, level: AlertLevel = AlertLevel.INFO) -> bool:
         return True
 
 
