@@ -194,6 +194,28 @@ class TestInMemoryMarketDataAdapter:
         result = adapter.get_forex_data("JPY=X", "2026-01-01", "2026-01-31")
         assert not result.empty
 
+    def test_get_ohlcv_returns_set_data(self):
+        adapter = InMemoryMarketDataAdapter()
+        df = pd.DataFrame({"Close": [100.0, 101.0], "Volume": [1000, 2000]})
+        adapter.set_ohlcv_data("7203.T", df)
+        result = adapter.get_ohlcv("7203.T", "5d")
+        assert not result.empty
+        assert list(result["Close"]) == [100.0, 101.0]
+
+    def test_get_ohlcv_returns_empty_when_not_set(self):
+        adapter = InMemoryMarketDataAdapter()
+        result = adapter.get_ohlcv("AAPL", "5d")
+        assert result.empty
+
+    def test_get_latest_price_returns_set_price(self):
+        adapter = InMemoryMarketDataAdapter()
+        adapter.set_latest_price("AAPL", 150.0)
+        assert adapter.get_latest_price("AAPL") == 150.0
+
+    def test_get_latest_price_returns_zero_when_not_set(self):
+        adapter = InMemoryMarketDataAdapter()
+        assert adapter.get_latest_price("AAPL") == 0.0
+
 
 # ---------------------------------------------------------------------------
 # InMemoryBrokerAdapter
