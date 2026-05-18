@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from config.settings import PREDICTION_MAX_WORKERS
 from src.prediction.predict_single import predict_single_stock
 from src.prediction.types import PredictionResult
 from src.utils.data_path_utils import get_models_dir
@@ -29,9 +30,9 @@ logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 
 logger = get_logger(__name__)
 
-# 並列実行時のワーカー数（デフォルト=1で同期実行、スレッド間競合を回避）
-# ガイドライン参照: 並列処理は競合バグの原因となるため同期集計が安定
-MAX_WORKERS = 1
+# 並列実行ワーカー数: 環境変数 PREDICTION_MAX_WORKERS で上書き可能（デフォルト: CPU数の半分）
+# 予測フェーズは読み取り専用のため並列実行しても DuckDB 排他ロックは不要
+MAX_WORKERS = PREDICTION_MAX_WORKERS
 
 
 def get_optimal_params(market: str, symbol: str) -> dict:
