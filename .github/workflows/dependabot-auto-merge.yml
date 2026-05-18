@@ -24,7 +24,7 @@ jobs:
         if: |
           steps.metadata.outputs.update-type == 'version-update:semver-patch' &&
           contains(github.event.pull_request.labels.*.name, 'security')
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
@@ -37,7 +37,7 @@ jobs:
 
       - name: Auto-approve patch updates
         if: steps.metadata.outputs.update-type == 'version-update:semver-patch'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
