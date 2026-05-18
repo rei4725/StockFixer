@@ -408,5 +408,27 @@ class TestAlertResultDiscordLines(unittest.TestCase):
         self.assertTrue(any("✅" in line for line in lines))
 
 
+class TestCountConsecutiveFailuresEdgeCases(unittest.TestCase):
+    def test_none_path_uses_results_dir(self):
+        from src.utils.alert_service import _count_consecutive_pipeline_failures
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch("src.utils.data_path_utils.get_results_dir", return_value=tmpdir):
+                result = _count_consecutive_pipeline_failures(None)
+        self.assertEqual(result, 0)
+
+    def test_invalid_json_returns_zero(self):
+        from src.utils.alert_service import _count_consecutive_pipeline_failures
+
+        with tempfile.NamedTemporaryFile(suffix=".json", mode="w", delete=False) as f:
+            f.write("not valid json {{{{")
+            fname = f.name
+        try:
+            result = _count_consecutive_pipeline_failures(fname)
+        finally:
+            os.unlink(fname)
+        self.assertEqual(result, 0)
+
+
 if __name__ == "__main__":
     unittest.main()
