@@ -9,10 +9,13 @@ on:
 
 jobs:
   create-release:
-    name: Tag and create GitHub Release
+    name: Tag and create GitHub Release (draft)
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      tag: ${{ steps.ver.outputs.tag }}
+      skip: ${{ steps.tag_check.outputs.exists }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -94,3 +97,63 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release upload "${{ steps.ver.outputs.tag }}" sbom.json --clobber
+
+  publish-release:
+    name: Wait for CI checks and publish release
+    needs: create-release
+    if: needs.create-release.outputs.skip == 'false'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Wait for CI workflows to complete
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          workflows=("unit-tests.yml" "integration-tests.yml" "security.yml")
+          timeout=1800
+          interval=30
+          elapsed=0
+
+          while [ $elapsed -lt $timeout ]; do
+            all_done=true
+
+            for wf in "${workflows[@]}"; do
+              run=$(gh api "repos/$REPO/actions/workflows/$wf/runs?head_sha=$SHA&per_page=1" \
+                --jq '.workflow_runs[0] | {status: .status, conclusion: .conclusion}' 2>/dev/null || echo 'null')
+
+              status=$(echo "$run" | jq -r '.status // "not_triggered"')
+              conclusion=$(echo "$run" | jq -r '.conclusion // ""')
+
+              if [ "$status" = "not_triggered" ] || [ "$run" = "null" ]; then
+                echo "$wf: not triggered for this commit, skipping"
+              elif [ "$status" != "completed" ]; then
+                echo "$wf: in progress (status=$status)"
+                all_done=false
+              elif [ "$conclusion" = "success" ]; then
+                echo "$wf: passed"
+              else
+                echo "::error::$wf failed (conclusion=$conclusion)"
+                exit 1
+              fi
+            done
+
+            $all_done && break
+            sleep $interval
+            elapsed=$((elapsed + interval))
+          done
+
+          if [ $elapsed -ge $timeout ]; then
+            echo "::error::Timed out waiting for CI checks after ${timeout}s"
+            exit 1
+          fi
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release edit "${{ needs.create-release.outputs.tag }}" --draft=false
+          echo "Published release ${{ needs.create-release.outputs.tag }}"
