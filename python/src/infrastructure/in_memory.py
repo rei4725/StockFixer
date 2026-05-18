@@ -36,6 +36,18 @@ class InMemoryPredictionRepository(PredictionResultRepository):
             df = df.tail(limit)
         return df
 
+    def get_latest_by_market(self, market: str) -> pd.DataFrame:
+        rows = [r for r in self._records if r.get("market") == market]
+        if not rows:
+            return pd.DataFrame()
+        df = pd.DataFrame(rows)
+        if "predicted_at" in df.columns:
+            idx = df.groupby("symbol")["predicted_at"].idxmax()
+            df = df.loc[idx].reset_index(drop=True)
+        if "diff_ratio" in df.columns:
+            df = df[df["diff_ratio"].notna()].sort_values("diff_ratio", ascending=False)
+        return df.reset_index(drop=True)
+
 
 class InMemoryStockFeatureRepository(StockFeatureRepository):
     """インメモリ株式特徴量リポジトリ（テスト用）"""
