@@ -36,7 +36,7 @@ jobs:
 
       - name: Restore previous benchmark results
         id: cache-restore
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: python/tests/perf/benchmark_results.json
           key: perf-benchmark-${{ github.ref }}-${{ github.sha }}
@@ -106,7 +106,7 @@ jobs:
 
       - name: Save benchmark results to cache
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: python/tests/perf/benchmark_results.json
           key: perf-benchmark-${{ github.ref }}-${{ github.sha }}
