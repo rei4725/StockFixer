@@ -37,8 +37,8 @@ from src.domain.trading_rules import ML_EXIT_PROB_THRESHOLD as _ML_EXIT_PROB_THR
 from src.domain.trading_rules import THRESHOLD_SCALE_MAX as _THRESHOLD_SCALE_MAX
 from src.domain.trading_rules import THRESHOLD_SCALE_MIN as _THRESHOLD_SCALE_MIN
 from src.domain.trading_rules import THRESHOLD_SCALE_MIN_ROWS as _THRESHOLD_SCALE_MIN_ROWS
-from src.prediction.models.exit_model import ExitModel
-from src.prediction.prediction_pipeline import get_optimal_params
+from src.trading.models.exit_model import ExitModel
+from src.utils.optimal_params_loader import get_optimal_params
 from src.trading.brokers.base import BrokerBase, BrokerError, OrderSide, OrderType
 from src.trading.correlation_risk import evaluate_correlation_gate
 from src.trading.risk_manager import RiskManager
