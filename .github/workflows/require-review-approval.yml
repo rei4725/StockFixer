@@ -13,7 +13,7 @@ jobs:
     if: github.actor != 'dependabot[bot]'
     steps:
       - name: Check for at least 1 approved review
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const { data: reviews } = await github.rest.pulls.listReviews({
