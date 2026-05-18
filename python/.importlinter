@@ -22,7 +22,6 @@ ignore_imports =
     src.reporting.query_service -> src.orchestration.types
     src.reporting.discord.discord_bot -> src.orchestration.types
     # --- utils → BC (後方互換 re-export shim — 将来削除予定) ---
-    src.utils.yf_client -> src.market_data.yf_client
     src.utils.db.prediction -> src.prediction.types
     # --- BC 間相互参照 (independence contract でも管理) ---
     src.reporting.types -> src.prediction.types
@@ -125,7 +124,6 @@ ignore_imports =
     # --- market_data → watchlist (バッチデータ収集がウォッチリストを反復) ---
     src.market_data.pipeline -> src.watchlist.batch_runner
     # --- utils → BC (推移的違反の根本原因 — 将来削除予定) ---
-    src.utils.yf_client -> src.market_data.yf_client
     src.utils.db.prediction -> src.prediction.types
     # --- 新規追加違反 (将来的解消対象) ---
     src.watchlist.batch_runner -> src.reporting.discord.discord_utils
