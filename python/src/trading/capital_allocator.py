@@ -11,19 +11,13 @@ from __future__ import annotations
 from typing import Optional
 
 from config.settings import MAX_POSITION_RATE, MAX_POSITIONS, MAX_SECTOR_POSITIONS
+from src.domain.trading_rules import DEFAULT_REGIME_SCALE as _DEFAULT_REGIME_SCALE
+from src.domain.trading_rules import REGIME_SCALE as _REGIME_SCALE
 from src.trading.types import AllocationCandidate, AllocationResult
 from src.utils.logger import get_logger
 from src.utils.sector_constraints import filter_by_sector_cap
 
 logger = get_logger(__name__)
-
-# レジーム別のポジションスケール係数
-_REGIME_SCALE: dict[str, float] = {
-    "bull": 1.0,
-    "range": 0.6,
-    "bear": 0.3,
-}
-_DEFAULT_REGIME_SCALE = 0.6
 
 
 def _enc_corr_scale(n: int, avg_correlation: float) -> float:

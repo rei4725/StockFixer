@@ -5,6 +5,8 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
+from src.domain.trading_rules import CONFLUENCE_BOOST_PER_HORIZON as _CONFLUENCE_BOOST_PER_HORIZON
+from src.domain.trading_rules import DEFAULT_HORIZON_WEIGHTS as _DEFAULT_HORIZON_WEIGHTS
 from src.utils.logger import get_logger
 from src.utils.optimal_params_loader import get_optimal_params
 
@@ -13,11 +15,6 @@ logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 # R-212: マルチホライズン統合シグナルスコア
 # ---------------------------------------------------------------------------
-
-# 各ホライズンの重み（近未来ほど重視）
-_DEFAULT_HORIZON_WEIGHTS: tuple[float, float, float, float] = (0.4, 0.3, 0.2, 0.1)
-# "1ホライズン分 confluence が増えるごとに何%スコアを強調するか"
-_CONFLUENCE_BOOST_PER_HORIZON: float = 0.1
 
 
 def compute_multi_horizon_score(
