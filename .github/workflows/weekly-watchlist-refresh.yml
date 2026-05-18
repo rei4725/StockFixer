@@ -1,4 +1,4 @@
-﻿name: Weekly Watchlist Refresh
+name: Weekly Watchlist Refresh
 
 on:
   schedule:
@@ -16,7 +16,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           # PRブランチを作成するためtokenが必要
           token: ${{ secrets.GITHUB_TOKEN }}
