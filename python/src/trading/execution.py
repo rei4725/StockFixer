@@ -32,7 +32,7 @@ from config.settings import (
     MAX_SECTOR_POSITIONS,
     MIN_CHANGE_RATIO,
 )
-from src.domain.ports import AlertLevel, MarketDataPort, NotificationPort
+from src.domain.ports import AlertLevel, MarketDataPort, NotificationPort, PredictionResultRepository
 from src.prediction.models.exit_model import ExitModel
 from src.prediction.prediction_pipeline import get_optimal_params
 from src.trading.brokers.base import BrokerBase, BrokerError, OrderSide, OrderType
@@ -501,6 +501,7 @@ def run_daily_orders(
     mode: str = "paper",
     market_data: MarketDataPort | None = None,
     notifier: NotificationPort | None = None,
+    prediction_repo: PredictionResultRepository | None = None,
 ) -> OrderExecutionStats:
     """
     日次自動発注メインエントリーポイント。
@@ -572,7 +573,10 @@ def run_daily_orders(
         )
         return stats
 
-    predictions = _load_latest_predictions(market)
+    if prediction_repo is not None:
+        predictions = prediction_repo.get_latest_by_market(market)
+    else:
+        predictions = _load_latest_predictions(market)
     if predictions.empty:
         logger.warning("[exec] 予測結果が存在しません。先に run_predict.py を実行してください。")
         stats.update(

@@ -68,6 +68,10 @@ class PredictionResultRepository(ABC):
     def load(self, market: str, limit: int = 100) -> pd.DataFrame:
         """指定マーケットの予測結果を読み込む"""
 
+    @abstractmethod
+    def get_latest_by_market(self, market: str) -> pd.DataFrame:
+        """マーケットごとに銘柄別最新予測を取得する（発注パイプライン用）"""
+
 
 class StockFeatureRepository(ABC):
     """株式特徴量の永続化ポート"""
