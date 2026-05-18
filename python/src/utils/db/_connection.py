@@ -10,7 +10,6 @@ Docker 上の複数プロセス（スケジューラー・API サーバー等）
 """
 
 import time
-import warnings
 from contextlib import contextmanager
 from threading import Lock
 from typing import Generator
@@ -93,26 +92,6 @@ def _db_connection() -> Generator[duckdb.DuckDBPyConnection, None, None]:
             con.close()
         file_lock.release()
 
-
-def get_connection() -> duckdb.DuckDBPyConnection:
-    """
-    後方互換用: 新規の読み書き接続を返す。呼び出し側で close() すること。
-
-    .. deprecated::
-        `_db_connection()` コンテキストマネージャーを推奨。
-        接続の閉じ忘れによるロック残留を防ぐため with 文を使用してください。
-    """
-    warnings.warn(
-        "get_connection() は非推奨です。_db_connection() コンテキストマネージャーを使用してください。",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    ensure_dir(get_data_dir())
-    db_path = get_db_path()
-    con = duckdb.connect(db_path, config=_DB_CONFIG)
-    if not _tables_initialized:
-        _init_tables(con)
-    return con
 
 
 def close_connection() -> None:

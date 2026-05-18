@@ -64,18 +64,18 @@ class TestMarketDataRawSetup(unittest.TestCase):
             os.rmdir(self.tmp_dir)
 
     def test_market_data_raw_table_exists_after_init(self):
-        con = db_module.get_connection()
-        tables = con.execute(
-            "SELECT table_name FROM information_schema.tables WHERE table_schema='main'"
-        ).fetchall()
+        with db_module._db_connection() as con:
+            tables = con.execute(
+                "SELECT table_name FROM information_schema.tables WHERE table_schema='main'"
+            ).fetchall()
         names = {r[0] for r in tables}
         self.assertIn("market_data_raw", names)
 
     def test_all_three_tables_created(self):
-        con = db_module.get_connection()
-        tables = con.execute(
-            "SELECT table_name FROM information_schema.tables WHERE table_schema='main'"
-        ).fetchall()
+        with db_module._db_connection() as con:
+            tables = con.execute(
+                "SELECT table_name FROM information_schema.tables WHERE table_schema='main'"
+            ).fetchall()
         names = {r[0] for r in tables}
         self.assertIn("stock_features", names)
         self.assertIn("prediction_results", names)
@@ -138,10 +138,10 @@ class TestUpsertRawOhlcv(unittest.TestCase):
         row = _row()
         del row["source"]
         upsert_raw_ohlcv([row])
-        con = db_module.get_connection()
-        src = con.execute(
-            "SELECT source FROM market_data_raw WHERE market='jp' AND symbol='7203'"
-        ).fetchone()
+        with db_module._db_connection() as con:
+            src = con.execute(
+                "SELECT source FROM market_data_raw WHERE market='jp' AND symbol='7203'"
+            ).fetchone()
         self.assertIsNotNone(src)
 
 

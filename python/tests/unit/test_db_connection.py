@@ -133,37 +133,6 @@ class TestDbConnectionContextManager(unittest.TestCase):
         mock_lock_instance.release.assert_called_once()
 
 
-class TestGetConnection(unittest.TestCase):
-    """get_connection() 非推奨関数のテスト"""
-
-    def test_returns_connection_and_warns(self):
-        """get_connection() は DeprecationWarning を出して接続を返すこと"""
-        import src.utils.db._connection as mod
-
-        mock_con = MagicMock(spec=duckdb.DuckDBPyConnection)
-        mock_con.execute.return_value = MagicMock(
-            fetchone=MagicMock(return_value=(1,)),
-            fetchall=MagicMock(
-                return_value=[("realized_pnl",), ("market",), ("predicted_at",), ("signal_price",)]
-            ),
-        )
-
-        with (
-            patch("src.utils.db._connection.ensure_dir"),
-            patch("src.utils.db._connection.get_data_dir", return_value="/tmp"),
-            patch("src.utils.db._connection.get_db_path", return_value="/tmp/test.db"),
-            patch("duckdb.connect", return_value=mock_con),
-        ):
-            mod._tables_initialized = True  # skip _init_tables
-            import warnings
-
-            with warnings.catch_warnings(record=True) as w:
-                warnings.simplefilter("always")
-                con = mod.get_connection()
-            self.assertIs(con, mock_con)
-            self.assertTrue(any(issubclass(warning.category, DeprecationWarning) for warning in w))
-
-
 class TestGetReadonlyConnection(unittest.TestCase):
     """get_readonly_connection() のテスト"""
 
