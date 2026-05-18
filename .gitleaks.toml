@@ -1,0 +1,60 @@
+# gitleaks configuration
+# https://github.com/gitleaks/gitleaks#configuration
+
+title = "StockFixer gitleaks config"
+
+[extend]
+# gitleaks の公式デフォルトルールセットを継承する
+useDefault = true
+
+# ──────────────────────────────────────────────
+# 検出対象として明示的に追加するパス
+# (デフォルトルールで拾えない禁止ファイルを補足)
+# ──────────────────────────────────────────────
+[[rules]]
+id          = "prohibited-env-file"
+description = "Prohibit committing .env files containing secrets"
+regex       = '''(?i)(discord_bot_token|discord_webhook_url|kabu_password|api_key|secret)\s*=\s*[^\s]+'''
+path        = '''(^|/)\.env(\..+)?$'''
+tags        = ["secret", "env"]
+
+[[rules]]
+id          = "prohibited-secrets-config"
+description = "Prohibit committing python/config/secrets.* files"
+regex       = '''.+'''
+path        = '''python/config/secrets\.\w+$'''
+tags        = ["secret", "config"]
+
+[[rules]]
+id          = "prohibited-pem-file"
+description = "Prohibit committing PEM certificate/key files"
+regex       = '''-----BEGIN [A-Z ]+-----'''
+path        = '''\.pem$'''
+tags        = ["secret", "cert"]
+
+# ──────────────────────────────────────────────
+# 誤検知抑制 (allowlist)
+# ──────────────────────────────────────────────
+[allowlist]
+description = "Allowlist for known false positives"
+
+# テストフィクスチャや設定サンプルの変数宣言は除外
+regexes = [
+  # プレースホルダー文字列（<...> や your_... 形式）
+  '''<[A-Z_]+>''',
+  '''your_[a-z_]+_here''',
+  # pytest・設定デフォルト値パターン
+  '''default\s*=\s*["']?[a-z_\-\.]+["']?''',
+]
+
+# テスト・ドキュメント・設定サンプルパスを除外
+paths = [
+  '''tests/''',
+  '''docs/''',
+  '''\.md$''',
+  '''\.example$''',
+  '''\.sample$''',
+  # 設定テンプレートファイル
+  '''\.env\.template$''',
+  '''\.env\.example$''',
+]
