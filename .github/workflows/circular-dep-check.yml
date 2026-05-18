@@ -1,4 +1,4 @@
-﻿name: Circular Dependency Check
+name: Circular Dependency Check
 
 on:
   pull_request:
@@ -22,7 +22,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Python
         uses: actions/setup-python@v5
