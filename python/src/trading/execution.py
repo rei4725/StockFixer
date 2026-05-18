@@ -32,7 +32,12 @@ from config.settings import (
     MAX_SECTOR_POSITIONS,
     MIN_CHANGE_RATIO,
 )
-from src.domain.ports import AlertLevel, MarketDataPort, NotificationPort, PredictionResultRepository
+from src.domain.ports import (
+    AlertLevel,
+    MarketDataPort,
+    NotificationPort,
+    PredictionResultRepository,
+)
 from src.domain.trading_rules import ML_EXIT_PROB_THRESHOLD as _ML_EXIT_PROB_THRESHOLD
 from src.domain.trading_rules import THRESHOLD_SCALE_MAX as _THRESHOLD_SCALE_MAX
 from src.domain.trading_rules import THRESHOLD_SCALE_MIN as _THRESHOLD_SCALE_MIN
@@ -205,7 +210,6 @@ def _get_held_symbols(broker: BrokerBase) -> set[str]:
     """保有中の銘柄コードセットを返す"""
     positions = broker.get_positions()
     return {p["symbol"].replace(".T", "") for p in positions if p.get("qty", 0) > 0}
-
 
 
 def _load_exit_model(market: str) -> ExitModel | None:
