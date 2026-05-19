@@ -228,9 +228,7 @@ def filter_event_signals(
         return signals.copy()
 
     result = signals.copy()
-    event_ts = pd.DatetimeIndex(
-        [pd.Timestamp(e).normalize() for e in event_dates]
-    )
+    event_ts = pd.DatetimeIndex([pd.Timestamp(e).normalize() for e in event_dates])
 
     for idx in result.index[result == "Buy"]:
         check_ts = pd.Timestamp(idx).normalize()

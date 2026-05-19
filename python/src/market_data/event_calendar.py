@@ -7,7 +7,7 @@ DuckDB にキャッシュして API 呼び出しを最小化する。
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional, Union
 
 import pandas as pd
 import yfinance as yf
@@ -38,7 +38,7 @@ def get_event_dates(market: str, symbol: str) -> pd.DatetimeIndex:
 
 
 def is_near_event(
-    check_date,
+    check_date: Union[str, Any],
     market: str,
     symbol: str,
     days_before: int = 2,
@@ -120,19 +120,13 @@ def _fetch_event_dates_from_yfinance(market: str, symbol: str) -> pd.DatetimeInd
             else:
                 earnings_df = getattr(ticker_obj, "earnings_dates", pd.DataFrame())
             if earnings_df is not None and len(earnings_df) > 0:
-                raw = (
-                    earnings_df.index
-                    if isinstance(earnings_df, pd.DataFrame)
-                    else earnings_df
-                )
+                raw = earnings_df.index if isinstance(earnings_df, pd.DataFrame) else earnings_df
                 for d in pd.DatetimeIndex(pd.to_datetime(raw, errors="coerce")).dropna():
                     dates.add(d.normalize())
         except Exception:
             logger.debug("earnings_dates 取得スキップ [%s]", ticker, exc_info=True)
     except Exception as exc:
-        logger.warning(
-            "イベント日取得失敗 [%s/%s]: %s", market, symbol, exc, exc_info=True
-        )
+        logger.warning("イベント日取得失敗 [%s/%s]: %s", market, symbol, exc, exc_info=True)
     if not dates:
         return pd.DatetimeIndex([])
     result = pd.DatetimeIndex(sorted(dates))
@@ -141,7 +135,9 @@ def _fetch_event_dates_from_yfinance(market: str, symbol: str) -> pd.DatetimeInd
     return result
 
 
-def _extract_calendar_dates(cal, dates: set) -> None:
+def _extract_calendar_dates(
+    cal: Union[dict[str, Any], pd.DataFrame], dates: set[pd.Timestamp]
+) -> None:
     """calendar オブジェクト（dict または DataFrame）から日付を抽出して dates に追加する。"""
     if isinstance(cal, dict):
         for key in ("Earnings Date", "earnings_date"):
@@ -188,15 +184,11 @@ def _save_event_dates(market: str, symbol: str, dates: pd.DatetimeIndex) -> None
     try:
         with _db_connection() as con:
             con.register("_ec_temp", df)
-            con.execute(
-                """
+            con.execute("""
                 INSERT OR REPLACE INTO earnings_calendar
                     (market, symbol, event_date, event_type, fetched_at)
                 SELECT market, symbol, event_date, event_type, CURRENT_TIMESTAMP
                 FROM _ec_temp
-                """
-            )
+                """)
     except Exception as exc:
-        logger.warning(
-            "イベント日保存失敗 [%s/%s]: %s", market, symbol, exc, exc_info=True
-        )
+        logger.warning("イベント日保存失敗 [%s/%s]: %s", market, symbol, exc, exc_info=True)
