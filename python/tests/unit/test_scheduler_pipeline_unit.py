@@ -624,3 +624,86 @@ class TestRunWeeklyShadowEvaluation(unittest.TestCase):
         }
         mock_notify.side_effect = Exception("Webhook 失敗")
         run_weekly_shadow_evaluation()  # 例外が外に出ないこと
+
+
+# ──────────────────────────────────────────────────────────────
+# PipelineStage / _handle_stage_error のユニットテスト
+# ──────────────────────────────────────────────────────────────
+
+
+class TestPipelineStageEnum(unittest.TestCase):
+    """PipelineStage 列挙型の基本テスト"""
+
+    def test_has_critical_member(self):
+        from src.orchestration.types import PipelineStage
+
+        self.assertIn("CRITICAL", PipelineStage.__members__)
+
+    def test_has_non_critical_member(self):
+        from src.orchestration.types import PipelineStage
+
+        self.assertIn("NON_CRITICAL", PipelineStage.__members__)
+
+    def test_has_recoverable_member(self):
+        from src.orchestration.types import PipelineStage
+
+        self.assertIn("RECOVERABLE", PipelineStage.__members__)
+
+
+class TestHandleStageError(unittest.TestCase):
+    """_handle_stage_error ヘルパーのユニットテスト"""
+
+    def _call(self, stage, notify_fn=None):
+        from src.orchestration.scheduler import _handle_stage_error
+        from src.orchestration.types import PipelineStage
+
+        exc = ValueError("test error")
+        try:
+            raise exc
+        except ValueError:
+            return _handle_stage_error(stage, "テストラベル", exc, notify_fn)
+
+    def test_critical_returns_true(self):
+        from src.orchestration.types import PipelineStage
+
+        result = self._call(PipelineStage.CRITICAL)
+        self.assertTrue(result)
+
+    def test_non_critical_returns_false(self):
+        from src.orchestration.types import PipelineStage
+
+        result = self._call(PipelineStage.NON_CRITICAL)
+        self.assertFalse(result)
+
+    def test_recoverable_returns_false(self):
+        from src.orchestration.types import PipelineStage
+
+        result = self._call(PipelineStage.RECOVERABLE)
+        self.assertFalse(result)
+
+    def test_critical_calls_notify_fn(self):
+        from src.orchestration.types import PipelineStage
+
+        notify_fn = MagicMock()
+        self._call(PipelineStage.CRITICAL, notify_fn=notify_fn)
+        notify_fn.assert_called_once()
+
+    def test_non_critical_does_not_call_notify_fn(self):
+        from src.orchestration.types import PipelineStage
+
+        notify_fn = MagicMock()
+        self._call(PipelineStage.NON_CRITICAL, notify_fn=notify_fn)
+        notify_fn.assert_not_called()
+
+    def test_recoverable_does_not_call_notify_fn(self):
+        from src.orchestration.types import PipelineStage
+
+        notify_fn = MagicMock()
+        self._call(PipelineStage.RECOVERABLE, notify_fn=notify_fn)
+        notify_fn.assert_not_called()
+
+    def test_critical_with_no_notify_fn_returns_true(self):
+        from src.orchestration.types import PipelineStage
+
+        result = self._call(PipelineStage.CRITICAL, notify_fn=None)
+        self.assertTrue(result)
