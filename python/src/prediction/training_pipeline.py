@@ -357,7 +357,11 @@ def _compute_and_save_shap(
 
 
 def train_models_for_symbol(
-    market: str, symbol: str, horizon: int = 1, shadow_mode: bool = False
+    market: str,
+    symbol: str,
+    horizon: int = 1,
+    shadow_mode: bool = False,
+    use_transformer: bool = False,
 ) -> dict:
     """
     単一銘柄に対してXGBoost・LightGBMモデルを学習・保存する
@@ -370,6 +374,7 @@ def train_models_for_symbol(
         symbol: 銘柄コード（例: "AAPL", "7203"）
         horizon: 予測ホライズン（営業日）。1=翌日（デフォルト）。
         shadow_mode: True のときチャレンジャーモデルとして学習・保存する
+        use_transformer: True のとき TransformerModel も学習・保存する
 
     Returns:
         dict: {"market", "symbol", "status", ...}  (batch_runner.print_summary 互換)
@@ -415,10 +420,14 @@ def train_models_for_symbol(
         # shadow_mode のときはチャレンジャーモデル名プレフィックスを使用
         name_prefix = "Challenger" if shadow_mode else "Stock"
 
-        for model_type, model_name in [
+        model_specs = [
             ("XGBoostModel", f"{name_prefix}XGBoostModel{suffix}"),
             ("LightGBMModel", f"{name_prefix}LightGBMModel{suffix}"),
-        ]:
+        ]
+        if use_transformer:
+            model_specs.append(("TransformerModel", f"{name_prefix}TransformerModel{suffix}"))
+
+        for model_type, model_name in model_specs:
             run_id = generate_run_id()
             model_manager.create_model(model_type, model_name)
             model_manager.train_model(
@@ -522,13 +531,16 @@ def train_models_for_symbol(
         return {"market": market, "symbol": symbol, "status": "error", "error": str(e)}
 
 
-def train_models_for_symbol_task(task, shadow_mode: bool = False) -> dict:
+def train_models_for_symbol_task(
+    task, shadow_mode: bool = False, use_transformer: bool = False
+) -> dict:
     """
     バッチランナー用ラッパー（SymbolTask または dict を受け取る）
 
     Args:
         task: SymbolTask または {"market": str, "symbol": str, "horizon": int (省略可)}
         shadow_mode: True のときチャレンジャーモデルとして学習・保存する
+        use_transformer: True のとき TransformerModel も学習・保存する
 
     Returns:
         dict: train_models_for_symbolの戻り値  (batch_runner.print_summary 互換)
@@ -537,10 +549,12 @@ def train_models_for_symbol_task(task, shadow_mode: bool = False) -> dict:
 
     if isinstance(task, SymbolTask):
         return train_models_for_symbol(
-            task.market, task.symbol, task.horizon, shadow_mode=shadow_mode
+            task.market, task.symbol, task.horizon, shadow_mode=shadow_mode,
+            use_transformer=use_transformer,
         )
     return train_models_for_symbol(
-        task["market"], task["symbol"], task.get("horizon", 1), shadow_mode=shadow_mode
+        task["market"], task["symbol"], task.get("horizon", 1), shadow_mode=shadow_mode,
+        use_transformer=use_transformer,
     )
 
 

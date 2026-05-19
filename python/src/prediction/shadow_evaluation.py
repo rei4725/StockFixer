@@ -302,10 +302,15 @@ def run_shadow_prediction(
 # Unified モデル専用: Challenger 予測・昇格フロー
 # ---------------------------------------------------------------------------
 
-_UNIFIED_PRODUCTION_NAMES = ["UnifiedStockXGBoost", "UnifiedStockLightGBM"]
+_UNIFIED_PRODUCTION_NAMES = [
+    "UnifiedStockXGBoost",
+    "UnifiedStockLightGBM",
+    "UnifiedStockTransformer",
+]
 _UNIFIED_CHALLENGER_NAMES = [
     "UnifiedStockXGBoost_challenger",
     "UnifiedStockLightGBM_challenger",
+    "UnifiedStockTransformer_challenger",
 ]
 
 
@@ -325,19 +330,22 @@ def predict_with_challenger_unified() -> list:
     from src.utils.data_path_utils import get_models_dir
     from src.utils.db import get_all_symbols
 
-    # challenger ファイルが存在するか確認
+    # challenger ファイルが存在するものだけ使用する（一部欠損は許容）
     unified_dir = os.path.join(get_models_dir(), "unified")
-    missing = [
+    available_challengers = [
         name
         for name in _UNIFIED_CHALLENGER_NAMES
-        if not os.path.exists(os.path.join(unified_dir, f"{name}.joblib"))
+        if os.path.exists(os.path.join(unified_dir, f"{name}.joblib"))
     ]
+    missing = [n for n in _UNIFIED_CHALLENGER_NAMES if n not in available_challengers]
     if missing:
-        logger.info(f"Challenger モデルが見つかりません（スキップ）: {missing}")
+        logger.info(f"一部の Challenger モデルが見つかりません（スキップ）: {missing}")
+    if not available_challengers:
+        logger.info("利用可能な Challenger モデルが見つかりません（スキップ）")
         return []
 
     # モデルをキャッシュに事前ロード
-    for name in _UNIFIED_CHALLENGER_NAMES:
+    for name in available_challengers:
         get_cached_model(name)
 
     all_keys = get_all_symbols()
@@ -346,7 +354,7 @@ def predict_with_challenger_unified() -> list:
     def _predict(args):
         market, symbol = args
         try:
-            return predict_with_unified_model(market, symbol, model_types=_UNIFIED_CHALLENGER_NAMES)
+            return predict_with_unified_model(market, symbol, model_types=available_challengers)
         except Exception:
             logger.warning("Challenger 予測スキップ: market=%s symbol=%s", market, symbol, exc_info=True)
             return None
