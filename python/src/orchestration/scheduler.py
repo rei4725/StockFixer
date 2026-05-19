@@ -17,7 +17,7 @@ def _handle_stage_error(
     stage: PipelineStage,
     label: str,
     exc: Exception,
-    notify_fn: Optional[Callable[[str], None]] = None,
+    notify_fn: Optional[Callable[[str], object]] = None,
 ) -> bool:
     """ステージ分類に基づくエラーハンドリング。
 
@@ -79,7 +79,12 @@ def run_daily_pipeline():
         )
         logger.info("[2/5] 予測完了 (production): %d 銘柄", len(output_rows))
     except Exception as e:
-        if _handle_stage_error(PipelineStage.CRITICAL, "[2/5] 予測 (production)", e, send_daily_pipeline_error):
+        if _handle_stage_error(
+            PipelineStage.CRITICAL,
+            "[2/5] 予測 (production)",
+            e,
+            send_daily_pipeline_error,
+        ):
             raise
 
     # 2.5. Challenger shadow 予測（NON_CRITICAL: モデルが存在しない場合はスキップ、失敗しても継続）
