@@ -78,6 +78,80 @@ def compute_enc(corr_matrix: pd.DataFrame) -> tuple[float, float]:
     return enc, avg_corr
 
 
+def filter_correlated_candidates(
+    candidate_symbols: list[str],
+    existing_symbols: list[str],
+    market: str,
+    window: int = 60,
+    threshold: float = 0.7,
+) -> tuple[list[str], list[str]]:
+    """候補銘柄から既存ポジションと高相関な銘柄を除外する。
+
+    直近 window 日の日次リターンから各候補と既存ポジションとのペアワイズ絶対相関を計算し、
+    threshold を超える候補をブロックする。
+
+    Args:
+        candidate_symbols: 新規エントリー候補の銘柄コードリスト
+        existing_symbols: 既存ポジションの銘柄コードリスト
+        market: マーケット識別子
+        window: 相関計算に使うローリングウィンドウ日数
+        threshold: ブロック閾値（この値を超えると新規エントリーをブロック）
+
+    Returns:
+        (allowed_symbols, blocked_symbols) のタプル
+    """
+    if not candidate_symbols or not existing_symbols:
+        return list(candidate_symbols), []
+
+    all_symbols = list(set(candidate_symbols) | set(existing_symbols))
+    returns = _load_recent_returns(all_symbols, market, window)
+
+    if returns.empty:
+        logger.warning("[corr] ペアワイズ相関計算用データ不足のためスキップ (candidates=%s)", candidate_symbols)
+        return list(candidate_symbols), []
+
+    existing_in_data = [s for s in existing_symbols if s in returns.columns]
+    if not existing_in_data:
+        return list(candidate_symbols), []
+
+    allowed: list[str] = []
+    blocked: list[str] = []
+
+    for sym in candidate_symbols:
+        if sym not in returns.columns:
+            allowed.append(sym)
+            continue
+
+        max_corr = 0.0
+        for existing in existing_in_data:
+            if existing == sym:
+                continue
+            corr_val = returns[sym].corr(returns[existing])
+            if not np.isnan(corr_val):
+                max_corr = max(max_corr, abs(corr_val))
+
+        if max_corr > threshold:
+            logger.info(
+                "[corr] ペアワイズ相関でブロック: %s (max_corr=%.2f > threshold=%.2f)",
+                sym,
+                max_corr,
+                threshold,
+            )
+            blocked.append(sym)
+        else:
+            allowed.append(sym)
+
+    if blocked:
+        logger.warning(
+            "[corr] ペアワイズ相関フィルタ: %d 銘柄ブロック, %d 銘柄通過 (threshold=%.2f)",
+            len(blocked),
+            len(allowed),
+            threshold,
+        )
+
+    return allowed, blocked
+
+
 def evaluate_correlation_gate(
     symbols: list[str],
     market: str,

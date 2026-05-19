@@ -10,7 +10,11 @@ from unittest.mock import patch
 import numpy as np
 import pandas as pd
 
-from src.trading.correlation_risk import compute_enc, evaluate_correlation_gate
+from src.trading.correlation_risk import (
+    compute_enc,
+    evaluate_correlation_gate,
+    filter_correlated_candidates,
+)
 from src.trading.types import CorrelationGateResult
 
 
@@ -132,6 +136,82 @@ class TestEvaluateCorrelationGate(unittest.TestCase):
         self.assertIsInstance(result, CorrelationGateResult)
         self.assertIsInstance(result.enc, float)
         self.assertIsInstance(result.avg_correlation, float)
+
+
+class TestFilterCorrelatedCandidates(unittest.TestCase):
+    def test_no_existing_positions_allows_all(self):
+        allowed, blocked = filter_correlated_candidates(["A", "B"], [], "us")
+        self.assertEqual(allowed, ["A", "B"])
+        self.assertEqual(blocked, [])
+
+    def test_no_candidates_returns_empty(self):
+        allowed, blocked = filter_correlated_candidates([], ["X"], "us")
+        self.assertEqual(allowed, [])
+        self.assertEqual(blocked, [])
+
+    @patch("src.trading.correlation_risk._load_recent_returns")
+    def test_high_corr_candidate_blocked(self, mock_load):
+        np.random.seed(0)
+        base = np.cumsum(np.random.randn(65))
+        noise = base + np.random.randn(65) * 0.03
+        df = pd.DataFrame({"NEW": np.diff(base), "EXIST": np.diff(noise)})
+        mock_load.return_value = df
+
+        allowed, blocked = filter_correlated_candidates(
+            ["NEW"], ["EXIST"], "us", window=60, threshold=0.7
+        )
+        self.assertEqual(blocked, ["NEW"])
+        self.assertEqual(allowed, [])
+
+    @patch("src.trading.correlation_risk._load_recent_returns")
+    def test_low_corr_candidate_allowed(self, mock_load):
+        np.random.seed(42)
+        df = pd.DataFrame({"NEW": np.random.randn(60), "EXIST": np.random.randn(60)})
+        mock_load.return_value = df
+
+        allowed, blocked = filter_correlated_candidates(
+            ["NEW"], ["EXIST"], "us", window=60, threshold=0.7
+        )
+        self.assertEqual(allowed, ["NEW"])
+        self.assertEqual(blocked, [])
+
+    @patch("src.trading.correlation_risk._load_recent_returns")
+    def test_empty_returns_allows_all(self, mock_load):
+        mock_load.return_value = pd.DataFrame()
+
+        allowed, blocked = filter_correlated_candidates(
+            ["A", "B"], ["C"], "us", window=60, threshold=0.7
+        )
+        self.assertEqual(allowed, ["A", "B"])
+        self.assertEqual(blocked, [])
+
+    @patch("src.trading.correlation_risk._load_recent_returns")
+    def test_candidate_not_in_data_allowed(self, mock_load):
+        df = pd.DataFrame({"EXIST": np.random.randn(60)})
+        mock_load.return_value = df
+
+        allowed, blocked = filter_correlated_candidates(
+            ["MISSING"], ["EXIST"], "us", window=60, threshold=0.7
+        )
+        self.assertEqual(allowed, ["MISSING"])
+        self.assertEqual(blocked, [])
+
+    @patch("src.trading.correlation_risk._load_recent_returns")
+    def test_mixed_candidates(self, mock_load):
+        np.random.seed(1)
+        base = np.cumsum(np.random.randn(65))
+        noise = base + np.random.randn(65) * 0.02
+        independent = np.random.randn(64)
+        df = pd.DataFrame(
+            {"HIGH_CORR": np.diff(base), "LOW_CORR": independent, "EXIST": np.diff(noise)}
+        )
+        mock_load.return_value = df
+
+        allowed, blocked = filter_correlated_candidates(
+            ["HIGH_CORR", "LOW_CORR"], ["EXIST"], "us", window=60, threshold=0.7
+        )
+        self.assertIn("HIGH_CORR", blocked)
+        self.assertIn("LOW_CORR", allowed)
 
 
 if __name__ == "__main__":
