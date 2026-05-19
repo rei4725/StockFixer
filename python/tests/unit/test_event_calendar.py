@@ -290,5 +290,90 @@ class TestFetchEventDatesFromYfinance(unittest.TestCase):
         self.assertEqual(len(result), 2)
 
 
+# ---------------------------------------------------------------------------
+# _load_cached_event_dates (with DB mock)
+# ---------------------------------------------------------------------------
+
+
+class TestLoadCachedEventDates(unittest.TestCase):
+    @patch("src.market_data.event_calendar._db_connection")
+    def test_returns_none_when_no_rows(self, mock_db):
+        mock_con = MagicMock()
+        mock_con.execute.return_value.fetchall.return_value = []
+        mock_db.return_value.__enter__.return_value = mock_con
+        mock_db.return_value.__exit__.return_value = None
+
+        result = _load_cached_event_dates("us", "AAPL")
+
+        self.assertIsNone(result)
+
+    @patch("src.market_data.event_calendar._db_connection")
+    def test_returns_none_when_ttl_expired(self, mock_db):
+        old_ts = (pd.Timestamp.now() - pd.Timedelta(days=8)).strftime("%Y-%m-%d %H:%M:%S")
+        mock_con = MagicMock()
+        mock_con.execute.return_value.fetchall.return_value = [("2024-02-01", old_ts)]
+        mock_db.return_value.__enter__.return_value = mock_con
+        mock_db.return_value.__exit__.return_value = None
+
+        result = _load_cached_event_dates("us", "AAPL")
+
+        self.assertIsNone(result)
+
+    @patch("src.market_data.event_calendar._db_connection")
+    def test_returns_dates_when_cache_fresh(self, mock_db):
+        recent_ts = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
+        mock_con = MagicMock()
+        mock_con.execute.return_value.fetchall.return_value = [
+            ("2024-02-01", recent_ts),
+            ("2024-05-01", recent_ts),
+        ]
+        mock_db.return_value.__enter__.return_value = mock_con
+        mock_db.return_value.__exit__.return_value = None
+
+        result = _load_cached_event_dates("us", "AAPL")
+
+        self.assertIsNotNone(result)
+        self.assertEqual(len(result), 2)
+
+    @patch("src.market_data.event_calendar._db_connection")
+    def test_returns_none_on_db_exception(self, mock_db):
+        mock_db.side_effect = Exception("DB error")
+
+        result = _load_cached_event_dates("us", "AAPL")
+
+        self.assertIsNone(result)
+
+
+# ---------------------------------------------------------------------------
+# _save_event_dates (with DB mock)
+# ---------------------------------------------------------------------------
+
+
+class TestSaveEventDates(unittest.TestCase):
+    @patch("src.market_data.event_calendar._db_connection")
+    def test_skips_empty_dates(self, mock_db):
+        _save_event_dates("us", "AAPL", pd.DatetimeIndex([]))
+        mock_db.assert_not_called()
+
+    @patch("src.market_data.event_calendar._db_connection")
+    def test_inserts_dates_into_db(self, mock_db):
+        mock_con = MagicMock()
+        mock_db.return_value.__enter__.return_value = mock_con
+        mock_db.return_value.__exit__.return_value = None
+
+        dates = pd.DatetimeIndex([pd.Timestamp("2024-02-01"), pd.Timestamp("2024-05-01")])
+        _save_event_dates("us", "AAPL", dates)
+
+        mock_con.register.assert_called_once()
+        mock_con.execute.assert_called_once()
+
+    @patch("src.market_data.event_calendar._db_connection")
+    def test_handles_db_exception_gracefully(self, mock_db):
+        mock_db.side_effect = Exception("DB error")
+
+        dates = pd.DatetimeIndex([pd.Timestamp("2024-02-01")])
+        _save_event_dates("us", "AAPL", dates)
+
+
 if __name__ == "__main__":
     unittest.main()
