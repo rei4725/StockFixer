@@ -189,6 +189,7 @@ class TestFetchAdditionalMacroFeatures(unittest.TestCase):
     @patch("src.market_data.yf_client.ticker_history")
     def test_partial_failure_returns_available_columns(self, mock_hist):
         """一部ティッカーの取得に失敗しても取得できたカラムが返る"""
+
         def side_effect(ticker, start, end):
             if ticker == "^GSPC":
                 return _make_ticker_hist()
