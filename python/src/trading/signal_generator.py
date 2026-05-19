@@ -199,6 +199,51 @@ class SignalGenerator:
 
 
 # ---------------------------------------------------------------------------
+# I-256: 決算・イベントカレンダーフィルター
+# ---------------------------------------------------------------------------
+
+
+def filter_event_signals(
+    signals: pd.Series,
+    event_dates: "pd.DatetimeIndex",
+    days_before: int = 2,
+    days_after: int = 1,
+) -> pd.Series:
+    """
+    イベント日（決算発表等）前後の Buy シグナルを Hold に変換する。
+
+    event_dates は呼び出し元が market_data.event_calendar.get_event_dates() などで
+    取得して渡すこと（クロスBC依存を避けるため直接インポートしない）。
+
+    Args:
+        signals: generate_signal() が返す 'Buy'/'Sell'/'Hold' の Series
+        event_dates: イベント日一覧（tz-naive DatetimeIndex）
+        days_before: イベント日の何日前からエントリー抑制するか（デフォルト 2）
+        days_after: イベント日の何日後までエントリー抑制するか（デフォルト 1）
+
+    Returns:
+        イベント近傍の Buy を Hold に変換したシグナル Series のコピー
+    """
+    if len(event_dates) == 0:
+        return signals.copy()
+
+    result = signals.copy()
+    event_ts = pd.DatetimeIndex(
+        [pd.Timestamp(e).normalize() for e in event_dates]
+    )
+
+    for idx in result.index[result == "Buy"]:
+        check_ts = pd.Timestamp(idx).normalize()
+        for ev_ts in event_ts:
+            delta = (check_ts - ev_ts).days
+            if -days_before <= delta <= days_after:
+                result.loc[idx] = "Hold"
+                break
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # R-305: セクターローテーション戦略
 # ---------------------------------------------------------------------------
 
