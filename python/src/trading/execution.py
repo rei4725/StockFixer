@@ -15,6 +15,7 @@ DuckDB の最新予測結果を読み込み、RiskManager のゲートチェッ�
 
 import os
 import uuid
+from datetime import date, timedelta
 from typing import Any, TypedDict
 
 import pandas as pd
@@ -266,20 +267,37 @@ def _compute_ml_exit_signals(
         return set()
 
 
+def _determine_entry_horizon(row: pd.Series) -> int:
+    """予測行の中で最大絶対変化率を持つホライズン（日数）を返す。"""
+    candidates: dict[int, float] = {1: abs(float(row.get("diff_ratio") or 0.0))}
+    for h, col in [(3, "diff_ratio_3d"), (5, "diff_ratio_5d"), (10, "diff_ratio_10d")]:
+        if col in row.index:
+            v = row[col]
+            if v is not None and not (isinstance(v, float) and pd.isna(v)):
+                try:
+                    candidates[h] = abs(float(v))
+                except (TypeError, ValueError):
+                    pass
+    return max(candidates, key=lambda k: candidates[k])
+
+
 def _link_paper_order_metadata(
     order_id: str,
     market: str,
     predicted_at: str,
     signal_price: float,
+    horizon: int | None = None,
+    target_exit_date: str | None = None,
 ) -> None:
     with _db_connection() as con:
         con.execute(
             """
             UPDATE paper_orders
-            SET market = ?, predicted_at = ?, signal_price = ?
+            SET market = ?, predicted_at = ?, signal_price = ?,
+                horizon = ?, target_exit_date = ?
             WHERE order_id = ?
             """,
-            [market, predicted_at, signal_price, order_id],
+            [market, predicted_at, signal_price, horizon, target_exit_date, order_id],
         )
 
 
@@ -447,6 +465,7 @@ def _record_order(
     mode: str,
     order_session: str = "open",
     split_ratio: float = 1.0,
+    horizon: int | None = None,
 ) -> None:
     """注文結果を orders テーブルに保存する"""
     with _db_connection() as con:
@@ -471,7 +490,12 @@ def _record_order(
 
     order_id = str(order_result.get("order_id", ""))
     if mode == "paper" and order_id:
-        _link_paper_order_metadata(order_id, market, predicted_at, signal_price)
+        target_exit_date: str | None = None
+        if horizon is not None and side in (OrderSide.BUY, OrderSide.SHORT):
+            target_exit_date = (date.today() + timedelta(days=horizon)).isoformat()
+        _link_paper_order_metadata(
+            order_id, market, predicted_at, signal_price, horizon, target_exit_date
+        )
 
     fill_price_raw = order_result.get("fill_price")
     fill_price = float(fill_price_raw) if isinstance(fill_price_raw, (int, float)) else None
@@ -798,6 +822,7 @@ def run_daily_orders(
                 mode=mode,
                 order_session=order_session,
                 split_ratio=split_ratio,
+                horizon=_determine_entry_horizon(row),
             )
             logger.info(
                 f"[exec] 買い発注: {symbol} {qty}株 @ {order_type.name}({order_reason}) "
@@ -965,6 +990,7 @@ def run_daily_orders(
                     mode=mode,
                     order_session=order_session,
                     split_ratio=short_split_ratio,
+                    horizon=_determine_entry_horizon(row),
                 )
                 logger.info(
                     f"[exec] ショート発注: {symbol} {qty}株 @ {order_type.name}({order_reason}) "

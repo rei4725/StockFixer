@@ -326,6 +326,12 @@ def run_daily_auto_order():
     except Exception as e:
         logger.error("自動発注完了通知失敗: %s", e, exc_info=True)
 
+    # ホライズン期限切れポジションの自動決済
+    try:
+        run_horizon_exit_check()
+    except Exception as e:
+        logger.error("ホライズン決済チェック失敗: %s", e, exc_info=True)
+
     # 相関リスク警告通知
     if stats.get("correlation_blocked"):
         try:
@@ -341,6 +347,65 @@ def run_daily_auto_order():
             )
         except Exception as e:
             logger.error("相関リスク警告通知失敗: %s", e, exc_info=True)
+
+
+def run_horizon_exit_check() -> None:
+    """
+    毎営業日実行: target_exit_date を過ぎたペーパーポジションを成行売りで強制決済する。
+
+    SL/TP によって既に決済済みのポジションは paper_positions に存在しないため
+    自然に除外される（SL/TP 優先）。
+    live モードでは処理をスキップする。
+    """
+    import os
+    from datetime import date
+
+    from src.trading.brokers.base import OrderSide
+    from src.trading.brokers.paper.paper_broker import PaperBroker
+    from src.utils.db._connection import _db_connection
+
+    mode = os.environ.get("AUTO_TRADE_MODE", "paper")
+    if mode == "live":
+        logger.info("live モードのためホライズン決済チェックをスキップ")
+        return
+
+    today_str = date.today().isoformat()
+    with _db_connection() as con:
+        rows = con.execute(
+            """
+            SELECT DISTINCT symbol
+            FROM paper_orders
+            WHERE side = ?
+              AND status = 'filled'
+              AND target_exit_date IS NOT NULL
+              AND CAST(target_exit_date AS VARCHAR) <= ?
+            """,
+            [int(OrderSide.BUY), today_str],
+        ).fetchall()
+
+    symbols_to_exit = [row[0] for row in rows]
+    if not symbols_to_exit:
+        logger.info("[horizon_exit] 期限切れポジションなし")
+        return
+
+    logger.info("[horizon_exit] 期限切れポジション対象: %s", symbols_to_exit)
+    broker = PaperBroker()
+    exited: list[str] = []
+    for symbol in symbols_to_exit:
+        positions = broker.get_positions()
+        pos = next(
+            (p for p in positions if p["symbol"].replace(".T", "") == symbol), None
+        )
+        if pos is None or pos.get("qty", 0) <= 0:
+            continue
+        try:
+            broker.send_order(symbol, OrderSide.SELL, pos["qty"])
+            logger.info("[horizon_exit] ホライズン決済: %s %d株", symbol, pos["qty"])
+            exited.append(symbol)
+        except Exception as e:
+            logger.error("[horizon_exit] 決済失敗: %s: %s", symbol, e, exc_info=True)
+
+    logger.info("[horizon_exit] ホライズン決済完了: %d 件", len(exited))
 
 
 def run_daily_settle_orders():
