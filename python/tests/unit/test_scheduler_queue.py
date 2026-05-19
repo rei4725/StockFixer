@@ -2,6 +2,7 @@ import json
 import os
 import sys
 from datetime import datetime
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -180,6 +181,7 @@ def test_run_job_logs_failure_with_duration(tmp_path, caplog):
             "minute": 0,
             "recovery_delay_minutes": 10,
             "max_executions_per_period": 1,
+            "max_retries": 0,
         }
     }
 
@@ -323,8 +325,153 @@ def test_run_job_error_propagates(tmp_path):
             "day_of_week": "*",
             "hour": 8,
             "minute": 0,
+            "max_retries": 0,
         }
     }
     manager = SchedulerQueueManager(config, state_file_path=str(state_path))
     with pytest.raises(ValueError, match="意図的なエラー"):
         manager.run_job("fail_job", reason="test")
+
+
+# ── Exponential backoff リトライ テスト ──────────────────────────────────────
+
+
+def _make_failing_config(state_path, max_retries: int, fail_count: int = 999):
+    """指定回数だけ失敗し、その後成功する関数を持つ config を返す。"""
+    call_count = {"n": 0}
+
+    def _func():
+        call_count["n"] += 1
+        if call_count["n"] <= fail_count:
+            raise RuntimeError(f"transient error #{call_count['n']}")
+
+    return (
+        {
+            "flaky_job": {
+                "func": _func,
+                "period": "daily",
+                "day_of_week": "*",
+                "hour": 8,
+                "minute": 0,
+                "max_retries": max_retries,
+                "retry_base_wait_seconds": 1.0,
+            }
+        },
+        call_count,
+    )
+
+
+@patch("src.orchestration.scheduler_queue.time.sleep")
+def test_retry_succeeds_on_second_attempt(mock_sleep, tmp_path):
+    """1回失敗後に成功した場合、run_job が True を返し retry イベントが記録されること"""
+    state_path = tmp_path / "state.json"
+    config, call_count = _make_failing_config(state_path, max_retries=3, fail_count=1)
+    manager = SchedulerQueueManager(config, state_file_path=str(state_path))
+
+    result = manager.run_job("flaky_job", reason="test")
+
+    assert result is True
+    assert call_count["n"] == 2
+
+    saved = json.loads(state_path.read_text(encoding="utf-8"))
+    statuses = [e["status"] for e in saved["events"]]
+    assert "retry" in statuses
+    assert statuses[-1] == "success"
+
+
+@patch("src.orchestration.scheduler_queue.time.sleep")
+def test_retry_exhausted_raises_and_sends_notification(mock_sleep, tmp_path):
+    """全リトライ失敗後に例外が再送出され、error_notifier が呼ばれること"""
+    state_path = tmp_path / "state.json"
+    config, call_count = _make_failing_config(state_path, max_retries=2, fail_count=999)
+    notifier = MagicMock()
+    manager = SchedulerQueueManager(
+        config, state_file_path=str(state_path), error_notifier=notifier
+    )
+
+    with pytest.raises(RuntimeError):
+        manager.run_job("flaky_job", reason="test")
+
+    # func は max_retries+1 回呼ばれる
+    assert call_count["n"] == 3
+
+    # notifier が job_id と error_message で呼ばれる
+    notifier.assert_called_once()
+    args = notifier.call_args[0]
+    assert args[0] == "flaky_job"
+    assert "transient error" in args[1]
+
+    # retry イベントが 2 件、最終 error イベントが 1 件
+    saved = json.loads(state_path.read_text(encoding="utf-8"))
+    statuses = [e["status"] for e in saved["events"]]
+    assert statuses.count("retry") == 2
+    assert statuses[-1] == "error"
+
+
+@patch("src.orchestration.scheduler_queue.time.sleep")
+def test_retry_sleep_uses_exponential_backoff(mock_sleep, tmp_path):
+    """sleep が指数的に増加すること（各 wait >= base_wait * 2^attempt）"""
+    state_path = tmp_path / "state.json"
+    config, _ = _make_failing_config(state_path, max_retries=3, fail_count=999)
+    manager = SchedulerQueueManager(config, state_file_path=str(state_path))
+
+    with pytest.raises(RuntimeError):
+        manager.run_job("flaky_job", reason="test")
+
+    assert mock_sleep.call_count == 3
+    waits = [call.args[0] for call in mock_sleep.call_args_list]
+    base = 1.0
+    for i, w in enumerate(waits):
+        assert w >= base * (2**i), f"attempt {i}: wait={w} < expected>={base * 2**i}"
+
+
+@patch("src.orchestration.scheduler_queue.time.sleep")
+def test_retry_zero_means_no_retry(mock_sleep, tmp_path):
+    """max_retries=0 の場合はリトライなしで即座に例外が再送出されること"""
+    state_path = tmp_path / "state.json"
+    config, call_count = _make_failing_config(state_path, max_retries=0, fail_count=999)
+    manager = SchedulerQueueManager(config, state_file_path=str(state_path))
+
+    with pytest.raises(RuntimeError):
+        manager.run_job("flaky_job", reason="test")
+
+    assert call_count["n"] == 1
+    mock_sleep.assert_not_called()
+
+
+@patch("src.orchestration.scheduler_queue.time.sleep")
+def test_retry_notifier_failure_does_not_propagate(mock_sleep, tmp_path):
+    """error_notifier 自体が例外を出しても run_job は元の例外を再送出すること"""
+    state_path = tmp_path / "state.json"
+    config, _ = _make_failing_config(state_path, max_retries=1, fail_count=999)
+
+    def bad_notifier(job_id, error_msg):
+        raise ConnectionError("Discord unavailable")
+
+    manager = SchedulerQueueManager(
+        config, state_file_path=str(state_path), error_notifier=bad_notifier
+    )
+
+    with pytest.raises(RuntimeError, match="transient error"):
+        manager.run_job("flaky_job", reason="test")
+
+
+@patch("src.orchestration.scheduler_queue.time.sleep")
+def test_retry_events_recorded_in_state(mock_sleep, tmp_path):
+    """retry イベントに attempt / max_retries / wait_seconds / timestamp が含まれること"""
+    state_path = tmp_path / "state.json"
+    config, _ = _make_failing_config(state_path, max_retries=2, fail_count=999)
+    manager = SchedulerQueueManager(config, state_file_path=str(state_path))
+
+    with pytest.raises(RuntimeError):
+        manager.run_job("flaky_job", reason="test")
+
+    saved = json.loads(state_path.read_text(encoding="utf-8"))
+    retry_events = [e for e in saved["events"] if e["status"] == "retry"]
+    assert len(retry_events) == 2
+    for ev in retry_events:
+        assert "attempt" in ev
+        assert "max_retries" in ev
+        assert "wait_seconds" in ev
+        assert "timestamp" in ev
+        assert ev["job_id"] == "flaky_job"
