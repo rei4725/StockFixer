@@ -164,9 +164,9 @@ class RiskManager:
             and self.take_profit_pct is not None
             and pnl_pct >= self.take_profit_pct
         )
-        if sl_triggered:
+        if sl_triggered and self.stop_loss_pct is not None:
             reason = f"SL発動: pnl={pnl_pct:.2%} <= -{self.stop_loss_pct:.2%}"
-        elif tp_triggered:
+        elif tp_triggered and self.take_profit_pct is not None:
             reason = f"TP発動: pnl={pnl_pct:.2%} >= {self.take_profit_pct:.2%}"
         else:
             reason = ""
