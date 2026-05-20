@@ -79,6 +79,10 @@ class Settings(BaseSettings):
     SCHEDULER_MAX_RETRIES: int = Field(default=3)
     SCHEDULER_RETRY_BASE_WAIT_SECONDS: float = Field(default=30.0)
 
+    # ---------- 出来高フィルター（signal_generator.py） ----------
+    VOLUME_FILTER_WINDOW_DAYS: int = Field(default=20)
+    VOLUME_FILTER_MULTIPLIER: float = Field(default=1.5)
+
 
 settings = Settings()
 
@@ -128,3 +132,5 @@ DRIFT_ALERT_THRESHOLD: float = settings.DRIFT_ALERT_THRESHOLD
 PREDICTION_MAX_WORKERS: int = settings.PREDICTION_MAX_WORKERS
 SCHEDULER_MAX_RETRIES: int = settings.SCHEDULER_MAX_RETRIES
 SCHEDULER_RETRY_BASE_WAIT_SECONDS: float = settings.SCHEDULER_RETRY_BASE_WAIT_SECONDS
+VOLUME_FILTER_WINDOW_DAYS: int = settings.VOLUME_FILTER_WINDOW_DAYS
+VOLUME_FILTER_MULTIPLIER: float = settings.VOLUME_FILTER_MULTIPLIER

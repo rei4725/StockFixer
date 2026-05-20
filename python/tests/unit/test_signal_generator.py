@@ -138,7 +138,6 @@ class TestSignalGenerator(unittest.TestCase):
                 "High": 101 + rng.uniform(-0.5, 0.5, 10).cumsum(),
                 "Low": 99 + rng.uniform(-0.5, 0.5, 10).cumsum(),
                 "Close": 100 + rng.uniform(-0.5, 0.5, 10).cumsum(),
-                "Volume": rng.integers(1000, 5000, 10),
                 "RSI": rng.uniform(20, 80, 10),
             },
             index=dates,
@@ -340,6 +339,85 @@ class TestSignalGeneratorOptimalParamsAutoLoad(unittest.TestCase):
         data = pd.DataFrame({"RSI": [50.0] * 5}, index=dates)
         prediction = pd.Series([0.01] * 5, index=dates)  # 0.01 < 0.015 → Hold
         signals = sg.generate_signal(data, prediction)
+        self.assertTrue(all(signals == "Hold"))
+
+
+# ---------------------------------------------------------------------------
+# Issue #253: 出来高フィルター
+# ---------------------------------------------------------------------------
+
+
+class TestSignalGeneratorVolumeFilter(unittest.TestCase):
+    """出来高フィルター: Buy シグナルが出来高条件を満たさない場合 Hold に変換される"""
+
+    def _make_data(self, volume_values, rsi=50.0) -> pd.DataFrame:
+        dates = pd.date_range(start="2023-01-01", periods=len(volume_values), freq="D")
+        return pd.DataFrame(
+            {
+                "Volume": volume_values,
+                "RSI": [rsi] * len(volume_values),
+            },
+            index=dates,
+        )
+
+    def test_buy_suppressed_when_volume_below_threshold(self):
+        """出来高が20日平均の1.5倍未満のときBuy→Holdに変換される"""
+        # 20日分のベース出来高(1000)を積んでから、低出来高(500)の行を1つ追加
+        volumes = [1000] * 20 + [500]
+        data = self._make_data(volumes)
+        prediction = pd.Series([0.01] * 21, index=data.index)
+        sg = signal_generator_module.SignalGenerator()
+        signals = sg.generate_signal(data, prediction)
+        # 最後の行: 500 < 1000 * 1.5 = 1500 → Hold
+        self.assertEqual(signals.iloc[-1], "Hold")
+
+    def test_buy_kept_when_volume_above_threshold(self):
+        """出来高が20日平均の1.5倍以上のときBuyが維持される"""
+        volumes = [1000] * 20 + [2000]
+        data = self._make_data(volumes)
+        prediction = pd.Series([0.01] * 21, index=data.index)
+        sg = signal_generator_module.SignalGenerator()
+        signals = sg.generate_signal(data, prediction)
+        # 最後の行: 2000 >= 1000 * 1.5 = 1500 → Buy
+        self.assertEqual(signals.iloc[-1], "Buy")
+
+    def test_sell_not_affected_by_volume_filter(self):
+        """Sellシグナルは出来高フィルターの影響を受けない"""
+        volumes = [1000] * 20 + [500]
+        data = self._make_data(volumes)
+        prediction = pd.Series([-0.01] * 21, index=data.index)
+        sg = signal_generator_module.SignalGenerator()
+        signals = sg.generate_signal(data, prediction)
+        self.assertEqual(signals.iloc[-1], "Sell")
+
+    def test_hold_not_affected_by_volume_filter(self):
+        """中立予測のHoldシグナルは出来高フィルターの影響を受けない"""
+        volumes = [1000] * 20 + [500]
+        data = self._make_data(volumes)
+        prediction = pd.Series([0.001] * 21, index=data.index)
+        sg = signal_generator_module.SignalGenerator()
+        signals = sg.generate_signal(data, prediction)
+        self.assertEqual(signals.iloc[-1], "Hold")
+
+    def test_volume_filter_skipped_when_no_volume_column(self):
+        """Volumeカラムがない場合はフィルターがスキップされBuyが維持される"""
+        dates = pd.date_range(start="2023-01-01", periods=5, freq="D")
+        data = pd.DataFrame({"RSI": [50.0] * 5}, index=dates)
+        prediction = pd.Series([0.01] * 5, index=dates)
+        sg = signal_generator_module.SignalGenerator()
+        signals = sg.generate_signal(data, prediction)
+        self.assertTrue(all(signals == "Buy"))
+
+    def test_volume_filter_uses_rolling_window(self):
+        """最初の数行(ウィンドウ未充足)もmin_periods=1で正しく動作する"""
+        # 出来高を全行1000に統一し予測を強いBuyにする
+        # 1.5倍ルールだとvolume(1000) >= avg(1000)*1.5=1500 は満たさない → Hold
+        volumes = [1000] * 5
+        data = self._make_data(volumes)
+        prediction = pd.Series([0.01] * 5, index=data.index)
+        sg = signal_generator_module.SignalGenerator()
+        signals = sg.generate_signal(data, prediction)
+        # 全行: volume(1000) < 1000 * 1.5 = 1500 → Hold
         self.assertTrue(all(signals == "Hold"))
 
 

@@ -5,6 +5,7 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
+from config.settings import VOLUME_FILTER_MULTIPLIER, VOLUME_FILTER_WINDOW_DAYS
 from src.domain.trading_rules import CONFLUENCE_BOOST_PER_HORIZON as _CONFLUENCE_BOOST_PER_HORIZON
 from src.domain.trading_rules import DEFAULT_HORIZON_WEIGHTS as _DEFAULT_HORIZON_WEIGHTS
 from src.utils.logger import get_logger
@@ -194,6 +195,12 @@ class SignalGenerator:
             # 買われすぎ(RSI>70) かつ Hold なら Sell（高値売りシグナル）
             signals.loc[(data["RSI"] < 30) & (signals == "Hold")] = "Buy"
             signals.loc[(data["RSI"] > 70) & (signals == "Hold")] = "Sell"
+
+        # 出来高フィルター: 直近20日平均の1.5倍未満の場合はBuy→Hold
+        if "Volume" in data.columns:
+            avg_volume = data["Volume"].rolling(VOLUME_FILTER_WINDOW_DAYS, min_periods=1).mean()
+            low_volume = data["Volume"] < avg_volume * VOLUME_FILTER_MULTIPLIER
+            signals.loc[low_volume & (signals == "Buy")] = "Hold"
 
         return signals
 
