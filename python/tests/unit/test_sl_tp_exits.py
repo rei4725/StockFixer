@@ -117,9 +117,7 @@ class TestCheckSlTpExits(unittest.TestCase):
         return MagicMock()
 
     def test_sl_triggers_sell_order(self):
-        positions = [
-            {"symbol": "7203", "qty": 100, "avg_price": 1000.0, "current_price": 940.0}
-        ]
+        positions = [{"symbol": "7203", "qty": 100, "avg_price": 1000.0, "current_price": 940.0}]
         broker = _make_broker(positions)
         stats = _make_stats()
         market_data = self._make_market_data()
@@ -131,9 +129,7 @@ class TestCheckSlTpExits(unittest.TestCase):
                     return_value=(OrderType.MARKET, 0.0, "market", "open"),
                 ):
                     with patch("src.trading.execution._record_order"):
-                        triggered = _check_sl_tp_exits(
-                            broker, "jp", "paper", market_data, stats
-                        )
+                        triggered = _check_sl_tp_exits(broker, "jp", "paper", market_data, stats)
 
         broker.send_order.assert_called_once_with(
             "7203", OrderSide.SELL, 100, price=0.0, order_type=OrderType.MARKET
@@ -143,9 +139,7 @@ class TestCheckSlTpExits(unittest.TestCase):
         self.assertAlmostEqual(stats["total_turnover"], 940.0 * 100)
 
     def test_tp_triggers_sell_order(self):
-        positions = [
-            {"symbol": "9984", "qty": 200, "avg_price": 1000.0, "current_price": 1150.0}
-        ]
+        positions = [{"symbol": "9984", "qty": 200, "avg_price": 1000.0, "current_price": 1150.0}]
         broker = _make_broker(positions)
         stats = _make_stats()
         market_data = self._make_market_data()
@@ -157,26 +151,20 @@ class TestCheckSlTpExits(unittest.TestCase):
                     return_value=(OrderType.MARKET, 0.0, "market", "open"),
                 ):
                     with patch("src.trading.execution._record_order"):
-                        triggered = _check_sl_tp_exits(
-                            broker, "jp", "paper", market_data, stats
-                        )
+                        triggered = _check_sl_tp_exits(broker, "jp", "paper", market_data, stats)
 
         self.assertIn("9984", triggered)
         self.assertEqual(stats["sell_orders"], 1)
 
     def test_no_trigger_no_order(self):
-        positions = [
-            {"symbol": "7203", "qty": 100, "avg_price": 1000.0, "current_price": 1010.0}
-        ]
+        positions = [{"symbol": "7203", "qty": 100, "avg_price": 1000.0, "current_price": 1010.0}]
         broker = _make_broker(positions)
         stats = _make_stats()
         market_data = self._make_market_data()
 
         with self._patch_risk(sl=False, tp=False, reason=""):
             with patch("src.trading.execution.get_optimal_params", return_value={}):
-                triggered = _check_sl_tp_exits(
-                    broker, "jp", "paper", market_data, stats
-                )
+                triggered = _check_sl_tp_exits(broker, "jp", "paper", market_data, stats)
 
         broker.send_order.assert_not_called()
         self.assertEqual(len(triggered), 0)
@@ -192,25 +180,19 @@ class TestCheckSlTpExits(unittest.TestCase):
         broker.send_order.assert_not_called()
 
     def test_zero_qty_skipped(self):
-        positions = [
-            {"symbol": "7203", "qty": 0, "avg_price": 1000.0, "current_price": 900.0}
-        ]
+        positions = [{"symbol": "7203", "qty": 0, "avg_price": 1000.0, "current_price": 900.0}]
         broker = _make_broker(positions)
         stats = _make_stats()
         market_data = self._make_market_data()
 
         with self._patch_risk(sl=True, reason="SL発動"):
-            triggered = _check_sl_tp_exits(
-                broker, "jp", "paper", market_data, stats
-            )
+            triggered = _check_sl_tp_exits(broker, "jp", "paper", market_data, stats)
 
         broker.send_order.assert_not_called()
         self.assertEqual(len(triggered), 0)
 
     def test_order_error_increments_errors(self):
-        positions = [
-            {"symbol": "7203", "qty": 100, "avg_price": 1000.0, "current_price": 900.0}
-        ]
+        positions = [{"symbol": "7203", "qty": 100, "avg_price": 1000.0, "current_price": 900.0}]
         broker = _make_broker(positions)
         broker.send_order.side_effect = RuntimeError("send_order failed")
         stats = _make_stats()
@@ -222,17 +204,13 @@ class TestCheckSlTpExits(unittest.TestCase):
                     "src.trading.execution._choose_order_params",
                     return_value=(OrderType.MARKET, 0.0, "market", "open"),
                 ):
-                    triggered = _check_sl_tp_exits(
-                        broker, "jp", "paper", market_data, stats
-                    )
+                    triggered = _check_sl_tp_exits(broker, "jp", "paper", market_data, stats)
 
         self.assertEqual(stats["errors"], 1)
         self.assertEqual(len(triggered), 0)
 
     def test_symbol_dot_t_stripped(self):
-        positions = [
-            {"symbol": "7203.T", "qty": 100, "avg_price": 1000.0, "current_price": 900.0}
-        ]
+        positions = [{"symbol": "7203.T", "qty": 100, "avg_price": 1000.0, "current_price": 900.0}]
         broker = _make_broker(positions)
         stats = _make_stats()
         market_data = self._make_market_data()
@@ -244,9 +222,7 @@ class TestCheckSlTpExits(unittest.TestCase):
                     return_value=(OrderType.MARKET, 0.0, "market", "open"),
                 ):
                     with patch("src.trading.execution._record_order"):
-                        triggered = _check_sl_tp_exits(
-                            broker, "jp", "paper", market_data, stats
-                        )
+                        triggered = _check_sl_tp_exits(broker, "jp", "paper", market_data, stats)
 
         # send_order には .T 除去後の symbol が渡されること
         call_args = broker.send_order.call_args
