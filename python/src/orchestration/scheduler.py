@@ -159,6 +159,7 @@ def run_weekly_training():
     """
     logger.info("=== 週次モデル学習開始 ===")
 
+    from config.settings import AUTO_PROMOTE_MODEL
     from src.prediction.promotion_gate import evaluate_promotion, save_promotion_result
     from src.prediction.shadow_evaluation import (
         _UNIFIED_CHALLENGER_NAMES,
@@ -199,19 +200,21 @@ def run_weekly_training():
             gate_result = evaluate_promotion(
                 shadow_model_name="challenger",
                 current_model_name="production",
-                require_manual_approval=False,
+                require_manual_approval=not AUTO_PROMOTE_MODEL,
             )
             save_promotion_result(gate_result)
             logger.info("昇格ゲート判定: eligible=%s reason=%s", gate_result.eligible, gate_result.reason)
 
-            if gate_result.eligible:
-                logger.info("[3/4] 昇格実行: challenger → production")
+            if gate_result.eligible and AUTO_PROMOTE_MODEL:
+                logger.info("[3/4] 昇格実行: challenger → production (AUTO_PROMOTE_MODEL=true)")
                 promote_result = promote_unified_challenger()
                 if promote_result["promoted"]:
                     logger.info("昇格完了: %s", promote_result["promoted"])
                     promoted = True
                 else:
                     logger.warning("昇格対象ファイルなし: skipped=%s", promote_result["skipped"])
+            elif gate_result.eligible:
+                logger.info("[3/4] 昇格基準クリアだが AUTO_PROMOTE_MODEL=false のため手動承認待ち")
             else:
                 logger.info("昇格ゲート未達（再学習のみ実施）: %s", gate_result.reason)
         except Exception as e:

@@ -83,6 +83,9 @@ class Settings(BaseSettings):
     VOLUME_FILTER_WINDOW_DAYS: int = Field(default=20)
     VOLUME_FILTER_MULTIPLIER: float = Field(default=1.5)
 
+    # ---------- 昇格ゲート自動承認（#254） ----------
+    AUTO_PROMOTE_MODEL: bool = Field(default=False)
+
 
 settings = Settings()
 
@@ -134,3 +137,4 @@ SCHEDULER_MAX_RETRIES: int = settings.SCHEDULER_MAX_RETRIES
 SCHEDULER_RETRY_BASE_WAIT_SECONDS: float = settings.SCHEDULER_RETRY_BASE_WAIT_SECONDS
 VOLUME_FILTER_WINDOW_DAYS: int = settings.VOLUME_FILTER_WINDOW_DAYS
 VOLUME_FILTER_MULTIPLIER: float = settings.VOLUME_FILTER_MULTIPLIER
+AUTO_PROMOTE_MODEL: bool = settings.AUTO_PROMOTE_MODEL
