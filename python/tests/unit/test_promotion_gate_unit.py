@@ -368,7 +368,10 @@ class TestSchedulerAutoPromotion(unittest.TestCase):
                 "src.prediction.promotion_gate._load_latest_wf_summary",
                 return_value=(wf_df, "wf_summary.csv"),
             ),
-            patch("src.prediction.promotion_gate._compute_hit_rate", return_value=0.6 if eligible else 0.3),
+            patch(
+                "src.prediction.promotion_gate._compute_hit_rate",
+                return_value=0.6 if eligible else 0.3,
+            ),
             patch("src.prediction.promotion_gate._compute_slippage", return_value=0.01),
             patch("src.prediction.promotion_gate._collect_run_ids", return_value=[]),
             patch("src.prediction.promotion_gate._log_promotion_to_mlflow"),
@@ -397,7 +400,6 @@ class TestSchedulerAutoPromotion(unittest.TestCase):
     def test_auto_promote_false_skips_promotion(self):
         """AUTO_PROMOTE_MODEL=False かつ eligible=True でも promote_unified_challenger は呼ばれない。"""
         mock_promote = MagicMock(return_value={"promoted": ["challenger.joblib"], "skipped": []})
-        patches = self._make_patches(auto_promote=False)
 
         with (
             patch("src.orchestration.scheduler.run_weekly_training.__module__"),
@@ -411,14 +413,12 @@ class TestSchedulerAutoPromotion(unittest.TestCase):
                 return_value={"challenger_wins": True},
             ),
             patch("src.prediction.shadow_evaluation.promote_unified_challenger", mock_promote),
-            patch(
-                "src.prediction.shadow_evaluation._UNIFIED_PRODUCTION_NAMES", ["production_xgb"]
-            ),
-            patch(
-                "src.prediction.shadow_evaluation._UNIFIED_CHALLENGER_NAMES", ["challenger_xgb"]
-            ),
+            patch("src.prediction.shadow_evaluation._UNIFIED_PRODUCTION_NAMES", ["production_xgb"]),
+            patch("src.prediction.shadow_evaluation._UNIFIED_CHALLENGER_NAMES", ["challenger_xgb"]),
             patch("src.prediction.unified_model_pipeline.train_unified_model"),
-            patch("src.prediction.prediction_pipeline.run_accuracy_check", return_value=pd.DataFrame()),
+            patch(
+                "src.prediction.prediction_pipeline.run_accuracy_check", return_value=pd.DataFrame()
+            ),
             patch("src.reporting.discord.discord_utils.send_drift_alert"),
             patch("src.reporting.discord.discord_utils.send_weekly_training_completion"),
             patch("src.reporting.discord.discord_utils.send_promotion_result"),
@@ -455,14 +455,12 @@ class TestSchedulerAutoPromotion(unittest.TestCase):
                 return_value={"challenger_wins": True},
             ),
             patch("src.prediction.shadow_evaluation.promote_unified_challenger", mock_promote),
-            patch(
-                "src.prediction.shadow_evaluation._UNIFIED_PRODUCTION_NAMES", ["production_xgb"]
-            ),
-            patch(
-                "src.prediction.shadow_evaluation._UNIFIED_CHALLENGER_NAMES", ["challenger_xgb"]
-            ),
+            patch("src.prediction.shadow_evaluation._UNIFIED_PRODUCTION_NAMES", ["production_xgb"]),
+            patch("src.prediction.shadow_evaluation._UNIFIED_CHALLENGER_NAMES", ["challenger_xgb"]),
             patch("src.prediction.unified_model_pipeline.train_unified_model"),
-            patch("src.prediction.prediction_pipeline.run_accuracy_check", return_value=pd.DataFrame()),
+            patch(
+                "src.prediction.prediction_pipeline.run_accuracy_check", return_value=pd.DataFrame()
+            ),
             patch("src.reporting.discord.discord_utils.send_drift_alert"),
             patch("src.reporting.discord.discord_utils.send_weekly_training_completion"),
             patch("src.reporting.discord.discord_utils.send_promotion_result"),
