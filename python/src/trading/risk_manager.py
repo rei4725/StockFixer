@@ -107,8 +107,6 @@ class RiskManager:
         symbol: Optional[str] = None,
     ):
         self._broker = broker
-        # TODO: stop_loss_pct / take_profit_pct は現在 RiskManager 内で未使用（Dead Attribute）。
-        #       将来の SL/TP チェックロジック（R-307 等）で参照予定。
         self.stop_loss_pct: Optional[float] = None
         self.take_profit_pct: Optional[float] = None
 
@@ -143,6 +141,38 @@ class RiskManager:
                     f"[{market}_{symbol}] optimal_params.json が見つからないか未登録のため "
                     f"stop_loss_pct/take_profit_pct はデフォルト値 (None) を使用します"
                 )
+
+    # ------------------------------------------------------------------
+    # SL/TP チェック
+    # ------------------------------------------------------------------
+
+    def check_sl_tp(
+        self,
+        avg_price: float,
+        current_price: float,
+    ) -> tuple[bool, bool, str]:
+        """ポジションの含み損益率が SL/TP 閾値を超えているか判定する。
+
+        Returns:
+            (sl_triggered, tp_triggered, reason)
+            SL と TP が同時に成立することはないため、sl_triggered が True のとき tp_triggered は False。
+        """
+        if avg_price <= 0:
+            return False, False, ""
+        pnl_pct = (current_price - avg_price) / avg_price
+        sl_triggered = self.stop_loss_pct is not None and pnl_pct <= -self.stop_loss_pct
+        tp_triggered = (
+            not sl_triggered
+            and self.take_profit_pct is not None
+            and pnl_pct >= self.take_profit_pct
+        )
+        if sl_triggered:
+            reason = f"SL発動: pnl={pnl_pct:.2%} <= -{self.stop_loss_pct:.2%}"
+        elif tp_triggered:
+            reason = f"TP発動: pnl={pnl_pct:.2%} >= {self.take_profit_pct:.2%}"
+        else:
+            reason = ""
+        return sl_triggered, tp_triggered, reason
 
     # ------------------------------------------------------------------
     # メインゲートチェック
