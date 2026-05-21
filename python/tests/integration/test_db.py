@@ -47,10 +47,10 @@ class TestDB(unittest.TestCase):
 
     def test_init_tables(self):
         """テーブルが正しく作成されることを確認"""
-        con = db_module.get_connection()
-        tables = con.execute(
-            "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
-        ).fetchall()
+        with db_module._db_connection() as con:
+            tables = con.execute(
+                "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
+            ).fetchall()
         table_names = {row[0] for row in tables}
         self.assertIn("stock_features", table_names)
         self.assertIn("prediction_results", table_names)

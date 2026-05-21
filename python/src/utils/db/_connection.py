@@ -10,7 +10,6 @@ Docker 上の複数プロセス（スケジューラー・API サーバー等）
 """
 
 import time
-import warnings
 from contextlib import contextmanager
 from threading import Lock
 from typing import Generator
@@ -94,27 +93,6 @@ def _db_connection() -> Generator[duckdb.DuckDBPyConnection, None, None]:
         file_lock.release()
 
 
-def get_connection() -> duckdb.DuckDBPyConnection:
-    """
-    後方互換用: 新規の読み書き接続を返す。呼び出し側で close() すること。
-
-    .. deprecated::
-        `_db_connection()` コンテキストマネージャーを推奨。
-        接続の閉じ忘れによるロック残留を防ぐため with 文を使用してください。
-    """
-    warnings.warn(
-        "get_connection() は非推奨です。_db_connection() コンテキストマネージャーを使用してください。",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    ensure_dir(get_data_dir())
-    db_path = get_db_path()
-    con = duckdb.connect(db_path, config=_DB_CONFIG)
-    if not _tables_initialized:
-        _init_tables(con)
-    return con
-
-
 def close_connection() -> None:
     """
     状態リセット。短命接続モデルでは永続接続は持たないが、
@@ -141,18 +119,15 @@ def get_readonly_connection() -> duckdb.DuckDBPyConnection:
 
 def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
     """全テーブルを作成する（CREATE TABLE IF NOT EXISTS）"""
-    con.execute(
-        """
+    con.execute("""
         CREATE TABLE IF NOT EXISTS stock_features (
             market   VARCHAR NOT NULL,
             symbol   VARCHAR NOT NULL,
             row_num  INTEGER NOT NULL,
             PRIMARY KEY (market, symbol, row_num)
         )
-    """
-    )
-    con.execute(
-        """
+    """)
+    con.execute("""
         CREATE TABLE IF NOT EXISTS prediction_results (
             market              VARCHAR NOT NULL,
             symbol              VARCHAR NOT NULL,
@@ -173,8 +148,7 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
             confluence_score    INTEGER,
             PRIMARY KEY (market, symbol, predicted_at, model_version)
         )
-    """
-    )
+    """)
     # 既存テーブルへのマルチホライズン列追加（べき等）
     for col, dtype in [
         ("avg_pred_price_3d", "DOUBLE"),
@@ -192,8 +166,7 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
             con.execute(f"ALTER TABLE prediction_results ADD COLUMN IF NOT EXISTS {col} {dtype}")
         except Exception:
             logger.debug("ALTER TABLE スキップ（DuckDB互換）: col=%s", col, exc_info=True)
-    con.execute(
-        """
+    con.execute("""
         CREATE TABLE IF NOT EXISTS market_data_raw (
             market      VARCHAR NOT NULL,
             symbol      VARCHAR NOT NULL,
@@ -210,10 +183,8 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
             ingested_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (market, symbol, timeframe, ts)
         )
-    """
-    )
-    con.execute(
-        """
+    """)
+    con.execute("""
         CREATE TABLE IF NOT EXISTS index_membership_history (
             market        VARCHAR NOT NULL,
             symbol        VARCHAR NOT NULL,
@@ -223,10 +194,8 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
             fetched_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (market, symbol, snapshot_date)
         )
-    """
-    )
-    con.execute(
-        """
+    """)
+    con.execute("""
         CREATE TABLE IF NOT EXISTS model_metrics (
             market               VARCHAR NOT NULL,
             symbol               VARCHAR NOT NULL,
@@ -237,10 +206,8 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
             n_samples            INTEGER,
             PRIMARY KEY (market, symbol, model_name, trained_at)
         )
-    """
-    )
-    con.execute(
-        """
+    """)
+    con.execute("""
         CREATE TABLE IF NOT EXISTS prediction_accuracy (
             market          VARCHAR NOT NULL,
             symbol          VARCHAR NOT NULL,
@@ -255,23 +222,19 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
             checked_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (market, symbol, model_name, predicted_at, horizon)
         )
-    """
-    )
+    """)
     # ペーパートレード用テーブル
-    con.execute(
-        """
+    con.execute("""
         CREATE TABLE IF NOT EXISTS paper_balance (
             balance DOUBLE NOT NULL
         )
-    """
-    )
+    """)
     # paper_balanceが空なら初期残高（100万円）を挿入
     count = con.execute("SELECT COUNT(*) FROM paper_balance").fetchone()[0]
     if count == 0:
         con.execute("INSERT INTO paper_balance VALUES (1000000.0)")
 
-    con.execute(
-        """
+    con.execute("""
         CREATE TABLE IF NOT EXISTS paper_orders (
             order_id     VARCHAR NOT NULL PRIMARY KEY,
             market       VARCHAR,
@@ -288,8 +251,7 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
             filled_at    TIMESTAMP,
             created_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
-    """
-    )
+    """)
     # realized_pnl カラムが既存テーブルに存在しない場合にマイグレーション
     existing_cols = [
         row[0]
@@ -306,18 +268,15 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
     ]:
         if col not in existing_cols:
             con.execute(f"ALTER TABLE paper_orders ADD COLUMN {col} {dtype}")
-    con.execute(
-        """
+    con.execute("""
         CREATE TABLE IF NOT EXISTS paper_positions (
             symbol      VARCHAR NOT NULL PRIMARY KEY,
             qty         INTEGER NOT NULL,
             avg_price   DOUBLE NOT NULL,
             updated_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
-    """
-    )
-    con.execute(
-        """
+    """)
+    con.execute("""
         CREATE TABLE IF NOT EXISTS shap_values (
             market      VARCHAR NOT NULL,
             symbol      VARCHAR NOT NULL,
@@ -328,10 +287,8 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
             shap_rank   INTEGER NOT NULL,
             PRIMARY KEY (market, symbol, model_name, trained_at, feature)
         )
-    """
-    )
-    con.execute(
-        """
+    """)
+    con.execute("""
         CREATE TABLE IF NOT EXISTS paper_real_diff (
             market          VARCHAR NOT NULL,
             symbol          VARCHAR NOT NULL,
@@ -353,8 +310,7 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
             split_ratio     DOUBLE,
             PRIMARY KEY (market, symbol, predicted_at, side)
         )
-    """
-    )
+    """)
     # R-405: order_session カラムのマイグレーション（既存テーブル対応）
     prd_cols = [
         row[0]
@@ -366,8 +322,7 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
         con.execute("ALTER TABLE paper_real_diff ADD COLUMN order_session VARCHAR")
     if "split_ratio" not in prd_cols:
         con.execute("ALTER TABLE paper_real_diff ADD COLUMN split_ratio DOUBLE")
-    con.execute(
-        """
+    con.execute("""
         CREATE TABLE IF NOT EXISTS feature_selection_log (
             market             VARCHAR NOT NULL,
             symbol             VARCHAR NOT NULL,
@@ -381,11 +336,9 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
             protected_by_shap  BOOLEAN NOT NULL DEFAULT FALSE,
             PRIMARY KEY (market, symbol, model_name, trained_at, feature)
         )
-    """
-    )
+    """)
 
-    con.execute(
-        """
+    con.execute("""
         CREATE TABLE IF NOT EXISTS experiment_runs (
             run_id               VARCHAR NOT NULL PRIMARY KEY,
             market               VARCHAR NOT NULL,
@@ -401,12 +354,10 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
             params_json          VARCHAR,
             created_at           TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
-    """
-    )
+    """)
 
     # R-214: 発注実行サマリーテーブル
-    con.execute(
-        """
+    con.execute("""
         CREATE TABLE IF NOT EXISTS order_run_summary (
             run_id            VARCHAR   NOT NULL PRIMARY KEY,
             market            VARCHAR   NOT NULL,
@@ -420,12 +371,10 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
             total_turnover    DOUBLE    NOT NULL DEFAULT 0.0,
             min_change_ratio  DOUBLE
         )
-    """
-    )
+    """)
 
     # R-215: 空売りポジションテーブル
-    con.execute(
-        """
+    con.execute("""
         CREATE TABLE IF NOT EXISTS paper_short_positions (
             symbol            VARCHAR   NOT NULL PRIMARY KEY,
             qty               INTEGER   NOT NULL,
@@ -434,20 +383,16 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
             opened_at         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
-    """
-    )
+    """)
 
-    con.execute(
-        """
+    con.execute("""
         CREATE TABLE IF NOT EXISTS dd_state (
             id            INTEGER PRIMARY KEY,
             peak_balance  DOUBLE  NOT NULL
         )
-    """
-    )
+    """)
 
-    con.execute(
-        """
+    con.execute("""
         CREATE TABLE IF NOT EXISTS data_quality_log (
             market      VARCHAR NOT NULL,
             symbol      VARCHAR NOT NULL,
@@ -456,22 +401,18 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
             detail      VARCHAR NOT NULL,
             checked_at  VARCHAR NOT NULL
         )
-    """
-    )
+    """)
 
-    con.execute(
-        """
+    con.execute("""
         CREATE TABLE IF NOT EXISTS system_config (
             key        VARCHAR NOT NULL PRIMARY KEY,
             value      VARCHAR NOT NULL,
             updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
-    """
-    )
+    """)
 
     # I-241: 週次精度スナップショット
-    con.execute(
-        """
+    con.execute("""
         CREATE TABLE IF NOT EXISTS accuracy_weekly_snapshots (
             week_start         VARCHAR NOT NULL,
             market             VARCHAR NOT NULL,
@@ -482,8 +423,7 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
             snapshot_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (week_start, market, symbol)
         )
-    """
-    )
+    """)
 
 
 def init_tables() -> None:

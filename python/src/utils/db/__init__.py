@@ -34,7 +34,6 @@ from src.utils.db._connection import (  # noqa: F401
     _db_connection,
     _init_tables,
     close_connection,
-    get_connection,
     get_readonly_connection,
     init_tables,
 )
