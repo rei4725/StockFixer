@@ -212,3 +212,28 @@ class MarketPredictionSnapshot:
     market: str
     top_results: list[PredictionResult] = field(default_factory=list)
     worst_results: list[PredictionResult] = field(default_factory=list)
+
+
+@dataclass
+class DriftMonitorResult:
+    """週次 Hit Rate ドリフト検知結果。
+
+    Attributes:
+        checked_at: 検査実行日時（ISO 8601）
+        current_week: 当週の week_start 文字列（例: "2026-05-11"）
+        current_hit_rate: 当週の Hit Rate（方向正解率）
+        avg_hit_rate: 過去 alert_weeks 週の平均 Hit Rate
+        drop_ratio: (avg - current) / avg — 正の値は低下を示す
+        is_drifted: drop_ratio >= alert_threshold のとき True
+        alert_weeks: 比較対象の週数
+        alert_threshold: ドリフト判定閾値（例: 0.05 = 5%）
+    """
+
+    checked_at: str
+    current_week: Optional[str]
+    current_hit_rate: Optional[float]
+    avg_hit_rate: Optional[float]
+    drop_ratio: Optional[float]
+    is_drifted: bool
+    alert_weeks: int
+    alert_threshold: float
