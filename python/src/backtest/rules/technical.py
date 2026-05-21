@@ -7,7 +7,6 @@ bb_upper, bb_lower, atr 等）を使ってシグナルを生成する。
 
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 
 

@@ -32,15 +32,19 @@ from config.settings import (
     MAX_SECTOR_POSITIONS,
     MIN_CHANGE_RATIO,
 )
-from src.domain.ports import AlertLevel, MarketDataPort, NotificationPort, PredictionResultRepository
+from src.domain.ports import (
+    AlertLevel,
+    MarketDataPort,
+    NotificationPort,
+    PredictionResultRepository,
+)
 from src.domain.trading_rules import ML_EXIT_PROB_THRESHOLD as _ML_EXIT_PROB_THRESHOLD
 from src.domain.trading_rules import THRESHOLD_SCALE_MAX as _THRESHOLD_SCALE_MAX
 from src.domain.trading_rules import THRESHOLD_SCALE_MIN as _THRESHOLD_SCALE_MIN
 from src.domain.trading_rules import THRESHOLD_SCALE_MIN_ROWS as _THRESHOLD_SCALE_MIN_ROWS
-from src.prediction.models.exit_model import ExitModel
-from src.prediction.prediction_pipeline import get_optimal_params
 from src.trading.brokers.base import BrokerBase, BrokerError, OrderSide, OrderType
 from src.trading.correlation_risk import evaluate_correlation_gate
+from src.trading.models.exit_model import ExitModel
 from src.trading.risk_manager import RiskManager
 from src.trading.signal_generator import apply_multi_horizon_score_column
 from src.trading.types import TradingGateStatus
@@ -49,6 +53,7 @@ from src.utils.db import upsert_paper_real_diff
 from src.utils.db._connection import _db_connection
 from src.utils.db.prediction import save_order_run_summary
 from src.utils.logger import get_logger
+from src.utils.optimal_params_loader import get_optimal_params
 from src.utils.sector_constraints import filter_by_sector_cap, get_symbol_sector
 
 logger = get_logger(__name__)
@@ -205,7 +210,6 @@ def _get_held_symbols(broker: BrokerBase) -> set[str]:
     """保有中の銘柄コードセットを返す"""
     positions = broker.get_positions()
     return {p["symbol"].replace(".T", "") for p in positions if p.get("qty", 0) > 0}
-
 
 
 def _load_exit_model(market: str) -> ExitModel | None:

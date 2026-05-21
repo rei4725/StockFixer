@@ -108,9 +108,10 @@ class TestRiskManagerIsAllowed(unittest.TestCase):
 class TestRiskManagerCalcPositionSize(unittest.TestCase):
     """calc_position_size() のポジションサイジングテスト"""
 
-    def _make_risk(self, balance=1_000_000.0):
+    def _make_risk(self, balance=2_000_000.0):
         broker = _make_broker(balance=balance)
         risk = RiskManager(broker)
+        risk.get_current_dd_ratio = MagicMock(return_value=0.0)
         return risk
 
     def test_returns_multiple_of_100(self):
@@ -333,6 +334,7 @@ class TestRiskManagerKellyBtFeedback(unittest.TestCase):
         }
         with patch(self._MOCK_TARGET, return_value=params):
             risk = RiskManager(_make_broker(balance=1_000_000.0), market="jp", symbol="7203")
+        risk.get_current_dd_ratio = MagicMock(return_value=0.0)
 
         # 明示的に低い勝率を指定 → インスタンス属性の 0.62 より少ない株数になるはず
         qty_explicit = risk.calc_position_size(

@@ -38,7 +38,6 @@ ignore_imports =
     src.backtest.stress_test -> src.watchlist.types
     src.backtest.walk_forward_report -> src.watchlist.batch_runner
     src.backtest.optimizer -> src.watchlist.batch_runner
-    src.trading.execution -> src.prediction.prediction_pipeline
     src.prediction.unified_model_pipeline -> src.market_data.loader
     src.prediction.training_pipeline -> src.market_data.loader
     src.prediction.training_pipeline -> src.watchlist.batch_runner
@@ -64,7 +63,6 @@ ignore_imports =
     src.prediction.rule_signal_pipeline -> src.market_data.yf_client
     src.prediction.training_pipeline -> src.market_data.technical
     src.market_data.pipeline -> src.watchlist.types
-    src.trading.execution -> src.prediction.models.exit_model
     src.backtest.portfolio -> src.trading.signal_generator
     src.backtest.pipeline -> src.trading.signal_generator
     src.trading.execution -> src.reporting.discord.discord_utils
@@ -73,11 +71,27 @@ ignore_imports =
     src.backtest.screener -> src.market_data.technical
     src.prediction.rule_signal_pipeline -> src.market_data.technical
     src.utils.alert_service -> src.reporting.discord.discord_utils
+    # --- 後方互換 re-export (ExitModel: prediction → trading) ---
+    src.prediction.models.exit_model -> src.trading.models.exit_model
 
 # ============================================================
 # Contract 2: BC 独立性契約
 #   Bounded Context 同士は相互参照禁止（将来的解消が前提）。
 #   ignore_imports に追加する際は必ず理由コメントを付けること。
+#
+# 違反分類ロードマップ:
+#   [A] types.py 共有で解消可能 (短期 Q3-2026):
+#       reporting → prediction/watchlist: 共有 types を domain/ に集約
+#   [B] イベント/コールバック駆動で解消可能 (中期 Q4-2026):
+#       market_data/watchlist/prediction → reporting: 通知をイベント経由に
+#       backtest → prediction/market_data: BT 専用ポートを定義
+#   [C] 設計変更が必要 (長期 2027):
+#       prediction.rule_signal_pipeline → trading/backtest: ルールエンジン BC の分離
+#
+# 削減目標:
+#   現状: 48件 (2026-05, #264 実施後: 49→48 件)
+#   Q3-2026: 30件以下 (分類 A を解消)
+#   Q4-2026: 20件以下 (分類 B を解消)
 # ============================================================
 [importlinter:contract:independence]
 name = BC independence (BCs must not import each other)
@@ -90,64 +104,73 @@ modules =
     src.watchlist
     src.market_data
 ignore_imports =
-    # --- reporting → prediction (予測結果をレポート表示) ---
+    # [A] reporting → prediction (予測結果をレポート表示 — types.py 共有で解消可能)
     src.reporting.types -> src.prediction.types
     src.reporting.query_service -> src.prediction.types
     src.reporting.query_service -> src.prediction.predict_single
     src.reporting.discord.discord_utils -> src.prediction.types
     src.reporting.discord.discord_bot -> src.prediction.types
-    # --- reporting → watchlist (ウォッチリスト銘柄の予測を表示) ---
+    # [A] reporting → watchlist (ウォッチリスト銘柄の予測を表示 — types.py 共有で解消可能)
     src.reporting.query_service -> src.watchlist.types
     src.reporting.discord.discord_bot -> src.watchlist.types
-    # --- backtest → prediction (バックテストが学習済みモデルを使用) ---
+    # [B] backtest → prediction (バックテストが学習済みモデルを使用 — BT 専用ポート定義で解消可能)
     src.backtest.pipeline -> src.prediction.manager
     src.backtest.portfolio -> src.prediction.manager
-    # --- backtest → market_data (バックテストが OHLCV データを取得) ---
+    # [B] backtest → market_data (バックテストが OHLCV データを取得 — BT 専用ポートで解消可能)
     src.backtest.pipeline -> src.market_data.loader
     src.backtest.backtester -> src.market_data.loader
-    # --- backtest → watchlist (バッチバックテストがウォッチリストを反復) ---
+    # [A] backtest → watchlist (バッチバックテストがウォッチリストを反復 — types 共有で解消可能)
     src.backtest.stress_test -> src.watchlist.types
     src.backtest.walk_forward_report -> src.watchlist.batch_runner
     src.backtest.optimizer -> src.watchlist.batch_runner
-    # --- trading → prediction (発注ロジックが予測シグナルを参照) ---
-    src.trading.execution -> src.prediction.prediction_pipeline
-    # --- prediction → market_data (学習パイプラインが OHLCV を取得) ---
+    # [B] prediction → market_data (学習パイプラインが OHLCV を取得 — market_data ポート注入で解消可能)
     src.prediction.unified_model_pipeline -> src.market_data.loader
     src.prediction.training_pipeline -> src.market_data.loader
-    # --- prediction → watchlist (バッチ学習がウォッチリストを反復) ---
+    # [A] prediction → watchlist (バッチ学習がウォッチリストを反復 — types 共有で解消可能)
     src.prediction.training_pipeline -> src.watchlist.batch_runner
     src.prediction.training_pipeline -> src.watchlist.types
-    # --- prediction → reporting (ドリフト検出時に Discord 通知) ---
+    # [B] prediction → reporting (ドリフト検出時に Discord 通知 — イベント駆動で解消可能)
     src.prediction.manager -> src.reporting.discord.discord_utils
-    # --- market_data → reporting (データ収集完了時に Discord 通知) ---
+    # [B] market_data → reporting (データ収集完了時に Discord 通知 — イベント駆動で解消可能)
     src.market_data.pipeline -> src.reporting.discord.discord_utils
-    # --- market_data → watchlist (バッチデータ収集がウォッチリストを反復) ---
+    # [B] market_data → watchlist (バッチデータ収集がウォッチリストを反復 — ポート注入で解消可能)
     src.market_data.pipeline -> src.watchlist.batch_runner
     # --- utils → BC (推移的違反の根本原因 — 将来削除予定) ---
     src.utils.db.prediction -> src.prediction.types
-    # --- 新規追加違反 (将来的解消対象) ---
+    # [B] watchlist → reporting (バッチ通知 — イベント駆動で解消可能)
     src.watchlist.batch_runner -> src.reporting.discord.discord_utils
+    # [C] prediction.rule_signal_pipeline → trading (ルールエンジン BC 分離が必要)
     src.prediction.rule_signal_pipeline -> src.trading.brokers.base
     src.prediction.rule_signal_pipeline -> src.trading.brokers.paper.paper_broker
+    # [B] reporting → trading (pre_close_alert — alert BC の切り出しで解消可能)
     src.reporting.discord.discord_utils -> src.trading.pre_close_alert_service
+    # [B] backtest → market_data (技術指標計算 — market_data ポートで解消可能)
     src.backtest.rule_backtester -> src.market_data.yf_client
     src.backtest.backtester -> src.market_data.technical
     src.backtest.metrics -> src.market_data.technical
     src.backtest.screener -> src.market_data.yf_client
     src.backtest.portfolio -> src.market_data.market_regime
     src.backtest.pipeline -> src.market_data.technical
+    # [C] prediction.rule_signal_pipeline → backtest (ルール共有 — ルール BC 分離で解消可能)
     src.prediction.rule_signal_pipeline -> src.backtest.rules
+    # [B] prediction → market_data (技術指標計算 — market_data ポートで解消可能)
     src.prediction.unified_model_pipeline -> src.market_data.technical
     src.prediction.predict_single -> src.market_data.technical
     src.prediction.predict_single -> src.market_data.loader
     src.prediction.rule_signal_pipeline -> src.market_data.yf_client
     src.prediction.training_pipeline -> src.market_data.technical
+    # [A] market_data → watchlist (types 共有で解消可能)
     src.market_data.pipeline -> src.watchlist.types
-    src.trading.execution -> src.prediction.models.exit_model
+    # [B] backtest → trading (シグナル生成 — trading ポートで解消可能)
     src.backtest.portfolio -> src.trading.signal_generator
     src.backtest.pipeline -> src.trading.signal_generator
+    # [B] trading → reporting (発注通知 — イベント駆動で解消可能)
     src.trading.execution -> src.reporting.discord.discord_utils
+    # [B] backtest → reporting (バックテスト通知 — イベント駆動で解消可能)
     src.backtest.pipeline -> src.reporting.discord.discord_utils
+    # [B] backtest → market_data (追加技術指標 — ポートで解消可能)
     src.backtest.rule_backtester -> src.market_data.technical
     src.backtest.screener -> src.market_data.technical
     src.prediction.rule_signal_pipeline -> src.market_data.technical
+    # --- 後方互換 re-export shim (ExitModel 移動に伴う一時的違反 — テスト更新後に削除) ---
+    src.prediction.models.exit_model -> src.trading.models.exit_model

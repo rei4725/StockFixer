@@ -38,6 +38,19 @@ jobs:
       - name: Run lint-imports
         run: lint-imports
 
+      - name: Check ignore_imports count does not increase
+        run: |
+          BASE_REF="${{ github.event.pull_request.base.sha || github.event.before }}"
+          CURRENT_COUNT=$(grep -c '^\s*src\.' .importlinter || true)
+          echo "Current ignore_imports count: $CURRENT_COUNT"
+          if [ -n "$BASE_REF" ] && git cat-file -e "$BASE_REF:.importlinter" 2>/dev/null; then
+            BASE_COUNT=$(git show "$BASE_REF:.importlinter" | grep -c '^\s*src\.' || true)
+            echo "Base ignore_imports count: $BASE_COUNT"
+            if [ "$CURRENT_COUNT" -gt "$BASE_COUNT" ]; then
+              echo "::warning::ignore_imports が $BASE_COUNT → $CURRENT_COUNT 件に増加しました。BC 間の依存追加は最終手段です。"
+            fi
+          fi
+
       - name: Report result
         if: failure()
         run: |

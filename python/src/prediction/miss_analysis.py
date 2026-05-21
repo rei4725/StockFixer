@@ -7,7 +7,6 @@
 
 from collections import Counter
 from dataclasses import dataclass
-from typing import Optional
 
 import pandas as pd
 

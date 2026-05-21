@@ -94,8 +94,8 @@ def _get_last_prediction_at() -> str | None:
 # ---------------------------------------------------------------------------
 
 
-from src.api.external_v1 import register_routes as _register_external_v1
-from src.api.metrics import register_routes as _register_metrics
+from src.api.external_v1 import register_routes as _register_external_v1  # noqa: E402
+from src.api.metrics import register_routes as _register_metrics  # noqa: E402
 
 _register_metrics(app)
 _register_external_v1(app)
