@@ -17,10 +17,9 @@ from src.reporting.query_service import (
     get_signal_snapshot,
     get_watchlist_prediction_view,
 )
-from src.reporting.types import MonthlyReportSummary
+from src.reporting.types import MonthlyReportSummary, WatchlistPredictionRow, WatchlistPredictionView
 from src.utils.japan_time import format_jst_from_iso
 from src.utils.logger import get_logger
-from src.watchlist.types import WatchlistPredictionRow, WatchlistPredictionView
 
 logger = get_logger(__name__)
 
