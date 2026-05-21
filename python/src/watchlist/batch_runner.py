@@ -12,7 +12,8 @@ from typing import Callable, Optional
 from src.utils.data_path_utils import get_watchlist_path
 from src.utils.db import load_index_membership_symbols_as_of
 from src.utils.logger import get_logger
-from src.watchlist.types import BatchFailure, BatchResult, SymbolTask
+from src.domain.types import SymbolTask
+from src.watchlist.types import BatchFailure, BatchResult
 
 logger = get_logger(__name__)
 

@@ -7,7 +7,8 @@ import unittest
 from unittest.mock import patch
 
 from src.watchlist.batch_runner import load_target_symbols, print_summary, run_parallel
-from src.watchlist.types import BatchFailure, BatchResult, SymbolTask
+from src.domain.types import SymbolTask
+from src.watchlist.types import BatchFailure, BatchResult
 
 
 class TestLoadTargetSymbols(unittest.TestCase):
