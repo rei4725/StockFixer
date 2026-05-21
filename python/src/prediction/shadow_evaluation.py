@@ -25,7 +25,7 @@ import pandas as pd
 
 from src.utils.data_path_utils import get_models_subdir
 from src.utils.db.experiment import generate_run_id, save_experiment_run
-from src.utils.db.prediction import load_prediction_accuracy
+from src.prediction.db import load_prediction_accuracy
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
