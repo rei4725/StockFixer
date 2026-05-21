@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 import pandas as pd
 
@@ -143,7 +143,7 @@ def run_monthly_report(target_month: Optional[str] = None) -> MonthlyReportSumma
 
 def save_monthly_report_to_file(
     summary: MonthlyReportSummary,
-    drift_checker: Optional[Callable] = None,
+    drift_checker: Optional[Callable[[], Any]] = None,
 ) -> str:
     """
     月次KPIサマリーを Markdown ファイルとして保存する（R-203）。

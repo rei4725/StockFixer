@@ -10,7 +10,6 @@ prediction_accuracy テーブルの Hit Rate を週次集計し、
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
 
 import pandas as pd
 
