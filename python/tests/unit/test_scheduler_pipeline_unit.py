@@ -7,8 +7,8 @@ from unittest.mock import MagicMock, patch
 
 import pandas as pd
 
-from src.orchestration.scheduler import run_daily_auto_order, run_daily_drift_check
 from src.domain.types import SymbolTask
+from src.orchestration.scheduler import run_daily_auto_order, run_daily_drift_check
 
 
 class TestRunDailyAutoOrder(unittest.TestCase):

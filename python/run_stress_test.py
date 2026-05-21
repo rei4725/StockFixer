@@ -27,8 +27,8 @@ from src.backtest.stress_test import (
     run_stress_test_batch,
     save_stress_test_results,
 )
-from src.utils.logger import get_logger
 from src.domain.types import SymbolTask
+from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
