@@ -14,7 +14,7 @@ from typing import Any
 
 from config.settings import PAPER_INITIAL_BALANCE
 from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
-from src.utils import yf_client
+import src.market_data.yf_client as yf_client
 from src.utils.db import upsert_paper_real_diff
 from src.utils.db._connection import _db_connection
 from src.utils.logger import get_logger
