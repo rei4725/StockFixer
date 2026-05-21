@@ -5,6 +5,7 @@
 """
 
 import unittest
+from unittest.mock import patch
 
 from src.trading.capital_allocator import allocate_capital
 from src.trading.types import AllocationCandidate, AllocationResult
@@ -162,6 +163,47 @@ class TestAllocateCapital(unittest.TestCase):
         high_w = next(r.weight for r in results if r.symbol == "HIGH")
         low_w = next(r.weight for r in results if r.symbol == "LOW")
         self.assertAlmostEqual(high_w / low_w, 2.0, places=5)
+
+
+class TestAllocateCapitalWithExistingPositions(unittest.TestCase):
+    @patch("src.trading.capital_allocator.filter_correlated_candidates")
+    def test_high_corr_with_existing_excluded(self, mock_filter):
+        mock_filter.return_value = (["MSFT"], ["AAPL"])
+        candidates = [
+            _make_candidate("AAPL", diff_ratio=0.05, confidence_ratio=0.9),
+            _make_candidate("MSFT", diff_ratio=0.03, confidence_ratio=0.8),
+        ]
+        results = allocate_capital(candidates, existing_positions=["TSLA"])
+        symbols = [r.symbol for r in results]
+        self.assertNotIn("AAPL", symbols)
+        self.assertIn("MSFT", symbols)
+
+    @patch("src.trading.capital_allocator.filter_correlated_candidates")
+    def test_all_blocked_returns_empty(self, mock_filter):
+        mock_filter.return_value = ([], ["AAPL"])
+        candidates = [_make_candidate("AAPL", diff_ratio=0.05, confidence_ratio=0.9)]
+        results = allocate_capital(candidates, existing_positions=["TSLA"])
+        self.assertEqual(results, [])
+
+    @patch("src.trading.capital_allocator.filter_correlated_candidates")
+    def test_no_existing_positions_skips_pairwise_check(self, mock_filter):
+        candidates = [_make_candidate("AAPL", diff_ratio=0.05, confidence_ratio=0.9)]
+        allocate_capital(candidates, existing_positions=None)
+        mock_filter.assert_not_called()
+
+    @patch("src.trading.capital_allocator.filter_correlated_candidates")
+    def test_pairwise_params_forwarded(self, mock_filter):
+        mock_filter.return_value = (["AAPL"], [])
+        candidates = [_make_candidate("AAPL", diff_ratio=0.05, confidence_ratio=0.9)]
+        allocate_capital(
+            candidates,
+            existing_positions=["TSLA"],
+            pairwise_corr_threshold=0.5,
+            pairwise_corr_window=30,
+        )
+        _, kwargs = mock_filter.call_args
+        self.assertEqual(kwargs["threshold"], 0.5)
+        self.assertEqual(kwargs["window"], 30)
 
 
 if __name__ == "__main__":

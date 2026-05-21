@@ -10,9 +10,16 @@ from __future__ import annotations
 
 from typing import Optional
 
-from config.settings import MAX_POSITION_RATE, MAX_POSITIONS, MAX_SECTOR_POSITIONS
+from config.settings import (
+    CORRELATION_PAIRWISE_THRESHOLD,
+    CORRELATION_PAIRWISE_WINDOW_DAYS,
+    MAX_POSITION_RATE,
+    MAX_POSITIONS,
+    MAX_SECTOR_POSITIONS,
+)
 from src.domain.trading_rules import DEFAULT_REGIME_SCALE as _DEFAULT_REGIME_SCALE
 from src.domain.trading_rules import REGIME_SCALE as _REGIME_SCALE
+from src.trading.correlation_risk import filter_correlated_candidates
 from src.trading.types import AllocationCandidate, AllocationResult
 from src.utils.logger import get_logger
 from src.utils.sector_constraints import filter_by_sector_cap
@@ -42,6 +49,9 @@ def allocate_capital(
     max_sector_positions: int = MAX_SECTOR_POSITIONS,
     max_weight_per_symbol: float = MAX_POSITION_RATE,
     min_diff_ratio: float = 0.0,
+    existing_positions: Optional[list[str]] = None,
+    pairwise_corr_threshold: float = CORRELATION_PAIRWISE_THRESHOLD,
+    pairwise_corr_window: int = CORRELATION_PAIRWISE_WINDOW_DAYS,
 ) -> list[AllocationResult]:
     """複数候補銘柄に対して推奨保有比率を一括計算する。
 
@@ -56,6 +66,10 @@ def allocate_capital(
         max_sector_positions: セクターごとの最大銘柄数。
         max_weight_per_symbol: 1銘柄あたりの最大ウェイト [0, 1]。
         min_diff_ratio: この値以下の diff_ratio を持つ候補を除外する。
+        existing_positions: 既存ポジションの銘柄コードリスト。指定した場合、
+            これらとの絶対相関が pairwise_corr_threshold を超える候補を除外する。
+        pairwise_corr_threshold: ペアワイズ相関ブロック閾値。
+        pairwise_corr_window: ペアワイズ相関計算のローリングウィンドウ日数。
 
     Returns:
         AllocationResult のリスト（weight の降順）。
@@ -72,6 +86,29 @@ def allocate_capital(
         regime_scale,
         avg_correlation,
     )
+
+    # ステップ0: 既存ポジションとのペアワイズ相関でフィルタ
+    if existing_positions:
+        market = candidates[0].market
+        candidate_syms = [c.symbol for c in candidates]
+        allowed_syms, blocked_syms = filter_correlated_candidates(
+            candidate_syms,
+            existing_positions,
+            market,
+            window=pairwise_corr_window,
+            threshold=pairwise_corr_threshold,
+        )
+        if blocked_syms:
+            allowed_set = set(allowed_syms)
+            candidates = [c for c in candidates if c.symbol in allowed_set]
+            logger.info(
+                "[allocator] ペアワイズ相関フィルタ後: %d 銘柄 (除外=%s)",
+                len(candidates),
+                blocked_syms,
+            )
+        if not candidates:
+            logger.info("[allocator] ペアワイズ相関フィルタ後に候補なし")
+            return []
 
     # ステップ1: 最小リターン閾値でフィルタ
     filtered = [c for c in candidates if c.diff_ratio > min_diff_ratio]
