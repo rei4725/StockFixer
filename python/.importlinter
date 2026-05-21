@@ -38,6 +38,7 @@ ignore_imports =
     src.prediction.unified_model_pipeline -> src.market_data.loader
     src.prediction.training_pipeline -> src.market_data.loader
     src.prediction.training_pipeline -> src.watchlist.batch_runner
+    src.prediction.training_pipeline -> src.watchlist.types
     src.prediction.manager -> src.reporting.discord.discord_utils
     src.market_data.pipeline -> src.reporting.discord.discord_utils
     src.market_data.pipeline -> src.watchlist.batch_runner
