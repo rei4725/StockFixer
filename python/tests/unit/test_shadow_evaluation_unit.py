@@ -181,12 +181,15 @@ class TestPromoteUnifiedChallenger(unittest.TestCase):
                 f.write(b"dummy model")
 
     def test_skips_when_challenger_not_found(self):
-        from src.prediction.shadow_evaluation import promote_unified_challenger
+        from src.prediction.shadow_evaluation import (
+            _UNIFIED_CHALLENGER_NAMES,
+            promote_unified_challenger,
+        )
 
         with patch("src.utils.data_path_utils.get_models_dir", return_value=self.tmpdir):
             result = promote_unified_challenger()
 
-        self.assertEqual(len(result["skipped"]), 2)
+        self.assertEqual(len(result["skipped"]), len(_UNIFIED_CHALLENGER_NAMES))
         self.assertEqual(len(result["promoted"]), 0)
 
     def test_dry_run_does_not_copy_files(self):

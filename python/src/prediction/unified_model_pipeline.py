@@ -319,6 +319,7 @@ def train_unified_models_batch(
     both: bool = True,
     model_type: str = "XGBoostModel",
     model_name: str = None,
+    include_transformer: bool = False,
 ) -> None:
     """指定ホライズン × モデルタイプの組み合わせで統合モデルを一括学習する。
 
@@ -327,11 +328,15 @@ def train_unified_models_batch(
         both: True のとき XGBoost + LightGBM の両モデルを学習
         model_type: both=False のとき使用するモデルタイプ
         model_name: both=False かつ horizon=1 のとき使用するモデル名（省略時は命名規則に従う）
+        include_transformer: True のとき TransformerModel もアンサンブルに追加して学習
     """
     for horizon in horizons:
         logger.info(f"=== 統合モデル学習: horizon={horizon}d ===")
         if both:
-            for mt in ["XGBoostModel", "LightGBMModel"]:
+            model_types_to_train = ["XGBoostModel", "LightGBMModel"]
+            if include_transformer:
+                model_types_to_train.append("TransformerModel")
+            for mt in model_types_to_train:
                 name = make_unified_model_name(mt, horizon)
                 logger.info(f"学習開始: {name}")
                 train_unified_model(model_type=mt, model_name=name, horizon=horizon)
