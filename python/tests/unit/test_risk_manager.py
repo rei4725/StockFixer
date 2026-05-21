@@ -336,6 +336,8 @@ class TestRiskManagerKellyBtFeedback(unittest.TestCase):
             risk = RiskManager(_make_broker(balance=1_000_000.0), market="jp", symbol="7203")
         risk.get_current_dd_ratio = MagicMock(return_value=0.0)
 
+        risk.get_current_dd_ratio = MagicMock(return_value=0.0)
+
         # 明示的に低い勝率を指定 → インスタンス属性の 0.62 より少ない株数になるはず
         qty_explicit = risk.calc_position_size(
             "7203", 1000.0, win_rate=0.4, avg_win=0.01, avg_loss=0.01

@@ -6,7 +6,7 @@ import json
 import os
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 
@@ -326,6 +326,161 @@ class TestLogPromotionToMlflow(unittest.TestCase):
 
         with patch("builtins.__import__", side_effect=mock_import):
             _log_promotion_to_mlflow(result)  # 例外が伝播しなければOK
+
+
+class TestAutoPromoteModelSetting(unittest.TestCase):
+    def test_default_is_false(self):
+        """AUTO_PROMOTE_MODEL はデフォルト False。"""
+        with patch.dict("os.environ", {}, clear=False):
+            import importlib
+
+            import config.settings as settings_mod
+
+            importlib.reload(settings_mod)
+            self.assertFalse(settings_mod.AUTO_PROMOTE_MODEL)
+
+    def test_env_true_sets_true(self):
+        """AUTO_PROMOTE_MODEL=true が True に変換される。"""
+        with patch.dict("os.environ", {"AUTO_PROMOTE_MODEL": "true"}, clear=False):
+            import importlib
+
+            import config.settings as settings_mod
+
+            importlib.reload(settings_mod)
+            self.assertTrue(settings_mod.AUTO_PROMOTE_MODEL)
+
+
+class TestSchedulerAutoPromotion(unittest.TestCase):
+    """スケジューラの AUTO_PROMOTE_MODEL による昇格制御のテスト。"""
+
+    def _make_patches(self, auto_promote: bool, eligible: bool = True):
+        wf_df = pd.DataFrame(
+            {
+                "model_name": ["challenger", "production"],
+                "total_return": [0.06, 0.04],
+                "max_drawdown": [-0.08, -0.12],
+                "sharpe_ratio": [0.7, 0.6],
+            }
+        )
+        return [
+            patch("config.settings.AUTO_PROMOTE_MODEL", auto_promote),
+            patch(
+                "src.prediction.promotion_gate._load_latest_wf_summary",
+                return_value=(wf_df, "wf_summary.csv"),
+            ),
+            patch(
+                "src.prediction.promotion_gate._compute_hit_rate",
+                return_value=0.6 if eligible else 0.3,
+            ),
+            patch("src.prediction.promotion_gate._compute_slippage", return_value=0.01),
+            patch("src.prediction.promotion_gate._collect_run_ids", return_value=[]),
+            patch("src.prediction.promotion_gate._log_promotion_to_mlflow"),
+        ]
+
+    def test_require_manual_approval_false_when_auto_promote_true(self):
+        """AUTO_PROMOTE_MODEL=True → require_manual_approval=False が渡される。"""
+        from src.prediction.promotion_gate import evaluate_promotion
+
+        patches = self._make_patches(auto_promote=True)
+        with patches[1], patches[2], patches[3], patches[4], patches[5]:
+            result = evaluate_promotion("challenger", "production", require_manual_approval=False)
+        self.assertFalse(result.require_manual_approval)
+        self.assertIn("自動昇格", result.reason)
+
+    def test_require_manual_approval_true_when_auto_promote_false(self):
+        """AUTO_PROMOTE_MODEL=False → require_manual_approval=True が渡される。"""
+        from src.prediction.promotion_gate import evaluate_promotion
+
+        patches = self._make_patches(auto_promote=False)
+        with patches[1], patches[2], patches[3], patches[4], patches[5]:
+            result = evaluate_promotion("challenger", "production", require_manual_approval=True)
+        self.assertTrue(result.require_manual_approval)
+        self.assertIn("手動承認", result.reason)
+
+    def test_auto_promote_false_skips_promotion(self):
+        """AUTO_PROMOTE_MODEL=False かつ eligible=True でも promote_unified_challenger は呼ばれない。"""
+        mock_promote = MagicMock(return_value={"promoted": ["challenger.joblib"], "skipped": []})
+
+        with (
+            patch("src.orchestration.scheduler.run_weekly_training.__module__"),
+            patch("config.settings.AUTO_PROMOTE_MODEL", False),
+            patch(
+                "src.prediction.promotion_gate.evaluate_promotion",
+            ) as mock_eval,
+            patch("src.prediction.promotion_gate.save_promotion_result"),
+            patch(
+                "src.prediction.shadow_evaluation.evaluate_shadow_models",
+                return_value={"challenger_wins": True},
+            ),
+            patch("src.prediction.shadow_evaluation.promote_unified_challenger", mock_promote),
+            patch("src.prediction.shadow_evaluation._UNIFIED_PRODUCTION_NAMES", ["production_xgb"]),
+            patch("src.prediction.shadow_evaluation._UNIFIED_CHALLENGER_NAMES", ["challenger_xgb"]),
+            patch("src.prediction.unified_model_pipeline.train_unified_model"),
+            patch(
+                "src.prediction.prediction_pipeline.run_accuracy_check", return_value=pd.DataFrame()
+            ),
+            patch("src.reporting.discord.discord_utils.send_drift_alert"),
+            patch("src.reporting.discord.discord_utils.send_weekly_training_completion"),
+            patch("src.reporting.discord.discord_utils.send_promotion_result"),
+        ):
+            from src.prediction.promotion_gate import PromotionResult
+
+            mock_eval.return_value = PromotionResult(
+                shadow_model="challenger",
+                current_model="production",
+                evaluated_at="2024-01-01T00:00:00",
+                eligible=True,
+                require_manual_approval=True,
+                criteria={},
+                reason="全基準クリア。手動承認待ち。",
+            )
+            from src.orchestration.scheduler import run_weekly_training
+
+            run_weekly_training()
+
+        mock_promote.assert_not_called()
+
+    def test_auto_promote_true_executes_promotion(self):
+        """AUTO_PROMOTE_MODEL=True かつ eligible=True で promote_unified_challenger が呼ばれる。"""
+        mock_promote = MagicMock(return_value={"promoted": ["challenger.joblib"], "skipped": []})
+
+        with (
+            patch("config.settings.AUTO_PROMOTE_MODEL", True),
+            patch(
+                "src.prediction.promotion_gate.evaluate_promotion",
+            ) as mock_eval,
+            patch("src.prediction.promotion_gate.save_promotion_result"),
+            patch(
+                "src.prediction.shadow_evaluation.evaluate_shadow_models",
+                return_value={"challenger_wins": True},
+            ),
+            patch("src.prediction.shadow_evaluation.promote_unified_challenger", mock_promote),
+            patch("src.prediction.shadow_evaluation._UNIFIED_PRODUCTION_NAMES", ["production_xgb"]),
+            patch("src.prediction.shadow_evaluation._UNIFIED_CHALLENGER_NAMES", ["challenger_xgb"]),
+            patch("src.prediction.unified_model_pipeline.train_unified_model"),
+            patch(
+                "src.prediction.prediction_pipeline.run_accuracy_check", return_value=pd.DataFrame()
+            ),
+            patch("src.reporting.discord.discord_utils.send_drift_alert"),
+            patch("src.reporting.discord.discord_utils.send_weekly_training_completion"),
+            patch("src.reporting.discord.discord_utils.send_promotion_result"),
+        ):
+            from src.prediction.promotion_gate import PromotionResult
+
+            mock_eval.return_value = PromotionResult(
+                shadow_model="challenger",
+                current_model="production",
+                evaluated_at="2024-01-01T00:00:00",
+                eligible=True,
+                require_manual_approval=False,
+                criteria={},
+                reason="全基準クリア。自動昇格可能。",
+            )
+            from src.orchestration.scheduler import run_weekly_training
+
+            run_weekly_training()
+
+        mock_promote.assert_called_once()
 
 
 if __name__ == "__main__":

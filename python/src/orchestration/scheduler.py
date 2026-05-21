@@ -159,6 +159,7 @@ def run_weekly_training():
     """
     logger.info("=== 週次モデル学習開始 ===")
 
+    from config.settings import AUTO_PROMOTE_MODEL
     from src.prediction.promotion_gate import evaluate_promotion, save_promotion_result
     from src.prediction.shadow_evaluation import (
         _UNIFIED_CHALLENGER_NAMES,
@@ -199,19 +200,23 @@ def run_weekly_training():
             gate_result = evaluate_promotion(
                 shadow_model_name="challenger",
                 current_model_name="production",
-                require_manual_approval=False,
+                require_manual_approval=not AUTO_PROMOTE_MODEL,
             )
             save_promotion_result(gate_result)
-            logger.info("昇格ゲート判定: eligible=%s reason=%s", gate_result.eligible, gate_result.reason)
+            logger.info(
+                "昇格ゲート判定: eligible=%s reason=%s", gate_result.eligible, gate_result.reason
+            )
 
-            if gate_result.eligible:
-                logger.info("[3/4] 昇格実行: challenger → production")
+            if gate_result.eligible and AUTO_PROMOTE_MODEL:
+                logger.info("[3/4] 昇格実行: challenger → production (AUTO_PROMOTE_MODEL=true)")
                 promote_result = promote_unified_challenger()
                 if promote_result["promoted"]:
                     logger.info("昇格完了: %s", promote_result["promoted"])
                     promoted = True
                 else:
                     logger.warning("昇格対象ファイルなし: skipped=%s", promote_result["skipped"])
+            elif gate_result.eligible:
+                logger.info("[3/4] 昇格基準クリアだが AUTO_PROMOTE_MODEL=false のため手動承認待ち")
             else:
                 logger.info("昇格ゲート未達（再学習のみ実施）: %s", gate_result.reason)
         except Exception as e:
@@ -336,7 +341,9 @@ def run_daily_auto_order():
 
     try:
         stats = run_daily_orders(broker=broker, market="jp", mode=mode)
-        logger.info("=== 自動発注完了: 買い=%s 売り=%s ===", stats["buy_orders"], stats["sell_orders"])
+        logger.info(
+            "=== 自動発注完了: 買い=%s 売り=%s ===", stats["buy_orders"], stats["sell_orders"]
+        )
     except Exception as e:
         logger.error("自動発注失敗: %s", e, exc_info=True)
         raise
@@ -775,7 +782,9 @@ def run_daily_drift_check():
     for sym in triggered_list:
         task = all_tasks.get((sym["market"], sym["symbol"]))
         if task is None:
-            logger.warning("ドリフト再学習: タスクが見つかりません (%s/%s)", sym["market"], sym["symbol"])
+            logger.warning(
+                "ドリフト再学習: タスクが見つかりません (%s/%s)", sym["market"], sym["symbol"]
+            )
             continue
         try:
             logger.info("ドリフト再学習開始: %s/%s", sym["market"], sym["symbol"])
@@ -790,9 +799,13 @@ def run_daily_drift_check():
                     f"{result.get('reason') or result.get('error') or result.get('status')}"
                 )
         except Exception as e:
-            logger.error("ドリフト再学習失敗 (%s/%s): %s", sym["market"], sym["symbol"], e, exc_info=True)
+            logger.error(
+                "ドリフト再学習失敗 (%s/%s): %s", sym["market"], sym["symbol"], e, exc_info=True
+            )
 
-    logger.info("=== 日次ドリフトチェック完了: 再学習=%s/%s 件 ===", success_count, len(triggered_list))
+    logger.info(
+        "=== 日次ドリフトチェック完了: 再学習=%s/%s 件 ===", success_count, len(triggered_list)
+    )
 
     # SHAP サマリーをまとめて 1 通送信
     if all_shap_results:
