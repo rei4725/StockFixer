@@ -250,8 +250,8 @@ class TestHandleForecastCommand(unittest.TestCase):
 
     @patch("src.reporting.discord.discord_bot.get_latest_market_prediction_snapshots")
     def test_sends_top_and_worst_tables(self, mock_get):
-        from src.reporting.discord.discord_bot import handle_forecast_command
         from src.prediction.types import MarketPredictionSnapshot
+        from src.reporting.discord.discord_bot import handle_forecast_command
 
         snapshot = MarketPredictionSnapshot(
             market="JP",
@@ -286,8 +286,8 @@ class TestHandleForecastCommand(unittest.TestCase):
 
     @patch("src.reporting.discord.discord_bot.get_latest_market_prediction_snapshots")
     def test_skips_empty_top_results(self, mock_get):
-        from src.reporting.discord.discord_bot import handle_forecast_command
         from src.prediction.types import MarketPredictionSnapshot
+        from src.reporting.discord.discord_bot import handle_forecast_command
 
         snapshot = MarketPredictionSnapshot(market="JP", top_results=[], worst_results=[])
         mock_get.return_value = ("2026-04-18T09:00:00", [snapshot])
