@@ -203,3 +203,12 @@ class SignalSnapshot:
     prediction: PredictionResult
     shap_direction: Optional[str] = None
     top_features: list[ShapFeatureContribution] = field(default_factory=list)
+
+
+@dataclass
+class MarketPredictionSnapshot:
+    """Discord などの表示用にまとめた市場別予測スナップショット。"""
+
+    market: str
+    top_results: list[PredictionResult] = field(default_factory=list)
+    worst_results: list[PredictionResult] = field(default_factory=list)

@@ -22,7 +22,6 @@ ignore_imports =
     src.reporting.query_service -> src.orchestration.types
     src.reporting.discord.discord_bot -> src.orchestration.types
     # --- BC 間相互参照 (independence contract でも管理) ---
-    src.reporting.types -> src.prediction.types
     src.reporting.query_service -> src.prediction.types
     src.reporting.query_service -> src.prediction.predict_single
     src.reporting.discord.discord_utils -> src.prediction.types
@@ -101,7 +100,6 @@ modules =
     src.market_data
 ignore_imports =
     # [A] reporting → prediction (予測結果をレポート表示 — types.py 共有で解消可能)
-    src.reporting.types -> src.prediction.types
     src.reporting.query_service -> src.prediction.types
     src.reporting.query_service -> src.prediction.predict_single
     src.reporting.discord.discord_utils -> src.prediction.types
