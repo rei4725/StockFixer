@@ -5,9 +5,37 @@
 各パイプラインの制御フロー、エラーハンドリングをここで実装。
 """
 
+from typing import Callable, Optional
+
+from src.orchestration.types import PipelineStage
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+def _handle_stage_error(
+    stage: PipelineStage,
+    label: str,
+    exc: Exception,
+    notify_fn: Optional[Callable[[str], object]] = None,
+) -> bool:
+    """ステージ分類に基づくエラーハンドリング。
+
+    Returns:
+        True  → 呼び出し元は raise すべき (CRITICAL)
+        False → 継続してよい (NON_CRITICAL / RECOVERABLE)
+    """
+    if stage is PipelineStage.CRITICAL:
+        logger.error("%s 失敗: %s", label, exc, exc_info=True)
+        if notify_fn is not None:
+            notify_fn(f"{label} 失敗: {exc}")
+        return True
+    elif stage is PipelineStage.NON_CRITICAL:
+        logger.error("%s 失敗: %s", label, exc, exc_info=True)
+        return False
+    else:  # RECOVERABLE
+        logger.warning("%s 失敗（継続）: %s", label, exc, exc_info=True)
+        return False
 
 
 def run_daily_pipeline():
@@ -29,7 +57,7 @@ def run_daily_pipeline():
         send_daily_pipeline_error,
     )
 
-    # 1. データ取得（バッチ）
+    # 1. データ取得（CRITICAL: 失敗時はパイプライン停止 + Discord通知）
     logger.info("[1/5] データ取得開始")
     from src.market_data.pipeline import run_data_batch
 
@@ -37,11 +65,10 @@ def run_daily_pipeline():
         run_data_batch()
         logger.info("[1/5] データ取得完了")
     except Exception as e:
-        logger.error("[1/5] データ取得失敗: %s", e, exc_info=True)
-        send_daily_pipeline_error(f"データ取得失敗: {e}")
-        raise
+        if _handle_stage_error(PipelineStage.CRITICAL, "[1/5] データ取得", e, send_daily_pipeline_error):
+            raise
 
-    # 2. 予測（Top10/Worst10 — production モデル）
+    # 2. 予測（CRITICAL: 失敗時はパイプライン停止 + Discord通知）
     logger.info("[2/5] 予測開始 (production)")
     from src.prediction.prediction_pipeline import output_top_worst_results, predict_all_unified
 
@@ -52,11 +79,15 @@ def run_daily_pipeline():
         )
         logger.info("[2/5] 予測完了 (production): %d 銘柄", len(output_rows))
     except Exception as e:
-        logger.error("[2/5] 予測失敗: %s", e, exc_info=True)
-        send_daily_pipeline_error(f"予測失敗: {e}")
-        raise
+        if _handle_stage_error(
+            PipelineStage.CRITICAL,
+            "[2/5] 予測 (production)",
+            e,
+            send_daily_pipeline_error,
+        ):
+            raise
 
-    # 2.5. Challenger shadow 予測（非致命的：モデルが存在しない場合はスキップ）
+    # 2.5. Challenger shadow 予測（NON_CRITICAL: モデルが存在しない場合はスキップ、失敗しても継続）
     logger.info("[2.5/5] Challenger shadow 予測開始")
     try:
         from src.prediction.shadow_evaluation import predict_with_challenger_unified
@@ -70,9 +101,9 @@ def run_daily_pipeline():
         else:
             logger.info("[2.5/5] Challenger モデルなし（スキップ）")
     except Exception as e:
-        logger.error("[2.5/5] Challenger shadow 予測失敗: %s", e, exc_info=True)
+        _handle_stage_error(PipelineStage.NON_CRITICAL, "[2.5/5] Challenger shadow 予測", e)
 
-    # 3. 前日予測の精度チェック（非致命的：失敗しても後続処理を継続）
+    # 3. 前日予測の精度チェック（NON_CRITICAL: 失敗しても後続処理を継続）
     logger.info("[3/5] 予測精度チェック開始")
     try:
         from src.prediction.prediction_pipeline import run_accuracy_check
@@ -84,7 +115,7 @@ def run_daily_pipeline():
         send_accuracy_summary(summary, horizon=1)
         logger.info("[3/5] 予測精度チェック完了 (production)")
     except Exception as e:
-        logger.error("[3/5] 予測精度チェック失敗 (production): %s", e, exc_info=True)
+        _handle_stage_error(PipelineStage.NON_CRITICAL, "[3/5] 予測精度チェック (production)", e)
 
     try:
         from src.prediction.prediction_pipeline import run_accuracy_check
@@ -92,24 +123,24 @@ def run_daily_pipeline():
         run_accuracy_check(horizon=1, model_name="challenger", model_version_filter="challenger")
         logger.info("[3/5] 予測精度チェック完了 (challenger)")
     except Exception as e:
-        logger.error("[3/5] 予測精度チェック失敗 (challenger): %s", e, exc_info=True)
+        _handle_stage_error(PipelineStage.NON_CRITICAL, "[3/5] 予測精度チェック (challenger)", e)
 
-    # 4. 日次ドリフトチェック（非致命的：失敗しても後続処理を継続）
+    # 4. 日次ドリフトチェック（NON_CRITICAL: 失敗しても後続処理を継続）
     logger.info("[4/5] 日次ドリフトチェック開始")
     try:
         run_daily_drift_check()
         logger.info("[4/5] 日次ドリフトチェック完了")
     except Exception as e:
-        logger.error("[4/5] 日次ドリフトチェック失敗: %s", e, exc_info=True)
+        _handle_stage_error(PipelineStage.NON_CRITICAL, "[4/5] 日次ドリフトチェック", e)
 
-    # 5. Discord通知
+    # 5. Discord通知（CRITICAL: 失敗時はパイプライン停止）
     logger.info("[5/5] Discord通知送信")
     try:
         send_daily_pipeline_completion()
         logger.info("[5/5] Discord通知完了")
     except Exception as e:
-        logger.error("[5/5] Discord通知失敗: %s", e, exc_info=True)
-        raise
+        if _handle_stage_error(PipelineStage.CRITICAL, "[5/5] Discord通知", e):
+            raise
 
     logger.info("=== 日次パイプライン完了 ===")
 
@@ -137,7 +168,7 @@ def run_weekly_training():
     )
     from src.prediction.unified_model_pipeline import train_unified_model
 
-    # 1. Shadow 評価（前週分の prediction_accuracy データで比較）
+    # 1. Shadow 評価（NON_CRITICAL: データなし時はスキップして継続）
     logger.info("[1/4] Shadow 評価開始")
     shadow_results = []
     for prod_name, chal_name in zip(_UNIFIED_PRODUCTION_NAMES, _UNIFIED_CHALLENGER_NAMES):
@@ -157,9 +188,9 @@ def run_weekly_training():
             )
             break  # prediction_accuracy の model_name は "production"/"challenger" で共通なので1回でよい
         except Exception as e:
-            logger.error("Shadow 評価失敗: %s", e, exc_info=True)
+            _handle_stage_error(PipelineStage.NON_CRITICAL, "Shadow 評価", e)
 
-    # 2 & 3. 昇格ゲート + 昇格
+    # 2 & 3. 昇格ゲート + 昇格（RECOVERABLE: 昇格不可でも後続の再学習は継続）
     promoted = False
     gate_result = None
     if shadow_results and shadow_results[0][2]["challenger_wins"]:
@@ -184,13 +215,13 @@ def run_weekly_training():
             else:
                 logger.info("昇格ゲート未達（再学習のみ実施）: %s", gate_result.reason)
         except Exception as e:
-            logger.error("昇格ゲート評価失敗: %s", e, exc_info=True)
+            _handle_stage_error(PipelineStage.RECOVERABLE, "昇格ゲート評価", e)
     elif shadow_results:
         logger.info("[2/4] challenger_wins=False のため昇格ゲートをスキップ")
     else:
         logger.info("[2/4] Shadow 評価データなし（初回実行）のため昇格ゲートをスキップ")
 
-    # 4. Challenger 再学習（次週の評価用）
+    # 4. Challenger 再学習（CRITICAL: 失敗時はパイプライン停止）
     logger.info("[4/4] Challenger 再学習開始")
     for model_type, challenger_name in zip(
         ["XGBoostModel", "LightGBMModel"], _UNIFIED_CHALLENGER_NAMES
@@ -200,10 +231,10 @@ def run_weekly_training():
             train_unified_model(model_type=model_type, model_name=challenger_name)
             logger.info("Challenger 学習完了: %s", challenger_name)
         except Exception as e:
-            logger.error("Challenger 学習失敗 (%s): %s", challenger_name, e, exc_info=True)
-            raise
+            if _handle_stage_error(PipelineStage.CRITICAL, f"Challenger 学習 ({challenger_name})", e):
+                raise
 
-    # 予測精度チェック & ドリフト警告
+    # 予測精度チェック & ドリフト警告（NON_CRITICAL: 失敗しても継続）
     logger.info("予測精度チェック開始")
     try:
         from src.prediction.prediction_pipeline import run_accuracy_check
@@ -214,9 +245,9 @@ def run_weekly_training():
         )
         send_drift_alert(summary, horizon=1)
     except Exception as e:
-        logger.error("予測精度チェック失敗: %s", e, exc_info=True)
+        _handle_stage_error(PipelineStage.NON_CRITICAL, "予測精度チェック", e)
 
-    # Discord 完了通知（昇格結果含む）
+    # Discord 完了通知（NON_CRITICAL: 通知失敗は警告ログのみ）
     try:
         from src.reporting.discord.discord_utils import (
             send_promotion_result,
@@ -231,7 +262,7 @@ def run_weekly_training():
                 criteria=gate_result.criteria,
             )
     except Exception as e:
-        logger.error("週次学習完了通知失敗: %s", e, exc_info=True)
+        _handle_stage_error(PipelineStage.NON_CRITICAL, "週次学習完了通知", e)
 
     logger.info("=== 週次モデル学習完了 ===")
 
