@@ -8,6 +8,7 @@ pydantic-settings の BaseSettings で env 変数を型安全に読み込み、
 のような module-level 定数アクセスを維持する。
 """
 
+import os
 from typing import Optional
 
 from pydantic import Field
@@ -69,6 +70,9 @@ class Settings(BaseSettings):
     DRIFT_ALERT_WEEKS: int = Field(default=4)
     DRIFT_ALERT_THRESHOLD: float = Field(default=0.05)
 
+    # ---------- 予測並列化（#266） ----------
+    PREDICTION_MAX_WORKERS: int = Field(default=max(1, (os.cpu_count() or 2) // 2))
+
 
 settings = Settings()
 
@@ -112,3 +116,5 @@ CLAUDE_TRADER_MAX_TOKENS: int = settings.CLAUDE_TRADER_MAX_TOKENS
 
 DRIFT_ALERT_WEEKS: int = settings.DRIFT_ALERT_WEEKS
 DRIFT_ALERT_THRESHOLD: float = settings.DRIFT_ALERT_THRESHOLD
+
+PREDICTION_MAX_WORKERS: int = settings.PREDICTION_MAX_WORKERS
