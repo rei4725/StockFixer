@@ -58,6 +58,7 @@ ignore_imports =
     src.prediction.predict_single -> src.market_data.loader
     src.prediction.rule_signal_pipeline -> src.market_data.yf_client
     src.prediction.training_pipeline -> src.market_data.technical
+    src.market_data.pipeline -> src.watchlist.types
     src.backtest.portfolio -> src.trading.signal_generator
     src.backtest.pipeline -> src.trading.signal_generator
     src.trading.execution -> src.reporting.discord.discord_utils
