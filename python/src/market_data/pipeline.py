@@ -27,6 +27,7 @@ from src.market_data.loader import (
 from src.market_data.quality_check import QualityCheckResult, run_quality_checks
 from src.market_data.saver import save_raw_ohlcv
 from src.market_data.technical import add_technical_indicators, create_basic_lag_features
+from config.data import MAX_DATA_WORKERS
 from src.utils.data_path_utils import get_ticker, normalize_col
 from src.utils.db import upsert_stock_features
 from src.utils.logger import get_logger
@@ -301,9 +302,6 @@ def run_data_batch(fetch_only: bool = False):
     """
     from src.watchlist.batch_runner import load_target_symbols, print_summary, run_parallel
     from src.watchlist.types import BatchFailure, BatchResult
-
-    # バッチ取得の並列数（yfinance API制限を考慮）
-    MAX_DATA_WORKERS = 3
 
     def _fetch_only(task) -> dict:
         """バッチランナー用: データ取得＋特徴量生成のみ（DB書き込みなし）"""

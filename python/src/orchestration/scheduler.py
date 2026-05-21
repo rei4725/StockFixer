@@ -732,12 +732,12 @@ def run_weekly_rule_evaluation() -> None:
     判定基準: 勝率 50% 以上 AND 純利益プラス
     完了後 Discord に評価サマリーを通知する。
     """
-    import os
+    from config.execution import RULE_EVAL_END, RULE_EVAL_MARKET, RULE_EVAL_START
 
     logger.info("=== 週次ルール評価開始 ===")
-    market = os.environ.get("RULE_EVAL_MARKET", "jp")
-    backtest_start = os.environ.get("RULE_EVAL_START", "2022-01-01")
-    backtest_end = os.environ.get("RULE_EVAL_END", "2025-01-01")
+    market = RULE_EVAL_MARKET
+    backtest_start = RULE_EVAL_START
+    backtest_end = RULE_EVAL_END
 
     try:
         from src.backtest.rule_selector import evaluate_all_symbols
