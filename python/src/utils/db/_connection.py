@@ -425,6 +425,20 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
         )
     """)
 
+    # I-256: 決算・イベントカレンダーキャッシュ
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS earnings_calendar (
+            market      VARCHAR   NOT NULL,
+            symbol      VARCHAR   NOT NULL,
+            event_date  DATE      NOT NULL,
+            event_type  VARCHAR   NOT NULL DEFAULT 'earnings',
+            fetched_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (market, symbol, event_date)
+        )
+    """
+    )
+
 
 def init_tables() -> None:
     """外部から明示的にテーブル初期化する場合に使用"""
