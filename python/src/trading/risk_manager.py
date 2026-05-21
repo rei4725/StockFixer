@@ -50,15 +50,13 @@ def fetch_latest_vix() -> Optional[float]:
     """
     try:
         with _db_connection() as con:
-            row = con.execute(
-                """
+            row = con.execute("""
                 SELECT vix_close
                 FROM stock_features
                 WHERE vix_close IS NOT NULL
                 ORDER BY row_num DESC
                 LIMIT 1
-                """
-            ).fetchone()
+                """).fetchone()
         if row is None:
             return None
         return float(row[0])
@@ -107,8 +105,6 @@ class RiskManager:
         symbol: Optional[str] = None,
     ):
         self._broker = broker
-        # TODO: stop_loss_pct / take_profit_pct は現在 RiskManager 内で未使用（Dead Attribute）。
-        #       将来の SL/TP チェックロジック（R-307 等）で参照予定。
         self.stop_loss_pct: Optional[float] = None
         self.take_profit_pct: Optional[float] = None
 
@@ -145,6 +141,38 @@ class RiskManager:
                 )
 
     # ------------------------------------------------------------------
+    # SL/TP チェック
+    # ------------------------------------------------------------------
+
+    def check_sl_tp(
+        self,
+        avg_price: float,
+        current_price: float,
+    ) -> tuple[bool, bool, str]:
+        """ポジションの含み損益率が SL/TP 閾値を超えているか判定する。
+
+        Returns:
+            (sl_triggered, tp_triggered, reason)
+            SL と TP が同時に成立することはないため、sl_triggered が True のとき tp_triggered は False。
+        """
+        if avg_price <= 0:
+            return False, False, ""
+        pnl_pct = (current_price - avg_price) / avg_price
+        sl_triggered = self.stop_loss_pct is not None and pnl_pct <= -self.stop_loss_pct
+        tp_triggered = (
+            not sl_triggered
+            and self.take_profit_pct is not None
+            and pnl_pct >= self.take_profit_pct
+        )
+        if sl_triggered and self.stop_loss_pct is not None:
+            reason = f"SL発動: pnl={pnl_pct:.2%} <= -{self.stop_loss_pct:.2%}"
+        elif tp_triggered and self.take_profit_pct is not None:
+            reason = f"TP発動: pnl={pnl_pct:.2%} >= {self.take_profit_pct:.2%}"
+        else:
+            reason = ""
+        return sl_triggered, tp_triggered, reason
+
+    # ------------------------------------------------------------------
     # メインゲートチェック
     # ------------------------------------------------------------------
 
@@ -167,7 +195,9 @@ class RiskManager:
 
         # ルール 1: 当日損失上限
         if daily_loss_limit is not None and daily_loss >= daily_loss_limit:
-            reason = f"日次損失上限に到達: 損失={daily_loss:.0f}円 / " f"上限={daily_loss_limit:.0f}円"
+            reason = (
+                f"日次損失上限に到達: 損失={daily_loss:.0f}円 / " f"上限={daily_loss_limit:.0f}円"
+            )
             logger.warning(f"[risk] {reason} → 新規発注停止")
             return TradingGateStatus(
                 is_allowed=False,
@@ -374,7 +404,9 @@ class RiskManager:
             "yes",
             "on",
         }:
-            logger.info(f"[risk] {DISABLE_DAILY_LOSS_GUARD_ENV}=1 のため日次損失ガードを無効化します")
+            logger.info(
+                f"[risk] {DISABLE_DAILY_LOSS_GUARD_ENV}=1 のため日次損失ガードを無効化します"
+            )
             return None
 
         raw_value = os.getenv(DAILY_LOSS_RATE_ENV)
@@ -386,7 +418,8 @@ class RiskManager:
         except ValueError:
             default_rate = f"{MAX_DAILY_LOSS_RATE:.2%}"
             logger.warning(
-                f"[risk] {DAILY_LOSS_RATE_ENV}={raw_value!r} を解釈できないため" f"既定値 {default_rate} を使用します"
+                f"[risk] {DAILY_LOSS_RATE_ENV}={raw_value!r} を解釈できないため"
+                f"既定値 {default_rate} を使用します"
             )
             return MAX_DAILY_LOSS_RATE
 
