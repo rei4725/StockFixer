@@ -71,8 +71,6 @@ ignore_imports =
     src.backtest.screener -> src.market_data.technical
     src.prediction.rule_signal_pipeline -> src.market_data.technical
     src.utils.alert_service -> src.reporting.discord.discord_utils
-    # --- 後方互換 re-export (ExitModel: prediction → trading) ---
-    src.prediction.models.exit_model -> src.trading.models.exit_model
 
 # ============================================================
 # Contract 2: BC 独立性契約
@@ -172,5 +170,3 @@ ignore_imports =
     src.backtest.rule_backtester -> src.market_data.technical
     src.backtest.screener -> src.market_data.technical
     src.prediction.rule_signal_pipeline -> src.market_data.technical
-    # --- 後方互換 re-export shim (ExitModel 移動に伴う一時的違反 — テスト更新後に削除) ---
-    src.prediction.models.exit_model -> src.trading.models.exit_model
