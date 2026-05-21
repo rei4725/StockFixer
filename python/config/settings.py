@@ -73,6 +73,10 @@ class Settings(BaseSettings):
     # ---------- 予測並列化（#266） ----------
     PREDICTION_MAX_WORKERS: int = Field(default=max(1, (os.cpu_count() or 2) // 2))
 
+    # ---------- スケジューラリトライ設定 ----------
+    SCHEDULER_MAX_RETRIES: int = Field(default=3)
+    SCHEDULER_RETRY_BASE_WAIT_SECONDS: float = Field(default=30.0)
+
 
 settings = Settings()
 
@@ -118,3 +122,5 @@ DRIFT_ALERT_WEEKS: int = settings.DRIFT_ALERT_WEEKS
 DRIFT_ALERT_THRESHOLD: float = settings.DRIFT_ALERT_THRESHOLD
 
 PREDICTION_MAX_WORKERS: int = settings.PREDICTION_MAX_WORKERS
+SCHEDULER_MAX_RETRIES: int = settings.SCHEDULER_MAX_RETRIES
+SCHEDULER_RETRY_BASE_WAIT_SECONDS: float = settings.SCHEDULER_RETRY_BASE_WAIT_SECONDS
