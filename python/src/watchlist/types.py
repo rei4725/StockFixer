@@ -7,7 +7,6 @@ watchlist BC の型定義。
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
 
 
 @dataclass
