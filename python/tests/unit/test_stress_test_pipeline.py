@@ -20,7 +20,7 @@ from src.backtest.stress_test import (
     save_stress_test_results,
 )
 from src.backtest.types import StressTestResult
-from src.watchlist.types import SymbolTask
+from src.domain.types import SymbolTask
 
 
 class TestStressScenarios:

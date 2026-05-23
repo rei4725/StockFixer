@@ -174,7 +174,7 @@ class TestRunWalkForwardComparisonReport:
     def test_runs_for_each_symbol(self, tmp_path):
         """各銘柄でバックテストが実行され、結果辞書が返ること"""
         from src.backtest.walk_forward_report import run_walk_forward_comparison_report
-        from src.watchlist.types import SymbolTask
+        from src.domain.types import SymbolTask
 
         reports_dir = tmp_path / "backtest" / "walk_forward_reports"
         reports_dir.mkdir(parents=True, exist_ok=True)
@@ -213,7 +213,7 @@ class TestRunWalkForwardComparisonReport:
     def test_passes_as_of_date_to_symbol_loader(self, tmp_path):
         """as_of_date が load_target_symbols に渡されること"""
         from src.backtest.walk_forward_report import run_walk_forward_comparison_report
-        from src.watchlist.types import SymbolTask
+        from src.domain.types import SymbolTask
 
         reports_dir = tmp_path / "backtest" / "walk_forward_reports"
         reports_dir.mkdir(parents=True, exist_ok=True)

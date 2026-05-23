@@ -13,18 +13,6 @@ import pandas as pd
 
 
 @dataclass
-class SymbolTask:
-    """バッチ処理の単位タスク（market + symbol + horizon）。
-
-    batch_runner.load_target_symbols() / run_parallel() で使用する。
-    """
-
-    market: str
-    symbol: str
-    horizon: int = 1
-
-
-@dataclass
 class WatchlistPredictionRow:
     """ウォッチリスト表示用の1行。"""
 

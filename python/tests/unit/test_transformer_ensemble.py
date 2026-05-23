@@ -87,7 +87,7 @@ class TestTransformerInTrainingPipeline(unittest.TestCase):
     def test_task_wrapper_passes_use_transformer(self, mock_train):
         """train_models_for_symbol_task が use_transformer を伝搬すること"""
         from src.prediction.training_pipeline import train_models_for_symbol_task
-        from src.watchlist.types import SymbolTask
+        from src.domain.types import SymbolTask
 
         mock_train.return_value = {"status": "success", "market": "us", "symbol": "AAPL"}
         task = SymbolTask(market="us", symbol="AAPL", horizon=1)

@@ -398,7 +398,7 @@ class TestRunOptimizeBatch(unittest.TestCase):
     def test_returns_list_of_results(self, mock_symbols, mock_run, mock_save, mock_json):
         """全銘柄の結果リストが返ること"""
         from src.backtest.optimizer import run_optimize_batch
-        from src.watchlist.types import SymbolTask
+        from src.domain.types import SymbolTask
 
         mock_symbols.return_value = [
             SymbolTask(market="jp", symbol="7203"),
@@ -419,7 +419,7 @@ class TestRunOptimizeBatch(unittest.TestCase):
     def test_handles_single_symbol_error(self, mock_symbols, mock_run, mock_save, mock_json):
         """1銘柄でエラーが出ても他の銘柄が処理されること"""
         from src.backtest.optimizer import run_optimize_batch
-        from src.watchlist.types import SymbolTask
+        from src.domain.types import SymbolTask
 
         mock_symbols.return_value = [
             SymbolTask(market="jp", symbol="7203"),
