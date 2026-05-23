@@ -1,5 +1,6 @@
 """discord_formatters モジュールのユニットテスト"""
 
+
 import unittest
 
 import pandas as pd
@@ -64,9 +65,7 @@ class TestConvertDfForDiscord(unittest.TestCase):
         result = convert_df_for_discord(df)
         assert "予想変化率" in result.columns
         # 1% 変化
-        assert "+1.0%" in str(result["予想変化率"].iloc[0]) or "1%" in str(
-            result["予想変化率"].iloc[0]
-        )
+        assert "+1.0%" in str(result["予想変化率"].iloc[0]) or "1%" in str(result["予想変化率"].iloc[0])
 
     def test_format_percent_negative(self):
         """マイナス変化率が正しく符号付きで出力されること"""
@@ -146,3 +145,32 @@ class TestConvertDfForDiscord(unittest.TestCase):
         )
         result = convert_df_for_discord(df)
         assert "予想±" not in result.columns
+
+    def test_zero_current_price_falls_back_to_empty_ratio(self):
+        """current_price=0 のとき 0除算をキャッチして予想変化率が '' になること"""
+        from src.reporting.discord.discord_formatters import convert_df_for_discord
+
+        df = pd.DataFrame(
+            {
+                "symbol": ["7203"],
+                "current_price": [0.0],
+                "avg_pred_price": [2550.0],
+            }
+        )
+        result = convert_df_for_discord(df)
+        assert result["予想変化率"].iloc[0] == ""
+
+    def test_format_percent_with_non_numeric_value(self):
+        """diff_ratio が非数値文字列のとき format_percent がそのまま返すこと"""
+        from src.reporting.discord.discord_formatters import convert_df_for_discord
+
+        df = pd.DataFrame(
+            {
+                "symbol": ["7203"],
+                "current_price": [2500.0],
+                "avg_pred_price": [2550.0],
+                "diff_ratio": ["invalid"],
+            }
+        )
+        result = convert_df_for_discord(df)
+        assert result["予想変化率"].iloc[0] == "invalid"
