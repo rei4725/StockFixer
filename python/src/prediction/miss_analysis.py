@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from src.utils.db.prediction import load_shap_latest
+from src.prediction.db import load_shap_latest
 from src.utils.db.stock_features import load_stock_features
 from src.utils.logger import get_logger
 

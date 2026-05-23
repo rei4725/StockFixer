@@ -18,7 +18,7 @@ from src.prediction.miss_analysis import (
     analyze_miss_causes,
     run_miss_analysis_batch,
 )
-from src.utils.db.prediction import load_top_prediction_misses, save_prediction_accuracy
+from src.prediction.db import load_top_prediction_misses, save_prediction_accuracy
 
 
 class _TmpDbTestCase(unittest.TestCase):

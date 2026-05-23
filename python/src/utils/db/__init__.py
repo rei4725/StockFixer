@@ -61,17 +61,17 @@ from src.utils.db.market_data import (  # noqa: F401
 from src.utils.db.migration_runner import get_applied_migrations, run_migrations  # noqa: F401
 
 # --- prediction_results / model_metrics / prediction_accuracy ---
-from src.utils.db.prediction import (  # noqa: F401
+from src.prediction.db import (  # noqa: F401
     load_drift_summary,
     load_excluded_features,
     load_feature_exclusion_candidates,
     load_latest_prediction_timestamp,
     load_model_weights,
 )
-from src.utils.db.prediction import (  # noqa: F401
+from src.prediction.db import (  # noqa: F401
     load_open_close_advantage_summary as load_open_close_advantage_summary,
 )
-from src.utils.db.prediction import (  # noqa: F401
+from src.prediction.db import (  # noqa: F401
     load_paper_real_diff_summary,
     load_prediction_accuracy,
     load_prediction_markets,
@@ -87,7 +87,7 @@ from src.utils.db.prediction import (  # noqa: F401
     save_shap_values,
     save_weekly_accuracy_snapshot,
 )
-from src.utils.db.prediction import upsert_paper_real_diff as upsert_paper_real_diff  # noqa: F401
+from src.prediction.db import upsert_paper_real_diff as upsert_paper_real_diff  # noqa: F401
 
 # --- data_quality_log ---
 from src.utils.db.quality_log import insert_quality_log  # noqa: F401

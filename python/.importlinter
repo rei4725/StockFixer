@@ -21,8 +21,6 @@ ignore_imports =
     # --- BC → orchestration (reporting が scheduler ステータス型を参照) ---
     src.reporting.query_service -> src.orchestration.types
     src.reporting.discord.discord_bot -> src.orchestration.types
-    # --- utils → BC (後方互換 re-export shim — 将来削除予定) ---
-    src.utils.db.prediction -> src.prediction.types
     # --- BC 間相互参照 (independence contract でも管理) ---
     src.reporting.types -> src.prediction.types
     src.reporting.query_service -> src.prediction.types
@@ -133,8 +131,6 @@ ignore_imports =
     src.market_data.pipeline -> src.reporting.discord.discord_utils
     # [B] market_data → watchlist (バッチデータ収集がウォッチリストを反復 — ポート注入で解消可能)
     src.market_data.pipeline -> src.watchlist.batch_runner
-    # --- utils → BC (推移的違反の根本原因 — 将来削除予定) ---
-    src.utils.db.prediction -> src.prediction.types
     # [B] watchlist → reporting (バッチ通知 — イベント駆動で解消可能)
     src.watchlist.batch_runner -> src.reporting.discord.discord_utils
     # [C] prediction.rule_signal_pipeline → trading (ルールエンジン BC 分離が必要)

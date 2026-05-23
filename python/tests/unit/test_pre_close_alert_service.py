@@ -39,11 +39,11 @@ class TestAlertTypeClassification(unittest.TestCase):
             patch.dict("os.environ", {"AUTO_TRADE_MODE": "paper"}, clear=False),
             patch("src.trading.brokers.paper.paper_broker.PaperBroker") as mock_broker_cls,
             patch(
-                "src.utils.db.prediction.load_latest_prediction_timestamp",
+                "src.prediction.db.load_latest_prediction_timestamp",
                 return_value="20260101_150000",
             ),
             patch(
-                "src.utils.db.prediction.load_prediction_results",
+                "src.prediction.db.load_prediction_results",
                 return_value=pred_df,
             ),
         ):
@@ -133,7 +133,7 @@ class TestEvaluatePositionsEarlyExit(unittest.TestCase):
             patch.dict("os.environ", {"AUTO_TRADE_MODE": "paper"}, clear=False),
             patch("src.trading.brokers.paper.paper_broker.PaperBroker") as mock_broker_cls,
             patch(
-                "src.utils.db.prediction.load_latest_prediction_timestamp",
+                "src.prediction.db.load_latest_prediction_timestamp",
                 return_value=None,
             ),
         ):
@@ -160,11 +160,11 @@ class TestEvaluatePositionsEarlyExit(unittest.TestCase):
             patch.dict("os.environ", {"AUTO_TRADE_MODE": "paper"}, clear=False),
             patch("src.trading.brokers.paper.paper_broker.PaperBroker") as mock_broker_cls,
             patch(
-                "src.utils.db.prediction.load_latest_prediction_timestamp",
+                "src.prediction.db.load_latest_prediction_timestamp",
                 return_value="20260101_150000",
             ),
             patch(
-                "src.utils.db.prediction.load_prediction_results",
+                "src.prediction.db.load_prediction_results",
                 return_value=pred_df,
             ),
         ):

@@ -11,7 +11,7 @@ import pandas as pd
 import src.utils.data_path_utils as path_utils
 import src.utils.db as db_module
 from src.prediction.types import PredictionResult, TrainingMetrics
-from src.utils.db.prediction import (
+from src.prediction.db import (
     load_drift_summary,
     load_excluded_features,
     load_latest_prediction_timestamp,

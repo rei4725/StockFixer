@@ -10,7 +10,7 @@ import argparse
 import sys
 
 from src.trading.capital_allocator import compute_portfolio_allocation
-from src.utils.db.prediction import load_latest_prediction_timestamp, load_prediction_results
+from src.prediction.db import load_latest_prediction_timestamp, load_prediction_results
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)

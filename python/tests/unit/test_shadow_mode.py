@@ -13,7 +13,7 @@ import pandas as pd
 import src.utils.data_path_utils as path_utils
 import src.utils.db as db_module
 from src.prediction.types import PredictionResult
-from src.utils.db.prediction import load_shadow_comparison, save_prediction_results
+from src.prediction.db import load_shadow_comparison, save_prediction_results
 
 
 class _TmpDbTestCase(unittest.TestCase):
@@ -121,7 +121,7 @@ class TestSavePredictionResultsWithModelVersion(_TmpDbTestCase):
         save_prediction_results("20260403_120000", [prod])
         save_prediction_results("20260403_120000", [chal])
 
-        from src.utils.db.prediction import load_prediction_results  # noqa: F401
+        from src.prediction.db import load_prediction_results  # noqa: F401
 
         # model_version なしのクエリでは全バージョン取得（デフォルト動作は変更なし）
         # shadow_comparison で両バージョンを取得できること
@@ -331,7 +331,7 @@ class TestEvaluateShadowModels(_TmpDbTestCase):
     """evaluate_shadow_models のテスト"""
 
     def _insert_accuracy_rows(self, model_name: str, rows: list[dict]):
-        from src.utils.db.prediction import save_prediction_accuracy
+        from src.prediction.db import save_prediction_accuracy
 
         for row in rows:
             row.setdefault("model_name", model_name)
