@@ -14,11 +14,10 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
+from typing import Any, Callable, Optional
 
 import pandas as pd
 
-from src.prediction.drift_monitor import check_weekly_hit_rate_drift
 from src.reporting.types import MonthlyReportSummary
 from src.utils.data_path_utils import get_results_dir
 from src.utils.db import load_drift_summary, load_paper_real_diff_summary, load_prediction_accuracy
@@ -142,7 +141,10 @@ def run_monthly_report(target_month: Optional[str] = None) -> MonthlyReportSumma
     return summary
 
 
-def save_monthly_report_to_file(summary: MonthlyReportSummary) -> str:
+def save_monthly_report_to_file(
+    summary: MonthlyReportSummary,
+    drift_checker: Optional[Callable[[], Any]] = None,
+) -> str:
     """
     月次KPIサマリーを Markdown ファイルとして保存する（R-203）。
 
@@ -150,6 +152,7 @@ def save_monthly_report_to_file(summary: MonthlyReportSummary) -> str:
 
     Args:
         summary: run_monthly_report() が返す MonthlyReportSummary
+        drift_checker: 週次 Hit Rate ドリフト検査を実行するコールバック（省略可）
 
     Returns:
         保存先ファイルパス
@@ -178,14 +181,13 @@ def save_monthly_report_to_file(summary: MonthlyReportSummary) -> str:
         )
 
     # 週次 Hit Rate ドリフト
-    try:
-        from config.settings import DRIFT_ALERT_THRESHOLD, DRIFT_ALERT_WEEKS
-
-        drift_result = check_weekly_hit_rate_drift(
-            weeks=DRIFT_ALERT_WEEKS, threshold=DRIFT_ALERT_THRESHOLD
-        )
-    except Exception as e:
-        logger.error("週次 Hit Rate ドリフト検査失敗: %s", e, exc_info=True)
+    if drift_checker is not None:
+        try:
+            drift_result = drift_checker()
+        except Exception as e:
+            logger.error("週次 Hit Rate ドリフト検査失敗: %s", e, exc_info=True)
+            drift_result = None
+    else:
         drift_result = None
 
     def _drift_row(label: str, val) -> str:
