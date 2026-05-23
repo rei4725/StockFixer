@@ -4,8 +4,8 @@ from unittest.mock import patch
 
 import pytest
 
-from src.prediction.types import PredictionResult
-from src.reporting.types import MarketPredictionSnapshot, MonthlyReportSummary
+from src.prediction.types import MarketPredictionSnapshot, PredictionResult
+from src.reporting.types import MonthlyReportSummary
 
 
 def _make_prediction(symbol: str = "AAPL", diff_ratio: float = 0.02) -> PredictionResult:

@@ -31,7 +31,6 @@ ignore_imports =
     src.backtest.portfolio -> src.prediction.manager
     src.backtest.pipeline -> src.market_data.loader
     src.backtest.backtester -> src.market_data.loader
-    src.backtest.stress_test -> src.watchlist.types
     src.backtest.walk_forward_report -> src.watchlist.batch_runner
     src.backtest.optimizer -> src.watchlist.batch_runner
     src.prediction.unified_model_pipeline -> src.market_data.loader
@@ -71,8 +70,6 @@ ignore_imports =
     # --- trading → prediction (注文実行時に予測 DB へ書き込み) ---
     src.trading.execution -> src.prediction.db
     src.trading.pre_close_alert_service -> src.prediction.db
-    # --- reporting → prediction (月次レポートがドリフト監視を直接呼び出し) ---
-    src.reporting.monthly -> src.prediction.drift_monitor
     # --- trading → market_data (遅延/直接インポートで価格取得) ---
     src.trading.execution -> src.infrastructure.yfinance_market_data_adapter
     src.trading.brokers.paper.paper_broker -> src.market_data.yf_client
@@ -120,7 +117,6 @@ ignore_imports =
     src.backtest.pipeline -> src.market_data.loader
     src.backtest.backtester -> src.market_data.loader
     # [A] backtest → watchlist (バッチバックテストがウォッチリストを反復 — types 共有で解消可能)
-    src.backtest.stress_test -> src.watchlist.types
     src.backtest.walk_forward_report -> src.watchlist.batch_runner
     src.backtest.optimizer -> src.watchlist.batch_runner
     # [B] prediction → market_data (学習パイプラインが OHLCV を取得 — market_data ポート注入で解消可能)
@@ -172,8 +168,6 @@ ignore_imports =
     # [B] trading → prediction (注文実行/アラートが予測 DB を参照 — イベント駆動で解消可能)
     src.trading.execution -> src.prediction.db
     src.trading.pre_close_alert_service -> src.prediction.db
-    # [B] reporting → prediction (月次レポートがドリフト監視を直接呼び出し — コールバック化で解消可能)
-    src.reporting.monthly -> src.prediction.drift_monitor
     # [B] trading → market_data (ペーパーブローカーが価格取得 — market_data ポートで解消可能)
     src.trading.brokers.paper.paper_broker -> src.market_data.yf_client
     # [B] trading → market_data (execution が遅延インポートで YFinanceAdapter を使用)

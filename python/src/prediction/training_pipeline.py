@@ -549,7 +549,7 @@ def train_models_for_symbol_task(
     Returns:
         dict: train_models_for_symbolの戻り値  (batch_runner.print_summary 互換)
     """
-    from src.watchlist.types import SymbolTask
+    from src.domain.types import SymbolTask
 
     if isinstance(task, SymbolTask):
         return train_models_for_symbol(
@@ -586,7 +586,7 @@ def run_model_batch(horizon: int = 1):
 
     def _load_features_task(task) -> FeatureLoadResult:
         """バッチランナー用: DB読み込みのみ（並列安全）"""
-        from src.watchlist.types import SymbolTask
+        from src.domain.types import SymbolTask
 
         if isinstance(task, SymbolTask):
             return load_features_for_training(task.market, task.symbol, horizon=task.horizon)
@@ -600,7 +600,7 @@ def run_model_batch(horizon: int = 1):
         return
 
     # horizon 情報をタスクに付与
-    from src.watchlist.types import SymbolTask
+    from src.domain.types import SymbolTask
 
     tasks = [
         (
