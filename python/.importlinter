@@ -179,5 +179,5 @@ ignore_imports =
     # [B] trading → market_data (execution が遅延インポートで YFinanceAdapter を使用)
     src.trading.execution -> src.infrastructure.yfinance_market_data_adapter
     # [B] 各 BC → prediction (utils.db/__init__.py が prediction.db を再エクスポートする間接参照)
-    #     utils.db → prediction.db の import を無視することで間接パスを消去
+    #     utils.db → prediction.db を無視することで backtest/market_data 等の間接パスを消去
     src.utils.db -> src.prediction.db
