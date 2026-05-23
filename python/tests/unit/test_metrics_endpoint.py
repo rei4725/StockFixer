@@ -1,4 +1,5 @@
 """src/api/metrics.py の単体テスト"""
+
 from unittest.mock import MagicMock, patch
 
 import pytest

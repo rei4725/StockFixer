@@ -1,4 +1,5 @@
 """backtest/metrics.py のユニットテスト"""
+
 import sys
 import tempfile
 import types
@@ -444,7 +445,10 @@ class TestComputeMetricsBoundary:
         "equity, expected_dd",
         [
             ([1000, 1100, 1200, 1300], 0.0),  # 単調増加 → DDなし
-            ([1000, 1200, 900, 1100], (900 - 1200) / 1200),  # ピークから1200→9003々0  # ピークから 25% 褶辺
+            (
+                [1000, 1200, 900, 1100],
+                (900 - 1200) / 1200,
+            ),  # ピークから1200→9003々0  # ピークから 25% 褶辺
         ],
     )
     def test_max_drawdown_scenarios(self, equity, expected_dd):

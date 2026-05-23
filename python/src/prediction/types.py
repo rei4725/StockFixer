@@ -59,7 +59,9 @@ class PredictionResult:
     diff_ratio_5d: Optional[float] = None
     diff_ratio_10d: Optional[float] = None
     confluence_score: Optional[int] = None
-    confidence_ratio: Optional[float] = None  # 1/(1+model_std); 1.0=最大信頼度（モデル間分散が小さい）
+    confidence_ratio: Optional[float] = (
+        None  # 1/(1+model_std); 1.0=最大信頼度（モデル間分散が小さい）
+    )
 
     # 信頼区間（Quantile Regression）
     pred_lower_10: Optional[float] = None  # P10予測価格（下側10%分位点）

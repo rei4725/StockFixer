@@ -4,6 +4,7 @@ Integration Test: バックテスト最適化パイプライン End-to-End
 グリッドサーチ実行 → メトリクス計算（dtype エラー修正の検証）
 完全なフロー検証。
 """
+
 import os
 import sys
 import unittest

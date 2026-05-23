@@ -184,9 +184,9 @@ def _handle_get_predictions(market: str, broker: BrokerBase) -> dict[str, Any]:
             "buy_candidates": _to_records(buy_candidates),
             "sell_candidates": _to_records(sell_candidates),
             "held_symbols": sorted(held_symbols),
-            "threshold_scale": float(predictions["threshold_scale"].iloc[0])
-            if not predictions.empty
-            else 1.0,
+            "threshold_scale": (
+                float(predictions["threshold_scale"].iloc[0]) if not predictions.empty else 1.0
+            ),
         }
     except Exception as e:
         logger.error("[claude_agent] get_predictions エラー: %s", e, exc_info=True)
@@ -299,7 +299,10 @@ def _handle_place_order(
         )
         if qty <= 0:
             stats["skipped"] += 1
-            return {"status": "skipped", "reason": f"{symbol}: ポジションサイズ 0（残高不足or上限）"}
+            return {
+                "status": "skipped",
+                "reason": f"{symbol}: ポジションサイズ 0（残高不足or上限）",
+            }
     else:
         positions = broker.get_positions()
         pos = next((p for p in positions if p["symbol"].replace(".T", "") == symbol), None)
@@ -369,8 +372,7 @@ def _save_reasoning_log(run_id: str, market: str, thinking_text: str, summary: s
     """Extended thinking の推論ログを claude_reasoning テーブルに保存する。"""  # noqa: D401
     try:
         with _db_connection() as con:
-            con.execute(
-                """
+            con.execute("""
                 CREATE TABLE IF NOT EXISTS claude_reasoning (
                     run_id      VARCHAR PRIMARY KEY,
                     market      VARCHAR,
@@ -378,8 +380,7 @@ def _save_reasoning_log(run_id: str, market: str, thinking_text: str, summary: s
                     summary     TEXT,
                     created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
-                """
-            )
+                """)
             con.execute(
                 """
                 INSERT OR REPLACE INTO claude_reasoning (run_id, market, thinking, summary)
@@ -415,7 +416,9 @@ def run_claude_trader(
     try:
         import anthropic
     except ImportError:
-        raise ImportError("anthropic パッケージが必要です。`pip install anthropic>=0.50.0` を実行してください。")
+        raise ImportError(
+            "anthropic パッケージが必要です。`pip install anthropic>=0.50.0` を実行してください。"
+        )
 
     run_id = str(uuid.uuid4())[:12]
     logger.info(

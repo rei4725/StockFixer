@@ -20,7 +20,6 @@ from src.market_data.event_calendar import (
 )
 from src.trading.signal_generator import filter_event_signals
 
-
 # ---------------------------------------------------------------------------
 # _extract_calendar_dates
 # ---------------------------------------------------------------------------
@@ -85,33 +84,23 @@ class TestIsNearEvent(unittest.TestCase):
 
     def test_exactly_on_event_date(self):
         ev = self._event_dates("2024-02-01")
-        self.assertTrue(
-            is_near_event("2024-02-01", "us", "AAPL", event_dates=ev)
-        )
+        self.assertTrue(is_near_event("2024-02-01", "us", "AAPL", event_dates=ev))
 
     def test_two_days_before(self):
         ev = self._event_dates("2024-02-01")
-        self.assertTrue(
-            is_near_event("2024-01-30", "us", "AAPL", event_dates=ev, days_before=2)
-        )
+        self.assertTrue(is_near_event("2024-01-30", "us", "AAPL", event_dates=ev, days_before=2))
 
     def test_one_day_after(self):
         ev = self._event_dates("2024-02-01")
-        self.assertTrue(
-            is_near_event("2024-02-02", "us", "AAPL", event_dates=ev, days_after=1)
-        )
+        self.assertTrue(is_near_event("2024-02-02", "us", "AAPL", event_dates=ev, days_after=1))
 
     def test_outside_window_before(self):
         ev = self._event_dates("2024-02-01")
-        self.assertFalse(
-            is_near_event("2024-01-29", "us", "AAPL", event_dates=ev, days_before=2)
-        )
+        self.assertFalse(is_near_event("2024-01-29", "us", "AAPL", event_dates=ev, days_before=2))
 
     def test_outside_window_after(self):
         ev = self._event_dates("2024-02-01")
-        self.assertFalse(
-            is_near_event("2024-02-03", "us", "AAPL", event_dates=ev, days_after=1)
-        )
+        self.assertFalse(is_near_event("2024-02-03", "us", "AAPL", event_dates=ev, days_after=1))
 
     def test_empty_event_dates_returns_false(self):
         self.assertFalse(
@@ -120,9 +109,7 @@ class TestIsNearEvent(unittest.TestCase):
 
     def test_jp_market(self):
         ev = self._event_dates("2024-05-15")
-        self.assertTrue(
-            is_near_event("2024-05-14", "jp", "7203", event_dates=ev, days_before=2)
-        )
+        self.assertTrue(is_near_event("2024-05-14", "jp", "7203", event_dates=ev, days_before=2))
 
 
 # ---------------------------------------------------------------------------
@@ -145,7 +132,7 @@ class TestFilterEventSignals(unittest.TestCase):
         result = filter_event_signals(signals, ev, days_before=2, days_after=1)
         # 2024-01-30 (2日前), 2024-01-31 (1日前), 2024-02-01 (当日), 2024-02-02 (1日後) → Hold
         # 2024-01-29 は window外 (3日前) → Buy のまま
-        self.assertEqual(result.iloc[0], "Buy")   # 2024-01-29: 3日前 → Buy
+        self.assertEqual(result.iloc[0], "Buy")  # 2024-01-29: 3日前 → Buy
         self.assertEqual(result.iloc[1], "Hold")  # 2024-01-30: 2日前 → Hold
         self.assertEqual(result.iloc[2], "Hold")  # 2024-01-31: 1日前 → Hold
         self.assertEqual(result.iloc[3], "Hold")  # 2024-02-01: 当日 → Hold
@@ -200,9 +187,7 @@ class TestGetEventDates(unittest.TestCase):
     @patch("src.market_data.event_calendar._save_event_dates")
     @patch("src.market_data.event_calendar._fetch_event_dates_from_yfinance")
     @patch("src.market_data.event_calendar._load_cached_event_dates")
-    def test_fetches_from_yfinance_when_cache_miss(
-        self, mock_load, mock_fetch, mock_save
-    ):
+    def test_fetches_from_yfinance_when_cache_miss(self, mock_load, mock_fetch, mock_save):
         mock_load.return_value = None
         fetched = pd.DatetimeIndex([pd.Timestamp("2024-05-01")])
         mock_fetch.return_value = fetched
@@ -216,9 +201,7 @@ class TestGetEventDates(unittest.TestCase):
     @patch("src.market_data.event_calendar._save_event_dates")
     @patch("src.market_data.event_calendar._fetch_event_dates_from_yfinance")
     @patch("src.market_data.event_calendar._load_cached_event_dates")
-    def test_returns_empty_index_on_fetch_failure(
-        self, mock_load, mock_fetch, mock_save
-    ):
+    def test_returns_empty_index_on_fetch_failure(self, mock_load, mock_fetch, mock_save):
         mock_load.return_value = None
         mock_fetch.return_value = pd.DatetimeIndex([])
 

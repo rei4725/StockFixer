@@ -126,7 +126,10 @@ class TestIntegrationWithSendWebhookNotification:
         mock_response = MagicMock()
         mock_response.raise_for_status.return_value = None
         mock_post.return_value = mock_response
-        mock_limiter.check_and_record.return_value = (True, "[通知抑止サマリー] 同一通知を 3 件抑止しました")
+        mock_limiter.check_and_record.return_value = (
+            True,
+            "[通知抑止サマリー] 同一通知を 3 件抑止しました",
+        )
 
         result = send_webhook_notification("タイトル", "メッセージ")
 

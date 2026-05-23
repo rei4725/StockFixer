@@ -1,7 +1,7 @@
 """ヘキサゴナルアーキテクチャ ポート・インメモリアダプターのユニットテスト"""
 
-import pytest
 import pandas as pd
+import pytest
 
 from src.domain.ports import (
     BrokerPort,
@@ -17,7 +17,6 @@ from src.infrastructure.in_memory import (
     InMemoryPredictionRepository,
     InMemoryStockFeatureRepository,
 )
-
 
 # ---------------------------------------------------------------------------
 # ポートが ABC として正しく定義されているか

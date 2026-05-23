@@ -63,7 +63,10 @@ def _fetch_current_price(market: str, symbol: str, df: pd.DataFrame) -> "float |
             return float(hist["Close"].iloc[-1])
     except Exception:
         logger.warning(
-            "yfinance現在価格取得失敗（フォールバック使用）: market=%s symbol=%s", market, symbol, exc_info=True
+            "yfinance現在価格取得失敗（フォールバック使用）: market=%s symbol=%s",
+            market,
+            symbol,
+            exc_info=True,
         )
     # yfinance失敗時はdfの末尾を使用（fallback）
     try:
@@ -112,7 +115,9 @@ def _run_single_model_prediction(
                 if col in df_feat.columns:
                     df_feat[col] = df_feat[col].ffill().bfill()
     except Exception:
-        logger.warning("クロスアセット特徴量付与スキップ: market=%s symbol=%s", market, symbol, exc_info=True)
+        logger.warning(
+            "クロスアセット特徴量付与スキップ: market=%s symbol=%s", market, symbol, exc_info=True
+        )
 
     X, _ = create_basic_lag_features(df_feat)
     if X.empty:
@@ -343,7 +348,9 @@ def explain_prediction_shap(
     try:
         import shap
     except ImportError:
-        print("shap ライブラリがインストールされていません。pip install shap>=0.46 で追加してください。")
+        print(
+            "shap ライブラリがインストールされていません。pip install shap>=0.46 で追加してください。"
+        )
         return None
 
     suffix = f"_{horizon}d" if horizon > 1 else ""

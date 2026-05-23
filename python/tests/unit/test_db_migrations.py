@@ -1,4 +1,5 @@
 """ユニットテスト: src.utils.db.migration_runner モジュール"""
+
 import os
 import tempfile
 import unittest

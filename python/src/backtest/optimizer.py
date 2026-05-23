@@ -395,12 +395,16 @@ def save_optimal_params_json(
             "num_trades": (
                 int(best_row.get("num_trades", 0)) if pd.notna(best_row.get("num_trades")) else 0
             ),
-            "avg_win": float(best_row.get("avg_win", 0.0))
-            if pd.notna(best_row.get("avg_win", 0.0))
-            else 0.0,
-            "avg_loss": float(best_row.get("avg_loss", 0.0))
-            if pd.notna(best_row.get("avg_loss", 0.0))
-            else 0.0,
+            "avg_win": (
+                float(best_row.get("avg_win", 0.0))
+                if pd.notna(best_row.get("avg_win", 0.0))
+                else 0.0
+            ),
+            "avg_loss": (
+                float(best_row.get("avg_loss", 0.0))
+                if pd.notna(best_row.get("avg_loss", 0.0))
+                else 0.0
+            ),
         },
     }
 
@@ -620,7 +624,9 @@ def run_optimize_batch(
             summary.append({"market": market, "symbol": symbol, "status": "error", "error": str(e)})
             error_count += 1
 
-    logger.info(f"全銘柄最適化バッチ完了: 成功={success_count} / スキップ={skip_count} / エラー={error_count}")
+    logger.info(
+        f"全銘柄最適化バッチ完了: 成功={success_count} / スキップ={skip_count} / エラー={error_count}"
+    )
     return summary
 
 
@@ -743,7 +749,9 @@ def run_optuna_batch(
         logger.warning("対象銘柄がありません。")
         return []
 
-    logger.info(f"Optunaバッチ最適化開始: {len(symbols)}銘柄 / n_trials={n_trials} / 並列={max_workers}")
+    logger.info(
+        f"Optunaバッチ最適化開始: {len(symbols)}銘柄 / n_trials={n_trials} / 並列={max_workers}"
+    )
 
     def _task(task: Any) -> dict[str, Any]:
         m = getattr(task, "market", None) or task["market"]

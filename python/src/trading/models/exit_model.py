@@ -4,6 +4,7 @@
 特徴量: マルチホライズン予測スコア・信頼度等（予測 API から取得済みの列のみ使用）
 ターゲット: 今日が最適エグジットタイムか否か（バイナリ分類）
 """
+
 from __future__ import annotations
 
 from typing import Any

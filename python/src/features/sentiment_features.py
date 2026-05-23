@@ -145,7 +145,10 @@ def add_sentiment_features(
         sent = sentiment_df.reindex(df.index)
         df["sentiment_score"] = sent["sentiment_score"].fillna(_NEUTRAL_SCORE)
         df["news_count"] = sent["news_count"].fillna(0).astype(int)
-        logger.debug("センチメント特徴量を付与 (外部データ, %d件)", int(sent["sentiment_score"].notna().sum()))
+        logger.debug(
+            "センチメント特徴量を付与 (外部データ, %d件)",
+            int(sent["sentiment_score"].notna().sum()),
+        )
     else:
         df["sentiment_score"] = _NEUTRAL_SCORE
         df["news_count"] = 0

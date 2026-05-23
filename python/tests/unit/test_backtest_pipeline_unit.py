@@ -4,6 +4,7 @@ Unit Test: バックテストパイプライン ロジック
 load_features, _build_task, メトリクス計算など、
 パイプラインの計算ロジックのみをテスト（外部依存なし）。
 """
+
 from unittest.mock import MagicMock, patch
 
 import numpy as np

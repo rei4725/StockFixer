@@ -240,7 +240,8 @@ def evaluate_promotion(
     """
     evaluated_at = datetime.now().isoformat()
     logger.info(
-        f"昇格ゲート評価開始: shadow={shadow_model_name} current={current_model_name} " f"horizon={horizon}"
+        f"昇格ゲート評価開始: shadow={shadow_model_name} current={current_model_name} "
+        f"horizon={horizon}"
     )
 
     # --- Walk-Forward 成績 ---
@@ -346,9 +347,15 @@ def evaluate_promotion(
     failed_names = [name for name, c in criteria.items() if not c["passed"]]
     if eligible:
         if require_manual_approval:
-            reason = f"全基準クリア（{shadow_model_name} は {current_model_name} を上回る）。" "手動承認待ち。"
+            reason = (
+                f"全基準クリア（{shadow_model_name} は {current_model_name} を上回る）。"
+                "手動承認待ち。"
+            )
         else:
-            reason = f"全基準クリア（{shadow_model_name} は {current_model_name} を上回る）。" "自動昇格可能。"
+            reason = (
+                f"全基準クリア（{shadow_model_name} は {current_model_name} を上回る）。"
+                "自動昇格可能。"
+            )
     else:
         reason = (
             f"昇格基準未達: {', '.join(failed_names)} が条件を満たしていない。"

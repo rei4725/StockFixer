@@ -4,6 +4,7 @@ market_data_raw テーブル操作のユニットテスト
 upsert_raw_ohlcv / load_raw_ohlcv / save_raw_ohlcv の動作を確認する。
 test_db.py と同じセットアップパターンで一時 DB を使用する。
 """
+
 import os
 import tempfile
 import unittest

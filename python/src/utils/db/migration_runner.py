@@ -25,15 +25,13 @@ _VERSION_RE = re.compile(r"^(\d{4})_(.+?)\.sql$")
 
 def _ensure_schema_migrations(con: duckdb.DuckDBPyConnection) -> None:
     """schema_migrations テーブルが存在しなければ作成する。"""
-    con.execute(
-        """
+    con.execute("""
         CREATE TABLE IF NOT EXISTS schema_migrations (
             version     VARCHAR NOT NULL PRIMARY KEY,
             description VARCHAR NOT NULL,
             applied_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
-        """
-    )
+        """)
 
 
 def _get_applied_versions(con: duckdb.DuckDBPyConnection) -> set:

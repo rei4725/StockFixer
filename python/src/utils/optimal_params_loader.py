@@ -2,6 +2,7 @@
 バックテスト最適化で生成された optimal_params.json を読み込むユーティリティ。
 SignalGenerator / RiskManager から参照する。
 """
+
 import json
 from pathlib import Path
 from typing import Optional

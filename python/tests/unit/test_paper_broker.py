@@ -16,8 +16,7 @@ from src.trading.brokers.paper.paper_broker import PaperBroker
 
 # テスト用インメモリ DB
 _TEST_CON = duckdb.connect(":memory:")
-_TEST_CON.execute(
-    """
+_TEST_CON.execute("""
     CREATE TABLE IF NOT EXISTS paper_orders (
         order_id VARCHAR, market VARCHAR, predicted_at VARCHAR,
         symbol VARCHAR, side INTEGER, qty INTEGER,
@@ -27,27 +26,21 @@ _TEST_CON.execute(
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         filled_at TIMESTAMP
     )
-    """
-)
-_TEST_CON.execute(
-    """
+    """)
+_TEST_CON.execute("""
     CREATE TABLE IF NOT EXISTS paper_positions (
         symbol VARCHAR PRIMARY KEY, qty INTEGER, avg_price DOUBLE,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
-    """
-)
-_TEST_CON.execute(
-    """
+    """)
+_TEST_CON.execute("""
     CREATE TABLE IF NOT EXISTS paper_balance (
         id INTEGER PRIMARY KEY DEFAULT 1,
         balance DOUBLE DEFAULT 1000000.0
     )
-    """
-)
+    """)
 _TEST_CON.execute("INSERT OR IGNORE INTO paper_balance (id, balance) VALUES (1, 1000000.0)")
-_TEST_CON.execute(
-    """
+_TEST_CON.execute("""
     CREATE TABLE IF NOT EXISTS paper_short_positions (
         symbol          VARCHAR NOT NULL PRIMARY KEY,
         qty             INTEGER NOT NULL,
@@ -56,8 +49,7 @@ _TEST_CON.execute(
         opened_at       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
-    """
-)
+    """)
 
 
 def _get_test_con():
@@ -465,15 +457,13 @@ class TestPaperBrokerGetPnlSummary(unittest.TestCase):
 
     @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
     def test_get_pnl_summary_with_filled_sell_order(self):
-        _TEST_CON.execute(
-            """
+        _TEST_CON.execute("""
             INSERT INTO paper_orders
                 (order_id, symbol, side, qty, price, order_type,
                  status, realized_pnl, filled_at)
             VALUES ('test_pnl_01', '7203', 2, 100, 1000.0, 10,
                     'filled', 5000.0, CURRENT_TIMESTAMP)
-            """
-        )
+            """)
         result = self.broker.get_pnl_summary()
         self.assertAlmostEqual(result["realized_pnl"], 5000.0)
         self.assertEqual(result["trade_count"], 1)

@@ -35,9 +35,9 @@ def convert_df_for_discord(df: pd.DataFrame) -> pd.DataFrame:
     df = df.rename(columns=columns_map)
     if "現在値" in df.columns and "予想終値" in df.columns and "予想変化率" not in df.columns:
         try:
-            df["予想変化率"] = (df["予想終値"].astype(float) - df["現在値"].astype(float)) / df["現在値"].astype(
-                float
-            )
+            df["予想変化率"] = (df["予想終値"].astype(float) - df["現在値"].astype(float)) / df[
+                "現在値"
+            ].astype(float)
         except (ValueError, TypeError, ZeroDivisionError):
             df["予想変化率"] = ""
     if "現在値" in df.columns:

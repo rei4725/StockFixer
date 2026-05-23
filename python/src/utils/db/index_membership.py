@@ -73,14 +73,12 @@ def save_index_membership_snapshot(
 
     with _db_connection() as con:
         con.register("_index_membership_temp", df)
-        con.execute(
-            """
+        con.execute("""
             INSERT OR REPLACE INTO index_membership_history
                 (market, symbol, index_name, snapshot_date, source, fetched_at)
             SELECT market, symbol, index_name, snapshot_date, source, fetched_at
             FROM _index_membership_temp
-            """
-        )
+            """)
 
     logger.info(
         f"DB保存完了: index_membership_history [{normalized_market}] "

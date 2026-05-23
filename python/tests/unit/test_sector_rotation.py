@@ -1,6 +1,7 @@
 """
 R-305: セクターローテーション戦略のユニットテスト
 """
+
 from __future__ import annotations
 
 import unittest

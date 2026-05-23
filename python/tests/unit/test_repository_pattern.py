@@ -5,10 +5,10 @@ InMemoryPredictionRepository を使って execution.py の run_daily_orders を
 DuckDB なしでテストできることを検証する。
 """
 
-import pytest
 from unittest.mock import patch
 
 import pandas as pd
+import pytest
 
 from src.domain.ports import PredictionResultRepository
 from src.infrastructure.in_memory import (
@@ -19,7 +19,6 @@ from src.infrastructure.in_memory import (
 from src.trading.brokers.base import OrderSide, OrderType
 from src.trading.execution import run_daily_orders
 from src.trading.types import TradingGateStatus
-
 
 # ---------------------------------------------------------------------------
 # InMemoryPredictionRepository.get_latest_by_market
@@ -171,9 +170,7 @@ class TestRunDailyOrdersWithRepository:
         broker = InMemoryBrokerAdapter()
         repo = _make_repo_with_predictions(n=1)
 
-        with patch(
-            "src.trading.execution._load_latest_predictions"
-        ) as mock_load:
+        with patch("src.trading.execution._load_latest_predictions") as mock_load:
             patches = [p.start() for p in _COMMON_PATCHES]
             try:
                 run_daily_orders(broker, market="jp", mode="paper", prediction_repo=repo)
