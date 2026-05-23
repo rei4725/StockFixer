@@ -6,19 +6,8 @@ Discord / レポート出力で使用するドメイン型。
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
-
-from src.prediction.types import PredictionResult
-
-
-@dataclass
-class MarketPredictionSnapshot:
-    """Discord などの表示用にまとめた市場別予測スナップショット。"""
-
-    market: str
-    top_results: list[PredictionResult] = field(default_factory=list)
-    worst_results: list[PredictionResult] = field(default_factory=list)
 
 
 @dataclass
