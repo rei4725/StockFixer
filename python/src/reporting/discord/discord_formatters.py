@@ -40,9 +40,14 @@ def convert_df_for_discord(df: pd.DataFrame) -> pd.DataFrame:
             ratio = (predicted - current) / current
             # 0除算で inf/-inf になる行は空文字に置換
             ratio = ratio.apply(
-                lambda v: ""
-                if (not isinstance(v, str) and (v != v or v == float("inf") or v == float("-inf")))
-                else v
+                lambda v: (
+                    ""
+                    if (
+                        not isinstance(v, str)
+                        and (v != v or v == float("inf") or v == float("-inf"))
+                    )
+                    else v
+                )
             )
             df["予想変化率"] = ratio
         except (ValueError, TypeError, ZeroDivisionError):
