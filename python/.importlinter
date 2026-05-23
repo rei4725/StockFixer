@@ -15,7 +15,7 @@ name = Layered architecture (utils < BC < orchestration/api)
 type = layers
 layers =
     src.api | src.orchestration
-    src.backtest | src.prediction | src.trading | src.reporting | src.watchlist | src.market_data
+    src.backtest | src.prediction | src.trading | src.reporting | src.watchlist | src.market_data | src.rule_engine
     src.utils
 ignore_imports =
     # --- BC → orchestration (reporting が scheduler ステータス型を参照) ---
@@ -43,8 +43,6 @@ ignore_imports =
     src.market_data.pipeline -> src.watchlist.batch_runner
     # --- 新規追加違反 (将来的解消対象) ---
     src.watchlist.batch_runner -> src.reporting.discord.discord_utils
-    src.prediction.rule_signal_pipeline -> src.trading.brokers.base
-    src.prediction.rule_signal_pipeline -> src.trading.brokers.paper.paper_broker
     src.reporting.discord.discord_utils -> src.trading.pre_close_alert_service
     src.backtest.rule_backtester -> src.market_data.yf_client
     src.backtest.backtester -> src.market_data.technical
@@ -52,11 +50,9 @@ ignore_imports =
     src.backtest.screener -> src.market_data.yf_client
     src.backtest.portfolio -> src.market_data.market_regime
     src.backtest.pipeline -> src.market_data.technical
-    src.prediction.rule_signal_pipeline -> src.backtest.rules
     src.prediction.unified_model_pipeline -> src.market_data.technical
     src.prediction.predict_single -> src.market_data.technical
     src.prediction.predict_single -> src.market_data.loader
-    src.prediction.rule_signal_pipeline -> src.market_data.yf_client
     src.prediction.training_pipeline -> src.market_data.technical
     src.market_data.pipeline -> src.watchlist.types
     src.backtest.portfolio -> src.trading.signal_generator
@@ -65,8 +61,10 @@ ignore_imports =
     src.backtest.pipeline -> src.reporting.discord.discord_utils
     src.backtest.rule_backtester -> src.market_data.technical
     src.backtest.screener -> src.market_data.technical
-    src.prediction.rule_signal_pipeline -> src.market_data.technical
     src.utils.alert_service -> src.reporting.discord.discord_utils
+    # [B] rule_engine → market_data (技術指標計算 — market_data ポートで解消可能)
+    src.rule_engine.pipeline -> src.market_data.yf_client
+    src.rule_engine.pipeline -> src.market_data.technical
 
 # ============================================================
 # Contract 2: BC 独立性契約
@@ -79,11 +77,11 @@ ignore_imports =
 #   [B] イベント/コールバック駆動で解消可能 (中期 Q4-2026):
 #       market_data/watchlist/prediction → reporting: 通知をイベント経由に
 #       backtest → prediction/market_data: BT 専用ポートを定義
-#   [C] 設計変更が必要 (長期 2027):
-#       prediction.rule_signal_pipeline → trading/backtest: ルールエンジン BC の分離
+#
+# [C] prediction.rule_signal_pipeline → trading/backtest は rule_engine BC (#340) で解消済み
 #
 # 削減目標:
-#   現状: 48件 (2026-05, #264 実施後: 49→48 件)
+#   現状: 44件 (2026-05, #340 実施後: [C] 3件削減)
 #   Q3-2026: 30件以下 (分類 A を解消)
 #   Q4-2026: 20件以下 (分類 B を解消)
 # ============================================================
@@ -97,6 +95,7 @@ modules =
     src.reporting
     src.watchlist
     src.market_data
+    src.rule_engine
 ignore_imports =
     # [A] reporting → prediction (予測結果をレポート表示 — types.py 共有で解消可能)
     src.reporting.query_service -> src.prediction.types
@@ -129,9 +128,6 @@ ignore_imports =
     src.market_data.pipeline -> src.watchlist.batch_runner
     # [B] watchlist → reporting (バッチ通知 — イベント駆動で解消可能)
     src.watchlist.batch_runner -> src.reporting.discord.discord_utils
-    # [C] prediction.rule_signal_pipeline → trading (ルールエンジン BC 分離が必要)
-    src.prediction.rule_signal_pipeline -> src.trading.brokers.base
-    src.prediction.rule_signal_pipeline -> src.trading.brokers.paper.paper_broker
     # [B] reporting → trading (pre_close_alert — alert BC の切り出しで解消可能)
     src.reporting.discord.discord_utils -> src.trading.pre_close_alert_service
     # [B] backtest → market_data (技術指標計算 — market_data ポートで解消可能)
@@ -141,13 +137,10 @@ ignore_imports =
     src.backtest.screener -> src.market_data.yf_client
     src.backtest.portfolio -> src.market_data.market_regime
     src.backtest.pipeline -> src.market_data.technical
-    # [C] prediction.rule_signal_pipeline → backtest (ルール共有 — ルール BC 分離で解消可能)
-    src.prediction.rule_signal_pipeline -> src.backtest.rules
     # [B] prediction → market_data (技術指標計算 — market_data ポートで解消可能)
     src.prediction.unified_model_pipeline -> src.market_data.technical
     src.prediction.predict_single -> src.market_data.technical
     src.prediction.predict_single -> src.market_data.loader
-    src.prediction.rule_signal_pipeline -> src.market_data.yf_client
     src.prediction.training_pipeline -> src.market_data.technical
     # [A] market_data → watchlist (types 共有で解消可能)
     src.market_data.pipeline -> src.watchlist.types
@@ -161,4 +154,6 @@ ignore_imports =
     # [B] backtest → market_data (追加技術指標 — ポートで解消可能)
     src.backtest.rule_backtester -> src.market_data.technical
     src.backtest.screener -> src.market_data.technical
-    src.prediction.rule_signal_pipeline -> src.market_data.technical
+    # [B] rule_engine → market_data (技術指標計算 — market_data ポートで解消可能)
+    src.rule_engine.pipeline -> src.market_data.yf_client
+    src.rule_engine.pipeline -> src.market_data.technical
