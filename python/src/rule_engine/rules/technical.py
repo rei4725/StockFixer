@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pandas as pd
 
 
@@ -168,7 +170,7 @@ class VolatilityBreakoutRule:
         return signal
 
 
-ALL_RULES: list = [
+ALL_RULES: list[Any] = [
     VolumeBreakoutRule(),
     EMAMomentumRule(),
     RSIContrarianRule(),
