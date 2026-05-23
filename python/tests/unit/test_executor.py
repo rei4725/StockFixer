@@ -1,7 +1,8 @@
 """ユニットテスト: PipelineExecutor インターフェースと PipelineOrchestrator DI"""
 
-import pytest
 from unittest.mock import MagicMock, call, patch
+
+import pytest
 
 from src.orchestration.executor import (
     BacktestOptimizationExecutor,
@@ -12,7 +13,6 @@ from src.orchestration.executor import (
     PredictionExecutor,
     WatchlistRefreshExecutor,
 )
-
 
 # ──────────────────────────────────────────────
 # PipelineExecutor Protocol の型チェック
@@ -207,9 +207,7 @@ class TestModelTrainingExecutor:
     @patch("src.prediction.unified_model_pipeline.train_unified_model")
     def test_delegates_to_train_unified_model(self, mock_train):
         ModelTrainingExecutor("XGBoostModel", "production").execute()
-        mock_train.assert_called_once_with(
-            model_type="XGBoostModel", model_name="production"
-        )
+        mock_train.assert_called_once_with(model_type="XGBoostModel", model_name="production")
 
 
 class TestWatchlistRefreshExecutor:

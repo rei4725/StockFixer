@@ -1,4 +1,5 @@
 """discord_formatters モジュールのユニットテスト"""
+
 import unittest
 
 import pandas as pd
@@ -63,7 +64,9 @@ class TestConvertDfForDiscord(unittest.TestCase):
         result = convert_df_for_discord(df)
         assert "予想変化率" in result.columns
         # 1% 変化
-        assert "+1.0%" in str(result["予想変化率"].iloc[0]) or "1%" in str(result["予想変化率"].iloc[0])
+        assert "+1.0%" in str(result["予想変化率"].iloc[0]) or "1%" in str(
+            result["予想変化率"].iloc[0]
+        )
 
     def test_format_percent_negative(self):
         """マイナス変化率が正しく符号付きで出力されること"""

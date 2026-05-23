@@ -1,6 +1,7 @@
 """
 ユニットテスト: config.trading_policy
 """
+
 import importlib
 import unittest
 from unittest.mock import patch

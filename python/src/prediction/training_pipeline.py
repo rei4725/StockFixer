@@ -446,7 +446,9 @@ def train_models_for_symbol(
                     f"方向正解率={saved_metrics.directional_accuracy:.2%} (OOS)"
                 )
             except Exception as e:
-                logger.warning(f"精度指標保存スキップ [{market}_{symbol}/{model_name}]: {e}", exc_info=True)
+                logger.warning(
+                    f"精度指標保存スキップ [{market}_{symbol}/{model_name}]: {e}", exc_info=True
+                )
             # 実験ランを experiment_runs テーブルへ記録
             try:
                 save_experiment_run(
@@ -465,7 +467,9 @@ def train_models_for_symbol(
                     params={"role": mode_label},
                 )
             except Exception as e:
-                logger.warning(f"実験ラン保存スキップ [{market}_{symbol}/{model_name}]: {e}", exc_info=True)
+                logger.warning(
+                    f"実験ラン保存スキップ [{market}_{symbol}/{model_name}]: {e}", exc_info=True
+                )
             # MLflow 実験トラッキング
             hyperparams: dict | None = None
             try:
@@ -549,11 +553,17 @@ def train_models_for_symbol_task(
 
     if isinstance(task, SymbolTask):
         return train_models_for_symbol(
-            task.market, task.symbol, task.horizon, shadow_mode=shadow_mode,
+            task.market,
+            task.symbol,
+            task.horizon,
+            shadow_mode=shadow_mode,
             use_transformer=use_transformer,
         )
     return train_models_for_symbol(
-        task["market"], task["symbol"], task.get("horizon", 1), shadow_mode=shadow_mode,
+        task["market"],
+        task["symbol"],
+        task.get("horizon", 1),
+        shadow_mode=shadow_mode,
         use_transformer=use_transformer,
     )
 
@@ -634,7 +644,8 @@ def run_model_batch(horizon: int = 1):
                     save_model_metrics(market, symbol, model_name, trained_at, metrics)
                 except Exception as me:
                     logger.warning(
-                        f"精度指標保存スキップ [{market}_{symbol}/{model_name}]: {me}", exc_info=True
+                        f"精度指標保存スキップ [{market}_{symbol}/{model_name}]: {me}",
+                        exc_info=True,
                     )
             logger.info(f"[モデル作成完了] {market}/{symbol}")
             train_results.append({"market": market, "symbol": symbol, "status": "success"})

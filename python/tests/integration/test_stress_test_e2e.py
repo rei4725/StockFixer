@@ -4,6 +4,7 @@ Integration Test: ストレステストパイプライン End-to-End
 yfinance 経由でのデータ取得を伴うため tests/integration/ に配置。
 実行には外部ネットワークアクセスが必要。
 """
+
 import os
 import sys
 import tempfile

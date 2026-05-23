@@ -1,6 +1,7 @@
 """
 BacktestTask / ReturnRegressionTask のユニットテスト
 """
+
 import unittest
 
 import pandas as pd

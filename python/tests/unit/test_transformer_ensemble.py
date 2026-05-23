@@ -196,6 +196,7 @@ class TestTransformerInShadowEvaluation(unittest.TestCase):
             ),
         ):
             from src.prediction.shadow_evaluation import predict_with_challenger_unified
+
             result = predict_with_challenger_unified()
 
         # 空銘柄リストなので空リストが返るが、例外は発生しないこと

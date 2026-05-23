@@ -1,4 +1,5 @@
 """src/api/health.py の単体テスト"""
+
 import json
 from unittest.mock import MagicMock, patch
 

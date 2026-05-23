@@ -106,7 +106,9 @@ def parse_args() -> argparse.Namespace:
     )
 
     # 取引条件
-    p.add_argument("--initial-cash", type=float, default=1_000_000, help="初期資金 (default: 1000000)")
+    p.add_argument(
+        "--initial-cash", type=float, default=1_000_000, help="初期資金 (default: 1000000)"
+    )
     p.add_argument("--fee-rate", type=float, default=0.001, help="片道手数料率 (default: 0.001)")
     p.add_argument("--slippage", type=float, default=0.001, help="スリッページ率 (default: 0.001)")
     p.add_argument(
@@ -176,7 +178,10 @@ def main() -> None:
 
         # 銘柄別サマリー
         print("\n\n===== 銘柄 × ルール 総合ランキング =====")
-        print(f"{'順位':<4} {'銘柄':>6} {'法則名':<24} {'勝率':>6} " f"{'総利益(円)':>12} {'取引数':>6} {'MDD':>8}")
+        print(
+            f"{'順位':<4} {'銘柄':>6} {'法則名':<24} {'勝率':>6} "
+            f"{'総利益(円)':>12} {'取引数':>6} {'MDD':>8}"
+        )
         print("-" * 70)
         for rank, (_, row) in enumerate(result_df.iterrows(), 1):
             profit_str = f"JPY{row['net_profit']:>+,.0f}"
@@ -198,7 +203,10 @@ def main() -> None:
             )
             .sort_values(["avg_win_rate", "total_profit"], ascending=[False, False])
         )
-        print(f"{'法則名':<24} {'平均勝率':>8} {'合計利益(円)':>14} " f"{'平均取引数':>10} {'銘柄数':>6}")
+        print(
+            f"{'法則名':<24} {'平均勝率':>8} {'合計利益(円)':>14} "
+            f"{'平均取引数':>10} {'銘柄数':>6}"
+        )
         print("-" * 65)
         for rule_name, row in summary.iterrows():
             profit_str = f"JPY{row['total_profit']:>+,.0f}"

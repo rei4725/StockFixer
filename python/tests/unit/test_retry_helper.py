@@ -6,6 +6,7 @@ Unit Test: src.utils.retry_helper.with_retry
 - 異常系: 非リトライエラーでの即 raise・max_retries 超過
 - バックオフ: 待機時間の指数増加・上限キャップ
 """
+
 from unittest.mock import MagicMock, patch
 
 import pytest

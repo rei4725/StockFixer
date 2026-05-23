@@ -352,9 +352,10 @@ class TestRunConditionalNotification(unittest.TestCase):
             AlertResult("NF-303-3", "ドリフト", False, 0, 2),
             AlertResult("NF-303-4", "ヘルス", False, 0, 2),
         ]
-        with patch(
-            "src.utils.alert_service._send_alert_detail", return_value=True
-        ) as mock_detail, patch("src.utils.alert_service._send_daily_summary") as mock_summary:
+        with (
+            patch("src.utils.alert_service._send_alert_detail", return_value=True) as mock_detail,
+            patch("src.utils.alert_service._send_daily_summary") as mock_summary,
+        ):
             ok = run_conditional_notification(results=results)
 
         mock_detail.assert_called_once_with(results)
@@ -368,9 +369,10 @@ class TestRunConditionalNotification(unittest.TestCase):
             AlertResult("NF-303-3", "C", False, 0, 2),
             AlertResult("NF-303-4", "D", False, 0, 2),
         ]
-        with patch("src.utils.alert_service._send_alert_detail") as mock_detail, patch(
-            "src.utils.alert_service._send_daily_summary", return_value=True
-        ) as mock_summary:
+        with (
+            patch("src.utils.alert_service._send_alert_detail") as mock_detail,
+            patch("src.utils.alert_service._send_daily_summary", return_value=True) as mock_summary,
+        ):
             ok = run_conditional_notification(results=results)
 
         mock_summary.assert_called_once_with(results)
@@ -384,9 +386,12 @@ class TestRunConditionalNotification(unittest.TestCase):
             AlertResult("NF-303-3", "C", False, 0, 2),
             AlertResult("NF-303-4", "D", False, 0, 2),
         ]
-        with patch(
-            "src.utils.alert_service.evaluate_alert_conditions", return_value=all_ok
-        ) as mock_eval, patch("src.utils.alert_service._send_daily_summary", return_value=True):
+        with (
+            patch(
+                "src.utils.alert_service.evaluate_alert_conditions", return_value=all_ok
+            ) as mock_eval,
+            patch("src.utils.alert_service._send_daily_summary", return_value=True),
+        ):
             run_conditional_notification(results=None)
         mock_eval.assert_called_once()
 

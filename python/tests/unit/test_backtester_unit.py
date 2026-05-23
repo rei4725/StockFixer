@@ -3,6 +3,7 @@
 外部依存（DB・yfinance・モデル）なく、simulate_trading のロジックのみをテスト。
 全依存を Mock で隔離し、高速実行を実現。
 """
+
 import sys
 import types
 from unittest.mock import MagicMock, patch

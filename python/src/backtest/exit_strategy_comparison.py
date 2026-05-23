@@ -4,6 +4,7 @@ Walk-Forward によるエグジット戦略比較ユーティリティ (R-402)
 固定 TP/SL 戦略と ML ベースエグジット戦略の成績（Net Return, MDD）を
 Walk-Forward で比較し、結果 DataFrame を返す。
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -134,7 +135,9 @@ def _print_comparison(
     ]
 
     print("\n" + "=" * 70)
-    print(f"エグジット戦略比較: 固定 TP/SL ({take_profit_pct:.0%}/{stop_loss_pct:.0%}) vs. ML エグジット")
+    print(
+        f"エグジット戦略比較: 固定 TP/SL ({take_profit_pct:.0%}/{stop_loss_pct:.0%}) vs. ML エグジット"
+    )
     print("=" * 70)
     print(result[summary_cols].to_string(index=False))
 

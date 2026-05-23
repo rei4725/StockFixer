@@ -239,9 +239,7 @@ class SchedulerQueueManager:
                     self._send_error_notification(job_id, max_retries, str(exc))
                     raise
 
-    def _send_error_notification(
-        self, job_id: str, max_retries: int, error_message: str
-    ) -> None:
+    def _send_error_notification(self, job_id: str, max_retries: int, error_message: str) -> None:
         """最大リトライ超過後の Discord エラー通知を送信する。"""
         if self._error_notifier is not None:
             try:

@@ -7,6 +7,7 @@ CI で前回の benchmark_results.json と比較し、
 
 初回実行時（ベースラインなし）は正常終了する。
 """
+
 import json
 import os
 import sys

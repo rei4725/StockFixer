@@ -144,9 +144,7 @@ def check_weekly_hit_rate_drift(
     weekly = _load_weekly_hit_rates(n_weeks=weeks + 1, horizon=horizon)
 
     if weekly.empty or len(weekly) < 2:
-        logger.warning(
-            "週次 Hit Rate データ不足: %d 週分 (最低 2 週必要)", len(weekly)
-        )
+        logger.warning("週次 Hit Rate データ不足: %d 週分 (最低 2 週必要)", len(weekly))
         return DriftMonitorResult(
             checked_at=checked_at,
             current_week=None,

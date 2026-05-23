@@ -165,9 +165,9 @@ class ModelManager:
 
         artifact = {
             "model": model.model,
-            "feature_hash": _compute_feature_hash(feature_columns)
-            if feature_columns is not None
-            else None,
+            "feature_hash": (
+                _compute_feature_hash(feature_columns) if feature_columns is not None else None
+            ),
             "git_sha": _get_git_sha(),
             "trained_at": datetime.now(timezone.utc).isoformat(),
         }
@@ -204,7 +204,9 @@ class ModelManager:
                         model_type = registered_name
                         break
                 else:
-                    raise ValueError(f"モデル '{model_name}' はまだ作成されていません。model_typeを指定してください。")
+                    raise ValueError(
+                        f"モデル '{model_name}' はまだ作成されていません。model_typeを指定してください。"
+                    )
             model_instance = self.create_model(model_type, model_name)
 
         artifact = joblib.load(model_path)

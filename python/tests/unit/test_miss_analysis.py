@@ -152,7 +152,12 @@ class TestAnalyzeMissCauses(unittest.TestCase):
         return pd.DataFrame(
             [
                 {"feature": "rsi_14", "shap_mean": 0.5, "shap_rank": 1, "trained_at": "20260301"},
-                {"feature": "volume_ma20", "shap_mean": 0.3, "shap_rank": 2, "trained_at": "20260301"},
+                {
+                    "feature": "volume_ma20",
+                    "shap_mean": 0.3,
+                    "shap_rank": 2,
+                    "trained_at": "20260301",
+                },
             ]
         )
 
@@ -162,7 +167,7 @@ class TestAnalyzeMissCauses(unittest.TestCase):
         normal_dates = [f"2026-03-{d:02d}" for d in range(1, 21)]
         normal_rsi = [50.0 + (i % 5 - 2) * 0.5 for i in range(20)]  # 48.0〜51.0
         normal_vol = [1000.0 + (i % 5 - 2) * 10 for i in range(20)]  # 980〜1020
-        miss_rsi = 1.0 if extreme else 50.0     # z ≈ -24 (extreme) or 0 (normal)
+        miss_rsi = 1.0 if extreme else 50.0  # z ≈ -24 (extreme) or 0 (normal)
         miss_vol = 9000.0 if extreme else 1000.0
         base = pd.DataFrame(
             {

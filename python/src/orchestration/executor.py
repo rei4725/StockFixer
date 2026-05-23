@@ -3,6 +3,7 @@ PipelineExecutor インターフェースと BC 層ごとの具体実装。
 
 スケジューラーへの DI 単位として機能し、テスト時にモック Executor を注入できる。
 """
+
 from __future__ import annotations
 
 import os

@@ -3,6 +3,7 @@
 
 IO をモックし、バックテストのシミュレーション処理時間を計測する。
 """
+
 import time
 from unittest.mock import MagicMock
 

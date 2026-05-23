@@ -1,4 +1,5 @@
 """ユニットテスト: src.utils.db._connection モジュール"""
+
 import unittest
 from unittest.mock import MagicMock, patch
 

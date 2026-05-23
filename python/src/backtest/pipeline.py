@@ -56,14 +56,19 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
             df = df.ffill().bfill()
         _MIN_ROWS = 30
         if len(df) < _MIN_ROWS:
-            logger.error(f"[backtest] データ行数不足: {market}/{symbol} " f"（{len(df)}行 < 最低{_MIN_ROWS}行）")
+            logger.error(
+                f"[backtest] データ行数不足: {market}/{symbol} "
+                f"（{len(df)}行 < 最低{_MIN_ROWS}行）"
+            )
             sys.exit(1)
         X, y = create_basic_lag_features(df, n_lags=10)
         if X is None or X.empty:
             nan_cols = df.isnull().sum()
             nan_cols = nan_cols[nan_cols > 0]
             detail = f"NaN残存列: {nan_cols.to_dict()}" if not nan_cols.empty else "NaN列なし"
-            logger.error(f"[backtest] 特徴量生成に失敗しました: {market}/{symbol}（{len(df)}行, {detail}）")
+            logger.error(
+                f"[backtest] 特徴量生成に失敗しました: {market}/{symbol}（{len(df)}行, {detail}）"
+            )
             sys.exit(1)
         X.columns = [re.sub(r"[^0-9a-zA-Z_]", "_", str(c)) for c in X.columns]
         X["y"] = y
@@ -92,14 +97,19 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
             df = df.ffill().bfill()
         _MIN_ROWS = 30
         if len(df) < _MIN_ROWS:
-            logger.error(f"[backtest] データ行数不足: {market}/{symbol} " f"（{len(df)}行 < 最低{_MIN_ROWS}行）")
+            logger.error(
+                f"[backtest] データ行数不足: {market}/{symbol} "
+                f"（{len(df)}行 < 最低{_MIN_ROWS}行）"
+            )
             sys.exit(1)
         X, y = create_basic_lag_features(df, n_lags=10)
         if X is None or X.empty:
             nan_cols = df.isnull().sum()
             nan_cols = nan_cols[nan_cols > 0]
             detail = f"NaN残存列: {nan_cols.to_dict()}" if not nan_cols.empty else "NaN列なし"
-            logger.error(f"[backtest] 特徴量生成に失敗しました: {market}/{symbol}（{len(df)}行, {detail}）")
+            logger.error(
+                f"[backtest] 特徴量生成に失敗しました: {market}/{symbol}（{len(df)}行, {detail}）"
+            )
             sys.exit(1)
         X.columns = [re.sub(r"[^0-9a-zA-Z_]", "_", str(c)) for c in X.columns]
         X["y"] = y
@@ -158,7 +168,9 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
                     if len(aligned) == len(df):
                         df = df.copy()
                         df.index = pd.DatetimeIndex(aligned, name="Date")
-                        logger.debug(f"[backtest] market_data_raw から日付を補完: {market}/{symbol}")
+                        logger.debug(
+                            f"[backtest] market_data_raw から日付を補完: {market}/{symbol}"
+                        )
             except Exception as e:
                 logger.debug(f"[backtest] 日付補完スキップ: {e}", exc_info=True)
 

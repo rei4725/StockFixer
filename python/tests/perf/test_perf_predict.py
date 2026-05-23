@@ -3,6 +3,7 @@
 
 IO をモックし、特徴量計算 + モデル推論の実行時間を計測する。
 """
+
 import time
 from unittest.mock import MagicMock, patch
 

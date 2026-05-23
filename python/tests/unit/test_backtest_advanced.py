@@ -4,6 +4,7 @@
 ストップロス / テイクプロフィット / ポジションサイジング / アンサンブル予測を
 外部依存なしでテストする。
 """
+
 import unittest
 from unittest.mock import MagicMock
 

@@ -4,6 +4,7 @@ Integration Test: バックテストパイプライン End-to-End
 DuckDB から特徴量取得 → モデル学習 → バックテスト実行
 完全なフロー検証。
 """
+
 import os
 import sys
 import unittest

@@ -426,8 +426,7 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
     """)
 
     # I-256: 決算・イベントカレンダーキャッシュ
-    con.execute(
-        """
+    con.execute("""
         CREATE TABLE IF NOT EXISTS earnings_calendar (
             market      VARCHAR   NOT NULL,
             symbol      VARCHAR   NOT NULL,
@@ -436,8 +435,7 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
             fetched_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (market, symbol, event_date)
         )
-    """
-    )
+    """)
 
 
 def init_tables() -> None:

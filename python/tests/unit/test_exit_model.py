@@ -1,4 +1,5 @@
 """ExitModel のユニットテスト (R-402)"""
+
 from __future__ import annotations
 
 import os
@@ -12,7 +13,7 @@ import pandas as pd
 
 def _make_feature_df(n: int = 60) -> pd.DataFrame:
     """ExitModel 用の特徴量 DataFrame を生成する"""
-    from src.prediction.models.exit_model import FEATURE_COLS
+    from src.trading.models.exit_model import FEATURE_COLS
 
     rng = np.random.default_rng(42)
     dates = pd.date_range("2024-01-01", periods=n, freq="D")
@@ -29,13 +30,13 @@ def _make_labels(n: int = 60) -> pd.Series:
 
 class TestExitModelInit(unittest.TestCase):
     def test_default_name(self):
-        from src.prediction.models.exit_model import ExitModel
+        from src.trading.models.exit_model import ExitModel
 
         m = ExitModel()
         self.assertEqual(m.model_name, "ExitModel")
 
     def test_custom_name(self):
-        from src.prediction.models.exit_model import ExitModel
+        from src.trading.models.exit_model import ExitModel
 
         m = ExitModel("MyExitModel")
         self.assertEqual(m.model_name, "MyExitModel")
@@ -43,7 +44,7 @@ class TestExitModelInit(unittest.TestCase):
     def test_model_is_xgb_classifier(self):
         import xgboost as xgb
 
-        from src.prediction.models.exit_model import ExitModel
+        from src.trading.models.exit_model import ExitModel
 
         m = ExitModel()
         self.assertIsInstance(m.model, xgb.XGBClassifier)
@@ -55,13 +56,13 @@ class TestExitModelTrainPredict(unittest.TestCase):
         self.y = _make_labels()
 
     def test_train_completes(self):
-        from src.prediction.models.exit_model import ExitModel
+        from src.trading.models.exit_model import ExitModel
 
         m = ExitModel()
         m.train(self.X, self.y)
 
     def test_predict_returns_series(self):
-        from src.prediction.models.exit_model import ExitModel
+        from src.trading.models.exit_model import ExitModel
 
         m = ExitModel()
         m.train(self.X, self.y)
@@ -69,7 +70,7 @@ class TestExitModelTrainPredict(unittest.TestCase):
         self.assertIsInstance(result, pd.Series)
 
     def test_predict_length_matches_input(self):
-        from src.prediction.models.exit_model import ExitModel
+        from src.trading.models.exit_model import ExitModel
 
         m = ExitModel()
         m.train(self.X, self.y)
@@ -77,7 +78,7 @@ class TestExitModelTrainPredict(unittest.TestCase):
         self.assertEqual(len(result), len(self.X))
 
     def test_predict_probability_range(self):
-        from src.prediction.models.exit_model import ExitModel
+        from src.trading.models.exit_model import ExitModel
 
         m = ExitModel()
         m.train(self.X, self.y)
@@ -86,14 +87,14 @@ class TestExitModelTrainPredict(unittest.TestCase):
         self.assertTrue((proba <= 1.0).all(), "確率は 1 以下であること")
 
     def test_predict_before_train_raises(self):
-        from src.prediction.models.exit_model import ExitModel
+        from src.trading.models.exit_model import ExitModel
 
         m = ExitModel()
         with self.assertRaises(ValueError):
             m.predict(self.X)
 
     def test_predict_index_matches(self):
-        from src.prediction.models.exit_model import ExitModel
+        from src.trading.models.exit_model import ExitModel
 
         m = ExitModel()
         m.train(self.X, self.y)
@@ -101,7 +102,7 @@ class TestExitModelTrainPredict(unittest.TestCase):
         pd.testing.assert_index_equal(result.index, self.X.index)
 
     def test_predict_single_row(self):
-        from src.prediction.models.exit_model import ExitModel
+        from src.trading.models.exit_model import ExitModel
 
         m = ExitModel()
         m.train(self.X, self.y)
@@ -109,7 +110,7 @@ class TestExitModelTrainPredict(unittest.TestCase):
         self.assertEqual(len(result), 1)
 
     def test_train_with_eval_set(self):
-        from src.prediction.models.exit_model import ExitModel
+        from src.trading.models.exit_model import ExitModel
 
         X, y = _make_feature_df(120), _make_labels(120)
         X_train, y_train = X.iloc[:90], y.iloc[:90]
@@ -127,21 +128,21 @@ class TestExitModelMakeLabels(unittest.TestCase):
         return pd.Series(prices, index=dates)
 
     def test_returns_series(self):
-        from src.prediction.models.exit_model import ExitModel
+        from src.trading.models.exit_model import ExitModel
 
         close = self._make_close()
         label = ExitModel.make_labels(close)
         self.assertIsInstance(label, pd.Series)
 
     def test_length_matches_input(self):
-        from src.prediction.models.exit_model import ExitModel
+        from src.trading.models.exit_model import ExitModel
 
         close = self._make_close(30)
         label = ExitModel.make_labels(close, lookahead=5)
         self.assertEqual(len(label), len(close))
 
     def test_tail_is_na(self):
-        from src.prediction.models.exit_model import ExitModel
+        from src.trading.models.exit_model import ExitModel
 
         lookahead = 5
         close = self._make_close(30)
@@ -152,7 +153,7 @@ class TestExitModelMakeLabels(unittest.TestCase):
         )
 
     def test_peak_is_labeled_exit(self):
-        from src.prediction.models.exit_model import ExitModel
+        from src.trading.models.exit_model import ExitModel
 
         # 価格が途中でピークを迎えるシリーズ
         n = 20
@@ -166,7 +167,7 @@ class TestExitModelMakeLabels(unittest.TestCase):
         self.assertIn(1, non_na.values, "ピーク近傍で exit=1 が発生すること")
 
     def test_name_is_exit_signal(self):
-        from src.prediction.models.exit_model import ExitModel
+        from src.trading.models.exit_model import ExitModel
 
         close = self._make_close()
         label = ExitModel.make_labels(close)
@@ -175,7 +176,7 @@ class TestExitModelMakeLabels(unittest.TestCase):
 
 class TestExitModelPrepareFeatures(unittest.TestCase):
     def test_all_feature_cols_present(self):
-        from src.prediction.models.exit_model import FEATURE_COLS, ExitModel
+        from src.trading.models.exit_model import FEATURE_COLS, ExitModel
 
         df = _make_feature_df()
         result = ExitModel.prepare_features(df)
@@ -183,14 +184,14 @@ class TestExitModelPrepareFeatures(unittest.TestCase):
             self.assertIn(col, result.columns)
 
     def test_missing_cols_filled_with_zero(self):
-        from src.prediction.models.exit_model import ExitModel
+        from src.trading.models.exit_model import ExitModel
 
         empty_df = pd.DataFrame({"other_col": [1, 2, 3]})
         result = ExitModel.prepare_features(empty_df)
         self.assertTrue((result == 0.0).all().all(), "存在しない列は 0.0 で補完されること")
 
     def test_output_is_float(self):
-        from src.prediction.models.exit_model import ExitModel
+        from src.trading.models.exit_model import ExitModel
 
         df = _make_feature_df()
         result = ExitModel.prepare_features(df)
@@ -203,7 +204,7 @@ class TestExitModelSaveLoad(unittest.TestCase):
     def setUp(self):
         self.X = _make_feature_df()
         self.y = _make_labels()
-        from src.prediction.models.exit_model import ExitModel
+        from src.trading.models.exit_model import ExitModel
 
         self.model = ExitModel()
         self.model.train(self.X, self.y)
@@ -213,7 +214,7 @@ class TestExitModelSaveLoad(unittest.TestCase):
         shutil.rmtree(self.tmp_dir, ignore_errors=True)
 
     def test_save_and_load_roundtrip(self):
-        from src.prediction.models.exit_model import ExitModel
+        from src.trading.models.exit_model import ExitModel
 
         path = os.path.join(self.tmp_dir, "exit_model.joblib")
         self.model.save_model(path)
@@ -225,7 +226,7 @@ class TestExitModelSaveLoad(unittest.TestCase):
         self.assertEqual(len(pred), len(self.X))
 
     def test_loaded_model_same_predictions(self):
-        from src.prediction.models.exit_model import ExitModel
+        from src.trading.models.exit_model import ExitModel
 
         path = os.path.join(self.tmp_dir, "exit_model.joblib")
         pred_before = self.model.predict(self.X)
@@ -241,7 +242,7 @@ class TestExitModelInInit(unittest.TestCase):
     """__init__.py 経由で ExitModel をインポートできること"""
 
     def test_importable_from_package(self):
-        from src.prediction.models import ExitModel
+        from src.trading.models import ExitModel
 
         self.assertTrue(issubclass(ExitModel, object))
 

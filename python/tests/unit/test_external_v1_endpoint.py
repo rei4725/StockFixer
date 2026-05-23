@@ -1,4 +1,5 @@
 """src/api/external_v1.py の単体テスト"""
+
 from unittest.mock import patch
 
 import pytest

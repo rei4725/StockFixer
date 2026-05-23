@@ -1,4 +1,5 @@
 """ユニットテスト: src.utils.db.system_config"""
+
 import unittest
 from unittest.mock import MagicMock, call, patch
 

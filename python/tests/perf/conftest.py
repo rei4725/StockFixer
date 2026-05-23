@@ -3,6 +3,7 @@
 
 セッション終了時に benchmark_results.json を書き出す。
 """
+
 import json
 import os
 

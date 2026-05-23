@@ -18,7 +18,12 @@ from src.trading.execution import _determine_entry_horizon
 
 class TestDetermineEntryHorizon(unittest.TestCase):
     def _row(self, **kwargs) -> pd.Series:
-        base = {"diff_ratio": 0.01, "diff_ratio_3d": None, "diff_ratio_5d": None, "diff_ratio_10d": None}
+        base = {
+            "diff_ratio": 0.01,
+            "diff_ratio_3d": None,
+            "diff_ratio_5d": None,
+            "diff_ratio_10d": None,
+        }
         base.update(kwargs)
         return pd.Series(base)
 
@@ -35,7 +40,9 @@ class TestDetermineEntryHorizon(unittest.TestCase):
         self.assertEqual(_determine_entry_horizon(row), 5)
 
     def test_10d_largest(self):
-        row = self._row(diff_ratio=0.01, diff_ratio_3d=0.02, diff_ratio_5d=0.03, diff_ratio_10d=0.09)
+        row = self._row(
+            diff_ratio=0.01, diff_ratio_3d=0.02, diff_ratio_5d=0.03, diff_ratio_10d=0.09
+        )
         self.assertEqual(_determine_entry_horizon(row), 10)
 
     def test_negative_values_use_abs(self):
@@ -47,7 +54,9 @@ class TestDetermineEntryHorizon(unittest.TestCase):
         self.assertEqual(_determine_entry_horizon(row), 5)
 
     def test_all_equal_returns_1(self):
-        row = self._row(diff_ratio=0.02, diff_ratio_3d=0.02, diff_ratio_5d=0.02, diff_ratio_10d=0.02)
+        row = self._row(
+            diff_ratio=0.02, diff_ratio_3d=0.02, diff_ratio_5d=0.02, diff_ratio_10d=0.02
+        )
         self.assertIn(_determine_entry_horizon(row), [1, 3, 5, 10])
 
     def test_missing_columns(self):

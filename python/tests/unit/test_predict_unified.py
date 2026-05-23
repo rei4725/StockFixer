@@ -1,4 +1,5 @@
 """predict_unified モジュールのユニットテスト"""
+
 import sys
 import unittest
 from unittest.mock import MagicMock, patch

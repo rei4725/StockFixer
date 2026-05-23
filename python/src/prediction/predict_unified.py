@@ -43,7 +43,9 @@ def load_feature_data(market: str, symbol: str) -> Optional[pd.DataFrame]:
         df = load_stock_features(market, symbol)
         return df
     except Exception:
-        logger.warning("特徴量データ読み込み失敗: market=%s symbol=%s", market, symbol, exc_info=True)
+        logger.warning(
+            "特徴量データ読み込み失敗: market=%s symbol=%s", market, symbol, exc_info=True
+        )
         return None
 
 
@@ -141,7 +143,12 @@ def predict_with_unified_model(
             else:
                 current_price = float(df["y"].iloc[-2]) if len(df) > 1 else float(df["y"].iloc[-1])
     except Exception:
-        logger.warning("現在価格取得失敗（フォールバック使用）: market=%s symbol=%s", market, symbol, exc_info=True)
+        logger.warning(
+            "現在価格取得失敗（フォールバック使用）: market=%s symbol=%s",
+            market,
+            symbol,
+            exc_info=True,
+        )
         # エラー時はフォールバック
         if "Close_lag1" in df.columns:
             current_price = float(df["Close_lag1"].iloc[-1])
@@ -188,7 +195,11 @@ def predict_with_unified_model(
             succeeded_model_names.append(model_name)
         except Exception:
             logger.warning(
-                "モデル予測スキップ: model=%s market=%s symbol=%s", model_name, market, symbol, exc_info=True
+                "モデル予測スキップ: model=%s market=%s symbol=%s",
+                model_name,
+                market,
+                symbol,
+                exc_info=True,
             )
             continue
 

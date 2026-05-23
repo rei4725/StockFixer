@@ -24,7 +24,9 @@ def parse_args():
     parser.add_argument("--fee-rate", type=float, default=0.001)
     parser.add_argument("--slippage", type=float, default=0.0)
     parser.add_argument("--ensemble", action="store_true")
-    parser.add_argument("--limit-symbols", type=int, default=None, help="テスト用に対象銘柄数を制限")
+    parser.add_argument(
+        "--limit-symbols", type=int, default=None, help="テスト用に対象銘柄数を制限"
+    )
     parser.add_argument(
         "--as-of-date",
         type=str,

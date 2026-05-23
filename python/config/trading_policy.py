@@ -5,6 +5,7 @@ RISK_PROFILE 環境変数でプロファイルを選択できる。
 各値は個別の環境変数で上書き可能。
 パースエラーは ValueError を raise する（settings.py の silent fallback とは異なる）。
 """
+
 import os
 
 _VALID_PROFILES = {"conservative", "moderate", "aggressive"}
@@ -53,7 +54,9 @@ def _strict_float(
 
 _raw_profile = os.getenv("RISK_PROFILE", "moderate").strip().lower()
 if _raw_profile not in _VALID_PROFILES:
-    raise ValueError(f"RISK_PROFILE='{_raw_profile}' は無効です。" f"有効値: {sorted(_VALID_PROFILES)}")
+    raise ValueError(
+        f"RISK_PROFILE='{_raw_profile}' は無効です。" f"有効値: {sorted(_VALID_PROFILES)}"
+    )
 
 RISK_PROFILE: str = _raw_profile
 _defaults = _PROFILE_DEFAULTS[RISK_PROFILE]

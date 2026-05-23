@@ -1,4 +1,5 @@
 """ML モデル基底クラス。BC 横断で利用可能な汎用ユーティリティ。"""
+
 from abc import ABC, abstractmethod
 
 import joblib
@@ -32,7 +33,9 @@ class BaseModel(ABC):
             joblib.dump(self.model, path)
             logger.info(f"{self.model_name} モデルを {path} に保存しました。")
         except Exception as e:
-            logger.error(f"{self.model_name} モデルの保存中にエラーが発生しました: {e}", exc_info=True)
+            logger.error(
+                f"{self.model_name} モデルの保存中にエラーが発生しました: {e}", exc_info=True
+            )
             raise
 
     def load_model(self, path: str):
@@ -40,7 +43,9 @@ class BaseModel(ABC):
             self.model = joblib.load(path)
             logger.info(f"{self.model_name} モデルを {path} からロードしました。")
         except Exception as e:
-            logger.error(f"{self.model_name} モデルのロード中にエラーが発生しました: {e}", exc_info=True)
+            logger.error(
+                f"{self.model_name} モデルのロード中にエラーが発生しました: {e}", exc_info=True
+            )
             raise
 
     def get_model_name(self) -> str:

@@ -8,7 +8,6 @@ from src.domain.ports import AlertLevel, NotificationPort
 from src.infrastructure.in_memory import InMemoryNotificationAdapter, NullNotificationAdapter
 from src.infrastructure.log_notification_adapter import LogNotificationAdapter
 
-
 # ---------------------------------------------------------------------------
 # NullNotificationAdapter
 # ---------------------------------------------------------------------------

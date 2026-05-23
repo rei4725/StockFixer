@@ -65,7 +65,9 @@ def run_daily_pipeline():
         run_data_batch()
         logger.info("[1/5] データ取得完了")
     except Exception as e:
-        if _handle_stage_error(PipelineStage.CRITICAL, "[1/5] データ取得", e, send_daily_pipeline_error):
+        if _handle_stage_error(
+            PipelineStage.CRITICAL, "[1/5] データ取得", e, send_daily_pipeline_error
+        ):
             raise
 
     # 2. 予測（CRITICAL: 失敗時はパイプライン停止 + Discord通知）
@@ -236,7 +238,9 @@ def run_weekly_training():
             train_unified_model(model_type=model_type, model_name=challenger_name)
             logger.info("Challenger 学習完了: %s", challenger_name)
         except Exception as e:
-            if _handle_stage_error(PipelineStage.CRITICAL, f"Challenger 学習 ({challenger_name})", e):
+            if _handle_stage_error(
+                PipelineStage.CRITICAL, f"Challenger 学習 ({challenger_name})", e
+            ):
                 raise
 
     # 予測精度チェック & ドリフト警告（NON_CRITICAL: 失敗しても継続）
@@ -431,9 +435,7 @@ def run_horizon_exit_check() -> None:
     exited: list[str] = []
     for symbol in symbols_to_exit:
         positions = broker.get_positions()
-        pos = next(
-            (p for p in positions if p["symbol"].replace(".T", "") == symbol), None
-        )
+        pos = next((p for p in positions if p["symbol"].replace(".T", "") == symbol), None)
         if pos is None or pos.get("qty", 0) <= 0:
             continue
         try:

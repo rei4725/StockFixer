@@ -24,9 +24,9 @@ class MissCauseFeature:
     """外れ原因として特定された特徴量"""
 
     feature: str
-    shap_rank: int    # 学習時の SHAPランク（小さいほど重要）
+    shap_rank: int  # 学習時の SHAPランク（小さいほど重要）
     shap_mean: float  # 学習時の SHAP 平均値
-    miss_count: int   # 外れ日に異常値を示した回数
+    miss_count: int  # 外れ日に異常値を示した回数
 
 
 def analyze_miss_causes(
@@ -103,7 +103,10 @@ def analyze_miss_causes(
         if extreme_count >= repeat_threshold:
             logger.warning(
                 "繰り返し外れ要因検知: %s/%s 特徴量=%s (%d回)",
-                market, symbol, feat, extreme_count,
+                market,
+                symbol,
+                feat,
+                extreme_count,
             )
 
         result.append(

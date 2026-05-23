@@ -356,7 +356,9 @@ def predict_with_challenger_unified() -> list:
         try:
             return predict_with_unified_model(market, symbol, model_types=available_challengers)
         except Exception:
-            logger.warning("Challenger 予測スキップ: market=%s symbol=%s", market, symbol, exc_info=True)
+            logger.warning(
+                "Challenger 予測スキップ: market=%s symbol=%s", market, symbol, exc_info=True
+            )
             return None
 
     results = []
@@ -468,7 +470,9 @@ def promote_challenger_to_production(
             logger.info(f"[dry_run] 昇格スキップ: {challenger_name} -> {production_name}")
         else:
             shutil.copy2(src, dst)
-            logger.info(f"モデル昇格完了: {challenger_name} -> {production_name} ({market}/{symbol})")
+            logger.info(
+                f"モデル昇格完了: {challenger_name} -> {production_name} ({market}/{symbol})"
+            )
 
         promoted.append(production_name)
 
