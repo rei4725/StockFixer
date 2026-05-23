@@ -16,6 +16,35 @@ DuckDB データベースアクセスパッケージ
 import sys
 import types
 
+# --- prediction_results / model_metrics / prediction_accuracy ---
+from src.prediction.db import (  # noqa: F401
+    load_drift_summary,
+    load_excluded_features,
+    load_feature_exclusion_candidates,
+    load_latest_prediction_timestamp,
+    load_model_weights,
+)
+from src.prediction.db import (  # noqa: F401
+    load_open_close_advantage_summary as load_open_close_advantage_summary,
+)
+from src.prediction.db import (  # noqa: F401
+    load_paper_real_diff_summary,
+    load_prediction_accuracy,
+    load_prediction_markets,
+    load_prediction_results,
+    load_shadow_comparison,
+    load_shap_latest,
+    load_top_prediction_misses,
+    load_weekly_accuracy_snapshots,
+    save_feature_selection,
+    save_model_metrics,
+    save_prediction_accuracy,
+    save_prediction_results,
+    save_shap_values,
+    save_weekly_accuracy_snapshot,
+)
+from src.prediction.db import upsert_paper_real_diff as upsert_paper_real_diff  # noqa: F401
+
 # ---------------------------------------------------------------------------
 # テスト互換モジュールプロキシ
 #
@@ -59,35 +88,6 @@ from src.utils.db.market_data import (  # noqa: F401
     upsert_raw_ohlcv,
 )
 from src.utils.db.migration_runner import get_applied_migrations, run_migrations  # noqa: F401
-
-# --- prediction_results / model_metrics / prediction_accuracy ---
-from src.prediction.db import (  # noqa: F401
-    load_drift_summary,
-    load_excluded_features,
-    load_feature_exclusion_candidates,
-    load_latest_prediction_timestamp,
-    load_model_weights,
-)
-from src.prediction.db import (  # noqa: F401
-    load_open_close_advantage_summary as load_open_close_advantage_summary,
-)
-from src.prediction.db import (  # noqa: F401
-    load_paper_real_diff_summary,
-    load_prediction_accuracy,
-    load_prediction_markets,
-    load_prediction_results,
-    load_shadow_comparison,
-    load_shap_latest,
-    load_top_prediction_misses,
-    load_weekly_accuracy_snapshots,
-    save_feature_selection,
-    save_model_metrics,
-    save_prediction_accuracy,
-    save_prediction_results,
-    save_shap_values,
-    save_weekly_accuracy_snapshot,
-)
-from src.prediction.db import upsert_paper_real_diff as upsert_paper_real_diff  # noqa: F401
 
 # --- data_quality_log ---
 from src.utils.db.quality_log import insert_quality_log  # noqa: F401

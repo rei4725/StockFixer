@@ -11,6 +11,7 @@ import pandas as pd
 
 import src.utils.data_path_utils as path_utils
 import src.utils.db as db_module
+from src.prediction.db import load_top_prediction_misses, save_prediction_accuracy
 from src.prediction.miss_analysis import (
     MissCauseFeature,
     _extract_dates,
@@ -18,7 +19,6 @@ from src.prediction.miss_analysis import (
     analyze_miss_causes,
     run_miss_analysis_batch,
 )
-from src.prediction.db import load_top_prediction_misses, save_prediction_accuracy
 
 
 class _TmpDbTestCase(unittest.TestCase):

@@ -7,8 +7,8 @@ PredictionResultRepository ポートの DuckDB 実装。
 import pandas as pd
 
 from src.domain.ports import PredictionResultRepository
-from src.utils.db._connection import _db_connection
 from src.prediction.db import load_prediction_results, save_prediction_results
+from src.utils.db._connection import _db_connection
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)

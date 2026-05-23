@@ -61,12 +61,21 @@ ignore_imports =
     src.market_data.pipeline -> src.watchlist.types
     src.backtest.portfolio -> src.trading.signal_generator
     src.backtest.pipeline -> src.trading.signal_generator
-    src.trading.execution -> src.reporting.discord.discord_utils
     src.backtest.pipeline -> src.reporting.discord.discord_utils
     src.backtest.rule_backtester -> src.market_data.technical
     src.backtest.screener -> src.market_data.technical
     src.prediction.rule_signal_pipeline -> src.market_data.technical
     src.utils.alert_service -> src.reporting.discord.discord_utils
+    # --- utils → prediction (後方互換 shim: utils/db/__init__.py が prediction.db を再エクスポート) ---
+    src.utils.db -> src.prediction.db
+    # --- trading → prediction (注文実行時に予測 DB へ書き込み) ---
+    src.trading.execution -> src.prediction.db
+    src.trading.pre_close_alert_service -> src.prediction.db
+    # --- reporting → prediction (月次レポートがドリフト監視を直接呼び出し) ---
+    src.reporting.monthly -> src.prediction.drift_monitor
+    # --- trading → market_data (遅延/直接インポートで価格取得) ---
+    src.trading.execution -> src.infrastructure.yfinance_market_data_adapter
+    src.trading.brokers.paper.paper_broker -> src.market_data.yf_client
 
 # ============================================================
 # Contract 2: BC 独立性契約
@@ -154,10 +163,21 @@ ignore_imports =
     src.backtest.portfolio -> src.trading.signal_generator
     src.backtest.pipeline -> src.trading.signal_generator
     # [B] trading → reporting (発注通知 — イベント駆動で解消可能)
-    src.trading.execution -> src.reporting.discord.discord_utils
     # [B] backtest → reporting (バックテスト通知 — イベント駆動で解消可能)
     src.backtest.pipeline -> src.reporting.discord.discord_utils
     # [B] backtest → market_data (追加技術指標 — ポートで解消可能)
     src.backtest.rule_backtester -> src.market_data.technical
     src.backtest.screener -> src.market_data.technical
     src.prediction.rule_signal_pipeline -> src.market_data.technical
+    # [B] trading → prediction (注文実行/アラートが予測 DB を参照 — イベント駆動で解消可能)
+    src.trading.execution -> src.prediction.db
+    src.trading.pre_close_alert_service -> src.prediction.db
+    # [B] reporting → prediction (月次レポートがドリフト監視を直接呼び出し — コールバック化で解消可能)
+    src.reporting.monthly -> src.prediction.drift_monitor
+    # [B] trading → market_data (ペーパーブローカーが価格取得 — market_data ポートで解消可能)
+    src.trading.brokers.paper.paper_broker -> src.market_data.yf_client
+    # [B] trading → market_data (execution が遅延インポートで YFinanceAdapter を使用)
+    src.trading.execution -> src.infrastructure.yfinance_market_data_adapter
+    # [B] 各 BC → prediction (utils.db/__init__.py が prediction.db を再エクスポートする間接参照)
+    #     utils.db → prediction.db の import を無視することで間接パスを消去
+    src.utils.db -> src.prediction.db

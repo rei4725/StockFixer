@@ -10,7 +10,6 @@ import pandas as pd
 
 import src.utils.data_path_utils as path_utils
 import src.utils.db as db_module
-from src.prediction.types import PredictionResult, TrainingMetrics
 from src.prediction.db import (
     load_drift_summary,
     load_excluded_features,
@@ -30,6 +29,7 @@ from src.prediction.db import (
     save_weekly_accuracy_snapshot,
     upsert_paper_real_diff,
 )
+from src.prediction.types import PredictionResult, TrainingMetrics
 
 
 class _TmpDbTestCase(unittest.TestCase):
