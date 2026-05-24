@@ -4,6 +4,7 @@ line-length = 100
 [tool.isort]
 profile = "black"
 line_length = 100
+src_paths = ["src"]
 
 [tool.mypy]
 # グローバル設定（既存の pre-commit args と同一）

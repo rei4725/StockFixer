@@ -16,10 +16,11 @@ from pathlib import Path
 import pandas as pd
 
 from config.data import MAX_PREDICTION_WORKERS
+from src.prediction.db import save_prediction_results
 from src.prediction.predict_single import predict_single_stock
 from src.prediction.types import PredictionResult
 from src.utils.data_path_utils import get_models_dir
-from src.utils.db import get_all_symbols, save_prediction_results
+from src.utils.db import get_all_symbols
 from src.utils.df_to_string import df_to_pretty_string
 from src.utils.logger import get_logger
 from src.utils.run_context import new_run_context

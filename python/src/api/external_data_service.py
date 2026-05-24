@@ -28,7 +28,7 @@ def get_public_predictions(limit: int = 20) -> list[dict]:
     current_price / avg_pred_price などの内部評価値は除外する。
     """
     try:
-        from src.utils.db import load_latest_prediction_timestamp, load_prediction_results
+        from src.prediction.db import load_latest_prediction_timestamp, load_prediction_results
 
         latest_ts = load_latest_prediction_timestamp()
         if not latest_ts:
