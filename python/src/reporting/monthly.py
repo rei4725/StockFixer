@@ -18,9 +18,13 @@ from typing import Any, Callable, Optional
 
 import pandas as pd
 
+from src.prediction.db import (
+    load_drift_summary,
+    load_paper_real_diff_summary,
+    load_prediction_accuracy,
+)
 from src.reporting.types import MonthlyReportSummary
 from src.utils.data_path_utils import get_results_dir
-from src.utils.db import load_drift_summary, load_paper_real_diff_summary, load_prediction_accuracy
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
