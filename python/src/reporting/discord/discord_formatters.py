@@ -1,4 +1,4 @@
-"""Discord 表示向けの整形ユーティリティ。"""
+﻿"""Discord 表示向けの整形ユーティリティ。"""
 
 from __future__ import annotations
 
@@ -35,9 +35,21 @@ def convert_df_for_discord(df: pd.DataFrame) -> pd.DataFrame:
     df = df.rename(columns=columns_map)
     if "現在値" in df.columns and "予想終値" in df.columns and "予想変化率" not in df.columns:
         try:
-            df["予想変化率"] = (df["予想終値"].astype(float) - df["現在値"].astype(float)) / df[
-                "現在値"
-            ].astype(float)
+            current = df["現在値"].astype(float)
+            predicted = df["予想終値"].astype(float)
+            ratio = (predicted - current) / current
+            # 0除算で inf/-inf になる行は空文字に置換
+            ratio = ratio.apply(
+                lambda v: (
+                    ""
+                    if (
+                        not isinstance(v, str)
+                        and (v != v or v == float("inf") or v == float("-inf"))
+                    )
+                    else v
+                )
+            )
+            df["予想変化率"] = ratio
         except (ValueError, TypeError, ZeroDivisionError):
             df["予想変化率"] = ""
     if "現在値" in df.columns:

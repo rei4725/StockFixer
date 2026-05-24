@@ -12,8 +12,8 @@ import pandas as pd
 
 import src.utils.data_path_utils as path_utils
 import src.utils.db as db_module
-from src.prediction.types import PredictionResult
 from src.prediction.db import load_shadow_comparison, save_prediction_results
+from src.prediction.types import PredictionResult
 
 
 class _TmpDbTestCase(unittest.TestCase):

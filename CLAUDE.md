@@ -20,19 +20,33 @@ pre-commit install
 pre-commit install --hook-type commit-msg
 ```
 
-### Lint & Format
+### PR 前の一括チェック（CI と同等）
+```powershell
+# Windows
+cd python; .\check-ci.ps1
+```
 ```bash
-black python/
-isort python/ --profile=black --line-length=100
-flake8 python/ --max-line-length=100
-mypy python/ --ignore-missing-imports --implicit-optional
+# Linux/Mac
+cd python && bash check-ci.sh
+```
+lint / mypy / pylint / import-linter / unit tests (cov≥80%) / bandit / pip-audit を順に実行する。
+`bandit` と `pip-audit` は未インストール時はスキップ（`pip install bandit pip-audit` で有効化）。
+
+### Lint & Format（個別実行）
+引数の設定は `pyproject.toml` / `.flake8` が正本。コマンドに直接書かないこと。
+```bash
+cd python/
+black .
+isort .
+flake8 .
+mypy src/
 pre-commit run --all-files
 ```
 
 ### Tests
 ```bash
-# Unit tests only (fast, <5s, mock-based — required ≥80% coverage)
-python -m pytest tests/unit/ -v
+# Unit tests with coverage gate (≥80% required — same as CI)
+python -m pytest tests/unit/ -v --cov=src --cov-branch --cov-report=term-missing --cov-fail-under=80
 
 # Integration tests (real DB/API, takes minutes)
 python -m pytest tests/integration/ -v
@@ -42,9 +56,6 @@ python -m pytest tests/e2e/ -v -m "not slow"
 
 # Single test
 python -m pytest tests/unit/path/to/test_file.py::ClassName::test_method -v
-
-# With coverage
-python -m pytest tests/unit/ -v --cov=src --cov-report=term-missing --cov-fail-under=80
 ```
 
 ### Run Entry Points

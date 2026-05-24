@@ -23,9 +23,9 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
+from src.prediction.db import load_prediction_accuracy
 from src.utils.data_path_utils import get_models_subdir
 from src.utils.db.experiment import generate_run_id, save_experiment_run
-from src.prediction.db import load_prediction_accuracy
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -356,9 +356,7 @@ def predict_with_challenger_unified() -> list:
         try:
             return predict_with_unified_model(market, symbol, model_types=available_challengers)
         except Exception:
-            logger.warning(
-                "Challenger 予測スキップ: market=%s symbol=%s", market, symbol, exc_info=True
-            )
+            logger.warning("Challenger 予測スキップ: market=%s symbol=%s", market, symbol, exc_info=True)
             return None
 
     results = []
@@ -470,9 +468,7 @@ def promote_challenger_to_production(
             logger.info(f"[dry_run] 昇格スキップ: {challenger_name} -> {production_name}")
         else:
             shutil.copy2(src, dst)
-            logger.info(
-                f"モデル昇格完了: {challenger_name} -> {production_name} ({market}/{symbol})"
-            )
+            logger.info(f"モデル昇格完了: {challenger_name} -> {production_name} ({market}/{symbol})")
 
         promoted.append(production_name)
 

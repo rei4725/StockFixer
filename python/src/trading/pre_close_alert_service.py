@@ -50,8 +50,8 @@ def evaluate_positions() -> list[PositionAlert]:
     """
     import os
 
-    from src.trading.brokers.paper.paper_broker import PaperBroker
     from src.prediction.db import load_latest_prediction_timestamp, load_prediction_results
+    from src.trading.brokers.paper.paper_broker import PaperBroker
 
     mode = os.environ.get("AUTO_TRADE_MODE", "paper")
     if mode == "live":
