@@ -43,7 +43,7 @@ from src.domain.trading_rules import ML_EXIT_PROB_THRESHOLD as _ML_EXIT_PROB_THR
 from src.domain.trading_rules import THRESHOLD_SCALE_MAX as _THRESHOLD_SCALE_MAX
 from src.domain.trading_rules import THRESHOLD_SCALE_MIN as _THRESHOLD_SCALE_MIN
 from src.domain.trading_rules import THRESHOLD_SCALE_MIN_ROWS as _THRESHOLD_SCALE_MIN_ROWS
-from src.prediction.db import save_order_run_summary
+from src.prediction.db import save_order_run_summary, upsert_paper_real_diff
 from src.trading.brokers.base import BrokerBase, BrokerError, OrderSide, OrderType
 from src.trading.correlation_risk import evaluate_correlation_gate
 from src.trading.models.exit_model import ExitModel
@@ -51,7 +51,6 @@ from src.trading.risk_manager import RiskManager
 from src.trading.signal_generator import apply_multi_horizon_score_column
 from src.trading.types import TradingGateStatus
 from src.utils.data_path_utils import get_ticker
-from src.utils.db import upsert_paper_real_diff
 from src.utils.db._connection import _db_connection
 from src.utils.logger import get_logger
 from src.utils.optimal_params_loader import get_optimal_params

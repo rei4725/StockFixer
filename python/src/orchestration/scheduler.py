@@ -304,9 +304,9 @@ def run_weekly_report():
     # 外れ原因分析（非致命的）
     logger.info("外れ原因分析開始")
     try:
+        from src.prediction.db import load_top_prediction_misses
         from src.prediction.miss_analysis import run_miss_analysis_batch
         from src.reporting.discord.discord_utils import send_miss_analysis_summary
-        from src.utils.db import load_top_prediction_misses
 
         miss_df = load_top_prediction_misses(horizon=1, top_n=10, since_days=30)
         analysis_results = run_miss_analysis_batch(miss_df)
