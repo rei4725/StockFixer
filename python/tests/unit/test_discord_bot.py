@@ -306,7 +306,7 @@ class TestHandleWatchnextCommand(unittest.TestCase):
     @patch("src.reporting.discord.discord_bot.get_watchlist_prediction_view")
     def test_sends_watchlist_table_on_success(self, mock_get):
         from src.reporting.discord.discord_bot import handle_watchnext_command
-        from src.watchlist.types import WatchlistPredictionRow, WatchlistPredictionView
+        from src.reporting.types import WatchlistPredictionRow, WatchlistPredictionView
 
         view = WatchlistPredictionView(
             rows=[
@@ -327,7 +327,7 @@ class TestHandleWatchnextCommand(unittest.TestCase):
     @patch("src.reporting.discord.discord_bot.get_watchlist_prediction_view")
     def test_sends_error_text_on_failure(self, mock_get):
         from src.reporting.discord.discord_bot import handle_watchnext_command
-        from src.watchlist.types import WatchlistPredictionView
+        from src.reporting.types import WatchlistPredictionView
 
         view = WatchlistPredictionView(error_message="DB接続エラー")
         mock_get.return_value = view
@@ -339,7 +339,7 @@ class TestHandleWatchnextCommand(unittest.TestCase):
     @patch("src.reporting.discord.discord_bot.get_watchlist_prediction_view")
     def test_sends_default_error_when_error_message_empty(self, mock_get):
         from src.reporting.discord.discord_bot import handle_watchnext_command
-        from src.watchlist.types import WatchlistPredictionView
+        from src.reporting.types import WatchlistPredictionView
 
         view = WatchlistPredictionView(error_message="")
         mock_get.return_value = view
