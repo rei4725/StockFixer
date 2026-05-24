@@ -22,7 +22,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from src.prediction.rule_signal_pipeline import execute_rule_paper_trades, run_rule_signal_pipeline
+from src.rule_engine.pipeline import run_rule_signal_pipeline
+from src.trading.rule_execution import execute_rule_paper_trades
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)

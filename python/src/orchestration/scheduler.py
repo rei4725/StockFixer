@@ -980,10 +980,8 @@ def run_daily_rule_signals() -> None:
     market = os.environ.get("RULE_EVAL_MARKET", "jp")
 
     try:
-        from src.prediction.rule_signal_pipeline import (
-            execute_rule_paper_trades,
-            run_rule_signal_pipeline,
-        )
+        from src.rule_engine.pipeline import run_rule_signal_pipeline
+        from src.trading.rule_execution import execute_rule_paper_trades
 
         signals = run_rule_signal_pipeline(market=market)
         trade_stats = execute_rule_paper_trades(signals=signals, market=market)
