@@ -59,10 +59,11 @@ def run_daily_pipeline():
 
     # 1. データ取得（CRITICAL: 失敗時はパイプライン停止 + Discord通知）
     logger.info("[1/5] データ取得開始")
+    from src.infrastructure.discord_notification_adapter import DiscordNotificationAdapter
     from src.market_data.pipeline import run_data_batch
 
     try:
-        run_data_batch()
+        run_data_batch(notification_port=DiscordNotificationAdapter())
         logger.info("[1/5] データ取得完了")
     except Exception as e:
         if _handle_stage_error(PipelineStage.CRITICAL, "[1/5] データ取得", e, send_daily_pipeline_error):
