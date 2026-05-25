@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
-from src.domain.ports import AlertLevel, NotificationPort
+from src.domain.ports import NotificationPort
 from src.domain.types import SymbolTask
 from src.watchlist.batch_runner import load_target_symbols, print_summary, run_parallel
 from src.watchlist.types import BatchFailure, BatchResult
