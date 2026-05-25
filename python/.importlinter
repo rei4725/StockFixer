@@ -61,8 +61,8 @@ ignore_imports =
     # [B] rule_engine → market_data (技術指標計算 — market_data ポートで解消可能)
     src.rule_engine.pipeline -> src.market_data.yf_client
     src.rule_engine.pipeline -> src.market_data.technical
-    # --- trading → prediction 直接参照 (BC間依存 — #339 で解消予定) ---
-    src.reporting.monthly -> src.prediction.db
+    # --- reporting → prediction.kpi_service (BC間依存 — #347 で db 直接参照を解消済み) ---
+    src.reporting.monthly -> src.prediction.kpi_service
     # --- trading → prediction 直接参照 (BC間依存 — #339 で解消予定) ---
     src.trading.execution -> src.prediction.db
     src.trading.pre_close_alert_service -> src.prediction.db
@@ -157,8 +157,8 @@ ignore_imports =
     # [B] rule_engine → market_data (技術指標計算 — market_data ポートで解消可能)
     src.rule_engine.pipeline -> src.market_data.yf_client
     src.rule_engine.pipeline -> src.market_data.technical
-    # [A] reporting → prediction 直接参照 (#338 で解消予定)
-    src.reporting.monthly -> src.prediction.db
+    # [A] reporting → prediction.kpi_service (#347 で db 直接参照を解消済み — kpi_service 経由)
+    src.reporting.monthly -> src.prediction.kpi_service
     # [B] trading → prediction 直接参照 (#339 で解消予定)
     src.trading.execution -> src.prediction.db
     src.trading.pre_close_alert_service -> src.prediction.db
