@@ -70,10 +70,8 @@ ignore_imports =
     # --- trading → prediction 直接参照 (BC間依存 — #339 で解消予定) ---
     src.trading.execution -> src.prediction.db
     src.trading.pre_close_alert_service -> src.prediction.db
-    src.trading.brokers.paper.paper_broker -> src.prediction.db
     # --- trading → market_data (infrastructure 経由の間接依存 — #339 で解消予定) ---
     src.trading.execution -> src.infrastructure.yfinance_market_data_adapter
-    src.trading.brokers.paper.paper_broker -> src.market_data.yf_client
 
 # ============================================================
 # Contract 2: BC 独立性契約
@@ -170,7 +168,5 @@ ignore_imports =
     # [B] trading → prediction 直接参照 (#339 で解消予定)
     src.trading.execution -> src.prediction.db
     src.trading.pre_close_alert_service -> src.prediction.db
-    src.trading.brokers.paper.paper_broker -> src.prediction.db
     # [B] trading → market_data (infrastructure 経由の間接依存 — #339 で解消予定)
     src.trading.execution -> src.infrastructure.yfinance_market_data_adapter
-    src.trading.brokers.paper.paper_broker -> src.market_data.yf_client
