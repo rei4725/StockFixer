@@ -13,6 +13,8 @@ import pandas as pd
 
 from src.domain.types import HorizonResult as HorizonResult  # noqa: F401
 from src.domain.types import PredictionResult as PredictionResult  # noqa: F401
+from src.domain.types import ShapFeatureContribution as ShapFeatureContribution  # noqa: F401
+from src.domain.types import SignalSnapshot as SignalSnapshot  # noqa: F401
 
 
 @dataclass
@@ -48,23 +50,6 @@ class FeatureLoadResult:
     @property
     def is_success(self) -> bool:
         return self.status == "success" and self.X is not None
-
-
-@dataclass
-class ShapFeatureContribution:
-    """SHAP 説明の1特徴量。"""
-
-    feature: str
-    shap_value: float
-
-
-@dataclass
-class SignalSnapshot:
-    """Discord signal コマンド向けの予測スナップショット。"""
-
-    prediction: PredictionResult
-    shap_direction: Optional[str] = None
-    top_features: list[ShapFeatureContribution] = field(default_factory=list)
 
 
 @dataclass

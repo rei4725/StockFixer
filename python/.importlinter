@@ -24,7 +24,6 @@ ignore_imports =
     src.reporting.query_service -> src.orchestration.types
     src.reporting.discord.discord_bot -> src.orchestration.types
     # --- BC 間相互参照 (independence contract でも管理) ---
-    src.reporting.query_service -> src.prediction.types
     src.reporting.query_service -> src.prediction.predict_single
     src.backtest.pipeline -> src.prediction.manager
     src.backtest.portfolio -> src.prediction.manager
@@ -106,8 +105,7 @@ modules =
     src.market_data
     src.rule_engine
 ignore_imports =
-    # [A] reporting → prediction (query_service のみ残存 — #344/#344 で解消予定)
-    src.reporting.query_service -> src.prediction.types
+    # [A] reporting → prediction (predict_single のみ残存 — 将来的に解消予定)
     src.reporting.query_service -> src.prediction.predict_single
     # [B] backtest → prediction (バックテストが学習済みモデルを使用 — BT 専用ポート定義で解消可能)
     src.backtest.pipeline -> src.prediction.manager

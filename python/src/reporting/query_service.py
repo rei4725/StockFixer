@@ -8,8 +8,8 @@ import os
 
 import pandas as pd
 
+from src.domain.types import PredictionResult, ShapFeatureContribution, SignalSnapshot
 from src.orchestration.types import SchedulerJobStatus
-from src.prediction.types import PredictionResult, ShapFeatureContribution, SignalSnapshot
 from src.reporting.types import (
     MarketPredictionSnapshot,
     MonthlyReportSummary,

@@ -120,7 +120,7 @@ class PredictionResult:
         return pd.DataFrame(rows) if rows else pd.DataFrame()
 
     @classmethod
-    def from_dataframe_row(cls, row: pd.Series) -> "PredictionResult":
+    def from_dataframe_row(cls, row: "pd.Series") -> "PredictionResult":
         """DataFrame の1行から PredictionResult を復元する（DB読み込み時に使用）。"""
 
         def _opt_float(key: str) -> Optional[float]:
@@ -162,3 +162,20 @@ class PredictionResult:
             model_version=_opt_str("model_version"),
             horizons=horizons_dict,
         )
+
+
+@dataclass
+class ShapFeatureContribution:
+    """SHAP 説明の1特徴量。"""
+
+    feature: str
+    shap_value: float
+
+
+@dataclass
+class SignalSnapshot:
+    """Discord signal コマンド向けの予測スナップショット。"""
+
+    prediction: PredictionResult
+    shap_direction: Optional[str] = None
+    top_features: list[ShapFeatureContribution] = field(default_factory=list)
