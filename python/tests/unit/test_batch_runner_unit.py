@@ -4,8 +4,9 @@ import json
 import os
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
+from src.domain.ports import AlertLevel, NotificationPort
 from src.domain.types import SymbolTask
 from src.watchlist.batch_runner import load_target_symbols, print_summary, run_parallel
 from src.watchlist.types import BatchFailure, BatchResult
@@ -274,15 +275,14 @@ class TestPrintSummary(unittest.TestCase):
             skipped=skipped or [],
         )
 
-    @patch("src.watchlist.batch_runner.send_webhook_notification", create=True)
-    def test_runs_without_error_on_mixed_results(self, _mock_notify):
+    def test_runs_without_error_on_mixed_results(self):
         """成功/エラー/スキップ混在でエラーなく実行されること"""
         batch = self._make_batch(
             succeeded=[{"market": "us", "symbol": "AAPL", "status": "success"}],
             failed=[BatchFailure(market="us", symbol="BAD", error="test error")],
             skipped=[{"market": "jp", "symbol": "1234", "status": "skip"}],
         )
-        print_summary("テスト処理", batch)
+        print_summary("テスト処理", batch, notification_port=None)
 
     def test_runs_without_error_on_all_success(self):
         """全成功でもエラーなく実行されること"""
@@ -298,8 +298,7 @@ class TestPrintSummary(unittest.TestCase):
         """空の BatchResult でもエラーなく実行されること"""
         print_summary("空処理", self._make_batch())
 
-    @patch("src.watchlist.batch_runner.send_webhook_notification", create=True)
-    def test_runs_without_error_on_all_errors(self, _mock_notify):
+    def test_runs_without_error_on_all_errors(self):
         """全エラーでもエラーなく実行されること"""
         batch = self._make_batch(
             failed=[
@@ -307,25 +306,25 @@ class TestPrintSummary(unittest.TestCase):
                 BatchFailure(market="us", symbol="BAD2", error="err2"),
             ],
         )
-        print_summary("全エラー処理", batch)
+        print_summary("全エラー処理", batch, notification_port=None)
 
-    @patch("src.reporting.discord.discord_utils.send_webhook_notification")
-    def test_discord_alert_sent_when_failures_exist(self, mock_notify):
-        """failed が存在するとき Discord 通知が試みられること"""
+    def test_discord_alert_sent_when_failures_exist(self):
+        """failed が存在するとき notification_port.send_alert が呼ばれること"""
+        mock_port = MagicMock(spec=NotificationPort)
         batch = self._make_batch(
             failed=[BatchFailure(market="us", symbol="BAD", error="fail")],
         )
-        print_summary("通知テスト", batch)
-        mock_notify.assert_called_once()
+        print_summary("通知テスト", batch, notification_port=mock_port)
+        mock_port.send_alert.assert_called_once()
 
     def test_no_discord_alert_when_no_failures(self):
-        """failed が空のとき Discord 通知が呼ばれないこと"""
+        """failed が空のとき notification_port.send_alert が呼ばれないこと"""
+        mock_port = MagicMock(spec=NotificationPort)
         batch = self._make_batch(
             succeeded=[{"market": "us", "symbol": "AAPL", "status": "success"}],
         )
-        with patch("src.reporting.discord.discord_utils.send_webhook_notification") as mock_notify:
-            print_summary("成功のみ", batch)
-        mock_notify.assert_not_called()
+        print_summary("成功のみ", batch, notification_port=mock_port)
+        mock_port.send_alert.assert_not_called()
 
 
 if __name__ == "__main__":

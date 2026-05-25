@@ -9,6 +9,7 @@ import json
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, TimeoutError, as_completed
 from typing import Callable, Optional
 
+from src.domain.ports import AlertLevel, NotificationPort
 from src.domain.types import SymbolTask
 from src.utils.data_path_utils import get_watchlist_path
 from src.utils.db import load_index_membership_symbols_as_of
@@ -142,13 +143,18 @@ def run_parallel(
     return BatchResult(succeeded=succeeded, failed=failed, skipped=skipped)
 
 
-def print_summary(phase: str, batch_result: BatchResult) -> None:
+def print_summary(
+    phase: str,
+    batch_result: BatchResult,
+    notification_port: Optional[NotificationPort] = None,
+) -> None:
     """
-    バッチ処理の結果サマリーを出力し、失敗があれば Discord に通知する。
+    バッチ処理の結果サマリーを出力し、失敗があれば通知する。
 
     Args:
         phase: 処理フェーズ名（例: "データ取得", "モデル作成"）
         batch_result: run_parallel() の返す BatchResult
+        notification_port: 通知ポート。None の場合は通知を送らない。
     """
     n_success = len(batch_result.succeeded)
     n_skip = len(batch_result.skipped)
@@ -161,16 +167,15 @@ def print_summary(phase: str, batch_result: BatchResult) -> None:
         for f in batch_result.failed:
             logger.warning(f"  - {f.market}/{f.symbol}: {f.error}")
 
-        try:
-            from src.reporting.discord.discord_utils import send_webhook_notification
-
-            lines = [f"**[{phase} バッチエラー]** {n_error} 銘柄失敗"]
-            for f in batch_result.failed:
-                lines.append(f"• `{f.market}/{f.symbol}`: {f.error}")
-            send_webhook_notification(
-                title=f"{phase} バッチエラー",
-                message="\n".join(lines),
-                color=0xFF0000,
-            )
-        except Exception as e:
-            logger.error("バッチエラー Discord 通知失敗: %s", e, exc_info=True)
+        if notification_port is not None:
+            try:
+                lines = [f"**[{phase} バッチエラー]** {n_error} 銘柄失敗"]
+                for f in batch_result.failed:
+                    lines.append(f"• `{f.market}/{f.symbol}`: {f.error}")
+                notification_port.send_alert(
+                    title=f"{phase} バッチエラー",
+                    message="\n".join(lines),
+                    level=AlertLevel.ERROR,
+                )
+            except Exception as e:
+                logger.error("バッチエラー Discord 通知失敗: %s", e, exc_info=True)

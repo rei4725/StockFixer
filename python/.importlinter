@@ -39,7 +39,6 @@ ignore_imports =
     src.market_data.pipeline -> src.reporting.discord.discord_utils
     src.market_data.pipeline -> src.watchlist.batch_runner
     # --- 新規追加違反 (将来的解消対象) ---
-    src.watchlist.batch_runner -> src.reporting.discord.discord_utils
     src.reporting.discord.discord_utils -> src.trading.pre_close_alert_service
     src.backtest.rule_backtester -> src.market_data.yf_client
     src.backtest.backtester -> src.market_data.technical
@@ -128,8 +127,6 @@ ignore_imports =
     src.market_data.pipeline -> src.reporting.discord.discord_utils
     # [B] market_data → watchlist (バッチデータ収集がウォッチリストを反復 — ポート注入で解消可能)
     src.market_data.pipeline -> src.watchlist.batch_runner
-    # [B] watchlist → reporting (バッチ通知 — イベント駆動で解消可能)
-    src.watchlist.batch_runner -> src.reporting.discord.discord_utils
     # [B] reporting → trading (pre_close_alert — alert BC の切り出しで解消可能)
     src.reporting.discord.discord_utils -> src.trading.pre_close_alert_service
     # [B] backtest → market_data (技術指標計算 — market_data ポートで解消可能)
