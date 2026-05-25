@@ -9,8 +9,9 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 import pandas as pd
-
 from config.data import MAX_DATA_WORKERS
+
+from src.domain.ports import AlertLevel, NotificationPort
 from src.features.macro_features import (
     add_event_flags,
     add_macro_derived_features,
@@ -28,7 +29,6 @@ from src.market_data.loader import (
 from src.market_data.quality_check import QualityCheckResult, run_quality_checks
 from src.market_data.saver import save_raw_ohlcv
 from src.market_data.technical import add_technical_indicators, create_basic_lag_features
-from src.domain.ports import AlertLevel, NotificationPort
 from src.utils.data_path_utils import get_ticker, normalize_col
 from src.utils.db import upsert_stock_features
 from src.utils.logger import get_logger
@@ -272,7 +272,9 @@ def _notify_quality_issues(
     if not notify_issues or notification_port is None:
         return
 
-    level = AlertLevel.ERROR if any(i.level == "error" for i in notify_issues) else AlertLevel.WARNING
+    level = (
+        AlertLevel.ERROR if any(i.level == "error" for i in notify_issues) else AlertLevel.WARNING
+    )
     title = f"[データ品質] {market}/{symbol}"
     message = "\n".join(f"・{i.detail}" for i in notify_issues)
     try:
