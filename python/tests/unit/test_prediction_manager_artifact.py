@@ -4,7 +4,7 @@ import os
 import shutil
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import joblib
 import pandas as pd
@@ -179,17 +179,19 @@ class TestModelManagerLoadArtifact(unittest.TestCase):
         self.manager.load_model("skip_check_model")
 
     def test_load_sends_discord_on_mismatch(self):
-        """feature_hash 不一致時に Discord 通知が試みられること"""
+        """feature_hash 不一致時に notification_port.send_alert が呼ばれること"""
         cols_train = ["x1"]
         self._save_dict_artifact("discord_model", feature_hash=_compute_feature_hash(cols_train))
-        self.manager.create_model("MockModel", "discord_model")
+        mock_port = MagicMock()
+        manager = ModelManager(model_dir=self.tmp_dir, notification_port=mock_port)
+        manager._registered_models = {"MockModel": _MockModel}
+        manager.create_model("MockModel", "discord_model")
 
-        with patch("src.reporting.discord.discord_utils.send_webhook_notification") as mock_notify:
-            with self.assertLogs("src.prediction.manager", level="WARNING") as cm:
-                self.manager.load_model("discord_model", feature_columns=["x1", "x2_new"])
+        with self.assertLogs("src.prediction.manager", level="WARNING") as cm:
+            manager.load_model("discord_model", feature_columns=["x1", "x2_new"])
 
         self.assertTrue(any("特徴量不一致" in line for line in cm.output))
-        mock_notify.assert_called_once()
+        mock_port.send_alert.assert_called_once()
 
 
 class TestTrainModelPassesFeatureColumns(unittest.TestCase):

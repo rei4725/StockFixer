@@ -35,7 +35,6 @@ ignore_imports =
     src.prediction.training_pipeline -> src.market_data.loader
     src.prediction.training_pipeline -> src.watchlist.batch_runner
     src.prediction.training_pipeline -> src.watchlist.types
-    src.prediction.manager -> src.reporting.discord.discord_utils
     src.market_data.pipeline -> src.reporting.discord.discord_utils
     src.market_data.pipeline -> src.watchlist.batch_runner
     # --- 新規追加違反 (将来的解消対象) ---
@@ -122,8 +121,6 @@ ignore_imports =
     # [A] prediction → watchlist (バッチ学習がウォッチリストを反復 — types 共有で解消可能)
     src.prediction.training_pipeline -> src.watchlist.batch_runner
     src.prediction.training_pipeline -> src.watchlist.types
-    # [B] prediction → reporting (ドリフト検出時に Discord 通知 — イベント駆動で解消可能)
-    src.prediction.manager -> src.reporting.discord.discord_utils
     # [B] market_data → reporting (データ収集完了時に Discord 通知 — イベント駆動で解消可能)
     src.market_data.pipeline -> src.reporting.discord.discord_utils
     # [B] market_data → watchlist (バッチデータ収集がウォッチリストを反復 — ポート注入で解消可能)
