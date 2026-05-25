@@ -76,6 +76,27 @@ from src.utils.db.stock_features import load_stock_features as load_stock_featur
 # --- system_config ---
 from src.utils.db.system_config import get_config_value, set_config_value  # noqa: F401
 
+# --- prediction DB (prediction_results / model_metrics / accuracy / shap) ---
+# prediction.db はかつて utils/db/prediction.py として管理されていた。
+# BC 分離後も既存コードとの後方互換を保つため re-export する。
+from src.prediction.db import (  # noqa: F401
+    load_drift_summary,
+    load_excluded_features,
+    load_feature_exclusion_candidates,
+    load_latest_prediction_timestamp,
+    load_model_weights,
+    load_paper_real_diff_summary,
+    load_prediction_markets,
+    load_prediction_results,
+    load_weekly_accuracy_snapshots,
+    save_feature_selection,
+    save_model_metrics,
+    save_prediction_accuracy,
+    save_prediction_results,
+    save_shap_values,
+    save_weekly_accuracy_snapshot,
+)
+
 
 class _DbPackageProxy(types.ModuleType):
     """
