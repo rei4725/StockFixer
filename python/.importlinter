@@ -34,7 +34,6 @@ ignore_imports =
     src.prediction.unified_model_pipeline -> src.market_data.loader
     src.prediction.training_pipeline -> src.market_data.loader
     src.prediction.training_pipeline -> src.watchlist.batch_runner
-    src.prediction.training_pipeline -> src.watchlist.types
     src.prediction.manager -> src.reporting.discord.discord_utils
     src.market_data.pipeline -> src.reporting.discord.discord_utils
     src.market_data.pipeline -> src.watchlist.batch_runner
@@ -51,7 +50,6 @@ ignore_imports =
     src.prediction.predict_single -> src.market_data.technical
     src.prediction.predict_single -> src.market_data.loader
     src.prediction.training_pipeline -> src.market_data.technical
-    src.market_data.pipeline -> src.watchlist.types
     src.backtest.portfolio -> src.trading.signal_generator
     src.backtest.pipeline -> src.trading.signal_generator
     src.backtest.pipeline -> src.reporting.discord.discord_utils
@@ -121,7 +119,6 @@ ignore_imports =
     src.prediction.training_pipeline -> src.market_data.loader
     # [A] prediction → watchlist (バッチ学習がウォッチリストを反復 — types 共有で解消可能)
     src.prediction.training_pipeline -> src.watchlist.batch_runner
-    src.prediction.training_pipeline -> src.watchlist.types
     # [B] prediction → reporting (ドリフト検出時に Discord 通知 — イベント駆動で解消可能)
     src.prediction.manager -> src.reporting.discord.discord_utils
     # [B] market_data → reporting (データ収集完了時に Discord 通知 — イベント駆動で解消可能)
@@ -144,8 +141,7 @@ ignore_imports =
     src.prediction.predict_single -> src.market_data.technical
     src.prediction.predict_single -> src.market_data.loader
     src.prediction.training_pipeline -> src.market_data.technical
-    # [A] market_data → watchlist (types 共有で解消可能)
-    src.market_data.pipeline -> src.watchlist.types
+    # market_data → watchlist: types 依存は domain/types.py 移行で解消済み
     # [B] backtest → trading (シグナル生成 — trading ポートで解消可能)
     src.backtest.portfolio -> src.trading.signal_generator
     src.backtest.pipeline -> src.trading.signal_generator

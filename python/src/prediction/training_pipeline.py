@@ -446,9 +446,7 @@ def train_models_for_symbol(
                     f"方向正解率={saved_metrics.directional_accuracy:.2%} (OOS)"
                 )
             except Exception as e:
-                logger.warning(
-                    f"精度指標保存スキップ [{market}_{symbol}/{model_name}]: {e}", exc_info=True
-                )
+                logger.warning(f"精度指標保存スキップ [{market}_{symbol}/{model_name}]: {e}", exc_info=True)
             # 実験ランを experiment_runs テーブルへ記録
             try:
                 save_experiment_run(
@@ -467,9 +465,7 @@ def train_models_for_symbol(
                     params={"role": mode_label},
                 )
             except Exception as e:
-                logger.warning(
-                    f"実験ラン保存スキップ [{market}_{symbol}/{model_name}]: {e}", exc_info=True
-                )
+                logger.warning(f"実験ラン保存スキップ [{market}_{symbol}/{model_name}]: {e}", exc_info=True)
             # MLflow 実験トラッキング
             hyperparams: dict | None = None
             try:
@@ -578,8 +574,8 @@ def run_model_batch(horizon: int = 1):
     Args:
         horizon: 予測ホライズン（営業日）。1=翌日（デフォルト）。
     """
+    from src.domain.types import BatchFailure, BatchResult
     from src.watchlist.batch_runner import load_target_symbols, print_summary, run_parallel
-    from src.watchlist.types import BatchFailure, BatchResult
 
     # バッチ作成の並列数（CPU数に応じて調整）
     MAX_MODEL_WORKERS = 3
