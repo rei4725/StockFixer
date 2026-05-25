@@ -38,6 +38,8 @@ ignore_imports =
     src.prediction.manager -> src.reporting.discord.discord_utils
     src.market_data.pipeline -> src.reporting.discord.discord_utils
     src.market_data.pipeline -> src.watchlist.batch_runner
+    # --- utils.db → prediction.db re-export (一時的後方互換 — #338 で解消予定) ---
+    src.utils.db -> src.prediction.db
     # --- 新規追加違反 (将来的解消対象) ---
     src.reporting.discord.discord_utils -> src.trading.pre_close_alert_service
     src.backtest.rule_backtester -> src.market_data.yf_client

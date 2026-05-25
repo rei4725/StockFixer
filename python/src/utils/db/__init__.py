@@ -76,6 +76,33 @@ from src.utils.db.stock_features import load_stock_features as load_stock_featur
 # --- system_config ---
 from src.utils.db.system_config import get_config_value, set_config_value  # noqa: F401
 
+# --- prediction (re-export: utils.db が prediction.db を一時的に再公開 — #338 で根本解消予定) ---
+from src.prediction.db import (  # noqa: F401
+    load_drift_summary,
+    load_excluded_features,
+    load_feature_exclusion_candidates,
+    load_latest_prediction_timestamp,
+    load_model_weights,
+    load_open_close_advantage_summary,
+    load_paper_real_diff_summary,
+    load_prediction_accuracy,
+    load_prediction_markets,
+    load_prediction_results,
+    load_shadow_comparison,
+    load_shap_latest,
+    load_top_prediction_misses,
+    load_turnover_comparison,
+    load_weekly_accuracy_snapshots,
+    save_feature_selection,
+    save_model_metrics,
+    save_order_run_summary,
+    save_prediction_accuracy,
+    save_prediction_results,
+    save_shap_values,
+    save_weekly_accuracy_snapshot,
+    upsert_paper_real_diff,
+)
+
 
 class _DbPackageProxy(types.ModuleType):
     """
