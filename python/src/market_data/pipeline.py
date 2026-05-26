@@ -306,8 +306,8 @@ def run_data_batch(fetch_only: bool = False):
     fetch_only=True:
       フェーズ1のみ実行（DB保存しない）
     """
+    from src.domain.types import BatchFailure, BatchResult
     from src.watchlist.batch_runner import load_target_symbols, print_summary, run_parallel
-    from src.watchlist.types import BatchFailure, BatchResult
 
     def _fetch_only(task) -> dict:
         """バッチランナー用: データ取得＋特徴量生成のみ（DB書き込みなし）"""

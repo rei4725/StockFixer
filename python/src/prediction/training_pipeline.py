@@ -578,8 +578,8 @@ def run_model_batch(horizon: int = 1):
     Args:
         horizon: 予測ホライズン（営業日）。1=翌日（デフォルト）。
     """
+    from src.domain.types import BatchFailure, BatchResult
     from src.watchlist.batch_runner import load_target_symbols, print_summary, run_parallel
-    from src.watchlist.types import BatchFailure, BatchResult
 
     # バッチ作成の並列数（CPU数に応じて調整）
     MAX_MODEL_WORKERS = 3
