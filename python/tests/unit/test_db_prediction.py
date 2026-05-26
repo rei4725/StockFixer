@@ -854,7 +854,7 @@ class TestLoadTurnoverComparison(_TmpDbTestCase):
 class TestSavePredictionAccuracyPartialFailure(unittest.TestCase):
     """save_prediction_accuracy の部分失敗テスト（モック使用）"""
 
-    @patch("src.utils.db.prediction._db_connection")
+    @patch("src.prediction.db._db_connection")
     def test_partial_failure_returns_partial_count(self, mock_db_ctx):
         """1行目成功・2行目例外 → 返却値 1 であること"""
         mock_con = MagicMock()
