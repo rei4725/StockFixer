@@ -5,6 +5,7 @@ line-length = 100
 profile = "black"
 line_length = 100
 src_paths = ["src"]
+known_first_party = ["config", "src"]
 
 [tool.mypy]
 # グローバル設定（既存の pre-commit args と同一）
