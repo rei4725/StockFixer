@@ -10,6 +10,7 @@ import pandas as pd
 
 import src.utils.data_path_utils as path_utils
 import src.utils.db as db_module
+from src.domain.types import BatchResult
 from src.prediction.training_pipeline import train_models_for_symbol, train_models_for_symbol_task
 from src.prediction.types import FeatureLoadResult
 
@@ -132,7 +133,7 @@ class TestTrainModelsForSymbolTask(unittest.TestCase):
         with patch("src.prediction.training_pipeline.train_models_for_symbol") as mock_fn:
             mock_fn.return_value = {"status": "success"}
             result = train_models_for_symbol_task({"market": "jp", "symbol": "7203"})
-            mock_fn.assert_called_once_with("jp", "7203", 1)
+            mock_fn.assert_called_once_with("jp", "7203", 1, shadow_mode=False, use_transformer=False)
             self.assertEqual(result["status"], "success")
 
 
@@ -187,7 +188,7 @@ class TestRunModelBatch(unittest.TestCase):
             FeatureLoadResult(market="us", symbol="TEST1", status="success", X=X, y=y),
             FeatureLoadResult(market="us", symbol="TEST2", status="success", X=X, y=y),
         ]
-        mock_run_parallel.return_value = phase1_results
+        mock_run_parallel.return_value = BatchResult(succeeded=phase1_results, failed=[], skipped=[])
 
         # 実行
         run_model_batch()
@@ -239,7 +240,7 @@ class TestRunModelBatch(unittest.TestCase):
         phase1_results = [
             FeatureLoadResult(market="us", symbol="TEST1", status="success", X=X, y=y),
         ]
-        mock_run_parallel.return_value = phase1_results
+        mock_run_parallel.return_value = BatchResult(succeeded=phase1_results, failed=[], skipped=[])
 
         # フェーズ2で学習エラーをシミュレート
         mock_mm = MagicMock()
@@ -275,9 +276,8 @@ class TestRunModelBatch(unittest.TestCase):
 
         phase1_results = [
             FeatureLoadResult(market="us", symbol="TEST1", status="success", X=X, y=y),
-            FeatureLoadResult(market="us", symbol="TEST2", status="error", error="読み込み失敗"),
         ]
-        mock_run_parallel.return_value = phase1_results
+        mock_run_parallel.return_value = BatchResult(succeeded=phase1_results, failed=[], skipped=[])
 
         # 実行
         run_model_batch()

@@ -16,7 +16,7 @@ DuckDB の最新予測結果を読み込み、RiskManager のゲートチェッ�
 import os
 import uuid
 from datetime import date, timedelta
-from typing import Any, TypedDict
+from typing import Any, Optional, TypedDict
 
 import pandas as pd
 
@@ -425,7 +425,7 @@ def _choose_order_params(
     symbol: str,
     side: OrderSide,
     current_price: float,
-    market_data: MarketDataPort,
+    market_data: Optional[MarketDataPort] = None,
 ) -> tuple[OrderType, float, str, str]:
     """流動性指標から成行/指値・寄付/引けを自動判定する（R-103 拡張: R-405）。
 
@@ -433,6 +433,10 @@ def _choose_order_params(
         (OrderType, limit_price, reason_string, order_session)
         order_session: "open"（寄付）または "close"（引け）
     """
+    if market_data is None:
+        from src.infrastructure.yfinance_market_data_adapter import YFinanceMarketDataAdapter
+
+        market_data = YFinanceMarketDataAdapter()
     avg_volume, spread_proxy = _load_execution_metrics(market, symbol, market_data)
 
     reasons: list[str] = []

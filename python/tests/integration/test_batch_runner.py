@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
+from src.domain.types import BatchFailure, BatchResult
 from src.watchlist.batch_runner import load_target_symbols, print_summary, run_parallel
 
 
@@ -53,8 +54,9 @@ class TestRunParallel(unittest.TestCase):
             return {"id": task, "status": "success"}
 
         results = run_parallel(dummy_func, [1, 2, 3], max_workers=2, label="テスト")
-        self.assertEqual(len(results), 3)
-        ids = {r["id"] for r in results}
+        self.assertIsInstance(results, BatchResult)
+        self.assertEqual(len(results.succeeded), 3)
+        ids = {r["id"] for r in results.succeeded}
         self.assertEqual(ids, {1, 2, 3})
 
     def test_uses_thread_pool_by_default(self):
@@ -79,12 +81,16 @@ class TestRunParallel(unittest.TestCase):
         results = run_parallel(
             dummy_func, ["a", "b"], max_workers=2, use_process=False, label="プロセステスト"
         )
-        self.assertEqual(len(results), 2)
+        self.assertIsInstance(results, BatchResult)
+        self.assertEqual(len(results.succeeded), 2)
 
     def test_empty_tasks(self):
-        """タスクが空の場合に空リストが返ることを確認"""
+        """タスクが空の場合に空の BatchResult が返ることを確認"""
         results = run_parallel(lambda x: x, [], max_workers=2)
-        self.assertEqual(results, [])
+        self.assertIsInstance(results, BatchResult)
+        self.assertEqual(results.succeeded, [])
+        self.assertEqual(results.failed, [])
+        self.assertEqual(results.skipped, [])
 
 
 class TestPrintSummary(unittest.TestCase):
@@ -92,14 +98,16 @@ class TestPrintSummary(unittest.TestCase):
 
     def test_counts_success_error_skip(self):
         """成功・エラー・スキップが正しくカウントされることを確認"""
-        results = [
-            {"status": "success", "market": "us", "symbol": "AAPL"},
-            {"status": "success", "market": "us", "symbol": "GOOG"},
-            {"status": "error", "market": "jp", "symbol": "7203", "error": "timeout"},
-            {"status": "skip", "market": "jp", "symbol": "9984"},
-        ]
+        batch_result = BatchResult(
+            succeeded=[
+                {"status": "success", "market": "us", "symbol": "AAPL"},
+                {"status": "success", "market": "us", "symbol": "GOOG"},
+            ],
+            failed=[BatchFailure(market="jp", symbol="7203", error="timeout")],
+            skipped=[{"status": "skip", "market": "jp", "symbol": "9984"}],
+        )
         with self.assertLogs("src.watchlist.batch_runner", level="INFO") as cm:
-            print_summary("テスト", results)
+            print_summary("テスト", batch_result)
         output = "\n".join(cm.output)
         self.assertIn("成功: 2", output)
         self.assertIn("エラー: 1", output)
@@ -107,19 +115,25 @@ class TestPrintSummary(unittest.TestCase):
 
     def test_error_detail_shown(self):
         """エラー詳細が出力に含まれることを確認"""
-        results = [
-            {"status": "error", "market": "us", "symbol": "BAD", "error": "connection failed"},
-        ]
+        batch_result = BatchResult(
+            succeeded=[],
+            failed=[BatchFailure(market="us", symbol="BAD", error="connection failed")],
+            skipped=[],
+        )
         with self.assertLogs("src.watchlist.batch_runner", level="WARNING") as cm:
-            print_summary("エラーテスト", results)
+            print_summary("エラーテスト", batch_result)
         output = "\n".join(cm.output)
         self.assertIn("connection failed", output)
 
     def test_no_error_no_detail(self):
         """エラーがなければエラー詳細セクションが出ないことを確認"""
-        results = [{"status": "success"}]
+        batch_result = BatchResult(
+            succeeded=[{"status": "success"}],
+            failed=[],
+            skipped=[],
+        )
         with self.assertLogs("src.watchlist.batch_runner", level="INFO") as cm:
-            print_summary("成功のみ", results)
+            print_summary("成功のみ", batch_result)
         output = "\n".join(cm.output)
         self.assertNotIn("エラー詳細", output)
 
