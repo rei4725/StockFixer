@@ -56,8 +56,6 @@ ignore_imports =
     src.backtest.rule_backtester -> src.market_data.technical
     src.backtest.screener -> src.market_data.technical
     src.utils.alert_service -> src.reporting.discord.discord_utils
-    # utils.db が prediction.db を re-export (#338 で根本解消予定)
-    src.utils.db -> src.prediction.db
     # [B] rule_engine → market_data (技術指標計算 — market_data ポートで解消可能)
     src.rule_engine.pipeline -> src.market_data.yf_client
     src.rule_engine.pipeline -> src.market_data.technical

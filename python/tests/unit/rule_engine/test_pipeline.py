@@ -84,8 +84,18 @@ class TestRunRuleSignalPipeline(unittest.TestCase):
 
         effective_df = pd.DataFrame(
             [
-                {"symbol": "7203", "best_rule": "rsi_contrarian", "win_rate": 0.6, "net_profit": 1000},
-                {"symbol": "6758", "best_rule": "ema_momentum", "win_rate": 0.55, "net_profit": 500},
+                {
+                    "symbol": "7203",
+                    "best_rule": "rsi_contrarian",
+                    "win_rate": 0.6,
+                    "net_profit": 1000,
+                },
+                {
+                    "symbol": "6758",
+                    "best_rule": "ema_momentum",
+                    "win_rate": 0.55,
+                    "net_profit": 500,
+                },
             ]
         )
         df = _make_ohlcv()

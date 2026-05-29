@@ -65,7 +65,9 @@ def run_daily_pipeline():
         run_data_batch()
         logger.info("[1/5] データ取得完了")
     except Exception as e:
-        if _handle_stage_error(PipelineStage.CRITICAL, "[1/5] データ取得", e, send_daily_pipeline_error):
+        if _handle_stage_error(
+            PipelineStage.CRITICAL, "[1/5] データ取得", e, send_daily_pipeline_error
+        ):
             raise
 
     # 2. 予測（CRITICAL: 失敗時はパイプライン停止 + Discord通知）
@@ -203,7 +205,9 @@ def run_weekly_training():
                 require_manual_approval=not AUTO_PROMOTE_MODEL,
             )
             save_promotion_result(gate_result)
-            logger.info("昇格ゲート判定: eligible=%s reason=%s", gate_result.eligible, gate_result.reason)
+            logger.info(
+                "昇格ゲート判定: eligible=%s reason=%s", gate_result.eligible, gate_result.reason
+            )
 
             if gate_result.eligible and AUTO_PROMOTE_MODEL:
                 logger.info("[3/4] 昇格実行: challenger → production (AUTO_PROMOTE_MODEL=true)")
@@ -234,7 +238,9 @@ def run_weekly_training():
             train_unified_model(model_type=model_type, model_name=challenger_name)
             logger.info("Challenger 学習完了: %s", challenger_name)
         except Exception as e:
-            if _handle_stage_error(PipelineStage.CRITICAL, f"Challenger 学習 ({challenger_name})", e):
+            if _handle_stage_error(
+                PipelineStage.CRITICAL, f"Challenger 学習 ({challenger_name})", e
+            ):
                 raise
 
     # 予測精度チェック & ドリフト警告（NON_CRITICAL: 失敗しても継続）
@@ -339,7 +345,9 @@ def run_daily_auto_order():
 
     try:
         stats = run_daily_orders(broker=broker, market="jp", mode=mode)
-        logger.info("=== 自動発注完了: 買い=%s 売り=%s ===", stats["buy_orders"], stats["sell_orders"])
+        logger.info(
+            "=== 自動発注完了: 買い=%s 売り=%s ===", stats["buy_orders"], stats["sell_orders"]
+        )
     except Exception as e:
         logger.error("自動発注失敗: %s", e, exc_info=True)
         raise
@@ -775,7 +783,9 @@ def run_daily_drift_check():
     for sym in triggered_list:
         task = all_tasks.get((sym["market"], sym["symbol"]))
         if task is None:
-            logger.warning("ドリフト再学習: タスクが見つかりません (%s/%s)", sym["market"], sym["symbol"])
+            logger.warning(
+                "ドリフト再学習: タスクが見つかりません (%s/%s)", sym["market"], sym["symbol"]
+            )
             continue
         try:
             logger.info("ドリフト再学習開始: %s/%s", sym["market"], sym["symbol"])
@@ -789,9 +799,13 @@ def run_daily_drift_check():
                     f"{result.get('reason') or result.get('error') or result.get('status')}"
                 )
         except Exception as e:
-            logger.error("ドリフト再学習失敗 (%s/%s): %s", sym["market"], sym["symbol"], e, exc_info=True)
+            logger.error(
+                "ドリフト再学習失敗 (%s/%s): %s", sym["market"], sym["symbol"], e, exc_info=True
+            )
 
-    logger.info("=== 日次ドリフトチェック完了: 再学習=%s/%s 件 ===", success_count, len(triggered_list))
+    logger.info(
+        "=== 日次ドリフトチェック完了: 再学習=%s/%s 件 ===", success_count, len(triggered_list)
+    )
 
     # 特徴量除外提案通知（再学習成功銘柄の最新 Permutation Importance を通知）
     if retrained_symbols:
