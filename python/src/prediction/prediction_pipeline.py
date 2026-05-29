@@ -390,7 +390,7 @@ def run_accuracy_check(
     Returns:
         pd.DataFrame: 今回採点した行のサマリー
     """
-    from src.utils.db import (
+    from src.utils.db import (  # pylint: disable=no-name-in-module
         load_drift_summary,
         load_prediction_results,
         load_raw_ohlcv,

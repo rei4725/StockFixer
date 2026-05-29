@@ -133,7 +133,9 @@ class TestTrainModelsForSymbolTask(unittest.TestCase):
         with patch("src.prediction.training_pipeline.train_models_for_symbol") as mock_fn:
             mock_fn.return_value = {"status": "success"}
             result = train_models_for_symbol_task({"market": "jp", "symbol": "7203"})
-            mock_fn.assert_called_once_with("jp", "7203", 1, shadow_mode=False, use_transformer=False)
+            mock_fn.assert_called_once_with(
+                "jp", "7203", 1, shadow_mode=False, use_transformer=False
+            )
             self.assertEqual(result["status"], "success")
 
 

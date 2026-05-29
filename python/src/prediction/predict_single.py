@@ -12,7 +12,7 @@ from src.market_data.technical import add_technical_indicators, create_basic_lag
 from src.prediction.manager import ModelManager
 from src.prediction.types import HorizonResult, PredictionResult
 from src.utils.data_path_utils import get_models_subdir, get_ticker, normalize_col
-from src.utils.db import load_model_weights
+from src.utils.db import load_model_weights  # pylint: disable=no-name-in-module
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
