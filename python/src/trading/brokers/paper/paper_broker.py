@@ -190,7 +190,12 @@ class PaperBroker(BrokerBase):
                         "fill_price=?, filled_at=CURRENT_TIMESTAMP WHERE order_id=?",
                         [fill_price, order_id],
                     )
-                if market and predicted_at and signal_price is not None and self._record_diff is not None:
+                if (
+                    market
+                    and predicted_at
+                    and signal_price is not None
+                    and self._record_diff is not None
+                ):
                     self._record_diff(
                         market=str(market),
                         symbol=str(symbol),
