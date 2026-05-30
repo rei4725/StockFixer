@@ -43,6 +43,9 @@ claude起動.bat
 *.rej
 *.orig
 
+# Experiments lane artifacts (keep code, exclude data artifacts)
+python/experiments/**/*.joblib
+
 # OS generated files
 .DS_Store
 Thumbs.db

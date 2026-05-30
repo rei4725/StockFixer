@@ -4,12 +4,14 @@ on:
   pull_request:
     paths:
       - "python/**"
+      - "!python/experiments/**"
       - ".github/workflows/unit-tests.yml"
   push:
     branches:
       - develop
     paths:
       - "python/**"
+      - "!python/experiments/**"
       - ".github/workflows/unit-tests.yml"
 
 jobs:
