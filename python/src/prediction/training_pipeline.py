@@ -24,7 +24,7 @@ from src.market_data.technical import add_earnings_flag
 from src.prediction.manager import ModelManager
 from src.prediction.types import FeatureLoadResult, TrainingMetrics
 from src.utils.data_path_utils import get_models_subdir
-from src.utils.db import (
+from src.utils.db import (  # pylint: disable=no-name-in-module
     generate_run_id,
     load_excluded_features,
     load_stock_features,

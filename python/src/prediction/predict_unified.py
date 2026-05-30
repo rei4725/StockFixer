@@ -14,7 +14,11 @@ import yfinance as yf
 
 from src.prediction.types import PredictionResult
 from src.utils.data_path_utils import get_ticker
-from src.utils.db import get_all_symbols, load_model_weights, load_stock_features
+from src.utils.db import (  # pylint: disable=no-name-in-module
+    get_all_symbols,
+    load_model_weights,
+    load_stock_features,
+)
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)

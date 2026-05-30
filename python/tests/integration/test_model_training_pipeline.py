@@ -190,7 +190,9 @@ class TestRunModelBatch(unittest.TestCase):
             FeatureLoadResult(market="us", symbol="TEST1", status="success", X=X, y=y),
             FeatureLoadResult(market="us", symbol="TEST2", status="success", X=X, y=y),
         ]
-        mock_run_parallel.return_value = BatchResult(succeeded=phase1_results, failed=[], skipped=[])
+        mock_run_parallel.return_value = BatchResult(
+            succeeded=phase1_results, failed=[], skipped=[]
+        )
 
         # 実行
         run_model_batch()
@@ -242,7 +244,9 @@ class TestRunModelBatch(unittest.TestCase):
         phase1_results = [
             FeatureLoadResult(market="us", symbol="TEST1", status="success", X=X, y=y),
         ]
-        mock_run_parallel.return_value = BatchResult(succeeded=phase1_results, failed=[], skipped=[])
+        mock_run_parallel.return_value = BatchResult(
+            succeeded=phase1_results, failed=[], skipped=[]
+        )
 
         # フェーズ2で学習エラーをシミュレート
         mock_mm = MagicMock()
@@ -279,7 +283,9 @@ class TestRunModelBatch(unittest.TestCase):
         phase1_results = [
             FeatureLoadResult(market="us", symbol="TEST1", status="success", X=X, y=y),
         ]
-        mock_run_parallel.return_value = BatchResult(succeeded=phase1_results, failed=[], skipped=[])
+        mock_run_parallel.return_value = BatchResult(
+            succeeded=phase1_results, failed=[], skipped=[]
+        )
 
         # 実行
         run_model_batch()
