@@ -1,7 +1,7 @@
 """ユニットテスト: src.utils.db.system_config"""
 
 import unittest
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 
 class TestGetConfigValue(unittest.TestCase):
@@ -61,8 +61,6 @@ class TestDriftThresholdDriven(unittest.TestCase):
     """scheduler.run_daily_drift_check が DuckDB 設定値を使用することを確認"""
 
     def test_uses_db_config_value(self):
-        from src.utils.db.system_config import get_config_value, set_config_value
-
         get_calls = []
 
         def mock_get(key, default=None):

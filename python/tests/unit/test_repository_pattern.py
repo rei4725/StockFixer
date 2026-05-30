@@ -13,10 +13,9 @@ import pytest
 from src.domain.ports import PredictionResultRepository
 from src.infrastructure.in_memory import (
     InMemoryBrokerAdapter,
-    InMemoryMarketDataAdapter,
     InMemoryPredictionRepository,
 )
-from src.trading.brokers.base import OrderSide, OrderType
+from src.trading.brokers.base import OrderType
 from src.trading.execution import run_daily_orders
 from src.trading.types import TradingGateStatus
 
@@ -128,7 +127,7 @@ class TestRunDailyOrdersWithRepository:
         broker = InMemoryBrokerAdapter(initial_balance=10_000_000.0)
         repo = _make_repo_with_predictions(n=3)
 
-        patches = [p.start() for p in _COMMON_PATCHES]
+        [p.start() for p in _COMMON_PATCHES]
         try:
             stats = run_daily_orders(broker, market="jp", mode="paper", prediction_repo=repo)
             assert stats["buy_orders"] > 0
@@ -141,7 +140,7 @@ class TestRunDailyOrdersWithRepository:
         broker = InMemoryBrokerAdapter()
         repo = InMemoryPredictionRepository()  # 空
 
-        patches = [p.start() for p in _COMMON_PATCHES]
+        [p.start() for p in _COMMON_PATCHES]
         try:
             stats = run_daily_orders(broker, market="jp", mode="paper", prediction_repo=repo)
             assert stats["buy_orders"] == 0
@@ -157,7 +156,7 @@ class TestRunDailyOrdersWithRepository:
             "src.trading.execution._load_latest_predictions",
             return_value=pd.DataFrame(),
         ) as mock_load:
-            patches = [p.start() for p in _COMMON_PATCHES]
+            [p.start() for p in _COMMON_PATCHES]
             try:
                 run_daily_orders(broker, market="jp", mode="paper", prediction_repo=None)
                 mock_load.assert_called_once_with("jp")
@@ -171,7 +170,7 @@ class TestRunDailyOrdersWithRepository:
         repo = _make_repo_with_predictions(n=1)
 
         with patch("src.trading.execution._load_latest_predictions") as mock_load:
-            patches = [p.start() for p in _COMMON_PATCHES]
+            [p.start() for p in _COMMON_PATCHES]
             try:
                 run_daily_orders(broker, market="jp", mode="paper", prediction_repo=repo)
                 mock_load.assert_not_called()

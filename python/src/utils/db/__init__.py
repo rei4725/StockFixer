@@ -77,22 +77,6 @@ from src.utils.db.stock_features import load_stock_features as load_stock_featur
 from src.utils.db.system_config import get_config_value, set_config_value  # noqa: F401
 
 
-def __getattr__(name: str):
-    """PEP 562 module-level __getattr__ for static analysis (runtime: _DbPackageProxy handles this).
-
-    Defines dynamic attributes so that type-checkers and pylint do not raise no-name-in-module
-    for names that are lazily loaded from src.prediction.db.
-    """
-    if name in _DbPackageProxy._FORWARDED:  # type: ignore[name-defined]
-        return getattr(_conn_module, name)
-    if name in _DbPackageProxy._PREDICTION_DB:  # type: ignore[name-defined]
-        import importlib
-
-        _pred_db = importlib.import_module("src.prediction.db")
-        return getattr(_pred_db, name)
-    raise AttributeError(f"module 'src.utils.db' has no attribute {name!r}")
-
-
 class _DbPackageProxy(types.ModuleType):
     """
     特定の属性への代入操作を _connection モジュールへ転送するプロキシ。
@@ -143,6 +127,22 @@ class _DbPackageProxy(types.ModuleType):
             _pred_db = importlib.import_module("src.prediction.db")
             return getattr(_pred_db, name)
         raise AttributeError(f"module 'src.utils.db' has no attribute {name!r}")
+
+
+def __getattr__(name: str):
+    """PEP 562 module-level __getattr__ for static analysis (runtime: _DbPackageProxy handles this).
+
+    Defines dynamic attributes so that type-checkers and pylint do not raise no-name-in-module
+    for names that are lazily loaded from src.prediction.db.
+    """
+    if name in _DbPackageProxy._FORWARDED:
+        return getattr(_conn_module, name)
+    if name in _DbPackageProxy._PREDICTION_DB:
+        import importlib
+
+        _pred_db = importlib.import_module("src.prediction.db")
+        return getattr(_pred_db, name)
+    raise AttributeError(f"module 'src.utils.db' has no attribute {name!r}")
 
 
 sys.modules[__name__].__class__ = _DbPackageProxy

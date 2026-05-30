@@ -62,7 +62,6 @@ class TestRunContext(unittest.TestCase):
     def test_masking_formatter_includes_run_id(self):
         """_MaskingFormatter が run_id をログに含めること"""
         import logging
-        from unittest.mock import patch
 
         from src.utils.logger import _DATE_FORMAT, _LOG_FORMAT, _MaskingFormatter
         from src.utils.run_context import new_run_context

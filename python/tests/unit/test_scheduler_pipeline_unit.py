@@ -655,7 +655,6 @@ class TestHandleStageError(unittest.TestCase):
 
     def _call(self, stage, notify_fn=None):
         from src.orchestration.scheduler import _handle_stage_error
-        from src.orchestration.types import PipelineStage
 
         exc = ValueError("test error")
         try:
