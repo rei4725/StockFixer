@@ -194,9 +194,7 @@ class TestExecuteRulePaperTrades(unittest.TestCase):
         mock_broker.get_positions.return_value = []
 
         signals = [{"symbol": "7203", "signal": 0, "price": 1000.0}]
-        with (
-            patch("src.trading.rule_execution.PaperBroker", return_value=mock_broker),
-        ):
+        with (patch("src.trading.rule_execution.PaperBroker", return_value=mock_broker),):
             result = execute_rule_paper_trades(signals, "jp")
         self.assertEqual(result["skipped"], 1)
 
