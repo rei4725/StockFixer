@@ -881,7 +881,9 @@ def run_pre_close_alert() -> None:
         from src.reporting.discord.discord_notification_specs import PRE_CLOSE_ALERT
         from src.reporting.discord.discord_utils import send_webhook_notification
 
-        send_webhook_notification(PRE_CLOSE_ALERT.title, "\n".join(lines), color=PRE_CLOSE_ALERT.color)
+        send_webhook_notification(
+            PRE_CLOSE_ALERT.title, "\n".join(lines), color=PRE_CLOSE_ALERT.color
+        )
         logger.info("=== 引け前ポジション再評価アラート送信完了 ===")
     except Exception as e:
         logger.error("引け前アラート通知失敗: %s", e, exc_info=True)
