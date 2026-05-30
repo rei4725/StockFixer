@@ -72,6 +72,8 @@ ignore_imports =
     src.trading.pre_close_alert_service -> src.prediction.db
     # --- trading → market_data (infrastructure 経由の間接依存 — #339 で解消予定) ---
     src.trading.execution -> src.infrastructure.yfinance_market_data_adapter
+    src.trading.rule_execution -> src.infrastructure.yfinance_market_data_adapter
+    src.trading.pre_close_alert_service -> src.infrastructure.yfinance_market_data_adapter
 
 # ============================================================
 # Contract 2: BC 独立性契約
@@ -170,3 +172,5 @@ ignore_imports =
     src.trading.pre_close_alert_service -> src.prediction.db
     # [B] trading → market_data (infrastructure 経由の間接依存 — #339 で解消予定)
     src.trading.execution -> src.infrastructure.yfinance_market_data_adapter
+    src.trading.rule_execution -> src.infrastructure.yfinance_market_data_adapter
+    src.trading.pre_close_alert_service -> src.infrastructure.yfinance_market_data_adapter
