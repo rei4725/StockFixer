@@ -405,6 +405,7 @@ class TestComputeVixPositionScale(unittest.TestCase):
 
     def test_vix_at_threshold_returns_scale(self):
         from config.trading_policy import VIX_POSITION_SCALE, VIX_SPIKE_THRESHOLD
+
         from src.trading.risk_manager import compute_vix_position_scale
 
         scale = compute_vix_position_scale(VIX_SPIKE_THRESHOLD)
@@ -412,6 +413,7 @@ class TestComputeVixPositionScale(unittest.TestCase):
 
     def test_vix_above_threshold_returns_scale(self):
         from config.trading_policy import VIX_POSITION_SCALE
+
         from src.trading.risk_manager import compute_vix_position_scale
 
         scale = compute_vix_position_scale(50.0)

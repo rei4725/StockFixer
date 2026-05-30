@@ -19,7 +19,6 @@ import uuid
 from typing import Any
 
 import pandas as pd
-
 from config.settings import (
     CLAUDE_TRADER_MAX_TOKENS,
     CLAUDE_TRADER_MODEL,
@@ -27,6 +26,7 @@ from config.settings import (
     MAX_ORDERS_PER_RUN,
     MIN_CHANGE_RATIO,
 )
+
 from src.trading.brokers.base import BrokerBase, BrokerError, OrderSide
 from src.trading.execution import (
     _attach_dynamic_thresholds,

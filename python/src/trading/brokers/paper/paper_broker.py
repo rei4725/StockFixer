@@ -12,8 +12,9 @@ kabu STATION® API が利用できない環境（APIキー未取得・テスト�
 import uuid
 from typing import Any
 
-import src.market_data.yf_client as yf_client
 from config.settings import PAPER_INITIAL_BALANCE
+
+import src.market_data.yf_client as yf_client
 from src.prediction.db import upsert_paper_real_diff
 from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
 from src.utils.db._connection import _db_connection
@@ -333,7 +334,9 @@ class PaperBroker(BrokerBase):
                 if not hist.empty:
                     current_price = float(hist["Close"].iloc[-1])
             except Exception:
-                logger.warning("[paper] %s: 株価取得失敗（フォールバック値を使用）", sym, exc_info=True)
+                logger.warning(
+                    "[paper] %s: 株価取得失敗（フォールバック値を使用）", sym, exc_info=True
+                )
             # 空売りの未実現損益: 売り単価 - 現在価格が正なら利益
             unrealized_pnl = (avg_short - current_price) * qty
             results.append(
@@ -365,7 +368,9 @@ class PaperBroker(BrokerBase):
                 if not hist.empty:
                     current_price = float(hist["Close"].iloc[-1])
             except Exception:
-                logger.warning("[paper] %s: 株価取得失敗（フォールバック値を使用）", sym, exc_info=True)
+                logger.warning(
+                    "[paper] %s: 株価取得失敗（フォールバック値を使用）", sym, exc_info=True
+                )
             unrealized_pnl = (current_price - avg) * qty
             results.append(
                 {
@@ -434,14 +439,12 @@ class PaperBroker(BrokerBase):
     def get_orders(self) -> list[dict[str, Any]]:
         """当日の注文一覧を返す"""
         with _db_connection() as con:
-            rows = con.execute(
-                """
+            rows = con.execute("""
                 SELECT order_id, symbol, side, qty, price, status
                 FROM paper_orders
                 WHERE DATE(created_at) = CURRENT_DATE
                 ORDER BY created_at DESC
-                """
-            ).fetchall()
+                """).fetchall()
         return [
             {
                 "order_id": oid,

@@ -30,6 +30,7 @@ from config.trading_policy import (  # noqa: F401  # R-307/R-219 でポジショ
     VIX_POSITION_SCALE,
     VIX_SPIKE_THRESHOLD,
 )
+
 from src.domain.exceptions import RiskError  # noqa: F401  # 後方互換のため re-export
 from src.trading.brokers.base import BrokerBase, OrderSide
 from src.trading.types import TradingGateStatus
