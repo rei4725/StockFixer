@@ -22,9 +22,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from src.rule_engine.pipeline import run_rule_signal_pipeline
-from src.trading.rule_execution import execute_rule_paper_trades
-from src.utils.logger import get_logger
+from src.rule_engine.pipeline import run_rule_signal_pipeline  # noqa: E402
+from src.trading.rule_execution import execute_rule_paper_trades  # noqa: E402
+from src.utils.logger import get_logger  # noqa: E402
 
 logger = get_logger(__name__)
 
@@ -90,9 +90,9 @@ def main() -> None:
         for s in buy_signals:
             price_str = f"{s['price']:>8,.0f}" if s.get("price") else "       ---"
             profit_str = f"JPY{s['net_profit']:>+,.0f}"
-            print(
-                f"{s['symbol']:>6}  {s['rule']:<22}  {price_str}  {s['win_rate']:>5.1%}  {profit_str:>12}"
-            )
+            row = f"{s['symbol']:>6}  {s['rule']:<22}  {price_str}"
+            row += f"  {s['win_rate']:>5.1%}  {profit_str:>12}"
+            print(row)
 
     if sell_signals:
         print("\n[SELL シグナル]")
@@ -133,7 +133,7 @@ def main() -> None:
         except Exception as exc:
             logger.warning(f"Discord通知失敗: {exc}")
 
-    logger.info(f"=== 日次ルールシグナルジョブ完了 ===")
+    logger.info("=== 日次ルールシグナルジョブ完了 ===")
 
 
 if __name__ == "__main__":

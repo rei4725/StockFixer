@@ -24,11 +24,7 @@ ignore_imports =
     src.reporting.query_service -> src.orchestration.types
     src.reporting.discord.discord_bot -> src.orchestration.types
     # --- BC 間相互参照 (independence contract でも管理) ---
-    src.reporting.types -> src.prediction.types
-    src.reporting.query_service -> src.prediction.types
     src.reporting.query_service -> src.prediction.predict_single
-    src.reporting.discord.discord_utils -> src.prediction.types
-    src.reporting.discord.discord_bot -> src.prediction.types
     src.backtest.pipeline -> src.prediction.manager
     src.backtest.portfolio -> src.prediction.manager
     src.backtest.pipeline -> src.market_data.loader
@@ -66,6 +62,9 @@ ignore_imports =
     src.rule_engine.pipeline -> src.market_data.technical
     # --- trading → prediction 直接参照 (BC間依存 — #339 で解消予定) ---
     src.reporting.monthly -> src.prediction.db
+    src.reporting.query_service -> src.prediction.db
+    src.reporting.dashboard -> src.prediction.db
+    src.reporting.discord.discord_utils -> src.prediction.db
     # --- trading → prediction 直接参照 (BC間依存 — #339 で解消予定) ---
     src.trading.execution -> src.prediction.db
     src.trading.pre_close_alert_service -> src.prediction.db
@@ -108,12 +107,8 @@ modules =
     src.market_data
     src.rule_engine
 ignore_imports =
-    # [A] reporting → prediction (予測結果をレポート表示 — types.py 共有で解消可能)
-    src.reporting.types -> src.prediction.types
-    src.reporting.query_service -> src.prediction.types
+    # [A] reporting → prediction (predict_single のみ残存 — 将来的に解消予定)
     src.reporting.query_service -> src.prediction.predict_single
-    src.reporting.discord.discord_utils -> src.prediction.types
-    src.reporting.discord.discord_bot -> src.prediction.types
     # [B] backtest → prediction (バックテストが学習済みモデルを使用 — BT 専用ポート定義で解消可能)
     src.backtest.pipeline -> src.prediction.manager
     src.backtest.portfolio -> src.prediction.manager
@@ -164,6 +159,9 @@ ignore_imports =
     src.rule_engine.pipeline -> src.market_data.technical
     # [A] reporting → prediction 直接参照 (#338 で解消予定)
     src.reporting.monthly -> src.prediction.db
+    src.reporting.query_service -> src.prediction.db
+    src.reporting.dashboard -> src.prediction.db
+    src.reporting.discord.discord_utils -> src.prediction.db
     # [B] trading → prediction 直接参照 (#339 で解消予定)
     src.trading.execution -> src.prediction.db
     src.trading.pre_close_alert_service -> src.prediction.db

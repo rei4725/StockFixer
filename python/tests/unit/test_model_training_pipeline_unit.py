@@ -590,8 +590,8 @@ class TestRunModelBatch(unittest.TestCase):
     @patch("src.watchlist.batch_runner.load_target_symbols")
     def test_runs_parallel_when_symbols_available(self, mock_symbols, mock_parallel, mock_print):
         """銘柄がある場合、run_parallel が呼ばれること"""
-        from src.prediction.training_pipeline import run_model_batch
         from src.domain.types import SymbolTask
+        from src.prediction.training_pipeline import run_model_batch
 
         mock_symbols.return_value = [SymbolTask(market="jp", symbol="7203")]
         mock_parallel.return_value = BatchResult(succeeded=[], failed=[], skipped=[])
@@ -607,9 +607,9 @@ class TestRunModelBatch(unittest.TestCase):
         self, mock_symbols, mock_parallel, mock_mm_cls, mock_save, mock_print
     ):
         """成功した特徴量ロードに対してモデルが学習されること"""
+        from src.domain.types import SymbolTask
         from src.prediction.training_pipeline import run_model_batch
         from src.prediction.types import FeatureLoadResult
-        from src.domain.types import SymbolTask
 
         mock_symbols.return_value = [SymbolTask(market="jp", symbol="7203")]
 
@@ -634,8 +634,8 @@ class TestRunModelBatch(unittest.TestCase):
     @patch("src.watchlist.batch_runner.load_target_symbols")
     def test_horizon_attached_to_tasks(self, mock_symbols, mock_parallel, mock_print):
         """horizon パラメータが SymbolTask に付与されること"""
-        from src.prediction.training_pipeline import run_model_batch
         from src.domain.types import SymbolTask
+        from src.prediction.training_pipeline import run_model_batch
 
         mock_symbols.return_value = [SymbolTask(market="jp", symbol="7203")]
         mock_parallel.return_value = BatchResult(succeeded=[], failed=[], skipped=[])
@@ -703,9 +703,9 @@ class TestTrainModelsForHorizon(unittest.TestCase):
     @patch("src.prediction.training_pipeline.load_target_symbols")
     def test_trains_when_features_available(self, mock_symbols, mock_load, mock_train):
         """特徴量が存在する場合にモデルが学習されること"""
+        from src.domain.types import SymbolTask
         from src.prediction.training_pipeline import _train_models_for_horizon
         from src.prediction.types import FeatureLoadResult
-        from src.domain.types import SymbolTask
 
         mock_symbols.return_value = [SymbolTask(market="jp", symbol="7203")]
         X = pd.DataFrame({"close_lag1": np.random.randn(100)})
@@ -723,9 +723,9 @@ class TestTrainModelsForHorizon(unittest.TestCase):
     @patch("src.prediction.training_pipeline.load_target_symbols")
     def test_skips_when_features_unavailable(self, mock_symbols, mock_load, mock_train):
         """特徴量がない場合はスキップされること（例外なし）"""
+        from src.domain.types import SymbolTask
         from src.prediction.training_pipeline import _train_models_for_horizon
         from src.prediction.types import FeatureLoadResult
-        from src.domain.types import SymbolTask
 
         mock_symbols.return_value = [SymbolTask(market="jp", symbol="7203")]
         mock_load.return_value = FeatureLoadResult(
@@ -749,9 +749,9 @@ class TestTrainModelsForHorizon(unittest.TestCase):
     @patch("src.prediction.training_pipeline.load_target_symbols")
     def test_exception_in_one_symbol_continues_others(self, mock_symbols, mock_load, mock_train):
         """1銘柄でエラーが出ても残りが処理されること"""
+        from src.domain.types import SymbolTask
         from src.prediction.training_pipeline import _train_models_for_horizon
         from src.prediction.types import FeatureLoadResult
-        from src.domain.types import SymbolTask
 
         mock_symbols.return_value = [
             SymbolTask(market="jp", symbol="7203"),

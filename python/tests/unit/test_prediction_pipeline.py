@@ -292,10 +292,10 @@ class TestPredictAllUnified(unittest.TestCase):
 class TestRunAccuracyCheck(unittest.TestCase):
     """run_accuracy_check のテスト"""
 
-    @patch("src.utils.db.load_drift_summary")
-    @patch("src.utils.db.save_prediction_accuracy")
+    @patch("src.prediction.db.load_drift_summary")
+    @patch("src.prediction.db.save_prediction_accuracy")
     @patch("src.utils.db.load_raw_ohlcv")
-    @patch("src.utils.db.load_prediction_results")
+    @patch("src.prediction.db.load_prediction_results")
     def test_saves_accuracy_to_db(self, mock_load, mock_ohlcv, mock_save, mock_drift):
         """精度データが DB に保存されること"""
         import pandas as pd
@@ -322,7 +322,7 @@ class TestRunAccuracyCheck(unittest.TestCase):
         run_accuracy_check(horizon=1)
         mock_save.assert_called_once()
 
-    @patch("src.utils.db.load_prediction_results")
+    @patch("src.prediction.db.load_prediction_results")
     def test_returns_empty_on_no_past_predictions(self, mock_load):
         """過去予測がない場合は正常終了して空 DataFrame が返ること"""
         import pandas as pd
@@ -334,10 +334,10 @@ class TestRunAccuracyCheck(unittest.TestCase):
         self.assertIsInstance(result, pd.DataFrame)
         self.assertTrue(result.empty)
 
-    @patch("src.utils.db.load_drift_summary")
-    @patch("src.utils.db.save_prediction_accuracy")
+    @patch("src.prediction.db.load_drift_summary")
+    @patch("src.prediction.db.save_prediction_accuracy")
     @patch("src.utils.db.load_raw_ohlcv")
-    @patch("src.utils.db.load_prediction_results")
+    @patch("src.prediction.db.load_prediction_results")
     def test_skips_when_ohlcv_empty(self, mock_load, mock_ohlcv, mock_save, mock_drift):
         """OHLCV が空の場合は save_prediction_accuracy が呼ばれないこと"""
         import pandas as pd
@@ -447,10 +447,10 @@ class TestPredictAllUnifiedMultiHorizon(unittest.TestCase):
 class TestRunAccuracyCheckAdditional(unittest.TestCase):
     """run_accuracy_check の追加カバレッジ"""
 
-    @patch("src.utils.db.load_drift_summary")
-    @patch("src.utils.db.save_prediction_accuracy")
+    @patch("src.prediction.db.load_drift_summary")
+    @patch("src.prediction.db.save_prediction_accuracy")
     @patch("src.utils.db.load_raw_ohlcv")
-    @patch("src.utils.db.load_prediction_results")
+    @patch("src.prediction.db.load_prediction_results")
     def test_skips_row_with_missing_market(self, mock_load, mock_ohlcv, mock_save, mock_drift):
         """market が None の行はスキップされること"""
         import pandas as pd
@@ -471,10 +471,10 @@ class TestRunAccuracyCheckAdditional(unittest.TestCase):
         run_accuracy_check(horizon=1)
         mock_save.assert_not_called()
 
-    @patch("src.utils.db.load_drift_summary")
-    @patch("src.utils.db.save_prediction_accuracy")
+    @patch("src.prediction.db.load_drift_summary")
+    @patch("src.prediction.db.save_prediction_accuracy")
     @patch("src.utils.db.load_raw_ohlcv")
-    @patch("src.utils.db.load_prediction_results")
+    @patch("src.prediction.db.load_prediction_results")
     def test_skips_row_with_none_pred_price(self, mock_load, mock_ohlcv, mock_save, mock_drift):
         """avg_pred_price が None の行はスキップされること"""
         import pandas as pd
@@ -495,10 +495,10 @@ class TestRunAccuracyCheckAdditional(unittest.TestCase):
         run_accuracy_check(horizon=1)
         mock_save.assert_not_called()
 
-    @patch("src.utils.db.load_drift_summary")
-    @patch("src.utils.db.save_prediction_accuracy")
+    @patch("src.prediction.db.load_drift_summary")
+    @patch("src.prediction.db.save_prediction_accuracy")
     @patch("src.utils.db.load_raw_ohlcv")
-    @patch("src.utils.db.load_prediction_results")
+    @patch("src.prediction.db.load_prediction_results")
     def test_skips_when_insufficient_future_data(
         self, mock_load, mock_ohlcv, mock_save, mock_drift
     ):
@@ -526,10 +526,10 @@ class TestRunAccuracyCheckAdditional(unittest.TestCase):
         run_accuracy_check(horizon=2)
         mock_save.assert_not_called()
 
-    @patch("src.utils.db.load_drift_summary")
-    @patch("src.utils.db.save_prediction_accuracy")
+    @patch("src.prediction.db.load_drift_summary")
+    @patch("src.prediction.db.save_prediction_accuracy")
     @patch("src.utils.db.load_raw_ohlcv")
-    @patch("src.utils.db.load_prediction_results")
+    @patch("src.prediction.db.load_prediction_results")
     def test_multiple_predictions_all_saved(self, mock_load, mock_ohlcv, mock_save, mock_drift):
         """複数銘柄の予測が一括で採点・保存されること"""
         import pandas as pd

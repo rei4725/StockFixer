@@ -102,7 +102,7 @@ repos:
         language: python
         stages: [pre-commit]
         files: \.(py)$
-        exclude: ^(tests/|\.github/hooks/)
+        exclude: ^(tests/|python/tests/|\.github/hooks/|python/\.github/hooks/)
         pass_filenames: true
 
   # 8. ロック問題検出 - ファイルロック
@@ -115,7 +115,7 @@ repos:
         language: python
         stages: [pre-commit]
         files: \.(py)$
-        exclude: ^(tests/|\.github/hooks/)
+        exclude: ^(tests/|python/tests/|\.github/hooks/|python/\.github/hooks/)
         pass_filenames: true
 
   # 9. アーキテクチャ違反検出 - 旧モジュール経由 import
@@ -137,7 +137,7 @@ repos:
         language: python
         stages: [pre-commit]
         files: \.(py)$
-        exclude: ^(tests/|\.github/hooks/)
+        exclude: ^(tests/|python/tests/|\.github/hooks/|python/\.github/hooks/)
         pass_filenames: true
 
   # 10. コミットメッセージ検証 (commitlint スタイル)
