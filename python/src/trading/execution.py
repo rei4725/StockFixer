@@ -16,7 +16,7 @@ DuckDB の最新予測結果を読み込み、RiskManager のゲートチェッ�
 import os
 import uuid
 from datetime import date, timedelta
-from typing import Any, Optional, TypedDict
+from typing import Any, TypedDict
 
 import pandas as pd
 
