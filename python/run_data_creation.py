@@ -12,10 +12,11 @@ import sys
 import src.market_data.yf_client as yf_client
 from src.market_data.pipeline import (
     fetch_stock_data_with_features,
-    run_data_batch,
+    run_batch_pipeline,
     save_stock_data_with_features,
 )
 from src.utils.logger import get_logger
+from src.watchlist.batch_runner import load_target_symbols
 
 logger = get_logger(__name__)
 
@@ -65,7 +66,8 @@ def main():
         yf_client.set_no_cache(True)
 
     if args.batch:
-        run_data_batch(fetch_only=args.fetch_only)
+        tasks = load_target_symbols()
+        run_batch_pipeline(tasks, fetch_only=args.fetch_only)
     else:
         if not args.market or not args.symbol:
             parser.error("--market と --symbol は必須です（--batch 指定時を除く）")

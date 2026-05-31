@@ -17,7 +17,6 @@ from src.market_data.pipeline import (
     save_features_to_db,
     save_stock_data_with_features,
 )
-from src.watchlist.types import BatchResult
 
 
 class _TmpDbTestCase(unittest.TestCase):
@@ -252,147 +251,63 @@ class TestSaveStockDataWithFeatures(_TmpDbTestCase):
         self.assertEqual(count1, count2)
 
 
-class TestRunDataBatch(_TmpDbTestCase):
-    """run_data_batch 関数のテスト"""
+class TestRunBatchPipeline(_TmpDbTestCase):
+    """run_batch_pipeline 関数のテスト"""
 
-    def _make_phase1_data(self):
-        """フェーズ1の成功データを生成するヘルパー"""
-        from src.market_data.technical import add_technical_indicators, create_basic_lag_features
+    def _make_tasks(self):
+        from src.domain.types import SymbolTask
 
-        df = self._make_ohlcv(60)
-        df = add_technical_indicators(df)
-        X, y = create_basic_lag_features(df, n_lags=5, feature_cols=None)
-        data = X.copy()
-        data["market"] = "us"
-        data["symbol"] = "TEST1"
-        data["market_encoded"] = 0
-        data["y"] = y
-        return data
+        return [SymbolTask(market="us", symbol="TEST1"), SymbolTask(market="us", symbol="TEST2")]
 
-    @patch("src.watchlist.batch_runner.load_target_symbols")
-    @patch("src.watchlist.batch_runner.run_parallel")
-    @patch("src.watchlist.batch_runner.print_summary")
-    def test_batch_success_calls_parallel_and_summary(
-        self,
-        mock_print_summary,
-        mock_run_parallel,
-        mock_load_symbols,
-    ):
-        """バッチ処理が正常に完了し、parallel実行とsummary出力が呼ばれることを確認"""
-        from src.market_data.pipeline import run_data_batch
+    @patch("src.market_data.pipeline.save_features_to_db")
+    @patch("src.market_data.pipeline.fetch_stock_data_with_features")
+    def test_batch_success_calls_fetch_and_save(self, mock_fetch, mock_save):
+        """バッチ処理が正常に完了し、fetch と save が呼ばれることを確認"""
+        from src.market_data.pipeline import run_batch_pipeline
 
-        mock_load_symbols.return_value = [
-            {"market": "us", "symbol": "TEST1"},
-            {"market": "us", "symbol": "TEST2"},
-        ]
-        data = self._make_phase1_data()
-        mock_run_parallel.return_value = BatchResult(
-            succeeded=[
-                {
-                    "market": "us",
-                    "symbol": "TEST1",
-                    "status": "success",
-                    "data": ("us", "TEST1", data, None, None),
-                },
-                {
-                    "market": "us",
-                    "symbol": "TEST2",
-                    "status": "success",
-                    "data": ("us", "TEST2", data, None, None),
-                },
-            ],
-            failed=[],
-            skipped=[],
-        )
+        mock_fetch.return_value = ("us", "TEST1", pd.DataFrame({"x": [1]}), None, None)
+        tasks = self._make_tasks()[:1]
 
-        run_data_batch()
+        result = run_batch_pipeline(tasks)
 
-        mock_run_parallel.assert_called_once()
-        mock_print_summary.assert_called_once()
+        mock_fetch.assert_called_once()
+        mock_save.assert_called_once()
+        self.assertEqual(len(result.succeeded), 1)
 
-    @patch("src.watchlist.batch_runner.load_target_symbols")
-    @patch("src.watchlist.batch_runner.print_summary")
-    def test_batch_no_symbols_skips_processing(
-        self,
-        mock_print_summary,
-        mock_load_symbols,
-    ):
-        """対象銘柄が空の場合、処理をスキップしsummaryが呼ばれないことを確認"""
-        from src.market_data.pipeline import run_data_batch
+    def test_batch_empty_tasks_returns_empty_result(self):
+        """対象銘柄が空の場合、空の BatchResult が返ること"""
+        from src.market_data.pipeline import run_batch_pipeline
 
-        mock_load_symbols.return_value = []
+        result = run_batch_pipeline([])
 
-        run_data_batch()
+        self.assertEqual(len(result.succeeded), 0)
+        self.assertEqual(len(result.failed), 0)
 
-        mock_print_summary.assert_not_called()
+    @patch("src.market_data.pipeline.save_features_to_db")
+    @patch("src.market_data.pipeline.fetch_stock_data_with_features")
+    def test_batch_fetch_error_becomes_failed(self, mock_fetch, mock_save):
+        """fetch でエラーが発生した場合、failed に記録されること"""
+        from src.market_data.pipeline import run_batch_pipeline
 
-    @patch("src.watchlist.batch_runner.load_target_symbols")
-    @patch("src.watchlist.batch_runner.run_parallel")
-    @patch("src.watchlist.batch_runner.print_summary")
-    def test_batch_with_fetch_errors_still_calls_summary(
-        self,
-        mock_print_summary,
-        mock_run_parallel,
-        mock_load_symbols,
-    ):
-        """フェーズ1でエラーが発生しても最終サマリーが出力されることを確認"""
-        from src.market_data.pipeline import run_data_batch
+        mock_fetch.side_effect = RuntimeError("fetch 失敗")
 
-        mock_load_symbols.return_value = [
-            {"market": "us", "symbol": "TEST1"},
-            {"market": "us", "symbol": "TEST2"},
-        ]
-        data = self._make_phase1_data()
-        mock_run_parallel.return_value = BatchResult(
-            succeeded=[
-                {
-                    "market": "us",
-                    "symbol": "TEST1",
-                    "status": "success",
-                    "data": ("us", "TEST1", data, None, None),
-                },
-            ],
-            failed=[],
-            skipped=[],
-        )
+        result = run_batch_pipeline(self._make_tasks()[:1])
 
-        run_data_batch()
+        self.assertEqual(len(result.failed), 1)
+        mock_save.assert_not_called()
 
-        mock_print_summary.assert_called_once()
+    @patch("src.market_data.pipeline.fetch_stock_data_with_features")
+    def test_batch_fetch_only_skips_db_write(self, mock_fetch):
+        """fetch_only=True では DB 書き込みをスキップして BatchResult を返すこと"""
+        from src.market_data.pipeline import run_batch_pipeline
 
-    @patch("src.watchlist.batch_runner.load_target_symbols")
-    @patch("src.watchlist.batch_runner.run_parallel")
-    @patch("src.watchlist.batch_runner.print_summary")
-    def test_batch_fetch_only_skips_db_write(
-        self,
-        mock_print_summary,
-        mock_run_parallel,
-        mock_load_symbols,
-    ):
-        """fetch_only=TrueではDB書き込みを行わず取得フェーズのsummaryが出力されることを確認"""
-        from src.market_data.pipeline import run_data_batch
+        mock_fetch.return_value = ("us", "TEST1", pd.DataFrame({"x": [1]}), None, None)
 
-        mock_load_symbols.return_value = [{"market": "us", "symbol": "TEST1"}]
-        data = self._make_phase1_data()
-        mock_run_parallel.return_value = BatchResult(
-            succeeded=[
-                {
-                    "market": "us",
-                    "symbol": "TEST1",
-                    "status": "success",
-                    "data": ("us", "TEST1", data, None),
-                },
-            ],
-            failed=[],
-            skipped=[],
-        )
+        with patch("src.market_data.pipeline.save_features_to_db") as mock_save:
+            result = run_batch_pipeline(self._make_tasks()[:1], fetch_only=True)
+            mock_save.assert_not_called()
 
-        run_data_batch(fetch_only=True)
-
-        mock_print_summary.assert_called_once()
-        # 取得フェーズのsummaryラベルに「保存なし」が含まれることを確認
-        summary_label = mock_print_summary.call_args[0][0]
-        self.assertIn("保存なし", summary_label)
+        self.assertEqual(len(result.succeeded), 1)
 
 
 if __name__ == "__main__":

@@ -170,10 +170,12 @@ class TestExecutorNames:
 
 
 class TestDataPipelineExecutor:
-    @patch("src.market_data.pipeline.run_data_batch")
-    def test_delegates_to_run_data_batch(self, mock_run):
+    @patch("src.market_data.pipeline.run_batch_pipeline")
+    @patch("src.watchlist.batch_runner.load_target_symbols")
+    def test_delegates_to_run_batch_pipeline(self, mock_load_symbols, mock_run):
+        mock_load_symbols.return_value = []
         DataPipelineExecutor().execute()
-        mock_run.assert_called_once_with()
+        mock_run.assert_called_once_with([])
 
 
 class TestPredictionExecutor:

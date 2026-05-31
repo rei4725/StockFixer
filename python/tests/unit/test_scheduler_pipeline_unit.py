@@ -392,9 +392,11 @@ class TestRunDailyPipeline:
     @patch("src.prediction.prediction_pipeline.run_accuracy_check")
     @patch("src.prediction.prediction_pipeline.output_top_worst_results")
     @patch("src.prediction.prediction_pipeline.predict_all_unified")
-    @patch("src.market_data.pipeline.run_data_batch")
+    @patch("src.market_data.pipeline.run_batch_pipeline")
+    @patch("src.watchlist.batch_runner.load_target_symbols")
     def test_daily_pipeline_runs_all_steps(
         self,
+        mock_symbols,
         mock_data,
         mock_predict,
         mock_output,
@@ -406,6 +408,7 @@ class TestRunDailyPipeline:
         """全ステップが順番に実行されること"""
         from src.orchestration.scheduler import run_daily_pipeline
 
+        mock_symbols.return_value = []
         mock_predict.return_value = []
         mock_output.return_value = ([], [])
         mock_accuracy.return_value = None
@@ -425,9 +428,11 @@ class TestRunDailyPipeline:
     @patch("src.prediction.prediction_pipeline.run_accuracy_check")
     @patch("src.prediction.prediction_pipeline.output_top_worst_results")
     @patch("src.prediction.prediction_pipeline.predict_all_unified")
-    @patch("src.market_data.pipeline.run_data_batch")
+    @patch("src.market_data.pipeline.run_batch_pipeline")
+    @patch("src.watchlist.batch_runner.load_target_symbols")
     def test_accuracy_check_failure_does_not_stop_pipeline(
         self,
+        mock_symbols,
         mock_data,
         mock_predict,
         mock_output,
@@ -439,6 +444,7 @@ class TestRunDailyPipeline:
         """精度チェックが失敗しても後続ステップが実行されること"""
         from src.orchestration.scheduler import run_daily_pipeline
 
+        mock_symbols.return_value = []
         mock_predict.return_value = []
         mock_output.return_value = ([], [])
         mock_accuracy.side_effect = Exception("精度チェックエラー")
@@ -451,13 +457,15 @@ class TestRunDailyPipeline:
         mock_notify.assert_called_once()
 
     @patch("src.reporting.discord.discord_utils.send_daily_pipeline_error")
-    @patch("src.market_data.pipeline.run_data_batch")
-    def test_data_step_failure_propagates(self, mock_data, mock_error):
+    @patch("src.market_data.pipeline.run_batch_pipeline")
+    @patch("src.watchlist.batch_runner.load_target_symbols")
+    def test_data_step_failure_propagates(self, mock_symbols, mock_data, mock_error):
         """データ取得ステップが失敗すると例外が伝播すること"""
         import pytest
 
         from src.orchestration.scheduler import run_daily_pipeline
 
+        mock_symbols.return_value = []
         mock_data.side_effect = RuntimeError("データ取得失敗")
         mock_error.return_value = None
 

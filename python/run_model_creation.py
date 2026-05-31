@@ -9,8 +9,9 @@
 import argparse
 import sys
 
-from src.prediction.training_pipeline import run_model_batch, train_models_for_symbol
+from src.prediction.training_pipeline import run_batch_training, train_models_for_symbol
 from src.utils.logger import get_logger
+from src.watchlist.batch_runner import load_target_symbols
 
 logger = get_logger(__name__)
 
@@ -44,9 +45,10 @@ def main():
     args = parser.parse_args()
 
     if args.batch:
+        tasks = load_target_symbols()
         for h in args.horizons:
             logger.info(f"=== バッチモデル作成: horizon={h}d ===")
-            run_model_batch(horizon=h)
+            run_batch_training(tasks, horizon=h)
     else:
         if not args.market or not args.symbol:
             parser.error("--market と --symbol は必須です（--batch 指定時を除く）")
