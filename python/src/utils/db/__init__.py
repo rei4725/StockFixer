@@ -99,10 +99,12 @@ class _DbPackageProxy(types.ModuleType):
             "load_weekly_accuracy_snapshots",
             "save_feature_selection",
             "save_model_metrics",
+            "save_order_run_summary",
             "save_prediction_accuracy",
             "save_prediction_results",
             "save_shap_values",
             "save_weekly_accuracy_snapshot",
+            "upsert_paper_real_diff",
         ]
     )
 

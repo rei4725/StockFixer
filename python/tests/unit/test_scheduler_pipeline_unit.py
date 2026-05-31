@@ -37,7 +37,11 @@ class TestRunDailyAutoOrder(unittest.TestCase):
         with patch.dict("os.environ", {"AUTO_TRADE_MODE": "paper"}, clear=False):
             run_daily_auto_order()
 
-        mock_run_daily_orders.assert_called_once_with(broker=broker, market="jp", mode="paper")
+        call_kwargs = mock_run_daily_orders.call_args.kwargs
+        self.assertEqual(call_kwargs["broker"], broker)
+        self.assertEqual(call_kwargs["market"], "jp")
+        self.assertEqual(call_kwargs["mode"], "paper")
+        self.assertIn("market_data", call_kwargs)
         mock_send_completion.assert_called_once_with(
             buy_orders=0,
             sell_orders=0,
@@ -75,7 +79,10 @@ class TestRunDailyAutoOrder(unittest.TestCase):
         ):
             run_daily_auto_order()
 
-        mock_run_daily_orders.assert_called_once_with(broker=broker, market="jp", mode="live")
+        call_kwargs = mock_run_daily_orders.call_args.kwargs
+        self.assertEqual(call_kwargs["broker"], broker)
+        self.assertEqual(call_kwargs["market"], "jp")
+        self.assertEqual(call_kwargs["mode"], "live")
         mock_send_completion.assert_called_once()
 
 

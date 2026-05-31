@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.infrastructure.yfinance_market_data_adapter import YFinanceMarketDataAdapter
 from src.trading.brokers.base import OrderSide, OrderType
 from src.trading.brokers.paper.paper_broker import PaperBroker
 from src.utils.data_path_utils import get_ticker
@@ -17,6 +16,7 @@ def execute_rule_paper_trades(
     signals: list[dict[str, Any]],
     market: str,
     initial_budget_per_trade: float = 100_000,
+    market_data_port=None,
 ) -> dict[str, int]:
     """
     シグナルに基づきペーパートレードを実行する。
@@ -28,11 +28,12 @@ def execute_rule_paper_trades(
         signals: run_rule_signal_pipeline の返り値
         market: マーケット識別子
         initial_budget_per_trade: 1銘柄あたりの最大投資額（概算）
+        market_data_port: MarketDataPort 実装（呼び出し元から注入）
 
     Returns:
         {"buy_orders": int, "sell_orders": int, "skipped": int}
     """
-    broker = PaperBroker(market_data_port=YFinanceMarketDataAdapter())
+    broker = PaperBroker(market_data_port=market_data_port)
     buy_orders = 0
     sell_orders = 0
     skipped = 0

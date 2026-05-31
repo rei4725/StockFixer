@@ -36,7 +36,7 @@ class PositionAlert:
     alert_type: AlertType
 
 
-def evaluate_positions() -> list[PositionAlert]:
+def evaluate_positions(market_data_port=None) -> list[PositionAlert]:
     """
     保有ポジション × 直近予測の差分を計算し推奨アクションを分類する。
 
@@ -45,21 +45,23 @@ def evaluate_positions() -> list[PositionAlert]:
         利確推奨: 保有含み益率 >= TAKE_PROFIT_HOLD_THRESHOLD かつ diff_ratio <= 0
         保有継続: 上記以外
 
+    Args:
+        market_data_port: MarketDataPort 実装（呼び出し元から注入）
+
     Returns:
         PositionAlert リスト（ポジションなし・予測データなしの場合は空リスト）
     """
     import os
 
-    from src.infrastructure.yfinance_market_data_adapter import YFinanceMarketDataAdapter
-    from src.prediction.db import load_latest_prediction_timestamp, load_prediction_results
     from src.trading.brokers.paper.paper_broker import PaperBroker
+    from src.utils.db import load_latest_prediction_timestamp, load_prediction_results
 
     mode = os.environ.get("AUTO_TRADE_MODE", "paper")
     if mode == "live":
         logger.info("live モードのため引け前アラートをスキップ（kabuポジション未対応）")
         return []
 
-    broker = PaperBroker(market_data_port=YFinanceMarketDataAdapter())
+    broker = PaperBroker(market_data_port=market_data_port)
     positions = broker.get_positions()
     if not positions:
         logger.info("保有ポジションなし — 引け前アラートをスキップ")
@@ -124,14 +126,14 @@ def evaluate_positions() -> list[PositionAlert]:
     return alerts
 
 
-def get_pre_close_alerts() -> list[str]:
+def get_pre_close_alerts(market_data_port=None) -> list[str]:
     """evaluate_positions() の結果をフォーマット済み文字列リストで返す。"""
     from src.utils.japan_time import format_jst
 
     MINUTE_FORMAT = "%Y-%m-%d %H:%M JST"
     now = format_jst(fmt=MINUTE_FORMAT)
 
-    alerts = evaluate_positions()
+    alerts = evaluate_positions(market_data_port=market_data_port)
 
     if not alerts:
         return [f"時刻: {now}", "保有ポジションなし"]
