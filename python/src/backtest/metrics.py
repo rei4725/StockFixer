@@ -14,6 +14,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from scipy.stats import norm as _norm
 
 from src.utils.logger import get_logger
 
@@ -26,6 +27,7 @@ def compute_metrics(
     risk_free_rate: float = 0.0,
     trading_days_per_year: int = 252,
     cash_column: str = "cash",
+    n_trials: int = 0,
 ) -> dict[str, Any]:
     """
     取引ログから主要メトリクスを一括計算する。
@@ -109,7 +111,7 @@ def compute_metrics(
                 buy_log["atr_fallback_used"].fillna(False).infer_objects().astype(bool).sum()
             )
 
-    return {
+    result: dict[str, Any] = {
         "final_cash": round(final_cash, 2),
         "total_return": round(total_return, 6),
         "num_trades": num_trades,
@@ -133,6 +135,9 @@ def compute_metrics(
         "avg_win": round(avg_win, 6),
         "avg_loss": round(avg_loss, 6),
     }
+    if n_trials > 0:
+        result["dsr"] = deflated_sharpe_ratio(sharpe, n_trials, num_trades)
+    return result
 
 
 # --- internal helpers ---
@@ -232,6 +237,45 @@ def compute_cost_comparison_metrics(
         ),
     }
     return result
+
+
+def deflated_sharpe_ratio(
+    sharpe: float,
+    n_trials: int,
+    n_obs: int,
+    skewness: float = 0.0,
+    kurtosis: float = 3.0,
+) -> float:
+    """
+    Deflated Sharpe Ratio (López de Prado, 2018).
+
+    Args:
+        sharpe:    算出済みの Sharpe Ratio
+        n_trials:  グリッドサーチの試行数（例: パラメータ組み合わせ数）
+        n_obs:     バックテストの取引回数（observations）
+        skewness:  取引リターンの歪度（デフォルト 0 = 正規分布近似）
+        kurtosis:  取引リターンの尖度（デフォルト 3 = 正規分布近似）
+
+    Returns:
+        0〜1 の確率値。1 に近いほど「偶然ではないスキルベースの成績」。
+    """
+    EULER_GAMMA = 0.5772156649
+
+    var = (1 - skewness * sharpe + (kurtosis - 1) / 4 * sharpe**2) / max(n_obs - 1, 1)
+    sr_std = math.sqrt(max(var, 0.0))
+    if sr_std <= 0 or n_trials <= 0:
+        return 0.0
+
+    # n_trials=1 は多重比較なし: 期待最大値=0 (1試行のN(0,1)の期待値)
+    if n_trials == 1:
+        expected_max = 0.0
+    else:
+        expected_max = sr_std * (
+            (1 - EULER_GAMMA) * _norm.ppf(1 - 1 / n_trials)
+            + EULER_GAMMA * _norm.ppf(1 - 1 / (n_trials * math.e))
+        )
+    z = (sharpe - expected_max) / sr_std
+    return float(_norm.cdf(z))
 
 
 def _sharpe_ratio(
