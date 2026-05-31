@@ -521,10 +521,10 @@ def plot_backtest_chart(
     market: str,
     symbol: str,
     initial_cash: float,
-    send_discord: bool = False,
+    file_notifier=None,
 ) -> None:
     """
-    バックテスト結果グラフを保存し、オプションで Discord に送信する。
+    バックテスト結果グラフを保存し、オプションで通知する。
 
     Args:
         result_df: バックテスト結果 DataFrame
@@ -532,7 +532,8 @@ def plot_backtest_chart(
         market: マーケット識別子
         symbol: 銘柄シンボル
         initial_cash: 初期資金
-        send_discord: True の場合 Discord Webhook に送信する
+        file_notifier: ``(path: str, title: str) -> None`` の呼び出し可能オブジェクト。
+            None の場合は通知しない。呼び出し元（orchestration 等）で注入する。
     """
     from src.backtest.metrics import plot_backtest
     from src.utils.data_path_utils import get_results_dir
@@ -548,13 +549,8 @@ def plot_backtest_chart(
     )
     if chart_path:
         logger.info(f"グラフ保存: {chart_path}")
-        if send_discord:
-            from src.reporting.discord.discord_utils import send_webhook_file
-
-            send_webhook_file(
-                chart_path,
-                title=f"{market.upper()}/{symbol} バックテスト結果",
-            )
+        if file_notifier is not None:
+            file_notifier(chart_path, f"{market.upper()}/{symbol} バックテスト結果")
 
 
 def fetch_benchmark_for_result(

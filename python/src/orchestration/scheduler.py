@@ -334,9 +334,9 @@ def run_daily_auto_order():
     import os
 
     from src.infrastructure.yfinance_market_data_adapter import YFinanceMarketDataAdapter
-    from src.prediction.db import upsert_paper_real_diff
     from src.trading.brokers.paper.paper_broker import PaperBroker
     from src.trading.execution import run_daily_orders
+    from src.utils.db import upsert_paper_real_diff
 
     mode = os.environ.get("AUTO_TRADE_MODE", "paper")
     logger.info("=== 自動発注開始 (mode=%s) ===", mode)
@@ -345,14 +345,16 @@ def run_daily_auto_order():
         from src.trading.brokers.kabu.kabu_client import KabuBroker
 
         broker = KabuBroker()
+        market_data = None
     else:
+        market_data = YFinanceMarketDataAdapter()
         broker = PaperBroker(
-            market_data_port=YFinanceMarketDataAdapter(),
+            market_data_port=market_data,
             record_diff=upsert_paper_real_diff,
         )
 
     try:
-        stats = run_daily_orders(broker=broker, market="jp", mode=mode)
+        stats = run_daily_orders(broker=broker, market="jp", mode=mode, market_data=market_data)
         logger.info(
             "=== 自動発注完了: 買い=%s 売り=%s ===", stats["buy_orders"], stats["sell_orders"]
         )
@@ -906,9 +908,10 @@ def run_pre_close_alert() -> None:
 
     logger.info("=== 引け前ポジション再評価アラート開始 ===")
     try:
+        from src.infrastructure.yfinance_market_data_adapter import YFinanceMarketDataAdapter
         from src.trading.pre_close_alert_service import get_pre_close_alerts
 
-        lines = get_pre_close_alerts()
+        lines = get_pre_close_alerts(market_data_port=YFinanceMarketDataAdapter())
         logger.info("引け前アラート評価完了: %d行", len(lines))
     except Exception as e:
         logger.error("引け前アラート評価失敗: %s", e, exc_info=True)
@@ -1020,11 +1023,14 @@ def run_daily_rule_signals() -> None:
     market = os.environ.get("RULE_EVAL_MARKET", "jp")
 
     try:
+        from src.infrastructure.yfinance_market_data_adapter import YFinanceMarketDataAdapter
         from src.rule_engine.pipeline import run_rule_signal_pipeline
         from src.trading.rule_execution import execute_rule_paper_trades
 
         signals = run_rule_signal_pipeline(market=market)
-        trade_stats = execute_rule_paper_trades(signals=signals, market=market)
+        trade_stats = execute_rule_paper_trades(
+            signals=signals, market=market, market_data_port=YFinanceMarketDataAdapter()
+        )
         logger.info(
             "=== 日次ルールシグナル完了: BUY=%s SELL=%s ===",
             trade_stats["buy_orders"],
