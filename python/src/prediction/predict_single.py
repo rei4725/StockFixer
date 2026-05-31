@@ -9,10 +9,10 @@ import yfinance as yf
 from src.market_data import loader as data_loader
 from src.market_data.loader import fetch_cross_asset_features
 from src.market_data.technical import add_technical_indicators, create_basic_lag_features
+from src.prediction.db import load_model_weights
 from src.prediction.manager import ModelManager
 from src.prediction.types import HorizonResult, PredictionResult
 from src.utils.data_path_utils import get_models_subdir, get_ticker, normalize_col
-from src.utils.db import load_model_weights  # pylint: disable=no-name-in-module
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -115,9 +115,7 @@ def _run_single_model_prediction(
                 if col in df_feat.columns:
                     df_feat[col] = df_feat[col].ffill().bfill()
     except Exception:
-        logger.warning(
-            "クロスアセット特徴量付与スキップ: market=%s symbol=%s", market, symbol, exc_info=True
-        )
+        logger.warning("クロスアセット特徴量付与スキップ: market=%s symbol=%s", market, symbol, exc_info=True)
 
     X, _ = create_basic_lag_features(df_feat)
     if X.empty:
@@ -348,9 +346,7 @@ def explain_prediction_shap(
     try:
         import shap
     except ImportError:
-        print(
-            "shap ライブラリがインストールされていません。pip install shap>=0.46 で追加してください。"
-        )
+        print("shap ライブラリがインストールされていません。pip install shap>=0.46 で追加してください。")
         return None
 
     suffix = f"_{horizon}d" if horizon > 1 else ""

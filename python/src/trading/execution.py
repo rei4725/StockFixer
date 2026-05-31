@@ -342,8 +342,10 @@ def _sync_live_execution_diffs(broker: BrokerBase) -> None:
 
 
 def _load_execution_metrics(
-    market: str, symbol: str, market_data: MarketDataPort
+    market: str, symbol: str, market_data: MarketDataPort | None
 ) -> tuple[float | None, float | None]:
+    if market_data is None:
+        return None, None
     ticker = get_ticker(market, symbol)
     hist = market_data.get_ohlcv(ticker, period=f"{LIMIT_ORDER_LOOKBACK_DAYS + 2}d")
     if hist.empty:
@@ -425,7 +427,7 @@ def _choose_order_params(
     symbol: str,
     side: OrderSide,
     current_price: float,
-    market_data: Optional[MarketDataPort] = None,
+    market_data: MarketDataPort | None = None,
 ) -> tuple[OrderType, float, str, str]:
     """流動性指標から成行/指値・寄付/引けを自動判定する（R-103 拡張: R-405）。
 

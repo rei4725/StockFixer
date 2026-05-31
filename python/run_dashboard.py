@@ -21,9 +21,7 @@ logger = get_logger(__name__)
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="StockFixer 運用監視ダッシュボードを表示する（read-only）"
-    )
+    parser = argparse.ArgumentParser(description="StockFixer 運用監視ダッシュボードを表示する（read-only）")
     parser.add_argument(
         "--days",
         type=int,

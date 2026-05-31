@@ -122,7 +122,6 @@ class TestRunRuleSignalPipeline(unittest.TestCase):
 
     def test_no_backtest_or_trading_import(self):
         """rule_engine.pipeline が backtest/trading に依存しないことを確認"""
-        import importlib
         import sys
 
         # モジュールをリロードして依存を確認

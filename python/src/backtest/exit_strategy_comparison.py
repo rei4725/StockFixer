@@ -135,9 +135,7 @@ def _print_comparison(
     ]
 
     print("\n" + "=" * 70)
-    print(
-        f"エグジット戦略比較: 固定 TP/SL ({take_profit_pct:.0%}/{stop_loss_pct:.0%}) vs. ML エグジット"
-    )
+    print(f"エグジット戦略比較: 固定 TP/SL ({take_profit_pct:.0%}/{stop_loss_pct:.0%}) vs. ML エグジット")
     print("=" * 70)
     print(result[summary_cols].to_string(index=False))
 

@@ -72,7 +72,7 @@ class TestDriftThresholdDriven(unittest.TestCase):
             return default
 
         with (
-            patch("src.utils.db.load_drift_summary", return_value=None),
+            patch("src.prediction.db.load_drift_summary", return_value=None),
             patch("src.utils.db.system_config.get_config_value", side_effect=mock_get),
         ):
             from src.orchestration import scheduler

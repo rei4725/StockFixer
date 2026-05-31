@@ -6,8 +6,8 @@ import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
-from src.domain.types import BatchFailure, BatchResult
 from src.watchlist.batch_runner import load_target_symbols, print_summary, run_parallel
+from src.watchlist.types import BatchFailure, BatchResult
 
 
 class TestLoadTargetSymbols(unittest.TestCase):

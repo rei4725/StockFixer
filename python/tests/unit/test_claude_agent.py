@@ -157,9 +157,7 @@ class TestHandlePlaceOrder(unittest.TestCase):
         self.assertEqual(call_args[0][2], 200)
 
     def test_risk_gate_blocked_skips_order(self):
-        self.risk.evaluate_trading_gate.return_value = _make_gate(
-            is_allowed=False, reason="日次損失上限"
-        )
+        self.risk.evaluate_trading_gate.return_value = _make_gate(is_allowed=False, reason="日次損失上限")
         stats = {"buy_orders": 0, "sell_orders": 0, "skipped": 0, "errors": 0}
         result = self._call("7200", "buy", stats)
         self.assertEqual(result["status"], "skipped")

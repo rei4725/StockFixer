@@ -83,7 +83,7 @@ class TestRunDailyDriftCheck(unittest.TestCase):
     @patch("src.prediction.training_pipeline.train_models_for_symbol_task")
     @patch("src.watchlist.batch_runner.load_target_symbols")
     @patch("src.reporting.discord.discord_utils.send_drift_retrain_notification")
-    @patch("src.utils.db.load_drift_summary")
+    @patch("src.prediction.db.load_drift_summary")
     def test_retrain_runs_for_triggered_symbols(
         self,
         mock_load_summary,
@@ -121,7 +121,7 @@ class TestRunDailyDriftCheck(unittest.TestCase):
     @patch("src.prediction.training_pipeline.train_models_for_symbol_task")
     @patch("src.watchlist.batch_runner.load_target_symbols")
     @patch("src.reporting.discord.discord_utils.send_drift_retrain_notification")
-    @patch("src.utils.db.load_drift_summary")
+    @patch("src.prediction.db.load_drift_summary")
     def test_no_retrain_when_summary_is_empty(
         self,
         mock_load_summary,
@@ -138,11 +138,11 @@ class TestRunDailyDriftCheck(unittest.TestCase):
         mock_train.assert_not_called()
 
     @patch("src.reporting.discord.discord_utils.send_feature_suggestion_notification")
-    @patch("src.utils.db.load_feature_exclusion_candidates")
+    @patch("src.prediction.db.load_feature_exclusion_candidates")
     @patch("src.prediction.training_pipeline.train_models_for_symbol_task")
     @patch("src.watchlist.batch_runner.load_target_symbols")
     @patch("src.reporting.discord.discord_utils.send_drift_retrain_notification")
-    @patch("src.utils.db.load_drift_summary")
+    @patch("src.prediction.db.load_drift_summary")
     def test_feature_suggestion_sent_after_successful_retrain(
         self,
         mock_load_summary,
@@ -174,11 +174,11 @@ class TestRunDailyDriftCheck(unittest.TestCase):
         mock_notify_suggestions.assert_called_once()
 
     @patch("src.reporting.discord.discord_utils.send_feature_suggestion_notification")
-    @patch("src.utils.db.load_feature_exclusion_candidates")
+    @patch("src.prediction.db.load_feature_exclusion_candidates")
     @patch("src.prediction.training_pipeline.train_models_for_symbol_task")
     @patch("src.watchlist.batch_runner.load_target_symbols")
     @patch("src.reporting.discord.discord_utils.send_drift_retrain_notification")
-    @patch("src.utils.db.load_drift_summary")
+    @patch("src.prediction.db.load_drift_summary")
     def test_feature_suggestion_not_sent_when_retrain_failed(
         self,
         mock_load_summary,
@@ -209,7 +209,7 @@ class TestRunDailyDriftCheck(unittest.TestCase):
     @patch("src.prediction.training_pipeline.train_models_for_symbol_task")
     @patch("src.watchlist.batch_runner.load_target_symbols")
     @patch("src.reporting.discord.discord_utils.send_drift_retrain_notification")
-    @patch("src.utils.db.load_drift_summary")
+    @patch("src.prediction.db.load_drift_summary")
     def test_no_retrain_when_no_symbol_crosses_threshold(
         self,
         mock_load_summary,
@@ -248,8 +248,8 @@ class TestRunWeeklyReport(unittest.TestCase):
     """run_weekly_report のテスト"""
 
     @patch("src.reporting.discord.discord_utils.send_weekly_report")
-    @patch("src.utils.db.load_paper_real_diff_summary")
-    @patch("src.utils.db.load_drift_summary")
+    @patch("src.prediction.db.load_paper_real_diff_summary")
+    @patch("src.prediction.db.load_drift_summary")
     def test_calls_send_weekly_report(self, mock_drift, mock_diff, mock_send):
         import pandas as pd
 
@@ -261,8 +261,8 @@ class TestRunWeeklyReport(unittest.TestCase):
         mock_send.assert_called_once()
 
     @patch("src.reporting.discord.discord_utils.send_weekly_report")
-    @patch("src.utils.db.load_paper_real_diff_summary")
-    @patch("src.utils.db.load_drift_summary")
+    @patch("src.prediction.db.load_paper_real_diff_summary")
+    @patch("src.prediction.db.load_drift_summary")
     def test_exception_does_not_propagate(self, mock_drift, mock_diff, mock_send):
         from src.orchestration.scheduler import run_weekly_report
 

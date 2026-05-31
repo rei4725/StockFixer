@@ -13,8 +13,8 @@ from datetime import datetime
 
 import pandas as pd
 
+from src.prediction.db import load_weekly_accuracy_snapshots
 from src.prediction.types import DriftMonitorResult  # noqa: F401
-from src.utils.db import load_weekly_accuracy_snapshots  # pylint: disable=no-name-in-module
 from src.utils.db._connection import _db_connection
 from src.utils.logger import get_logger
 
