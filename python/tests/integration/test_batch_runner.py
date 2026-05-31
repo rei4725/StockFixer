@@ -91,7 +91,8 @@ class TestRunParallel(unittest.TestCase):
 class TestPrintSummary(unittest.TestCase):
     """print_summary 関数のテスト"""
 
-    def test_counts_success_error_skip(self):
+    @patch("src.reporting.discord.discord_utils.send_webhook_notification")
+    def test_counts_success_error_skip(self, _mock_notify):
         """成功・エラー・スキップが正しくカウントされることを確認"""
         results = BatchResult(
             succeeded=[{"market": "us", "symbol": "AAPL"}, {"market": "us", "symbol": "GOOG"}],
@@ -105,7 +106,8 @@ class TestPrintSummary(unittest.TestCase):
         self.assertIn("エラー: 1", output)
         self.assertIn("スキップ: 1", output)
 
-    def test_error_detail_shown(self):
+    @patch("src.reporting.discord.discord_utils.send_webhook_notification")
+    def test_error_detail_shown(self, _mock_notify):
         """エラー詳細が出力に含まれることを確認"""
         results = BatchResult(
             succeeded=[],
