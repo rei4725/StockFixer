@@ -508,5 +508,62 @@ class TestCalcPositionSizeVixScale(unittest.TestCase):
         self.assertGreaterEqual(qty_normal, qty_spike)
 
 
+# ---------------------------------------------------------------------------
+# レジーム別 Kelly 乗数 (Issue #397)
+# ---------------------------------------------------------------------------
+
+
+class TestCalcPositionSizeRegime(unittest.TestCase):
+    """calc_position_size() の market_regime 引数テスト"""
+
+    # kelly * HALF_KELLY = 0.175 * 0.375 = 0.0656 < MAX_POSITION_RATE(0.1) → キャップ不発
+    _WIN_RATE = 0.55
+    _AVG_WIN = 0.012
+    _AVG_LOSS = 0.010
+    _BALANCE = 10_000_000.0
+    _PRICE = 10.0
+
+    def _make_risk(self):
+        broker = _make_broker(balance=self._BALANCE)
+        risk = RiskManager(broker)
+        risk.get_current_dd_ratio = MagicMock(return_value=0.0)
+        return risk
+
+    def _qty(self, regime):
+        risk = self._make_risk()
+        return risk.calc_position_size(
+            "7203",
+            price=self._PRICE,
+            win_rate=self._WIN_RATE,
+            avg_win=self._AVG_WIN,
+            avg_loss=self._AVG_LOSS,
+            market_regime=regime,
+        )
+
+    def test_bull_regime_same_as_none(self):
+        """market_regime="bull" は乗数=1.0 なので market_regime=None と同じ株数"""
+        self.assertEqual(self._qty("bull"), self._qty(None))
+
+    def test_bear_regime_halves_position(self):
+        """market_regime="bear" は乗数=0.5 で約半分の株数"""
+        qty_none = self._qty(None)
+        qty_bear = self._qty("bear")
+        self.assertGreater(qty_none, 0)
+        self.assertLess(qty_bear, qty_none)
+        self.assertAlmostEqual(qty_bear / qty_none, 0.5, delta=0.1)
+
+    def test_range_regime_reduces_position(self):
+        """market_regime="range" は乗数=0.7 で約 70% の株数"""
+        qty_none = self._qty(None)
+        qty_range = self._qty("range")
+        self.assertGreater(qty_none, 0)
+        self.assertLess(qty_range, qty_none)
+        self.assertAlmostEqual(qty_range / qty_none, 0.7, delta=0.1)
+
+    def test_unknown_regime_does_not_raise_and_defaults_to_one(self):
+        """未知レジームは例外を出さず乗数=1.0 として動作する"""
+        self.assertEqual(self._qty("unknown"), self._qty(None))
+
+
 if __name__ == "__main__":
     unittest.main()

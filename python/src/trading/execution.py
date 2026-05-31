@@ -523,7 +523,7 @@ def _check_sl_tp_exits(
     broker: BrokerBase,
     market: str,
     mode: str,
-    market_data: MarketDataPort,
+    market_data: MarketDataPort | None,
     stats: OrderExecutionStats,
 ) -> set[str]:
     """保有ポジションを走査し SL/TP トリガーで成行売りを発行する。

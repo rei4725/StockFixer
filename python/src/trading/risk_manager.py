@@ -26,6 +26,7 @@ from config.trading_policy import (  # noqa: F401  # R-307/R-219 でポジショ
     DEFAULT_AVG_WIN,
     DEFAULT_WIN_RATE,
     HIGH_CONFIDENCE_POSITION_CAP,
+    KELLY_REGIME_MULTIPLIERS,
     MAX_ACCEPTABLE_DRAWDOWN,
     VIX_POSITION_SCALE,
     VIX_SPIKE_THRESHOLD,
@@ -270,6 +271,7 @@ class RiskManager:
         avg_win: Optional[float] = None,
         avg_loss: Optional[float] = None,
         confidence_ratio: float = 1.0,
+        market_regime: Optional[str] = None,
     ) -> int:
         """
         ハーフ Kelly 基準で発注株数を計算する。
@@ -309,6 +311,14 @@ class RiskManager:
 
         kelly = max(0.0, min(kelly, 1.0))  # クリッピング
         invest_amount = balance * kelly * HALF_KELLY
+
+        # レジーム別補正
+        if market_regime is not None:
+            regime_mult = KELLY_REGIME_MULTIPLIERS.get(market_regime, 1.0)
+            invest_amount = invest_amount * regime_mult
+            logger.debug(
+                f"[risk] {symbol}: レジーム補正 regime={market_regime} mult={regime_mult:.2f}"
+            )
 
         # 1銘柄上限キャップ
         max_amount = balance * MAX_POSITION_RATE
