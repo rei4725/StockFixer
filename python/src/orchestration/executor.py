@@ -90,13 +90,17 @@ class BacktestOptimizationExecutor:
         return "backtest_optimization"
 
     def execute(self) -> None:
+        from src.watchlist.batch_runner import load_target_symbols
+
         use_optuna = os.getenv("USE_OPTUNA", "").strip().lower() in ("1", "true", "yes")
         n_trials = int(os.getenv("OPTUNA_N_TRIALS", "50"))
+        tasks = load_target_symbols()
 
         if use_optuna:
             from src.backtest.optimizer import run_optuna_batch
 
             run_optuna_batch(
+                tasks,
                 model_type="XGBoostModel",
                 ensemble=False,
                 source="file",
@@ -109,6 +113,7 @@ class BacktestOptimizationExecutor:
             from src.backtest.optimizer import run_optimize_batch
 
             run_optimize_batch(
+                tasks,
                 model_type="XGBoostModel",
                 ensemble=False,
                 source="file",

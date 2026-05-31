@@ -221,13 +221,17 @@ class TestWatchlistRefreshExecutor:
 
 class TestBacktestOptimizationExecutor:
     @patch("src.backtest.optimizer.run_optimize_batch")
-    def test_uses_grid_search_by_default(self, mock_run, monkeypatch):
+    @patch("src.watchlist.batch_runner.load_target_symbols")
+    def test_uses_grid_search_by_default(self, mock_symbols, mock_run, monkeypatch):
         monkeypatch.delenv("USE_OPTUNA", raising=False)
+        mock_symbols.return_value = []
         BacktestOptimizationExecutor().execute()
         mock_run.assert_called_once()
 
     @patch("src.backtest.optimizer.run_optuna_batch")
-    def test_uses_optuna_when_env_set(self, mock_run, monkeypatch):
+    @patch("src.watchlist.batch_runner.load_target_symbols")
+    def test_uses_optuna_when_env_set(self, mock_symbols, mock_run, monkeypatch):
         monkeypatch.setenv("USE_OPTUNA", "true")
+        mock_symbols.return_value = []
         BacktestOptimizationExecutor().execute()
         mock_run.assert_called_once()
