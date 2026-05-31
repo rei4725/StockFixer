@@ -1,16 +1,16 @@
-﻿[importlinter]
+[importlinter]
 root_packages =
     src
-# "No matches" 縺ｪ ignore_imports 繧ｨ繝ｳ繝医Μ繧・error 縺ｧ縺ｯ縺ｪ縺・warning 縺ｨ縺励※謇ｱ縺・
+# "No matches" な ignore_imports エントリを error ではなく warning として扱う
 unmatched_ignores = warn
 
 # ============================================================
-# Contract 1: 繝ｬ繧､繝､繝ｼ髫主ｱ､螂醍ｴ・
-#   utils < BC鄒､ < orchestration/api
-#   荳贋ｽ阪Ξ繧､繝､繝ｼ縺御ｸ倶ｽ阪Ξ繧､繝､繝ｼ繧貞盾辣ｧ縺吶ｋ縺ｮ縺ｯ蜷域ｳ輔る・・遖∵ｭ｢縲・
+# Contract 1: レイヤー階層契約
+#   utils < BC群 < orchestration/api
+#   上位レイヤーが下位レイヤーを参照するのは合法。逆は禁止。
 #
-# ignore_imports: 譌｢蟄倬＆蜿搾ｼ亥ｰ・擂逧・↑隗｣豸亥ｯｾ雎｡・峨ｒ譏守､ｺ蛻玲嫌縲・
-# 譁ｰ隕城＆蜿阪ｒ霑ｽ蜉縺吶ｋ髫帙・蠢・★繝ｬ繝薙Η繝ｼ繧堤ｵ後ｋ縺薙→縲・
+# ignore_imports: 既存違反（将来的な解消対象）を明示列挙。
+# 新規違反を追加する際は必ずレビューを経ること。
 # ============================================================
 [importlinter:contract:layers]
 name = Layered architecture (utils < BC < orchestration/api)
@@ -20,10 +20,10 @@ layers =
     src.backtest | src.prediction | src.trading | src.reporting | src.watchlist | src.market_data | src.rule_engine
     src.utils
 ignore_imports =
-    # --- BC 竊・orchestration (reporting 縺・scheduler 繧ｹ繝・・繧ｿ繧ｹ蝙九ｒ蜿ら・) ---
+    # --- BC → orchestration (reporting が scheduler ステータス型を参照) ---
     src.reporting.query_service -> src.orchestration.types
     src.reporting.discord.discord_bot -> src.orchestration.types
-    # --- BC 髢鍋嶌莠貞盾辣ｧ (independence contract 縺ｧ繧らｮ｡逅・ ---
+    # --- BC 間相互参照 (independence contract でも管理) ---
     src.reporting.query_service -> src.prediction.predict_single
     src.backtest.pipeline -> src.prediction.manager
     src.backtest.portfolio -> src.prediction.manager
@@ -36,7 +36,7 @@ ignore_imports =
     src.prediction.training_pipeline -> src.watchlist.batch_runner
     src.prediction.training_pipeline -> src.watchlist.types
     src.market_data.pipeline -> src.watchlist.batch_runner
-    # --- 譁ｰ隕剰ｿｽ蜉驕募渚 (蟆・擂逧・ｧ｣豸亥ｯｾ雎｡) ---
+    # --- 新規追加違反 (将来的解消対象) ---
     src.backtest.rule_backtester -> src.market_data.yf_client
     src.backtest.backtester -> src.market_data.technical
     src.backtest.metrics -> src.market_data.technical
@@ -54,12 +54,10 @@ ignore_imports =
     src.backtest.rule_backtester -> src.market_data.technical
     src.backtest.screener -> src.market_data.technical
     src.utils.alert_service -> src.reporting.discord.discord_utils
-    # [B] utils.db 竊・prediction.db (prediction DB 髢｢謨ｰ縺ｮ蠕梧婿莠呈鋤 re-export 窶・BC 謨ｴ逅・ｾ後↓隗｣豸井ｺ亥ｮ・
-    src.utils.db -> src.prediction.db
-    # [B] rule_engine 竊・market_data (謚陦捺欠讓呵ｨ育ｮ・窶・market_data 繝昴・繝医〒隗｣豸亥庄閭ｽ)
+    # [B] rule_engine → market_data (技術指標計算 — market_data ポートで解消可能)
     src.rule_engine.pipeline -> src.market_data.yf_client
     src.rule_engine.pipeline -> src.market_data.technical
-    # --- trading 竊・prediction 逶ｴ謗･蜿ら・ (BC髢謎ｾ晏ｭ・窶・#339 縺ｧ隗｣豸井ｺ亥ｮ・ ---
+    # --- trading → prediction 直接参照 (BC間依存 — #339 で解消予定) ---
     src.reporting.monthly -> src.prediction.db
     src.reporting.query_service -> src.prediction.db
     src.reporting.dashboard -> src.prediction.db
@@ -67,34 +65,34 @@ ignore_imports =
     src.trading.execution -> src.infrastructure.yfinance_market_data_adapter
     src.trading.rule_execution -> src.infrastructure.yfinance_market_data_adapter
     src.trading.pre_close_alert_service -> src.infrastructure.yfinance_market_data_adapter
-    # [B] trading 竊・prediction 逶ｴ謗･蜿ら・ (BC髢謎ｾ晏ｭ・窶・#339 縺ｧ隗｣豸井ｺ亥ｮ・
+    # [B] trading → prediction 直接参照 (BC間依存 — #339 で解消予定)
     src.trading.execution -> src.prediction.db
     src.trading.pre_close_alert_service -> src.prediction.db
 
 # ============================================================
-# Contract 2: BC 迢ｬ遶区ｧ螂醍ｴ・
-#   Bounded Context 蜷悟｣ｫ縺ｯ逶ｸ莠貞盾辣ｧ遖∵ｭ｢・亥ｰ・擂逧・ｧ｣豸医′蜑肴署・峨・
-#   ignore_imports 縺ｫ霑ｽ蜉縺吶ｋ髫帙・蠢・★逅・罰繧ｳ繝｡繝ｳ繝医ｒ莉倥￠繧九％縺ｨ縲・
+# Contract 2: BC 独立性契約
+#   Bounded Context 同士は相互参照禁止（将来的解消が前提）。
+#   ignore_imports に追加する際は必ず理由コメントを付けること。
 #
-# 驕募渚蛻・｡槭Ο繝ｼ繝峨・繝・・:
-#   [A] types.py 蜈ｱ譛峨〒隗｣豸亥庄閭ｽ (遏ｭ譛・Q3-2026):
-#       reporting 竊・prediction/watchlist: 蜈ｱ譛・types 繧・domain/ 縺ｫ髮・ｴ・
-#   [B] 繧､繝吶Φ繝・繧ｳ繝ｼ繝ｫ繝舌ャ繧ｯ鬧・虚縺ｧ隗｣豸亥庄閭ｽ (荳ｭ譛・Q4-2026):
-#       market_data/watchlist/prediction 竊・reporting: 騾夂衍繧偵う繝吶Φ繝育ｵ檎罰縺ｫ
-#       backtest 竊・prediction/market_data: BT 蟆ら畑繝昴・繝医ｒ螳夂ｾｩ
+# 違反分類ロードマップ:
+#   [A] types.py 共有で解消可能 (短期 Q3-2026):
+#       reporting → prediction/watchlist: 共有 types を domain/ に集約
+#   [B] イベント/コールバック駆動で解消可能 (中期 Q4-2026):
+#       market_data/watchlist/prediction → reporting: 通知をイベント経由に
+#       backtest → prediction/market_data: BT 専用ポートを定義
 #
-# [C] prediction.rule_signal_pipeline 竊・trading/backtest 縺ｯ rule_engine BC (#340) 縺ｧ隗｣豸域ｸ医∩
+# [C] prediction.rule_signal_pipeline → trading/backtest は rule_engine BC (#340) で解消済み
 #
-# 蜑頑ｸ帷岼讓・
-#   迴ｾ迥ｶ: 44莉ｶ (2026-05, #340 螳滓命蠕・ [C] 3莉ｶ蜑頑ｸ・
-#   Q3-2026: 30莉ｶ莉･荳・(蛻・｡・A 繧定ｧ｣豸・
-#   Q4-2026: 20莉ｶ莉･荳・(蛻・｡・B 繧定ｧ｣豸・
+# 削減目標:
+#   現状: 44件 (2026-05, #340 実施後: [C] 3件削減)
+#   Q3-2026: 30件以下 (分類 A を解消)
+#   Q4-2026: 20件以下 (分類 B を解消)
 # ============================================================
 [importlinter:contract:independence]
 name = BC independence (BCs must not import each other)
 type = independence
-# utils.db 縺・prediction.db 繧・re-export 縺励※縺・ｋ髢捺磁萓晏ｭ倥・ #338 縺ｧ譬ｹ譛ｬ隗｣豸井ｺ亥ｮ・
-# 縺昴ｌ縺ｾ縺ｧ縺ｯ indirect check 繧堤┌蜉ｹ蛹悶＠縺ｦ direct import 縺ｮ縺ｿ讀懆ｨｼ縺吶ｋ
+# utils.db が prediction.db を re-export している間接依存は #338 で根本解消予定
+# それまでは indirect check を無効化して direct import のみ検証する
 allow_indirect_imports = True
 modules =
     src.backtest
@@ -105,59 +103,59 @@ modules =
     src.market_data
     src.rule_engine
 ignore_imports =
-    # [A] reporting 竊・prediction (predict_single 縺ｮ縺ｿ谿句ｭ・窶・蟆・擂逧・↓隗｣豸井ｺ亥ｮ・
+    # [A] reporting → prediction (predict_single のみ残存 — 将来的に解消予定)
     src.reporting.query_service -> src.prediction.predict_single
-    # [B] backtest 竊・prediction (繝舌ャ繧ｯ繝・せ繝医′蟄ｦ鄙呈ｸ医∩繝｢繝・Ν繧剃ｽｿ逕ｨ 窶・BT 蟆ら畑繝昴・繝亥ｮ夂ｾｩ縺ｧ隗｣豸亥庄閭ｽ)
+    # [B] backtest → prediction (バックテストが学習済みモデルを使用 — BT 専用ポート定義で解消可能)
     src.backtest.pipeline -> src.prediction.manager
     src.backtest.portfolio -> src.prediction.manager
-    # [B] backtest 竊・market_data (繝舌ャ繧ｯ繝・せ繝医′ OHLCV 繝・・繧ｿ繧貞叙蠕・窶・BT 蟆ら畑繝昴・繝医〒隗｣豸亥庄閭ｽ)
+    # [B] backtest → market_data (バックテストが OHLCV データを取得 — BT 専用ポートで解消可能)
     src.backtest.pipeline -> src.market_data.loader
     src.backtest.backtester -> src.market_data.loader
-    # [A] backtest 竊・watchlist (繝舌ャ繝√ヰ繝・け繝・せ繝医′繧ｦ繧ｩ繝・メ繝ｪ繧ｹ繝医ｒ蜿榊ｾｩ 窶・types 蜈ｱ譛峨〒隗｣豸亥庄閭ｽ)
+    # [A] backtest → watchlist (バッチバックテストがウォッチリストを反復 — types 共有で解消可能)
     src.backtest.walk_forward_report -> src.watchlist.batch_runner
     src.backtest.optimizer -> src.watchlist.batch_runner
-    # [B] prediction 竊・market_data (蟄ｦ鄙偵ヱ繧､繝励Λ繧､繝ｳ縺・OHLCV 繧貞叙蠕・窶・market_data 繝昴・繝域ｳｨ蜈･縺ｧ隗｣豸亥庄閭ｽ)
+    # [B] prediction → market_data (学習パイプラインが OHLCV を取得 — market_data ポート注入で解消可能)
     src.prediction.unified_model_pipeline -> src.market_data.loader
     src.prediction.training_pipeline -> src.market_data.loader
-    # [A] prediction 竊・watchlist (繝舌ャ繝∝ｭｦ鄙偵′繧ｦ繧ｩ繝・メ繝ｪ繧ｹ繝医ｒ蜿榊ｾｩ 窶・types 蜈ｱ譛峨〒隗｣豸亥庄閭ｽ)
+    # [A] prediction → watchlist (バッチ学習がウォッチリストを反復 — types 共有で解消可能)
     src.prediction.training_pipeline -> src.watchlist.batch_runner
     src.prediction.training_pipeline -> src.watchlist.types
-    # [B] market_data 竊・watchlist (繝舌ャ繝√ョ繝ｼ繧ｿ蜿朱寔縺後え繧ｩ繝・メ繝ｪ繧ｹ繝医ｒ蜿榊ｾｩ 窶・繝昴・繝域ｳｨ蜈･縺ｧ隗｣豸亥庄閭ｽ)
+    # [B] market_data → watchlist (バッチデータ収集がウォッチリストを反復 — ポート注入で解消可能)
     src.market_data.pipeline -> src.watchlist.batch_runner
-    # [B] backtest 竊・market_data (謚陦捺欠讓呵ｨ育ｮ・窶・market_data 繝昴・繝医〒隗｣豸亥庄閭ｽ)
+    # [B] backtest → market_data (技術指標計算 — market_data ポートで解消可能)
     src.backtest.rule_backtester -> src.market_data.yf_client
     src.backtest.backtester -> src.market_data.technical
     src.backtest.metrics -> src.market_data.technical
     src.backtest.screener -> src.market_data.yf_client
     src.backtest.portfolio -> src.market_data.market_regime
     src.backtest.pipeline -> src.market_data.technical
-    # [B] prediction 竊・market_data (謚陦捺欠讓呵ｨ育ｮ・窶・market_data 繝昴・繝医〒隗｣豸亥庄閭ｽ)
+    # [B] prediction → market_data (技術指標計算 — market_data ポートで解消可能)
     src.prediction.unified_model_pipeline -> src.market_data.technical
     src.prediction.predict_single -> src.market_data.technical
     src.prediction.predict_single -> src.market_data.loader
     src.prediction.training_pipeline -> src.market_data.technical
-    # [A] market_data 竊・watchlist (types 蜈ｱ譛峨〒隗｣豸亥庄閭ｽ)
+    # [A] market_data → watchlist (types 共有で解消可能)
     src.market_data.pipeline -> src.watchlist.types
-    # [B] backtest 竊・trading (繧ｷ繧ｰ繝翫Ν逕滓・ 窶・trading 繝昴・繝医〒隗｣豸亥庄閭ｽ)
+    # [B] backtest → trading (シグナル生成 — trading ポートで解消可能)
     src.backtest.portfolio -> src.trading.signal_generator
     src.backtest.pipeline -> src.trading.signal_generator
-    # [B] backtest 竊・reporting (繝舌ャ繧ｯ繝・せ繝磯夂衍 窶・繧､繝吶Φ繝磯ｧ・虚縺ｧ隗｣豸亥庄閭ｽ)
+    # [B] backtest → reporting (バックテスト通知 — イベント駆動で解消可能)
     src.backtest.pipeline -> src.reporting.discord.discord_utils
-    # [B] backtest 竊・market_data (霑ｽ蜉謚陦捺欠讓・窶・繝昴・繝医〒隗｣豸亥庄閭ｽ)
+    # [B] backtest → market_data (追加技術指標 — ポートで解消可能)
     src.backtest.rule_backtester -> src.market_data.technical
     src.backtest.screener -> src.market_data.technical
-    # [B] rule_engine 竊・market_data (謚陦捺欠讓呵ｨ育ｮ・窶・market_data 繝昴・繝医〒隗｣豸亥庄閭ｽ)
+    # [B] rule_engine → market_data (技術指標計算 — market_data ポートで解消可能)
     src.rule_engine.pipeline -> src.market_data.yf_client
     src.rule_engine.pipeline -> src.market_data.technical
-    # [A] reporting 竊・prediction 逶ｴ謗･蜿ら・ (#338 縺ｧ隗｣豸井ｺ亥ｮ・
+    # [A] reporting → prediction 直接参照 (#338 で解消予定)
     src.reporting.monthly -> src.prediction.db
     src.reporting.query_service -> src.prediction.db
     src.reporting.dashboard -> src.prediction.db
     src.reporting.discord.discord_utils -> src.prediction.db
-    # [B] trading 竊・prediction 逶ｴ謗･蜿ら・ (#339 縺ｧ隗｣豸井ｺ亥ｮ・
+    # [B] trading → prediction 直接参照 (#339 で解消予定)
     src.trading.execution -> src.prediction.db
     src.trading.pre_close_alert_service -> src.prediction.db
-    # [B] trading 竊・market_data (infrastructure 邨檎罰縺ｮ髢捺磁萓晏ｭ・窶・#339 縺ｧ隗｣豸井ｺ亥ｮ・
+    # [B] trading → market_data (infrastructure 経由の間接依存 — #339 で解消予定)
     src.trading.execution -> src.infrastructure.yfinance_market_data_adapter
     src.trading.rule_execution -> src.infrastructure.yfinance_market_data_adapter
     src.trading.pre_close_alert_service -> src.infrastructure.yfinance_market_data_adapter
