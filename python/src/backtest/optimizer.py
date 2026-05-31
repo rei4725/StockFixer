@@ -470,6 +470,7 @@ def get_optimal_params(
 
 
 def run_optimize_batch(
+    tasks: list,
     model_type: str = "XGBoostModel",
     ensemble: bool = False,
     source: str = "file",
@@ -490,15 +491,17 @@ def run_optimize_batch(
     max_workers: int = 3,
     sort_by: str = "sharpe_ratio",
     skip_days: Optional[int] = None,
-    as_of_date: Optional[str] = None,
 ) -> list[dict[str, Any]]:
     """
     ウォッチリストの全銘柄に対してバックテスト最適化をバッチ実行する。
+
+    tasks は呼び出し元（orchestration 等）で load_target_symbols() して渡す。
 
     フェーズ1: 最適化計算（並列） — DuckDB読み込みのみ・書き込みなし
     フェーズ2: 結果保存（逐次） — optimal_params.json の同時書き込み破損を防止
 
     Args:
+        tasks: 対象銘柄タスクリスト（SymbolTask または dict）
         model_type: モデルタイプ
         ensemble: XGBoost+LightGBMアンサンブル予測を使用するか
         source: データソース
@@ -519,19 +522,13 @@ def run_optimize_batch(
         max_workers: 並列数
         sort_by: 最適パラメータ選定基準
         skip_days: 最終最適化からこの日数以内ならスキップ（None=常に実行）
-        as_of_date: YYYY-MM-DD。指定時は当日時点の指数構成銘柄を対象にする。
 
     Returns:
         各銘柄の結果サマリー list[dict]
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    from src.utils.logger import get_logger
-    from src.watchlist.batch_runner import load_target_symbols
-
-    logger = get_logger(__name__)
-
-    symbols = load_target_symbols(as_of_date=as_of_date)
+    symbols = tasks
     if not symbols:
         logger.warning("対象銘柄がありません。")
         return []
@@ -719,6 +716,7 @@ def run_optuna_optimization(
 
 
 def run_optuna_batch(
+    tasks: list,
     model_type: str = "XGBoostModel",
     ensemble: bool = False,
     source: str = "file",
@@ -726,13 +724,15 @@ def run_optuna_batch(
     n_trials: int = 50,
     max_workers: int = 3,
     sort_by: str = "sharpe_ratio",
-    as_of_date: Optional[str] = None,
 ) -> list[dict[str, Any]]:
     """
     ウォッチリスト全銘柄に Optuna 最適化をバッチ実行し、
     optimal_params.json を更新する（週次スケジューラから呼び出す）。
 
+    tasks は呼び出し元（orchestration 等）で load_target_symbols() して渡す。
+
     Args:
+        tasks: 対象銘柄タスクリスト（SymbolTask または dict）
         n_trials: 銘柄ごとの Optuna 試行回数
         max_workers: 並列数
         その他: ``run_optuna_optimization`` と同様
@@ -742,9 +742,7 @@ def run_optuna_batch(
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    from src.watchlist.batch_runner import load_target_symbols
-
-    symbols = load_target_symbols(as_of_date=as_of_date)
+    symbols = tasks
     if not symbols:
         logger.warning("対象銘柄がありません。")
         return []

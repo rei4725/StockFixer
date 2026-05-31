@@ -394,13 +394,12 @@ class TestRunOptimizeBatch(unittest.TestCase):
     @patch("src.backtest.optimizer.save_optimal_params_json")
     @patch("src.backtest.optimizer.save_optimization_results")
     @patch("src.backtest.optimizer.run_optimization")
-    @patch("src.watchlist.batch_runner.load_target_symbols")
-    def test_returns_list_of_results(self, mock_symbols, mock_run, mock_save, mock_json):
+    def test_returns_list_of_results(self, mock_run, mock_save, mock_json):
         """全銘柄の結果リストが返ること"""
         from src.backtest.optimizer import run_optimize_batch
         from src.domain.types import SymbolTask
 
-        mock_symbols.return_value = [
+        tasks = [
             SymbolTask(market="jp", symbol="7203"),
             SymbolTask(market="jp", symbol="9984"),
         ]
@@ -408,20 +407,19 @@ class TestRunOptimizeBatch(unittest.TestCase):
         mock_save.return_value = "/tmp/results.csv"
         mock_json.return_value = "/tmp/params.json"
 
-        results = run_optimize_batch(model_type="XGBoostModel", max_workers=1)
+        results = run_optimize_batch(tasks, model_type="XGBoostModel", max_workers=1)
         self.assertIsInstance(results, list)
         self.assertEqual(len(results), 2)
 
     @patch("src.backtest.optimizer.save_optimal_params_json")
     @patch("src.backtest.optimizer.save_optimization_results")
     @patch("src.backtest.optimizer.run_optimization")
-    @patch("src.watchlist.batch_runner.load_target_symbols")
-    def test_handles_single_symbol_error(self, mock_symbols, mock_run, mock_save, mock_json):
+    def test_handles_single_symbol_error(self, mock_run, mock_save, mock_json):
         """1銘柄でエラーが出ても他の銘柄が処理されること"""
         from src.backtest.optimizer import run_optimize_batch
         from src.domain.types import SymbolTask
 
-        mock_symbols.return_value = [
+        tasks = [
             SymbolTask(market="jp", symbol="7203"),
             SymbolTask(market="jp", symbol="9984"),
         ]
@@ -432,29 +430,18 @@ class TestRunOptimizeBatch(unittest.TestCase):
         mock_save.return_value = "/tmp/results.csv"
         mock_json.return_value = "/tmp/params.json"
 
-        results = run_optimize_batch(model_type="XGBoostModel", max_workers=1)
+        results = run_optimize_batch(tasks, model_type="XGBoostModel", max_workers=1)
         self.assertIsInstance(results, list)
         self.assertEqual(len(results), 2)
         statuses = [r.get("status") for r in results]
         self.assertIn("error", statuses)
 
-    @patch("src.watchlist.batch_runner.load_target_symbols")
-    def test_returns_empty_on_no_symbols(self, mock_symbols):
-        """銘柄がない場合、空リストが返ること"""
+    def test_returns_empty_on_no_tasks(self):
+        """タスクが空の場合、空リストが返ること"""
         from src.backtest.optimizer import run_optimize_batch
 
-        mock_symbols.return_value = []
-        results = run_optimize_batch(model_type="XGBoostModel")
+        results = run_optimize_batch([], model_type="XGBoostModel")
         self.assertEqual(results, [])
-
-    @patch("src.watchlist.batch_runner.load_target_symbols")
-    def test_passes_as_of_date_to_symbol_loader(self, mock_symbols):
-        """as_of_date が load_target_symbols に渡されること"""
-        from src.backtest.optimizer import run_optimize_batch
-
-        mock_symbols.return_value = []
-        run_optimize_batch(model_type="XGBoostModel", as_of_date="2025-06-30")
-        mock_symbols.assert_called_once_with(as_of_date="2025-06-30")
 
 
 if __name__ == "__main__":

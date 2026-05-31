@@ -29,8 +29,6 @@ ignore_imports =
     src.backtest.portfolio -> src.prediction.manager
     src.backtest.pipeline -> src.market_data.loader
     src.backtest.backtester -> src.market_data.loader
-    src.backtest.walk_forward_report -> src.watchlist.batch_runner
-    src.backtest.optimizer -> src.watchlist.batch_runner
     src.prediction.unified_model_pipeline -> src.market_data.loader
     src.prediction.training_pipeline -> src.market_data.loader
     # --- 新規追加違反 (将来的解消対象) ---
@@ -107,9 +105,6 @@ ignore_imports =
     # [B] backtest → market_data (バックテストが OHLCV データを取得 — BT 専用ポートで解消可能)
     src.backtest.pipeline -> src.market_data.loader
     src.backtest.backtester -> src.market_data.loader
-    # [A] backtest → watchlist (バッチバックテストがウォッチリストを反復 — types 共有で解消可能)
-    src.backtest.walk_forward_report -> src.watchlist.batch_runner
-    src.backtest.optimizer -> src.watchlist.batch_runner
     # [B] prediction → market_data (学習パイプラインが OHLCV を取得 — market_data ポート注入で解消可能)
     src.prediction.unified_model_pipeline -> src.market_data.loader
     src.prediction.training_pipeline -> src.market_data.loader
