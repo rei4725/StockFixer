@@ -9,8 +9,8 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 import pandas as pd
-from config.data import MAX_DATA_WORKERS
 
+from config.data import MAX_DATA_WORKERS
 from src.domain.ports import AlertLevel, NotificationPort
 from src.features.macro_features import (
     add_event_flags,
