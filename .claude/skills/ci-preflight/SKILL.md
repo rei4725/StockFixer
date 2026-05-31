@@ -24,11 +24,24 @@ PR が既にある場合は、何が失敗しているかをカテゴリ別に�
 gh pr checks <PR番号> --repo <owner>/<repo>
 ```
 
+#### ブランチの乖離確認（最初に必ず実行）
+
+**Lint エラーが大量 / integration-test が複数失敗** している場合は、コード修正より先に develop との乖離を確認する。
+乖離が原因なら個別修正は不要で、マージするだけで全問題が解消することが多い。
+
+```bash
+git fetch origin
+git log HEAD..origin/develop --oneline  # develop 側の未取込コミット一覧
+```
+
+- **未取込コミットがある** → `git merge origin/develop` してから再チェック
+- **乖離なし** → 個別のパターン修正（以下）へ進む
+
 失敗を確認したら以下を判断する：
-1. **Lint 系** → STEP 1 の auto-fix から始める
+1. **Lint 系（大量の `would reformat`）** → 先にブランチ乖離確認。乖離なければ STEP 1 の auto-fix へ
 2. **import-linter** → `.importlinter` を確認（[P5]）
-3. **テスト失敗** → develop と同じ失敗かを先に確認（[P12]「develop 比較」参照）
-4. **benchmark** → テスト自体は通っているが PR コメント投稿のパーミッション問題なら無視してよい
+3. **テスト失敗** → ブランチ乖離確認 → develop と同じ失敗かを確認（[P12]「develop 比較」参照）
+4. **benchmark** → [P13] 参照
 
 #### バージョン不一致の事前チェック（Lint 系で詰まる前に必ず確認）
 
@@ -138,6 +151,10 @@ gh api "repos/<owner>/<repo>/actions/runs/<run_id>/jobs" 2>&1 \
 ## 失敗パターンと修正手順
 
 ### [P1] black / isort フォーマット違反
+
+**`would reformat` が 10件以上出る場合はブランチ乖離を先に疑う。**
+develop 側でフォーマット一括適用のコミットが入っていると、未追随ブランチに大量の差分が出る。
+→ `git merge origin/develop` してから再確認。乖離がなければ STEP 1 の auto-fix へ。
 
 STEP 1 で自動修正済みのはず。まだ出る場合 → [P9] Windows CRLF 問題を確認。
 
@@ -438,9 +455,38 @@ git stash pop
 
 ---
 
+### [P13] benchmark 失敗
+
+benchmark の失敗には 2 種類ある。ログの末尾で区別する。
+
+**パターン A: PR コメント投稿の権限エラー**（無視可）
+
+```
+Error: Resource not accessible by integration
+```
+
+テスト自体は通過しており、結果コメントを PR に書き込む GitHub Actions のパーミッション問題。
+fork PR やパーミッション制限 PR でよく起きる。**コード修正不要。**
+
+**パターン B: テスト自体の失敗**（要対応）
+
+```
+FAILED tests/perf/test_perf_backtest.py::... - ValueError: ...
+```
+
+実際のコードバグ。ただし **ブランチ乖離が原因のことが多い**。
+
+調査手順:
+1. `git merge origin/develop` してから `py -m pytest tests/perf/ -v` をローカルで実行
+2. develop マージ後に通れば乖離が原因 → push するだけで解消
+3. マージ後も失敗する場合は develop との差分を確認してコードを修正
+
+---
+
 ## 作業効率化のチェックリスト
 
 ```
+□ STEP 0: git log HEAD..origin/develop --oneline でブランチ乖離を確認（大量エラーの場合は先にマージ）
 □ STEP 0: gh pr checks で失敗を一覧化し、PR固有かdevelop既存問題かを分類する
 □ STEP 0: requirements-dev.txt と .pre-commit-config.yaml のバージョンが一致しているか確認
 □ STEP 1a: Python ファイルを LF に変換（core.autocrlf 問題の予防）
@@ -463,7 +509,7 @@ git stash pop
 | `unit-test > Coverage` | P10, P12 | develop と比較してから判断 |
 | `Architecture Contract Check` | P5 | `$env:PYTHONUTF8=1; lint-imports.exe` |
 | `integration-test` | P11, P12 | `py -m pytest tests/integration/ -v` |
-| `benchmark` | - | テスト自体は通っていてもPRコメント投稿権限エラーで fail することがある（無視可） |
+| `benchmark` | P13 | [P13] 参照。権限エラーか実テスト失敗かを区別する |
 | `Dependency Vulnerability Scan` | P7 | `py -m pip check` |
 | `validate-pr-body` | P8 | PR本文を目視確認 |
 
