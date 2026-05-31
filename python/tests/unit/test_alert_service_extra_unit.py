@@ -66,22 +66,16 @@ class TestSendAlertDetail(unittest.TestCase):
         from src.utils.alert_service import _send_alert_detail
 
         results = [self._make_triggered_result()]
-        with patch(
-            "src.reporting.discord.discord_utils.send_webhook_notification", return_value=True
-        ) as mock_send:
-            result = _send_alert_detail(results)
-        mock_send.assert_called_once()
+        notifier = lambda title, msg, color: True  # noqa: E731
+        result = _send_alert_detail(results, notifier)
         self.assertTrue(result)
 
     def test_send_daily_summary_calls_webhook(self):
         from src.utils.alert_service import _send_daily_summary
 
         results = [self._make_triggered_result()]
-        with patch(
-            "src.reporting.discord.discord_utils.send_webhook_notification", return_value=True
-        ) as mock_send:
-            result = _send_daily_summary(results)
-        mock_send.assert_called_once()
+        notifier = lambda title, msg, color: True  # noqa: E731
+        result = _send_daily_summary(results, notifier)
         self.assertTrue(result)
 
 

@@ -14,11 +14,14 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+NotifierFn = Callable[[str, str, int], bool]
 
 # ---------------------------------------------------------------------------
 # 閾値定数
@@ -276,41 +279,30 @@ def evaluate_alert_conditions(
 # ---------------------------------------------------------------------------
 
 
-def _send_alert_detail(results: list[AlertResult]) -> bool:
+def _send_alert_detail(results: list[AlertResult], notifier: NotifierFn) -> bool:
     """アラート詳細を Discord に送信する。"""
-    from src.reporting.discord.discord_utils import send_webhook_notification
-
     lines = ["以下の条件が成立しています。確認してください。", ""]
     for r in results:
         if r.triggered:
             lines.extend(r.as_discord_lines())
             lines.append("")
 
-    return send_webhook_notification(
-        "🚨 運用アラート発報（NF-303）",
-        "\n".join(lines).strip(),
-        color=0xFF0000,
-    )
+    return notifier("🚨 運用アラート発報（NF-303）", "\n".join(lines).strip(), 0xFF0000)
 
 
-def _send_daily_summary(results: list[AlertResult]) -> bool:
+def _send_daily_summary(results: list[AlertResult], notifier: NotifierFn) -> bool:
     """全条件非成立時の日次サマリーを Discord に送信する。"""
-    from src.reporting.discord.discord_utils import send_webhook_notification
-
     lines = ["全アラートルール: 条件非成立（正常）", ""]
     for r in results:
         lines.append(f"✅ [{r.rule_id}] {r.name}  ({r.consecutive_count}/{r.threshold})")
 
-    return send_webhook_notification(
-        "📋 日次アラートサマリー（NF-303）",
-        "\n".join(lines),
-        color=0x00BFFF,
-    )
+    return notifier("📋 日次アラートサマリー（NF-303）", "\n".join(lines), 0x00BFFF)
 
 
 def run_conditional_notification(
     results: list[AlertResult] | None = None,
     state_file_path: str | None = None,
+    notifier: NotifierFn | None = None,
 ) -> bool:
     """
     アラート条件を評価し、成立時は詳細アラート、非成立時は日次サマリーを送信する。
@@ -318,6 +310,7 @@ def run_conditional_notification(
     Args:
         results: 評価済みの AlertResult リスト。None の場合は内部で evaluate する。
         state_file_path: scheduler_queue_state.json のパス（None = デフォルト）
+        notifier: Discord 送信コールバック（title, message, color） -> bool。None の場合は通知スキップ。
 
     Returns:
         Discord 送信成功時 True
@@ -325,11 +318,14 @@ def run_conditional_notification(
     if results is None:
         results = evaluate_alert_conditions(state_file_path)
 
+    if notifier is None:
+        return False
+
     any_triggered = any(r.triggered for r in results)
 
     if any_triggered:
         logger.warning("アラート条件成立 — 詳細通知を送信します")
-        return _send_alert_detail(results)
+        return _send_alert_detail(results, notifier)
     else:
         logger.info("アラート条件非成立 — 日次サマリーを送信します")
-        return _send_daily_summary(results)
+        return _send_daily_summary(results, notifier)
