@@ -19,7 +19,6 @@ from datetime import date, timedelta
 from typing import Any, TypedDict
 
 import pandas as pd
-
 from config.settings import (
     BUY_THRESHOLD,
     CORRELATION_ENC_THRESHOLD,
@@ -33,6 +32,7 @@ from config.settings import (
     MAX_SECTOR_POSITIONS,
     MIN_CHANGE_RATIO,
 )
+
 from src.domain.ports import (
     AlertLevel,
     MarketDataPort,

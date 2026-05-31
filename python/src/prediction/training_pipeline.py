@@ -9,8 +9,6 @@ from datetime import datetime
 
 import numpy as np
 import pandas as pd
-from sklearn.inspection import permutation_importance
-
 from config.settings import (
     EARNINGS_MASK_WINDOW_DAYS,
     FEATURE_SELECTION_DROP_RATIO,
@@ -18,6 +16,8 @@ from config.settings import (
     FEATURE_SELECTION_PROTECT_TOP_SHAP,
     PERMUTATION_IMPORTANCE_REPEATS,
 )
+from sklearn.inspection import permutation_importance
+
 from src.market_data.loader import get_earnings_dates
 from src.market_data.technical import add_earnings_flag
 from src.prediction.db import (
