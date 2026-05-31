@@ -11,9 +11,10 @@ pydantic-settings の BaseSettings で env 変数を型安全に読み込み、
 import os
 from typing import Optional
 
-from config.trading_policy import KELLY_CAP as _KELLY_CAP
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from config.trading_policy import KELLY_CAP as _KELLY_CAP
 
 
 class Settings(BaseSettings):

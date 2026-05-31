@@ -14,8 +14,8 @@ from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
-from config.data import MAX_PREDICTION_WORKERS
 
+from config.data import MAX_PREDICTION_WORKERS
 from src.prediction.db import save_prediction_results
 from src.prediction.predict_single import predict_single_stock
 from src.prediction.types import PredictionResult

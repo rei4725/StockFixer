@@ -59,7 +59,7 @@ ignore_imports =
     src.rule_engine.pipeline -> src.market_data.yf_client
     src.rule_engine.pipeline -> src.market_data.technical
     # --- trading → prediction 直接参照 (BC間依存 — #339 で解消予定) ---
-    src.reporting.monthly -> src.prediction.db
+    src.reporting.monthly -> src.prediction.kpi_service
     src.reporting.query_service -> src.prediction.db
     src.reporting.dashboard -> src.prediction.db
     src.reporting.discord.discord_utils -> src.prediction.db
@@ -151,7 +151,7 @@ ignore_imports =
     src.rule_engine.pipeline -> src.market_data.yf_client
     src.rule_engine.pipeline -> src.market_data.technical
     # [A] reporting → prediction 直接参照 (#338 で解消予定)
-    src.reporting.monthly -> src.prediction.db
+    src.reporting.monthly -> src.prediction.kpi_service
     src.reporting.query_service -> src.prediction.db
     src.reporting.dashboard -> src.prediction.db
     src.reporting.discord.discord_utils -> src.prediction.db

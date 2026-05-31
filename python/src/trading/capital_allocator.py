@@ -17,7 +17,6 @@ from config.settings import (
     MAX_POSITIONS,
     MAX_SECTOR_POSITIONS,
 )
-
 from src.domain.trading_rules import DEFAULT_REGIME_SCALE as _DEFAULT_REGIME_SCALE
 from src.domain.trading_rules import REGIME_SCALE as _REGIME_SCALE
 from src.trading.correlation_risk import filter_correlated_candidates

@@ -22,7 +22,6 @@ import argparse
 import sys
 
 from config.settings import MAX_SECTOR_POSITIONS
-
 from src.backtest.portfolio import (
     plot_portfolio,
     print_portfolio_metrics,
