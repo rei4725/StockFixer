@@ -5,8 +5,8 @@ from discord.ext import commands
 from discord.utils import escape_markdown
 from dotenv import load_dotenv
 
+from src.domain.types import PredictionResult
 from src.orchestration.types import SchedulerJobStatus
-from src.prediction.types import PredictionResult
 from src.reporting.discord.discord_formatters import convert_df_for_discord
 from src.reporting.discord.discord_text import DISCORD_TEXT_LIMIT, split_text_chunks
 from src.reporting.query_service import (
@@ -101,9 +101,7 @@ def build_scheduler_status_lines(statuses: list[SchedulerJobStatus]) -> list[str
     lines = ["=== スケジューラ状態 ==="]
     for job_status in statuses:
         timestamp = (
-            format_jst_from_iso(job_status.last_run_at)
-            if job_status.last_run_at
-            else "実行履歴なし"
+            format_jst_from_iso(job_status.last_run_at) if job_status.last_run_at else "実行履歴なし"
         )
         lines.append(job_status.label)
         lines.append(f"  最終実行: {timestamp}  [状態: {job_status.status}]")
@@ -126,15 +124,11 @@ def get_top10_diff_stocks_message(market: str, rank_type: str, predicted_at: str
 async def handle_forecast_command(message):
     latest_ts, snapshots = get_latest_market_prediction_snapshots()
     if latest_ts is None:
-        await message.channel.send(
-            escape_markdown("予測結果が見つかりませんでした。"), allowed_mentions=None
-        )
+        await message.channel.send(escape_markdown("予測結果が見つかりませんでした。"), allowed_mentions=None)
         return
 
     if not snapshots:
-        await message.channel.send(
-            escape_markdown("予測結果が見つかりませんでした。"), allowed_mentions=None
-        )
+        await message.channel.send(escape_markdown("予測結果が見つかりませんでした。"), allowed_mentions=None)
         return
 
     for snapshot in snapshots:
@@ -192,9 +186,7 @@ async def handle_signal_command(message, parts: list):
     market = parts[2].lower() if len(parts) >= 3 and not parts[2].startswith("--") else "us"
     explain = "--explain" in parts
 
-    await message.channel.send(
-        escape_markdown(f"計算中... {market}/{symbol}"), allowed_mentions=None
-    )
+    await message.channel.send(escape_markdown(f"計算中... {market}/{symbol}"), allowed_mentions=None)
     snapshot = get_signal_snapshot(market, symbol, explain=explain)
     if snapshot is None:
         await message.channel.send(
@@ -241,9 +233,7 @@ def build_monthly_report_lines(summary: MonthlyReportSummary) -> list[str]:
         "達成" if (summary.sharpe_ratio is not None and summary.sharpe_ratio >= 1.0) else "未達"
     )
     mdd_kpi = (
-        "達成"
-        if (summary.max_drawdown is not None and abs(summary.max_drawdown) <= 0.15)
-        else "未達"
+        "達成" if (summary.max_drawdown is not None and abs(summary.max_drawdown) <= 0.15) else "未達"
     )
 
     lines = [
@@ -301,9 +291,7 @@ async def handle_status_command(message):
     state_file = os.path.join(get_results_dir(), "scheduler_queue_state.json")
     if not os.path.exists(state_file):
         await message.channel.send(
-            escape_markdown(
-                "スケジューラ状態ファイルが見つかりません。スケジューラが起動されていない可能性があります。"
-            ),
+            escape_markdown("スケジューラ状態ファイルが見つかりません。スケジューラが起動されていない可能性があります。"),
             allowed_mentions=None,
         )
         return

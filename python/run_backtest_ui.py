@@ -244,9 +244,7 @@ with st.sidebar:
             key="pf_ensemble",
         )
 
-    pf_run_button = st.button(
-        "▶ ポートフォリオ実行", type="primary", use_container_width=True, key="pf_run"
-    )
+    pf_run_button = st.button("▶ ポートフォリオ実行", type="primary", use_container_width=True, key="pf_run")
 
     st.divider()
 
@@ -314,9 +312,7 @@ with st.sidebar:
             key="opt_sort_by",
         )
 
-    opt_run_button = st.button(
-        "▶ 最適化実行", type="primary", use_container_width=True, key="opt_run"
-    )
+    opt_run_button = st.button("▶ 最適化実行", type="primary", use_container_width=True, key="opt_run")
 
 
 # ──────────────────────────────────────────────
@@ -442,7 +438,9 @@ def build_price_signal_chart(
         color = (
             "#e74c3c"
             if action == "stop_loss"
-            else "#e67e22" if action == "take_profit" else "#e74c3c"
+            else "#e67e22"
+            if action == "take_profit"
+            else "#e74c3c"
         )
         fig.add_trace(
             go.Scatter(
@@ -1106,9 +1104,7 @@ with tab_wf:
             )
 
             if wf_df is None or wf_df.empty:
-                st.warning(
-                    "Walk-Forward 結果が空です。データソースとパラメータを確認してください。"
-                )
+                st.warning("Walk-Forward 結果が空です。データソースとパラメータを確認してください。")
             else:
                 # ── 1. サマリー（全 fold 平均） ──
                 st.subheader("📊 Walk-Forward サマリー（全 Fold 平均）")
@@ -1134,9 +1130,7 @@ with tab_wf:
                     stability_msg = f"⚠️ やや不安定（リターン標準偏差 {ret_std * 100:.2f}%）"
                 else:
                     stability_color = "error"
-                    stability_msg = (
-                        f"❌ 不安定（リターン標準偏差 {ret_std * 100:.2f}% — 過学習の可能性）"
-                    )
+                    stability_msg = f"❌ 不安定（リターン標準偏差 {ret_std * 100:.2f}% — 過学習の可能性）"
 
                 getattr(st, stability_color)(stability_msg)
 

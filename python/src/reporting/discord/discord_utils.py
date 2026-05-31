@@ -10,7 +10,7 @@ from typing import Optional
 
 import requests
 
-from src.prediction.types import PredictionResult
+from src.domain.types import PredictionResult
 from src.reporting.discord import rate_limiter as _rate_limiter
 from src.reporting.discord.discord_formatters import convert_df_for_discord, get_market_emoji
 from src.reporting.discord.discord_notification_specs import (
@@ -51,9 +51,7 @@ DISCORD_DATE_FORMAT = "%Y/%m/%d"
 def _get_webhook_url() -> str | None:
     webhook_url = os.getenv("DISCORD_WEBHOOK_URL")
     if not webhook_url:
-        logger.warning(
-            "DISCORD_WEBHOOK_URLが環境変数に設定されていません。Webhook通知をスキップします。"
-        )
+        logger.warning("DISCORD_WEBHOOK_URLが環境変数に設定されていません。Webhook通知をスキップします。")
         return None
     return webhook_url
 
@@ -452,7 +450,7 @@ def send_weekly_report(
     """
     import pandas as pd
 
-    from src.utils.db import (
+    from src.prediction.db import (
         load_drift_summary,
         load_paper_real_diff_summary,
         load_weekly_accuracy_snapshots,
@@ -477,8 +475,7 @@ def send_weekly_report(
         n = int(row.get("n_samples", 0))
         flag = " ⚠️" if acc <= 0.45 else ""
         lines.append(
-            f"• `{row['market']}/{row['symbol']}` "
-            f"正解率={acc:.1%}, 平均誤差={err:.4f}, N={n}{flag}"
+            f"• `{row['market']}/{row['symbol']}` " f"正解率={acc:.1%}, 平均誤差={err:.4f}, N={n}{flag}"
         )
 
     # 全体サマリー
@@ -818,9 +815,7 @@ def send_watchlist_update_report(diffs) -> bool:
 
         if diff.removed_unverified:
             syms = ", ".join(f"`{s}`" for s in diff.removed_unverified)
-            lines.append(
-                f"⚠️ 指数除外・取引可能のため保留 ({len(diff.removed_unverified)}銘柄): {syms}"
-            )
+            lines.append(f"⚠️ 指数除外・取引可能のため保留 ({len(diff.removed_unverified)}銘柄): {syms}")
 
         if diff.capped:
             lines.append("🛑 安全弁発動: 削除上限（10%）に達したため一部保留")
@@ -1360,8 +1355,6 @@ def send_shadow_evaluation_notification(result: dict) -> bool:
         chal_line,
     ]
     if challenger_wins:
-        lines.append(
-            "→ Challenger が上回りました。手動承認後に promote_challenger_to_production() を実行してください。"
-        )
+        lines.append("→ Challenger が上回りました。手動承認後に promote_challenger_to_production() を実行してください。")
 
     return send_status_notification(spec, lines)
