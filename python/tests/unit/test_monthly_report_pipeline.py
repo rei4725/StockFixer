@@ -9,13 +9,8 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from src.reporting.monthly import (
-    _compute_avg_slippage,
-    _compute_hit_rate,
-    _load_latest_wf_summary,
-    _mean_metric,
-    run_monthly_report,
-)
+from src.prediction.kpi_service import MonthlyKPI, _compute_avg_slippage, _compute_hit_rate
+from src.reporting.monthly import _load_latest_wf_summary, _mean_metric, run_monthly_report
 
 # ---------------------------------------------------------------------------
 # _mean_metric
@@ -91,18 +86,18 @@ class TestLoadLatestWfSummary(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# _compute_hit_rate
+# _compute_hit_rate (kpi_service)
 # ---------------------------------------------------------------------------
 
 
 class TestComputeHitRate(unittest.TestCase):
-    @patch("src.reporting.monthly.load_prediction_accuracy")
+    @patch("src.prediction.kpi_service.load_prediction_accuracy")
     def test_returns_none_when_table_empty(self, mock_load):
         mock_load.return_value = pd.DataFrame()
         result = _compute_hit_rate()
         self.assertIsNone(result)
 
-    @patch("src.reporting.monthly.load_prediction_accuracy")
+    @patch("src.prediction.kpi_service.load_prediction_accuracy")
     def test_calculates_mean_direction_match(self, mock_load):
         mock_load.return_value = pd.DataFrame(
             {
@@ -113,7 +108,7 @@ class TestComputeHitRate(unittest.TestCase):
         result = _compute_hit_rate()
         self.assertAlmostEqual(result, 0.75)
 
-    @patch("src.reporting.monthly.load_prediction_accuracy")
+    @patch("src.prediction.kpi_service.load_prediction_accuracy")
     def test_filters_by_checked_at(self, mock_load):
         now = datetime.now()
         old_date = "2020-01-01"
@@ -130,25 +125,25 @@ class TestComputeHitRate(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# _compute_avg_slippage
+# _compute_avg_slippage (kpi_service)
 # ---------------------------------------------------------------------------
 
 
 class TestComputeAvgSlippage(unittest.TestCase):
-    @patch("src.reporting.monthly.load_paper_real_diff_summary")
+    @patch("src.prediction.kpi_service.load_paper_real_diff_summary")
     def test_returns_slippage_from_summary(self, mock_summary):
         mock_summary.return_value = {"avg_paper_slippage": 0.002}
         result = _compute_avg_slippage()
         self.assertAlmostEqual(result, 0.002)
 
-    @patch("src.reporting.monthly.load_paper_real_diff_summary")
+    @patch("src.prediction.kpi_service.load_paper_real_diff_summary")
     def test_returns_none_when_key_missing(self, mock_summary):
         mock_summary.return_value = {}
         result = _compute_avg_slippage()
         self.assertIsNone(result)
 
     @patch(
-        "src.reporting.monthly.load_paper_real_diff_summary",
+        "src.prediction.kpi_service.load_paper_real_diff_summary",
         side_effect=Exception("DB error"),
     )
     def test_returns_none_on_exception(self, _mock):
@@ -162,8 +157,7 @@ class TestComputeAvgSlippage(unittest.TestCase):
 
 
 class TestRunMonthlyReport(unittest.TestCase):
-    @patch("src.reporting.monthly._compute_avg_slippage", return_value=0.001)
-    @patch("src.reporting.monthly._compute_hit_rate", return_value=0.6)
+    @patch("src.reporting.monthly.get_monthly_kpis")
     @patch(
         "src.reporting.monthly._load_latest_wf_summary",
         return_value=(
@@ -188,7 +182,8 @@ class TestRunMonthlyReport(unittest.TestCase):
             "wf_summary_20260401.csv",
         ),
     )
-    def test_aggregates_all_kpi_fields(self, _mock_wf, _mock_hit, _mock_slip):
+    def test_aggregates_all_kpi_fields(self, _mock_wf, mock_kpi):
+        mock_kpi.return_value = MonthlyKPI(hit_rate=0.6, avg_slippage=0.001, drift_count=0)
         summary = run_monthly_report(target_month="2026-04")
 
         self.assertEqual(summary.target_month, "2026-04")
@@ -200,13 +195,13 @@ class TestRunMonthlyReport(unittest.TestCase):
         self.assertEqual(summary.symbol_count, 2)
         self.assertEqual(summary.wf_snapshot_file, "wf_summary_20260401.csv")
 
-    @patch("src.reporting.monthly._compute_avg_slippage", return_value=None)
-    @patch("src.reporting.monthly._compute_hit_rate", return_value=None)
+    @patch("src.reporting.monthly.get_monthly_kpis")
     @patch(
         "src.reporting.monthly._load_latest_wf_summary",
         return_value=(None, None),
     )
-    def test_returns_none_kpis_when_no_data(self, _mock_wf, _mock_hit, _mock_slip):
+    def test_returns_none_kpis_when_no_data(self, _mock_wf, mock_kpi):
+        mock_kpi.return_value = MonthlyKPI(hit_rate=None, avg_slippage=None, drift_count=0)
         summary = run_monthly_report(target_month="2026-04")
 
         self.assertIsNone(summary.net_return)
@@ -217,13 +212,13 @@ class TestRunMonthlyReport(unittest.TestCase):
         self.assertIsNone(summary.symbol_count)
         self.assertIsNone(summary.wf_snapshot_file)
 
-    @patch("src.reporting.monthly._compute_avg_slippage", return_value=None)
-    @patch("src.reporting.monthly._compute_hit_rate", return_value=None)
+    @patch("src.reporting.monthly.get_monthly_kpis")
     @patch(
         "src.reporting.monthly._load_latest_wf_summary",
         return_value=(None, None),
     )
-    def test_uses_current_month_when_not_specified(self, _mock_wf, _mock_hit, _mock_slip):
+    def test_uses_current_month_when_not_specified(self, _mock_wf, mock_kpi):
+        mock_kpi.return_value = MonthlyKPI(hit_rate=None, avg_slippage=None, drift_count=0)
         expected_month = datetime.now().strftime("%Y-%m")
         summary = run_monthly_report()
         self.assertEqual(summary.target_month, expected_month)

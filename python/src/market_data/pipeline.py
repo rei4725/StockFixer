@@ -11,6 +11,7 @@ from typing import Optional
 import pandas as pd
 
 from config.data import MAX_DATA_WORKERS
+from src.domain.ports import AlertLevel, NotificationPort
 from src.features.macro_features import (
     add_event_flags,
     add_macro_derived_features,
@@ -225,7 +226,11 @@ def fetch_stock_data_with_features(
 
 
 def save_features_to_db(
-    market: str, symbol: str, data, quality_result: QualityCheckResult = None
+    market: str,
+    symbol: str,
+    data,
+    quality_result: QualityCheckResult = None,
+    notification_port: "NotificationPort | None" = None,
 ) -> None:
     """
     特徴量DataFrameをDBに保存する（逐次実行用）。
@@ -235,16 +240,21 @@ def save_features_to_db(
         symbol: 銘柄シンボル
         data: 特徴量DataFrame
         quality_result: データ品質チェック結果（Noneの場合はスキップ）
+        notification_port: 通知ポート（Noneの場合は Discord 通知なし）
     """
     upsert_stock_features(market, symbol, data)
     logger.info(f"DB保存完了: {market}_{symbol}")
     if quality_result is not None and quality_result.issues:
-        _notify_quality_issues(market, symbol, quality_result)
+        _notify_quality_issues(market, symbol, quality_result, notification_port)
 
 
-def _notify_quality_issues(market: str, symbol: str, quality_result: QualityCheckResult) -> None:
-    """品質チェック結果をDBに記録し、通知が必要なものを Discord に送る。"""
-    from src.reporting.discord.discord_utils import send_webhook_notification
+def _notify_quality_issues(
+    market: str,
+    symbol: str,
+    quality_result: QualityCheckResult,
+    notification_port: "NotificationPort | None" = None,
+) -> None:
+    """品質チェック結果をDBに記録し、通知が必要なものを notification_port 経由で送る。"""
     from src.utils.db.quality_log import insert_quality_log
 
     issues_dicts = [
@@ -259,14 +269,16 @@ def _notify_quality_issues(market: str, symbol: str, quality_result: QualityChec
     notify_issues = [
         i for i in quality_result.issues if i.level == "error" or i.check == "zero_volume"
     ]
-    if not notify_issues:
+    if not notify_issues or notification_port is None:
         return
 
-    color = 0xFF0000 if any(i.level == "error" for i in notify_issues) else 0xFFAA00
+    level = (
+        AlertLevel.ERROR if any(i.level == "error" for i in notify_issues) else AlertLevel.WARNING
+    )
     title = f"[データ品質] {market}/{symbol}"
     message = "\n".join(f"・{i.detail}" for i in notify_issues)
     try:
-        send_webhook_notification(title=title, message=message, color=color)
+        notification_port.send_alert(title=title, message=message, level=level)
     except Exception as e:
         logger.error(f"品質チェック Discord通知エラー: {e}", exc_info=True)
 
@@ -295,7 +307,10 @@ def save_stock_data_with_features(
     save_features_to_db(market, symbol, data, quality_result)
 
 
-def run_data_batch(fetch_only: bool = False):
+def run_data_batch(
+    fetch_only: bool = False,
+    notification_port: "NotificationPort | None" = None,
+):
     """
     ウォッチリストの全銘柄をバッチ取得する。
 
@@ -306,8 +321,8 @@ def run_data_batch(fetch_only: bool = False):
     fetch_only=True:
       フェーズ1のみ実行（DB保存しない）
     """
+    from src.domain.types import BatchFailure, BatchResult
     from src.watchlist.batch_runner import load_target_symbols, print_summary, run_parallel
-    from src.watchlist.types import BatchFailure, BatchResult
 
     def _fetch_only(task) -> dict:
         """バッチランナー用: データ取得＋特徴量生成のみ（DB書き込みなし）"""
@@ -360,7 +375,7 @@ def run_data_batch(fetch_only: bool = False):
                     save_raw_ohlcv(market, symbol, raw_data)
                 except Exception as e:
                     logger.error(f"[Raw保存エラー] {market}/{symbol}: {e}", exc_info=True)
-            save_features_to_db(market, symbol, data, quality_result)
+            save_features_to_db(market, symbol, data, quality_result, notification_port)
             db_results.append({"market": market, "symbol": symbol, "status": "success"})
         except Exception as e:
             logger.error(f"[DB書き込みエラー] {market}/{symbol}: {e}", exc_info=True)

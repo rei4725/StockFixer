@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """pre-commit から import-linter を python/ 配下で実行するラッパー。"""
+
 import os
 import subprocess
 import sys

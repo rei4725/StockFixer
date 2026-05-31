@@ -54,6 +54,7 @@ class TestRunParallel(unittest.TestCase):
             return {"id": task, "status": "success"}
 
         results = run_parallel(dummy_func, [1, 2, 3], max_workers=2, label="テスト")
+        self.assertIsInstance(results, BatchResult)
         self.assertEqual(len(results.succeeded), 3)
         ids = {r["id"] for r in results.succeeded}
         self.assertEqual(ids, {1, 2, 3})
@@ -80,12 +81,16 @@ class TestRunParallel(unittest.TestCase):
         results = run_parallel(
             dummy_func, ["a", "b"], max_workers=2, use_process=False, label="プロセステスト"
         )
+        self.assertIsInstance(results, BatchResult)
         self.assertEqual(len(results.succeeded), 2)
 
     def test_empty_tasks(self):
-        """タスクが空の場合に空リストが返ることを確認"""
+        """タスクが空の場合に空の BatchResult が返ることを確認"""
         results = run_parallel(lambda x: x, [], max_workers=2)
-        self.assertEqual(results, BatchResult(succeeded=[], failed=[], skipped=[]))
+        self.assertIsInstance(results, BatchResult)
+        self.assertEqual(len(results.succeeded), 0)
+        self.assertEqual(len(results.failed), 0)
+        self.assertEqual(len(results.skipped), 0)
 
 
 class TestPrintSummary(unittest.TestCase):
@@ -94,13 +99,16 @@ class TestPrintSummary(unittest.TestCase):
     @patch("src.reporting.discord.discord_utils.send_webhook_notification")
     def test_counts_success_error_skip(self, _mock_notify):
         """成功・エラー・スキップが正しくカウントされることを確認"""
-        results = BatchResult(
-            succeeded=[{"market": "us", "symbol": "AAPL"}, {"market": "us", "symbol": "GOOG"}],
+        batch = BatchResult(
+            succeeded=[
+                {"status": "success", "market": "us", "symbol": "AAPL"},
+                {"status": "success", "market": "us", "symbol": "GOOG"},
+            ],
             failed=[BatchFailure(market="jp", symbol="7203", error="timeout")],
-            skipped=[{"market": "jp", "symbol": "9984"}],
+            skipped=[{"status": "skip", "market": "jp", "symbol": "9984"}],
         )
         with self.assertLogs("src.watchlist.batch_runner", level="INFO") as cm:
-            print_summary("テスト", results)
+            print_summary("テスト", batch)
         output = "\n".join(cm.output)
         self.assertIn("成功: 2", output)
         self.assertIn("エラー: 1", output)
@@ -109,21 +117,25 @@ class TestPrintSummary(unittest.TestCase):
     @patch("src.reporting.discord.discord_utils.send_webhook_notification")
     def test_error_detail_shown(self, _mock_notify):
         """エラー詳細が出力に含まれることを確認"""
-        results = BatchResult(
+        batch = BatchResult(
             succeeded=[],
             failed=[BatchFailure(market="us", symbol="BAD", error="connection failed")],
             skipped=[],
         )
         with self.assertLogs("src.watchlist.batch_runner", level="WARNING") as cm:
-            print_summary("エラーテスト", results)
+            print_summary("エラーテスト", batch)
         output = "\n".join(cm.output)
         self.assertIn("connection failed", output)
 
     def test_no_error_no_detail(self):
         """エラーがなければエラー詳細セクションが出ないことを確認"""
-        results = BatchResult(succeeded=[{"status": "success"}], failed=[], skipped=[])
+        batch = BatchResult(
+            succeeded=[{"status": "success"}],
+            failed=[],
+            skipped=[],
+        )
         with self.assertLogs("src.watchlist.batch_runner", level="INFO") as cm:
-            print_summary("成功のみ", results)
+            print_summary("成功のみ", batch)
         output = "\n".join(cm.output)
         self.assertNotIn("エラー詳細", output)
 

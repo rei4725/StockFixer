@@ -6,30 +6,23 @@
 
 データソース:
     - Net Return / Sharpe / Max Drawdown : 最新の Walk-Forward レポート CSV
-    - Hit Rate                           : prediction_accuracy テーブル（直近30日）
-    - Avg Slippage                       : paper_real_diff テーブル（直近30日）
+    - Hit Rate / Avg Slippage / Drift    : prediction.kpi_service 経由
 """
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Optional
 
 import pandas as pd
 
-from src.prediction.db import (
-    load_drift_summary,
-    load_paper_real_diff_summary,
-    load_prediction_accuracy,
-)
+from src.prediction.kpi_service import get_monthly_kpis
 from src.reporting.types import MonthlyReportSummary
 from src.utils.data_path_utils import get_results_dir
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
-
-_REPORT_DAYS = 30  # Hit Rate / Avg Slippage の集計期間（日）
 
 
 # ---------------------------------------------------------------------------
@@ -59,34 +52,6 @@ def _mean_metric(df: pd.DataFrame, col: str) -> Optional[float]:
         return None
     val = pd.to_numeric(df[col], errors="coerce").mean()
     return float(val) if not pd.isna(val) else None
-
-
-def _compute_hit_rate(days: int = _REPORT_DAYS) -> Optional[float]:
-    """prediction_accuracy テーブルから方向一致率を集計する。"""
-    df = load_prediction_accuracy(horizon=1, limit=5000)
-    if df.empty or "direction_match" not in df.columns:
-        return None
-
-    if "checked_at" in df.columns:
-        df["checked_at"] = pd.to_datetime(df["checked_at"], errors="coerce")
-        cutoff = datetime.now() - timedelta(days=days)
-        df = df[df["checked_at"] >= cutoff]
-
-    if df.empty:
-        return None
-
-    return float(df["direction_match"].astype(float).mean())
-
-
-def _compute_avg_slippage(days: int = _REPORT_DAYS) -> Optional[float]:
-    """paper_real_diff テーブルから平均スリッページを取得する。"""
-    try:
-        summary = load_paper_real_diff_summary(recent_days=days)
-        val = summary.get("avg_paper_slippage")
-        return float(val) if val is not None else None
-    except Exception as e:
-        logger.error(f"avg_slippage 取得失敗: {e}", exc_info=True)
-        return None
 
 
 # ---------------------------------------------------------------------------
@@ -123,8 +88,9 @@ def run_monthly_report(target_month: Optional[str] = None) -> MonthlyReportSumma
         symbol_count = len(wf_df)
 
     # ---- 補助KPI ----
-    hit_rate = _compute_hit_rate()
-    avg_slippage = _compute_avg_slippage()
+    kpi = get_monthly_kpis()
+    hit_rate = kpi.hit_rate
+    avg_slippage = kpi.avg_slippage
 
     summary = MonthlyReportSummary(
         generated_at=generated_at,
@@ -171,18 +137,10 @@ def save_monthly_report_to_file(
     def _f2(val: Optional[float]) -> str:
         return f"{val:.2f}" if val is not None else "N/A"
 
-    # paper/real 乖離サマリー
-    diff = load_paper_real_diff_summary(recent_days=30)
-    # ドリフトサマリー
-    drift_df = load_drift_summary(horizon=1, recent_n=30)
-    drift_count = 0
-    if drift_df is not None and not drift_df.empty:
-        drift_count = int(
-            (
-                (drift_df.get("mean_abs_error", pd.Series(dtype=float)) >= 0.02)
-                | (drift_df.get("direction_accuracy", pd.Series(dtype=float)) <= 0.45)
-            ).sum()
-        )
+    # paper/real 乖離サマリー・ドリフト集計
+    _kpi = get_monthly_kpis()
+    diff = _kpi.diff_summary
+    drift_count = _kpi.drift_count
 
     # 週次 Hit Rate ドリフト
     if drift_checker is not None:

@@ -136,10 +136,10 @@ class TestRunWeeklyTraining(unittest.TestCase):
         # XGBoostとLightGBMの両方でtrain_unified_modelが呼ばれたことを確認
         self.assertEqual(mock_train.call_count, 2)
         calls = mock_train.call_args_list
-        # 最初の呼び出しはXGBoost
+        # 最初の呼び出しはXGBoost challenger
         self.assertEqual(calls[0][1]["model_type"], "XGBoostModel")
         self.assertEqual(calls[0][1]["model_name"], "UnifiedStockXGBoost_challenger")
-        # 2番目の呼び出しはLightGBM
+        # 2番目の呼び出しはLightGBM challenger
         self.assertEqual(calls[1][1]["model_type"], "LightGBMModel")
         self.assertEqual(calls[1][1]["model_name"], "UnifiedStockLightGBM_challenger")
 

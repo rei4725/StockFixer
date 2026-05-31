@@ -7,6 +7,7 @@ from typing import Dict, List, Optional, Type
 import joblib
 import pandas as pd
 
+from src.domain.ports import AlertLevel, NotificationPort
 from src.prediction.models.base import BaseModel
 from src.prediction.models.lightgbm import LightGBMModel
 from src.prediction.models.transformer_model import TransformerModel
@@ -44,9 +45,14 @@ class ModelManager:
     複数のモデルタイプをサポートし、モデルの保存・ロードも管理する。
     """
 
-    def __init__(self, model_dir: str = None):
+    def __init__(
+        self,
+        model_dir: str = None,
+        notification_port: NotificationPort | None = None,
+    ):
         self.models: Dict[str, BaseModel] = {}
         self.model_dir = model_dir if model_dir else get_models_dir()
+        self._notify = notification_port
         ensure_dir(self.model_dir)
         self._registered_models: Dict[str, Type[BaseModel]] = {
             "XGBoostModel": XGBoostModel,
@@ -252,13 +258,8 @@ class ModelManager:
             f" trained_at={artifact.get('trained_at', 'unknown')})"
         )
         logger.warning(msg)
-        try:
-            from src.reporting.discord.discord_utils import send_webhook_notification
-
-            send_webhook_notification(
-                title="⚠️ 特徴量ハッシュ不一致",
-                message=msg,
-                color=0xFF6600,
-            )
-        except Exception as e:
-            logger.error("Discord通知失敗（特徴量不一致警告）: %s", e, exc_info=True)
+        if self._notify:
+            try:
+                self._notify.send_alert("⚠️ 特徴量ハッシュ不一致", msg, AlertLevel.WARNING)
+            except Exception as e:
+                logger.error("Discord通知失敗（特徴量不一致警告）: %s", e, exc_info=True)
