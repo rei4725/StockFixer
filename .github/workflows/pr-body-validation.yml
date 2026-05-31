@@ -9,7 +9,25 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event.pull_request.user.login != 'dependabot[bot]'
     steps:
+      - name: Check if experiments-only PR
+        id: check-scope
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          files=$(gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+            --jq '.[].filename')
+          all_experiments=true
+          while IFS= read -r file; do
+            [[ -z "$file" ]] && continue
+            if [[ "$file" != python/experiments/* ]]; then
+              all_experiments=false
+              break
+            fi
+          done <<< "$files"
+          echo "skip=$all_experiments" >> "$GITHUB_OUTPUT"
+
       - name: Validate required sections
+        if: steps.check-scope.outputs.skip != 'true'
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
         shell: bash

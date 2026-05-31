@@ -35,10 +35,8 @@ ignore_imports =
     src.prediction.training_pipeline -> src.market_data.loader
     src.prediction.training_pipeline -> src.watchlist.batch_runner
     src.prediction.manager -> src.reporting.discord.discord_utils
-    src.market_data.pipeline -> src.reporting.discord.discord_utils
     src.market_data.pipeline -> src.watchlist.batch_runner
     # --- 新規追加違反 (将来的解消対象) ---
-    src.watchlist.batch_runner -> src.reporting.discord.discord_utils
     src.backtest.rule_backtester -> src.market_data.yf_client
     src.backtest.backtester -> src.market_data.technical
     src.backtest.metrics -> src.market_data.technical
@@ -122,12 +120,8 @@ ignore_imports =
     src.prediction.training_pipeline -> src.watchlist.batch_runner
     # [B] prediction → reporting (ドリフト検出時に Discord 通知 — イベント駆動で解消可能)
     src.prediction.manager -> src.reporting.discord.discord_utils
-    # [B] market_data → reporting (データ収集完了時に Discord 通知 — イベント駆動で解消可能)
-    src.market_data.pipeline -> src.reporting.discord.discord_utils
     # [B] market_data → watchlist (バッチデータ収集がウォッチリストを反復 — ポート注入で解消可能)
     src.market_data.pipeline -> src.watchlist.batch_runner
-    # [B] watchlist → reporting (バッチ通知 — イベント駆動で解消可能)
-    src.watchlist.batch_runner -> src.reporting.discord.discord_utils
     # [B] backtest → market_data (技術指標計算 — market_data ポートで解消可能)
     src.backtest.rule_backtester -> src.market_data.yf_client
     src.backtest.backtester -> src.market_data.technical

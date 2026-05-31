@@ -88,9 +88,9 @@ class TestRunParallel(unittest.TestCase):
         """タスクが空の場合に空の BatchResult が返ることを確認"""
         results = run_parallel(lambda x: x, [], max_workers=2)
         self.assertIsInstance(results, BatchResult)
-        self.assertEqual(results.succeeded, [])
-        self.assertEqual(results.failed, [])
-        self.assertEqual(results.skipped, [])
+        self.assertEqual(len(results.succeeded), 0)
+        self.assertEqual(len(results.failed), 0)
+        self.assertEqual(len(results.skipped), 0)
 
 
 class TestPrintSummary(unittest.TestCase):
@@ -99,7 +99,7 @@ class TestPrintSummary(unittest.TestCase):
     @patch("src.reporting.discord.discord_utils.send_webhook_notification")
     def test_counts_success_error_skip(self, _mock_notify):
         """成功・エラー・スキップが正しくカウントされることを確認"""
-        batch_result = BatchResult(
+        batch = BatchResult(
             succeeded=[
                 {"status": "success", "market": "us", "symbol": "AAPL"},
                 {"status": "success", "market": "us", "symbol": "GOOG"},
@@ -108,7 +108,7 @@ class TestPrintSummary(unittest.TestCase):
             skipped=[{"status": "skip", "market": "jp", "symbol": "9984"}],
         )
         with self.assertLogs("src.watchlist.batch_runner", level="INFO") as cm:
-            print_summary("テスト", batch_result)
+            print_summary("テスト", batch)
         output = "\n".join(cm.output)
         self.assertIn("成功: 2", output)
         self.assertIn("エラー: 1", output)
@@ -117,25 +117,25 @@ class TestPrintSummary(unittest.TestCase):
     @patch("src.reporting.discord.discord_utils.send_webhook_notification")
     def test_error_detail_shown(self, _mock_notify):
         """エラー詳細が出力に含まれることを確認"""
-        batch_result = BatchResult(
+        batch = BatchResult(
             succeeded=[],
             failed=[BatchFailure(market="us", symbol="BAD", error="connection failed")],
             skipped=[],
         )
         with self.assertLogs("src.watchlist.batch_runner", level="WARNING") as cm:
-            print_summary("エラーテスト", batch_result)
+            print_summary("エラーテスト", batch)
         output = "\n".join(cm.output)
         self.assertIn("connection failed", output)
 
     def test_no_error_no_detail(self):
         """エラーがなければエラー詳細セクションが出ないことを確認"""
-        batch_result = BatchResult(
+        batch = BatchResult(
             succeeded=[{"status": "success"}],
             failed=[],
             skipped=[],
         )
         with self.assertLogs("src.watchlist.batch_runner", level="INFO") as cm:
-            print_summary("成功のみ", batch_result)
+            print_summary("成功のみ", batch)
         output = "\n".join(cm.output)
         self.assertNotIn("エラー詳細", output)
 
