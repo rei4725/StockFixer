@@ -1,4 +1,4 @@
-﻿"""Discord 表示向けの整形ユーティリティ。"""
+"""Discord 表示向けの整形ユーティリティ。"""
 
 from __future__ import annotations
 

@@ -106,11 +106,7 @@ def compute_metrics(
             position_values = pd.to_numeric(buy_log["position_value"], errors="coerce").dropna()
         if "atr_fallback_used" in buy_log.columns:
             atr_fallback_trades = int(
-                buy_log["atr_fallback_used"]
-                .fillna(False)
-                .infer_objects(copy=False)
-                .astype(bool)
-                .sum()
+                buy_log["atr_fallback_used"].fillna(False).infer_objects().astype(bool).sum()
             )
 
     return {
@@ -296,7 +292,9 @@ def plot_backtest(
         import matplotlib.dates as mdates
         import matplotlib.pyplot as plt
     except ImportError:
-        raise ImportError("matplotlib がインストールされていません。`pip install matplotlib` を実行してください。")
+        raise ImportError(
+            "matplotlib がインストールされていません。`pip install matplotlib` を実行してください。"
+        )
 
     if trade_log is None or trade_log.empty:
         return ""
@@ -333,7 +331,9 @@ def plot_backtest(
 
     # --- プロット ---
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
-    title = f"{market.upper()}/{symbol} バックテスト結果" if market or symbol else "バックテスト結果"
+    title = (
+        f"{market.upper()}/{symbol} バックテスト結果" if market or symbol else "バックテスト結果"
+    )
     fig.suptitle(title, fontsize=14)
 
     # 上段: 累積リターン曲線

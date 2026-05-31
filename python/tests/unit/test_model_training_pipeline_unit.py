@@ -1,4 +1,4 @@
-﻿"""model_training_pipeline モジュールのユニットテスト"""
+"""model_training_pipeline モジュールのユニットテスト"""
 
 import unittest
 from unittest.mock import MagicMock, patch
