@@ -16,7 +16,6 @@ from src.prediction.training_pipeline import (
     train_models_for_symbol_task,
 )
 from src.prediction.types import FeatureLoadResult, TrainingMetrics
-from src.watchlist.types import BatchResult
 
 
 class TestComputeTrainingMetrics(unittest.TestCase):
@@ -568,55 +567,50 @@ class TestLoadFeaturesForTrainingHorizon(unittest.TestCase):
 
 
 # ──────────────────────────────────────────────────────────────────
-# run_model_batch
+# run_batch_training
 # ──────────────────────────────────────────────────────────────────
 
 
-class TestRunModelBatch(unittest.TestCase):
-    """run_model_batch のテスト"""
+class TestRunBatchTraining(unittest.TestCase):
+    """run_batch_training のテスト"""
 
-    @patch("src.watchlist.batch_runner.run_parallel")
-    @patch("src.watchlist.batch_runner.load_target_symbols")
-    def test_returns_early_when_no_symbols(self, mock_symbols, mock_parallel):
-        """銘柄がない場合、早期リターンすること（run_parallel 未呼び出し）"""
-        from src.prediction.training_pipeline import run_model_batch
+    def test_returns_empty_result_when_no_tasks(self):
+        """タスクが空の場合、空の BatchResult を返すこと"""
+        from src.prediction.training_pipeline import run_batch_training
 
-        mock_symbols.return_value = []
-        run_model_batch(horizon=1)  # 例外なし
-        mock_parallel.assert_not_called()
+        result = run_batch_training(tasks=[], horizon=1)
+        self.assertEqual(len(result.succeeded), 0)
+        self.assertEqual(len(result.failed), 0)
 
-    @patch("src.watchlist.batch_runner.print_summary")
-    @patch("src.watchlist.batch_runner.run_parallel")
-    @patch("src.watchlist.batch_runner.load_target_symbols")
-    def test_runs_parallel_when_symbols_available(self, mock_symbols, mock_parallel, mock_print):
-        """銘柄がある場合、run_parallel が呼ばれること"""
+    @patch("src.prediction.training_pipeline.load_features_for_training")
+    def test_runs_load_when_tasks_provided(self, mock_load):
+        """タスクがある場合、load_features_for_training が呼ばれること"""
         from src.domain.types import SymbolTask
-        from src.prediction.training_pipeline import run_model_batch
-
-        mock_symbols.return_value = [SymbolTask(market="jp", symbol="7203")]
-        mock_parallel.return_value = BatchResult(succeeded=[], failed=[], skipped=[])
-        run_model_batch(horizon=1)
-        mock_parallel.assert_called_once()
-
-    @patch("src.watchlist.batch_runner.print_summary")
-    @patch("src.prediction.training_pipeline.save_model_metrics")
-    @patch("src.prediction.training_pipeline.ModelManager")
-    @patch("src.watchlist.batch_runner.run_parallel")
-    @patch("src.watchlist.batch_runner.load_target_symbols")
-    def test_trains_models_for_successful_loads(
-        self, mock_symbols, mock_parallel, mock_mm_cls, mock_save, mock_print
-    ):
-        """成功した特徴量ロードに対してモデルが学習されること"""
-        from src.domain.types import SymbolTask
-        from src.prediction.training_pipeline import run_model_batch
+        from src.prediction.training_pipeline import run_batch_training
         from src.prediction.types import FeatureLoadResult
 
-        mock_symbols.return_value = [SymbolTask(market="jp", symbol="7203")]
+        mock_load.return_value = FeatureLoadResult(
+            status="skip", market="jp", symbol="7203", reason="データなし"
+        )
+        tasks = [SymbolTask(market="jp", symbol="7203")]
+
+        run_batch_training(tasks=tasks, horizon=1)
+        mock_load.assert_called_once()
+
+    @patch("src.prediction.training_pipeline.save_model_metrics")
+    @patch("src.prediction.training_pipeline.ModelManager")
+    @patch("src.prediction.training_pipeline.load_features_for_training")
+    def test_trains_models_for_successful_loads(self, mock_load, mock_mm_cls, mock_save):
+        """成功した特徴量ロードに対してモデルが学習されること"""
+        from src.domain.types import SymbolTask
+        from src.prediction.training_pipeline import run_batch_training
+        from src.prediction.types import FeatureLoadResult
 
         X = pd.DataFrame({"f1": np.random.randn(50), "f2": np.random.randn(50)})
         y = pd.Series(np.random.randn(50) * 0.01)
-        load_result = FeatureLoadResult(status="success", market="jp", symbol="7203", X=X, y=y)
-        mock_parallel.return_value = BatchResult(succeeded=[load_result], failed=[], skipped=[])
+        mock_load.return_value = FeatureLoadResult(
+            status="success", market="jp", symbol="7203", X=X, y=y
+        )
 
         mock_model = MagicMock()
         mock_model.predict.return_value = pd.Series(np.zeros(50))
@@ -624,33 +618,27 @@ class TestRunModelBatch(unittest.TestCase):
         mock_mm_cls.return_value = mock_mm
         mock_mm.get_model.return_value = mock_model
 
-        run_model_batch(horizon=1)
+        tasks = [SymbolTask(market="jp", symbol="7203")]
+        run_batch_training(tasks=tasks, horizon=1)
 
         self.assertGreaterEqual(mock_mm.create_model.call_count, 2)
         self.assertGreaterEqual(mock_mm.train_model.call_count, 2)
 
-    @patch("src.watchlist.batch_runner.print_summary")
-    @patch("src.watchlist.batch_runner.run_parallel")
-    @patch("src.watchlist.batch_runner.load_target_symbols")
-    def test_horizon_attached_to_tasks(self, mock_symbols, mock_parallel, mock_print):
+    @patch("src.prediction.training_pipeline.load_features_for_training")
+    def test_horizon_attached_to_tasks(self, mock_load):
         """horizon パラメータが SymbolTask に付与されること"""
         from src.domain.types import SymbolTask
-        from src.prediction.training_pipeline import run_model_batch
+        from src.prediction.training_pipeline import run_batch_training
+        from src.prediction.types import FeatureLoadResult
 
-        mock_symbols.return_value = [SymbolTask(market="jp", symbol="7203")]
-        mock_parallel.return_value = BatchResult(succeeded=[], failed=[], skipped=[])
+        def check_horizon(task):
+            assert task.horizon == 5, f"expected horizon=5, got {task.horizon}"
+            return FeatureLoadResult(status="skip", market="jp", symbol="7203", reason="skip")
 
-        run_model_batch(horizon=5)
-
-        mock_parallel.assert_called_once()
-        call_kwargs = mock_parallel.call_args.kwargs
-        tasks = call_kwargs.get("tasks", [])
-        self.assertGreater(len(tasks), 0)
-        first_task = tasks[0]
-        horizon_val = (
-            first_task.horizon if hasattr(first_task, "horizon") else first_task.get("horizon")
-        )
-        self.assertEqual(horizon_val, 5)
+        mock_load.side_effect = check_horizon
+        tasks = [SymbolTask(market="jp", symbol="7203")]
+        run_batch_training(tasks=tasks, horizon=5)
+        mock_load.assert_called_once()
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -664,9 +652,11 @@ class TestTrainAllModels(unittest.TestCase):
     @patch("src.prediction.training_pipeline._train_models_for_horizon")
     def test_calls_train_for_each_horizon(self, mock_train):
         """各 horizon に対して _train_models_for_horizon が呼ばれること"""
+        from src.domain.types import SymbolTask
         from src.prediction.training_pipeline import train_all_models
 
-        train_all_models(horizons=[1, 7])
+        tasks = [SymbolTask(market="jp", symbol="7203")]
+        train_all_models(horizons=[1, 7], tasks=tasks)
         self.assertEqual(mock_train.call_count, 2)
         calls = [c[0][0] for c in mock_train.call_args_list]
         self.assertIn(1, calls)
@@ -678,7 +668,7 @@ class TestTrainAllModels(unittest.TestCase):
         from src.prediction.training_pipeline import train_all_models
 
         mock_train.side_effect = [Exception("学習エラー"), None]
-        train_all_models(horizons=[1, 7])
+        train_all_models(horizons=[1, 7], tasks=[])
         self.assertEqual(mock_train.call_count, 2)
 
     @patch("src.prediction.training_pipeline._train_models_for_horizon")
@@ -687,7 +677,7 @@ class TestTrainAllModels(unittest.TestCase):
         from src.prediction.training_pipeline import train_all_models
 
         train_all_models()
-        mock_train.assert_called_once_with(1, max_workers=3)
+        mock_train.assert_called_once_with(1, [], max_workers=3)
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -700,14 +690,13 @@ class TestTrainModelsForHorizon(unittest.TestCase):
 
     @patch("src.prediction.training_pipeline.train_models_for_symbol")
     @patch("src.prediction.training_pipeline.load_features_for_training")
-    @patch("src.prediction.training_pipeline.load_target_symbols")
-    def test_trains_when_features_available(self, mock_symbols, mock_load, mock_train):
+    def test_trains_when_features_available(self, mock_load, mock_train):
         """特徴量が存在する場合にモデルが学習されること"""
         from src.domain.types import SymbolTask
         from src.prediction.training_pipeline import _train_models_for_horizon
         from src.prediction.types import FeatureLoadResult
 
-        mock_symbols.return_value = [SymbolTask(market="jp", symbol="7203")]
+        tasks = [SymbolTask(market="jp", symbol="7203")]
         X = pd.DataFrame({"close_lag1": np.random.randn(100)})
         y = pd.Series(np.random.randn(100))
         mock_load.return_value = FeatureLoadResult(
@@ -715,45 +704,41 @@ class TestTrainModelsForHorizon(unittest.TestCase):
         )
         mock_train.return_value = {"market": "jp", "symbol": "7203", "status": "success"}
 
-        _train_models_for_horizon(horizon=1, max_workers=1)
+        _train_models_for_horizon(horizon=1, tasks=tasks, max_workers=1)
         mock_train.assert_called_once_with("jp", "7203", horizon=1)
 
     @patch("src.prediction.training_pipeline.train_models_for_symbol")
     @patch("src.prediction.training_pipeline.load_features_for_training")
-    @patch("src.prediction.training_pipeline.load_target_symbols")
-    def test_skips_when_features_unavailable(self, mock_symbols, mock_load, mock_train):
+    def test_skips_when_features_unavailable(self, mock_load, mock_train):
         """特徴量がない場合はスキップされること（例外なし）"""
         from src.domain.types import SymbolTask
         from src.prediction.training_pipeline import _train_models_for_horizon
         from src.prediction.types import FeatureLoadResult
 
-        mock_symbols.return_value = [SymbolTask(market="jp", symbol="7203")]
+        tasks = [SymbolTask(market="jp", symbol="7203")]
         mock_load.return_value = FeatureLoadResult(
             market="jp", symbol="7203", status="error", X=pd.DataFrame(), y=pd.Series(dtype=float)
         )
 
-        _train_models_for_horizon(horizon=1, max_workers=1)  # 例外なし
+        _train_models_for_horizon(horizon=1, tasks=tasks, max_workers=1)  # 例外なし
         mock_train.assert_not_called()
 
-    @patch("src.prediction.training_pipeline.load_target_symbols")
-    def test_returns_empty_when_no_symbols(self, mock_symbols):
-        """銘柄がない場合、空リストが返ること"""
+    def test_returns_empty_when_no_tasks(self):
+        """タスクが空の場合、空リストが返ること"""
         from src.prediction.training_pipeline import _train_models_for_horizon
 
-        mock_symbols.return_value = []
-        results = _train_models_for_horizon(horizon=1)
+        results = _train_models_for_horizon(horizon=1, tasks=[])
         self.assertEqual(results, [])
 
     @patch("src.prediction.training_pipeline.train_models_for_symbol")
     @patch("src.prediction.training_pipeline.load_features_for_training")
-    @patch("src.prediction.training_pipeline.load_target_symbols")
-    def test_exception_in_one_symbol_continues_others(self, mock_symbols, mock_load, mock_train):
+    def test_exception_in_one_symbol_continues_others(self, mock_load, mock_train):
         """1銘柄でエラーが出ても残りが処理されること"""
         from src.domain.types import SymbolTask
         from src.prediction.training_pipeline import _train_models_for_horizon
         from src.prediction.types import FeatureLoadResult
 
-        mock_symbols.return_value = [
+        tasks = [
             SymbolTask(market="jp", symbol="7203"),
             SymbolTask(market="jp", symbol="9984"),
         ]
@@ -764,7 +749,7 @@ class TestTrainModelsForHorizon(unittest.TestCase):
         )
         mock_train.side_effect = [Exception("学習失敗"), {"status": "success"}]
 
-        results = _train_models_for_horizon(horizon=1, max_workers=1)
+        results = _train_models_for_horizon(horizon=1, tasks=tasks, max_workers=1)
         self.assertEqual(len(results), 2)
         statuses = [r.get("status") for r in results]
         self.assertIn("error", statuses)

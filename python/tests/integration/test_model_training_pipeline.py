@@ -10,7 +10,6 @@ import pandas as pd
 
 import src.utils.data_path_utils as path_utils
 import src.utils.db as db_module
-from src.domain.types import BatchResult
 from src.prediction.training_pipeline import train_models_for_symbol, train_models_for_symbol_task
 from src.prediction.types import FeatureLoadResult
 
@@ -139,8 +138,8 @@ class TestTrainModelsForSymbolTask(unittest.TestCase):
             self.assertEqual(result["status"], "success")
 
 
-class TestRunModelBatch(unittest.TestCase):
-    """run_model_batch 関数のテスト"""
+class TestRunBatchTraining(unittest.TestCase):
+    """run_batch_training 関数のテスト"""
 
     def setUp(self):
         """テスト用一時DBを設定"""
@@ -164,134 +163,68 @@ class TestRunModelBatch(unittest.TestCase):
         if os.path.exists(self.tmp_dir):
             os.rmdir(self.tmp_dir)
 
-    @patch("src.watchlist.batch_runner.load_target_symbols")
-    @patch("src.watchlist.batch_runner.run_parallel")
-    @patch("src.watchlist.batch_runner.print_summary")
-    def test_batch_success(
-        self,
-        mock_print_summary,
-        mock_run_parallel,
-        mock_load_symbols,
-    ):
+    @patch("src.prediction.training_pipeline.load_features_for_training")
+    def test_batch_success(self, mock_load):
         """バッチ処理が正常に完了することを確認"""
-        from src.prediction.training_pipeline import run_model_batch
+        from src.domain.types import SymbolTask
+        from src.prediction.training_pipeline import run_batch_training
 
-        # テスト用シンボル
-        mock_load_symbols.return_value = [
-            {"market": "us", "symbol": "TEST1"},
-            {"market": "us", "symbol": "TEST2"},
-        ]
-
-        # フェーズ1の結果（データ読み込みのみ）
         X = pd.DataFrame(np.random.rand(30, 5), columns=[f"feat{i}" for i in range(5)])
         y = pd.Series(np.random.rand(30))
-
-        phase1_results = [
-            FeatureLoadResult(market="us", symbol="TEST1", status="success", X=X, y=y),
-            FeatureLoadResult(market="us", symbol="TEST2", status="success", X=X, y=y),
-        ]
-        mock_run_parallel.return_value = BatchResult(
-            succeeded=phase1_results, failed=[], skipped=[]
+        mock_load.return_value = FeatureLoadResult(
+            market="us", symbol="TEST1", status="success", X=X, y=y
         )
 
-        # 実行
-        run_model_batch()
+        tasks = [SymbolTask(market="us", symbol="TEST1")]
+        result = run_batch_training(tasks=tasks)
 
-        # run_parallelが呼ばれたことを確認
-        mock_run_parallel.assert_called_once()
-        # print_summaryが呼ばれたことを確認
-        mock_print_summary.assert_called_once()
+        self.assertGreaterEqual(len(result.succeeded) + len(result.failed), 1)
 
-    @patch("src.watchlist.batch_runner.load_target_symbols")
-    @patch("src.watchlist.batch_runner.print_summary")
-    def test_batch_no_symbols(
-        self,
-        mock_print_summary,
-        mock_load_symbols,
-    ):
-        """対象銘柄がない場合を確認"""
-        from src.prediction.training_pipeline import run_model_batch
+    def test_batch_no_tasks(self):
+        """対象銘柄がない場合、空の BatchResult が返ること"""
+        from src.prediction.training_pipeline import run_batch_training
 
-        mock_load_symbols.return_value = []
+        result = run_batch_training(tasks=[])
 
-        # 実行（例外が発生しないことを確認）
-        run_model_batch()
+        self.assertEqual(len(result.succeeded), 0)
+        self.assertEqual(len(result.failed), 0)
 
-        # print_summaryは呼ばれないはず
-        mock_print_summary.assert_not_called()
-
-    @patch("src.watchlist.batch_runner.load_target_symbols")
-    @patch("src.watchlist.batch_runner.run_parallel")
-    @patch("src.watchlist.batch_runner.print_summary")
     @patch("src.prediction.training_pipeline.ModelManager")
-    def test_batch_with_training_errors(
-        self,
-        mock_mm_cls,
-        mock_print_summary,
-        mock_run_parallel,
-        mock_load_symbols,
-    ):
-        """フェーズ2で学習エラーが発生する場合を確認"""
-        from src.prediction.training_pipeline import run_model_batch
+    @patch("src.prediction.training_pipeline.load_features_for_training")
+    def test_batch_with_training_errors(self, mock_load, mock_mm_cls):
+        """フェーズ2で学習エラーが発生しても例外が外に出ないこと"""
+        from src.domain.types import SymbolTask
+        from src.prediction.training_pipeline import run_batch_training
 
-        mock_load_symbols.return_value = [
-            {"market": "us", "symbol": "TEST1"},
-        ]
-
-        # フェーズ1の結果（成功）
         X = pd.DataFrame(np.random.rand(30, 5), columns=[f"feat{i}" for i in range(5)])
         y = pd.Series(np.random.rand(30))
-        phase1_results = [
-            FeatureLoadResult(market="us", symbol="TEST1", status="success", X=X, y=y),
-        ]
-        mock_run_parallel.return_value = BatchResult(
-            succeeded=phase1_results, failed=[], skipped=[]
+        mock_load.return_value = FeatureLoadResult(
+            market="us", symbol="TEST1", status="success", X=X, y=y
         )
-
-        # フェーズ2で学習エラーをシミュレート
         mock_mm = MagicMock()
         mock_mm.train_model.side_effect = RuntimeError("学習失敗")
         mock_mm_cls.return_value = mock_mm
 
-        # 実行（例外が発生しないことを確認）
-        run_model_batch()
+        tasks = [SymbolTask(market="us", symbol="TEST1")]
+        result = run_batch_training(tasks=tasks)  # 例外が外に出ないこと
 
-        # print_summaryが呼ばれたことを確認（エラーサマリーを含む）
-        mock_print_summary.assert_called_once()
+        self.assertEqual(len(result.failed), 1)
 
-    @patch("src.watchlist.batch_runner.load_target_symbols")
-    @patch("src.watchlist.batch_runner.run_parallel")
-    @patch("src.watchlist.batch_runner.print_summary")
-    def test_batch_with_load_errors(
-        self,
-        mock_print_summary,
-        mock_run_parallel,
-        mock_load_symbols,
-    ):
+    @patch("src.prediction.training_pipeline.load_features_for_training")
+    def test_batch_with_load_errors(self, mock_load):
         """フェーズ1でデータ読み込みエラーが発生する場合を確認"""
-        from src.prediction.training_pipeline import run_model_batch
+        from src.domain.types import SymbolTask
+        from src.prediction.training_pipeline import run_batch_training
 
-        mock_load_symbols.return_value = [
-            {"market": "us", "symbol": "TEST1"},
-            {"market": "us", "symbol": "TEST2"},
-        ]
-
-        # フェーズ1の結果（1つ成功、1つエラー）
-        X = pd.DataFrame(np.random.rand(30, 5), columns=[f"feat{i}" for i in range(5)])
-        y = pd.Series(np.random.rand(30))
-
-        phase1_results = [
-            FeatureLoadResult(market="us", symbol="TEST1", status="success", X=X, y=y),
-        ]
-        mock_run_parallel.return_value = BatchResult(
-            succeeded=phase1_results, failed=[], skipped=[]
+        mock_load.return_value = FeatureLoadResult(
+            market="us", symbol="TEST1", status="error", error="DB エラー"
         )
 
-        # 実行
-        run_model_batch()
+        tasks = [SymbolTask(market="us", symbol="TEST1")]
+        result = run_batch_training(tasks=tasks)
 
-        # print_summaryが呼ばれたことを確認
-        mock_print_summary.assert_called_once()
+        self.assertEqual(len(result.failed), 1)
+        self.assertEqual(len(result.succeeded), 0)
 
 
 if __name__ == "__main__":

@@ -6,6 +6,10 @@
 
 import re
 from datetime import datetime
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.domain.types import BatchResult
 
 import numpy as np
 import pandas as pd
@@ -30,7 +34,6 @@ from src.prediction.manager import ModelManager
 from src.prediction.types import FeatureLoadResult, TrainingMetrics
 from src.utils.db import generate_run_id, load_stock_features, save_experiment_run
 from src.utils.logger import get_logger
-from src.watchlist.batch_runner import load_target_symbols
 
 logger = get_logger(__name__)
 
@@ -502,65 +505,107 @@ def train_models_for_symbol_task(
     )
 
 
-def run_model_batch(horizon: int = 1):
+def _log_training_summary(phase: str, batch_result: "BatchResult") -> None:
+    """バッチ学習結果をログに出力する。"""
+    n_success = len(batch_result.succeeded)
+    n_skip = len(batch_result.skipped)
+    n_error = len(batch_result.failed)
+    logger.info(f"{phase} 結果サマリー 成功: {n_success} / スキップ: {n_skip} / エラー: {n_error}")
+    if batch_result.failed:
+        logger.warning(f"\n{phase} エラー詳細:")
+        for f in batch_result.failed:
+            logger.warning(f"  - {f.market}/{f.symbol}: {f.error}")
+
+
+def run_batch_training(tasks: list, horizon: int = 1) -> "BatchResult":
     """
     ウォッチリストの全銘柄のモデルを作成する。
+
+    tasks は呼び出し元（orchestration 等）で load_target_symbols() して渡す。
 
     フェーズ1: DB読み込み（並列） - DuckDB読み取りはスレッド並列で安全
     フェーズ2: モデル学習・保存（逐次） - ファイルI/Oの競合を回避
 
     Args:
+        tasks: 対象銘柄タスクリスト（SymbolTask または dict）
         horizon: 予測ホライズン（営業日）。1=翌日（デフォルト）。
     """
-    from src.domain.types import BatchFailure, BatchResult
-    from src.watchlist.batch_runner import load_target_symbols, print_summary, run_parallel
+    from concurrent.futures import ThreadPoolExecutor
+    from concurrent.futures import TimeoutError as FuturesTimeoutError
+    from concurrent.futures import as_completed
 
-    # バッチ作成の並列数（CPU数に応じて調整）
-    MAX_MODEL_WORKERS = 3
+    from src.domain.types import BatchFailure, BatchResult, SymbolTask
+
+    _MAX_MODEL_WORKERS = 3
+    _TASK_TIMEOUT = 300
 
     def _load_features_task(task) -> FeatureLoadResult:
-        """バッチランナー用: DB読み込みのみ（並列安全）"""
-        from src.domain.types import SymbolTask
-
+        """DB読み込みのみ（並列安全）"""
         if isinstance(task, SymbolTask):
             return load_features_for_training(task.market, task.symbol, horizon=task.horizon)
         return load_features_for_training(
             task["market"], task["symbol"], horizon=task.get("horizon", 1)
         )
 
-    symbols = load_target_symbols()
-    if not symbols:
+    if not tasks:
         logger.warning("対象銘柄がありません。")
-        return
+        return BatchResult(succeeded=[], failed=[], skipped=[])
 
     # horizon 情報をタスクに付与
-    from src.domain.types import SymbolTask
-
-    tasks = [
+    enhanced_tasks = [
         (
             SymbolTask(market=s.market, symbol=s.symbol, horizon=horizon)
             if hasattr(s, "market")
             else {**s, "horizon": horizon}
         )
-        for s in symbols
+        for s in tasks
     ]
 
     # フェーズ1: データ読み込み（並列）
-    batch_result = run_parallel(
-        func=_load_features_task,
-        tasks=tasks,
-        max_workers=MAX_MODEL_WORKERS,
-        label="データ読み込み",
+    logger.info(
+        f"データ読み込み開始（並列数: {_MAX_MODEL_WORKERS}） 対象件数: {len(enhanced_tasks)}"
     )
+    load_succeeded: list = []
+    load_failed: list = []
+    load_skipped: list = []
+
+    with ThreadPoolExecutor(max_workers=_MAX_MODEL_WORKERS) as executor:
+        futures = {executor.submit(_load_features_task, task): task for task in enhanced_tasks}
+        for future in as_completed(futures):
+            task = futures[future]
+            _m = getattr(task, "market", None) or (
+                task.get("market", "?") if hasattr(task, "get") else "?"
+            )
+            _s = getattr(task, "symbol", None) or (
+                task.get("symbol", "?") if hasattr(task, "get") else "?"
+            )
+            try:
+                result = future.result(timeout=_TASK_TIMEOUT)
+                if result.status == "skip":
+                    load_skipped.append(result)
+                elif result.status == "error":
+                    logger.error(f"[データ読み込みエラー] {_m}/{_s}: {result.error}")
+                    load_failed.append(
+                        BatchFailure(market=_m, symbol=_s, error=result.error or "読み込みエラー")
+                    )
+                else:
+                    load_succeeded.append(result)
+            except FuturesTimeoutError:
+                logger.error(f"[タイムアウト] {_m}/{_s}: {_TASK_TIMEOUT}秒超過")
+                load_failed.append(
+                    BatchFailure(market=_m, symbol=_s, error=f"タイムアウト（{_TASK_TIMEOUT}秒）")
+                )
+            except Exception as e:
+                logger.error(f"[未処理エラー] {_m}/{_s}: {e}", exc_info=True)
+                load_failed.append(BatchFailure(market=_m, symbol=_s, error=str(e)))
 
     # フェーズ2: モデル学習・保存（逐次）
     suffix = f"_{horizon}d" if horizon > 1 else ""
-    success_data = batch_result.succeeded
-    logger.info(f"モデル学習開始（逐次）: 対象件数={len(success_data)} (horizon={horizon}d)")
+    logger.info(f"モデル学習開始（逐次）: 対象件数={len(load_succeeded)} (horizon={horizon}d)")
 
     trained_at = datetime.now().strftime("%Y%m%d_%H%M%S")
     train_results = []
-    for i, r in enumerate(success_data, 1):
+    for i, r in enumerate(load_succeeded, 1):
         market, symbol = r.market, r.symbol
         try:
             logger.info(f"[モデル作成開始] {market}/{symbol}")
@@ -589,7 +634,7 @@ def run_model_batch(horizon: int = 1):
                 {"market": market, "symbol": symbol, "status": "error", "error": str(e)}
             )
         if i % 50 == 0:
-            logger.info(f"  ... {i}/{len(success_data)} 件完了")
+            logger.info(f"  ... {i}/{len(load_succeeded)} 件完了")
 
     # 最終サマリー
     train_succeeded = [r for r in train_results if r.get("status") == "success"]
@@ -604,30 +649,31 @@ def run_model_batch(horizon: int = 1):
     ]
     final_batch = BatchResult(
         succeeded=train_succeeded,
-        failed=train_failed + batch_result.failed,
-        skipped=batch_result.skipped,
+        failed=train_failed + load_failed,
+        skipped=load_skipped,
     )
-    print_summary("モデル作成", final_batch)
+    _log_training_summary("モデル作成", final_batch)
+    return final_batch
 
 
-def _train_models_for_horizon(horizon: int, max_workers: int = 3) -> list:
+def _train_models_for_horizon(horizon: int, tasks: list, max_workers: int = 3) -> list:
     """
     指定ホライズンの全銘柄モデルを学習する（機能テスト対応シンプル実装）。
 
     Args:
         horizon: 予測ホライズン（営業日）
+        tasks: 対象銘柄タスクリスト（orchestration 側で load_target_symbols() して渡す）
         max_workers: 並列ワーカー数（現在は逐次処理）
 
     Returns:
         list[dict]: 各銘柄の学習結果サマリー
     """
-    symbols = load_target_symbols()
-    if not symbols:
+    if not tasks:
         logger.warning("対象銘柄がありません。")
         return []
 
     results = []
-    for sym in symbols:
+    for sym in tasks:
         try:
             loaded = load_features_for_training(sym.market, sym.symbol, horizon=horizon)
             if not loaded.is_success:
@@ -652,20 +698,25 @@ def _train_models_for_horizon(horizon: int, max_workers: int = 3) -> list:
     return results
 
 
-def train_all_models(horizons: list | None = None, max_workers: int = 3) -> None:
+def train_all_models(
+    horizons: list | None = None, tasks: list | None = None, max_workers: int = 3
+) -> None:
     """
     複数ホライズンで全銘柄のモデルを学習する。
 
     Args:
         horizons: 学習対象ホライズンのリスト（例: [1, 3, 7]）。None のとき [1] を使用。
+        tasks: 対象銘柄タスクリスト。None のとき空リストとして扱う。
         max_workers: 並列ワーカー数
     """
     if horizons is None:
         horizons = [1]
+    if tasks is None:
+        tasks = []
 
     for horizon in horizons:
         try:
             logger.info(f"[全銘柄学習開始] horizon={horizon}d")
-            _train_models_for_horizon(horizon, max_workers=max_workers)
+            _train_models_for_horizon(horizon, tasks, max_workers=max_workers)
         except Exception as e:
             logger.error(f"[ホライズン学習エラー] horizon={horizon}: {e}", exc_info=True)

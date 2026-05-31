@@ -36,9 +36,11 @@ class DataPipelineExecutor:
         return "data_pipeline"
 
     def execute(self) -> None:
-        from src.market_data.pipeline import run_data_batch
+        from src.market_data.pipeline import run_batch_pipeline
+        from src.watchlist.batch_runner import load_target_symbols
 
-        run_data_batch()
+        tasks = load_target_symbols()
+        run_batch_pipeline(tasks)
 
 
 class PredictionExecutor:

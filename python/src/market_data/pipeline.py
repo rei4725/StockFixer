@@ -6,7 +6,10 @@ data層とfeatures層を組み合わせて利用する
 """
 
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from src.domain.types import BatchResult
 
 import pandas as pd
 
@@ -307,12 +310,27 @@ def save_stock_data_with_features(
     save_features_to_db(market, symbol, data, quality_result)
 
 
-def run_data_batch(
+def _log_pipeline_summary(phase: str, batch_result: "BatchResult") -> None:
+    """バッチ処理結果をログに出力する。"""
+    n_success = len(batch_result.succeeded)
+    n_skip = len(batch_result.skipped)
+    n_error = len(batch_result.failed)
+    logger.info(f"{phase} 結果サマリー 成功: {n_success} / スキップ: {n_skip} / エラー: {n_error}")
+    if batch_result.failed:
+        logger.warning(f"\n{phase} エラー詳細:")
+        for f in batch_result.failed:
+            logger.warning(f"  - {f.market}/{f.symbol}: {f.error}")
+
+
+def run_batch_pipeline(
+    tasks: list,
     fetch_only: bool = False,
     notification_port: "NotificationPort | None" = None,
-):
+) -> "BatchResult":
     """
     ウォッチリストの全銘柄をバッチ取得する。
+
+    tasks は呼び出し元（orchestration 等）で load_target_symbols() して渡す。
 
     fetch_only=False（デフォルト）:
       フェーズ1: データ取得＋特徴量生成（並列） - I/O boundなAPI呼び出し
@@ -321,11 +339,16 @@ def run_data_batch(
     fetch_only=True:
       フェーズ1のみ実行（DB保存しない）
     """
-    from src.domain.types import BatchFailure, BatchResult
-    from src.watchlist.batch_runner import load_target_symbols, print_summary, run_parallel
+    from concurrent.futures import ThreadPoolExecutor
+    from concurrent.futures import TimeoutError as FuturesTimeoutError
+    from concurrent.futures import as_completed
 
-    def _fetch_only(task) -> dict:
-        """バッチランナー用: データ取得＋特徴量生成のみ（DB書き込みなし）"""
+    from src.domain.types import BatchFailure, BatchResult
+
+    _TASK_TIMEOUT = 300
+
+    def _fetch_task(task) -> dict:
+        """データ取得＋特徴量生成のみ（DB書き込みなし）"""
         market = getattr(task, "market", None) or task["market"]
         symbol = getattr(task, "symbol", None) or task["symbol"]
         try:
@@ -344,23 +367,51 @@ def run_data_batch(
             logger.error(f"[データ取得エラー] {market}/{symbol}: {e}", exc_info=True)
             return {"market": market, "symbol": symbol, "status": "error", "error": str(e)}
 
-    symbols = load_target_symbols()
-    if not symbols:
+    if not tasks:
         logger.warning("対象銘柄がありません。")
-        return
+        return BatchResult(succeeded=[], failed=[], skipped=[])
 
     # フェーズ1: データ取得＋特徴量生成（並列）
-    batch_result = run_parallel(
-        func=_fetch_only,
-        tasks=symbols,
-        max_workers=MAX_DATA_WORKERS,
-        label="データ取得",
-    )
+    logger.info(f"データ取得開始（並列数: {MAX_DATA_WORKERS}） 対象件数: {len(tasks)}")
+    succeeded: list = []
+    failed: list = []
+    skipped: list = []
 
-    # fetch_only=True の場合はここで終了
+    with ThreadPoolExecutor(max_workers=MAX_DATA_WORKERS) as executor:
+        futures = {executor.submit(_fetch_task, task): task for task in tasks}
+        for future in as_completed(futures):
+            task = futures[future]
+            _m = getattr(task, "market", None) or (
+                task.get("market", "?") if hasattr(task, "get") else "?"
+            )
+            _s = getattr(task, "symbol", None) or (
+                task.get("symbol", "?") if hasattr(task, "get") else "?"
+            )
+            try:
+                result = future.result(timeout=_TASK_TIMEOUT)
+                status = result.get("status", "success") if isinstance(result, dict) else "success"
+                if status == "skip":
+                    skipped.append(result)
+                elif status == "error":
+                    _e = result.get("error", "unknown")
+                    logger.error(f"[エラー結果] {_m}/{_s}: {_e}")
+                    failed.append(BatchFailure(market=_m, symbol=_s, error=str(_e)))
+                else:
+                    succeeded.append(result)
+            except FuturesTimeoutError:
+                logger.error(f"[タイムアウト] {_m}/{_s}: {_TASK_TIMEOUT}秒超過")
+                failed.append(
+                    BatchFailure(market=_m, symbol=_s, error=f"タイムアウト（{_TASK_TIMEOUT}秒）")
+                )
+            except Exception as e:
+                logger.error(f"[未処理エラー] {_m}/{_s}: {e}", exc_info=True)
+                failed.append(BatchFailure(market=_m, symbol=_s, error=str(e)))
+
+    batch_result = BatchResult(succeeded=succeeded, failed=failed, skipped=skipped)
+
     if fetch_only:
-        print_summary("データ取得（保存なし）", batch_result)
-        return
+        _log_pipeline_summary("データ取得（保存なし）", batch_result)
+        return batch_result
 
     # フェーズ2: DB書き込み（逐次） - DuckDB排他ロック制約のため直列実行
     success_data = [r for r in batch_result.succeeded if r.get("data")]
@@ -401,4 +452,5 @@ def run_data_batch(
         failed=db_failed + batch_result.failed,
         skipped=batch_result.skipped,
     )
-    print_summary("データ更新", final_batch)
+    _log_pipeline_summary("データ更新", final_batch)
+    return final_batch

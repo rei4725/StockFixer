@@ -38,89 +38,91 @@ class TestRunDailyPipeline(unittest.TestCase):
     @patch("src.reporting.discord.discord_utils.send_daily_pipeline_completion")
     @patch("src.prediction.prediction_pipeline.output_top_worst_results")
     @patch("src.prediction.prediction_pipeline.predict_all_unified")
-    @patch("src.market_data.pipeline.run_data_batch")
+    @patch("src.market_data.pipeline.run_batch_pipeline")
+    @patch("src.watchlist.batch_runner.load_target_symbols")
     def test_daily_pipeline_success(
         self,
-        mock_run_batch,
+        mock_load_symbols,
+        mock_run_pipeline,
         mock_predict,
         mock_output,
         mock_send_completion,
     ):
         """日次パイプラインが正常に完了することを確認"""
-        # 実行
+        mock_load_symbols.return_value = []
         run_daily_pipeline()
 
-        # 各処理が呼び出されたことを確認
-        mock_run_batch.assert_called_once()
+        mock_run_pipeline.assert_called_once()
         mock_predict.assert_called_once()
         mock_output.assert_called_once()
-        # 完了通知が送られたことを確認
         mock_send_completion.assert_called_once()
 
     @patch("src.reporting.discord.discord_utils.send_daily_pipeline_error")
     @patch("src.prediction.prediction_pipeline.output_top_worst_results")
     @patch("src.prediction.prediction_pipeline.predict_all_unified")
-    @patch("src.market_data.pipeline.run_data_batch")
+    @patch("src.market_data.pipeline.run_batch_pipeline")
+    @patch("src.watchlist.batch_runner.load_target_symbols")
     def test_daily_pipeline_data_fetch_error(
         self,
-        mock_run_batch,
+        mock_load_symbols,
+        mock_run_pipeline,
         mock_predict,
         mock_output,
         mock_send_error,
     ):
         """データ取得エラーが発生した場合を確認"""
-        mock_run_batch.side_effect = Exception("データ取得失敗")
+        mock_load_symbols.return_value = []
+        mock_run_pipeline.side_effect = Exception("データ取得失敗")
 
-        # 例外が発生することを確認
         with self.assertRaises(Exception):  # noqa: B017
             run_daily_pipeline()
 
-        # エラー通知が送られたことを確認
         mock_send_error.assert_called_once()
-        # 予測は実行されないはず
         mock_predict.assert_not_called()
 
     @patch("src.reporting.discord.discord_utils.send_daily_pipeline_error")
     @patch("src.prediction.prediction_pipeline.output_top_worst_results")
     @patch("src.prediction.prediction_pipeline.predict_all_unified")
-    @patch("src.market_data.pipeline.run_data_batch")
+    @patch("src.market_data.pipeline.run_batch_pipeline")
+    @patch("src.watchlist.batch_runner.load_target_symbols")
     def test_daily_pipeline_prediction_error(
         self,
-        mock_run_batch,
+        mock_load_symbols,
+        mock_run_pipeline,
         mock_predict,
         mock_output,
         mock_send_error,
     ):
         """予測エラーが発生した場合を確認"""
+        mock_load_symbols.return_value = []
         mock_predict.side_effect = Exception("予測失敗")
 
-        # 例外が発生することを確認
         with self.assertRaises(Exception):  # noqa: B017
             run_daily_pipeline()
 
-        # エラー通知が送られたことを確認
         mock_send_error.assert_called_once()
 
     @patch("src.reporting.discord.discord_utils.send_daily_pipeline_completion")
     @patch("src.prediction.prediction_pipeline.output_top_worst_results")
     @patch("src.prediction.prediction_pipeline.predict_all_unified")
-    @patch("src.market_data.pipeline.run_data_batch")
+    @patch("src.market_data.pipeline.run_batch_pipeline")
+    @patch("src.watchlist.batch_runner.load_target_symbols")
     def test_daily_pipeline_notification_error(
         self,
-        mock_run_batch,
+        mock_load_symbols,
+        mock_run_pipeline,
         mock_predict,
         mock_output,
         mock_send_completion,
     ):
         """Discord通知エラーが発生した場合を確認"""
+        mock_load_symbols.return_value = []
         mock_send_completion.side_effect = Exception("Discord通知失敗")
 
-        # 例外が発生することを確認
         with self.assertRaises(Exception):  # noqa: B017
             run_daily_pipeline()
 
-        # データ取得・予測は正常に完了後、通知で失敗
-        mock_run_batch.assert_called_once()
+        mock_run_pipeline.assert_called_once()
         mock_predict.assert_called_once()
 
 
