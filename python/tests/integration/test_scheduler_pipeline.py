@@ -138,10 +138,10 @@ class TestRunWeeklyTraining(unittest.TestCase):
         calls = mock_train.call_args_list
         # 最初の呼び出しはXGBoost
         self.assertEqual(calls[0][1]["model_type"], "XGBoostModel")
-        self.assertEqual(calls[0][1]["model_name"], "UnifiedStockXGBoost")
+        self.assertEqual(calls[0][1]["model_name"], "UnifiedStockXGBoost_challenger")
         # 2番目の呼び出しはLightGBM
         self.assertEqual(calls[1][1]["model_type"], "LightGBMModel")
-        self.assertEqual(calls[1][1]["model_name"], "UnifiedStockLightGBM")
+        self.assertEqual(calls[1][1]["model_name"], "UnifiedStockLightGBM_challenger")
 
     @patch("src.prediction.unified_model_pipeline.train_unified_model")
     def test_weekly_training_xgboost_error(self, mock_train):
