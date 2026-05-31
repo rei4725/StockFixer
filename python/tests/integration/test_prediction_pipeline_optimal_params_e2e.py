@@ -26,7 +26,9 @@ class TestGetOptimalParamsIntegration:
         )
 
         if not os.path.exists(config_path):
-            pytest.skip("config/optimal_params.json が見つかりません（バックテスト最適化実行後に生成）")
+            pytest.skip(
+                "config/optimal_params.json が見つかりません（バックテスト最適化実行後に生成）"
+            )
 
         # 実際の JSON を読み込み
         with open(config_path, "r", encoding="utf-8") as f:

@@ -162,7 +162,6 @@ def run_weekly_training():
     logger.info("=== 週次モデル学習開始 ===")
 
     from config.settings import AUTO_PROMOTE_MODEL
-
     from src.prediction.promotion_gate import evaluate_promotion, save_promotion_result
     from src.prediction.shadow_evaluation import (
         _UNIFIED_CHALLENGER_NAMES,
@@ -331,6 +330,8 @@ def run_daily_auto_order():
     """
     import os
 
+    from src.infrastructure.yfinance_market_data_adapter import YFinanceMarketDataAdapter
+    from src.prediction.db import upsert_paper_real_diff
     from src.trading.brokers.paper.paper_broker import PaperBroker
     from src.trading.execution import run_daily_orders
 
@@ -342,7 +343,10 @@ def run_daily_auto_order():
 
         broker = KabuBroker()
     else:
-        broker = PaperBroker()
+        broker = PaperBroker(
+            market_data_port=YFinanceMarketDataAdapter(),
+            record_diff=upsert_paper_real_diff,
+        )
 
     try:
         stats = run_daily_orders(broker=broker, market="jp", mode=mode)
@@ -379,7 +383,6 @@ def run_daily_auto_order():
     if stats.get("correlation_blocked"):
         try:
             from config.settings import CORRELATION_ENC_THRESHOLD
-
             from src.reporting.discord.discord_utils import send_correlation_alert
 
             send_correlation_alert(
@@ -404,6 +407,7 @@ def run_horizon_exit_check() -> None:
     import os
     from datetime import date
 
+    from src.infrastructure.yfinance_market_data_adapter import YFinanceMarketDataAdapter
     from src.trading.brokers.base import OrderSide
     from src.trading.brokers.paper.paper_broker import PaperBroker
     from src.utils.db._connection import _db_connection
@@ -433,7 +437,7 @@ def run_horizon_exit_check() -> None:
         return
 
     logger.info("[horizon_exit] 期限切れポジション対象: %s", symbols_to_exit)
-    broker = PaperBroker()
+    broker = PaperBroker(market_data_port=YFinanceMarketDataAdapter())
     exited: list[str] = []
     for symbol in symbols_to_exit:
         positions = broker.get_positions()
@@ -462,11 +466,16 @@ def run_daily_settle_orders():
         logger.info("live モードのため settle スキップ")
         return
 
+    from src.infrastructure.yfinance_market_data_adapter import YFinanceMarketDataAdapter
+    from src.prediction.db import upsert_paper_real_diff
     from src.trading.brokers.paper.paper_broker import PaperBroker
 
     logger.info("=== ペーパートレード約定処理開始 ===")
     try:
-        broker = PaperBroker()
+        broker = PaperBroker(
+            market_data_port=YFinanceMarketDataAdapter(),
+            record_diff=upsert_paper_real_diff,
+        )
         settled = broker.settle_pending_orders()
         logger.info("=== 約定処理完了: %s 件 ===", len(settled))
     except Exception as e:
@@ -499,10 +508,11 @@ def run_daily_paper_trade_report():
 
     logger.info("=== ペーパートレード損益レポート送信開始 ===")
     try:
+        from src.infrastructure.yfinance_market_data_adapter import YFinanceMarketDataAdapter
         from src.reporting.discord.discord_utils import send_paper_trade_position_report
         from src.trading.brokers.paper.paper_broker import PaperBroker
 
-        broker = PaperBroker()
+        broker = PaperBroker(market_data_port=YFinanceMarketDataAdapter())
         positions = broker.get_positions()
         summary = broker.get_pnl_summary()
         send_paper_trade_position_report(positions, summary)
@@ -885,18 +895,21 @@ def run_pre_close_alert() -> None:
 
     logger.info("=== 引け前ポジション再評価アラート開始 ===")
     try:
-        from src.trading.pre_close_alert_service import evaluate_positions
+        from src.trading.pre_close_alert_service import get_pre_close_alerts
 
-        alerts = evaluate_positions()
-        logger.info("引け前アラート評価完了: %d件", len(alerts))
+        lines = get_pre_close_alerts()
+        logger.info("引け前アラート評価完了: %d行", len(lines))
     except Exception as e:
         logger.error("引け前アラート評価失敗: %s", e, exc_info=True)
         raise
 
     try:
-        from src.reporting.discord.discord_utils import send_pre_close_alert
+        from src.reporting.discord.discord_notification_specs import PRE_CLOSE_ALERT
+        from src.reporting.discord.discord_utils import send_webhook_notification
 
-        send_pre_close_alert(alerts)
+        send_webhook_notification(
+            PRE_CLOSE_ALERT.title, "\n".join(lines), color=PRE_CLOSE_ALERT.color
+        )
         logger.info("=== 引け前ポジション再評価アラート送信完了 ===")
     except Exception as e:
         logger.error("引け前アラート通知失敗: %s", e, exc_info=True)
@@ -913,7 +926,6 @@ def run_monthly_report_job() -> None:
         4. Discord に通知
     """
     from config.settings import DRIFT_ALERT_THRESHOLD, DRIFT_ALERT_WEEKS
-
     from src.prediction.drift_monitor import check_weekly_hit_rate_drift
     from src.reporting.discord.discord_utils import send_monthly_report_notification
     from src.reporting.monthly import run_monthly_report, save_monthly_report_to_file

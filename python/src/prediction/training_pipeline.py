@@ -9,6 +9,8 @@ from datetime import datetime
 
 import numpy as np
 import pandas as pd
+from sklearn.inspection import permutation_importance
+
 from config.settings import (
     EARNINGS_MASK_WINDOW_DAYS,
     FEATURE_SELECTION_DROP_RATIO,
@@ -16,8 +18,6 @@ from config.settings import (
     FEATURE_SELECTION_PROTECT_TOP_SHAP,
     PERMUTATION_IMPORTANCE_REPEATS,
 )
-from sklearn.inspection import permutation_importance
-
 from src.market_data.loader import get_earnings_dates
 from src.market_data.technical import add_earnings_flag
 from src.prediction.db import (
@@ -398,7 +398,9 @@ def train_models_for_symbol(
                     f"方向正解率={saved_metrics.directional_accuracy:.2%} (OOS)"
                 )
             except Exception as e:
-                logger.warning(f"精度指標保存スキップ [{market}_{symbol}/{model_name}]: {e}", exc_info=True)
+                logger.warning(
+                    f"精度指標保存スキップ [{market}_{symbol}/{model_name}]: {e}", exc_info=True
+                )
             # 実験ランを experiment_runs テーブルへ記録
             try:
                 save_experiment_run(
@@ -417,7 +419,9 @@ def train_models_for_symbol(
                     params={"role": mode_label},
                 )
             except Exception as e:
-                logger.warning(f"実験ラン保存スキップ [{market}_{symbol}/{model_name}]: {e}", exc_info=True)
+                logger.warning(
+                    f"実験ラン保存スキップ [{market}_{symbol}/{model_name}]: {e}", exc_info=True
+                )
             # SHAP特徴量寄与の計算・保存
             try:
                 model = model_manager.get_model(model_name)

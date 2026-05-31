@@ -54,8 +54,8 @@ class TestRunParallel(unittest.TestCase):
             return {"id": task, "status": "success"}
 
         results = run_parallel(dummy_func, [1, 2, 3], max_workers=2, label="テスト")
-        self.assertEqual(len(results), 3)
-        ids = {r["id"] for r in results}
+        self.assertEqual(len(results.succeeded), 3)
+        ids = {r["id"] for r in results.succeeded}
         self.assertEqual(ids, {1, 2, 3})
 
     def test_uses_thread_pool_by_default(self):
@@ -80,18 +80,19 @@ class TestRunParallel(unittest.TestCase):
         results = run_parallel(
             dummy_func, ["a", "b"], max_workers=2, use_process=False, label="プロセステスト"
         )
-        self.assertEqual(len(results), 2)
+        self.assertEqual(len(results.succeeded), 2)
 
     def test_empty_tasks(self):
         """タスクが空の場合に空リストが返ることを確認"""
         results = run_parallel(lambda x: x, [], max_workers=2)
-        self.assertEqual(results, [])
+        self.assertEqual(results, BatchResult(succeeded=[], failed=[], skipped=[]))
 
 
 class TestPrintSummary(unittest.TestCase):
     """print_summary 関数のテスト"""
 
-    def test_counts_success_error_skip(self):
+    @patch("src.reporting.discord.discord_utils.send_webhook_notification")
+    def test_counts_success_error_skip(self, _mock_notify):
         """成功・エラー・スキップが正しくカウントされることを確認"""
         results = BatchResult(
             succeeded=[{"market": "us", "symbol": "AAPL"}, {"market": "us", "symbol": "GOOG"}],
@@ -105,7 +106,8 @@ class TestPrintSummary(unittest.TestCase):
         self.assertIn("エラー: 1", output)
         self.assertIn("スキップ: 1", output)
 
-    def test_error_detail_shown(self):
+    @patch("src.reporting.discord.discord_utils.send_webhook_notification")
+    def test_error_detail_shown(self, _mock_notify):
         """エラー詳細が出力に含まれることを確認"""
         results = BatchResult(
             succeeded=[],

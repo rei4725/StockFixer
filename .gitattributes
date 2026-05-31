@@ -1,0 +1,14 @@
+# テキストファイルの改行コードを自動変換
+* text=auto
+
+# Python ファイルは常に LF（CI/black との一致を保証）
+*.py text eol=lf
+*.sh text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.toml text eol=lf
+*.cfg text eol=lf
+*.ini text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.txt text eol=lf

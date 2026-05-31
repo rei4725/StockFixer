@@ -11,6 +11,7 @@ from src.trading.pre_close_alert_service import (
     AlertType,
     PositionAlert,
     evaluate_positions,
+    get_pre_close_alerts,
 )
 
 
@@ -177,6 +178,49 @@ class TestEvaluatePositionsEarlyExit(unittest.TestCase):
         alert_map = {a.symbol: a.alert_type for a in alerts}
         self.assertEqual(alert_map["7203"], AlertType.STOP_LOSS)
         self.assertEqual(alert_map["9984"], AlertType.HOLD)
+
+
+class TestGetPreCloseAlerts(unittest.TestCase):
+    """get_pre_close_alerts のユニットテスト"""
+
+    def test_returns_no_position_lines_when_empty(self):
+        with (
+            patch.dict("os.environ", {"AUTO_TRADE_MODE": "paper"}, clear=False),
+            patch("src.trading.brokers.paper.paper_broker.PaperBroker") as mock_broker_cls,
+        ):
+            broker = MagicMock()
+            broker.get_positions.return_value = []
+            mock_broker_cls.return_value = broker
+            lines = get_pre_close_alerts()
+
+        self.assertIsInstance(lines, list)
+        self.assertTrue(any("保有ポジションなし" in line for line in lines))
+
+    def test_returns_formatted_lines_with_positions(self):
+        pos = _make_position("7203", 100, 1000.0, 980.0)
+        pred_df = _make_pred_df("7203", avg_pred_price=960.0, diff_ratio=-0.02)
+        with (
+            patch.dict("os.environ", {"AUTO_TRADE_MODE": "paper"}, clear=False),
+            patch("src.trading.brokers.paper.paper_broker.PaperBroker") as mock_broker_cls,
+            patch(
+                "src.prediction.db.load_latest_prediction_timestamp",
+                return_value="20260101_150000",
+            ),
+            patch(
+                "src.prediction.db.load_prediction_results",
+                return_value=pred_df,
+            ),
+        ):
+            broker = MagicMock()
+            broker.get_positions.return_value = [pos]
+            mock_broker_cls.return_value = broker
+            lines = get_pre_close_alerts()
+
+        self.assertIsInstance(lines, list)
+        self.assertTrue(len(lines) > 0)
+        full_text = "\n".join(lines)
+        self.assertIn("7203", full_text)
+        self.assertIn("損切り推奨", full_text)
 
 
 if __name__ == "__main__":

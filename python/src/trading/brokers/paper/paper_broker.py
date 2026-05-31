@@ -10,12 +10,10 @@ kabu STATION® API が利用できない環境（APIキー未取得・テスト�
 """
 
 import uuid
-from typing import Any
+from typing import Any, Callable
 
 from config.settings import PAPER_INITIAL_BALANCE
-
-import src.market_data.yf_client as yf_client
-from src.prediction.db import upsert_paper_real_diff
+from src.domain.ports import MarketDataPort
 from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
 from src.utils.db._connection import _db_connection
 from src.utils.logger import get_logger
@@ -35,6 +33,14 @@ class PaperBroker(BrokerBase):
     """
 
     broker_name = "paper"
+
+    def __init__(
+        self,
+        market_data_port: MarketDataPort,
+        record_diff: Callable[..., None] | None = None,
+    ) -> None:
+        self._market_data = market_data_port
+        self._record_diff = record_diff
 
     def get_token(self) -> str:
         """ペーパートレードはトークン不要。ダミー文字列を返す"""
@@ -146,7 +152,7 @@ class PaperBroker(BrokerBase):
         ) in rows:
             ticker = f"{symbol}.T"
             try:
-                hist = yf_client.download(ticker, period="2d", interval="1d")
+                hist = self._market_data.get_ohlcv(ticker, "2d")
                 if hist.empty:
                     logger.warning(f"[paper] {symbol}: 株価取得失敗、スキップ")
                     continue
@@ -184,8 +190,13 @@ class PaperBroker(BrokerBase):
                         "fill_price=?, filled_at=CURRENT_TIMESTAMP WHERE order_id=?",
                         [fill_price, order_id],
                     )
-                if market and predicted_at and signal_price is not None:
-                    upsert_paper_real_diff(
+                if (
+                    market
+                    and predicted_at
+                    and signal_price is not None
+                    and self._record_diff is not None
+                ):
+                    self._record_diff(
                         market=str(market),
                         symbol=str(symbol),
                         predicted_at=str(predicted_at),
@@ -330,7 +341,7 @@ class PaperBroker(BrokerBase):
             ticker = f"{sym}.T"
             current_price = avg_short  # フォールバック
             try:
-                hist = yf_client.download(ticker, period="2d", interval="1d")
+                hist = self._market_data.get_ohlcv(ticker, "2d")
                 if not hist.empty:
                     current_price = float(hist["Close"].iloc[-1])
             except Exception:
@@ -364,7 +375,7 @@ class PaperBroker(BrokerBase):
             ticker = f"{sym}.T"
             current_price = avg  # フォールバック
             try:
-                hist = yf_client.download(ticker, period="2d", interval="1d")
+                hist = self._market_data.get_ohlcv(ticker, "2d")
                 if not hist.empty:
                     current_price = float(hist["Close"].iloc[-1])
             except Exception:

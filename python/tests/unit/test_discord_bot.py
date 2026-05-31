@@ -1,4 +1,4 @@
-﻿"""ユニットテスト: discord_bot の純粋関数"""
+"""ユニットテスト: discord_bot の純粋関数"""
 
 import asyncio
 import unittest

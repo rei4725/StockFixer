@@ -262,7 +262,9 @@ def backtest_pair(
 
     hedge_ratio, adf_stat, is_cointegrated = check_cointegration(price_a, price_b)
     if not is_cointegrated:
-        logger.info("[pair] %s/%s はコインテグレーションなし (ADF=%.4f)", symbol_a, symbol_b, adf_stat)
+        logger.info(
+            "[pair] %s/%s はコインテグレーションなし (ADF=%.4f)", symbol_a, symbol_b, adf_stat
+        )
         return None
 
     corr = float(price_a.corr(price_b))

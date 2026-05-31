@@ -1,4 +1,4 @@
-﻿"""
+"""
 ユニットテスト: PaperBroker
 
 DuckDB を一時ファイルに差し替えてテスト。yfinance 呼び出しはモック化。
@@ -6,18 +6,18 @@ DuckDB を一時ファイルに差し替えてテスト。yfinance 呼び出し�
 
 import unittest
 from contextlib import contextmanager
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import duckdb
 import pandas as pd
 
+from src.domain.ports import MarketDataPort
 from src.trading.brokers.base import OrderSide
 from src.trading.brokers.paper.paper_broker import PaperBroker
 
 # テスト用インメモリ DB
 _TEST_CON = duckdb.connect(":memory:")
-_TEST_CON.execute(
-    """
+_TEST_CON.execute("""
     CREATE TABLE IF NOT EXISTS paper_orders (
         order_id VARCHAR, market VARCHAR, predicted_at VARCHAR,
         symbol VARCHAR, side INTEGER, qty INTEGER,
@@ -27,27 +27,21 @@ _TEST_CON.execute(
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         filled_at TIMESTAMP
     )
-    """
-)
-_TEST_CON.execute(
-    """
+    """)
+_TEST_CON.execute("""
     CREATE TABLE IF NOT EXISTS paper_positions (
         symbol VARCHAR PRIMARY KEY, qty INTEGER, avg_price DOUBLE,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
-    """
-)
-_TEST_CON.execute(
-    """
+    """)
+_TEST_CON.execute("""
     CREATE TABLE IF NOT EXISTS paper_balance (
         id INTEGER PRIMARY KEY DEFAULT 1,
         balance DOUBLE DEFAULT 1000000.0
     )
-    """
-)
+    """)
 _TEST_CON.execute("INSERT OR IGNORE INTO paper_balance (id, balance) VALUES (1, 1000000.0)")
-_TEST_CON.execute(
-    """
+_TEST_CON.execute("""
     CREATE TABLE IF NOT EXISTS paper_short_positions (
         symbol          VARCHAR NOT NULL PRIMARY KEY,
         qty             INTEGER NOT NULL,
@@ -56,8 +50,7 @@ _TEST_CON.execute(
         opened_at       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
-    """
-)
+    """)
 
 
 def _get_test_con():
@@ -69,13 +62,26 @@ def _test_db_connection():
     yield _TEST_CON
 
 
+def _make_mock_ohlcv() -> pd.DataFrame:
+    return pd.DataFrame(
+        {"Open": [1000.0], "High": [1050.0], "Low": [990.0], "Close": [1020.0]},
+        index=pd.to_datetime(["2026-03-15"]),
+    )
+
+
+def _make_market_data_mock() -> MagicMock:
+    mock = MagicMock(spec=MarketDataPort)
+    mock.get_ohlcv.return_value = _make_mock_ohlcv()
+    return mock
+
+
 class TestPaperBrokerOrder(unittest.TestCase):
     def setUp(self):
         # 各テスト前にテーブルをリセット
         _TEST_CON.execute("DELETE FROM paper_orders")
         _TEST_CON.execute("DELETE FROM paper_positions")
         _TEST_CON.execute("UPDATE paper_balance SET balance = 1000000.0")
-        self.broker = PaperBroker()
+        self.broker = PaperBroker(market_data_port=_make_market_data_mock())
 
     @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
     def test_send_order_returns_pending(self, _mock=None):
@@ -117,18 +123,15 @@ class TestPaperBrokerSettle(unittest.TestCase):
         _TEST_CON.execute("DELETE FROM paper_orders")
         _TEST_CON.execute("DELETE FROM paper_positions")
         _TEST_CON.execute("UPDATE paper_balance SET balance = 1000000.0")
-        self.broker = PaperBroker()
-
-    def _mock_yf_download(self, *args, **kwargs):
-        return pd.DataFrame(
-            {"Open": [1000.0], "High": [1050.0], "Low": [990.0], "Close": [1020.0]},
-            index=pd.to_datetime(["2026-03-15"]),
+        self._mock_market_data = _make_market_data_mock()
+        self._mock_record_diff = MagicMock()
+        self.broker = PaperBroker(
+            market_data_port=self._mock_market_data,
+            record_diff=self._mock_record_diff,
         )
 
     @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
-    @patch("src.trading.brokers.paper.paper_broker.yf_client.download")
-    def test_settle_market_buy(self, mock_yf, _mock_con=None):
-        mock_yf.return_value = self._mock_yf_download()
+    def test_settle_market_buy(self):
         self.broker.send_order("7203", OrderSide.BUY, 100)
         settled = self.broker.settle_pending_orders()
         self.assertEqual(len(settled), 1)
@@ -138,9 +141,7 @@ class TestPaperBrokerSettle(unittest.TestCase):
         self.assertAlmostEqual(balance, 1_000_000.0 - 1000.0 * 100)
 
     @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
-    @patch("src.trading.brokers.paper.paper_broker.yf_client.download")
-    def test_settle_creates_position(self, mock_yf, _mock_con=None):
-        mock_yf.return_value = self._mock_yf_download()
+    def test_settle_creates_position(self):
         self.broker.send_order("7203", OrderSide.BUY, 100)
         self.broker.settle_pending_orders()
         pos = _TEST_CON.execute(
@@ -149,11 +150,8 @@ class TestPaperBrokerSettle(unittest.TestCase):
         self.assertIsNotNone(pos)
         self.assertEqual(pos[0], 100)
 
-    @patch("src.trading.brokers.paper.paper_broker.upsert_paper_real_diff")
     @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
-    @patch("src.trading.brokers.paper.paper_broker.yf_client.download")
-    def test_settle_updates_paper_real_diff(self, mock_yf, mock_upsert):
-        mock_yf.return_value = self._mock_yf_download()
+    def test_settle_updates_paper_real_diff(self):
         result = self.broker.send_order("7203", OrderSide.BUY, 100)
         _TEST_CON.execute(
             "UPDATE paper_orders SET market='jp', predicted_at='20260405_085000', "
@@ -163,10 +161,10 @@ class TestPaperBrokerSettle(unittest.TestCase):
 
         self.broker.settle_pending_orders()
 
-        mock_upsert.assert_called_once()
-        self.assertEqual(mock_upsert.call_args.kwargs["market"], "jp")
-        self.assertEqual(mock_upsert.call_args.kwargs["symbol"], "7203")
-        self.assertAlmostEqual(mock_upsert.call_args.kwargs["actual_price"], 1000.0)
+        self._mock_record_diff.assert_called_once()
+        self.assertEqual(self._mock_record_diff.call_args.kwargs["market"], "jp")
+        self.assertEqual(self._mock_record_diff.call_args.kwargs["symbol"], "7203")
+        self.assertAlmostEqual(self._mock_record_diff.call_args.kwargs["actual_price"], 1000.0)
 
 
 class TestPaperBrokerShort(unittest.TestCase):
@@ -175,13 +173,8 @@ class TestPaperBrokerShort(unittest.TestCase):
         _TEST_CON.execute("DELETE FROM paper_positions")
         _TEST_CON.execute("DELETE FROM paper_short_positions")
         _TEST_CON.execute("UPDATE paper_balance SET balance = 1000000.0")
-        self.broker = PaperBroker()
-
-    def _mock_yf_download(self):
-        return pd.DataFrame(
-            {"Open": [1000.0], "High": [1050.0], "Low": [990.0], "Close": [1020.0]},
-            index=pd.to_datetime(["2026-03-15"]),
-        )
+        self._mock_market_data = _make_market_data_mock()
+        self.broker = PaperBroker(market_data_port=self._mock_market_data)
 
     @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
     def test_send_short_order_returns_pending(self):
@@ -222,10 +215,8 @@ class TestPaperBrokerShort(unittest.TestCase):
         self.assertAlmostEqual(pos[1], 1300.0)  # (1200*100 + 1400*100) / 200
 
     @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
-    @patch("src.trading.brokers.paper.paper_broker.yf_client.download")
-    def test_settle_short_updates_position_to_fill_price(self, mock_yf):
+    def test_settle_short_updates_position_to_fill_price(self):
         """settle 後に paper_short_positions が実際の約定値段で更新されること"""
-        mock_yf.return_value = self._mock_yf_download()
         # send_order で仮登録（price=1500）
         self.broker.send_order("7203", OrderSide.SHORT, 100, price=1500.0)
         settled = self.broker.settle_pending_orders()
@@ -240,10 +231,8 @@ class TestPaperBrokerShort(unittest.TestCase):
         self.assertAlmostEqual(pos[1], 1000.0)
 
     @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
-    @patch("src.trading.brokers.paper.paper_broker.yf_client.download")
-    def test_settle_short_cover_computes_realized_pnl(self, mock_yf):
+    def test_settle_short_cover_computes_realized_pnl(self):
         """SHORT_COVER の約定で realized_pnl が正しく計算されること"""
-        mock_yf.return_value = self._mock_yf_download()
         # 空売りポジション (avg=1200) を用意
         _TEST_CON.execute(
             "INSERT INTO paper_short_positions"
@@ -259,10 +248,8 @@ class TestPaperBrokerShort(unittest.TestCase):
         self.assertAlmostEqual(row[0], 20000.0)
 
     @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
-    @patch("src.trading.brokers.paper.paper_broker.yf_client.download")
-    def test_settle_short_cover_reduces_position(self, mock_yf):
+    def test_settle_short_cover_reduces_position(self):
         """SHORT_COVER 約定後に paper_short_positions の qty が減少すること"""
-        mock_yf.return_value = self._mock_yf_download()
         _TEST_CON.execute(
             "INSERT INTO paper_short_positions"
             " (symbol, qty, avg_short_price) VALUES ('7203', 200, 1200.0)"
@@ -276,10 +263,8 @@ class TestPaperBrokerShort(unittest.TestCase):
         self.assertEqual(pos[0], 100)
 
     @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
-    @patch("src.trading.brokers.paper.paper_broker.yf_client.download")
-    def test_settle_short_cover_full_removes_position(self, mock_yf):
+    def test_settle_short_cover_full_removes_position(self):
         """全数量返済で paper_short_positions レコードが削除されること"""
-        mock_yf.return_value = self._mock_yf_download()
         _TEST_CON.execute(
             "INSERT INTO paper_short_positions"
             " (symbol, qty, avg_short_price) VALUES ('7203', 100, 1200.0)"
@@ -292,10 +277,8 @@ class TestPaperBrokerShort(unittest.TestCase):
         self.assertIsNone(pos)
 
     @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
-    @patch("src.trading.brokers.paper.paper_broker.yf_client.download")
-    def test_get_short_positions(self, mock_yf):
+    def test_get_short_positions(self):
         """get_short_positions が paper_short_positions を正しく返すこと"""
-        mock_yf.return_value = self._mock_yf_download()
         _TEST_CON.execute(
             "INSERT INTO paper_short_positions"
             " (symbol, qty, avg_short_price) VALUES ('7203', 100, 1200.0)"
@@ -315,7 +298,7 @@ class TestPaperBrokerShort(unittest.TestCase):
 
 class TestPaperBrokerGetToken(unittest.TestCase):
     def setUp(self):
-        self.broker = PaperBroker()
+        self.broker = PaperBroker(market_data_port=_make_market_data_mock())
 
     def test_get_token_returns_paper_mode(self):
         self.assertEqual(self.broker.get_token(), "paper_mode")
@@ -327,7 +310,7 @@ class TestPaperBrokerGetToken(unittest.TestCase):
 class TestPaperBrokerGetBalance(unittest.TestCase):
     def setUp(self):
         _TEST_CON.execute("UPDATE paper_balance SET balance = 1000000.0")
-        self.broker = PaperBroker()
+        self.broker = PaperBroker(market_data_port=_make_market_data_mock())
 
     @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
     def test_get_balance_returns_current_value(self):
@@ -351,7 +334,7 @@ class TestPaperBrokerGetOrders(unittest.TestCase):
         _TEST_CON.execute("DELETE FROM paper_orders")
         _TEST_CON.execute("DELETE FROM paper_positions")
         _TEST_CON.execute("UPDATE paper_balance SET balance = 1000000.0")
-        self.broker = PaperBroker()
+        self.broker = PaperBroker(market_data_port=_make_market_data_mock())
 
     @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
     def test_get_orders_returns_list(self):
@@ -387,18 +370,11 @@ class TestPaperBrokerGetPositionsAdditional(unittest.TestCase):
         _TEST_CON.execute("DELETE FROM paper_orders")
         _TEST_CON.execute("DELETE FROM paper_positions")
         _TEST_CON.execute("UPDATE paper_balance SET balance = 1000000.0")
-        self.broker = PaperBroker()
-
-    def _mock_df(self):
-        return pd.DataFrame(
-            {"Open": [1000.0], "High": [1050.0], "Low": [990.0], "Close": [1020.0]},
-            index=pd.to_datetime(["2026-03-15"]),
-        )
+        self._mock_market_data = _make_market_data_mock()
+        self.broker = PaperBroker(market_data_port=self._mock_market_data)
 
     @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
-    @patch("src.trading.brokers.paper.paper_broker.yf_client.download")
-    def test_get_positions_returns_position_with_pnl(self, mock_yf):
-        mock_yf.return_value = self._mock_df()
+    def test_get_positions_returns_position_with_pnl(self):
         _TEST_CON.execute(
             "INSERT INTO paper_positions (symbol, qty, avg_price) VALUES ('7203', 100, 1000.0)"
         )
@@ -411,9 +387,8 @@ class TestPaperBrokerGetPositionsAdditional(unittest.TestCase):
         self.assertAlmostEqual(positions[0]["unrealized_pnl"], 2000.0)
 
     @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
-    @patch("src.trading.brokers.paper.paper_broker.yf_client.download")
-    def test_get_positions_fallback_on_yf_error(self, mock_yf):
-        mock_yf.side_effect = Exception("yfinance error")
+    def test_get_positions_fallback_on_yf_error(self):
+        self._mock_market_data.get_ohlcv.side_effect = Exception("market data error")
         _TEST_CON.execute(
             "INSERT INTO paper_positions (symbol, qty, avg_price) VALUES ('7203', 100, 1000.0)"
         )
@@ -427,7 +402,7 @@ class TestPaperBrokerGetPnlSummary(unittest.TestCase):
         _TEST_CON.execute("DELETE FROM paper_orders")
         _TEST_CON.execute("DELETE FROM paper_positions")
         _TEST_CON.execute("UPDATE paper_balance SET balance = 1000000.0")
-        self.broker = PaperBroker()
+        self.broker = PaperBroker(market_data_port=_make_market_data_mock())
 
     @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
     def test_get_pnl_summary_returns_dict(self):
@@ -465,15 +440,13 @@ class TestPaperBrokerGetPnlSummary(unittest.TestCase):
 
     @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
     def test_get_pnl_summary_with_filled_sell_order(self):
-        _TEST_CON.execute(
-            """
+        _TEST_CON.execute("""
             INSERT INTO paper_orders
                 (order_id, symbol, side, qty, price, order_type,
                  status, realized_pnl, filled_at)
             VALUES ('test_pnl_01', '7203', 2, 100, 1000.0, 10,
                     'filled', 5000.0, CURRENT_TIMESTAMP)
-            """
-        )
+            """)
         result = self.broker.get_pnl_summary()
         self.assertAlmostEqual(result["realized_pnl"], 5000.0)
         self.assertEqual(result["trade_count"], 1)

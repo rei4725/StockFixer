@@ -30,7 +30,6 @@ from config.trading_policy import (  # noqa: F401  # R-307/R-219 でポジショ
     VIX_POSITION_SCALE,
     VIX_SPIKE_THRESHOLD,
 )
-
 from src.domain.exceptions import RiskError  # noqa: F401  # 後方互換のため re-export
 from src.trading.brokers.base import BrokerBase, OrderSide
 from src.trading.types import TradingGateStatus
@@ -51,15 +50,13 @@ def fetch_latest_vix() -> Optional[float]:
     """
     try:
         with _db_connection() as con:
-            row = con.execute(
-                """
+            row = con.execute("""
                 SELECT vix_close
                 FROM stock_features
                 WHERE vix_close IS NOT NULL
                 ORDER BY row_num DESC
                 LIMIT 1
-                """
-            ).fetchone()
+                """).fetchone()
         if row is None:
             return None
         return float(row[0])
@@ -198,7 +195,9 @@ class RiskManager:
 
         # ルール 1: 当日損失上限
         if daily_loss_limit is not None and daily_loss >= daily_loss_limit:
-            reason = f"日次損失上限に到達: 損失={daily_loss:.0f}円 / " f"上限={daily_loss_limit:.0f}円"
+            reason = (
+                f"日次損失上限に到達: 損失={daily_loss:.0f}円 / " f"上限={daily_loss_limit:.0f}円"
+            )
             logger.warning(f"[risk] {reason} → 新規発注停止")
             return TradingGateStatus(
                 is_allowed=False,
@@ -405,7 +404,9 @@ class RiskManager:
             "yes",
             "on",
         }:
-            logger.info(f"[risk] {DISABLE_DAILY_LOSS_GUARD_ENV}=1 のため日次損失ガードを無効化します")
+            logger.info(
+                f"[risk] {DISABLE_DAILY_LOSS_GUARD_ENV}=1 のため日次損失ガードを無効化します"
+            )
             return None
 
         raw_value = os.getenv(DAILY_LOSS_RATE_ENV)
@@ -417,7 +418,8 @@ class RiskManager:
         except ValueError:
             default_rate = f"{MAX_DAILY_LOSS_RATE:.2%}"
             logger.warning(
-                f"[risk] {DAILY_LOSS_RATE_ENV}={raw_value!r} を解釈できないため" f"既定値 {default_rate} を使用します"
+                f"[risk] {DAILY_LOSS_RATE_ENV}={raw_value!r} を解釈できないため"
+                f"既定値 {default_rate} を使用します"
             )
             return MAX_DAILY_LOSS_RATE
 

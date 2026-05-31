@@ -24,8 +24,8 @@ from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
-from config.settings import MAX_SECTOR_POSITIONS
 
+from config.settings import MAX_SECTOR_POSITIONS
 from src.market_data.market_regime import get_market_regime
 from src.trading.signal_generator import get_regime_sector_weight
 from src.utils.logger import get_logger
@@ -266,7 +266,9 @@ def plot_portfolio(
     ax1 = axes[0]
     pf_ret = (equity_df["portfolio_value"] / equity_df["portfolio_value"].iloc[0] - 1) * 100
     ew_ret = (equity_df["equal_weight_value"] / equity_df["equal_weight_value"].iloc[0] - 1) * 100
-    ax1.plot(equity_df["date"], pf_ret, label=f"Top-{top_n} 予測比例", color="steelblue", linewidth=1.5)
+    ax1.plot(
+        equity_df["date"], pf_ret, label=f"Top-{top_n} 予測比例", color="steelblue", linewidth=1.5
+    )
     ax1.plot(
         equity_df["date"],
         ew_ret,
@@ -316,7 +318,9 @@ def plot_portfolio(
         plt.setp(ax3.xaxis.get_majorticklabels(), rotation=30, ha="right")
         ax3.grid(True, alpha=0.3, axis="y")
     else:
-        ax3.text(0.5, 0.5, "ターンオーバーデータなし", ha="center", va="center", transform=ax3.transAxes)
+        ax3.text(
+            0.5, 0.5, "ターンオーバーデータなし", ha="center", va="center", transform=ax3.transAxes
+        )
 
     # 指標サマリー
     info_parts = [
