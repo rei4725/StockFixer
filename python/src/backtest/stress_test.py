@@ -109,9 +109,7 @@ def run_stress_test_single(
         StressTestResult。失敗時は None。
     """
     if scenario_name not in STRESS_SCENARIOS:
-        logger.error(
-            f"[stress_test] 不明なシナリオ: {scenario_name}。対応シナリオ: {list(STRESS_SCENARIOS)}"
-        )
+        logger.error(f"[stress_test] 不明なシナリオ: {scenario_name}。対応シナリオ: {list(STRESS_SCENARIOS)}")
         return None
 
     scenario = STRESS_SCENARIOS[scenario_name]
