@@ -302,18 +302,22 @@ class TestRunWeeklyWalkForwardReport(unittest.TestCase):
 
     @patch("src.reporting.discord.discord_utils.send_walk_forward_report_completion")
     @patch("src.backtest.walk_forward_report.run_walk_forward_comparison_report")
-    def test_sends_completion_notification(self, mock_run, mock_send):
+    @patch("src.watchlist.batch_runner.load_target_symbols")
+    def test_sends_completion_notification(self, mock_symbols, mock_run, mock_send):
         from src.orchestration.scheduler import run_weekly_walk_forward_report
 
+        mock_symbols.return_value = []
         mock_run.return_value = {"success": 5, "failed": 1, "total": 6}
         run_weekly_walk_forward_report()
         mock_send.assert_called_once()
 
     @patch("src.reporting.discord.discord_utils.send_walk_forward_report_completion")
     @patch("src.backtest.walk_forward_report.run_walk_forward_comparison_report")
-    def test_exception_does_not_propagate(self, mock_run, mock_send):
+    @patch("src.watchlist.batch_runner.load_target_symbols")
+    def test_exception_does_not_propagate(self, mock_symbols, mock_run, mock_send):
         from src.orchestration.scheduler import run_weekly_walk_forward_report
 
+        mock_symbols.return_value = []
         mock_run.side_effect = Exception("レポートエラー")
         run_weekly_walk_forward_report()  # 例外が外に出ないこと
 
@@ -344,18 +348,22 @@ class TestRunWeeklyOptimization(unittest.TestCase):
 
     @patch("src.reporting.discord.discord_utils.send_optimization_completion")
     @patch("src.backtest.optimizer.run_optimize_batch")
-    def test_sends_completion_notification(self, mock_run, mock_send):
+    @patch("src.watchlist.batch_runner.load_target_symbols")
+    def test_sends_completion_notification(self, mock_symbols, mock_run, mock_send):
         from src.orchestration.scheduler import run_weekly_optimization
 
+        mock_symbols.return_value = []
         mock_run.return_value = [{"symbol": "7203", "status": "ok"}]
         run_weekly_optimization()
         mock_send.assert_called_once()
 
     @patch("src.reporting.discord.discord_utils.send_optimization_completion")
     @patch("src.backtest.optimizer.run_optimize_batch")
-    def test_exception_does_not_propagate(self, mock_run, mock_send):
+    @patch("src.watchlist.batch_runner.load_target_symbols")
+    def test_exception_does_not_propagate(self, mock_symbols, mock_run, mock_send):
         from src.orchestration.scheduler import run_weekly_optimization
 
+        mock_symbols.return_value = []
         mock_run.side_effect = Exception("最適化エラー")
         run_weekly_optimization()  # 例外が外に出ないこと
 

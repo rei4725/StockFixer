@@ -179,6 +179,7 @@ class TestRunWalkForwardComparisonReport:
         reports_dir = tmp_path / "backtest" / "walk_forward_reports"
         reports_dir.mkdir(parents=True, exist_ok=True)
 
+        tasks = [SymbolTask(market="jp", symbol="7203")]
         wf_df = pd.DataFrame(
             {
                 "total_return": [0.02],
@@ -189,7 +190,6 @@ class TestRunWalkForwardComparisonReport:
         )
 
         with (
-            patch("src.backtest.walk_forward_report.load_target_symbols") as mock_symbols,
             patch("src.backtest.walk_forward_report.run_backtest_walk_forward") as mock_wf,
             patch(
                 "src.backtest.walk_forward_report.get_results_dir",
@@ -200,42 +200,37 @@ class TestRunWalkForwardComparisonReport:
                 return_value=str(reports_dir),
             ),
         ):
-            mock_symbols.return_value = [SymbolTask(market="jp", symbol="7203")]
             mock_wf.return_value = (None, None, wf_df)
-
-            result = run_walk_forward_comparison_report(limit_symbols=1)
+            result = run_walk_forward_comparison_report(tasks, limit_symbols=1)
 
         mock_wf.assert_called_once()
-        mock_symbols.assert_called_once_with(as_of_date=None)
         assert result["total"] == 1
         assert result["failed"] == 0
 
-    def test_passes_as_of_date_to_symbol_loader(self, tmp_path):
-        """as_of_date が load_target_symbols に渡されること"""
+    def test_limit_symbols_slices_tasks(self, tmp_path):
+        """limit_symbols がタスクリストを切り詰めること"""
         from src.backtest.walk_forward_report import run_walk_forward_comparison_report
         from src.domain.types import SymbolTask
 
         reports_dir = tmp_path / "backtest" / "walk_forward_reports"
         reports_dir.mkdir(parents=True, exist_ok=True)
+
+        tasks = [
+            SymbolTask(market="jp", symbol="7203"),
+            SymbolTask(market="jp", symbol="9984"),
+            SymbolTask(market="jp", symbol="6758"),
+        ]
         wf_df = pd.DataFrame(
             {"total_return": [0.01], "sharpe_ratio": [1.0], "max_drawdown": [-0.02]}
         )
 
         with (
-            patch("src.backtest.walk_forward_report.load_target_symbols") as mock_symbols,
             patch("src.backtest.walk_forward_report.run_backtest_walk_forward") as mock_wf,
-            patch(
-                "src.backtest.walk_forward_report.get_results_dir",
-                return_value=str(tmp_path),
-            ),
-            patch(
-                "src.backtest.walk_forward_report.ensure_dir",
-                return_value=str(reports_dir),
-            ),
+            patch("src.backtest.walk_forward_report.get_results_dir", return_value=str(tmp_path)),
+            patch("src.backtest.walk_forward_report.ensure_dir", return_value=str(reports_dir)),
         ):
-            mock_symbols.return_value = [SymbolTask(market="us", symbol="AAPL")]
             mock_wf.return_value = (None, None, wf_df)
+            result = run_walk_forward_comparison_report(tasks, limit_symbols=1)
 
-            run_walk_forward_comparison_report(as_of_date="2025-06-30")
-
-        mock_symbols.assert_called_once_with(as_of_date="2025-06-30")
+        assert mock_wf.call_count == 1
+        assert result["total"] == 1

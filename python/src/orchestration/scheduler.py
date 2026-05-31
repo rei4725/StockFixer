@@ -543,11 +543,15 @@ def run_weekly_optimization():
 
     success, failed = 0, 0
     try:
+        from src.watchlist.batch_runner import load_target_symbols
+
+        tasks = load_target_symbols()
         if use_optuna:
             from src.backtest.optimizer import run_optuna_batch
 
             logger.info("最適化エンジン: Optuna (n_trials=%d)", n_trials)
             results = run_optuna_batch(
+                tasks,
                 model_type="XGBoostModel",
                 ensemble=False,
                 source="file",
@@ -561,6 +565,7 @@ def run_weekly_optimization():
 
             logger.info("最適化エンジン: グリッドサーチ")
             results = run_optimize_batch(
+                tasks,
                 model_type="XGBoostModel",
                 ensemble=False,
                 source="file",
@@ -594,8 +599,11 @@ def run_weekly_walk_forward_report():
     result: dict = {}
     try:
         from src.backtest.walk_forward_report import run_walk_forward_comparison_report
+        from src.watchlist.batch_runner import load_target_symbols
 
+        tasks = load_target_symbols()
         result = run_walk_forward_comparison_report(
+            tasks,
             model_type="XGBoostModel",
             source="file",
             n_splits=5,

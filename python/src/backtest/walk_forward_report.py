@@ -17,7 +17,6 @@ from src.backtest.pipeline import run_backtest_walk_forward
 from src.utils.data_path_utils import ensure_dir, get_results_dir
 from src.utils.db.experiment import generate_run_id, save_experiment_run
 from src.utils.logger import get_logger
-from src.watchlist.batch_runner import load_target_symbols
 
 logger = get_logger(__name__)
 
@@ -230,6 +229,7 @@ def _to_markdown_summary(comparison_df: pd.DataFrame, previous_path: Optional[Pa
 
 
 def run_walk_forward_comparison_report(
+    tasks: list,
     model_type: str = "XGBoostModel",
     source: str = "file",
     n_splits: int = 5,
@@ -239,15 +239,16 @@ def run_walk_forward_comparison_report(
     slippage: float = 0.0,
     ensemble: bool = False,
     limit_symbols: Optional[int] = None,
-    as_of_date: Optional[str] = None,
 ) -> dict[str, Any]:
     """
     標準条件で Walk-Forward 検証を全銘柄実行し、比較レポートを保存する。
 
+    tasks は呼び出し元（orchestration 等）で load_target_symbols() して渡す。
+
     Returns:
         保存先情報を含む辞書
     """
-    targets = load_target_symbols(as_of_date=as_of_date)
+    targets = list(tasks)
     if limit_symbols is not None:
         targets = targets[:limit_symbols]
 
