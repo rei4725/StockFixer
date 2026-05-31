@@ -50,6 +50,7 @@ def evaluate_positions() -> list[PositionAlert]:
     """
     import os
 
+    from src.infrastructure.yfinance_market_data_adapter import YFinanceMarketDataAdapter
     from src.prediction.db import load_latest_prediction_timestamp, load_prediction_results
     from src.trading.brokers.paper.paper_broker import PaperBroker
 
@@ -58,7 +59,7 @@ def evaluate_positions() -> list[PositionAlert]:
         logger.info("live モードのため引け前アラートをスキップ（kabuポジション未対応）")
         return []
 
-    broker = PaperBroker()
+    broker = PaperBroker(market_data_port=YFinanceMarketDataAdapter())
     positions = broker.get_positions()
     if not positions:
         logger.info("保有ポジションなし — 引け前アラートをスキップ")

@@ -78,16 +78,14 @@ def calibrate_alpha(con: duckdb.DuckDBPyConnection, min_samples: int = 10) -> fl
         推定 alpha 値
     """
     try:
-        rows = con.execute(
-            """
+        rows = con.execute("""
             SELECT signal_price, actual_price, side
             FROM paper_real_diff
             WHERE actual_price IS NOT NULL
               AND signal_price  IS NOT NULL
               AND signal_price  > 0
               AND actual_price  > 0
-            """
-        ).fetchall()
+            """).fetchall()
     except Exception as e:
         logger.warning("paper_real_diff 読み込み失敗、デフォルト alpha を使用: %s", e)
         return _DEFAULT_ALPHA
