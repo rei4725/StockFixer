@@ -8,13 +8,13 @@ import os
 
 import pandas as pd
 
+from src.domain.types import PredictionResult, ShapFeatureContribution, SignalSnapshot
 from src.orchestration.types import SchedulerJobStatus
 from src.prediction.db import (
     load_latest_prediction_timestamp,
     load_prediction_markets,
     load_prediction_results,
 )
-from src.prediction.types import PredictionResult, ShapFeatureContribution, SignalSnapshot
 from src.reporting.types import (
     MarketPredictionSnapshot,
     MonthlyReportSummary,
