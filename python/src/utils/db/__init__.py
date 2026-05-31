@@ -17,6 +17,25 @@ DuckDB データベースアクセスパッケージ
 import sys
 import types
 
+# --- prediction.db 後方互換 re-export (#338 で根本解消予定) ---
+from src.prediction.db import (  # noqa: F401
+    load_drift_summary,
+    load_excluded_features,
+    load_feature_exclusion_candidates,
+    load_latest_prediction_timestamp,
+    load_model_weights,
+    load_paper_real_diff_summary,
+    load_prediction_accuracy,
+    load_prediction_markets,
+    load_prediction_results,
+    load_weekly_accuracy_snapshots,
+    save_feature_selection,
+    save_model_metrics,
+    save_prediction_accuracy,
+    save_shap_values,
+    save_weekly_accuracy_snapshot,
+)
+
 # ---------------------------------------------------------------------------
 # テスト互換モジュールプロキシ
 #
@@ -68,25 +87,6 @@ from src.utils.db.stock_features import load_stock_features as load_stock_featur
 # --- system_config ---
 from src.utils.db.system_config import get_config_value  # noqa: F401
 from src.utils.db.system_config import set_config_value  # noqa: F401
-
-# --- prediction.db 後方互換 re-export (#338 で根本解消予定) ---
-from src.prediction.db import (  # noqa: F401
-    load_drift_summary,
-    load_excluded_features,
-    load_feature_exclusion_candidates,
-    load_latest_prediction_timestamp,
-    load_model_weights,
-    load_paper_real_diff_summary,
-    load_prediction_accuracy,
-    load_prediction_markets,
-    load_prediction_results,
-    save_feature_selection,
-    save_model_metrics,
-    save_prediction_accuracy,
-    save_shap_values,
-    save_weekly_accuracy_snapshot,
-    load_weekly_accuracy_snapshots,
-)
 
 
 class _DbPackageProxy(types.ModuleType):
