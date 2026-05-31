@@ -1,6 +1,6 @@
 """ユニットテスト: PipelineExecutor インターフェースと PipelineOrchestrator DI"""
 
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 

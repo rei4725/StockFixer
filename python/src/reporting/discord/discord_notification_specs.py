@@ -26,22 +26,16 @@ DAILY_ORDER_COMPLETION = NotificationSpec("✅ 自動発注完了", COLOR_INFO)
 DAILY_ORDER_STOPPED = NotificationSpec("⚠️ 自動発注停止", COLOR_WARNING)
 DAILY_SETTLE_COMPLETION = NotificationSpec("✅ 約定処理完了", COLOR_INFO)
 OPTIMIZATION_COMPLETION = NotificationSpec("✅ 週次バックテスト最適化完了", COLOR_SUCCESS)
-OPTIMIZATION_COMPLETION_WITH_ERRORS = NotificationSpec(
-    "✅ 週次バックテスト最適化完了", COLOR_CAUTION
-)
+OPTIMIZATION_COMPLETION_WITH_ERRORS = NotificationSpec("✅ 週次バックテスト最適化完了", COLOR_CAUTION)
 WALK_FORWARD_REPORT_COMPLETION = NotificationSpec("✅ Walk-Forward 比較レポート完了", COLOR_SUCCESS)
-WALK_FORWARD_REPORT_WITH_ERRORS = NotificationSpec(
-    "⚠️ Walk-Forward 比較レポート完了", COLOR_CAUTION
-)
+WALK_FORWARD_REPORT_WITH_ERRORS = NotificationSpec("⚠️ Walk-Forward 比較レポート完了", COLOR_CAUTION)
 DB_MAINTENANCE_COMPLETION = NotificationSpec("✅ DB メンテナンス完了", COLOR_SUCCESS)
 DB_MAINTENANCE_ERROR = NotificationSpec("❌ DB メンテナンス失敗", COLOR_ERROR)
 DB_BACKUP_COMPLETION = NotificationSpec("✅ DB バックアップ完了", COLOR_SUCCESS)
 DB_BACKUP_ERROR = NotificationSpec("❌ DB バックアップ失敗", COLOR_ERROR)
 MONTHLY_REPORT_COMPLETION = NotificationSpec("📊 月次レポート生成完了", COLOR_INFO)
 PRE_CLOSE_ALERT = NotificationSpec("📋 引け前ポジション再評価", COLOR_INFO)
-SHADOW_EVALUATION_CHALLENGER_WINS = NotificationSpec(
-    "🏆 A/Bテスト: Challenger 昇格候補", COLOR_WARNING
-)
+SHADOW_EVALUATION_CHALLENGER_WINS = NotificationSpec("🏆 A/Bテスト: Challenger 昇格候補", COLOR_WARNING)
 SHADOW_EVALUATION_NO_WINNER = NotificationSpec("ℹ️ A/Bテスト: 評価完了", COLOR_INFO)
 HIT_RATE_DRIFT_ALERT = NotificationSpec("⚠️ モデルドリフト検知: Hit Rate 低下", COLOR_WARNING)
 

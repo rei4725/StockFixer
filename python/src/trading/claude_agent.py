@@ -372,7 +372,8 @@ def _save_reasoning_log(run_id: str, market: str, thinking_text: str, summary: s
     """Extended thinking の推論ログを claude_reasoning テーブルに保存する。"""  # noqa: D401
     try:
         with _db_connection() as con:
-            con.execute("""
+            con.execute(
+                """
                 CREATE TABLE IF NOT EXISTS claude_reasoning (
                     run_id      VARCHAR PRIMARY KEY,
                     market      VARCHAR,
@@ -380,7 +381,8 @@ def _save_reasoning_log(run_id: str, market: str, thinking_text: str, summary: s
                     summary     TEXT,
                     created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
-                """)
+                """
+            )
             con.execute(
                 """
                 INSERT OR REPLACE INTO claude_reasoning (run_id, market, thinking, summary)
@@ -416,9 +418,7 @@ def run_claude_trader(
     try:
         import anthropic
     except ImportError:
-        raise ImportError(
-            "anthropic パッケージが必要です。`pip install anthropic>=0.50.0` を実行してください。"
-        )
+        raise ImportError("anthropic パッケージが必要です。`pip install anthropic>=0.50.0` を実行してください。")
 
     run_id = str(uuid.uuid4())[:12]
     logger.info(
