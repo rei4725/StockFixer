@@ -37,9 +37,7 @@ class OrRule:
         self.rules = rules
         self.threshold = threshold
         self.name = name or "or_" + "_".join(r.name for r in rules)
-        self.description = f"OR複合(閾値{threshold:.0%}): " + " | ".join(
-            r.description for r in rules
-        )
+        self.description = f"OR複合(閾値{threshold:.0%}): " + " | ".join(r.description for r in rules)
 
     def generate_signal(self, df: pd.DataFrame) -> pd.Series:
         signals = [r.generate_signal(df) for r in self.rules]

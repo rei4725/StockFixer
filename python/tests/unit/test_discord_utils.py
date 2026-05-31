@@ -465,7 +465,7 @@ class TestSendWeeklyReportExtra(unittest.TestCase):
         self.assertTrue(result)
         mock_send.assert_called()
 
-    @patch("src.utils.db.load_drift_summary")
+    @patch("src.prediction.db.load_drift_summary")
     def test_returns_false_when_accuracy_df_none_and_db_empty(self, mock_load):
         """accuracy_df=None かつ DB が空の場合は False が返ること"""
         from src.reporting.discord.discord_utils import send_weekly_report

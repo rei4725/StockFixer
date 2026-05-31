@@ -2,8 +2,6 @@
 
 import logging
 
-import pytest
-
 from src.domain.ports import AlertLevel, NotificationPort
 from src.infrastructure.in_memory import InMemoryNotificationAdapter, NullNotificationAdapter
 from src.infrastructure.log_notification_adapter import LogNotificationAdapter
@@ -107,7 +105,7 @@ class TestInMemoryNotificationAdapterSendAlert:
 
 class TestRunDailyOrdersNotifierDI:
     def test_notifier_send_alert_called_on_broker_error(self):
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import MagicMock
 
         from src.trading.brokers.base import BrokerBase, BrokerError
         from src.trading.execution import run_daily_orders
