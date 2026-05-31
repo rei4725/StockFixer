@@ -17,7 +17,6 @@ from typing import Any, Callable, Optional
 from zoneinfo import ZoneInfo
 
 from config.settings import settings
-
 from src.utils.data_path_utils import ensure_dir, get_results_dir
 from src.utils.japan_time import isoformat_utc
 
