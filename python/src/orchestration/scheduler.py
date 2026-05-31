@@ -1027,9 +1027,10 @@ def run_daily_rule_signals() -> None:
         from src.rule_engine.pipeline import run_rule_signal_pipeline
         from src.trading.rule_execution import execute_rule_paper_trades
 
-        signals = run_rule_signal_pipeline(market=market)
+        market_data_adapter = YFinanceMarketDataAdapter()
+        signals = run_rule_signal_pipeline(market=market, market_data_port=market_data_adapter)
         trade_stats = execute_rule_paper_trades(
-            signals=signals, market=market, market_data_port=YFinanceMarketDataAdapter()
+            signals=signals, market=market, market_data_port=market_data_adapter
         )
         logger.info(
             "=== 日次ルールシグナル完了: BUY=%s SELL=%s ===",

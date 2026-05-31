@@ -287,7 +287,7 @@ class TestSignalGenerator(unittest.TestCase):
 class TestSignalGeneratorOptimalParamsAutoLoad(unittest.TestCase):
     """SignalGenerator.__init__ が optimal_params.json を自動ロードするテスト"""
 
-    _MOCK_TARGET = "src.trading.signal_generator.get_optimal_params"
+    _MOCK_TARGET = "src.utils.signal_generator.get_optimal_params"
 
     def test_threshold_loaded_from_json_when_market_symbol_given(self):
         """market/symbol を指定すると JSON の threshold が base_threshold に反映される"""

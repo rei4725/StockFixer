@@ -1,15 +1,16 @@
 from __future__ import annotations
 
-from typing import Optional
-
 import numpy as np
 import pandas as pd
 
-from config.settings import VOLUME_FILTER_MULTIPLIER, VOLUME_FILTER_WINDOW_DAYS
 from src.domain.trading_rules import CONFLUENCE_BOOST_PER_HORIZON as _CONFLUENCE_BOOST_PER_HORIZON
 from src.domain.trading_rules import DEFAULT_HORIZON_WEIGHTS as _DEFAULT_HORIZON_WEIGHTS
 from src.utils.logger import get_logger
-from src.utils.optimal_params_loader import get_optimal_params
+from src.utils.regime_weights import REGIME_SECTOR_WEIGHTS as REGIME_SECTOR_WEIGHTS  # noqa: F401
+from src.utils.regime_weights import (  # noqa: F401
+    get_regime_sector_weight as get_regime_sector_weight,
+)
+from src.utils.signal_generator import SignalGenerator as SignalGenerator  # noqa: F401
 
 logger = get_logger(__name__)
 
@@ -116,95 +117,6 @@ def _opt_int(row: pd.Series, col: str) -> int | None:
         return None
 
 
-class SignalGenerator:
-    def __init__(
-        self,
-        base_threshold: float = 0.005,
-        market: Optional[str] = None,
-        symbol: Optional[str] = None,
-    ):
-        """
-        Args:
-            base_threshold: 基準シグナル閾値（デフォルト ±0.5%）。
-                            rolling_std が渡された場合はボラ比率で動的スケーリングされる。
-            market: マーケット識別子（例: "jp", "us"）。
-                    symbol と合わせて指定すると optimal_params.json から threshold を自動ロードする。
-            symbol: 銘柄シンボル（例: "7203", "AAPL"）。
-        """
-        if market is not None and symbol is not None:
-            params = get_optimal_params(market, symbol)
-            if params is not None and "threshold" in params:
-                self.base_threshold = float(params["threshold"])
-                logger.debug(
-                    f"[{market}_{symbol}] optimal_params.json から threshold を自動ロード: "
-                    f"{self.base_threshold}"
-                )
-            else:
-                logger.warning(
-                    f"[{market}_{symbol}] optimal_params.json が見つからないか threshold が未設定のため "
-                    f"デフォルト値 {base_threshold} を使用します"
-                )
-                self.base_threshold = base_threshold
-        else:
-            self.base_threshold = base_threshold
-
-    def generate_signal(
-        self,
-        data: pd.DataFrame,
-        prediction: pd.Series,
-        rolling_std: pd.Series = None,
-    ) -> pd.Series:
-        """
-        テクニカル分析の結果とAI予測結果に基づいて売買シグナルを生成します。
-
-        Args:
-            data (pd.DataFrame): テクニカル分析の結果を含むデータフレーム。
-                                 例: RSI, MACD, EMAなどの指標。
-            prediction (pd.Series): AIモデルによる株価予測結果。
-            rolling_std (pd.Series, optional): 予測値の直近ローリング標準偏差。
-                渡された場合、閾値を `base_threshold * (rolling_std / avg_std)` で
-                ボラティリティ連動補正する。None の場合は固定閾値を使用する。
-
-        Returns:
-            pd.Series: 各時点での売買シグナル ('Buy', 'Sell', 'Hold') 。
-        """
-        signals = pd.Series("Hold", index=data.index)
-
-        # 動的閾値の計算
-        if rolling_std is not None and len(rolling_std.dropna()) > 0:
-            avg_std = rolling_std.mean()
-            if avg_std > 0:
-                vol_ratio = rolling_std / avg_std
-                threshold = self.base_threshold * vol_ratio
-            else:
-                threshold = pd.Series(self.base_threshold, index=data.index)
-        else:
-            threshold = pd.Series(self.base_threshold, index=data.index)
-
-        # 予測値が閾値を超えた場合に Buy/Sell シグナルを生成
-        buy_condition = prediction > threshold
-        sell_condition = prediction < -threshold
-
-        signals.loc[buy_condition] = "Buy"
-        signals.loc[sell_condition] = "Sell"
-
-        # RSI判定（テスト用にカラム名を'RSI'に統一）
-        if "RSI" in data.columns:
-            # RSI極値でHoldゾーンを拡張:
-            # 売られすぎ(RSI<30) かつ Hold なら Buy（底値拾い買いシグナル）
-            # 買われすぎ(RSI>70) かつ Hold なら Sell（高値売りシグナル）
-            signals.loc[(data["RSI"] < 30) & (signals == "Hold")] = "Buy"
-            signals.loc[(data["RSI"] > 70) & (signals == "Hold")] = "Sell"
-
-        # 出来高フィルター: 直近20日平均の1.5倍未満の場合はBuy→Hold
-        if "Volume" in data.columns:
-            avg_volume = data["Volume"].rolling(VOLUME_FILTER_WINDOW_DAYS, min_periods=1).mean()
-            low_volume = data["Volume"] < avg_volume * VOLUME_FILTER_MULTIPLIER
-            signals.loc[low_volume & (signals == "Buy")] = "Hold"
-
-        return signals
-
-
 # ---------------------------------------------------------------------------
 # I-256: 決算・イベントカレンダーフィルター
 # ---------------------------------------------------------------------------
@@ -246,53 +158,6 @@ def filter_event_signals(
                 break
 
     return result
-
-
-# ---------------------------------------------------------------------------
-# R-305: セクターローテーション戦略
-# ---------------------------------------------------------------------------
-
-REGIME_SECTOR_WEIGHTS: dict[str, dict[str, float]] = {
-    "bull": {
-        "Technology": 2.0,
-        "Consumer Cyclical": 1.8,
-        "Industrials": 1.5,
-        "Communication Services": 1.3,
-        "Financial Services": 1.2,
-    },
-    "bear": {
-        "Healthcare": 2.0,
-        "Utilities": 2.0,
-        "Consumer Defensive": 1.8,
-        "Energy": 1.3,
-        "Basic Materials": 1.2,
-    },
-    "range": {},
-}
-
-_BULL_DEFAULT_SECTOR_WEIGHT: float = 0.7
-_BEAR_DEFAULT_SECTOR_WEIGHT: float = 0.5
-_RANGE_DEFAULT_SECTOR_WEIGHT: float = 1.0
-
-
-def get_regime_sector_weight(regime: str, sector: str) -> float:
-    """
-    市場レジームとセクターに応じた配分ウェイト乗数を返す。
-
-    bull: モメンタム系セクター集中、非対象セクターは抑制
-    bear: ディフェンシブ系セクター優先、非対象セクターは抑制
-    range: 全セクター均等（乗数 1.0）
-    """
-    weights_map = REGIME_SECTOR_WEIGHTS.get(regime, {})
-    if not weights_map:
-        return _RANGE_DEFAULT_SECTOR_WEIGHT
-    if sector in weights_map:
-        return weights_map[sector]
-    if regime == "bull":
-        return _BULL_DEFAULT_SECTOR_WEIGHT
-    if regime == "bear":
-        return _BEAR_DEFAULT_SECTOR_WEIGHT
-    return _RANGE_DEFAULT_SECTOR_WEIGHT
 
 
 if __name__ == "__main__":
