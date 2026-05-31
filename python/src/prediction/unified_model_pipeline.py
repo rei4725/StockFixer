@@ -9,14 +9,14 @@ from datetime import datetime
 from typing import Tuple
 
 import pandas as pd
+from sklearn.inspection import permutation_importance
+
 from config.settings import (
     EARNINGS_MASK_WINDOW_DAYS,
     FEATURE_SELECTION_DROP_RATIO,
     FEATURE_SELECTION_MIN_FEATURES,
     PERMUTATION_IMPORTANCE_REPEATS,
 )
-from sklearn.inspection import permutation_importance
-
 from src.market_data.loader import get_earnings_dates
 from src.market_data.technical import add_earnings_flag
 from src.prediction.db import load_excluded_features, save_feature_selection

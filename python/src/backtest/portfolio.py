@@ -24,8 +24,8 @@ from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
-from config.settings import MAX_SECTOR_POSITIONS
 
+from config.settings import MAX_SECTOR_POSITIONS
 from src.market_data.market_regime import get_market_regime
 from src.trading.signal_generator import get_regime_sector_weight
 from src.utils.logger import get_logger

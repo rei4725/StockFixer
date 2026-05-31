@@ -4,8 +4,8 @@ from typing import Optional
 
 import numpy as np
 import pandas as pd
-from config.settings import VOLUME_FILTER_MULTIPLIER, VOLUME_FILTER_WINDOW_DAYS
 
+from config.settings import VOLUME_FILTER_MULTIPLIER, VOLUME_FILTER_WINDOW_DAYS
 from src.domain.trading_rules import CONFLUENCE_BOOST_PER_HORIZON as _CONFLUENCE_BOOST_PER_HORIZON
 from src.domain.trading_rules import DEFAULT_HORIZON_WEIGHTS as _DEFAULT_HORIZON_WEIGHTS
 from src.utils.logger import get_logger
