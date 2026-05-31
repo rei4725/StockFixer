@@ -35,7 +35,8 @@ def _build_broker(mode: str):
         api_password = os.environ.get("KABU_API_PASSWORD")
         if not api_password:
             logger.critical(
-                "live モードには環境変数 KABU_API_PASSWORD が必要です。" "kabu STATION® アプリを起動した上で設定してください。"
+                "live モードには環境変数 KABU_API_PASSWORD が必要です。"
+                "kabu STATION® アプリを起動した上で設定してください。"
             )
             sys.exit(1)
         return KabuBroker(api_password=api_password)

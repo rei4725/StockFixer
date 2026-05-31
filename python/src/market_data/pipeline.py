@@ -165,7 +165,9 @@ def fetch_stock_data_with_features(
         for col in additional_macro.columns:
             if col in df.columns:
                 df[col] = df[col].ffill().bfill()
-        logger.debug("追加マクロ特徴量を付与: %s (%s/%s)", list(additional_macro.columns), market, symbol)
+        logger.debug(
+            "追加マクロ特徴量を付与: %s (%s/%s)", list(additional_macro.columns), market, symbol
+        )
 
     # 派生マクロ指標を追加（VIX MA / スパイクフラグ / 利回りモメンタム等）
     df = add_macro_derived_features(df)
@@ -187,7 +189,9 @@ def fetch_stock_data_with_features(
     # 行数不足チェック（TA指標の最大ウィンドウ26 + ラグ5 + ターゲット1 = 実用最低30行）
     _MIN_ROWS = 30
     if len(df) < _MIN_ROWS:
-        logger.warning(f"特徴量生成をスキップ: {market}/{symbol} " f"（{len(df)}行 < 最低{_MIN_ROWS}行）")
+        logger.warning(
+            f"特徴量生成をスキップ: {market}/{symbol} " f"（{len(df)}行 < 最低{_MIN_ROWS}行）"
+        )
         return None
 
     logger.info(f"特徴量生成（全数値列ラグ特徴量）... {market}/{symbol} ({len(df)}行)")
@@ -197,7 +201,9 @@ def fetch_stock_data_with_features(
         nan_cols = df.isnull().sum()
         nan_cols = nan_cols[nan_cols > 0]
         detail = f"NaN残存列: {nan_cols.to_dict()}" if not nan_cols.empty else "NaN列なし"
-        logger.warning(f"特徴量生成に失敗しました: {market}/{symbol} " f"（元データ {len(df)}行, {detail}）")
+        logger.warning(
+            f"特徴量生成に失敗しました: {market}/{symbol} " f"（元データ {len(df)}行, {detail}）"
+        )
         return None
 
     # 特徴量名の正規化
