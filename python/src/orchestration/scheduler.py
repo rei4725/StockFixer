@@ -895,18 +895,21 @@ def run_pre_close_alert() -> None:
 
     logger.info("=== 引け前ポジション再評価アラート開始 ===")
     try:
-        from src.trading.pre_close_alert_service import evaluate_positions
+        from src.trading.pre_close_alert_service import get_pre_close_alerts
 
-        alerts = evaluate_positions()
-        logger.info("引け前アラート評価完了: %d件", len(alerts))
+        lines = get_pre_close_alerts()
+        logger.info("引け前アラート評価完了: %d行", len(lines))
     except Exception as e:
         logger.error("引け前アラート評価失敗: %s", e, exc_info=True)
         raise
 
     try:
-        from src.reporting.discord.discord_utils import send_pre_close_alert
+        from src.reporting.discord.discord_notification_specs import PRE_CLOSE_ALERT
+        from src.reporting.discord.discord_utils import send_webhook_notification
 
-        send_pre_close_alert(alerts)
+        send_webhook_notification(
+            PRE_CLOSE_ALERT.title, "\n".join(lines), color=PRE_CLOSE_ALERT.color
+        )
         logger.info("=== 引け前ポジション再評価アラート送信完了 ===")
     except Exception as e:
         logger.error("引け前アラート通知失敗: %s", e, exc_info=True)

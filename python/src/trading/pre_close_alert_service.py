@@ -122,3 +122,60 @@ def evaluate_positions() -> list[PositionAlert]:
         sum(1 for a in alerts if a.alert_type == AlertType.HOLD),
     )
     return alerts
+
+
+def get_pre_close_alerts() -> list[str]:
+    """evaluate_positions() の結果をフォーマット済み文字列リストで返す。"""
+    from src.utils.japan_time import format_jst
+
+    MINUTE_FORMAT = "%Y-%m-%d %H:%M JST"
+    now = format_jst(fmt=MINUTE_FORMAT)
+
+    alerts = evaluate_positions()
+
+    if not alerts:
+        return [f"時刻: {now}", "保有ポジションなし"]
+
+    stop_loss = [a for a in alerts if a.alert_type == AlertType.STOP_LOSS]
+    take_profit = [a for a in alerts if a.alert_type == AlertType.TAKE_PROFIT]
+    hold = [a for a in alerts if a.alert_type == AlertType.HOLD]
+
+    lines = [
+        f"**[引け前ポジション再評価] {now}**",
+        f"保有: {len(alerts)}銘柄  |  損切り: {len(stop_loss)}  利確: {len(take_profit)}  保有継続: {len(hold)}",
+        "",
+    ]
+
+    if stop_loss:
+        lines.append("🔴 **損切り推奨（SL接近）**")
+        for a in stop_loss:
+            lines.append(
+                f"  • `{a.symbol}` "
+                f"現在値={a.current_price:,.0f}円 "
+                f"予測={a.avg_pred_price:,.0f}円({a.diff_ratio:+.1%}) "
+                f"含み損益={a.unrealized_pnl:+,.0f}円"
+            )
+
+    if take_profit:
+        lines.append("")
+        lines.append("🟡 **利確推奨（目標値超）**")
+        for a in take_profit:
+            lines.append(
+                f"  • `{a.symbol}` "
+                f"現在値={a.current_price:,.0f}円 "
+                f"予測={a.avg_pred_price:,.0f}円({a.diff_ratio:+.1%}) "
+                f"含み益={a.unrealized_pnl:+,.0f}円({a.hold_pnl_ratio:+.1%})"
+            )
+
+    if hold:
+        lines.append("")
+        lines.append("🟢 **保有継続**")
+        for a in hold:
+            lines.append(
+                f"  • `{a.symbol}` "
+                f"現在値={a.current_price:,.0f}円 "
+                f"予測={a.avg_pred_price:,.0f}円({a.diff_ratio:+.1%}) "
+                f"含み損益={a.unrealized_pnl:+,.0f}円"
+            )
+
+    return lines
