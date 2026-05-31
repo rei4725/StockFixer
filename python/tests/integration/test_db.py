@@ -10,6 +10,12 @@ import pandas as pd
 
 import src.utils.data_path_utils as path_utils
 import src.utils.db as db_module
+from src.prediction.db import (
+    load_latest_prediction_timestamp,
+    load_prediction_markets,
+    load_prediction_results,
+    save_prediction_results,
+)
 from src.prediction.types import PredictionResult
 
 
@@ -156,17 +162,17 @@ class TestDB(unittest.TestCase):
             ),
         ]
 
-        db_module.save_prediction_results("20260228_120000", results)
+        save_prediction_results("20260228_120000", results)
 
-        loaded = db_module.load_prediction_results("20260228_120000")
+        loaded = load_prediction_results("20260228_120000")
         self.assertEqual(len(loaded), 2)
 
         # top_n/worst_nフィルタ
-        loaded_top = db_module.load_prediction_results("20260228_120000", top_n=1)
+        loaded_top = load_prediction_results("20260228_120000", top_n=1)
         self.assertEqual(len(loaded_top), 1)
         self.assertEqual(loaded_top["symbol"].iloc[0], "AAPL")  # diff_ratio降順で1位
 
-        loaded_worst = db_module.load_prediction_results("20260228_120000", worst_n=1)
+        loaded_worst = load_prediction_results("20260228_120000", worst_n=1)
         self.assertEqual(len(loaded_worst), 1)
         self.assertEqual(loaded_worst["symbol"].iloc[0], "GOOG")  # diff_ratio昇順で1位
 
@@ -193,12 +199,12 @@ class TestDB(unittest.TestCase):
             )
         ]
 
-        db_module.save_prediction_results("20260101_100000", result_aapl)
-        db_module.save_prediction_results("20260228_120000", result_aapl)
+        save_prediction_results("20260101_100000", result_aapl)
+        save_prediction_results("20260228_120000", result_aapl)
         # 同じ銘柄(AAPL)への2回目のinsertはDelete-Insertで上書き
-        db_module.save_prediction_results("20260115_080000", result_msft)
+        save_prediction_results("20260115_080000", result_msft)
 
-        latest = db_module.load_latest_prediction_timestamp()
+        latest = load_latest_prediction_timestamp()
         self.assertEqual(latest, "20260228_120000")
 
     def test_load_prediction_results_latest_default(self):
@@ -224,10 +230,10 @@ class TestDB(unittest.TestCase):
             )
         ]
 
-        db_module.save_prediction_results("20260101_100000", results_aapl)
-        db_module.save_prediction_results("20260228_120000", results_goog)
+        save_prediction_results("20260101_100000", results_aapl)
+        save_prediction_results("20260228_120000", results_goog)
 
-        loaded = db_module.load_prediction_results()
+        loaded = load_prediction_results()
         self.assertEqual(len(loaded), 1)
         self.assertEqual(loaded["symbol"].iloc[0], "GOOG")
 
@@ -252,9 +258,9 @@ class TestDB(unittest.TestCase):
             ),
         ]
 
-        db_module.save_prediction_results("20260228_120000", results)
+        save_prediction_results("20260228_120000", results)
 
-        markets = db_module.load_prediction_markets("20260228_120000")
+        markets = load_prediction_markets("20260228_120000")
         self.assertEqual(sorted(markets), ["jp", "us"])
 
     def test_dynamic_column_addition(self):

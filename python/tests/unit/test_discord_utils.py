@@ -1,4 +1,4 @@
-﻿"""ユニットテスト: discord_utils"""
+"""ユニットテスト: discord_utils"""
 
 import unittest
 from unittest.mock import MagicMock, mock_open, patch

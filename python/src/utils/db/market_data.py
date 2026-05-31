@@ -56,16 +56,14 @@ def upsert_raw_ohlcv(rows: list[dict]) -> int:
 
     with _db_connection() as con:
         con.register("_raw_ohlcv_temp", df)
-        con.execute(
-            """
+        con.execute("""
             INSERT OR REPLACE INTO market_data_raw
                 (market, symbol, ticker, timeframe, ts,
                  open, high, low, close, volume, adj_close, source, ingested_at)
             SELECT market, symbol, ticker, timeframe, ts,
                    open, high, low, close, volume, adj_close, source, ingested_at
             FROM _raw_ohlcv_temp
-            """
-        )
+            """)
     n = len(df)
     logger.info(
         f"DB保存完了: market_data_raw "

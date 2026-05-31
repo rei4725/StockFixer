@@ -274,7 +274,7 @@ class TestPrintSummary(unittest.TestCase):
             skipped=skipped or [],
         )
 
-    @patch("src.watchlist.batch_runner.send_webhook_notification", create=True)
+    @patch("src.reporting.discord.discord_utils.send_webhook_notification")
     def test_runs_without_error_on_mixed_results(self, _mock_notify):
         """成功/エラー/スキップ混在でエラーなく実行されること"""
         batch = self._make_batch(
@@ -298,7 +298,7 @@ class TestPrintSummary(unittest.TestCase):
         """空の BatchResult でもエラーなく実行されること"""
         print_summary("空処理", self._make_batch())
 
-    @patch("src.watchlist.batch_runner.send_webhook_notification", create=True)
+    @patch("src.reporting.discord.discord_utils.send_webhook_notification")
     def test_runs_without_error_on_all_errors(self, _mock_notify):
         """全エラーでもエラーなく実行されること"""
         batch = self._make_batch(

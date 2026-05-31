@@ -624,7 +624,9 @@ def run_optimize_batch(
             summary.append({"market": market, "symbol": symbol, "status": "error", "error": str(e)})
             error_count += 1
 
-    logger.info(f"全銘柄最適化バッチ完了: 成功={success_count} / スキップ={skip_count} / エラー={error_count}")
+    logger.info(
+        f"全銘柄最適化バッチ完了: 成功={success_count} / スキップ={skip_count} / エラー={error_count}"
+    )
     return summary
 
 
@@ -747,7 +749,9 @@ def run_optuna_batch(
         logger.warning("対象銘柄がありません。")
         return []
 
-    logger.info(f"Optunaバッチ最適化開始: {len(symbols)}銘柄 / n_trials={n_trials} / 並列={max_workers}")
+    logger.info(
+        f"Optunaバッチ最適化開始: {len(symbols)}銘柄 / n_trials={n_trials} / 並列={max_workers}"
+    )
 
     def _task(task: Any) -> dict[str, Any]:
         m = getattr(task, "market", None) or task["market"]

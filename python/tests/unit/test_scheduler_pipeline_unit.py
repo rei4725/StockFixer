@@ -1,4 +1,4 @@
-﻿"""ユニットテスト: scheduler_pipeline の自動発注連携"""
+"""ユニットテスト: scheduler_pipeline の自動発注連携"""
 
 import sys
 import unittest
