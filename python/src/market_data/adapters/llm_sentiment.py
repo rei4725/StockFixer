@@ -69,6 +69,8 @@ class OllamaClient:
             return None
 
         combined = "\n".join(f"- {t}" for t in texts if t)
+        if not combined:
+            return None
         prompt = _SCORE_PROMPT.format(texts=combined)
 
         try:
