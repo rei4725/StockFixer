@@ -390,12 +390,12 @@ def run_accuracy_check(
     Returns:
         pd.DataFrame: 今回採点した行のサマリー
     """
-    from src.utils.db import (
+    from src.prediction.db import (
         load_drift_summary,
         load_prediction_results,
-        load_raw_ohlcv,
         save_prediction_accuracy,
     )
+    from src.utils.db import load_raw_ohlcv
 
     logger.info(
         f"=== 予測精度チェック開始 (horizon={horizon}, model_name={model_name}, "

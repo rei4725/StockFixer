@@ -35,8 +35,12 @@ bandit-report/
 python/.pytest_tmp/
 python/.pytest_tmp_runs/
 
-# AI tool settings (local only)
-.claude/
+# AI tool settings (local only — skills/agents は git 管理)
+.claude/*
+!.claude/skills
+!.claude/skills/**
+!.claude/agents
+!.claude/agents/**
 claude起動.bat
 
 # Patch artifacts

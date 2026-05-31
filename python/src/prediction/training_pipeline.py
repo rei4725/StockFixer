@@ -4,7 +4,6 @@
 指定した銘柄のデータを使い、XGBoost・LightGBMモデルを学習・保存する
 """
 
-import os
 import re
 from datetime import datetime
 
@@ -21,18 +20,15 @@ from sklearn.inspection import permutation_importance
 
 from src.market_data.loader import get_earnings_dates
 from src.market_data.technical import add_earnings_flag
-from src.prediction.manager import ModelManager
-from src.prediction.types import FeatureLoadResult, TrainingMetrics
-from src.utils.data_path_utils import get_models_subdir
-from src.utils.db import (
-    generate_run_id,
+from src.prediction.db import (
     load_excluded_features,
-    load_stock_features,
-    save_experiment_run,
     save_feature_selection,
     save_model_metrics,
     save_shap_values,
 )
+from src.prediction.manager import ModelManager
+from src.prediction.types import FeatureLoadResult, TrainingMetrics
+from src.utils.db import generate_run_id, load_stock_features, save_experiment_run
 from src.utils.logger import get_logger
 from src.watchlist.batch_runner import load_target_symbols
 
@@ -184,50 +180,6 @@ def load_features_for_training(market: str, symbol: str, horizon: int = 1) -> Fe
     except Exception as e:
         logger.error(f"[データ読み込みエラー] {market}/{symbol}: {e}", exc_info=True)
         return FeatureLoadResult(status="error", market=market, symbol=symbol, error=str(e))
-
-
-def _log_to_mlflow(
-    *,
-    market: str,
-    symbol: str,
-    model_name: str,
-    model_type: str,
-    horizon: int,
-    mode_label: str,
-    run_id: str,
-    metrics: "TrainingMetrics | None",
-    model_path: "str | None",
-    hyperparams: "dict | None",
-) -> None:
-    """学習実験を MLflow に記録する。失敗しても例外を伝播させない。"""
-    try:
-        import mlflow
-
-        mlflow.set_experiment(f"StockFixer/{market}")
-        with mlflow.start_run(run_name=f"{symbol}_{model_type}"):
-            params: dict = {
-                "market": market,
-                "symbol": symbol,
-                "horizon": str(horizon),
-                "model_type": model_type,
-                "mode": mode_label,
-            }
-            if hyperparams:
-                params.update({f"hp_{k}": str(v) for k, v in list(hyperparams.items())[:20]})
-            mlflow.log_params(params)
-            if metrics:
-                mlflow.log_metrics(
-                    {
-                        "rmse": metrics.rmse,
-                        "directional_accuracy": metrics.directional_accuracy,
-                        "n_samples": float(metrics.n_samples),
-                    }
-                )
-            mlflow.set_tag("db_run_id", run_id)
-            if model_path and os.path.exists(model_path):
-                mlflow.log_artifact(model_path)
-    except Exception as e:
-        logger.debug("MLflow記録スキップ [%s/%s/%s]: %s", market, symbol, model_name, e)
 
 
 def _compute_training_metrics(y_true: pd.Series, y_pred: pd.Series) -> TrainingMetrics:
@@ -446,9 +398,7 @@ def train_models_for_symbol(
                     f"方向正解率={saved_metrics.directional_accuracy:.2%} (OOS)"
                 )
             except Exception as e:
-                logger.warning(
-                    f"精度指標保存スキップ [{market}_{symbol}/{model_name}]: {e}", exc_info=True
-                )
+                logger.warning(f"精度指標保存スキップ [{market}_{symbol}/{model_name}]: {e}", exc_info=True)
             # 実験ランを experiment_runs テーブルへ記録
             try:
                 save_experiment_run(
@@ -467,27 +417,7 @@ def train_models_for_symbol(
                     params={"role": mode_label},
                 )
             except Exception as e:
-                logger.warning(
-                    f"実験ラン保存スキップ [{market}_{symbol}/{model_name}]: {e}", exc_info=True
-                )
-            # MLflow 実験トラッキング
-            hyperparams: dict | None = None
-            try:
-                hyperparams = model_manager.get_model(model_name).model.get_params()
-            except Exception:
-                pass
-            _log_to_mlflow(
-                market=market,
-                symbol=symbol,
-                model_name=model_name,
-                model_type=model_type,
-                horizon=horizon,
-                mode_label=mode_label,
-                run_id=run_id,
-                metrics=saved_metrics,
-                model_path=os.path.join(get_models_subdir(market, symbol), f"{model_name}.joblib"),
-                hyperparams=hyperparams,
-            )
+                logger.warning(f"実験ラン保存スキップ [{market}_{symbol}/{model_name}]: {e}", exc_info=True)
             # SHAP特徴量寄与の計算・保存
             try:
                 model = model_manager.get_model(model_name)

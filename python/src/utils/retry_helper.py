@@ -83,13 +83,11 @@ def with_retry(
 
             if is_rate_limit:
                 logger.warning(
-                    f"[レート制限] 検出されました。{wait_time:.1f}秒待機後にリトライします... "
-                    f"({attempt}/{max_retries})"
+                    f"[レート制限] 検出されました。{wait_time:.1f}秒待機後にリトライします... " f"({attempt}/{max_retries})"
                 )
             else:
                 logger.warning(
-                    f"[ネットワークエラー] {wait_time:.1f}秒待機後にリトライします... "
-                    f"({attempt}/{max_retries})"
+                    f"[ネットワークエラー] {wait_time:.1f}秒待機後にリトライします... " f"({attempt}/{max_retries})"
                 )
 
             # カウントダウン表示（5秒以上の場合）

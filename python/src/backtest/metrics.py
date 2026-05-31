@@ -296,9 +296,7 @@ def plot_backtest(
         import matplotlib.dates as mdates
         import matplotlib.pyplot as plt
     except ImportError:
-        raise ImportError(
-            "matplotlib がインストールされていません。`pip install matplotlib` を実行してください。"
-        )
+        raise ImportError("matplotlib がインストールされていません。`pip install matplotlib` を実行してください。")
 
     if trade_log is None or trade_log.empty:
         return ""
@@ -335,9 +333,7 @@ def plot_backtest(
 
     # --- プロット ---
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
-    title = (
-        f"{market.upper()}/{symbol} バックテスト結果" if market or symbol else "バックテスト結果"
-    )
+    title = f"{market.upper()}/{symbol} バックテスト結果" if market or symbol else "バックテスト結果"
     fig.suptitle(title, fontsize=14)
 
     # 上段: 累積リターン曲線

@@ -157,7 +157,6 @@ class TestGeneratePairSignals(unittest.TestCase):
         self.assertIn("position_b", signals.columns)
 
     def test_positions_are_opposite(self):
-        rng = np.random.default_rng(0)
         t = np.linspace(0, 4 * np.pi, 200)
         spread = pd.Series(np.sin(t) * 3)
         signals = generate_pair_signals(spread, entry_z=1.5, exit_z=0.3, window=10)

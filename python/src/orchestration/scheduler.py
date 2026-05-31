@@ -288,12 +288,12 @@ def run_weekly_report():
     try:
         from datetime import date, timedelta
 
-        from src.reporting.discord.discord_utils import send_weekly_report
-        from src.utils.db import (
+        from src.prediction.db import (
             load_drift_summary,
             load_paper_real_diff_summary,
             save_weekly_accuracy_snapshot,
         )
+        from src.reporting.discord.discord_utils import send_weekly_report
 
         summary = load_drift_summary(horizon=1)
 
@@ -736,7 +736,7 @@ def run_daily_drift_check():
     """
     import os
 
-    from src.utils.db import load_drift_summary
+    from src.prediction.db import load_drift_summary
     from src.utils.db.system_config import get_config_value
 
     _mae_default = os.environ.get("DRIFT_MAE_THRESHOLD", "0.02")
@@ -812,8 +812,8 @@ def run_daily_drift_check():
     # 特徴量除外提案通知（再学習成功銘柄の最新 Permutation Importance を通知）
     if retrained_symbols:
         try:
+            from src.prediction.db import load_feature_exclusion_candidates
             from src.reporting.discord.discord_utils import send_feature_suggestion_notification
-            from src.utils.db import load_feature_exclusion_candidates
 
             feature_suggestions = []
             for sym in retrained_symbols:

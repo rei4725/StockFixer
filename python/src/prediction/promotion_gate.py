@@ -184,33 +184,6 @@ def _collect_run_ids(shadow_model: str, current_model: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def _log_promotion_to_mlflow(result: PromotionResult) -> None:
-    """昇格判定結果を MLflow に記録する。失敗しても例外を伝播させない。"""
-    try:
-        import mlflow
-
-        mlflow.set_experiment("StockFixer/promotion")
-        with mlflow.start_run(run_name=f"promotion_{result.evaluated_at}"):
-            mlflow.set_tags(
-                {
-                    "shadow_model": result.shadow_model,
-                    "current_model": result.current_model,
-                    "eligible": str(result.eligible),
-                    "reason": result.reason,
-                    "require_manual_approval": str(result.require_manual_approval),
-                }
-            )
-            for criterion_name, criterion_data in result.criteria.items():
-                mlflow.log_metric(
-                    f"{criterion_name}_passed",
-                    float(criterion_data.get("passed", False)),
-                )
-            if result.run_ids:
-                mlflow.set_tag("db_run_ids", ",".join(result.run_ids[:5]))
-    except Exception as e:
-        logger.debug("MLflow昇格記録スキップ: %s", e)
-
-
 def evaluate_promotion(
     shadow_model_name: str,
     current_model_name: str,
@@ -386,7 +359,6 @@ def evaluate_promotion(
         f"net_return={net_return_passed} mdd={mdd_passed} "
         f"sharpe={sharpe_passed} hit_rate={hit_rate_passed} slippage={slippage_passed}"
     )
-    _log_promotion_to_mlflow(result)
     return result
 
 

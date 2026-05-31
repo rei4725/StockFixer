@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from src.watchlist.batch_runner import load_target_symbols, print_summary, run_parallel
+from src.watchlist.types import BatchFailure, BatchResult
 
 
 class TestLoadTargetSymbols(unittest.TestCase):
@@ -92,12 +93,11 @@ class TestPrintSummary(unittest.TestCase):
 
     def test_counts_success_error_skip(self):
         """成功・エラー・スキップが正しくカウントされることを確認"""
-        results = [
-            {"status": "success", "market": "us", "symbol": "AAPL"},
-            {"status": "success", "market": "us", "symbol": "GOOG"},
-            {"status": "error", "market": "jp", "symbol": "7203", "error": "timeout"},
-            {"status": "skip", "market": "jp", "symbol": "9984"},
-        ]
+        results = BatchResult(
+            succeeded=[{"market": "us", "symbol": "AAPL"}, {"market": "us", "symbol": "GOOG"}],
+            failed=[BatchFailure(market="jp", symbol="7203", error="timeout")],
+            skipped=[{"market": "jp", "symbol": "9984"}],
+        )
         with self.assertLogs("src.watchlist.batch_runner", level="INFO") as cm:
             print_summary("テスト", results)
         output = "\n".join(cm.output)
@@ -107,9 +107,11 @@ class TestPrintSummary(unittest.TestCase):
 
     def test_error_detail_shown(self):
         """エラー詳細が出力に含まれることを確認"""
-        results = [
-            {"status": "error", "market": "us", "symbol": "BAD", "error": "connection failed"},
-        ]
+        results = BatchResult(
+            succeeded=[],
+            failed=[BatchFailure(market="us", symbol="BAD", error="connection failed")],
+            skipped=[],
+        )
         with self.assertLogs("src.watchlist.batch_runner", level="WARNING") as cm:
             print_summary("エラーテスト", results)
         output = "\n".join(cm.output)
@@ -117,7 +119,7 @@ class TestPrintSummary(unittest.TestCase):
 
     def test_no_error_no_detail(self):
         """エラーがなければエラー詳細セクションが出ないことを確認"""
-        results = [{"status": "success"}]
+        results = BatchResult(succeeded=[{"status": "success"}], failed=[], skipped=[])
         with self.assertLogs("src.watchlist.batch_runner", level="INFO") as cm:
             print_summary("成功のみ", results)
         output = "\n".join(cm.output)
