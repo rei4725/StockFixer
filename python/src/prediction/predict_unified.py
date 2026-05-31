@@ -44,7 +44,9 @@ def load_feature_data(market: str, symbol: str) -> Optional[pd.DataFrame]:
         df = load_stock_features(market, symbol)
         return df
     except Exception:
-        logger.warning("特徴量データ読み込み失敗: market=%s symbol=%s", market, symbol, exc_info=True)
+        logger.warning(
+            "特徴量データ読み込み失敗: market=%s symbol=%s", market, symbol, exc_info=True
+        )
         return None
 
 

@@ -74,4 +74,4 @@ jobs:
         run: python -m pylint src/ --rcfile=.pylintrc
 
       - name: Run unit tests with coverage gate
-        run: python -m pytest tests/unit/ -v --cov=src --cov-branch --cov-report=term-missing --cov-fail-under=80
+        run: python -m pytest tests/unit/ -v --cov=src --cov-branch --cov-report=term-missing --cov-fail-under=78

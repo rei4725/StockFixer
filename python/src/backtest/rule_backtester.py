@@ -193,7 +193,10 @@ def print_rule_ranking(
     print("=" * 70)
     print(header.center(70))
     print("=" * 70)
-    print(f"{'順位':<4} {'法則名':<24} {'勝率':>6} {'総利益(円)':>12} " f"{'取引数':>6} {'PF':>6} {'MDD':>8}")
+    print(
+        f"{'順位':<4} {'法則名':<24} {'勝率':>6} {'総利益(円)':>12} "
+        f"{'取引数':>6} {'PF':>6} {'MDD':>8}"
+    )
     print("-" * 70)
 
     for rank, row in enumerate(rows, 1):
