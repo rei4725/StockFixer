@@ -28,7 +28,6 @@ from src.prediction.db import (
 )
 from src.prediction.manager import ModelManager
 from src.prediction.types import FeatureLoadResult, TrainingMetrics
-from src.utils.data_path_utils import get_models_subdir
 from src.utils.db import generate_run_id, load_stock_features, save_experiment_run
 from src.utils.logger import get_logger
 from src.watchlist.batch_runner import load_target_symbols
@@ -399,7 +398,9 @@ def train_models_for_symbol(
                     f"方向正解率={saved_metrics.directional_accuracy:.2%} (OOS)"
                 )
             except Exception as e:
-                logger.warning(f"精度指標保存スキップ [{market}_{symbol}/{model_name}]: {e}", exc_info=True)
+                logger.warning(
+                    f"精度指標保存スキップ [{market}_{symbol}/{model_name}]: {e}", exc_info=True
+                )
             # 実験ランを experiment_runs テーブルへ記録
             try:
                 save_experiment_run(
@@ -418,7 +419,9 @@ def train_models_for_symbol(
                     params={"role": mode_label},
                 )
             except Exception as e:
-                logger.warning(f"実験ラン保存スキップ [{market}_{symbol}/{model_name}]: {e}", exc_info=True)
+                logger.warning(
+                    f"実験ラン保存スキップ [{market}_{symbol}/{model_name}]: {e}", exc_info=True
+                )
             # SHAP特徴量寄与の計算・保存
             try:
                 model = model_manager.get_model(model_name)

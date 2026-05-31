@@ -1,4 +1,4 @@
-﻿"""scheduler_pipeline モジュールのユニットテスト"""
+"""scheduler_pipeline モジュールのユニットテスト"""
 
 import os
 import tempfile
