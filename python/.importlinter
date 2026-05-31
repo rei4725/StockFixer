@@ -38,8 +38,6 @@ ignore_imports =
     src.prediction.manager -> src.reporting.discord.discord_utils
     src.market_data.pipeline -> src.reporting.discord.discord_utils
     src.market_data.pipeline -> src.watchlist.batch_runner
-    # --- utils.db → prediction.db re-export (一時的後方互換 — #338 で解消予定) ---
-    src.utils.db -> src.prediction.db
     # --- 新規追加違反 (将来的解消対象) ---
     src.backtest.rule_backtester -> src.market_data.yf_client
     src.backtest.backtester -> src.market_data.technical
@@ -107,8 +105,6 @@ modules =
     src.market_data
     src.rule_engine
 ignore_imports =
-    # --- utils.db → prediction.db re-export (一時的後方互換 — #338 で解消予定) ---
-    src.utils.db -> src.prediction.db
     # [A] reporting → prediction (predict_single のみ残存 — 将来的に解消予定)
     src.reporting.query_service -> src.prediction.predict_single
     # [B] backtest → prediction (バックテストが学習済みモデルを使用 — BT 専用ポート定義で解消可能)
