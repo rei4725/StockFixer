@@ -262,6 +262,69 @@ def _max_drawdown(equity: pd.Series) -> float:
     return float(drawdown.min())
 
 
+def monte_carlo_equity(
+    trade_pnl_list: list[float],
+    initial_cash: float,
+    n_simulations: int = 1000,
+    confidence: float = 0.95,
+    seed: int = 42,
+) -> dict[str, float]:
+    """
+    取引損益系列をランダムシャッフルして equity curve を n_simulations 回シミュレートし、
+    最大ドローダウンと最終資産の分布統計を返す。
+
+    Args:
+        trade_pnl_list: 取引ごとの損益リスト（正=利益, 負=損失）
+        initial_cash:   初期資金
+        n_simulations:  シミュレーション回数
+        confidence:     信頼水準（デフォルト 0.95 = 95%）
+        seed:           乱数シード（再現性確保用）
+
+    Returns:
+        {
+            "max_drawdown_mean":  最大ドローダウンの平均（負の小数）,
+            "max_drawdown_p95":   最大ドローダウンの 95 パーセンタイル（負の小数）,
+            "final_cash_p05":     最終資産の 5 パーセンタイル,
+            "final_cash_p50":     最終資産の中央値,
+            "final_cash_p95":     最終資産の 95 パーセンタイル,
+        }
+    """
+    if not trade_pnl_list:
+        return {
+            "max_drawdown_mean": 0.0,
+            "max_drawdown_p95": 0.0,
+            "final_cash_p05": 0.0,
+            "final_cash_p50": 0.0,
+            "final_cash_p95": 0.0,
+        }
+
+    rng = np.random.default_rng(seed)
+    arr = np.array(trade_pnl_list, dtype=float)
+
+    max_dds: list[float] = []
+    final_cashes: list[float] = []
+    for _ in range(n_simulations):
+        # 復元抽出（ブートストラップ）で equity curve を生成
+        shuffled = rng.choice(arr, size=len(arr), replace=True)
+        equity = np.empty(len(shuffled) + 1)
+        equity[0] = initial_cash
+        equity[1:] = initial_cash + np.cumsum(shuffled)
+
+        roll_max = np.maximum.accumulate(equity)
+        dd = (equity - roll_max) / np.where(roll_max > 0, roll_max, 1.0)
+        max_dds.append(float(dd.min()))
+        final_cashes.append(float(equity[-1]))
+
+    pct = int(confidence * 100)
+    return {
+        "max_drawdown_mean": float(np.mean(max_dds)),
+        "max_drawdown_p95": float(np.percentile(max_dds, pct)),
+        "final_cash_p05": float(np.percentile(final_cashes, 5)),
+        "final_cash_p50": float(np.percentile(final_cashes, 50)),
+        "final_cash_p95": float(np.percentile(final_cashes, pct)),
+    }
+
+
 def plot_backtest(
     trade_log: pd.DataFrame,
     metrics: dict[str, Any],
