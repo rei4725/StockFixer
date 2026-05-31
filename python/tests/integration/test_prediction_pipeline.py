@@ -116,7 +116,7 @@ class TestOutputTopWorstResults(unittest.TestCase):
         output_top_worst_results(rows, mode="individual")
 
         # prediction_resultsテーブルにデータが保存されている
-        from src.utils.db import load_prediction_results
+        from src.prediction.db import load_prediction_results
 
         df = load_prediction_results()
         self.assertFalse(df.empty)
@@ -128,7 +128,7 @@ class TestOutputTopWorstResults(unittest.TestCase):
         rows = self._make_rows(20, market="us")
         output_top_worst_results(rows, mode="unified")
 
-        from src.utils.db import load_prediction_results
+        from src.prediction.db import load_prediction_results
 
         df_top = load_prediction_results(market="us", top_n=10)
         df_worst = load_prediction_results(market="us", worst_n=10)
@@ -145,7 +145,7 @@ class TestOutputTopWorstResults(unittest.TestCase):
         rows = self._make_rows(25, market="us") + self._make_rows(25, market="jp")
         output_top_worst_results(rows, mode="individual")
 
-        from src.utils.db import load_prediction_markets
+        from src.prediction.db import load_prediction_markets
 
         markets = load_prediction_markets()
         self.assertIn("us", markets)

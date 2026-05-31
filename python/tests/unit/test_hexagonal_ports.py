@@ -56,13 +56,12 @@ def test_broker_port_is_abstract():
 class TestInMemoryPredictionRepository:
     def _make_result(self, market: str, symbol: str):
         class _R:
-            pass
+            def __init__(self, market: str, symbol: str, diff_ratio: float) -> None:
+                self.market = market
+                self.symbol = symbol
+                self.diff_ratio = diff_ratio
 
-        r = _R()
-        r.market = market
-        r.symbol = symbol
-        r.diff_ratio = 0.02
-        return r
+        return _R(market=market, symbol=symbol, diff_ratio=0.02)
 
     def test_save_and_load(self):
         repo = InMemoryPredictionRepository()

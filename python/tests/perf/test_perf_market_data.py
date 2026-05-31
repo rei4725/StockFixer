@@ -9,7 +9,6 @@ import time
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from src.market_data.technical import add_technical_indicators, create_basic_lag_features
 
