@@ -10,11 +10,6 @@ import pandas as pd
 
 from src.domain.types import PredictionResult, ShapFeatureContribution, SignalSnapshot
 from src.orchestration.types import SchedulerJobStatus
-from src.prediction.db import (
-    load_latest_prediction_timestamp,
-    load_prediction_markets,
-    load_prediction_results,
-)
 from src.reporting.types import (
     MarketPredictionSnapshot,
     MonthlyReportSummary,
@@ -22,6 +17,11 @@ from src.reporting.types import (
     WatchlistPredictionView,
 )
 from src.utils.data_path_utils import get_monitor_list_path, get_results_dir
+from src.utils.db import (
+    load_latest_prediction_timestamp,
+    load_prediction_markets,
+    load_prediction_results,
+)
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)

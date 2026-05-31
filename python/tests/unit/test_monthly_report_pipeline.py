@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from src.prediction.kpi_service import MonthlyKPI, _compute_avg_slippage, _compute_hit_rate
+from src.reporting.kpi import MonthlyKPI, _compute_avg_slippage, _compute_hit_rate
 from src.reporting.monthly import _load_latest_wf_summary, _mean_metric, run_monthly_report
 
 # ---------------------------------------------------------------------------
@@ -91,13 +91,13 @@ class TestLoadLatestWfSummary(unittest.TestCase):
 
 
 class TestComputeHitRate(unittest.TestCase):
-    @patch("src.prediction.kpi_service.load_prediction_accuracy")
+    @patch("src.reporting.kpi.load_prediction_accuracy")
     def test_returns_none_when_table_empty(self, mock_load):
         mock_load.return_value = pd.DataFrame()
         result = _compute_hit_rate()
         self.assertIsNone(result)
 
-    @patch("src.prediction.kpi_service.load_prediction_accuracy")
+    @patch("src.reporting.kpi.load_prediction_accuracy")
     def test_calculates_mean_direction_match(self, mock_load):
         mock_load.return_value = pd.DataFrame(
             {
@@ -108,7 +108,7 @@ class TestComputeHitRate(unittest.TestCase):
         result = _compute_hit_rate()
         self.assertAlmostEqual(result, 0.75)
 
-    @patch("src.prediction.kpi_service.load_prediction_accuracy")
+    @patch("src.reporting.kpi.load_prediction_accuracy")
     def test_filters_by_checked_at(self, mock_load):
         now = datetime.now()
         old_date = "2020-01-01"
@@ -130,20 +130,20 @@ class TestComputeHitRate(unittest.TestCase):
 
 
 class TestComputeAvgSlippage(unittest.TestCase):
-    @patch("src.prediction.kpi_service.load_paper_real_diff_summary")
+    @patch("src.reporting.kpi.load_paper_real_diff_summary")
     def test_returns_slippage_from_summary(self, mock_summary):
         mock_summary.return_value = {"avg_paper_slippage": 0.002}
         result = _compute_avg_slippage()
         self.assertAlmostEqual(result, 0.002)
 
-    @patch("src.prediction.kpi_service.load_paper_real_diff_summary")
+    @patch("src.reporting.kpi.load_paper_real_diff_summary")
     def test_returns_none_when_key_missing(self, mock_summary):
         mock_summary.return_value = {}
         result = _compute_avg_slippage()
         self.assertIsNone(result)
 
     @patch(
-        "src.prediction.kpi_service.load_paper_real_diff_summary",
+        "src.reporting.kpi.load_paper_real_diff_summary",
         side_effect=Exception("DB error"),
     )
     def test_returns_none_on_exception(self, _mock):

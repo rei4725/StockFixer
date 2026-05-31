@@ -451,7 +451,7 @@ def send_weekly_report(
     """
     import pandas as pd
 
-    from src.prediction.db import (
+    from src.utils.db import (
         load_drift_summary,
         load_paper_real_diff_summary,
         load_weekly_accuracy_snapshots,

@@ -93,6 +93,7 @@ class _DbPackageProxy(types.ModuleType):
             "load_latest_prediction_timestamp",
             "load_model_weights",
             "load_paper_real_diff_summary",
+            "load_prediction_accuracy",
             "load_prediction_markets",
             "load_prediction_results",
             "load_weekly_accuracy_snapshots",

@@ -17,7 +17,7 @@ from typing import Any, Callable, Optional
 
 import pandas as pd
 
-from src.prediction.kpi_service import get_monthly_kpis
+from src.reporting.kpi import get_monthly_kpis
 from src.reporting.types import MonthlyReportSummary
 from src.utils.data_path_utils import get_results_dir
 from src.utils.logger import get_logger
