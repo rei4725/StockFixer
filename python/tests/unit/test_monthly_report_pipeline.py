@@ -9,16 +9,8 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from src.prediction.kpi_service import (
-    MonthlyKPI,
-    _compute_avg_slippage,
-    _compute_hit_rate,
-)
-from src.reporting.monthly import (
-    _load_latest_wf_summary,
-    _mean_metric,
-    run_monthly_report,
-)
+from src.prediction.kpi_service import MonthlyKPI, _compute_avg_slippage, _compute_hit_rate
+from src.reporting.monthly import _load_latest_wf_summary, _mean_metric, run_monthly_report
 
 # ---------------------------------------------------------------------------
 # _mean_metric
@@ -191,9 +183,7 @@ class TestRunMonthlyReport(unittest.TestCase):
         ),
     )
     def test_aggregates_all_kpi_fields(self, _mock_wf, mock_kpi):
-        mock_kpi.return_value = MonthlyKPI(
-            hit_rate=0.6, avg_slippage=0.001, drift_count=0
-        )
+        mock_kpi.return_value = MonthlyKPI(hit_rate=0.6, avg_slippage=0.001, drift_count=0)
         summary = run_monthly_report(target_month="2026-04")
 
         self.assertEqual(summary.target_month, "2026-04")
@@ -211,9 +201,7 @@ class TestRunMonthlyReport(unittest.TestCase):
         return_value=(None, None),
     )
     def test_returns_none_kpis_when_no_data(self, _mock_wf, mock_kpi):
-        mock_kpi.return_value = MonthlyKPI(
-            hit_rate=None, avg_slippage=None, drift_count=0
-        )
+        mock_kpi.return_value = MonthlyKPI(hit_rate=None, avg_slippage=None, drift_count=0)
         summary = run_monthly_report(target_month="2026-04")
 
         self.assertIsNone(summary.net_return)
@@ -230,9 +218,7 @@ class TestRunMonthlyReport(unittest.TestCase):
         return_value=(None, None),
     )
     def test_uses_current_month_when_not_specified(self, _mock_wf, mock_kpi):
-        mock_kpi.return_value = MonthlyKPI(
-            hit_rate=None, avg_slippage=None, drift_count=0
-        )
+        mock_kpi.return_value = MonthlyKPI(hit_rate=None, avg_slippage=None, drift_count=0)
         expected_month = datetime.now().strftime("%Y-%m")
         summary = run_monthly_report()
         self.assertEqual(summary.target_month, expected_month)
