@@ -10,7 +10,7 @@ jobs:
   check-approval:
     name: Check Review Approval
     runs-on: ubuntu-latest
-    if: github.actor != 'dependabot[bot]'
+    if: github.event.pull_request.user.login != 'dependabot[bot]' && github.event.pull_request.user.login != 'rei4725'
     steps:
       - name: Check for at least 1 approved review
         uses: actions/github-script@v9

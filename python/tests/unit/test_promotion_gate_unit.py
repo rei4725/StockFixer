@@ -186,14 +186,13 @@ class TestEvaluatePromotion(unittest.TestCase):
             patch("src.prediction.promotion_gate._compute_hit_rate", return_value=hit_rate),
             patch("src.prediction.promotion_gate._compute_slippage", return_value=slippage),
             patch("src.prediction.promotion_gate._collect_run_ids", return_value=run_ids),
-            patch("src.prediction.promotion_gate._log_promotion_to_mlflow"),
         ]
 
     def test_eligible_when_all_criteria_met(self):
         from src.prediction.promotion_gate import evaluate_promotion
 
         patches = self._patch_all()
-        with patches[0], patches[1], patches[2], patches[3], patches[4]:
+        with patches[0], patches[1], patches[2], patches[3]:
             result = evaluate_promotion("shadow", "current")
         self.assertTrue(result.eligible)
         self.assertEqual(result.shadow_model, "shadow")
@@ -203,7 +202,7 @@ class TestEvaluatePromotion(unittest.TestCase):
         from src.prediction.promotion_gate import evaluate_promotion
 
         patches = self._patch_all(hit_rate=0.4)
-        with patches[0], patches[1], patches[2], patches[3], patches[4]:
+        with patches[0], patches[1], patches[2], patches[3]:
             result = evaluate_promotion("shadow", "current")
         self.assertFalse(result.eligible)
         self.assertIn("hit_rate", result.criteria)
@@ -212,7 +211,7 @@ class TestEvaluatePromotion(unittest.TestCase):
         from src.prediction.promotion_gate import evaluate_promotion
 
         patches = self._patch_all(slippage=0.05)
-        with patches[0], patches[1], patches[2], patches[3], patches[4]:
+        with patches[0], patches[1], patches[2], patches[3]:
             result = evaluate_promotion("shadow", "current")
         self.assertFalse(result.eligible)
 
@@ -227,7 +226,6 @@ class TestEvaluatePromotion(unittest.TestCase):
             patch("src.prediction.promotion_gate._compute_hit_rate", return_value=0.6),
             patch("src.prediction.promotion_gate._compute_slippage", return_value=0.01),
             patch("src.prediction.promotion_gate._collect_run_ids", return_value=[]),
-            patch("src.prediction.promotion_gate._log_promotion_to_mlflow"),
         ):
             result = evaluate_promotion("shadow", "current")
         self.assertFalse(result.eligible)
@@ -236,7 +234,7 @@ class TestEvaluatePromotion(unittest.TestCase):
         from src.prediction.promotion_gate import evaluate_promotion
 
         patches = self._patch_all()
-        with patches[0], patches[1], patches[2], patches[3], patches[4]:
+        with patches[0], patches[1], patches[2], patches[3]:
             result = evaluate_promotion("shadow", "current", require_manual_approval=True)
         self.assertIn("手動承認", result.reason)
 
@@ -244,7 +242,7 @@ class TestEvaluatePromotion(unittest.TestCase):
         from src.prediction.promotion_gate import evaluate_promotion
 
         patches = self._patch_all()
-        with patches[0], patches[1], patches[2], patches[3], patches[4]:
+        with patches[0], patches[1], patches[2], patches[3]:
             result = evaluate_promotion("shadow", "current", require_manual_approval=False)
         self.assertIn("自動昇格", result.reason)
 
@@ -252,7 +250,7 @@ class TestEvaluatePromotion(unittest.TestCase):
         from src.prediction.promotion_gate import evaluate_promotion
 
         patches = self._patch_all(run_ids=["existing"])
-        with patches[0], patches[1], patches[2], patches[3], patches[4]:
+        with patches[0], patches[1], patches[2], patches[3]:
             result = evaluate_promotion("shadow", "current", shadow_run_id="new_shadow_run")
         self.assertIn("new_shadow_run", result.run_ids)
 
@@ -260,7 +258,7 @@ class TestEvaluatePromotion(unittest.TestCase):
         from src.prediction.promotion_gate import evaluate_promotion
 
         patches = self._patch_all()
-        with patches[0], patches[1], patches[2], patches[3], patches[4]:
+        with patches[0], patches[1], patches[2], patches[3]:
             result = evaluate_promotion("shadow", "current")
         for key in ("net_return", "mdd", "sharpe", "hit_rate", "slippage"):
             self.assertIn(key, result.criteria)
@@ -269,7 +267,7 @@ class TestEvaluatePromotion(unittest.TestCase):
         from src.prediction.promotion_gate import PromotionResult, evaluate_promotion
 
         patches = self._patch_all()
-        with patches[0], patches[1], patches[2], patches[3], patches[4]:
+        with patches[0], patches[1], patches[2], patches[3]:
             result = evaluate_promotion("shadow", "current")
         self.assertIsInstance(result, PromotionResult)
 
@@ -297,35 +295,6 @@ class TestSavePromotionResult(unittest.TestCase):
                 data = json.load(f)
         self.assertEqual(data["eligible"], True)
         self.assertEqual(data["shadow_model"], "shadow")
-
-
-class TestLogPromotionToMlflow(unittest.TestCase):
-    def test_silently_fails_on_import_error(self):
-        from src.prediction.promotion_gate import PromotionResult, _log_promotion_to_mlflow
-
-        result = PromotionResult(
-            shadow_model="s",
-            current_model="c",
-            evaluated_at="2024-01-01T00:00:00",
-            eligible=True,
-            require_manual_approval=False,
-            criteria={
-                "net_return": {"passed": True},
-                "mdd": {"passed": True},
-            },
-            reason="test",
-        )
-        import builtins
-
-        original_import = builtins.__import__
-
-        def mock_import(name, *args, **kwargs):
-            if name == "mlflow":
-                raise ImportError("no mlflow")
-            return original_import(name, *args, **kwargs)
-
-        with patch("builtins.__import__", side_effect=mock_import):
-            _log_promotion_to_mlflow(result)  # 例外が伝播しなければOK
 
 
 class TestAutoPromoteModelSetting(unittest.TestCase):
@@ -374,7 +343,6 @@ class TestSchedulerAutoPromotion(unittest.TestCase):
             ),
             patch("src.prediction.promotion_gate._compute_slippage", return_value=0.01),
             patch("src.prediction.promotion_gate._collect_run_ids", return_value=[]),
-            patch("src.prediction.promotion_gate._log_promotion_to_mlflow"),
         ]
 
     def test_require_manual_approval_false_when_auto_promote_true(self):
@@ -382,7 +350,7 @@ class TestSchedulerAutoPromotion(unittest.TestCase):
         from src.prediction.promotion_gate import evaluate_promotion
 
         patches = self._make_patches(auto_promote=True)
-        with patches[1], patches[2], patches[3], patches[4], patches[5]:
+        with patches[1], patches[2], patches[3], patches[4]:
             result = evaluate_promotion("challenger", "production", require_manual_approval=False)
         self.assertFalse(result.require_manual_approval)
         self.assertIn("自動昇格", result.reason)
@@ -392,7 +360,7 @@ class TestSchedulerAutoPromotion(unittest.TestCase):
         from src.prediction.promotion_gate import evaluate_promotion
 
         patches = self._make_patches(auto_promote=False)
-        with patches[1], patches[2], patches[3], patches[4], patches[5]:
+        with patches[1], patches[2], patches[3], patches[4]:
             result = evaluate_promotion("challenger", "production", require_manual_approval=True)
         self.assertTrue(result.require_manual_approval)
         self.assertIn("手動承認", result.reason)

@@ -37,7 +37,7 @@ repos:
 
   # 2. Python コードフォーマッタ (Black)
   - repo: https://github.com/psf/black
-    rev: 23.12.1
+    rev: 26.5.0
     hooks:
       - id: black
         language_version: python3
@@ -48,7 +48,7 @@ repos:
     rev: 5.13.2
     hooks:
       - id: isort
-        args: [--profile=black, --line-length=100, --src=python]
+        args: [--settings-path=python]
 
   # 4. Python コード品質チェック (Flake8)
   - repo: https://github.com/PyCQA/flake8
@@ -102,7 +102,7 @@ repos:
         language: python
         stages: [pre-commit]
         files: \.(py)$
-        exclude: ^(tests/|\.github/hooks/)
+        exclude: ^(tests/|python/tests/|\.github/hooks/|python/\.github/hooks/)
         pass_filenames: true
 
   # 8. ロック問題検出 - ファイルロック
@@ -115,7 +115,7 @@ repos:
         language: python
         stages: [pre-commit]
         files: \.(py)$
-        exclude: ^(tests/|\.github/hooks/)
+        exclude: ^(tests/|python/tests/|\.github/hooks/|python/\.github/hooks/)
         pass_filenames: true
 
   # 9. アーキテクチャ違反検出 - 旧モジュール経由 import
@@ -137,7 +137,7 @@ repos:
         language: python
         stages: [pre-commit]
         files: \.(py)$
-        exclude: ^(tests/|\.github/hooks/)
+        exclude: ^(tests/|python/tests/|\.github/hooks/|python/\.github/hooks/)
         pass_filenames: true
 
   # 10. コミットメッセージ検証 (commitlint スタイル)

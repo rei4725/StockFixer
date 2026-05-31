@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import pandas as pd
 
+from src.domain.types import PredictionResult
 from src.reporting.query_service import (
     get_latest_market_prediction_snapshots,
     get_ranked_prediction_results,
@@ -62,17 +63,13 @@ class TestDiscordQueryService(unittest.TestCase):
         mock_predict_single_stock,
         mock_explain_prediction_shap,
     ):
-        mock_predict_single_stock.return_value = pd.DataFrame(
-            [
-                {
-                    "market": "jp",
-                    "symbol": "7203",
-                    "current_price": 100.0,
-                    "avg_pred_price": 101.0,
-                    "diff_ratio": 0.01,
-                    "model_count": 2,
-                }
-            ]
+        mock_predict_single_stock.return_value = PredictionResult(
+            market="jp",
+            symbol="7203",
+            current_price=100.0,
+            avg_pred_price=101.0,
+            diff_ratio=0.01,
+            model_count=2,
         )
         mock_explain_prediction_shap.return_value = {
             "direction": "up",
@@ -191,17 +188,13 @@ class TestDiscordQueryService(unittest.TestCase):
 
     @patch("src.prediction.predict_single.predict_single_stock")
     def test_get_signal_snapshot_without_explain(self, mock_predict):
-        mock_predict.return_value = pd.DataFrame(
-            [
-                {
-                    "market": "us",
-                    "symbol": "AAPL",
-                    "current_price": 150.0,
-                    "avg_pred_price": 152.0,
-                    "diff_ratio": 0.013,
-                    "model_count": 2,
-                }
-            ]
+        mock_predict.return_value = PredictionResult(
+            market="us",
+            symbol="AAPL",
+            current_price=150.0,
+            avg_pred_price=152.0,
+            diff_ratio=0.013,
+            model_count=2,
         )
         result = get_signal_snapshot("us", "AAPL", explain=False)
         self.assertIsNotNone(result)
@@ -210,17 +203,13 @@ class TestDiscordQueryService(unittest.TestCase):
     @patch("src.prediction.predict_single.explain_prediction_shap", return_value=None)
     @patch("src.prediction.predict_single.predict_single_stock")
     def test_get_signal_snapshot_without_shap_result(self, mock_predict, _mock_shap):
-        mock_predict.return_value = pd.DataFrame(
-            [
-                {
-                    "market": "us",
-                    "symbol": "AAPL",
-                    "current_price": 150.0,
-                    "avg_pred_price": 152.0,
-                    "diff_ratio": 0.013,
-                    "model_count": 2,
-                }
-            ]
+        mock_predict.return_value = PredictionResult(
+            market="us",
+            symbol="AAPL",
+            current_price=150.0,
+            avg_pred_price=152.0,
+            diff_ratio=0.013,
+            model_count=2,
         )
         result = get_signal_snapshot("us", "AAPL", explain=True)
         self.assertIsNotNone(result)
@@ -240,14 +229,13 @@ class TestDiscordQueryService(unittest.TestCase):
 
     @patch("src.prediction.predict_single.predict_single_stock")
     def test_get_watchlist_prediction_view_normal(self, mock_predict):
-        mock_predict.return_value = pd.DataFrame(
-            [
-                {
-                    "symbol": "AAPL",
-                    "current_price": 150.0,
-                    "avg_pred_price": 152.0,
-                }
-            ]
+        mock_predict.return_value = PredictionResult(
+            market="us",
+            symbol="AAPL",
+            current_price=150.0,
+            avg_pred_price=152.0,
+            diff_ratio=0.013,
+            model_count=2,
         )
         with tempfile.TemporaryDirectory() as tmp_dir:
             csv_path = self._write_watchlist_csv(tmp_dir, [["us", "AAPL"]])

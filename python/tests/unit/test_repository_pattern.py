@@ -11,12 +11,8 @@ import pandas as pd
 import pytest
 
 from src.domain.ports import PredictionResultRepository
-from src.infrastructure.in_memory import (
-    InMemoryBrokerAdapter,
-    InMemoryMarketDataAdapter,
-    InMemoryPredictionRepository,
-)
-from src.trading.brokers.base import OrderSide, OrderType
+from src.infrastructure.in_memory import InMemoryBrokerAdapter, InMemoryPredictionRepository
+from src.trading.brokers.base import OrderType
 from src.trading.execution import run_daily_orders
 from src.trading.types import TradingGateStatus
 
@@ -27,17 +23,23 @@ from src.trading.types import TradingGateStatus
 
 class TestInMemoryPredictionRepositoryGetLatest:
     def _make_result(self, market: str, symbol: str, diff_ratio: float, predicted_at: str):
-        class _R:
-            pass
+        from dataclasses import dataclass
 
-        r = _R()
-        r.market = market
-        r.symbol = symbol
-        r.diff_ratio = diff_ratio
-        r.predicted_at = predicted_at
-        r.current_price = 1000.0
-        r.confidence_ratio = 1.0
-        return r
+        @dataclass
+        class _R:
+            market: str
+            symbol: str
+            diff_ratio: float
+            predicted_at: str
+            current_price: float = 1000.0
+            confidence_ratio: float = 1.0
+
+        return _R(
+            market=market,
+            symbol=symbol,
+            diff_ratio=diff_ratio,
+            predicted_at=predicted_at,
+        )
 
     def test_returns_latest_per_symbol(self):
         repo = InMemoryPredictionRepository()
@@ -87,19 +89,27 @@ _GATE_OK = TradingGateStatus(
 
 
 def _make_repo_with_predictions(n: int = 3) -> InMemoryPredictionRepository:
-    repo = InMemoryPredictionRepository()
+    from dataclasses import dataclass
 
+    @dataclass
     class _R:
-        pass
+        market: str
+        symbol: str
+        diff_ratio: float
+        current_price: float
+        confidence_ratio: float
+        predicted_at: str
 
+    repo = InMemoryPredictionRepository()
     for i in range(n):
-        r = _R()
-        r.market = "jp"
-        r.symbol = f"720{i}"
-        r.diff_ratio = 0.02 + 0.001 * i
-        r.current_price = 1000.0 + i * 10
-        r.confidence_ratio = 1.0
-        r.predicted_at = "20260518_090000"
+        r = _R(
+            market="jp",
+            symbol=f"720{i}",
+            diff_ratio=0.02 + 0.001 * i,
+            current_price=1000.0 + i * 10,
+            confidence_ratio=1.0,
+            predicted_at="20260518_090000",
+        )
         repo.save("20260518_090000", [r])
     return repo
 
@@ -128,7 +138,7 @@ class TestRunDailyOrdersWithRepository:
         broker = InMemoryBrokerAdapter(initial_balance=10_000_000.0)
         repo = _make_repo_with_predictions(n=3)
 
-        patches = [p.start() for p in _COMMON_PATCHES]
+        _ = [p.start() for p in _COMMON_PATCHES]
         try:
             stats = run_daily_orders(broker, market="jp", mode="paper", prediction_repo=repo)
             assert stats["buy_orders"] > 0
@@ -141,7 +151,7 @@ class TestRunDailyOrdersWithRepository:
         broker = InMemoryBrokerAdapter()
         repo = InMemoryPredictionRepository()  # 空
 
-        patches = [p.start() for p in _COMMON_PATCHES]
+        _ = [p.start() for p in _COMMON_PATCHES]
         try:
             stats = run_daily_orders(broker, market="jp", mode="paper", prediction_repo=repo)
             assert stats["buy_orders"] == 0
@@ -157,7 +167,7 @@ class TestRunDailyOrdersWithRepository:
             "src.trading.execution._load_latest_predictions",
             return_value=pd.DataFrame(),
         ) as mock_load:
-            patches = [p.start() for p in _COMMON_PATCHES]
+            _ = [p.start() for p in _COMMON_PATCHES]
             try:
                 run_daily_orders(broker, market="jp", mode="paper", prediction_repo=None)
                 mock_load.assert_called_once_with("jp")
@@ -171,7 +181,7 @@ class TestRunDailyOrdersWithRepository:
         repo = _make_repo_with_predictions(n=1)
 
         with patch("src.trading.execution._load_latest_predictions") as mock_load:
-            patches = [p.start() for p in _COMMON_PATCHES]
+            _ = [p.start() for p in _COMMON_PATCHES]
             try:
                 run_daily_orders(broker, market="jp", mode="paper", prediction_repo=repo)
                 mock_load.assert_not_called()

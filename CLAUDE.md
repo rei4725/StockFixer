@@ -152,6 +152,8 @@ Brokers are injected into services; never referenced concretely from above layer
 
 ## Git Workflow
 
+**メインブランチ**: `develop`（PR のベースブランチはすべて `develop`）
+
 ### 作業開始前（スキップ禁止）
 ```bash
 git fetch

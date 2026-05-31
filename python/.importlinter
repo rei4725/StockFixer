@@ -24,11 +24,7 @@ ignore_imports =
     src.reporting.query_service -> src.orchestration.types
     src.reporting.discord.discord_bot -> src.orchestration.types
     # --- BC 間相互参照 (independence contract でも管理) ---
-    src.reporting.types -> src.prediction.types
-    src.reporting.query_service -> src.prediction.types
     src.reporting.query_service -> src.prediction.predict_single
-    src.reporting.discord.discord_utils -> src.prediction.types
-    src.reporting.discord.discord_bot -> src.prediction.types
     src.backtest.pipeline -> src.prediction.manager
     src.backtest.portfolio -> src.prediction.manager
     src.backtest.pipeline -> src.market_data.loader
@@ -44,7 +40,6 @@ ignore_imports =
     src.market_data.pipeline -> src.watchlist.batch_runner
     # --- 新規追加違反 (将来的解消対象) ---
     src.watchlist.batch_runner -> src.reporting.discord.discord_utils
-    src.reporting.discord.discord_utils -> src.trading.pre_close_alert_service
     src.backtest.rule_backtester -> src.market_data.yf_client
     src.backtest.backtester -> src.market_data.technical
     src.backtest.metrics -> src.market_data.technical
@@ -67,13 +62,15 @@ ignore_imports =
     src.rule_engine.pipeline -> src.market_data.technical
     # --- trading → prediction 直接参照 (BC間依存 — #339 で解消予定) ---
     src.reporting.monthly -> src.prediction.db
-    # --- trading → prediction 直接参照 (BC間依存 — #339 で解消予定) ---
+    src.reporting.query_service -> src.prediction.db
+    src.reporting.dashboard -> src.prediction.db
+    src.reporting.discord.discord_utils -> src.prediction.db
+    src.trading.execution -> src.infrastructure.yfinance_market_data_adapter
+    src.trading.rule_execution -> src.infrastructure.yfinance_market_data_adapter
+    src.trading.pre_close_alert_service -> src.infrastructure.yfinance_market_data_adapter
+    # [B] trading → prediction 直接参照 (BC間依存 — #339 で解消予定)
     src.trading.execution -> src.prediction.db
     src.trading.pre_close_alert_service -> src.prediction.db
-    src.trading.brokers.paper.paper_broker -> src.prediction.db
-    # --- trading → market_data (infrastructure 経由の間接依存 — #339 で解消予定) ---
-    src.trading.execution -> src.infrastructure.yfinance_market_data_adapter
-    src.trading.brokers.paper.paper_broker -> src.market_data.yf_client
 
 # ============================================================
 # Contract 2: BC 独立性契約
@@ -109,12 +106,8 @@ modules =
     src.market_data
     src.rule_engine
 ignore_imports =
-    # [A] reporting → prediction (予測結果をレポート表示 — types.py 共有で解消可能)
-    src.reporting.types -> src.prediction.types
-    src.reporting.query_service -> src.prediction.types
+    # [A] reporting → prediction (predict_single のみ残存 — 将来的に解消予定)
     src.reporting.query_service -> src.prediction.predict_single
-    src.reporting.discord.discord_utils -> src.prediction.types
-    src.reporting.discord.discord_bot -> src.prediction.types
     # [B] backtest → prediction (バックテストが学習済みモデルを使用 — BT 専用ポート定義で解消可能)
     src.backtest.pipeline -> src.prediction.manager
     src.backtest.portfolio -> src.prediction.manager
@@ -138,8 +131,6 @@ ignore_imports =
     src.market_data.pipeline -> src.watchlist.batch_runner
     # [B] watchlist → reporting (バッチ通知 — イベント駆動で解消可能)
     src.watchlist.batch_runner -> src.reporting.discord.discord_utils
-    # [B] reporting → trading (pre_close_alert — alert BC の切り出しで解消可能)
-    src.reporting.discord.discord_utils -> src.trading.pre_close_alert_service
     # [B] backtest → market_data (技術指標計算 — market_data ポートで解消可能)
     src.backtest.rule_backtester -> src.market_data.yf_client
     src.backtest.backtester -> src.market_data.technical
@@ -167,10 +158,13 @@ ignore_imports =
     src.rule_engine.pipeline -> src.market_data.technical
     # [A] reporting → prediction 直接参照 (#338 で解消予定)
     src.reporting.monthly -> src.prediction.db
+    src.reporting.query_service -> src.prediction.db
+    src.reporting.dashboard -> src.prediction.db
+    src.reporting.discord.discord_utils -> src.prediction.db
     # [B] trading → prediction 直接参照 (#339 で解消予定)
     src.trading.execution -> src.prediction.db
     src.trading.pre_close_alert_service -> src.prediction.db
-    src.trading.brokers.paper.paper_broker -> src.prediction.db
     # [B] trading → market_data (infrastructure 経由の間接依存 — #339 で解消予定)
     src.trading.execution -> src.infrastructure.yfinance_market_data_adapter
-    src.trading.brokers.paper.paper_broker -> src.market_data.yf_client
+    src.trading.rule_execution -> src.infrastructure.yfinance_market_data_adapter
+    src.trading.pre_close_alert_service -> src.infrastructure.yfinance_market_data_adapter

@@ -11,7 +11,7 @@ from typing import Optional
 
 import pandas as pd
 
-from src.prediction.types import PredictionResult
+from src.domain.types import PredictionResult
 
 
 @dataclass

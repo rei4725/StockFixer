@@ -5,8 +5,8 @@ from discord.ext import commands
 from discord.utils import escape_markdown
 from dotenv import load_dotenv
 
+from src.domain.types import PredictionResult
 from src.orchestration.types import SchedulerJobStatus
-from src.prediction.types import PredictionResult
 from src.reporting.discord.discord_formatters import convert_df_for_discord
 from src.reporting.discord.discord_text import DISCORD_TEXT_LIMIT, split_text_chunks
 from src.reporting.query_service import (

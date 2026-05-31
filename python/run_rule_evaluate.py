@@ -25,8 +25,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from src.backtest.rule_selector import evaluate_all_symbols, print_rule_summary
-from src.utils.logger import get_logger
+from src.backtest.rule_selector import evaluate_all_symbols  # noqa: E402
+from src.backtest.rule_selector import print_rule_summary  # noqa: E402
+from src.utils.logger import get_logger  # noqa: E402
 
 logger = get_logger(__name__)
 
@@ -83,7 +84,7 @@ def main() -> None:
     )
 
     print(f"\n{'=' * 50}")
-    print(f"  ルール評価完了")
+    print("  ルール評価完了")
     print(f"  評価銘柄: {summary['evaluated']}")
     print(f"  有効ルール発見: {summary['effective']} 銘柄")
     print(f"  スキップ: {summary['skipped']} 銘柄")
