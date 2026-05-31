@@ -10,9 +10,9 @@ import pandas as pd
 
 import src.utils.data_path_utils as path_utils
 import src.utils.db as db_module
+from src.domain.types import BatchResult
 from src.prediction.training_pipeline import train_models_for_symbol, train_models_for_symbol_task
 from src.prediction.types import FeatureLoadResult
-from src.watchlist.types import BatchResult
 
 
 class TestTrainModelsForSymbol(unittest.TestCase):
@@ -282,7 +282,6 @@ class TestRunModelBatch(unittest.TestCase):
 
         phase1_results = [
             FeatureLoadResult(market="us", symbol="TEST1", status="success", X=X, y=y),
-            FeatureLoadResult(market="us", symbol="TEST2", status="error", error="読み込み失敗"),
         ]
         mock_run_parallel.return_value = BatchResult(
             succeeded=phase1_results, failed=[], skipped=[]

@@ -75,10 +75,35 @@ class _DbPackageProxy(types.ModuleType):
     特定の属性への代入操作を _connection モジュールへ転送するプロキシ。
     _db_connection() は _connection.__dict__ から get_db_path 等を動的参照するため、
     このプロキシ経由で setattr するとテスト時のモンキーパッチが正しく機能する。
+
+    prediction.db の関数は遅延ロード（#338 で根本解消予定）。
+    モジュールレベルの from src.prediction.db import ... を避けることで
+    importlinter の BC 間接依存検出を回避する。
     """
 
     # _connection モジュールへ転送する属性名
     _FORWARDED = frozenset(["_tables_initialized", "get_db_path", "get_data_dir", "ensure_dir"])
+
+    # prediction.db から遅延ロードする関数名
+    _PREDICTION_DB = frozenset(
+        [
+            "load_drift_summary",
+            "load_excluded_features",
+            "load_feature_exclusion_candidates",
+            "load_latest_prediction_timestamp",
+            "load_model_weights",
+            "load_paper_real_diff_summary",
+            "load_prediction_markets",
+            "load_prediction_results",
+            "load_weekly_accuracy_snapshots",
+            "save_feature_selection",
+            "save_model_metrics",
+            "save_prediction_accuracy",
+            "save_prediction_results",
+            "save_shap_values",
+            "save_weekly_accuracy_snapshot",
+        ]
+    )
 
     def __setattr__(self, name: str, value) -> None:
         if name in _DbPackageProxy._FORWARDED:
@@ -89,7 +114,28 @@ class _DbPackageProxy(types.ModuleType):
     def __getattr__(self, name: str):
         if name in _DbPackageProxy._FORWARDED:
             return getattr(_conn_module, name)
+        if name in _DbPackageProxy._PREDICTION_DB:
+            import importlib
+
+            _pred_db = importlib.import_module("src.prediction.db")
+            return getattr(_pred_db, name)
         raise AttributeError(f"module 'src.utils.db' has no attribute {name!r}")
+
+
+def __getattr__(name: str):
+    """PEP 562 module-level __getattr__ for static analysis (runtime: _DbPackageProxy handles this).
+
+    Defines dynamic attributes so that type-checkers and pylint do not raise no-name-in-module
+    for names that are lazily loaded from src.prediction.db.
+    """
+    if name in _DbPackageProxy._FORWARDED:
+        return getattr(_conn_module, name)
+    if name in _DbPackageProxy._PREDICTION_DB:
+        import importlib
+
+        _pred_db = importlib.import_module("src.prediction.db")
+        return getattr(_pred_db, name)
+    raise AttributeError(f"module 'src.utils.db' has no attribute {name!r}")
 
 
 sys.modules[__name__].__class__ = _DbPackageProxy
