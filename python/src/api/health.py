@@ -108,7 +108,8 @@ def health() -> tuple[Response, int]:
 
     scheduler_stale = False
     if scheduler_runs:
-        latest_ts = max(scheduler_runs.values())
+        valid_runs = [v for v in scheduler_runs.values() if v is not None]
+        latest_ts = max(valid_runs) if valid_runs else None
         if latest_ts:
             try:
                 last_dt = datetime.fromisoformat(latest_ts)

@@ -45,9 +45,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="バックテストを実行する")
     parser.add_argument("--market", type=str, default="jp", help="マーケット (例: jp, us)")
     parser.add_argument("--symbol", type=str, required=True, help="銘柄コード (例: 7203, AAPL)")
-    parser.add_argument(
-        "--start-date", type=str, default=None, help="バックテスト開始日 YYYY-MM-DD"
-    )
+    parser.add_argument("--start-date", type=str, default=None, help="バックテスト開始日 YYYY-MM-DD")
     parser.add_argument("--end-date", type=str, default=None, help="バックテスト終了日 YYYY-MM-DD")
     parser.add_argument(
         "--model-type",
@@ -80,9 +78,7 @@ def parse_args():
         help="データソース: 'file'=DB特徴量, 'api'=yfinance直接取得, 'raw'=DBのOHLCVから再生成 (default: file)",
     )
     parser.add_argument("--walk-forward", action="store_true", help="Walk-Forward 検証を使用する")
-    parser.add_argument(
-        "--n-splits", type=int, default=5, help="Walk-Forward の分割数 (default: 5)"
-    )
+    parser.add_argument("--n-splits", type=int, default=5, help="Walk-Forward の分割数 (default: 5)")
     parser.add_argument(
         "--train-ratio",
         type=float,
@@ -92,9 +88,7 @@ def parse_args():
     parser.add_argument(
         "--initial-cash", type=float, default=1_000_000, help="初期資金 (default: 1,000,000)"
     )
-    parser.add_argument(
-        "--fee-rate", type=float, default=0.001, help="取引手数料率 (default: 0.001)"
-    )
+    parser.add_argument("--fee-rate", type=float, default=0.001, help="取引手数料率 (default: 0.001)")
     parser.add_argument("--slippage", type=float, default=0.0, help="スリッページ (default: 0.0)")
 
     # リスク管理
@@ -151,9 +145,7 @@ def parse_args():
     )
 
     # アンサンブル
-    parser.add_argument(
-        "--ensemble", action="store_true", help="XGBoost+LightGBMアンサンブル予測を使用する"
-    )
+    parser.add_argument("--ensemble", action="store_true", help="XGBoost+LightGBMアンサンブル予測を使用する")
 
     # ベンチマーク比較
     parser.add_argument(
@@ -165,9 +157,7 @@ def parse_args():
     )
 
     # グラフ出力
-    parser.add_argument(
-        "--save-chart", action="store_true", help="バックテスト結果グラフ(PNG)をresults/に保存する"
-    )
+    parser.add_argument("--save-chart", action="store_true", help="バックテスト結果グラフ(PNG)をresults/に保存する")
     parser.add_argument(
         "--discord-chart",
         action="store_true",
@@ -180,9 +170,7 @@ def parse_args():
 def main():
     args = parse_args()
     model_label = "Ensemble(XGB+LGB)" if args.ensemble else args.model_type
-    logger.info(
-        f"バックテスト開始: {args.market}/{args.symbol} | task={args.task} | model={model_label}"
-    )
+    logger.info(f"バックテスト開始: {args.market}/{args.symbol} | task={args.task} | model={model_label}")
 
     if args.stop_loss:
         logger.info(f"  ストップロス: {args.stop_loss:.1%}")

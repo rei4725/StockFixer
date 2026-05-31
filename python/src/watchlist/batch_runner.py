@@ -131,9 +131,7 @@ def run_parallel(
                 _m = _task_field(task, "market")
                 _s = _task_field(task, "symbol")
                 logger.error(f"[タイムアウト] {_m}/{_s}: {task_timeout}秒超過")
-                failed.append(
-                    BatchFailure(market=_m, symbol=_s, error=f"タイムアウト（{task_timeout}秒）")
-                )
+                failed.append(BatchFailure(market=_m, symbol=_s, error=f"タイムアウト（{task_timeout}秒）"))
             except Exception as e:
                 _m = _task_field(task, "market")
                 _s = _task_field(task, "symbol")

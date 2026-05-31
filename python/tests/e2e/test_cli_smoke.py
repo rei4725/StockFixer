@@ -75,9 +75,7 @@ class TestCLIHelp:
         )
         # argparse の usage または usage: が出力に含まれることを確認
         combined = (result.stdout + result.stderr).lower()
-        assert (
-            "usage" in combined
-        ), f"{script} --help に usage 情報が含まれない:\n{result.stdout[:300]}"
+        assert "usage" in combined, f"{script} --help に usage 情報が含まれない:\n{result.stdout[:300]}"
 
 
 # ---------------------------------------------------------------------------
@@ -152,9 +150,7 @@ class TestCLIActualRun:
             cwd=_PYTHON_DIR,
         )
         # argparse の必須引数エラーは exit code 2
-        assert (
-            result.returncode != 0
-        ), "必須引数なしなのに exit 0 が返った（引数チェックが機能していない可能性）"
+        assert result.returncode != 0, "必須引数なしなのに exit 0 が返った（引数チェックが機能していない可能性）"
 
     @pytest.mark.slow
     @pytest.mark.timeout(120)
@@ -173,9 +169,7 @@ class TestCLIActualRun:
             cwd=_PYTHON_DIR,
         )
         # --symbol / --symbols なしは sys.exit(1) で終了
-        assert (
-            result.returncode != 0
-        ), "必須引数なしなのに exit 0 が返った（引数チェックが機能していない可能性）"
+        assert result.returncode != 0, "必須引数なしなのに exit 0 が返った（引数チェックが機能していない可能性）"
 
     @pytest.mark.slow
     @pytest.mark.timeout(120)

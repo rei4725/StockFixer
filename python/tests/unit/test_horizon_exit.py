@@ -8,9 +8,8 @@
 
 import unittest
 from datetime import date, timedelta
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
-import numpy as np
 import pandas as pd
 
 from src.trading.execution import _determine_entry_horizon

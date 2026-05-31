@@ -107,9 +107,7 @@ def filter_correlated_candidates(
     returns = _load_recent_returns(all_symbols, market, window)
 
     if returns.empty:
-        logger.warning(
-            "[corr] ペアワイズ相関計算用データ不足のためスキップ (candidates=%s)", candidate_symbols
-        )
+        logger.warning("[corr] ペアワイズ相関計算用データ不足のためスキップ (candidates=%s)", candidate_symbols)
         return list(candidate_symbols), []
 
     existing_in_data = [s for s in existing_symbols if s in returns.columns]
@@ -203,9 +201,7 @@ def evaluate_correlation_gate(
     is_allowed = enc >= enc_threshold
     reason: Optional[str] = None
     if not is_allowed:
-        reason = (
-            f"ENC={enc:.2f} < 閾値={enc_threshold:.2f} " f"(銘柄数={n}, 平均相関={avg_corr:.2f})"
-        )
+        reason = f"ENC={enc:.2f} < 閾値={enc_threshold:.2f} " f"(銘柄数={n}, 平均相関={avg_corr:.2f})"
         logger.warning("[corr] 相関リスク上昇検知: %s → 新規エントリーをブロック", reason)
     else:
         logger.info(
