@@ -4,10 +4,18 @@ from __future__ import annotations
 
 import unittest
 from datetime import date
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
+
+
+class _MockMarketDataPort:
+    def __init__(self, df):
+        self._df = df
+
+    def get_ohlcv_with_indicators(self, ticker, lookback_days):
+        return self._df
 
 
 def _make_ohlcv(n: int = 60) -> pd.DataFrame:
@@ -76,7 +84,7 @@ class TestRunRuleSignalPipeline(unittest.TestCase):
             "src.rule_engine.pipeline.load_effective_rules",
             return_value=pd.DataFrame(),
         ):
-            result = run_rule_signal_pipeline("jp")
+            result = run_rule_signal_pipeline("jp", market_data_port=MagicMock())
         self.assertEqual(result, [])
 
     def test_returns_results_for_each_symbol(self):
@@ -99,14 +107,12 @@ class TestRunRuleSignalPipeline(unittest.TestCase):
             ]
         )
         df = _make_ohlcv()
+        mock_port = _MockMarketDataPort(df)
         with (
             patch("src.rule_engine.pipeline.load_effective_rules", return_value=effective_df),
-            patch("src.rule_engine.pipeline.get_ticker", return_value="TICKER"),
-            patch("src.rule_engine.pipeline.yf_client.download", return_value=df),
-            patch("src.rule_engine.pipeline.add_technical_indicators", return_value=df),
             patch("src.rule_engine.pipeline.upsert_rule_signal"),
         ):
-            result = run_rule_signal_pipeline("jp")
+            result = run_rule_signal_pipeline("jp", market_data_port=mock_port)
         self.assertEqual(len(result), 2)
         self.assertIn("signal_label", result[0])
 
@@ -117,7 +123,7 @@ class TestRunRuleSignalPipeline(unittest.TestCase):
             "src.rule_engine.pipeline.load_effective_rules",
             return_value=pd.DataFrame(),
         ):
-            result = run_rule_signal_pipeline("jp", signal_date=None)
+            result = run_rule_signal_pipeline("jp", signal_date=None, market_data_port=MagicMock())
         self.assertEqual(result, [])
 
     def test_no_backtest_or_trading_import(self):

@@ -27,8 +27,8 @@ import pandas as pd
 
 from config.settings import MAX_SECTOR_POSITIONS
 from src.market_data.market_regime import get_market_regime
-from src.trading.signal_generator import get_regime_sector_weight
 from src.utils.logger import get_logger
+from src.utils.regime_weights import get_regime_sector_weight
 from src.utils.sector_constraints import filter_by_sector_cap, get_symbol_sector
 
 logger = get_logger(__name__)

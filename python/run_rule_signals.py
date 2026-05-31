@@ -22,6 +22,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+from src.infrastructure.yfinance_market_data_adapter import YFinanceMarketDataAdapter  # noqa: E402
 from src.rule_engine.pipeline import run_rule_signal_pipeline  # noqa: E402
 from src.trading.rule_execution import execute_rule_paper_trades  # noqa: E402
 from src.utils.logger import get_logger  # noqa: E402
@@ -62,7 +63,11 @@ def main() -> None:
     logger.info(f"=== 日次ルールシグナルジョブ開始 ({today}) ===")
 
     # 1. シグナル生成
-    signals = run_rule_signal_pipeline(market=args.market, signal_date=today)
+    signals = run_rule_signal_pipeline(
+        market=args.market,
+        signal_date=today,
+        market_data_port=YFinanceMarketDataAdapter(),
+    )
 
     if not signals:
         logger.warning("シグナルなし（週次評価 run_rule_evaluate.py を先に実行してください）")

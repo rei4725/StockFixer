@@ -10,6 +10,16 @@ import numpy as np
 import pandas as pd
 
 
+class _MockMarketDataPort:
+    """OHLCVWithIndicatorsPort の最小モック実装"""
+
+    def __init__(self, df):
+        self._df = df
+
+    def get_ohlcv_with_indicators(self, ticker, lookback_days):
+        return self._df
+
+
 def _make_ohlcv(n: int = 60) -> pd.DataFrame:
     idx = pd.date_range("2024-01-01", periods=n, freq="B")
     close = np.linspace(1000, 1100, n)
@@ -29,21 +39,15 @@ class TestGetTodaySignal(unittest.TestCase):
     def test_unknown_rule_returns_hold(self):
         from src.rule_engine.pipeline import _get_today_signal
 
-        signal, price = _get_today_signal("jp", "7203", "unknown_rule")
+        signal, price = _get_today_signal("jp", "7203", "unknown_rule", MagicMock())
         self.assertEqual(signal, 0)
         self.assertIsNone(price)
 
     def test_empty_df_returns_hold(self):
         from src.rule_engine.pipeline import _get_today_signal
 
-        with (
-            patch("src.rule_engine.pipeline.get_ticker", return_value="7203.T"),
-            patch(
-                "src.rule_engine.pipeline.yf_client.download",
-                return_value=pd.DataFrame(),
-            ),
-        ):
-            signal, price = _get_today_signal("jp", "7203", "rsi_contrarian")
+        mock_port = _MockMarketDataPort(pd.DataFrame())
+        signal, price = _get_today_signal("jp", "7203", "rsi_contrarian", mock_port)
         self.assertEqual(signal, 0)
         self.assertIsNone(price)
 
@@ -51,12 +55,8 @@ class TestGetTodaySignal(unittest.TestCase):
         from src.rule_engine.pipeline import _get_today_signal
 
         df = _make_ohlcv()
-        with (
-            patch("src.rule_engine.pipeline.get_ticker", return_value="7203.T"),
-            patch("src.rule_engine.pipeline.yf_client.download", return_value=df),
-            patch("src.rule_engine.pipeline.add_technical_indicators", return_value=df),
-        ):
-            signal, price = _get_today_signal("jp", "7203", "rsi_contrarian")
+        mock_port = _MockMarketDataPort(df)
+        signal, price = _get_today_signal("jp", "7203", "rsi_contrarian", mock_port)
         self.assertIn(signal, [-1, 0, 1])
         self.assertIsInstance(price, float)
 
@@ -69,7 +69,7 @@ class TestRunRuleSignalPipeline(unittest.TestCase):
             "src.rule_engine.pipeline.load_effective_rules",
             return_value=pd.DataFrame(),
         ):
-            result = run_rule_signal_pipeline("jp")
+            result = run_rule_signal_pipeline("jp", market_data_port=MagicMock())
         self.assertEqual(result, [])
 
     def test_returns_results_for_each_symbol(self):
@@ -92,17 +92,15 @@ class TestRunRuleSignalPipeline(unittest.TestCase):
             ]
         )
         df = _make_ohlcv()
+        mock_port = _MockMarketDataPort(df)
         with (
             patch(
                 "src.rule_engine.pipeline.load_effective_rules",
                 return_value=effective_df,
             ),
-            patch("src.rule_engine.pipeline.get_ticker", return_value="TICKER"),
-            patch("src.rule_engine.pipeline.yf_client.download", return_value=df),
-            patch("src.rule_engine.pipeline.add_technical_indicators", return_value=df),
             patch("src.rule_engine.pipeline.upsert_rule_signal"),
         ):
-            result = run_rule_signal_pipeline("jp")
+            result = run_rule_signal_pipeline("jp", market_data_port=mock_port)
         self.assertEqual(len(result), 2)
         self.assertIn("symbol", result[0])
         self.assertIn("signal_label", result[0])
@@ -123,7 +121,7 @@ class TestRunRuleSignalPipeline(unittest.TestCase):
                 side_effect=RuntimeError("fetch error"),
             ),
         ):
-            result = run_rule_signal_pipeline("jp")
+            result = run_rule_signal_pipeline("jp", market_data_port=MagicMock())
         self.assertEqual(result, [])
 
     def test_signal_date_defaults_to_today(self):
@@ -133,7 +131,7 @@ class TestRunRuleSignalPipeline(unittest.TestCase):
             "src.rule_engine.pipeline.load_effective_rules",
             return_value=pd.DataFrame(),
         ):
-            result = run_rule_signal_pipeline("jp", signal_date=None)
+            result = run_rule_signal_pipeline("jp", signal_date=None, market_data_port=MagicMock())
         self.assertEqual(result, [])
 
     def test_custom_signal_date(self):
@@ -143,7 +141,9 @@ class TestRunRuleSignalPipeline(unittest.TestCase):
             "src.rule_engine.pipeline.load_effective_rules",
             return_value=pd.DataFrame(),
         ):
-            result = run_rule_signal_pipeline("jp", signal_date=date(2024, 1, 15))
+            result = run_rule_signal_pipeline(
+                "jp", signal_date=date(2024, 1, 15), market_data_port=MagicMock()
+            )
         self.assertEqual(result, [])
 
 

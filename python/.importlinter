@@ -42,13 +42,8 @@ ignore_imports =
     src.prediction.predict_single -> src.market_data.technical
     src.prediction.predict_single -> src.market_data.loader
     src.prediction.training_pipeline -> src.market_data.technical
-    src.backtest.portfolio -> src.trading.signal_generator
-    src.backtest.pipeline -> src.trading.signal_generator
     src.backtest.rule_backtester -> src.market_data.technical
     src.backtest.screener -> src.market_data.technical
-    # [B] rule_engine → market_data (技術指標計算 — market_data ポートで解消可能)
-    src.rule_engine.pipeline -> src.market_data.yf_client
-    src.rule_engine.pipeline -> src.market_data.technical
     src.utils.alert_service -> src.reporting.discord.discord_utils
 
 # ============================================================
@@ -108,12 +103,6 @@ ignore_imports =
     src.prediction.predict_single -> src.market_data.technical
     src.prediction.predict_single -> src.market_data.loader
     src.prediction.training_pipeline -> src.market_data.technical
-    # [B] backtest → trading (シグナル生成 — trading ポートで解消可能)
-    src.backtest.portfolio -> src.trading.signal_generator
-    src.backtest.pipeline -> src.trading.signal_generator
     # [B] backtest → market_data (追加技術指標 — ポートで解消可能)
     src.backtest.rule_backtester -> src.market_data.technical
     src.backtest.screener -> src.market_data.technical
-    # [B] rule_engine → market_data (技術指標計算 — market_data ポートで解消可能)
-    src.rule_engine.pipeline -> src.market_data.yf_client
-    src.rule_engine.pipeline -> src.market_data.technical

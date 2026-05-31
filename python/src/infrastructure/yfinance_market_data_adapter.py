@@ -45,3 +45,12 @@ class YFinanceMarketDataAdapter(MarketDataPort):
         if df.empty or "Close" not in df.columns:
             return 0.0
         return float(df["Close"].iloc[-1])
+
+    def get_ohlcv_with_indicators(self, ticker: str, lookback_days: int) -> pd.DataFrame | None:
+        """OHLCV を取得しテクニカル指標を付与して返す。データなし時は None。"""
+        from src.market_data.technical import add_technical_indicators
+
+        df = yf_client.download(ticker, period=f"{lookback_days}d")
+        if df is None or df.empty:
+            return None
+        return add_technical_indicators(df)
