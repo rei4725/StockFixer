@@ -8,8 +8,13 @@ import os
 
 import pandas as pd
 
+from src.domain.types import PredictionResult, ShapFeatureContribution, SignalSnapshot
 from src.orchestration.types import SchedulerJobStatus
-from src.prediction.types import PredictionResult, ShapFeatureContribution, SignalSnapshot
+from src.prediction.db import (
+    load_latest_prediction_timestamp,
+    load_prediction_markets,
+    load_prediction_results,
+)
 from src.reporting.types import (
     MarketPredictionSnapshot,
     MonthlyReportSummary,
@@ -17,11 +22,6 @@ from src.reporting.types import (
     WatchlistPredictionView,
 )
 from src.utils.data_path_utils import get_monitor_list_path, get_results_dir
-from src.utils.db import (
-    load_latest_prediction_timestamp,
-    load_prediction_markets,
-    load_prediction_results,
-)
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -76,8 +76,8 @@ def get_watchlist_prediction_view() -> WatchlistPredictionView:
                 if len(row) < 2:
                     continue
                 market, symbol = row[0], row[1]
-                result_df = predict_single_stock(market, symbol)
-                if result_df is None or result_df.empty:
+                result = predict_single_stock(market, symbol)
+                if result is None:
                     rows.append(
                         WatchlistPredictionRow(
                             symbol=symbol,
@@ -87,18 +87,17 @@ def get_watchlist_prediction_view() -> WatchlistPredictionView:
                         )
                     )
                     continue
-                record = result_df.iloc[0]
                 try:
                     diff_ratio = (
-                        float(record["avg_pred_price"]) - float(record["current_price"])
-                    ) / float(record["current_price"])
-                except (ValueError, TypeError, ZeroDivisionError, KeyError):
+                        result.avg_pred_price - result.current_price
+                    ) / result.current_price
+                except (TypeError, ZeroDivisionError):
                     diff_ratio = None
                 rows.append(
                     WatchlistPredictionRow(
-                        symbol=str(record["symbol"]),
-                        current_price=float(record["current_price"]),
-                        avg_pred_price=float(record["avg_pred_price"]),
+                        symbol=str(result.symbol),
+                        current_price=float(result.current_price),
+                        avg_pred_price=float(result.avg_pred_price),
                         diff_ratio=diff_ratio,
                     )
                 )
@@ -112,24 +111,23 @@ def get_watchlist_prediction_view() -> WatchlistPredictionView:
 def get_signal_snapshot(market: str, symbol: str, explain: bool = False) -> SignalSnapshot | None:
     from src.prediction.predict_single import explain_prediction_shap, predict_single_stock
 
-    result_df = predict_single_stock(market, symbol)
-    if result_df is None or result_df.empty:
+    result = predict_single_stock(market, symbol)
+    if result is None:
         return None
 
-    prediction = PredictionResult.from_dataframe_row(result_df.iloc[0])
     if not explain:
-        return SignalSnapshot(prediction=prediction)
+        return SignalSnapshot(prediction=result)
 
     shap_result = explain_prediction_shap(market, symbol, top_n=5)
     if not shap_result:
-        return SignalSnapshot(prediction=prediction)
+        return SignalSnapshot(prediction=result)
 
     features = [
         ShapFeatureContribution(feature=item["feature"], shap_value=float(item["shap_value"]))
         for item in shap_result.get("top_features", [])
     ]
     return SignalSnapshot(
-        prediction=prediction,
+        prediction=result,
         shap_direction=shap_result.get("direction"),
         top_features=features,
     )

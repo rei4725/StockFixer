@@ -195,8 +195,8 @@ class TestPrediction:
     def test_prediction_result_saved_to_db(self, e2e_db_env):
         """予測結果を DB へ保存できること。"""
         import src.utils.db._connection as _conn
+        from src.prediction.db import save_prediction_results
         from src.prediction.predict_single import predict_single_stock
-        from src.utils.db import save_prediction_results
 
         with patch(
             "src.prediction.predict_single.data_loader.get_stock_data",

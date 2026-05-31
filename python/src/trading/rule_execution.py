@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from src.infrastructure.yfinance_market_data_adapter import YFinanceMarketDataAdapter
 from src.trading.brokers.base import OrderSide, OrderType
 from src.trading.brokers.paper.paper_broker import PaperBroker
 from src.utils.data_path_utils import get_ticker
@@ -31,7 +32,7 @@ def execute_rule_paper_trades(
     Returns:
         {"buy_orders": int, "sell_orders": int, "skipped": int}
     """
-    broker = PaperBroker()
+    broker = PaperBroker(market_data_port=YFinanceMarketDataAdapter())
     buy_orders = 0
     sell_orders = 0
     skipped = 0

@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from src.watchlist.batch_runner import load_target_symbols, print_summary, run_parallel
+from src.watchlist.types import BatchFailure, BatchResult
 
 
 class TestLoadTargetSymbols(unittest.TestCase):
@@ -53,8 +54,8 @@ class TestRunParallel(unittest.TestCase):
             return {"id": task, "status": "success"}
 
         results = run_parallel(dummy_func, [1, 2, 3], max_workers=2, label="テスト")
-        self.assertEqual(len(results), 3)
-        ids = {r["id"] for r in results}
+        self.assertEqual(len(results.succeeded), 3)
+        ids = {r["id"] for r in results.succeeded}
         self.assertEqual(ids, {1, 2, 3})
 
     def test_uses_thread_pool_by_default(self):
@@ -79,25 +80,25 @@ class TestRunParallel(unittest.TestCase):
         results = run_parallel(
             dummy_func, ["a", "b"], max_workers=2, use_process=False, label="プロセステスト"
         )
-        self.assertEqual(len(results), 2)
+        self.assertEqual(len(results.succeeded), 2)
 
     def test_empty_tasks(self):
         """タスクが空の場合に空リストが返ることを確認"""
         results = run_parallel(lambda x: x, [], max_workers=2)
-        self.assertEqual(results, [])
+        self.assertEqual(results, BatchResult(succeeded=[], failed=[], skipped=[]))
 
 
 class TestPrintSummary(unittest.TestCase):
     """print_summary 関数のテスト"""
 
-    def test_counts_success_error_skip(self):
+    @patch("src.reporting.discord.discord_utils.send_webhook_notification")
+    def test_counts_success_error_skip(self, _mock_notify):
         """成功・エラー・スキップが正しくカウントされることを確認"""
-        results = [
-            {"status": "success", "market": "us", "symbol": "AAPL"},
-            {"status": "success", "market": "us", "symbol": "GOOG"},
-            {"status": "error", "market": "jp", "symbol": "7203", "error": "timeout"},
-            {"status": "skip", "market": "jp", "symbol": "9984"},
-        ]
+        results = BatchResult(
+            succeeded=[{"market": "us", "symbol": "AAPL"}, {"market": "us", "symbol": "GOOG"}],
+            failed=[BatchFailure(market="jp", symbol="7203", error="timeout")],
+            skipped=[{"market": "jp", "symbol": "9984"}],
+        )
         with self.assertLogs("src.watchlist.batch_runner", level="INFO") as cm:
             print_summary("テスト", results)
         output = "\n".join(cm.output)
@@ -105,11 +106,14 @@ class TestPrintSummary(unittest.TestCase):
         self.assertIn("エラー: 1", output)
         self.assertIn("スキップ: 1", output)
 
-    def test_error_detail_shown(self):
+    @patch("src.reporting.discord.discord_utils.send_webhook_notification")
+    def test_error_detail_shown(self, _mock_notify):
         """エラー詳細が出力に含まれることを確認"""
-        results = [
-            {"status": "error", "market": "us", "symbol": "BAD", "error": "connection failed"},
-        ]
+        results = BatchResult(
+            succeeded=[],
+            failed=[BatchFailure(market="us", symbol="BAD", error="connection failed")],
+            skipped=[],
+        )
         with self.assertLogs("src.watchlist.batch_runner", level="WARNING") as cm:
             print_summary("エラーテスト", results)
         output = "\n".join(cm.output)
@@ -117,7 +121,7 @@ class TestPrintSummary(unittest.TestCase):
 
     def test_no_error_no_detail(self):
         """エラーがなければエラー詳細セクションが出ないことを確認"""
-        results = [{"status": "success"}]
+        results = BatchResult(succeeded=[{"status": "success"}], failed=[], skipped=[])
         with self.assertLogs("src.watchlist.batch_runner", level="INFO") as cm:
             print_summary("成功のみ", results)
         output = "\n".join(cm.output)

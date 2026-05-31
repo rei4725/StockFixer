@@ -178,8 +178,8 @@ class TestPredictionResultsQuality:
         """
         from unittest.mock import patch
 
+        from src.prediction.db import save_prediction_results
         from src.prediction.predict_single import predict_single_stock
-        from src.utils.db import save_prediction_results
 
         # 予測を実行して保存（冪等: 既存行は DELETE-INSERT で置き換え）
         with patch(

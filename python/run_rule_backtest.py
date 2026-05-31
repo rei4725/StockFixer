@@ -1,4 +1,4 @@
-"""
+r"""
 ルールベースバックテスト CLI
 
 テクニカル指標ルールを使った売買戦略をバックテストし、
@@ -30,21 +30,17 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() in ("cp932", "shift-jis",
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from src.backtest.rule_backtester import (
-    print_rule_ranking,
-    run_multi_symbol_rule_backtest,
-    run_rule_backtest,
-)
-from src.backtest.rules import ALL_RULES
-from src.backtest.rules.technical import (
-    BollingerBandRule,
-    EMAMomentumRule,
-    MACDRSIRule,
-    RSIContrarianRule,
-    VolatilityBreakoutRule,
-    VolumeBreakoutRule,
-)
-from src.backtest.screener import screen_volatile_symbols
+from src.backtest.rule_backtester import print_rule_ranking  # noqa: E402
+from src.backtest.rule_backtester import run_multi_symbol_rule_backtest  # noqa: E402
+from src.backtest.rule_backtester import run_rule_backtest  # noqa: E402; noqa: E402
+from src.backtest.rules import ALL_RULES  # noqa: E402
+from src.backtest.rules.technical import BollingerBandRule  # noqa: E402
+from src.backtest.rules.technical import EMAMomentumRule  # noqa: E402
+from src.backtest.rules.technical import MACDRSIRule  # noqa: E402
+from src.backtest.rules.technical import RSIContrarianRule  # noqa: E402
+from src.backtest.rules.technical import VolatilityBreakoutRule  # noqa: E402
+from src.backtest.rules.technical import VolumeBreakoutRule  # noqa: E402; noqa: E402
+from src.backtest.screener import screen_volatile_symbols  # noqa: E402
 
 RULE_MAP = {
     "volume_breakout": VolumeBreakoutRule(),
@@ -139,7 +135,7 @@ def main() -> None:
     rules = [RULE_MAP[args.rule]] if args.rule else ALL_RULES
 
     print(f"\n{'=' * 70}")
-    print(f"  ルールベースバックテスト")
+    print("  ルールベースバックテスト")
     print(f"  期間: {args.start} → {args.end}")
     print(f"  初期資金: JPY{args.initial_cash:,.0f}  手数料: {args.fee_rate:.3%}  SL: {stop_loss}")
     print(f"  ルール数: {len(rules)}")
