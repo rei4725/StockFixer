@@ -1,4 +1,4 @@
-﻿"""
+"""
 ユニットテスト: PaperBroker
 
 DuckDB を一時ファイルに差し替えてテスト。yfinance 呼び出しはモック化。
