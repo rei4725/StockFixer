@@ -210,7 +210,9 @@ class ModelManager:
                         model_type = registered_name
                         break
                 else:
-                    raise ValueError(f"モデル '{model_name}' はまだ作成されていません。model_typeを指定してください。")
+                    raise ValueError(
+                        f"モデル '{model_name}' はまだ作成されていません。model_typeを指定してください。"
+                    )
             model_instance = self.create_model(model_type, model_name)
 
         artifact = joblib.load(model_path)

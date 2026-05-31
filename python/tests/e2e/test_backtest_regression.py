@@ -132,7 +132,9 @@ class TestBacktestRegression:
         合成データでも max_drawdown が -100% ちょうどになることはない。
         （全ポジションを保有したまま価格がゼロになることは合成データでは発生しない）
         """
-        assert metrics["max_drawdown"] > -1.0, "max_drawdown が -100% を達成: 破産判定ロジックのバグの可能性"
+        assert (
+            metrics["max_drawdown"] > -1.0
+        ), "max_drawdown が -100% を達成: 破産判定ロジックのバグの可能性"
 
     def test_hit_rate_in_valid_range(self, metrics):
         """win_rate（方向一致率）が 0〜1 の範囲であること。"""
@@ -184,7 +186,9 @@ class TestWalkForwardBasic:
             n_splits=3,
         )
 
-        assert "fold" in wf_df.columns or len(wf_df) >= 3, "Walk-Forward の結果が 3 フォールド分存在しない"
+        assert (
+            "fold" in wf_df.columns or len(wf_df) >= 3
+        ), "Walk-Forward の結果が 3 フォールド分存在しない"
 
 
 # ---------------------------------------------------------------------------

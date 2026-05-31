@@ -252,7 +252,7 @@ class TestSaveRawOhlcv(unittest.TestCase):
 
     def test_save_raw_ohlcv_from_yfinance_df(self):
         """yfinance 形式のDataFrameをそのまま保存できる"""
-        from src.data.data_saver import save_raw_ohlcv
+        from src.market_data.saver import save_raw_ohlcv
 
         idx = pd.date_range("2024-01-02", periods=3, freq="B")
         df = pd.DataFrame(
@@ -273,7 +273,7 @@ class TestSaveRawOhlcv(unittest.TestCase):
         self.assertEqual(len(loaded), 3)
 
     def test_save_raw_ohlcv_returns_row_count(self):
-        from src.data.data_saver import save_raw_ohlcv
+        from src.market_data.saver import save_raw_ohlcv
 
         idx = pd.date_range("2024-02-01", periods=5, freq="B")
         df = pd.DataFrame(

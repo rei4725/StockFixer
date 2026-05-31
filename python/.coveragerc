@@ -5,5 +5,5 @@ omit =
     src/sbi/*
 
 [report]
-fail_under = 70
+fail_under = 78
 show_missing = true
