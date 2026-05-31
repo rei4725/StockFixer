@@ -1,4 +1,19 @@
 services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: always
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:11434/api/tags || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
   stockfixer:
     build:
       context: ./python
@@ -10,8 +25,12 @@ services:
     image: stockfixer:${VERSION:-dev}
     container_name: stockfixer
     restart: always
+    depends_on:
+      ollama:
+        condition: service_healthy
     environment:
       - LOG_FORMAT=json
+      - OLLAMA_URL=http://ollama:11434
     env_file:
       - ./python/.env
     volumes:
@@ -33,3 +52,6 @@ services:
       retries: 3
       start_period: 30s
     tty: true
+
+volumes:
+  ollama_data:
