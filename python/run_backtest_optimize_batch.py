@@ -29,9 +29,7 @@ logger = get_logger(__name__)
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(
-        description="全銘柄バックテスト最適化バッチ（並列グリッドサーチ）"
-    )
+    parser = argparse.ArgumentParser(description="全銘柄バックテスト最適化バッチ（並列グリッドサーチ）")
     parser.add_argument(
         "--model-type",
         type=str,
@@ -49,15 +47,11 @@ def parse_args():
     )
     parser.add_argument("--n-splits", type=int, default=5, help="Walk-Forward分割数 (default: 5)")
     parser.add_argument("--initial-cash", type=float, default=1_000_000, help="初期資金")
-    parser.add_argument(
-        "--fee-rate", type=float, default=0.001, help="取引手数料率 (default: 0.001)"
-    )
+    parser.add_argument("--fee-rate", type=float, default=0.001, help="取引手数料率 (default: 0.001)")
     parser.add_argument("--slippage", type=float, default=0.0, help="スリッページ (default: 0.0)")
 
     # 閾値グリッド
-    parser.add_argument(
-        "--threshold-min", type=float, default=0.0, help="閾値の最小値 (default: 0.0)"
-    )
+    parser.add_argument("--threshold-min", type=float, default=0.0, help="閾値の最小値 (default: 0.0)")
     parser.add_argument(
         "--threshold-max", type=float, default=0.015, help="閾値の最大値 (default: 0.015)"
     )

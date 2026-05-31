@@ -1,4 +1,4 @@
-"""
+r"""
 ルールベースバックテスト CLI
 
 テクニカル指標ルールを使った売買戦略をバックテストし、
@@ -30,21 +30,17 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() in ("cp932", "shift-jis",
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from src.backtest.rule_backtester import (
-    print_rule_ranking,
-    run_multi_symbol_rule_backtest,
-    run_rule_backtest,
-)
-from src.backtest.rules import ALL_RULES
-from src.backtest.rules.technical import (
-    BollingerBandRule,
-    EMAMomentumRule,
-    MACDRSIRule,
-    RSIContrarianRule,
-    VolatilityBreakoutRule,
-    VolumeBreakoutRule,
-)
-from src.backtest.screener import screen_volatile_symbols
+from src.backtest.rule_backtester import print_rule_ranking  # noqa: E402
+from src.backtest.rule_backtester import run_multi_symbol_rule_backtest  # noqa: E402
+from src.backtest.rule_backtester import run_rule_backtest  # noqa: E402; noqa: E402
+from src.backtest.rules import ALL_RULES  # noqa: E402
+from src.backtest.rules.technical import BollingerBandRule  # noqa: E402
+from src.backtest.rules.technical import EMAMomentumRule  # noqa: E402
+from src.backtest.rules.technical import MACDRSIRule  # noqa: E402
+from src.backtest.rules.technical import RSIContrarianRule  # noqa: E402
+from src.backtest.rules.technical import VolatilityBreakoutRule  # noqa: E402
+from src.backtest.rules.technical import VolumeBreakoutRule  # noqa: E402; noqa: E402
+from src.backtest.screener import screen_volatile_symbols  # noqa: E402
 
 RULE_MAP = {
     "volume_breakout": VolumeBreakoutRule(),
@@ -106,9 +102,7 @@ def parse_args() -> argparse.Namespace:
     )
 
     # 取引条件
-    p.add_argument(
-        "--initial-cash", type=float, default=1_000_000, help="初期資金 (default: 1000000)"
-    )
+    p.add_argument("--initial-cash", type=float, default=1_000_000, help="初期資金 (default: 1000000)")
     p.add_argument("--fee-rate", type=float, default=0.001, help="片道手数料率 (default: 0.001)")
     p.add_argument("--slippage", type=float, default=0.001, help="スリッページ率 (default: 0.001)")
     p.add_argument(
@@ -139,7 +133,7 @@ def main() -> None:
     rules = [RULE_MAP[args.rule]] if args.rule else ALL_RULES
 
     print(f"\n{'=' * 70}")
-    print(f"  ルールベースバックテスト")
+    print("  ルールベースバックテスト")
     print(f"  期間: {args.start} → {args.end}")
     print(f"  初期資金: JPY{args.initial_cash:,.0f}  手数料: {args.fee_rate:.3%}  SL: {stop_loss}")
     print(f"  ルール数: {len(rules)}")
@@ -178,10 +172,7 @@ def main() -> None:
 
         # 銘柄別サマリー
         print("\n\n===== 銘柄 × ルール 総合ランキング =====")
-        print(
-            f"{'順位':<4} {'銘柄':>6} {'法則名':<24} {'勝率':>6} "
-            f"{'総利益(円)':>12} {'取引数':>6} {'MDD':>8}"
-        )
+        print(f"{'順位':<4} {'銘柄':>6} {'法則名':<24} {'勝率':>6} " f"{'総利益(円)':>12} {'取引数':>6} {'MDD':>8}")
         print("-" * 70)
         for rank, (_, row) in enumerate(result_df.iterrows(), 1):
             profit_str = f"JPY{row['net_profit']:>+,.0f}"
@@ -203,10 +194,7 @@ def main() -> None:
             )
             .sort_values(["avg_win_rate", "total_profit"], ascending=[False, False])
         )
-        print(
-            f"{'法則名':<24} {'平均勝率':>8} {'合計利益(円)':>14} "
-            f"{'平均取引数':>10} {'銘柄数':>6}"
-        )
+        print(f"{'法則名':<24} {'平均勝率':>8} {'合計利益(円)':>14} " f"{'平均取引数':>10} {'銘柄数':>6}")
         print("-" * 65)
         for rule_name, row in summary.iterrows():
             profit_str = f"JPY{row['total_profit']:>+,.0f}"

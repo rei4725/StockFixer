@@ -116,7 +116,7 @@ def _check_zero_volume(df: pd.DataFrame, n_days: int) -> List[QualityIssue]:
 
 
 def _max_consecutive_true(series: pd.Series) -> int:
-    """True が最大何回連続するかを返す。"""
+    """True が最大何回連続するかを返す。"""  # noqa: D401
     max_count = 0
     count = 0
     for v in series:

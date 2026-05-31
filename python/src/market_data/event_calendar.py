@@ -93,9 +93,7 @@ def _load_cached_event_dates(market: str, symbol: str) -> Optional[pd.DatetimeIn
         dates = pd.DatetimeIndex([pd.Timestamp(r[0]) for r in rows])
         return dates
     except Exception as exc:
-        logger.warning(
-            "イベントカレンダーキャッシュ読込失敗 [%s/%s]: %s", market, symbol, exc, exc_info=True
-        )
+        logger.warning("イベントカレンダーキャッシュ読込失敗 [%s/%s]: %s", market, symbol, exc, exc_info=True)
         return None
 
 
@@ -184,11 +182,13 @@ def _save_event_dates(market: str, symbol: str, dates: pd.DatetimeIndex) -> None
     try:
         with _db_connection() as con:
             con.register("_ec_temp", df)
-            con.execute("""
+            con.execute(
+                """
                 INSERT OR REPLACE INTO earnings_calendar
                     (market, symbol, event_date, event_type, fetched_at)
                 SELECT market, symbol, event_date, event_type, CURRENT_TIMESTAMP
                 FROM _ec_temp
-                """)
+                """
+            )
     except Exception as exc:
         logger.warning("イベント日保存失敗 [%s/%s]: %s", market, symbol, exc, exc_info=True)

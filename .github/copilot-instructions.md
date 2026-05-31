@@ -150,6 +150,7 @@ run_*.py → api層 → services層 → models/strategy/backtest層 → features
 | `version-mgmt` | Gitタグによるバージョン管理・Dockerイメージ連動 |
 | `troubleshooting` | よくあるエラーの原因と対処法 |
 | `code-review` | AIと自動チェックツールによる包括的コードレビュー（品質・ロック問題・セキュリティ） |
+| `ci-preflight` | push/PR前にCIが失敗しやすいポイントを事前検証する（black版違い・importlinter未更新・依存競合・F401・PRボディ欠落） |
 
 ---
 

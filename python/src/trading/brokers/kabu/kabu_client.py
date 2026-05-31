@@ -57,8 +57,7 @@ class KabuBroker(BrokerBase):
 
         if not self._api_password:
             raise EnvironmentError(
-                "KABU_API_PASSWORD が設定されていません。"
-                "環境変数を設定するか KabuBroker(api_password=...) で渡してください。"
+                "KABU_API_PASSWORD が設定されていません。" "環境変数を設定するか KabuBroker(api_password=...) で渡してください。"
             )
 
         last_exc: Exception | None = None
