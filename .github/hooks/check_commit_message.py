@@ -94,7 +94,10 @@ def validate_commit_message(msg: str) -> tuple[bool, str]:
         return False, "✗ サブジェクトが空です。"
 
     if len(subject) > 100:
-        return False, (f"✗ サブジェクトが長すぎます（最大100文字、現在{len(subject)}文字）。\n" f"  入力: {subject}")
+        return False, (
+            f"✗ サブジェクトが長すぎます（最大100文字、現在{len(subject)}文字）。\n"
+            f"  入力: {subject}"
+        )
 
     # 最初の文字を確認（大文字推奨）
     if subject[0].islower():
