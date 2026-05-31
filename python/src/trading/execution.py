@@ -435,6 +435,10 @@ def _choose_order_params(
         (OrderType, limit_price, reason_string, order_session)
         order_session: "open"（寄付）または "close"（引け）
     """
+    if market_data is None:
+        from src.infrastructure.yfinance_market_data_adapter import YFinanceMarketDataAdapter
+
+        market_data = YFinanceMarketDataAdapter()
     avg_volume, spread_proxy = _load_execution_metrics(market, symbol, market_data)
 
     reasons: list[str] = []

@@ -1,8 +1,8 @@
 """
-ユニットテスト: Repository パターン (#282)
+ユニットテスチE Repository パターン (#282)
 
-InMemoryPredictionRepository を使って execution.py の run_daily_orders を
-DuckDB なしでテストできることを検証する。
+InMemoryPredictionRepository を使って execution.py の run_daily_orders めE
+DuckDB なしでテストできることを検証する
 """
 
 from unittest.mock import patch
@@ -75,7 +75,7 @@ class TestInMemoryPredictionRepositoryGetLatest:
 
 
 # ---------------------------------------------------------------------------
-# run_daily_orders を prediction_repo 経由でテスト (DB なし)
+# run_daily_orders の prediction_repo 経由でテスト（DB なし）
 # ---------------------------------------------------------------------------
 
 _GATE_OK = TradingGateStatus(
@@ -160,7 +160,7 @@ class TestRunDailyOrdersWithRepository:
                 p.stop()
 
     def test_no_repo_falls_back_to_db(self):
-        """prediction_repo=None のときは従来の _load_latest_predictions を使う（後方互換）"""
+        """prediction_repo=None のとき、従来の _load_latest_predictions を使う（後方互換）"""
         broker = InMemoryBrokerAdapter()
 
         with patch(
@@ -176,7 +176,7 @@ class TestRunDailyOrdersWithRepository:
                     p.stop()
 
     def test_with_repo_skips_db_load(self):
-        """prediction_repo を渡したとき _load_latest_predictions は呼ばれない"""
+        """prediction_repo を渡したとき、_load_latest_predictions は呼ばれない"""
         broker = InMemoryBrokerAdapter()
         repo = _make_repo_with_predictions(n=1)
 
