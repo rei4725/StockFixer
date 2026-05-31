@@ -39,7 +39,7 @@ def test_perf_backtester_run(record_benchmark):
     mock_data_loader.get_stock_data_auto.return_value = df
 
     mock_model = MagicMock()
-    mock_model.predict.return_value = np.random.uniform(-0.02, 0.02, len(df))
+    mock_model.predict.side_effect = lambda X: np.random.uniform(-0.02, 0.02, len(X))
 
     mock_model_manager = MagicMock()
     mock_model_manager.get_model.return_value = mock_model

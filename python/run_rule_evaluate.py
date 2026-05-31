@@ -25,7 +25,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from src.backtest.rule_selector import evaluate_all_symbols, print_rule_summary  # noqa: E402
+from src.backtest.rule_selector import evaluate_all_symbols  # noqa: E402
+from src.backtest.rule_selector import print_rule_summary  # noqa: E402
 from src.utils.logger import get_logger  # noqa: E402
 
 logger = get_logger(__name__)
