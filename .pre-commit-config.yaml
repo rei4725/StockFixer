@@ -48,7 +48,7 @@ repos:
     rev: 5.13.2
     hooks:
       - id: isort
-        args: [--profile=black, --line-length=100]
+        args: [--settings-path=python]
 
   # 4. Python コード品質チェック (Flake8)
   - repo: https://github.com/PyCQA/flake8
