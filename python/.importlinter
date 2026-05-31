@@ -116,7 +116,6 @@ ignore_imports =
     src.prediction.training_pipeline -> src.market_data.loader
     # [A] prediction → watchlist (バッチ学習がウォッチリストを反復 — types 共有で解消可能)
     src.prediction.training_pipeline -> src.watchlist.batch_runner
-    src.prediction.training_pipeline -> src.watchlist.types
     # [B] market_data → watchlist (バッチデータ収集がウォッチリストを反復 — ポート注入で解消可能)
     src.market_data.pipeline -> src.watchlist.batch_runner
     # [B] backtest → market_data (技術指標計算 — market_data ポートで解消可能)
