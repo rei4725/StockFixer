@@ -18,9 +18,8 @@ from typing import Optional
 import pandas as pd
 from tabulate import tabulate  # type: ignore[import-untyped]
 
-from src.prediction.db import load_drift_summary, load_paper_real_diff_summary
 from src.reporting.monthly import run_monthly_report
-from src.utils.db import load_experiment_runs
+from src.utils.db import load_drift_summary, load_experiment_runs, load_paper_real_diff_summary
 from src.utils.db._connection import _db_connection
 from src.utils.logger import get_logger
 

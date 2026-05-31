@@ -1,8 +1,7 @@
 """
-prediction BC の月次 KPI 集約サービス（reporting 向けインターフェース）。
+reporting BC の月次 KPI 集約サービス。
 
-reporting BC が prediction データを参照する際の唯一の窓口。
-prediction.db への直接参照を reporting 側から排除する。
+reporting BC が予測精度データを参照する際の唯一の窓口。
 """
 
 from __future__ import annotations
@@ -13,11 +12,7 @@ from typing import Optional
 
 import pandas as pd
 
-from src.prediction.db import (
-    load_drift_summary,
-    load_paper_real_diff_summary,
-    load_prediction_accuracy,
-)
+from src.utils.db import load_drift_summary, load_paper_real_diff_summary, load_prediction_accuracy
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)

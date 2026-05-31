@@ -22,6 +22,11 @@ disable=
     import-error,
     no-member
 
+[TYPECHECK]
+# utils.db は _DbPackageProxy で prediction.db 関数を動的に公開しているため
+# pylint の静的解析では名前が見えないが実行時は正常に動作する
+ignored-modules=src.utils.db
+
 [DESIGN]
 max-args=10
 max-attributes=10
