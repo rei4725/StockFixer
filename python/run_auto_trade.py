@@ -35,14 +35,20 @@ def _build_broker(mode: str):
         api_password = os.environ.get("KABU_API_PASSWORD")
         if not api_password:
             logger.critical(
-                "live モードには環境変数 KABU_API_PASSWORD が必要です。" "kabu STATION® アプリを起動した上で設定してください。"
+                "live モードには環境変数 KABU_API_PASSWORD が必要です。"
+                "kabu STATION® アプリを起動した上で設定してください。"
             )
             sys.exit(1)
         return KabuBroker(api_password=api_password)
     else:
+        from src.infrastructure.yfinance_market_data_adapter import YFinanceMarketDataAdapter
+        from src.prediction.db import upsert_paper_real_diff
         from src.trading.brokers.paper.paper_broker import PaperBroker
 
-        return PaperBroker()
+        return PaperBroker(
+            market_data_port=YFinanceMarketDataAdapter(),
+            record_diff=upsert_paper_real_diff,
+        )
 
 
 if __name__ == "__main__":

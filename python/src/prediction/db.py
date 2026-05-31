@@ -727,14 +727,12 @@ def save_weekly_accuracy_snapshot(week_start: str, df: pd.DataFrame) -> None:
                 "DELETE FROM accuracy_weekly_snapshots WHERE week_start = ?",
                 [week_start],
             )
-            con.execute(
-                """
+            con.execute("""
                 INSERT INTO accuracy_weekly_snapshots
                     (week_start, market, symbol, direction_accuracy, mean_abs_error, n_samples)
                 SELECT week_start, market, symbol, direction_accuracy, mean_abs_error, n_samples
                 FROM snap
-                """
-            )
+                """)
             logger.debug(f"accuracy_weekly_snapshots 保存: week_start={week_start}, {len(snap)}件")
         except Exception as e:
             logger.error(f"save_weekly_accuracy_snapshot 失敗: {e}", exc_info=True)
@@ -757,14 +755,12 @@ def load_weekly_accuracy_snapshots(n_weeks: int = 4) -> pd.DataFrame:
                 f"SELECT DISTINCT week_start FROM accuracy_weekly_snapshots "
                 f"ORDER BY week_start DESC LIMIT {int(n_weeks)}"
             )
-            return con.execute(
-                f"""
+            return con.execute(f"""
                 SELECT week_start, market, symbol, direction_accuracy, mean_abs_error, n_samples
                 FROM accuracy_weekly_snapshots
                 WHERE week_start IN ({weeks_subq})
                 ORDER BY week_start DESC, market, symbol
-                """
-            ).fetchdf()
+                """).fetchdf()
         except Exception as e:
             logger.error(f"load_weekly_accuracy_snapshots 失敗: {e}", exc_info=True)
             return pd.DataFrame()
@@ -804,14 +800,12 @@ def save_shap_values(
             "WHERE market = ? AND symbol = ? AND model_name = ? AND trained_at = ?",
             [market, symbol, model_name, trained_at],
         )
-        con.execute(
-            """
+        con.execute("""
             INSERT INTO shap_values
                 (market, symbol, model_name, trained_at, feature, shap_mean, shap_rank)
             SELECT market, symbol, model_name, trained_at, feature, shap_mean, shap_rank
             FROM save_df
-            """
-        )
+            """)
     logger.debug(f"shap_values 保存: [{market}_{symbol}/{model_name}] {len(save_df)}特徴量")
 
 
@@ -895,8 +889,7 @@ def save_feature_selection(
             "WHERE market = ? AND symbol = ? AND model_name = ? AND trained_at = ?",
             [market, symbol, model_name, trained_at],
         )
-        con.execute(
-            """
+        con.execute("""
             INSERT INTO feature_selection_log (
                 market, symbol, model_name, trained_at, feature,
                 importance_mean, importance_std, importance_rank,
@@ -906,8 +899,7 @@ def save_feature_selection(
                    importance_mean, importance_std, importance_rank,
                    is_excluded, protected_by_shap
             FROM save_df
-            """
-        )
+            """)
 
 
 def load_feature_exclusion_candidates(market: str, symbol: str) -> "pd.DataFrame":

@@ -33,8 +33,8 @@ class TestGetTop10DiffStocksMessage(unittest.TestCase):
             os.rmdir(self.tmp_dir)
 
     def test_normal(self):
+        from src.prediction.db import save_prediction_results
         from src.prediction.types import PredictionResult
-        from src.utils.db import save_prediction_results
 
         results = [
             PredictionResult(
