@@ -142,6 +142,11 @@ def e2e_db_env(e2e_ohlcv, tmp_path_factory):
     for p in patchers:
         p.start()
 
+    from src.backtest.ports import set_model_manager_factory
+    from src.prediction.manager import ModelManager
+
+    set_model_manager_factory(ModelManager)
+
     try:
         # -----------------------------------------------------------------
         # フィクスチャデータ投入
