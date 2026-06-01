@@ -100,7 +100,7 @@ try {
     if ($e2eHasFailed) { throw "E2E テストが失敗しました。デプロイを中断します (exit=$LASTEXITCODE)" }
 
     # --- ビルド引数セット ---
-    $env:VERSION    = (Get-Content (Join-Path $repoDir "python" "VERSION")).Trim()
+    $env:VERSION    = (Get-Content (Join-Path (Join-Path $repoDir "python") "VERSION")).Trim()
     $env:BUILD_DATE = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
     $env:GIT_COMMIT = git rev-parse --short HEAD
     Write-Log "VERSION=$($env:VERSION)  GIT_COMMIT=$($env:GIT_COMMIT)  BUILD_DATE=$($env:BUILD_DATE)"
