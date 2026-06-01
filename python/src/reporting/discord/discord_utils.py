@@ -186,6 +186,25 @@ def send_webhook_text(text: str) -> bool:
         return False
 
 
+def _append_llm_reasons(parts: list[str], results: list, max_count: int = 3) -> None:
+    """上位銘柄の LLM 推薦理由を parts リストに追記する。
+
+    Ollama が未接続の場合は何もしない。
+    """
+    try:
+        from src.reporting.llm_reason import generate_reasons_for_top  # noqa: PLC0415
+
+        reasons = generate_reasons_for_top(results, max_count=max_count)
+        if not reasons:
+            return
+        lines = ["💡 推薦理由（上位3銘柄）"]
+        for symbol, reason in reasons.items():
+            lines.append(f"・{symbol}: {reason}")
+        parts.append("\n".join(lines))
+    except Exception as e:
+        logger.debug("LLM 推薦理由生成をスキップ: %s", e)
+
+
 def send_daily_pipeline_completion(
     data_count: Optional[int] = None,
     prediction_markets: Optional[list] = None,
@@ -233,6 +252,7 @@ def send_daily_pipeline_completion(
                             PredictionResult.to_dataframe(snapshot.top_results)
                         )
                         parts.append(f"📈 上位10銘柄\n```\n{df_top.to_string(index=False)}\n```")
+                        _append_llm_reasons(parts, snapshot.top_results)
 
                     if snapshot.worst_results:
                         df_worst = convert_df_for_discord(
