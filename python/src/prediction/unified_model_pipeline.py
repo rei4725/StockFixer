@@ -17,9 +17,8 @@ from config.settings import (
     FEATURE_SELECTION_MIN_FEATURES,
     PERMUTATION_IMPORTANCE_REPEATS,
 )
-from src.market_data.loader import get_earnings_dates
-from src.market_data.technical import add_earnings_flag
 from src.prediction.db import load_excluded_features, save_feature_selection
+from src.prediction.ports import get_market_data_port
 from src.utils.data_path_utils import ensure_dir, get_models_dir
 from src.utils.db import load_all_stock_features
 from src.utils.logger import get_logger
@@ -42,8 +41,11 @@ def _mask_earnings_rows_for_unified(df: pd.DataFrame) -> pd.DataFrame:
         work = group.copy()
         date_index = pd.DatetimeIndex(pd.to_datetime(work["date"], errors="coerce"))
         work.index = date_index
-        earnings_dates = get_earnings_dates(str(market), str(symbol))
-        work = add_earnings_flag(work, earnings_dates, lookaround_days=EARNINGS_MASK_WINDOW_DAYS)
+        _mds = get_market_data_port()
+        earnings_dates = _mds.get_earnings_dates(str(market), str(symbol))
+        work = _mds.add_earnings_flag(
+            work, earnings_dates, lookaround_days=EARNINGS_MASK_WINDOW_DAYS
+        )
         before = len(work)
         work = work[work["earnings_flag"] == 0].copy()
         removed_count += before - len(work)
@@ -244,9 +246,44 @@ def train_unified_model(
     logger.info(f"=== 統合モデル学習完了 (horizon={horizon}d) ===")
 
 
+_SENTIMENT_COLS = ["sentiment_score", "sentiment_ma5", "sentiment_momentum", "news_count"]
+
+
+def _load_sentiment_lookup() -> dict[tuple[str, str, str], dict[str, float]]:
+    """stock_features からセンチメント列を (market, symbol, date) キーで読み込む。
+
+    Returns:
+        {(market, symbol, date_str): {col: value}} 形式の辞書。
+        stock_features にセンチメント列がない場合は空辞書を返す。
+    """
+    sf = load_all_stock_features()
+    if sf.empty:
+        return {}
+
+    available = [c for c in _SENTIMENT_COLS if c in sf.columns]
+    if not available:
+        return {}
+
+    need = ["market", "symbol"] + available
+    date_col = "date" if "date" in sf.columns else None
+    if date_col:
+        need = [date_col] + need
+
+    lookup: dict[tuple[str, str, str], dict[str, float]] = {}
+    for row in sf[need].itertuples(index=True):
+        date_val = getattr(row, date_col, None) if date_col else row.Index
+        date_str = str(pd.Timestamp(date_val).date()) if date_val is not None else ""
+        key = (str(row.market), str(row.symbol), date_str)
+        lookup[key] = {c: getattr(row, c, 0.0) for c in available}
+
+    return lookup
+
+
 def _load_all_ohlcv_for_unified(horizon: int) -> Tuple[pd.DataFrame, pd.Series]:
     """
     market_data_raw から全銘柄の OHLCV を取得し、指定ホライズンの特徴量を生成する。
+
+    sentiment_score 等のセンチメント列は stock_features から結合して付与する。
 
     Args:
         horizon: 予測ホライズン（営業日）
@@ -256,14 +293,20 @@ def _load_all_ohlcv_for_unified(horizon: int) -> Tuple[pd.DataFrame, pd.Series]:
     """
     import re
 
-    from src.market_data.technical import add_technical_indicators, create_basic_lag_features
     from src.utils.db import load_all_raw_ohlcv_symbols, load_raw_ohlcv
 
     all_X = []
     all_y = []
 
+    _mds = get_market_data_port()
     symbols = load_all_raw_ohlcv_symbols()
     logger.info(f"OHLCV対象銘柄数: {len(symbols)}")
+
+    sentiment_lookup = _load_sentiment_lookup()
+    if sentiment_lookup:
+        logger.info("センチメント特徴量を stock_features から結合します")
+    else:
+        logger.debug("stock_features にセンチメント列なし（スキップ）")
 
     for market, symbol in symbols:
         try:
@@ -272,13 +315,23 @@ def _load_all_ohlcv_for_unified(horizon: int) -> Tuple[pd.DataFrame, pd.Series]:
                 continue
 
             # load_raw_ohlcv はすでに先頭大文字列名（Open/High/Low/Close/Volume）で返す
-            df_feat = add_technical_indicators(raw)
-            X_sym, y_sym = create_basic_lag_features(df_feat, target_horizon=horizon)
+            df_feat = _mds.add_technical_indicators(raw)
+            X_sym, y_sym = _mds.create_basic_lag_features(df_feat, target_horizon=horizon)
 
             # 銘柄を識別する特徴量を追加
             market_codes = {"us": 0, "jp": 1}
             X_sym = X_sym.copy()
             X_sym["market_encoded"] = market_codes.get(market, -1)
+
+            # センチメント列を stock_features からルックアップして結合
+            if sentiment_lookup:
+                available_sent_cols = set(next(iter(sentiment_lookup.values())).keys())
+                for col in available_sent_cols:
+                    X_sym[col] = X_sym.index.map(
+                        lambda d, m=market, s=symbol, c=col: sentiment_lookup.get(
+                            (m, s, str(pd.Timestamp(d).date())), {}
+                        ).get(c, 0.0)
+                    )
 
             def _norm(c):
                 return re.sub(r"[^0-9a-zA-Z_]", "_", str(c))

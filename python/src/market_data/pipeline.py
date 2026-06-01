@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 import pandas as pd
 
 from config.data import MAX_DATA_WORKERS
+from config.settings import SENTIMENT_LOOKBACK_DAYS
 from src.domain.ports import AlertLevel, NotificationPort
 from src.features.macro_features import (
     add_event_flags,
@@ -180,8 +181,12 @@ def fetch_stock_data_with_features(
     df = add_event_flags(df)
 
     # センチメント特徴量を付与（R-404：ニュースセンチメントオルタナティブデータ）
-    # OLLAMA_URL 設定時は LLM スコアリング、未設定時はキーワードマッチにフォールバック
-    sentiment_df = fetch_news_sentiment_with_llm(symbol, start_date, end_date, market=market)
+    # NewsAPI / EDINET の実用範囲に合わせ直近 SENTIMENT_LOOKBACK_DAYS 日分のみ取得する
+    sentiment_start = max(
+        start_date,
+        (datetime.now() - timedelta(days=SENTIMENT_LOOKBACK_DAYS)).strftime("%Y-%m-%d"),
+    )
+    sentiment_df = fetch_news_sentiment_with_llm(symbol, sentiment_start, end_date, market=market)
     df = add_sentiment_features(df, sentiment_df=sentiment_df)
 
     # 部分的なNaN値を前方/後方補完（OHLCV欠損日等によるdropna行数増大を防ぐ）

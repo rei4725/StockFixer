@@ -24,6 +24,7 @@ OHLCV DataFrame に特徴量として付加する。
 from __future__ import annotations
 
 import os
+import threading
 from typing import Callable, Optional
 
 import pandas as pd
@@ -31,6 +32,9 @@ import pandas as pd
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+# バッチパイプラインで複数銘柄が並列実行される際に Ollama への同時リクエストを防ぐ
+_OLLAMA_SEMAPHORE = threading.Semaphore(1)
 
 # センチメント取得に失敗した場合の中立スコア
 _NEUTRAL_SCORE = 0.0
@@ -170,7 +174,8 @@ def _build_score_fn(use_llm: bool) -> Callable[[list[str]], float]:
     logger.debug("Ollama LLM でセンチメントスコアリング")
 
     def _llm_score(titles: list[str]) -> float:
-        score = client.score(titles)
+        with _OLLAMA_SEMAPHORE:
+            score = client.score(titles)
         return score if score is not None else _score_titles(titles)
 
     return _llm_score

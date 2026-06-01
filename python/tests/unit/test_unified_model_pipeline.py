@@ -105,15 +105,21 @@ class TestPrepareUnifiedFeatures(unittest.TestCase):
 
 
 class TestUnifiedEarningsMask(unittest.TestCase):
-    @patch("src.prediction.unified_model_pipeline.get_earnings_dates")
-    def test_mask_earnings_rows_for_unified_removes_flagged_rows(self, mock_get_earnings):
+    @patch("src.prediction.unified_model_pipeline.get_market_data_port")
+    def test_mask_earnings_rows_for_unified_removes_flagged_rows(self, mock_get_port):
+        from unittest.mock import MagicMock
+
+        from src.market_data.technical import add_earnings_flag
         from src.prediction.unified_model_pipeline import _mask_earnings_rows_for_unified
 
         df = _make_df(n=10)
         df["market"] = "us"
         df["symbol"] = "AAPL"
         df["date"] = pd.date_range("2026-01-01", periods=10, freq="B")
-        mock_get_earnings.return_value = pd.DatetimeIndex([pd.Timestamp("2026-01-07")])
+        mock_port = MagicMock()
+        mock_port.get_earnings_dates.return_value = pd.DatetimeIndex([pd.Timestamp("2026-01-07")])
+        mock_port.add_earnings_flag.side_effect = add_earnings_flag
+        mock_get_port.return_value = mock_port
 
         masked = _mask_earnings_rows_for_unified(df)
 
@@ -133,6 +139,211 @@ class TestLoadUnifiedModel(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(FileNotFoundError):
                 load_unified_model(model_name="NonExistentModel", model_dir=tmp)
+
+
+class TestLoadSentimentLookup(unittest.TestCase):
+    """_load_sentiment_lookup のテスト"""
+
+    @patch("src.prediction.unified_model_pipeline.load_all_stock_features")
+    def test_returns_empty_when_stock_features_empty(self, mock_load):
+        from src.prediction.unified_model_pipeline import _load_sentiment_lookup
+
+        mock_load.return_value = pd.DataFrame()
+        result = _load_sentiment_lookup()
+        self.assertEqual(result, {})
+
+    @patch("src.prediction.unified_model_pipeline.load_all_stock_features")
+    def test_returns_empty_when_no_sentiment_cols(self, mock_load):
+        from src.prediction.unified_model_pipeline import _load_sentiment_lookup
+
+        mock_load.return_value = pd.DataFrame(
+            {"market": ["us"], "symbol": ["AAPL"], "close_lag1": [100.0]}
+        )
+        result = _load_sentiment_lookup()
+        self.assertEqual(result, {})
+
+    @patch("src.prediction.unified_model_pipeline.load_all_stock_features")
+    def test_builds_lookup_with_sentiment_cols(self, mock_load):
+        from src.prediction.unified_model_pipeline import _load_sentiment_lookup
+
+        dates = pd.date_range("2025-01-02", periods=2, freq="B")
+        mock_load.return_value = pd.DataFrame(
+            {
+                "date": dates,
+                "market": ["us", "us"],
+                "symbol": ["AAPL", "AAPL"],
+                "sentiment_score": [0.5, -0.3],
+                "news_count": [5, 2],
+            }
+        )
+        result = _load_sentiment_lookup()
+        self.assertGreater(len(result), 0)
+        key = ("us", "AAPL", str(dates[0].date()))
+        self.assertIn(key, result)
+        self.assertAlmostEqual(result[key]["sentiment_score"], 0.5)
+        self.assertEqual(result[key]["news_count"], 5)
+
+    @patch("src.prediction.unified_model_pipeline.load_all_stock_features")
+    def test_lookup_partial_sentiment_cols(self, mock_load):
+        """sentiment_score のみ存在する場合もキーが作られること"""
+        from src.prediction.unified_model_pipeline import _load_sentiment_lookup
+
+        dates = pd.date_range("2025-01-02", periods=1, freq="B")
+        mock_load.return_value = pd.DataFrame(
+            {
+                "date": dates,
+                "market": ["jp"],
+                "symbol": ["7203"],
+                "sentiment_score": [0.1],
+            }
+        )
+        result = _load_sentiment_lookup()
+        key = ("jp", "7203", str(dates[0].date()))
+        self.assertIn(key, result)
+        self.assertAlmostEqual(result[key]["sentiment_score"], 0.1)
+
+    @patch("src.prediction.unified_model_pipeline.load_all_stock_features")
+    def test_lookup_without_date_col_uses_index(self, mock_load):
+        """date 列がない場合はインデックスを使うこと"""
+        from src.prediction.unified_model_pipeline import _load_sentiment_lookup
+
+        dates = pd.date_range("2025-01-02", periods=1, freq="B")
+        df = pd.DataFrame(
+            {
+                "market": ["us"],
+                "symbol": ["AAPL"],
+                "sentiment_score": [0.7],
+            },
+            index=dates,
+        )
+        mock_load.return_value = df
+        result = _load_sentiment_lookup()
+        self.assertGreater(len(result), 0)
+
+
+class TestLoadAllOhlcvForUnified(unittest.TestCase):
+    """_load_all_ohlcv_for_unified のテスト"""
+
+    @patch("src.prediction.unified_model_pipeline._load_sentiment_lookup")
+    @patch("src.utils.db.load_all_raw_ohlcv_symbols")
+    def test_returns_empty_when_no_symbols(self, mock_symbols, mock_lookup):
+        """銘柄リストが空の場合は空の DataFrame と Series を返すこと"""
+        from src.prediction.unified_model_pipeline import _load_all_ohlcv_for_unified
+
+        mock_symbols.return_value = []
+        mock_lookup.return_value = {}
+        X, y = _load_all_ohlcv_for_unified(horizon=1)
+        self.assertTrue(X.empty)
+        self.assertTrue(y.empty)
+
+    @patch("src.prediction.unified_model_pipeline._load_sentiment_lookup")
+    @patch("src.prediction.unified_model_pipeline.get_market_data_port")
+    @patch("src.utils.db.load_raw_ohlcv")
+    @patch("src.utils.db.load_all_raw_ohlcv_symbols")
+    def test_returns_empty_when_raw_ohlcv_missing(
+        self, mock_symbols, mock_raw, mock_port, mock_lookup
+    ):
+        """load_raw_ohlcv が None を返す場合はスキップして空を返すこと"""
+        from unittest.mock import MagicMock
+
+        from src.prediction.unified_model_pipeline import _load_all_ohlcv_for_unified
+
+        mock_lookup.return_value = {}
+        mock_port.return_value = MagicMock()
+        mock_symbols.return_value = [("us", "AAPL")]
+        mock_raw.return_value = None
+        X, y = _load_all_ohlcv_for_unified(horizon=1)
+        self.assertTrue(X.empty)
+
+    @patch("src.prediction.unified_model_pipeline._load_sentiment_lookup")
+    @patch("src.prediction.unified_model_pipeline.get_market_data_port")
+    @patch("src.utils.db.load_raw_ohlcv")
+    @patch("src.utils.db.load_all_raw_ohlcv_symbols")
+    def test_integrates_sentiment_when_lookup_populated(
+        self, mock_symbols, mock_raw, mock_port, mock_lookup
+    ):
+        """sentiment_lookup が非空の場合はセンチメント列が X に追加されること"""
+        from unittest.mock import MagicMock
+
+        from src.prediction.unified_model_pipeline import _load_all_ohlcv_for_unified
+
+        dates = pd.date_range("2025-01-02", periods=5, freq="B")
+        raw = pd.DataFrame(
+            {
+                "Open": [100.0] * 5,
+                "High": [101.0] * 5,
+                "Low": [99.0] * 5,
+                "Close": [100.5] * 5,
+                "Volume": [1_000_000] * 5,
+            },
+            index=dates,
+        )
+        X_sym = pd.DataFrame({"close_lag1": [100.0] * 4}, index=dates[1:])
+        y_sym = pd.Series([0.01] * 4, index=dates[1:])
+
+        mock_mds = MagicMock()
+        mock_mds.add_technical_indicators.return_value = raw
+        mock_mds.create_basic_lag_features.return_value = (X_sym, y_sym)
+        mock_port.return_value = mock_mds
+        mock_symbols.return_value = [("us", "AAPL")]
+        mock_raw.return_value = raw
+
+        sent_key = ("us", "AAPL", str(dates[1].date()))
+        mock_lookup.return_value = {sent_key: {"sentiment_score": 0.5}}
+
+        X, y = _load_all_ohlcv_for_unified(horizon=1)
+        self.assertFalse(X.empty)
+        self.assertIn("sentiment_score", X.columns)
+
+    @patch("src.prediction.unified_model_pipeline._load_sentiment_lookup")
+    @patch("src.prediction.unified_model_pipeline.get_market_data_port")
+    @patch("src.utils.db.load_raw_ohlcv")
+    @patch("src.utils.db.load_all_raw_ohlcv_symbols")
+    def test_skips_symbol_on_exception(self, mock_symbols, mock_raw, mock_port, mock_lookup):
+        """処理中に例外が発生した銘柄はスキップされること"""
+        from unittest.mock import MagicMock
+
+        from src.prediction.unified_model_pipeline import _load_all_ohlcv_for_unified
+
+        mock_lookup.return_value = {}
+        mock_mds = MagicMock()
+        mock_mds.add_technical_indicators.side_effect = RuntimeError("TA error")
+        mock_port.return_value = mock_mds
+        mock_symbols.return_value = [("us", "AAPL")]
+        mock_raw.return_value = pd.DataFrame(
+            {"Close": [100.0]}, index=pd.date_range("2025-01-02", periods=1)
+        )
+        X, y = _load_all_ohlcv_for_unified(horizon=1)
+        self.assertTrue(X.empty)
+
+    @patch("src.prediction.unified_model_pipeline._load_sentiment_lookup")
+    @patch("src.prediction.unified_model_pipeline.get_market_data_port")
+    @patch("src.utils.db.load_raw_ohlcv")
+    @patch("src.utils.db.load_all_raw_ohlcv_symbols")
+    def test_returns_features_without_sentiment(
+        self, mock_symbols, mock_raw, mock_port, mock_lookup
+    ):
+        """sentiment_lookup が空でも特徴量が返ること"""
+        from unittest.mock import MagicMock
+
+        from src.prediction.unified_model_pipeline import _load_all_ohlcv_for_unified
+
+        dates = pd.date_range("2025-01-02", periods=5, freq="B")
+        raw = pd.DataFrame({"Close": [100.0] * 5}, index=dates)
+        X_sym = pd.DataFrame({"close_lag1": [100.0] * 4}, index=dates[1:])
+        y_sym = pd.Series([0.01] * 4, index=dates[1:])
+
+        mock_mds = MagicMock()
+        mock_mds.add_technical_indicators.return_value = raw
+        mock_mds.create_basic_lag_features.return_value = (X_sym, y_sym)
+        mock_port.return_value = mock_mds
+        mock_lookup.return_value = {}
+        mock_symbols.return_value = [("jp", "7203")]
+        mock_raw.return_value = raw
+
+        X, y = _load_all_ohlcv_for_unified(horizon=1)
+        self.assertFalse(X.empty)
+        self.assertNotIn("sentiment_score", X.columns)
 
 
 if __name__ == "__main__":

@@ -86,6 +86,9 @@ class Settings(BaseSettings):
     # ---------- 昇格ゲート自動承認（#254） ----------
     AUTO_PROMOTE_MODEL: bool = Field(default=False)
 
+    # ---------- センチメント特徴量（R-404） ----------
+    SENTIMENT_LOOKBACK_DAYS: int = Field(default=30)
+
 
 settings = Settings()
 
@@ -138,3 +141,4 @@ SCHEDULER_RETRY_BASE_WAIT_SECONDS: float = settings.SCHEDULER_RETRY_BASE_WAIT_SE
 VOLUME_FILTER_WINDOW_DAYS: int = settings.VOLUME_FILTER_WINDOW_DAYS
 VOLUME_FILTER_MULTIPLIER: float = settings.VOLUME_FILTER_MULTIPLIER
 AUTO_PROMOTE_MODEL: bool = settings.AUTO_PROMOTE_MODEL
+SENTIMENT_LOOKBACK_DAYS: int = settings.SENTIMENT_LOOKBACK_DAYS

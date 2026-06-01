@@ -28,13 +28,12 @@ ignore_imports =
     src.backtest.pipeline -> src.prediction.manager
     src.backtest.portfolio -> src.prediction.manager
     src.backtest.backtester -> src.market_data.loader
-    src.prediction.unified_model_pipeline -> src.market_data.loader
     src.prediction.training_pipeline -> src.market_data.loader
     # --- 新規追加違反 (将来的解消対象) ---
     src.backtest.data_port -> src.market_data.backtest_adapter
+    src.prediction.ports -> src.market_data.prediction_adapter
     src.backtest.backtester -> src.market_data.technical
     src.backtest.metrics -> src.market_data.technical
-    src.prediction.unified_model_pipeline -> src.market_data.technical
     src.prediction.predict_single -> src.market_data.technical
     src.prediction.predict_single -> src.market_data.loader
     src.prediction.training_pipeline -> src.market_data.technical
@@ -81,14 +80,14 @@ ignore_imports =
     # [B] backtest → market_data (バックテストが OHLCV データを取得 — BT 専用ポートで解消可能)
     src.backtest.backtester -> src.market_data.loader
     # [B] prediction → market_data (学習パイプラインが OHLCV を取得 — market_data ポート注入で解消可能)
-    src.prediction.unified_model_pipeline -> src.market_data.loader
     src.prediction.training_pipeline -> src.market_data.loader
     # [B] backtest → market_data (ポート経由: data_port が backtest_adapter を遅延ロード)
     src.backtest.data_port -> src.market_data.backtest_adapter
+    # [B] prediction → market_data (ports が prediction_adapter を遅延ロード)
+    src.prediction.ports -> src.market_data.prediction_adapter
     src.backtest.backtester -> src.market_data.technical
     src.backtest.metrics -> src.market_data.technical
     # [B] prediction → market_data (技術指標計算 — market_data ポートで解消可能)
-    src.prediction.unified_model_pipeline -> src.market_data.technical
     src.prediction.predict_single -> src.market_data.technical
     src.prediction.predict_single -> src.market_data.loader
     src.prediction.training_pipeline -> src.market_data.technical
