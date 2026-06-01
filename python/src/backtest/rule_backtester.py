@@ -12,10 +12,9 @@ from typing import Any
 
 import pandas as pd
 
-import src.market_data.yf_client as yf_client
 from src.backtest.backtester import Backtester
+from src.backtest.data_port import get_backtest_data_port
 from src.backtest.rules.base import TradingRule
-from src.market_data.technical import add_technical_indicators
 from src.utils.data_path_utils import get_ticker
 from src.utils.logger import get_logger
 
@@ -79,12 +78,13 @@ def run_rule_backtest(
     ticker = get_ticker(market, symbol)
     logger.info(f"データ取得: {ticker} ({start} → {end})")
 
-    df = yf_client.download(ticker, start=start, end=end)
+    _dp = get_backtest_data_port()
+    df = _dp.download(ticker, start=start, end=end)
     if df is None or df.empty:
         logger.error(f"データ取得失敗: {ticker}")
         return []
 
-    df = add_technical_indicators(df)
+    df = _dp.add_technical_indicators(df)
     df = df.dropna(subset=["Close"])
 
     logger.info(f"データ取得完了: {len(df)} 行")

@@ -27,23 +27,17 @@ ignore_imports =
     src.reporting.query_service -> src.prediction.predict_single
     src.backtest.pipeline -> src.prediction.manager
     src.backtest.portfolio -> src.prediction.manager
-    src.backtest.pipeline -> src.market_data.loader
     src.backtest.backtester -> src.market_data.loader
     src.prediction.unified_model_pipeline -> src.market_data.loader
     src.prediction.training_pipeline -> src.market_data.loader
     # --- 新規追加違反 (将来的解消対象) ---
-    src.backtest.rule_backtester -> src.market_data.yf_client
+    src.backtest.data_port -> src.market_data.backtest_adapter
     src.backtest.backtester -> src.market_data.technical
     src.backtest.metrics -> src.market_data.technical
-    src.backtest.screener -> src.market_data.yf_client
-    src.backtest.portfolio -> src.market_data.market_regime
-    src.backtest.pipeline -> src.market_data.technical
     src.prediction.unified_model_pipeline -> src.market_data.technical
     src.prediction.predict_single -> src.market_data.technical
     src.prediction.predict_single -> src.market_data.loader
     src.prediction.training_pipeline -> src.market_data.technical
-    src.backtest.rule_backtester -> src.market_data.technical
-    src.backtest.screener -> src.market_data.technical
 
 # ============================================================
 # Contract 2: BC 独立性契約
@@ -85,23 +79,16 @@ ignore_imports =
     src.backtest.pipeline -> src.prediction.manager
     src.backtest.portfolio -> src.prediction.manager
     # [B] backtest → market_data (バックテストが OHLCV データを取得 — BT 専用ポートで解消可能)
-    src.backtest.pipeline -> src.market_data.loader
     src.backtest.backtester -> src.market_data.loader
     # [B] prediction → market_data (学習パイプラインが OHLCV を取得 — market_data ポート注入で解消可能)
     src.prediction.unified_model_pipeline -> src.market_data.loader
     src.prediction.training_pipeline -> src.market_data.loader
-    # [B] backtest → market_data (技術指標計算 — market_data ポートで解消可能)
-    src.backtest.rule_backtester -> src.market_data.yf_client
+    # [B] backtest → market_data (ポート経由: data_port が backtest_adapter を遅延ロード)
+    src.backtest.data_port -> src.market_data.backtest_adapter
     src.backtest.backtester -> src.market_data.technical
     src.backtest.metrics -> src.market_data.technical
-    src.backtest.screener -> src.market_data.yf_client
-    src.backtest.portfolio -> src.market_data.market_regime
-    src.backtest.pipeline -> src.market_data.technical
     # [B] prediction → market_data (技術指標計算 — market_data ポートで解消可能)
     src.prediction.unified_model_pipeline -> src.market_data.technical
     src.prediction.predict_single -> src.market_data.technical
     src.prediction.predict_single -> src.market_data.loader
     src.prediction.training_pipeline -> src.market_data.technical
-    # [B] backtest → market_data (追加技術指標 — ポートで解消可能)
-    src.backtest.rule_backtester -> src.market_data.technical
-    src.backtest.screener -> src.market_data.technical
