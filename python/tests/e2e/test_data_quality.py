@@ -183,7 +183,7 @@ class TestPredictionResultsQuality:
 
         # 予測を実行して保存（冪等: 既存行は DELETE-INSERT で置き換え）
         with patch(
-            "src.prediction.predict_single.data_loader.get_stock_data",
+            "src.market_data.prediction_adapter.PredictionMarketDataAdapter.get_stock_data",
             return_value=e2e_db_env["ohlcv"],
         ):
             result = predict_single_stock(e2e_db_env["market"], e2e_db_env["symbol"])

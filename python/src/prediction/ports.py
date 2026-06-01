@@ -6,7 +6,7 @@ prediction BC はこのポートを通じて market_data BC の機能を利用�
 
 from __future__ import annotations
 
-from typing import List, Optional, Protocol, Tuple, Union, runtime_checkable
+from typing import Any, List, Optional, Protocol, Tuple, Union, runtime_checkable
 
 import pandas as pd
 
@@ -14,6 +14,10 @@ import pandas as pd
 @runtime_checkable
 class MarketDataPort(Protocol):
     """prediction 用 market_data アクセスポートのインターフェース。"""
+
+    def get_stock_data(self, market: str, symbol: str, start: Any, end: Any) -> pd.DataFrame: ...
+
+    def fetch_cross_asset_features(self, start: str, end: str) -> Optional[pd.DataFrame]: ...
 
     def get_earnings_dates(self, market: str, symbol: str) -> pd.DatetimeIndex: ...
 

@@ -148,9 +148,8 @@ class TestPrediction:
         """predict_single_stock が None 以外の PredictionResult を返すこと。"""
         from src.prediction.predict_single import predict_single_stock
 
-        # yfinance を呼ぶ data_loader.get_stock_data をモック
         with patch(
-            "src.prediction.predict_single.data_loader.get_stock_data",
+            "src.market_data.prediction_adapter.PredictionMarketDataAdapter.get_stock_data",
             return_value=e2e_db_env["ohlcv"],
         ):
             result = predict_single_stock(
@@ -165,7 +164,7 @@ class TestPrediction:
         from src.prediction.predict_single import predict_single_stock
 
         with patch(
-            "src.prediction.predict_single.data_loader.get_stock_data",
+            "src.market_data.prediction_adapter.PredictionMarketDataAdapter.get_stock_data",
             return_value=e2e_db_env["ohlcv"],
         ):
             result = predict_single_stock(
@@ -181,7 +180,7 @@ class TestPrediction:
         from src.prediction.predict_single import predict_single_stock
 
         with patch(
-            "src.prediction.predict_single.data_loader.get_stock_data",
+            "src.market_data.prediction_adapter.PredictionMarketDataAdapter.get_stock_data",
             return_value=e2e_db_env["ohlcv"],
         ):
             result = predict_single_stock(
@@ -199,7 +198,7 @@ class TestPrediction:
         from src.prediction.predict_single import predict_single_stock
 
         with patch(
-            "src.prediction.predict_single.data_loader.get_stock_data",
+            "src.market_data.prediction_adapter.PredictionMarketDataAdapter.get_stock_data",
             return_value=e2e_db_env["ohlcv"],
         ):
             result = predict_single_stock(

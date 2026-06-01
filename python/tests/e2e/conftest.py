@@ -132,7 +132,11 @@ def e2e_db_env(e2e_ohlcv, tmp_path_factory):
             "src.reporting.discord.discord_utils.send_daily_pipeline_error", return_value=None
         ),
         # クロスアセット特徴量をモックして学習/予測で特徴量数を一致させる（R-306）
-        mock.patch("src.prediction.predict_single.fetch_cross_asset_features", return_value=None),
+        mock.patch(
+            "src.market_data.prediction_adapter"
+            ".PredictionMarketDataAdapter.fetch_cross_asset_features",
+            return_value=None,
+        ),
         mock.patch("src.market_data.pipeline.fetch_cross_asset_features", return_value=None),
     ]
     for p in patchers:

@@ -138,12 +138,9 @@ class TestPredictSingleStock(unittest.TestCase):
     def test_returns_none_when_no_data(self):
         from src.prediction.predict_single import predict_single_stock
 
-        with (
-            patch(
-                "src.prediction.predict_single.data_loader.get_stock_data",
-                return_value=pd.DataFrame(),
-            ),
-        ):
+        mock_port = MagicMock()
+        mock_port.get_stock_data.return_value = pd.DataFrame()
+        with patch("src.prediction.predict_single.get_market_data_port", return_value=mock_port):
             result = predict_single_stock("jp", "7203")
         self.assertIsNone(result)
 
@@ -151,14 +148,14 @@ class TestPredictSingleStock(unittest.TestCase):
         from src.prediction.predict_single import predict_single_stock
 
         df = _make_df()
+        mock_port = MagicMock()
+        mock_port.get_stock_data.return_value = df
+        mock_port.add_technical_indicators.return_value = df
+        mock_port.fetch_cross_asset_features.return_value = None
+        mock_port.create_basic_lag_features.return_value = (df, pd.Series())
         with tempfile.TemporaryDirectory() as tmpdir:
             with (
-                patch("src.prediction.predict_single.data_loader.get_stock_data", return_value=df),
-                patch("src.prediction.predict_single.add_technical_indicators", return_value=df),
-                patch(
-                    "src.prediction.predict_single.create_basic_lag_features",
-                    return_value=(df, pd.Series()),
-                ),
+                patch("src.prediction.predict_single.get_market_data_port", return_value=mock_port),
                 patch("src.prediction.predict_single.get_models_subdir", return_value=tmpdir),
                 patch("src.prediction.predict_single.get_ticker", return_value="7203.T"),
                 patch(
@@ -283,15 +280,15 @@ class TestExplainPredictionShapBody(unittest.TestCase):
                 np.random.rand(10, n_features), columns=[f"feature_{i}" for i in range(n_features)]
             )
 
+            mock_port = MagicMock()
+            mock_port.get_stock_data.return_value = df
+            mock_port.add_technical_indicators.return_value = df
+            mock_port.fetch_cross_asset_features.return_value = None
+            mock_port.create_basic_lag_features.return_value = (X_df, pd.Series())
             with (
                 patch.dict("sys.modules", {"shap": mock_shap}),
                 patch("src.prediction.predict_single.get_models_subdir", return_value=tmpdir),
-                patch("src.prediction.predict_single.data_loader.get_stock_data", return_value=df),
-                patch("src.prediction.predict_single.add_technical_indicators", return_value=df),
-                patch(
-                    "src.prediction.predict_single.create_basic_lag_features",
-                    return_value=(X_df, pd.Series()),
-                ),
+                patch("src.prediction.predict_single.get_market_data_port", return_value=mock_port),
                 patch("src.prediction.predict_single.ModelManager", return_value=mock_mm),
                 patch("src.prediction.predict_single.normalize_col", side_effect=lambda x: x),
             ):
@@ -313,13 +310,12 @@ class TestExplainPredictionShapBody(unittest.TestCase):
             with open(model_path, "wb") as f:
                 f.write(b"dummy")
 
+            mock_port = MagicMock()
+            mock_port.get_stock_data.return_value = pd.DataFrame()
             with (
                 patch.dict("sys.modules", {"shap": mock_shap}),
                 patch("src.prediction.predict_single.get_models_subdir", return_value=tmpdir),
-                patch(
-                    "src.prediction.predict_single.data_loader.get_stock_data",
-                    return_value=pd.DataFrame(),
-                ),
+                patch("src.prediction.predict_single.get_market_data_port", return_value=mock_port),
             ):
                 result = explain_prediction_shap("jp", "7203")
 

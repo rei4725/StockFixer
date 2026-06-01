@@ -58,10 +58,8 @@ class TestPredictSingleStockWithMocks(unittest.TestCase):
         self,
         mock_subdir,
         mock_exists,
-        mock_data_loader,
+        mock_get_port,
         mock_yf,
-        mock_tech,
-        mock_lag,
         mock_mm_cls,
         current_price=150.0,
         pred_return=0.01,
@@ -72,7 +70,7 @@ class TestPredictSingleStockWithMocks(unittest.TestCase):
         mock_exists.return_value = True
 
         ohlcv = _make_ohlcv(periods)
-        mock_data_loader.get_stock_data.return_value = ohlcv
+        mock_get_port.return_value.get_stock_data.return_value = ohlcv
 
         hist_df = pd.DataFrame(
             {"Close": [current_price]}, index=pd.date_range("2024-03-01", periods=1)
@@ -81,11 +79,12 @@ class TestPredictSingleStockWithMocks(unittest.TestCase):
         ticker_obj.history.return_value = hist_df
         mock_yf.Ticker.return_value = ticker_obj
 
-        mock_tech.return_value = ohlcv
+        mock_get_port.return_value.add_technical_indicators.return_value = ohlcv
+        mock_get_port.return_value.fetch_cross_asset_features.return_value = None
         dates = pd.date_range("2024-01-01", periods=periods, freq="B")
         X = pd.DataFrame({"f1": range(periods), "f2": range(periods)}, index=dates)
         y = pd.Series(np.zeros(periods), index=dates)
-        mock_lag.return_value = (X, y)
+        mock_get_port.return_value.create_basic_lag_features.return_value = (X, y)
 
         mock_model = MagicMock()
         mock_model.predict.return_value = pd.Series([pred_return])
@@ -94,20 +93,16 @@ class TestPredictSingleStockWithMocks(unittest.TestCase):
         mock_mm_cls.return_value = mock_mm
 
     @patch("src.prediction.predict_single.ModelManager")
-    @patch("src.prediction.predict_single.create_basic_lag_features")
-    @patch("src.prediction.predict_single.add_technical_indicators")
+    @patch("src.prediction.predict_single.get_market_data_port")
     @patch("src.prediction.predict_single.yf")
-    @patch("src.prediction.predict_single.data_loader")
     @patch("src.prediction.predict_single.os.path.exists")
     @patch("src.prediction.predict_single.get_models_subdir")
     def test_returns_prediction_result(
         self,
         mock_subdir,
         mock_exists,
-        mock_data_loader,
         mock_yf,
-        mock_tech,
-        mock_lag,
+        mock_get_port,
         mock_mm_cls,
     ):
         """正常時は PredictionResult が返ること"""
@@ -116,10 +111,8 @@ class TestPredictSingleStockWithMocks(unittest.TestCase):
         self._setup_mocks(
             mock_subdir,
             mock_exists,
-            mock_data_loader,
+            mock_get_port,
             mock_yf,
-            mock_tech,
-            mock_lag,
             mock_mm_cls,
         )
 
@@ -129,20 +122,16 @@ class TestPredictSingleStockWithMocks(unittest.TestCase):
         self.assertIsInstance(result, PredictionResult)
 
     @patch("src.prediction.predict_single.ModelManager")
-    @patch("src.prediction.predict_single.create_basic_lag_features")
-    @patch("src.prediction.predict_single.add_technical_indicators")
+    @patch("src.prediction.predict_single.get_market_data_port")
     @patch("src.prediction.predict_single.yf")
-    @patch("src.prediction.predict_single.data_loader")
     @patch("src.prediction.predict_single.os.path.exists")
     @patch("src.prediction.predict_single.get_models_subdir")
     def test_result_fields_correct(
         self,
         mock_subdir,
         mock_exists,
-        mock_data_loader,
         mock_yf,
-        mock_tech,
-        mock_lag,
+        mock_get_port,
         mock_mm_cls,
     ):
         """PredictionResult の market/symbol/current_price が正しいこと"""
@@ -151,10 +140,8 @@ class TestPredictSingleStockWithMocks(unittest.TestCase):
         self._setup_mocks(
             mock_subdir,
             mock_exists,
-            mock_data_loader,
+            mock_get_port,
             mock_yf,
-            mock_tech,
-            mock_lag,
             mock_mm_cls,
             current_price=150.0,
             pred_return=0.01,
@@ -167,20 +154,16 @@ class TestPredictSingleStockWithMocks(unittest.TestCase):
         self.assertAlmostEqual(result.current_price, 150.0, places=1)
 
     @patch("src.prediction.predict_single.ModelManager")
-    @patch("src.prediction.predict_single.create_basic_lag_features")
-    @patch("src.prediction.predict_single.add_technical_indicators")
+    @patch("src.prediction.predict_single.get_market_data_port")
     @patch("src.prediction.predict_single.yf")
-    @patch("src.prediction.predict_single.data_loader")
     @patch("src.prediction.predict_single.os.path.exists")
     @patch("src.prediction.predict_single.get_models_subdir")
     def test_diff_ratio_calculated(
         self,
         mock_subdir,
         mock_exists,
-        mock_data_loader,
         mock_yf,
-        mock_tech,
-        mock_lag,
+        mock_get_port,
         mock_mm_cls,
     ):
         """diff_ratio = (avg_pred_price - current_price) / current_price であること"""
@@ -189,10 +172,8 @@ class TestPredictSingleStockWithMocks(unittest.TestCase):
         self._setup_mocks(
             mock_subdir,
             mock_exists,
-            mock_data_loader,
+            mock_get_port,
             mock_yf,
-            mock_tech,
-            mock_lag,
             mock_mm_cls,
             current_price=100.0,
             pred_return=0.02,
@@ -205,20 +186,16 @@ class TestPredictSingleStockWithMocks(unittest.TestCase):
         self.assertAlmostEqual(result.diff_ratio, expected_diff, places=4)
 
     @patch("src.prediction.predict_single.ModelManager")
-    @patch("src.prediction.predict_single.create_basic_lag_features")
-    @patch("src.prediction.predict_single.add_technical_indicators")
+    @patch("src.prediction.predict_single.get_market_data_port")
     @patch("src.prediction.predict_single.yf")
-    @patch("src.prediction.predict_single.data_loader")
     @patch("src.prediction.predict_single.os.path.exists")
     @patch("src.prediction.predict_single.get_models_subdir")
     def test_model_count_reflects_model_types(
         self,
         mock_subdir,
         mock_exists,
-        mock_data_loader,
         mock_yf,
-        mock_tech,
-        mock_lag,
+        mock_get_port,
         mock_mm_cls,
     ):
         """model_count がモデル数と一致すること"""
@@ -227,10 +204,8 @@ class TestPredictSingleStockWithMocks(unittest.TestCase):
         self._setup_mocks(
             mock_subdir,
             mock_exists,
-            mock_data_loader,
+            mock_get_port,
             mock_yf,
-            mock_tech,
-            mock_lag,
             mock_mm_cls,
         )
 
@@ -242,63 +217,59 @@ class TestPredictSingleStockWithMocks(unittest.TestCase):
 class TestPredictSingleStockEdgeCases(unittest.TestCase):
     """エッジケースのテスト"""
 
-    @patch("src.prediction.predict_single.data_loader")
+    @patch("src.prediction.predict_single.get_market_data_port")
     @patch("src.prediction.predict_single.os.path.exists")
     @patch("src.prediction.predict_single.get_models_subdir")
-    def test_returns_none_when_ohlcv_empty(self, mock_subdir, mock_exists, mock_data_loader):
+    def test_returns_none_when_ohlcv_empty(self, mock_subdir, mock_exists, mock_get_port):
         """OHLCV データが空の場合は None が返ること"""
         from src.prediction.predict_single import predict_single_stock
 
         mock_subdir.return_value = "/models/us_BAD"
         mock_exists.return_value = True
-        mock_data_loader.get_stock_data.return_value = pd.DataFrame()
+        mock_get_port.return_value.get_stock_data.return_value = pd.DataFrame()
 
         result = predict_single_stock("us", "BAD", model_types=["StockXGBoostModel.joblib"])
 
         self.assertIsNone(result)
 
-    @patch("src.prediction.predict_single.create_basic_lag_features")
-    @patch("src.prediction.predict_single.add_technical_indicators")
+    @patch("src.prediction.predict_single.get_market_data_port")
     @patch("src.prediction.predict_single.yf")
-    @patch("src.prediction.predict_single.data_loader")
     @patch("src.prediction.predict_single.os.path.exists")
     @patch("src.prediction.predict_single.get_models_subdir")
     def test_returns_none_when_features_empty(
-        self, mock_subdir, mock_exists, mock_data_loader, mock_yf, mock_tech, mock_lag
+        self, mock_subdir, mock_exists, mock_yf, mock_get_port
     ):
         """特徴量生成後に X が空の場合は None が返ること"""
         from src.prediction.predict_single import predict_single_stock
 
         mock_subdir.return_value = "/models/us_AAPL"
         mock_exists.return_value = True
-        mock_data_loader.get_stock_data.return_value = _make_ohlcv(30)
+        mock_get_port.return_value.get_stock_data.return_value = _make_ohlcv(30)
 
         hist_df = pd.DataFrame({"Close": [100.0]}, index=pd.date_range("2024-01-01", periods=1))
         mock_yf.Ticker.return_value = MagicMock()
         mock_yf.Ticker.return_value.history.return_value = hist_df
 
-        mock_tech.return_value = _make_ohlcv(30)
-        mock_lag.return_value = (pd.DataFrame(), pd.Series(dtype=float))
+        mock_get_port.return_value.add_technical_indicators.return_value = _make_ohlcv(30)
+        mock_get_port.return_value.fetch_cross_asset_features.return_value = None
+        mock_get_port.return_value.create_basic_lag_features.return_value = (
+            pd.DataFrame(),
+            pd.Series(dtype=float),
+        )
 
         result = predict_single_stock("us", "AAPL", model_types=["StockXGBoostModel.joblib"])
 
         self.assertIsNone(result)
 
     @patch("src.prediction.predict_single.yf")
-    @patch("src.prediction.predict_single.data_loader")
     @patch("src.prediction.predict_single.os.path.exists")
     @patch("src.prediction.predict_single.get_models_subdir")
-    def test_fallback_to_close_when_yf_fails(
-        self, mock_subdir, mock_exists, mock_data_loader, mock_yf
-    ):
+    def test_fallback_to_close_when_yf_fails(self, mock_subdir, mock_exists, mock_yf):
         """yfinance での現在価格取得失敗時は Close 列からフォールバックすること"""
         from src.prediction.predict_single import predict_single_stock
 
         mock_subdir.return_value = "/models/us_AAPL"
         mock_exists.return_value = True
-
-        ohlcv = _make_ohlcv(30)
-        mock_data_loader.get_stock_data.return_value = ohlcv
 
         # yfinance のヒストリーが例外を起こすケースをシミュレート
         mock_yf.Ticker.return_value.history.side_effect = Exception("network error")

@@ -28,19 +28,17 @@ def _make_ohlcv(periods: int = 252) -> pd.DataFrame:
 
 
 @patch("src.prediction.predict_single.load_model_weights")
-@patch("src.prediction.predict_single.fetch_cross_asset_features")
 @patch("src.prediction.predict_single.ModelManager")
 @patch("src.prediction.predict_single.yf")
-@patch("src.prediction.predict_single.data_loader")
+@patch("src.prediction.predict_single.get_market_data_port")
 @patch("src.prediction.predict_single.os.path.exists")
 @patch("src.prediction.predict_single.get_models_subdir")
 def test_perf_predict_single(
     mock_subdir,
     mock_exists,
-    mock_data_loader,
+    mock_get_port,
     mock_yf,
     mock_mm_cls,
-    mock_cross_asset,
     mock_load_weights,
     record_benchmark,
     tmp_path,
@@ -51,7 +49,12 @@ def test_perf_predict_single(
     mock_exists.return_value = True
 
     ohlcv = _make_ohlcv(252)
-    mock_data_loader.get_stock_data.return_value = ohlcv
+    mock_port = MagicMock()
+    mock_port.get_stock_data.return_value = ohlcv
+    mock_port.add_technical_indicators.return_value = ohlcv
+    mock_port.create_basic_lag_features.return_value = (ohlcv.iloc[:, :3], pd.Series(dtype=float))
+    mock_port.fetch_cross_asset_features.return_value = None
+    mock_get_port.return_value = mock_port
 
     hist_df = pd.DataFrame(
         {"Close": [ohlcv["Close"].iloc[-1]]},
@@ -60,8 +63,6 @@ def test_perf_predict_single(
     ticker_obj = MagicMock()
     ticker_obj.history.return_value = hist_df
     mock_yf.Ticker.return_value = ticker_obj
-
-    mock_cross_asset.return_value = None
 
     mock_load_weights.return_value = [1.0]
 
