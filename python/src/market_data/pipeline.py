@@ -20,7 +20,7 @@ from src.features.macro_features import (
     add_macro_derived_features,
     fetch_additional_macro_features,
 )
-from src.features.sentiment_features import add_sentiment_features, fetch_news_sentiment
+from src.features.sentiment_features import add_sentiment_features, fetch_news_sentiment_with_llm
 from src.market_data.base import DataSourceBase
 from src.market_data.loader import (
     fetch_cross_asset_features,
@@ -180,7 +180,8 @@ def fetch_stock_data_with_features(
     df = add_event_flags(df)
 
     # センチメント特徴量を付与（R-404：ニュースセンチメントオルタナティブデータ）
-    sentiment_df = fetch_news_sentiment(symbol, start_date, end_date)
+    # OLLAMA_URL 設定時は LLM スコアリング、未設定時はキーワードマッチにフォールバック
+    sentiment_df = fetch_news_sentiment_with_llm(symbol, start_date, end_date)
     df = add_sentiment_features(df, sentiment_df=sentiment_df)
 
     # 部分的なNaN値を前方/後方補完（OHLCV欠損日等によるdropna行数増大を防ぐ）

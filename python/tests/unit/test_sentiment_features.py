@@ -1,9 +1,17 @@
 import unittest
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
 
-from src.features.sentiment_features import _score_titles, add_sentiment_features
+from src.features.sentiment_features import (
+    _fetch_news_articles,
+    _records_to_sentiment_df,
+    _score_titles,
+    add_sentiment_features,
+    fetch_news_sentiment,
+    fetch_news_sentiment_with_llm,
+)
 
 
 def _make_ohlcv(n: int = 30) -> pd.DataFrame:
@@ -112,6 +120,144 @@ class TestScoreTitles(unittest.TestCase):
         score = _score_titles(titles)
         self.assertGreaterEqual(score, -1.0)
         self.assertLessEqual(score, 1.0)
+
+
+class TestFetchNewsArticles(unittest.TestCase):
+    """_fetch_news_articles の単体テスト"""
+
+    def test_returns_none_when_no_api_key(self):
+        with patch.dict("os.environ", {}, clear=True):
+            result = _fetch_news_articles("AAPL", "2024-01-01", "2024-01-31")
+        self.assertIsNone(result)
+
+    @patch("src.features.sentiment_features._fetch_news_articles")
+    def test_fetch_news_sentiment_returns_none_when_no_articles(self, mock_fetch):
+        mock_fetch.return_value = None
+        result = fetch_news_sentiment("AAPL", "2024-01-01", "2024-01-31")
+        self.assertIsNone(result)
+
+    def test_records_to_sentiment_df_structure(self):
+        records = {
+            "2024-01-02": ["Stock surges", "Bullish outlook"],
+            "2024-01-03": ["Market declines"],
+        }
+        df = _records_to_sentiment_df(records, _score_titles)
+        self.assertIsNotNone(df)
+        assert df is not None
+        self.assertIn("sentiment_score", df.columns)
+        self.assertIn("news_count", df.columns)
+        self.assertEqual(len(df), 2)
+        self.assertEqual(df.loc[pd.Timestamp("2024-01-02"), "news_count"], 2)
+
+    def test_records_to_sentiment_df_empty_returns_none(self):
+        result = _records_to_sentiment_df({}, _score_titles)
+        self.assertIsNone(result)
+
+
+class TestFetchNewsSentimentWithLlm(unittest.TestCase):
+    """fetch_news_sentiment_with_llm の LLM パス / フォールバックテスト"""
+
+    @patch("src.features.sentiment_features._fetch_news_articles")
+    def test_returns_none_when_no_articles(self, mock_fetch):
+        mock_fetch.return_value = None
+        result = fetch_news_sentiment_with_llm("AAPL", "2024-01-01", "2024-01-31")
+        self.assertIsNone(result)
+
+    @patch("src.features.sentiment_features._fetch_news_articles")
+    @patch("src.market_data.adapters.llm_sentiment.OllamaClient")
+    def test_uses_llm_when_available(self, mock_client_cls, mock_fetch):
+        """Ollama が接続可能なとき LLM スコアが使われる"""
+        mock_fetch.return_value = {"2024-01-02": ["Apple surges on record earnings"]}
+
+        mock_client = MagicMock()
+        mock_client.is_available = True
+        mock_client.score.return_value = 0.85
+        mock_client_cls.return_value = mock_client
+
+        result = fetch_news_sentiment_with_llm("AAPL", "2024-01-01", "2024-01-31")
+
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertAlmostEqual(result["sentiment_score"].iloc[0], 0.85)
+        mock_client.score.assert_called_once()
+
+    @patch("src.features.sentiment_features._fetch_news_articles")
+    @patch("src.market_data.adapters.llm_sentiment.OllamaClient")
+    def test_falls_back_to_keywords_when_ollama_unavailable(self, mock_client_cls, mock_fetch):
+        """Ollama が接続できないときキーワードマッチにフォールバックする"""
+        mock_fetch.return_value = {
+            "2024-01-02": ["Stock surge to record highs", "Company beats expectations"]
+        }
+
+        mock_client = MagicMock()
+        mock_client.is_available = False
+        mock_client_cls.return_value = mock_client
+
+        result = fetch_news_sentiment_with_llm("AAPL", "2024-01-01", "2024-01-31")
+
+        self.assertIsNotNone(result)
+        assert result is not None
+        # キーワードマッチ（正の語が含まれる）→ スコアが正
+        self.assertGreater(result["sentiment_score"].iloc[0], 0.0)
+        mock_client.score.assert_not_called()
+
+    @patch("src.features.sentiment_features._fetch_news_articles")
+    @patch("src.market_data.adapters.llm_sentiment.OllamaClient")
+    def test_falls_back_to_keywords_when_llm_returns_none(self, mock_client_cls, mock_fetch):
+        """LLM が None を返した場合（タイムアウト等）にキーワードマッチで補完する"""
+        mock_fetch.return_value = {"2024-01-02": ["Market crash and decline continues"]}
+
+        mock_client = MagicMock()
+        mock_client.is_available = True
+        mock_client.score.return_value = None  # LLM 失敗
+        mock_client_cls.return_value = mock_client
+
+        result = fetch_news_sentiment_with_llm("AAPL", "2024-01-01", "2024-01-31")
+
+        self.assertIsNotNone(result)
+        assert result is not None
+        # キーワードマッチ（負の語が含まれる）→ スコアが負
+        self.assertLess(result["sentiment_score"].iloc[0], 0.0)
+
+    @patch("src.features.sentiment_features._fetch_news_articles")
+    @patch("src.market_data.adapters.llm_sentiment.OllamaClient")
+    def test_score_clamped_to_valid_range(self, mock_client_cls, mock_fetch):
+        """LLM スコアが -1.0〜1.0 の範囲に収まる"""
+        mock_fetch.return_value = {"2024-01-02": ["some news"]}
+
+        mock_client = MagicMock()
+        mock_client.is_available = True
+        mock_client.score.return_value = 0.75
+        mock_client_cls.return_value = mock_client
+
+        result = fetch_news_sentiment_with_llm("AAPL", "2024-01-01", "2024-01-31")
+
+        assert result is not None
+        score = result["sentiment_score"].iloc[0]
+        self.assertGreaterEqual(score, -1.0)
+        self.assertLessEqual(score, 1.0)
+
+    @patch("src.features.sentiment_features._fetch_news_articles")
+    @patch("src.market_data.adapters.llm_sentiment.OllamaClient")
+    def test_multiple_dates_scored_independently(self, mock_client_cls, mock_fetch):
+        """複数日のニュースが日付別に独立してスコアリングされる"""
+        mock_fetch.return_value = {
+            "2024-01-02": ["Bullish news"],
+            "2024-01-03": ["Bearish news"],
+            "2024-01-04": ["Neutral news"],
+        }
+
+        mock_client = MagicMock()
+        mock_client.is_available = True
+        mock_client.score.side_effect = [0.8, -0.6, 0.0]
+        mock_client_cls.return_value = mock_client
+
+        result = fetch_news_sentiment_with_llm("AAPL", "2024-01-01", "2024-01-31")
+
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertEqual(len(result), 3)
+        self.assertEqual(mock_client.score.call_count, 3)
 
 
 if __name__ == "__main__":
