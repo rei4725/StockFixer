@@ -5,7 +5,7 @@ Kelly criterion, drawdown scale, and position sizing constraints
 are verified against algebraic invariants rather than example-based assertions.
 """
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from hypothesis import HealthCheck, assume, given, settings
 from hypothesis import strategies as st
@@ -80,6 +80,9 @@ def _make_risk(balance: float) -> RiskManager:
     return risk
 
 
+_VIX_PATCH = "src.trading.risk_manager.fetch_latest_vix"
+
+
 class TestPositionSizeProperty:
     @given(
         win_rate=_win_rate,
@@ -98,10 +101,11 @@ class TestPositionSizeProperty:
         price: float,
     ) -> None:
         """任意の勝率・損益比・価格でポジションサイズは非負"""
-        risk = _make_risk(balance)
-        qty = risk.calc_position_size(
-            "TEST", price=price, win_rate=win_rate, avg_win=avg_win, avg_loss=avg_loss
-        )
+        with patch(_VIX_PATCH, return_value=None):
+            risk = _make_risk(balance)
+            qty = risk.calc_position_size(
+                "TEST", price=price, win_rate=win_rate, avg_win=avg_win, avg_loss=avg_loss
+            )
         assert qty >= 0
 
     @given(
@@ -121,10 +125,11 @@ class TestPositionSizeProperty:
         price: float,
     ) -> None:
         """発注コストが MAX_POSITION_RATE × 口座残高を超えない"""
-        risk = _make_risk(balance)
-        qty = risk.calc_position_size(
-            "TEST", price=price, win_rate=win_rate, avg_win=avg_win, avg_loss=avg_loss
-        )
+        with patch(_VIX_PATCH, return_value=None):
+            risk = _make_risk(balance)
+            qty = risk.calc_position_size(
+                "TEST", price=price, win_rate=win_rate, avg_win=avg_win, avg_loss=avg_loss
+            )
         assert qty * price <= balance * MAX_POSITION_RATE + 1e-6
 
     @given(
@@ -144,8 +149,9 @@ class TestPositionSizeProperty:
         price: float,
     ) -> None:
         """発注株数は 100 株単位（ロット制約）"""
-        risk = _make_risk(balance)
-        qty = risk.calc_position_size(
-            "TEST", price=price, win_rate=win_rate, avg_win=avg_win, avg_loss=avg_loss
-        )
+        with patch(_VIX_PATCH, return_value=None):
+            risk = _make_risk(balance)
+            qty = risk.calc_position_size(
+                "TEST", price=price, win_rate=win_rate, avg_win=avg_win, avg_loss=avg_loss
+            )
         assert qty % 100 == 0
