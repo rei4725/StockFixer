@@ -36,7 +36,11 @@ from src.backtest.pipeline import (
     run_backtest_walk_forward,
     save_backtest_results,
 )
+from src.backtest.ports import set_model_manager_factory
+from src.prediction.manager import ModelManager
 from src.utils.logger import get_logger
+
+set_model_manager_factory(ModelManager)
 
 logger = get_logger(__name__)
 

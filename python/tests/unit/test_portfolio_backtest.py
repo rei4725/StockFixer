@@ -319,9 +319,9 @@ class TestPlotPortfolio(unittest.TestCase):
 class TestBuildSignalMatrixAdditional(unittest.TestCase):
     """_build_signal_matrix の追加テスト"""
 
-    @patch("src.prediction.manager.ModelManager")
+    @patch("src.backtest.portfolio.get_model_manager")
     @patch("src.backtest.pipeline.load_features")
-    def test_builds_matrix_for_single_symbol(self, mock_load, mock_mm_cls):
+    def test_builds_matrix_for_single_symbol(self, mock_load, mock_get_mm):
         """1銘柄の予測スコアと価格マトリクスが構築されること"""
         import numpy as np
 
@@ -340,7 +340,7 @@ class TestBuildSignalMatrixAdditional(unittest.TestCase):
         mock_load.return_value = df_feat
 
         n_test = n - int(n * 0.8)  # 10
-        mock_mm = mock_mm_cls.return_value
+        mock_mm = mock_get_mm.return_value
         mock_mm.predict_with_model.return_value = np.array([0.01] * n_test)
 
         score_matrix, close_matrix = _build_signal_matrix(
@@ -358,9 +358,9 @@ class TestBuildSignalMatrixAdditional(unittest.TestCase):
         self.assertFalse(score_matrix.empty)
         self.assertIn("jp_7203", score_matrix.columns)
 
-    @patch("src.prediction.manager.ModelManager")
+    @patch("src.backtest.portfolio.get_model_manager")
     @patch("src.backtest.pipeline.load_features")
-    def test_skips_symbol_with_insufficient_data(self, mock_load, mock_mm_cls):
+    def test_skips_symbol_with_insufficient_data(self, mock_load, mock_get_mm):
         """データ不足の銘柄はスキップされること"""
         import numpy as np
 

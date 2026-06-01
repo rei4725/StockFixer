@@ -302,10 +302,10 @@ class TestRunBacktestSingle:
     """run_backtest_single() のテスト"""
 
     @patch("src.backtest.pipeline.load_features")
-    @patch("src.prediction.manager.ModelManager")
+    @patch("src.backtest.pipeline.get_model_manager")
     @patch("src.backtest.backtester.Backtester")
     @patch("src.trading.signal_generator.SignalGenerator")
-    def test_run_backtest_single_returns_metrics(self, mock_sg, mock_bt, mock_mm_cls, mock_lf):
+    def test_run_backtest_single_returns_metrics(self, mock_sg, mock_bt, mock_get_mm, mock_lf):
         """基本フローでメトリクス辞書が返ること"""
         n = 20
         dates = pd.date_range("2024-01-01", periods=n, freq="B")
@@ -320,7 +320,7 @@ class TestRunBacktestSingle:
         mock_lf.return_value = mock_df
 
         # ModelManager mock
-        mock_mm = mock_mm_cls.return_value
+        mock_mm = mock_get_mm.return_value
         n_test = n - int(n * 0.8)  # 4
         mock_mm.predict_with_model.return_value = [0.01] * n_test
 
@@ -342,11 +342,11 @@ class TestRunBacktestSingle:
 
     @patch("src.backtest.pipeline.load_features")
     @patch("src.backtest.pipeline._ensemble_predict")
-    @patch("src.prediction.manager.ModelManager")
+    @patch("src.backtest.pipeline.get_model_manager")
     @patch("src.backtest.backtester.Backtester")
     @patch("src.trading.signal_generator.SignalGenerator")
     def test_run_backtest_single_ensemble_mode(
-        self, mock_sg, mock_bt, mock_mm_cls, mock_ep, mock_lf
+        self, mock_sg, mock_bt, mock_get_mm, mock_ep, mock_lf
     ):
         """ensemble=True の場合は _ensemble_predict が呼ばれること"""
         n = 20
@@ -378,11 +378,11 @@ class TestRunBacktestSingle:
         mock_ep.assert_called_once()
 
     @patch("src.backtest.pipeline.load_features")
-    @patch("src.prediction.manager.ModelManager")
+    @patch("src.backtest.pipeline.get_model_manager")
     @patch("src.backtest.backtester.Backtester")
     @patch("src.trading.signal_generator.SignalGenerator")
     def test_exclude_sentiment_removes_sentiment_columns(
-        self, mock_sg, mock_bt, mock_mm_cls, mock_lf
+        self, mock_sg, mock_bt, mock_get_mm, mock_lf
     ):
         """exclude_sentiment=True のとき sentiment_* / news_count 列が学習から除外される"""
         n = 20
@@ -401,7 +401,7 @@ class TestRunBacktestSingle:
         )
         mock_lf.return_value = mock_df
 
-        mock_mm = mock_mm_cls.return_value
+        mock_mm = mock_get_mm.return_value
         n_test = n - int(n * 0.8)
         mock_mm.predict_with_model.return_value = [0.01] * n_test
 
@@ -420,11 +420,11 @@ class TestRunBacktestSingle:
         assert sentiment_cols == [], f"センチメント列が除外されていない: {sentiment_cols}"
 
     @patch("src.backtest.pipeline.load_features")
-    @patch("src.prediction.manager.ModelManager")
+    @patch("src.backtest.pipeline.get_model_manager")
     @patch("src.backtest.backtester.Backtester")
     @patch("src.trading.signal_generator.SignalGenerator")
     def test_include_sentiment_keeps_sentiment_columns(
-        self, mock_sg, mock_bt, mock_mm_cls, mock_lf
+        self, mock_sg, mock_bt, mock_get_mm, mock_lf
     ):
         """exclude_sentiment=False（デフォルト）では sentiment_* 列が学習に含まれる"""
         n = 20
@@ -441,7 +441,7 @@ class TestRunBacktestSingle:
         )
         mock_lf.return_value = mock_df
 
-        mock_mm = mock_mm_cls.return_value
+        mock_mm = mock_get_mm.return_value
         n_test = n - int(n * 0.8)
         mock_mm.predict_with_model.return_value = [0.01] * n_test
 
@@ -840,10 +840,10 @@ class TestSaveBacktestResultsAdditional(unittest.TestCase):
 class TestRunBacktestWalkForward(unittest.TestCase):
     """run_backtest_walk_forward のテスト（未カバー行 382-415）"""
 
-    @patch("src.prediction.manager.ModelManager")
+    @patch("src.backtest.pipeline.get_model_manager")
     @patch("src.trading.signal_generator.SignalGenerator")
     @patch("src.backtest.walk_forward.WalkForwardValidator")
-    def test_returns_walk_forward_results(self, mock_wfv_cls, mock_sg, mock_mm_cls):
+    def test_returns_walk_forward_results(self, mock_wfv_cls, mock_sg, mock_get_mm):
         """WalkForwardValidator の実行結果が (None, None, wf_df) として返ること"""
         from src.backtest.pipeline import run_backtest_walk_forward
 
@@ -862,10 +862,10 @@ class TestRunBacktestWalkForward(unittest.TestCase):
         pd.testing.assert_frame_equal(wf_df, expected_df)
         mock_wfv_cls.return_value.run.assert_called_once()
 
-    @patch("src.prediction.manager.ModelManager")
+    @patch("src.backtest.pipeline.get_model_manager")
     @patch("src.trading.signal_generator.SignalGenerator")
     @patch("src.backtest.walk_forward.WalkForwardValidator")
-    def test_ensemble_skips_create_model(self, mock_wfv_cls, mock_sg, mock_mm_cls):
+    def test_ensemble_skips_create_model(self, mock_wfv_cls, mock_sg, mock_get_mm):
         """ensemble=True の場合は create_model が呼ばれないこと"""
         from src.backtest.pipeline import run_backtest_walk_forward
 
@@ -873,12 +873,12 @@ class TestRunBacktestWalkForward(unittest.TestCase):
 
         run_backtest_walk_forward("jp", "7203", ensemble=True)
 
-        mock_mm_cls.return_value.create_model.assert_not_called()
+        mock_get_mm.return_value.create_model.assert_not_called()
 
-    @patch("src.prediction.manager.ModelManager")
+    @patch("src.backtest.pipeline.get_model_manager")
     @patch("src.trading.signal_generator.SignalGenerator")
     @patch("src.backtest.walk_forward.WalkForwardValidator")
-    def test_non_ensemble_calls_create_model(self, mock_wfv_cls, mock_sg, mock_mm_cls):
+    def test_non_ensemble_calls_create_model(self, mock_wfv_cls, mock_sg, mock_get_mm):
         """ensemble=False の場合は create_model が呼ばれること"""
         from src.backtest.pipeline import run_backtest_walk_forward
 
@@ -886,12 +886,12 @@ class TestRunBacktestWalkForward(unittest.TestCase):
 
         run_backtest_walk_forward("jp", "7203", ensemble=False)
 
-        mock_mm_cls.return_value.create_model.assert_called_once()
+        mock_get_mm.return_value.create_model.assert_called_once()
 
-    @patch("src.prediction.manager.ModelManager")
+    @patch("src.backtest.pipeline.get_model_manager")
     @patch("src.trading.signal_generator.SignalGenerator")
     @patch("src.backtest.walk_forward.WalkForwardValidator")
-    def test_lightgbm_model_type(self, mock_wfv_cls, mock_sg, mock_mm_cls):
+    def test_lightgbm_model_type(self, mock_wfv_cls, mock_sg, mock_get_mm):
         """LightGBMModel 指定でも正常動作すること"""
         from src.backtest.pipeline import run_backtest_walk_forward
 
@@ -903,6 +903,6 @@ class TestRunBacktestWalkForward(unittest.TestCase):
 
         self.assertIsNone(result_df)
         self.assertIsNone(metrics)
-        mock_mm_cls.return_value.create_model.assert_called_once_with(
+        mock_get_mm.return_value.create_model.assert_called_once_with(
             "LightGBMModel", "BacktestLightGBMModel"
         )
