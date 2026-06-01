@@ -5,6 +5,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from datetime import datetime, timedelta
 from unittest.mock import patch
 
 import pandas as pd
@@ -19,6 +20,11 @@ from src.prediction.miss_analysis import (
     analyze_miss_causes,
     run_miss_analysis_batch,
 )
+
+
+def _recent_predicted_at(days_ago: int = 1) -> str:
+    """since_days=30 フィルターに確実に収まる最近の predicted_at 文字列を返す。"""
+    return (datetime.now() - timedelta(days=days_ago)).strftime("%Y%m%d_120000")
 
 
 class _TmpDbTestCase(unittest.TestCase):
@@ -69,12 +75,13 @@ class TestLoadTopPredictionMisses(_TmpDbTestCase):
         self.assertTrue(df.empty)
 
     def test_returns_top_n_by_abs_error(self):
+        recent = _recent_predicted_at()
         rows = [
             {
                 "market": "us",
                 "symbol": "AAPL",
                 "model_name": "test",
-                "predicted_at": "20260501_120000",
+                "predicted_at": recent,
                 "horizon": 1,
                 "predicted_ratio": 0.05,
                 "actual_ratio": -0.03,
@@ -83,7 +90,7 @@ class TestLoadTopPredictionMisses(_TmpDbTestCase):
                 "market": "us",
                 "symbol": "GOOG",
                 "model_name": "test",
-                "predicted_at": "20260501_120000",
+                "predicted_at": recent,
                 "horizon": 1,
                 "predicted_ratio": 0.01,
                 "actual_ratio": -0.00,
@@ -114,12 +121,13 @@ class TestLoadTopPredictionMisses(_TmpDbTestCase):
         self.assertTrue(df.empty)
 
     def test_top_n_limit(self):
+        recent = _recent_predicted_at()
         rows = [
             {
                 "market": "us",
                 "symbol": f"SYM{i}",
                 "model_name": "test",
-                "predicted_at": "20260501_120000",
+                "predicted_at": recent,
                 "horizon": 1,
                 "predicted_ratio": 0.01 * i,
                 "actual_ratio": -0.01 * i,
