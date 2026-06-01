@@ -12,10 +12,13 @@ from src.market_data.prediction_adapter import PredictionMarketDataAdapter
 from src.orchestration.types import PipelineStage
 from src.prediction.manager import ModelManager
 from src.prediction.ports import set_market_data_port
+from src.prediction.predict_single import explain_prediction_shap, predict_single_stock
+from src.reporting.query_service import register_prediction_fns
 from src.utils.logger import get_logger
 
 set_market_data_port(PredictionMarketDataAdapter())
 set_model_manager_factory(ModelManager)
+register_prediction_fns(predict_single_stock, explain_prediction_shap)
 
 logger = get_logger(__name__)
 
