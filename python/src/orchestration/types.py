@@ -6,9 +6,11 @@ orchestration BC の型定義。
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
+
+from src.utils.scheduler_types import SchedulerJobStatus  # noqa: F401  # re-export
+
+__all__ = ["PipelineStage", "SchedulerJobStatus"]
 
 
 class PipelineStage(Enum):
@@ -22,13 +24,3 @@ class PipelineStage(Enum):
     CRITICAL = "CRITICAL"
     NON_CRITICAL = "NON_CRITICAL"
     RECOVERABLE = "RECOVERABLE"
-
-
-@dataclass
-class SchedulerJobStatus:
-    """スケジューラ状態表示用のジョブステータス。"""
-
-    job_id: str
-    label: str
-    last_run_at: Optional[str]
-    status: str

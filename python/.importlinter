@@ -20,9 +20,6 @@ layers =
     src.backtest | src.prediction | src.trading | src.reporting | src.watchlist | src.market_data | src.rule_engine
     src.utils
 ignore_imports =
-    # --- BC → orchestration (reporting が scheduler ステータス型を参照) ---
-    src.reporting.query_service -> src.orchestration.types
-    src.reporting.discord.discord_bot -> src.orchestration.types
     # --- 新規追加違反 (将来的解消対象) ---
     src.backtest.data_port -> src.market_data.backtest_adapter
     src.prediction.ports -> src.market_data.prediction_adapter

@@ -4,7 +4,6 @@ import asyncio
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.orchestration.types import SchedulerJobStatus
 from src.prediction.types import PredictionResult
 from src.reporting.discord.discord_bot import (
     TOP10_LABEL,
@@ -16,6 +15,7 @@ from src.reporting.discord.discord_bot import (
     determine_signal_label,
 )
 from src.reporting.types import MonthlyReportSummary
+from src.utils.scheduler_types import SchedulerJobStatus
 
 
 class TestDiscordBotHelpers(unittest.TestCase):
