@@ -2,6 +2,7 @@ from typing import Any, Callable, Optional
 
 import pandas as pd
 
+from src.backtest.data_port import get_backtest_data_port
 from src.backtest.metrics import compute_cost_comparison_metrics
 from src.backtest.task import BacktestTask, ReturnRegressionTask
 
@@ -88,9 +89,7 @@ class Backtester:
             )
 
         # 2. 特徴量生成（テクニカル指標付与）
-        from src.market_data.technical import add_technical_indicators
-
-        df = add_technical_indicators(df)
+        df = get_backtest_data_port().add_technical_indicators(df)
 
         # 3. ラベル生成（タスクに委譲）
         df[task.label_col] = task.make_labels(df)
@@ -473,9 +472,9 @@ class Backtester:
 
     def _load_from_raw(self) -> pd.DataFrame:
         """market_data_raw テーブルからOHLCVを取得する"""
-        from src.market_data.loader import get_raw_ohlcv_from_db
-
-        df = get_raw_ohlcv_from_db(self.market, self.symbol, self.start_date, self.end_date)
+        df = get_backtest_data_port().get_raw_ohlcv_from_db(
+            self.market, self.symbol, self.start_date, self.end_date
+        )
         if df is None or df.empty:
             raise ValueError(
                 f"market_data_rawにデータがありません: {self.market}/{self.symbol} "

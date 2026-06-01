@@ -232,7 +232,7 @@ class TestLoadFeaturesRawSource:
 
         assert isinstance(result, pd.DataFrame)
         assert not result.empty
-        mock_raw.assert_called_once_with("jp", "7203")
+        mock_raw.assert_called_once_with("jp", "7203", None, None)
 
     @patch("src.market_data.loader.get_raw_ohlcv_from_db")
     def test_load_features_raw_exits_on_empty(self, mock_raw):
