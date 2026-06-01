@@ -105,15 +105,21 @@ class TestPrepareUnifiedFeatures(unittest.TestCase):
 
 
 class TestUnifiedEarningsMask(unittest.TestCase):
-    @patch("src.prediction.unified_model_pipeline.get_earnings_dates")
-    def test_mask_earnings_rows_for_unified_removes_flagged_rows(self, mock_get_earnings):
+    @patch("src.prediction.unified_model_pipeline.get_market_data_port")
+    def test_mask_earnings_rows_for_unified_removes_flagged_rows(self, mock_get_port):
+        from unittest.mock import MagicMock
+
+        from src.market_data.technical import add_earnings_flag
         from src.prediction.unified_model_pipeline import _mask_earnings_rows_for_unified
 
         df = _make_df(n=10)
         df["market"] = "us"
         df["symbol"] = "AAPL"
         df["date"] = pd.date_range("2026-01-01", periods=10, freq="B")
-        mock_get_earnings.return_value = pd.DatetimeIndex([pd.Timestamp("2026-01-07")])
+        mock_port = MagicMock()
+        mock_port.get_earnings_dates.return_value = pd.DatetimeIndex([pd.Timestamp("2026-01-07")])
+        mock_port.add_earnings_flag.side_effect = add_earnings_flag
+        mock_get_port.return_value = mock_port
 
         masked = _mask_earnings_rows_for_unified(df)
 
