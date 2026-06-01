@@ -377,6 +377,86 @@ class TestRunBacktestSingle:
 
         mock_ep.assert_called_once()
 
+    @patch("src.backtest.pipeline.load_features")
+    @patch("src.prediction.manager.ModelManager")
+    @patch("src.backtest.backtester.Backtester")
+    @patch("src.trading.signal_generator.SignalGenerator")
+    def test_exclude_sentiment_removes_sentiment_columns(
+        self, mock_sg, mock_bt, mock_mm_cls, mock_lf
+    ):
+        """exclude_sentiment=True のとき sentiment_* / news_count 列が学習から除外される"""
+        n = 20
+        dates = pd.date_range("2024-01-01", periods=n, freq="B")
+        mock_df = pd.DataFrame(
+            {
+                "feat1": np.random.uniform(0, 1, n),
+                "sentiment_score": np.random.uniform(-1, 1, n),
+                "sentiment_ma5": np.random.uniform(-1, 1, n),
+                "sentiment_momentum": np.random.uniform(-0.1, 0.1, n),
+                "news_count": np.random.randint(0, 10, n).astype(float),
+                "y": np.random.uniform(-0.05, 0.05, n),
+                "Close": [100.0 + i for i in range(n)],
+            },
+            index=dates,
+        )
+        mock_lf.return_value = mock_df
+
+        mock_mm = mock_mm_cls.return_value
+        n_test = n - int(n * 0.8)
+        mock_mm.predict_with_model.return_value = [0.01] * n_test
+
+        mock_bt_instance = mock_bt.return_value
+        mock_bt_instance.simulate_trading.return_value = (pd.DataFrame(), {"total_return": 0.01})
+
+        from src.backtest.pipeline import run_backtest_single
+
+        run_backtest_single("jp", "7203", exclude_sentiment=True)
+
+        train_call = mock_mm.train_model.call_args
+        X_train_used = train_call[0][1]  # 第2引数が X_train
+        sentiment_cols = [
+            c for c in X_train_used.columns if c.startswith("sentiment_") or c == "news_count"
+        ]
+        assert sentiment_cols == [], f"センチメント列が除外されていない: {sentiment_cols}"
+
+    @patch("src.backtest.pipeline.load_features")
+    @patch("src.prediction.manager.ModelManager")
+    @patch("src.backtest.backtester.Backtester")
+    @patch("src.trading.signal_generator.SignalGenerator")
+    def test_include_sentiment_keeps_sentiment_columns(
+        self, mock_sg, mock_bt, mock_mm_cls, mock_lf
+    ):
+        """exclude_sentiment=False（デフォルト）では sentiment_* 列が学習に含まれる"""
+        n = 20
+        dates = pd.date_range("2024-01-01", periods=n, freq="B")
+        mock_df = pd.DataFrame(
+            {
+                "feat1": np.random.uniform(0, 1, n),
+                "sentiment_score": np.random.uniform(-1, 1, n),
+                "news_count": np.random.randint(0, 10, n).astype(float),
+                "y": np.random.uniform(-0.05, 0.05, n),
+                "Close": [100.0 + i for i in range(n)],
+            },
+            index=dates,
+        )
+        mock_lf.return_value = mock_df
+
+        mock_mm = mock_mm_cls.return_value
+        n_test = n - int(n * 0.8)
+        mock_mm.predict_with_model.return_value = [0.01] * n_test
+
+        mock_bt_instance = mock_bt.return_value
+        mock_bt_instance.simulate_trading.return_value = (pd.DataFrame(), {"total_return": 0.01})
+
+        from src.backtest.pipeline import run_backtest_single
+
+        run_backtest_single("jp", "7203", exclude_sentiment=False)
+
+        train_call = mock_mm.train_model.call_args
+        X_train_used = train_call[0][1]
+        assert "sentiment_score" in X_train_used.columns
+        assert "news_count" in X_train_used.columns
+
 
 class TestPrintBacktestMetrics:
     """print_backtest_metrics() のテスト"""
