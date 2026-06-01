@@ -10,6 +10,7 @@ import pandas as pd
 
 from src.domain.types import PredictionResult, ShapFeatureContribution, SignalSnapshot
 from src.orchestration.types import SchedulerJobStatus
+from src.reporting.ports import ExplainShapFn, PredictSingleFn
 from src.reporting.types import (
     MarketPredictionSnapshot,
     MonthlyReportSummary,
@@ -25,6 +26,19 @@ from src.utils.db import (
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+_predict_single_fn: PredictSingleFn | None = None
+_explain_shap_fn: ExplainShapFn | None = None
+
+
+def register_prediction_fns(
+    predict_fn: PredictSingleFn,
+    explain_fn: ExplainShapFn,
+) -> None:
+    """予測関数を登録する（orchestration 起動時に1回だけ呼ぶ）。"""
+    global _predict_single_fn, _explain_shap_fn
+    _predict_single_fn = predict_fn
+    _explain_shap_fn = explain_fn
 
 
 def _to_prediction_results(df: pd.DataFrame | None) -> list[PredictionResult]:
@@ -65,8 +79,10 @@ def get_latest_market_prediction_snapshots() -> tuple[str | None, list[MarketPre
 
 
 def get_watchlist_prediction_view() -> WatchlistPredictionView:
-    from src.prediction.predict_single import predict_single_stock
-
+    if _predict_single_fn is None:
+        raise RuntimeError(
+            "predict_single_fn が未登録です。register_prediction_fns() を先に呼び出してください。"
+        )
     watchlist_path = get_monitor_list_path()
     rows: list[WatchlistPredictionRow] = []
     try:
@@ -76,7 +92,7 @@ def get_watchlist_prediction_view() -> WatchlistPredictionView:
                 if len(row) < 2:
                     continue
                 market, symbol = row[0], row[1]
-                result = predict_single_stock(market, symbol)
+                result = _predict_single_fn(market, symbol)
                 if result is None:
                     rows.append(
                         WatchlistPredictionRow(
@@ -109,16 +125,19 @@ def get_watchlist_prediction_view() -> WatchlistPredictionView:
 
 
 def get_signal_snapshot(market: str, symbol: str, explain: bool = False) -> SignalSnapshot | None:
-    from src.prediction.predict_single import explain_prediction_shap, predict_single_stock
+    if _predict_single_fn is None or _explain_shap_fn is None:
+        raise RuntimeError(
+            "prediction fns が未登録です。register_prediction_fns() を先に呼び出してください。"
+        )
 
-    result = predict_single_stock(market, symbol)
+    result = _predict_single_fn(market, symbol)
     if result is None:
         return None
 
     if not explain:
         return SignalSnapshot(prediction=result)
 
-    shap_result = explain_prediction_shap(market, symbol, top_n=5)
+    shap_result = _explain_shap_fn(market, symbol, 5)
     if not shap_result:
         return SignalSnapshot(prediction=result)
 
