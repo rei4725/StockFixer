@@ -1,9 +1,14 @@
 """
 パフォーマンスリグレッション検出スクリプト
 
-CI で前回の benchmark_results.json と比較し、
-20% 以上遅くなった場合は警告メッセージを regression_warning.txt に書き出して
-終了コード 1 で終了する。
+CI で前回の benchmark_results.json と比較し、以下の両条件を満たす場合に
+警告メッセージを regression_warning.txt に書き出して終了コード 1 で終了する。
+
+  - 相対変化が THRESHOLD (20%) 超
+  - かつ絶対差が MIN_ABS_DELTA (50ms) 超
+
+100ms 未満の計測は CI ランナーのスケジューリングノイズで容易に 20〜80% 振れるため、
+絶対差による下限を設けて誤検知を防ぐ。
 
 初回実行時（ベースラインなし）は正常終了する。
 """
@@ -12,7 +17,8 @@ import json
 import os
 import sys
 
-THRESHOLD = 0.20  # 20% 超過でリグレッション判定
+THRESHOLD = 0.20  # 相対変化 20% 超でリグレッション候補
+MIN_ABS_DELTA = 0.050  # 絶対差 50ms 未満はノイズとみなして無視
 
 PERF_DIR = os.path.dirname(__file__)
 PREV_FILE = os.path.join(PERF_DIR, "benchmark_results_prev.json")
@@ -39,8 +45,9 @@ def main() -> int:
         if name not in prev:
             continue
         prev_time = prev[name]
-        if prev_time > 0 and curr_time > prev_time * (1 + THRESHOLD):
-            pct = (curr_time - prev_time) / prev_time * 100
+        delta = curr_time - prev_time
+        if prev_time > 0 and delta > MIN_ABS_DELTA and curr_time > prev_time * (1 + THRESHOLD):
+            pct = delta / prev_time * 100
             regressions.append(f"- `{name}`: {prev_time:.3f}s → {curr_time:.3f}s (+{pct:.1f}%)")
 
     if not regressions:
@@ -50,7 +57,7 @@ def main() -> int:
     lines = [
         "## ⚠️ パフォーマンスリグレッション検出",
         "",
-        "以下のベンチマークが前回比 20% 以上遅くなりました:",
+        "以下のベンチマークが前回比 20% 以上かつ 50ms 超遅くなりました:",
         "",
         *regressions,
         "",
