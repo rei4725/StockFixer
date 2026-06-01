@@ -37,20 +37,20 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
     if source == "api":
         from datetime import datetime, timedelta
 
-        from src.market_data.loader import get_stock_data
-        from src.market_data.technical import add_technical_indicators, create_basic_lag_features
+        from src.backtest.data_port import get_backtest_data_port
         from src.utils.data_path_utils import get_ticker
 
         end = datetime.now().strftime("%Y-%m-%d")
         start = (datetime.now() - timedelta(days=365 * 5)).strftime("%Y-%m-%d")
         ticker = get_ticker(market, symbol)
-        df = get_stock_data(market, ticker, start, end)
+        _dp = get_backtest_data_port()
+        df = _dp.get_stock_data(market, ticker, start, end)
         if df is None or df.empty:
             logger.error(f"[backtest] yfinanceからデータを取得できませんでした: {market}/{symbol}")
             sys.exit(1)
         df = df.dropna(axis=1, how="all")
         close_series = df["Close"].copy()
-        df = add_technical_indicators(df)
+        df = _dp.add_technical_indicators(df)
         _nan = int(df.isnull().sum().sum())
         if _nan > 0:
             df = df.ffill().bfill()
@@ -61,7 +61,7 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
                 f"（{len(df)}行 < 最低{_MIN_ROWS}行）"
             )
             sys.exit(1)
-        X, y = create_basic_lag_features(df, n_lags=10)
+        X, y = _dp.create_basic_lag_features(df, n_lags=10)
         if X is None or X.empty:
             nan_cols = df.isnull().sum()
             nan_cols = nan_cols[nan_cols > 0]
@@ -79,10 +79,10 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
         return X
 
     elif source == "raw":
-        from src.market_data.loader import get_raw_ohlcv_from_db
-        from src.market_data.technical import add_technical_indicators, create_basic_lag_features
+        from src.backtest.data_port import get_backtest_data_port
 
-        df = get_raw_ohlcv_from_db(market, symbol)
+        _dp = get_backtest_data_port()
+        df = _dp.get_raw_ohlcv_from_db(market, symbol)
         if df is None or df.empty:
             logger.error(
                 f"[backtest] market_data_rawにデータがありません: {market}/{symbol}"
@@ -91,7 +91,7 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
             sys.exit(1)
         df = df.dropna(axis=1, how="all")
         close_series = df["Close"].copy()
-        df = add_technical_indicators(df)
+        df = _dp.add_technical_indicators(df)
         _nan = int(df.isnull().sum().sum())
         if _nan > 0:
             df = df.ffill().bfill()
@@ -102,7 +102,7 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
                 f"（{len(df)}行 < 最低{_MIN_ROWS}行）"
             )
             sys.exit(1)
-        X, y = create_basic_lag_features(df, n_lags=10)
+        X, y = _dp.create_basic_lag_features(df, n_lags=10)
         if X is None or X.empty:
             nan_cols = df.isnull().sum()
             nan_cols = nan_cols[nan_cols > 0]

@@ -1,4 +1,5 @@
 import unittest
+import unittest.mock
 from unittest.mock import patch
 
 import pandas as pd
@@ -30,7 +31,9 @@ class TestPortfolioBacktestRegimeMetrics(unittest.TestCase):
             dtype=str,
         )
 
-        with patch("src.backtest.portfolio.get_market_regime", return_value=mocked_regime):
+        mock_port = unittest.mock.MagicMock()
+        mock_port.get_market_regime.return_value = mocked_regime
+        with patch("src.backtest.portfolio.get_backtest_data_port", return_value=mock_port):
             enriched, regime_metrics = _attach_regime_metrics(equity_df, close_matrix)
 
         self.assertIn("regime", enriched.columns)
