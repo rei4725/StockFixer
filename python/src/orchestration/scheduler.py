@@ -7,12 +7,15 @@
 
 from typing import Callable, Optional
 
+from src.backtest.ports import set_model_manager_factory
 from src.market_data.prediction_adapter import PredictionMarketDataAdapter
 from src.orchestration.types import PipelineStage
+from src.prediction.manager import ModelManager
 from src.prediction.ports import set_market_data_port
 from src.utils.logger import get_logger
 
 set_market_data_port(PredictionMarketDataAdapter())
+set_model_manager_factory(ModelManager)
 
 logger = get_logger(__name__)
 

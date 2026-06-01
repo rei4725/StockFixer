@@ -25,8 +25,6 @@ ignore_imports =
     src.reporting.discord.discord_bot -> src.orchestration.types
     # --- BC 間相互参照 (independence contract でも管理) ---
     src.reporting.query_service -> src.prediction.predict_single
-    src.backtest.pipeline -> src.prediction.manager
-    src.backtest.portfolio -> src.prediction.manager
     # --- 新規追加違反 (将来的解消対象) ---
     src.backtest.data_port -> src.market_data.backtest_adapter
     src.prediction.ports -> src.market_data.prediction_adapter
@@ -67,9 +65,6 @@ modules =
 ignore_imports =
     # [A] reporting → prediction (predict_single のみ残存 — 将来的に解消予定)
     src.reporting.query_service -> src.prediction.predict_single
-    # [B] backtest → prediction (バックテストが学習済みモデルを使用 — BT 専用ポート定義で解消可能)
-    src.backtest.pipeline -> src.prediction.manager
-    src.backtest.portfolio -> src.prediction.manager
     # [B] backtest → market_data (ポート経由: data_port が backtest_adapter を遅延ロード)
     src.backtest.data_port -> src.market_data.backtest_adapter
     # [B] prediction → market_data (ports が prediction_adapter を遅延ロード)

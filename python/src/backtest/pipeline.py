@@ -13,6 +13,7 @@ from typing import Any, Optional, Tuple
 
 import pandas as pd
 
+from src.backtest.ports import get_model_manager
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -235,7 +236,6 @@ def run_backtest_single(
         (result_df, metrics, None) のタプル
     """
     from src.backtest.backtester import Backtester
-    from src.prediction.manager import ModelManager
     from src.utils.signal_generator import SignalGenerator
 
     task = _build_task(task_name, threshold)
@@ -300,7 +300,7 @@ def run_backtest_single(
     X_test = test_df[feature_cols].dropna(thresh=min_valid)
 
     # モデル学習・予測
-    mm = ModelManager()
+    mm = get_model_manager()
 
     if ensemble:
         pred = _ensemble_predict(mm, X_train, y_train, X_test, model_name)
@@ -394,13 +394,12 @@ def run_backtest_walk_forward(
         (None, None, wf_df) のタプル
     """
     from src.backtest.walk_forward import WalkForwardValidator
-    from src.prediction.manager import ModelManager
     from src.utils.signal_generator import SignalGenerator
 
     task = _build_task(task_name, threshold)
     model_name = model_name or f"Backtest{model_type}"
 
-    mm = ModelManager()
+    mm = get_model_manager()
     if not ensemble:
         mm.create_model(model_type, model_name)
 
