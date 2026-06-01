@@ -9,6 +9,7 @@ import pandas as pd
 
 from src.prediction.drift_monitor import (
     DriftMonitorResult,
+    _load_weekly_hit_rates_direct,
     _load_weekly_hit_rates_from_snapshots,
     check_weekly_hit_rate_drift,
 )
@@ -153,6 +154,48 @@ class TestCheckWeeklyHitRateDrift(unittest.TestCase):
         result = check_weekly_hit_rate_drift(weeks=2, threshold=0.05)
         self.assertFalse(result.is_drifted)
         self.assertLessEqual(result.drop_ratio, 0.0)
+
+
+class TestLoadWeeklyHitRatesDirect(unittest.TestCase):
+    @patch("src.prediction.drift_monitor._db_connection")
+    def test_returns_dataframe_on_success(self, mock_ctx):
+        mock_con = mock_ctx.return_value.__enter__.return_value
+        mock_con.execute.return_value.fetchdf.return_value = pd.DataFrame(
+            {"week_start": ["2026-05-04", "2026-04-27"], "hit_rate": [0.65, 0.70]}
+        )
+        result = _load_weekly_hit_rates_direct(n_weeks=4, horizon=1)
+        self.assertFalse(result.empty)
+        self.assertIn("week_start", result.columns)
+        self.assertIn("hit_rate", result.columns)
+
+    @patch("src.prediction.drift_monitor._db_connection")
+    def test_returns_empty_on_empty_query(self, mock_ctx):
+        mock_con = mock_ctx.return_value.__enter__.return_value
+        mock_con.execute.return_value.fetchdf.return_value = pd.DataFrame()
+        result = _load_weekly_hit_rates_direct(n_weeks=4, horizon=1)
+        self.assertTrue(result.empty)
+
+    @patch("src.prediction.drift_monitor._db_connection")
+    def test_returns_empty_on_exception(self, mock_ctx):
+        mock_con = mock_ctx.return_value.__enter__.return_value
+        mock_con.execute.side_effect = Exception("DB error")
+        result = _load_weekly_hit_rates_direct(n_weeks=4, horizon=1)
+        self.assertTrue(result.empty)
+
+
+class TestCheckWeeklyHitRateDriftEdgeCases(unittest.TestCase):
+    @patch("src.prediction.drift_monitor._load_weekly_hit_rates")
+    def test_zero_avg_hit_rate_returns_zero_drop_ratio(self, mock_load):
+        """avg_hit_rate が 0 の場合 drop_ratio は 0 でドリフトなし"""
+        mock_load.return_value = pd.DataFrame(
+            {
+                "week_start": ["2026-05-11", "2026-05-04"],
+                "hit_rate": [0.0, 0.0],
+            }
+        )
+        result = check_weekly_hit_rate_drift(weeks=1, threshold=0.05)
+        self.assertAlmostEqual(result.drop_ratio, 0.0)
+        self.assertFalse(result.is_drifted)
 
 
 if __name__ == "__main__":

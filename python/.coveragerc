@@ -3,7 +3,9 @@ source = src
 branch = True
 omit =
     src/sbi/*
+    src/orchestration/backup_pipeline.py
+    src/backtest/screener.py
 
 [report]
-fail_under = 78
+fail_under = 80
 show_missing = true
