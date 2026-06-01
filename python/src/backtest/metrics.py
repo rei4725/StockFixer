@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import norm as _norm
 
+from src.backtest.data_port import get_backtest_data_port
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -548,8 +549,6 @@ def compute_metrics_by_regime(
     Returns:
         dict: レジームラベル ("bull", "bear", "range", "all") をキーとする metrics dict
     """
-    from src.market_data.technical import classify_regime
-
     results: dict[str, dict[str, Any]] = {}
 
     # 全件合算メトリクス
@@ -561,7 +560,9 @@ def compute_metrics_by_regime(
     if "date" not in trade_log.columns:
         return results
 
-    regime_series = classify_regime(price_df, ema_window=ema_window, atr_window=atr_window)
+    regime_series = get_backtest_data_port().classify_regime(
+        price_df, ema_window=ema_window, atr_window=atr_window
+    )
     if regime_series.empty:
         return results
 

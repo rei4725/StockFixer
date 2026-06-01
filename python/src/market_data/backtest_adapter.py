@@ -7,7 +7,7 @@ market_data BC 内に配置することで backtest -> market_data 直接依存�
 
 from __future__ import annotations
 
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
 
 import pandas as pd
 
@@ -22,10 +22,12 @@ class BacktestMarketDataAdapter:
 
         return get_stock_data(market, ticker, start, end)
 
-    def get_raw_ohlcv_from_db(self, market: str, symbol: str) -> Optional[pd.DataFrame]:
+    def get_raw_ohlcv_from_db(
+        self, market: str, symbol: str, start: Optional[str] = None, end: Optional[str] = None
+    ) -> Optional[pd.DataFrame]:
         from src.market_data.loader import get_raw_ohlcv_from_db
 
-        return get_raw_ohlcv_from_db(market, symbol)
+        return get_raw_ohlcv_from_db(market, symbol, start, end)
 
     def add_technical_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         from src.market_data.technical import add_technical_indicators
@@ -49,6 +51,11 @@ class BacktestMarketDataAdapter:
         from src.market_data import yf_client
 
         return yf_client.download(ticker, start=start, end=end)
+
+    def classify_regime(self, df: pd.DataFrame, **kwargs: Any) -> pd.Series:
+        from src.market_data.technical import classify_regime
+
+        return classify_regime(df, **kwargs)
 
     def get_market_regime(self, proxy_df: pd.DataFrame) -> pd.Series:
         from src.market_data.market_regime import get_market_regime
