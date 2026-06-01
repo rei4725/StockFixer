@@ -1,5 +1,5 @@
 # StockFixer Python Environment
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 # ビルド引数（イメージメタデータ）
 ARG BUILD_DATE=unknown
