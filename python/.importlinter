@@ -30,8 +30,6 @@ ignore_imports =
     # --- 新規追加違反 (将来的解消対象) ---
     src.backtest.data_port -> src.market_data.backtest_adapter
     src.prediction.ports -> src.market_data.prediction_adapter
-    src.prediction.predict_single -> src.market_data.technical
-    src.prediction.predict_single -> src.market_data.loader
 
 # ============================================================
 # Contract 2: BC 独立性契約
@@ -76,6 +74,3 @@ ignore_imports =
     src.backtest.data_port -> src.market_data.backtest_adapter
     # [B] prediction → market_data (ports が prediction_adapter を遅延ロード)
     src.prediction.ports -> src.market_data.prediction_adapter
-    # [B] prediction → market_data (技術指標計算 — market_data ポートで解消可能)
-    src.prediction.predict_single -> src.market_data.technical
-    src.prediction.predict_single -> src.market_data.loader

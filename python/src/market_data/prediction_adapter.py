@@ -7,13 +7,23 @@ market_data BC 内に配置することで prediction -> market_data 直接依�
 
 from __future__ import annotations
 
-from typing import List, Optional, Tuple, Union
+from typing import Any, List, Optional, Tuple, Union
 
 import pandas as pd
 
 
 class PredictionMarketDataAdapter:
     """market_data BC の関数を MarketDataPort インターフェースに適合させるアダプター。"""
+
+    def get_stock_data(self, market: str, symbol: str, start: Any, end: Any) -> pd.DataFrame:
+        from src.market_data import loader as _loader
+
+        return _loader.get_stock_data(market, symbol, start, end)
+
+    def fetch_cross_asset_features(self, start: str, end: str) -> Optional[pd.DataFrame]:
+        from src.market_data.loader import fetch_cross_asset_features
+
+        return fetch_cross_asset_features(start, end)
 
     def get_earnings_dates(self, market: str, symbol: str) -> pd.DatetimeIndex:
         from src.market_data.loader import get_earnings_dates

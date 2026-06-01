@@ -229,14 +229,14 @@ class TestRunSingleModelPrediction(unittest.TestCase):
         mock_mm = MagicMock()
         mock_mm.load_model.return_value = mock_model
 
+        mock_port = MagicMock()
+        mock_port.add_technical_indicators.return_value = df
+        mock_port.fetch_cross_asset_features.return_value = None
+        mock_port.create_basic_lag_features.return_value = (fake_X, fake_y)
+
         with patch(
-            "src.prediction.predict_single.add_technical_indicators", return_value=df
-        ), patch(
-            "src.prediction.predict_single.create_basic_lag_features",
-            return_value=(fake_X, fake_y),
-        ), patch(
-            "src.prediction.predict_single.ModelManager", return_value=mock_mm
-        ):
+            "src.prediction.predict_single.get_market_data_port", return_value=mock_port
+        ), patch("src.prediction.predict_single.ModelManager", return_value=mock_mm):
             return _run_single_model_prediction(model_path, "us", "AAPL", df, current_price)
 
     def test_returns_tuple_on_success(self):
@@ -261,14 +261,14 @@ class TestRunSingleModelPrediction(unittest.TestCase):
         empty_X = pd.DataFrame()
         empty_y = pd.Series(dtype=float)
 
+        mock_port = MagicMock()
+        mock_port.add_technical_indicators.return_value = df
+        mock_port.fetch_cross_asset_features.return_value = None
+        mock_port.create_basic_lag_features.return_value = (empty_X, empty_y)
+
         with patch(
-            "src.prediction.predict_single.add_technical_indicators", return_value=df
-        ), patch(
-            "src.prediction.predict_single.create_basic_lag_features",
-            return_value=(empty_X, empty_y),
-        ), patch(
-            "src.prediction.predict_single.ModelManager"
-        ):
+            "src.prediction.predict_single.get_market_data_port", return_value=mock_port
+        ), patch("src.prediction.predict_single.ModelManager"):
             result = _run_single_model_prediction("path/model.joblib", "us", "AAPL", df, 100.0)
         self.assertIsNone(result)
 
@@ -286,14 +286,14 @@ class TestRunSingleModelPrediction(unittest.TestCase):
         mock_mm = MagicMock()
         mock_mm.load_model.return_value = mock_model
 
+        mock_port = MagicMock()
+        mock_port.add_technical_indicators.return_value = df
+        mock_port.fetch_cross_asset_features.return_value = None
+        mock_port.create_basic_lag_features.return_value = (fake_X, fake_y)
+
         with patch(
-            "src.prediction.predict_single.add_technical_indicators", return_value=df
-        ), patch(
-            "src.prediction.predict_single.create_basic_lag_features",
-            return_value=(fake_X, fake_y),
-        ), patch(
-            "src.prediction.predict_single.ModelManager", return_value=mock_mm
-        ):
+            "src.prediction.predict_single.get_market_data_port", return_value=mock_port
+        ), patch("src.prediction.predict_single.ModelManager", return_value=mock_mm):
             result = _run_single_model_prediction("p/m.joblib", "us", "AAPL", df, 100.0)
         _, pred_return = result
         self.assertAlmostEqual(pred_return, 0.07)
@@ -321,16 +321,16 @@ class TestPredictSingleStock(unittest.TestCase):
     @patch("src.prediction.predict_single.load_model_weights")
     @patch("src.prediction.predict_single._run_single_model_prediction")
     @patch("src.prediction.predict_single._fetch_current_price")
-    @patch("src.prediction.predict_single.data_loader")
+    @patch("src.prediction.predict_single.get_market_data_port")
     @patch("src.prediction.predict_single.os.path.exists")
     def test_returns_prediction_result_when_models_exist(
-        self, mock_exists, mock_loader, mock_price, mock_run, mock_weights
+        self, mock_exists, mock_get_port, mock_price, mock_run, mock_weights
     ):
         """モデルが存在する場合、PredictionResult が返ること"""
         from src.prediction.predict_single import predict_single_stock
 
         mock_exists.return_value = True
-        mock_loader.get_stock_data.return_value = self._make_df()
+        mock_get_port.return_value.get_stock_data.return_value = self._make_df()
         mock_price.return_value = 1100.0
         mock_run.return_value = (1150.0, 0.045)
         mock_weights.return_value = [0.5, 0.5]
@@ -350,26 +350,26 @@ class TestPredictSingleStock(unittest.TestCase):
         result = predict_single_stock("jp", "7203")
         self.assertIsNone(result)
 
-    @patch("src.prediction.predict_single.data_loader")
+    @patch("src.prediction.predict_single.get_market_data_port")
     @patch("src.prediction.predict_single.os.path.exists")
-    def test_returns_none_when_features_empty(self, mock_exists, mock_loader):
+    def test_returns_none_when_features_empty(self, mock_exists, mock_get_port):
         """特徴量データが空の場合 None が返ること"""
         from src.prediction.predict_single import predict_single_stock
 
         mock_exists.return_value = True
-        mock_loader.get_stock_data.return_value = pd.DataFrame()
+        mock_get_port.return_value.get_stock_data.return_value = pd.DataFrame()
         result = predict_single_stock("jp", "7203")
         self.assertIsNone(result)
 
     @patch("src.prediction.predict_single._fetch_current_price")
-    @patch("src.prediction.predict_single.data_loader")
+    @patch("src.prediction.predict_single.get_market_data_port")
     @patch("src.prediction.predict_single.os.path.exists")
-    def test_returns_none_when_price_none(self, mock_exists, mock_loader, mock_price):
+    def test_returns_none_when_price_none(self, mock_exists, mock_get_port, mock_price):
         """現在値が取得できない場合 None が返ること"""
         from src.prediction.predict_single import predict_single_stock
 
         mock_exists.return_value = True
-        mock_loader.get_stock_data.return_value = self._make_df()
+        mock_get_port.return_value.get_stock_data.return_value = self._make_df()
         mock_price.return_value = None
         result = predict_single_stock("jp", "7203")
         self.assertIsNone(result)
@@ -377,16 +377,16 @@ class TestPredictSingleStock(unittest.TestCase):
     @patch("src.prediction.predict_single.load_model_weights")
     @patch("src.prediction.predict_single._run_single_model_prediction")
     @patch("src.prediction.predict_single._fetch_current_price")
-    @patch("src.prediction.predict_single.data_loader")
+    @patch("src.prediction.predict_single.get_market_data_port")
     @patch("src.prediction.predict_single.os.path.exists")
     def test_continues_on_model_exception(
-        self, mock_exists, mock_loader, mock_price, mock_run, mock_weights
+        self, mock_exists, mock_get_port, mock_price, mock_run, mock_weights
     ):
         """モデル予測で例外が出ても次のモデルに続くこと"""
         from src.prediction.predict_single import predict_single_stock
 
         mock_exists.return_value = True
-        mock_loader.get_stock_data.return_value = self._make_df()
+        mock_get_port.return_value.get_stock_data.return_value = self._make_df()
         mock_price.return_value = 1100.0
         # horizon=1 → 2モデル: XGBoost が例外、LightGBM が成功
         mock_run.side_effect = [Exception("モデルエラー"), (1150.0, 0.045)]

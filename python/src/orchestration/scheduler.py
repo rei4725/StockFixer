@@ -7,8 +7,12 @@
 
 from typing import Callable, Optional
 
+from src.market_data.prediction_adapter import PredictionMarketDataAdapter
 from src.orchestration.types import PipelineStage
+from src.prediction.ports import set_market_data_port
 from src.utils.logger import get_logger
+
+set_market_data_port(PredictionMarketDataAdapter())
 
 logger = get_logger(__name__)
 
