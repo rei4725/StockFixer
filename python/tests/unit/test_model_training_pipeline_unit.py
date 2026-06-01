@@ -156,13 +156,18 @@ class TestLoadFeaturesForTraining(unittest.TestCase):
                 self.assertNotIn("-", col)
                 self.assertNotIn("/", col)
 
-    @patch("src.prediction.training_pipeline.get_earnings_dates")
+    @patch("src.prediction.training_pipeline.get_market_data_port")
     @patch("src.prediction.training_pipeline.load_stock_features")
-    def test_horizon1_masks_earnings_window_rows(self, mock_load, mock_get_earnings):
+    def test_horizon1_masks_earnings_window_rows(self, mock_load, mock_get_port):
+        from src.market_data.technical import add_earnings_flag
+
         df = self._make_stock_features_df(periods=20)
         df.loc[:, "date"] = df.index
         mock_load.return_value = df
-        mock_get_earnings.return_value = pd.DatetimeIndex([pd.Timestamp("2024-01-10")])
+        mock_port = MagicMock()
+        mock_port.get_earnings_dates.return_value = pd.DatetimeIndex([pd.Timestamp("2024-01-10")])
+        mock_port.add_earnings_flag.side_effect = add_earnings_flag
+        mock_get_port.return_value = mock_port
 
         result = load_features_for_training("us", "AAPL", horizon=1)
 
@@ -471,14 +476,9 @@ class TestComputeAndSaveShap(unittest.TestCase):
 class TestLoadFeaturesForTrainingHorizon(unittest.TestCase):
     """load_features_for_training の horizon > 1 テスト"""
 
-    @patch("src.prediction.training_pipeline.get_earnings_dates")
-    @patch("src.prediction.training_pipeline.add_earnings_flag")
-    @patch("src.market_data.technical.create_basic_lag_features")
-    @patch("src.market_data.technical.add_technical_indicators")
+    @patch("src.prediction.training_pipeline.get_market_data_port")
     @patch("src.utils.db.load_raw_ohlcv")
-    def test_horizon_3_uses_raw_ohlcv(
-        self, mock_raw, mock_ti, mock_lag, mock_add_earnings, mock_earnings_dates
-    ):
+    def test_horizon_3_uses_raw_ohlcv(self, mock_raw, mock_get_port):
         """horizon=3 では market_data_raw からデータを読み込むこと"""
         from src.prediction.training_pipeline import load_features_for_training
 
@@ -493,11 +493,7 @@ class TestLoadFeaturesForTrainingHorizon(unittest.TestCase):
             },
             index=pd.date_range("2024-01-01", periods=n, freq="B"),
         )
-
         mock_raw.return_value = df
-        mock_add_earnings.return_value = df
-        mock_ti.return_value = df
-        mock_earnings_dates.return_value = pd.DatetimeIndex([])
 
         X = pd.DataFrame(
             {"close_lag1": np.random.randn(n - 4)},
@@ -507,19 +503,19 @@ class TestLoadFeaturesForTrainingHorizon(unittest.TestCase):
             np.random.randn(n - 4),
             index=pd.date_range("2024-01-01", periods=n - 4, freq="B"),
         )
-        mock_lag.return_value = (X, y)
+        mock_port = MagicMock()
+        mock_port.get_earnings_dates.return_value = pd.DatetimeIndex([])
+        mock_port.add_earnings_flag.return_value = df
+        mock_port.add_technical_indicators.return_value = df
+        mock_port.create_basic_lag_features.return_value = (X, y)
+        mock_get_port.return_value = mock_port
 
         load_features_for_training("jp", "7203", horizon=3)
         mock_raw.assert_called_once_with("jp", "7203")
 
-    @patch("src.prediction.training_pipeline.get_earnings_dates")
-    @patch("src.prediction.training_pipeline.add_earnings_flag")
-    @patch("src.market_data.technical.create_basic_lag_features")
-    @patch("src.market_data.technical.add_technical_indicators")
+    @patch("src.prediction.training_pipeline.get_market_data_port")
     @patch("src.utils.db.load_raw_ohlcv")
-    def test_horizon_3_returns_success(
-        self, mock_raw, mock_ti, mock_lag, mock_add_earnings, mock_earnings_dates
-    ):
+    def test_horizon_3_returns_success(self, mock_raw, mock_get_port):
         """horizon=3 で正常データがあれば status=success が返ること"""
         from src.prediction.training_pipeline import load_features_for_training
 
@@ -534,11 +530,7 @@ class TestLoadFeaturesForTrainingHorizon(unittest.TestCase):
             },
             index=pd.date_range("2024-01-01", periods=n, freq="B"),
         )
-
         mock_raw.return_value = df
-        mock_add_earnings.return_value = df
-        mock_ti.return_value = df
-        mock_earnings_dates.return_value = pd.DatetimeIndex([])
 
         X = pd.DataFrame(
             {"close_lag1": np.random.randn(n - 4), "rsi": np.random.randn(n - 4)},
@@ -548,7 +540,12 @@ class TestLoadFeaturesForTrainingHorizon(unittest.TestCase):
             np.random.randn(n - 4),
             index=pd.date_range("2024-01-01", periods=n - 4, freq="B"),
         )
-        mock_lag.return_value = (X, y)
+        mock_port = MagicMock()
+        mock_port.get_earnings_dates.return_value = pd.DatetimeIndex([])
+        mock_port.add_earnings_flag.return_value = df
+        mock_port.add_technical_indicators.return_value = df
+        mock_port.create_basic_lag_features.return_value = (X, y)
+        mock_get_port.return_value = mock_port
 
         result = load_features_for_training("jp", "7203", horizon=3)
         self.assertEqual(result.status, "success")

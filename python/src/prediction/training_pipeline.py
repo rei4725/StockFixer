@@ -22,8 +22,6 @@ from config.settings import (
     FEATURE_SELECTION_PROTECT_TOP_SHAP,
     PERMUTATION_IMPORTANCE_REPEATS,
 )
-from src.market_data.loader import get_earnings_dates
-from src.market_data.technical import add_earnings_flag
 from src.prediction.db import (
     load_excluded_features,
     save_feature_selection,
@@ -31,6 +29,7 @@ from src.prediction.db import (
     save_shap_values,
 )
 from src.prediction.manager import ModelManager
+from src.prediction.ports import get_market_data_port
 from src.prediction.types import FeatureLoadResult, TrainingMetrics
 from src.utils.db import generate_run_id, load_stock_features, save_experiment_run
 from src.utils.logger import get_logger
@@ -69,8 +68,9 @@ def _mask_earnings_rows(df: pd.DataFrame, market: str, symbol: str) -> pd.DataFr
         return work
 
     work.index = date_index
-    earnings_dates = get_earnings_dates(market, symbol)
-    work = add_earnings_flag(work, earnings_dates, lookaround_days=EARNINGS_MASK_WINDOW_DAYS)
+    _mds = get_market_data_port()
+    earnings_dates = _mds.get_earnings_dates(market, symbol)
+    work = _mds.add_earnings_flag(work, earnings_dates, lookaround_days=EARNINGS_MASK_WINDOW_DAYS)
     work = work[work["earnings_flag"] == 0].copy()
     if has_date_column:
         work["date"] = work.index
@@ -149,10 +149,6 @@ def load_features_for_training(market: str, symbol: str, horizon: int = 1) -> Fe
             y = df["y"]
         else:
             # 多ホライズンパス: market_data_raw から OHLCV を取得して再計算
-            from src.market_data.technical import (
-                add_technical_indicators,
-                create_basic_lag_features,
-            )
             from src.utils.db import load_raw_ohlcv
 
             raw = load_raw_ohlcv(market, symbol)
@@ -165,10 +161,13 @@ def load_features_for_training(market: str, symbol: str, horizon: int = 1) -> Fe
                 )
 
             # load_raw_ohlcv はすでに先頭大文字列名（Open/High/Low/Close/Volume）で返す
-            earnings_dates = get_earnings_dates(market, symbol)
-            raw = add_earnings_flag(raw, earnings_dates, lookaround_days=EARNINGS_MASK_WINDOW_DAYS)
-            df_feat = add_technical_indicators(raw)
-            X, y = create_basic_lag_features(df_feat, target_horizon=horizon)
+            _mds = get_market_data_port()
+            earnings_dates = _mds.get_earnings_dates(market, symbol)
+            raw = _mds.add_earnings_flag(
+                raw, earnings_dates, lookaround_days=EARNINGS_MASK_WINDOW_DAYS
+            )
+            df_feat = _mds.add_technical_indicators(raw)
+            X, y = _mds.create_basic_lag_features(df_feat, target_horizon=horizon)
 
         X = _apply_feature_exclusions(X, market, symbol)
 

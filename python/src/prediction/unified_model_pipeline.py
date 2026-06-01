@@ -17,9 +17,8 @@ from config.settings import (
     FEATURE_SELECTION_MIN_FEATURES,
     PERMUTATION_IMPORTANCE_REPEATS,
 )
-from src.market_data.loader import get_earnings_dates
-from src.market_data.technical import add_earnings_flag
 from src.prediction.db import load_excluded_features, save_feature_selection
+from src.prediction.ports import get_market_data_port
 from src.utils.data_path_utils import ensure_dir, get_models_dir
 from src.utils.db import load_all_stock_features
 from src.utils.logger import get_logger
@@ -42,8 +41,11 @@ def _mask_earnings_rows_for_unified(df: pd.DataFrame) -> pd.DataFrame:
         work = group.copy()
         date_index = pd.DatetimeIndex(pd.to_datetime(work["date"], errors="coerce"))
         work.index = date_index
-        earnings_dates = get_earnings_dates(str(market), str(symbol))
-        work = add_earnings_flag(work, earnings_dates, lookaround_days=EARNINGS_MASK_WINDOW_DAYS)
+        _mds = get_market_data_port()
+        earnings_dates = _mds.get_earnings_dates(str(market), str(symbol))
+        work = _mds.add_earnings_flag(
+            work, earnings_dates, lookaround_days=EARNINGS_MASK_WINDOW_DAYS
+        )
         before = len(work)
         work = work[work["earnings_flag"] == 0].copy()
         removed_count += before - len(work)
@@ -256,12 +258,12 @@ def _load_all_ohlcv_for_unified(horizon: int) -> Tuple[pd.DataFrame, pd.Series]:
     """
     import re
 
-    from src.market_data.technical import add_technical_indicators, create_basic_lag_features
     from src.utils.db import load_all_raw_ohlcv_symbols, load_raw_ohlcv
 
     all_X = []
     all_y = []
 
+    _mds = get_market_data_port()
     symbols = load_all_raw_ohlcv_symbols()
     logger.info(f"OHLCV対象銘柄数: {len(symbols)}")
 
@@ -272,8 +274,8 @@ def _load_all_ohlcv_for_unified(horizon: int) -> Tuple[pd.DataFrame, pd.Series]:
                 continue
 
             # load_raw_ohlcv はすでに先頭大文字列名（Open/High/Low/Close/Volume）で返す
-            df_feat = add_technical_indicators(raw)
-            X_sym, y_sym = create_basic_lag_features(df_feat, target_horizon=horizon)
+            df_feat = _mds.add_technical_indicators(raw)
+            X_sym, y_sym = _mds.create_basic_lag_features(df_feat, target_horizon=horizon)
 
             # 銘柄を識別する特徴量を追加
             market_codes = {"us": 0, "jp": 1}
