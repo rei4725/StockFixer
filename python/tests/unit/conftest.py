@@ -5,6 +5,22 @@ import pandas as pd
 import pytest
 
 # ============================================
+# Discord 実送信ガード（unit テスト全体に適用）
+# ============================================
+
+
+@pytest.fixture(autouse=True)
+def _block_discord_http(monkeypatch):
+    """Block real Discord HTTP calls from all unit tests.
+
+    DISCORD_WEBHOOK_URL を除去することで _post_webhook が早期 return し、
+    どのテストからも実際の webhook エンドポイントに到達しなくなる。
+    Discord 送信の有無を検証したいテストは @patch で個別に制御する。
+    """
+    monkeypatch.delenv("DISCORD_WEBHOOK_URL", raising=False)
+
+
+# ============================================
 # Mock オブジェクト Factory
 # ============================================
 
