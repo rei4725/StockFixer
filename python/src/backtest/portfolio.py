@@ -26,7 +26,7 @@ import numpy as np
 import pandas as pd
 
 from config.settings import MAX_SECTOR_POSITIONS
-from src.market_data.market_regime import get_market_regime
+from src.backtest.data_port import get_backtest_data_port
 from src.utils.logger import get_logger
 from src.utils.regime_weights import get_regime_sector_weight
 from src.utils.sector_constraints import filter_by_sector_cap, get_symbol_sector
@@ -524,7 +524,7 @@ def _simulate_portfolio(
     if use_sector_rotation:
         proxy_df = _build_market_proxy_frame(close_matrix)
         if not proxy_df.empty:
-            regime_series = get_market_regime(proxy_df)
+            regime_series = get_backtest_data_port().get_market_regime(proxy_df)
 
     rebalance_set = set(str(d)[:10] for d in rebalance_dates)
 
@@ -727,7 +727,7 @@ def _attach_regime_metrics(
     if proxy_df.empty:
         return equity_df, {}
 
-    regime_series = get_market_regime(proxy_df)
+    regime_series = get_backtest_data_port().get_market_regime(proxy_df)
     if regime_series.empty:
         return equity_df, {}
 

@@ -12,8 +12,7 @@ from typing import Any
 
 import pandas as pd
 
-import src.market_data.yf_client as yf_client
-from src.market_data.technical import add_technical_indicators
+from src.backtest.data_port import get_backtest_data_port
 from src.utils.data_path_utils import get_ticker
 from src.utils.logger import get_logger
 
@@ -33,7 +32,7 @@ def _calc_volatility_score(df: pd.DataFrame) -> dict[str, Any]:
     if df.empty or len(df) < 20:
         return {"avg_volume": 0.0, "avg_atr_pct": 0.0, "score": 0.0}
 
-    df = add_technical_indicators(df)
+    df = get_backtest_data_port().add_technical_indicators(df)
 
     avg_volume = float(df["Volume"].mean())
     avg_atr_pct = float((df["atr"] / df["Close"]).mean()) if "atr" in df.columns else 0.0
@@ -72,7 +71,7 @@ def screen_volatile_symbols(
     for symbol in symbols:
         ticker = get_ticker(market, symbol)
         try:
-            df = yf_client.download(ticker, start=screen_start, end=screen_end)
+            df = get_backtest_data_port().download(ticker, start=screen_start, end=screen_end)
             if df is None or len(df) < min_data_days:
                 continue
             stats = _calc_volatility_score(df)
