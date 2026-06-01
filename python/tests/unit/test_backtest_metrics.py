@@ -14,7 +14,9 @@ from src.backtest.metrics import (
     _max_drawdown,
     _sharpe_ratio,
     compute_metrics,
+    deflated_sharpe_ratio,
     fetch_benchmark_returns,
+    monte_carlo_equity,
     plot_backtest,
 )
 
@@ -561,6 +563,72 @@ class TestComputeMetricsAvgWinLoss:
         metrics = compute_metrics(pd.DataFrame(), initial_cash=1_000_000)
         assert metrics["avg_win"] == 0.0
         assert metrics["avg_loss"] == 0.0
+
+
+class TestMonteCarloEquity(unittest.TestCase):
+    """monte_carlo_equity のユニットテスト"""
+
+    def test_empty_list_returns_all_zeros(self):
+        """空リストを渡しても例外が出ず、全フィールドが 0.0 であること"""
+        result = monte_carlo_equity([], initial_cash=1_000_000)
+        for key in (
+            "max_drawdown_mean",
+            "max_drawdown_p95",
+            "final_cash_p05",
+            "final_cash_p50",
+            "final_cash_p95",
+        ):
+            self.assertEqual(result[key], 0.0)
+
+    def test_positive_pnl_list_final_cash_p05_lt_p95(self):
+        """[100.0, -50.0, 200.0] を渡したとき final_cash_p05 < final_cash_p95 であること"""
+        result = monte_carlo_equity([100.0, -50.0, 200.0], initial_cash=1_000_000)
+        self.assertLess(result["final_cash_p05"], result["final_cash_p95"])
+
+    def test_reproducibility_with_same_seed(self):
+        """seed=42 で 2 回呼んだとき同じ結果が返ること"""
+        pnl = [100.0, -50.0, 200.0, -30.0, 80.0]
+        result1 = monte_carlo_equity(pnl, initial_cash=1_000_000, seed=42)
+        result2 = monte_carlo_equity(pnl, initial_cash=1_000_000, seed=42)
+        self.assertEqual(result1, result2)
+
+
+class TestDeflatedSharpeRatio(unittest.TestCase):
+    """deflated_sharpe_ratio と compute_metrics の n_trials 拡張テスト"""
+
+    def test_n_trials_1_returns_approx_half(self):
+        """n_trials=1, sharpe=0.0 のとき DSR ≈ norm.cdf(0) ≈ 0.5"""
+        dsr = deflated_sharpe_ratio(sharpe=0.0, n_trials=1, n_obs=50)
+        self.assertAlmostEqual(dsr, 0.5, places=6)
+
+    def test_range_0_to_1(self):
+        """sharpe=3.0, n_trials=100, n_obs=50 のとき DSR が [0, 1] の範囲内"""
+        dsr = deflated_sharpe_ratio(sharpe=3.0, n_trials=100, n_obs=50)
+        self.assertGreaterEqual(dsr, 0.0)
+        self.assertLessEqual(dsr, 1.0)
+
+    def test_compute_metrics_no_dsr_when_n_trials_zero(self):
+        """n_trials=0 を渡したとき compute_metrics 結果に 'dsr' キーが含まれない"""
+        log = _trade_log(
+            [
+                {
+                    "date": "2024-01-02",
+                    "action": "buy",
+                    "price": 100.0,
+                    "qty": 100,
+                    "cash": 990_000,
+                },
+                {
+                    "date": "2024-01-10",
+                    "action": "sell",
+                    "price": 110.0,
+                    "qty": 100,
+                    "cash": 1_001_000,
+                },
+            ]
+        )
+        metrics = compute_metrics(log, initial_cash=1_000_000, n_trials=0)
+        self.assertNotIn("dsr", metrics)
 
 
 if __name__ == "__main__":

@@ -401,6 +401,8 @@ class TestRunDailyPaperTradeReport(unittest.TestCase):
 class TestRunDailyPipeline:
     """run_daily_pipeline のテスト"""
 
+    @patch("src.reporting.discord.discord_utils.send_miss_analysis_summary")
+    @patch("src.prediction.db.load_top_prediction_misses")
     @patch("src.reporting.discord.discord_utils.send_daily_pipeline_error")
     @patch("src.reporting.discord.discord_utils.send_daily_pipeline_completion")
     @patch("src.orchestration.scheduler.run_daily_drift_check")
@@ -419,6 +421,8 @@ class TestRunDailyPipeline:
         mock_drift,
         mock_notify,
         mock_error,
+        mock_load_misses,
+        mock_send_misses,
     ):
         """全ステップが順番に実行されること"""
         from src.orchestration.scheduler import run_daily_pipeline
@@ -429,6 +433,7 @@ class TestRunDailyPipeline:
         mock_accuracy.return_value = None
         mock_drift.return_value = None
         mock_notify.return_value = True
+        mock_load_misses.return_value = pd.DataFrame()
 
         run_daily_pipeline()
 
@@ -437,6 +442,8 @@ class TestRunDailyPipeline:
         mock_output.assert_called_once()
         mock_notify.assert_called_once()
 
+    @patch("src.reporting.discord.discord_utils.send_miss_analysis_summary")
+    @patch("src.prediction.db.load_top_prediction_misses")
     @patch("src.reporting.discord.discord_utils.send_daily_pipeline_error")
     @patch("src.reporting.discord.discord_utils.send_daily_pipeline_completion")
     @patch("src.orchestration.scheduler.run_daily_drift_check")
@@ -455,6 +462,8 @@ class TestRunDailyPipeline:
         mock_drift,
         mock_notify,
         mock_error,
+        mock_load_misses,
+        mock_send_misses,
     ):
         """精度チェックが失敗しても後続ステップが実行されること"""
         from src.orchestration.scheduler import run_daily_pipeline
@@ -465,6 +474,7 @@ class TestRunDailyPipeline:
         mock_accuracy.side_effect = Exception("精度チェックエラー")
         mock_drift.return_value = None
         mock_notify.return_value = True
+        mock_load_misses.return_value = pd.DataFrame()
 
         run_daily_pipeline()  # 例外が外に伝播しないこと
 

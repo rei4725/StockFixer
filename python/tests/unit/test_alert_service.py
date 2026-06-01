@@ -6,7 +6,7 @@ import json
 import os
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from src.utils.alert_service import (
     DRIFT_WARN_THRESHOLD,
@@ -352,13 +352,14 @@ class TestRunConditionalNotification(unittest.TestCase):
             AlertResult("NF-303-3", "ドリフト", False, 0, 2),
             AlertResult("NF-303-4", "ヘルス", False, 0, 2),
         ]
+        notifier = Mock(return_value=True)
         with (
             patch("src.utils.alert_service._send_alert_detail", return_value=True) as mock_detail,
             patch("src.utils.alert_service._send_daily_summary") as mock_summary,
         ):
-            ok = run_conditional_notification(results=results)
+            ok = run_conditional_notification(results=results, notifier=notifier)
 
-        mock_detail.assert_called_once_with(results)
+        mock_detail.assert_called_once_with(results, notifier)
         mock_summary.assert_not_called()
         self.assertTrue(ok)
 
@@ -369,13 +370,14 @@ class TestRunConditionalNotification(unittest.TestCase):
             AlertResult("NF-303-3", "C", False, 0, 2),
             AlertResult("NF-303-4", "D", False, 0, 2),
         ]
+        notifier = Mock(return_value=True)
         with (
             patch("src.utils.alert_service._send_alert_detail") as mock_detail,
             patch("src.utils.alert_service._send_daily_summary", return_value=True) as mock_summary,
         ):
-            ok = run_conditional_notification(results=results)
+            ok = run_conditional_notification(results=results, notifier=notifier)
 
-        mock_summary.assert_called_once_with(results)
+        mock_summary.assert_called_once_with(results, notifier)
         mock_detail.assert_not_called()
         self.assertTrue(ok)
 

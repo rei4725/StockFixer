@@ -44,7 +44,6 @@ ignore_imports =
     src.prediction.training_pipeline -> src.market_data.technical
     src.backtest.rule_backtester -> src.market_data.technical
     src.backtest.screener -> src.market_data.technical
-    src.utils.alert_service -> src.reporting.discord.discord_utils
 
 # ============================================================
 # Contract 2: BC 独立性契約

@@ -80,6 +80,13 @@ DEFAULT_WIN_RATE: float = 0.55
 DEFAULT_AVG_WIN: float = 0.015
 DEFAULT_AVG_LOSS: float = 0.008
 
+# レジーム別 Kelly 乗数（1.0 = 通常, <1.0 = 縮小）
+KELLY_REGIME_MULTIPLIERS: dict[str, float] = {
+    "bull": 1.0,
+    "bear": 0.5,
+    "range": 0.7,
+}
+
 # VIX テールリスクヘッジ設定（R-406）
 # VIX がこの閾値を超えたときにポジション縮小を適用する
 VIX_SPIKE_THRESHOLD: float = _strict_float("VIX_SPIKE_THRESHOLD", 30.0, min_val=10.0, max_val=100.0)
