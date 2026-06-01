@@ -201,6 +201,7 @@ def run_backtest_single(
     atr_max_fraction: float = 1.0,
     ensemble: bool = False,
     apply_min_change_filter: bool = False,
+    exclude_sentiment: bool = False,
 ) -> Tuple[pd.DataFrame, dict[str, Any], pd.Series]:
     """
     単一学習/検証期間のバックテストを実行する。
@@ -228,6 +229,7 @@ def run_backtest_single(
         atr_min_fraction: ATRモード: 建玉下限比率（デフォルト: 10%）
         atr_max_fraction: ATRモード: 建玉上限比率（デフォルト: 100%）
         ensemble: XGBoost+LightGBMアンサンブル予測を使用
+        exclude_sentiment: True の場合、センチメント列を特徴量から除外して学習する
 
     Returns:
         (result_df, metrics, None) のタプル
@@ -279,8 +281,13 @@ def run_backtest_single(
             test_df.rename(columns={"close": "Close"}, errors="ignore")
         )
 
+    _SENTIMENT_PREFIXES = ("sentiment_", "news_count")
     feature_cols = [
-        c for c in train_df.columns if c not in exclude_cols and c not in ("Close", "close")
+        c
+        for c in train_df.columns
+        if c not in exclude_cols
+        and c not in ("Close", "close")
+        and not (exclude_sentiment and (c.startswith(_SENTIMENT_PREFIXES)))
     ]
 
     # NULL を含む行を極力除去しない（90% 以上、有効な特徴量が必要）

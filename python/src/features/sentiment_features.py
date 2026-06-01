@@ -1,21 +1,30 @@
 """
 ニュースセンチメント特徴量モジュール
 
-外部データソース（NewsAPI 等）からニュースセンチメントスコアを取得し、
+外部データソース（NewsAPI / EDINET 等）からニュースセンチメントスコアを取得し、
 OHLCV DataFrame に特徴量として付加する。
 
-データソース優先順位:
-  1. 呼び出し元が渡した sentiment_df（外部取得済みデータ）
-  2. NEWSAPI_KEY 環境変数が設定されていれば NewsAPI v2 から取得
-  3. どちらも利用できない場合は中立スコア（0.0）でプレースホルダーを返す
+データソース（市場別優先順位）:
+  US 市場:
+    1. NEWSAPI_KEY 設定済み → NewsAPI v2
+    2. キーワードマッチにフォールバック
+  JP 市場:
+    1. EDINET API v2（適時開示・有価証券報告書タイトル）
+    2. 開示なし / 取得失敗時は中立スコア（0.0）
+
+スコアリング方式（fetch_news_sentiment_with_llm を使用した場合）:
+  - OLLAMA_URL 設定済み + Ollama 応答あり → LLM スコアリング
+  - それ以外 → キーワードマッチにフォールバック
 
 将来拡張:
   - HuggingFace FinBERT によるオフライン推論
   - FRED 経済指標（UMCSENT 等）との融合
 """
 
+from __future__ import annotations
+
 import os
-from typing import Optional
+from typing import Callable, Optional
 
 import pandas as pd
 
@@ -27,19 +36,20 @@ logger = get_logger(__name__)
 _NEUTRAL_SCORE = 0.0
 
 
-def fetch_news_sentiment(
+# ---------------------------------------------------------------------------
+# 内部ヘルパー
+# ---------------------------------------------------------------------------
+
+
+def _fetch_news_articles(
     symbol: str,
     start_date: str,
     end_date: str,
-) -> Optional[pd.DataFrame]:
-    """
-    NewsAPI v2 からシンボル関連ニュースのセンチメントスコアを取得する。
-
-    NEWSAPI_KEY 環境変数が未設定の場合は None を返す（呼び出し元がフォールバック処理を行う）。
+) -> Optional[dict[str, list[str]]]:
+    """NewsAPI v2 から日付別のタイトルリストを取得する。
 
     Returns:
-        DatetimeIndex を持つ DataFrame (列: sentiment_score, news_count)。
-        取得不可の場合は None。
+        {date_str: [title, ...]} 形式の辞書。取得不可の場合は None。
     """
     api_key = os.environ.get("NEWSAPI_KEY")
     if not api_key:
@@ -72,31 +82,138 @@ def fetch_news_sentiment(
                 continue
             records.setdefault(published, []).append(article.get("title", "") or "")
 
-        rows = []
-        for date_str, titles in records.items():
-            score = _score_titles(titles)
-            rows.append(
-                {
-                    "date": pd.Timestamp(date_str),
-                    "sentiment_score": score,
-                    "news_count": len(titles),
-                }
-            )
-
-        if not rows:
-            return None
-
-        df = pd.DataFrame(rows).set_index("date").sort_index()
-        return df
+        return records if records else None
 
     except Exception as e:
         logger.error("NewsAPI 取得エラー: %s", e, exc_info=True)
         return None
 
 
-def _score_titles(titles: list[str]) -> float:
+def _records_to_sentiment_df(
+    records: dict[str, list[str]],
+    score_fn: Callable[[list[str]], float],
+) -> Optional[pd.DataFrame]:
+    """日付別タイトル辞書をスコアリングして sentiment DataFrame に変換する。"""
+    rows = []
+    for date_str, titles in records.items():
+        score = score_fn(titles)
+        rows.append(
+            {
+                "date": pd.Timestamp(date_str),
+                "sentiment_score": score,
+                "news_count": len(titles),
+            }
+        )
+
+    if not rows:
+        return None
+
+    return pd.DataFrame(rows).set_index("date").sort_index()
+
+
+# ---------------------------------------------------------------------------
+# 公開 API
+# ---------------------------------------------------------------------------
+
+
+def fetch_news_sentiment(
+    symbol: str,
+    start_date: str,
+    end_date: str,
+) -> Optional[pd.DataFrame]:
+    """NewsAPI v2 + キーワードマッチでセンチメントスコアを取得する。
+
+    後方互換用。新規呼び出しは fetch_news_sentiment_with_llm を推奨。
+
+    Returns:
+        DatetimeIndex を持つ DataFrame (列: sentiment_score, news_count)。
+        取得不可の場合は None。
     """
-    タイトルリストから簡易センチメントスコア（-1.0〜1.0）を算出する。
+    records = _fetch_news_articles(symbol, start_date, end_date)
+    if records is None:
+        return None
+    return _records_to_sentiment_df(records, _score_titles)
+
+
+def _fetch_jp_disclosure_titles(
+    symbol: str,
+    start_date: str,
+    end_date: str,
+) -> Optional[dict[str, list[str]]]:
+    """EDINET API から日本株の開示書類タイトルを取得する。
+
+    Returns:
+        {date_str: [title, ...]} 形式の辞書。取得不可の場合は None。
+    """
+    try:
+        from src.market_data.adapters.edinet_client import EdinetClient  # noqa: PLC0415
+
+        client = EdinetClient()
+        return client.fetch_document_titles(symbol, start_date, end_date)
+    except Exception as e:
+        logger.error("EDINET 取得エラー: %s", e, exc_info=True)
+        return None
+
+
+def _build_score_fn(use_llm: bool) -> Callable[[list[str]], float]:
+    """Ollama が利用可能なら LLM スコア関数、そうでなければキーワードマッチを返す。"""
+    if not use_llm:
+        return _score_titles
+
+    from src.market_data.adapters.llm_sentiment import OllamaClient  # noqa: PLC0415
+
+    client = OllamaClient()
+    if not client.is_available:
+        logger.debug("Ollama 未接続のためキーワードマッチにフォールバック")
+        return _score_titles
+
+    logger.debug("Ollama LLM でセンチメントスコアリング")
+
+    def _llm_score(titles: list[str]) -> float:
+        score = client.score(titles)
+        return score if score is not None else _score_titles(titles)
+
+    return _llm_score
+
+
+def fetch_news_sentiment_with_llm(
+    symbol: str,
+    start_date: str,
+    end_date: str,
+    market: str = "us",
+) -> Optional[pd.DataFrame]:
+    """市場別ニュース/開示情報を取得し、Ollama LLM でセンチメントスコアを算出する。
+
+    US 市場: NewsAPI v2 からニュース取得
+    JP 市場: EDINET API v2 から開示書類タイトルを取得
+
+    OLLAMA_URL が未設定または Ollama に接続できない場合は、キーワードマッチに
+    自動フォールバックするため、既存環境でも安全に呼び出せる。
+
+    Args:
+        symbol: 銘柄コード（US: "AAPL", JP: "7203"）
+        start_date: 取得開始日 (YYYY-MM-DD)
+        end_date: 取得終了日 (YYYY-MM-DD)
+        market: 市場識別子 ("us" または "jp")
+
+    Returns:
+        DatetimeIndex を持つ DataFrame (列: sentiment_score, news_count)。
+        データソースなし / 記事・開示なし の場合は None。
+    """
+    if market == "jp":
+        records = _fetch_jp_disclosure_titles(symbol, start_date, end_date)
+    else:
+        records = _fetch_news_articles(symbol, start_date, end_date)
+
+    if records is None:
+        return None
+
+    score_fn = _build_score_fn(use_llm=True)
+    return _records_to_sentiment_df(records, score_fn)
+
+
+def _score_titles(titles: list[str]) -> float:
+    """タイトルリストから簡易センチメントスコア（-1.0〜1.0）を算出する。
 
     FinBERT や VADER が利用可能な環境では差し替え可能。
     ここでは正/負キーワードの出現比率から算出する簡易実装。
@@ -121,8 +238,7 @@ def add_sentiment_features(
     sentiment_df: Optional[pd.DataFrame] = None,
     window_days: int = 5,
 ) -> pd.DataFrame:
-    """
-    OHLCV + テクニカル指標 DataFrame にセンチメント特徴量を追加する。
+    """OHLCV + テクニカル指標 DataFrame にセンチメント特徴量を追加する。
 
     追加列:
       - sentiment_score    : その日のセンチメントスコア (-1.0〜1.0, 欠損日は 0.0)
