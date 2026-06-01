@@ -155,7 +155,7 @@ class TestFetchNewsArticles(unittest.TestCase):
 
 
 class TestFetchNewsSentimentWithLlm(unittest.TestCase):
-    """fetch_news_sentiment_with_llm の LLM パス / フォールバックテスト"""
+    """fetch_news_sentiment_with_llm の LLM パス / フォールバックテスト（US 市場）"""
 
     @patch("src.features.sentiment_features._fetch_news_articles")
     def test_returns_none_when_no_articles(self, mock_fetch):
@@ -258,6 +258,62 @@ class TestFetchNewsSentimentWithLlm(unittest.TestCase):
         assert result is not None
         self.assertEqual(len(result), 3)
         self.assertEqual(mock_client.score.call_count, 3)
+
+
+class TestFetchNewsSentimentWithLlmJp(unittest.TestCase):
+    """fetch_news_sentiment_with_llm の JP 市場（EDINET）パステスト"""
+
+    @patch("src.features.sentiment_features._fetch_jp_disclosure_titles")
+    def test_returns_none_when_no_edinet_data(self, mock_fetch_jp):
+        mock_fetch_jp.return_value = None
+        result = fetch_news_sentiment_with_llm("7203", "2024-01-01", "2024-01-31", market="jp")
+        self.assertIsNone(result)
+        mock_fetch_jp.assert_called_once_with("7203", "2024-01-01", "2024-01-31")
+
+    @patch("src.features.sentiment_features._fetch_jp_disclosure_titles")
+    @patch("src.market_data.adapters.llm_sentiment.OllamaClient")
+    def test_jp_market_uses_edinet_titles(self, mock_client_cls, mock_fetch_jp):
+        """JP 市場では EDINET 開示タイトルが LLM スコアリングに使われる"""
+        mock_fetch_jp.return_value = {"2024-01-02": ["上方修正のお知らせ"]}
+
+        mock_client = MagicMock()
+        mock_client.is_available = True
+        mock_client.score.return_value = 0.7
+        mock_client_cls.return_value = mock_client
+
+        result = fetch_news_sentiment_with_llm("7203", "2024-01-01", "2024-01-31", market="jp")
+
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertAlmostEqual(result["sentiment_score"].iloc[0], 0.7)
+        mock_fetch_jp.assert_called_once_with("7203", "2024-01-01", "2024-01-31")
+
+    @patch("src.features.sentiment_features._fetch_news_articles")
+    @patch("src.features.sentiment_features._fetch_jp_disclosure_titles")
+    def test_us_market_does_not_call_edinet(self, mock_fetch_jp, mock_fetch_us):
+        """US 市場では EDINET を呼び出さない"""
+        mock_fetch_us.return_value = None
+        fetch_news_sentiment_with_llm("AAPL", "2024-01-01", "2024-01-31", market="us")
+        mock_fetch_jp.assert_not_called()
+        mock_fetch_us.assert_called_once()
+
+    @patch("src.features.sentiment_features._fetch_jp_disclosure_titles")
+    @patch("src.market_data.adapters.llm_sentiment.OllamaClient")
+    def test_jp_market_falls_back_to_keywords_when_ollama_unavailable(
+        self, mock_client_cls, mock_fetch_jp
+    ):
+        """Ollama 未接続時はキーワードマッチにフォールバックする（JP 市場）"""
+        mock_fetch_jp.return_value = {"2024-01-02": ["record surge bullish"]}
+
+        mock_client = MagicMock()
+        mock_client.is_available = False
+        mock_client_cls.return_value = mock_client
+
+        result = fetch_news_sentiment_with_llm("7203", "2024-01-01", "2024-01-31", market="jp")
+
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertGreater(result["sentiment_score"].iloc[0], 0.0)
 
 
 if __name__ == "__main__":

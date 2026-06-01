@@ -1,13 +1,16 @@
 """
 ニュースセンチメント特徴量モジュール
 
-外部データソース（NewsAPI 等）からニュースセンチメントスコアを取得し、
+外部データソース（NewsAPI / EDINET 等）からニュースセンチメントスコアを取得し、
 OHLCV DataFrame に特徴量として付加する。
 
-データソース優先順位:
-  1. 呼び出し元が渡した sentiment_df（外部取得済みデータ）
-  2. NEWSAPI_KEY 環境変数が設定されていれば NewsAPI v2 から取得
-  3. どちらも利用できない場合は中立スコア（0.0）でプレースホルダーを返す
+データソース（市場別優先順位）:
+  US 市場:
+    1. NEWSAPI_KEY 設定済み → NewsAPI v2
+    2. キーワードマッチにフォールバック
+  JP 市場:
+    1. EDINET API v2（適時開示・有価証券報告書タイトル）
+    2. 開示なし / 取得失敗時は中立スコア（0.0）
 
 スコアリング方式（fetch_news_sentiment_with_llm を使用した場合）:
   - OLLAMA_URL 設定済み + Ollama 応答あり → LLM スコアリング
@@ -132,43 +135,80 @@ def fetch_news_sentiment(
     return _records_to_sentiment_df(records, _score_titles)
 
 
-def fetch_news_sentiment_with_llm(
+def _fetch_jp_disclosure_titles(
     symbol: str,
     start_date: str,
     end_date: str,
-) -> Optional[pd.DataFrame]:
-    """NewsAPI v2 からニュースを取得し、Ollama LLM でセンチメントスコアを算出する。
-
-    OLLAMA_URL が未設定または Ollama に接続できない場合は、キーワードマッチに
-    自動フォールバックするため、既存環境でも安全に呼び出せる。
+) -> Optional[dict[str, list[str]]]:
+    """EDINET API から日本株の開示書類タイトルを取得する。
 
     Returns:
-        DatetimeIndex を持つ DataFrame (列: sentiment_score, news_count)。
-        NewsAPI キーなし / 記事なし の場合は None。
+        {date_str: [title, ...]} 形式の辞書。取得不可の場合は None。
     """
-    records = _fetch_news_articles(symbol, start_date, end_date)
-    if records is None:
+    try:
+        from src.market_data.adapters.edinet_client import EdinetClient  # noqa: PLC0415
+
+        client = EdinetClient()
+        return client.fetch_document_titles(symbol, start_date, end_date)
+    except Exception as e:
+        logger.error("EDINET 取得エラー: %s", e, exc_info=True)
         return None
+
+
+def _build_score_fn(use_llm: bool) -> Callable[[list[str]], float]:
+    """Ollama が利用可能なら LLM スコア関数、そうでなければキーワードマッチを返す。"""
+    if not use_llm:
+        return _score_titles
 
     from src.market_data.adapters.llm_sentiment import OllamaClient  # noqa: PLC0415
 
     client = OllamaClient()
-
-    if client.is_available:
-        logger.debug("Ollama LLM でセンチメントスコアリング")
-
-        def _llm_score(titles: list[str]) -> float:
-            score = client.score(titles)
-            if score is None:
-                # LLM が None を返した場合（タイムアウト等）はキーワードマッチで補完
-                return _score_titles(titles)
-            return score
-
-        score_fn: Callable[[list[str]], float] = _llm_score
-    else:
+    if not client.is_available:
         logger.debug("Ollama 未接続のためキーワードマッチにフォールバック")
-        score_fn = _score_titles
+        return _score_titles
 
+    logger.debug("Ollama LLM でセンチメントスコアリング")
+
+    def _llm_score(titles: list[str]) -> float:
+        score = client.score(titles)
+        return score if score is not None else _score_titles(titles)
+
+    return _llm_score
+
+
+def fetch_news_sentiment_with_llm(
+    symbol: str,
+    start_date: str,
+    end_date: str,
+    market: str = "us",
+) -> Optional[pd.DataFrame]:
+    """市場別ニュース/開示情報を取得し、Ollama LLM でセンチメントスコアを算出する。
+
+    US 市場: NewsAPI v2 からニュース取得
+    JP 市場: EDINET API v2 から開示書類タイトルを取得
+
+    OLLAMA_URL が未設定または Ollama に接続できない場合は、キーワードマッチに
+    自動フォールバックするため、既存環境でも安全に呼び出せる。
+
+    Args:
+        symbol: 銘柄コード（US: "AAPL", JP: "7203"）
+        start_date: 取得開始日 (YYYY-MM-DD)
+        end_date: 取得終了日 (YYYY-MM-DD)
+        market: 市場識別子 ("us" または "jp")
+
+    Returns:
+        DatetimeIndex を持つ DataFrame (列: sentiment_score, news_count)。
+        データソースなし / 記事・開示なし の場合は None。
+    """
+    if market == "jp":
+        records = _fetch_jp_disclosure_titles(symbol, start_date, end_date)
+    else:
+        records = _fetch_news_articles(symbol, start_date, end_date)
+
+    if records is None:
+        return None
+
+    score_fn = _build_score_fn(use_llm=True)
     return _records_to_sentiment_df(records, score_fn)
 
 

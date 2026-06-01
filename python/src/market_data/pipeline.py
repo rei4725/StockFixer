@@ -181,7 +181,7 @@ def fetch_stock_data_with_features(
 
     # センチメント特徴量を付与（R-404：ニュースセンチメントオルタナティブデータ）
     # OLLAMA_URL 設定時は LLM スコアリング、未設定時はキーワードマッチにフォールバック
-    sentiment_df = fetch_news_sentiment_with_llm(symbol, start_date, end_date)
+    sentiment_df = fetch_news_sentiment_with_llm(symbol, start_date, end_date, market=market)
     df = add_sentiment_features(df, sentiment_df=sentiment_df)
 
     # 部分的なNaN値を前方/後方補完（OHLCV欠損日等によるdropna行数増大を防ぐ）
