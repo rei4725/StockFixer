@@ -6,7 +6,6 @@ from discord.utils import escape_markdown
 from dotenv import load_dotenv
 
 from src.domain.types import PredictionResult
-from src.orchestration.types import SchedulerJobStatus
 from src.reporting.discord.discord_formatters import convert_df_for_discord
 from src.reporting.discord.discord_text import DISCORD_TEXT_LIMIT, split_text_chunks
 from src.reporting.query_service import (
@@ -24,6 +23,7 @@ from src.reporting.types import (
 )
 from src.utils.japan_time import format_jst_from_iso
 from src.utils.logger import get_logger
+from src.utils.scheduler_types import SchedulerJobStatus
 
 logger = get_logger(__name__)
 
