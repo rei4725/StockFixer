@@ -6,11 +6,9 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
-from src.market_data import loader as data_loader
-from src.market_data.loader import fetch_cross_asset_features
-from src.market_data.technical import add_technical_indicators, create_basic_lag_features
 from src.prediction.db import load_model_weights
 from src.prediction.manager import ModelManager
+from src.prediction.ports import get_market_data_port
 from src.prediction.types import HorizonResult, PredictionResult
 from src.utils.data_path_utils import get_models_subdir, get_ticker, normalize_col
 from src.utils.logger import get_logger
@@ -99,13 +97,14 @@ def _run_single_model_prediction(
     Returns:
         (pred_price, pred_return) のタプル。失敗時は None。
     """
-    df_feat = add_technical_indicators(df)
+    _mds = get_market_data_port()
+    df_feat = _mds.add_technical_indicators(df)
 
     # クロスアセット特徴量を付与（学習パイプラインと一致させる R-306）
     try:
         start_str = pd.DatetimeIndex(df_feat.index).min().strftime("%Y-%m-%d")
         end_str = pd.DatetimeIndex(df_feat.index).max().strftime("%Y-%m-%d")
-        cross_asset = fetch_cross_asset_features(start_str, end_str)
+        cross_asset = _mds.fetch_cross_asset_features(start_str, end_str)
         if cross_asset is not None and not cross_asset.empty:
             feat_idx = df_feat.index
             if isinstance(feat_idx, pd.DatetimeIndex) and feat_idx.tz is not None:
@@ -119,7 +118,7 @@ def _run_single_model_prediction(
             "クロスアセット特徴量付与スキップ: market=%s symbol=%s", market, symbol, exc_info=True
         )
 
-    X, _ = create_basic_lag_features(df_feat)
+    X, _ = _mds.create_basic_lag_features(df_feat)
     if X.empty:
         return None
     # 学習パイプラインと同じ特徴量名正規化・market_encoded 付与
@@ -231,7 +230,7 @@ def predict_single_stock(
             print(f"[{symbol}] モデルが存在しません: {model_path}")
             continue
         try:
-            df = data_loader.get_stock_data(
+            df = get_market_data_port().get_stock_data(
                 market,
                 symbol,
                 pd.Timestamp.today() - pd.Timedelta(days=lookback_days),
@@ -362,7 +361,8 @@ def explain_prediction_shap(
         return None
 
     try:
-        df = data_loader.get_stock_data(
+        _mds = get_market_data_port()
+        df = _mds.get_stock_data(
             market,
             symbol,
             pd.Timestamp.today() - pd.Timedelta(days=90),
@@ -371,8 +371,8 @@ def explain_prediction_shap(
         if df.empty or "Close" not in df.columns:
             return None
 
-        df_feat = add_technical_indicators(df)
-        X, _ = create_basic_lag_features(df_feat, target_horizon=horizon)
+        df_feat = _mds.add_technical_indicators(df)
+        X, _ = _mds.create_basic_lag_features(df_feat, target_horizon=horizon)
         if X.empty:
             return None
         # 学習パイプラインと同じ特徴量名正規化・market_encoded 付与

@@ -6,7 +6,7 @@ backtest BC はこのポートを通じて market_data BC の機能を利用す�
 
 from __future__ import annotations
 
-from typing import Optional, Protocol, Tuple, runtime_checkable
+from typing import Any, Optional, Protocol, Tuple, runtime_checkable
 
 import pandas as pd
 
@@ -19,13 +19,17 @@ class BacktestDataPort(Protocol):
         self, market: str, ticker: str, start: str, end: str
     ) -> Optional[pd.DataFrame]: ...
 
-    def get_raw_ohlcv_from_db(self, market: str, symbol: str) -> Optional[pd.DataFrame]: ...
+    def get_raw_ohlcv_from_db(
+        self, market: str, symbol: str, start: Optional[str] = None, end: Optional[str] = None
+    ) -> Optional[pd.DataFrame]: ...
 
     def add_technical_indicators(self, df: pd.DataFrame) -> pd.DataFrame: ...
 
     def create_basic_lag_features(
         self, df: pd.DataFrame, n_lags: int = 10
     ) -> Tuple[pd.DataFrame, pd.Series]: ...
+
+    def classify_regime(self, df: pd.DataFrame, **kwargs: Any) -> pd.Series: ...
 
     def download(
         self,

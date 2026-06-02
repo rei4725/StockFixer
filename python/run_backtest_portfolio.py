@@ -28,7 +28,11 @@ from src.backtest.portfolio import (
     run_portfolio_backtest,
     save_portfolio_results,
 )
+from src.backtest.ports import set_model_manager_factory
+from src.prediction.manager import ModelManager
 from src.utils.logger import get_logger
+
+set_model_manager_factory(ModelManager)
 
 logger = get_logger(__name__)
 

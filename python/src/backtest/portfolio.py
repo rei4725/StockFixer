@@ -27,6 +27,7 @@ import pandas as pd
 
 from config.settings import MAX_SECTOR_POSITIONS
 from src.backtest.data_port import get_backtest_data_port
+from src.backtest.ports import get_model_manager
 from src.utils.logger import get_logger
 from src.utils.regime_weights import get_regime_sector_weight
 from src.utils.sector_constraints import filter_by_sector_cap, get_symbol_sector
@@ -397,7 +398,6 @@ def _build_signal_matrix(
     学習データは train_ratio で分割し、テスト期間の予測のみ収録する。
     """
     from src.backtest.pipeline import _ensemble_predict, load_features
-    from src.prediction.manager import ModelManager
 
     score_dict: dict[str, pd.Series] = {}
     close_dict: dict[str, pd.Series] = {}
@@ -432,7 +432,7 @@ def _build_signal_matrix(
                 logger.debug(f"[PF] 特徴量空スキップ: {key}")
                 continue
 
-            mm = ModelManager()
+            mm = get_model_manager()
 
             if ensemble:
                 pred = _ensemble_predict(mm, X_train, y_train, X_test, f"PF_{key}")

@@ -56,14 +56,14 @@ class TestDiscordQueryService(unittest.TestCase):
         self.assertEqual(snapshots[0].top_results[0].symbol, "7203")
         self.assertEqual(snapshots[0].worst_results, [])
 
-    @patch("src.prediction.predict_single.explain_prediction_shap")
-    @patch("src.prediction.predict_single.predict_single_stock")
+    @patch("src.reporting.query_service._explain_shap_fn")
+    @patch("src.reporting.query_service._predict_single_fn")
     def test_get_signal_snapshot_maps_prediction_and_shap(
         self,
-        mock_predict_single_stock,
-        mock_explain_prediction_shap,
+        mock_predict_single_fn,
+        mock_explain_shap_fn,
     ):
-        mock_predict_single_stock.return_value = PredictionResult(
+        mock_predict_single_fn.return_value = PredictionResult(
             market="jp",
             symbol="7203",
             current_price=100.0,
@@ -71,7 +71,7 @@ class TestDiscordQueryService(unittest.TestCase):
             diff_ratio=0.01,
             model_count=2,
         )
-        mock_explain_prediction_shap.return_value = {
+        mock_explain_shap_fn.return_value = {
             "direction": "up",
             "top_features": [{"feature": "close_lag_1", "shap_value": 0.5}],
         }
@@ -181,13 +181,15 @@ class TestDiscordQueryService(unittest.TestCase):
     # get_signal_snapshot — edge cases
     # ------------------------------------------------------------------
 
-    @patch("src.prediction.predict_single.predict_single_stock", return_value=None)
-    def test_get_signal_snapshot_returns_none_when_no_prediction(self, _mock):
+    @patch("src.reporting.query_service._explain_shap_fn")
+    @patch("src.reporting.query_service._predict_single_fn", return_value=None)
+    def test_get_signal_snapshot_returns_none_when_no_prediction(self, _mock_predict, _mock_shap):
         result = get_signal_snapshot("us", "AAPL")
         self.assertIsNone(result)
 
-    @patch("src.prediction.predict_single.predict_single_stock")
-    def test_get_signal_snapshot_without_explain(self, mock_predict):
+    @patch("src.reporting.query_service._explain_shap_fn")
+    @patch("src.reporting.query_service._predict_single_fn")
+    def test_get_signal_snapshot_without_explain(self, mock_predict, _mock_shap):
         mock_predict.return_value = PredictionResult(
             market="us",
             symbol="AAPL",
@@ -200,8 +202,8 @@ class TestDiscordQueryService(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertIsNone(result.shap_direction)
 
-    @patch("src.prediction.predict_single.explain_prediction_shap", return_value=None)
-    @patch("src.prediction.predict_single.predict_single_stock")
+    @patch("src.reporting.query_service._explain_shap_fn", return_value=None)
+    @patch("src.reporting.query_service._predict_single_fn")
     def test_get_signal_snapshot_without_shap_result(self, mock_predict, _mock_shap):
         mock_predict.return_value = PredictionResult(
             market="us",
@@ -227,7 +229,7 @@ class TestDiscordQueryService(unittest.TestCase):
                 writer.writerow(row)
         return path
 
-    @patch("src.prediction.predict_single.predict_single_stock")
+    @patch("src.reporting.query_service._predict_single_fn")
     def test_get_watchlist_prediction_view_normal(self, mock_predict):
         mock_predict.return_value = PredictionResult(
             market="us",
@@ -245,7 +247,7 @@ class TestDiscordQueryService(unittest.TestCase):
         self.assertEqual(len(view.rows), 1)
         self.assertEqual(view.rows[0].symbol, "AAPL")
 
-    @patch("src.prediction.predict_single.predict_single_stock", return_value=None)
+    @patch("src.reporting.query_service._predict_single_fn", return_value=None)
     def test_get_watchlist_prediction_view_no_prediction(self, _mock):
         with tempfile.TemporaryDirectory() as tmp_dir:
             csv_path = self._write_watchlist_csv(tmp_dir, [["us", "AAPL"]])
@@ -259,11 +261,12 @@ class TestDiscordQueryService(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             csv_path = self._write_watchlist_csv(tmp_dir, [["us"], ["us", "AAPL"]])
             with patch("src.reporting.query_service.get_monitor_list_path", return_value=csv_path):
-                with patch("src.prediction.predict_single.predict_single_stock", return_value=None):
+                with patch("src.reporting.query_service._predict_single_fn", return_value=None):
                     view = get_watchlist_prediction_view()
         self.assertEqual(len(view.rows), 1)
 
-    def test_get_watchlist_prediction_view_error_returns_error_message(self):
+    @patch("src.reporting.query_service._predict_single_fn")
+    def test_get_watchlist_prediction_view_error_returns_error_message(self, _mock_predict):
         with patch(
             "src.reporting.query_service.get_monitor_list_path",
             return_value="/nonexistent/path.csv",
