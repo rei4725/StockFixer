@@ -136,6 +136,56 @@ class TestFetchNewsArticles(unittest.TestCase):
         result = fetch_news_sentiment("AAPL", "2024-01-01", "2024-01-31")
         self.assertIsNone(result)
 
+    @patch("src.features.sentiment_features._fetch_news_articles")
+    def test_fetch_news_sentiment_returns_df_when_articles_exist(self, mock_fetch):
+        mock_fetch.return_value = {"2024-01-02": ["Apple stock surges on record revenue"]}
+        result = fetch_news_sentiment("AAPL", "2024-01-01", "2024-01-31")
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertIn("sentiment_score", result.columns)
+
+    @patch("requests.get")
+    def test_fetch_news_articles_returns_records_when_api_key_set(self, mock_get):
+        """NEWSAPI_KEY が設定されている場合に日付別記事辞書を返すこと"""
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "articles": [
+                {"publishedAt": "2024-01-02T10:00:00Z", "title": "Stock surges"},
+                {"publishedAt": "2024-01-02T12:00:00Z", "title": "Record earnings"},
+            ]
+        }
+        mock_get.return_value = mock_resp
+
+        with patch.dict("os.environ", {"NEWSAPI_KEY": "test_key"}):
+            result = _fetch_news_articles("AAPL", "2024-01-01", "2024-01-31")
+
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertIn("2024-01-02", result)
+        self.assertEqual(len(result["2024-01-02"]), 2)
+
+    @patch("requests.get")
+    def test_fetch_news_articles_returns_none_when_empty_articles(self, mock_get):
+        """API は成功するが articles が空の場合は None を返すこと"""
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"articles": []}
+        mock_get.return_value = mock_resp
+
+        with patch.dict("os.environ", {"NEWSAPI_KEY": "test_key"}):
+            result = _fetch_news_articles("AAPL", "2024-01-01", "2024-01-31")
+
+        self.assertIsNone(result)
+
+    @patch("requests.get")
+    def test_fetch_news_articles_returns_none_on_request_error(self, mock_get):
+        """HTTP リクエストが失敗した場合は None を返すこと"""
+        mock_get.side_effect = ConnectionError("network error")
+
+        with patch.dict("os.environ", {"NEWSAPI_KEY": "test_key"}):
+            result = _fetch_news_articles("AAPL", "2024-01-01", "2024-01-31")
+
+        self.assertIsNone(result)
+
     def test_records_to_sentiment_df_structure(self):
         records = {
             "2024-01-02": ["Stock surges", "Bullish outlook"],
@@ -314,6 +364,35 @@ class TestFetchNewsSentimentWithLlmJp(unittest.TestCase):
         self.assertIsNotNone(result)
         assert result is not None
         self.assertGreater(result["sentiment_score"].iloc[0], 0.0)
+
+
+class TestBuildScoreFnNoLlm(unittest.TestCase):
+    """_build_score_fn(use_llm=False) のテスト"""
+
+    def test_returns_keyword_fn_when_use_llm_false(self):
+        from src.features.sentiment_features import _build_score_fn, _score_titles
+
+        fn = _build_score_fn(use_llm=False)
+        self.assertIs(fn, _score_titles)
+
+    def test_keyword_fn_scores_positive(self):
+        from src.features.sentiment_features import _build_score_fn
+
+        fn = _build_score_fn(use_llm=False)
+        score = fn(["stocks surge record high rally"])
+        self.assertGreater(score, 0.0)
+
+
+class TestFetchJpDisclosureTitlesException(unittest.TestCase):
+    """_fetch_jp_disclosure_titles の例外パスのテスト"""
+
+    @patch("src.market_data.adapters.edinet_client.EdinetClient")
+    def test_returns_none_on_edinet_exception(self, mock_cls):
+        from src.features.sentiment_features import _fetch_jp_disclosure_titles
+
+        mock_cls.side_effect = RuntimeError("connection error")
+        result = _fetch_jp_disclosure_titles("7203", "2025-01-01", "2025-01-31")
+        self.assertIsNone(result)
 
 
 if __name__ == "__main__":
