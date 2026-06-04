@@ -44,6 +44,26 @@ class TrendCandidate:
 
 
 @dataclass
+class Position:
+    """月次ライブ・スクリーンが追跡する保有ポジション（半自動運用）。
+
+    売買は人間が最終判断するため、本テーブルは「人間が建てたと宣言した」
+    ポジションの状態（保有/段階利確/撤退）を月次で更新するための台帳。
+    """
+
+    market: str
+    symbol: str
+    entry_date: str  # YYYY-MM-DD
+    entry_price: float
+    status: str = "open"  # "open" | "closed"
+    held_fraction: float = 1.0  # 直近評価時点の保有比率（1.0=フル, 0.0=撤退完了）
+    last_action: str = "entry"  # "entry" | "hold" | "scale_out" | "exit"
+    last_reason: str = "entry"  # 直近イベントの理由（ma_break / trail_stop / scale_2x ...）
+    last_multiple: float = 1.0  # 直近評価時点の倍率（price / entry_price）
+    last_evaluated: str = ""  # 最終評価日（YYYY-MM-DD）
+
+
+@dataclass
 class MultibaggerCandidate:
     """質ゲート通過後の最終候補（TrendCandidate ＋ ファンダ指標 ＋ 合成スコア）。
 

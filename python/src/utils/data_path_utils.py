@@ -79,6 +79,11 @@ def get_watchlist_audit_log_path() -> str:
     return os.path.join(_PYTHON_ROOT, "config", "watchlist_audit_log.json")
 
 
+def get_multibagger_positions_path() -> str:
+    """月次 multibagger 保有ポジション JSON のパスを返す（config/multibagger_positions.json）"""
+    return os.path.join(_PYTHON_ROOT, "config", "multibagger_positions.json")
+
+
 # ===== ティッカー補正 =====
 def get_ticker(market: str, symbol: str) -> str:
     """市場ごとにティッカーを補正して返す（例：日本株は .T を付与）。"""
