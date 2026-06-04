@@ -1,6 +1,7 @@
 """screening BC の型定義"""
 
 from dataclasses import dataclass, field
+from typing import Optional
 
 
 @dataclass
@@ -40,3 +41,27 @@ class TrendCandidate:
     return_6m: float  # 6ヶ月リターン
     return_12m: float  # 12ヶ月リターン
     avg_volume: float  # 平均出来高（流動性）
+
+
+@dataclass
+class MultibaggerCandidate:
+    """質ゲート通過後の最終候補（TrendCandidate ＋ ファンダ指標 ＋ 合成スコア）。
+
+    財務欠損銘柄を ``on_missing="penalize"`` で残す場合、ファンダ指標は None・
+    ``fundamentals_missing=True`` となり、合成スコアは減点される。
+    """
+
+    market: str
+    symbol: str
+    multibagger_score: float  # 合成スコア（高いほど上位）
+    trend_score: float  # トレンド・スクリーナーの score（#429）
+    growth_score: float  # 成長スコア（順位正規化, 0〜1）
+    quality_score: float  # 質スコア（順位正規化, 0〜1）
+    close: float  # 直近終値
+    revenue_cagr_3y: Optional[float]  # 売上CAGR(3年)
+    roe: Optional[float]  # 自己資本利益率
+    op_margin: Optional[float]  # 営業利益率
+    net_margin: Optional[float]  # 純利益率
+    debt_to_equity: Optional[float]  # 負債資本倍率(D/E)
+    market_cap: Optional[float]  # 時価総額
+    fundamentals_missing: bool  # 財務欠損で penalize 扱いか
