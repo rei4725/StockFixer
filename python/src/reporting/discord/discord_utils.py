@@ -994,20 +994,23 @@ def send_db_maintenance_completion(
     """
     if error:
         spec = DB_MAINTENANCE_ERROR
-        lines = [
-            f"時刻: {format_jst(fmt=DISCORD_DATETIME_FORMAT)}",
-            f"エラー: {error}",
+        fields: list[dict] = [
+            {"name": "🕐 時刻", "value": format_jst(fmt=DISCORD_DATETIME_FORMAT), "inline": True},
+            {"name": "❌ エラー", "value": error, "inline": False},
         ]
     else:
         spec = DB_MAINTENANCE_COMPLETION
         diff_mb = size_after_mb - size_before_mb
-        diff_str = f"{diff_mb:+.2f} MB"
-        lines = [
-            f"時刻: {format_jst(fmt=DISCORD_DATETIME_FORMAT)}",
-            f"処理時間: {elapsed_seconds:.1f} 秒",
-            f"DBサイズ: {size_before_mb:.2f} MB → {size_after_mb:.2f} MB ({diff_str})",
+        fields = [
+            {"name": "🕐 時刻", "value": format_jst(fmt=DISCORD_DATETIME_FORMAT), "inline": True},
+            {"name": "⏱ 処理時間", "value": f"{elapsed_seconds:.1f} 秒", "inline": True},
+            {
+                "name": "💾 DBサイズ",
+                "value": f"{size_before_mb:,.2f} MB → {size_after_mb:,.2f} MB ({diff_mb:+,.2f} MB)",
+                "inline": False,
+            },
         ]
-    return send_status_notification(spec, lines)
+    return send_status_fields(spec, fields)
 
 
 def send_backup_completion(
@@ -1032,20 +1035,20 @@ def send_backup_completion(
     """
     if error:
         spec = DB_BACKUP_ERROR
-        lines = [
-            f"時刻: {format_jst(fmt=DISCORD_DATETIME_FORMAT)}",
-            f"エラー: {error}",
+        fields: list[dict] = [
+            {"name": "🕐 時刻", "value": format_jst(fmt=DISCORD_DATETIME_FORMAT), "inline": True},
+            {"name": "❌ エラー", "value": error, "inline": False},
         ]
     else:
         spec = DB_BACKUP_COMPLETION
-        lines = [
-            f"時刻: {format_jst(fmt=DISCORD_DATETIME_FORMAT)}",
-            f"処理時間: {elapsed_seconds:.1f} 秒",
-            f"サイズ: {size_mb:.2f} MB",
-            f"保存先: {backup_path}",
-            f"削除世代: {pruned_count} 件",
+        fields = [
+            {"name": "🕐 時刻", "value": format_jst(fmt=DISCORD_DATETIME_FORMAT), "inline": True},
+            {"name": "⏱ 処理時間", "value": f"{elapsed_seconds:.1f} 秒", "inline": True},
+            {"name": "💾 サイズ", "value": f"{size_mb:,.2f} MB", "inline": True},
+            {"name": "🗑 削除世代", "value": f"{pruned_count:,} 件", "inline": True},
+            {"name": "📁 保存先", "value": backup_path, "inline": False},
         ]
-    return send_status_notification(spec, lines)
+    return send_status_fields(spec, fields)
 
 
 def send_monthly_report_notification(
@@ -1082,19 +1085,23 @@ def send_monthly_report_notification(
             return f"{val * 100:.{decimals}f}%"
         return f"{val:.{decimals}f}"
 
-    lines = [
-        f"対象月: {target_month}",
-        f"時刻: {format_jst(fmt=DISCORD_DATETIME_FORMAT)}",
-        f"Net Return: {_fmt(net_return, pct=True)}",
-        f"Max Drawdown: {_fmt(max_drawdown, pct=True)}",
-        f"Sharpe Ratio: {_fmt(sharpe_ratio)}",
-        f"Hit Rate: {_fmt(hit_rate, pct=True)}",
-        f"Avg Slippage: {_fmt(avg_slippage, pct=True)}",
-        f"集計銘柄数: {symbol_count if symbol_count is not None else 'N/A'}",
+    fields: list[dict] = [
+        {"name": "📅 対象月", "value": target_month, "inline": True},
+        {"name": "🕐 時刻", "value": format_jst(fmt=DISCORD_DATETIME_FORMAT), "inline": True},
+        {"name": "💹 Net Return", "value": _fmt(net_return, pct=True), "inline": True},
+        {"name": "📉 Max Drawdown", "value": _fmt(max_drawdown, pct=True), "inline": True},
+        {"name": "📈 Sharpe Ratio", "value": _fmt(sharpe_ratio), "inline": True},
+        {"name": "🎯 Hit Rate", "value": _fmt(hit_rate, pct=True), "inline": True},
+        {"name": "💧 Avg Slippage", "value": _fmt(avg_slippage, pct=True), "inline": True},
+        {
+            "name": "🏷 集計銘柄数",
+            "value": f"{symbol_count:,}" if symbol_count is not None else "N/A",
+            "inline": True,
+        },
     ]
     if report_path:
-        lines.append(f"保存先: {report_path}")
-    return send_status_notification(MONTHLY_REPORT_COMPLETION, lines)
+        fields.append({"name": "📁 保存先", "value": report_path, "inline": False})
+    return send_status_fields(MONTHLY_REPORT_COMPLETION, fields)
 
 
 def send_drift_retrain_notification(
@@ -1218,14 +1225,22 @@ def send_hit_rate_drift_alert(result) -> bool:
     def _pct(val) -> str:
         return f"{val * 100:.1f}%" if val is not None else "N/A"
 
-    lines = [
-        f"週: {result.current_week or 'N/A'}",
-        f"当週 Hit Rate: {_pct(result.current_hit_rate)}",
-        f"過去 {result.alert_weeks} 週平均: {_pct(result.avg_hit_rate)}",
-        f"低下率: {_pct(result.drop_ratio)} (閾値: {_pct(result.alert_threshold)})",
-        "再学習・モデル切り替えをご検討ください。",
+    fields: list[dict] = [
+        {"name": "📅 週", "value": result.current_week or "N/A", "inline": True},
+        {"name": "🎯 当週 Hit Rate", "value": _pct(result.current_hit_rate), "inline": True},
+        {
+            "name": f"📊 過去 {result.alert_weeks} 週平均",
+            "value": _pct(result.avg_hit_rate),
+            "inline": True,
+        },
+        {"name": "📉 低下率", "value": _pct(result.drop_ratio), "inline": True},
+        {"name": "🚧 閾値", "value": _pct(result.alert_threshold), "inline": True},
     ]
-    return send_status_notification(HIT_RATE_DRIFT_ALERT, lines)
+    return send_status_fields(
+        HIT_RATE_DRIFT_ALERT,
+        fields,
+        description="再学習・モデル切り替えをご検討ください。",
+    )
 
 
 def send_rule_evaluation_completion(
@@ -1342,24 +1357,26 @@ def send_shadow_evaluation_notification(result: dict) -> bool:
     def _fmt(v) -> str:
         return f"{v:.3f}" if v is not None else "N/A"
 
-    prod_line = (
-        f"Production  — Hit Rate: {_fmt(result.get('production_hit_rate'))}"
+    prod_value = (
+        f"Hit Rate: {_fmt(result.get('production_hit_rate'))}"
         f" / Sharpe: {_fmt(result.get('production_sharpe'))}"
-        f" (n={result.get('n_production', 0)})"
+        f" (n={result.get('n_production', 0):,})"
     )
-    chal_line = (
-        f"Challenger  — Hit Rate: {_fmt(result.get('challenger_hit_rate'))}"
+    chal_value = (
+        f"Hit Rate: {_fmt(result.get('challenger_hit_rate'))}"
         f" / Sharpe: {_fmt(result.get('challenger_sharpe'))}"
-        f" (n={result.get('n_challenger', 0)})"
+        f" (n={result.get('n_challenger', 0):,})"
     )
-    lines = [
-        f"時刻: {format_jst(fmt=DISCORD_DATETIME_FORMAT)}",
-        prod_line,
-        chal_line,
+    fields: list[dict] = [
+        {"name": "🕐 時刻", "value": format_jst(fmt=DISCORD_DATETIME_FORMAT), "inline": True},
+        {"name": "🏭 Production", "value": prod_value, "inline": False},
+        {"name": "🧪 Challenger", "value": chal_value, "inline": False},
     ]
+    description = ""
     if challenger_wins:
-        lines.append(
-            "→ Challenger が上回りました。手動承認後に promote_challenger_to_production() を実行してください。"
+        description = (
+            "→ Challenger が上回りました。"
+            "手動承認後に promote_challenger_to_production() を実行してください。"
         )
 
-    return send_status_notification(spec, lines)
+    return send_status_fields(spec, fields, description=description)

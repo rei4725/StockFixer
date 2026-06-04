@@ -1,6 +1,7 @@
 """ユニットテスト: discord_utils"""
 
 import unittest
+from types import SimpleNamespace
 from unittest.mock import MagicMock, mock_open, patch
 
 import pandas as pd
@@ -8,10 +9,15 @@ import pytest
 
 from src.reporting.discord.discord_text import split_text_chunks
 from src.reporting.discord.discord_utils import (
+    send_backup_completion,
     send_daily_order_completion,
     send_daily_pipeline_error,
     send_daily_settle_completion,
+    send_db_maintenance_completion,
+    send_hit_rate_drift_alert,
+    send_monthly_report_notification,
     send_optimization_completion,
+    send_shadow_evaluation_notification,
     send_shap_notification,
     send_walk_forward_report_completion,
     send_webhook_notification,
@@ -200,6 +206,240 @@ class TestSendWalkForwardReportCompletion(unittest.TestCase):
         self.assertEqual(fields["❌ 失敗"], "1 銘柄")
         self.assertEqual(fields["📊 合計"], "6 銘柄")
         self.assertEqual(fields["📄 前回比較"], "なし（初回実行）")
+
+
+class TestSendDbMaintenanceCompletion(unittest.TestCase):
+    @patch(
+        "src.reporting.discord.discord_utils._rate_limiter.check_and_record",
+        return_value=(True, None),
+    )
+    @patch("src.reporting.discord.discord_utils._post_webhook")
+    def test_success_sends_sizes_as_fields(self, mock_post, _mock_rl):
+        mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
+
+        result = send_db_maintenance_completion(
+            elapsed_seconds=12.3, size_before_mb=120.5, size_after_mb=100.25
+        )
+
+        self.assertTrue(result)
+        embed = _embed_from_post(mock_post)
+        self.assertEqual(embed["title"], "✅ DB メンテナンス完了")
+        fields = _fields_map(embed)
+        self.assertIn("JST", fields["🕐 時刻"])
+        self.assertEqual(fields["⏱ 処理時間"], "12.3 秒")
+        self.assertEqual(fields["💾 DBサイズ"], "120.50 MB → 100.25 MB (-20.25 MB)")
+
+    @patch(
+        "src.reporting.discord.discord_utils._rate_limiter.check_and_record",
+        return_value=(True, None),
+    )
+    @patch("src.reporting.discord.discord_utils._post_webhook")
+    def test_error_sends_error_field(self, mock_post, _mock_rl):
+        mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
+
+        result = send_db_maintenance_completion(
+            elapsed_seconds=0.0, size_before_mb=0.0, size_after_mb=0.0, error="VACUUM 失敗"
+        )
+
+        self.assertTrue(result)
+        embed = _embed_from_post(mock_post)
+        self.assertEqual(embed["title"], "❌ DB メンテナンス失敗")
+        self.assertEqual(_fields_map(embed)["❌ エラー"], "VACUUM 失敗")
+
+
+class TestSendBackupCompletion(unittest.TestCase):
+    @patch(
+        "src.reporting.discord.discord_utils._rate_limiter.check_and_record",
+        return_value=(True, None),
+    )
+    @patch("src.reporting.discord.discord_utils._post_webhook")
+    def test_success_sends_fields(self, mock_post, _mock_rl):
+        mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
+
+        result = send_backup_completion(
+            backup_path="/backups/db_2026.duckdb",
+            size_mb=1234.5,
+            elapsed_seconds=5.0,
+            pruned_count=3,
+        )
+
+        self.assertTrue(result)
+        embed = _embed_from_post(mock_post)
+        self.assertEqual(embed["title"], "✅ DB バックアップ完了")
+        fields = _fields_map(embed)
+        self.assertEqual(fields["⏱ 処理時間"], "5.0 秒")
+        self.assertEqual(fields["💾 サイズ"], "1,234.50 MB")
+        self.assertEqual(fields["🗑 削除世代"], "3 件")
+        self.assertEqual(fields["📁 保存先"], "/backups/db_2026.duckdb")
+
+    @patch(
+        "src.reporting.discord.discord_utils._rate_limiter.check_and_record",
+        return_value=(True, None),
+    )
+    @patch("src.reporting.discord.discord_utils._post_webhook")
+    def test_error_sends_error_field(self, mock_post, _mock_rl):
+        mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
+
+        result = send_backup_completion(
+            backup_path="", size_mb=0.0, elapsed_seconds=0.0, pruned_count=0, error="ディスク不足"
+        )
+
+        self.assertTrue(result)
+        embed = _embed_from_post(mock_post)
+        self.assertEqual(embed["title"], "❌ DB バックアップ失敗")
+        self.assertEqual(_fields_map(embed)["❌ エラー"], "ディスク不足")
+
+
+class TestSendMonthlyReportNotification(unittest.TestCase):
+    @patch(
+        "src.reporting.discord.discord_utils._rate_limiter.check_and_record",
+        return_value=(True, None),
+    )
+    @patch("src.reporting.discord.discord_utils._post_webhook")
+    def test_sends_metrics_as_fields(self, mock_post, _mock_rl):
+        mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
+
+        result = send_monthly_report_notification(
+            target_month="2026-05",
+            net_return=0.1234,
+            max_drawdown=-0.05,
+            sharpe_ratio=1.5,
+            hit_rate=0.55,
+            avg_slippage=0.001,
+            symbol_count=1234,
+            report_path="/reports/2026-05.md",
+        )
+
+        self.assertTrue(result)
+        embed = _embed_from_post(mock_post)
+        self.assertEqual(embed["title"], "📊 月次レポート生成完了")
+        fields = _fields_map(embed)
+        self.assertEqual(fields["📅 対象月"], "2026-05")
+        self.assertEqual(fields["💹 Net Return"], "12.34%")
+        self.assertEqual(fields["📈 Sharpe Ratio"], "1.50")
+        self.assertEqual(fields["🏷 集計銘柄数"], "1,234")
+        self.assertEqual(fields["📁 保存先"], "/reports/2026-05.md")
+
+    @patch(
+        "src.reporting.discord.discord_utils._rate_limiter.check_and_record",
+        return_value=(True, None),
+    )
+    @patch("src.reporting.discord.discord_utils._post_webhook")
+    def test_none_metrics_render_na(self, mock_post, _mock_rl):
+        mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
+
+        result = send_monthly_report_notification(
+            target_month="2026-05",
+            net_return=None,
+            max_drawdown=None,
+            sharpe_ratio=None,
+            hit_rate=None,
+            avg_slippage=None,
+            symbol_count=None,
+        )
+
+        self.assertTrue(result)
+        fields = _fields_map(_embed_from_post(mock_post))
+        self.assertEqual(fields["💹 Net Return"], "N/A")
+        self.assertEqual(fields["🏷 集計銘柄数"], "N/A")
+        self.assertNotIn("📁 保存先", fields)
+
+
+class TestSendHitRateDriftAlert(unittest.TestCase):
+    @patch(
+        "src.reporting.discord.discord_utils._rate_limiter.check_and_record",
+        return_value=(True, None),
+    )
+    @patch("src.reporting.discord.discord_utils._post_webhook")
+    def test_drifted_sends_fields(self, mock_post, _mock_rl):
+        mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
+        result_obj = SimpleNamespace(
+            is_drifted=True,
+            current_week="2026-W22",
+            current_hit_rate=0.40,
+            avg_hit_rate=0.52,
+            drop_ratio=0.12,
+            alert_threshold=0.10,
+            alert_weeks=4,
+        )
+
+        result = send_hit_rate_drift_alert(result_obj)
+
+        self.assertTrue(result)
+        embed = _embed_from_post(mock_post)
+        self.assertEqual(embed["title"], "⚠️ モデルドリフト検知: Hit Rate 低下")
+        fields = _fields_map(embed)
+        self.assertEqual(fields["📅 週"], "2026-W22")
+        self.assertEqual(fields["🎯 当週 Hit Rate"], "40.0%")
+        self.assertEqual(fields["📊 過去 4 週平均"], "52.0%")
+        self.assertEqual(fields["📉 低下率"], "12.0%")
+        self.assertEqual(fields["🚧 閾値"], "10.0%")
+
+    @patch("src.reporting.discord.discord_utils._post_webhook")
+    def test_not_drifted_does_not_send(self, mock_post):
+        result_obj = SimpleNamespace(
+            is_drifted=False,
+            current_week="2026-W22",
+            current_hit_rate=0.55,
+            avg_hit_rate=0.55,
+            drop_ratio=0.0,
+            alert_threshold=0.10,
+            alert_weeks=4,
+        )
+
+        result = send_hit_rate_drift_alert(result_obj)
+
+        self.assertFalse(result)
+        mock_post.assert_not_called()
+
+
+class TestSendShadowEvaluationNotification(unittest.TestCase):
+    @patch(
+        "src.reporting.discord.discord_utils._rate_limiter.check_and_record",
+        return_value=(True, None),
+    )
+    @patch("src.reporting.discord.discord_utils._post_webhook")
+    def test_challenger_wins_sends_fields(self, mock_post, _mock_rl):
+        mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
+
+        result = send_shadow_evaluation_notification(
+            {
+                "challenger_wins": True,
+                "production_hit_rate": 0.50,
+                "production_sharpe": 1.0,
+                "n_production": 1000,
+                "challenger_hit_rate": 0.55,
+                "challenger_sharpe": 1.2,
+                "n_challenger": 1500,
+            }
+        )
+
+        self.assertTrue(result)
+        embed = _embed_from_post(mock_post)
+        self.assertEqual(embed["title"], "🏆 A/Bテスト: Challenger 昇格候補")
+        self.assertIn("promote_challenger_to_production", embed["description"])
+        fields = _fields_map(embed)
+        self.assertIn("Hit Rate: 0.500", fields["🏭 Production"])
+        self.assertIn("n=1,000", fields["🏭 Production"])
+        self.assertIn("Hit Rate: 0.550", fields["🧪 Challenger"])
+        self.assertIn("n=1,500", fields["🧪 Challenger"])
+
+    @patch(
+        "src.reporting.discord.discord_utils._rate_limiter.check_and_record",
+        return_value=(True, None),
+    )
+    @patch("src.reporting.discord.discord_utils._post_webhook")
+    def test_no_winner_has_no_description(self, mock_post, _mock_rl):
+        mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
+
+        result = send_shadow_evaluation_notification({"challenger_wins": False})
+
+        self.assertTrue(result)
+        embed = _embed_from_post(mock_post)
+        self.assertEqual(embed["title"], "ℹ️ A/Bテスト: 評価完了")
+        self.assertEqual(embed["description"], "")
+        fields = _fields_map(embed)
+        self.assertIn("n=0", fields["🏭 Production"])
 
 
 class TestSendWebhookNotification(unittest.TestCase):
