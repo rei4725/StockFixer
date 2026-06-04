@@ -9,33 +9,58 @@ import pytest
 from src.reporting.discord.discord_text import split_text_chunks
 from src.reporting.discord.discord_utils import (
     send_daily_order_completion,
+    send_daily_pipeline_error,
+    send_daily_settle_completion,
+    send_optimization_completion,
     send_shap_notification,
+    send_walk_forward_report_completion,
     send_webhook_notification,
     send_webhook_text_chunked,
     send_weekly_report,
+    send_weekly_training_completion,
 )
 
 
+def _embed_from_post(mock_post) -> dict:
+    """_post_webhook モックから最初の embed を取り出す。"""
+    payload = mock_post.call_args.kwargs["json_payload"]
+    return payload["embeds"][0]
+
+
+def _fields_map(embed: dict) -> dict:
+    return {f["name"]: f["value"] for f in embed["fields"]}
+
+
 class TestSendDailyOrderCompletion(unittest.TestCase):
-    @patch("src.reporting.discord.discord_utils.send_webhook_notification", return_value=True)
-    def test_normal_completion_notification(self, mock_send):
+    @patch(
+        "src.reporting.discord.discord_utils._rate_limiter.check_and_record",
+        return_value=(True, None),
+    )
+    @patch("src.reporting.discord.discord_utils._post_webhook")
+    def test_normal_completion_notification(self, mock_post, _mock_rl):
+        mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
+
         result = send_daily_order_completion(buy_orders=2, sell_orders=1, mode="paper")
 
         self.assertTrue(result)
-        mock_send.assert_called_once()
-        title, message = mock_send.call_args.args[:2]
-        color = mock_send.call_args.kwargs["color"]
+        embed = _embed_from_post(mock_post)
+        self.assertEqual(embed["title"], "✅ 自動発注完了")
+        self.assertEqual(embed["color"], 0x00BFFF)
+        fields = _fields_map(embed)
+        self.assertIn("JST", fields["🕐 時刻"])
+        self.assertEqual(fields["⚙️ モード"], "paper")
+        self.assertEqual(fields["🟢 買い注文"], "2 件")
+        self.assertEqual(fields["🔴 売り注文"], "1 件")
+        self.assertNotIn("⛔ 停止理由", fields)
 
-        self.assertEqual(title, "✅ 自動発注完了")
-        self.assertIn("モード: paper", message)
-        self.assertIn("買い注文: 2 件", message)
-        self.assertIn("売り注文: 1 件", message)
-        self.assertIn("JST", message)
-        self.assertNotIn("停止理由:", message)
-        self.assertEqual(color, 0x00BFFF)
+    @patch(
+        "src.reporting.discord.discord_utils._rate_limiter.check_and_record",
+        return_value=(True, None),
+    )
+    @patch("src.reporting.discord.discord_utils._post_webhook")
+    def test_stopped_completion_notification_contains_stop_details(self, mock_post, _mock_rl):
+        mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
 
-    @patch("src.reporting.discord.discord_utils.send_webhook_notification", return_value=True)
-    def test_stopped_completion_notification_contains_stop_details(self, mock_send):
         result = send_daily_order_completion(
             buy_orders=0,
             sell_orders=0,
@@ -47,15 +72,134 @@ class TestSendDailyOrderCompletion(unittest.TestCase):
         )
 
         self.assertTrue(result)
-        mock_send.assert_called_once()
-        title, message = mock_send.call_args.args[:2]
-        color = mock_send.call_args.kwargs["color"]
+        embed = _embed_from_post(mock_post)
+        self.assertEqual(embed["title"], "⚠️ 自動発注停止")
+        self.assertEqual(embed["color"], 0xFF9900)
+        fields = _fields_map(embed)
+        self.assertEqual(fields["⛔ 停止理由"], "日次損失上限に到達")
+        self.assertEqual(fields["💰 当日損失"], "25,000 円 / 上限: 20,000 円")
 
-        self.assertEqual(title, "⚠️ 自動発注停止")
-        self.assertIn("停止理由: 日次損失上限に到達", message)
-        self.assertIn("当日損失: 25000 円 / 上限: 20000 円", message)
-        self.assertIn("JST", message)
-        self.assertEqual(color, 0xFF9900)
+
+class TestSendDailyPipelineError(unittest.TestCase):
+    @patch(
+        "src.reporting.discord.discord_utils._rate_limiter.check_and_record",
+        return_value=(True, None),
+    )
+    @patch("src.reporting.discord.discord_utils._post_webhook")
+    def test_sends_error_as_fields(self, mock_post, _mock_rl):
+        mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
+
+        result = send_daily_pipeline_error("データ取得に失敗")
+
+        self.assertTrue(result)
+        fields = _fields_map(_embed_from_post(mock_post))
+        self.assertIn("JST", fields["🕐 時刻"])
+        self.assertEqual(fields["❌ エラー"], "データ取得に失敗")
+
+
+class TestSendDailySettleCompletion(unittest.TestCase):
+    @patch(
+        "src.reporting.discord.discord_utils._rate_limiter.check_and_record",
+        return_value=(True, None),
+    )
+    @patch("src.reporting.discord.discord_utils._post_webhook")
+    def test_sends_settled_count_as_fields(self, mock_post, _mock_rl):
+        mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
+
+        result = send_daily_settle_completion(settled_count=1234)
+
+        self.assertTrue(result)
+        fields = _fields_map(_embed_from_post(mock_post))
+        self.assertIn("JST", fields["🕐 時刻"])
+        self.assertEqual(fields["📊 約定件数"], "1,234 件")
+
+
+class TestSendWeeklyTrainingCompletion(unittest.TestCase):
+    @patch(
+        "src.reporting.discord.discord_utils._rate_limiter.check_and_record",
+        return_value=(True, None),
+    )
+    @patch("src.reporting.discord.discord_utils._post_webhook")
+    def test_sends_models_as_fields(self, mock_post, _mock_rl):
+        mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
+
+        result = send_weekly_training_completion(["model_a", "model_b"])
+
+        self.assertTrue(result)
+        fields = _fields_map(_embed_from_post(mock_post))
+        self.assertIn("JST", fields["🕐 時刻"])
+        self.assertEqual(fields["📦 学習モデル数"], "2 件")
+        self.assertIn("model_a", fields["🏷 学習済みモデル"])
+        self.assertIn("model_b", fields["🏷 学習済みモデル"])
+
+    @patch(
+        "src.reporting.discord.discord_utils._rate_limiter.check_and_record",
+        return_value=(True, None),
+    )
+    @patch("src.reporting.discord.discord_utils._post_webhook")
+    def test_empty_models_uses_placeholder(self, mock_post, _mock_rl):
+        mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
+
+        result = send_weekly_training_completion([])
+
+        self.assertTrue(result)
+        fields = _fields_map(_embed_from_post(mock_post))
+        self.assertEqual(fields["📦 学習モデル数"], "0 件")
+        self.assertEqual(fields["🏷 学習済みモデル"], "なし")
+
+
+class TestSendOptimizationCompletion(unittest.TestCase):
+    @patch(
+        "src.reporting.discord.discord_utils._rate_limiter.check_and_record",
+        return_value=(True, None),
+    )
+    @patch("src.reporting.discord.discord_utils._post_webhook")
+    def test_sends_success_failed_as_fields(self, mock_post, _mock_rl):
+        mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
+
+        result = send_optimization_completion(success=8, failed=2)
+
+        self.assertTrue(result)
+        fields = _fields_map(_embed_from_post(mock_post))
+        self.assertIn("JST", fields["🕐 時刻"])
+        self.assertEqual(fields["✅ 成功"], "8 銘柄")
+        self.assertEqual(fields["⚠️ 失敗"], "2 銘柄")
+
+    @patch(
+        "src.reporting.discord.discord_utils._rate_limiter.check_and_record",
+        return_value=(True, None),
+    )
+    @patch("src.reporting.discord.discord_utils._post_webhook")
+    def test_all_success_uses_check_icon(self, mock_post, _mock_rl):
+        mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
+
+        result = send_optimization_completion(success=10, failed=0)
+
+        self.assertTrue(result)
+        fields = _fields_map(_embed_from_post(mock_post))
+        self.assertEqual(fields["✅ 失敗"], "0 銘柄")
+
+
+class TestSendWalkForwardReportCompletion(unittest.TestCase):
+    @patch(
+        "src.reporting.discord.discord_utils._rate_limiter.check_and_record",
+        return_value=(True, None),
+    )
+    @patch("src.reporting.discord.discord_utils._post_webhook")
+    def test_sends_summary_as_fields(self, mock_post, _mock_rl):
+        mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
+
+        result = send_walk_forward_report_completion(
+            {"success": 5, "failed": 1, "total": 6, "markdown_path": None, "previous_path": None}
+        )
+
+        self.assertTrue(result)
+        fields = _fields_map(_embed_from_post(mock_post))
+        self.assertIn("JST", fields["🕐 時刻"])
+        self.assertEqual(fields["✅ 成功"], "5 銘柄")
+        self.assertEqual(fields["❌ 失敗"], "1 銘柄")
+        self.assertEqual(fields["📊 合計"], "6 銘柄")
+        self.assertEqual(fields["📄 前回比較"], "なし（初回実行）")
 
 
 class TestSendWebhookNotification(unittest.TestCase):
