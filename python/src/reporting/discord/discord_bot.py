@@ -6,7 +6,11 @@ from discord.utils import escape_markdown
 from dotenv import load_dotenv
 
 from src.domain.types import PredictionResult
-from src.reporting.discord.discord_formatters import convert_df_for_discord
+from src.reporting.discord.discord_formatters import (
+    build_prediction_list,
+    convert_df_for_discord,
+    get_market_emoji,
+)
 from src.reporting.discord.discord_text import DISCORD_TEXT_LIMIT, split_text_chunks
 from src.reporting.query_service import (
     get_latest_market_prediction_snapshots,
@@ -116,6 +120,19 @@ def build_prediction_table_text(results: list[PredictionResult]) -> str:
     return convert_df_for_discord(PredictionResult.to_dataframe(results)).to_string(index=False)
 
 
+def build_prediction_list_message(market: str, label: str, results: list[PredictionResult]) -> str:
+    """予測結果を「リスト型（絵文字＋1行/銘柄）」のチャンネル投稿向けメッセージに整形する。
+
+    Discord のマークダウン（太字・コード）が描画されるよう、コードブロックでは
+    包まない。スマホでも折り返さず読みやすい。
+    """
+    if not results:
+        return ""
+    emoji = get_market_emoji(market)
+    header = f"{emoji} **{market.upper()} {label}**"
+    return "\n".join([header, *build_prediction_list(results, max_n=10)])
+
+
 def get_top10_diff_stocks_message(market: str, rank_type: str, predicted_at: str = None) -> str:
     """DBから予測結果を取得してDiscord表示用テキストに変換する"""
     return build_prediction_table_text(
@@ -138,22 +155,16 @@ async def handle_forecast_command(message):
         return
 
     for snapshot in snapshots:
-        table_text = build_prediction_table_text(snapshot.top_results)
-        if not table_text:
+        msg = build_prediction_list_message(snapshot.market, TOP10_LABEL, snapshot.top_results)
+        if not msg:
             continue
-        await send_chunked_channel_message(
-            message.channel,
-            build_ranked_stock_message(snapshot.market, TOP10_LABEL, table_text),
-        )
+        await send_chunked_channel_message(message.channel, msg, preserve_lines=True)
 
     for snapshot in snapshots:
-        table_text = build_prediction_table_text(snapshot.worst_results)
-        if not table_text:
+        msg = build_prediction_list_message(snapshot.market, WORST10_LABEL, snapshot.worst_results)
+        if not msg:
             continue
-        await send_chunked_channel_message(
-            message.channel,
-            build_ranked_stock_message(snapshot.market, WORST10_LABEL, table_text),
-        )
+        await send_chunked_channel_message(message.channel, msg, preserve_lines=True)
 
 
 @bot.event

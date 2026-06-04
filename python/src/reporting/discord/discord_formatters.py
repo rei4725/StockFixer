@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, Sequence
+
 import numpy as np
 import pandas as pd
 
@@ -10,6 +12,53 @@ MARKET_EMOJI = {
     "NASDAQ": "🇺🇸",
     "US": "🇺🇸",
 }
+
+# シグナル判定のしきい値（変化率）。determine_signal_label と揃える。
+SIGNAL_BUY_THRESHOLD = 0.005
+SIGNAL_SELL_THRESHOLD = -0.005
+
+
+def signal_emoji(diff_ratio: float | None) -> str:
+    """予想変化率からシグナル絵文字（⬆️ 買い / ⬇️ 売り / ⏺️ 中立）を返す。"""
+    if diff_ratio is None:
+        return "⏺️"
+    if diff_ratio > SIGNAL_BUY_THRESHOLD:
+        return "⬆️"
+    if diff_ratio < SIGNAL_SELL_THRESHOLD:
+        return "⬇️"
+    return "⏺️"
+
+
+def format_price(value: float | None) -> str:
+    """価格を桁区切り付きで、値域に応じた桁数に整形する。"""
+    if value is None or (isinstance(value, float) and value != value):  # None or NaN
+        return "—"
+    v = float(value)
+    if abs(v) >= 100:
+        return f"{v:,.0f}"
+    if abs(v) >= 1:
+        return f"{v:,.2f}"
+    return f"{v:.3f}"
+
+
+def build_prediction_list(results: Sequence[Any], max_n: int = 10) -> list[str]:
+    """予測結果リストを「絵文字＋1行/銘柄」のリスト表示行へ整形する。
+
+    各 result は symbol / current_price / avg_pred_price / diff_ratio 属性を持つ
+    PredictionResult を想定（duck typing）。スマホでの折り返しを避けるため
+    1 銘柄 1 行に収める。
+
+    例: `` 1`` ⬆️ **7203**  2,500 → 2,530  (+1.2%)
+    """
+    lines: list[str] = []
+    for i, r in enumerate(list(results)[:max_n], start=1):
+        ratio = getattr(r, "diff_ratio", None)
+        emoji = signal_emoji(ratio)
+        cur = format_price(getattr(r, "current_price", None))
+        pred = format_price(getattr(r, "avg_pred_price", None))
+        pct = f"{ratio * 100:+.1f}%" if ratio is not None else "—"
+        lines.append(f"`{i:>2}` {emoji} **{getattr(r, 'symbol', '?')}**  {cur} → {pred}  ({pct})")
+    return lines
 
 
 def normalize_market_code(market: str) -> str:
