@@ -14,6 +14,9 @@ logger = get_logger(__name__)
 
 
 def main():
+    from src.orchestration.port_wiring import wire_ports
+
+    wire_ports()
     logger.info("=== 手動バックアップ開始 ===")
     result = run_db_backup()
     if result["error"]:

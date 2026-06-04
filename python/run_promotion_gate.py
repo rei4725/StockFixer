@@ -66,6 +66,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from src.orchestration.port_wiring import wire_ports
+
+    wire_ports()
     args = _parse_args(argv)
 
     result = evaluate_promotion(

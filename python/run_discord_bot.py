@@ -1,9 +1,12 @@
 import sys
 
+from src.orchestration.port_wiring import wire_ports
 from src.reporting.discord.discord_bot import TOKEN, bot
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+wire_ports()
 
 if __name__ == "__main__":
     if not TOKEN:

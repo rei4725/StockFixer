@@ -200,6 +200,9 @@ class CodeReviewRunner:
 
 def main():
     """メインエントリポイント"""
+    from src.orchestration.port_wiring import wire_ports
+
+    wire_ports()
     import argparse
 
     parser = argparse.ArgumentParser(description="StockFixer コードレビュー実行スクリプト")

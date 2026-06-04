@@ -65,6 +65,9 @@ def _print_table(results) -> None:
 
 
 def main() -> None:
+    from src.orchestration.port_wiring import wire_ports
+
+    wire_ports()
     parser = argparse.ArgumentParser(
         description="ポートフォリオ資本配分エンジン (R-301)",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,

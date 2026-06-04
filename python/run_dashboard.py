@@ -40,6 +40,9 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    from src.orchestration.port_wiring import wire_ports
+
+    wire_ports()
     args = parse_args()
     run_dashboard(recent_days=args.days, drift_n=args.drift_n)
 

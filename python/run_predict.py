@@ -47,6 +47,9 @@ def run_check_accuracy(horizon: int = 1):
 
 
 def main():
+    from src.orchestration.port_wiring import wire_ports
+
+    wire_ports()
     parser = argparse.ArgumentParser(description="株価予測スクリプト")
     parser.add_argument(
         "--mode",

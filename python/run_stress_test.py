@@ -28,9 +28,12 @@ from src.backtest.stress_test import (
     save_stress_test_results,
 )
 from src.domain.types import SymbolTask
+from src.orchestration.port_wiring import wire_ports
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+wire_ports()
 
 
 def parse_args():

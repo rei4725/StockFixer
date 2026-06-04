@@ -18,6 +18,9 @@ from src.market_data.adapters.llm_sentiment import OllamaClient  # noqa: E402
 
 
 def main() -> None:
+    from src.orchestration.port_wiring import wire_ports
+
+    wire_ports()
     client = OllamaClient()
 
     print(f"Ollama URL : {client._base_url or '(未設定)'}")

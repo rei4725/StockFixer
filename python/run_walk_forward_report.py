@@ -37,6 +37,9 @@ def parse_args():
 
 
 def main():
+    from src.orchestration.port_wiring import wire_ports
+
+    wire_ports()
     args = parse_args()
     result = run_walk_forward_comparison_report(
         model_type=args.model_type,

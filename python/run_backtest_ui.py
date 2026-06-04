@@ -14,9 +14,12 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from src.orchestration.port_wiring import wire_ports
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+wire_ports()
 
 # ──────────────────────────────────────────────
 # ページ設定

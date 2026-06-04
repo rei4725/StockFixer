@@ -49,10 +49,16 @@ def set_market_data_port(port: MarketDataPort) -> None:
 
 
 def get_market_data_port() -> MarketDataPort:
-    """デフォルト実装（PredictionMarketDataAdapter）を遅延初期化して返す。"""
-    global _port
-    if _port is None:
-        from src.market_data.prediction_adapter import PredictionMarketDataAdapter
+    """注入済みの MarketDataPort を返す。未注入なら RuntimeError。
 
-        _port = PredictionMarketDataAdapter()
+    注入は orchestration の合成ルートで行う:
+    `src.orchestration.port_wiring.wire_ports()`（エントリポイント起動時に呼ぶ）。
+    テストや個別注入は `set_market_data_port()` を使う。
+    """
+    if _port is None:
+        raise RuntimeError(
+            "MarketDataPort が未注入です。エントリポイントで "
+            "src.orchestration.port_wiring.wire_ports() を呼ぶか、"
+            "set_market_data_port() で実装を注入してください。"
+        )
     return _port

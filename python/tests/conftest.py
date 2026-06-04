@@ -8,6 +8,28 @@ import pandas as pd
 import pytest
 
 # ============================================
+# ポート注入（合成ルート相当）
+# ============================================
+
+
+@pytest.fixture(autouse=True)
+def _wire_default_ports():
+    """各テストの前に BC ポートへデフォルトの market_data アダプタを注入する。
+
+    本番では orchestration の wire_ports() が担う注入を、テストでは autouse で
+    肩代わりする。getter を個別に patch / set_*_port するテストはそのまま上書きできる。
+    """
+    from src.backtest.data_port import set_backtest_data_port
+    from src.market_data.backtest_adapter import BacktestMarketDataAdapter
+    from src.market_data.prediction_adapter import PredictionMarketDataAdapter
+    from src.prediction.ports import set_market_data_port
+
+    set_backtest_data_port(BacktestMarketDataAdapter())
+    set_market_data_port(PredictionMarketDataAdapter())
+    yield
+
+
+# ============================================
 # データ生成 Helper
 # ============================================
 
