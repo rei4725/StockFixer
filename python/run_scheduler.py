@@ -13,6 +13,7 @@ Discord Botと同時に起動し、1プロセスで全ジョブを管理する�
   py run_scheduler.py --run-now optimization # 全銘柄バックテスト最適化を即時実行して終了
   py run_scheduler.py --run-now wf_report    # Walk-Forward比較レポートを即時実行して終了
     py run_scheduler.py --run-now drift        # ドリフト監視と自動再学習を即時実行して終了
+  py run_scheduler.py --run-now multibagger  # 月次 multibagger スクリーン + 保有/撤退アラートを即時実行して終了
 """
 
 import argparse
@@ -142,6 +143,13 @@ def job_monthly_report():
     from src.orchestration.scheduler import run_monthly_report_job
 
     run_monthly_report_job()
+
+
+def job_monthly_multibagger():
+    """毎月1日 04:00 - multibagger 月次スクリーン + 保有/撤退アラート"""
+    from src.orchestration.multibagger_job import run_monthly_multibagger_screen
+
+    run_monthly_multibagger_screen()
 
 
 # ── イベントリスナー ──────────────────────────────────
@@ -322,6 +330,18 @@ SCHEDULE_CONFIG = {
         "max_executions_per_period": 1,
         "description": "毎月1日 03:00 - 月次KPIレポート生成・保存・Discord通知",
     },
+    "monthly_multibagger": {
+        "func": job_monthly_multibagger,
+        "trigger": "cron",
+        "period": "monthly",
+        "day_of_week": "mon-sun",
+        "day": 1,
+        "hour": 4,
+        "minute": 0,
+        "recovery_delay_minutes": 60,
+        "max_executions_per_period": 1,
+        "description": "毎月1日 04:00 - multibagger 月次スクリーン + 保有/撤退アラート",
+    },
 }
 
 
@@ -481,6 +501,8 @@ def run_now(pipeline: str):
         queue_manager.run_job("daily_backup", reason="manual", force=True)
     elif pipeline == "monthly_report":
         queue_manager.run_job("monthly_report", reason="manual", force=True)
+    elif pipeline == "multibagger":
+        queue_manager.run_job("monthly_multibagger", reason="manual", force=True)
     else:
         print(f"不明なパイプライン: {pipeline}")
         print(
@@ -519,6 +541,7 @@ def main():
             "pre_close_alert",
             "backup",
             "monthly_report",
+            "multibagger",
         ],
         help=(
             "指定パイプラインを即時実行して終了する（テスト用）。"
