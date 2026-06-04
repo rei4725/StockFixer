@@ -437,6 +437,30 @@ def _init_tables(con: duckdb.DuckDBPyConnection) -> None:
         )
     """)
 
+    # #432: 財務スナップショット（yfinance fundamentals）
+    # 最新スナップショットのみ・ポイントインタイム非対応。ライブスクリーン専用。
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS stock_fundamentals (
+            market              VARCHAR   NOT NULL,
+            symbol              VARCHAR   NOT NULL,
+            as_of               TIMESTAMP NOT NULL,
+            revenue             DOUBLE,
+            operating_income    DOUBLE,
+            net_income          DOUBLE,
+            eps                 DOUBLE,
+            roe                 DOUBLE,
+            op_margin           DOUBLE,
+            net_margin          DOUBLE,
+            debt_to_equity      DOUBLE,
+            cash                DOUBLE,
+            market_cap          DOUBLE,
+            shares_outstanding  DOUBLE,
+            revenue_cagr_3y     DOUBLE,
+            fetched_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (market, symbol)
+        )
+    """)
+
 
 def init_tables() -> None:
     """外部から明示的にテーブル初期化する場合に使用"""
