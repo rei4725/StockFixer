@@ -74,6 +74,18 @@ def _compute_metrics(df: pd.DataFrame) -> Optional[dict]:
     }
 
 
+def _truncate_as_of(df: pd.DataFrame, as_of: Optional[str]) -> pd.DataFrame:
+    """評価基準日 as_of 以前の行のみに切り詰める（ルックアヘッド防止）。
+
+    date 列が文字列でも datetime でも扱えるよう pandas で正規化して比較する。
+    as_of が None、または date 列がない場合は df をそのまま返す。
+    """
+    if as_of is None or df is None or df.empty or "date" not in df.columns:
+        return df
+    mask = pd.to_datetime(df["date"]) <= pd.Timestamp(as_of)
+    return df[mask]
+
+
 def screen_trend_candidates(
     market: str = "us",
     top_n: int = 30,
@@ -82,8 +94,13 @@ def screen_trend_candidates(
     min_avg_volume: float = 100_000,  # 最低平均出来高
     min_price: float = 5.0,  # 最低株価
     min_data_days: int = 252,  # 最低データ日数
+    as_of: Optional[str] = None,  # 評価基準日（YYYY-MM-DD）。指定時はこの日以前のみ使用
 ) -> list[TrendCandidate]:
     """長期上昇トレンドにある multibagger 候補を抽出・ランキングする。
+
+    Args:
+        as_of: 評価基準日。指定するとこの日（含む）までの終値のみで判定する。
+            長期バックテスト(#431)が過去時点のスクリーンを再現するために使う。
 
     Returns:
         スコア降順の TrendCandidate リスト（最大 top_n 件）。該当なしなら空リスト。
@@ -94,6 +111,7 @@ def screen_trend_candidates(
     rows: list[dict] = []
     for m, symbol in symbols:
         df = load_stock_features(m, symbol)
+        df = _truncate_as_of(df, as_of)
         if df is None or len(df) < min_data_days:
             continue
 

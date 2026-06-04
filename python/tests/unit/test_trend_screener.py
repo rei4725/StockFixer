@@ -139,6 +139,26 @@ class TestScreenTrendCandidates(unittest.TestCase):
         result = self._run(symbols, df_map, rel_strength_pct=0.0)
         self.assertEqual(result, [])
 
+    def test_as_of_truncates_future_data(self):
+        """as_of 指定時はその日以前のみで判定する（ルックアヘッド防止）。
+
+        前半上昇・後半崩落の銘柄を、ピーク時点の as_of で評価すると上昇トレンドと
+        して選ばれるが、崩落後の全データで評価すると除外される。
+        """
+        up = np.linspace(10.0, 100.0, 300)
+        down = np.linspace(100.0, 30.0, 100)
+        df = _make_df(np.concatenate([up, down]))
+        symbols = [("us", "PEAKED")]
+        df_map = {("us", "PEAKED"): df}
+
+        peak_date = df["date"].iloc[299]
+        result_as_of = self._run(symbols, df_map, rel_strength_pct=0.0, as_of=peak_date)
+        self.assertIn("PEAKED", [c.symbol for c in result_as_of])
+
+        # as_of なし（崩落後の全データ）では高値から大きく下落し除外される
+        result_full = self._run(symbols, df_map, rel_strength_pct=0.0)
+        self.assertNotIn("PEAKED", [c.symbol for c in result_full])
+
 
 if __name__ == "__main__":
     unittest.main()
