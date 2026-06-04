@@ -1,6 +1,29 @@
 """screening BC の型定義"""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+
+@dataclass
+class HoldRules:
+    """保有/撤退エンジンのルール（差し替え可能なパラメータ）。"""
+
+    trail_ma_weeks: int = 40  # 40週(=200日)線割れで撤退
+    trail_stop_pct: float = 0.35  # 高値から -35% で撤退（MA割れと OR）
+    # 2倍/5倍で部分利確
+    scale_out_multiples: list[float] = field(default_factory=lambda: [2.0, 5.0])
+    scale_out_fraction: float = 0.20  # 各利確で保有の20%を売却（[] や 0 で「放置」=利確しない）
+
+
+@dataclass
+class PositionEvent:
+    """保有シミュレーション中に発生した約定イベント。"""
+
+    date: str  # YYYY-MM-DD
+    action: str  # "entry" | "hold" | "scale_out" | "exit"
+    price: float
+    held_fraction: float  # 約定後の保有比率（1.0=フル, 0.0=撤退完了）
+    reason: str  # "entry" | "ma_break" | "trail_stop" | "scale_2x" | "scale_5x" | "thesis_break"
+    multiple: float  # エントリー価格に対する現在倍率（price / entry_price）
 
 
 @dataclass
