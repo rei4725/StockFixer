@@ -76,6 +76,34 @@ class TestSendWebhookNotification(unittest.TestCase):
         payload = mock_post.call_args.kwargs["json_payload"]
         self.assertEqual(payload["embeds"][0]["timestamp"], "2026-04-06T09:30:45+09:00")
 
+    @patch(
+        "src.reporting.discord.discord_utils._rate_limiter.check_and_record",
+        return_value=(True, None),
+    )
+    @patch("src.reporting.discord.discord_utils._post_webhook")
+    def test_fields_are_attached_to_embed(self, mock_post, _mock_rl):
+        mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
+        fields = [{"name": "🕐 時刻", "value": "09:00", "inline": True}]
+
+        result = send_webhook_notification("fields-title", "", fields=fields)
+
+        self.assertTrue(result)
+        payload = mock_post.call_args.kwargs["json_payload"]
+        self.assertEqual(payload["embeds"][0]["fields"], fields)
+
+    @patch(
+        "src.reporting.discord.discord_utils._rate_limiter.check_and_record",
+        return_value=(True, None),
+    )
+    @patch("src.reporting.discord.discord_utils._post_webhook")
+    def test_no_fields_key_when_not_provided(self, mock_post, _mock_rl):
+        mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
+
+        send_webhook_notification("no-fields-title", "message")
+
+        payload = mock_post.call_args.kwargs["json_payload"]
+        self.assertNotIn("fields", payload["embeds"][0])
+
 
 class TestChunkedTextHelpers(unittest.TestCase):
     def test_split_text_chunks_preserves_lines_when_possible(self):

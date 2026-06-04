@@ -1,8 +1,70 @@
 """discord_formatters モジュールのユニットテスト"""
 
 import unittest
+from dataclasses import dataclass
 
 import pandas as pd
+
+
+@dataclass
+class _PredStub:
+    symbol: str
+    current_price: float
+    avg_pred_price: float
+    diff_ratio: float
+
+
+class TestSignalEmoji(unittest.TestCase):
+    def test_buy_sell_neutral_and_none(self):
+        from src.reporting.discord.discord_formatters import signal_emoji
+
+        assert signal_emoji(0.01) == "⬆️"
+        assert signal_emoji(-0.01) == "⬇️"
+        assert signal_emoji(0.0) == "⏺️"
+        assert signal_emoji(0.004) == "⏺️"  # しきい値内は中立
+        assert signal_emoji(None) == "⏺️"
+
+
+class TestFormatPrice(unittest.TestCase):
+    def test_thousands_separator_and_precision(self):
+        from src.reporting.discord.discord_formatters import format_price
+
+        assert format_price(2500.0) == "2,500"
+        assert format_price(8.456) == "8.46"
+        assert format_price(0.123) == "0.123"
+
+    def test_none_and_nan(self):
+        from src.reporting.discord.discord_formatters import format_price
+
+        assert format_price(None) == "—"
+        assert format_price(float("nan")) == "—"
+
+
+class TestBuildPredictionList(unittest.TestCase):
+    def test_emoji_symbol_and_change(self):
+        from src.reporting.discord.discord_formatters import build_prediction_list
+
+        results = [
+            _PredStub("7203", 2500, 2530, 0.012),
+            _PredStub("9984", 8400, 8420, 0.0024),
+            _PredStub("7974", 7200, 7150, -0.0069),
+        ]
+        lines = build_prediction_list(results)
+        assert len(lines) == 3
+        assert "⬆️" in lines[0] and "**7203**" in lines[0] and "+1.2%" in lines[0]
+        assert "⏺️" in lines[1]  # しきい値内は中立
+        assert "⬇️" in lines[2] and "-0.7%" in lines[2]
+
+    def test_max_n_limits_rows(self):
+        from src.reporting.discord.discord_formatters import build_prediction_list
+
+        results = [_PredStub(str(i), 100, 101, 0.01) for i in range(20)]
+        assert len(build_prediction_list(results, max_n=5)) == 5
+
+    def test_empty(self):
+        from src.reporting.discord.discord_formatters import build_prediction_list
+
+        assert build_prediction_list([]) == []
 
 
 class TestNormalizeMarketCode(unittest.TestCase):

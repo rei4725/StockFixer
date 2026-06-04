@@ -10,10 +10,10 @@ from typing import Optional
 
 import requests
 
-from src.domain.types import PredictionResult
 from src.reporting.discord import rate_limiter as _rate_limiter
-from src.reporting.discord.discord_formatters import convert_df_for_discord, get_market_emoji
+from src.reporting.discord.discord_formatters import build_prediction_list, get_market_emoji
 from src.reporting.discord.discord_notification_specs import (
+    COLOR_INFO,
     DAILY_PIPELINE_COMPLETION,
     DAILY_PIPELINE_ERROR,
     DAILY_SETTLE_COMPLETION,
@@ -31,11 +31,7 @@ from src.reporting.discord.discord_notification_specs import (
     get_optimization_spec,
     get_walk_forward_report_spec,
 )
-from src.reporting.discord.discord_text import (
-    DISCORD_TEXT_LIMIT,
-    DISCORD_WIDE_TEXT_LIMIT,
-    split_text_chunks,
-)
+from src.reporting.discord.discord_text import DISCORD_TEXT_LIMIT, split_text_chunks
 from src.reporting.query_service import get_latest_market_prediction_snapshots
 from src.utils.japan_time import format_jst, format_jst_from_iso, isoformat_jst
 from src.utils.run_context import get_run_id
@@ -110,10 +106,26 @@ def send_status_notification(spec: NotificationSpec, lines: list[str]) -> bool:
     return send_webhook_notification(spec.title, "\n".join(lines), color=spec.color)
 
 
+def send_status_fields(
+    spec: NotificationSpec,
+    fields: list[dict],
+    description: str = "",
+) -> bool:
+    """NotificationSpec と embed fields（名前/値の2カラムグリッド）で通知する。
+
+    Args:
+        spec: タイトルと色
+        fields: [{"name": str, "value": str, "inline": bool}, ...]
+        description: fields の上に表示する補足文（任意）
+    """
+    return send_webhook_notification(spec.title, description, color=spec.color, fields=fields)
+
+
 def send_webhook_notification(
     title: str,
     message: str,
     color: int = 0x00FF00,
+    fields: Optional[list[dict]] = None,
 ) -> bool:
     """
     Discordブhookを使用して通知を送信する
@@ -144,6 +156,8 @@ def send_webhook_notification(
             "color": color,
             "timestamp": isoformat_jst(),
         }
+        if fields:
+            embed["fields"] = fields
         if run_id:
             embed["footer"] = {"text": f"run_id: {run_id}"}
         embed_data = {"embeds": [embed]}
@@ -221,56 +235,51 @@ def send_daily_pipeline_completion(
     Returns:
         成功時True、失敗時False
     """
-    # 1. 完了メッセージを送信
-    message_lines = [
-        f"時刻: {format_jst(fmt=DISCORD_DATETIME_FORMAT)}",
+    # 1. 完了メッセージを embed fields（2カラムグリッド）で送信
+    fields: list[dict] = [
+        {"name": "🕐 時刻", "value": format_jst(fmt=DISCORD_DATETIME_FORMAT), "inline": True},
     ]
-
     if data_count is not None:
-        message_lines.append(f"取得データ: {data_count}件")
-
+        fields.append({"name": "📊 取得データ", "value": f"{data_count:,} 件", "inline": True})
     if prediction_markets:
-        markets_str = "、".join(prediction_markets)
-        message_lines.append(f"予測市場: {markets_str}")
+        markets_str = " ".join(f"{get_market_emoji(m)}{m.upper()}" for m in prediction_markets)
+        fields.append({"name": "🌐 予測市場", "value": markets_str, "inline": True})
 
-    success = send_status_notification(DAILY_PIPELINE_COMPLETION, message_lines)
+    success = send_status_fields(DAILY_PIPELINE_COMPLETION, fields)
 
-    # 2. 予測結果テーブルを送信（マーケット単位でTop→Worst、1メッセージにまとめる）
+    # 2. 予測結果をマーケット単位の「リスト型」embed で送信
     if include_forecast:
         try:
             latest_ts, snapshots = get_latest_market_prediction_snapshots()
             if latest_ts and snapshots:
                 ts_label = latest_ts[:16] if len(latest_ts) >= 16 else latest_ts
-                parts = [f"📊 予測結果 — {ts_label}\n{'━' * 28}"]
-
                 for snapshot in snapshots:
-                    emoji = get_market_emoji(snapshot.market)
-                    parts.append(f"\n{emoji} {snapshot.market}")
-
-                    if snapshot.top_results:
-                        df_top = convert_df_for_discord(
-                            PredictionResult.to_dataframe(snapshot.top_results)
-                        )
-                        parts.append(f"📈 上位10銘柄\n```\n{df_top.to_string(index=False)}\n```")
-                        _append_llm_reasons(parts, snapshot.top_results)
-
-                    if snapshot.worst_results:
-                        df_worst = convert_df_for_discord(
-                            PredictionResult.to_dataframe(snapshot.worst_results)
-                        )
-                        parts.append(f"📉 下位10銘柄\n```\n{df_worst.to_string(index=False)}\n```")
-
-                if len(parts) > 1:
-                    send_webhook_text_chunked(
-                        "\n".join(parts),
-                        limit=DISCORD_WIDE_TEXT_LIMIT,
-                        preserve_lines=False,
-                    )
-
+                    _send_prediction_snapshot(snapshot, ts_label)
         except Exception as e:
-            logger.error("予測結果テーブル送信失敗: %s", e)
+            logger.error("予測結果送信失敗: %s", e, exc_info=True)
 
     return success
+
+
+def _send_prediction_snapshot(snapshot, ts_label: str) -> None:
+    """1マーケット分の予測（上位/下位）をリスト型 embed で送信する。"""
+    parts: list[str] = []
+    if snapshot.top_results:
+        parts.append("📈 **上位（予想上昇）**")
+        parts.extend(build_prediction_list(snapshot.top_results, max_n=10))
+        _append_llm_reasons(parts, snapshot.top_results)
+    if snapshot.worst_results:
+        if parts:
+            parts.append("")
+        parts.append("📉 **下位（予想下落）**")
+        parts.extend(build_prediction_list(snapshot.worst_results, max_n=10))
+
+    if not parts:
+        return
+
+    emoji = get_market_emoji(snapshot.market)
+    title = f"{emoji} {snapshot.market.upper()} 予測 — {ts_label}"
+    send_webhook_notification(title, "\n".join(parts), color=COLOR_INFO)
 
 
 def send_daily_pipeline_error(error_message: str) -> bool:
