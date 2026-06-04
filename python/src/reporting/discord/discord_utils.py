@@ -292,9 +292,12 @@ def send_daily_pipeline_error(error_message: str) -> bool:
     Returns:
         成功時True、失敗時False
     """
-    message = f"エラー: {error_message}\n時刻: {format_jst(fmt=DISCORD_DATETIME_FORMAT)}"
+    fields: list[dict] = [
+        {"name": "🕐 時刻", "value": format_jst(fmt=DISCORD_DATETIME_FORMAT), "inline": True},
+        {"name": "❌ エラー", "value": error_message, "inline": False},
+    ]
 
-    return send_status_notification(DAILY_PIPELINE_ERROR, message.split("\n"))
+    return send_status_fields(DAILY_PIPELINE_ERROR, fields)
 
 
 def send_webhook_file(file_path: str, title: str = "") -> bool:
@@ -599,9 +602,13 @@ def send_weekly_training_completion(models: list) -> bool:
     Returns:
         成功時 True、失敗時 False
     """
-    models_str = "\n".join(f"• {m}" for m in models)
-    message = f"時刻: {format_jst(fmt=DISCORD_DATETIME_FORMAT)}\n" f"学習済みモデル:\n{models_str}"
-    return send_status_notification(WEEKLY_TRAINING_COMPLETION, message.split("\n"))
+    models_str = "\n".join(f"• {m}" for m in models) or "なし"
+    fields: list[dict] = [
+        {"name": "🕐 時刻", "value": format_jst(fmt=DISCORD_DATETIME_FORMAT), "inline": True},
+        {"name": "📦 学習モデル数", "value": f"{len(models):,} 件", "inline": True},
+        {"name": "🏷 学習済みモデル", "value": models_str, "inline": False},
+    ]
+    return send_status_fields(WEEKLY_TRAINING_COMPLETION, fields)
 
 
 def send_promotion_result(promoted: bool, reason: str, criteria: dict) -> bool:
@@ -663,17 +670,29 @@ def send_daily_order_completion(
         成功時 True、失敗時 False
     """
     spec = get_daily_order_spec(trading_stopped=trading_stopped)
-    lines = [
-        f"時刻: {format_jst(fmt=DISCORD_DATETIME_FORMAT)}",
-        f"モード: {mode}",
-        f"買い注文: {buy_orders} 件",
-        f"売り注文: {sell_orders} 件",
+    fields: list[dict] = [
+        {"name": "🕐 時刻", "value": format_jst(fmt=DISCORD_DATETIME_FORMAT), "inline": True},
+        {"name": "⚙️ モード", "value": mode, "inline": True},
+        {"name": "🟢 買い注文", "value": f"{buy_orders:,} 件", "inline": True},
+        {"name": "🔴 売り注文", "value": f"{sell_orders:,} 件", "inline": True},
     ]
     if trading_stopped:
-        lines.append(f"停止理由: {stop_reason or 'リスクガードにより停止'}")
+        fields.append(
+            {
+                "name": "⛔ 停止理由",
+                "value": stop_reason or "リスクガードにより停止",
+                "inline": False,
+            }
+        )
         if daily_loss is not None and daily_loss_limit is not None:
-            lines.append(f"当日損失: {daily_loss:.0f} 円 / 上限: {daily_loss_limit:.0f} 円")
-    return send_status_notification(spec, lines)
+            fields.append(
+                {
+                    "name": "💰 当日損失",
+                    "value": f"{daily_loss:,.0f} 円 / 上限: {daily_loss_limit:,.0f} 円",
+                    "inline": True,
+                }
+            )
+    return send_status_fields(spec, fields)
 
 
 def send_daily_settle_completion(settled_count: int) -> bool:
@@ -686,8 +705,11 @@ def send_daily_settle_completion(settled_count: int) -> bool:
     Returns:
         成功時 True、失敗時 False
     """
-    message = f"時刻: {format_jst(fmt=DISCORD_DATETIME_FORMAT)}\n" f"約定件数: {settled_count} 件"
-    return send_status_notification(DAILY_SETTLE_COMPLETION, message.split("\n"))
+    fields: list[dict] = [
+        {"name": "🕐 時刻", "value": format_jst(fmt=DISCORD_DATETIME_FORMAT), "inline": True},
+        {"name": "📊 約定件数", "value": f"{settled_count:,} 件", "inline": True},
+    ]
+    return send_status_fields(DAILY_SETTLE_COMPLETION, fields)
 
 
 def send_optimization_completion(success: int, failed: int) -> bool:
@@ -703,13 +725,17 @@ def send_optimization_completion(success: int, failed: int) -> bool:
     """
     spec = get_optimization_spec(failed=failed)
     status_icon = "⚠️" if failed > 0 else "✅"
-    message = (
-        f"時刻: {format_jst(fmt=DISCORD_DATETIME_FORMAT)}\n"
-        f"成功: {success} 銘柄\n"
-        f"失敗: {failed} 銘柄 {status_icon if failed > 0 else ''}\n"
-        f"最適パラメータを `config/optimal_params.json` に保存しました"
-    )
-    return send_status_notification(spec, message.split("\n"))
+    fields: list[dict] = [
+        {"name": "🕐 時刻", "value": format_jst(fmt=DISCORD_DATETIME_FORMAT), "inline": True},
+        {"name": "✅ 成功", "value": f"{success:,} 銘柄", "inline": True},
+        {"name": f"{status_icon} 失敗", "value": f"{failed:,} 銘柄", "inline": True},
+        {
+            "name": "💾 保存先",
+            "value": "最適パラメータを `config/optimal_params.json` に保存しました",
+            "inline": False,
+        },
+    ]
+    return send_status_fields(spec, fields)
 
 
 def send_paper_trade_position_report(positions: list[dict], summary: dict) -> bool:
@@ -794,12 +820,18 @@ def send_walk_forward_report_completion(result: dict) -> bool:
     previous_path = result.get("previous_path")
 
     spec = get_walk_forward_report_spec(failed_count=failed_count)
-    message_lines = [
-        f"時刻: {format_jst(fmt=DISCORD_DATETIME_FORMAT)}",
-        f"成功: {success_count} 銘柄 / 失敗: {failed_count} 銘柄 / 合計: {total_count} 銘柄",
-        f"前回比較: {previous_path if previous_path else 'なし（初回実行）'}",
+    fields: list[dict] = [
+        {"name": "🕐 時刻", "value": format_jst(fmt=DISCORD_DATETIME_FORMAT), "inline": True},
+        {"name": "✅ 成功", "value": f"{success_count:,} 銘柄", "inline": True},
+        {"name": "❌ 失敗", "value": f"{failed_count:,} 銘柄", "inline": True},
+        {"name": "📊 合計", "value": f"{total_count:,} 銘柄", "inline": True},
+        {
+            "name": "📄 前回比較",
+            "value": previous_path if previous_path else "なし（初回実行）",
+            "inline": False,
+        },
     ]
-    ok = send_status_notification(spec, message_lines)
+    ok = send_status_fields(spec, fields)
 
     if markdown_path:
         try:
