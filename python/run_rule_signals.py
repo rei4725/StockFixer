@@ -57,6 +57,9 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    from src.orchestration.port_wiring import wire_ports
+
+    wire_ports()
     args = parse_args()
     today = date.today()
 

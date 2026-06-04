@@ -182,6 +182,9 @@ def parse_args():
 
 
 def main():
+    from src.orchestration.port_wiring import wire_ports
+
+    wire_ports()
     args = parse_args()
     model_label = "Ensemble(XGB+LGB)" if args.ensemble else args.model_type
     logger.info(

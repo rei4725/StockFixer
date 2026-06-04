@@ -48,6 +48,9 @@ def run_single(market: str, symbol: str, start_date=None, end_date=None, fetch_o
 
 
 def main():
+    from src.orchestration.port_wiring import wire_ports
+
+    wire_ports()
     parser = argparse.ArgumentParser(description="株価データ取得・特徴量生成・保存スクリプト")
     parser.add_argument("--batch", action="store_true", help="ウォッチリストの全銘柄を並列取得する")
     parser.add_argument("--market", type=str, help="市場名（例: us, jp）")

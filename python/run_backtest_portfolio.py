@@ -177,6 +177,9 @@ def _run_one(args, top_n: int, rebalance_freq: str) -> None:
 
 
 def main():
+    from src.orchestration.port_wiring import wire_ports
+
+    wire_ports()
     args = parse_args()
 
     combos = [(n, f) for n in args.top_n for f in args.rebalance_freq]

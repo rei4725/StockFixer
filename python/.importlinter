@@ -19,10 +19,6 @@ layers =
     src.api | src.orchestration
     src.backtest | src.prediction | src.trading | src.reporting | src.watchlist | src.market_data | src.rule_engine
     src.utils
-ignore_imports =
-    # --- 新規追加違反 (将来的解消対象) ---
-    src.backtest.data_port -> src.market_data.backtest_adapter
-    src.prediction.ports -> src.market_data.prediction_adapter
 
 # ============================================================
 # Contract 2: BC 独立性契約
@@ -57,8 +53,3 @@ modules =
     src.watchlist
     src.market_data
     src.rule_engine
-ignore_imports =
-    # [B] backtest → market_data (ポート経由: data_port が backtest_adapter を遅延ロード)
-    src.backtest.data_port -> src.market_data.backtest_adapter
-    # [B] prediction → market_data (ports が prediction_adapter を遅延ロード)
-    src.prediction.ports -> src.market_data.prediction_adapter

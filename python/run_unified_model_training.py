@@ -15,6 +15,9 @@ logger = get_logger(__name__)
 
 
 def main():
+    from src.orchestration.port_wiring import wire_ports
+
+    wire_ports()
     parser = argparse.ArgumentParser(description="統合モデルを学習する")
     parser.add_argument(
         "--model-type",

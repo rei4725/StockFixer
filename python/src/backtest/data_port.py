@@ -52,10 +52,16 @@ def set_backtest_data_port(port: BacktestDataPort) -> None:
 
 
 def get_backtest_data_port() -> BacktestDataPort:
-    """デフォルト実装（BacktestMarketDataAdapter）を遅延初期化して返す。"""
-    global _port
-    if _port is None:
-        from src.market_data.backtest_adapter import BacktestMarketDataAdapter
+    """注入済みの BacktestDataPort を返す。未注入なら RuntimeError。
 
-        _port = BacktestMarketDataAdapter()
+    注入は orchestration の合成ルートで行う:
+    `src.orchestration.port_wiring.wire_ports()`（エントリポイント起動時に呼ぶ）。
+    テストや個別注入は `set_backtest_data_port()` を使う。
+    """
+    if _port is None:
+        raise RuntimeError(
+            "BacktestDataPort が未注入です。エントリポイントで "
+            "src.orchestration.port_wiring.wire_ports() を呼ぶか、"
+            "set_backtest_data_port() で実装を注入してください。"
+        )
     return _port

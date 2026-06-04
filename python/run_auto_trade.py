@@ -20,9 +20,12 @@ run_auto_trade.py — 自動発注 CLIエントリーポイント
 import argparse
 import sys
 
+from src.orchestration.port_wiring import wire_ports
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+wire_ports()
 
 
 def _build_broker(mode: str):

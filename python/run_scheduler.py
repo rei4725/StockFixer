@@ -492,6 +492,9 @@ def run_now(pipeline: str):
 
 
 def main():
+    from src.orchestration.port_wiring import wire_ports
+
+    wire_ports()
     parser = argparse.ArgumentParser(description="StockFixer 定期実行スケジューラ")
     parser.add_argument(
         "--with-bot",

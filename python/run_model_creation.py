@@ -28,6 +28,9 @@ def run_single(market: str, symbol: str, horizon: int = 1):
 
 
 def main():
+    from src.orchestration.port_wiring import wire_ports
+
+    wire_ports()
     parser = argparse.ArgumentParser(description="銘柄別モデル作成スクリプト")
     parser.add_argument(
         "--batch", action="store_true", help="ウォッチリストの全銘柄を並列で作成する"
