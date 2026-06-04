@@ -1,0 +1,95 @@
+name: Auto-arm next multibagger issue
+
+# 目的:
+#   multibagger ロードマップ（EPIC #428）の依存関係に従い、前提 issue が
+#   完了クローズされたら、次の issue に `auto-ok` ラベルを自動付与して
+#   IssueAgent が順番に自動着手できるようにする。
+#
+# 仕組み:
+#   issue が closed になると発火し、その issue を前提とする後続 issue を探し、
+#   後続の前提がすべて closed なら `auto-ok` を付与する。
+#   ※ issues イベントのワークフローはデフォルトブランチ(develop)版が実行される。
+
+on:
+  issues:
+    types: [closed]
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  arm-next:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            // 依存マップ: 後続 issue -> 直接の前提 issue 群。
+            // 全前提が closed になったら後続に auto-ok を付与する。
+            // ロードマップを増やす際はここを編集するだけでよい。
+            const deps = {
+              430: [429],          // (1-2) 保有/撤退エンジン  <- (1-1)
+              431: [429, 430],     // (1-3) 長期バックテスト    <- (1-1),(1-2)
+              432: [431],          // (2-1) 財務取得層          <- Stage1 完了(=1-3)
+              433: [429, 432],     // (2-2) 質ゲート            <- (1-1),(2-1)
+              434: [430, 433],     // (2-3) 月次ライブ+Discord  <- (1-2),(2-2)
+            };
+            const LABEL = 'auto-ok';
+            const { owner, repo } = context.repo;
+            const closed = context.payload.issue.number;
+
+            // "not planned" 等での close では arm しない（completed のみ）
+            const reason = context.payload.issue.state_reason;
+            if (reason && reason !== 'completed') {
+              core.info(`#${closed} は ${reason} でクローズ。スキップ。`);
+              return;
+            }
+
+            const dependents = Object.keys(deps)
+              .map(Number)
+              .filter((n) => deps[n].includes(closed));
+            if (dependents.length === 0) {
+              core.info(`#${closed} を前提とする後続 issue はありません。`);
+              return;
+            }
+
+            const isClosed = async (num) => {
+              const { data } = await github.rest.issues.get({
+                owner, repo, issue_number: num,
+              });
+              return data;
+            };
+
+            for (const d of dependents) {
+              const issue = await isClosed(d);
+              if (issue.state === 'closed') {
+                core.info(`#${d} は既にクローズ済み。スキップ。`);
+                continue;
+              }
+              const labelNames = (issue.labels || []).map((l) => (typeof l === 'string' ? l : l.name));
+              if (labelNames.includes(LABEL)) {
+                core.info(`#${d} は既に ${LABEL} 付与済み。スキップ。`);
+                continue;
+              }
+              // 後続の全前提が closed か確認
+              let ready = true;
+              for (const pre of deps[d]) {
+                const p = await isClosed(pre);
+                if (p.state !== 'closed') {
+                  ready = false;
+                  core.info(`#${d} は #${pre} 未完了のため待機。`);
+                  break;
+                }
+              }
+              if (!ready) continue;
+
+              await github.rest.issues.addLabels({
+                owner, repo, issue_number: d, labels: [LABEL],
+              });
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: d,
+                body: `前提 issue (#${closed}) が完了したため \`${LABEL}\` を自動付与しました。IssueAgent が次の定期実行で着手します。`,
+              });
+              core.info(`#${d} に ${LABEL} を付与しました。`);
+            }
