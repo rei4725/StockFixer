@@ -10,18 +10,20 @@ _N = 300  # 252日以上のデータを確保
 
 
 def _make_df(closes, volume=1_000_000) -> pd.DataFrame:
-    """Close 系列から stock_features 風 DataFrame を作る。"""
+    """Close 系列から load_raw_ohlcv 風（Date index）DataFrame を作る。"""
     closes = np.asarray(closes, dtype=float)
     n = len(closes)
+    idx = pd.date_range("2024-01-01", periods=n, freq="B")
+    idx.name = "Date"
     return pd.DataFrame(
         {
-            "date": pd.date_range("2024-01-01", periods=n, freq="B").strftime("%Y-%m-%d"),
             "Open": closes,
             "High": closes,
             "Low": closes,
             "Close": closes,
             "Volume": np.full(n, float(volume)),
-        }
+        },
+        index=idx,
     )
 
 
@@ -43,14 +45,14 @@ def _peaked(n=_N) -> pd.DataFrame:
 
 
 def _patch_db(symbols, df_map):
-    """get_all_symbols / load_stock_features をモックするコンテキスト。"""
+    """load_all_raw_ohlcv_symbols / load_raw_ohlcv をモックするコンテキスト。"""
 
     def _loader(market, symbol):
         return df_map.get((market, symbol))
 
     return (
-        patch("src.screening.trend_screener.get_all_symbols", return_value=symbols),
-        patch("src.screening.trend_screener.load_stock_features", side_effect=_loader),
+        patch("src.screening.trend_screener.load_all_raw_ohlcv_symbols", return_value=symbols),
+        patch("src.screening.trend_screener.load_raw_ohlcv", side_effect=_loader),
     )
 
 
@@ -151,7 +153,7 @@ class TestScreenTrendCandidates(unittest.TestCase):
         symbols = [("us", "PEAKED")]
         df_map = {("us", "PEAKED"): df}
 
-        peak_date = df["date"].iloc[299]
+        peak_date = df.index[299].strftime("%Y-%m-%d")
         result_as_of = self._run(symbols, df_map, rel_strength_pct=0.0, as_of=peak_date)
         self.assertIn("PEAKED", [c.symbol for c in result_as_of])
 

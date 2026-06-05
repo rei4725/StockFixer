@@ -1,7 +1,10 @@
 """長期トレンド・スクリーナー本体
 
-米国株 OHLCV（DuckDB `stock_features`）のみを使い、長期上昇トレンドにある
+米国株の生 OHLCV（DuckDB `market_data_raw`）を使い、長期上昇トレンドにある
 multibagger 候補を抽出・ランキングする。
+
+注意: 当日終値は `market_data_raw` から取得する。`stock_features` は ML 用の
+ラグ・派生特徴量テーブルで生の Close 列を持たないため使わない。
 """
 
 from __future__ import annotations
@@ -13,7 +16,7 @@ import pandas as pd
 
 from src.screening.types import TrendCandidate
 from src.utils.data_path_utils import ensure_dir, get_results_dir
-from src.utils.db.stock_features import get_all_symbols, load_stock_features
+from src.utils.db.market_data import load_all_raw_ohlcv_symbols, load_raw_ohlcv
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -77,13 +80,17 @@ def _compute_metrics(df: pd.DataFrame) -> Optional[dict]:
 def _truncate_as_of(df: pd.DataFrame, as_of: Optional[str]) -> pd.DataFrame:
     """評価基準日 as_of 以前の行のみに切り詰める（ルックアヘッド防止）。
 
-    date 列が文字列でも datetime でも扱えるよう pandas で正規化して比較する。
-    as_of が None、または date 列がない場合は df をそのまま返す。
+    load_raw_ohlcv は日付を index（"Date"）に持つため index で比較する。
+    後方互換のため "date" 列がある場合はそちらも使える。
+    as_of が None、または df が空の場合はそのまま返す。
     """
-    if as_of is None or df is None or df.empty or "date" not in df.columns:
+    if as_of is None or df is None or df.empty:
         return df
-    mask = pd.to_datetime(df["date"]) <= pd.Timestamp(as_of)
-    return df[mask]
+    if "date" in df.columns:
+        mask = pd.to_datetime(df["date"]) <= pd.Timestamp(as_of)
+        return df[mask]
+    idx = pd.to_datetime(df.index)
+    return df[idx <= pd.Timestamp(as_of)]
 
 
 def screen_trend_candidates(
@@ -105,12 +112,12 @@ def screen_trend_candidates(
     Returns:
         スコア降順の TrendCandidate リスト（最大 top_n 件）。該当なしなら空リスト。
     """
-    symbols = [(m, s) for (m, s) in get_all_symbols() if m == market]
+    symbols = [(m, s) for (m, s) in load_all_raw_ohlcv_symbols() if m == market]
     logger.info(f"スクリーニング対象: {len(symbols)} 銘柄 ({market})")
 
     rows: list[dict] = []
     for m, symbol in symbols:
-        df = load_stock_features(m, symbol)
+        df = load_raw_ohlcv(m, symbol)
         df = _truncate_as_of(df, as_of)
         if df is None or len(df) < min_data_days:
             continue
