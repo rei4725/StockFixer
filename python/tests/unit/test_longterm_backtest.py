@@ -1,6 +1,6 @@
 """長期コホート・バックテスト(#431)の単体テスト。
 
-合成の stock_features（既知の価格軌道）を load_stock_features / get_all_symbols
+合成の生 OHLCV（既知の価格軌道）を load_raw_ohlcv / load_all_raw_ohlcv_symbols
 モックで与え、fetch_benchmark_returns もモックして検証する。
 """
 
@@ -22,16 +22,19 @@ _END = _DATES[-1]
 
 
 def _features(closes) -> pd.DataFrame:
+    """load_raw_ohlcv 風（Date index・Close 列）の合成 OHLCV を作る。"""
     closes = np.asarray(closes, dtype=float)
+    idx = pd.to_datetime(_DATES)
+    idx.name = "Date"
     return pd.DataFrame(
         {
-            "date": _DATES,
             "Open": closes,
             "High": closes,
             "Low": closes,
             "Close": closes,
             "Volume": np.full(_N, 1_000_000.0),
-        }
+        },
+        index=idx,
     )
 
 
@@ -104,8 +107,8 @@ def _loader(market, symbol):
 def _run(symbols, screen=None, call_log=None, **kwargs):
     syms = [("us", s) for s in symbols]
     screen = screen or _make_screen(symbols, call_log)
-    with patch.object(lb, "get_all_symbols", return_value=syms), patch.object(
-        lb, "load_stock_features", side_effect=_loader
+    with patch.object(lb, "load_all_raw_ohlcv_symbols", return_value=syms), patch.object(
+        lb, "load_raw_ohlcv", side_effect=_loader
     ), patch.object(lb, "screen_trend_candidates", side_effect=screen), patch.object(
         lb,
         "fetch_benchmark_returns",
@@ -185,8 +188,8 @@ class TestLongtermBacktest(unittest.TestCase):
 
     def test_empty_universe(self):
         """対象データなしでも例外なく空の結果を返す。"""
-        with patch.object(lb, "get_all_symbols", return_value=[]), patch.object(
-            lb, "load_stock_features", return_value=None
+        with patch.object(lb, "load_all_raw_ohlcv_symbols", return_value=[]), patch.object(
+            lb, "load_raw_ohlcv", return_value=None
         ), patch.object(
             lb,
             "fetch_benchmark_returns",

@@ -33,7 +33,7 @@ from src.screening.hold_engine import simulate_position
 from src.screening.trend_screener import screen_trend_candidates
 from src.screening.types import HoldRules
 from src.utils.data_path_utils import ensure_dir, get_results_dir
-from src.utils.db.stock_features import get_all_symbols, load_stock_features
+from src.utils.db.market_data import load_all_raw_ohlcv_symbols, load_raw_ohlcv
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -54,14 +54,19 @@ def _load_price_map(market: str, end: str) -> dict[str, pd.DataFrame]:
     end までに切り詰める（バックテスト窓外を評価しないため）。
     """
     price_map: dict[str, pd.DataFrame] = {}
-    for m, symbol in get_all_symbols():
+    for m, symbol in load_all_raw_ohlcv_symbols():
         if m != market:
             continue
-        df = load_stock_features(m, symbol)
-        if df is None or df.empty or "date" not in df.columns or "Close" not in df.columns:
+        raw = load_raw_ohlcv(m, symbol)
+        if raw is None or raw.empty or "Close" not in raw.columns:
             continue
-        df = df[["date", "Close"]].copy()
-        df["date"] = pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d")
+        # load_raw_ohlcv は日付を index に持つ。内部形式（date 文字列 + Close）に正規化する。
+        df = pd.DataFrame(
+            {
+                "date": pd.to_datetime(raw.index).strftime("%Y-%m-%d"),
+                "Close": raw["Close"].astype(float).to_numpy(),
+            }
+        )
         df = df[df["date"] <= end].sort_values("date").reset_index(drop=True)
         if not df.empty:
             price_map[symbol] = df
@@ -110,7 +115,7 @@ def _close_lookups(
     for symbol, df in price_map.items():
         s = df.set_index("date")["Close"].astype(float)
         s = s.reindex(calendar).ffill()
-        lookups[symbol] = s.to_dict()
+        lookups[symbol] = {str(k): float(v) for k, v in s.to_dict().items()}
     return lookups
 
 
@@ -264,7 +269,7 @@ def run_longterm_backtest(
         benchmark = fetch_benchmark_returns(benchmark_ticker, start, end)
         return (
             empty_equity,
-            _compute_metrics({}, empty_trades, initial_cash, start, end, benchmark),
+            _compute_metrics(empty_equity, empty_trades, initial_cash, start, end, benchmark),
             empty_trades,
         )  # noqa: E501
 
