@@ -62,6 +62,11 @@ class Settings(BaseSettings):
     CORRELATION_PAIRWISE_THRESHOLD: float = Field(default=0.7)
     CORRELATION_PAIRWISE_WINDOW_DAYS: int = Field(default=60)
 
+    # ---------- DB メンテナンス / retention（scheduler.run_weekly_db_maintenance） ----------
+    # 診断ログ（shap_values / feature_selection_log）の保持日数。
+    # これより古い行は週次メンテで削除する（各グループの最新は常に保持）。
+    DB_LOG_RETENTION_DAYS: int = Field(default=30)
+
     # ---------- Claude トレーダー（claude_agent.py） ----------
     CLAUDE_TRADER_ENABLED: bool = Field(default=False)
     CLAUDE_TRADER_MODEL: str = Field(default="claude-opus-4-7")
@@ -142,3 +147,4 @@ VOLUME_FILTER_WINDOW_DAYS: int = settings.VOLUME_FILTER_WINDOW_DAYS
 VOLUME_FILTER_MULTIPLIER: float = settings.VOLUME_FILTER_MULTIPLIER
 AUTO_PROMOTE_MODEL: bool = settings.AUTO_PROMOTE_MODEL
 SENTIMENT_LOOKBACK_DAYS: int = settings.SENTIMENT_LOOKBACK_DAYS
+DB_LOG_RETENTION_DAYS: int = settings.DB_LOG_RETENTION_DAYS
