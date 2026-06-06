@@ -104,8 +104,13 @@ def close_connection() -> None:
 
 def get_readonly_connection() -> duckdb.DuckDBPyConnection:
     """
-    読み取り専用の新規接続を返す（別プロセスからの利用向け）。
+    読み取り専用の新規接続を返す（**別プロセスからの利用専用**）。
     呼び出し側で close() すること。
+
+    ⚠️ メインプロセス（scheduler / bot / api を動かすプロセス）内では使わないこと。
+    read-write の _db_connection と設定（access_mode 等）が衝突し
+    「Can't open a connection ... with a different configuration」エラーになる。
+    同一プロセス内の読み取りは _db_connection（FileLock 直列化）を使う。
     """
     ensure_dir(get_data_dir())
     db_path = get_db_path()

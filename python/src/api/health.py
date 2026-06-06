@@ -34,15 +34,18 @@ app.config["JSON_SORT_KEYS"] = False
 
 
 def _check_db() -> tuple[str, str | None]:
-    """DB接続を確認する。(status, error_msg) を返す。"""
-    try:
-        from src.utils.db._connection import get_readonly_connection
+    """DB接続を確認する。(status, error_msg) を返す。
 
-        con = get_readonly_connection()
-        try:
+    health サーバは scheduler / bot と同一プロセスで動くため、read-only の別接続
+    （get_readonly_connection）を開くと read-write 接続と設定が衝突する
+    （DuckDB は同一プロセスで同一ファイルへ異なる設定の接続を許さない）。
+    そのため共有の _db_connection（FileLock 直列化・設定統一）経由で読む。
+    """
+    try:
+        from src.utils.db._connection import _db_connection
+
+        with _db_connection() as con:
             con.execute("SELECT 1").fetchone()
-        finally:
-            con.close()
         return "ok", None
     except Exception as exc:
         return "error", str(exc)
@@ -76,13 +79,11 @@ def _load_scheduler_last_runs() -> dict[str, str | None]:
 def _get_last_prediction_at() -> str | None:
     """prediction_results テーブルから直近の予測実行時刻を返す。"""
     try:
-        from src.utils.db._connection import get_readonly_connection
+        # 同一プロセス内のため共有接続を使う（read-only 別接続だと設定衝突する）
+        from src.utils.db._connection import _db_connection
 
-        con = get_readonly_connection()
-        try:
+        with _db_connection() as con:
             row = con.execute("SELECT MAX(predicted_at) FROM prediction_results").fetchone()
-        finally:
-            con.close()
         return row[0] if row and row[0] else None
     except Exception as exc:
         logger.warning("last_prediction_at 取得失敗: %s", exc)
