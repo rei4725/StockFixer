@@ -279,6 +279,78 @@ def deflated_sharpe_ratio(
     return float(_norm.cdf(z))
 
 
+def _sharpe_by_column(block: np.ndarray) -> np.ndarray:
+    """各列（=各戦略候補）の Sharpe（mean/std）を返す。std=0 の列は 0。"""
+    mean = block.mean(axis=0)
+    std = block.std(axis=0, ddof=1) if block.shape[0] > 1 else np.ones(block.shape[1])
+    with np.errstate(divide="ignore", invalid="ignore"):
+        sharpe = np.where(std > 0, mean / std, 0.0)
+    return np.nan_to_num(sharpe, nan=0.0, posinf=0.0, neginf=0.0)
+
+
+def probability_of_backtest_overfitting(
+    returns_matrix: np.ndarray,
+    n_splits: int = 10,
+) -> float:
+    """CSCV (Combinatorially Symmetric Cross-Validation) による PBO を計算する。
+
+    López de Prado (2014) の手法。N 個の候補戦略（パラメータ組合せ等）の期間
+    リターン行列から「インサンプル最良の戦略がアウトオブサンプルで中央値を下回る確率」
+    を推定する。PBO が高い（>0.5 目安）ほど、最適化結果が過学習である可能性が高い。
+
+    Args:
+        returns_matrix: shape (T, N) の配列。T=期間数、N=候補戦略数。各列が1戦略の
+            期間リターン系列（例: トレードごと or 日次リターン）。
+        n_splits: 期間 T を分割するブロック数 S（偶数）。C(S, S/2) 通りの IS/OOS 分割を作る。
+
+    Returns:
+        PBO（0〜1）。候補が2未満・データ不足のときは NaN。
+    """
+    from itertools import combinations
+
+    M = np.asarray(returns_matrix, dtype=float)
+    if M.ndim != 2 or M.shape[1] < 2:
+        return float("nan")
+    if n_splits % 2 != 0:
+        n_splits -= 1
+    if n_splits < 2:
+        return float("nan")
+
+    T, N = M.shape
+    block_size = T // n_splits
+    if block_size < 1:
+        return float("nan")
+
+    # 末尾の端数は捨てて等分割
+    blocks = [M[i * block_size : (i + 1) * block_size] for i in range(n_splits)]
+    indices = list(range(n_splits))
+
+    lambdas: list[float] = []
+    for is_sel in combinations(indices, n_splits // 2):
+        is_set = set(is_sel)
+        oos_sel = [i for i in indices if i not in is_set]
+        is_mat = np.vstack([blocks[i] for i in is_sel])
+        oos_mat = np.vstack([blocks[i] for i in oos_sel])
+
+        is_perf = _sharpe_by_column(is_mat)
+        oos_perf = _sharpe_by_column(oos_mat)
+
+        # IS 最良戦略
+        n_star = int(np.argmax(is_perf))
+        # その戦略の OOS 相対順位 ω = rank / (N+1)（rank: 1=最下位 … N=最上位）
+        order = np.argsort(oos_perf, kind="stable")  # 昇順
+        rank = int(np.where(order == n_star)[0][0]) + 1
+        omega = rank / (N + 1)
+        omega = min(max(omega, 1e-6), 1.0 - 1e-6)
+        lambdas.append(math.log(omega / (1.0 - omega)))
+
+    if not lambdas:
+        return float("nan")
+    arr = np.asarray(lambdas)
+    # λ <= 0 = IS最良が OOS で中央値以下 = 過学習の兆候
+    return float(np.mean(arr <= 0.0))
+
+
 def _sharpe_ratio(
     pnl_list: list[float],
     risk_free_rate: float,
