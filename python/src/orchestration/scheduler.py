@@ -672,9 +672,11 @@ def run_weekly_db_maintenance() -> None:
     import os
     import time
 
+    from config.settings import DB_LOG_RETENTION_DAYS
     from src.reporting.discord.discord_utils import send_db_maintenance_completion
     from src.utils.data_path_utils import get_db_path
     from src.utils.db import _db_connection
+    from src.utils.db.retention import purge_old_training_logs
 
     logger.info("=== 週次 DB メンテナンス開始 ===")
     db_path = get_db_path()
@@ -691,9 +693,18 @@ def run_weekly_db_maintenance() -> None:
 
     try:
         with _db_connection() as con:
+            # 1. retention: 診断ログの古い行を削除（肥大化の主因対策。各グループ最新は保持）
+            deleted = purge_old_training_logs(con, DB_LOG_RETENTION_DAYS)
+            total_deleted = sum(deleted.values())
+            logger.info(
+                "週次 DB メンテナンス: retention 削除 %d 行 (%s)",
+                total_deleted,
+                deleted,
+            )
+            # 2. CHECKPOINT + VACUUM（削除済み領域を再利用可能にする）
             con.execute("CHECKPOINT")
             con.execute("VACUUM")
-        logger.info("週次 DB メンテナンス: CHECKPOINT + VACUUM 完了")
+        logger.info("週次 DB メンテナンス: retention + CHECKPOINT + VACUUM 完了")
     except Exception as e:
         logger.error("週次 DB メンテナンス失敗: %s", e, exc_info=True)
         error_msg = str(e)
