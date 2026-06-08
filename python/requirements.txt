@@ -4,7 +4,7 @@ urllib3>=2.7.0
 tabulate==0.10.0
 python-dotenv==1.2.2
 yfinance==1.4.1
-scikit-learn==1.8.0
+scikit-learn==1.9.0
 scipy>=1.17.1
 lightgbm==4.6.0
 xgboost==3.2.0
