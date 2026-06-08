@@ -21,7 +21,7 @@ ta==0.11.0
 duckdb==1.5.3
 apscheduler==3.11.2
 streamlit>=1.58.0
-plotly>=6.7.0
+plotly>=6.8.0
 filelock>=3.29.1
 optuna>=4.8.0
 pydantic-settings>=2.14.1
