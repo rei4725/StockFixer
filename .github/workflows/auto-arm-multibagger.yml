@@ -22,7 +22,7 @@ jobs:
   arm-next:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/github-script@v7
+      - uses: actions/github-script@v9
         with:
           script: |
             // 依存マップ: 後続 issue -> 直接の前提 issue 群。
