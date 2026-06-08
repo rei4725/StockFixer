@@ -11,15 +11,21 @@ read-only で開き、各テーブルを**型を保持して**新ファイルへ
 
 from __future__ import annotations
 
-from datetime import datetime
+import os
+from datetime import datetime, timezone
 from typing import Optional
 
 import duckdb
+from filelock import FileLock
 
 from src.utils.db.retention import _LOG_TABLES, _cutoff
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+# コンパクション中は他プロセスの接続を排他するため FileLock を保持する。
+# 取得待ちタイムアウト（保持時間ではなく acquire 待ちの上限）。
+_COMPACT_LOCK_TIMEOUT = 300.0
 
 
 def _src_tables(con: duckdb.DuckDBPyConnection, alias: str) -> list[str]:
@@ -96,3 +102,80 @@ def compact_database(
         con.close()
 
     return result
+
+
+def swap_compacted(
+    db_path: str,
+    new_path: str,
+    keep_backup: bool = True,
+    now: Optional[datetime] = None,
+) -> Optional[str]:
+    """コンパクション済みファイル new_path を db_path に入れ替える。
+
+    元ファイルを ``.bak-<UTC時刻>`` に退避してから new_path をリネームする。
+    ``keep_backup=False`` の場合は退避ファイルを削除する。
+
+    Args:
+        db_path: 入れ替え先（現行 DB）のパス。
+        new_path: コンパクション済みの新ファイル。
+        keep_backup: True なら退避ファイルを残す。False なら削除する。
+        now: 退避ファイル名のタイムスタンプ基準（テスト用）。
+
+    Returns:
+        退避ファイルのパス。keep_backup=False で削除した場合は None。
+    """
+    ts = (now or datetime.now(timezone.utc)).strftime("%Y%m%d_%H%M%S")
+    bak_path = f"{db_path}.bak-{ts}"
+    os.replace(db_path, bak_path)
+    os.replace(new_path, db_path)
+    if not keep_backup:
+        try:
+            os.remove(bak_path)
+        except OSError as e:
+            logger.warning("退避ファイルの削除に失敗: %s (%s)", bak_path, e)
+        return None
+    return bak_path
+
+
+def compact_in_place(
+    db_path: str,
+    retention_days: int,
+    keep_backup: bool = False,
+    now: Optional[datetime] = None,
+) -> dict[str, tuple[int, int]]:
+    """db_path を物理コンパクションしてアトミックに入れ替える（同一プロセス内向け）。
+
+    FileLock（``db_path + ".lock"``）を取得して他プロセス／他接続を排他してから、
+    ``db_path + ".compact"`` を構築し os.replace で入れ替える。
+
+    前提: 呼び出し時、同一プロセス内に db_path への開いた DuckDB 接続が無いこと
+    （短命接続パターンの with ブロックを抜けた後に呼ぶ）。
+
+    Args:
+        db_path: 対象 DB ファイル。
+        retention_days: 診断ログの保持日数。
+        keep_backup: True なら退避ファイル（.bak-*）を残す。
+        now: 基準時刻（テスト用）。
+
+    Returns:
+        {テーブル名: (元行数, コピー後行数)}
+    """
+    new_path = db_path + ".compact"
+    if os.path.exists(new_path):
+        os.remove(new_path)
+
+    lock = FileLock(db_path + ".lock", timeout=_COMPACT_LOCK_TIMEOUT)
+    with lock:
+        try:
+            counts = compact_database(db_path, new_path, retention_days, now=now)
+            swap_compacted(db_path, new_path, keep_backup=keep_backup, now=now)
+        except Exception:
+            # 失敗時は新ファイルを破棄し、元ファイルを温存する
+            if os.path.exists(new_path):
+                try:
+                    os.remove(new_path)
+                except OSError:
+                    logger.warning("失敗後の新ファイル削除に失敗: %s", new_path)
+            raise
+
+    return counts

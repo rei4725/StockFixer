@@ -5,7 +5,7 @@
 各パイプラインの制御フロー、エラーハンドリングをここで実装。
 """
 
-from typing import Callable, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 
 from src.backtest.ports import set_model_manager_factory
 from src.orchestration.port_wiring import wire_ports
@@ -14,6 +14,9 @@ from src.prediction.manager import ModelManager
 from src.prediction.predict_single import explain_prediction_shap, predict_single_stock
 from src.reporting.query_service import register_prediction_fns
 from src.utils.logger import get_logger
+
+if TYPE_CHECKING:
+    from datetime import datetime
 
 wire_ports()
 set_model_manager_factory(ModelManager)
@@ -660,26 +663,43 @@ def run_weekly_watchlist_refresh():
         logger.error("ウォッチリスト更新失敗: %s", e, exc_info=True)
 
 
+def _is_first_week_of_month(now: "datetime") -> bool:
+    """月初週（1〜7日）かどうか。月次オートコンパクションの発火判定に使う。
+
+    週次メンテは土曜に走るため、各月で 1〜7 日に当たる土曜は必ず1回だけ存在する。
+    これにより「月1回」のコンパクションを単純な日付判定で実現する。
+    """
+    return now.day <= 7
+
+
 def run_weekly_db_maintenance() -> None:
     """
-    週次 DB メンテナンス（土曜 03:00）: CHECKPOINT → VACUUM を実行する。
+    週次 DB メンテナンス（土曜 03:00）: retention → CHECKPOINT/VACUUM を実行する。
 
     実行内容:
-        1. CHECKPOINT — WAL をメインファイルへフラッシュ
-        2. VACUUM     — 削除済み領域を回収してファイルサイズを縮小
-    実行前後の DB ファイルサイズと所要時間を Discord に通知する。
+        1. retention  — 診断ログの古い行を削除（各グループ最新は保持）
+        2. CHECKPOINT — WAL をメインファイルへフラッシュ
+        3. VACUUM     — 削除済み領域を再利用可能化
+        4. （月初週のみ）物理コンパクション — 再構築でファイル死領域を回収
+    実行後にサイズ・所要時間を Discord 通知し、サイズが閾値超なら警告する。
     """
     import os
     import time
+    from datetime import datetime, timezone
 
-    from config.settings import DB_LOG_RETENTION_DAYS
-    from src.reporting.discord.discord_utils import send_db_maintenance_completion
+    from config.settings import DB_COMPACT_ENABLED, DB_LOG_RETENTION_DAYS, DB_SIZE_ALERT_GB
+    from src.reporting.discord.discord_utils import (
+        send_db_maintenance_completion,
+        send_webhook_text,
+    )
     from src.utils.data_path_utils import get_db_path
     from src.utils.db import _db_connection
+    from src.utils.db.compact import compact_in_place
     from src.utils.db.retention import purge_old_training_logs
 
     logger.info("=== 週次 DB メンテナンス開始 ===")
     db_path = get_db_path()
+    now = datetime.now(timezone.utc)
 
     def _mb(path: str) -> float:
         try:
@@ -705,6 +725,13 @@ def run_weekly_db_maintenance() -> None:
             con.execute("CHECKPOINT")
             con.execute("VACUUM")
         logger.info("週次 DB メンテナンス: retention + CHECKPOINT + VACUUM 完了")
+
+        # 3. 月初週のみ物理コンパクション（VACUUM では縮まない死領域を再構築で回収）
+        #    _db_connection の with を抜けて接続を閉じた後に実行する（FileLock は内部で再取得）。
+        if DB_COMPACT_ENABLED and _is_first_week_of_month(now):
+            logger.info("月初週のため物理コンパクションを実行します")
+            counts = compact_in_place(db_path, DB_LOG_RETENTION_DAYS, keep_backup=False, now=now)
+            logger.info("物理コンパクション完了: %d テーブル再構築", len(counts))
     except Exception as e:
         logger.error("週次 DB メンテナンス失敗: %s", e, exc_info=True)
         error_msg = str(e)
@@ -725,6 +752,13 @@ def run_weekly_db_maintenance() -> None:
             size_after_mb=size_after,
             error=error_msg,
         )
+        # サイズ監視: 閾値超なら警告（コンパクション後でも超えるなら異常な増加）
+        size_after_gb = size_after / 1024
+        if error_msg is None and size_after_gb > DB_SIZE_ALERT_GB:
+            send_webhook_text(
+                f"⚠️ DB サイズ警告: {size_after_gb:,.1f} GB が閾値 {DB_SIZE_ALERT_GB:,.1f} GB を超えています。"
+                f"\nretention 設定や肥大化テーブルを確認してください。"
+            )
     except Exception as e:
         logger.error("DB メンテナンス通知失敗: %s", e, exc_info=True)
 
