@@ -17,11 +17,10 @@ VACUUM ではファイルが縮まないため、生存行だけを新ファイ�
 import argparse
 import os
 import sys
-from datetime import datetime, timezone
 
 from config.settings import DB_LOG_RETENTION_DAYS
 from src.utils.data_path_utils import get_db_path
-from src.utils.db.compact import compact_database
+from src.utils.db.compact import compact_database, swap_compacted
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -90,10 +89,7 @@ def main():
         return
 
     # 入れ替え（元ファイルは退避）
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    bak_path = f"{db_path}.bak-{ts}"
-    os.rename(db_path, bak_path)
-    os.rename(new_path, db_path)
+    bak_path = swap_compacted(db_path, new_path, keep_backup=True)
     logger.info("入れ替え完了: 旧ファイルを %s に退避", bak_path)
     print(f"\n✅ 入れ替え完了。元ファイルは {bak_path} に退避（検証後に削除可）。")
     print("コンテナを起動して health を確認してください。")

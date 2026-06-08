@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 import duckdb
 
-from src.utils.db.compact import compact_database
+from src.utils.db.compact import compact_database, compact_in_place, swap_compacted
 
 
 def _build_src(path):
@@ -72,3 +72,66 @@ class TestCompactDatabase:
         _build_src(src)
         compact_database(src, dst, retention_days=30, now=datetime(2026, 6, 6, tzinfo=timezone.utc))
         assert os.path.exists(dst)
+
+
+class TestSwapCompacted:
+    def test_swap_keeps_backup(self, tmp_path):
+        db = tmp_path / "db.duckdb"
+        new = tmp_path / "db.duckdb.compact"
+        db.write_text("OLD")
+        new.write_text("NEW")
+
+        now = datetime(2026, 6, 1, 3, 0, 0, tzinfo=timezone.utc)
+        bak = swap_compacted(str(db), str(new), keep_backup=True, now=now)
+
+        assert db.read_text() == "NEW"  # 新ファイルが本体に
+        assert not new.exists()  # .compact は消費された
+        assert bak is not None and os.path.exists(bak)
+        assert open(bak).read() == "OLD"  # 退避に旧ファイル
+
+    def test_swap_removes_backup_when_not_kept(self, tmp_path):
+        db = tmp_path / "db.duckdb"
+        new = tmp_path / "db.duckdb.compact"
+        db.write_text("OLD")
+        new.write_text("NEW")
+
+        bak = swap_compacted(str(db), str(new), keep_backup=False)
+
+        assert db.read_text() == "NEW"
+        assert bak is None
+        # 退避ファイルは残らない
+        assert not list(tmp_path.glob("*.bak-*"))
+
+
+class TestCompactInPlace:
+    def test_rebuilds_and_swaps_in_place(self, tmp_path):
+        db = str(tmp_path / "db.duckdb")
+        _build_src(db)
+        size_before = os.path.getsize(db)
+
+        now = datetime(2026, 6, 6, tzinfo=timezone.utc)
+        counts = compact_in_place(db, retention_days=30, keep_backup=False, now=now)
+
+        # 同じパスにコンパクション結果が入っている
+        assert counts["shap_values"] == (5, 2)
+        assert counts["prediction_results"] == (10, 10)
+        # 一時ファイル・退避ファイルは残らない
+        assert not os.path.exists(db + ".compact")
+        assert not list(tmp_path.glob("*.bak-*"))
+        # 入れ替え後の DB が読め、フィルタ結果が反映されている
+        con = duckdb.connect(db, read_only=True)
+        try:
+            assert con.execute("SELECT COUNT(*) FROM shap_values").fetchone()[0] == 2
+            assert con.execute("SELECT COUNT(*) FROM prediction_results").fetchone()[0] == 10
+        finally:
+            con.close()
+        # ファイルは肥大していない（再構築後 ≤ 元）
+        assert os.path.getsize(db) <= size_before
+
+    def test_keep_backup_preserves_original(self, tmp_path):
+        db = str(tmp_path / "db.duckdb")
+        _build_src(db)
+        now = datetime(2026, 6, 6, tzinfo=timezone.utc)
+        compact_in_place(db, retention_days=30, keep_backup=True, now=now)
+        baks = list(tmp_path.glob("*.bak-*"))
+        assert len(baks) == 1  # 退避ファイルが残る

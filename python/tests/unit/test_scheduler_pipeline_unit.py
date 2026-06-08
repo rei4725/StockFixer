@@ -739,3 +739,25 @@ class TestHandleStageError(unittest.TestCase):
 
         result = self._call(PipelineStage.CRITICAL, notify_fn=None)
         self.assertTrue(result)
+
+
+class TestIsFirstWeekOfMonth(unittest.TestCase):
+    """月初週判定（月次オートコンパクションの発火条件）。"""
+
+    def test_days_1_to_7_are_first_week(self):
+        from datetime import datetime, timezone
+
+        from src.orchestration.scheduler import _is_first_week_of_month
+
+        for day in range(1, 8):
+            now = datetime(2026, 6, day, tzinfo=timezone.utc)
+            self.assertTrue(_is_first_week_of_month(now), f"day={day} should be first week")
+
+    def test_day_8_and_later_are_not_first_week(self):
+        from datetime import datetime, timezone
+
+        from src.orchestration.scheduler import _is_first_week_of_month
+
+        for day in (8, 15, 28, 30):
+            now = datetime(2026, 6, day, tzinfo=timezone.utc)
+            self.assertFalse(_is_first_week_of_month(now), f"day={day} should not be first week")
