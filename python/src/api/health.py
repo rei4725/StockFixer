@@ -141,11 +141,17 @@ def health() -> tuple[Response, int]:
 
 
 def start_health_server(port: int = 5100) -> None:
-    """Flask health サーバーをデーモンスレッドで起動する。"""
+    """health サーバーを本番用 WSGI サーバ（waitress）でデーモンスレッド起動する。
+
+    Flask 開発サーバ（werkzeug の app.run）は本番運用に非対応のため、純Python で
+    Windows 相性の良い waitress で WSGI アプリ（app）を直接配信する。
+    """
 
     def _run() -> None:
-        logger.info("Health サーバー起動: port=%d", port)
-        app.run(host="0.0.0.0", port=port, use_reloader=False, threaded=True)
+        from waitress import serve  # type: ignore[import-untyped]
+
+        logger.info("Health サーバー起動: port=%d (waitress)", port)
+        serve(app, host="0.0.0.0", port=port, threads=4)
 
     thread = threading.Thread(target=_run, daemon=True, name="health-server")
     thread.start()
