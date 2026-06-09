@@ -15,11 +15,16 @@ from typing import Any, Dict, Optional
 
 import pandas as pd
 
+from src.backtest.metrics import deflated_sharpe_ratio
 from src.backtest.pipeline import run_backtest_walk_forward
 from src.utils.data_path_utils import ensure_dir, get_results_dir
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+# Deflated Sharpe Ratio がこの値を下回る最良戦略は「多重比較バイアスを除くと
+# 統計的に有意でない（過学習の疑い）」として警告する（ソフトゲート）。
+_DSR_WARN_THRESHOLD = 0.95
 
 
 def _frange(start: float, stop: float, step: float) -> list[float]:
@@ -395,6 +400,9 @@ def save_optimal_params_json(
             "num_trades": (
                 int(best_row.get("num_trades", 0)) if pd.notna(best_row.get("num_trades")) else 0
             ),
+            "deflated_sharpe_ratio": (
+                float(best_row["dsr"]) if pd.notna(best_row.get("dsr")) else None
+            ),
             "avg_win": (
                 float(best_row.get("avg_win", 0.0))
                 if pd.notna(best_row.get("avg_win", 0.0))
@@ -690,6 +698,11 @@ def run_optuna_optimization(
             if wf_df is None or wf_df.empty or sort_by not in wf_df.columns:
                 return float("-inf") if not _minimize else float("inf")
             val = float(wf_df[sort_by].mean())
+            # DSR 算出用に最良試行の Sharpe と総取引回数（observations）を保持する
+            if "sharpe_ratio" in wf_df.columns:
+                trial.set_user_attr("sharpe", float(wf_df["sharpe_ratio"].mean()))
+            if "num_trades" in wf_df.columns:
+                trial.set_user_attr("num_trades", int(wf_df["num_trades"].sum()))
             return -val if _minimize else val
         except Exception:
             return float("-inf") if not _minimize else float("inf")
@@ -702,6 +715,32 @@ def run_optuna_optimization(
     study.optimize(_objective, n_trials=n_trials, show_progress_bar=False)
     logger.info(f"[{market}/{symbol}] Optuna最適化完了: best_value={study.best_value:.4f}")
 
+    # 選択バイアス補正: 最良戦略を「完了試行数」で多重比較補正した DSR を算出する。
+    # N 試行から最良 Sharpe を選ぶこと自体に上振れバイアスがあるため、DSR で割り引く。
+    completed = [t for t in study.trials if t.value is not None]
+    n_done = len(completed)
+    best_trial = study.best_trial
+    best_sharpe = float(best_trial.user_attrs.get("sharpe", study.best_value))
+    best_nobs = int(best_trial.user_attrs.get("num_trades", 0))
+    best_dsr = deflated_sharpe_ratio(best_sharpe, n_done, best_nobs)
+    logger.info(
+        "[%s/%s] DSR=%.3f (best_sharpe=%.3f, n_trials=%d, n_obs=%d)",
+        market,
+        symbol,
+        best_dsr,
+        best_sharpe,
+        n_done,
+        best_nobs,
+    )
+    if best_nobs > 0 and best_dsr < _DSR_WARN_THRESHOLD:
+        logger.warning(
+            "[%s/%s] DSR=%.3f < %.2f: 多重比較を除くと有意でない可能性（過学習の疑い）",
+            market,
+            symbol,
+            best_dsr,
+            _DSR_WARN_THRESHOLD,
+        )
+
     # 結果を run_optimization 互換の DataFrame に変換
     rows = []
     for trial in study.trials:
@@ -710,6 +749,10 @@ def run_optuna_optimization(
         raw_metric = -trial.value if _minimize else trial.value
         row: Dict[str, Any] = dict(trial.params)
         row[sort_by] = raw_metric
+        row["num_trades"] = int(trial.user_attrs.get("num_trades", 0))
+        # DSR は最良戦略に対してのみ意味を持つため最良行にだけ付与する
+        if trial.number == best_trial.number:
+            row["dsr"] = best_dsr
         rows.append(row)
 
     return pd.DataFrame(rows)

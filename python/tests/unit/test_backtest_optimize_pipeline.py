@@ -444,5 +444,93 @@ class TestRunOptimizeBatch(unittest.TestCase):
         self.assertEqual(results, [])
 
 
+# ──────────────────────────────────────────────────────────────────
+# Deflated Sharpe Ratio による選択バイアスガード（#467 / #372）
+# ──────────────────────────────────────────────────────────────────
+
+
+class TestOptunaDSRGuard(unittest.TestCase):
+    """Optuna 最適化が最良戦略に DSR を付与することの検証。"""
+
+    def _make_wf_df(self):
+        return pd.DataFrame(
+            {
+                "sharpe_ratio": [1.5],
+                "num_trades": [50],
+            }
+        )
+
+    @patch("src.backtest.optimizer.run_backtest_walk_forward")
+    def test_best_row_has_dsr_and_num_trades(self, mock_wf):
+        from src.backtest.optimizer import run_optuna_optimization
+
+        mock_wf.return_value = (None, None, self._make_wf_df())
+
+        result = run_optuna_optimization(
+            market="jp",
+            symbol="7203",
+            n_trials=3,
+        )
+        # num_trades 列が全行に付与される
+        self.assertIn("num_trades", result.columns)
+        self.assertTrue((result["num_trades"] == 50).all())
+        # DSR は最良戦略の1行だけに付与される
+        self.assertIn("dsr", result.columns)
+        non_na = result["dsr"].dropna()
+        self.assertEqual(len(non_na), 1)
+        dsr_value = float(non_na.iloc[0])
+        self.assertGreaterEqual(dsr_value, 0.0)
+        self.assertLessEqual(dsr_value, 1.0)
+
+    @patch("src.backtest.optimizer.run_backtest_walk_forward")
+    def test_dsr_uses_trial_count_for_correction(self, mock_wf):
+        """試行数が増えるほど多重比較補正で DSR は上がりにくくなる（単調性の sanity）。"""
+        from src.backtest.optimizer import run_optuna_optimization
+
+        mock_wf.return_value = (None, None, self._make_wf_df())
+
+        few = run_optuna_optimization(market="jp", symbol="7203", n_trials=2)
+        many = run_optuna_optimization(market="jp", symbol="7203", n_trials=20)
+        dsr_few = float(few["dsr"].dropna().iloc[0])
+        dsr_many = float(many["dsr"].dropna().iloc[0])
+        # 同じ Sharpe でも試行数が多いほど期待最大値が上がり DSR は下がる
+        self.assertGreaterEqual(dsr_few, dsr_many)
+
+
+class TestSaveOptimalParamsDSR(unittest.TestCase):
+    """save_optimal_params_json が DSR を JSON metrics に記録することの検証。"""
+
+    def _best_df(self, with_dsr: bool):
+        data = {
+            "threshold": [0.01],
+            "sharpe_ratio": [1.5],
+            "num_trades": [50],
+        }
+        if with_dsr:
+            data["dsr"] = [0.87]
+        return pd.DataFrame(data)
+
+    def _save_and_capture(self, df):
+        """save_optimal_params_json を実ファイルに触れず実行し、書き込まれた dict を返す。"""
+        from src.backtest.optimizer import save_optimal_params_json
+
+        with patch("src.backtest.optimizer.os.path.exists", return_value=False), patch(
+            "src.backtest.optimizer.ensure_dir"
+        ), patch("builtins.open", mock_open()), patch(
+            "src.backtest.optimizer.json.dump"
+        ) as mock_dump:
+            save_optimal_params_json(df, "jp", "7203")
+        return mock_dump.call_args[0][0]
+
+    def test_records_dsr_when_present(self):
+        saved = self._save_and_capture(self._best_df(with_dsr=True))
+        metrics = saved["jp_7203"]["metrics"]
+        self.assertAlmostEqual(metrics["deflated_sharpe_ratio"], 0.87, places=6)
+
+    def test_dsr_none_when_absent(self):
+        saved = self._save_and_capture(self._best_df(with_dsr=False))
+        self.assertIsNone(saved["jp_7203"]["metrics"]["deflated_sharpe_ratio"])
+
+
 if __name__ == "__main__":
     unittest.main()
