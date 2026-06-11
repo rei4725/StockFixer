@@ -91,14 +91,13 @@ api/              HTTP health endpoints
 orchestration/    APScheduler wiring — calls into bounded contexts
     ↓
 backtest/  prediction/  trading/  reporting/  watchlist/  market_data/
+screening/ rule_engine/
           Bounded contexts — each owns its own types.py and pipelines
     ↓
+domain/           Shared kernel — 共有型 (SymbolTask 等) + ports (NotificationPort 等)
+infrastructure/   Adapters — domain ports の実装 (yfinance / Discord / in-memory)
 utils/            DB, logging, retry, path helpers
 ```
-
-> **Legacy modules** (未整理 — 将来 BC に吸収予定):
-> `src/data/`, `src/models/`, `src/analysis/`, `src/strategy/`, `src/features/`
-> `src/brokers/` は `src/trading/brokers/` への後方互換 re-export shim — 削除予定
 
 ### Bounded Contexts (`src/<context>/`)
 
@@ -111,8 +110,19 @@ utils/            DB, logging, retry, path helpers
 | `trading/` | `src/trading/` | Order execution |
 | `reporting/` | `src/reporting/` | Discord notifications |
 | `watchlist/` | `src/watchlist/` | Symbol CRUD |
-| `market_data/` | `src/market_data/` | yfinance data loading + feature engineering |
+| `market_data/` | `src/market_data/` | yfinance data loading + feature engineering (macro/sentiment 特徴量含む) |
+| `screening/` | `src/screening/` | 長期投資スクリーニング (trend/quality/hold) |
+| `rule_engine/` | `src/rule_engine/` | ルールベースシグナル生成 |
 | `orchestration/` | `src/orchestration/` | Scheduler wiring (APScheduler) |
+
+### Shared Kernel (`src/domain/` + `src/infrastructure/`)
+
+ヘキサゴナルアーキテクチャの中核。BC ではないが全 BC から参照される:
+
+- `domain/types.py` — BC 横断の共有型 (`SymbolTask`, `PredictionResult`, `BatchResult` 等)
+- `domain/ports.py` — ポート定義 (`NotificationPort`, `MarketDataPort` 等)
+- `domain/trading_rules.py` — 取引ルール定数
+- `infrastructure/` — ポートの実装アダプタ (yfinance / Discord / log / in-memory)
 
 ### Key Data Types (defined in each BC's `types.py`)
 

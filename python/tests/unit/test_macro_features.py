@@ -6,7 +6,7 @@ from unittest.mock import patch
 import numpy as np
 import pandas as pd
 
-from src.features.macro_features import (
+from src.market_data.macro_features import (
     add_event_flags,
     add_macro_derived_features,
     fetch_additional_macro_features,
