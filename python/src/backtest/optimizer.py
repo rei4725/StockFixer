@@ -9,13 +9,15 @@ run_backtest_optimize.py はこのモジュールの関数を呼び出すラッ�
 
 import itertools
 import json
+import math
 import os
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 
+import numpy as np
 import pandas as pd
 
-from src.backtest.metrics import deflated_sharpe_ratio
+from src.backtest.metrics import deflated_sharpe_ratio, probability_of_backtest_overfitting
 from src.backtest.pipeline import run_backtest_walk_forward
 from src.utils.data_path_utils import ensure_dir, get_results_dir
 from src.utils.logger import get_logger
@@ -25,6 +27,66 @@ logger = get_logger(__name__)
 # Deflated Sharpe Ratio がこの値を下回る最良戦略は「多重比較バイアスを除くと
 # 統計的に有意でない（過学習の疑い）」として警告する（ソフトゲート）。
 _DSR_WARN_THRESHOLD = 0.95
+
+# PBO (Probability of Backtest Overfitting) がこの値を超える最適化結果は
+# 「インサンプル最良戦略が OOS で中央値以下に沈む確率が高い（過学習の疑い）」
+# として警告する（ソフトゲート）。López de Prado (2014) の目安 0.5 を採用。
+_PBO_WARN_THRESHOLD = 0.5
+
+
+def _compute_pbo_from_fold_returns(
+    fold_returns: list[list[float]],
+    market: str,
+    symbol: str,
+) -> float:
+    """候補ごとの fold 別リターン系列から PBO を計算しログ出力する。
+
+    Walk-Forward の fold は時系列順なので、fold リターンを「期間リターン」と
+    みなして CSCV を適用する（fold 粒度の近似。日次粒度はパイプラインが
+    エクイティカーブを公開していないため将来課題）。
+
+    Args:
+        fold_returns: 候補（パラメータ組合せ / Optuna 試行）ごとの fold リターン系列
+        market: ログ用マーケット識別子
+        symbol: ログ用銘柄シンボル
+
+    Returns:
+        PBO（0〜1）。候補2未満・fold 不足のときは NaN。
+    """
+    series = [s for s in fold_returns if len(s) >= 2]
+    if len(series) < 2:
+        return float("nan")
+
+    # 全候補を共通の最短 fold 数に揃える（エラー fold 等で長さが揃わない場合に備える）
+    t = min(len(s) for s in series)
+    matrix = np.array([s[:t] for s in series], dtype=float).T  # shape (T, N)
+
+    # ブロック数は偶数かつ fold 数以下に制限（probability_of_backtest_overfitting
+    # 側でも偶数化されるが、T を超えると NaN になるためここで上限を掛ける）
+    n_splits = min(10, t - (t % 2))
+    pbo = probability_of_backtest_overfitting(matrix, n_splits=n_splits)
+
+    if math.isnan(pbo):
+        return pbo
+    logger.info(
+        "[%s/%s] PBO=%.3f (candidates=%d, folds=%d, n_splits=%d)",
+        market,
+        symbol,
+        pbo,
+        matrix.shape[1],
+        t,
+        n_splits,
+    )
+    if pbo > _PBO_WARN_THRESHOLD:
+        logger.warning(
+            "[%s/%s] PBO=%.3f > %.2f: IS最良戦略が OOS で中央値以下に沈む確率が高い"
+            "（過学習の疑い）",
+            market,
+            symbol,
+            pbo,
+            _PBO_WARN_THRESHOLD,
+        )
+    return pbo
 
 
 def _frange(start: float, stop: float, step: float) -> list[float]:
@@ -124,6 +186,8 @@ def run_optimization(
     print()
 
     all_results = []
+    # PBO 算出用: 成功した候補ごとの fold 別リターン系列（時系列順）
+    fold_returns_by_candidate: list[list[float]] = []
 
     for i, (threshold, stop_loss, take_profit, atr_risk_pct, atr_multiplier) in enumerate(
         param_grid, 1
@@ -199,6 +263,13 @@ def run_optimization(
                 summary["atr_max_fraction"] = atr_max_fraction
                 summary["ensemble"] = ensemble
                 all_results.append(summary)
+                if "total_return" in wf_df.columns:
+                    fold_returns_by_candidate.append(
+                        pd.to_numeric(wf_df["total_return"], errors="coerce")
+                        .fillna(0.0)
+                        .astype(float)
+                        .tolist()
+                    )
         except Exception as e:
             logger.warning(f"最適化エラー: {symbol}", exc_info=True)
             all_results.append(
@@ -213,7 +284,16 @@ def run_optimization(
                 }
             )
 
-    return pd.DataFrame(all_results)
+    result_df = pd.DataFrame(all_results)
+
+    # 過学習ガード: 全候補の fold リターン行列から PBO を算出する。
+    # 探索全体に対する1つの指標のため、全行に同じ値を付与する
+    # （save_optimal_params_json が best 行から読めるようにする）。
+    pbo = _compute_pbo_from_fold_returns(fold_returns_by_candidate, market, symbol)
+    if not math.isnan(pbo) and not result_df.empty:
+        result_df["pbo"] = pbo
+
+    return result_df
 
 
 def print_optimization_results(result_df: pd.DataFrame, sort_by: str) -> None:
@@ -403,6 +483,7 @@ def save_optimal_params_json(
             "deflated_sharpe_ratio": (
                 float(best_row["dsr"]) if pd.notna(best_row.get("dsr")) else None
             ),
+            "pbo": (float(best_row["pbo"]) if pd.notna(best_row.get("pbo")) else None),
             "avg_win": (
                 float(best_row.get("avg_win", 0.0))
                 if pd.notna(best_row.get("avg_win", 0.0))
@@ -703,6 +784,15 @@ def run_optuna_optimization(
                 trial.set_user_attr("sharpe", float(wf_df["sharpe_ratio"].mean()))
             if "num_trades" in wf_df.columns:
                 trial.set_user_attr("num_trades", int(wf_df["num_trades"].sum()))
+            # PBO 算出用に fold 別リターン系列（時系列順）を保持する
+            if "total_return" in wf_df.columns:
+                trial.set_user_attr(
+                    "fold_returns",
+                    pd.to_numeric(wf_df["total_return"], errors="coerce")
+                    .fillna(0.0)
+                    .astype(float)
+                    .tolist(),
+                )
             return -val if _minimize else val
         except Exception:
             return float("-inf") if not _minimize else float("inf")
@@ -741,6 +831,13 @@ def run_optuna_optimization(
             _DSR_WARN_THRESHOLD,
         )
 
+    # 過学習ガード: 全試行の fold リターン行列から PBO を算出する
+    pbo = _compute_pbo_from_fold_returns(
+        [t.user_attrs["fold_returns"] for t in completed if "fold_returns" in t.user_attrs],
+        market,
+        symbol,
+    )
+
     # 結果を run_optimization 互換の DataFrame に変換
     rows = []
     for trial in study.trials:
@@ -753,6 +850,9 @@ def run_optuna_optimization(
         # DSR は最良戦略に対してのみ意味を持つため最良行にだけ付与する
         if trial.number == best_trial.number:
             row["dsr"] = best_dsr
+        # PBO は探索全体に対する指標のため全行に付与する
+        if not math.isnan(pbo):
+            row["pbo"] = pbo
         rows.append(row)
 
     return pd.DataFrame(rows)

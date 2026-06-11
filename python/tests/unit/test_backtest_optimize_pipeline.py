@@ -532,5 +532,170 @@ class TestSaveOptimalParamsDSR(unittest.TestCase):
         self.assertIsNone(saved["jp_7203"]["metrics"]["deflated_sharpe_ratio"])
 
 
+# ──────────────────────────────────────────────────────────────────
+# PBO (Probability of Backtest Overfitting) ガード配線（#372）
+# ──────────────────────────────────────────────────────────────────
+
+
+class TestComputePboFromFoldReturns(unittest.TestCase):
+    """_compute_pbo_from_fold_returns の純粋関数テスト"""
+
+    def test_nan_when_less_than_two_candidates(self):
+        """候補が2未満のとき NaN"""
+        import math
+
+        from src.backtest.optimizer import _compute_pbo_from_fold_returns
+
+        self.assertTrue(math.isnan(_compute_pbo_from_fold_returns([], "jp", "7203")))
+        self.assertTrue(math.isnan(_compute_pbo_from_fold_returns([[0.1, 0.2, 0.3]], "jp", "7203")))
+
+    def test_nan_when_folds_too_short(self):
+        """fold 数が2未満の系列しかないとき NaN"""
+        import math
+
+        from src.backtest.optimizer import _compute_pbo_from_fold_returns
+
+        self.assertTrue(math.isnan(_compute_pbo_from_fold_returns([[0.1], [0.2]], "jp", "7203")))
+
+    def test_returns_value_in_unit_interval(self):
+        """有効な入力で 0〜1 の値が返ること"""
+        import numpy as np
+
+        from src.backtest.optimizer import _compute_pbo_from_fold_returns
+
+        rng = np.random.default_rng(42)
+        fold_returns = [rng.normal(0, 0.01, size=8).tolist() for _ in range(6)]
+        pbo = _compute_pbo_from_fold_returns(fold_returns, "jp", "7203")
+        self.assertGreaterEqual(pbo, 0.0)
+        self.assertLessEqual(pbo, 1.0)
+
+    def test_truncates_unequal_length_series(self):
+        """系列長が揃っていなくても最短長に揃えて計算されること"""
+        import math
+
+        import numpy as np
+
+        from src.backtest.optimizer import _compute_pbo_from_fold_returns
+
+        rng = np.random.default_rng(7)
+        fold_returns = [
+            rng.normal(0, 0.01, size=8).tolist(),
+            rng.normal(0, 0.01, size=6).tolist(),
+            rng.normal(0, 0.01, size=7).tolist(),
+        ]
+        pbo = _compute_pbo_from_fold_returns(fold_returns, "jp", "7203")
+        self.assertFalse(math.isnan(pbo))
+
+
+class TestRunOptimizationPBO(unittest.TestCase):
+    """run_optimization が PBO 列を付与することの検証。"""
+
+    def _make_wf_df(self, returns):
+        return pd.DataFrame(
+            {
+                "total_return": returns,
+                "sharpe_ratio": [1.0] * len(returns),
+                "num_trades": [10] * len(returns),
+            }
+        )
+
+    @patch("src.backtest.optimizer.run_backtest_walk_forward")
+    def test_pbo_column_attached_with_multiple_candidates(self, mock_wf):
+        """複数候補 × 複数 fold で pbo 列が全行に同一値で付与されること"""
+        from src.backtest.optimizer import run_optimization
+
+        mock_wf.side_effect = [
+            (None, None, self._make_wf_df([0.05, -0.02, 0.03, 0.01])),
+            (None, None, self._make_wf_df([0.01, 0.04, -0.01, 0.02])),
+        ]
+        result = run_optimization(
+            market="jp",
+            symbol="7203",
+            threshold_min=0.01,
+            threshold_max=0.02,
+            threshold_step=0.01,
+        )
+        self.assertIn("pbo", result.columns)
+        values = result["pbo"].dropna().unique()
+        self.assertEqual(len(values), 1)
+        self.assertGreaterEqual(float(values[0]), 0.0)
+        self.assertLessEqual(float(values[0]), 1.0)
+
+    @patch("src.backtest.optimizer.run_backtest_walk_forward")
+    def test_no_pbo_column_with_single_candidate(self, mock_wf):
+        """候補が1つだけのとき pbo 列は付与されないこと"""
+        from src.backtest.optimizer import run_optimization
+
+        mock_wf.return_value = (None, None, self._make_wf_df([0.05, -0.02, 0.03, 0.01]))
+        result = run_optimization(
+            market="jp",
+            symbol="7203",
+            threshold_min=0.01,
+            threshold_max=0.01,
+            threshold_step=0.01,
+        )
+        self.assertNotIn("pbo", result.columns)
+
+
+class TestOptunaPBOGuard(unittest.TestCase):
+    """Optuna 最適化が PBO を全行に付与することの検証。"""
+
+    def _make_wf_df(self):
+        return pd.DataFrame(
+            {
+                "total_return": [0.05, -0.02, 0.03, 0.01],
+                "sharpe_ratio": [1.5, -0.5, 1.0, 0.3],
+                "num_trades": [10, 12, 8, 15],
+            }
+        )
+
+    @patch("src.backtest.optimizer.run_backtest_walk_forward")
+    def test_all_rows_have_pbo(self, mock_wf):
+        from src.backtest.optimizer import run_optuna_optimization
+
+        mock_wf.return_value = (None, None, self._make_wf_df())
+
+        result = run_optuna_optimization(market="jp", symbol="7203", n_trials=3)
+        self.assertIn("pbo", result.columns)
+        non_na = result["pbo"].dropna()
+        self.assertEqual(len(non_na), len(result))
+        self.assertEqual(len(non_na.unique()), 1)
+        self.assertGreaterEqual(float(non_na.iloc[0]), 0.0)
+        self.assertLessEqual(float(non_na.iloc[0]), 1.0)
+
+
+class TestSaveOptimalParamsPBO(unittest.TestCase):
+    """save_optimal_params_json が PBO を JSON metrics に記録することの検証。"""
+
+    def _best_df(self, with_pbo: bool):
+        data = {
+            "threshold": [0.01],
+            "sharpe_ratio": [1.5],
+            "num_trades": [50],
+        }
+        if with_pbo:
+            data["pbo"] = [0.32]
+        return pd.DataFrame(data)
+
+    def _save_and_capture(self, df):
+        from src.backtest.optimizer import save_optimal_params_json
+
+        with patch("src.backtest.optimizer.os.path.exists", return_value=False), patch(
+            "src.backtest.optimizer.ensure_dir"
+        ), patch("builtins.open", mock_open()), patch(
+            "src.backtest.optimizer.json.dump"
+        ) as mock_dump:
+            save_optimal_params_json(df, "jp", "7203")
+        return mock_dump.call_args[0][0]
+
+    def test_records_pbo_when_present(self):
+        saved = self._save_and_capture(self._best_df(with_pbo=True))
+        self.assertAlmostEqual(saved["jp_7203"]["metrics"]["pbo"], 0.32, places=6)
+
+    def test_pbo_none_when_absent(self):
+        saved = self._save_and_capture(self._best_df(with_pbo=False))
+        self.assertIsNone(saved["jp_7203"]["metrics"]["pbo"])
+
+
 if __name__ == "__main__":
     unittest.main()
