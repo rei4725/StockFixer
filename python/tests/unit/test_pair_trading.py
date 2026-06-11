@@ -9,7 +9,7 @@ import unittest
 import numpy as np
 import pandas as pd
 
-from src.strategy.pair_trading import (
+from src.backtest.pair_trading import (
     PairBacktestResult,
     _adf_statistic,
     backtest_pair,

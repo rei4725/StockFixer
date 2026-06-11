@@ -99,9 +99,6 @@ infrastructure/   Adapters — domain ports の実装 (yfinance / Discord / in-m
 utils/            DB, logging, retry, path helpers
 ```
 
-> **Legacy modules** (未整理 — 将来 BC に吸収予定):
-> `src/strategy/` — pair_trading.py のみ。本番コードから未参照（テストのみ）
-
 ### Bounded Contexts (`src/<context>/`)
 
 各 BC は `src/` 直下に配置され、それぞれ `types.py` を持つ:
