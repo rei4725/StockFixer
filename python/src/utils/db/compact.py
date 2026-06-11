@@ -3,7 +3,7 @@
 DuckDB の VACUUM はファイルを縮小しないため、肥大化した DB を実際に小さくするには
 「生存行だけを新しいファイルへコピー」する再構築が必要。本モジュールは元 DB を
 read-only で開き、各テーブルを**型を保持して**新ファイルへコピーする。診断ログ
-（shap_values / feature_selection_log）は retention 条件で絞ってコピーする。
+（_LOG_TABLES）は retention 条件で絞ってコピーする。
 
 注意: 元 DB が他プロセス（コンテナ）に開かれている間は read-only でも開けない
 （DuckDB の設定衝突）。実行前にコンテナを停止すること。
@@ -59,8 +59,11 @@ def compact_database(
     Returns:
         {テーブル名: (元行数, コピー後行数)}
     """
-    cutoff = _cutoff(retention_days, now)
-    log_keys = {t: keys for t, keys in _LOG_TABLES}
+    # テーブルごとに (グループキー, 時刻カラム, cutoff) を引けるようにする
+    log_specs = {
+        t: (keys, time_col, _cutoff(retention_days, now, fmt))
+        for t, keys, time_col, fmt in _LOG_TABLES
+    }
     result: dict[str, tuple[int, int]] = {}
 
     con = duckdb.connect(dst_path)
@@ -74,13 +77,13 @@ def compact_database(
             coldefs = ", ".join(f'"{row[0]}" {row[1]}' for row in desc)
             con.execute(f'CREATE TABLE "{table}" ({coldefs})')
 
-            if table in log_keys:
-                keys = log_keys[table]
+            if table in log_specs:
+                keys, time_col, cutoff = log_specs[table]
                 key_join = " AND ".join(f't2.{k} = src."{table}".{k}' for k in keys)
-                # keep = 直近 cutoff 以降 OR 自グループの最新 trained_at
+                # keep = 直近 cutoff 以降 OR 自グループの最新時刻
                 where = (
-                    f"trained_at >= ? OR trained_at >= "
-                    f'(SELECT MAX(t2.trained_at) FROM src."{table}" t2 WHERE {key_join})'
+                    f"{time_col} >= ? OR {time_col} >= "
+                    f'(SELECT MAX(t2.{time_col}) FROM src."{table}" t2 WHERE {key_join})'
                 )
                 con.execute(
                     f'INSERT INTO "{table}" SELECT * FROM src."{table}" WHERE {where}',
