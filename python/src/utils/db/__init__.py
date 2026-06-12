@@ -44,6 +44,14 @@ from src.utils.db.experiment import generate_run_id  # noqa: F401
 from src.utils.db.experiment import load_best_run  # noqa: F401
 from src.utils.db.experiment import load_experiment_runs, save_experiment_run
 
+# --- factory_runs（戦略ファクトリー #369） ---
+from src.utils.db.factory_runs import (  # noqa: F401
+    count_factory_runs,
+    ensure_factory_tables,
+    load_factory_hashes,
+    save_factory_run,
+)
+
 # --- index_membership_history ---
 from src.utils.db.index_membership import (  # noqa: F401
     load_index_membership_symbols_as_of,
