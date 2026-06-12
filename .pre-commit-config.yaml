@@ -140,6 +140,14 @@ repos:
         exclude: ^(tests/|python/tests/|\.github/hooks/|python/\.github/hooks/)
         pass_filenames: true
 
+      - id: check-doc-drift
+        name: Doc Drift (path references in CLAUDE.md / skills)
+        entry: python ./.github/hooks/check_doc_drift.py
+        language: python
+        stages: [pre-commit]
+        files: ^(CLAUDE\.md|\.claude/skills/.*/SKILL\.md)$
+        pass_filenames: true
+
   # 10. コミットメッセージ検証 (commitlint スタイル)
   # コミットメッセージが "feat:", "fix:", "docs:" などで始まることを確認
   - repo: local

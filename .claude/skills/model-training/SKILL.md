@@ -52,6 +52,6 @@ py run_unified_model_training.py --model-type LightGBMModel --no-both
 - `run_model_batch()` — ウォッチリスト全銘柄モデル作成
 
 ## References
-- [model_training_pipeline.py](../../../python/src/services/model_training_pipeline.py)
-- [unified_model_pipeline.py](../../../python/src/services/unified_model_pipeline.py)
-- [model_manager.py](../../../python/src/models/model_manager.py)
+- [training_pipeline.py](../../../python/src/prediction/training_pipeline.py)
+- [unified_model_pipeline.py](../../../python/src/prediction/unified_model_pipeline.py)
+- [manager.py](../../../python/src/prediction/manager.py)

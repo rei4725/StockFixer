@@ -64,7 +64,7 @@ py run_scheduler.py --run-now optimization
 - `run_weekly_optimization()` — 週次全銘柄バックテスト最適化（`config/optimal_params.json` 更新）
 
 ## References
-- [scheduler_pipeline.py](../../../python/src/services/scheduler_pipeline.py)
+- [scheduler.py](../../../python/src/orchestration/scheduler.py)
 - [run_scheduler.py](../../../python/run_scheduler.py)
 
 ## 運用メモ（デプロイ連携）
