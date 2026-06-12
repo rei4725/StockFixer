@@ -738,6 +738,54 @@ def send_optimization_completion(success: int, failed: int) -> bool:
     return send_status_fields(spec, fields)
 
 
+def send_factory_completion(
+    market: str,
+    evaluated: int,
+    passed: int,
+    champion_sharpe: float,
+    pbo: float,
+    best_label: str,
+    best_sharpe: float,
+    report_hashes: list[str],
+) -> bool:
+    """
+    戦略ファクトリー夜間バッチ（#369）の完了通知を Discord Webhook に送信する。
+
+    Args:
+        market: 対象マーケット
+        evaluated: 評価した候補仮説数
+        passed: ゲート合格数
+        champion_sharpe: 対照（チャンピオン）の最高 Sharpe
+        pbo: バッチ全体の PBO
+        best_label: 最高 Sharpe 候補のラベル
+        best_sharpe: 最高 Sharpe 候補の値
+        report_hashes: 合格仮説のハッシュ一覧（レポートファイル名）
+
+    Returns:
+        成功時 True、失敗時 False
+    """
+    icon = "🏭✨" if passed > 0 else "🏭"
+    spec = NotificationSpec(
+        title=f"{icon} 戦略ファクトリー夜間バッチ完了 ({market})",
+        color=0x00BFFF if passed > 0 else 0x808080,
+    )
+    passed_value = "\n".join(f"`{h}.json`" for h in report_hashes) if report_hashes else "なし"
+    fields: list[dict] = [
+        {"name": "🕐 時刻", "value": format_jst(fmt=DISCORD_DATETIME_FORMAT), "inline": True},
+        {"name": "🧪 評価仮説", "value": f"{evaluated} 本", "inline": True},
+        {"name": "✅ ゲート合格", "value": f"{passed} 本", "inline": True},
+        {"name": "👑 チャンピオン Sharpe", "value": f"{champion_sharpe:.3f}", "inline": True},
+        {"name": "📉 バッチ PBO", "value": f"{pbo:.3f}", "inline": True},
+        {
+            "name": "🥇 ベスト候補",
+            "value": f"{best_label} (Sharpe {best_sharpe:.3f})",
+            "inline": False,
+        },
+        {"name": "📄 レポート (results/factory/reports/)", "value": passed_value, "inline": False},
+    ]
+    return send_status_fields(spec, fields)
+
+
 def send_paper_trade_position_report(positions: list[dict], summary: dict) -> bool:
     """
     ペーパートレードのポジション・損益レポートを Discord Webhook に送信する。

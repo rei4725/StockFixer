@@ -21,6 +21,13 @@ from typing import Any, Optional
 import numpy as np
 import pandas as pd
 
+from config.settings import (
+    FACTORY_GATE_CHAMPION_MARGIN,
+    FACTORY_GATE_MAX_DRAWDOWN,
+    FACTORY_GATE_MAX_PBO,
+    FACTORY_GATE_MIN_DSR,
+    FACTORY_GATE_MIN_TRADES,
+)
 from src.backtest.backtester import Backtester
 from src.backtest.data_port import get_backtest_data_port
 from src.backtest.metrics import deflated_sharpe_ratio, probability_of_backtest_overfitting
@@ -90,15 +97,7 @@ _PARAM_GRID: dict[str, list[dict[str, Any]]] = {
     ],
 }
 
-# ---------------------------------------------------------------------------
-# ゲート閾値（PR-2 で config/settings.py へ移設し env 上書き可能にする）
-# ---------------------------------------------------------------------------
-
-FACTORY_GATE_MIN_TRADES = 30
-FACTORY_GATE_MIN_DSR = 0.95
-FACTORY_GATE_MAX_PBO = 0.5
-FACTORY_GATE_MAX_DRAWDOWN = -0.25
-FACTORY_GATE_CHAMPION_MARGIN = 1.1
+# ゲート閾値は config/settings.py（FACTORY_GATE_*）で定義し env 上書き可能
 
 _REPORT_SCHEMA_VERSION = 1
 _MIN_SYMBOL_ROWS = 100
