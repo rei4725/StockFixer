@@ -106,5 +106,5 @@ StockFixerで発生しやすいエラーの原因特定と解決を迅速に行�
 > **ポイント**: MEDIUM は CI FAIL しない（`::warning::` で通知のみ）。HIGH のみブロックされる。
 
 ## References
-- [db.py](../../../python/src/utils/db.py)
+- [db パッケージ](../../../python/src/utils/db/__init__.py)
 - [data_path_utils.py](../../../python/src/utils/data_path_utils.py)

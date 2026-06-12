@@ -56,5 +56,5 @@ py run_predict.py --individual
 - `output_top_worst_results(output_rows, mode)` — Top10/Worst10出力＋DB保存
 
 ## References
-- [prediction_pipeline.py](../../../python/src/services/prediction_pipeline.py)
-- [discord_bot.py](../../../python/src/api/discord_bot.py)
+- [prediction_pipeline.py](../../../python/src/prediction/prediction_pipeline.py)
+- [discord_bot.py](../../../python/src/reporting/discord/discord_bot.py)

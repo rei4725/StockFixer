@@ -61,5 +61,5 @@ py run_backtest.py --market us --symbol AAPL \
 - `print_backtest_metrics(...)` — メトリクス出力
 
 ## References
-- [backtest_pipeline.py](../../../python/src/services/backtest_pipeline.py)
+- [pipeline.py](../../../python/src/backtest/pipeline.py)
 - [run_backtest.py](../../../python/run_backtest.py)

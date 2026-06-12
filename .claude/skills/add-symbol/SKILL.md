@@ -10,10 +10,12 @@ compatibility: "Python 3.10+。python/ ディレクトリで実行。"
 ## Procedure
 
 ### 1. ウォッチリストに追加
-`python/データ取得対象.csv` に `market,symbol` 行を追加する。
-```csv
-jp,9984
-us,MSFT
+`python/config/watchlist.json` の該当マーケット配列に銘柄を追加する。
+```json
+{
+  "us": ["AAPL", "MSFT"],
+  "jp": ["7203", "9984"]
+}
 ```
 - 日本株: market=`jp`, symbol=数字のみ（`.T`サフィックスは`get_ticker()`で自動補正）
 - 米国株: market=`us`, symbol=ティッカーシンボル
@@ -33,9 +35,9 @@ py run_model_creation.py --market jp --symbol 9984
 
 ### 4. 確認
 ```bash
-py python/tools/check_data.py
+py -c "import duckdb; con = duckdb.connect('data/stockfixer.duckdb', read_only=True); print(con.execute(\"SELECT market, symbol, COUNT(*) FROM stock_features WHERE symbol='9984' GROUP BY 1,2\").fetchall())"
 ```
-- DBに正しくデータが保存されていることを確認
+- DBに正しくデータが保存されていることを確認（duckdb-ops スキルも参照）
 
 ### 注意事項
 - 次回のスケジューラー実行（daily_pipeline）で自動的に予測対象に含まれる
@@ -43,5 +45,5 @@ py python/tools/check_data.py
 - 上場廃止銘柄を追加するとyfinanceがエラーを返す可能性がある
 
 ## References
-- [データ取得対象.csv](../../../python/データ取得対象.csv)
+- [watchlist.json](../../../python/config/watchlist.json)
 - [data_path_utils.py](../../../python/src/utils/data_path_utils.py)

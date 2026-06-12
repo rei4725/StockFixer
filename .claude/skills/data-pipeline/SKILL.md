@@ -23,15 +23,15 @@ py run_data_creation.py --market jp --symbol 7203
 cd python
 py run_data_creation.py --batch
 ```
-- 対象銘柄は `python/データ取得対象.csv`（market,symbol形式）から読み込む
+- 対象銘柄は `python/config/watchlist.json` から読み込む
 - **フェーズ1**: データ取得＋特徴量生成（並列 max_workers=5）
 - **フェーズ2**: DB書込（逐次実行、DuckDBロック制約回避）
 
 ### 内部処理フロー
-1. `src/services/data_pipeline.py` → `fetch_stock_data_with_features()` でyfinanceからOHLCV取得
-2. `src/features/technical_analysis.py` → テクニカル指標算出（SMA, RSI, MACD等）
-3. `src/features/` → ラグ特徴量・ターゲット(y)列を自動付与
-4. `src/utils/db.py` → `upsert_stock_features()` で `stock_features` テーブルにDELETE-INSERT
+1. `src/market_data/pipeline.py` → `fetch_stock_data_with_features()` でyfinanceからOHLCV取得
+2. `src/market_data/technical.py` → テクニカル指標算出（SMA, RSI, MACD等）+ ラグ特徴量・ターゲット(y)列
+3. `src/market_data/macro_features.py` / `sentiment_features.py` → マクロ・センチメント特徴量を付与
+4. `src/utils/db/` → `upsert_stock_features()` で `stock_features` テーブルにDELETE-INSERT
 5. 生OHLCVは `market_data_raw` テーブルにもべき等INSERT
 
 ### 保存先
@@ -43,9 +43,9 @@ py run_data_creation.py --batch
 ## Key Functions
 - `save_stock_data_with_features(market, symbol)` — フェッチ＋DB保存の一括実行
 - `run_data_batch()` — ウォッチリスト全銘柄バッチ処理
-- `load_target_symbols()` — CSVからウォッチリスト読み込み
+- `load_target_symbols()` — watchlist.json からウォッチリスト読み込み
 
 ## References
-- [data_pipeline.py](../../../python/src/services/data_pipeline.py)
-- [batch_runner.py](../../../python/src/services/batch_runner.py)
-- [db.py](../../../python/src/utils/db.py)
+- [pipeline.py](../../../python/src/market_data/pipeline.py)
+- [batch_runner.py](../../../python/src/watchlist/batch_runner.py)
+- [db パッケージ](../../../python/src/utils/db/__init__.py)
