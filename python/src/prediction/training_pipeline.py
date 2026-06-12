@@ -30,11 +30,20 @@ from src.prediction.db import (
 )
 from src.prediction.manager import ModelManager
 from src.prediction.ports import get_market_data_port
+from src.prediction.purged_cv import PurgedKFold
 from src.prediction.types import FeatureLoadResult, TrainingMetrics
 from src.utils.db import generate_run_id, load_stock_features, save_experiment_run
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+# Purged K-Fold CV（#372）: leak-free な OOS 指標を算出する最小サンプル数とフォールド数。
+# これ未満のデータでは従来のホールドアウト指標にフォールバックする。
+_PURGED_CV_MIN_SAMPLES = 150
+_PURGED_CV_N_SPLITS = 5
+# CV はフォールドごとに一時モデルを学習するため、学習が軽量なモデルに限定する
+# （TransformerModel は対象外 — ホールドアウト指標を使用）。
+_PURGED_CV_MODEL_TYPES = {"XGBoostModel", "LightGBMModel"}
 
 
 def _apply_feature_exclusions(X: pd.DataFrame, market: str, symbol: str) -> pd.DataFrame:
@@ -191,6 +200,56 @@ def _compute_training_metrics(y_true: pd.Series, y_pred: pd.Series) -> TrainingM
     return TrainingMetrics(
         rmse=rmse, directional_accuracy=directional_accuracy, n_samples=len(y_true)
     )
+
+
+def _compute_purged_cv_metrics(
+    model_type: str,
+    X: pd.DataFrame,
+    y: pd.Series,
+    horizon: int,
+) -> TrainingMetrics | None:
+    """Purged K-Fold + Embargo CV で leak-free な OOS 指標を算出する（#372）。
+
+    各フォールドで一時モデル（auto_save=False）を学習し、全フォールドの OOS 予測を
+    プールして指標を計算する。前向きラベル（horizon 日先リターン）がテスト期間と
+    重なる訓練サンプルは purge_gap=horizon で除外される。
+
+    Returns:
+        プール済み OOS 指標。データ不足・対象外モデル・学習失敗時は None
+        （呼び出し元がホールドアウト指標へフォールバックする）。
+    """
+    if model_type not in _PURGED_CV_MODEL_TYPES:
+        return None
+    if len(X) < _PURGED_CV_MIN_SAMPLES:
+        return None
+
+    try:
+        splitter = PurgedKFold(
+            n_splits=_PURGED_CV_N_SPLITS,
+            purge_gap=max(int(horizon), 1),
+        )
+        manager = ModelManager()
+        y_true_parts: list[pd.Series] = []
+        y_pred_parts: list[np.ndarray] = []
+        for fold, (train_idx, test_idx) in enumerate(splitter.split(X)):
+            fold_name = f"_purged_cv_{model_type}_{fold}"
+            manager.create_model(model_type, fold_name)
+            manager.train_model(fold_name, X.iloc[train_idx], y.iloc[train_idx], auto_save=False)
+            pred = manager.get_model(fold_name).predict(X.iloc[test_idx])
+            y_pred_parts.append(np.asarray(pred, dtype=float))
+            y_true_parts.append(y.iloc[test_idx])
+
+        if not y_true_parts:
+            return None
+        y_true = pd.concat(y_true_parts)
+        y_pred = pd.Series(np.concatenate(y_pred_parts), index=y_true.index)
+        return _compute_training_metrics(y_true, y_pred)
+    except Exception as e:
+        logger.warning(
+            f"Purged CV 指標の計算に失敗（ホールドアウト指標にフォールバック）: {e}",
+            exc_info=True,
+        )
+        return None
 
 
 def _build_feature_selection_frame(
@@ -354,10 +413,13 @@ def train_models_for_symbol(
         suffix = f"_{horizon}d" if horizon > 1 else ""
 
         # 時系列順に 80/20 分割（バリデーション: 直近 20%）
+        # Purge（#372）: ラベルは horizon 営業日先のリターンのため、境界直前の
+        # horizon 行は前向きラベルが検証期間と重なる（リーク）。学習集合から除外する。
         n_total = len(X)
         n_val = max(int(n_total * 0.2), min(30, n_total // 3))
-        if n_total - n_val >= 100:
-            X_train, y_train = X.iloc[:-n_val], y.iloc[:-n_val]
+        purge_gap = max(int(horizon), 1)
+        if n_total - n_val - purge_gap >= 100:
+            X_train, y_train = X.iloc[: -(n_val + purge_gap)], y.iloc[: -(n_val + purge_gap)]
             X_val, y_val = X.iloc[-n_val:], y.iloc[-n_val:]
             train_extra: dict = {"eval_set": [(X_val, y_val)]}
         else:
@@ -388,16 +450,23 @@ def train_models_for_symbol(
                 model_name, X_train, y_train, market=market, symbol=symbol, **train_extra
             )
             # 学習後 out-of-sample 精度計測・DB記録
+            # Purged K-Fold CV（#372）による leak-free 指標を優先し、
+            # 算出不能時は従来のホールドアウト指標にフォールバックする。
             saved_metrics = None
             try:
                 model = model_manager.get_model(model_name)
-                y_pred = model.predict(X_val)
-                saved_metrics = _compute_training_metrics(y_val, y_pred)
+                saved_metrics = _compute_purged_cv_metrics(model_type, X, y, horizon)
+                metrics_source = "purged-cv"
+                if saved_metrics is None:
+                    y_pred = model.predict(X_val)
+                    saved_metrics = _compute_training_metrics(y_val, y_pred)
+                    metrics_source = "holdout"
                 save_model_metrics(market, symbol, model_name, trained_at, saved_metrics)
                 logger.debug(
                     f"[精度記録] {market}/{symbol}/{model_name}: "
                     f"RMSE={saved_metrics.rmse:.6f}, "
-                    f"方向正解率={saved_metrics.directional_accuracy:.2%} (OOS)"
+                    f"方向正解率={saved_metrics.directional_accuracy:.2%} "
+                    f"(OOS, {metrics_source})"
                 )
             except Exception as e:
                 logger.warning(

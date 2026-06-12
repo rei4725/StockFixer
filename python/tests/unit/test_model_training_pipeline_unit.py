@@ -752,5 +752,104 @@ class TestTrainModelsForHorizon(unittest.TestCase):
         self.assertIn("error", statuses)
 
 
+# ──────────────────────────────────────────────────────────────────
+# Purged K-Fold CV 指標（#372）
+# ──────────────────────────────────────────────────────────────────
+
+
+class TestComputePurgedCvMetrics(unittest.TestCase):
+    """_compute_purged_cv_metrics のテスト"""
+
+    def _make_xy(self, n=200):
+        dates = pd.date_range("2023-01-01", periods=n, freq="D")
+        X = pd.DataFrame({"f1": range(n), "f2": np.linspace(0, 1, n)}, index=dates)
+        y = pd.Series(np.random.default_rng(42).normal(0, 0.01, n), index=dates)
+        return X, y
+
+    def test_none_for_unsupported_model_type(self):
+        """対象外モデル（TransformerModel）は None でフォールバックすること"""
+        from src.prediction.training_pipeline import _compute_purged_cv_metrics
+
+        X, y = self._make_xy(200)
+        self.assertIsNone(_compute_purged_cv_metrics("TransformerModel", X, y, horizon=1))
+
+    def test_none_when_insufficient_samples(self):
+        """最小サンプル数未満では None でフォールバックすること"""
+        from src.prediction.training_pipeline import _compute_purged_cv_metrics
+
+        X, y = self._make_xy(100)
+        self.assertIsNone(_compute_purged_cv_metrics("XGBoostModel", X, y, horizon=1))
+
+    @patch("src.prediction.training_pipeline.ModelManager")
+    def test_pools_oos_predictions_across_folds(self, mock_mm_cls):
+        """全フォールドの OOS 予測がプールされ n_samples が全行数になること"""
+        from src.prediction.training_pipeline import _compute_purged_cv_metrics
+
+        X, y = self._make_xy(200)
+        mock_model = MagicMock()
+        mock_model.predict.side_effect = lambda X_: pd.Series(np.zeros(len(X_)), index=X_.index)
+        mock_mm = MagicMock()
+        mock_mm.get_model.return_value = mock_model
+        mock_mm_cls.return_value = mock_mm
+
+        metrics = _compute_purged_cv_metrics("XGBoostModel", X, y, horizon=5)
+
+        self.assertIsNotNone(metrics)
+        # PurgedKFold のテスト区間は全行を1回ずつカバーする
+        self.assertEqual(metrics.n_samples, 200)
+        self.assertGreaterEqual(metrics.rmse, 0.0)
+        # 5フォールド分の一時モデルが学習されること
+        self.assertEqual(mock_mm.train_model.call_count, 5)
+        # 一時モデルがディスク保存されないこと（auto_save=False）
+        for call in mock_mm.train_model.call_args_list:
+            self.assertFalse(call.kwargs.get("auto_save", True))
+
+    @patch("src.prediction.training_pipeline.ModelManager")
+    def test_none_on_training_failure(self, mock_mm_cls):
+        """フォールド学習が失敗したら None でフォールバックすること"""
+        from src.prediction.training_pipeline import _compute_purged_cv_metrics
+
+        X, y = self._make_xy(200)
+        mock_mm = MagicMock()
+        mock_mm.train_model.side_effect = RuntimeError("学習失敗")
+        mock_mm_cls.return_value = mock_mm
+
+        self.assertIsNone(_compute_purged_cv_metrics("XGBoostModel", X, y, horizon=1))
+
+
+class TestPurgedHoldoutBoundary(unittest.TestCase):
+    """80/20 ホールドアウト境界の purge（#372）の検証"""
+
+    @patch("src.prediction.training_pipeline.save_model_metrics")
+    @patch("src.prediction.training_pipeline.ModelManager")
+    @patch("src.prediction.training_pipeline.load_features_for_training")
+    def test_train_set_excludes_purge_gap(self, mock_load, mock_mm_cls, mock_save_metrics):
+        """学習集合が n_total - n_val - horizon 行になること（境界リーク除去）"""
+        from src.prediction.training_pipeline import train_models_for_symbol
+
+        n, horizon = 200, 5
+        dates = pd.date_range("2023-01-01", periods=n, freq="D")
+        X = pd.DataFrame({"f1": range(n), "f2": np.linspace(0, 1, n)}, index=dates)
+        y = pd.Series(np.random.default_rng(0).normal(0, 0.01, n), index=dates)
+        mock_load.return_value = FeatureLoadResult(
+            status="success", market="us", symbol="AAPL", X=X, y=y
+        )
+        mock_model = MagicMock()
+        mock_model.predict.side_effect = lambda X_: pd.Series(np.zeros(len(X_)), index=X_.index)
+        mock_mm = MagicMock()
+        mock_mm.get_model.return_value = mock_model
+        mock_mm_cls.return_value = mock_mm
+
+        train_models_for_symbol("us", "AAPL", horizon=horizon)
+
+        # 本番モデルの学習呼び出し（モデル名指定）を抽出して学習行数を検証
+        main_calls = [
+            c for c in mock_mm.train_model.call_args_list if str(c.args[0]).startswith("Stock")
+        ]
+        self.assertGreaterEqual(len(main_calls), 1)
+        # n_val = max(int(200*0.2), min(30, 66)) = 40, purge_gap = 5 → 学習行数 155
+        self.assertEqual(len(main_calls[0].args[1]), 155)
+
+
 if __name__ == "__main__":
     unittest.main()
