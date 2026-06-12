@@ -152,6 +152,13 @@ def job_monthly_multibagger():
     run_monthly_multibagger_screen()
 
 
+def job_nightly_strategy_factory():
+    """毎日 05:00 - 戦略ファクトリー夜間バッチ（FACTORY_ENABLED=false ならスキップ）"""
+    from src.orchestration.scheduler import run_nightly_strategy_factory
+
+    run_nightly_strategy_factory()
+
+
 # ── イベントリスナー ──────────────────────────────────
 def _job_listener(event):
     """ジョブ実行結果のログ出力"""
@@ -342,6 +349,17 @@ SCHEDULE_CONFIG = {
         "max_executions_per_period": 1,
         "description": "毎月1日 04:00 - multibagger 月次スクリーン + 保有/撤退アラート",
     },
+    "nightly_strategy_factory": {
+        "func": job_nightly_strategy_factory,
+        "trigger": "cron",
+        "period": "daily",
+        "day_of_week": "mon-sun",
+        "hour": 5,
+        "minute": 0,
+        "recovery_delay_minutes": 60,
+        "max_executions_per_period": 1,
+        "description": "毎日 05:00 - 戦略ファクトリー夜間バッチ（jp/us 日替わり、#369）",
+    },
 }
 
 
@@ -503,6 +521,8 @@ def run_now(pipeline: str):
         queue_manager.run_job("monthly_report", reason="manual", force=True)
     elif pipeline == "multibagger":
         queue_manager.run_job("monthly_multibagger", reason="manual", force=True)
+    elif pipeline == "factory":
+        queue_manager.run_job("nightly_strategy_factory", reason="manual", force=True)
     else:
         print(f"不明なパイプライン: {pipeline}")
         print(
@@ -542,6 +562,7 @@ def main():
             "backup",
             "monthly_report",
             "multibagger",
+            "factory",
         ],
         help=(
             "指定パイプラインを即時実行して終了する（テスト用）。"
@@ -550,7 +571,8 @@ def main():
             "optimization=全銘柄最適化、"
             "wf_report=Walk-Forward比較レポート生成、"
             "watchlist=ウォッチリスト自動更新、"
-            "drift=ドリフト監視と自動再学習"
+            "drift=ドリフト監視と自動再学習、"
+            "factory=戦略ファクトリー夜間バッチ（FACTORY_ENABLED に従う）"
         ),
     )
     args = parser.parse_args()

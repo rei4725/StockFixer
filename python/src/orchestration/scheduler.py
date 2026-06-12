@@ -1106,3 +1106,91 @@ def run_daily_rule_signals() -> None:
         )
     except Exception as e:
         logger.error("ルールシグナル通知失敗: %s", e, exc_info=True)
+
+
+def run_nightly_strategy_factory(
+    force: bool = False,
+    market: "Optional[str]" = None,
+    budget: "Optional[int]" = None,
+    seed: "Optional[int]" = None,
+) -> None:
+    """
+    毎日実行 (05:00): 戦略ファクトリー夜間バッチ（#369 Phase 1）
+
+    ルール組合せ仮説をサンプリング → 窓分割バックテスト評価 → 過学習ゲート →
+    合格仮説のみ results/factory/reports/ へ不変 JSON レポートを出力する。
+    Issue 起票は IssueAgent（--factory-intake）の責務。
+
+    Args:
+        force: True なら FACTORY_ENABLED=false でも実行（CLI 手動実行用）
+        market: 対象マーケット。None なら jp/us を日替わり交互
+        budget: 仮説数。None なら FACTORY_NIGHTLY_BUDGET
+        seed: サンプラーシード。None なら日付ベース
+    """
+    from datetime import datetime
+
+    from config.settings import (
+        FACTORY_ENABLED,
+        FACTORY_LOOKBACK_YEARS,
+        FACTORY_N_WINDOWS,
+        FACTORY_NIGHTLY_BUDGET,
+    )
+
+    if not FACTORY_ENABLED and not force:
+        logger.info(
+            "戦略ファクトリーはスキップ（FACTORY_ENABLED=false。手動実行は run_strategy_factory.py）"
+        )
+        return
+
+    if market is None:
+        # jp/us を日替わり交互（通日の偶奇）
+        market = "jp" if datetime.now().timetuple().tm_yday % 2 == 0 else "us"
+    if budget is None:
+        budget = FACTORY_NIGHTLY_BUDGET
+
+    logger.info("=== 戦略ファクトリー夜間バッチ開始: market=%s budget=%s ===", market, budget)
+    result = None
+    try:
+        from src.backtest.factory import run_factory_batch
+        from src.watchlist.batch_runner import load_target_symbols
+
+        tasks = load_target_symbols()
+        symbols = [t.symbol for t in tasks if t.market == market]
+        if not symbols:
+            logger.warning("対象銘柄なしのため中止: market=%s", market)
+            return
+
+        result = run_factory_batch(
+            market=market,
+            symbols=symbols,
+            budget=budget,
+            lookback_years=FACTORY_LOOKBACK_YEARS,
+            n_windows=FACTORY_N_WINDOWS,
+            seed=seed,
+        )
+        logger.info(
+            "=== 戦略ファクトリー完了: 評価=%s 合格=%s ===",
+            len(result.candidates),
+            len(result.passed),
+        )
+    except Exception as e:
+        logger.error("戦略ファクトリー失敗: %s", e, exc_info=True)
+
+    # Discord 完了通知
+    try:
+        from src.reporting.discord.discord_utils import send_factory_completion
+
+        if result is not None:
+            best = max(result.candidates, key=lambda e: e.sharpe_ratio, default=None)
+            send_factory_completion(
+                market=market,
+                evaluated=len(result.candidates),
+                passed=len(result.passed),
+                champion_sharpe=result.champion_sharpe,
+                pbo=result.pbo,
+                best_label=best.hypothesis.label if best else "-",
+                best_sharpe=best.sharpe_ratio if best else 0.0,
+                report_hashes=[e.hypothesis.hypothesis_hash for e in result.passed],
+            )
+    except Exception as e:
+        logger.error("戦略ファクトリー通知失敗: %s", e, exc_info=True)

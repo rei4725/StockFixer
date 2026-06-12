@@ -99,6 +99,17 @@ class Settings(BaseSettings):
     # ---------- センチメント特徴量（R-404） ----------
     SENTIMENT_LOOKBACK_DAYS: int = Field(default=30)
 
+    # ---------- 戦略ファクトリー（#369 Phase 1） ----------
+    FACTORY_ENABLED: bool = Field(default=False)
+    FACTORY_NIGHTLY_BUDGET: int = Field(default=10)
+    FACTORY_LOOKBACK_YEARS: int = Field(default=2)
+    FACTORY_N_WINDOWS: int = Field(default=8)
+    FACTORY_GATE_MIN_TRADES: int = Field(default=30)
+    FACTORY_GATE_MIN_DSR: float = Field(default=0.95)
+    FACTORY_GATE_MAX_PBO: float = Field(default=0.5)
+    FACTORY_GATE_MAX_DRAWDOWN: float = Field(default=-0.25)
+    FACTORY_GATE_CHAMPION_MARGIN: float = Field(default=1.1)
+
 
 settings = Settings()
 
@@ -155,3 +166,13 @@ SENTIMENT_LOOKBACK_DAYS: int = settings.SENTIMENT_LOOKBACK_DAYS
 DB_LOG_RETENTION_DAYS: int = settings.DB_LOG_RETENTION_DAYS
 DB_COMPACT_ENABLED: bool = settings.DB_COMPACT_ENABLED
 DB_SIZE_ALERT_GB: float = settings.DB_SIZE_ALERT_GB
+
+FACTORY_ENABLED: bool = settings.FACTORY_ENABLED
+FACTORY_NIGHTLY_BUDGET: int = settings.FACTORY_NIGHTLY_BUDGET
+FACTORY_LOOKBACK_YEARS: int = settings.FACTORY_LOOKBACK_YEARS
+FACTORY_N_WINDOWS: int = settings.FACTORY_N_WINDOWS
+FACTORY_GATE_MIN_TRADES: int = settings.FACTORY_GATE_MIN_TRADES
+FACTORY_GATE_MIN_DSR: float = settings.FACTORY_GATE_MIN_DSR
+FACTORY_GATE_MAX_PBO: float = settings.FACTORY_GATE_MAX_PBO
+FACTORY_GATE_MAX_DRAWDOWN: float = settings.FACTORY_GATE_MAX_DRAWDOWN
+FACTORY_GATE_CHAMPION_MARGIN: float = settings.FACTORY_GATE_CHAMPION_MARGIN

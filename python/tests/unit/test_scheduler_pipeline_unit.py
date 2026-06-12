@@ -761,3 +761,88 @@ class TestIsFirstWeekOfMonth(unittest.TestCase):
         for day in (8, 15, 28, 30):
             now = datetime(2026, 6, day, tzinfo=timezone.utc)
             self.assertFalse(_is_first_week_of_month(now), f"day={day} should not be first week")
+
+
+class TestRunNightlyStrategyFactory(unittest.TestCase):
+    """run_nightly_strategy_factory のテスト"""
+
+    def _make_batch_result(self, market="jp"):
+        from src.backtest.types import FactoryBatchResult
+
+        return FactoryBatchResult(market=market, champion_sharpe=1.0, pbo=0.3)
+
+    @patch("src.backtest.factory.run_factory_batch")
+    def test_skips_when_disabled_and_not_forced(self, mock_batch):
+        from src.orchestration.scheduler import run_nightly_strategy_factory
+
+        with patch("config.settings.FACTORY_ENABLED", False):
+            run_nightly_strategy_factory(force=False)
+
+        mock_batch.assert_not_called()
+
+    @patch("src.reporting.discord.discord_utils.send_factory_completion")
+    @patch("src.watchlist.batch_runner.load_target_symbols")
+    @patch("src.backtest.factory.run_factory_batch")
+    def test_forced_run_filters_symbols_by_market(self, mock_batch, mock_load, mock_send):
+        from src.orchestration.scheduler import run_nightly_strategy_factory
+
+        mock_load.return_value = [
+            SymbolTask(market="jp", symbol="7203"),
+            SymbolTask(market="jp", symbol="9984"),
+            SymbolTask(market="us", symbol="AAPL"),
+        ]
+        mock_batch.return_value = self._make_batch_result("jp")
+
+        with patch("config.settings.FACTORY_ENABLED", False):
+            run_nightly_strategy_factory(force=True, market="jp", budget=3, seed=1)
+
+        kwargs = mock_batch.call_args.kwargs
+        self.assertEqual(kwargs["market"], "jp")
+        self.assertEqual(kwargs["symbols"], ["7203", "9984"])
+        self.assertEqual(kwargs["budget"], 3)
+        mock_send.assert_called_once()
+
+    @patch("src.reporting.discord.discord_utils.send_factory_completion")
+    @patch("src.watchlist.batch_runner.load_target_symbols")
+    @patch("src.backtest.factory.run_factory_batch")
+    def test_default_market_is_jp_or_us(self, mock_batch, mock_load, mock_send):
+        from src.orchestration.scheduler import run_nightly_strategy_factory
+
+        mock_load.return_value = [
+            SymbolTask(market="jp", symbol="7203"),
+            SymbolTask(market="us", symbol="AAPL"),
+        ]
+        mock_batch.side_effect = lambda **kw: self._make_batch_result(kw["market"])
+
+        with patch("config.settings.FACTORY_ENABLED", True):
+            run_nightly_strategy_factory(force=False)
+
+        self.assertIn(mock_batch.call_args.kwargs["market"], ("jp", "us"))
+
+    @patch("src.reporting.discord.discord_utils.send_factory_completion")
+    @patch("src.watchlist.batch_runner.load_target_symbols")
+    @patch("src.backtest.factory.run_factory_batch")
+    def test_no_symbols_aborts_without_batch(self, mock_batch, mock_load, mock_send):
+        from src.orchestration.scheduler import run_nightly_strategy_factory
+
+        mock_load.return_value = [SymbolTask(market="us", symbol="AAPL")]
+
+        run_nightly_strategy_factory(force=True, market="jp")
+
+        mock_batch.assert_not_called()
+        mock_send.assert_not_called()
+
+    @patch("src.reporting.discord.discord_utils.send_factory_completion")
+    @patch("src.watchlist.batch_runner.load_target_symbols")
+    @patch("src.backtest.factory.run_factory_batch")
+    def test_batch_error_does_not_raise_and_skips_notification(
+        self, mock_batch, mock_load, mock_send
+    ):
+        from src.orchestration.scheduler import run_nightly_strategy_factory
+
+        mock_load.return_value = [SymbolTask(market="jp", symbol="7203")]
+        mock_batch.side_effect = RuntimeError("evaluation failed")
+
+        run_nightly_strategy_factory(force=True, market="jp")  # 例外が外に漏れないこと
+
+        mock_send.assert_not_called()
