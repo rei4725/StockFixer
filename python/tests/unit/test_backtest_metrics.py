@@ -256,15 +256,27 @@ class TestMaxDrawdown(unittest.TestCase):
 class TestPlotBacktestAndBenchmark(unittest.TestCase):
     """plot_backtest / fetch_benchmark_returns のテスト"""
 
+    _MPL_MODULES = ("matplotlib", "matplotlib.pyplot", "matplotlib.dates")
+
     def setUp(self):
+        import sys
+
         import yfinance as _real_yf
 
         self._real_yf = _real_yf
+        # 偽 matplotlib を sys.modules に挿す前に実物を退避する
+        # （復元しないと後続テストの実 matplotlib 利用が壊れる）
+        self._real_mpl = {name: sys.modules.get(name) for name in self._MPL_MODULES}
 
     def tearDown(self):
         import sys
 
         sys.modules["yfinance"] = self._real_yf
+        for name, module in self._real_mpl.items():
+            if module is not None:
+                sys.modules[name] = module
+            else:
+                sys.modules.pop(name, None)
 
     def _install_fake_matplotlib(self):
         class _Axis:
