@@ -1024,6 +1024,41 @@ def run_monthly_report_job() -> None:
     except Exception as e:
         logger.error("月次レポート通知失敗: %s", e, exc_info=True)
 
+    # 損益曲線 vs S&P500 チャートを生成して送信（NON_CRITICAL: 失敗しても月次レポートは成立）
+    try:
+        import os
+
+        from src.market_data.backtest_adapter import BacktestMarketDataAdapter
+        from src.reporting.discord.discord_utils import send_webhook_file
+        from src.reporting.equity_chart import build_equity_chart
+        from src.trading.paper_equity import get_paper_equity_curve
+        from src.utils.data_path_utils import get_results_dir
+
+        equity = get_paper_equity_curve(days=180)
+        if len(equity.dropna()) < 5:
+            logger.info("エクイティ系列が不足のため損益曲線チャートをスキップ")
+        else:
+            start = equity.index[0].strftime("%Y-%m-%d")
+            end = equity.index[-1].strftime("%Y-%m-%d")
+            benchmark = None
+            try:
+                bench_df = BacktestMarketDataAdapter().download("^GSPC", start=start, end=end)
+                if bench_df is not None and not bench_df.empty and "Close" in bench_df.columns:
+                    benchmark = bench_df["Close"]
+            except Exception as e:
+                logger.warning("S&P500 取得失敗（エクイティのみ描画）: %s", e)
+
+            chart_dir = os.path.join(get_results_dir(), "monthly")
+            os.makedirs(chart_dir, exist_ok=True)
+            chart_path = os.path.join(chart_dir, f"{summary.target_month}_equity.png")
+            build_equity_chart(equity, benchmark, chart_path)
+            send_webhook_file(
+                chart_path, title="📈 ペーパートレード損益曲線 vs S&P500（直近180日）"
+            )
+            logger.info("損益曲線チャート送信完了: %s", chart_path)
+    except Exception as e:
+        logger.error("損益曲線チャート生成失敗: %s", e, exc_info=True)
+
     logger.info("=== 月次レポート完了 ===")
 
 
