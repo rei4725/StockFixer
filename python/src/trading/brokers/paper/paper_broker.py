@@ -264,22 +264,34 @@ class PaperBroker(BrokerBase):
                     [symbol, qty, fill_price],
                 )
         elif side == int(OrderSide.SELL):
-            proceeds = qty * fill_price
+            # 未保有銘柄の SELL は現金を計上しない（幻の現金水増しを防止）。
+            # 保有数量を超える SELL は保有分にクランプする（過大な現金計上を防止）。
+            if not existing:
+                logger.warning(
+                    "[paper] %s: 未保有のため SELL をスキップ（現金・実現損益を計上しない）", symbol
+                )
+                return
+            old_qty, old_avg = existing
+            sell_qty = min(qty, old_qty)
+            if sell_qty < qty:
+                logger.warning(
+                    "[paper] %s: 売却数量 %d が保有 %d を超過 → 保有分にクランプ",
+                    symbol,
+                    qty,
+                    old_qty,
+                )
+            proceeds = sell_qty * fill_price
             con.execute("UPDATE paper_balance SET balance = balance + ?", [proceeds])
-            if existing:
-                old_qty, old_avg = existing
-                new_qty = old_qty - qty
-                if new_qty <= 0:
-                    con.execute("DELETE FROM paper_positions WHERE symbol=?", [symbol])
-                else:
-                    con.execute(
-                        "UPDATE paper_positions SET qty=?, "
-                        "updated_at=CURRENT_TIMESTAMP WHERE symbol=?",
-                        [new_qty, symbol],
-                    )
+            new_qty = old_qty - sell_qty
+            if new_qty <= 0:
+                con.execute("DELETE FROM paper_positions WHERE symbol=?", [symbol])
             else:
-                old_avg = fill_price  # ポジション不明時はPnL=0扱い
-            realized_pnl = (fill_price - old_avg) * qty
+                con.execute(
+                    "UPDATE paper_positions SET qty=?, "
+                    "updated_at=CURRENT_TIMESTAMP WHERE symbol=?",
+                    [new_qty, symbol],
+                )
+            realized_pnl = (fill_price - old_avg) * sell_qty
             con.execute(
                 "UPDATE paper_orders SET realized_pnl=? WHERE order_id=?",
                 [realized_pnl, order_id],
