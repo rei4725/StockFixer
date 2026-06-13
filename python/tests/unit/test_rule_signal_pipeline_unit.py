@@ -148,13 +148,25 @@ class TestRunRuleSignalPipeline(unittest.TestCase):
 
 
 class TestExecuteRulePaperTrades(unittest.TestCase):
+    @staticmethod
+    def _mock_risk(is_allowed=True, qty=100):
+        """RiskManager のモックを生成する（ゲート判定と発注株数を制御）。"""
+        risk = MagicMock()
+        risk.update_peak_balance.return_value = None
+        risk.evaluate_trading_gate.return_value = MagicMock(is_allowed=is_allowed, reason="test")
+        risk.calc_position_size.return_value = qty
+        return risk
+
     def test_empty_signals_returns_zero_counts(self):
         from src.trading.rule_execution import execute_rule_paper_trades
 
         mock_broker = MagicMock()
         mock_broker.get_positions.return_value = []
 
-        with patch("src.trading.rule_execution.PaperBroker", return_value=mock_broker):
+        with (
+            patch("src.trading.rule_execution.PaperBroker", return_value=mock_broker),
+            patch("src.trading.rule_execution.RiskManager", return_value=self._mock_risk()),
+        ):
             result = execute_rule_paper_trades([], "jp")
         self.assertEqual(result["buy_orders"], 0)
         self.assertEqual(result["sell_orders"], 0)
@@ -168,10 +180,71 @@ class TestExecuteRulePaperTrades(unittest.TestCase):
         signals = [{"symbol": "7203", "signal": 1, "price": 1000.0}]
         with (
             patch("src.trading.rule_execution.PaperBroker", return_value=mock_broker),
+            patch("src.trading.rule_execution.RiskManager", return_value=self._mock_risk(qty=100)),
             patch("src.trading.rule_execution.get_ticker", return_value="7203.T"),
         ):
             result = execute_rule_paper_trades(signals, "jp")
         self.assertEqual(result["buy_orders"], 1)
+        mock_broker.send_order.assert_called_once()
+
+    def test_buy_skipped_when_gate_blocked(self):
+        """リスクゲート不合格時は新規買いを発注しない。"""
+        from src.trading.rule_execution import execute_rule_paper_trades
+
+        mock_broker = MagicMock()
+        mock_broker.get_positions.return_value = []
+
+        signals = [{"symbol": "7203", "signal": 1, "price": 1000.0}]
+        with (
+            patch("src.trading.rule_execution.PaperBroker", return_value=mock_broker),
+            patch(
+                "src.trading.rule_execution.RiskManager",
+                return_value=self._mock_risk(is_allowed=False),
+            ),
+            patch("src.trading.rule_execution.get_ticker", return_value="7203.T"),
+        ):
+            result = execute_rule_paper_trades(signals, "jp")
+        self.assertEqual(result["buy_orders"], 0)
+        self.assertEqual(result["skipped"], 1)
+        mock_broker.send_order.assert_not_called()
+
+    def test_buy_skipped_when_max_positions_reached(self):
+        """保有銘柄数が MAX_POSITIONS に達していれば新規買いをスキップする。"""
+        from config.settings import MAX_POSITIONS
+        from src.trading.rule_execution import execute_rule_paper_trades
+
+        mock_broker = MagicMock()
+        # MAX_POSITIONS 件をすでに保有している状態を作る
+        mock_broker.get_positions.return_value = [
+            {"symbol": f"S{i:04d}", "qty": 100} for i in range(MAX_POSITIONS)
+        ]
+
+        signals = [{"symbol": "7203", "signal": 1, "price": 1000.0}]
+        with (
+            patch("src.trading.rule_execution.PaperBroker", return_value=mock_broker),
+            patch("src.trading.rule_execution.RiskManager", return_value=self._mock_risk()),
+            patch("src.trading.rule_execution.get_ticker", return_value="7203.T"),
+        ):
+            result = execute_rule_paper_trades(signals, "jp")
+        self.assertEqual(result["buy_orders"], 0)
+        mock_broker.send_order.assert_not_called()
+
+    def test_buy_skipped_when_position_size_zero(self):
+        """残高不足等で株数 0 のときは発注しない。"""
+        from src.trading.rule_execution import execute_rule_paper_trades
+
+        mock_broker = MagicMock()
+        mock_broker.get_positions.return_value = []
+
+        signals = [{"symbol": "7203", "signal": 1, "price": 1000.0}]
+        with (
+            patch("src.trading.rule_execution.PaperBroker", return_value=mock_broker),
+            patch("src.trading.rule_execution.RiskManager", return_value=self._mock_risk(qty=0)),
+            patch("src.trading.rule_execution.get_ticker", return_value="7203.T"),
+        ):
+            result = execute_rule_paper_trades(signals, "jp")
+        self.assertEqual(result["buy_orders"], 0)
+        mock_broker.send_order.assert_not_called()
 
     def test_sell_signal_places_order_when_holding(self):
         from src.trading.rule_execution import execute_rule_paper_trades
@@ -182,6 +255,26 @@ class TestExecuteRulePaperTrades(unittest.TestCase):
         signals = [{"symbol": "7203", "signal": -1, "price": 1100.0}]
         with (
             patch("src.trading.rule_execution.PaperBroker", return_value=mock_broker),
+            patch("src.trading.rule_execution.RiskManager", return_value=self._mock_risk()),
+            patch("src.trading.rule_execution.get_ticker", return_value="7203.T"),
+        ):
+            result = execute_rule_paper_trades(signals, "jp")
+        self.assertEqual(result["sell_orders"], 1)
+
+    def test_sell_allowed_even_when_gate_blocked(self):
+        """ゲート不合格でも決済（SELL）は許可する。"""
+        from src.trading.rule_execution import execute_rule_paper_trades
+
+        mock_broker = MagicMock()
+        mock_broker.get_positions.return_value = [{"symbol": "7203", "qty": 100}]
+
+        signals = [{"symbol": "7203", "signal": -1, "price": 1100.0}]
+        with (
+            patch("src.trading.rule_execution.PaperBroker", return_value=mock_broker),
+            patch(
+                "src.trading.rule_execution.RiskManager",
+                return_value=self._mock_risk(is_allowed=False),
+            ),
             patch("src.trading.rule_execution.get_ticker", return_value="7203.T"),
         ):
             result = execute_rule_paper_trades(signals, "jp")
@@ -194,7 +287,10 @@ class TestExecuteRulePaperTrades(unittest.TestCase):
         mock_broker.get_positions.return_value = []
 
         signals = [{"symbol": "7203", "signal": 0, "price": 1000.0}]
-        with (patch("src.trading.rule_execution.PaperBroker", return_value=mock_broker),):
+        with (
+            patch("src.trading.rule_execution.PaperBroker", return_value=mock_broker),
+            patch("src.trading.rule_execution.RiskManager", return_value=self._mock_risk()),
+        ):
             result = execute_rule_paper_trades(signals, "jp")
         self.assertEqual(result["skipped"], 1)
 
@@ -207,6 +303,7 @@ class TestExecuteRulePaperTrades(unittest.TestCase):
         signals = [{"symbol": "7203", "signal": 1, "price": 1000.0}]
         with (
             patch("src.trading.rule_execution.PaperBroker", return_value=mock_broker),
+            patch("src.trading.rule_execution.RiskManager", return_value=self._mock_risk()),
             patch("src.trading.rule_execution.get_ticker", return_value="7203.T"),
         ):
             result = execute_rule_paper_trades(signals, "jp")
