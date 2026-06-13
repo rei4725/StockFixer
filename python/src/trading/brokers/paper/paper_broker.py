@@ -9,6 +9,7 @@ kabu STATION® API が利用できない環境（APIキー未取得・テスト�
 - BrokerBase と同一インターフェースのため、mode 変更だけで本番切り替え可能
 """
 
+import math
 import uuid
 from typing import Any, Callable
 
@@ -64,12 +65,15 @@ class PaperBroker(BrokerBase):
         """
         order_id = str(uuid.uuid4())[:12]
         sym = symbol.replace(".T", "")
+        # PaperBroker は東証銘柄専用（settle で f"{symbol}.T" を組み立てる）ため market は "jp"。
+        # ここで確定させることで、メタデータ補完（_link_paper_order_metadata）を経由しない
+        # 発注経路でも market が NULL にならず、エクイティ再構成の時価評価が機能する。
         with _db_connection() as con:
             con.execute(
                 """
                 INSERT INTO paper_orders
-                    (order_id, symbol, side, qty, price, order_type, status, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP)
+                    (order_id, market, symbol, side, qty, price, order_type, status, created_at)
+                VALUES (?, 'jp', ?, ?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP)
                 """,
                 [order_id, sym, int(side), qty, price, int(order_type)],
             )
@@ -161,6 +165,15 @@ class PaperBroker(BrokerBase):
                 open_price = float(today_row["Open"])
                 high_price = float(today_row["High"])
                 low_price = float(today_row["Low"])
+
+                # yfinance が NaN の OHLC を返すことがある（hist.empty は通過する）。
+                # NaN のまま約定させると fill_price / 残高 / avg_price が NaN 汚染するため、
+                # pending のまま据え置いて次回リトライさせる。
+                if math.isnan(open_price) or math.isnan(high_price) or math.isnan(low_price):
+                    logger.warning(
+                        f"[paper] {symbol}: OHLC が NaN のため約定スキップ（pending 据え置き）"
+                    )
+                    continue
 
                 if order_type_val == int(OrderType.MARKET):
                     fill_price = open_price
