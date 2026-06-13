@@ -195,6 +195,22 @@ class TestRunDailyOrders(unittest.TestCase):
         finally:
             self._stop_patches(patch_list)
 
+    def test_max_positions_cap_respected(self):
+        # ゲートが許可でも、保有が MAX_POSITIONS に達していれば新規買いは出さない
+        from config.settings import MAX_POSITIONS
+
+        held = [{"symbol": f"S{i:03d}", "qty": 100} for i in range(MAX_POSITIONS)]
+        broker = _make_broker(positions=held)
+        predictions = _make_predictions(n_buy=3)  # 新規銘柄 7200-7202
+        patches = self._patch_pipeline(predictions)
+        _, patch_list = self._start_patches(patches)
+        try:
+            stats = run_daily_orders(broker, market="jp", mode="paper")
+            self.assertEqual(stats["buy_orders"], 0)
+            broker.send_order.assert_not_called()
+        finally:
+            self._stop_patches(patch_list)
+
     def test_held_symbol_not_rebought(self):
         # 既に保有している銘柄には買い注文を出さない
         positions = [{"symbol": "7200", "qty": 100, "avg_price": 1000.0, "current_price": 1000.0}]

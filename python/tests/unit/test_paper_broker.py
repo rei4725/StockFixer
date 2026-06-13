@@ -151,6 +151,61 @@ class TestPaperBrokerSettle(unittest.TestCase):
         self.assertEqual(pos[0], 100)
 
     @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
+    def test_settle_sell_without_position_skips_cash(self):
+        """未保有銘柄の SELL では現金・実現損益を計上しない（幻の現金防止）。"""
+        self.broker.send_order("7203", OrderSide.SELL, 100)
+        self.broker.settle_pending_orders()
+        balance = _TEST_CON.execute("SELECT balance FROM paper_balance").fetchone()[0]
+        self.assertAlmostEqual(balance, 1_000_000.0)  # 増えていないこと
+        pos = _TEST_CON.execute("SELECT qty FROM paper_positions WHERE symbol='7203'").fetchone()
+        self.assertIsNone(pos)
+        pnl = _TEST_CON.execute(
+            "SELECT realized_pnl FROM paper_orders WHERE symbol='7203'"
+        ).fetchone()[0]
+        self.assertIsNone(pnl)
+
+    @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
+    def test_settle_sell_clamps_to_held_qty(self):
+        """保有数量を超える SELL は保有分にクランプして現金計上する。"""
+        _TEST_CON.execute(
+            "INSERT INTO paper_positions (symbol, qty, avg_price) VALUES ('7203', 100, 900.0)"
+        )
+        self.broker.send_order("7203", OrderSide.SELL, 150)  # 保有100を超える
+        self.broker.settle_pending_orders()
+        # fill=1000 のとき proceeds は 100株分のみ
+        balance = _TEST_CON.execute("SELECT balance FROM paper_balance").fetchone()[0]
+        self.assertAlmostEqual(balance, 1_000_000.0 + 1000.0 * 100)
+        pos = _TEST_CON.execute("SELECT qty FROM paper_positions WHERE symbol='7203'").fetchone()
+        self.assertIsNone(pos)  # 全量決済で削除
+        pnl = _TEST_CON.execute(
+            "SELECT realized_pnl FROM paper_orders WHERE symbol='7203'"
+        ).fetchone()[0]
+        self.assertAlmostEqual(pnl, (1000.0 - 900.0) * 100)
+
+    @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
+    def test_settle_skips_on_nan_ohlc(self):
+        """NaN の OHLC では約定させず pending を据え置く（残高・avg_price 汚染防止）。"""
+        nan_df = pd.DataFrame(
+            {
+                "Open": [float("nan")],
+                "High": [float("nan")],
+                "Low": [float("nan")],
+                "Close": [1000.0],
+            },
+            index=pd.to_datetime(["2026-03-15"]),
+        )
+        self._mock_market_data.get_ohlcv.return_value = nan_df
+        self.broker.send_order("7203", OrderSide.BUY, 100)
+        settled = self.broker.settle_pending_orders()
+        self.assertEqual(settled, [])
+        status = _TEST_CON.execute(
+            "SELECT status FROM paper_orders WHERE symbol='7203'"
+        ).fetchone()[0]
+        self.assertEqual(status, "pending")
+        balance = _TEST_CON.execute("SELECT balance FROM paper_balance").fetchone()[0]
+        self.assertAlmostEqual(balance, 1_000_000.0)
+
+    @patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)
     def test_settle_updates_paper_real_diff(self):
         result = self.broker.send_order("7203", OrderSide.BUY, 100)
         _TEST_CON.execute(

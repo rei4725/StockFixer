@@ -9,6 +9,7 @@ kabu STATION® API が利用できない環境（APIキー未取得・テスト�
 - BrokerBase と同一インターフェースのため、mode 変更だけで本番切り替え可能
 """
 
+import math
 import uuid
 from typing import Any, Callable
 
@@ -64,12 +65,15 @@ class PaperBroker(BrokerBase):
         """
         order_id = str(uuid.uuid4())[:12]
         sym = symbol.replace(".T", "")
+        # PaperBroker は東証銘柄専用（settle で f"{symbol}.T" を組み立てる）ため market は "jp"。
+        # ここで確定させることで、メタデータ補完（_link_paper_order_metadata）を経由しない
+        # 発注経路でも market が NULL にならず、エクイティ再構成の時価評価が機能する。
         with _db_connection() as con:
             con.execute(
                 """
                 INSERT INTO paper_orders
-                    (order_id, symbol, side, qty, price, order_type, status, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP)
+                    (order_id, market, symbol, side, qty, price, order_type, status, created_at)
+                VALUES (?, 'jp', ?, ?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP)
                 """,
                 [order_id, sym, int(side), qty, price, int(order_type)],
             )
@@ -162,6 +166,15 @@ class PaperBroker(BrokerBase):
                 high_price = float(today_row["High"])
                 low_price = float(today_row["Low"])
 
+                # yfinance が NaN の OHLC を返すことがある（hist.empty は通過する）。
+                # NaN のまま約定させると fill_price / 残高 / avg_price が NaN 汚染するため、
+                # pending のまま据え置いて次回リトライさせる。
+                if math.isnan(open_price) or math.isnan(high_price) or math.isnan(low_price):
+                    logger.warning(
+                        f"[paper] {symbol}: OHLC が NaN のため約定スキップ（pending 据え置き）"
+                    )
+                    continue
+
                 if order_type_val == int(OrderType.MARKET):
                     fill_price = open_price
                 else:  # 指値
@@ -251,22 +264,34 @@ class PaperBroker(BrokerBase):
                     [symbol, qty, fill_price],
                 )
         elif side == int(OrderSide.SELL):
-            proceeds = qty * fill_price
+            # 未保有銘柄の SELL は現金を計上しない（幻の現金水増しを防止）。
+            # 保有数量を超える SELL は保有分にクランプする（過大な現金計上を防止）。
+            if not existing:
+                logger.warning(
+                    "[paper] %s: 未保有のため SELL をスキップ（現金・実現損益を計上しない）", symbol
+                )
+                return
+            old_qty, old_avg = existing
+            sell_qty = min(qty, old_qty)
+            if sell_qty < qty:
+                logger.warning(
+                    "[paper] %s: 売却数量 %d が保有 %d を超過 → 保有分にクランプ",
+                    symbol,
+                    qty,
+                    old_qty,
+                )
+            proceeds = sell_qty * fill_price
             con.execute("UPDATE paper_balance SET balance = balance + ?", [proceeds])
-            if existing:
-                old_qty, old_avg = existing
-                new_qty = old_qty - qty
-                if new_qty <= 0:
-                    con.execute("DELETE FROM paper_positions WHERE symbol=?", [symbol])
-                else:
-                    con.execute(
-                        "UPDATE paper_positions SET qty=?, "
-                        "updated_at=CURRENT_TIMESTAMP WHERE symbol=?",
-                        [new_qty, symbol],
-                    )
+            new_qty = old_qty - sell_qty
+            if new_qty <= 0:
+                con.execute("DELETE FROM paper_positions WHERE symbol=?", [symbol])
             else:
-                old_avg = fill_price  # ポジション不明時はPnL=0扱い
-            realized_pnl = (fill_price - old_avg) * qty
+                con.execute(
+                    "UPDATE paper_positions SET qty=?, "
+                    "updated_at=CURRENT_TIMESTAMP WHERE symbol=?",
+                    [new_qty, symbol],
+                )
+            realized_pnl = (fill_price - old_avg) * sell_qty
             con.execute(
                 "UPDATE paper_orders SET realized_pnl=? WHERE order_id=?",
                 [realized_pnl, order_id],

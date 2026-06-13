@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from config.settings import MAX_ORDERS_PER_RUN, MAX_POSITIONS
 from src.trading.brokers.base import OrderSide, OrderType
 from src.trading.brokers.paper.paper_broker import PaperBroker
+from src.trading.risk_manager import RiskManager
 from src.utils.data_path_utils import get_ticker
 from src.utils.logger import get_logger
 
@@ -34,6 +36,7 @@ def execute_rule_paper_trades(
         {"buy_orders": int, "sell_orders": int, "skipped": int}
     """
     broker = PaperBroker(market_data_port=market_data_port)
+    risk = RiskManager(broker)
     buy_orders = 0
     sell_orders = 0
     skipped = 0
@@ -42,7 +45,22 @@ def execute_rule_paper_trades(
         positions = broker.get_positions()
         held_symbols = {p["symbol"] for p in positions}
     except Exception:
+        positions = []
         held_symbols = set()
+
+    # ML 経路（execution.run_daily_orders）と同等のリスク制御を適用する。
+    # R-307: DD 基準値を発注前に更新し、当日発注可否ゲート（日次損失・連続損失・
+    # 保有上限）を評価する。不合格時は新規買いを停止するが、決済（SELL）は許可する。
+    risk.update_peak_balance()
+    gate = risk.evaluate_trading_gate()
+    if not gate.is_allowed:
+        logger.warning(
+            "[rule] リスクゲート不合格のため新規買いを停止: %s",
+            gate.reason or "理由未設定",
+        )
+
+    position_count = len(held_symbols)  # 1ラン内で増える建玉数を追跡し MAX_POSITIONS を厳守
+    buy_orders_this_run = 0
 
     for item in signals:
         symbol = item["symbol"]
@@ -51,7 +69,35 @@ def execute_rule_paper_trades(
 
         try:
             if signal == 1 and symbol not in held_symbols:
-                qty = max(1, int(initial_budget_per_trade / price)) if price > 0 else 1
+                if not gate.is_allowed:
+                    skipped += 1
+                    continue
+                if position_count >= MAX_POSITIONS:
+                    logger.info(
+                        "[rule] %s: 保有上限 %d 到達のため新規買いスキップ", symbol, MAX_POSITIONS
+                    )
+                    skipped += 1
+                    continue
+                if buy_orders_this_run >= MAX_ORDERS_PER_RUN:
+                    logger.info(
+                        "[rule] %s: 1ラン発注上限 %d 到達のため新規買いスキップ",
+                        symbol,
+                        MAX_ORDERS_PER_RUN,
+                    )
+                    skipped += 1
+                    continue
+
+                # 残高連動のハーフ Kelly 基準で株数を算出（残高不足時は 0 株 → スキップ）。
+                # initial_budget_per_trade は 1 銘柄あたりの投資上限として併用する（保守側）。
+                qty = risk.calc_position_size(symbol, price)
+                if price > 0 and initial_budget_per_trade > 0:
+                    budget_cap = (int(initial_budget_per_trade / price) // 100) * 100
+                    qty = min(qty, budget_cap)
+                if qty <= 0:
+                    logger.info("[rule] %s: 発注株数 0（残高不足 or サイズ上限）→ スキップ", symbol)
+                    skipped += 1
+                    continue
+
                 ticker = get_ticker(market, symbol)
                 broker.send_order(
                     symbol=ticker,
@@ -60,6 +106,8 @@ def execute_rule_paper_trades(
                     order_type=OrderType.MARKET,
                 )
                 buy_orders += 1
+                buy_orders_this_run += 1
+                position_count += 1
                 logger.info(f"  BUY 注文: {symbol}  {qty}株  現在値={price:.0f}円")
 
             elif signal == -1 and symbol in held_symbols:

@@ -30,6 +30,7 @@ from config.settings import (
     LIMIT_ORDER_PRICE_BUFFER,
     LIMIT_ORDER_SPREAD_PROXY_THRESHOLD,
     MAX_ORDERS_PER_RUN,
+    MAX_POSITIONS,
     MAX_SECTOR_POSITIONS,
     MIN_CHANGE_RATIO,
 )
@@ -812,9 +813,19 @@ def run_daily_orders(
         )
         buy_signals = predictions.iloc[0:0]  # 空 DataFrame
 
+    # 1ラン内で増える建玉数を追跡し、ラン途中でも MAX_POSITIONS を超えないようにする。
+    # （ゲートはラン開始時の一度きりで、head(MAX_ORDERS_PER_RUN) だけでは保有上限を
+    #   最大 MAX_ORDERS_PER_RUN-1 件超過しうるため）
+    position_count = len(held_symbols)
+
     for _, row in buy_signals.iterrows():
         symbol = row["symbol"]
         current_price = float(row.get("current_price") or 0)
+
+        if position_count >= MAX_POSITIONS:
+            logger.info("[exec] 保有上限 %d 到達のため以降の新規買いをスキップ", MAX_POSITIONS)
+            stats["skipped"] += 1
+            continue
 
         # 予測変動量が閾値未満 → 発注スキップ（R-214）
         if abs(float(row.get("diff_ratio") or 0.0)) < MIN_CHANGE_RATIO:
@@ -910,6 +921,7 @@ def run_daily_orders(
             )
             stats["buy_orders"] += 1
             stats["total_turnover"] += current_price * qty
+            position_count += 1
         except Exception as e:
             logger.error(f"[exec] 買い注文エラー ({symbol}): {e}", exc_info=True)
             stats["errors"] += 1

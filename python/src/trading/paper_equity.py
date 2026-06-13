@@ -43,6 +43,7 @@ def _load_filled_orders() -> pd.DataFrame:
             SELECT market, symbol, side, qty, fill_price, filled_at
             FROM paper_orders
             WHERE status = 'filled' AND fill_price IS NOT NULL AND filled_at IS NOT NULL
+              AND NOT isnan(fill_price)
             ORDER BY filled_at
             """).fetchdf()
     return df
