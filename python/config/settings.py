@@ -106,9 +106,13 @@ class Settings(BaseSettings):
     FACTORY_N_WINDOWS: int = Field(default=8)
     FACTORY_GATE_MIN_TRADES: int = Field(default=30)
     FACTORY_GATE_MIN_DSR: float = Field(default=0.95)
-    FACTORY_GATE_MAX_PBO: float = Field(default=0.5)
+    FACTORY_GATE_MAX_PBO: float = Field(
+        default=0.5
+    )  # バッチ診断の閾値（per-hypothesis ゲートではない）
     FACTORY_GATE_MAX_DRAWDOWN: float = Field(default=-0.25)
-    FACTORY_GATE_CHAMPION_MARGIN: float = Field(default=1.1)
+    FACTORY_GATE_CHAMPION_MARGIN: float = Field(
+        default=1.0
+    )  # チャンピオン超え（×1.1 は到達不能だったため 1.0）
 
 
 settings = Settings()
