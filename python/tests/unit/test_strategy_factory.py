@@ -171,20 +171,24 @@ class TestApplyGate(unittest.TestCase):
         apply_gate(ev, champion_sharpe=1.0)
         self.assertFalse(ev.gate_passed)
 
-    def test_fails_on_high_pbo(self):
+    def test_high_pbo_does_not_block_gate(self):
+        # PBO はバッチ診断へ降格。高 PBO でも他条件を満たせばゲートは通る。
         ev = self._make_eval(pbo=0.70)
         apply_gate(ev, champion_sharpe=1.0)
-        self.assertFalse(ev.gate_passed)
+        self.assertTrue(ev.gate_passed)
+        self.assertFalse(any("pbo" in r for r in ev.gate_reasons))
 
     def test_fails_on_deep_drawdown(self):
         ev = self._make_eval(max_drawdown=-0.40)
         apply_gate(ev, champion_sharpe=1.0)
         self.assertFalse(ev.gate_passed)
 
-    def test_fails_when_not_beating_champion_margin(self):
-        ev = self._make_eval(sharpe_ratio=1.05)
-        apply_gate(ev, champion_sharpe=1.0)  # 必要値 1.1
+    def test_fails_when_not_beating_champion(self):
+        # champion マージン=1.0: champion 以下なら不合格
+        ev = self._make_eval(sharpe_ratio=0.9)
+        apply_gate(ev, champion_sharpe=1.0)  # 必要値 1.0
         self.assertFalse(ev.gate_passed)
+        self.assertTrue(any("sharpe" in r for r in ev.gate_reasons))
 
     def test_champion_nan_skips_champion_condition(self):
         ev = self._make_eval(sharpe_ratio=0.5, dsr=0.97, pbo=0.3)
@@ -250,6 +254,27 @@ class TestWriteReport(unittest.TestCase):
         self.assertIn("strategy-factory", report["labels"])
         self.assertIn("Deflated Sharpe", report["issue_body"])
         self.assertEqual(report["gate"]["dsr"], 0.96)
+        # 低 PBO のときは警告注記を出さない
+        self.assertNotIn("バッチPBO", report["issue_body"])
+
+    def test_high_batch_pbo_adds_warning_to_body(self):
+        ev = FactoryEvaluation(
+            hypothesis=FactoryHypothesis(rule_spec=_ATOMIC_SPEC, market="jp"),
+            sharpe_ratio=1.5,
+            dsr=0.96,
+            pbo=0.70,  # 高 PBO
+            num_trades=40,
+            max_drawdown=-0.1,
+            window_returns=[0.01] * 8,
+            n_symbols=3,
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("src.backtest.factory.get_results_dir", return_value=tmp):
+                path = write_report(ev, champion_sharpe=1.0, period=("2024-01-01", "2026-01-01"))
+            with open(path, encoding="utf-8") as f:
+                report = json.load(f)
+        self.assertIn("バッチPBO", report["issue_body"])
+        self.assertIn("過学習リスク", report["issue_body"])
 
 
 class TestRunFactoryBatch(unittest.TestCase):

@@ -102,6 +102,11 @@ _PARAM_GRID: dict[str, list[dict[str, Any]]] = {
 _REPORT_SCHEMA_VERSION = 1
 _MIN_SYMBOL_ROWS = 100
 
+# metrics._sharpe_ratio はトレード単位 Sharpe に ×√252 を掛けて年率化する。
+# この年率化済み Sharpe をそのまま DSR に渡すと z 値が巨大化し DSR が 0/1 に飽和して
+# ゲートの識別力を失う。DSR にはトレード単位 Sharpe（年率化を打ち消した値）を渡す。
+_SHARPE_ANNUALIZATION = math.sqrt(252)
+
 
 # ---------------------------------------------------------------------------
 # ルール構築
@@ -336,14 +341,17 @@ def evaluate_hypothesis(
 
 
 def apply_gate(evaluation: FactoryEvaluation, champion_sharpe: float) -> None:
-    """ゲート条件を判定し evaluation.gate_passed / gate_reasons を更新する。"""
+    """ゲート条件を判定し evaluation.gate_passed / gate_reasons を更新する。
+
+    PBO はバッチ全体で1値となる性質上、per-hypothesis ゲートに使うと「一晩全滅」に
+    なるため、ここでは判定しない（バッチ診断としてレポート/通知に警告表示する）。
+    DSR はトレード単位 Sharpe（年率化を打ち消した値）で算出済みのため飽和しない。
+    """
     reasons: list[str] = []
     if evaluation.num_trades < FACTORY_GATE_MIN_TRADES:
         reasons.append(f"num_trades {evaluation.num_trades} < {FACTORY_GATE_MIN_TRADES}")
     if math.isnan(evaluation.dsr) or evaluation.dsr < FACTORY_GATE_MIN_DSR:
         reasons.append(f"dsr {evaluation.dsr:.3f} < {FACTORY_GATE_MIN_DSR}")
-    if math.isnan(evaluation.pbo) or evaluation.pbo > FACTORY_GATE_MAX_PBO:
-        reasons.append(f"pbo {evaluation.pbo:.3f} > {FACTORY_GATE_MAX_PBO}")
     if evaluation.max_drawdown < FACTORY_GATE_MAX_DRAWDOWN:
         reasons.append(f"max_drawdown {evaluation.max_drawdown:.3f} < {FACTORY_GATE_MAX_DRAWDOWN}")
     if not math.isnan(champion_sharpe):
@@ -376,9 +384,16 @@ def _build_issue_body(
         f"| {i + 1} | {r:+.2%} |" for i, r in enumerate(evaluation.window_returns)
     )
     champion_cell = f"> チャンピオン {champion_sharpe:.3f} × {FACTORY_GATE_CHAMPION_MARGIN}"
+    pbo_warning = (
+        f"\n> ⚠️ **バッチPBO={evaluation.pbo:.3f} > {FACTORY_GATE_MAX_PBO}**: "
+        "この夜のバッチは選択過程の過学習リスクが高い。OOS 劣化に注意してレビューすること。\n"
+        if not math.isnan(evaluation.pbo) and evaluation.pbo > FACTORY_GATE_MAX_PBO
+        else ""
+    )
     return f"""## 戦略仮説（自動生成）
 
 夜間ファクトリーのゲートを通過した仮説です。`hypothesis_hash={h.hypothesis_hash}`
+{pbo_warning}
 
 ### スペック
 
@@ -504,11 +519,21 @@ def run_factory_batch(
 
     for evaluation in evaluations:
         evaluation.pbo = float(batch_pbo)
+        per_trade_sharpe = evaluation.sharpe_ratio / _SHARPE_ANNUALIZATION
         evaluation.dsr = deflated_sharpe_ratio(
-            evaluation.sharpe_ratio, max(n_trials, 1), max(evaluation.num_trades, 1)
+            per_trade_sharpe, max(n_trials, 1), max(evaluation.num_trades, 1)
         )
         if not evaluation.hypothesis.is_control:
             apply_gate(evaluation, champion_sharpe)
+
+    # PBO はバッチ単位の過学習診断。高ければログ警告（レポートにも注記される）。
+    if not math.isnan(batch_pbo) and batch_pbo > FACTORY_GATE_MAX_PBO:
+        logger.warning(
+            "[factory] バッチPBO=%.3f > %.2f（選択過程の過学習リスク高）。"
+            "合格レポートには警告を付与する。",
+            batch_pbo,
+            FACTORY_GATE_MAX_PBO,
+        )
 
     # 記録 + レポート出力（候補のみ。逐次実行なので DuckDB 書き込み規約に適合）
     for evaluation in result_candidates(evaluations):
