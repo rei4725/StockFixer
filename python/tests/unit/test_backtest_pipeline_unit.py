@@ -11,7 +11,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.backtest.metrics import _extract_trade_pnl, _max_drawdown, _sharpe_ratio, compute_metrics
+from src.backtest.metrics import (
+    _extract_trade_pnl,
+    _max_drawdown,
+    _sharpe_per_trade,
+    compute_metrics,
+)
 from src.backtest.task import ReturnRegressionTask
 
 
@@ -159,7 +164,7 @@ class TestMetricsHelpers:
         # サンプルリターン列（±5%）
         returns = [0.05, -0.03, 0.04, -0.02, 0.06]
 
-        sharpe = _sharpe_ratio(returns, risk_free_rate=0.0, trading_days_per_year=252)
+        sharpe = _sharpe_per_trade(returns)
 
         # シャープレシオは計算可能（数値）
         assert isinstance(sharpe, (int, float))

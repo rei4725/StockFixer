@@ -102,11 +102,6 @@ _PARAM_GRID: dict[str, list[dict[str, Any]]] = {
 _REPORT_SCHEMA_VERSION = 1
 _MIN_SYMBOL_ROWS = 100
 
-# metrics._sharpe_ratio はトレード単位 Sharpe に ×√252 を掛けて年率化する。
-# この年率化済み Sharpe をそのまま DSR に渡すと z 値が巨大化し DSR が 0/1 に飽和して
-# ゲートの識別力を失う。DSR にはトレード単位 Sharpe（年率化を打ち消した値）を渡す。
-_SHARPE_ANNUALIZATION = math.sqrt(252)
-
 
 # ---------------------------------------------------------------------------
 # ルール構築
@@ -280,6 +275,7 @@ def evaluate_hypothesis(
     backtester = _make_backtester(initial_cash, fee_rate, slippage, stop_loss_pct)
 
     sharpes: list[float] = []
+    sharpes_per_trade: list[float] = []
     win_rates: list[float] = []
     total_returns: list[float] = []
     drawdowns: list[float] = []
@@ -295,6 +291,7 @@ def evaluate_hypothesis(
 
             _, metrics = backtester.simulate_trading(df, signal)
             sharpes.append(float(metrics.get("sharpe_ratio", 0.0) or 0.0))
+            sharpes_per_trade.append(float(metrics.get("sharpe_per_trade", 0.0) or 0.0))
             win_rates.append(float(metrics.get("win_rate", 0.0) or 0.0))
             total_returns.append(float(metrics.get("total_return", 0.0) or 0.0))
             drawdowns.append(float(metrics.get("max_drawdown", 0.0) or 0.0))
@@ -326,6 +323,7 @@ def evaluate_hypothesis(
     return FactoryEvaluation(
         hypothesis=hypothesis,
         sharpe_ratio=float(np.mean(sharpes)) if sharpes else 0.0,
+        sharpe_per_trade=float(np.mean(sharpes_per_trade)) if sharpes_per_trade else 0.0,
         win_rate=float(np.mean(win_rates)) if win_rates else 0.0,
         num_trades=num_trades,
         max_drawdown=float(min(drawdowns)) if drawdowns else 0.0,
@@ -519,9 +517,10 @@ def run_factory_batch(
 
     for evaluation in evaluations:
         evaluation.pbo = float(batch_pbo)
-        per_trade_sharpe = evaluation.sharpe_ratio / _SHARPE_ANNUALIZATION
+        # DSR には非年率の取引単位 Sharpe を渡す（compute_metrics が直接出力する。
+        # metrics 側で年率化が実取引頻度ベースに是正されたため、旧 √252 de-scale は不要）。
         evaluation.dsr = deflated_sharpe_ratio(
-            per_trade_sharpe, max(n_trials, 1), max(evaluation.num_trades, 1)
+            evaluation.sharpe_per_trade, max(n_trials, 1), max(evaluation.num_trades, 1)
         )
         if not evaluation.hypothesis.is_control:
             apply_gate(evaluation, champion_sharpe)

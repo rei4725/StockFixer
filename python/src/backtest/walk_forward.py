@@ -235,6 +235,7 @@ class WalkForwardValidator:
         numeric_cols = [
             "total_return",
             "sharpe_ratio",
+            "sharpe_per_trade",
             "max_drawdown",
             "gross_total_return",
             "gross_sharpe_ratio",
