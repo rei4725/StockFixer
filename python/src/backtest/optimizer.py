@@ -779,8 +779,11 @@ def run_optuna_optimization(
             if wf_df is None or wf_df.empty or sort_by not in wf_df.columns:
                 return float("-inf") if not _minimize else float("inf")
             val = float(wf_df[sort_by].mean())
-            # DSR 算出用に最良試行の Sharpe と総取引回数（observations）を保持する
-            if "sharpe_ratio" in wf_df.columns:
+            # DSR 算出用に最良試行の Sharpe と総取引回数（observations）を保持する。
+            # DSR には非年率の取引単位 Sharpe を渡す（年率化済みだと飽和するため）。
+            if "sharpe_per_trade" in wf_df.columns:
+                trial.set_user_attr("sharpe", float(wf_df["sharpe_per_trade"].mean()))
+            elif "sharpe_ratio" in wf_df.columns:
                 trial.set_user_attr("sharpe", float(wf_df["sharpe_ratio"].mean()))
             if "num_trades" in wf_df.columns:
                 trial.set_user_attr("num_trades", int(wf_df["num_trades"].sum()))

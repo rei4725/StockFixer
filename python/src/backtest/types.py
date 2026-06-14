@@ -65,6 +65,7 @@ class FactoryEvaluation:
 
     hypothesis: FactoryHypothesis
     sharpe_ratio: float = 0.0
+    sharpe_per_trade: float = 0.0
     win_rate: float = 0.0
     num_trades: int = 0
     max_drawdown: float = 0.0

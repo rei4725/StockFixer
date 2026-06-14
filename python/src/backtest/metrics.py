@@ -88,8 +88,14 @@ def compute_metrics(
     avg_win = float(np.mean(win_returns)) if win_returns else 0.0
     avg_loss = float(np.mean(loss_returns)) if loss_returns else 0.0
 
-    # --- Sharpe ratio（取引ごとのリターン列から） ---
-    sharpe = _sharpe_ratio(trade_pnls, risk_free_rate, trading_days_per_year)
+    # --- Sharpe ratio（取引ごとの損益列から） ---
+    # 取引単位 Sharpe（非年率）を素に、実取引頻度で年率化する。
+    # sharpe_per_trade は DSR 入力（飽和回避）に使う。
+    sharpe_per_trade = _sharpe_per_trade(
+        trade_pnls, risk_free_rate / max(num_trades, 1) if num_trades > 0 else 0.0
+    )
+    trades_per_year = _estimate_trades_per_year(trade_log, num_trades, trading_days_per_year)
+    sharpe = _annualize_sharpe(sharpe_per_trade, trades_per_year)
 
     # --- Maximum Drawdown ---
     max_dd = _max_drawdown(equity)
@@ -119,6 +125,7 @@ def compute_metrics(
         "win_rate": round(win_rate, 4),
         "profit_factor": round(profit_factor, 4) if profit_factor != math.inf else None,
         "sharpe_ratio": round(sharpe, 4),
+        "sharpe_per_trade": round(sharpe_per_trade, 6),
         "max_drawdown": round(max_dd, 6),
         "avg_position_fraction": (
             round(float(position_fractions.mean()), 6) if not position_fractions.empty else 0.0
@@ -137,7 +144,9 @@ def compute_metrics(
         "avg_loss": round(avg_loss, 6),
     }
     if n_trials > 0:
-        result["dsr"] = deflated_sharpe_ratio(sharpe, n_trials, num_trades)
+        # DSR には非年率の取引単位 Sharpe を渡す（年率化済み Sharpe だと z 値が
+        # 巨大化して DSR が 0/1 に飽和し、過学習検知が機能しなくなるため）。
+        result["dsr"] = deflated_sharpe_ratio(sharpe_per_trade, n_trials, num_trades)
     return result
 
 
@@ -152,6 +161,7 @@ def _empty_metrics(initial_cash: float) -> dict[str, Any]:
         "win_rate": 0.0,
         "profit_factor": None,
         "sharpe_ratio": 0.0,
+        "sharpe_per_trade": 0.0,
         "max_drawdown": 0.0,
         "avg_position_fraction": 0.0,
         "min_position_fraction": 0.0,
@@ -351,23 +361,47 @@ def probability_of_backtest_overfitting(
     return float(np.mean(arr <= 0.0))
 
 
-def _sharpe_ratio(
-    pnl_list: list[float],
-    risk_free_rate: float,
-    trading_days_per_year: int,
-) -> float:
-    """取引単位の損益リストから Sharpe ratio を計算する"""
+def _sharpe_per_trade(pnl_list: list[float], risk_free_per_trade: float = 0.0) -> float:
+    """取引単位の Sharpe（mean/std、年率化なし）を返す。
+
+    DSR の入力（López de Prado の式は非年率の per-observation Sharpe を前提）と、
+    年率化 Sharpe の素として使う。
+    """
     if len(pnl_list) < 2:
         return 0.0
-    arr = np.array(pnl_list)
-    mean = arr.mean()
+    arr = np.array(pnl_list, dtype=float)
     std = arr.std(ddof=1)
     if std == 0:
         return 0.0
-    # 年率換算（取引回数ベース）
-    trades_per_year = trading_days_per_year  # 近似値
-    daily_rf = risk_free_rate / trades_per_year
-    return float((mean - daily_rf) / std * math.sqrt(trades_per_year))
+    return float((arr.mean() - risk_free_per_trade) / std)
+
+
+def _estimate_trades_per_year(
+    trade_log: pd.DataFrame, num_trades: int, trading_days_per_year: int
+) -> float:
+    """バックテスト期間の暦スパンから実取引頻度（年あたり取引数）を推定する。
+
+    旧実装は一律 252 取引/年と仮定して年率化していたが、これは実取引頻度を無視し
+    Sharpe を頻度非整合に膨張させていた。期間が不明な場合のみ従来挙動（252）に
+    フォールバックする。
+    """
+    if num_trades < 1 or "date" not in trade_log.columns:
+        return float(trading_days_per_year)
+    dates = pd.to_datetime(trade_log["date"], errors="coerce").dropna()
+    if dates.empty:
+        return float(trading_days_per_year)
+    span_days = (dates.max() - dates.min()).days
+    if span_days <= 0:
+        return float(trading_days_per_year)
+    years = span_days / 365.25
+    return num_trades / years
+
+
+def _annualize_sharpe(sharpe_per_trade: float, trades_per_year: float) -> float:
+    """取引単位 Sharpe を実取引頻度で年率化する。"""
+    if trades_per_year <= 0:
+        return 0.0
+    return float(sharpe_per_trade * math.sqrt(trades_per_year))
 
 
 def _max_drawdown(equity: pd.Series) -> float:

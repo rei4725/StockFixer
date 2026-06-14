@@ -12,7 +12,7 @@ import pytest
 from src.backtest.metrics import (
     _extract_trade_pnl,
     _max_drawdown,
-    _sharpe_ratio,
+    _sharpe_per_trade,
     compute_metrics,
     deflated_sharpe_ratio,
     fetch_benchmark_returns,
@@ -222,25 +222,25 @@ class TestExtractTradePnl(unittest.TestCase):
 
 
 class TestSharpeRatio(unittest.TestCase):
-    """_sharpe_ratio のテスト"""
+    """_sharpe_per_trade のテスト（非年率の取引単位 Sharpe）"""
 
     def test_empty_list_returns_zero(self):
-        self.assertEqual(_sharpe_ratio([], 0.0, 252), 0.0)
+        self.assertEqual(_sharpe_per_trade([]), 0.0)
 
     def test_single_item_returns_zero(self):
-        self.assertEqual(_sharpe_ratio([100.0], 0.0, 252), 0.0)
+        self.assertEqual(_sharpe_per_trade([100.0]), 0.0)
 
     def test_zero_std_returns_zero(self):
-        self.assertEqual(_sharpe_ratio([100.0, 100.0, 100.0], 0.0, 252), 0.0)
+        self.assertEqual(_sharpe_per_trade([100.0, 100.0, 100.0]), 0.0)
 
     def test_positive_returns_positive_sharpe(self):
         pnl = [200.0, 100.0, 300.0, 150.0, 250.0]
-        sharpe = _sharpe_ratio(pnl, 0.0, 252)
+        sharpe = _sharpe_per_trade(pnl)
         self.assertGreater(sharpe, 0.0)
 
     def test_negative_returns_negative_sharpe(self):
         pnl = [-200.0, -100.0, -300.0, -150.0, -250.0]
-        sharpe = _sharpe_ratio(pnl, 0.0, 252)
+        sharpe = _sharpe_per_trade(pnl)
         self.assertLess(sharpe, 0.0)
 
 
@@ -442,7 +442,7 @@ class TestComputeMetricsBoundary:
     )
     def test_sharpe_sign(self, pnl, expected_sign):
         """平均プラスの PnL → シャープ正 / マイナスの PnL → シャープ負"""
-        sharpe = _sharpe_ratio(pnl, 0.0, 252)
+        sharpe = _sharpe_per_trade(pnl)
         if expected_sign == "positive":
             assert sharpe > 0.0
         else:
