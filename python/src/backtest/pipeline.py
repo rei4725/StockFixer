@@ -54,7 +54,10 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
         df = _dp.add_technical_indicators(df)
         _nan = int(df.isnull().sum().sum())
         if _nan > 0:
-            df = df.ffill().bfill()
+            # 時系列前処理では ffill のみ（過去→現在方向の補完）。
+            # bfill は未来情報リーク（ルックアヘッド）になるため使わず、
+            # 先頭の埋められない NaN 行は dropna で除去する。
+            df = df.ffill().dropna()
         _MIN_ROWS = 30
         if len(df) < _MIN_ROWS:
             logger.error(
@@ -95,7 +98,10 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
         df = _dp.add_technical_indicators(df)
         _nan = int(df.isnull().sum().sum())
         if _nan > 0:
-            df = df.ffill().bfill()
+            # 時系列前処理では ffill のみ（過去→現在方向の補完）。
+            # bfill は未来情報リーク（ルックアヘッド）になるため使わず、
+            # 先頭の埋められない NaN 行は dropna で除去する。
+            df = df.ffill().dropna()
         _MIN_ROWS = 30
         if len(df) < _MIN_ROWS:
             logger.error(

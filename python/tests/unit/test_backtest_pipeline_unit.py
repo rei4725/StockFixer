@@ -643,6 +643,62 @@ class TestSaveBacktestResults(unittest.TestCase):
             self.assertEqual(len(csv_files), 0)
 
 
+class TestLoadFeaturesNoLookaheadLeak:
+    """ルックアヘッドリーク防止: 前処理で bfill を使わないことの回帰テスト (#495)"""
+
+    def test_load_features_does_not_use_bfill(self):
+        """load_features のソースに後方埋め (.bfill()) が含まれないこと"""
+        import inspect
+
+        from src.backtest.pipeline import load_features
+
+        source = inspect.getsource(load_features)
+        assert ".bfill(" not in source, "bfill は未来情報リーク（ルックアヘッド）となるため使用禁止"
+
+    @patch("src.market_data.loader.get_raw_ohlcv_from_db")
+    @patch("src.market_data.technical.add_technical_indicators")
+    @patch("src.market_data.technical.create_basic_lag_features")
+    def test_leading_nan_rows_are_dropped_not_backfilled(self, mock_lag, mock_ti, mock_raw):
+        """先頭の NaN 行が後方埋めされず dropna で除去されること"""
+        n = 40
+        dates = pd.date_range("2024-01-01", periods=n, freq="B")
+        raw_df = pd.DataFrame(
+            {
+                "Open": [100.0] * n,
+                "High": [105.0] * n,
+                "Low": [95.0] * n,
+                "Close": [102.0] * n,
+                "Volume": [1000.0] * n,
+            },
+            index=dates,
+        )
+        mock_raw.return_value = raw_df.copy()
+        # 技術指標の初期ウィンドウを模した先頭 NaN（指標列）
+        ti_df = raw_df.copy()
+        ti_df["indicator"] = [np.nan] + [1.0] * (n - 1)
+        mock_ti.return_value = ti_df
+
+        captured = {}
+
+        def _capture(df, n_lags):
+            captured["df"] = df.copy()
+            idx = df.index
+            return pd.DataFrame({"feat1": [1.0] * len(idx)}, index=idx), pd.Series(
+                [0.01] * len(idx), index=idx
+            )
+
+        mock_lag.side_effect = _capture
+
+        from src.backtest.pipeline import load_features
+
+        load_features("jp", "7203", "raw")
+
+        processed = captured["df"]
+        # 先頭 NaN 行は除去され、bfill による未来値（102.0）で埋められていない
+        assert dates[0] not in processed.index
+        assert not processed["Close"].isnull().any()
+
+
 # ---------------------------------------------------------------------------
 # 追加テスト: load_features(source='api')
 # ---------------------------------------------------------------------------
