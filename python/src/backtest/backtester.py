@@ -132,6 +132,8 @@ class Backtester:
         short_price = 0.0
         short_trade_log: list[dict[str, Any]] = []
         trade_log = []
+        # 各バーの mark-to-market equity 記録 (date, equity_net, equity_gross) — #492
+        equity_records: list[tuple[Any, float, float]] = []
 
         close_col = "Close" if "Close" in df.columns else "close"
 
@@ -160,6 +162,11 @@ class Backtester:
                     )
                     position = 0
                     position_price = 0.0
+                    equity_records.append(
+                        self._mark_to_market(
+                            date, cash, cash_gross, position, price, short_position, short_price
+                        )
+                    )
                     continue
 
                 if self.take_profit_pct is not None and change_from_entry >= self.take_profit_pct:
@@ -179,6 +186,11 @@ class Backtester:
                     )
                     position = 0
                     position_price = 0.0
+                    equity_records.append(
+                        self._mark_to_market(
+                            date, cash, cash_gross, position, price, short_position, short_price
+                        )
+                    )
                     continue
 
             # シグナルに基づく売買
@@ -288,6 +300,13 @@ class Backtester:
                         }
                     )
 
+            # 各バー末の mark-to-market equity を記録（保有中の含み損益込み・#492）
+            equity_records.append(
+                self._mark_to_market(
+                    date, cash, cash_gross, position, price, short_position, short_price
+                )
+            )
+
         # 最終日に未決済ポジションを強制決済
         if position > 0:
             price = df.iloc[-1][close_col]
@@ -339,7 +358,13 @@ class Backtester:
             short_position = 0
 
         result_df = pd.DataFrame(trade_log)
-        metrics = compute_cost_comparison_metrics(result_df, self.initial_cash)
+        equity_net, equity_gross = self._build_equity_curves(equity_records)
+        metrics = compute_cost_comparison_metrics(
+            result_df,
+            self.initial_cash,
+            equity_net=equity_net,
+            equity_gross=equity_gross,
+        )
         # ショートメトリクスを追加
         if short_trade_log:
             metrics["short_return"] = round(
@@ -350,6 +375,54 @@ class Backtester:
             metrics["short_return"] = 0.0
             metrics["short_num_trades"] = 0
         return result_df, metrics
+
+    def _mark_to_market(
+        self,
+        date: Any,
+        cash: float,
+        cash_gross: float,
+        position: int,
+        price: float,
+        short_position: int,
+        short_price: float,
+    ) -> tuple[Any, float, float]:
+        """各バーの mark-to-market equity（net / gross）を返す（#492）。
+
+        保有中のロング時価とショート未実現損益を現金に加算し、決済を待たずに
+        含み損益を資産曲線へ反映する。これにより max_drawdown の過小評価を防ぐ。
+        - long_value : 保有株の時価（コスト無視。清算コストは決済時に計上）
+        - short_net  : 現時点でカバーした場合の純損益（往復コスト込み）
+        - short_gross: コスト無視のショート未実現損益
+        """
+        long_value = position * price
+        if short_position > 0:
+            short_net = short_price * short_position * (
+                1 - self.fee_rate - self.slippage
+            ) - price * short_position * (1 + self.fee_rate + self.slippage)
+            short_gross = (short_price - price) * short_position
+        else:
+            short_net = 0.0
+            short_gross = 0.0
+        equity_net = cash + long_value + short_net
+        equity_gross = cash_gross + long_value + short_gross
+        return date, equity_net, equity_gross
+
+    @staticmethod
+    def _build_equity_curves(
+        equity_records: list[tuple[Any, float, float]],
+    ) -> tuple[pd.Series, pd.Series]:
+        """記録した (date, equity_net, equity_gross) 列から日次 equity Series を構築する。
+
+        記録が空の場合は空 Series を返し、metrics 側で従来の決済時点キャッシュ
+        ベースの equity にフォールバックさせる（後方互換）。
+        """
+        if not equity_records:
+            empty = pd.Series(dtype=float)
+            return empty, empty
+        dates = [r[0] for r in equity_records]
+        net = pd.Series([r[1] for r in equity_records], index=dates)
+        gross = pd.Series([r[2] for r in equity_records], index=dates)
+        return net, gross
 
     def _calc_qty(
         self,
