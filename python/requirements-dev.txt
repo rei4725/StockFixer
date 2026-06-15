@@ -23,7 +23,7 @@ isort==8.0.1
 pre-commit==4.6.0
 
 # セキュリティスキャン
-pip-audit>=2.10.0
+pip-audit>=2.10.1
 bandit>=1.9.4
 
 # 循環依存検出
