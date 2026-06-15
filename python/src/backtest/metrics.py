@@ -10,7 +10,7 @@ from __future__ import annotations
 import math
 import os
 from datetime import datetime
-from typing import Any
+from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
@@ -29,6 +29,7 @@ def compute_metrics(
     trading_days_per_year: int = 252,
     cash_column: str = "cash",
     n_trials: int = 0,
+    equity_series: Optional[pd.Series] = None,
 ) -> dict[str, Any]:
     """
     取引ログから主要メトリクスを一括計算する。
@@ -40,6 +41,9 @@ def compute_metrics(
         risk_free_rate: 無リスク金利（年率、小数）
         trading_days_per_year: 1年の取引日数（Sharpe計算用）
         cash_column: equity curve 算出に使う資産列名
+        equity_series: 各バーの mark-to-market 日次 equity（保有中の含み損益込み）。
+                       渡された場合は max_drawdown をこの系列から算出する。None の場合は
+                       決済時点キャッシュベースの equity にフォールバックする（後方互換）。
 
     Returns:
         dict: 各指標の辞書
@@ -98,7 +102,10 @@ def compute_metrics(
     sharpe = _annualize_sharpe(sharpe_per_trade, trades_per_year)
 
     # --- Maximum Drawdown ---
-    max_dd = _max_drawdown(equity)
+    # mark-to-market 日次 equity が渡された場合はそれを使う（保有中の含み損益を反映）。
+    # 渡されない場合は決済時点キャッシュベースの equity にフォールバック（後方互換）。
+    dd_equity = equity_series if equity_series is not None and not equity_series.empty else equity
+    max_dd = _max_drawdown(dd_equity)
 
     buy_log = (
         trade_log[trade_log["action"] == "buy"] if "action" in trade_log.columns else pd.DataFrame()
@@ -215,14 +222,21 @@ def compute_cost_comparison_metrics(
     initial_cash: float,
     risk_free_rate: float = 0.0,
     trading_days_per_year: int = 252,
+    equity_net: Optional[pd.Series] = None,
+    equity_gross: Optional[pd.Series] = None,
 ) -> dict[str, Any]:
-    """控除後（net）と控除前（gross）のKPI比較を返す。"""
+    """控除後（net）と控除前（gross）のKPI比較を返す。
+
+    equity_net / equity_gross に各バーの mark-to-market 日次 equity を渡すと、
+    max_drawdown を保有中の含み損益込みで算出する（#492）。
+    """
     net = compute_metrics(
         trade_log=trade_log,
         initial_cash=initial_cash,
         risk_free_rate=risk_free_rate,
         trading_days_per_year=trading_days_per_year,
         cash_column="cash",
+        equity_series=equity_net,
     )
     gross = compute_metrics(
         trade_log=trade_log,
@@ -230,6 +244,7 @@ def compute_cost_comparison_metrics(
         risk_free_rate=risk_free_rate,
         trading_days_per_year=trading_days_per_year,
         cash_column="cash_gross",
+        equity_series=equity_gross,
     )
 
     result = {

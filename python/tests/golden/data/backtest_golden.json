@@ -1,5 +1,5 @@
 {
-  "hash": "b6341f640d1b643b9f4abf3221d8dea3e025d7337b1dbffbb6f952661e1a9b72",
+  "hash": "e747d9d47d83d31dd0dbc76e644d290071c5e63398f5c2093f79a6edcb9fa8ee",
   "data": {
     "trade_log": [
       {
@@ -93,8 +93,9 @@
       "num_trades": 6,
       "win_rate": 0.6667,
       "profit_factor": 3.0371,
-      "sharpe_ratio": 8.0253,
-      "max_drawdown": -0.020788,
+      "sharpe_ratio": 3.8907,
+      "sharpe_per_trade": 0.505548,
+      "max_drawdown": -0.024769,
       "avg_position_fraction": 0.999937,
       "min_position_fraction": 0.999899,
       "max_position_fraction": 0.999976,
@@ -104,8 +105,8 @@
       "avg_loss": 0.016151,
       "gross_final_cash": 1070369.69,
       "gross_total_return": 0.07037,
-      "gross_sharpe_ratio": 8.0253,
-      "gross_max_drawdown": -0.017564,
+      "gross_sharpe_ratio": 3.8907,
+      "gross_max_drawdown": -0.021604,
       "cost_impact_cash": 18801.77,
       "cost_impact_return": 0.018802,
       "short_return": 0.0,
