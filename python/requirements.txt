@@ -27,7 +27,7 @@ filelock>=3.29.1
 optuna>=4.9.0
 pydantic-settings>=2.14.1
 prometheus-client>=0.25.0
-anthropic>=0.107.1
+anthropic>=0.109.1
 
 
 # セキュリティ修正: 脆弱性のある推移的依存関係を安全なバージョンに固定
