@@ -11,7 +11,7 @@ lightgbm==4.6.0
 xgboost==3.2.0
 requests==2.34.2
 httpx==0.28.1
-matplotlib==3.10.9
+matplotlib==3.11.0
 shap==0.52.0
 numba==0.65.1
 llvmlite==0.47.0
