@@ -35,19 +35,8 @@ jobs:
               body: ':warning: **セキュリティアドバイザリ由来の更新です。**\n\nこの PR は自動マージ対象ですが、セキュリティ修正を含むため変更内容を必ずご確認ください。'
             });
 
-      - name: Auto-approve patch updates
-        if: steps.metadata.outputs.update-type == 'version-update:semver-patch'
-        uses: actions/github-script@v9
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            await github.rest.pulls.createReview({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: context.payload.pull_request.number,
-              event: 'APPROVE'
-            });
-
+      # 注: 自動 approve は行わない。GITHUB_TOKEN による approve は 422 で失敗し、
+      # かつ dependabot PR は require-review-approval.yml の対象外（承認不要）のため不要。
       - name: Enable auto-merge for patch updates
         if: steps.metadata.outputs.update-type == 'version-update:semver-patch'
         run: gh pr merge --auto --squash "$PR_URL"
