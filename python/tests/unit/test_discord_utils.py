@@ -799,7 +799,7 @@ class TestSendWebhookFile(unittest.TestCase):
 class TestSendDriftAlert(unittest.TestCase):
     """send_drift_alert のテスト"""
 
-    @patch("src.reporting.discord.discord_utils.send_webhook_text", return_value=True)
+    @patch("src.reporting.discord.notifications_drift.send_webhook_text", return_value=True)
     def test_sends_alert_when_accuracy_below_threshold(self, mock_send):
         """閾値以下の direction_accuracy がある場合に通知が送信されること"""
         from src.reporting.discord.discord_utils import send_drift_alert
@@ -817,7 +817,7 @@ class TestSendDriftAlert(unittest.TestCase):
         mock_send.assert_called_once()
         self.assertTrue(result)
 
-    @patch("src.reporting.discord.discord_utils.send_webhook_text", return_value=True)
+    @patch("src.reporting.discord.notifications_drift.send_webhook_text", return_value=True)
     def test_no_alert_when_accuracy_above_threshold(self, mock_send):
         """閾値を超える direction_accuracy のみの場合は通知が送信されないこと"""
         from src.reporting.discord.discord_utils import send_drift_alert
@@ -835,7 +835,7 @@ class TestSendDriftAlert(unittest.TestCase):
         mock_send.assert_not_called()
         self.assertFalse(result)
 
-    @patch("src.reporting.discord.discord_utils.send_webhook_text")
+    @patch("src.reporting.discord.notifications_drift.send_webhook_text")
     def test_returns_false_for_empty_df(self, mock_send):
         """空 DataFrame の場合は False が返ること"""
         from src.reporting.discord.discord_utils import send_drift_alert
@@ -844,7 +844,7 @@ class TestSendDriftAlert(unittest.TestCase):
         mock_send.assert_not_called()
         self.assertFalse(result)
 
-    @patch("src.reporting.discord.discord_utils.send_webhook_text")
+    @patch("src.reporting.discord.notifications_drift.send_webhook_text")
     def test_returns_false_for_none(self, mock_send):
         """None を渡した場合は False が返ること"""
         from src.reporting.discord.discord_utils import send_drift_alert
@@ -950,7 +950,7 @@ class TestSendFeatureSuggestionNotification(unittest.TestCase):
 class TestSendAccuracySummary(unittest.TestCase):
     """send_accuracy_summary のテスト"""
 
-    @patch("src.reporting.discord.discord_utils.send_webhook_text", return_value=True)
+    @patch("src.reporting.discord.notifications_drift.send_webhook_text", return_value=True)
     def test_sends_summary_with_valid_df(self, mock_send):
         """有効な summary_df がある場合に通知が送信されること"""
         from src.reporting.discord.discord_utils import send_accuracy_summary
@@ -972,7 +972,7 @@ class TestSendAccuracySummary(unittest.TestCase):
         self.assertIn("jp/7203", text)
         self.assertIn("us/AAPL", text)
 
-    @patch("src.reporting.discord.discord_utils.send_webhook_text")
+    @patch("src.reporting.discord.notifications_drift.send_webhook_text")
     def test_returns_false_for_empty_df(self, mock_send):
         """空 DataFrame の場合は False が返ること"""
         from src.reporting.discord.discord_utils import send_accuracy_summary
@@ -981,7 +981,7 @@ class TestSendAccuracySummary(unittest.TestCase):
         mock_send.assert_not_called()
         self.assertFalse(result)
 
-    @patch("src.reporting.discord.discord_utils.send_webhook_text")
+    @patch("src.reporting.discord.notifications_drift.send_webhook_text")
     def test_returns_false_for_none(self, mock_send):
         """None を渡した場合は False が返ること"""
         from src.reporting.discord.discord_utils import send_accuracy_summary
