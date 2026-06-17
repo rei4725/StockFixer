@@ -13,6 +13,7 @@ from typing import Optional
 import requests
 
 from src.reporting.discord import rate_limiter as _rate_limiter
+from src.reporting.discord.discord_notification_specs import NotificationSpec
 from src.reporting.discord.discord_text import DISCORD_TEXT_LIMIT, split_text_chunks
 from src.utils.japan_time import isoformat_jst
 from src.utils.run_context import get_run_id
@@ -190,3 +191,22 @@ def send_webhook_file(file_path: str, title: str = "") -> bool:
     except requests.exceptions.RequestException as e:
         logger.error("Discordファイル送信失敗: %s", e)
         return False
+
+
+def send_status_notification(spec: NotificationSpec, lines: list[str]) -> bool:
+    return send_webhook_notification(spec.title, "\n".join(lines), color=spec.color)
+
+
+def send_status_fields(
+    spec: NotificationSpec,
+    fields: list[dict],
+    description: str = "",
+) -> bool:
+    """NotificationSpec と embed fields（名前/値の2カラムグリッド）で通知する。
+
+    Args:
+        spec: タイトルと色
+        fields: [{"name": str, "value": str, "inline": bool}, ...]
+        description: fields の上に表示する補足文（任意）
+    """
+    return send_webhook_notification(spec.title, description, color=spec.color, fields=fields)

@@ -658,7 +658,7 @@ class TestSendTextFileChunked:
 class TestSendStatusNotification:
     """send_status_notification のテスト"""
 
-    @patch("src.reporting.discord.discord_utils.send_webhook_notification")
+    @patch("src.reporting.discord.webhook_sender.send_webhook_notification")
     def test_calls_webhook_notification_with_title(self, mock_notify):
         """spec のタイトルと行を結合して通知すること"""
         from src.reporting.discord.discord_notification_specs import NotificationSpec

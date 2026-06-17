@@ -5,6 +5,11 @@ from __future__ import annotations
 DISCORD_TEXT_LIMIT = 1900
 DISCORD_WIDE_TEXT_LIMIT = 3800
 
+# 日時表示フォーマット（Discord 通知共通）
+DISCORD_DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S JST"
+DISCORD_MINUTE_FORMAT = "%Y-%m-%d %H:%M JST"
+DISCORD_DATE_FORMAT = "%Y/%m/%d"
+
 
 def split_text_chunks(
     text: str, limit: int = DISCORD_TEXT_LIMIT, preserve_lines: bool = True
