@@ -888,7 +888,7 @@ class TestSendWeeklyReportExtra(unittest.TestCase):
 
 
 class TestSendFeatureSuggestionNotification(unittest.TestCase):
-    @patch("src.reporting.discord.discord_utils.send_webhook_notification", return_value=True)
+    @patch("src.reporting.discord.notifications_model.send_webhook_notification", return_value=True)
     def test_sends_notification_with_candidates(self, mock_send):
         from src.reporting.discord.discord_utils import send_feature_suggestion_notification
 
@@ -908,7 +908,7 @@ class TestSendFeatureSuggestionNotification(unittest.TestCase):
         self.assertIn("rsi", kwargs["message"])
         self.assertIn("macd", kwargs["message"])
 
-    @patch("src.reporting.discord.discord_utils.send_webhook_notification", return_value=True)
+    @patch("src.reporting.discord.notifications_model.send_webhook_notification", return_value=True)
     def test_global_warning_for_common_features(self, mock_send):
         from src.reporting.discord.discord_utils import send_feature_suggestion_notification
 
@@ -927,7 +927,7 @@ class TestSendFeatureSuggestionNotification(unittest.TestCase):
         self.assertIn("グローバル除外候補", message)
         self.assertIn("rsi", message)
 
-    @patch("src.reporting.discord.discord_utils.send_webhook_notification")
+    @patch("src.reporting.discord.notifications_model.send_webhook_notification")
     def test_returns_false_for_empty_list(self, mock_send):
         from src.reporting.discord.discord_utils import send_feature_suggestion_notification
 
@@ -935,7 +935,7 @@ class TestSendFeatureSuggestionNotification(unittest.TestCase):
         self.assertFalse(result)
         mock_send.assert_not_called()
 
-    @patch("src.reporting.discord.discord_utils.send_webhook_notification", return_value=True)
+    @patch("src.reporting.discord.notifications_model.send_webhook_notification", return_value=True)
     def test_handles_empty_candidates_df(self, mock_send):
         from src.reporting.discord.discord_utils import send_feature_suggestion_notification
 
