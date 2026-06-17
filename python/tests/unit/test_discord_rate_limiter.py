@@ -100,9 +100,9 @@ class TestRateLimit:
 
 
 class TestIntegrationWithSendWebhookNotification:
-    @patch("src.reporting.discord.discord_utils._post_webhook")
+    @patch("src.reporting.discord.webhook_sender._post_webhook")
     @patch(
-        "src.reporting.discord.discord_utils.isoformat_jst",
+        "src.reporting.discord.webhook_sender.isoformat_jst",
         return_value="2026-01-01T00:00:00+09:00",
     )
     @patch("src.reporting.discord.rate_limiter._limiter")
@@ -114,9 +114,9 @@ class TestIntegrationWithSendWebhookNotification:
         assert result is True
         mock_post.assert_not_called()
 
-    @patch("src.reporting.discord.discord_utils._post_webhook")
+    @patch("src.reporting.discord.webhook_sender._post_webhook")
     @patch(
-        "src.reporting.discord.discord_utils.isoformat_jst",
+        "src.reporting.discord.webhook_sender.isoformat_jst",
         return_value="2026-01-01T00:00:00+09:00",
     )
     @patch("src.reporting.discord.rate_limiter._limiter")
@@ -138,9 +138,9 @@ class TestIntegrationWithSendWebhookNotification:
         first_call = mock_post.call_args_list[0]
         assert "通知抑止サマリー" in first_call.kwargs["json_payload"]["content"]
 
-    @patch("src.reporting.discord.discord_utils._post_webhook")
+    @patch("src.reporting.discord.webhook_sender._post_webhook")
     @patch(
-        "src.reporting.discord.discord_utils.isoformat_jst",
+        "src.reporting.discord.webhook_sender.isoformat_jst",
         return_value="2026-01-01T00:00:00+09:00",
     )
     @patch("src.reporting.discord.rate_limiter._limiter")
