@@ -39,10 +39,10 @@ def _fields_map(embed: dict) -> dict:
 
 class TestSendDailyOrderCompletion(unittest.TestCase):
     @patch(
-        "src.reporting.discord.discord_utils._rate_limiter.check_and_record",
+        "src.reporting.discord.webhook_sender._rate_limiter.check_and_record",
         return_value=(True, None),
     )
-    @patch("src.reporting.discord.discord_utils._post_webhook")
+    @patch("src.reporting.discord.webhook_sender._post_webhook")
     def test_normal_completion_notification(self, mock_post, _mock_rl):
         mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
 
@@ -60,10 +60,10 @@ class TestSendDailyOrderCompletion(unittest.TestCase):
         self.assertNotIn("⛔ 停止理由", fields)
 
     @patch(
-        "src.reporting.discord.discord_utils._rate_limiter.check_and_record",
+        "src.reporting.discord.webhook_sender._rate_limiter.check_and_record",
         return_value=(True, None),
     )
-    @patch("src.reporting.discord.discord_utils._post_webhook")
+    @patch("src.reporting.discord.webhook_sender._post_webhook")
     def test_stopped_completion_notification_contains_stop_details(self, mock_post, _mock_rl):
         mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
 
@@ -88,10 +88,10 @@ class TestSendDailyOrderCompletion(unittest.TestCase):
 
 class TestSendDailyPipelineError(unittest.TestCase):
     @patch(
-        "src.reporting.discord.discord_utils._rate_limiter.check_and_record",
+        "src.reporting.discord.webhook_sender._rate_limiter.check_and_record",
         return_value=(True, None),
     )
-    @patch("src.reporting.discord.discord_utils._post_webhook")
+    @patch("src.reporting.discord.webhook_sender._post_webhook")
     def test_sends_error_as_fields(self, mock_post, _mock_rl):
         mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
 
@@ -105,10 +105,10 @@ class TestSendDailyPipelineError(unittest.TestCase):
 
 class TestSendDailySettleCompletion(unittest.TestCase):
     @patch(
-        "src.reporting.discord.discord_utils._rate_limiter.check_and_record",
+        "src.reporting.discord.webhook_sender._rate_limiter.check_and_record",
         return_value=(True, None),
     )
-    @patch("src.reporting.discord.discord_utils._post_webhook")
+    @patch("src.reporting.discord.webhook_sender._post_webhook")
     def test_sends_settled_count_as_fields(self, mock_post, _mock_rl):
         mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
 
@@ -122,10 +122,10 @@ class TestSendDailySettleCompletion(unittest.TestCase):
 
 class TestSendWeeklyTrainingCompletion(unittest.TestCase):
     @patch(
-        "src.reporting.discord.discord_utils._rate_limiter.check_and_record",
+        "src.reporting.discord.webhook_sender._rate_limiter.check_and_record",
         return_value=(True, None),
     )
-    @patch("src.reporting.discord.discord_utils._post_webhook")
+    @patch("src.reporting.discord.webhook_sender._post_webhook")
     def test_sends_models_as_fields(self, mock_post, _mock_rl):
         mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
 
@@ -139,10 +139,10 @@ class TestSendWeeklyTrainingCompletion(unittest.TestCase):
         self.assertIn("model_b", fields["🏷 学習済みモデル"])
 
     @patch(
-        "src.reporting.discord.discord_utils._rate_limiter.check_and_record",
+        "src.reporting.discord.webhook_sender._rate_limiter.check_and_record",
         return_value=(True, None),
     )
-    @patch("src.reporting.discord.discord_utils._post_webhook")
+    @patch("src.reporting.discord.webhook_sender._post_webhook")
     def test_empty_models_uses_placeholder(self, mock_post, _mock_rl):
         mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
 
@@ -156,10 +156,10 @@ class TestSendWeeklyTrainingCompletion(unittest.TestCase):
 
 class TestSendOptimizationCompletion(unittest.TestCase):
     @patch(
-        "src.reporting.discord.discord_utils._rate_limiter.check_and_record",
+        "src.reporting.discord.webhook_sender._rate_limiter.check_and_record",
         return_value=(True, None),
     )
-    @patch("src.reporting.discord.discord_utils._post_webhook")
+    @patch("src.reporting.discord.webhook_sender._post_webhook")
     def test_sends_success_failed_as_fields(self, mock_post, _mock_rl):
         mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
 
@@ -172,10 +172,10 @@ class TestSendOptimizationCompletion(unittest.TestCase):
         self.assertEqual(fields["⚠️ 失敗"], "2 銘柄")
 
     @patch(
-        "src.reporting.discord.discord_utils._rate_limiter.check_and_record",
+        "src.reporting.discord.webhook_sender._rate_limiter.check_and_record",
         return_value=(True, None),
     )
-    @patch("src.reporting.discord.discord_utils._post_webhook")
+    @patch("src.reporting.discord.webhook_sender._post_webhook")
     def test_all_success_uses_check_icon(self, mock_post, _mock_rl):
         mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
 
@@ -188,10 +188,10 @@ class TestSendOptimizationCompletion(unittest.TestCase):
 
 class TestSendWalkForwardReportCompletion(unittest.TestCase):
     @patch(
-        "src.reporting.discord.discord_utils._rate_limiter.check_and_record",
+        "src.reporting.discord.webhook_sender._rate_limiter.check_and_record",
         return_value=(True, None),
     )
-    @patch("src.reporting.discord.discord_utils._post_webhook")
+    @patch("src.reporting.discord.webhook_sender._post_webhook")
     def test_sends_summary_as_fields(self, mock_post, _mock_rl):
         mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
 
@@ -210,10 +210,10 @@ class TestSendWalkForwardReportCompletion(unittest.TestCase):
 
 class TestSendDbMaintenanceCompletion(unittest.TestCase):
     @patch(
-        "src.reporting.discord.discord_utils._rate_limiter.check_and_record",
+        "src.reporting.discord.webhook_sender._rate_limiter.check_and_record",
         return_value=(True, None),
     )
-    @patch("src.reporting.discord.discord_utils._post_webhook")
+    @patch("src.reporting.discord.webhook_sender._post_webhook")
     def test_success_sends_sizes_as_fields(self, mock_post, _mock_rl):
         mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
 
@@ -230,10 +230,10 @@ class TestSendDbMaintenanceCompletion(unittest.TestCase):
         self.assertEqual(fields["💾 DBサイズ"], "120.50 MB → 100.25 MB (-20.25 MB)")
 
     @patch(
-        "src.reporting.discord.discord_utils._rate_limiter.check_and_record",
+        "src.reporting.discord.webhook_sender._rate_limiter.check_and_record",
         return_value=(True, None),
     )
-    @patch("src.reporting.discord.discord_utils._post_webhook")
+    @patch("src.reporting.discord.webhook_sender._post_webhook")
     def test_error_sends_error_field(self, mock_post, _mock_rl):
         mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
 
@@ -249,10 +249,10 @@ class TestSendDbMaintenanceCompletion(unittest.TestCase):
 
 class TestSendBackupCompletion(unittest.TestCase):
     @patch(
-        "src.reporting.discord.discord_utils._rate_limiter.check_and_record",
+        "src.reporting.discord.webhook_sender._rate_limiter.check_and_record",
         return_value=(True, None),
     )
-    @patch("src.reporting.discord.discord_utils._post_webhook")
+    @patch("src.reporting.discord.webhook_sender._post_webhook")
     def test_success_sends_fields(self, mock_post, _mock_rl):
         mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
 
@@ -273,10 +273,10 @@ class TestSendBackupCompletion(unittest.TestCase):
         self.assertEqual(fields["📁 保存先"], "/backups/db_2026.duckdb")
 
     @patch(
-        "src.reporting.discord.discord_utils._rate_limiter.check_and_record",
+        "src.reporting.discord.webhook_sender._rate_limiter.check_and_record",
         return_value=(True, None),
     )
-    @patch("src.reporting.discord.discord_utils._post_webhook")
+    @patch("src.reporting.discord.webhook_sender._post_webhook")
     def test_error_sends_error_field(self, mock_post, _mock_rl):
         mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
 
@@ -292,10 +292,10 @@ class TestSendBackupCompletion(unittest.TestCase):
 
 class TestSendMonthlyReportNotification(unittest.TestCase):
     @patch(
-        "src.reporting.discord.discord_utils._rate_limiter.check_and_record",
+        "src.reporting.discord.webhook_sender._rate_limiter.check_and_record",
         return_value=(True, None),
     )
-    @patch("src.reporting.discord.discord_utils._post_webhook")
+    @patch("src.reporting.discord.webhook_sender._post_webhook")
     def test_sends_metrics_as_fields(self, mock_post, _mock_rl):
         mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
 
@@ -321,10 +321,10 @@ class TestSendMonthlyReportNotification(unittest.TestCase):
         self.assertEqual(fields["📁 保存先"], "/reports/2026-05.md")
 
     @patch(
-        "src.reporting.discord.discord_utils._rate_limiter.check_and_record",
+        "src.reporting.discord.webhook_sender._rate_limiter.check_and_record",
         return_value=(True, None),
     )
-    @patch("src.reporting.discord.discord_utils._post_webhook")
+    @patch("src.reporting.discord.webhook_sender._post_webhook")
     def test_none_metrics_render_na(self, mock_post, _mock_rl):
         mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
 
@@ -347,10 +347,10 @@ class TestSendMonthlyReportNotification(unittest.TestCase):
 
 class TestSendHitRateDriftAlert(unittest.TestCase):
     @patch(
-        "src.reporting.discord.discord_utils._rate_limiter.check_and_record",
+        "src.reporting.discord.webhook_sender._rate_limiter.check_and_record",
         return_value=(True, None),
     )
-    @patch("src.reporting.discord.discord_utils._post_webhook")
+    @patch("src.reporting.discord.webhook_sender._post_webhook")
     def test_drifted_sends_fields(self, mock_post, _mock_rl):
         mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
         result_obj = SimpleNamespace(
@@ -375,7 +375,7 @@ class TestSendHitRateDriftAlert(unittest.TestCase):
         self.assertEqual(fields["📉 低下率"], "12.0%")
         self.assertEqual(fields["🚧 閾値"], "10.0%")
 
-    @patch("src.reporting.discord.discord_utils._post_webhook")
+    @patch("src.reporting.discord.webhook_sender._post_webhook")
     def test_not_drifted_does_not_send(self, mock_post):
         result_obj = SimpleNamespace(
             is_drifted=False,
@@ -395,10 +395,10 @@ class TestSendHitRateDriftAlert(unittest.TestCase):
 
 class TestSendShadowEvaluationNotification(unittest.TestCase):
     @patch(
-        "src.reporting.discord.discord_utils._rate_limiter.check_and_record",
+        "src.reporting.discord.webhook_sender._rate_limiter.check_and_record",
         return_value=(True, None),
     )
-    @patch("src.reporting.discord.discord_utils._post_webhook")
+    @patch("src.reporting.discord.webhook_sender._post_webhook")
     def test_challenger_wins_sends_fields(self, mock_post, _mock_rl):
         mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
 
@@ -425,10 +425,10 @@ class TestSendShadowEvaluationNotification(unittest.TestCase):
         self.assertIn("n=1,500", fields["🧪 Challenger"])
 
     @patch(
-        "src.reporting.discord.discord_utils._rate_limiter.check_and_record",
+        "src.reporting.discord.webhook_sender._rate_limiter.check_and_record",
         return_value=(True, None),
     )
-    @patch("src.reporting.discord.discord_utils._post_webhook")
+    @patch("src.reporting.discord.webhook_sender._post_webhook")
     def test_no_winner_has_no_description(self, mock_post, _mock_rl):
         mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
 
@@ -443,9 +443,9 @@ class TestSendShadowEvaluationNotification(unittest.TestCase):
 
 
 class TestSendWebhookNotification(unittest.TestCase):
-    @patch("src.reporting.discord.discord_utils._post_webhook")
+    @patch("src.reporting.discord.webhook_sender._post_webhook")
     @patch(
-        "src.reporting.discord.discord_utils.isoformat_jst",
+        "src.reporting.discord.webhook_sender.isoformat_jst",
         return_value="2026-04-06T09:30:45+09:00",
     )
     def test_embed_timestamp_uses_jst_isoformat(self, mock_isoformat, mock_post):
@@ -461,10 +461,10 @@ class TestSendWebhookNotification(unittest.TestCase):
         self.assertEqual(payload["embeds"][0]["timestamp"], "2026-04-06T09:30:45+09:00")
 
     @patch(
-        "src.reporting.discord.discord_utils._rate_limiter.check_and_record",
+        "src.reporting.discord.webhook_sender._rate_limiter.check_and_record",
         return_value=(True, None),
     )
-    @patch("src.reporting.discord.discord_utils._post_webhook")
+    @patch("src.reporting.discord.webhook_sender._post_webhook")
     def test_fields_are_attached_to_embed(self, mock_post, _mock_rl):
         mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
         fields = [{"name": "🕐 時刻", "value": "09:00", "inline": True}]
@@ -476,10 +476,10 @@ class TestSendWebhookNotification(unittest.TestCase):
         self.assertEqual(payload["embeds"][0]["fields"], fields)
 
     @patch(
-        "src.reporting.discord.discord_utils._rate_limiter.check_and_record",
+        "src.reporting.discord.webhook_sender._rate_limiter.check_and_record",
         return_value=(True, None),
     )
-    @patch("src.reporting.discord.discord_utils._post_webhook")
+    @patch("src.reporting.discord.webhook_sender._post_webhook")
     def test_no_fields_key_when_not_provided(self, mock_post, _mock_rl):
         mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
 
@@ -495,7 +495,7 @@ class TestChunkedTextHelpers(unittest.TestCase):
 
         self.assertEqual(chunks, ["a\nb", "c"])
 
-    @patch("src.reporting.discord.discord_utils.send_webhook_text", return_value=True)
+    @patch("src.reporting.discord.webhook_sender.send_webhook_text", return_value=True)
     def test_send_webhook_text_chunked_sends_all_chunks(self, mock_send):
         result = send_webhook_text_chunked("12345", limit=2, preserve_lines=False)
 
@@ -504,7 +504,7 @@ class TestChunkedTextHelpers(unittest.TestCase):
 
 
 class TestSendShapNotification(unittest.TestCase):
-    @patch("src.reporting.discord.discord_utils.send_webhook_text", return_value=True)
+    @patch("src.reporting.discord.webhook_sender.send_webhook_text", return_value=True)
     def test_sends_top_and_bottom_sections(self, mock_send):
         shap_df = pd.DataFrame(
             {
@@ -525,7 +525,7 @@ class TestSendShapNotification(unittest.TestCase):
         self.assertIn("feat_1", sent_text)
         self.assertIn("feat_12", sent_text)
 
-    @patch("src.reporting.discord.discord_utils.send_webhook_text", return_value=True)
+    @patch("src.reporting.discord.webhook_sender.send_webhook_text", return_value=True)
     def test_returns_false_for_empty_dataframe(self, mock_send):
         result = send_shap_notification(
             "jp",
@@ -539,7 +539,7 @@ class TestSendShapNotification(unittest.TestCase):
 
 
 class TestSendWeeklyReport(unittest.TestCase):
-    @patch("src.reporting.discord.discord_utils.send_webhook_text", return_value=True)
+    @patch("src.reporting.discord.webhook_sender.send_webhook_text", return_value=True)
     def test_appends_paper_real_diff_section(self, mock_send):
         accuracy_df = pd.DataFrame(
             [
@@ -583,7 +583,7 @@ if __name__ == "__main__":
 class TestPostWebhookErrorHandling:
     """_post_webhook エラーハンドリングのテスト"""
 
-    @patch("src.reporting.discord.discord_utils._get_webhook_url")
+    @patch("src.reporting.discord.webhook_sender._get_webhook_url")
     def test_returns_none_when_no_webhook_url(self, mock_url):
         """Webhook URL 未設定時は None が返ること"""
         from src.reporting.discord.discord_utils import _post_webhook
@@ -592,8 +592,8 @@ class TestPostWebhookErrorHandling:
         result = _post_webhook(json_payload={"content": "test"})
         assert result is None
 
-    @patch("src.reporting.discord.discord_utils._get_webhook_url")
-    @patch("src.reporting.discord.discord_utils.requests.post")
+    @patch("src.reporting.discord.webhook_sender._get_webhook_url")
+    @patch("src.reporting.discord.webhook_sender.requests.post")
     def test_raises_on_http_error(self, mock_post, mock_url):
         """HTTP エラー時は例外が発生すること"""
         import requests
@@ -611,7 +611,7 @@ class TestPostWebhookErrorHandling:
 class TestSendWebhookTextChunkedExtra:
     """send_webhook_text_chunked の追加テスト"""
 
-    @patch("src.reporting.discord.discord_utils.send_webhook_text")
+    @patch("src.reporting.discord.webhook_sender.send_webhook_text")
     def test_sends_single_chunk_for_short_text(self, mock_send):
         """短いテキストは1チャンクで送信されること"""
         from src.reporting.discord.discord_utils import send_webhook_text_chunked
@@ -621,7 +621,7 @@ class TestSendWebhookTextChunkedExtra:
         assert result is True
         mock_send.assert_called_once()
 
-    @patch("src.reporting.discord.discord_utils.send_webhook_text")
+    @patch("src.reporting.discord.webhook_sender.send_webhook_text")
     def test_returns_false_if_any_chunk_fails(self, mock_send):
         """一部チャンクが失敗した場合は False が返ること"""
         from src.reporting.discord.discord_utils import send_webhook_text_chunked
@@ -635,7 +635,7 @@ class TestSendWebhookTextChunkedExtra:
 class TestSendTextFileChunked:
     """send_text_file_chunked のテスト"""
 
-    @patch("src.reporting.discord.discord_utils.send_webhook_text_chunked")
+    @patch("src.reporting.discord.webhook_sender.send_webhook_text_chunked")
     def test_reads_and_sends_file(self, mock_send, tmp_path):
         """ファイルを読み込んで送信すること"""
         from src.reporting.discord.discord_utils import send_text_file_chunked
@@ -679,8 +679,8 @@ class TestSendWebhookNotificationExtra:
 
     @patch("src.reporting.discord.rate_limiter.check_and_record", return_value=(True, None))
     @patch("src.reporting.discord.rate_limiter.apply_rate_limit")
-    @patch("src.reporting.discord.discord_utils._post_webhook")
-    @patch("src.reporting.discord.discord_utils.isoformat_jst")
+    @patch("src.reporting.discord.webhook_sender._post_webhook")
+    @patch("src.reporting.discord.webhook_sender.isoformat_jst")
     def test_returns_false_on_request_exception(self, mock_ts, mock_post, _rl, _ded):
         """RequestException 時は False が返ること"""
         import requests
@@ -694,8 +694,8 @@ class TestSendWebhookNotificationExtra:
 
     @patch("src.reporting.discord.rate_limiter.check_and_record", return_value=(True, None))
     @patch("src.reporting.discord.rate_limiter.apply_rate_limit")
-    @patch("src.reporting.discord.discord_utils._post_webhook")
-    @patch("src.reporting.discord.discord_utils.isoformat_jst")
+    @patch("src.reporting.discord.webhook_sender._post_webhook")
+    @patch("src.reporting.discord.webhook_sender.isoformat_jst")
     def test_returns_false_when_response_is_none(self, mock_ts, mock_post, _rl, _ded):
         """レスポンスが None の場合は False が返ること"""
         from src.reporting.discord.discord_utils import send_webhook_notification
@@ -735,10 +735,10 @@ class TestPostWebhook(unittest.TestCase):
     """_post_webhook のテスト"""
 
     @patch(
-        "src.reporting.discord.discord_utils._get_webhook_url",
+        "src.reporting.discord.webhook_sender._get_webhook_url",
         return_value="https://webhook.url/test",
     )
-    @patch("src.reporting.discord.discord_utils.requests.post")
+    @patch("src.reporting.discord.webhook_sender.requests.post")
     def test_posts_json_payload(self, mock_post, mock_url):
         """有効な URL がある場合に requests.post が呼ばれること"""
         from src.reporting.discord.discord_utils import _post_webhook
@@ -750,7 +750,7 @@ class TestPostWebhook(unittest.TestCase):
         _post_webhook(json_payload={"content": "test"})
         mock_post.assert_called_once()
 
-    @patch("src.reporting.discord.discord_utils._get_webhook_url", return_value=None)
+    @patch("src.reporting.discord.webhook_sender._get_webhook_url", return_value=None)
     def test_returns_none_when_no_url(self, mock_url):
         """URL 未設定時は None が返ること"""
         from src.reporting.discord.discord_utils import _post_webhook
@@ -762,9 +762,9 @@ class TestPostWebhook(unittest.TestCase):
 class TestSendWebhookFile(unittest.TestCase):
     """send_webhook_file のテスト"""
 
-    @patch("src.reporting.discord.discord_utils._post_webhook")
+    @patch("src.reporting.discord.webhook_sender._post_webhook")
     @patch("builtins.open", mock_open(read_data=b"test data"))
-    @patch("src.reporting.discord.discord_utils.os.path.exists", return_value=True)
+    @patch("src.reporting.discord.webhook_sender.os.path.exists", return_value=True)
     def test_sends_file_when_exists(self, mock_exists, mock_post):
         """ファイルが存在する場合に _post_webhook が呼ばれ True が返ること"""
         from src.reporting.discord.discord_utils import send_webhook_file
@@ -777,7 +777,7 @@ class TestSendWebhookFile(unittest.TestCase):
         mock_post.assert_called_once()
         self.assertTrue(result)
 
-    @patch("src.reporting.discord.discord_utils.os.path.exists", return_value=False)
+    @patch("src.reporting.discord.webhook_sender.os.path.exists", return_value=False)
     def test_skips_when_file_not_exists(self, mock_exists):
         """ファイルが存在しない場合は False が返ること"""
         from src.reporting.discord.discord_utils import send_webhook_file
@@ -785,9 +785,9 @@ class TestSendWebhookFile(unittest.TestCase):
         result = send_webhook_file("/tmp/nonexistent.csv", "test")
         self.assertFalse(result)
 
-    @patch("src.reporting.discord.discord_utils._post_webhook", return_value=None)
+    @patch("src.reporting.discord.webhook_sender._post_webhook", return_value=None)
     @patch("builtins.open", mock_open(read_data=b"test data"))
-    @patch("src.reporting.discord.discord_utils.os.path.exists", return_value=True)
+    @patch("src.reporting.discord.webhook_sender.os.path.exists", return_value=True)
     def test_returns_false_when_post_returns_none(self, mock_exists, mock_post):
         """_post_webhook が None を返す場合は False が返ること"""
         from src.reporting.discord.discord_utils import send_webhook_file
@@ -857,7 +857,7 @@ class TestSendDriftAlert(unittest.TestCase):
 class TestSendWeeklyReportExtra(unittest.TestCase):
     """send_weekly_report の追加テスト"""
 
-    @patch("src.reporting.discord.discord_utils.send_webhook_text", return_value=True)
+    @patch("src.reporting.discord.webhook_sender.send_webhook_text", return_value=True)
     def test_sends_report_with_valid_accuracy_df(self, mock_send):
         """有効な accuracy_df がある場合にレポートが送信されること"""
         from src.reporting.discord.discord_utils import send_weekly_report
