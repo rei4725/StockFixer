@@ -64,7 +64,7 @@ class TestDetermineEntryHorizon(unittest.TestCase):
 
 
 class TestLinkPaperOrderMetadata(unittest.TestCase):
-    @patch("src.trading.execution._db_connection")
+    @patch("src.trading.execution.recording._db_connection")
     def test_sets_horizon_and_target_exit_date(self, mock_db):
         from src.trading.execution import _link_paper_order_metadata
 
@@ -92,7 +92,7 @@ class TestLinkPaperOrderMetadata(unittest.TestCase):
         self.assertEqual(params[4], target)
         self.assertEqual(params[5], "ORD-001")
 
-    @patch("src.trading.execution._db_connection")
+    @patch("src.trading.execution.recording._db_connection")
     def test_none_horizon_allowed(self, mock_db):
         from src.trading.execution import _link_paper_order_metadata
 
