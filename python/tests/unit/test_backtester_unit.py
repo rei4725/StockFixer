@@ -253,6 +253,7 @@ class TestBacktesterRiskManagement:
             initial_cash=1_000_000,
             fee_rate=0.0,
             stop_loss_pct=0.05,  # 5% ストップロス
+            execution_lag=0,  # SL 発火ロジックを同バーで隔離検証
         )
 
         # Buy → Hold → Hold → Hold → Hold → 自動決済（ストップロス）
@@ -281,6 +282,7 @@ class TestBacktesterRiskManagement:
             initial_cash=1_000_000,
             fee_rate=0.0,
             take_profit_pct=0.10,  # 10% テイクプロフィット
+            execution_lag=0,  # TP 発火ロジックを同バーで隔離検証
         )
 
         signal = pd.Series([1, 0, 0, 0, 0], index=prices.index)
@@ -545,7 +547,9 @@ class TestBacktesterRunPath:
 class TestBacktesterShortSimulation:
     """R-215: ショートシミュレーションのテスト"""
 
-    def _make_bt(self, enable_short: bool = True, fee_rate: float = 0.0):
+    def _make_bt(self, enable_short: bool = True, fee_rate: float = 0.0, execution_lag: int = 0):
+        # PnL 式・約定メカニクスを同バー(execution_lag=0)で隔離検証する。
+        # 翌バー約定(#493)の挙動は TestBacktesterExecutionLag で別途検証する。
         return Backtester(
             model_manager=MagicMock(),
             signal_generator=MagicMock(),
@@ -557,6 +561,7 @@ class TestBacktesterShortSimulation:
             initial_cash=1_000_000,
             fee_rate=fee_rate,
             enable_short=enable_short,
+            execution_lag=execution_lag,
         )
 
     def test_short_entry_and_cover_profit(self):
@@ -626,6 +631,7 @@ class TestBacktesterShortSimulation:
             fee_rate=0.001,
             slippage=0.001,
             enable_short=True,
+            execution_lag=0,  # ショート PnL 式を同バーで隔離検証
         )
         _, metrics = bt.simulate_trading(df, signal)
 
@@ -678,6 +684,85 @@ class TestBacktesterShortSimulation:
         # ロング決済の "sell" と短期"short"/"short_cover" の両方がある
         assert "buy" in actions
         assert "sell" in actions
+
+
+class TestBacktesterExecutionLag:
+    """#493: 実行ラグ（翌バー約定）の検証"""
+
+    def _bt(self, execution_lag: int = 1, **kwargs):
+        params = dict(
+            model_manager=MagicMock(),
+            signal_generator=MagicMock(),
+            data_loader=MagicMock(),
+            start_date=None,
+            end_date=None,
+            market="jp",
+            symbol="7203",
+            initial_cash=1_000_000,
+            fee_rate=0.0,
+            execution_lag=execution_lag,
+        )
+        params.update(kwargs)
+        return Backtester(**params)
+
+    def test_signal_executed_next_bar_close(self):
+        """Open列なし: シグナル日 t の判断が t+1 のCloseで約定される"""
+        idx = pd.date_range("2024-01-01", periods=4, freq="B")
+        df = pd.DataFrame({"Close": [100.0, 110.0, 120.0, 130.0]}, index=idx)
+        signal = pd.Series([1, -1, 0, 0], index=idx)
+
+        result_df, _ = self._bt(execution_lag=1).simulate_trading(df, signal)
+
+        buy = result_df[result_df["action"] == "buy"].iloc[0]
+        sell = result_df[result_df["action"] == "sell"].iloc[0]
+        # buy シグナル(bar0) → bar1 Close=110 で約定 / sell シグナル(bar1) → bar2 Close=120
+        assert buy["price"] == 110.0
+        assert sell["price"] == 120.0
+
+    def test_open_fill_when_open_column_present(self):
+        """Open列あり: 約定は翌バーの始値(Open)で行われる"""
+        idx = pd.date_range("2024-01-01", periods=4, freq="B")
+        df = pd.DataFrame(
+            {
+                "Open": [99.0, 109.0, 119.0, 129.0],
+                "Close": [100.0, 110.0, 120.0, 130.0],
+            },
+            index=idx,
+        )
+        signal = pd.Series([1, -1, 0, 0], index=idx)
+
+        result_df, _ = self._bt(execution_lag=1).simulate_trading(df, signal)
+
+        buy = result_df[result_df["action"] == "buy"].iloc[0]
+        sell = result_df[result_df["action"] == "sell"].iloc[0]
+        # bar1 Open=109 で買い / bar2 Open=119 で売り
+        assert buy["price"] == 109.0
+        assert sell["price"] == 119.0
+
+    def test_final_bar_signal_discarded(self):
+        """最終バーのシグナルは約定先バーが無いため破棄される"""
+        idx = pd.date_range("2024-01-01", periods=3, freq="B")
+        df = pd.DataFrame({"Close": [100.0, 110.0, 120.0]}, index=idx)
+        signal = pd.Series([0, 0, 1], index=idx)  # 最終バーのみ買い
+
+        result_df, metrics = self._bt(execution_lag=1).simulate_trading(df, signal)
+
+        assert metrics["num_trades"] == 0
+        assert result_df.empty or "buy" not in result_df["action"].values
+
+    def test_lag0_same_bar_backward_compat(self):
+        """execution_lag=0 は従来の同バー(当日Close)約定を再現する"""
+        idx = pd.date_range("2024-01-01", periods=4, freq="B")
+        df = pd.DataFrame({"Close": [100.0, 110.0, 120.0, 130.0]}, index=idx)
+        signal = pd.Series([1, -1, 0, 0], index=idx)
+
+        result_df, _ = self._bt(execution_lag=0).simulate_trading(df, signal)
+
+        buy = result_df[result_df["action"] == "buy"].iloc[0]
+        sell = result_df[result_df["action"] == "sell"].iloc[0]
+        # bar0 Close=100 で買い / bar1 Close=110 で売り（同バー約定）
+        assert buy["price"] == 100.0
+        assert sell["price"] == 110.0
 
 
 if __name__ == "__main__":

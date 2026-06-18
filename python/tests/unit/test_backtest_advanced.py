@@ -25,8 +25,14 @@ def _make_backtester(
     atr_multiplier=1.0,
     atr_min_fraction=0.1,
     atr_max_fraction=1.0,
+    execution_lag=0,
 ) -> Backtester:
-    """依存モックを持つ Backtester を生成する"""
+    """依存モックを持つ Backtester を生成する。
+
+    SL/TP・ポジションサイジング等のメカニクスを同バー(execution_lag=0)で
+    隔離検証する。翌バー約定(#493)の挙動は test_backtester_unit の
+    TestBacktesterExecutionLag で別途検証する。
+    """
     return Backtester(
         model_manager=MagicMock(),
         signal_generator=MagicMock(),
@@ -46,6 +52,7 @@ def _make_backtester(
         atr_multiplier=atr_multiplier,
         atr_min_fraction=atr_min_fraction,
         atr_max_fraction=atr_max_fraction,
+        execution_lag=execution_lag,
     )
 
 
