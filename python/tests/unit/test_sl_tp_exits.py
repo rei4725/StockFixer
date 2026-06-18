@@ -123,12 +123,12 @@ class TestCheckSlTpExits(unittest.TestCase):
         market_data = self._make_market_data()
 
         with self._patch_risk(sl=True, reason="SL発動: pnl=-6.00% <= -5.00%"):
-            with patch("src.trading.execution.get_optimal_params", return_value={}):
+            with patch("src.trading.execution.params.get_optimal_params", return_value={}):
                 with patch(
-                    "src.trading.execution._choose_order_params",
+                    "src.trading.execution.sl_tp._choose_order_params",
                     return_value=(OrderType.MARKET, 0.0, "market", "open"),
                 ):
-                    with patch("src.trading.execution._record_order"):
+                    with patch("src.trading.execution.sl_tp._record_order"):
                         triggered = _check_sl_tp_exits(broker, "jp", "paper", market_data, stats)
 
         broker.send_order.assert_called_once_with(
@@ -145,12 +145,12 @@ class TestCheckSlTpExits(unittest.TestCase):
         market_data = self._make_market_data()
 
         with self._patch_risk(tp=True, reason="TP発動: pnl=15.00% >= 10.00%"):
-            with patch("src.trading.execution.get_optimal_params", return_value={}):
+            with patch("src.trading.execution.params.get_optimal_params", return_value={}):
                 with patch(
-                    "src.trading.execution._choose_order_params",
+                    "src.trading.execution.sl_tp._choose_order_params",
                     return_value=(OrderType.MARKET, 0.0, "market", "open"),
                 ):
-                    with patch("src.trading.execution._record_order"):
+                    with patch("src.trading.execution.sl_tp._record_order"):
                         triggered = _check_sl_tp_exits(broker, "jp", "paper", market_data, stats)
 
         self.assertIn("9984", triggered)
@@ -163,7 +163,7 @@ class TestCheckSlTpExits(unittest.TestCase):
         market_data = self._make_market_data()
 
         with self._patch_risk(sl=False, tp=False, reason=""):
-            with patch("src.trading.execution.get_optimal_params", return_value={}):
+            with patch("src.trading.execution.params.get_optimal_params", return_value={}):
                 triggered = _check_sl_tp_exits(broker, "jp", "paper", market_data, stats)
 
         broker.send_order.assert_not_called()
@@ -199,9 +199,9 @@ class TestCheckSlTpExits(unittest.TestCase):
         market_data = self._make_market_data()
 
         with self._patch_risk(sl=True, reason="SL発動"):
-            with patch("src.trading.execution.get_optimal_params", return_value={}):
+            with patch("src.trading.execution.params.get_optimal_params", return_value={}):
                 with patch(
-                    "src.trading.execution._choose_order_params",
+                    "src.trading.execution.sl_tp._choose_order_params",
                     return_value=(OrderType.MARKET, 0.0, "market", "open"),
                 ):
                     triggered = _check_sl_tp_exits(broker, "jp", "paper", market_data, stats)
@@ -216,12 +216,12 @@ class TestCheckSlTpExits(unittest.TestCase):
         market_data = self._make_market_data()
 
         with self._patch_risk(sl=True, reason="SL発動"):
-            with patch("src.trading.execution.get_optimal_params", return_value={}):
+            with patch("src.trading.execution.params.get_optimal_params", return_value={}):
                 with patch(
-                    "src.trading.execution._choose_order_params",
+                    "src.trading.execution.sl_tp._choose_order_params",
                     return_value=(OrderType.MARKET, 0.0, "market", "open"),
                 ):
-                    with patch("src.trading.execution._record_order"):
+                    with patch("src.trading.execution.sl_tp._record_order"):
                         triggered = _check_sl_tp_exits(broker, "jp", "paper", market_data, stats)
 
         # send_order には .T 除去後の symbol が渡されること

@@ -115,9 +115,9 @@ def _make_repo_with_predictions(n: int = 3) -> InMemoryPredictionRepository:
 
 
 _COMMON_PATCHES = [
-    patch("src.trading.execution._record_order"),
+    patch("src.trading.execution.runner._record_order"),
     patch(
-        "src.trading.execution._choose_order_params",
+        "src.trading.execution.runner._choose_order_params",
         return_value=(OrderType.MARKET, 0.0, "market", "open"),
     ),
     patch(
@@ -127,7 +127,7 @@ _COMMON_PATCHES = [
     patch("src.trading.execution.RiskManager.calc_position_size", return_value=100),
     patch("src.trading.risk_manager.RiskManager._get_daily_realized_loss", return_value=0.0),
     patch("src.trading.risk_manager.RiskManager._get_consecutive_losses", return_value=0),
-    patch("src.trading.execution.save_order_run_summary"),
+    patch("src.trading.execution.runner.save_order_run_summary"),
 ]
 
 
@@ -164,7 +164,7 @@ class TestRunDailyOrdersWithRepository:
         broker = InMemoryBrokerAdapter()
 
         with patch(
-            "src.trading.execution._load_latest_predictions",
+            "src.trading.execution.runner._load_latest_predictions",
             return_value=pd.DataFrame(),
         ) as mock_load:
             _ = [p.start() for p in _COMMON_PATCHES]
@@ -180,7 +180,7 @@ class TestRunDailyOrdersWithRepository:
         broker = InMemoryBrokerAdapter()
         repo = _make_repo_with_predictions(n=1)
 
-        with patch("src.trading.execution._load_latest_predictions") as mock_load:
+        with patch("src.trading.execution.runner._load_latest_predictions") as mock_load:
             _ = [p.start() for p in _COMMON_PATCHES]
             try:
                 run_daily_orders(broker, market="jp", mode="paper", prediction_repo=repo)
