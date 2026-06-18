@@ -30,6 +30,7 @@ class Backtester:
         atr_max_fraction: float = 1.0,
         enable_short: bool = False,
         slippage_fn: Optional[Callable[[int, float, float], float]] = None,
+        execution_lag: int = 1,
     ):
         self.model_manager = model_manager
         self.signal_generator = signal_generator
@@ -51,6 +52,9 @@ class Backtester:
         self.atr_max_fraction = min(1.0, max(0.0, atr_max_fraction))
         self.enable_short = enable_short
         self.slippage_fn = slippage_fn  # R-210: 動的スリッページ関数 (qty, price, avg_vol) -> rate
+        # #493: シグナル約定の実行ラグ（バー数）。1=翌バー約定（引け後シグナル→翌寄り）。
+        # 0 で従来の同バー(当日Close)約定に戻す（後方互換）。
+        self.execution_lag = max(0, int(execution_lag))
 
     def _get_slippage(self, qty: int, price: float, volume: float = 0.0) -> float:
         """有効スリッページ率を返す。slippage_fn が設定されていれば動的モデルを使用する（R-210）。"""
@@ -136,10 +140,25 @@ class Backtester:
         equity_records: list[tuple[Any, float, float]] = []
 
         close_col = "Close" if "Close" in df.columns else "close"
+        # #493: 実行ラグ。シグナル/確信度を execution_lag バー遅延させ、翌バーで約定する。
+        # 約定価格は翌バー始値(Open)。Open 列が無ければ Close にフォールバック。
+        # SL/TP・mark-to-market は従来どおり当バー Close 基準（判定・約定とも Close で整合）。
+        # 最終バーまでに約定先バーが無いシグナルは shift により自然に破棄される。
+        exec_col = "Open" if (self.execution_lag > 0 and "Open" in df.columns) else close_col
+        if self.execution_lag > 0:
+            exec_signal = signal.reindex(df.index).shift(self.execution_lag)
+            exec_pred = (
+                pred.reindex(df.index).shift(self.execution_lag) if pred is not None else None
+            )
+        else:
+            exec_signal = signal
+            exec_pred = pred
 
         for date in df.index:
             price = df.loc[date, close_col]
-            sig = signal.get(date, 0) if date in signal.index else 0
+            exec_price = df.loc[date, exec_col]
+            raw_sig = exec_signal.get(date, 0) if date in exec_signal.index else 0
+            sig = 0 if pd.isna(raw_sig) else int(raw_sig)
 
             # ストップロス / テイクプロフィット判定（シグナルより先に評価）
             if position > 0 and position_price > 0:
@@ -197,17 +216,17 @@ class Backtester:
             # ショートカバー: 買いシグナル + ショートポジション保有
             if sig == 1 and self.enable_short and short_position > 0:
                 # エントリー売り: short_price * qty * (1 - fee - slip)
-                # カバー買い: price * qty * (1 + fee + slip)
+                # カバー買い: exec_price * qty * (1 + fee + slip)
                 net_pnl = short_price * short_position * (
                     1 - self.fee_rate - self.slippage
-                ) - price * short_position * (1 + self.fee_rate + self.slippage)
-                pnl = (short_price - price) * short_position
+                ) - exec_price * short_position * (1 + self.fee_rate + self.slippage)
+                pnl = (short_price - exec_price) * short_position
                 cash += net_pnl
                 cash_gross += pnl
                 short_trade_log.append(
                     {
                         "entry_price": short_price,
-                        "exit_price": price,
+                        "exit_price": exec_price,
                         "qty": short_position,
                         "pnl": net_pnl,
                     }
@@ -216,7 +235,7 @@ class Backtester:
                     {
                         "date": date,
                         "action": "short_cover",
-                        "price": price,
+                        "price": exec_price,
                         "qty": short_position,
                         "cash": cash,
                         "cash_gross": cash_gross,
@@ -225,27 +244,27 @@ class Backtester:
                 short_position = 0
                 short_price = 0.0
             elif sig == 1 and position == 0:
-                # Buy
+                # Buy（翌バー始値 exec_price で約定）
                 atr_value = df.loc[date, "atr"] if "atr" in df.columns else None
                 position_details = self._calc_position_details(
                     cash,
-                    price,
-                    pred.get(date) if pred is not None else None,
+                    exec_price,
+                    exec_pred.get(date) if exec_pred is not None else None,
                     atr_value=atr_value,
                 )
                 qty = position_details["qty"]
                 if qty > 0:
-                    cost = qty * price * (1 + self.fee_rate + self.slippage)
-                    cost_gross = qty * price
+                    cost = qty * exec_price * (1 + self.fee_rate + self.slippage)
+                    cost_gross = qty * exec_price
                     cash -= cost
                     cash_gross -= cost_gross
                     position += qty
-                    position_price = price
+                    position_price = exec_price
                     trade_log.append(
                         {
                             "date": date,
                             "action": "buy",
-                            "price": price,
+                            "price": exec_price,
                             "qty": qty,
                             "cash": cash,
                             "cash_gross": cash_gross,
@@ -259,16 +278,16 @@ class Backtester:
                         }
                     )
             elif sig == -1 and position > 0:
-                # Sell (ロング決済)
-                proceeds = position * price * (1 - self.fee_rate - self.slippage)
-                proceeds_gross = position * price
+                # Sell (ロング決済・翌バー始値 exec_price で約定)
+                proceeds = position * exec_price * (1 - self.fee_rate - self.slippage)
+                proceeds_gross = position * exec_price
                 cash += proceeds
                 cash_gross += proceeds_gross
                 trade_log.append(
                     {
                         "date": date,
                         "action": "sell",
-                        "price": price,
+                        "price": exec_price,
                         "qty": position,
                         "cash": cash,
                         "cash_gross": cash_gross,
@@ -277,23 +296,23 @@ class Backtester:
                 position = 0
                 position_price = 0.0
             elif sig == -1 and self.enable_short and position == 0 and short_position == 0:
-                # ショートエントリー: 売りシグナル + ロングポジション非保有 + ショート非保有
+                # ショートエントリー（翌バー始値 exec_price で約定）
                 atr_value = df.loc[date, "atr"] if "atr" in df.columns else None
                 position_details = self._calc_position_details(
                     cash,
-                    price,
-                    pred.get(date) if pred is not None else None,
+                    exec_price,
+                    exec_pred.get(date) if exec_pred is not None else None,
                     atr_value=atr_value,
                 )
                 qty = position_details["qty"]
                 if qty > 0:
                     short_position = qty
-                    short_price = price
+                    short_price = exec_price
                     trade_log.append(
                         {
                             "date": date,
                             "action": "short",
-                            "price": price,
+                            "price": exec_price,
                             "qty": qty,
                             "cash": cash,
                             "cash_gross": cash_gross,

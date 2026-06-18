@@ -1,114 +1,114 @@
 {
-  "hash": "e747d9d47d83d31dd0dbc76e644d290071c5e63398f5c2093f79a6edcb9fa8ee",
+  "hash": "7c0cd41e562aa09f14bcb79c853c65e7dc310c643aade06f311878e5ced4065f",
   "data": {
     "trade_log": [
       {
-        "date": "2024-01-01",
+        "date": "2024-01-02",
         "action": "buy",
-        "price": 101.095824,
-        "qty": 9876,
-        "cash": 80.006718
+        "price": 99.842825,
+        "qty": 10000,
+        "cash": 74.111894
       },
       {
-        "date": "2024-01-04",
+        "date": "2024-01-05",
         "action": "sell",
-        "price": 103.075202,
-        "qty": 9876,
-        "cash": 1016523.743154
+        "price": 100.437392,
+        "qty": 10000,
+        "cash": 1002941.471307
       },
       {
-        "date": "2024-01-08",
+        "date": "2024-01-09",
         "action": "buy",
-        "price": 103.354401,
-        "qty": 9820,
-        "cash": 61.11946
+        "price": 103.35497,
+        "qty": 9689,
+        "cash": 33.059833
       },
       {
-        "date": "2024-01-10",
+        "date": "2024-01-11",
         "action": "sell",
-        "price": 105.543217,
-        "qty": 9820,
-        "cash": 1034940.854659
+        "price": 103.015114,
+        "qty": 9689,
+        "cash": 996649.33305
       },
       {
-        "date": "2024-01-15",
+        "date": "2024-01-16",
         "action": "buy",
-        "price": 103.340407,
-        "qty": 9999,
-        "cash": 90.174417
+        "price": 103.996992,
+        "qty": 9569,
+        "cash": 9.39346
       },
       {
-        "date": "2024-01-18",
+        "date": "2024-01-19",
         "action": "sell",
-        "price": 106.913974,
-        "qty": 9999,
-        "cash": 1067519.44965
+        "price": 105.620754,
+        "qty": 9569,
+        "cash": 1009178.364178
       },
       {
-        "date": "2024-01-22",
+        "date": "2024-01-23",
         "action": "buy",
-        "price": 105.596586,
-        "qty": 10094,
-        "cash": 28.677441
+        "price": 104.756775,
+        "qty": 9619,
+        "cash": 11.458201
       },
       {
-        "date": "2024-01-24",
+        "date": "2024-01-25",
         "action": "sell",
-        "price": 104.070194,
-        "qty": 10094,
-        "cash": 1048937.485838
+        "price": 104.326911,
+        "qty": 9619,
+        "cash": 1002026.736227
       },
       {
-        "date": "2024-01-29",
+        "date": "2024-01-30",
         "action": "buy",
-        "price": 106.939727,
-        "qty": 9793,
-        "cash": 105.848757
+        "price": 105.294253,
+        "qty": 9502,
+        "cash": 19.989912
       },
       {
-        "date": "2024-02-01",
+        "date": "2024-02-02",
         "action": "sell",
-        "price": 109.813107,
-        "qty": 9793,
-        "cash": 1073892.509878
+        "price": 109.817375,
+        "qty": 9502,
+        "cash": 1041939.459867
       },
       {
-        "date": "2024-02-05",
+        "date": "2024-02-06",
         "action": "buy",
-        "price": 109.705196,
-        "qty": 9774,
-        "cash": 25.534151
+        "price": 108.476359,
+        "qty": 9590,
+        "cash": 90.740487
       },
       {
-        "date": "2024-02-07",
+        "date": "2024-02-08",
         "action": "sell",
-        "price": 107.747295,
-        "qty": 9774,
-        "cash": 1051567.915289
+        "price": 105.300809,
+        "qty": 9590,
+        "cash": 1008410.744101
       }
     ],
     "metrics": {
-      "final_cash": 1051567.92,
-      "total_return": 0.051568,
+      "final_cash": 1008410.74,
+      "total_return": 0.008411,
       "num_trades": 6,
-      "win_rate": 0.6667,
-      "profit_factor": 3.0371,
-      "sharpe_ratio": 3.8907,
-      "sharpe_per_trade": 0.505548,
-      "max_drawdown": -0.024769,
-      "avg_position_fraction": 0.999937,
-      "min_position_fraction": 0.999899,
-      "max_position_fraction": 0.999976,
-      "avg_position_value": 1038679.09,
+      "win_rate": 0.5,
+      "profit_factor": 1.7017,
+      "sharpe_ratio": 1.4009,
+      "sharpe_per_trade": 0.182031,
+      "max_drawdown": -0.040419,
+      "avg_position_fraction": 0.999961,
+      "min_position_fraction": 0.999913,
+      "max_position_fraction": 0.999991,
+      "avg_position_value": 1007238.58,
       "atr_fallback_trades": 0,
-      "avg_win": 0.025552,
-      "avg_loss": 0.016151,
-      "gross_final_cash": 1070369.69,
-      "gross_total_return": 0.07037,
-      "gross_sharpe_ratio": 3.8907,
-      "gross_max_drawdown": -0.021604,
-      "cost_impact_cash": 18801.77,
-      "cost_impact_return": 0.018802,
+      "avg_win": 0.021509,
+      "avg_loss": 0.012222,
+      "gross_final_cash": 1026580.91,
+      "gross_total_return": 0.026581,
+      "gross_sharpe_ratio": 1.4009,
+      "gross_max_drawdown": -0.03837,
+      "cost_impact_cash": 18170.17,
+      "cost_impact_return": 0.01817,
       "short_return": 0.0,
       "short_num_trades": 0
     }

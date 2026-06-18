@@ -12,6 +12,9 @@ from src.backtest.backtester import Backtester
 
 
 def _make_backtester(**kwargs) -> Backtester:
+    # #492 の mark-to-market 機構を同バー約定(execution_lag=0)で隔離検証する。
+    # 翌バー約定(#493)の挙動は test_backtester_unit で別途検証する。
+    kwargs.setdefault("execution_lag", 0)
     return Backtester(
         model_manager=MagicMock(),
         signal_generator=MagicMock(),
