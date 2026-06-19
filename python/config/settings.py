@@ -84,6 +84,13 @@ class Settings(BaseSettings):
     LLM_REVIEW_MODEL: str = Field(default="claude-opus-4-8")
     LLM_REVIEW_MAX_TOKENS: int = Field(default=1024)
 
+    # ---------- Claude バックテスト批判レビュー（backtest/critical_review.py） ----------
+    # Claude にバックテスト方法論・設定を批判的レビューさせ、欠陥を Issue 草案 JSON 化する。
+    # 既定無効。読み取り専用（コード変更・発注に非関与）。
+    BACKTEST_REVIEW_ENABLED: bool = Field(default=False)
+    BACKTEST_REVIEW_MODEL: str = Field(default="claude-opus-4-8")
+    BACKTEST_REVIEW_MAX_TOKENS: int = Field(default=4096)
+
     # ---------- モデルドリフト監視（R-274） ----------
     DRIFT_ALERT_WEEKS: int = Field(default=4)
     DRIFT_ALERT_THRESHOLD: float = Field(default=0.05)
@@ -166,6 +173,10 @@ CLAUDE_TRADER_MAX_TOKENS: int = settings.CLAUDE_TRADER_MAX_TOKENS
 LLM_REVIEW_ENABLED: bool = settings.LLM_REVIEW_ENABLED
 LLM_REVIEW_MODEL: str = settings.LLM_REVIEW_MODEL
 LLM_REVIEW_MAX_TOKENS: int = settings.LLM_REVIEW_MAX_TOKENS
+
+BACKTEST_REVIEW_ENABLED: bool = settings.BACKTEST_REVIEW_ENABLED
+BACKTEST_REVIEW_MODEL: str = settings.BACKTEST_REVIEW_MODEL
+BACKTEST_REVIEW_MAX_TOKENS: int = settings.BACKTEST_REVIEW_MAX_TOKENS
 
 DRIFT_ALERT_WEEKS: int = settings.DRIFT_ALERT_WEEKS
 DRIFT_ALERT_THRESHOLD: float = settings.DRIFT_ALERT_THRESHOLD
