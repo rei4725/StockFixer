@@ -37,6 +37,9 @@ run_step "pylint (errors only)" python -m pylint src/ --rcfile=.pylintrc
 # 3. アーキテクチャ（設定は .importlinter）
 run_step "import-linter" lint-imports
 
+# 3.5 ファイル行数ゲート（肥大化防止 / Issue #497 フォローアップ）
+run_step "file-size-check" python scripts/check_file_size.py
+
 # 4. テスト＋カバレッジゲート（設定は pytest.ini）
 run_step "unit tests (cov ≥80%)" \
   python -m pytest tests/unit/ -v --cov=src --cov-branch --cov-report=term-missing --cov-fail-under=80
