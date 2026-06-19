@@ -25,7 +25,10 @@ logger = logging.getLogger(__name__)
 
 
 def send_weekly_report(
-    accuracy_df=None, horizon: int = 1, diff_summary: Optional[dict] = None
+    accuracy_df=None,
+    horizon: int = 1,
+    diff_summary: Optional[dict] = None,
+    llm_review: Optional[str] = None,
 ) -> bool:
     """
     週次パフォーマンスレポートを Discord Webhook に送信する。
@@ -37,6 +40,8 @@ def send_weekly_report(
     Args:
         accuracy_df: load_drift_summary() の戻り値 DataFrame（None の場合はDB から取得）
         horizon: 対象ホライズン
+        diff_summary: paper/real 乖離サマリー（None の場合は DB から取得）
+        llm_review: Claude が生成した講評テキスト（None の場合は講評節を省略）
 
     Returns:
         成功時 True、失敗時 False
@@ -148,6 +153,10 @@ def send_weekly_report(
             f"平均乖離率={diff_summary['avg_abs_diff_ratio']:.3%}, "
             f"最大価格差={diff_summary['max_abs_price_diff']:.3f}"
         )
+
+    if llm_review:
+        lines.append("\n**🧠 Claude 講評**")
+        lines.append(llm_review)
 
     return send_webhook_text_chunked("\n".join(lines))
 

@@ -157,6 +157,7 @@ def run_weekly_report():
             save_weekly_accuracy_snapshot,
         )
         from src.reporting.discord.discord_utils import send_weekly_report
+        from src.reporting.llm_review import generate_weekly_review
 
         summary = load_drift_summary(horizon=1)
 
@@ -166,7 +167,11 @@ def run_weekly_report():
         save_weekly_accuracy_snapshot(week_start, summary)
 
         diff_summary = load_paper_real_diff_summary(recent_days=7)
-        send_weekly_report(accuracy_df=summary, horizon=1, diff_summary=diff_summary)
+        # Claude 講評（LLM_REVIEW_ENABLED=False の既定では None を返す・非致命的）
+        llm_review = generate_weekly_review(summary, diff_summary=diff_summary, horizon=1)
+        send_weekly_report(
+            accuracy_df=summary, horizon=1, diff_summary=diff_summary, llm_review=llm_review
+        )
         logger.info("=== 週次レポート送信完了 ===")
     except Exception as e:
         logger.error("週次レポート生成失敗: %s", e, exc_info=True)

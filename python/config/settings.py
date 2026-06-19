@@ -78,6 +78,12 @@ class Settings(BaseSettings):
     CLAUDE_TRADER_THINKING_BUDGET: int = Field(default=5000)
     CLAUDE_TRADER_MAX_TOKENS: int = Field(default=8192)
 
+    # ---------- Claude 週次レビュー講評（reporting/llm_review.py） ----------
+    # 週次レポートに Claude が生成した総評を添える。既定無効で安全にロールアウトする。
+    LLM_REVIEW_ENABLED: bool = Field(default=False)
+    LLM_REVIEW_MODEL: str = Field(default="claude-opus-4-8")
+    LLM_REVIEW_MAX_TOKENS: int = Field(default=1024)
+
     # ---------- モデルドリフト監視（R-274） ----------
     DRIFT_ALERT_WEEKS: int = Field(default=4)
     DRIFT_ALERT_THRESHOLD: float = Field(default=0.05)
@@ -156,6 +162,10 @@ CLAUDE_TRADER_ENABLED: bool = settings.CLAUDE_TRADER_ENABLED
 CLAUDE_TRADER_MODEL: str = settings.CLAUDE_TRADER_MODEL
 CLAUDE_TRADER_THINKING_BUDGET: int = settings.CLAUDE_TRADER_THINKING_BUDGET
 CLAUDE_TRADER_MAX_TOKENS: int = settings.CLAUDE_TRADER_MAX_TOKENS
+
+LLM_REVIEW_ENABLED: bool = settings.LLM_REVIEW_ENABLED
+LLM_REVIEW_MODEL: str = settings.LLM_REVIEW_MODEL
+LLM_REVIEW_MAX_TOKENS: int = settings.LLM_REVIEW_MAX_TOKENS
 
 DRIFT_ALERT_WEEKS: int = settings.DRIFT_ALERT_WEEKS
 DRIFT_ALERT_THRESHOLD: float = settings.DRIFT_ALERT_THRESHOLD
