@@ -1,0 +1,41 @@
+name: File Size Check
+
+on:
+  pull_request:
+    paths:
+      - "python/src/**"
+      - "python/scripts/check_file_size.py"
+      - ".github/workflows/file-size-check.yml"
+  push:
+    branches:
+      - develop
+    paths:
+      - "python/src/**"
+      - "python/scripts/check_file_size.py"
+
+jobs:
+  file-size-check:
+    name: File Size Guard (max lines per file)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: python
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Run file-size-check
+        run: python scripts/check_file_size.py
+
+      - name: Report result
+        if: failure()
+        run: |
+          echo "::error::File size guard violations detected."
+          echo "1 ファイルが上限行数を超過しています。責務単位でモジュール分割してください。"
+          echo "詳細: python/scripts/check_file_size.py を実行（re-export ファサード方式が安全）。"
