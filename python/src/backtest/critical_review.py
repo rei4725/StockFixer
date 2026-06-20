@@ -7,8 +7,9 @@ Claude にバックテストの方法論・設定・最適化メトリクスを�
 results/factory/reports/ に書き出す。IssueAgent の --factory-intake が
 GitHub Issue 草案として起票する（#492-497 を生んだ批判的レビューの自動化）。
 
-BACKTEST_REVIEW_ENABLED=False（既定）/ANTHROPIC_API_KEY 未設定/anthropic 未導入/
-API 失敗時は空リストを返し、何も書き込まない（graceful degradation）。
+バックエンドは LLM_BACKEND で選択する（sdk=API 課金 / cli=サブスク認証）。
+BACKTEST_REVIEW_ENABLED=False（既定）/生成・解析失敗時は空リストを返し、
+何も書き込まない（graceful degradation）。
 読み取り専用のレビューのみ（コード変更・発注判断には一切関与しない）。
 人手レビュー必須のため auto-ok ラベルは付与しない。
 """
@@ -198,17 +199,16 @@ def _write_finding_report(finding: dict) -> Optional[str]:
 
 def _request_findings(context: str) -> list[dict]:
     """Claude に構造化出力でレビュー結果を要求する。"""
-    import anthropic  # noqa: PLC0415  遅延 import（未インストール環境を許容）
+    from src.infrastructure.llm.factory import get_text_review_port  # noqa: PLC0415
 
-    client = anthropic.Anthropic()
-    response = client.messages.create(
+    port = get_text_review_port()
+    text = port.complete(
+        system=_SYSTEM_PROMPT,
+        user=context,
         model=BACKTEST_REVIEW_MODEL,
         max_tokens=BACKTEST_REVIEW_MAX_TOKENS,
-        system=_SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": context}],
-        output_config={"format": {"type": "json_schema", "schema": _FINDINGS_SCHEMA}},
+        schema=_FINDINGS_SCHEMA,
     )
-    text = next((b.text for b in response.content if b.type == "text"), "")
     data = json.loads(text)
     findings = data.get("findings", [])
     return findings if isinstance(findings, list) else []
@@ -225,12 +225,6 @@ def run_backtest_review(dry_run: bool = False) -> list[dict]:
     """
     if not BACKTEST_REVIEW_ENABLED:
         logger.info("[bt_review] BACKTEST_REVIEW_ENABLED=false のためスキップ")
-        return []
-
-    try:
-        import anthropic  # noqa: F401, PLC0415  存在確認
-    except ImportError:
-        logger.warning("[bt_review] anthropic 未インストールのためスキップ")
         return []
 
     context = _gather_review_context()

@@ -134,3 +134,37 @@ class MarketDataPort(ABC):
     @abstractmethod
     def get_latest_price(self, symbol: str) -> float:
         """最新終値を返す。取得失敗時は 0.0 を返す。"""
+
+
+class TextReviewPort(ABC):
+    """Claude へのテキスト/構造化レビュー要求を抽象化するポート。
+
+    実装は SDK（ANTHROPIC_API_KEY 従量課金）と CLI（Claude Code サブスク認証）の
+    2系統。呼び出し元はバックエンドを意識せず complete() のみを使う。
+    """
+
+    @abstractmethod
+    def complete(
+        self,
+        *,
+        system: str,
+        user: str,
+        model: str,
+        max_tokens: int,
+        schema: Optional[dict] = None,
+    ) -> str:
+        """1往復の補完を行い、応答テキストを返す。
+
+        Args:
+            system: システムプロンプト
+            user: ユーザープロンプト本文
+            model: モデル指定（SDK はフル ID、CLI はエイリアス/フル ID 双方可）
+            max_tokens: 最大出力トークン数（CLI ではベストエフォート）
+            schema: 指定時は JSON Schema 準拠の JSON 文字列を返すよう要求する
+
+        Returns:
+            応答テキスト。schema 指定時は JSON 文字列（呼び出し元が json.loads する）。
+
+        Raises:
+            実装依存の例外（API 失敗・バイナリ不在等）。呼び出し元が捕捉する。
+        """
