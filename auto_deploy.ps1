@@ -100,6 +100,24 @@ function Invoke-TestGate($pythonExe, $label, [string[]]$pytestArgs) {
     return $failed
 }
 
+# pytest basetemp の古い残骸を掃除する。
+# デプロイ毎に smoke_/unit_/e2e_<タイムスタンプ> を新規生成するため、放置すると
+# 無制限に累積し、ロックされた残骸が固定 basetemp のローカル実行を WinError 5 で
+# 巻き込む。直近 $keep 個のみ事後調査用に残し、それ以外をベストエフォートで削除する。
+function Clear-OldPytestTmp([string]$root, [int]$keep = 3) {
+    if (-not (Test-Path $root)) { return }
+    $dirs = Get-ChildItem -Path $root -Directory -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending
+    if ($null -eq $dirs -or $dirs.Count -le $keep) { return }
+    foreach ($d in ($dirs | Select-Object -Skip $keep)) {
+        try {
+            Remove-Item -Recurse -Force -LiteralPath $d.FullName -ErrorAction Stop
+        } catch {
+            Write-Log "[tmp-clean] スキップ（ロック等）: $($d.Name)"
+        }
+    }
+}
+
 # ---- ロック（多重起動防止） ----
 if (Test-Path $lockFile) {
     $age = (New-TimeSpan -Start (Get-Item $lockFile).LastWriteTime -End (Get-Date)).TotalMinutes
@@ -147,6 +165,7 @@ try {
     } finally { Pop-Location }
 
     # ---- デプロイ前テストゲート ----
+    Clear-OldPytestTmp (Join-Path $repoDir "python\.pytest_tmp_runs")
     $stamp = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
     $smokeFailed = Invoke-TestGate $pythonExe "smoke" @(
         "tests/unit/test_data_pipeline.py","tests/unit/test_db_market_data.py",

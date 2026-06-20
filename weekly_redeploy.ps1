@@ -14,10 +14,30 @@ function Write-Log($msg) {
     [System.IO.File]::AppendAllText($logFile, "$line`n", [System.Text.Encoding]::UTF8)
 }
 
+# pytest basetemp の古い残骸を掃除する（直近 $keep 個のみ残す）。
+# デプロイ毎に unique な basetemp を生成するため放置すると無制限に累積し、
+# ロックされた残骸が固定 basetemp のローカル実行を WinError 5 で巻き込む。
+function Clear-OldPytestTmp([string]$root, [int]$keep = 3) {
+    if (-not (Test-Path $root)) { return }
+    $dirs = Get-ChildItem -Path $root -Directory -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending
+    if ($null -eq $dirs -or $dirs.Count -le $keep) { return }
+    foreach ($d in ($dirs | Select-Object -Skip $keep)) {
+        try {
+            Remove-Item -Recurse -Force -LiteralPath $d.FullName -ErrorAction Stop
+        } catch {
+            Write-Log "[tmp-clean] スキップ（ロック等）: $($d.Name)"
+        }
+    }
+}
+
 Write-Log "=== 週次再デプロイ開始 ==="
 
 try {
     Set-Location $repoDir
+
+    # 前回までの pytest basetemp 残骸を掃除（累積・WinError 5 の二次災害を防ぐ）
+    Clear-OldPytestTmp (Join-Path $repoDir "python\.pytest_tmp_runs")
 
     $pythonExe = Join-Path $repoDir ".venv\Scripts\python.exe"
     if (-not (Test-Path $pythonExe)) {
