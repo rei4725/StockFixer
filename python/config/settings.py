@@ -91,6 +91,13 @@ class Settings(BaseSettings):
     BACKTEST_REVIEW_MODEL: str = Field(default="claude-opus-4-8")
     BACKTEST_REVIEW_MAX_TOKENS: int = Field(default=4096)
 
+    # ---------- LLM バックエンド選択（infrastructure/llm/factory.py） ----------
+    # "sdk": anthropic SDK（ANTHROPIC_API_KEY 従量課金・既定）
+    # "cli": Claude Code CLI（Pro/Max サブスク認証・CLAUDE_CODE_OAUTH_TOKEN）
+    LLM_BACKEND: str = Field(default="sdk")
+    CLAUDE_CLI_BINARY: str = Field(default="claude")
+    CLAUDE_CLI_TIMEOUT_SECONDS: int = Field(default=180)
+
     # ---------- モデルドリフト監視（R-274） ----------
     DRIFT_ALERT_WEEKS: int = Field(default=4)
     DRIFT_ALERT_THRESHOLD: float = Field(default=0.05)
@@ -177,6 +184,10 @@ LLM_REVIEW_MAX_TOKENS: int = settings.LLM_REVIEW_MAX_TOKENS
 BACKTEST_REVIEW_ENABLED: bool = settings.BACKTEST_REVIEW_ENABLED
 BACKTEST_REVIEW_MODEL: str = settings.BACKTEST_REVIEW_MODEL
 BACKTEST_REVIEW_MAX_TOKENS: int = settings.BACKTEST_REVIEW_MAX_TOKENS
+
+LLM_BACKEND: str = settings.LLM_BACKEND
+CLAUDE_CLI_BINARY: str = settings.CLAUDE_CLI_BINARY
+CLAUDE_CLI_TIMEOUT_SECONDS: int = settings.CLAUDE_CLI_TIMEOUT_SECONDS
 
 DRIFT_ALERT_WEEKS: int = settings.DRIFT_ALERT_WEEKS
 DRIFT_ALERT_THRESHOLD: float = settings.DRIFT_ALERT_THRESHOLD

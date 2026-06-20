@@ -33,6 +33,14 @@ RUN pip install --no-cache-dir --upgrade "pip>=25.3" && \
         "wheel>=0.46.2" && \
     rm /tmp/requirements.txt
 
+# Claude Code CLI（LLM_BACKEND=cli でサブスク認証経由の LLM 呼び出しに使用）
+# node 不要のネイティブインストーラで /root/.local/bin に導入する。
+# サブスク認証は CLAUDE_CODE_OAUTH_TOKEN（claude setup-token で発行）を env で渡す。
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
+    && curl -fsSL https://claude.ai/install.sh | bash \
+    && rm -rf /var/lib/apt/lists/*
+ENV PATH="/root/.local/bin:${PATH}"
+
 # アプリケーションコードのコピー
 COPY . .
 

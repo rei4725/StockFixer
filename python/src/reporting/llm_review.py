@@ -4,8 +4,9 @@ Claude 週次レビュー講評生成モジュール
 週次の予測精度（ドリフト）と paper/real 乖離の指標を Claude に渡し、
 「今週の総評・懸念点・推奨アクション」を日本語で生成する。
 
-LLM_REVIEW_ENABLED=False（既定）または ANTHROPIC_API_KEY 未設定・API 失敗時は
-None を返し、呼び出し元は講評なしで週次レポートを送信する（graceful degradation）。
+バックエンドは LLM_BACKEND で選択する（sdk=API 課金 / cli=サブスク認証）。
+LLM_REVIEW_ENABLED=False（既定）または生成失敗時は None を返し、呼び出し元は
+講評なしで週次レポートを送信する（graceful degradation）。
 実弾の発注判断には一切関与しない（読み取り専用の講評のみ）。
 """
 
@@ -87,23 +88,18 @@ def generate_weekly_review(
         logger.info("[llm_review] 精度データなしのため講評をスキップ")
         return None
 
-    try:
-        import anthropic  # noqa: PLC0415  遅延 import（未インストール環境を許容）
-    except ImportError:
-        logger.warning("[llm_review] anthropic 未インストールのため講評をスキップ")
-        return None
-
     digest = _build_metrics_digest(accuracy_df, diff_summary, horizon)
 
     try:
-        client = anthropic.Anthropic()
-        response = client.messages.create(
+        from src.infrastructure.llm.factory import get_text_review_port  # noqa: PLC0415
+
+        port = get_text_review_port()
+        review = port.complete(
+            system=_SYSTEM_PROMPT,
+            user=digest,
             model=LLM_REVIEW_MODEL,
             max_tokens=LLM_REVIEW_MAX_TOKENS,
-            system=_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": digest}],
-        )
-        review = "".join(block.text for block in response.content if block.type == "text").strip()
+        ).strip()
         if review:
             logger.info("[llm_review] 講評生成完了（%d文字）", len(review))
             return review
