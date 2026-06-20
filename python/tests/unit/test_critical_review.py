@@ -36,6 +36,9 @@ _SAMPLE = [
 ]
 
 
+# 環境変数 LLM_BACKEND に依存させず、anthropic モックが効く SDK 経路に固定する
+# （cli だと factory が実 claude CLI を起動してしまう）
+@patch("src.infrastructure.llm.factory.LLM_BACKEND", "sdk")
 class TestRunBacktestReview(unittest.TestCase):
     @patch("src.backtest.critical_review.BACKTEST_REVIEW_ENABLED", False)
     def test_disabled_returns_empty(self):
