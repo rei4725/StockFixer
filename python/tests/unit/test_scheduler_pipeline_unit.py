@@ -251,6 +251,23 @@ if __name__ == "__main__":
 # ──────────────────────────────────────────────────────────────
 
 
+def _mock_anthropic(text="(1)総評 (2)懸念 (3)推奨"):
+    """anthropic.Anthropic を差し替えるモックを返す。"""
+    text_block = MagicMock()
+    text_block.type = "text"
+    text_block.text = text
+    response = MagicMock()
+    response.content = [text_block]
+    client = MagicMock()
+    client.messages.create.return_value = response
+    anthropic_module = MagicMock()
+    anthropic_module.Anthropic.return_value = client
+    return anthropic_module, client
+
+
+# 環境変数 LLM_BACKEND に依存させず、anthropic モックが効く SDK 経路に固定する
+# （cli だと factory が実 claude CLI を起動してしまう）
+@patch("src.infrastructure.llm.factory.LLM_BACKEND", "sdk")
 class TestRunWeeklyReport(unittest.TestCase):
     """run_weekly_report のテスト"""
 
@@ -258,13 +275,30 @@ class TestRunWeeklyReport(unittest.TestCase):
     @patch("src.prediction.db.load_paper_real_diff_summary")
     @patch("src.prediction.db.load_drift_summary")
     def test_calls_send_weekly_report(self, mock_drift, mock_diff, mock_send):
-        import pandas as pd
-
         from src.orchestration.scheduler import run_weekly_report
 
-        mock_drift.return_value = pd.DataFrame({"symbol": ["7203"], "direction_accuracy": [0.6]})
-        mock_diff.return_value = pd.DataFrame({"symbol": ["7203"], "diff": [0.01]})
-        run_weekly_report()
+        mock_drift.return_value = pd.DataFrame(
+            [
+                {
+                    "market": "jp",
+                    "symbol": "7203",
+                    "direction_accuracy": 0.6,
+                    "mean_abs_error": 0.01,
+                    "n_samples": 30,
+                }
+            ]
+        )
+        mock_diff.return_value = {
+            "tracked_count": 12,
+            "comparable_count": 8,
+            "avg_paper_slippage": 0.001,
+            "avg_real_slippage": 0.002,
+            "avg_abs_price_diff": 1.5,
+            "avg_abs_diff_ratio": 0.0015,
+        }
+        anthropic_module, _ = _mock_anthropic()
+        with patch.dict(sys.modules, {"anthropic": anthropic_module}):
+            run_weekly_report()
         mock_send.assert_called_once()
 
     @patch("src.reporting.discord.discord_utils.send_weekly_report")
