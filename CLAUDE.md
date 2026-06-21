@@ -113,6 +113,7 @@ utils/            DB, logging, retry, path helpers
 | `market_data/` | `src/market_data/` | yfinance data loading + feature engineering (macro/sentiment 特徴量含む) |
 | `screening/` | `src/screening/` | 長期投資スクリーニング (trend/quality/hold) |
 | `rule_engine/` | `src/rule_engine/` | ルールベースシグナル生成 |
+| `quality/` | `src/quality/` | Claude 駆動の品質系開発自動化 (テスト穴埋め等) |
 | `orchestration/` | `src/orchestration/` | Scheduler wiring (APScheduler) |
 
 ### Shared Kernel (`src/domain/` + `src/infrastructure/`)
