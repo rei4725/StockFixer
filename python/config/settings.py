@@ -91,6 +91,17 @@ class Settings(BaseSettings):
     BACKTEST_REVIEW_MODEL: str = Field(default="claude-opus-4-8")
     BACKTEST_REVIEW_MAX_TOKENS: int = Field(default=4096)
 
+    # ---------- Claude テスト穴埋めボット（quality/test_gap_review.py） ----------
+    # coverage の未カバー行を Claude に渡し不足テストの追加案を Issue 草案 JSON 化する。
+    # 既定無効。読み取り専用（テストコードは生成せず Issue 草案のみ）。
+    TEST_GAP_ENABLED: bool = Field(default=False)
+    TEST_GAP_MODEL: str = Field(default="claude-opus-4-8")
+    TEST_GAP_MAX_TOKENS: int = Field(default=4096)
+    TEST_GAP_MAX_FILES: int = Field(default=5)
+    TEST_GAP_MIN_COVERAGE: float = Field(default=80.0)
+    # CLI argv 上限（Windows 32,767 文字）対策のプロンプト文字数バジェット
+    TEST_GAP_CONTEXT_CHAR_BUDGET: int = Field(default=16000)
+
     # ---------- LLM バックエンド選択（infrastructure/llm/factory.py） ----------
     # "sdk": anthropic SDK（ANTHROPIC_API_KEY 従量課金・既定）
     # "cli": Claude Code CLI（Pro/Max サブスク認証・CLAUDE_CODE_OAUTH_TOKEN）
@@ -184,6 +195,13 @@ LLM_REVIEW_MAX_TOKENS: int = settings.LLM_REVIEW_MAX_TOKENS
 BACKTEST_REVIEW_ENABLED: bool = settings.BACKTEST_REVIEW_ENABLED
 BACKTEST_REVIEW_MODEL: str = settings.BACKTEST_REVIEW_MODEL
 BACKTEST_REVIEW_MAX_TOKENS: int = settings.BACKTEST_REVIEW_MAX_TOKENS
+
+TEST_GAP_ENABLED: bool = settings.TEST_GAP_ENABLED
+TEST_GAP_MODEL: str = settings.TEST_GAP_MODEL
+TEST_GAP_MAX_TOKENS: int = settings.TEST_GAP_MAX_TOKENS
+TEST_GAP_MAX_FILES: int = settings.TEST_GAP_MAX_FILES
+TEST_GAP_MIN_COVERAGE: float = settings.TEST_GAP_MIN_COVERAGE
+TEST_GAP_CONTEXT_CHAR_BUDGET: int = settings.TEST_GAP_CONTEXT_CHAR_BUDGET
 
 LLM_BACKEND: str = settings.LLM_BACKEND
 CLAUDE_CLI_BINARY: str = settings.CLAUDE_CLI_BINARY

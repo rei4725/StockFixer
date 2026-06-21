@@ -17,7 +17,7 @@ name = Layered architecture (utils < BC < orchestration/api)
 type = layers
 layers =
     src.api | src.orchestration
-    src.backtest | src.prediction | src.trading | src.reporting | src.watchlist | src.market_data | src.rule_engine
+    src.backtest | src.prediction | src.trading | src.reporting | src.watchlist | src.market_data | src.rule_engine | src.quality
     src.utils
 
 # ============================================================
@@ -53,3 +53,4 @@ modules =
     src.watchlist
     src.market_data
     src.rule_engine
+    src.quality
