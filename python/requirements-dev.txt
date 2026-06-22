@@ -2,7 +2,7 @@
 # インストール: pip install -r requirements-dev.txt
 
 # テスト
-pytest>=9.1.0
+pytest>=9.1.1
 pytest-timeout==2.4.0
 pytest-cov==7.1.0
 hypothesis>=6.155.7
