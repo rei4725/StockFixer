@@ -8,7 +8,7 @@ yfinance==1.4.1
 scikit-learn==1.9.0
 scipy>=1.17.1
 lightgbm==4.6.0
-xgboost==3.2.0
+xgboost==3.3.0
 requests==2.34.2
 httpx==0.28.1
 matplotlib==3.11.0
@@ -19,7 +19,7 @@ pandas>=3.0.3,<4
 lxml>=6.1.1
 discord.py==2.7.1
 ta==0.11.0
-duckdb==1.5.3
+duckdb==1.5.4
 apscheduler==3.11.2
 streamlit>=1.58.0
 plotly>=6.8.0
