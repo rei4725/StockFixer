@@ -14,11 +14,17 @@ function Write-Log($msg) {
     [System.IO.File]::AppendAllText($logFile, "$line`n", [System.Text.Encoding]::UTF8)
 }
 
-# pytest basetemp の古い残骸を掃除する（直近 $keep 個のみ残す）。
+# pytest basetemp の古い残骸を掃除し（直近 $keep 個のみ残す）、root の存在を保証する。
 # デプロイ毎に unique な basetemp を生成するため放置すると無制限に累積し、
 # ロックされた残骸が固定 basetemp のローカル実行を WinError 5 で巻き込む。
+# また pytest 9.x は明示 --basetemp の親ディレクトリを自動生成しないため、ネスト
+# basetemp（.pytest_tmp_runs\smoke_<stamp> 等）の親 root が無いと全テストが setup
+# 段階で WinError 3 になる。root が無ければ作成してこれを防ぐ。
 function Clear-OldPytestTmp([string]$root, [int]$keep = 3) {
-    if (-not (Test-Path $root)) { return }
+    if (-not (Test-Path $root)) {
+        New-Item -ItemType Directory -Path $root -Force | Out-Null
+        return
+    }
     $dirs = Get-ChildItem -Path $root -Directory -ErrorAction SilentlyContinue |
         Sort-Object LastWriteTime -Descending
     if ($null -eq $dirs -or $dirs.Count -le $keep) { return }
