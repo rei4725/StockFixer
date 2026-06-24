@@ -135,7 +135,7 @@ class TestComputeMetricsByRegime(unittest.TestCase):
         from src.backtest.metrics import compute_metrics_by_regime
 
         trade_log = _make_trade_log()
-        with patch("src.backtest.metrics.compute_metrics", return_value=self._mock_metrics()):
+        with patch("src.backtest.metrics.core.compute_metrics", return_value=self._mock_metrics()):
             result = compute_metrics_by_regime(trade_log, pd.DataFrame(), 1_000_000)
         self.assertIn("all", result)
         self.assertNotIn("bull", result)
@@ -143,7 +143,7 @@ class TestComputeMetricsByRegime(unittest.TestCase):
     def test_returns_all_key_when_empty_trade_log(self):
         from src.backtest.metrics import compute_metrics_by_regime
 
-        with patch("src.backtest.metrics.compute_metrics", return_value=self._mock_metrics()):
+        with patch("src.backtest.metrics.core.compute_metrics", return_value=self._mock_metrics()):
             result = compute_metrics_by_regime(None, _make_price_df(), 1_000_000)
         self.assertIn("all", result)
 
@@ -151,7 +151,7 @@ class TestComputeMetricsByRegime(unittest.TestCase):
         from src.backtest.metrics import compute_metrics_by_regime
 
         trade_log = _make_trade_log().drop(columns=["date"])
-        with patch("src.backtest.metrics.compute_metrics", return_value=self._mock_metrics()):
+        with patch("src.backtest.metrics.core.compute_metrics", return_value=self._mock_metrics()):
             result = compute_metrics_by_regime(trade_log, _make_price_df(), 1_000_000)
         self.assertIn("all", result)
 
@@ -165,8 +165,8 @@ class TestComputeMetricsByRegime(unittest.TestCase):
         regime_series = pd.Series(["bull"] * len(idx), index=idx)
 
         with (
-            patch("src.backtest.metrics.compute_metrics", return_value=self._mock_metrics()),
-            patch("src.backtest.metrics._empty_metrics", return_value=self._mock_metrics()),
+            patch("src.backtest.metrics.core.compute_metrics", return_value=self._mock_metrics()),
+            patch("src.backtest.metrics.core._empty_metrics", return_value=self._mock_metrics()),
         ):
             with patch("src.market_data.technical.classify_regime", return_value=regime_series):
                 result = compute_metrics_by_regime(trade_log, price_df, 1_000_000)
@@ -179,7 +179,7 @@ class TestComputeMetricsByRegime(unittest.TestCase):
         trade_log = _make_trade_log()
         price_df = _make_price_df()
 
-        with patch("src.backtest.metrics.compute_metrics", return_value=self._mock_metrics()):
+        with patch("src.backtest.metrics.core.compute_metrics", return_value=self._mock_metrics()):
             with patch(
                 "src.market_data.technical.classify_regime", return_value=pd.Series([], dtype=str)
             ):
