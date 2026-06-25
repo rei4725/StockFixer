@@ -27,7 +27,6 @@ GRANDFATHERED: dict[str, int] = {
     "backtest/portfolio.py": 808,
     "prediction/training_pipeline.py": 790,
     "backtest/metrics.py": 707,
-    "backtest/pipeline.py": 645,
 }
 
 SRC_ROOT = Path(__file__).resolve().parent.parent / "src"
