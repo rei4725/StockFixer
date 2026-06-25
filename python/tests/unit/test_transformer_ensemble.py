@@ -19,9 +19,9 @@ def _make_feature_result(market="us", symbol="AAPL", n=100):
 class TestTransformerInTrainingPipeline(unittest.TestCase):
     """train_models_for_symbol の use_transformer オプションのテスト"""
 
-    @patch("src.prediction.training_pipeline.save_model_metrics")
-    @patch("src.prediction.training_pipeline.ModelManager")
-    @patch("src.prediction.training_pipeline.load_features_for_training")
+    @patch("src.prediction.training_pipeline._training.save_model_metrics")
+    @patch("src.prediction.training_pipeline._training.ModelManager")
+    @patch("src.prediction.training_pipeline._training.load_features_for_training")
     def test_use_transformer_false_trains_two_models(self, mock_load, mock_mm_cls, mock_save):
         """use_transformer=False (デフォルト) では XGBoost + LightGBM の 2 モデルのみ学習されること"""
         from src.prediction.training_pipeline import train_models_for_symbol
@@ -39,9 +39,9 @@ class TestTransformerInTrainingPipeline(unittest.TestCase):
         self.assertEqual(result["status"], "success")
         self.assertEqual(mock_mm.create_model.call_count, 2)
 
-    @patch("src.prediction.training_pipeline.save_model_metrics")
-    @patch("src.prediction.training_pipeline.ModelManager")
-    @patch("src.prediction.training_pipeline.load_features_for_training")
+    @patch("src.prediction.training_pipeline._training.save_model_metrics")
+    @patch("src.prediction.training_pipeline._training.ModelManager")
+    @patch("src.prediction.training_pipeline._training.load_features_for_training")
     def test_use_transformer_true_trains_three_models(self, mock_load, mock_mm_cls, mock_save):
         """use_transformer=True のとき XGBoost + LightGBM + TransformerModel の 3 モデルが学習されること"""
         from src.prediction.training_pipeline import train_models_for_symbol
@@ -61,9 +61,9 @@ class TestTransformerInTrainingPipeline(unittest.TestCase):
         created_types = [call[0][0] for call in mock_mm.create_model.call_args_list]
         self.assertIn("TransformerModel", created_types)
 
-    @patch("src.prediction.training_pipeline.save_model_metrics")
-    @patch("src.prediction.training_pipeline.ModelManager")
-    @patch("src.prediction.training_pipeline.load_features_for_training")
+    @patch("src.prediction.training_pipeline._training.save_model_metrics")
+    @patch("src.prediction.training_pipeline._training.ModelManager")
+    @patch("src.prediction.training_pipeline._training.load_features_for_training")
     def test_use_transformer_true_uses_transformer_name_prefix(
         self, mock_load, mock_mm_cls, mock_save
     ):
@@ -83,7 +83,7 @@ class TestTransformerInTrainingPipeline(unittest.TestCase):
         created_names = [call[0][1] for call in mock_mm.create_model.call_args_list]
         self.assertIn("ChallengerTransformerModel", created_names)
 
-    @patch("src.prediction.training_pipeline.train_models_for_symbol")
+    @patch("src.prediction.training_pipeline._training.train_models_for_symbol")
     def test_task_wrapper_passes_use_transformer(self, mock_train):
         """train_models_for_symbol_task が use_transformer を伝搬すること"""
         from src.domain.types import SymbolTask

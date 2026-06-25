@@ -584,17 +584,20 @@ class TestTrainModelsForSymbolShadowMode(unittest.TestCase):
 
         with (
             patch(
-                "src.prediction.training_pipeline.load_features_for_training",
+                "src.prediction.training_pipeline._training.load_features_for_training",
                 return_value=fake_loaded,
             ),
-            patch("src.prediction.training_pipeline.ModelManager") as MockMgr,
-            patch("src.prediction.training_pipeline.save_model_metrics"),
-            patch("src.prediction.training_pipeline.save_experiment_run"),
+            patch("src.prediction.training_pipeline._training.ModelManager") as MockMgr,
+            patch("src.prediction.training_pipeline._training.save_model_metrics"),
+            patch("src.prediction.training_pipeline._training.save_experiment_run"),
             patch(
-                "src.prediction.training_pipeline._compute_and_save_shap",
+                "src.prediction.training_pipeline._training._compute_and_save_shap",
                 return_value=pd.DataFrame(),
             ),
-            patch("src.prediction.training_pipeline._compute_and_save_permutation_importance"),
+            patch(
+                "src.prediction.training_pipeline._training"
+                "._compute_and_save_permutation_importance"
+            ),
         ):
             mgr_instance = MockMgr.return_value
             mgr_instance.get_model.return_value.predict.return_value = pd.Series(
@@ -626,17 +629,20 @@ class TestTrainModelsForSymbolShadowMode(unittest.TestCase):
 
         with (
             patch(
-                "src.prediction.training_pipeline.load_features_for_training",
+                "src.prediction.training_pipeline._training.load_features_for_training",
                 return_value=fake_loaded,
             ),
-            patch("src.prediction.training_pipeline.ModelManager") as MockMgr,
-            patch("src.prediction.training_pipeline.save_model_metrics"),
-            patch("src.prediction.training_pipeline.save_experiment_run"),
+            patch("src.prediction.training_pipeline._training.ModelManager") as MockMgr,
+            patch("src.prediction.training_pipeline._training.save_model_metrics"),
+            patch("src.prediction.training_pipeline._training.save_experiment_run"),
             patch(
-                "src.prediction.training_pipeline._compute_and_save_shap",
+                "src.prediction.training_pipeline._training._compute_and_save_shap",
                 return_value=pd.DataFrame(),
             ),
-            patch("src.prediction.training_pipeline._compute_and_save_permutation_importance"),
+            patch(
+                "src.prediction.training_pipeline._training"
+                "._compute_and_save_permutation_importance"
+            ),
         ):
             mgr_instance = MockMgr.return_value
             mgr_instance.get_model.return_value.predict.return_value = pd.Series(
@@ -667,20 +673,23 @@ class TestTrainModelsForSymbolShadowMode(unittest.TestCase):
 
         with (
             patch(
-                "src.prediction.training_pipeline.load_features_for_training",
+                "src.prediction.training_pipeline._training.load_features_for_training",
                 return_value=fake_loaded,
             ),
-            patch("src.prediction.training_pipeline.ModelManager") as MockMgr,
-            patch("src.prediction.training_pipeline.save_model_metrics"),
+            patch("src.prediction.training_pipeline._training.ModelManager") as MockMgr,
+            patch("src.prediction.training_pipeline._training.save_model_metrics"),
             patch(
-                "src.prediction.training_pipeline.save_experiment_run",
+                "src.prediction.training_pipeline._training.save_experiment_run",
                 side_effect=lambda **kw: experiment_calls.append(kw),
             ),
             patch(
-                "src.prediction.training_pipeline._compute_and_save_shap",
+                "src.prediction.training_pipeline._training._compute_and_save_shap",
                 return_value=pd.DataFrame(),
             ),
-            patch("src.prediction.training_pipeline._compute_and_save_permutation_importance"),
+            patch(
+                "src.prediction.training_pipeline._training"
+                "._compute_and_save_permutation_importance"
+            ),
         ):
             mgr_instance = MockMgr.return_value
             mgr_instance.get_model.return_value.predict.return_value = pd.Series(
