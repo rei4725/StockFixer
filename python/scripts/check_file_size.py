@@ -22,10 +22,7 @@ MAX_LINES = 600
 
 # src/ からの相対パス -> 現状行数を上限とする grandfather 登録。
 # 分割して MAX_LINES 以下にしたら、この辞書から該当行を削除すること。
-GRANDFATHERED: dict[str, int] = {
-    "backtest/optimizer.py": 944,
-    "backtest/metrics.py": 707,
-}
+GRANDFATHERED: dict[str, int] = {}
 
 SRC_ROOT = Path(__file__).resolve().parent.parent / "src"
 

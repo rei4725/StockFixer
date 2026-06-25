@@ -167,7 +167,7 @@ class TestSaveOptimizationResults(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             with patch(
-                "src.backtest.optimizer.get_results_dir",
+                "src.backtest.optimizer.persistence.get_results_dir",
                 return_value=tmp_dir,
             ):
                 path = save_optimization_results(result_df, "jp", "7203")
@@ -188,7 +188,7 @@ class TestSaveOptimizationResults(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             with patch(
-                "src.backtest.optimizer.get_results_dir",
+                "src.backtest.optimizer.persistence.get_results_dir",
                 return_value=tmp_dir,
             ):
                 path = save_optimization_results(result_df, "jp", "7203")
@@ -227,7 +227,7 @@ class TestRunOptimization(unittest.TestCase):
             }
         )
 
-    @patch("src.backtest.optimizer.run_backtest_walk_forward")
+    @patch("src.backtest.optimizer.grid.run_backtest_walk_forward")
     def test_returns_dataframe_with_results(self, mock_wf):
         """最適化結果が DataFrame として返ること"""
         from src.backtest.optimizer import run_optimization
@@ -246,7 +246,7 @@ class TestRunOptimization(unittest.TestCase):
         self.assertGreaterEqual(len(result), 1)
         self.assertIn("threshold", result.columns)
 
-    @patch("src.backtest.optimizer.run_backtest_walk_forward")
+    @patch("src.backtest.optimizer.grid.run_backtest_walk_forward")
     def test_returns_dataframe_on_all_errors(self, mock_wf):
         """全パラメータでエラーが発生しても DataFrame が返ること（エラー列を含む）"""
         from src.backtest.optimizer import run_optimization
@@ -265,7 +265,7 @@ class TestRunOptimization(unittest.TestCase):
         self.assertGreaterEqual(len(result), 1)
         self.assertIn("error", result.columns)
 
-    @patch("src.backtest.optimizer.run_backtest_walk_forward")
+    @patch("src.backtest.optimizer.grid.run_backtest_walk_forward")
     def test_parameter_combinations_count(self, mock_wf):
         """閾値数 × ストップロス数 のパラメータ組み合わせが生成されること"""
         from src.backtest.optimizer import run_optimization
@@ -282,7 +282,7 @@ class TestRunOptimization(unittest.TestCase):
         )
         self.assertEqual(len(result), 2)
 
-    @patch("src.backtest.optimizer.run_backtest_walk_forward")
+    @patch("src.backtest.optimizer.grid.run_backtest_walk_forward")
     def test_threshold_column_values_match_input(self, mock_wf):
         """結果の threshold 列が指定した閾値と一致すること"""
         from src.backtest.optimizer import run_optimization
@@ -337,7 +337,7 @@ class TestSaveOptimalParamsJson(unittest.TestCase):
 
         m = mopen()
         with patch("os.path.exists", return_value=False), patch(
-            "src.backtest.optimizer.ensure_dir"
+            "src.backtest.optimizer.persistence.ensure_dir"
         ), patch("builtins.open", m):
             path = save_optimal_params_json(
                 self._make_result_df(), "jp", "7203", sort_by="sharpe_ratio"
@@ -368,7 +368,7 @@ class TestSaveOptimalParamsJson(unittest.TestCase):
 
         m = mock_open(read_data=_json.dumps(existing_data))
         with patch("os.path.exists", return_value=True), patch(
-            "src.backtest.optimizer.ensure_dir"
+            "src.backtest.optimizer.persistence.ensure_dir"
         ), patch("builtins.open", m), patch("json.dump", side_effect=fake_dump):
             path = save_optimal_params_json(
                 self._make_result_df(), "jp", "7203", sort_by="sharpe_ratio"
@@ -391,9 +391,9 @@ class TestSaveOptimalParamsJson(unittest.TestCase):
 class TestRunOptimizeBatch(unittest.TestCase):
     """run_optimize_batch のテスト"""
 
-    @patch("src.backtest.optimizer.save_optimal_params_json")
-    @patch("src.backtest.optimizer.save_optimization_results")
-    @patch("src.backtest.optimizer.run_optimization")
+    @patch("src.backtest.optimizer.batch.save_optimal_params_json")
+    @patch("src.backtest.optimizer.batch.save_optimization_results")
+    @patch("src.backtest.optimizer.batch.run_optimization")
     def test_returns_list_of_results(self, mock_run, mock_save, mock_json):
         """全銘柄の結果リストが返ること"""
         from src.backtest.optimizer import run_optimize_batch
@@ -411,9 +411,9 @@ class TestRunOptimizeBatch(unittest.TestCase):
         self.assertIsInstance(results, list)
         self.assertEqual(len(results), 2)
 
-    @patch("src.backtest.optimizer.save_optimal_params_json")
-    @patch("src.backtest.optimizer.save_optimization_results")
-    @patch("src.backtest.optimizer.run_optimization")
+    @patch("src.backtest.optimizer.batch.save_optimal_params_json")
+    @patch("src.backtest.optimizer.batch.save_optimization_results")
+    @patch("src.backtest.optimizer.batch.run_optimization")
     def test_handles_single_symbol_error(self, mock_run, mock_save, mock_json):
         """1銘柄でエラーが出ても他の銘柄が処理されること"""
         from src.backtest.optimizer import run_optimize_batch
@@ -460,7 +460,7 @@ class TestOptunaDSRGuard(unittest.TestCase):
             }
         )
 
-    @patch("src.backtest.optimizer.run_backtest_walk_forward")
+    @patch("src.backtest.optimizer.optuna_search.run_backtest_walk_forward")
     def test_best_row_has_dsr_and_num_trades(self, mock_wf):
         from src.backtest.optimizer import run_optuna_optimization
 
@@ -482,7 +482,7 @@ class TestOptunaDSRGuard(unittest.TestCase):
         self.assertGreaterEqual(dsr_value, 0.0)
         self.assertLessEqual(dsr_value, 1.0)
 
-    @patch("src.backtest.optimizer.run_backtest_walk_forward")
+    @patch("src.backtest.optimizer.optuna_search.run_backtest_walk_forward")
     def test_dsr_uses_trial_count_for_correction(self, mock_wf):
         """試行数が増えるほど多重比較補正で DSR は上がりにくくなる（単調性の sanity）。"""
         from src.backtest.optimizer import run_optuna_optimization
@@ -514,10 +514,10 @@ class TestSaveOptimalParamsDSR(unittest.TestCase):
         """save_optimal_params_json を実ファイルに触れず実行し、書き込まれた dict を返す。"""
         from src.backtest.optimizer import save_optimal_params_json
 
-        with patch("src.backtest.optimizer.os.path.exists", return_value=False), patch(
-            "src.backtest.optimizer.ensure_dir"
+        with patch("src.backtest.optimizer.persistence.os.path.exists", return_value=False), patch(
+            "src.backtest.optimizer.persistence.ensure_dir"
         ), patch("builtins.open", mock_open()), patch(
-            "src.backtest.optimizer.json.dump"
+            "src.backtest.optimizer.persistence.json.dump"
         ) as mock_dump:
             save_optimal_params_json(df, "jp", "7203")
         return mock_dump.call_args[0][0]
@@ -599,7 +599,7 @@ class TestRunOptimizationPBO(unittest.TestCase):
             }
         )
 
-    @patch("src.backtest.optimizer.run_backtest_walk_forward")
+    @patch("src.backtest.optimizer.grid.run_backtest_walk_forward")
     def test_pbo_column_attached_with_multiple_candidates(self, mock_wf):
         """複数候補 × 複数 fold で pbo 列が全行に同一値で付与されること"""
         from src.backtest.optimizer import run_optimization
@@ -621,7 +621,7 @@ class TestRunOptimizationPBO(unittest.TestCase):
         self.assertGreaterEqual(float(values[0]), 0.0)
         self.assertLessEqual(float(values[0]), 1.0)
 
-    @patch("src.backtest.optimizer.run_backtest_walk_forward")
+    @patch("src.backtest.optimizer.grid.run_backtest_walk_forward")
     def test_no_pbo_column_with_single_candidate(self, mock_wf):
         """候補が1つだけのとき pbo 列は付与されないこと"""
         from src.backtest.optimizer import run_optimization
@@ -649,7 +649,7 @@ class TestOptunaPBOGuard(unittest.TestCase):
             }
         )
 
-    @patch("src.backtest.optimizer.run_backtest_walk_forward")
+    @patch("src.backtest.optimizer.optuna_search.run_backtest_walk_forward")
     def test_all_rows_have_pbo(self, mock_wf):
         from src.backtest.optimizer import run_optuna_optimization
 
@@ -680,10 +680,10 @@ class TestSaveOptimalParamsPBO(unittest.TestCase):
     def _save_and_capture(self, df):
         from src.backtest.optimizer import save_optimal_params_json
 
-        with patch("src.backtest.optimizer.os.path.exists", return_value=False), patch(
-            "src.backtest.optimizer.ensure_dir"
+        with patch("src.backtest.optimizer.persistence.os.path.exists", return_value=False), patch(
+            "src.backtest.optimizer.persistence.ensure_dir"
         ), patch("builtins.open", mock_open()), patch(
-            "src.backtest.optimizer.json.dump"
+            "src.backtest.optimizer.persistence.json.dump"
         ) as mock_dump:
             save_optimal_params_json(df, "jp", "7203")
         return mock_dump.call_args[0][0]
