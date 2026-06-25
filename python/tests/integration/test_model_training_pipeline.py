@@ -49,13 +49,14 @@ class TestTrainModelsForSymbol(unittest.TestCase):
     def test_skip_with_empty_data(self):
         """DBに空データがある場合にskipステータスが返ることを確認"""
         with patch(
-            "src.prediction.training_pipeline.load_stock_features", return_value=pd.DataFrame()
+            "src.prediction.training_pipeline._features.load_stock_features",
+            return_value=pd.DataFrame(),
         ):
             result = train_models_for_symbol("us", "EMPTY")
         self.assertEqual(result["status"], "skip")
 
-    @patch("src.prediction.training_pipeline.ModelManager")
-    @patch("src.prediction.training_pipeline.load_stock_features")
+    @patch("src.prediction.training_pipeline._training.ModelManager")
+    @patch("src.prediction.training_pipeline._features.load_stock_features")
     def test_success_trains_both_models(self, mock_load, mock_mm_cls):
         """正常なデータでXGBoostとLightGBMの両方が学習されることを確認"""
         # テスト用DataFrameを返す
@@ -79,8 +80,8 @@ class TestTrainModelsForSymbol(unittest.TestCase):
         # train_modelが2回呼ばれる
         self.assertEqual(mock_mm.train_model.call_count, 2)
 
-    @patch("src.prediction.training_pipeline.ModelManager")
-    @patch("src.prediction.training_pipeline.load_stock_features")
+    @patch("src.prediction.training_pipeline._training.ModelManager")
+    @patch("src.prediction.training_pipeline._features.load_stock_features")
     def test_error_returns_error_status(self, mock_load, mock_mm_cls):
         """学習中に例外が発生した場合にerrorステータスが返ることを確認"""
         df = pd.DataFrame(
@@ -98,8 +99,8 @@ class TestTrainModelsForSymbol(unittest.TestCase):
         self.assertEqual(result["status"], "error")
         self.assertIn("学習エラー", result["error"])
 
-    @patch("src.prediction.training_pipeline.ModelManager")
-    @patch("src.prediction.training_pipeline.load_stock_features")
+    @patch("src.prediction.training_pipeline._training.ModelManager")
+    @patch("src.prediction.training_pipeline._features.load_stock_features")
     def test_excludes_string_columns(self, mock_load, mock_mm_cls):
         """market, symbol, y列が特徴量から除外されることを確認"""
         df = pd.DataFrame(
@@ -129,7 +130,7 @@ class TestTrainModelsForSymbolTask(unittest.TestCase):
 
     def test_unpacks_dict_correctly(self):
         """dict引数が正しく展開されて呼び出されることを確認"""
-        with patch("src.prediction.training_pipeline.train_models_for_symbol") as mock_fn:
+        with patch("src.prediction.training_pipeline._training.train_models_for_symbol") as mock_fn:
             mock_fn.return_value = {"status": "success"}
             result = train_models_for_symbol_task({"market": "jp", "symbol": "7203"})
             mock_fn.assert_called_once_with(
@@ -163,7 +164,7 @@ class TestRunBatchTraining(unittest.TestCase):
         if os.path.exists(self.tmp_dir):
             os.rmdir(self.tmp_dir)
 
-    @patch("src.prediction.training_pipeline.load_features_for_training")
+    @patch("src.prediction.training_pipeline._training.load_features_for_training")
     def test_batch_success(self, mock_load):
         """バッチ処理が正常に完了することを確認"""
         from src.domain.types import SymbolTask
@@ -189,8 +190,8 @@ class TestRunBatchTraining(unittest.TestCase):
         self.assertEqual(len(result.succeeded), 0)
         self.assertEqual(len(result.failed), 0)
 
-    @patch("src.prediction.training_pipeline.ModelManager")
-    @patch("src.prediction.training_pipeline.load_features_for_training")
+    @patch("src.prediction.training_pipeline._training.ModelManager")
+    @patch("src.prediction.training_pipeline._training.load_features_for_training")
     def test_batch_with_training_errors(self, mock_load, mock_mm_cls):
         """フェーズ2で学習エラーが発生しても例外が外に出ないこと"""
         from src.domain.types import SymbolTask
@@ -210,7 +211,7 @@ class TestRunBatchTraining(unittest.TestCase):
 
         self.assertEqual(len(result.failed), 1)
 
-    @patch("src.prediction.training_pipeline.load_features_for_training")
+    @patch("src.prediction.training_pipeline._training.load_features_for_training")
     def test_batch_with_load_errors(self, mock_load):
         """フェーズ1でデータ読み込みエラーが発生する場合を確認"""
         from src.domain.types import SymbolTask
