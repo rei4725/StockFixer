@@ -85,7 +85,7 @@ class TestRegimeSectorWeightsConstants(unittest.TestCase):
 class TestApplySectorRotation(unittest.TestCase):
     """_apply_sector_rotation のテスト"""
 
-    @patch("src.backtest.portfolio._get_portfolio_symbol_sector")
+    @patch("src.backtest.portfolio.simulation._get_portfolio_symbol_sector")
     def test_multiplies_scores_by_regime_weight(self, mock_sector):
         """レジームウェイトがスコアに乗算されること"""
         from src.backtest.portfolio import _apply_sector_rotation
@@ -98,7 +98,7 @@ class TestApplySectorRotation(unittest.TestCase):
         self.assertAlmostEqual(result["jp_7203"], 0.05 * 2.0)
         self.assertAlmostEqual(result["jp_6758"], 0.03 * 2.0)
 
-    @patch("src.backtest.portfolio._get_portfolio_symbol_sector")
+    @patch("src.backtest.portfolio.simulation._get_portfolio_symbol_sector")
     def test_range_regime_does_not_change_scores(self, mock_sector):
         """range レジームではスコアが変わらないこと（乗数 1.0）"""
         from src.backtest.portfolio import _apply_sector_rotation
@@ -108,7 +108,7 @@ class TestApplySectorRotation(unittest.TestCase):
         result = _apply_sector_rotation(scores, "range")
         self.assertAlmostEqual(result["jp_7203"], 0.04)
 
-    @patch("src.backtest.portfolio._get_portfolio_symbol_sector")
+    @patch("src.backtest.portfolio.simulation._get_portfolio_symbol_sector")
     def test_does_not_mutate_original_series(self, mock_sector):
         """元の Series を変更しないこと"""
         from src.backtest.portfolio import _apply_sector_rotation
@@ -130,7 +130,7 @@ class TestSimulatePortfolioWithSectorRotation(unittest.TestCase):
         close_data = {sym: rng.random(n_days) * 100 + 100 for sym in symbols}
         return pd.DataFrame(score_data, index=dates), pd.DataFrame(close_data, index=dates)
 
-    @patch("src.backtest.portfolio._get_portfolio_symbol_sector")
+    @patch("src.backtest.portfolio.simulation._get_portfolio_symbol_sector")
     def test_returns_equity_curve_with_rotation(self, mock_sector):
         """sector_rotation=True でも equity_df が返ること"""
         from src.backtest.portfolio import _get_rebalance_dates, _simulate_portfolio
@@ -153,7 +153,7 @@ class TestSimulatePortfolioWithSectorRotation(unittest.TestCase):
         self.assertIn("portfolio_value", eq_df.columns)
         self.assertGreater(len(eq_df), 0)
 
-    @patch("src.backtest.portfolio._get_portfolio_symbol_sector")
+    @patch("src.backtest.portfolio.simulation._get_portfolio_symbol_sector")
     def test_rotation_on_off_both_valid(self, mock_sector):
         """rotation ON/OFF どちらも有効な equity_df を返すこと"""
         from src.backtest.portfolio import _get_rebalance_dates, _simulate_portfolio
@@ -208,7 +208,7 @@ class TestCompareSectorRotationKpi(unittest.TestCase):
         result = compare_sector_rotation_kpi(market="jp")
         self.assertEqual(result, {})
 
-    @patch("src.backtest.portfolio._get_portfolio_symbol_sector")
+    @patch("src.backtest.portfolio.simulation._get_portfolio_symbol_sector")
     @patch("src.backtest.portfolio._build_signal_matrix")
     @patch("src.utils.db.stock_features.get_all_symbols")
     def test_returns_comparison_dict_with_expected_keys(
@@ -240,7 +240,7 @@ class TestCompareSectorRotationKpi(unittest.TestCase):
         self.assertIn("sharpe_diff", result["kpi_diff"])
         self.assertIn("max_drawdown_diff", result["kpi_diff"])
 
-    @patch("src.backtest.portfolio._get_portfolio_symbol_sector")
+    @patch("src.backtest.portfolio.simulation._get_portfolio_symbol_sector")
     @patch("src.backtest.portfolio._build_signal_matrix")
     @patch("src.utils.db.stock_features.get_all_symbols")
     def test_kpi_diff_values_are_numeric(self, mock_symbols, mock_build, mock_sector):
