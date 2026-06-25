@@ -33,7 +33,7 @@ class TestPortfolioBacktestRegimeMetrics(unittest.TestCase):
 
         mock_port = unittest.mock.MagicMock()
         mock_port.get_market_regime.return_value = mocked_regime
-        with patch("src.backtest.portfolio.get_backtest_data_port", return_value=mock_port):
+        with patch("src.backtest.portfolio.metrics.get_backtest_data_port", return_value=mock_port):
             enriched, regime_metrics = _attach_regime_metrics(equity_df, close_matrix)
 
         self.assertIn("regime", enriched.columns)
@@ -46,7 +46,7 @@ class TestPortfolioBacktestRegimeMetrics(unittest.TestCase):
 
 
 class TestPortfolioBacktestSectorLimit(unittest.TestCase):
-    @patch("src.backtest.portfolio.get_symbol_sector")
+    @patch("src.backtest.portfolio.simulation.get_symbol_sector")
     def test_limit_portfolio_candidates_by_sector_caps_same_sector(self, mock_get_sector):
         mock_get_sector.side_effect = ["Auto", "Auto", "Tech", "Bank"]
         top_candidates = pd.Series(
@@ -250,7 +250,7 @@ class TestSimulatePortfolio(unittest.TestCase):
         close_data = {sym: rng.random(n_days) * 100 + 100 for sym in symbols}
         return pd.DataFrame(score_data, index=dates), pd.DataFrame(close_data, index=dates)
 
-    @patch("src.backtest.portfolio._get_portfolio_symbol_sector")
+    @patch("src.backtest.portfolio.simulation._get_portfolio_symbol_sector")
     def test_returns_equity_curve(self, mock_sector):
         """シミュレーション結果に portfolio_value 列が含まれること"""
         from src.backtest.portfolio import _get_rebalance_dates, _simulate_portfolio
@@ -272,7 +272,7 @@ class TestSimulatePortfolio(unittest.TestCase):
         assert "portfolio_value" in equity_df.columns
         assert len(equity_df) > 0
 
-    @patch("src.backtest.portfolio._get_portfolio_symbol_sector")
+    @patch("src.backtest.portfolio.simulation._get_portfolio_symbol_sector")
     def test_holdings_records_are_list(self, mock_sector):
         """ホールディング記録がリストであること"""
         from src.backtest.portfolio import _get_rebalance_dates, _simulate_portfolio
@@ -319,7 +319,7 @@ class TestPlotPortfolio(unittest.TestCase):
 class TestBuildSignalMatrixAdditional(unittest.TestCase):
     """_build_signal_matrix の追加テスト"""
 
-    @patch("src.backtest.portfolio.get_model_manager")
+    @patch("src.backtest.portfolio.signal_matrix.get_model_manager")
     @patch("src.backtest.pipeline.load_features")
     def test_builds_matrix_for_single_symbol(self, mock_load, mock_get_mm):
         """1銘柄の予測スコアと価格マトリクスが構築されること"""
@@ -358,7 +358,7 @@ class TestBuildSignalMatrixAdditional(unittest.TestCase):
         self.assertFalse(score_matrix.empty)
         self.assertIn("jp_7203", score_matrix.columns)
 
-    @patch("src.backtest.portfolio.get_model_manager")
+    @patch("src.backtest.portfolio.signal_matrix.get_model_manager")
     @patch("src.backtest.pipeline.load_features")
     def test_skips_symbol_with_insufficient_data(self, mock_load, mock_get_mm):
         """データ不足の銘柄はスキップされること"""

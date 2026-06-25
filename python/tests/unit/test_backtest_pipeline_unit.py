@@ -306,8 +306,8 @@ class TestLoadFeaturesFileSource:
 class TestRunBacktestSingle:
     """run_backtest_single() のテスト"""
 
-    @patch("src.backtest.pipeline.load_features")
-    @patch("src.backtest.pipeline.get_model_manager")
+    @patch("src.backtest.pipeline.runner.load_features")
+    @patch("src.backtest.pipeline.runner.get_model_manager")
     @patch("src.backtest.backtester.Backtester")
     @patch("src.trading.signal_generator.SignalGenerator")
     def test_run_backtest_single_returns_metrics(self, mock_sg, mock_bt, mock_get_mm, mock_lf):
@@ -345,9 +345,9 @@ class TestRunBacktestSingle:
         mock_mm.train_model.assert_called_once()
         mock_bt_instance.simulate_trading.assert_called_once()
 
-    @patch("src.backtest.pipeline.load_features")
-    @patch("src.backtest.pipeline._ensemble_predict")
-    @patch("src.backtest.pipeline.get_model_manager")
+    @patch("src.backtest.pipeline.runner.load_features")
+    @patch("src.backtest.pipeline.runner._ensemble_predict")
+    @patch("src.backtest.pipeline.runner.get_model_manager")
     @patch("src.backtest.backtester.Backtester")
     @patch("src.trading.signal_generator.SignalGenerator")
     def test_run_backtest_single_ensemble_mode(
@@ -382,8 +382,8 @@ class TestRunBacktestSingle:
 
         mock_ep.assert_called_once()
 
-    @patch("src.backtest.pipeline.load_features")
-    @patch("src.backtest.pipeline.get_model_manager")
+    @patch("src.backtest.pipeline.runner.load_features")
+    @patch("src.backtest.pipeline.runner.get_model_manager")
     @patch("src.backtest.backtester.Backtester")
     @patch("src.trading.signal_generator.SignalGenerator")
     def test_exclude_sentiment_removes_sentiment_columns(
@@ -424,8 +424,8 @@ class TestRunBacktestSingle:
         ]
         assert sentiment_cols == [], f"センチメント列が除外されていない: {sentiment_cols}"
 
-    @patch("src.backtest.pipeline.load_features")
-    @patch("src.backtest.pipeline.get_model_manager")
+    @patch("src.backtest.pipeline.runner.load_features")
+    @patch("src.backtest.pipeline.runner.get_model_manager")
     @patch("src.backtest.backtester.Backtester")
     @patch("src.trading.signal_generator.SignalGenerator")
     def test_include_sentiment_keeps_sentiment_columns(
@@ -901,7 +901,7 @@ class TestSaveBacktestResultsAdditional(unittest.TestCase):
 class TestRunBacktestWalkForward(unittest.TestCase):
     """run_backtest_walk_forward のテスト（未カバー行 382-415）"""
 
-    @patch("src.backtest.pipeline.get_model_manager")
+    @patch("src.backtest.pipeline.runner.get_model_manager")
     @patch("src.trading.signal_generator.SignalGenerator")
     @patch("src.backtest.walk_forward.WalkForwardValidator")
     def test_returns_walk_forward_results(self, mock_wfv_cls, mock_sg, mock_get_mm):
@@ -923,7 +923,7 @@ class TestRunBacktestWalkForward(unittest.TestCase):
         pd.testing.assert_frame_equal(wf_df, expected_df)
         mock_wfv_cls.return_value.run.assert_called_once()
 
-    @patch("src.backtest.pipeline.get_model_manager")
+    @patch("src.backtest.pipeline.runner.get_model_manager")
     @patch("src.trading.signal_generator.SignalGenerator")
     @patch("src.backtest.walk_forward.WalkForwardValidator")
     def test_ensemble_skips_create_model(self, mock_wfv_cls, mock_sg, mock_get_mm):
@@ -936,7 +936,7 @@ class TestRunBacktestWalkForward(unittest.TestCase):
 
         mock_get_mm.return_value.create_model.assert_not_called()
 
-    @patch("src.backtest.pipeline.get_model_manager")
+    @patch("src.backtest.pipeline.runner.get_model_manager")
     @patch("src.trading.signal_generator.SignalGenerator")
     @patch("src.backtest.walk_forward.WalkForwardValidator")
     def test_non_ensemble_calls_create_model(self, mock_wfv_cls, mock_sg, mock_get_mm):
@@ -949,7 +949,7 @@ class TestRunBacktestWalkForward(unittest.TestCase):
 
         mock_get_mm.return_value.create_model.assert_called_once()
 
-    @patch("src.backtest.pipeline.get_model_manager")
+    @patch("src.backtest.pipeline.runner.get_model_manager")
     @patch("src.trading.signal_generator.SignalGenerator")
     @patch("src.backtest.walk_forward.WalkForwardValidator")
     def test_lightgbm_model_type(self, mock_wfv_cls, mock_sg, mock_get_mm):
