@@ -24,7 +24,6 @@ MAX_LINES = 600
 # 分割して MAX_LINES 以下にしたら、この辞書から該当行を削除すること。
 GRANDFATHERED: dict[str, int] = {
     "backtest/optimizer.py": 944,
-    "backtest/portfolio.py": 808,
     "prediction/training_pipeline.py": 790,
     "backtest/metrics.py": 707,
     "backtest/pipeline.py": 645,
