@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
+import requests
 
 from src.market_data.adapters.wikipedia_pageviews import WikipediaPageviewsClient, resolve_article
 from src.market_data.wikipedia_features import add_pageview_features, fetch_pageview_features
@@ -34,6 +35,7 @@ class TestFetchDailyViews(unittest.TestCase):
         mock_resp.status_code = status_code
         mock_resp.raise_for_status.return_value = None
         mock_resp.json.return_value = {"items": items}
+        mock_resp.headers = {}
         return mock_resp
 
     @patch("requests.get")
@@ -77,6 +79,42 @@ class TestFetchDailyViews(unittest.TestCase):
         self.client.fetch_daily_views("us", "AAPL", "2024-01-01", "2024-01-01")
         _, kwargs = mock_get.call_args
         self.assertIn("User-Agent", kwargs.get("headers", {}))
+
+    @patch("time.sleep", lambda *a, **k: None)
+    @patch("requests.get")
+    def test_retries_on_429_then_succeeds(self, mock_get):
+        rate_limited = self._mock_response([], status_code=429)
+        ok = self._mock_response([{"timestamp": "2024010100", "views": 5}])
+        mock_get.side_effect = [rate_limited, ok]
+        result = self.client.fetch_daily_views("us", "AAPL", "2024-01-01", "2024-01-01")
+        self.assertEqual(result, {"2024-01-01": 5})
+        self.assertEqual(mock_get.call_count, 2)
+
+    @patch("time.sleep", lambda *a, **k: None)
+    @patch("requests.get")
+    def test_429_exhausted_returns_none(self, mock_get):
+        mock_get.return_value = self._mock_response([], status_code=429)
+        result = self.client.fetch_daily_views("us", "AAPL", "2024-01-01", "2024-01-01")
+        self.assertIsNone(result)
+        # _MAX_RETRIES 回まで試行する
+        self.assertEqual(mock_get.call_count, 3)
+
+    @patch("time.sleep", lambda *a, **k: None)
+    @patch("requests.get")
+    def test_retries_on_server_error(self, mock_get):
+        server_error = self._mock_response([], status_code=503)
+        ok = self._mock_response([{"timestamp": "2024010100", "views": 7}])
+        mock_get.side_effect = [server_error, ok]
+        result = self.client.fetch_daily_views("us", "AAPL", "2024-01-01", "2024-01-01")
+        self.assertEqual(result, {"2024-01-01": 7})
+
+    @patch("time.sleep", lambda *a, **k: None)
+    @patch("requests.get")
+    def test_network_error_retries_then_none(self, mock_get):
+        mock_get.side_effect = requests.exceptions.ConnectionError("boom")
+        result = self.client.fetch_daily_views("us", "AAPL", "2024-01-01", "2024-01-01")
+        self.assertIsNone(result)
+        self.assertEqual(mock_get.call_count, 3)
 
 
 class TestFetchPageviewFeatures(unittest.TestCase):

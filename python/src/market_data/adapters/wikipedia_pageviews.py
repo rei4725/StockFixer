@@ -18,6 +18,8 @@ API ドキュメント: https://wikimedia.org/api/rest_v1/#/Pageviews%20data
 
 from __future__ import annotations
 
+import threading
+import time
 from datetime import date as _date
 from typing import Optional
 from urllib.parse import quote
@@ -32,6 +34,28 @@ _API_BASE = "https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article"
 
 # Wikimedia ポリシー上 User-Agent は必須（識別可能な文字列を送る）
 _USER_AGENT = "StockFixer/1.0 (https://github.com/rei4725/StockFixer; market-data pipeline)"
+
+# 429/5xx リトライ設定
+_MAX_RETRIES = 3
+_BACKOFF_BASE_SECONDS = 1.0
+_MAX_BACKOFF_SECONDS = 30.0
+
+# バッチパイプラインは複数銘柄を並列スレッドで処理するため、Wikimedia への
+# 同時バーストを避けてリクエスト開始間隔を最小 _MIN_REQUEST_INTERVAL 秒に空ける。
+_MIN_REQUEST_INTERVAL = 0.2
+_rate_lock = threading.Lock()
+_last_request_ts = 0.0
+
+
+def _throttle() -> None:
+    """並列スレッド間でリクエスト開始間隔を空ける（レート制限の予防）。"""
+    global _last_request_ts
+    with _rate_lock:
+        wait = _MIN_REQUEST_INTERVAL - (time.monotonic() - _last_request_ts)
+        if wait > 0:
+            time.sleep(wait)
+        _last_request_ts = time.monotonic()
+
 
 # 銘柄コード → Wikipedia 記事名（既知辞書）。
 # 注目度シグナルが効きやすいメガキャップ／高知名度銘柄を中心に収録する。
@@ -171,22 +195,8 @@ class WikipediaPageviewsClient:
             f"/daily/{start:%Y%m%d}/{end:%Y%m%d}"
         )
 
-        try:
-            resp = requests.get(
-                url,
-                headers={"User-Agent": _USER_AGENT},
-                timeout=self._timeout,
-            )
-            if resp.status_code == 404:
-                # 該当記事・期間にデータがない（2015-07 以前など）
-                return None
-            resp.raise_for_status()
-            items = resp.json().get("items", [])
-        except requests.exceptions.RequestException as e:
-            logger.debug("Wikipedia API リクエストエラー (%s): %s", article, e)
-            return None
-        except Exception as e:
-            logger.warning("Wikipedia API 予期しないエラー (%s): %s", article, e)
+        items = self._get_items_with_retry(url, article)
+        if items is None:
             return None
 
         records: dict[str, int] = {}
@@ -198,3 +208,73 @@ class WikipediaPageviewsClient:
                 records[date_str] = int(item.get("views", 0) or 0)
 
         return records if records else None
+
+    def _get_items_with_retry(self, url: str, article: str) -> Optional[list]:
+        """URL を叩き items リストを返す。429/5xx/ネットワークエラーは指数バックオフでリトライ。
+
+        404（データなし）は即 None。レート制限（429）でリトライ尽きた場合は
+        「データなし」と区別できるよう warning ログを出してから None を返す。
+        """
+        for attempt in range(1, _MAX_RETRIES + 1):
+            _throttle()
+            try:
+                resp = requests.get(
+                    url,
+                    headers={"User-Agent": _USER_AGENT},
+                    timeout=self._timeout,
+                )
+            except requests.exceptions.RequestException as e:
+                if attempt == _MAX_RETRIES:
+                    logger.warning("Wikipedia API ネットワークエラー (%s): %s", article, e)
+                    return None
+                time.sleep(self._backoff_seconds(attempt))
+                continue
+
+            if resp.status_code == 404:
+                # 該当記事・期間にデータがない（記事名誤り / 2015-07 以前など）
+                return None
+
+            if resp.status_code == 429 or resp.status_code >= 500:
+                if attempt == _MAX_RETRIES:
+                    logger.warning(
+                        "Wikipedia API レート制限/サーバエラー (status=%s) によりスキップ: %s",
+                        resp.status_code,
+                        article,
+                    )
+                    return None
+                wait = self._retry_after_seconds(resp) or self._backoff_seconds(attempt)
+                logger.warning(
+                    "Wikipedia API status=%s 検出、%.1f秒待機しリトライ (%d/%d): %s",
+                    resp.status_code,
+                    wait,
+                    attempt,
+                    _MAX_RETRIES,
+                    article,
+                )
+                time.sleep(wait)
+                continue
+
+            try:
+                resp.raise_for_status()
+                return resp.json().get("items", [])
+            except Exception as e:
+                logger.warning("Wikipedia API 予期しないエラー (%s): %s", article, e)
+                return None
+
+        return None
+
+    @staticmethod
+    def _backoff_seconds(attempt: int) -> float:
+        """指数バックオフ待機時間（上限 _MAX_BACKOFF_SECONDS）。"""
+        return min(_BACKOFF_BASE_SECONDS * (2 ** (attempt - 1)), _MAX_BACKOFF_SECONDS)
+
+    @staticmethod
+    def _retry_after_seconds(resp: requests.Response) -> Optional[float]:
+        """Retry-After ヘッダ（秒数指定のみ対応）を解釈する。"""
+        value = resp.headers.get("Retry-After")
+        if not value:
+            return None
+        try:
+            return min(float(value), _MAX_BACKOFF_SECONDS)
+        except ValueError:
+            return None
