@@ -33,6 +33,7 @@ from src.market_data.quality_check import QualityCheckResult, run_quality_checks
 from src.market_data.saver import save_raw_ohlcv
 from src.market_data.sentiment_features import add_sentiment_features, fetch_news_sentiment_with_llm
 from src.market_data.technical import add_technical_indicators, create_basic_lag_features
+from src.market_data.wikipedia_features import add_pageview_features, fetch_pageview_features
 from src.utils.data_path_utils import get_ticker, normalize_col
 from src.utils.db import upsert_stock_features
 from src.utils.logger import get_logger
@@ -188,6 +189,11 @@ def fetch_stock_data_with_features(
     )
     sentiment_df = fetch_news_sentiment_with_llm(symbol, sentiment_start, end_date, market=market)
     df = add_sentiment_features(df, sentiment_df=sentiment_df)
+
+    # Wikipedia ページビュー特徴量を付与（#370：注目度の先行指標オルタナデータ）
+    # 記事未登録銘柄・取得失敗時は中立値（0）で埋まるため全銘柄で安全に呼び出せる。
+    pageview_df = fetch_pageview_features(symbol, market, start_date, end_date)
+    df = add_pageview_features(df, pageview_df=pageview_df)
 
     # 部分的なNaN値を前方/後方補完（OHLCV欠損日等によるdropna行数増大を防ぐ）
     nan_before = int(df.isnull().sum().sum())
