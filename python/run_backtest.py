@@ -99,7 +99,17 @@ def parse_args():
     parser.add_argument(
         "--fee-rate", type=float, default=0.001, help="取引手数料率 (default: 0.001)"
     )
-    parser.add_argument("--slippage", type=float, default=0.0, help="スリッページ (default: 0.0)")
+    parser.add_argument(
+        "--slippage",
+        type=float,
+        default=None,
+        help="片道スリッページ率 (未指定時は市場別デフォルト US 5bps / JP 10bps)",
+    )
+    parser.add_argument(
+        "--no-dynamic-slippage",
+        action="store_true",
+        help="出来高連動の動的スリッページ（平方根インパクト）を無効化する",
+    )
 
     # リスク管理
     parser.add_argument(
@@ -215,6 +225,7 @@ def main():
         initial_cash=args.initial_cash,
         fee_rate=args.fee_rate,
         slippage=args.slippage,
+        dynamic_slippage=not args.no_dynamic_slippage,
         stop_loss_pct=args.stop_loss,
         take_profit_pct=args.take_profit,
         position_sizing=args.position_sizing,

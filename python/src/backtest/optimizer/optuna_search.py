@@ -5,7 +5,7 @@ TPE サンプラーで閾値を探索し、選択バイアス補正済みの DSR
 """
 
 import math
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import pandas as pd
 
@@ -26,7 +26,8 @@ def run_optuna_optimization(
     n_splits: int = 5,
     initial_cash: float = 1_000_000,
     fee_rate: float = 0.001,
-    slippage: float = 0.0,
+    slippage: Optional[float] = None,
+    dynamic_slippage: bool = True,
     n_trials: int = 50,
     sort_by: str = "sharpe_ratio",
 ) -> pd.DataFrame:
@@ -70,6 +71,7 @@ def run_optuna_optimization(
                 initial_cash=initial_cash,
                 fee_rate=fee_rate,
                 slippage=slippage,
+                dynamic_slippage=dynamic_slippage,
                 ensemble=ensemble,
             )
             if wf_df is None or wf_df.empty or sort_by not in wf_df.columns:

@@ -3,15 +3,31 @@
 run_backtest.py 等のラッパーから呼ばれるサービス層の実行関数群。
 """
 
-from typing import Any, Optional, Tuple
+from typing import Any, Callable, Optional, Tuple
 
 import pandas as pd
 
+from config.settings import DEFAULT_SLIPPAGE_JP, DEFAULT_SLIPPAGE_US
 from src.backtest.pipeline.features import load_features
 from src.backtest.ports import get_model_manager
+from src.backtest.slippage import make_slippage_fn
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+def default_slippage_for(market: str) -> float:
+    """市場別のデフォルト片道スリッページ率を返す（#494）。"""
+    return DEFAULT_SLIPPAGE_JP if market == "jp" else DEFAULT_SLIPPAGE_US
+
+
+def _resolve_slippage(
+    market: str, slippage: Optional[float], dynamic_slippage: bool
+) -> Tuple[float, Optional[Callable[[int, float, float], float]]]:
+    """フラットスリッページ（未指定なら市場別デフォルト）と動的スリッページ関数を解決する。"""
+    eff_slippage = slippage if slippage is not None else default_slippage_for(market)
+    slippage_fn = make_slippage_fn() if dynamic_slippage else None
+    return eff_slippage, slippage_fn
 
 
 def run_backtest_single(
@@ -27,7 +43,8 @@ def run_backtest_single(
     train_ratio: float = 0.8,
     initial_cash: float = 1_000_000,
     fee_rate: float = 0.001,
-    slippage: float = 0.0,
+    slippage: Optional[float] = None,
+    dynamic_slippage: bool = True,
     stop_loss_pct: Optional[float] = None,
     take_profit_pct: Optional[float] = None,
     position_sizing: str = "full",
@@ -56,7 +73,8 @@ def run_backtest_single(
         train_ratio: 学習データ比率
         initial_cash: 初期資金
         fee_rate: 取引手数料率
-        slippage: スリッページ
+        slippage: 片道スリッページ率（None なら市場別デフォルト US5bps/JP10bps）
+        dynamic_slippage: True で出来高連動の動的スリッページ（平方根インパクト）を加算
         stop_loss_pct: ストップロス率（例: 0.05=5%下落で損切り）
         take_profit_pct: テイクプロフィット率（例: 0.10=10%上昇で利確）
         position_sizing: ポジションサイジング ("full", "fixed", "confidence", "atr")
@@ -147,6 +165,9 @@ def run_backtest_single(
 
     signal = task.make_signal(pred)
 
+    # スリッページ解決（未指定は市場別デフォルト、動的モデルは任意）
+    eff_slippage, slippage_fn = _resolve_slippage(market, slippage, dynamic_slippage)
+
     # シミュレーション
     backtester = Backtester(
         model_manager=mm,
@@ -158,7 +179,8 @@ def run_backtest_single(
         symbol=symbol,
         initial_cash=initial_cash,
         fee_rate=fee_rate,
-        slippage=slippage,
+        slippage=eff_slippage,
+        slippage_fn=slippage_fn,
         stop_loss_pct=stop_loss_pct,
         take_profit_pct=take_profit_pct,
         position_sizing=position_sizing,
@@ -189,7 +211,8 @@ def run_backtest_walk_forward(
     n_splits: int = 5,
     initial_cash: float = 1_000_000,
     fee_rate: float = 0.001,
-    slippage: float = 0.0,
+    slippage: Optional[float] = None,
+    dynamic_slippage: bool = True,
     stop_loss_pct: Optional[float] = None,
     take_profit_pct: Optional[float] = None,
     position_sizing: str = "full",
@@ -215,7 +238,8 @@ def run_backtest_walk_forward(
         n_splits: Walk-Forward の分割数
         initial_cash: 初期資金
         fee_rate: 取引手数料率
-        slippage: スリッページ
+        slippage: 片道スリッページ率（None なら市場別デフォルト US5bps/JP10bps）
+        dynamic_slippage: True で出来高連動の動的スリッページ（平方根インパクト）を加算
         stop_loss_pct: ストップロス率
         take_profit_pct: テイクプロフィット率
         position_sizing: ポジションサイジング ("full", "fixed", "confidence", "atr")
@@ -239,6 +263,8 @@ def run_backtest_walk_forward(
     if not ensemble:
         mm.create_model(model_type, model_name)
 
+    eff_slippage, slippage_fn = _resolve_slippage(market, slippage, dynamic_slippage)
+
     wfv = WalkForwardValidator(
         market=market,
         symbol=symbol,
@@ -246,7 +272,8 @@ def run_backtest_walk_forward(
         signal_generator=SignalGenerator(market=market, symbol=symbol),
         initial_cash=initial_cash,
         fee_rate=fee_rate,
-        slippage=slippage,
+        slippage=eff_slippage,
+        slippage_fn=slippage_fn,
         n_splits=n_splits,
         source=source,
         stop_loss_pct=stop_loss_pct,

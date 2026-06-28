@@ -130,6 +130,11 @@ class Settings(BaseSettings):
     # ---------- センチメント特徴量（R-404） ----------
     SENTIMENT_LOOKBACK_DAYS: int = Field(default=30)
 
+    # ---------- バックテストのデフォルトスリッページ（#494・片道率） ----------
+    # 流動性差を反映: 米大型株はタイト、日本株はやや広い。
+    DEFAULT_SLIPPAGE_US: float = Field(default=0.0005)  # 5bps
+    DEFAULT_SLIPPAGE_JP: float = Field(default=0.0010)  # 10bps
+
     # ---------- 戦略ファクトリー（#369 Phase 1） ----------
     FACTORY_ENABLED: bool = Field(default=False)
     FACTORY_NIGHTLY_BUDGET: int = Field(default=10)
@@ -217,6 +222,8 @@ VOLUME_FILTER_WINDOW_DAYS: int = settings.VOLUME_FILTER_WINDOW_DAYS
 VOLUME_FILTER_MULTIPLIER: float = settings.VOLUME_FILTER_MULTIPLIER
 AUTO_PROMOTE_MODEL: bool = settings.AUTO_PROMOTE_MODEL
 SENTIMENT_LOOKBACK_DAYS: int = settings.SENTIMENT_LOOKBACK_DAYS
+DEFAULT_SLIPPAGE_US: float = settings.DEFAULT_SLIPPAGE_US
+DEFAULT_SLIPPAGE_JP: float = settings.DEFAULT_SLIPPAGE_JP
 DB_LOG_RETENTION_DAYS: int = settings.DB_LOG_RETENTION_DAYS
 DB_COMPACT_ENABLED: bool = settings.DB_COMPACT_ENABLED
 DB_SIZE_ALERT_GB: float = settings.DB_SIZE_ALERT_GB

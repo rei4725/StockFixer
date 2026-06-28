@@ -7,7 +7,7 @@ Walk-Forward Validation
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import pandas as pd
 from sklearn.model_selection import TimeSeriesSplit
@@ -59,6 +59,7 @@ class WalkForwardValidator:
         atr_max_fraction: float = 1.0,
         ensemble: bool = False,
         enable_short: bool = False,
+        slippage_fn: Optional[Callable[[int, float, float], float]] = None,
     ):
         self.market = market
         self.symbol = symbol
@@ -79,6 +80,7 @@ class WalkForwardValidator:
         self.atr_max_fraction = atr_max_fraction
         self.ensemble = ensemble
         self.enable_short = enable_short
+        self.slippage_fn = slippage_fn
 
     def run(
         self,
@@ -207,6 +209,7 @@ class WalkForwardValidator:
             initial_cash=self.initial_cash,
             fee_rate=self.fee_rate,
             slippage=self.slippage,
+            slippage_fn=self.slippage_fn,
             stop_loss_pct=self.stop_loss_pct,
             take_profit_pct=self.take_profit_pct,
             position_sizing=self.position_sizing,
