@@ -47,6 +47,20 @@ class TestHealthEndpoint:
         assert data["status"] == "degraded"
         assert "error" in data["db"]
 
+    def test_health_db_busy_returns_ok(self, client):
+        """DB が別処理使用中（busy）でも status=ok・HTTP 200 を返す（#550）"""
+        with (
+            patch("src.api.health._check_db", return_value=("busy", None)),
+            patch("src.api.health._load_scheduler_last_runs", return_value={}),
+            patch("src.api.health._get_last_prediction_at", return_value=None),
+        ):
+            resp = client.get("/health")
+
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["status"] == "ok"
+        assert data["db"] == "busy"
+
     def test_health_includes_scheduler_last_runs(self, client):
         """scheduler_last_runs フィールドがレスポンスに含まれる"""
         runs = {"daily_pipeline": "2026-04-30T07:35:00+00:00"}
@@ -119,6 +133,73 @@ class TestHealthEndpoint:
         data = resp.get_json()
         assert data["status"] == "ok"
         assert resp.status_code == 200
+
+
+class TestCheckDb:
+    """_check_db のロックタイムアウト（busy）と異常（error）の区別（#550）"""
+
+    def test_busy_when_lock_timeout(self):
+        """FileLock 取得タイムアウト時は busy を返す（異常扱いしない）"""
+        from src.api.health import _check_db
+        from src.utils.db._connection import DbLockTimeoutError
+
+        with patch(
+            "src.utils.db._connection._db_connection",
+            side_effect=DbLockTimeoutError("別プロセスがDBを使用中"),
+        ):
+            status, err = _check_db()
+
+        assert status == "busy"
+        assert err is None
+
+    def test_error_when_connection_fails(self):
+        """ロック以外の接続失敗（DB 破損等）は error を返す"""
+        from src.api.health import _check_db
+
+        with patch(
+            "src.utils.db._connection._db_connection",
+            side_effect=RuntimeError("Could not read enough bytes"),
+        ):
+            status, err = _check_db()
+
+        assert status == "error"
+        assert "Could not read enough bytes" in err
+
+    def test_ok_when_db_available(self):
+        """DB に接続できれば ok を返す（隔離された一時 DB を使用）"""
+        from src.api.health import _check_db
+
+        status, err = _check_db()
+
+        assert status == "ok"
+        assert err is None
+
+
+class TestDbConnectionLockTimeout:
+    """_db_connection の lock_timeout 引数の動作（#550）"""
+
+    def test_raises_db_lock_timeout_error_when_locked(self):
+        """他がロック保持中に短い lock_timeout で DbLockTimeoutError が出ること"""
+        from filelock import FileLock
+
+        from src.utils.data_path_utils import get_db_path
+        from src.utils.db._connection import DbLockTimeoutError, _db_connection
+
+        # 別インスタンスの FileLock で先にロックを握る（他処理の DB 使用を模擬）
+        blocker = FileLock(get_db_path() + ".lock")
+        blocker.acquire()
+        try:
+            with pytest.raises(DbLockTimeoutError):
+                with _db_connection(lock_timeout=0.1):
+                    pass
+        finally:
+            blocker.release()
+
+    def test_default_timeout_still_raises_runtime_error_compatible(self):
+        """DbLockTimeoutError は RuntimeError のサブクラス（既存呼び出し側と互換）"""
+        from src.utils.db._connection import DbLockTimeoutError
+
+        assert issubclass(DbLockTimeoutError, RuntimeError)
 
 
 class TestLoadSchedulerLastRuns:

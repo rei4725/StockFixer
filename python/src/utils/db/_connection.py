@@ -34,8 +34,18 @@ _init_lock = Lock()  # テーブル初期化の二重実行防止
 _tables_initialized = False  # プロセス内でのテーブル初期化済みフラグ
 
 
+class DbLockTimeoutError(RuntimeError):
+    """DuckDB の FileLock 取得がタイムアウトしたことを表す。
+
+    「別処理が DB を使用中」を意味し、DB 自体の異常ではない。
+    ヘルスチェック等が busy と異常を区別するために使う。
+    """
+
+
 @contextmanager
-def _db_connection() -> Generator[duckdb.DuckDBPyConnection, None, None]:
+def _db_connection(
+    lock_timeout: float | None = None,
+) -> Generator[duckdb.DuckDBPyConnection, None, None]:
     """
     短命DB接続を提供するコンテキストマネージャー。
 
@@ -45,6 +55,12 @@ def _db_connection() -> Generator[duckdb.DuckDBPyConnection, None, None]:
 
     リトライ: IOException（ロック衝突等）が発生した場合は
     _RETRY_COUNT 回まで _RETRY_DELAY 秒待ってリトライする。
+
+    Args:
+        lock_timeout: FileLock の取得待ち上限（秒）。None なら既定の
+            _FILELOCK_TIMEOUT。ヘルスチェック等、長時間ブロックできない
+            呼び出し側が短い値を指定する。タイムアウト時は
+            DbLockTimeoutError を送出する。
 
     Usage:
         with _db_connection() as con:
@@ -56,12 +72,13 @@ def _db_connection() -> Generator[duckdb.DuckDBPyConnection, None, None]:
     db_path = get_db_path()
     lock_path = db_path + ".lock"
 
-    file_lock = FileLock(lock_path, timeout=_FILELOCK_TIMEOUT)
+    timeout = _FILELOCK_TIMEOUT if lock_timeout is None else lock_timeout
+    file_lock = FileLock(lock_path, timeout=timeout)
     try:
         file_lock.acquire()
     except FileLockTimeout:
-        raise RuntimeError(
-            f"DuckDB書き込みロック取得タイムアウト ({_FILELOCK_TIMEOUT}秒): 別プロセスがDBを使用中です。{lock_path}"
+        raise DbLockTimeoutError(
+            f"DuckDB書き込みロック取得タイムアウト ({timeout}秒): 別プロセスがDBを使用中です。{lock_path}"
         )
 
     con = None
