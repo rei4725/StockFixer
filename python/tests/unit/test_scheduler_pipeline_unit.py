@@ -535,10 +535,11 @@ class TestRunDailyPipeline:
 class TestRunWeeklyDbMaintenance(unittest.TestCase):
     """run_weekly_db_maintenance のテスト"""
 
+    @patch("src.utils.db.compact.compact_in_place", return_value={})
     @patch("src.reporting.discord.discord_utils.send_db_maintenance_completion")
     @patch("src.utils.db._db_connection")
     @patch("os.path.getsize", return_value=10 * 1024 * 1024)
-    def test_sends_completion_on_success(self, mock_size, mock_conn, mock_send):
+    def test_sends_completion_on_success(self, mock_size, mock_conn, mock_send, mock_compact):
         from contextlib import contextmanager
 
         from src.orchestration.scheduler import run_weekly_db_maintenance
