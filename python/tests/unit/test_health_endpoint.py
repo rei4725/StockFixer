@@ -22,9 +22,8 @@ class TestHealthEndpoint:
         mock_con.execute.return_value.fetchone.return_value = (1,)
 
         with (
-            patch("src.api.health._check_db", return_value=("ok", None)),
+            patch("src.api.health._check_db", return_value=("ok", None, None)),
             patch("src.api.health._load_scheduler_last_runs", return_value={}),
-            patch("src.api.health._get_last_prediction_at", return_value=None),
         ):
             resp = client.get("/health")
 
@@ -36,9 +35,11 @@ class TestHealthEndpoint:
     def test_health_db_error(self, client):
         """DB接続失敗時に status=degraded・HTTP 503 を返す"""
         with (
-            patch("src.api.health._check_db", return_value=("error", "connection refused")),
+            patch(
+                "src.api.health._check_db",
+                return_value=("error", "connection refused", None),
+            ),
             patch("src.api.health._load_scheduler_last_runs", return_value={}),
-            patch("src.api.health._get_last_prediction_at", return_value=None),
         ):
             resp = client.get("/health")
 
@@ -50,9 +51,8 @@ class TestHealthEndpoint:
     def test_health_db_busy_returns_ok(self, client):
         """DB が別処理使用中（busy）でも status=ok・HTTP 200 を返す（#550）"""
         with (
-            patch("src.api.health._check_db", return_value=("busy", None)),
+            patch("src.api.health._check_db", return_value=("busy", None, None)),
             patch("src.api.health._load_scheduler_last_runs", return_value={}),
-            patch("src.api.health._get_last_prediction_at", return_value=None),
         ):
             resp = client.get("/health")
 
@@ -65,9 +65,8 @@ class TestHealthEndpoint:
         """scheduler_last_runs フィールドがレスポンスに含まれる"""
         runs = {"daily_pipeline": "2026-04-30T07:35:00+00:00"}
         with (
-            patch("src.api.health._check_db", return_value=("ok", None)),
+            patch("src.api.health._check_db", return_value=("ok", None, None)),
             patch("src.api.health._load_scheduler_last_runs", return_value=runs),
-            patch("src.api.health._get_last_prediction_at", return_value=None),
         ):
             resp = client.get("/health")
 
@@ -78,9 +77,8 @@ class TestHealthEndpoint:
         """last_prediction_at フィールドがレスポンスに含まれる"""
         ts = "2026-04-30T07:40:00"
         with (
-            patch("src.api.health._check_db", return_value=("ok", None)),
+            patch("src.api.health._check_db", return_value=("ok", None, ts)),
             patch("src.api.health._load_scheduler_last_runs", return_value={}),
-            patch("src.api.health._get_last_prediction_at", return_value=ts),
         ):
             resp = client.get("/health")
 
@@ -90,9 +88,8 @@ class TestHealthEndpoint:
     def test_health_checked_at_present(self, client):
         """checked_at フィールドが必ず含まれる"""
         with (
-            patch("src.api.health._check_db", return_value=("ok", None)),
+            patch("src.api.health._check_db", return_value=("ok", None, None)),
             patch("src.api.health._load_scheduler_last_runs", return_value={}),
-            patch("src.api.health._get_last_prediction_at", return_value=None),
         ):
             resp = client.get("/health")
 
@@ -107,9 +104,8 @@ class TestHealthEndpoint:
         stale_time = (datetime.now(timezone.utc) - timedelta(minutes=31)).isoformat()
         runs = {"daily_pipeline": stale_time}
         with (
-            patch("src.api.health._check_db", return_value=("ok", None)),
+            patch("src.api.health._check_db", return_value=("ok", None, None)),
             patch("src.api.health._load_scheduler_last_runs", return_value=runs),
-            patch("src.api.health._get_last_prediction_at", return_value=None),
         ):
             resp = client.get("/health")
 
@@ -124,9 +120,8 @@ class TestHealthEndpoint:
         recent_time = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
         runs = {"daily_pipeline": recent_time}
         with (
-            patch("src.api.health._check_db", return_value=("ok", None)),
+            patch("src.api.health._check_db", return_value=("ok", None, None)),
             patch("src.api.health._load_scheduler_last_runs", return_value=runs),
-            patch("src.api.health._get_last_prediction_at", return_value=None),
         ):
             resp = client.get("/health")
 
@@ -136,7 +131,7 @@ class TestHealthEndpoint:
 
 
 class TestCheckDb:
-    """_check_db のロックタイムアウト（busy）と異常（error）の区別（#550）"""
+    """_check_db のロックタイムアウト（busy）と異常（error）の区別（#550/#553）"""
 
     def test_busy_when_lock_timeout(self):
         """FileLock 取得タイムアウト時は busy を返す（異常扱いしない）"""
@@ -147,10 +142,11 @@ class TestCheckDb:
             "src.utils.db._connection._db_connection",
             side_effect=DbLockTimeoutError("別プロセスがDBを使用中"),
         ):
-            status, err = _check_db()
+            status, err, last_pred = _check_db()
 
         assert status == "busy"
         assert err is None
+        assert last_pred is None
 
     def test_error_when_connection_fails(self):
         """ロック以外の接続失敗（DB 破損等）は error を返す"""
@@ -160,19 +156,48 @@ class TestCheckDb:
             "src.utils.db._connection._db_connection",
             side_effect=RuntimeError("Could not read enough bytes"),
         ):
-            status, err = _check_db()
+            status, err, last_pred = _check_db()
 
         assert status == "error"
         assert "Could not read enough bytes" in err
+        assert last_pred is None
 
     def test_ok_when_db_available(self):
         """DB に接続できれば ok を返す（隔離された一時 DB を使用）"""
         from src.api.health import _check_db
 
-        status, err = _check_db()
+        status, err, last_pred = _check_db()
 
         assert status == "ok"
         assert err is None
+        assert last_pred is None  # 一時 DB に予測データはない
+
+    def test_single_connection_returns_last_prediction(self):
+        """1 接続で疎通確認と last_prediction_at をまとめて取得する（#553）"""
+        from src.api.health import _check_db
+        from src.utils.db._connection import _db_connection
+
+        # 隔離された一時 DB に予測データを 1 件投入
+        with _db_connection() as con:
+            con.execute(
+                "INSERT INTO prediction_results (market, symbol, predicted_at, model_version)"
+                " VALUES ('jp', '7203', '20260702_120000', 'production')"
+            )
+
+        status, err, last_pred = _check_db()
+
+        assert status == "ok"
+        assert err is None
+        assert last_pred == "20260702_120000"
+
+    def test_query_last_prediction_swallows_errors(self):
+        """last_prediction_at のクエリ失敗は None を返し、例外を伝播させないこと"""
+        from src.api.health import _query_last_prediction_at
+
+        bad_con = MagicMock()
+        bad_con.execute.side_effect = RuntimeError("query failed")
+
+        assert _query_last_prediction_at(bad_con) is None
 
 
 class TestDbConnectionLockTimeout:
