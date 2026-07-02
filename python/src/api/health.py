@@ -22,6 +22,11 @@ from src.utils.logger import get_logger
 
 _SCHEDULER_STALE_SECS = 30 * 60  # 30分
 
+# health 用 DB チェックのロック取得待ち上限（秒）。
+# Docker HEALTHCHECK の HTTP タイムアウト（8秒）内に必ず応答を返せるよう、
+# 既定の 120 秒ではなく短い値でロック待ちを打ち切る（#550）。
+_DB_CHECK_LOCK_TIMEOUT = 2.0
+
 logger = get_logger(__name__)
 
 app = Flask(__name__)
@@ -40,12 +45,20 @@ def _check_db() -> tuple[str, str | None]:
     （get_readonly_connection）を開くと read-write 接続と設定が衝突する
     （DuckDB は同一プロセスで同一ファイルへ異なる設定の接続を許さない）。
     そのため共有の _db_connection（FileLock 直列化・設定統一）経由で読む。
+
+    ロック待ちは _DB_CHECK_LOCK_TIMEOUT 秒で打ち切り "busy" を返す（#550）。
+    busy は「別処理（日次パイプライン等）が DB を使用中 = プロセスは生きている」
+    ことを意味し、異常ではない。DB 破損のような真の異常はロック取得後の
+    接続失敗として "error" になる。
     """
     try:
-        from src.utils.db._connection import _db_connection
+        from src.utils.db._connection import DbLockTimeoutError, _db_connection
 
-        with _db_connection() as con:
-            con.execute("SELECT 1").fetchone()
+        try:
+            with _db_connection(lock_timeout=_DB_CHECK_LOCK_TIMEOUT) as con:
+                con.execute("SELECT 1").fetchone()
+        except DbLockTimeoutError:
+            return "busy", None
         return "ok", None
     except Exception as exc:
         return "error", str(exc)
@@ -80,10 +93,14 @@ def _get_last_prediction_at() -> str | None:
     """prediction_results テーブルから直近の予測実行時刻を返す。"""
     try:
         # 同一プロセス内のため共有接続を使う（read-only 別接続だと設定衝突する）
-        from src.utils.db._connection import _db_connection
+        from src.utils.db._connection import DbLockTimeoutError, _db_connection
 
-        with _db_connection() as con:
-            row = con.execute("SELECT MAX(predicted_at) FROM prediction_results").fetchone()
+        try:
+            with _db_connection(lock_timeout=_DB_CHECK_LOCK_TIMEOUT) as con:
+                row = con.execute("SELECT MAX(predicted_at) FROM prediction_results").fetchone()
+        except DbLockTimeoutError:
+            # 別処理が DB 使用中。異常ではないので warning にしない
+            return None
         return row[0] if row and row[0] else None
     except Exception as exc:
         logger.warning("last_prediction_at 取得失敗: %s", exc)
@@ -121,7 +138,8 @@ def health() -> tuple[Response, int]:
             except ValueError:
                 pass
 
-    overall = "ok" if db_status == "ok" and not scheduler_stale else "degraded"
+    # busy = 別処理（バッチ等）が DB 使用中で、プロセスとしては健全（#550）
+    overall = "ok" if db_status in ("ok", "busy") and not scheduler_stale else "degraded"
 
     payload: dict[str, Any] = {
         "status": overall,
@@ -131,7 +149,7 @@ def health() -> tuple[Response, int]:
         "checked_at": datetime.now(timezone.utc).isoformat(),
     }
 
-    http_status = 200 if db_status == "ok" else 503
+    http_status = 200 if db_status in ("ok", "busy") else 503
     return jsonify(payload), http_status
 
 
