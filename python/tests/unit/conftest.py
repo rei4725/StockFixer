@@ -1,4 +1,5 @@
 # Unit test専用 fixture。外部DB・API依存は含まない。
+import os
 from unittest.mock import MagicMock
 
 import pandas as pd
@@ -26,7 +27,7 @@ def _block_discord_http(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _isolate_db(tmp_path):
+def _isolate_db(tmp_path, monkeypatch):
     """全 unit テストを隔離した一時 DuckDB に向け、本番 DB を触らせない。
 
     発注・リスク系の一部コード（例: RiskManager / fetch_latest_vix）は
@@ -38,19 +39,56 @@ def _isolate_db(tmp_path):
     各テストごとに一時ファイルへ向けることで本番 DB から完全に切り離す。
     DB を実際に開くテストはテーブルが自動初期化された空 DB を使う
     （データに依存するテストは個別に投入・モックしている）。
+
+    #548 対策: `src.utils.db`（プロキシ→ _connection）だけでなく、大元の
+    `src.utils.data_path_utils.get_db_path` も差し替える。週次 compact のように
+    data_path_utils から直接 import する呼び出し側は前者の patch を通らず、
+    本番 DB パスが実処理（物理コンパクション等）へ渡ってしまうため。
     """
+    import src.utils.data_path_utils as path_utils
     import src.utils.db as db_module
 
-    orig_get_db_path = db_module.get_db_path
+    test_db = str(tmp_path / "unit.duckdb")
     db_module.close_connection()
-    db_module.get_db_path = lambda: str(tmp_path / "unit.duckdb")
+    # 経路1: src.utils.db 経由（_db_connection / get_readonly_connection）
+    monkeypatch.setattr(db_module, "get_db_path", lambda: test_db)
+    # 経路2: data_path_utils から直接 import する呼び出し側（週次 compact 等）
+    monkeypatch.setattr(path_utils, "get_db_path", lambda: test_db)
     db_module._tables_initialized = False
     try:
         yield
     finally:
         db_module.close_connection()
-        db_module.get_db_path = orig_get_db_path
         db_module._tables_initialized = False
+
+
+@pytest.fixture(autouse=True)
+def _forbid_production_duckdb_connect(monkeypatch):
+    """本番 data ディレクトリ配下への duckdb.connect を禁止するトリップワイヤ。
+
+    _isolate_db の patch を通らない経路（パスを引数で受け取る compact 系や
+    duckdb.connect の直接呼び出し）が本番 DB ファイルに到達した瞬間に
+    テストを失敗させる。#548（unit テストが本番 DB を物理コンパクション中に
+    タイムアウトで強制中断され DB が破損）の再発防止。
+    """
+    import duckdb
+
+    from src.utils.data_path_utils import get_data_dir
+
+    prod_data_dir = os.path.abspath(get_data_dir())
+    orig_connect = duckdb.connect
+
+    def _guarded_connect(*args, **kwargs):
+        database = kwargs.get("database", args[0] if args else None)
+        if isinstance(database, (str, os.PathLike)):
+            resolved = os.path.abspath(str(database))
+            if resolved == prod_data_dir or resolved.startswith(prod_data_dir + os.sep):
+                raise RuntimeError(
+                    f"unit テストから本番 data ディレクトリへの duckdb.connect は禁止です (#548 再発防止): {resolved}"
+                )
+        return orig_connect(*args, **kwargs)
+
+    monkeypatch.setattr(duckdb, "connect", _guarded_connect)
 
 
 # ============================================
