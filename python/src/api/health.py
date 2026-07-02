@@ -38,8 +38,8 @@ app.config["JSON_SORT_KEYS"] = False
 # ---------------------------------------------------------------------------
 
 
-def _check_db() -> tuple[str, str | None]:
-    """DB接続を確認する。(status, error_msg) を返す。
+def _check_db() -> tuple[str, str | None, str | None]:
+    """DB接続を確認する。(status, error_msg, last_prediction_at) を返す。
 
     health サーバは scheduler / bot と同一プロセスで動くため、read-only の別接続
     （get_readonly_connection）を開くと read-write 接続と設定が衝突する
@@ -50,6 +50,10 @@ def _check_db() -> tuple[str, str | None]:
     busy は「別処理（日次パイプライン等）が DB を使用中 = プロセスは生きている」
     ことを意味し、異常ではない。DB 破損のような真の異常はロック取得後の
     接続失敗として "error" になる。
+
+    バッチと I/O 競合している間は duckdb.connect 自体に数秒かかるため（#553 実測:
+    接続 1 回あたり 4〜5 秒）、接続は 1 回だけ張り、疎通確認と last_prediction_at
+    取得をまとめて行う。
     """
     try:
         from src.utils.db._connection import DbLockTimeoutError, _db_connection
@@ -57,11 +61,22 @@ def _check_db() -> tuple[str, str | None]:
         try:
             with _db_connection(lock_timeout=_DB_CHECK_LOCK_TIMEOUT) as con:
                 con.execute("SELECT 1").fetchone()
+                last_prediction_at = _query_last_prediction_at(con)
         except DbLockTimeoutError:
-            return "busy", None
-        return "ok", None
+            return "busy", None, None
+        return "ok", None, last_prediction_at
     except Exception as exc:
-        return "error", str(exc)
+        return "error", str(exc), None
+
+
+def _query_last_prediction_at(con: Any) -> str | None:
+    """開いている接続から直近の予測実行時刻を返す。失敗しても健全性判定に影響させない。"""
+    try:
+        row = con.execute("SELECT MAX(predicted_at) FROM prediction_results").fetchone()
+        return row[0] if row and row[0] else None
+    except Exception as exc:
+        logger.warning("last_prediction_at 取得失敗: %s", exc)
+        return None
 
 
 def _load_scheduler_last_runs() -> dict[str, str | None]:
@@ -89,24 +104,6 @@ def _load_scheduler_last_runs() -> dict[str, str | None]:
     return latest
 
 
-def _get_last_prediction_at() -> str | None:
-    """prediction_results テーブルから直近の予測実行時刻を返す。"""
-    try:
-        # 同一プロセス内のため共有接続を使う（read-only 別接続だと設定衝突する）
-        from src.utils.db._connection import DbLockTimeoutError, _db_connection
-
-        try:
-            with _db_connection(lock_timeout=_DB_CHECK_LOCK_TIMEOUT) as con:
-                row = con.execute("SELECT MAX(predicted_at) FROM prediction_results").fetchone()
-        except DbLockTimeoutError:
-            # 別処理が DB 使用中。異常ではないので warning にしない
-            return None
-        return row[0] if row and row[0] else None
-    except Exception as exc:
-        logger.warning("last_prediction_at 取得失敗: %s", exc)
-        return None
-
-
 # ---------------------------------------------------------------------------
 # エンドポイント
 # ---------------------------------------------------------------------------
@@ -121,7 +118,7 @@ _register_external_v1(app)
 
 @app.route("/health")
 def health() -> tuple[Response, int]:
-    db_status, db_error = _check_db()
+    db_status, db_error, last_prediction_at = _check_db()
     scheduler_runs = _load_scheduler_last_runs()
 
     scheduler_stale = False
@@ -145,7 +142,7 @@ def health() -> tuple[Response, int]:
         "status": overall,
         "db": db_status if db_error is None else f"error: {db_error}",
         "scheduler_last_runs": scheduler_runs,
-        "last_prediction_at": _get_last_prediction_at(),
+        "last_prediction_at": last_prediction_at,
         "checked_at": datetime.now(timezone.utc).isoformat(),
     }
 

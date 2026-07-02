@@ -52,8 +52,11 @@ ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
 
 # ヘルスチェック（/health エンドポイントを叩いて DB 接続と業務状態を確認）
-HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --retries=3 \
-    CMD python -c "import urllib.request, sys; r=urllib.request.urlopen('http://localhost:5100/health',timeout=8); sys.exit(0 if r.status==200 else 1)" || exit 1
+# timeout はバッチと I/O 競合中の応答遅延（#553 実測: ok パスで最大 11 秒超）を
+# 吸収できる値にする。/health 自身が busy 打ち切り（2秒×1接続）で応答を返すため、
+# 30 秒あれば十分な余裕がある。
+HEALTHCHECK --interval=60s --timeout=30s --start-period=60s --retries=3 \
+    CMD python -c "import urllib.request, sys; r=urllib.request.urlopen('http://localhost:5100/health',timeout=25); sys.exit(0 if r.status==200 else 1)" || exit 1
 
 # デフォルトコマンド: スケジューラ + Discord Bot
 CMD ["python", "run_scheduler.py", "--with-bot"]
