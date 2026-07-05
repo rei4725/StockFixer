@@ -1,6 +1,7 @@
 """model_training_pipeline モジュールのユニットテスト"""
 
 import os
+import shutil
 import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
@@ -37,7 +38,7 @@ class TestTrainModelsForSymbol(unittest.TestCase):
         if os.path.exists(wal_path):
             os.remove(wal_path)
         if os.path.exists(self.tmp_dir):
-            os.rmdir(self.tmp_dir)
+            shutil.rmtree(self.tmp_dir)
 
     def test_skip_when_no_data(self):
         """DBにデータがない場合にskipステータスが返ることを確認"""
@@ -162,7 +163,7 @@ class TestRunBatchTraining(unittest.TestCase):
         if os.path.exists(wal_path):
             os.remove(wal_path)
         if os.path.exists(self.tmp_dir):
-            os.rmdir(self.tmp_dir)
+            shutil.rmtree(self.tmp_dir)
 
     @patch("src.prediction.training_pipeline._training.load_features_for_training")
     def test_batch_success(self, mock_load):

@@ -3,6 +3,7 @@ DuckDB アクセスモジュールのユニットテスト
 """
 
 import os
+import shutil
 import tempfile
 import unittest
 
@@ -49,7 +50,7 @@ class TestDB(unittest.TestCase):
         if os.path.exists(wal_path):
             os.remove(wal_path)
         if os.path.exists(self.tmp_dir):
-            os.rmdir(self.tmp_dir)
+            shutil.rmtree(self.tmp_dir)
 
     def test_init_tables(self):
         """テーブルが正しく作成されることを確認"""
@@ -301,7 +302,7 @@ class TestExperimentRunsIntegration(unittest.TestCase):
         if os.path.exists(wal_path):
             os.remove(wal_path)
         if os.path.exists(self.tmp_dir):
-            os.rmdir(self.tmp_dir)
+            shutil.rmtree(self.tmp_dir)
 
     def test_save_and_load_experiment_run(self):
         """実DBでsave_experiment_run → load_experiment_runsの往復確認"""

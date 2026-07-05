@@ -1,4 +1,5 @@
 import os
+import shutil
 import tempfile
 import unittest
 from datetime import datetime, timedelta
@@ -47,7 +48,7 @@ class TestDataLoader(unittest.TestCase):
         if os.path.exists(wal_path):
             os.remove(wal_path)
         if os.path.exists(self.tmp_dir):
-            os.rmdir(self.tmp_dir)
+            shutil.rmtree(self.tmp_dir)
 
     def test_get_stock_data_returns_dataframe(self):
         """get_stock_data関数がpandas.DataFrameを返すことを確認します。"""
