@@ -94,6 +94,15 @@ def print_backtest_metrics(
         print(f"  {'cost_impact_cash':20s}: {metrics.get('cost_impact_cash')}")
         print(f"  {'cost_impact_return':20s}: {metrics.get('cost_impact_return')}")
 
+    if "mc_final_cash_p50" in metrics:
+        print(f"{'─'*50}")
+        print("  [Monte Carlo] 取引損益ブートストラップ (n=1000)")
+        print(f"  {'max_drawdown_mean':20s}: {metrics.get('mc_max_drawdown_mean')}")
+        print(f"  {'max_drawdown_p95':20s}: {metrics.get('mc_max_drawdown_p95')}")
+        print(f"  {'final_cash_p05':20s}: {metrics.get('mc_final_cash_p05')}")
+        print(f"  {'final_cash_p50':20s}: {metrics.get('mc_final_cash_p50')}")
+        print(f"  {'final_cash_p95':20s}: {metrics.get('mc_final_cash_p95')}")
+
     if benchmark and benchmark.get("total_return") is not None:
         bm_ret = benchmark["total_return"]
         strategy_ret = metrics.get("total_return", 0.0)

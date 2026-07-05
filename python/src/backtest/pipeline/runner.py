@@ -56,6 +56,7 @@ def run_backtest_single(
     ensemble: bool = False,
     apply_min_change_filter: bool = False,
     exclude_sentiment: bool = False,
+    include_monte_carlo: bool = False,
 ) -> Tuple[pd.DataFrame, dict[str, Any], pd.Series]:
     """
     単一学習/検証期間のバックテストを実行する。
@@ -85,6 +86,7 @@ def run_backtest_single(
         atr_max_fraction: ATRモード: 建玉上限比率（デフォルト: 100%）
         ensemble: XGBoost+LightGBMアンサンブル予測を使用
         exclude_sentiment: True の場合、センチメント列を特徴量から除外して学習する
+        include_monte_carlo: True の場合、metrics に Monte Carlo リスク統計（mc_ プレフィックス）を含める
 
     Returns:
         (result_df, metrics, None) のタプル
@@ -189,6 +191,7 @@ def run_backtest_single(
         atr_multiplier=atr_multiplier,
         atr_min_fraction=atr_min_fraction,
         atr_max_fraction=atr_max_fraction,
+        include_monte_carlo=include_monte_carlo,
     )
     result_df, metrics = backtester.simulate_trading(
         test_df.loc[X_test.index],

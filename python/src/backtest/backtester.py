@@ -34,6 +34,7 @@ class Backtester:
         enable_short: bool = False,
         slippage_fn: Optional[Callable[[int, float, float], float]] = None,
         execution_lag: int = 1,
+        include_monte_carlo: bool = False,
     ):
         self.model_manager = model_manager
         self.signal_generator = signal_generator
@@ -58,6 +59,8 @@ class Backtester:
         # #493: シグナル約定の実行ラグ（バー数）。1=翌バー約定（引け後シグナル→翌寄り）。
         # 0 で従来の同バー(当日Close)約定に戻す（後方互換）。
         self.execution_lag = max(0, int(execution_lag))
+        # #374: Monte Carlo リスク統計（ブートストラップ）を metrics に含めるか
+        self.include_monte_carlo = include_monte_carlo
 
     def _get_slippage(self, qty: int, price: float, volume: float = 0.0) -> float:
         """有効スリッページ率を返す（#494）。
@@ -406,6 +409,7 @@ class Backtester:
             self.initial_cash,
             equity_net=equity_net,
             equity_gross=equity_gross,
+            include_monte_carlo=self.include_monte_carlo,
         )
         # ショートメトリクスを追加
         if short_trade_log:
