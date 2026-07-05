@@ -1,6 +1,7 @@
 """scheduler_pipeline モジュールのユニットテスト"""
 
 import os
+import shutil
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -33,7 +34,7 @@ class TestRunDailyPipeline(unittest.TestCase):
         if os.path.exists(wal_path):
             os.remove(wal_path)
         if os.path.exists(self.tmp_dir):
-            os.rmdir(self.tmp_dir)
+            shutil.rmtree(self.tmp_dir)
 
     @patch("src.reporting.discord.discord_utils.send_daily_pipeline_completion")
     @patch("src.prediction.prediction_pipeline.output_top_worst_results")

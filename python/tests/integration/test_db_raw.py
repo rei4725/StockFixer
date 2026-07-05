@@ -6,6 +6,7 @@ test_db.py と同じセットアップパターンで一時 DB を使用する�
 """
 
 import os
+import shutil
 import tempfile
 import unittest
 
@@ -62,7 +63,7 @@ class TestMarketDataRawSetup(unittest.TestCase):
         if os.path.exists(wal):
             os.remove(wal)
         if os.path.exists(self.tmp_dir):
-            os.rmdir(self.tmp_dir)
+            shutil.rmtree(self.tmp_dir)
 
     def test_market_data_raw_table_exists_after_init(self):
         with db_module._db_connection() as con:
@@ -105,7 +106,7 @@ class TestUpsertRawOhlcv(unittest.TestCase):
         if os.path.exists(wal):
             os.remove(wal)
         if os.path.exists(self.tmp_dir):
-            os.rmdir(self.tmp_dir)
+            shutil.rmtree(self.tmp_dir)
 
     def test_upsert_empty_list_returns_zero(self):
         n = upsert_raw_ohlcv([])
@@ -176,7 +177,7 @@ class TestLoadRawOhlcv(unittest.TestCase):
         if os.path.exists(wal):
             os.remove(wal)
         if os.path.exists(self.tmp_dir):
-            os.rmdir(self.tmp_dir)
+            shutil.rmtree(self.tmp_dir)
 
     def test_load_returns_dataframe(self):
         df = load_raw_ohlcv("jp", "7203")
@@ -248,7 +249,7 @@ class TestSaveRawOhlcv(unittest.TestCase):
         if os.path.exists(wal):
             os.remove(wal)
         if os.path.exists(self.tmp_dir):
-            os.rmdir(self.tmp_dir)
+            shutil.rmtree(self.tmp_dir)
 
     def test_save_raw_ohlcv_from_yfinance_df(self):
         """yfinance 形式のDataFrameをそのまま保存できる"""

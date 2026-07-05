@@ -1,6 +1,7 @@
 """prediction_pipeline モジュールのユニットテスト"""
 
 import os
+import shutil
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -83,7 +84,7 @@ class TestOutputTopWorstResults(unittest.TestCase):
         if os.path.exists(wal_path):
             os.remove(wal_path)
         if os.path.exists(self.tmp_dir):
-            os.rmdir(self.tmp_dir)
+            shutil.rmtree(self.tmp_dir)
 
     def _make_rows(self, n=15, market="us"):
         """テスト用予測結果 PredictionResult リストを生成する"""
@@ -175,7 +176,7 @@ class TestRunPredictSingle(unittest.TestCase):
         if os.path.exists(wal_path):
             os.remove(wal_path)
         if os.path.exists(self.tmp_dir):
-            os.rmdir(self.tmp_dir)
+            shutil.rmtree(self.tmp_dir)
 
     @patch("src.prediction.prediction_pipeline.save_prediction_results")
     @patch("src.prediction.prediction_pipeline.predict_single_stock")
@@ -247,7 +248,7 @@ class TestRunPredictWatchlist(unittest.TestCase):
         if os.path.exists(wal_path):
             os.remove(wal_path)
         if os.path.exists(self.tmp_dir):
-            os.rmdir(self.tmp_dir)
+            shutil.rmtree(self.tmp_dir)
 
     @patch("src.prediction.prediction_pipeline.save_prediction_results")
     @patch("src.utils.data_path_utils.get_monitor_list_path")
