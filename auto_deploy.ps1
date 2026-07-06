@@ -102,8 +102,9 @@ function Invoke-TestGate($pythonExe, $label, [string[]]$pytestArgs) {
 
 # pytest basetemp の古い残骸を掃除し、root ディレクトリの存在を保証する。
 # デプロイ毎に smoke_/unit_/e2e_<タイムスタンプ> を新規生成するため、放置すると
-# 無制限に累積し、ロックされた残骸が固定 basetemp のローカル実行を WinError 5 で
-# 巻き込む。直近 $keep 個のみ事後調査用に残し、それ以外をベストエフォートで削除する。
+# 無制限に累積する。ローカル実行は tests/conftest.py が実行毎の local_* を割り当て
+# 自前で掃除するが、昇格タスクが生成した残骸は昇格プロセスでしか削除できないため、
+# ここが正式な掃除役。直近 $keep 個のみ事後調査用に残し、それ以外をベストエフォートで削除する。
 # また pytest 9.x は明示 --basetemp の親ディレクトリを自動生成しないため、ネスト
 # basetemp（.pytest_tmp_runs\smoke_<stamp> 等）の親 root が無いと全テストが setup
 # 段階で WinError 3 になる。root が無ければ作成してこれを防ぐ。
