@@ -30,4 +30,4 @@ bandit>=1.9.4
 pydeps>=3.0.6
 
 # アーキテクチャ契約検証
-import-linter>=2.12
+import-linter>=2.13
