@@ -448,7 +448,7 @@ def run_claude_trader(
         logger.error("[claude_agent] トークン取得失敗: %s", e, exc_info=True)
         return stats
 
-    risk = RiskManager(broker)
+    risk = RiskManager(broker, market=market)
     risk.update_peak_balance()
 
     # 発注可否チェック（早期リターン）

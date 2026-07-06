@@ -119,6 +119,34 @@ class TestRiskManagerCalcPositionSize(unittest.TestCase):
         qty = risk.calc_position_size("7203", price=1000.0)
         self.assertEqual(qty % 100, 0)
 
+    def test_jp_market_returns_multiple_of_100(self):
+        """日本株（market='jp'）は単元株制度により 100 株単位に丸められる"""
+        broker = _make_broker(balance=2_000_000.0)
+        risk = RiskManager(broker, market="jp")
+        risk.get_current_dd_ratio = MagicMock(return_value=0.0)
+        qty = risk.calc_position_size("7203", price=1000.0)
+        self.assertGreater(qty, 0)
+        self.assertEqual(qty % 100, 0)
+
+    def test_us_market_allows_single_share_lot(self):
+        """米国株（market='us'）は 1 株単位で発注できる（100 株未満でも 0 にならない）"""
+        broker = _make_broker(balance=2_000_000.0)
+        risk = RiskManager(broker, market="us")
+        risk.get_current_dd_ratio = MagicMock(return_value=0.0)
+        # 高単価銘柄: 上限 balance×10%=200,000 円 / 30,000 円 ≒ 6 株。
+        # lot=100 なら 0 株に丸められるが、lot=1 なら 1 株以上になる。
+        qty = risk.calc_position_size("AAPL", price=30_000.0)
+        self.assertGreater(qty, 0)
+        self.assertLess(qty, 100)
+
+    def test_unknown_market_falls_back_to_lot_100(self):
+        """market 未指定・未知の市場は保守側の 100 株単位に丸める"""
+        broker = _make_broker(balance=2_000_000.0)
+        risk = RiskManager(broker, market="xx")
+        risk.get_current_dd_ratio = MagicMock(return_value=0.0)
+        qty = risk.calc_position_size("7203", price=1000.0)
+        self.assertEqual(qty % 100, 0)
+
     def test_zero_price_returns_zero(self):
         risk = self._make_risk()
         qty = risk.calc_position_size("7203", price=0.0)

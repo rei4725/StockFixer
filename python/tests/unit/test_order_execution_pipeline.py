@@ -867,6 +867,12 @@ class TestSplitRatio(unittest.TestCase):
         self.assertEqual(_apply_split_qty(100, 0.5), 100)
         self.assertEqual(_apply_split_qty(50, 0.5), 100)
 
+    def test_apply_split_qty_us_lot_1(self):
+        """米国株（lot=1）は 1 株単位で分割される"""
+        self.assertEqual(_apply_split_qty(10, 0.5, lot=1), 5)
+        self.assertEqual(_apply_split_qty(3, 0.5, lot=1), 1)
+        self.assertEqual(_apply_split_qty(1, 0.5, lot=1), 1)
+
     def test_low_confidence_skipped_in_run(self):
         """confidence_ratio < 0.50 の銘柄は発注されず skipped にカウントされる"""
         broker = _make_broker()

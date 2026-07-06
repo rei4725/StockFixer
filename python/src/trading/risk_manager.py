@@ -32,6 +32,7 @@ from config.trading_policy import (  # noqa: F401  # R-307/R-219 でポジショ
     VIX_SPIKE_THRESHOLD,
 )
 from src.domain.exceptions import RiskError  # noqa: F401  # 後方互換のため re-export
+from src.domain.trading_rules import get_lot_size
 from src.trading.brokers.base import BrokerBase, OrderSide
 from src.trading.types import TradingGateStatus
 from src.utils.db._connection import _db_connection
@@ -106,6 +107,7 @@ class RiskManager:
         symbol: Optional[str] = None,
     ):
         self._broker = broker
+        self._market = market
         self.stop_loss_pct: Optional[float] = None
         self.take_profit_pct: Optional[float] = None
 
@@ -286,7 +288,7 @@ class RiskManager:
                               モデル間分散が大きいほど小さくなり、ポジションを縮小する。
 
         Returns:
-            発注株数（1株未満は切り捨て、0 になる場合は 0）
+            発注株数（市場別の最低売買単位に切り捨て。日本株は 100 株単位。0 になる場合は 0）
         """
         if win_rate is None:
             win_rate = self.kelly_win_rate
@@ -353,8 +355,8 @@ class RiskManager:
             )
         qty = int(qty * vix_scale)
 
-        # 最低単元（日本株は原則 100 株単位）
-        lot = 100
+        # 市場別の最低売買単位に丸める（日本株=100株単位、米国株=1株。市場不明時は100株）
+        lot = get_lot_size(self._market)
         qty = (qty // lot) * lot
 
         logger.debug(

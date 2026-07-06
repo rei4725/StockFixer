@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from config.settings import MAX_ORDERS_PER_RUN, MAX_POSITIONS
+from src.domain.trading_rules import get_lot_size
 from src.trading.brokers.base import OrderSide, OrderType
 from src.trading.brokers.paper.paper_broker import PaperBroker
 from src.trading.risk_manager import RiskManager
@@ -36,7 +37,8 @@ def execute_rule_paper_trades(
         {"buy_orders": int, "sell_orders": int, "skipped": int}
     """
     broker = PaperBroker(market_data_port=market_data_port)
-    risk = RiskManager(broker)
+    risk = RiskManager(broker, market=market)
+    lot = get_lot_size(market)
     buy_orders = 0
     sell_orders = 0
     skipped = 0
@@ -91,7 +93,7 @@ def execute_rule_paper_trades(
                 # initial_budget_per_trade は 1 銘柄あたりの投資上限として併用する（保守側）。
                 qty = risk.calc_position_size(symbol, price)
                 if price > 0 and initial_budget_per_trade > 0:
-                    budget_cap = (int(initial_budget_per_trade / price) // 100) * 100
+                    budget_cap = (int(initial_budget_per_trade / price) // lot) * lot
                     qty = min(qty, budget_cap)
                 if qty <= 0:
                     logger.info("[rule] %s: 発注株数 0（残高不足 or サイズ上限）→ スキップ", symbol)

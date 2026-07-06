@@ -29,6 +29,7 @@ from src.domain.ports import (
     NotificationPort,
     PredictionResultRepository,
 )
+from src.domain.trading_rules import get_lot_size
 from src.trading.brokers.base import BrokerBase, BrokerError, OrderSide
 from src.trading.correlation_risk import evaluate_correlation_gate
 from src.trading.risk_manager import RiskManager
@@ -112,8 +113,9 @@ def run_daily_orders(
             )
         return stats
 
-    risk = RiskManager(broker)
+    risk = RiskManager(broker, market=market)
     risk.update_peak_balance()  # R-307: DD基準値を発注前に更新
+    lot = get_lot_size(market)
 
     # --- 当日取引可否チェック ---
     gate_status: TradingGateStatus = risk.evaluate_trading_gate()
@@ -339,7 +341,7 @@ def run_daily_orders(
             continue
 
         if split_ratio < 1.0:
-            qty = _apply_split_qty(qty, split_ratio)
+            qty = _apply_split_qty(qty, split_ratio, lot=lot)
             logger.info(
                 "[exec] %s: confidence_ratio=%.3f → %.0f%%発注 %d株 (R-308)",
                 symbol,
@@ -508,7 +510,7 @@ def run_daily_orders(
                 continue
 
             if short_split_ratio < 1.0:
-                qty = _apply_split_qty(qty, short_split_ratio)
+                qty = _apply_split_qty(qty, short_split_ratio, lot=lot)
                 logger.info(
                     "[exec] %s: confidence_ratio=%.3f → %.0f%%ショート発注 %d株 (R-308)",
                     symbol,
