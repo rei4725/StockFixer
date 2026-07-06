@@ -187,6 +187,11 @@ def parse_args():
         action="store_true",
         help="バックテスト結果グラフをDiscord Webhookに送信する（--save-chart も自動有効化）",
     )
+    parser.add_argument(
+        "--monte-carlo",
+        action="store_true",
+        help="取引損益系列をブートストラップしたMonte Carloリスク統計を表示する（単一期間モードのみ）",
+    )
 
     return parser.parse_args()
 
@@ -212,6 +217,10 @@ def main():
             "  ATR設定: "
             f"risk_pct={args.atr_risk_pct:.2%}, multiplier={args.atr_multiplier}, "
             f"min_fraction={args.atr_min_fraction:.0%}, max_fraction={args.atr_max_fraction:.0%}"
+        )
+    if args.monte_carlo and args.walk_forward:
+        logger.warning(
+            "--monte-carlo は単一期間モードのみ対応のため無視されます（--walk-forward指定時）"
         )
 
     common_kwargs = dict(
@@ -250,6 +259,7 @@ def main():
             start_date=args.start_date,
             end_date=args.end_date,
             train_ratio=args.train_ratio,
+            include_monte_carlo=args.monte_carlo,
         )
         # ベンチマーク比較
         benchmark_info = None

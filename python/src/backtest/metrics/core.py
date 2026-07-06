@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 
 from src.backtest.data_port import get_backtest_data_port
-from src.backtest.metrics.overfitting import deflated_sharpe_ratio
+from src.backtest.metrics.overfitting import deflated_sharpe_ratio, monte_carlo_equity
 
 
 def compute_metrics(
@@ -24,6 +24,7 @@ def compute_metrics(
     cash_column: str = "cash",
     n_trials: int = 0,
     equity_series: Optional[pd.Series] = None,
+    include_monte_carlo: bool = False,
 ) -> dict[str, Any]:
     """
     取引ログから主要メトリクスを一括計算する。
@@ -38,6 +39,10 @@ def compute_metrics(
         equity_series: 各バーの mark-to-market 日次 equity（保有中の含み損益込み）。
                        渡された場合は max_drawdown をこの系列から算出する。None の場合は
                        決済時点キャッシュベースの equity にフォールバックする（後方互換）。
+        include_monte_carlo: True の場合、取引損益系列をブートストラップした
+                       Monte Carlo リスク統計（mc_ プレフィックス）を結果に追加する。
+                       1000回シミュレーションのためグリッドサーチ等の繰り返し呼び出しでは
+                       既定で無効（単発のバックテストレポート向け）。
 
     Returns:
         dict: 各指標の辞書
@@ -148,6 +153,9 @@ def compute_metrics(
         # DSR には非年率の取引単位 Sharpe を渡す（年率化済み Sharpe だと z 値が
         # 巨大化して DSR が 0/1 に飽和し、過学習検知が機能しなくなるため）。
         result["dsr"] = deflated_sharpe_ratio(sharpe_per_trade, n_trials, num_trades)
+    if include_monte_carlo:
+        mc = monte_carlo_equity(trade_pnls, initial_cash)
+        result.update({f"mc_{key}": value for key, value in mc.items()})
     return result
 
 
@@ -218,11 +226,14 @@ def compute_cost_comparison_metrics(
     trading_days_per_year: int = 252,
     equity_net: Optional[pd.Series] = None,
     equity_gross: Optional[pd.Series] = None,
+    include_monte_carlo: bool = False,
 ) -> dict[str, Any]:
     """控除後（net）と控除前（gross）のKPI比較を返す。
 
     equity_net / equity_gross に各バーの mark-to-market 日次 equity を渡すと、
     max_drawdown を保有中の含み損益込みで算出する（#492）。
+    include_monte_carlo: True の場合、net 側に Monte Carlo リスク統計（mc_ プレフィックス）
+        を追加する（実運用で晒すコスト後の分布を見たいため gross 側には付与しない）。
     """
     net = compute_metrics(
         trade_log=trade_log,
@@ -231,6 +242,7 @@ def compute_cost_comparison_metrics(
         trading_days_per_year=trading_days_per_year,
         cash_column="cash",
         equity_series=equity_net,
+        include_monte_carlo=include_monte_carlo,
     )
     gross = compute_metrics(
         trade_log=trade_log,

@@ -468,6 +468,48 @@ class TestBacktesterMetricsShape:
         _, metrics = bt.simulate_trading(df, sig)
         assert metrics["num_trades"] == 2
 
+    def test_include_monte_carlo_false_by_default_omits_mc_keys(self, sample_price_df):
+        """include_monte_carlo 未指定（デフォルト False）では mc_ キーが含まれない（#374）"""
+        bt = Backtester(
+            model_manager=MagicMock(),
+            signal_generator=MagicMock(),
+            data_loader=MagicMock(),
+            start_date=None,
+            end_date=None,
+            market="jp",
+            symbol="7203",
+            initial_cash=1_000_000,
+            fee_rate=0.001,
+        )
+        sig = pd.Series([1, 0, -1, 0, 0], index=sample_price_df.index)
+        _, metrics = bt.simulate_trading(sample_price_df, sig)
+        assert "mc_final_cash_p50" not in metrics
+
+    def test_include_monte_carlo_true_adds_mc_keys(self, sample_price_df):
+        """include_monte_carlo=True で mc_ プレフィックスの統計が metrics に含まれる（#374）"""
+        bt = Backtester(
+            model_manager=MagicMock(),
+            signal_generator=MagicMock(),
+            data_loader=MagicMock(),
+            start_date=None,
+            end_date=None,
+            market="jp",
+            symbol="7203",
+            initial_cash=1_000_000,
+            fee_rate=0.001,
+            include_monte_carlo=True,
+        )
+        sig = pd.Series([1, 0, -1, 0, 0], index=sample_price_df.index)
+        _, metrics = bt.simulate_trading(sample_price_df, sig)
+        for key in (
+            "mc_max_drawdown_mean",
+            "mc_max_drawdown_p95",
+            "mc_final_cash_p05",
+            "mc_final_cash_p50",
+            "mc_final_cash_p95",
+        ):
+            assert key in metrics
+
 
 class TestBacktesterWithTask:
     """task.make_signal との統合"""

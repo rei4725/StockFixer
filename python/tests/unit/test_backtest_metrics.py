@@ -605,6 +605,68 @@ class TestMonteCarloEquity(unittest.TestCase):
         self.assertEqual(result1, result2)
 
 
+class TestComputeMetricsMonteCarlo(unittest.TestCase):
+    """compute_metrics の include_monte_carlo オプションのテスト（#374）"""
+
+    def setUp(self):
+        self.initial_cash = 1_000_000
+        self.log = _trade_log(
+            [
+                {
+                    "date": "2024-01-02",
+                    "action": "buy",
+                    "price": 100.0,
+                    "qty": 100,
+                    "cash": 990_000,
+                },
+                {
+                    "date": "2024-01-05",
+                    "action": "sell",
+                    "price": 120.0,
+                    "qty": 100,
+                    "cash": 1_002_000,
+                },
+                {
+                    "date": "2024-01-07",
+                    "action": "buy",
+                    "price": 100.0,
+                    "qty": 100,
+                    "cash": 992_000,
+                },
+                {
+                    "date": "2024-01-10",
+                    "action": "sell",
+                    "price": 80.0,
+                    "qty": 100,
+                    "cash": 1_000_000,
+                },
+            ]
+        )
+
+    def test_default_omits_mc_keys(self):
+        """include_monte_carlo 未指定（デフォルト False）では mc_ キーが含まれない"""
+        metrics = compute_metrics(self.log, self.initial_cash)
+        self.assertNotIn("mc_final_cash_p50", metrics)
+
+    def test_include_monte_carlo_adds_mc_keys(self):
+        """include_monte_carlo=True で mc_ プレフィックスの統計が追加される"""
+        metrics = compute_metrics(self.log, self.initial_cash, include_monte_carlo=True)
+        for key in (
+            "mc_max_drawdown_mean",
+            "mc_max_drawdown_p95",
+            "mc_final_cash_p05",
+            "mc_final_cash_p50",
+            "mc_final_cash_p95",
+        ):
+            self.assertIn(key, metrics)
+
+    def test_include_monte_carlo_with_no_trades_returns_zeros(self):
+        """取引なしで include_monte_carlo=True を指定しても例外にならない"""
+        metrics = compute_metrics(pd.DataFrame(), self.initial_cash, include_monte_carlo=True)
+        self.assertEqual(metrics["num_trades"], 0)
+        self.assertNotIn("mc_final_cash_p50", metrics)
+
+
 class TestDeflatedSharpeRatio(unittest.TestCase):
     """deflated_sharpe_ratio と compute_metrics の n_trials 拡張テスト"""
 
