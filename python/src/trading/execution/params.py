@@ -148,9 +148,9 @@ def _calc_split_ratio(confidence_ratio: float) -> float:
         return 0.0
 
 
-def _apply_split_qty(qty: int, split_ratio: float) -> int:
-    """分割比率を株数に適用し 100 株単位に丸める。"""
-    return max(100, int(qty * split_ratio // 100) * 100)
+def _apply_split_qty(qty: int, split_ratio: float, lot: int = 100) -> int:
+    """分割比率を株数に適用し、市場別の最低売買単位（lot）に丸める。"""
+    return max(lot, int(qty * split_ratio // lot) * lot)
 
 
 def _choose_order_params(

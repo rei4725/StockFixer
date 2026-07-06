@@ -41,3 +41,22 @@ THRESHOLD_SCALE_MIN_ROWS: int = 5
 
 # エグジット確率がこの閾値を超えたときにエグジットシグナルを発火する
 ML_EXIT_PROB_THRESHOLD: float = 0.65
+
+# ---------------------------------------------------------------------------
+# 市場別の最低売買単位 (risk_manager, execution)
+# ---------------------------------------------------------------------------
+
+# 日本株は単元株制度により 100 株単位で売買する。米国株は 1 株から売買可能。
+MARKET_LOT_SIZE: dict[str, int] = {
+    "jp": 100,
+    "us": 1,
+}
+# 市場が特定できない場合は保守側（大きい単元）に倒す
+DEFAULT_LOT_SIZE: int = 100
+
+
+def get_lot_size(market: str | None) -> int:
+    """市場別の最低売買単位（単元株数）を返す。"""
+    if market is None:
+        return DEFAULT_LOT_SIZE
+    return MARKET_LOT_SIZE.get(market.lower(), DEFAULT_LOT_SIZE)
