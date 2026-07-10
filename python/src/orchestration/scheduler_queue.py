@@ -18,6 +18,7 @@ from zoneinfo import ZoneInfo
 
 from config.settings import settings
 from src.utils.data_path_utils import ensure_dir, get_results_dir
+from src.utils.heartbeat import ping_heartbeat
 from src.utils.japan_time import isoformat_utc
 
 logger = logging.getLogger("scheduler")
@@ -188,6 +189,8 @@ class SchedulerQueueManager:
                 }
             )
             self._in_progress_jobs.discard(job_id)
+            # 外部死活監視（#496）: 実行したジョブのみ ping（skip 経路は送らない）
+            ping_heartbeat(job_id, success=(status == "success"))
 
     def _run_with_retry(
         self, job_id: str, config: dict[str, Any], reason: str, period_key: str

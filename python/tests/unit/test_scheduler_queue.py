@@ -475,3 +475,63 @@ def test_retry_events_recorded_in_state(mock_sleep, tmp_path):
         assert "wait_seconds" in ev
         assert "timestamp" in ev
         assert ev["job_id"] == "flaky_job"
+
+
+# ============================================
+# 外部死活監視 ping（#496）
+# ============================================
+
+
+def test_run_job_pings_heartbeat_on_success(tmp_path):
+    """成功したジョブは job_id を slug に success=True で ping されること"""
+    counter = {}
+    state_path = tmp_path / "scheduler_queue_state.json"
+    manager = SchedulerQueueManager(_build_config(counter), state_file_path=str(state_path))
+
+    with patch("src.orchestration.scheduler_queue.ping_heartbeat") as mock_ping:
+        assert manager.run_job("daily_pipeline", reason="scheduled") is True
+
+    mock_ping.assert_called_once_with("daily_pipeline", success=True)
+
+
+def test_run_job_pings_heartbeat_fail_on_error(tmp_path):
+    """失敗したジョブは success=False で ping されること（/fail 通知）"""
+
+    def _failing_func():
+        raise RuntimeError("intentional failure")
+
+    config = {
+        "daily_pipeline": {
+            "func": _failing_func,
+            "period": "daily",
+            "day_of_week": "mon-fri",
+            "hour": 19,
+            "minute": 0,
+            "recovery_delay_minutes": 10,
+            "max_executions_per_period": 1,
+            "max_retries": 0,
+        }
+    }
+    state_path = tmp_path / "scheduler_queue_state.json"
+    manager = SchedulerQueueManager(config, state_file_path=str(state_path))
+
+    with patch("src.orchestration.scheduler_queue.ping_heartbeat") as mock_ping:
+        with pytest.raises(RuntimeError, match="intentional failure"):
+            manager.run_job("daily_pipeline", reason="manual", force=True)
+
+    mock_ping.assert_called_once_with("daily_pipeline", success=False)
+
+
+def test_run_job_does_not_ping_on_skip(tmp_path):
+    """実行上限スキップ時は ping しないこと（skip を生存信号にしない）"""
+    counter = {}
+    state_path = tmp_path / "scheduler_queue_state.json"
+    manager = SchedulerQueueManager(_build_config(counter), state_file_path=str(state_path))
+
+    manager.run_job("daily_pipeline", reason="scheduled")
+    manager.run_job("daily_pipeline", reason="recovery")
+
+    with patch("src.orchestration.scheduler_queue.ping_heartbeat") as mock_ping:
+        assert manager.run_job("daily_pipeline", reason="recovery") is False
+
+    mock_ping.assert_not_called()

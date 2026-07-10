@@ -1,5 +1,8 @@
 [tool.black]
 line-length = 100
+# .pytest_tmp_runs は昇格デプロイタスクが生成する一時ディレクトリで、
+# 非昇格プロセスからは読めず black のファイル走査が PermissionError で落ちる
+force-exclude = '\.pytest_tmp_runs'
 
 [tool.isort]
 profile = "black"

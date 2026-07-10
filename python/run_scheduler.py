@@ -24,6 +24,7 @@ from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.schedulers.blocking import BlockingScheduler
 
+from src.utils.heartbeat import SCHEDULER_ALIVE_SLUG, ping_heartbeat
 from src.utils.logger import get_logger
 
 # ログ設定（logger.pyに集約、basicConfigは不要）
@@ -403,6 +404,10 @@ def _register_jobs(scheduler, queue_manager):
 
 def _poll_recovery_jobs(queue_manager):
     """所定時刻を過ぎても未実行のジョブを補完実行する（前日分も含む）"""
+    # 外部死活監視（#496）: スケジューラ生存を5分間隔で通知。
+    # 補完ジョブの失敗で生存信号が途切れないよう、ポーリング冒頭で送る。
+    ping_heartbeat(SCHEDULER_ALIVE_SLUG)
+
     now = queue_manager.now()
 
     for job_id in SCHEDULE_CONFIG.keys():

@@ -22,6 +22,25 @@ def _block_discord_http(monkeypatch):
 
 
 # ============================================
+# healthchecks.io 実送信ガード（unit テスト全体に適用）
+# ============================================
+
+
+@pytest.fixture(autouse=True)
+def _block_heartbeat_ping(monkeypatch):
+    """Block real healthchecks.io pings from all unit tests.
+
+    HEALTHCHECKS_PING_KEY を空にすることで ping_heartbeat が早期 return し、
+    本番 .env にキーが設定されていてもテスト実行が本番の監視 check を
+    汚染しない（#548 と同型の「テストが本番リソースに到達する」事故の予防）。
+    ping の有無を検証したいテストは settings を個別に monkeypatch する。
+    """
+    from config.settings import settings
+
+    monkeypatch.setattr(settings, "HEALTHCHECKS_PING_KEY", "")
+
+
+# ============================================
 # 本番 DuckDB 隔離ガード（unit テスト全体に適用）
 # ============================================
 
