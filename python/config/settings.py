@@ -135,6 +135,11 @@ class Settings(BaseSettings):
     DEFAULT_SLIPPAGE_US: float = Field(default=0.0005)  # 5bps
     DEFAULT_SLIPPAGE_JP: float = Field(default=0.0010)  # 10bps
 
+    # ---------- 外部死活監視 healthchecks.io（#496） ----------
+    # ping キーが空文字の間は heartbeat ping は完全に no-op（開発・テストで安全）。
+    HEALTHCHECKS_PING_KEY: str = Field(default="")
+    HEALTHCHECKS_BASE_URL: str = Field(default="https://hc-ping.com")
+
     # ---------- 戦略ファクトリー（#369 Phase 1） ----------
     FACTORY_ENABLED: bool = Field(default=False)
     FACTORY_NIGHTLY_BUDGET: int = Field(default=10)
@@ -227,6 +232,9 @@ DEFAULT_SLIPPAGE_JP: float = settings.DEFAULT_SLIPPAGE_JP
 DB_LOG_RETENTION_DAYS: int = settings.DB_LOG_RETENTION_DAYS
 DB_COMPACT_ENABLED: bool = settings.DB_COMPACT_ENABLED
 DB_SIZE_ALERT_GB: float = settings.DB_SIZE_ALERT_GB
+
+HEALTHCHECKS_PING_KEY: str = settings.HEALTHCHECKS_PING_KEY
+HEALTHCHECKS_BASE_URL: str = settings.HEALTHCHECKS_BASE_URL
 
 FACTORY_ENABLED: bool = settings.FACTORY_ENABLED
 FACTORY_NIGHTLY_BUDGET: int = settings.FACTORY_NIGHTLY_BUDGET
