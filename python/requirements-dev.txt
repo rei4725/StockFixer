@@ -9,7 +9,7 @@ hypothesis>=6.156.1
 
 # 型チェック
 mypy==2.1.0
-types-requests==2.33.0.20260518
+types-requests==2.33.0.20260712
 types-PyYAML==6.0.12.20260518
 types-tabulate==0.10.0.20260508
 
