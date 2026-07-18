@@ -37,8 +37,10 @@ jobs:
 
       # 注: 自動 approve は行わない。GITHUB_TOKEN による approve は 422 で失敗し、
       # かつ dependabot PR は require-review-approval.yml の対象外（承認不要）のため不要。
-      - name: Enable auto-merge for patch updates
-        if: steps.metadata.outputs.update-type == 'version-update:semver-patch'
+      - name: Enable auto-merge for patch/minor updates
+        if: |
+          steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
+          steps.metadata.outputs.update-type == 'version-update:semver-minor'
         run: gh pr merge --auto --squash "$PR_URL"
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
