@@ -1,0 +1,35 @@
+name: PR Base Branch Guard
+
+on:
+  pull_request:
+    types: [opened, reopened, edited]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  base-branch-guard:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.base.ref != 'develop'
+    steps:
+      - name: Warn about non-develop base branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          set -euo pipefail
+
+          already_warned=$(gh pr view "$PR_NUMBER" --json comments \
+            --jq '[.comments[]
+              | select(.author.login == "github-actions")
+              | select(.body | test("baseブランチは `develop` ではなく"))
+            ] | length')
+
+          if [ "$already_warned" != "0" ]; then
+            echo "PR #$PR_NUMBER: base branch warning already posted, skipping."
+            exit 0
+          fi
+
+          echo "PR #$PR_NUMBER: base branch is '$BASE_REF', posting warning."
+          gh pr comment "$PR_NUMBER" --body "このPRのbaseブランチは \`develop\` ではなく \`${BASE_REF}\` じゃ。もし \`${BASE_REF}\` のPRが \`--delete-branch\` 付きでsquashマージされると、このPRはdevelopへ自動的に付け替えられず、意図せずCLOSEDになる可能性がある。意図的なスタックなら無視してよいが、そうでなければ親PRマージ後に \`develop\` から切り直すことを検討されたし。"
