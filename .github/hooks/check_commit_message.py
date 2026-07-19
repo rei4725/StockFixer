@@ -12,8 +12,12 @@ Conventional Commits スタイルに従っているかをチェックする。
   refactor(models): 予測モデル構造を整理
 """
 
+import io
 import re
 import sys
+
+# Windows cp932 による Unicode 出力エラーを回避
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
 # 許可されるコミットタイプ
 ALLOWED_TYPES = {
@@ -72,7 +76,7 @@ def validate_commit_message(msg: str) -> tuple[bool, str]:
 
     if not match:
         return False, (
-            f"✗ コミットメッセージ形式が正しくありません。\n"
+            f"[NG] コミットメッセージ形式が正しくありません。\n"
             f"  形式: <type>(<scope>): <subject> または <type>: <subject>\n"
             f"  例: feat(data-pipeline): 株価取得エラーハンドリング追加\n"
             f"  例: fix: タイムゾーン設定バグを修正\n"
@@ -84,18 +88,18 @@ def validate_commit_message(msg: str) -> tuple[bool, str]:
     # タイプをチェック
     if commit_type not in ALLOWED_TYPES:
         return False, (
-            f"✗ コミットタイプ '{commit_type}' は許可されていません。\n"
+            f"[NG] コミットタイプ '{commit_type}' は許可されていません。\n"
             f"  許可されるタイプ: {', '.join(sorted(ALLOWED_TYPES))}\n"
             f"  入力: {first_line}"
         )
 
     # サブジェクトをチェック
     if not subject:
-        return False, "✗ サブジェクトが空です。"
+        return False, "[NG] サブジェクトが空です。"
 
     if len(subject) > 100:
         return False, (
-            f"✗ サブジェクトが長すぎます（最大100文字、現在{len(subject)}文字）。\n"
+            f"[NG] サブジェクトが長すぎます（最大100文字、現在{len(subject)}文字）。\n"
             f"  入力: {subject}"
         )
 
@@ -124,13 +128,13 @@ def main():
         with open(commit_msg_file, "r", encoding="utf-8") as f:
             msg = f.read()
     except Exception as e:
-        print(f"✗ ファイル読み込みエラー: {e}")
+        print(f"[NG] ファイル読み込みエラー: {e}")
         sys.exit(1)
 
     is_valid, msg_result = validate_commit_message(msg)
 
     if is_valid:
-        print("✓ コミットメッセージ: OK")
+        print("[OK] コミットメッセージ: OK")
         sys.exit(0)
     else:
         print(msg_result)
