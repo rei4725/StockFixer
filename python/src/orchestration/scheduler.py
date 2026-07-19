@@ -22,7 +22,11 @@ from src.orchestration.jobs.daily import (
     run_horizon_exit_check,
     run_pre_close_alert,
 )
-from src.orchestration.jobs.periodic import run_monthly_report_job, run_nightly_strategy_factory
+from src.orchestration.jobs.periodic import (
+    run_monthly_report_job,
+    run_nightly_strategy_factory,
+    run_strategy_promotion_check,
+)
 from src.orchestration.jobs.weekly import (
     run_weekly_db_maintenance,
     run_weekly_optimization,
@@ -73,4 +77,5 @@ __all__ = [
     # periodic
     "run_monthly_report_job",
     "run_nightly_strategy_factory",
+    "run_strategy_promotion_check",
 ]

@@ -160,6 +160,13 @@ def job_nightly_strategy_factory():
     run_nightly_strategy_factory()
 
 
+def job_strategy_promotion_check():
+    """2時間ごと(毎時30分) - 戦略ファクトリー由来マージPRの昇格記録（STRATEGY_PROMOTION_CHECK_ENABLEDに従う）"""
+    from src.orchestration.scheduler import run_strategy_promotion_check
+
+    run_strategy_promotion_check()
+
+
 # ── イベントリスナー ──────────────────────────────────
 def _job_listener(event):
     """ジョブ実行結果のログ出力"""
@@ -361,6 +368,17 @@ SCHEDULE_CONFIG = {
         "max_executions_per_period": 1,
         "description": "毎日 05:00 - 戦略ファクトリー夜間バッチ（jp/us 日替わり、#369）",
     },
+    "strategy_promotion_check": {
+        "func": job_strategy_promotion_check,
+        "trigger": "cron",
+        "period": "daily",
+        "day_of_week": "mon-sun",
+        "hour": "*/2",
+        "minute": 30,
+        "recovery_delay_minutes": 30,
+        "max_executions_per_period": 12,
+        "description": "2時間ごと(毎時30分) - 戦略ファクトリー由来マージPRの昇格記録",
+    },
 }
 
 
@@ -528,6 +546,8 @@ def run_now(pipeline: str):
         queue_manager.run_job("monthly_multibagger", reason="manual", force=True)
     elif pipeline == "factory":
         queue_manager.run_job("nightly_strategy_factory", reason="manual", force=True)
+    elif pipeline == "promotion_check":
+        queue_manager.run_job("strategy_promotion_check", reason="manual", force=True)
     else:
         print(f"不明なパイプライン: {pipeline}")
         print(
@@ -568,6 +588,7 @@ def main():
             "monthly_report",
             "multibagger",
             "factory",
+            "promotion_check",
         ],
         help=(
             "指定パイプラインを即時実行して終了する（テスト用）。"
