@@ -40,6 +40,11 @@ services:
       - ./python/models:/app/models
       - ./python/results:/app/results
       - ./Logs:/app/logs
+    deploy:
+      resources:
+        limits:
+          cpus: "8"
+          memory: 8g
     logging:
       driver: json-file
       options:
