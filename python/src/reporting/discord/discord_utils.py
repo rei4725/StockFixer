@@ -40,6 +40,7 @@ from src.reporting.discord.notifications_model import (  # noqa: F401  # re-expo
     send_shadow_evaluation_notification,
     send_shap_batch_summary,
     send_shap_notification,
+    send_strategy_promotion_detected,
 )
 from src.reporting.discord.notifications_report import (  # noqa: F401  # re-export（#497 第2弾）
     send_monthly_report_notification,

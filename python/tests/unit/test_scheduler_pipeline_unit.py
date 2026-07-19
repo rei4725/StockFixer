@@ -881,3 +881,21 @@ class TestRunNightlyStrategyFactory(unittest.TestCase):
         run_nightly_strategy_factory(force=True, market="jp")  # 例外が外に漏れないこと
 
         mock_send.assert_not_called()
+
+
+class TestStrategyPromotionCheckSchedule(unittest.TestCase):
+    def test_schedule_config_has_strategy_promotion_check(self):
+        from run_scheduler import SCHEDULE_CONFIG
+
+        self.assertIn("strategy_promotion_check", SCHEDULE_CONFIG)
+        config = SCHEDULE_CONFIG["strategy_promotion_check"]
+        self.assertEqual(config["trigger"], "cron")
+        self.assertEqual(config["hour"], "*/2")
+        self.assertEqual(config["minute"], 30)
+
+    @patch("src.orchestration.scheduler.run_strategy_promotion_check")
+    def test_run_now_promotion_check_invokes_job(self, mock_run):
+        from run_scheduler import run_now
+
+        run_now("promotion_check")
+        mock_run.assert_called_once()

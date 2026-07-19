@@ -73,6 +73,15 @@ from src.utils.db.stock_features import upsert_stock_features  # noqa: F401
 from src.utils.db.stock_features import get_all_symbols, load_all_stock_features
 from src.utils.db.stock_features import load_stock_features as load_stock_features  # noqa: F401
 
+# --- strategy_promotions（戦略ファクトリー自動昇格ループ） ---
+from src.utils.db.strategy_promotions import (  # noqa: F401
+    ensure_strategy_promotions_table,
+    load_active_promotions,
+    mark_promotion_rolled_back,
+    promotion_exists,
+    save_strategy_promotion,
+)
+
 # --- system_config ---
 from src.utils.db.system_config import get_config_value  # noqa: F401
 from src.utils.db.system_config import set_config_value  # noqa: F401
