@@ -98,6 +98,9 @@ class Settings(BaseSettings):
     FACTORY_HYPOTHESIS_REVIEW_MODEL: str = Field(default="claude-opus-4-8")
     FACTORY_HYPOTHESIS_REVIEW_MAX_TOKENS: int = Field(default=2048)
 
+    GITHUB_TOKEN: str = Field(default="")
+    GITHUB_REPO: str = Field(default="rei4725/StockFixer")
+
     # ---------- Claude テスト穴埋めボット（quality/test_gap_review.py） ----------
     # coverage の未カバー行を Claude に渡し不足テストの追加案を Issue 草案 JSON 化する。
     # 既定無効。読み取り専用（テストコードは生成せず Issue 草案のみ）。
@@ -216,6 +219,9 @@ BACKTEST_REVIEW_MAX_TOKENS: int = settings.BACKTEST_REVIEW_MAX_TOKENS
 FACTORY_HYPOTHESIS_REVIEW_ENABLED: bool = settings.FACTORY_HYPOTHESIS_REVIEW_ENABLED
 FACTORY_HYPOTHESIS_REVIEW_MODEL: str = settings.FACTORY_HYPOTHESIS_REVIEW_MODEL
 FACTORY_HYPOTHESIS_REVIEW_MAX_TOKENS: int = settings.FACTORY_HYPOTHESIS_REVIEW_MAX_TOKENS
+
+GITHUB_TOKEN: str = settings.GITHUB_TOKEN
+GITHUB_REPO: str = settings.GITHUB_REPO
 
 TEST_GAP_ENABLED: bool = settings.TEST_GAP_ENABLED
 TEST_GAP_MODEL: str = settings.TEST_GAP_MODEL
