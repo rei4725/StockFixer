@@ -30,6 +30,7 @@ from config.settings import (
 )
 from src.backtest.backtester import Backtester
 from src.backtest.data_port import get_backtest_data_port
+from src.backtest.hypothesis_review import review_hypothesis
 from src.backtest.metrics import deflated_sharpe_ratio, probability_of_backtest_overfitting
 from src.backtest.rules import (
     AndRule,
@@ -374,8 +375,34 @@ def _reports_dir() -> str:
     return path
 
 
+def _build_review_section(review: Optional[dict]) -> str:
+    """レビュー結果を Markdown セクション化する。review が None なら空文字を返す。"""
+    if not review:
+        return ""
+    risk_level = review.get("risk_level", "low")
+    assessment = review.get("assessment", "")
+    concerns = review.get("concerns") or []
+    banner = (
+        f"\n> ⚠️ **Claude批判的レビュー: risk_level={risk_level}**\n"
+        if risk_level == "high"
+        else ""
+    )
+    concerns_block = ""
+    if concerns:
+        concern_lines = "\n".join(f"- {c}" for c in concerns)
+        concerns_block = f"\n**懸念点:**\n{concern_lines}\n"
+    return f"""
+### Claude批判的レビュー
+{banner}
+{assessment}
+{concerns_block}"""
+
+
 def _build_issue_body(
-    evaluation: FactoryEvaluation, champion_sharpe: float, period: tuple[str, str]
+    evaluation: FactoryEvaluation,
+    champion_sharpe: float,
+    period: tuple[str, str],
+    review: Optional[dict] = None,
 ) -> str:
     h = evaluation.hypothesis
     window_rows = "\n".join(
@@ -388,6 +415,7 @@ def _build_issue_body(
         if not math.isnan(evaluation.pbo) and evaluation.pbo > FACTORY_GATE_MAX_PBO
         else ""
     )
+    review_section = _build_review_section(review)
     return f"""## 戦略仮説（自動生成）
 
 夜間ファクトリーのゲートを通過した仮説です。`hypothesis_hash={h.hypothesis_hash}`
@@ -419,14 +447,17 @@ def _build_issue_body(
 | 窓 | リターン |
 |---|---|
 {window_rows}
-
+{review_section}
 ---
 *この Issue は StockFixer 戦略ファクトリー（#369 Phase 1）が自動生成したレポートです。*
 """
 
 
 def write_report(
-    evaluation: FactoryEvaluation, champion_sharpe: float, period: tuple[str, str]
+    evaluation: FactoryEvaluation,
+    champion_sharpe: float,
+    period: tuple[str, str],
+    review: Optional[dict] = None,
 ) -> str:
     """ゲート合格仮説の不変 JSON レポートを原子的に書き出してパスを返す。"""
     h = evaluation.hypothesis
@@ -435,7 +466,7 @@ def write_report(
         "hypothesis_hash": h.hypothesis_hash,
         "created_at": datetime.now().astimezone().isoformat(),
         "issue_title": f"[factory:{h.hypothesis_hash}] {h.label} ({h.market})",
-        "issue_body": _build_issue_body(evaluation, champion_sharpe, period),
+        "issue_body": _build_issue_body(evaluation, champion_sharpe, period, review=review),
         "labels": ["strategy-factory"],
         "gate": {
             "sharpe_ratio": evaluation.sharpe_ratio,
@@ -447,6 +478,7 @@ def write_report(
         },
         "spec": h.rule_spec,
         "market": h.market,
+        "review": review,
     }
     path = os.path.join(_reports_dir(), f"{h.hypothesis_hash}.json")
     tmp_path = path + ".tmp"
@@ -537,7 +569,10 @@ def run_factory_batch(
     # 記録 + レポート出力（候補のみ。逐次実行なので DuckDB 書き込み規約に適合）
     for evaluation in result_candidates(evaluations):
         if evaluation.gate_passed:
-            evaluation.report_path = write_report(evaluation, champion_sharpe, (start, end))
+            review = review_hypothesis(evaluation, champion_sharpe)
+            evaluation.report_path = write_report(
+                evaluation, champion_sharpe, (start, end), review=review
+            )
         save_factory_run(
             hypothesis_hash=evaluation.hypothesis.hypothesis_hash,
             market=market,

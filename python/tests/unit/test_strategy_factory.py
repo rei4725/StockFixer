@@ -276,6 +276,54 @@ class TestWriteReport(unittest.TestCase):
         self.assertIn("バッチPBO", report["issue_body"])
         self.assertIn("過学習リスク", report["issue_body"])
 
+    def test_review_section_embedded_when_provided(self):
+        ev = FactoryEvaluation(
+            hypothesis=FactoryHypothesis(rule_spec=_ATOMIC_SPEC, market="jp"),
+            sharpe_ratio=1.5,
+            dsr=0.96,
+            pbo=0.2,
+            num_trades=40,
+            max_drawdown=-0.1,
+            window_returns=[0.01] * 8,
+            n_symbols=3,
+        )
+        review = {
+            "risk_level": "high",
+            "assessment": "窓1のみに依存した成績。",
+            "concerns": ["窓1以外はほぼ横ばい"],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("src.backtest.factory.get_results_dir", return_value=tmp):
+                path = write_report(
+                    ev, champion_sharpe=1.0, period=("2024-01-01", "2026-01-01"), review=review
+                )
+            with open(path, encoding="utf-8") as f:
+                report = json.load(f)
+        self.assertIn("Claude批判的レビュー", report["issue_body"])
+        self.assertIn("窓1のみに依存した成績。", report["issue_body"])
+        self.assertIn("窓1以外はほぼ横ばい", report["issue_body"])
+        self.assertIn("risk_level=high", report["issue_body"])
+        self.assertEqual(report["review"], review)
+
+    def test_review_section_omitted_when_none(self):
+        ev = FactoryEvaluation(
+            hypothesis=FactoryHypothesis(rule_spec=_ATOMIC_SPEC, market="jp"),
+            sharpe_ratio=1.5,
+            dsr=0.96,
+            pbo=0.2,
+            num_trades=40,
+            max_drawdown=-0.1,
+            window_returns=[0.01] * 8,
+            n_symbols=3,
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("src.backtest.factory.get_results_dir", return_value=tmp):
+                path = write_report(ev, champion_sharpe=1.0, period=("2024-01-01", "2026-01-01"))
+            with open(path, encoding="utf-8") as f:
+                report = json.load(f)
+        self.assertNotIn("Claude批判的レビュー", report["issue_body"])
+        self.assertIsNone(report["review"])
+
 
 class TestRunFactoryBatch(unittest.TestCase):
     """run_factory_batch の結合テスト（ポート・DB をモック）"""
@@ -327,6 +375,50 @@ class TestRunFactoryBatch(unittest.TestCase):
 
         self.assertEqual(result.evaluated, [])
         mock_save.assert_not_called()
+
+    @patch("src.backtest.factory.review_hypothesis")
+    @patch("src.backtest.factory.save_factory_run")
+    @patch("src.backtest.factory.count_factory_runs", return_value=0)
+    @patch("src.backtest.factory.load_factory_hashes", return_value=set())
+    @patch("src.backtest.factory.get_backtest_data_port")
+    def test_batch_calls_review_only_for_passed_hypotheses(
+        self, mock_port, mock_hashes, mock_count, mock_save, mock_review
+    ):
+        mock_port.return_value = self._fake_port()
+        mock_review.return_value = None
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("src.backtest.factory.get_results_dir", return_value=tmp):
+                result = run_factory_batch(
+                    market="jp", symbols=["AAA", "BBB"], budget=4, n_windows=6, seed=123
+                )
+
+        self.assertEqual(mock_review.call_count, len(result.passed))
+
+    @patch("src.backtest.factory.review_hypothesis", return_value=None)
+    @patch("src.backtest.factory.save_factory_run")
+    @patch("src.backtest.factory.count_factory_runs", return_value=0)
+    @patch("src.backtest.factory.load_factory_hashes", return_value=set())
+    @patch("src.backtest.factory.get_backtest_data_port")
+    def test_review_none_still_writes_report(
+        self, mock_port, mock_hashes, mock_count, mock_save, mock_review
+    ):
+        # review_hypothesis はグレースフルデグラデーション契約により失敗時 None を返す
+        # （例外を投げない）。None が返ってもレポート書き込みは通常通り完了する。
+        mock_port.return_value = self._fake_port()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("src.backtest.factory.get_results_dir", return_value=tmp):
+                result = run_factory_batch(
+                    market="jp", symbols=["AAA", "BBB"], budget=4, n_windows=6, seed=123
+                )
+
+        for evaluation in result.passed:
+            self.assertIsNotNone(evaluation.report_path)
+            self.assertTrue(os.path.exists(evaluation.report_path))
+            with open(evaluation.report_path, encoding="utf-8") as f:
+                report = json.load(f)
+            self.assertIsNone(report["review"])
 
 
 if __name__ == "__main__":
