@@ -315,3 +315,27 @@ def send_shadow_evaluation_notification(result: dict) -> bool:
         )
 
     return send_status_fields(spec, fields, description=description)
+
+
+def send_strategy_promotion_detected(
+    pr_number: int, rule_or_feature_id: str, pre_promotion_baseline: float
+) -> bool:
+    """
+    戦略ファクトリー由来 PR のマージ検出（＝昇格）を Discord Webhook に通知する。
+
+    Args:
+        pr_number: マージされた PR 番号
+        rule_or_feature_id: 対象仮説/アイデアの識別子（factory hash）
+        pre_promotion_baseline: 昇格直前のチャンピオン Sharpe
+
+    Returns:
+        成功時 True、失敗時 False
+    """
+    lines = [
+        "**🏭⬆️ 戦略ファクトリー: 新規昇格を検出**",
+        f"時刻: {format_jst(fmt=DISCORD_DATETIME_FORMAT)}",
+        f"PR: #{pr_number}",
+        f"識別子: `{rule_or_feature_id}`",
+        f"昇格直前ベースライン Sharpe: {pre_promotion_baseline:.3f}",
+    ]
+    return send_webhook_text_chunked("\n".join(lines))
