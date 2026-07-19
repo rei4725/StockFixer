@@ -98,6 +98,8 @@ class Settings(BaseSettings):
     FACTORY_HYPOTHESIS_REVIEW_MODEL: str = Field(default="claude-opus-4-8")
     FACTORY_HYPOTHESIS_REVIEW_MAX_TOKENS: int = Field(default=2048)
 
+    # ---------- 戦略ファクトリー自動昇格ループ: 昇格記録（orchestration/jobs/periodic.py） ----------
+    # 既定無効。マージ検知ジョブはこのフラグが true になるまで一切のGitHub API呼び出しを行わない。
     GITHUB_TOKEN: str = Field(default="")
     GITHUB_REPO: str = Field(default="rei4725/StockFixer")
     STRATEGY_PROMOTION_CHECK_ENABLED: bool = Field(default=False)

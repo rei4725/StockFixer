@@ -59,7 +59,7 @@ def save_strategy_promotion(
             [pr_number, merge_commit_hash, rule_or_feature_id, promoted_at, pre_promotion_baseline],
         )
     logger.info(
-        "戦略昇格記録: pr=%s hash=%s baseline=%.3f",
+        "戦略昇格記録: pr=%s id=%s baseline=%.3f",
         pr_number,
         rule_or_feature_id,
         pre_promotion_baseline,
