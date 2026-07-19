@@ -240,7 +240,7 @@ class TestWriteReport(unittest.TestCase):
             n_symbols=3,
         )
         with tempfile.TemporaryDirectory() as tmp:
-            with patch("src.backtest.factory.get_results_dir", return_value=tmp):
+            with patch("src.backtest.factory_report.get_results_dir", return_value=tmp):
                 path = write_report(ev, champion_sharpe=1.0, period=("2024-01-01", "2026-01-01"))
 
             self.assertTrue(os.path.exists(path))
@@ -269,7 +269,7 @@ class TestWriteReport(unittest.TestCase):
             n_symbols=3,
         )
         with tempfile.TemporaryDirectory() as tmp:
-            with patch("src.backtest.factory.get_results_dir", return_value=tmp):
+            with patch("src.backtest.factory_report.get_results_dir", return_value=tmp):
                 path = write_report(ev, champion_sharpe=1.0, period=("2024-01-01", "2026-01-01"))
             with open(path, encoding="utf-8") as f:
                 report = json.load(f)
@@ -293,7 +293,7 @@ class TestWriteReport(unittest.TestCase):
             "concerns": ["窓1以外はほぼ横ばい"],
         }
         with tempfile.TemporaryDirectory() as tmp:
-            with patch("src.backtest.factory.get_results_dir", return_value=tmp):
+            with patch("src.backtest.factory_report.get_results_dir", return_value=tmp):
                 path = write_report(
                     ev, champion_sharpe=1.0, period=("2024-01-01", "2026-01-01"), review=review
                 )
@@ -317,7 +317,7 @@ class TestWriteReport(unittest.TestCase):
             n_symbols=3,
         )
         with tempfile.TemporaryDirectory() as tmp:
-            with patch("src.backtest.factory.get_results_dir", return_value=tmp):
+            with patch("src.backtest.factory_report.get_results_dir", return_value=tmp):
                 path = write_report(ev, champion_sharpe=1.0, period=("2024-01-01", "2026-01-01"))
             with open(path, encoding="utf-8") as f:
                 report = json.load(f)
@@ -346,7 +346,7 @@ class TestRunFactoryBatch(unittest.TestCase):
         mock_port.return_value = self._fake_port()
 
         with tempfile.TemporaryDirectory() as tmp:
-            with patch("src.backtest.factory.get_results_dir", return_value=tmp):
+            with patch("src.backtest.factory_report.get_results_dir", return_value=tmp):
                 result = run_factory_batch(
                     market="jp", symbols=["AAA", "BBB"], budget=4, n_windows=6, seed=123
                 )
@@ -388,7 +388,7 @@ class TestRunFactoryBatch(unittest.TestCase):
         mock_review.return_value = None
 
         with tempfile.TemporaryDirectory() as tmp:
-            with patch("src.backtest.factory.get_results_dir", return_value=tmp):
+            with patch("src.backtest.factory_report.get_results_dir", return_value=tmp):
                 result = run_factory_batch(
                     market="jp", symbols=["AAA", "BBB"], budget=4, n_windows=6, seed=123
                 )
@@ -408,7 +408,7 @@ class TestRunFactoryBatch(unittest.TestCase):
         mock_port.return_value = self._fake_port()
 
         with tempfile.TemporaryDirectory() as tmp:
-            with patch("src.backtest.factory.get_results_dir", return_value=tmp):
+            with patch("src.backtest.factory_report.get_results_dir", return_value=tmp):
                 result = run_factory_batch(
                     market="jp", symbols=["AAA", "BBB"], budget=4, n_windows=6, seed=123
                 )
