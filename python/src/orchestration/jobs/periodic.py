@@ -175,3 +175,79 @@ def run_nightly_strategy_factory(
             )
     except Exception as e:
         logger.error("戦略ファクトリー通知失敗: %s", e, exc_info=True)
+
+
+_FACTORY_LABELS = frozenset({"strategy-factory", "strategy-factory-idea"})
+
+
+def run_strategy_promotion_check(force: bool = False) -> None:
+    """
+    2時間ごと実行: マージ済み戦略ファクトリー由来 PR を検出し strategy_promotions に記録する。
+
+    Args:
+        force: True なら STRATEGY_PROMOTION_CHECK_ENABLED=false でも実行（CLI 手動実行用）
+    """
+    from datetime import datetime, timedelta
+
+    from config.settings import STRATEGY_PROMOTION_CHECK_ENABLED
+    from src.backtest.promotion_detection import (
+        extract_closing_issue_numbers,
+        extract_factory_hash,
+        load_gate_baseline,
+    )
+    from src.utils.db.strategy_promotions import promotion_exists, save_strategy_promotion
+    from src.utils.github_api import get_issue, list_recently_merged_pull_requests
+
+    if not STRATEGY_PROMOTION_CHECK_ENABLED and not force:
+        logger.info("戦略昇格チェックはスキップ（STRATEGY_PROMOTION_CHECK_ENABLED=false）")
+        return
+
+    logger.info("=== 戦略昇格チェック開始 ===")
+    detected: list[dict] = []
+    try:
+        since = datetime.now().astimezone() - timedelta(days=7)
+        prs = list_recently_merged_pull_requests(since=since)
+        for pr in prs:
+            if promotion_exists(pr["number"]):
+                continue
+            for issue_number in extract_closing_issue_numbers(pr["body"]):
+                try:
+                    issue = get_issue(issue_number)
+                except Exception as e:
+                    logger.warning("Issue取得失敗: #%s: %s", issue_number, e)
+                    continue
+                if not _FACTORY_LABELS.intersection(issue["labels"]):
+                    continue
+                hypothesis_hash = extract_factory_hash(issue["title"])
+                if hypothesis_hash is None:
+                    continue
+                baseline = load_gate_baseline(hypothesis_hash)
+                if baseline is None:
+                    logger.warning("baseline未発見のためスキップ: hash=%s", hypothesis_hash)
+                    continue
+                save_strategy_promotion(
+                    pr_number=pr["number"],
+                    merge_commit_hash=pr["merge_commit_sha"],
+                    rule_or_feature_id=hypothesis_hash,
+                    pre_promotion_baseline=baseline,
+                )
+                detected.append(
+                    {
+                        "pr_number": pr["number"],
+                        "rule_or_feature_id": hypothesis_hash,
+                        "pre_promotion_baseline": baseline,
+                    }
+                )
+                break  # 1PRにつき1件のみ記録（複数Issueをcloseする稀なPRは最初の一致のみ）
+        logger.info("=== 戦略昇格チェック完了: 新規検出=%s ===", len(detected))
+    except Exception as e:
+        logger.error("戦略昇格チェック失敗: %s", e, exc_info=True)
+        return
+
+    for d in detected:
+        try:
+            from src.reporting.discord.discord_utils import send_strategy_promotion_detected
+
+            send_strategy_promotion_detected(**d)
+        except Exception as e:
+            logger.error("戦略昇格通知失敗: %s", e, exc_info=True)

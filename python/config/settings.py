@@ -100,6 +100,7 @@ class Settings(BaseSettings):
 
     GITHUB_TOKEN: str = Field(default="")
     GITHUB_REPO: str = Field(default="rei4725/StockFixer")
+    STRATEGY_PROMOTION_CHECK_ENABLED: bool = Field(default=False)
 
     # ---------- Claude テスト穴埋めボット（quality/test_gap_review.py） ----------
     # coverage の未カバー行を Claude に渡し不足テストの追加案を Issue 草案 JSON 化する。
@@ -222,6 +223,7 @@ FACTORY_HYPOTHESIS_REVIEW_MAX_TOKENS: int = settings.FACTORY_HYPOTHESIS_REVIEW_M
 
 GITHUB_TOKEN: str = settings.GITHUB_TOKEN
 GITHUB_REPO: str = settings.GITHUB_REPO
+STRATEGY_PROMOTION_CHECK_ENABLED: bool = settings.STRATEGY_PROMOTION_CHECK_ENABLED
 
 TEST_GAP_ENABLED: bool = settings.TEST_GAP_ENABLED
 TEST_GAP_MODEL: str = settings.TEST_GAP_MODEL
