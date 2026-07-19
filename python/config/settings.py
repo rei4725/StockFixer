@@ -91,6 +91,13 @@ class Settings(BaseSettings):
     BACKTEST_REVIEW_MODEL: str = Field(default="claude-opus-4-8")
     BACKTEST_REVIEW_MAX_TOKENS: int = Field(default=4096)
 
+    # ---------- Claude 仮説単位レビュー（backtest/hypothesis_review.py） ----------
+    # 戦略ファクトリーのゲート通過仮説1件ごとに Claude が過学習/偶然性リスクを評価する。
+    # 既定無効。読み取り専用（ゲート判定・コード変更・発注には一切関与しない）。
+    FACTORY_HYPOTHESIS_REVIEW_ENABLED: bool = Field(default=False)
+    FACTORY_HYPOTHESIS_REVIEW_MODEL: str = Field(default="claude-opus-4-8")
+    FACTORY_HYPOTHESIS_REVIEW_MAX_TOKENS: int = Field(default=2048)
+
     # ---------- Claude テスト穴埋めボット（quality/test_gap_review.py） ----------
     # coverage の未カバー行を Claude に渡し不足テストの追加案を Issue 草案 JSON 化する。
     # 既定無効。読み取り専用（テストコードは生成せず Issue 草案のみ）。
@@ -205,6 +212,10 @@ LLM_REVIEW_MAX_TOKENS: int = settings.LLM_REVIEW_MAX_TOKENS
 BACKTEST_REVIEW_ENABLED: bool = settings.BACKTEST_REVIEW_ENABLED
 BACKTEST_REVIEW_MODEL: str = settings.BACKTEST_REVIEW_MODEL
 BACKTEST_REVIEW_MAX_TOKENS: int = settings.BACKTEST_REVIEW_MAX_TOKENS
+
+FACTORY_HYPOTHESIS_REVIEW_ENABLED: bool = settings.FACTORY_HYPOTHESIS_REVIEW_ENABLED
+FACTORY_HYPOTHESIS_REVIEW_MODEL: str = settings.FACTORY_HYPOTHESIS_REVIEW_MODEL
+FACTORY_HYPOTHESIS_REVIEW_MAX_TOKENS: int = settings.FACTORY_HYPOTHESIS_REVIEW_MAX_TOKENS
 
 TEST_GAP_ENABLED: bool = settings.TEST_GAP_ENABLED
 TEST_GAP_MODEL: str = settings.TEST_GAP_MODEL
