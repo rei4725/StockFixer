@@ -46,6 +46,7 @@ IssueAgent 自身のポーリングロジックのみに依存している。
 | ロールバック | 実績が基準を下回ったら自動で前状態に戻す | 即時昇格のリスクを事後的に相殺する安全弁 |
 | ロールバック実行経路 | 直接 `git revert && git push`（IssueAgent 非経由） | 通常フロー（最大2時間の遅延）だと損失拡大を防げないため |
 | リーク検知 | PIT（Point-In-Time）整合性チェックを `backtest-gate-check` と並ぶ必須CIとして追加 | DSR/PBOは過学習は検出できるがリークは検出できない。マージ即昇格・シャドウ期間なしの前提下では、リークを検出する独立した仕組みが唯一の一次防御になるため |
+| 生成ルールの本番接続 | 新規ルールは `GENERATED_RULES` 共有レジストリに登録し、バックテスト（`backtest/factory.py`）と本番シグナル生成（`rule_engine/pipeline.py`）の両方が同じ辞書を参照する | 実装調査の結果、既存の `backtest/rules/` と `rule_engine/rules/` は別々に重複実装されており自動同期されていないことが判明。この構造のまま新規ルールを追加すると「マージ＝即昇格」は成立しない（バックテスト可能なだけで本番には反映されない）。共有レジストリで新規生成コードに限りこの穴を塞ぐ。既存6ルールの重複自体は本機能のスコープ外（既存の技術的負債として現状維持） |
 
 ## アーキテクチャ全体
 
@@ -82,7 +83,37 @@ IssueAgent 自身のポーリングロジックのみに依存している。
 
 ## コンポーネント詳細
 
-### 1. `generate_llm_hypotheses()`（`src/backtest/factory.py` に追加）
+### 1. 生成コードレジストリ（`GENERATED_RULES` / `GENERATED_FEATURES`）
+
+これが本設計全体の土台になる。実装調査の結果、既存の6ルールは `backtest/rules/`（バックテスト用）
+と `rule_engine/rules/`（本番シグナル生成用、`rule_engine/pipeline.py` が使用）に**別々に重複実装**
+されており、自動同期される仕組みが無いことが判明した（`diff` で実際に確認済み。ロジックはほぼ同一
+だが docstring 等が異なる独立コピー）。この構造のまま新規ルールを追加すると、バックテストは
+できても本番シグナルには一切反映されず、「マージ＝即昇格」という設計前提が成立しない。
+
+一方、特徴量側（`add_technical_indicators`）はバックテスト（`market_data/backtest_adapter.py:35`）
+と本番パイプライン（`market_data/pipeline.py:150`）の両方が `src.market_data.technical` の同一関数を
+呼んでおり、既に単一ソースになっていることも確認した。したがって新規特徴量は既存の仕組みに素直に
+乗せられるが、新規ルールだけは新しい接続方式が要る。
+
+**方針**: 新規 LLM 生成ルールに限り、共有レジストリを新設し、バックテストと本番の両方がそこから
+読む形にする（既存6ルールの重複自体は本機能のスコープ外、既存の技術的負債として現状維持）。
+
+- `python/src/rule_engine/generated_rules.py`（新規）: `GENERATED_RULES: dict[str, TradingRule]`。
+  新規ルール実装 PR はここに1エントリを追加する。
+- `backtest/factory.py` の `build_rule()`（111–124行目）を拡張: `rule_spec["type"] == "generated"`
+  の場合 `GENERATED_RULES[rule_spec["idea_id"]]` を返す分岐を追加。
+- `rule_engine/pipeline.py` の `_RULE_INSTANCES`（本番で実際に使うルール集合、30–37行目）を拡張し、
+  `GENERATED_RULES` の全エントリを合成する。
+- 新規特徴量は `market_data/technical.py` の `add_technical_indicators()` 末尾に
+  `GENERATED_FEATURES: dict[str, Callable[[pd.DataFrame], pd.DataFrame]]`（新規）を適用する
+  ループを追加し、同様の単一ソース化を行う。
+
+この方式により、新規ルール/特徴量の PR がマージされた瞬間に、本番の `rule_engine/pipeline.py` と
+バックテストの `backtest/factory.py` が**文字通り同じコードを参照する**ようになる。これが
+「マージ＝即昇格」を実体として成立させる仕組みであり、対話の中でユーザーに明示的に確認済み。
+
+### 2. `generate_llm_hypotheses()`（`src/backtest/factory.py` に追加）
 
 - 入力: DuckDB に蓄積された過去の合格/不合格傾向、`compute_metrics_by_regime` によるレジーム別
   弱点、直近のチャンピオンメトリクス。
@@ -103,7 +134,7 @@ IssueAgent 自身のポーリングロジックのみに依存している。
 - 失敗時（例外・スキーマ不正）は空リストを返し、既存のパラメータ探索型のみで夜間バッチは
   通常通り継続する（`hypothesis_review.py` と同じ graceful degradation 方針）。
 
-### 2. Issue 自動起票の拡張（`src/backtest/factory_report.py`）
+### 3. Issue 自動起票の拡張（`src/backtest/factory_report.py`）
 
 - 既存のパラメータ探索型仮説（バックテスト済み）は `labels: ["strategy-factory", "auto-ok"]`。
 - 新規のアイデア型（未実装のため未検証）は `labels: ["strategy-factory-idea", "auto-ok"]`
@@ -116,7 +147,7 @@ IssueAgent 自身のポーリングロジックのみに依存している。
   （後述）を満たすこと。満たさない場合は PR を作成しない、または close すること」という
   明示的な指示を含める。
 
-### 3. `strategy-scope-guard.yml`（新規 GitHub Actions ワークフロー）
+### 4. `strategy-scope-guard.yml`（新規 GitHub Actions ワークフロー）
 
 - `pull_request` イベントで起動。`git diff --name-only origin/develop...HEAD` で変更ファイル
   一覧を取得し、許可ディレクトリ allowlist（`python/src/backtest/`, `python/src/market_data/`,
@@ -126,7 +157,7 @@ IssueAgent 自身のポーリングロジックのみに依存している。
 - 判定ロジック本体は `python/scripts/check_strategy_scope.py`（新規、純粋関数として実装し
   ユニットテスト可能にする）に切り出し、ワークフローはそれを呼ぶだけにする。
 
-### 4. `pit-integrity-check.yml`（新規 GitHub Actions ワークフロー）
+### 5. `pit-integrity-check.yml`（新規 GitHub Actions ワークフロー）
 
 過学習ゲート（DSR/PBO）は「リターン系列が偶然のパターンでないか」を検証するが、その
 リターン系列自体が未来のデータを参照して生成されていたら（リーク）意味を持たない。同一の
@@ -150,7 +181,7 @@ IssueAgent 自身のポーリングロジックのみに依存している。
   ユニットテスト可能にする（実際に既知のリーク混入コードに対して fail することをテストで
   固定する）。
 
-### 5. `backtest-gate-check.yml`（新規 GitHub Actions ワークフロー）
+### 6. `backtest-gate-check.yml`（新規 GitHub Actions ワークフロー）
 
 - `strategy-scope-guard` 通過後に実行（`needs:` で依存）。
 - 新設 `run_factory_gate_check.py`（CLI ラッパー、既存 `run_*.py` パターンに倣う）が PR
@@ -161,7 +192,7 @@ IssueAgent 自身のポーリングロジックのみに依存している。
 - これが実質的な「利益に貢献するか」の最終審査であり、IssueAgent（実装エージェント）の
   自己申告に頼らない独立検証となる。
 
-### 6. 昇格記録: `strategy_promotions` テーブル（DuckDB、新規）
+### 7. 昇格記録: `strategy_promotions` テーブル（DuckDB、新規）
 
 | カラム | 説明 |
 |---|---|
@@ -176,7 +207,7 @@ IssueAgent 自身のポーリングロジックのみに依存している。
 マージ検知ジョブ（既存の日次/週次バッチの一部として、マージ済み PR のうち
 `strategy-factory*` ラベル由来かつ未記録のものを検出）がこのテーブルへの書き込みを担う。
 
-### 7. `rollback_monitor.py`（`src/orchestration/jobs/` に新規、日次実行）
+### 8. `rollback_monitor.py`（`src/orchestration/jobs/` に新規、日次実行）
 
 - `strategy_promotions` から `status = 'active'` かつ昇格後 N 営業日（既定5日、設定化）
   経過したレコードを対象に、当該ルール/特徴量が寄与した実現損益を集計する。
@@ -210,6 +241,10 @@ IssueAgent 自身のポーリングロジックのみに依存している。
 
 ## テスト戦略
 
+- `GENERATED_RULES` / `GENERATED_FEATURES` レジストリ: 空の状態で `build_rule()` /
+  `add_technical_indicators()` が既存6ルール・既存特徴量に対して従来通り動作すること（回帰なし）
+  と、ダミーエントリを1件登録した状態で `backtest/factory.py` と `rule_engine/pipeline.py` の
+  双方から同一インスタンスが参照できることを単体テストで固定する。
 - `generate_llm_hypotheses()`: `hypothesis_review.py` 系のテストパターン（LLM ポートをモック、
   スキーマ検証、`FACTORY_LLM_IDEATION_ENABLED=False` 時の no-op 確認）を踏襲。
 - `check_strategy_scope.py`: allowlist 判定ロジックを純粋関数として単体テスト（境界値・
