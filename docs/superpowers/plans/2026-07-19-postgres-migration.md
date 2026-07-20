@@ -1966,6 +1966,205 @@ git commit -m "feat: DuckDB物理コンパクションをPostgres VACUUM (ANALYZ
 
 ---
 
+## Task 12.5: `backup_pipeline.py` を pg_dump ベースの日次バックアップへ移行
+
+**Files:**
+- Modify: `python/src/orchestration/backup_pipeline.py`（全面書き換え）
+- Test: 既存の対応するunitテストを確認し、更新する
+
+**Interfaces:**
+- Consumes: `get_database_url()`（Task 1）
+- Produces: `run_db_backup() -> dict`（既存シグネチャ維持。呼び出し元 `python/src/orchestration/jobs/daily.py` の `result["backup_path"]`/`result["size_mb"]`/`result["elapsed_seconds"]`/`result["pruned_count"]`/`result["error"]` 参照はそのまま動作させる）
+
+Task 12で `weekly.py` のDuckDB専用 `CHECKPOINT` を除去したのと同じ理由で、`backup_pipeline.py` の `run_db_backup()` も修正が必要。現状は `CHECKPOINT` 実行後にDuckDBファイルを直接コピーする方式だが、Postgres移行後は (1) `CHECKPOINT` がPostgresでは一般ユーザー権限で実行できず失敗し、(2) データがコンテナ内のPostgresボリュームに存在するためファイルコピーでは何も意味のあるバックアップにならない。`docker compose exec postgres which pg_dump pg_restore` で確認済みの通り、`postgres:16-alpine` イメージには `pg_dump`/`pg_restore` が同梱されている。Pythonの `subprocess` から `pg_dump` をカスタムフォーマット（`-Fc`）で呼び出し、単一ファイルのバックアップとして保存する方式に置き換える。
+
+- [ ] **Step 1: 既存テストの有無を確認**
+
+```bash
+cd python && python -m pytest tests/unit -k "backup_pipeline" -v --collect-only
+```
+
+出力されたテストを、このタスクの回帰ゲートとして控えておく。
+
+- [ ] **Step 2: `backup_pipeline.py` を全面書き換え**
+
+```python
+"""
+PostgreSQL 定期バックアップパイプライン (NF-602)
+
+pg_dump（カスタムフォーマット）でタイムスタンプ付きファイルへ出力し、最大5世代を保持する。
+"""
+
+import os
+import shutil
+import subprocess
+import time
+from datetime import datetime
+from urllib.parse import urlparse
+
+from src.utils.data_path_utils import get_data_dir, get_database_url
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
+MAX_GENERATIONS = 5
+_PG_DUMP_TIMEOUT_SECONDS = 300
+
+
+def get_backup_dir() -> str:
+    """バックアップルートディレクトリのパスを返す"""
+    return os.path.join(get_data_dir(), "backups")
+
+
+def run_db_backup() -> dict:
+    """
+    PostgreSQL バックアップを実行する。
+
+    手順:
+        1. pg_dump（カスタムフォーマット, -Fc）でタイムスタンプ付きファイルへ出力
+        2. 5世代超過分を古い順に削除
+
+    Returns:
+        dict: backup_path, size_mb, elapsed_seconds, pruned_count, error
+    """
+    backup_root = get_backup_dir()
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_dest_dir = os.path.join(backup_root, timestamp)
+    backup_dest_path = os.path.join(backup_dest_dir, "stockfixer.dump")
+
+    start = time.monotonic()
+    error_msg = None
+    size_mb = 0.0
+    pruned_count = 0
+
+    try:
+        os.makedirs(backup_dest_dir, exist_ok=True)
+        logger.info("バックアップ: pg_dump 開始 → %s", backup_dest_path)
+        _run_pg_dump(get_database_url(), backup_dest_path)
+        size_mb = os.path.getsize(backup_dest_path) / (1024 * 1024)
+        logger.info("バックアップ: pg_dump 完了 (%.2f MB)", size_mb)
+
+        pruned_count = _prune_old_backups(backup_root, MAX_GENERATIONS)
+
+    except Exception as e:
+        logger.error("バックアップ失敗: %s", e, exc_info=True)
+        error_msg = str(e)
+
+    elapsed = time.monotonic() - start
+    logger.info(
+        "=== バックアップ完了: %.1f 秒, %.2f MB, 削除世代=%s ===",
+        elapsed,
+        size_mb,
+        pruned_count,
+    )
+
+    return {
+        "backup_path": backup_dest_path,
+        "size_mb": size_mb,
+        "elapsed_seconds": elapsed,
+        "pruned_count": pruned_count,
+        "error": error_msg,
+    }
+
+
+def _run_pg_dump(database_url: str, dest_path: str) -> None:
+    """pg_dump をカスタムフォーマットで実行する（環境変数でパスワードを渡し、コマンドラインへの露出を避ける）。"""
+    parsed = urlparse(database_url)
+    env = dict(os.environ)
+    if parsed.password:
+        env["PGPASSWORD"] = parsed.password
+
+    cmd = [
+        "pg_dump",
+        "-Fc",
+        "-h",
+        parsed.hostname or "localhost",
+        "-p",
+        str(parsed.port or 5432),
+        "-U",
+        parsed.username or "",
+        "-f",
+        dest_path,
+        (parsed.path or "/").lstrip("/"),
+    ]
+    result = subprocess.run(
+        cmd,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=_PG_DUMP_TIMEOUT_SECONDS,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"pg_dump 失敗 (code={result.returncode}): {result.stderr}")
+
+
+def _prune_old_backups(backup_root: str, max_generations: int) -> int:
+    """max_generations を超えた古いバックアップを削除し、削除件数を返す。"""
+    if not os.path.isdir(backup_root):
+        return 0
+
+    # YYYYMMDD_HHMMSS 形式のディレクトリのみ対象（辞書順 = 時系列順）
+    entries = sorted(
+        e for e in os.listdir(backup_root) if os.path.isdir(os.path.join(backup_root, e))
+    )
+    to_delete = entries[: max(0, len(entries) - max_generations)]
+
+    for name in to_delete:
+        target = os.path.join(backup_root, name)
+        try:
+            shutil.rmtree(target)
+            logger.info("古いバックアップを削除: %s", target)
+        except Exception as e:
+            logger.error("バックアップ削除失敗 (%s): %s", target, e, exc_info=True)
+
+    return len(to_delete)
+```
+
+`_prune_old_backups` はDBエンジンに依存しないロジックのため元コードのまま維持する。`get_backup_dir()` の公開シグネチャも維持する。
+
+- [ ] **Step 3: `pg_dump` がコンテナ内で利用可能か確認**
+
+`docker-compose.yml` の `stockfixer` サービスは `python/Dockerfile` からビルドされる。このイメージに `pg_dump`（PostgreSQLクライアントツール）が含まれているか確認する:
+
+```bash
+docker compose run --rm stockfixer which pg_dump
+```
+
+含まれていない場合は `python/Dockerfile` に `postgresql-client` パッケージのインストールを追加する（Debian系ベースイメージなら `apt-get install -y postgresql-client`、Alpine系なら `apk add postgresql-client` — 実際のベースイメージに応じた行を追加すること）。
+
+- [ ] **Step 4: 既存テストを更新**
+
+Step 1で見つけたテストファイルを読み、DuckDBの `CHECKPOINT`/`shutil.copy2` を前提にしたモックを、新しい `_run_pg_dump`（`subprocess.run` をモック）を前提にした形に書き換える。`_prune_old_backups` を検証するテストはロジック変更が無いためそのまま流用できる。
+
+- [ ] **Step 5: テスト実行**
+
+```bash
+cd python && python -m pytest tests/unit -k "backup_pipeline" -v
+```
+
+Expected: 全件 `PASS`
+
+- [ ] **Step 6: ローカルで実際にバックアップを実行して検証**
+
+```bash
+docker compose up -d postgres
+cd python && python -c "from src.orchestration.backup_pipeline import run_db_backup; print(run_db_backup())"
+```
+
+Expected: `error` キーが `None`、`backup_path` に指定した `.dump` ファイルが実在し、`pg_restore --list <path>` でダンプ内容が読めること。
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add python/src/orchestration/backup_pipeline.py python/Dockerfile
+git commit -m "feat: backup_pipeline.pyをpg_dumpベースのPostgresバックアップへ移行"
+```
+
+（`python/Dockerfile` は Step 3 で変更が必要だった場合のみ追加。テストファイルも変更していれば併せて追加すること。）
+
+---
+
 ## Task 13: `health.py` のDBヘルスチェックをpsycopg版へ移行
 
 **Files:**
