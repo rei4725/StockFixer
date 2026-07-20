@@ -1,21 +1,23 @@
 """
-DuckDB 定期バックアップパイプライン (NF-602)
+PostgreSQL 定期バックアップパイプライン (NF-602)
 
-DB ファイルをタイムスタンプ付きディレクトリにコピーし、最大5世代を保持する。
+pg_dump（カスタムフォーマット）でタイムスタンプ付きファイルへ出力し、最大5世代を保持する。
 """
 
 import os
 import shutil
+import subprocess
 import time
 from datetime import datetime
+from urllib.parse import urlparse
 
-from src.utils.data_path_utils import get_data_dir, get_db_path
-from src.utils.db import _db_connection
+from src.utils.data_path_utils import get_data_dir, get_database_url
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 MAX_GENERATIONS = 5
+_PG_DUMP_TIMEOUT_SECONDS = 300
 
 
 def get_backup_dir() -> str:
@@ -25,21 +27,19 @@ def get_backup_dir() -> str:
 
 def run_db_backup() -> dict:
     """
-    DuckDB バックアップを実行する。
+    PostgreSQL バックアップを実行する。
 
     手順:
-        1. CHECKPOINT で WAL をメインファイルへフラッシュ
-        2. タイムスタンプ付きディレクトリへファイルコピー
-        3. 5世代超過分を古い順に削除
+        1. pg_dump（カスタムフォーマット, -Fc）でタイムスタンプ付きファイルへ出力
+        2. 5世代超過分を古い順に削除
 
     Returns:
         dict: backup_path, size_mb, elapsed_seconds, pruned_count, error
     """
-    db_path = get_db_path()
     backup_root = get_backup_dir()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_dest_dir = os.path.join(backup_root, timestamp)
-    backup_dest_path = os.path.join(backup_dest_dir, "stockfixer.duckdb")
+    backup_dest_path = os.path.join(backup_dest_dir, "stockfixer.dump")
 
     start = time.monotonic()
     error_msg = None
@@ -47,20 +47,12 @@ def run_db_backup() -> dict:
     pruned_count = 0
 
     try:
-        # 1. CHECKPOINT（WAL をメインファイルへフラッシュしてコピー対象を確定させる）
-        logger.info("バックアップ: CHECKPOINT 開始")
-        with _db_connection() as con:
-            con.execute("CHECKPOINT")
-        logger.info("バックアップ: CHECKPOINT 完了")
-
-        # 2. ファイルコピー
         os.makedirs(backup_dest_dir, exist_ok=True)
-        logger.info("バックアップ: コピー開始 → %s", backup_dest_path)
-        shutil.copy2(db_path, backup_dest_path)
+        logger.info("バックアップ: pg_dump 開始 → %s", backup_dest_path)
+        _run_pg_dump(get_database_url(), backup_dest_path)
         size_mb = os.path.getsize(backup_dest_path) / (1024 * 1024)
-        logger.info("バックアップ: コピー完了 (%.2f MB)", size_mb)
+        logger.info("バックアップ: pg_dump 完了 (%.2f MB)", size_mb)
 
-        # 3. 古い世代を削除
         pruned_count = _prune_old_backups(backup_root, MAX_GENERATIONS)
 
     except Exception as e:
@@ -82,6 +74,38 @@ def run_db_backup() -> dict:
         "pruned_count": pruned_count,
         "error": error_msg,
     }
+
+
+def _run_pg_dump(database_url: str, dest_path: str) -> None:
+    """pg_dump をカスタムフォーマットで実行する（環境変数でパスワードを渡し、コマンドラインへの露出を避ける）。"""
+    parsed = urlparse(database_url)
+    env = dict(os.environ)
+    if parsed.password:
+        env["PGPASSWORD"] = parsed.password
+
+    cmd = [
+        "pg_dump",
+        "-Fc",
+        "-h",
+        parsed.hostname or "localhost",
+        "-p",
+        str(parsed.port or 5432),
+        "-U",
+        parsed.username or "",
+        "-f",
+        dest_path,
+        (parsed.path or "/").lstrip("/"),
+    ]
+    result = subprocess.run(
+        cmd,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=_PG_DUMP_TIMEOUT_SECONDS,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"pg_dump 失敗 (code={result.returncode}): {result.stderr}")
 
 
 def _prune_old_backups(backup_root: str, max_generations: int) -> int:
