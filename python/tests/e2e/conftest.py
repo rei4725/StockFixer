@@ -27,7 +27,23 @@ N_DAYS = 200  # 特徴量生成・モデル学習に十分な行数
 
 
 # ---------------------------------------------------------------------------
-# 0. ポート注入（本番の合成ルート相当）
+# 0a. マイグレーション適用（セッション開始時に1回だけ）
+#    tests/unit・tests/integration と異なり tests/e2e は別系統の conftest の
+#    ため、_test_database_ready 相当のセッションフィクスチャを持たない。
+#    CI の様にまっさらな Postgres コンテナで実行される場合、スキーマが
+#    存在しないと e2e_db_env のデータ投入が UndefinedTable で失敗する。
+# ---------------------------------------------------------------------------
+@pytest.fixture(scope="session", autouse=True)
+def _e2e_database_ready():
+    from src.utils.db._connection import _get_pool
+    from src.utils.db.migration_runner import run_migrations
+
+    with _get_pool().connection() as con:
+        run_migrations(con)
+
+
+# ---------------------------------------------------------------------------
+# 0b. ポート注入（本番の合成ルート相当）
 #    E2E は実パイプラインを走らせるため、module スコープの setup fixture より
 #    先に session スコープでポートを注入しておく必要がある。
 # ---------------------------------------------------------------------------
