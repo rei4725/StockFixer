@@ -76,6 +76,12 @@ def _isolate_db(_test_database_ready):
     from src.utils.db._connection import close_connection, set_test_connection
 
     con = psycopg.connect(get_database_url(), autocommit=False)
+    # 接続を明示的にトランザクション開始状態にしてから注入する。こうしないと
+    # _connection.py 側で `with con.transaction():` のようなネスト保護を
+    # 使った場合、テスト最初の呼び出しが「ネストではなく最外殻」と誤認されて
+    # 誤ってCOMMITしてしまう（テスト分離が壊れ、本物のPostgresへ書き込みが
+    # 漏れる）。SELECT 1 で最初のトランザクションを確実に開始させておく。
+    con.execute("SELECT 1")
     set_test_connection(con)
     try:
         yield

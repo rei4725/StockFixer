@@ -68,7 +68,18 @@ def _db_connection(
     global _tables_initialized
 
     if _test_connection is not None:
-        yield _test_connection
+        # SAVEPOINT でこの with ブロック単位のスコープを作る。呼び出し側が
+        # 例外を自前で catch して握りつぶすコード（例: fetch_latest_vix の
+        # 「列が無ければ None」フォールバック）があっても、Postgres の
+        # "current transaction is aborted" 状態がテスト全体の共有接続に
+        # 残ってしまい、以降の DB 呼び出しが全て InFailedSqlTransaction に
+        # なるのを防ぐ。本番の自動コミット接続では各文が独立トランザクション
+        # のため元々この問題は起きない（テスト固有の対策）。
+        # 前提: 呼び出し元のテストフィクスチャが _test_connection を渡す前に
+        # 既にトランザクションを開始済みであること（そうでないと con.transaction()
+        # がネストではなく最外殻とみなされ誤ってCOMMITしてしまう）。
+        with _test_connection.transaction():
+            yield _test_connection
         return
 
     timeout = _DEFAULT_LOCK_TIMEOUT if lock_timeout is None else lock_timeout
