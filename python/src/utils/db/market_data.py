@@ -37,6 +37,13 @@ def upsert_raw_ohlcv(rows: list[dict]) -> int:
     if "source" not in df.columns:
         df["source"] = "yfinance"
     df["ingested_at"] = pd.Timestamp.now("UTC")
+    if "volume" in df.columns:
+        # 呼び出し元（saver.py の DataFrame.iterrows()）は価格列と出来高列が
+        # 混在する行を反復するため、Volume が本来 int でも float64 へ
+        # 暗黙アップキャストされることがある。market_data_raw.volume は
+        # BIGINT のため、float のまま COPY すると "1234.0" のようなテキスト
+        # 表現になり Postgres が拒否する。ここで明示的に整数へ丸める。
+        df["volume"] = df["volume"].astype("Int64")
 
     cols = [
         "market",
