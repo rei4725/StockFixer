@@ -22,6 +22,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import duckdb  # noqa: E402
+import psycopg  # noqa: E402
 
 from src.utils.data_path_utils import get_database_url  # noqa: E402
 from src.utils.logger import get_logger  # noqa: E402
@@ -295,12 +296,124 @@ def _get_dynamic_columns(src_con: duckdb.DuckDBPyConnection, table: str) -> list
     return [row[0] for row in rows]
 
 
+def _get_dynamic_column_types(
+    src_con: duckdb.DuckDBPyConnection, table: str
+) -> list[tuple[str, str]]:
+    """DuckDB側の実際のカラム名+型一覧を取得する（stock_features の不足カラムを
+    Postgres側へ ALTER で補うための型推定に使う）。
+
+    `_get_dynamic_columns()` と同様、`table_catalog = current_database()` で
+    絞り込み、ATTACH先Postgresカタログ分の重複行を除外する。
+    """
+    rows = src_con.execute(
+        "SELECT column_name, data_type FROM information_schema.columns "
+        "WHERE table_name = ? AND table_catalog = current_database() "
+        "ORDER BY ordinal_position",
+        [table],
+    ).fetchall()
+    return [(row[0], row[1]) for row in rows]
+
+
+def _duckdb_type_to_postgres(duckdb_type: str) -> str:
+    """DuckDBの `information_schema.columns.data_type` 文字列をPostgresの
+    カラム型へマッピングする。
+
+    `stock_features.py` の `_ensure_columns()`（pandas dtype起点の型推定）と
+    同じ型カテゴリ（整数/浮動小数/真偽値/日時/文字列）に対応させる。
+    未知の型（将来DuckDBが返しうる型を含む）は VARCHAR にフォールバックする
+    （`_ensure_columns()` の else 節と同じ安全側の挙動）。
+    """
+    t = duckdb_type.upper()
+    integer_types = {
+        "TINYINT",
+        "SMALLINT",
+        "INTEGER",
+        "BIGINT",
+        "HUGEINT",
+        "UTINYINT",
+        "USMALLINT",
+        "UINTEGER",
+        "UBIGINT",
+        "UHUGEINT",
+    }
+    if t in integer_types:
+        return "BIGINT"
+    if t in ("DOUBLE", "FLOAT", "REAL") or t.startswith("DECIMAL"):
+        return "DOUBLE PRECISION"
+    if t == "BOOLEAN":
+        return "BOOLEAN"
+    if t.startswith("TIMESTAMP") or t == "DATE":
+        return "TIMESTAMP"
+    return "VARCHAR"
+
+
+def _ensure_stock_features_target_columns(src_con: duckdb.DuckDBPyConnection) -> None:
+    """`stock_features` について、DuckDB移行元にのみ存在する動的追加列
+    （運用中に特徴量エンジニアリングがALTERしてきた列）をPostgres移行先へ補う。
+
+    本スクリプトが動く時点（Postgresベースライン適用直後・アプリがまだ一度も
+    Postgresへ書き込んでいない）では、Postgres側の `stock_features` は
+    `0001_baseline_postgres.sql` 由来の market/symbol/row_num の3列しか
+    持たない。一方、実運用のDuckDB移行元は `stock_features.py` の
+    `_ensure_columns()` が運用中に `ALTER TABLE ADD COLUMN` してきた多数の
+    指標列を持つ。この差分を先に埋めておかないと、後続の
+    `INSERT INTO pg."stock_features" (...) SELECT ...` がPostgres側で
+    「column does not exist」エラーで失敗する。
+
+    注意1: ALTER は `pg.` カタログ経由（DuckDB接続からのDDLパススルー）ではなく、
+    psycopg で直接Postgresへ実行する。実測したところ、DuckDBはALTER文中の
+    型名を自分の型システムで正規化してからPostgresへ転送するため、
+    `DOUBLE PRECISION`/`FLOAT8` はDuckDB内部エイリアスの `DOUBLE` に
+    書き換えられて転送され、Postgres側で `type "double" does not exist`
+    エラーになる（`stock_features` の指標列の大半は浮動小数点のため、
+    これはstock_features全体で高確率に踏む問題であり、DuckDB経由のDDL
+    パススルーには頼れない）。psycopgで直接Postgres構文のDDLを発行すれば
+    この型名の再正規化を回避できる。
+
+    注意2: DuckDBは一度ATTACHしたPostgresカタログのテーブルスキーマを接続の
+    生存期間中キャッシュする。psycopgなど別接続経由でのスキーマ変更は、
+    同じ `src_con` からは自動的に見えない（後続の `INSERT INTO pg."..."` が
+    ALTER前の古いスキーマを見て「column does not exist」で失敗する）ことを
+    実測で確認した。そのためカラムを追加した場合は `pg` カタログを
+    DETACH→再ATTACHしてキャッシュを強制的に破棄する。
+    """
+    source_types = _get_dynamic_column_types(src_con, "stock_features")
+    target_columns = {
+        row[0]
+        for row in src_con.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = 'stock_features' AND table_catalog = 'pg'"
+        ).fetchall()
+    }
+    missing = [(col, dt) for col, dt in source_types if col not in target_columns]
+    if not missing:
+        return
+
+    with psycopg.connect(get_database_url(), autocommit=True) as pg_con:
+        for col, duckdb_type in missing:
+            pg_type = _duckdb_type_to_postgres(duckdb_type)
+            pg_con.execute(f'ALTER TABLE stock_features ADD COLUMN IF NOT EXISTS "{col}" {pg_type}')
+            logger.info(f"stock_features: Postgres側へカラムを追加しました: {col} ({pg_type})")
+
+    # psycopg経由の変更をDuckDBの `pg` カタログキャッシュへ反映させるため、
+    # DETACH→再ATTACHしてスキーマを再取得する。
+    src_con.execute("DETACH pg")
+    src_con.execute(f"ATTACH '{get_database_url()}' AS pg (TYPE POSTGRES, READ_ONLY FALSE)")
+
+
 def migrate_table(src_con: duckdb.DuckDBPyConnection, table: str, columns: list[str]) -> int:
     """1テーブル分をDuckDB→Postgresへ移行する。移行先件数を返す。
 
     冪等性: INSERT前にpg側をTRUNCATEするため、複数回実行しても最終状態は
     「DuckDB側の現在の内容」に収束する。
+
+    `stock_features` は動的に列が増えるテーブルのため、TRUNCATE/INSERTの前に
+    Postgres移行先の不足カラムをALTERで補う（他テーブルは静的スキーマで
+    移行先とすでに一致している前提のため、この処理は行わない）。
     """
+    if table == "stock_features":
+        _ensure_stock_features_target_columns(src_con)
+
     col_list = ", ".join(f'"{c}"' for c in columns)
     src_con.execute(f'TRUNCATE TABLE pg."{table}"')
     src_con.execute(f'INSERT INTO pg."{table}" ({col_list}) SELECT {col_list} FROM "{table}"')
