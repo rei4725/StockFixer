@@ -2455,7 +2455,7 @@ import duckdb
 
 from src.utils.data_path_utils import get_database_url
 from src.utils.logger import get_logger
-from scripts.migrate_to_postgres import _TABLES, _get_dynamic_columns
+from scripts.migrate_to_postgres import _TABLES
 
 logger = get_logger(__name__)
 
@@ -2492,6 +2492,8 @@ def main() -> int:
     args = parser.parse_args()
 
     src_con = duckdb.connect(args.duckdb_path, read_only=True)
+    src_con.execute("INSTALL postgres")
+    src_con.execute("LOAD postgres")
     src_con.execute(f"ATTACH '{get_database_url()}' AS pg (TYPE POSTGRES)")
 
     all_ok = True
