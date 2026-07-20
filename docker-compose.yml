@@ -14,6 +14,23 @@ services:
       retries: 5
       start_period: 60s
 
+  postgres:
+    image: postgres:16-alpine
+    container_name: stockfixer-postgres
+    restart: always
+    environment:
+      - POSTGRES_DB=stockfixer
+      - POSTGRES_USER=stockfixer
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-stockfixer_dev}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stockfixer -d stockfixer"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
   stockfixer:
     build:
       context: ./python
@@ -28,9 +45,12 @@ services:
     depends_on:
       ollama:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
     environment:
       - LOG_FORMAT=json
       - OLLAMA_URL=http://ollama:11434
+      - DATABASE_URL=postgresql://stockfixer:${POSTGRES_PASSWORD:-stockfixer_dev}@postgres:5432/stockfixer
     env_file:
       - ./python/.env
     volumes:
@@ -60,3 +80,4 @@ services:
 
 volumes:
   ollama_data:
+  postgres_data:
