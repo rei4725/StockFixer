@@ -28,15 +28,12 @@ import types
 from src.utils.db import _connection as _conn_module  # noqa: E402
 
 # --- 接続管理 ---
-from src.utils.db._connection import _RETRY_COUNT  # noqa: F401
 from src.utils.db._connection import (
-    _DB_CONFIG,
-    _RETRY_DELAY,
     _db_connection,
-    _init_tables,
     close_connection,
     get_readonly_connection,
     init_tables,
+    set_test_connection,
 )
 
 # --- experiment_runs ---
@@ -99,7 +96,7 @@ class _DbPackageProxy(types.ModuleType):
     """
 
     # _connection モジュールへ転送する属性名
-    _FORWARDED = frozenset(["_tables_initialized", "get_db_path", "get_data_dir", "ensure_dir"])
+    _FORWARDED = frozenset(["_tables_initialized", "get_database_url"])
 
     # prediction.db から遅延ロードする関数名
     _PREDICTION_DB = frozenset(
