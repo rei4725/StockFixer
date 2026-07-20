@@ -28,6 +28,10 @@ _test_connection: Optional[psycopg.Connection] = None
 
 _DEFAULT_LOCK_TIMEOUT = 30.0
 
+# 初回スキーマ・マイグレーション適用をプロセス間で直列化するための固定キー。
+# 任意の bigint 定数（このコードベースの他箇所では未使用）。
+_MIGRATION_LOCK_KEY = 727100
+
 
 class DbLockTimeoutError(RuntimeError):
     """コネクションプールからの接続取得がタイムアウトしたことを表す。
@@ -71,8 +75,12 @@ def _db_connection(
     try:
         with _get_pool().connection(timeout=timeout) as con:
             if not _tables_initialized:
-                run_migrations(con)
-                _tables_initialized = True
+                con.execute("SELECT pg_advisory_lock(%s)", [_MIGRATION_LOCK_KEY])
+                try:
+                    run_migrations(con)
+                    _tables_initialized = True
+                finally:
+                    con.execute("SELECT pg_advisory_unlock(%s)", [_MIGRATION_LOCK_KEY])
             yield con
     except PoolTimeout as e:
         raise DbLockTimeoutError(

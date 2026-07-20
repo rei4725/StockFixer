@@ -23,7 +23,7 @@ import types
 # `import src.utils.db as db_module` してから行う以下の操作を
 # 実態である _connection モジュールへ透過転送する:
 #   db_module._tables_initialized = False
-#   db_module.get_db_path = lambda: "/tmp/test.duckdb"
+#   db_module.get_database_url = lambda: "postgresql://test"
 # ---------------------------------------------------------------------------
 from src.utils.db import _connection as _conn_module  # noqa: E402
 
@@ -87,7 +87,7 @@ from src.utils.db.system_config import set_config_value  # noqa: F401
 class _DbPackageProxy(types.ModuleType):
     """
     特定の属性への代入操作を _connection モジュールへ転送するプロキシ。
-    _db_connection() は _connection.__dict__ から get_db_path 等を動的参照するため、
+    _db_connection() は _connection.__dict__ から get_database_url 等を動的参照するため、
     このプロキシ経由で setattr するとテスト時のモンキーパッチが正しく機能する。
 
     prediction.db の関数は遅延ロード（#338 で根本解消予定）。
