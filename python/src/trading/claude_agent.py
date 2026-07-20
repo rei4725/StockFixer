@@ -383,8 +383,12 @@ def _save_reasoning_log(run_id: str, market: str, thinking_text: str, summary: s
                 """)
             con.execute(
                 """
-                INSERT OR REPLACE INTO claude_reasoning (run_id, market, thinking, summary)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO claude_reasoning (run_id, market, thinking, summary)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (run_id) DO UPDATE SET
+                    market = EXCLUDED.market,
+                    thinking = EXCLUDED.thinking,
+                    summary = EXCLUDED.summary
                 """,
                 [run_id, market, thinking_text, summary],
             )
