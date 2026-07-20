@@ -134,7 +134,7 @@ class TestCheckDb:
     """_check_db のロックタイムアウト（busy）と異常（error）の区別（#550/#553）"""
 
     def test_busy_when_lock_timeout(self):
-        """FileLock 取得タイムアウト時は busy を返す（異常扱いしない）"""
+        """プール接続取得タイムアウト時は busy を返す（異常扱いしない）"""
         from src.api.health import _check_db
         from src.utils.db._connection import DbLockTimeoutError
 

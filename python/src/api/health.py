@@ -22,9 +22,9 @@ from src.utils.logger import get_logger
 
 _SCHEDULER_STALE_SECS = 30 * 60  # 30分
 
-# health 用 DB チェックのロック取得待ち上限（秒）。
+# health 用 DB チェックの接続待ち上限（秒）。
 # Docker HEALTHCHECK の HTTP タイムアウト（8秒）内に必ず応答を返せるよう、
-# 既定の 120 秒ではなく短い値でロック待ちを打ち切る（#550）。
+# 既定の 30 秒ではなく短い値でプール接続待ちを打ち切る（#550）。
 _DB_CHECK_LOCK_TIMEOUT = 2.0
 
 logger = get_logger(__name__)
