@@ -350,17 +350,17 @@ class TestRunClaudeTrader(unittest.TestCase):
 
 
 class TestSaveReasoningLog(unittest.TestCase):
-    """_save_reasoning_log の ON CONFLICT (run_id) DO UPDATE 経路を実DBで検証する。
+    """save_reasoning_log の ON CONFLICT (run_id) DO UPDATE 経路を実DBで検証する。
 
     _isolate_db (tests/unit/conftest.py, autouse) が実 Postgres 接続を注入するため、
     ここではモックを使わずDB書き込みを直接確認する。
     """
 
     def test_insert_then_query_reflects_saved_values(self):
-        from src.trading.claude_agent import _save_reasoning_log
+        from src.trading.claude_reasoning_log import save_reasoning_log
         from src.utils.db._connection import _db_connection
 
-        _save_reasoning_log(
+        save_reasoning_log(
             run_id="run-001",
             market="jp",
             thinking_text="最初の思考ログ",
@@ -380,16 +380,16 @@ class TestSaveReasoningLog(unittest.TestCase):
         self.assertEqual(row[3], "最初の要約")
 
     def test_second_call_with_same_run_id_updates_in_place(self):
-        from src.trading.claude_agent import _save_reasoning_log
+        from src.trading.claude_reasoning_log import save_reasoning_log
         from src.utils.db._connection import _db_connection
 
-        _save_reasoning_log(
+        save_reasoning_log(
             run_id="run-002",
             market="jp",
             thinking_text="1回目の思考ログ",
             summary="1回目の要約",
         )
-        _save_reasoning_log(
+        save_reasoning_log(
             run_id="run-002",
             market="us",
             thinking_text="2回目の思考ログ",

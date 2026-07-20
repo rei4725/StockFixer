@@ -28,6 +28,7 @@ from config.settings import (
     MIN_CHANGE_RATIO,
 )
 from src.trading.brokers.base import BrokerBase, BrokerError, OrderSide
+from src.trading.claude_reasoning_log import save_reasoning_log
 from src.trading.execution import (
     _attach_dynamic_thresholds,
     _choose_order_params,
@@ -39,7 +40,6 @@ from src.trading.execution import (
 from src.trading.risk_manager import RiskManager
 from src.trading.signal_generator import apply_multi_horizon_score_column
 from src.trading.types import TradingGateStatus
-from src.utils.db._connection import _db_connection
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -364,39 +364,6 @@ def _handle_place_order(
 
 
 # ---------------------------------------------------------------------------
-# 推論ログ保存
-# ---------------------------------------------------------------------------
-
-
-def _save_reasoning_log(run_id: str, market: str, thinking_text: str, summary: str) -> None:
-    """Extended thinking の推論ログを claude_reasoning テーブルに保存する。"""  # noqa: D401
-    try:
-        with _db_connection() as con:
-            con.execute("""
-                CREATE TABLE IF NOT EXISTS claude_reasoning (
-                    run_id      VARCHAR PRIMARY KEY,
-                    market      VARCHAR,
-                    thinking    TEXT,
-                    summary     TEXT,
-                    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-                """)
-            con.execute(
-                """
-                INSERT INTO claude_reasoning (run_id, market, thinking, summary)
-                VALUES (%s, %s, %s, %s)
-                ON CONFLICT (run_id) DO UPDATE SET
-                    market = EXCLUDED.market,
-                    thinking = EXCLUDED.thinking,
-                    summary = EXCLUDED.summary
-                """,
-                [run_id, market, thinking_text, summary],
-            )
-    except Exception:
-        logger.warning("[claude_agent] 推論ログ保存に失敗しました", exc_info=True)
-
-
-# ---------------------------------------------------------------------------
 # メインエントリーポイント
 # ---------------------------------------------------------------------------
 
@@ -584,7 +551,7 @@ market: {market}, mode: {mode}
 
     # 推論ログを保存
     if thinking_log:
-        _save_reasoning_log(
+        save_reasoning_log(
             run_id=run_id,
             market=market,
             thinking_text="\n\n---\n\n".join(thinking_log),
