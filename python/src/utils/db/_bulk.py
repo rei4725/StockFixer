@@ -64,9 +64,14 @@ def bulk_upsert(
     update_cols = [c for c in cols if c not in key_cols]
 
     with con.cursor() as cur:
+        # ON COMMIT DROP はautocommit=True接続では各文が即コミットされるため
+        # CREATE直後に一時テーブルが消えてしまう。また同一セッション内で
+        # 別テーブルへ再度呼び出された場合、コミットが発生しない限り
+        # 前回分が残り DuplicateTable になる。そのため ON COMMIT 節は使わず、
+        # 明示的な DROP で寿命を管理する。
+        cur.execute("DROP TABLE IF EXISTS _bulk_upsert")
         cur.execute(
-            f"CREATE TEMP TABLE _bulk_upsert ON COMMIT DROP AS "
-            f'SELECT {col_list} FROM "{table}" WITH NO DATA'
+            f'CREATE TEMP TABLE _bulk_upsert AS SELECT {col_list} FROM "{table}" WITH NO DATA'
         )
         with cur.copy(f"COPY _bulk_upsert ({col_list}) FROM STDIN") as copy:
             for row in _prepare_rows(df, cols):
@@ -83,3 +88,4 @@ def bulk_upsert(
             f"SELECT {col_list} FROM _bulk_upsert "
             f"ON CONFLICT ({key_list}) {conflict_action}"
         )
+        cur.execute("DROP TABLE IF EXISTS _bulk_upsert")
