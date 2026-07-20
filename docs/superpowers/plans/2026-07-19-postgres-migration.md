@@ -2821,6 +2821,73 @@ git commit -m "docs: PostgreSQL切り替えランブックを追加"
 
 ---
 
+## Task 17.5: `trading/` 配下の移行漏れ4モジュールを修正（最終全体レビューで発覚）
+
+**Files:**
+- Modify: `python/src/trading/brokers/paper/paper_broker.py`
+- Modify: `python/src/trading/risk_manager.py`
+- Modify: `python/src/trading/execution/recording.py`
+- Modify: `python/src/orchestration/jobs/daily.py`
+- Modify: `python/tests/unit/test_paper_broker.py`
+- Modify: `python/tests/unit/test_horizon_exit.py`
+
+**Interfaces:**
+- Consumes: `_db_connection()`（Task 3）
+- Produces: 既存公開API（各モジュールの関数シグネチャ）は変更しない。
+
+全19タスク完了後の最終全体レビューで発覚: `python/src/trading/brokers/paper/paper_broker.py`（デフォルトのペーパートレードBroker本体）・`python/src/trading/risk_manager.py`・`python/src/trading/execution/recording.py`・`python/src/orchestration/jobs/daily.py`（`_check_horizon_exits`）の4ファイルが、Task 1〜17・11.5・12.5のどの移行対象にも含まれておらず、DuckDB専用の `?` プレースホルダのまま残っていた。
+
+**CIが緑のまま見過ごされていた理由**: この4ファイルのテストは、autouse fixtureの`_isolate_db`（実Postgres・トランザクションロールバック方式）を経由せず、`_db_connection`を直接patchして迂回していた。
+- `test_paper_broker.py`: `_TEST_CON = duckdb.connect(":memory:")` という**実DuckDBのin-memory接続**で丸ごと差し替えていたため、`?`のままでもDuckDB側では正常に動いてテストが通ってしまっていた。
+- `test_horizon_exit.py`: `_db_connection`を`MagicMock`で差し替えていたため、SQL文字列は一切実行されずテストが通っていた（`risk_manager.py`は`test_risk_manager.py`でも同様に全面MagicMock化されているが、DB直叩き関数`update_peak_balance`/`_get_daily_realized_loss`/`_get_consecutive_losses`自体は`test_horizon_exit.py`側でのみ実DB相当の検証がされている場合があるため、後述のStep 5で実態を確認すること）。
+
+`paper_broker.py`はCLAUDE.mdの記載上「デフォルトのペーパートレードBroker」であり、`risk_manager.py`は発注前に必ず呼ばれるリスクガード、`recording.py`は`runner.py`/`claude_agent.py`/`sl_tp.py`から呼ばれる注文記録処理、`daily.py`の`_check_horizon_exits`は日次のホライズン強制決済ジョブ — いずれも実発注経路の中核であり、切り替え後は確実に壊れる。
+
+**既知の別問題（本タスクでは修正しない、切り離して報告する）**: `recording.py`の`_record_order`が`INSERT INTO orders`という、DuckDB時代を含め一度も存在したことのないテーブルへ書き込もうとしている。`runner.py`の全4箇所の呼び出しが広範な`try/except Exception`で包まれているため、この失敗は今まで気づかれずサイレントに握りつぶされてきた（Postgres移行とは無関係な既存バグ）。本タスクでは`?`→`%s`の変換のみ行い、`orders`テーブルの欠落自体は直さない（新規テーブルの追加は本移行のスコープ外の製品判断が必要なため）。この問題はタスク完了後にユーザーへ別途報告すること。
+
+- [ ] **Step 1: `paper_broker.py` を置換**
+
+ファイル全体を読み、`?`を全て`%s`に置換する（28箇所、`send_order`・`settle_pending_orders`・`_apply_fill`・`cancel_order`・ポジション/空売りポジション関連クエリ）。`INSERT OR IGNORE`のようなDuckDB/SQLite構文が無いか確認する（現状は無いはずだが、ファイル全体を読んで確認すること）。
+
+- [ ] **Step 2: `risk_manager.py` を置換**
+
+`update_peak_balance`（L381, 383）・`_table_exists`（L405）・`_get_daily_realized_loss`（L458, 478）・`_get_consecutive_losses`（L494, 514）の`?`を全て`%s`に置換する。`_table_exists`が使う`information_schema.tables`クエリは標準SQLでPostgresでもそのまま動作する。
+
+- [ ] **Step 3: `recording.py` を置換**
+
+`_link_paper_order_metadata`（L24-26）・`_sync_live_execution_diffs`（L50）・`_record_order`（L91）の`?`を全て`%s`に置換する。`_record_order`の`INSERT INTO orders`文自体は変更しない（上記の既知の別問題として切り離す）。
+
+- [ ] **Step 4: `daily.py` の `_check_horizon_exits` を置換**
+
+L229, 232の`?`を`%s`に置換する。
+
+- [ ] **Step 5: テストを実Postgres経由に修正**
+
+`test_paper_broker.py`: `_TEST_CON = duckdb.connect(":memory:")`によるDuckDB直接差し替えを廃止し、`from src.utils.db._connection import set_test_connection`と`_db_connection`経由の実Postgres接続（autouse `_isolate_db` fixtureが提供する接続）を使う形に書き換える。`@patch("src.trading.brokers.paper.paper_broker._db_connection", new=_test_db_connection)`のような個別patchも不要になるはずなので、実際に`_isolate_db`だけで各テストが動くか確認しながら書き換える。DuckDB固有のセットアップSQL（`_TEST_CON.execute("""...""")`のテーブル作成部分）は、Postgresでは`_isolate_db`のセッションフィクスチャが`run_migrations`で既にスキーマを用意しているため不要になる。
+
+`test_horizon_exit.py`: `@patch("src.trading.execution.recording._db_connection")`と`@patch(_DB_PATCH)`（`src.utils.db._connection._db_connection`）によるMagicMock差し替えを、可能な範囲で実Postgres経由の検証に置き換える。Broker自体のモック（`_BROKER_PATCH`）はDB移行と無関係なため維持してよい。全てのテストケースをMagicMockから移行する必要はないが、少なくとも1つは実際にPostgresへSQLが実行されることを検証するテストにすること（Task 8で確立した「本番のON CONFLICT/UPSERT経路には実DB回帰テストを1つは持たせる」という方針に倣う）。
+
+- [ ] **Step 6: 回帰テスト実行**
+
+```bash
+cd python && python -m pytest tests/unit -k "paper_broker or risk_manager or horizon_exit or recording" -v
+```
+
+Expected: 全件 `PASS`（かつ実Postgres経由で実行されていることをテスト内容で確認する — DuckDB/MagicMockに戻っていないこと）
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add python/src/trading/brokers/paper/paper_broker.py python/src/trading/risk_manager.py python/src/trading/execution/recording.py python/src/orchestration/jobs/daily.py python/tests/unit/test_paper_broker.py python/tests/unit/test_horizon_exit.py
+git commit -m "fix: 最終レビューで発覚したtrading配下4モジュールの移行漏れを修正"
+```
+
+- [ ] **Step 8: `orders`テーブル欠落問題をユーザーに報告**
+
+このタスクの完了後、`recording.py`の`_record_order`が存在しない`orders`テーブルへ書き込もうとしている既知の別問題（Postgres移行とは無関係、DuckDB時代から潜在していた）をユーザーに報告し、対応要否を確認する。
+
+---
+
 ## Self-Review Notes（作成者メモ）
 
 - **Spec coverage**: 設計書の①〜⑦全セクションに対応するタスクを配置済み（①②→Task1-3, ③→Task14-15,17, ④→Task5-13, ⑤→Task4, ⑥⑦→Task17・各タスクのロールバック記述）。
