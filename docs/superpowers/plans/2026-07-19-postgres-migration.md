@@ -1824,7 +1824,7 @@ L42-48の`.fetchdf()`を`pd.read_sql`に置換する（固定WHEREのため`?`�
 
 - [ ] **Step 2: `correlation_risk.py`**
 
-L32の動的IN句プレースホルダ生成`placeholders = ", ".join("?" * len(symbols))`を`placeholders = ", ".join("%s" * len(symbols))`に、L38・L44の`?`を`%s`に置換する。
+L32の動的IN句プレースホルダ生成`placeholders = ", ".join("?" * len(symbols))`を`placeholders = ", ".join(["%s"] * len(symbols))`に置換する（`"%s" * n`は2文字文字列の反復ではなく文字単位の乱れた文字列になるバグを含むため、リストを`*`で複製してから`join`する必要がある）。L38・L44の`?`を`%s`に置換する。
 
 - [ ] **Step 3: `execution/predictions.py`**
 
