@@ -270,8 +270,8 @@ CREATE TABLE IF NOT EXISTS strategy_promotions (
     pr_number              INTEGER   NOT NULL PRIMARY KEY,
     merge_commit_hash      VARCHAR   NOT NULL,
     rule_or_feature_id     VARCHAR   NOT NULL,
-    promoted_at            TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    pre_promotion_baseline VARCHAR,
+    promoted_at            TIMESTAMP NOT NULL,
+    pre_promotion_baseline DOUBLE PRECISION NOT NULL,
     status                 VARCHAR   NOT NULL DEFAULT 'active'
 );
 
@@ -279,7 +279,7 @@ CREATE TABLE IF NOT EXISTS strategy_promotions (
 CREATE TABLE IF NOT EXISTS factory_runs (
     hypothesis_hash  VARCHAR NOT NULL PRIMARY KEY,
     market           VARCHAR NOT NULL,
-    spec_json        VARCHAR,
+    spec_json        VARCHAR   NOT NULL,
     sharpe_ratio     DOUBLE PRECISION,
     win_rate         DOUBLE PRECISION,
     num_trades       INTEGER,
@@ -287,7 +287,7 @@ CREATE TABLE IF NOT EXISTS factory_runs (
     total_return     DOUBLE PRECISION,
     dsr              DOUBLE PRECISION,
     pbo              DOUBLE PRECISION,
-    gate_passed      BOOLEAN,
+    gate_passed      BOOLEAN   NOT NULL,
     gate_reasons     VARCHAR,
     report_path      VARCHAR,
     evaluated_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -300,4 +300,32 @@ CREATE TABLE IF NOT EXISTS claude_reasoning (
     thinking    TEXT,
     summary     TEXT,
     created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ルールベース: 銘柄ごとの最優秀ルール（rule_results.py が動的CREATEしていたもの）
+CREATE TABLE IF NOT EXISTS rule_best_by_symbol (
+    market           VARCHAR   NOT NULL,
+    symbol           VARCHAR   NOT NULL,
+    best_rule        VARCHAR   NOT NULL,
+    win_rate         DOUBLE PRECISION NOT NULL,
+    net_profit       DOUBLE PRECISION NOT NULL,
+    num_trades       INTEGER   NOT NULL,
+    profit_factor    DOUBLE PRECISION,
+    max_drawdown     DOUBLE PRECISION,
+    backtest_start   DATE      NOT NULL,
+    backtest_end     DATE      NOT NULL,
+    evaluated_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (market, symbol)
+);
+
+-- ルールベース: 日次シグナル記録（rule_results.py が動的CREATEしていたもの）
+CREATE TABLE IF NOT EXISTS rule_daily_signals (
+    signal_date  DATE      NOT NULL,
+    market       VARCHAR   NOT NULL,
+    symbol       VARCHAR   NOT NULL,
+    rule_name    VARCHAR   NOT NULL,
+    signal       INTEGER   NOT NULL,
+    price        DOUBLE PRECISION,
+    created_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (signal_date, market, symbol)
 );
