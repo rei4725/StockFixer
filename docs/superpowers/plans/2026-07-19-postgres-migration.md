@@ -2723,7 +2723,7 @@ git commit -m "ci: GitHub ActionsとローカルCIチェックにPostgreSQLサ�
 
 ## 前提
 
-- Task 1〜16 が全てdevelopにマージ済みであること
+- 本プランの全タスク（Task 1〜17、および途中発見された Task 11.5・12.5 を含む）がdevelopにマージ済みであること
 - `docker compose config` でpostgresサービスが定義されていることを確認済み
 
 ## 手順
