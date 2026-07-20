@@ -378,9 +378,9 @@ class RiskManager:
         with _db_connection() as con:
             row = con.execute("SELECT peak_balance FROM dd_state WHERE id = 1").fetchone()
             if row is None:
-                con.execute("INSERT INTO dd_state (id, peak_balance) VALUES (1, ?)", [current])
+                con.execute("INSERT INTO dd_state (id, peak_balance) VALUES (1, %s)", [current])
             elif current > float(row[0]):
-                con.execute("UPDATE dd_state SET peak_balance = ? WHERE id = 1", [current])
+                con.execute("UPDATE dd_state SET peak_balance = %s WHERE id = 1", [current])
 
     def get_current_dd_ratio(self) -> float:
         """現在のドローダウン率（peak_balance との差分比）を返す。"""
@@ -402,7 +402,7 @@ class RiskManager:
             """
             SELECT COUNT(*)
             FROM information_schema.tables
-            WHERE table_name = ?
+            WHERE table_name = %s
             """,
             [table_name],
         ).fetchone()
@@ -455,7 +455,7 @@ class RiskManager:
                     SELECT COALESCE(SUM(realized_pnl), 0.0)
                     FROM paper_orders
                     WHERE status = 'filled'
-                      AND side IN (?, ?)
+                      AND side IN (%s, %s)
                       AND filled_at IS NOT NULL
                       AND DATE(filled_at) = CURRENT_DATE
                       AND realized_pnl < 0
@@ -475,7 +475,7 @@ class RiskManager:
                 SELECT COALESCE(SUM(realized_pnl), 0.0)
                 FROM trade_pnl
                 WHERE DATE(closed_at) = CURRENT_DATE
-                  AND broker = ?
+                  AND broker = %s
                   AND realized_pnl < 0
                 """,
                 [self._broker.broker_name],
@@ -491,10 +491,10 @@ class RiskManager:
                     SELECT realized_pnl
                     FROM paper_orders
                     WHERE status = 'filled'
-                      AND side IN (?, ?)
+                      AND side IN (%s, %s)
                       AND realized_pnl IS NOT NULL
                     ORDER BY filled_at DESC
-                    LIMIT ?
+                    LIMIT %s
                     """,
                     [int(OrderSide.SELL), int(OrderSide.SHORT_COVER), MAX_CONSECUTIVE_LOSSES],
                 ).fetchall()
@@ -511,9 +511,9 @@ class RiskManager:
                     """
                     SELECT realized_pnl
                     FROM trade_pnl
-                    WHERE broker = ?
+                    WHERE broker = %s
                     ORDER BY closed_at DESC
-                    LIMIT ?
+                    LIMIT %s
                     """,
                     [self._broker.broker_name, MAX_CONSECUTIVE_LOSSES],
                 ).fetchall()

@@ -226,10 +226,10 @@ def run_horizon_exit_check() -> None:
             """
             SELECT DISTINCT symbol
             FROM paper_orders
-            WHERE side = ?
+            WHERE side = %s
               AND status = 'filled'
               AND target_exit_date IS NOT NULL
-              AND CAST(target_exit_date AS VARCHAR) <= ?
+              AND CAST(target_exit_date AS VARCHAR) <= %s
             """,
             [int(OrderSide.BUY), today_str],
         ).fetchall()
