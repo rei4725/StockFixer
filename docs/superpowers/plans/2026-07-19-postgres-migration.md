@@ -1545,12 +1545,14 @@ git commit -m "feat: prediction_results.pyをpsycopg3へ移行"
 
 元L53-58相当（主キー`pr_number`、列: `pr_number, merge_commit_hash, rule_or_feature_id, promoted_at, pre_promotion_baseline, status`）:
 
+`save_strategy_promotion`関数には`status`という引数は存在しない（元コードでは`status`列は常にリテラル`'active'`で、`promoted_at`は関数引数（Noneなら`datetime.now()`で補完）としてバインドされている）。この2点を踏まえて以下に置換する:
+
 ```python
         con.execute(
             """
             INSERT INTO strategy_promotions
                 (pr_number, merge_commit_hash, rule_or_feature_id, promoted_at, pre_promotion_baseline, status)
-            VALUES (%s, %s, %s, CURRENT_TIMESTAMP, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, 'active')
             ON CONFLICT (pr_number) DO UPDATE SET
                 merge_commit_hash = EXCLUDED.merge_commit_hash,
                 rule_or_feature_id = EXCLUDED.rule_or_feature_id,
@@ -1558,11 +1560,11 @@ git commit -m "feat: prediction_results.pyをpsycopg3へ移行"
                 pre_promotion_baseline = EXCLUDED.pre_promotion_baseline,
                 status = EXCLUDED.status
             """,
-            [pr_number, merge_commit_hash, rule_or_feature_id, pre_promotion_baseline, status],
+            [pr_number, merge_commit_hash, rule_or_feature_id, promoted_at, pre_promotion_baseline],
         )
 ```
 
-元のVALUES句が`CURRENT_TIMESTAMP`を含んでいた場合はそのまま維持する（元コードを確認し、`promoted_at`が引数由来かリテラルかで調整する）。残る`?`（2箇所）を`%s`に、`.fetchdf()`（1箇所, L87）を`pd.read_sql`に置換する。
+（`promoted_at`は呼び出し元の関数内で`if promoted_at is None: promoted_at = datetime.now()`により補完済みの変数。ここをDB側の`CURRENT_TIMESTAMP`に置き換えてはならない — 呼び出し元が明示的に`promoted_at`を指定するケースを壊すため。）残る`?`（2箇所）を`%s`に、`.fetchdf()`（1箇所, L87）を`pd.read_sql`に置換する。
 
 - [ ] **Step 2: `factory_runs.py` を置換**
 
@@ -1574,7 +1576,7 @@ git commit -m "feat: prediction_results.pyをpsycopg3へ移行"
             INSERT INTO factory_runs
                 (hypothesis_hash, market, spec_json, sharpe_ratio, win_rate, num_trades,
                  max_drawdown, total_return, dsr, pbo, gate_passed, gate_reasons, report_path, evaluated_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (hypothesis_hash) DO UPDATE SET
                 market = EXCLUDED.market,
                 spec_json = EXCLUDED.spec_json,
@@ -1591,11 +1593,11 @@ git commit -m "feat: prediction_results.pyをpsycopg3へ移行"
                 evaluated_at = EXCLUDED.evaluated_at
             """,
             [hypothesis_hash, market, spec_json, sharpe_ratio, win_rate, num_trades,
-             max_drawdown, total_return, dsr, pbo, gate_passed, gate_reasons, report_path],
+             max_drawdown, total_return, dsr, pbo, gate_passed, gate_reasons, report_path, datetime.now()],
         )
 ```
 
-残る`?`（1箇所）を`%s`に置換する。
+元コードは`evaluated_at`を`CURRENT_TIMESTAMP`のようなDB側リテラルではなく、呼び出し時に`datetime.now()`をそのままパラメータとして渡している（関数引数ではなく呼び出し箇所でのインライン評価）。この挙動を変えないよう、`evaluated_at`用の14番目の`%s`にも必ず値を渡すこと。残る`?`（1箇所）を`%s`に置換する。
 
 - [ ] **Step 3: `experiment.py` を置換**
 
@@ -1607,7 +1609,7 @@ git commit -m "feat: prediction_results.pyをpsycopg3へ移行"
             INSERT INTO experiment_runs
                 (run_id, market, symbol, model_name, trained_at, horizon,
                  rmse, directional_accuracy, n_samples, n_features, feature_hash, params_json, created_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (run_id) DO UPDATE SET
                 market = EXCLUDED.market,
                 symbol = EXCLUDED.symbol,
@@ -1622,11 +1624,11 @@ git commit -m "feat: prediction_results.pyをpsycopg3へ移行"
                 params_json = EXCLUDED.params_json
             """,
             [run_id, market, symbol, model_name, trained_at, horizon,
-             rmse, directional_accuracy, n_samples, n_features, feature_hash, params_json],
+             rmse, directional_accuracy, n_samples, n_features, feature_hash, params_json, datetime.now()],
         )
 ```
 
-残る`?`（4箇所）を`%s`に、`.fetchdf()`（2箇所, L135, L174）を`pd.read_sql`に置換する。
+元コードは`created_at`を`CURRENT_TIMESTAMP`のようなDB側リテラルではなく、呼び出し時に`datetime.now()`をそのままパラメータとして渡している。この挙動を変えないよう、`created_at`用の13番目の`%s`にも必ず値を渡すこと。残る`?`（4箇所）を`%s`に、`.fetchdf()`（2箇所, L135, L174）を`pd.read_sql`に置換する。
 
 - [ ] **Step 4: `claude_agent.py` を置換**
 
