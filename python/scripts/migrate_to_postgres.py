@@ -274,10 +274,22 @@ _TABLES: dict[str, list[str]] = {
 
 
 def _get_dynamic_columns(src_con: duckdb.DuckDBPyConnection, table: str) -> list[str]:
-    """DuckDB側の実際のカラム一覧を取得する（stock_features等、動的にALTERされるテーブル用）"""
+    """DuckDB側の実際のカラム一覧を取得する（stock_features等、動的にALTERされるテーブル用）
+
+    注意: この関数は `main()` で `ATTACH ... AS pg (TYPE POSTGRES)` 実行後に
+    呼ばれる。ATTACH後は DuckDB の `information_schema.columns` がローカルの
+    移行元DBと、ATTACH先のPostgres（`pg`カタログ）の両方を横断するようになる。
+    Postgres側にも移行先ベースラインスキーマ由来の同名テーブル（例:
+    `stock_features` は market/symbol/row_num の3列）が存在するため、
+    `table_catalog` で絞り込まないと両カタログ分のカラム名が重複して返り、
+    後続の INSERT が `Duplicate column name` で失敗する。
+    `current_database()` は ATTACH後も移行元DB名を指し続けるため、これで
+    移行元DB自身のカラムだけに絞り込める。
+    """
     rows = src_con.execute(
         "SELECT column_name FROM information_schema.columns "
-        "WHERE table_name = ? ORDER BY ordinal_position",
+        "WHERE table_name = ? AND table_catalog = current_database() "
+        "ORDER BY ordinal_position",
         [table],
     ).fetchall()
     return [row[0] for row in rows]
