@@ -1,5 +1,4 @@
 # Unit test専用 fixture。外部DB・API依存は含まない。
-import os
 from unittest.mock import MagicMock
 
 import pandas as pd
@@ -41,73 +40,50 @@ def _block_heartbeat_ping(monkeypatch):
 
 
 # ============================================
-# 本番 DuckDB 隔離ガード（unit テスト全体に適用）
+# トランザクションロールバックによる DB 隔離（unit テスト全体に適用）
 # ============================================
 
 
-@pytest.fixture(autouse=True)
-def _isolate_db(tmp_path, monkeypatch):
-    """全 unit テストを隔離した一時 DuckDB に向け、本番 DB を触らせない。
+@pytest.fixture(scope="session")
+def _test_database_ready():
+    """テストセッション開始時に1回だけ、テスト用Postgresへマイグレーションを適用する。
 
-    発注・リスク系の一部コード（例: RiskManager / fetch_latest_vix）は
-    モックされていない経路で `_db_connection()` を通じて本番 DB
-    `python/data/stockfixer.duckdb` を開く。本番 DB が他プロセス
-    （Windows の dllhost 等）に断続ロックされていると、これらのテストが
-    flake してデプロイ前テストを落とす原因になっていた。
-
-    各テストごとに一時ファイルへ向けることで本番 DB から完全に切り離す。
-    DB を実際に開くテストはテーブルが自動初期化された空 DB を使う
-    （データに依存するテストは個別に投入・モックしている）。
-
-    #548 対策: `src.utils.db`（プロキシ→ _connection）だけでなく、大元の
-    `src.utils.data_path_utils.get_db_path` も差し替える。週次 compact のように
-    data_path_utils から直接 import する呼び出し側は前者の patch を通らず、
-    本番 DB パスが実処理（物理コンパクション等）へ渡ってしまうため。
+    DATABASE_URL は本番と共有の接続文字列だが、CI/ローカルとも
+    テスト専用のPostgresインスタンス（docker-composeのpostgresサービス、
+    または CI の services:postgres）を指す前提。
     """
-    import src.utils.data_path_utils as path_utils
-    import src.utils.db as db_module
+    from src.utils.db._connection import _get_pool
 
-    test_db = str(tmp_path / "unit.duckdb")
-    db_module.close_connection()
-    # 経路1: src.utils.db 経由（_db_connection / get_readonly_connection）
-    monkeypatch.setattr(db_module, "get_db_path", lambda: test_db)
-    # 経路2: data_path_utils から直接 import する呼び出し側（週次 compact 等）
-    monkeypatch.setattr(path_utils, "get_db_path", lambda: test_db)
-    db_module._tables_initialized = False
+    with _get_pool().connection() as con:
+        from src.utils.db.migration_runner import run_migrations
+
+        run_migrations(con)
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _isolate_db(_test_database_ready):
+    """全 unit テストを1トランザクションに包み、テスト終了時にロールバックする。
+
+    _connection.py は呼び出し側が commit() しない設計のため、共有接続を
+    そのままロールバックするだけで全ての書き込みを巻き戻せる
+    （#548: 本番DB破損事故 / PR#556: filelock起因のCI一斉失敗、両方の
+    事故クラスがこの方式では構造的に発生しなくなる）。
+    """
+    import psycopg
+
+    from src.utils.data_path_utils import get_database_url
+    from src.utils.db._connection import close_connection, set_test_connection
+
+    con = psycopg.connect(get_database_url(), autocommit=False)
+    set_test_connection(con)
     try:
         yield
     finally:
-        db_module.close_connection()
-        db_module._tables_initialized = False
-
-
-@pytest.fixture(autouse=True)
-def _forbid_production_duckdb_connect(monkeypatch):
-    """本番 data ディレクトリ配下への duckdb.connect を禁止するトリップワイヤ。
-
-    _isolate_db の patch を通らない経路（パスを引数で受け取る compact 系や
-    duckdb.connect の直接呼び出し）が本番 DB ファイルに到達した瞬間に
-    テストを失敗させる。#548（unit テストが本番 DB を物理コンパクション中に
-    タイムアウトで強制中断され DB が破損）の再発防止。
-    """
-    import duckdb
-
-    from src.utils.data_path_utils import get_data_dir
-
-    prod_data_dir = os.path.abspath(get_data_dir())
-    orig_connect = duckdb.connect
-
-    def _guarded_connect(*args, **kwargs):
-        database = kwargs.get("database", args[0] if args else None)
-        if isinstance(database, (str, os.PathLike)):
-            resolved = os.path.abspath(str(database))
-            if resolved == prod_data_dir or resolved.startswith(prod_data_dir + os.sep):
-                raise RuntimeError(
-                    f"unit テストから本番 data ディレクトリへの duckdb.connect は禁止です (#548 再発防止): {resolved}"
-                )
-        return orig_connect(*args, **kwargs)
-
-    monkeypatch.setattr(duckdb, "connect", _guarded_connect)
+        con.rollback()
+        set_test_connection(None)
+        con.close()
+        close_connection()
 
 
 # ============================================

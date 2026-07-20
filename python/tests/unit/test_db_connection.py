@@ -44,6 +44,7 @@ class TestDbConnectionPoolTimeout:
         close_connection()
 
     def test_raises_db_lock_timeout_error_on_pool_timeout(self):
+        set_test_connection(None)  # _isolate_db の注入接続を外し、プール経路を実際に通す
         mock_pool = MagicMock()
         mock_pool.connection.side_effect = PoolTimeout("no connection available")
 
@@ -61,6 +62,7 @@ class TestDbConnectionMigrationLock:
         close_connection()
 
     def test_wraps_first_time_migration_in_advisory_lock(self):
+        set_test_connection(None)  # _isolate_db の注入接続を外し、プール経路を実際に通す
         mock_con = MagicMock()
         mock_pool = MagicMock()
         mock_pool.connection.return_value.__enter__.return_value = mock_con
@@ -87,6 +89,7 @@ class TestDbConnectionMigrationLock:
         assert _connection._tables_initialized is True
 
     def test_releases_advisory_lock_even_if_migration_raises(self):
+        set_test_connection(None)  # _isolate_db の注入接続を外し、プール経路を実際に通す
         mock_con = MagicMock()
         mock_pool = MagicMock()
         mock_pool.connection.return_value.__enter__.return_value = mock_con
