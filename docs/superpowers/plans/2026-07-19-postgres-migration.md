@@ -2318,6 +2318,11 @@ _TABLES: dict[str, list[str]] = {
         "max_drawdown", "total_return", "dsr", "pbo", "gate_passed", "gate_reasons", "report_path", "evaluated_at",
     ],
     "claude_reasoning": ["run_id", "market", "thinking", "summary", "created_at"],
+    "rule_best_by_symbol": [
+        "market", "symbol", "best_rule", "win_rate", "net_profit", "num_trades",
+        "profit_factor", "max_drawdown", "backtest_start", "backtest_end", "evaluated_at",
+    ],
+    "rule_daily_signals": ["signal_date", "market", "symbol", "rule_name", "signal", "price", "created_at"],
 }
 ```
 
