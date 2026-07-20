@@ -6,8 +6,8 @@
 
 - 本プランの全タスク（Task 1〜17、および途中発見された Task 11.5・12.5 を含む）がdevelopにマージ済みであること
 - `docker compose config` でpostgresサービスが定義されていることを確認済み
-- `docker-compose.yml` は `stockfixer` サービスの `DATABASE_URL` を `postgres` サービス（`postgres:5432`、ユーザー`stockfixer`／DB`stockfixer`）向けに固定で設定済み（`environment:` に直書き）。この値は `python/.env` に同名の変数を書いても `environment:` 側が優先されて上書きされない点に注意する（Step 6参照）。
-- 以下の手順4・5・および任意のStep 3事前確認コマンドはコンテナ内ではなく**ホスト側**（`python/`ディレクトリ）で実行する想定。これらは `get_database_url()`（既定値 `postgresql://stockfixer:stockfixer_dev@localhost:5432/stockfixer`）経由でPostgresへ接続するため、`docker-compose.yml`のpostgresサービスがポート`5432`をホストへ公開していることが前提。**`POSTGRES_PASSWORD`を既定値（`stockfixer_dev`）から変更している場合は、これらのコマンドを実行する前にホスト側シェルで`DATABASE_URL`を実際のパスワードに合わせてexportすること**（例: `export DATABASE_URL=postgresql://stockfixer:<実パスワード>@localhost:5432/stockfixer`）。忘れるとStep 3〜5が認証エラーで失敗する。
+- `docker-compose.yml` は `stockfixer` サービスの `DATABASE_URL` を `postgres` サービス（`postgres:5432`、ユーザー`stockfixer`／DB`stockfixer`）向けに固定で設定済み（`environment:` に直書き）。この値は `python/.env` に同名の変数を書いても `environment:` 側が優先されて上書きされない点に注意する。
+- Step 3〜5の `python scripts/...`（および `init_tables()`）実行は**ホスト側では行わず**、`docker compose run --rm --no-deps stockfixer ...` で `stockfixer` イメージのコンテナ内から実行する（各手順参照）。これにより `stockfixer` サービスに既に設定済みの `DATABASE_URL` をそのまま再利用でき、パスワードをホスト側シェルへ`export`する必要が一切ない。これは `pg_dump` 実行時にホスト入力・ホスト露出を避けている `backup_pipeline.py` の `_run_pg_dump`、および本ランブック「pg_dumpバックアップの復元手順」で `stockfixer` コンテナの `DATABASE_URL` を再利用しているのと同じ方針である。**`POSTGRES_PASSWORD`を既定値（`stockfixer_dev`）から変更する場合は、`docker-compose.yml`と同じ階層のプロジェクトルート`.env`（`python/.env`とは別物、`docker compose`の変数展開に使われるファイル）に`POSTGRES_PASSWORD`を設定しておくこと**。この値は`postgres`サービスの初期化パスワードと`stockfixer`サービスの`DATABASE_URL`の両方に展開されるため、Step 1を始める前（少なくともStep 3で`postgres`を起動する前）に設定しておく必要がある。忘れるとStep 3の`postgres`起動時点でパスワード不一致が生じる。
 
 ## 手順
 
@@ -24,33 +24,36 @@
    cp python/data/stockfixer.duckdb python/data/backups/stockfixer_pre_postgres_$(date +%Y%m%d).duckdb
    ```
 
-3. Postgres起動 + マイグレーション適用
+3. Postgres起動 + スキーマ初期化（必須）
 
    ```bash
    docker compose up -d postgres
    docker compose exec postgres pg_isready -U stockfixer -d stockfixer
-   # マイグレーションは _connection.py の初回接続時に自動適用されるため、
-   # 疎通確認のみで良い（アプリ起動前に手動で確認したい場合は python -c "from src.utils.db import init_tables; init_tables()"）
+   # start_period: 10s のため、起動直後は失敗することがある。失敗した場合は数秒待って再実行する
+   # （例: until docker compose exec postgres pg_isready -U stockfixer -d stockfixer; do sleep 2; done）
+
+   docker compose run --rm --no-deps stockfixer python -c "from src.utils.db import init_tables; init_tables()"
    ```
+
+   `init_tables()` の実行は**必須**（省略不可）。マイグレーションは `_connection.py` がアプリ自身の初回接続時に `pg_advisory_lock` 経由で自動適用するが、それが発火するのは Step 6 でアプリコンテナが起動した時点であり、Step 4・5より後になる。一方 Step 4 の `migrate_to_postgres.py` は DuckDB からPostgresへ `psycopg` で直接接続するだけで `src.utils.db`／`_connection.py` を一切経由しないため、自動マイグレーションの経路に乗らない（スクリプト自身のdocstringにも「前提: 移行先PostgresにTask 2のマイグレーションが適用済みであること」と明記されている）。スキーマが無い状態で Step 4 を実行すると、最初に処理される `stock_features` テーブルへの `TRUNCATE TABLE pg."stock_features"` が「relation does not exist」で失敗する。Step 5 の `verify_postgres_migration.py` も同様にスキーマの事前作成が前提。そのため、このStepで明示的に `init_tables()` を実行してスキーマを作成しておくことが必須となる。
 
 4. データ移行スクリプト実行
 
    ```bash
-   cd python
-   python scripts/migrate_to_postgres.py --duckdb-path data/stockfixer.duckdb
+   docker compose run --rm --no-deps stockfixer python scripts/migrate_to_postgres.py --duckdb-path data/stockfixer.duckdb
    ```
 
 5. 整合性検証
 
    ```bash
-   python scripts/verify_postgres_migration.py --duckdb-path data/stockfixer.duckdb
+   docker compose run --rm --no-deps stockfixer python scripts/verify_postgres_migration.py --duckdb-path data/stockfixer.duckdb
    ```
 
-   終了コード0を確認する。非ゼロの場合は手順を中止し、原因を調査する。
+   終了コード0を確認する（`docker compose run`はコンテナ内で実行したコマンドの終了コードをそのまま返す）。非ゼロの場合は手順を中止し、原因を調査する。
 
 6. 切り替え
 
-   `DATABASE_URL`は前述のとおり`docker-compose.yml`の`stockfixer`サービス定義に既に設定済みのため、`.env`側の追加編集は不要。本番で`POSTGRES_PASSWORD`を既定値から変更する場合は、`docker-compose.yml`と同じ階層のプロジェクトルート`.env`（`docker compose`の変数展開に使われるファイルで、`python/.env`とは別物）に`POSTGRES_PASSWORD`を設定してから以下を実行する。
+   `DATABASE_URL`は前述のとおり`docker-compose.yml`の`stockfixer`サービス定義に既に設定済みのため、`.env`側の追加編集は不要。`POSTGRES_PASSWORD`を既定値から変更する場合の対応は前提セクション参照（Step 1より前に設定済みであること）。
 
    ```bash
    docker compose up -d stockfixer
