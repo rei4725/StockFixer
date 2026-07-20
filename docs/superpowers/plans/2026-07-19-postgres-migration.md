@@ -1860,6 +1860,52 @@ git commit -m "feat: 業務ロジック層の読み取り専用DBアクセスを
 
 ---
 
+## Task 11.5: `paper_real_diff.py` の移行（漏れていたモジュール）
+
+**Files:**
+- Modify: `python/src/prediction/db/paper_real_diff.py`
+
+**Interfaces:**
+- Consumes: `_db_connection()`（Task 3）
+- Produces: 既存公開API（`upsert_paper_real_diff`, `load_paper_real_diff_summary`, `load_open_close_advantage_summary`）のシグネチャは変更しない。
+
+Task 16（CI配線）の検証中に発見: `python/src/prediction/db/paper_real_diff.py` はTask 1〜15のどの移行タスクの対象ファイル一覧にも含まれておらず、DuckDB専用の `?` プレースホルダ構文のまま残っていた。このモジュールは `paper_real_diff` テーブル（paper/real 約定価格の乖離追跡）へのDELETE-then-INSERT方式の書き込みと集計SELECTのみを行い、`.fetchdf()`・`con.register()`・`INSERT OR REPLACE` は使用していないため、Task 7（`prediction_results.py`）と同型の単純な `?`→`%s` 変換で移行できる。`COUNT(*) FILTER (WHERE ...)` と `NULLIF` は標準SQLでPostgresでもそのまま動作するため変更不要。
+
+`python/src/orchestration/jobs/daily.py`・`weekly.py`・`python/src/trading/execution/recording.py`・`python/src/backtest/slippage.py`・複数のreportingモジュールから実際に呼ばれている現役コードのため、切り替え後にこのモジュールが壊れたまま気づかれないと、paper/real取引の乖離監視が本番でサイレントに機能しなくなる。
+
+- [ ] **Step 1: 既存テストの有無を確認**
+
+```bash
+cd python && python -m pytest tests/unit -k "paper_real_diff" -v --collect-only
+```
+
+出力されたテストを、このタスクの回帰ゲートとして控えておく（`test_db_prediction.py::TestPaperRealDiff` のような形で存在する可能性が高い）。
+
+- [ ] **Step 2: `upsert_paper_real_diff` を置換**
+
+`?` を全て `%s` に置換する。SELECT文（元L37）、DELETE文（元L99-100）、INSERT文（元L112）の3箇所。プレースホルダの個数とパラメータリストの対応関係を崩さないよう注意する（SELECT: 4個/4個、DELETE: 4個/4個、INSERT: 17個の`%s`のうち16個がパラメータ束縛で1個は`CURRENT_TIMESTAMP`固定 — 元コードのVALUES句 `VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?)` は18個中17番目が`CURRENT_TIMESTAMP`固定で、パラメータリストは16個 + `merged["order_session"]` + `merged.get("split_ratio")` の計18要素中17個がバインドされる。元コードの構造をそのまま維持し、`?`の位置だけを`%s`に置き換えること）。
+
+- [ ] **Step 3: `load_paper_real_diff_summary` と `load_open_close_advantage_summary` を置換**
+
+両関数とも `?` は1箇所ずつ（`since`パラメータ）。`%s`に置換する。
+
+- [ ] **Step 4: 回帰テスト実行**
+
+```bash
+cd python && python -m pytest tests/unit -k "paper_real_diff" -v
+```
+
+Expected: Step 1で確認した全テストが `PASS`
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add python/src/prediction/db/paper_real_diff.py
+git commit -m "fix: 移行漏れだったpaper_real_diff.pyをpsycopg3へ移行"
+```
+
+---
+
 ## Task 12: `compact.py` の物理コンパクション廃止 → Postgres VACUUM への置き換え
 
 **Files:**
