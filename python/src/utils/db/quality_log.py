@@ -30,7 +30,7 @@ def insert_quality_log(
                 """
                 INSERT INTO data_quality_log
                     (market, symbol, check_name, level, detail, checked_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s)
                 """,
                 [market, symbol, item["check"], item["level"], item["detail"], checked_at],
             )

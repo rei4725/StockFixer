@@ -843,9 +843,37 @@ class TestLoadTurnoverComparison(_TmpDbTestCase):
             self.assertIn(col, df.columns)
 
     def test_ordered_by_run_at_desc(self):
-        """run_at 降順で返ること（最新が先頭）"""
-        self._save("r-001", buy_orders=1)
-        self._save("r-002", buy_orders=2)
+        """run_at 降順で返ること（最新が先頭）
+
+        save_order_run_summary は run_at に SQL側の CURRENT_TIMESTAMP を使う。
+        Postgres の CURRENT_TIMESTAMP はトランザクション開始時刻で固定される
+        （transaction_timestamp() 相当）ため、テスト全体を1トランザクションに
+        包んでロールバックする _isolate_db フィクスチャ配下では、同一テスト内で
+        2回 INSERT しても run_at が同一値になり順序が不定になる。
+        そのためこのテストだけは save_order_run_summary を経由せず、
+        run_at を明示的に異なる値にして直接 INSERT する。
+        """
+        from src.utils.db._connection import _db_connection
+
+        with _db_connection() as con:
+            con.execute(
+                """
+                INSERT INTO order_run_summary
+                    (run_id, market, mode, run_at, buy_orders, sell_orders, short_orders,
+                     skipped, skipped_min_change, total_turnover, min_change_ratio)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                ["r-001", "jp", "paper", "2026-07-19 10:00:00", 1, 0, 0, 0, 0, 10000.0, 0.003],
+            )
+            con.execute(
+                """
+                INSERT INTO order_run_summary
+                    (run_id, market, mode, run_at, buy_orders, sell_orders, short_orders,
+                     skipped, skipped_min_change, total_turnover, min_change_ratio)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                ["r-002", "jp", "paper", "2026-07-19 11:00:00", 2, 0, 0, 0, 0, 10000.0, 0.003],
+            )
         df = load_turnover_comparison("jp")
         # 後から挿入されたものが先頭（run_at が新しい）
         self.assertEqual(df["run_id"].iloc[0], "r-002")

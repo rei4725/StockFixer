@@ -27,7 +27,7 @@ def save_order_run_summary(
             INSERT INTO order_run_summary
                 (run_id, market, mode, run_at, buy_orders, sell_orders, short_orders,
                  skipped, skipped_min_change, total_turnover, min_change_ratio)
-            VALUES (?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, CURRENT_TIMESTAMP, %s, %s, %s, %s, %s, %s, %s)
             """,
             [
                 run_id,
@@ -63,17 +63,18 @@ def load_turnover_comparison(market: str, limit: int = 30) -> pd.DataFrame:
     """
     with _db_connection() as con:
         try:
-            return con.execute(
+            return pd.read_sql(
                 """
                 SELECT run_id, market, mode, run_at, total_turnover,
                        buy_orders, sell_orders, short_orders, skipped_min_change
                 FROM order_run_summary
-                WHERE market = ?
+                WHERE market = %s
                 ORDER BY run_at DESC
-                LIMIT ?
+                LIMIT %s
                 """,
-                [market, limit],
-            ).fetchdf()
+                con,
+                params=[market, limit],
+            )
         except Exception as e:
             logger.error(f"load_turnover_comparison 失敗: {e}", exc_info=True)
             return pd.DataFrame()
