@@ -42,18 +42,16 @@ def _check_db() -> tuple[str, str | None, str | None]:
     """DB接続を確認する。(status, error_msg, last_prediction_at) を返す。
 
     health サーバは scheduler / bot と同一プロセスで動くため、read-only の別接続
-    （get_readonly_connection）を開くと read-write 接続と設定が衝突する
-    （DuckDB は同一プロセスで同一ファイルへ異なる設定の接続を許さない）。
-    そのため共有の _db_connection（FileLock 直列化・設定統一）経由で読む。
+    （get_readonly_connection）は使わず、共有のプールから借用する _db_connection
+    経由で読む。
 
-    ロック待ちは _DB_CHECK_LOCK_TIMEOUT 秒で打ち切り "busy" を返す（#550）。
-    busy は「別処理（日次パイプライン等）が DB を使用中 = プロセスは生きている」
-    ことを意味し、異常ではない。DB 破損のような真の異常はロック取得後の
-    接続失敗として "error" になる。
+    プールが空でタイムアウトした場合は _DB_CHECK_LOCK_TIMEOUT 秒で打ち切り "busy"
+    を返す（#550）。busy は「別処理（日次パイプライン等）が DB を使用中 =
+    プロセスは生きている」ことを意味し、異常ではない。DB 破損のような真の異常は
+    接続取得後の失敗として "error" になる。
 
-    バッチと I/O 競合している間は duckdb.connect 自体に数秒かかるため（#553 実測:
-    接続 1 回あたり 4〜5 秒）、接続は 1 回だけ張り、疎通確認と last_prediction_at
-    取得をまとめて行う。
+    接続は 1 回だけ張り、疎通確認と last_prediction_at 取得をまとめて行う
+    （#553）。
     """
     try:
         from src.utils.db._connection import DbLockTimeoutError, _db_connection
