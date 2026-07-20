@@ -122,7 +122,7 @@ class TestModelTraining:
 
         with _conn._db_connection() as con:
             rows = con.execute(
-                "SELECT * FROM model_metrics WHERE market = ? AND symbol = ?",
+                "SELECT * FROM model_metrics WHERE market = %s AND symbol = %s",
                 [e2e_db_env["market"], e2e_db_env["symbol"]],
             ).fetchall()
 
@@ -134,7 +134,7 @@ class TestModelTraining:
 
         with _conn._db_connection() as con:
             rows = con.execute(
-                "SELECT * FROM experiment_runs WHERE market = ? AND symbol = ?",
+                "SELECT * FROM experiment_runs WHERE market = %s AND symbol = %s",
                 [e2e_db_env["market"], e2e_db_env["symbol"]],
             ).fetchall()
 
@@ -211,7 +211,7 @@ class TestPrediction:
 
         with _conn._db_connection() as con:
             rows = con.execute(
-                "SELECT * FROM prediction_results WHERE market = ? AND symbol = ?",
+                "SELECT * FROM prediction_results WHERE market = %s AND symbol = %s",
                 [e2e_db_env["market"], e2e_db_env["symbol"]],
             ).fetchall()
         assert len(rows) > 0, "prediction_results に行が保存されていない"

@@ -159,14 +159,18 @@ class TestPredictionResultsQuality:
     """e2e 環境の prediction_results テーブルに対する品質アサーション。"""
 
     def _load(self, e2e_db_env):
+        import pandas as pd
+
         import src.utils.db._connection as _conn
 
         with _conn._db_connection() as con:
             try:
-                df = con.execute(
-                    "SELECT * FROM prediction_results WHERE market = ? AND symbol = ?",
-                    [e2e_db_env["market"], e2e_db_env["symbol"]],
-                ).fetchdf()
+                df = pd.read_sql(
+                    "SELECT * FROM prediction_results "
+                    "WHERE market = %(market)s AND symbol = %(symbol)s",
+                    con,
+                    params={"market": e2e_db_env["market"], "symbol": e2e_db_env["symbol"]},
+                )
             except Exception:
                 return None
         return df if not df.empty else None
