@@ -2726,6 +2726,24 @@ git commit -m "ci: GitHub ActionsとローカルCIチェックにPostgreSQLサ�
 
    `python/data/backups/stockfixer_pre_postgres_*.duckdb`は2週間保持し、問題なければ削除する。
 
+## pg_dumpバックアップの復元手順（Task 12.5で判明した重要な注意点）
+
+Task 12.5で `backup_pipeline.py` を `pg_dump`（カスタムフォーマット, `-Fc`）ベースに移行した際、`stockfixer` アプリコンテナに同梱される `pg_dump`（Debian trixieベースイメージのデフォルト、v17系）と、`postgres` サービスコンテナ（`postgres:16-alpine`、v16系）の間にバージョン差異があることが判明した。
+
+**`pg_dump` のカスタムアーカイブフォーマットは「ダンプしたツールのバージョン」にアーカイブヘッダのバージョンが紐づき、より古い `pg_restore` は新しいアーカイブを読めない**（逆に新しい `pg_restore` は古いアーカイブを読める、という非対称な互換性）。実際に検証したところ、v17の `pg_dump` で作成したダンプを `docker compose exec postgres pg_restore`（v16）で読もうとすると `pg_restore: error: unsupported version (1.16) in file header` で失敗する。
+
+**復元時は必ずダンプを作成したのと同じツール（`stockfixer` アプリコンテナ内の `pg_restore`）を使うこと**:
+
+```bash
+# NG: postgresサービスコンテナのpg_restoreはバージョンが古く読めない
+docker compose exec postgres pg_restore ...
+
+# OK: stockfixerアプリコンテナのpg_restoreを使う
+docker compose exec stockfixer pg_restore -h postgres -U stockfixer -d stockfixer -c /app/data/backups/<timestamp>/stockfixer.dump
+```
+
+なお、Task 12.5の検証は `pg_restore --list`（アーカイブのテーブル一覧読み取り）による互換性確認までで、実データを実際に空DBへ復元する完全なリストア手順の実地検証はまだ行っていない。本番復元が必要になった際は、上記コマンドの後に対象テーブルへのデータ反映を目視確認すること。
+
 ## ロールバック手順
 
 問題が発生した場合:
