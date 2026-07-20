@@ -5,6 +5,7 @@ from typing import Optional
 import pandas as pd
 
 from src.prediction.types import PredictionResult
+from src.utils.db._bulk import bulk_insert
 from src.utils.db._connection import _db_connection
 from src.utils.logger import get_logger
 from src.utils.run_context import get_run_id
@@ -68,15 +69,11 @@ def save_prediction_results(predicted_at: str, results: list[PredictionResult]) 
         pairs = save_df[["market", "symbol", "model_version"]].drop_duplicates()
         for _, row in pairs.iterrows():
             con.execute(
-                "DELETE FROM prediction_results WHERE market = ? AND symbol = ?"
-                " AND model_version = ?",
+                "DELETE FROM prediction_results WHERE market = %s AND symbol = %s"
+                " AND model_version = %s",
                 [row["market"], row["symbol"], row["model_version"]],
             )
-        col_str = ", ".join(cols)
-        con.register("_save_df_temp", save_df)
-        con.execute(
-            f"INSERT INTO prediction_results ({col_str}) SELECT {col_str} FROM _save_df_temp"
-        )
+        bulk_insert(con, "prediction_results", save_df, columns=cols)
     logger.info(f"DB保存完了: prediction_results [{predicted_at}] ({len(save_df)}行)")
 
 
@@ -122,10 +119,10 @@ def load_prediction_results(
         params: list = []
         conditions = []
         if market is not None:
-            conditions.append("market = ?")
+            conditions.append("market = %s")
             params.append(market)
         if model_version is not None:
-            conditions.append("model_version = ?")
+            conditions.append("model_version = %s")
             params.append(model_version)
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
@@ -133,7 +130,7 @@ def load_prediction_results(
         query += f" LIMIT {int(limit)}"
         with _db_connection() as con:
             try:
-                return con.execute(query, params).fetchdf()
+                return pd.read_sql(query, con, params=params)
             except Exception as e:
                 logger.error(f"prediction_results 読み込み失敗: {e}", exc_info=True)
                 return pd.DataFrame()
@@ -143,29 +140,29 @@ def load_prediction_results(
         if predicted_at is None:
             return pd.DataFrame()
 
-    query = "SELECT * FROM prediction_results WHERE predicted_at = ?"
+    query = "SELECT * FROM prediction_results WHERE predicted_at = %s"
     params = [predicted_at]
 
     if market is not None:
-        query += " AND market = ?"
+        query += " AND market = %s"
         params.append(market)
 
     if model_version is not None:
-        query += " AND model_version = ?"
+        query += " AND model_version = %s"
         params.append(model_version)
 
     if worst_n is not None:
-        query += " ORDER BY diff_ratio ASC LIMIT ?"
+        query += " ORDER BY diff_ratio ASC LIMIT %s"
         params.append(worst_n)
     elif top_n is not None:
-        query += " ORDER BY diff_ratio DESC LIMIT ?"
+        query += " ORDER BY diff_ratio DESC LIMIT %s"
         params.append(top_n)
     else:
         query += " ORDER BY diff_ratio DESC"
 
     with _db_connection() as con:
         try:
-            return con.execute(query, params).fetchdf()
+            return pd.read_sql(query, con, params=params)
         except Exception as e:
             logger.error(f"prediction_results 読み込み失敗: {e}", exc_info=True)
             return pd.DataFrame()
@@ -190,7 +187,7 @@ def load_prediction_markets(predicted_at: str = None) -> list:
         try:
             result = con.execute(
                 "SELECT DISTINCT market FROM prediction_results "
-                "WHERE predicted_at = ? ORDER BY market",
+                "WHERE predicted_at = %s ORDER BY market",
                 [predicted_at],
             ).fetchall()
             return [row[0] for row in result]
@@ -224,23 +221,23 @@ def load_shadow_comparison(
     """
     query = """
         SELECT * FROM prediction_results
-        WHERE model_version IN (?, ?)
+        WHERE model_version IN (%s, %s)
     """
     params: list = [production_version, challenger_version]
 
     if market is not None:
-        query += " AND market = ?"
+        query += " AND market = %s"
         params.append(market)
     if symbol is not None:
-        query += " AND symbol = ?"
+        query += " AND symbol = %s"
         params.append(symbol)
 
-    query += " ORDER BY predicted_at DESC LIMIT ?"
+    query += " ORDER BY predicted_at DESC LIMIT %s"
     params.append(int(limit))
 
     with _db_connection() as con:
         try:
-            return con.execute(query, params).fetchdf()
+            return pd.read_sql(query, con, params=params)
         except Exception as e:
             logger.error(f"load_shadow_comparison 失敗: {e}", exc_info=True)
             return pd.DataFrame()
