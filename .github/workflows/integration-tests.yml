@@ -2,9 +2,6 @@ name: Integration / E2E Tests
 
 on:
   pull_request:
-    paths:
-      - "python/**"
-      - ".github/workflows/integration-tests.yml"
   push:
     branches:
       - develop
