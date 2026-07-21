@@ -18,7 +18,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          pr_numbers=$(gh pr list --state open --author "app/dependabot" --json number,mergeable \
+          pr_numbers=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --author "app/dependabot" --json number,mergeable \
             --jq '.[] | select(.mergeable == "CONFLICTING") | .number')
 
           if [ -z "$pr_numbers" ]; then
@@ -29,7 +29,7 @@ jobs:
           for pr in $pr_numbers; do
             (
               set -e
-              info=$(gh pr view "$pr" --json comments,commits)
+              info=$(gh pr view "$pr" --repo "$GITHUB_REPOSITORY" --json comments,commits)
               last_commit_date=$(echo "$info" | jq -r '.commits[-1].committedDate')
               last_rebase_comment_date=$(echo "$info" | jq -r '
                 [.comments[]
@@ -44,7 +44,7 @@ jobs:
               fi
 
               echo "PR #$pr: requesting rebase."
-              gh pr comment "$pr" --body "@dependabot rebase"
+              gh pr comment "$pr" --repo "$GITHUB_REPOSITORY" --body "@dependabot rebase"
             ) || echo "PR #$pr: skipped due to an error, continuing."
           done
         env:
