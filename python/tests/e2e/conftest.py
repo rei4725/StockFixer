@@ -1,9 +1,8 @@
 """
 E2E テスト共通 fixture
 
-テスト専用の孤立環境（トランザクションロールバック方式のPostgres接続 +
-一時モデルディレクトリ）を構築し、合成 OHLCV データを投入してパイプライン
-全体を通せる状態にする。
+テスト専用の孤立環境（一時 DuckDB + 一時モデルディレクトリ）を構築し、
+合成 OHLCV データを投入してパイプライン全体を通せる状態にする。
 
 使用するテスト用銘柄:
     market = "us", symbol = "E2ETEST"
@@ -27,23 +26,7 @@ N_DAYS = 200  # 特徴量生成・モデル学習に十分な行数
 
 
 # ---------------------------------------------------------------------------
-# 0a. マイグレーション適用（セッション開始時に1回だけ）
-#    tests/unit・tests/integration と異なり tests/e2e は別系統の conftest の
-#    ため、_test_database_ready 相当のセッションフィクスチャを持たない。
-#    CI の様にまっさらな Postgres コンテナで実行される場合、スキーマが
-#    存在しないと e2e_db_env のデータ投入が UndefinedTable で失敗する。
-# ---------------------------------------------------------------------------
-@pytest.fixture(scope="session", autouse=True)
-def _e2e_database_ready():
-    from src.utils.db._connection import _get_pool
-    from src.utils.db.migration_runner import run_migrations
-
-    with _get_pool().connection() as con:
-        run_migrations(con)
-
-
-# ---------------------------------------------------------------------------
-# 0b. ポート注入（本番の合成ルート相当）
+# 0. ポート注入（本番の合成ルート相当）
 #    E2E は実パイプラインを走らせるため、module スコープの setup fixture より
 #    先に session スコープでポートを注入しておく必要がある。
 # ---------------------------------------------------------------------------
@@ -96,24 +79,17 @@ def e2e_db_env(e2e_ohlcv, tmp_path_factory):
     """
     E2E テスト用の孤立環境を構築して yield する。
 
-    tests/unit・tests/integration と異なり、このフィクスチャはモジュール全体で
-    1つの環境を共有する（各テストごとにロールバックしない）。そのため専用の
-    Postgres接続をモジュールスコープで開き、モジュールの全テスト終了後に
-    まとめてロールバックする。tests/unit/conftest.py の _isolate_db と同じ理由で、
-    接続をトランザクション開始状態にしてから注入する（詳細はそちらのコメント参照）。
-
     yield する辞書:
+        db_path   : 一時 DuckDB のファイルパス
         models_dir: 一時モデルディレクトリ
         market    : E2E_MARKET
         symbol    : E2E_SYMBOL
         ohlcv     : 合成 OHLCV DataFrame
     """
-    import psycopg
-
-    from src.utils.data_path_utils import get_database_url
-    from src.utils.db._connection import close_connection, set_test_connection
+    import src.utils.db as db_module
 
     base = tmp_path_factory.mktemp("e2e_env")
+    db_path = str(base / "e2e.duckdb")
     models_dir = str(base / "models")
     os.makedirs(models_dir, exist_ok=True)
 
@@ -126,12 +102,13 @@ def e2e_db_env(e2e_ohlcv, tmp_path_factory):
         return d
 
     # ---------------------------------------------------------------------
-    # DB分離: モジュール専用のPostgres接続をトランザクションロールバック方式で注入
+    # DB パッチ: _connection モジュール経由の get_db_path を差し替え
+    # （_DbPackageProxy.__setattr__ が _connection へ転送する）
     # ---------------------------------------------------------------------
-    close_connection()
-    con = psycopg.connect(get_database_url(), autocommit=False)
-    con.execute("SELECT 1")
-    set_test_connection(con)
+    orig_db_path_fn = db_module.get_db_path
+    db_module.close_connection()
+    db_module.get_db_path = lambda: db_path
+    db_module._tables_initialized = False
 
     # ---------------------------------------------------------------------
     # モデルディレクトリパッチ
@@ -191,16 +168,16 @@ def e2e_db_env(e2e_ohlcv, tmp_path_factory):
         _train_models(E2E_MARKET, E2E_SYMBOL)
 
         yield {
+            "db_path": db_path,
             "models_dir": models_dir,
             "market": E2E_MARKET,
             "symbol": E2E_SYMBOL,
             "ohlcv": e2e_ohlcv,
         }
     finally:
-        con.rollback()
-        set_test_connection(None)
-        con.close()
-        close_connection()
+        db_module.close_connection()
+        db_module.get_db_path = orig_db_path_fn
+        db_module._tables_initialized = False
         for p in patchers:
             p.stop()
 

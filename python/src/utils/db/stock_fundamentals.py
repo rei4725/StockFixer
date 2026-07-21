@@ -74,11 +74,11 @@ def upsert_fundamentals(record: _FundamentalRecordLike) -> None:
     symbol = record.symbol
     values = [getattr(record, name) for name in _COLUMNS]
     col_list = ", ".join(_COLUMNS)
-    placeholders = ", ".join("%s" for _ in _COLUMNS)
+    placeholders = ", ".join("?" for _ in _COLUMNS)
 
     with _db_connection() as con:
         con.execute(
-            "DELETE FROM stock_fundamentals WHERE market = %s AND symbol = %s",
+            "DELETE FROM stock_fundamentals WHERE market = ? AND symbol = ?",
             [market, symbol],
         )
         con.execute(
@@ -97,11 +97,10 @@ def load_fundamentals(market: str, symbol: str) -> Optional[dict]:
     """
     with _db_connection() as con:
         try:
-            df = pd.read_sql(
-                "SELECT * FROM stock_fundamentals WHERE market = %s AND symbol = %s",
-                con,
-                params=[market, symbol],
-            )
+            df = con.execute(
+                "SELECT * FROM stock_fundamentals WHERE market = ? AND symbol = ?",
+                [market, symbol],
+            ).fetchdf()
         except Exception as e:
             logger.error(f"stock_fundamentals 読み込み失敗 [{market}_{symbol}]: {e}", exc_info=True)
             return None
@@ -120,7 +119,7 @@ def load_all_fundamentals() -> pd.DataFrame:
     """
     with _db_connection() as con:
         try:
-            df = pd.read_sql("SELECT * FROM stock_fundamentals ORDER BY market, symbol", con)
+            df = con.execute("SELECT * FROM stock_fundamentals ORDER BY market, symbol").fetchdf()
         except Exception as e:
             logger.error(f"stock_fundamentals 全件読み込み失敗: {e}", exc_info=True)
             return pd.DataFrame()

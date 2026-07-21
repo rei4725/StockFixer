@@ -50,22 +50,21 @@ def _load_weekly_hit_rates_direct(n_weeks: int, horizon: int) -> pd.DataFrame:
     """
     with _db_connection() as con:
         try:
-            df = pd.read_sql(
+            df = con.execute(
                 f"""
                 SELECT
                     date_trunc('week', checked_at) AS week_start,
                     AVG(CAST(direction_match AS INTEGER)) AS hit_rate
                 FROM prediction_accuracy
-                WHERE horizon = %s
+                WHERE horizon = ?
                   AND direction_match IS NOT NULL
                   AND checked_at IS NOT NULL
                 GROUP BY date_trunc('week', checked_at)
                 ORDER BY week_start DESC
                 LIMIT {int(n_weeks)}
                 """,
-                con,
-                params=[horizon],
-            )
+                [horizon],
+            ).fetchdf()
             if df.empty:
                 return pd.DataFrame()
             df["week_start"] = df["week_start"].astype(str)

@@ -56,7 +56,7 @@ class TestDB(unittest.TestCase):
         """テーブルが正しく作成されることを確認"""
         with db_module._db_connection() as con:
             tables = con.execute(
-                "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"
+                "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
             ).fetchall()
         table_names = {row[0] for row in tables}
         self.assertIn("stock_features", table_names)

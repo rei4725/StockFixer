@@ -34,7 +34,7 @@ def upsert_paper_real_diff(
                    paper_slippage, real_slippage, paper_filled_at, real_checked_at, created_at,
                    order_session, split_ratio
             FROM paper_real_diff
-            WHERE market = %s AND symbol = %s AND predicted_at = %s AND side = %s
+            WHERE market = ? AND symbol = ? AND predicted_at = ? AND side = ?
             """,
             [market, symbol, predicted_at, side],
         ).fetchone()
@@ -96,8 +96,8 @@ def upsert_paper_real_diff(
             price_diff = float(merged["real_price"]) - float(merged["paper_price"])
 
         con.execute(
-            "DELETE FROM paper_real_diff WHERE market = %s AND symbol = %s "
-            "AND predicted_at = %s AND side = %s",
+            "DELETE FROM paper_real_diff WHERE market = ? AND symbol = ? "
+            "AND predicted_at = ? AND side = ?",
             [market, symbol, predicted_at, side],
         )
         con.execute(
@@ -109,8 +109,7 @@ def upsert_paper_real_diff(
                 paper_filled_at, real_checked_at, created_at, updated_at, order_session,
                 split_ratio
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    CURRENT_TIMESTAMP, %s, %s)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?)
             """,
             [
                 market,
@@ -151,7 +150,7 @@ def load_paper_real_diff_summary(recent_days: int = 7) -> dict:
                 AVG(ABS(price_diff / NULLIF(signal_price, 0))) AS avg_abs_diff_ratio,
                 MAX(ABS(price_diff)) AS max_abs_price_diff
             FROM paper_real_diff
-            WHERE COALESCE(paper_filled_at, real_checked_at, created_at) >= %s
+            WHERE COALESCE(paper_filled_at, real_checked_at, created_at) >= ?
             """,
             [since],
         ).fetchone()
@@ -187,7 +186,7 @@ def load_open_close_advantage_summary(recent_days: int = 30) -> dict[str, dict]:
                 MAX(paper_slippage) AS max_slippage
             FROM paper_real_diff
             WHERE paper_price IS NOT NULL
-              AND COALESCE(paper_filled_at, created_at) >= %s
+              AND COALESCE(paper_filled_at, created_at) >= ?
             GROUP BY session
             ORDER BY session
             """,

@@ -2,7 +2,6 @@
 
 import pandas as pd
 
-from src.utils.db._bulk import bulk_insert
 from src.utils.db._connection import _db_connection
 from src.utils.logger import get_logger
 
@@ -35,23 +34,15 @@ def save_shap_values(
     with _db_connection() as con:
         con.execute(
             "DELETE FROM shap_values "
-            "WHERE market = %s AND symbol = %s AND model_name = %s AND trained_at = %s",
+            "WHERE market = ? AND symbol = ? AND model_name = ? AND trained_at = ?",
             [market, symbol, model_name, trained_at],
         )
-        bulk_insert(
-            con,
-            "shap_values",
-            save_df,
-            columns=[
-                "market",
-                "symbol",
-                "model_name",
-                "trained_at",
-                "feature",
-                "shap_mean",
-                "shap_rank",
-            ],
-        )
+        con.execute("""
+            INSERT INTO shap_values
+                (market, symbol, model_name, trained_at, feature, shap_mean, shap_rank)
+            SELECT market, symbol, model_name, trained_at, feature, shap_mean, shap_rank
+            FROM save_df
+            """)
     logger.debug(f"shap_values 保存: [{market}_{symbol}/{model_name}] {len(save_df)}特徴量")
 
 
@@ -79,33 +70,31 @@ def load_shap_latest(
         try:
             latest = con.execute(
                 "SELECT MAX(trained_at) FROM shap_values "
-                "WHERE market = %s AND symbol = %s AND model_name = %s",
+                "WHERE market = ? AND symbol = ? AND model_name = ?",
                 [market, symbol, model_name],
             ).fetchone()[0]
             if latest is None:
                 return pd.DataFrame()
-            top_df = pd.read_sql(
+            top_df = con.execute(
                 f"""
                 SELECT feature, shap_mean, shap_rank, trained_at
                 FROM shap_values
-                WHERE market = %s AND symbol = %s AND model_name = %s AND trained_at = %s
+                WHERE market = ? AND symbol = ? AND model_name = ? AND trained_at = ?
                 ORDER BY shap_rank ASC
                 LIMIT {int(top_n)}
                 """,
-                con,
-                params=[market, symbol, model_name, latest],
-            )
-            bottom_df = pd.read_sql(
+                [market, symbol, model_name, latest],
+            ).fetchdf()
+            bottom_df = con.execute(
                 f"""
                 SELECT feature, shap_mean, shap_rank, trained_at
                 FROM shap_values
-                WHERE market = %s AND symbol = %s AND model_name = %s AND trained_at = %s
+                WHERE market = ? AND symbol = ? AND model_name = ? AND trained_at = ?
                 ORDER BY shap_rank DESC
                 LIMIT {int(bottom_n)}
                 """,
-                con,
-                params=[market, symbol, model_name, latest],
-            )
+                [market, symbol, model_name, latest],
+            ).fetchdf()
             return pd.concat([top_df, bottom_df], ignore_index=True).drop_duplicates(
                 subset=["feature"]
             )
@@ -134,26 +123,20 @@ def save_feature_selection(
     with _db_connection() as con:
         con.execute(
             "DELETE FROM feature_selection_log "
-            "WHERE market = %s AND symbol = %s AND model_name = %s AND trained_at = %s",
+            "WHERE market = ? AND symbol = ? AND model_name = ? AND trained_at = ?",
             [market, symbol, model_name, trained_at],
         )
-        bulk_insert(
-            con,
-            "feature_selection_log",
-            save_df,
-            columns=[
-                "market",
-                "symbol",
-                "model_name",
-                "trained_at",
-                "feature",
-                "importance_mean",
-                "importance_std",
-                "importance_rank",
-                "is_excluded",
-                "protected_by_shap",
-            ],
-        )
+        con.execute("""
+            INSERT INTO feature_selection_log (
+                market, symbol, model_name, trained_at, feature,
+                importance_mean, importance_std, importance_rank,
+                is_excluded, protected_by_shap
+            )
+            SELECT market, symbol, model_name, trained_at, feature,
+                   importance_mean, importance_std, importance_rank,
+                   is_excluded, protected_by_shap
+            FROM save_df
+            """)
 
 
 def load_feature_exclusion_candidates(market: str, symbol: str) -> pd.DataFrame:
@@ -165,7 +148,7 @@ def load_feature_exclusion_candidates(market: str, symbol: str) -> pd.DataFrame:
     """
     with _db_connection() as con:
         latest = con.execute(
-            "SELECT MAX(trained_at) FROM feature_selection_log WHERE market = %s AND symbol = %s",
+            "SELECT MAX(trained_at) FROM feature_selection_log WHERE market = ? AND symbol = ?",
             [market, symbol],
         ).fetchone()[0]
         if latest is None:
@@ -176,7 +159,7 @@ def load_feature_exclusion_candidates(market: str, symbol: str) -> pd.DataFrame:
                    AVG(importance_mean) AS importance_mean,
                    CAST(AVG(importance_rank) AS INTEGER) AS importance_rank
             FROM feature_selection_log
-            WHERE market = %s AND symbol = %s AND trained_at = %s
+            WHERE market = ? AND symbol = ? AND trained_at = ?
               AND is_excluded = TRUE AND protected_by_shap = FALSE
             GROUP BY feature
             ORDER BY importance_rank DESC
@@ -196,7 +179,7 @@ def load_excluded_features(
     """直近の特徴量選択結果から次回学習で除外する特徴量名を返す。"""
     with _db_connection() as con:
         latest = con.execute(
-            "SELECT MAX(trained_at) FROM feature_selection_log WHERE market = %s AND symbol = %s",
+            "SELECT MAX(trained_at) FROM feature_selection_log WHERE market = ? AND symbol = ?",
             [market, symbol],
         ).fetchone()[0]
         if latest is None:
@@ -206,7 +189,7 @@ def load_excluded_features(
             """
             SELECT feature, is_excluded, protected_by_shap
             FROM feature_selection_log
-            WHERE market = %s AND symbol = %s AND trained_at = %s
+            WHERE market = ? AND symbol = ? AND trained_at = ?
             """,
             [market, symbol, latest],
         ).fetchall()

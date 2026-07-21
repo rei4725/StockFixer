@@ -50,16 +50,11 @@ def save_strategy_promotion(
     with _db_connection() as con:
         con.execute(
             """
-            INSERT INTO strategy_promotions
-                (pr_number, merge_commit_hash, rule_or_feature_id,
-                 promoted_at, pre_promotion_baseline, status)
-            VALUES (%s, %s, %s, %s, %s, 'active')
-            ON CONFLICT (pr_number) DO UPDATE SET
-                merge_commit_hash = EXCLUDED.merge_commit_hash,
-                rule_or_feature_id = EXCLUDED.rule_or_feature_id,
-                promoted_at = EXCLUDED.promoted_at,
-                pre_promotion_baseline = EXCLUDED.pre_promotion_baseline,
-                status = EXCLUDED.status
+            INSERT OR REPLACE INTO strategy_promotions (
+                pr_number, merge_commit_hash, rule_or_feature_id,
+                promoted_at, pre_promotion_baseline, status
+            )
+            VALUES (?, ?, ?, ?, ?, 'active')
             """,
             [pr_number, merge_commit_hash, rule_or_feature_id, promoted_at, pre_promotion_baseline],
         )
@@ -76,7 +71,7 @@ def promotion_exists(pr_number: int) -> bool:
     ensure_strategy_promotions_table()
     with _db_connection() as con:
         row = con.execute(
-            "SELECT 1 FROM strategy_promotions WHERE pr_number = %s", [pr_number]
+            "SELECT 1 FROM strategy_promotions WHERE pr_number = ?", [pr_number]
         ).fetchone()
     return row is not None
 
@@ -86,11 +81,10 @@ def load_active_promotions() -> pd.DataFrame:
     ensure_strategy_promotions_table()
     with _db_connection() as con:
         try:
-            return pd.read_sql(
+            return con.execute(
                 "SELECT * FROM strategy_promotions "
-                "WHERE status = 'active' ORDER BY promoted_at DESC",
-                con,
-            )
+                "WHERE status = 'active' ORDER BY promoted_at DESC"
+            ).fetchdf()
         except Exception as e:
             logger.error("strategy_promotions 読み込み失敗: %s", e, exc_info=True)
             return pd.DataFrame()
@@ -101,7 +95,7 @@ def mark_promotion_rolled_back(pr_number: int) -> None:
     ensure_strategy_promotions_table()
     with _db_connection() as con:
         con.execute(
-            "UPDATE strategy_promotions SET status = 'rolled_back' WHERE pr_number = %s",
+            "UPDATE strategy_promotions SET status = 'rolled_back' WHERE pr_number = ?",
             [pr_number],
         )
     logger.info("戦略昇格をロールバック済みにマーク: pr=%s", pr_number)

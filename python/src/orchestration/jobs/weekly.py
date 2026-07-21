@@ -318,14 +318,16 @@ def run_weekly_watchlist_refresh():
 
 def run_weekly_db_maintenance() -> None:
     """
-    週次 DB メンテナンス（土曜 03:00）: retention → VACUUM (ANALYZE) を実行する。
+    週次 DB メンテナンス（土曜 03:00）: retention → CHECKPOINT/VACUUM を実行する。
 
     実行内容:
         1. retention  — 診断ログの古い行を削除（各グループ最新は保持）
-        2. （月初週のみ）VACUUM (ANALYZE) — 肥大化・統計情報の陳腐化を防ぐ
-           （日常的な肥大化対策は Postgres の autovacuum に委ねる）
+        2. CHECKPOINT — WAL をメインファイルへフラッシュ
+        3. VACUUM     — 削除済み領域を再利用可能化
+        4. （月初週のみ）物理コンパクション — 再構築でファイル死領域を回収
     実行後にサイズ・所要時間を Discord 通知し、サイズが閾値超なら警告する。
     """
+    import os
     import time
     from datetime import datetime, timezone
 
@@ -334,23 +336,22 @@ def run_weekly_db_maintenance() -> None:
         send_db_maintenance_completion,
         send_webhook_text,
     )
+    from src.utils.data_path_utils import get_db_path
     from src.utils.db import _db_connection
-    from src.utils.db.compact import vacuum_database
+    from src.utils.db.compact import compact_in_place
     from src.utils.db.retention import purge_old_training_logs
 
     logger.info("=== 週次 DB メンテナンス開始 ===")
+    db_path = get_db_path()
     now = datetime.now(timezone.utc)
 
-    def _db_size_mb() -> float:
+    def _mb(path: str) -> float:
         try:
-            with _db_connection() as con:
-                row = con.execute("SELECT pg_database_size(current_database())").fetchone()
-            return (row[0] if row else 0) / (1024 * 1024)
-        except Exception as e:
-            logger.warning("DB サイズ取得に失敗: %s", e)
+            return os.path.getsize(path) / (1024 * 1024)
+        except OSError:
             return 0.0
 
-    size_before = _db_size_mb()
+    size_before = _mb(db_path)
     start = time.monotonic()
     error_msg = None
 
@@ -364,19 +365,23 @@ def run_weekly_db_maintenance() -> None:
                 total_deleted,
                 deleted,
             )
-        logger.info("週次 DB メンテナンス: retention 完了")
+            # 2. CHECKPOINT + VACUUM（削除済み領域を再利用可能にする）
+            con.execute("CHECKPOINT")
+            con.execute("VACUUM")
+        logger.info("週次 DB メンテナンス: retention + CHECKPOINT + VACUUM 完了")
 
-        # 2. 月初週のみVACUUM（ANALYZE）で肥大化を回収する。
+        # 3. 月初週のみ物理コンパクション（VACUUM では縮まない死領域を再構築で回収）
+        #    _db_connection の with を抜けて接続を閉じた後に実行する（FileLock は内部で再取得）。
         if DB_COMPACT_ENABLED and _is_first_week_of_month(now):
-            logger.info("月初週のためVACUUM (ANALYZE) を実行します")
-            vacuum_database()
-            logger.info("VACUUM (ANALYZE) 完了")
+            logger.info("月初週のため物理コンパクションを実行します")
+            counts = compact_in_place(db_path, DB_LOG_RETENTION_DAYS, keep_backup=False, now=now)
+            logger.info("物理コンパクション完了: %d テーブル再構築", len(counts))
     except Exception as e:
         logger.error("週次 DB メンテナンス失敗: %s", e, exc_info=True)
         error_msg = str(e)
 
     elapsed = time.monotonic() - start
-    size_after = _db_size_mb()
+    size_after = _mb(db_path)
     logger.info(
         "=== 週次 DB メンテナンス完了: %.1f 秒, %.2f MB → %.2f MB ===",
         elapsed,
@@ -391,7 +396,7 @@ def run_weekly_db_maintenance() -> None:
             size_after_mb=size_after,
             error=error_msg,
         )
-        # サイズ監視: 閾値超なら警告
+        # サイズ監視: 閾値超なら警告（コンパクション後でも超えるなら異常な増加）
         size_after_gb = size_after / 1024
         if error_msg is None and size_after_gb > DB_SIZE_ALERT_GB:
             send_webhook_text(

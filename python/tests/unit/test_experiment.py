@@ -158,9 +158,7 @@ class TestSaveExperimentRun(unittest.TestCase):
 class TestLoadExperimentRuns(unittest.TestCase):
     def _make_mock_with_df(self, df: pd.DataFrame):
         mock_con = MagicMock()
-        mock_cursor = mock_con.cursor.return_value
-        mock_cursor.description = [(col,) for col in df.columns]
-        mock_cursor.fetchall.return_value = list(df.itertuples(index=False, name=None))
+        mock_con.execute.return_value.fetchdf.return_value = df
         mock_cm = MagicMock()
         mock_cm.__enter__ = MagicMock(return_value=mock_con)
         mock_cm.__exit__ = MagicMock(return_value=False)
@@ -185,7 +183,7 @@ class TestLoadExperimentRuns(unittest.TestCase):
 
     def test_returns_empty_df_on_error(self):
         mock_con = MagicMock()
-        mock_con.cursor.return_value.execute.side_effect = Exception("table does not exist")
+        mock_con.execute.side_effect = Exception("table does not exist")
         mock_cm = MagicMock()
         mock_cm.__enter__ = MagicMock(return_value=mock_con)
         mock_cm.__exit__ = MagicMock(return_value=False)
@@ -200,7 +198,7 @@ class TestLoadExperimentRuns(unittest.TestCase):
         mock_con = mock_cm.__enter__.return_value
         with patch("src.utils.db.experiment._db_connection", return_value=mock_cm):
             load_experiment_runs()
-        query = mock_con.cursor.return_value.execute.call_args[0][0]
+        query = mock_con.execute.call_args[0][0]
         self.assertIn("WHERE 1=1", query)
         self.assertNotIn("AND market", query)
 
@@ -209,8 +207,8 @@ class TestLoadExperimentRuns(unittest.TestCase):
         mock_con = mock_cm.__enter__.return_value
         with patch("src.utils.db.experiment._db_connection", return_value=mock_cm):
             load_experiment_runs(model_name="StockXGBoostModel")
-        query = mock_con.cursor.return_value.execute.call_args[0][0]
-        self.assertIn("AND model_name = %s", query)
+        query = mock_con.execute.call_args[0][0]
+        self.assertIn("AND model_name = ?", query)
 
 
 # ---------------------------------------------------------------------------
@@ -222,9 +220,7 @@ class TestLoadBestRun(unittest.TestCase):
     def _make_mock_with_row(self, row_dict: dict | None):
         df = pd.DataFrame([row_dict]) if row_dict else pd.DataFrame()
         mock_con = MagicMock()
-        mock_cursor = mock_con.cursor.return_value
-        mock_cursor.description = [(col,) for col in df.columns]
-        mock_cursor.fetchall.return_value = list(df.itertuples(index=False, name=None))
+        mock_con.execute.return_value.fetchdf.return_value = df
         mock_cm = MagicMock()
         mock_cm.__enter__ = MagicMock(return_value=mock_con)
         mock_cm.__exit__ = MagicMock(return_value=False)
@@ -251,26 +247,32 @@ class TestLoadBestRun(unittest.TestCase):
         self.assertIsNone(result)
 
     def test_rmse_uses_asc_order(self):
-        mock_cm = self._make_mock_with_row(None)
-        mock_con = mock_cm.__enter__.return_value
+        mock_con = MagicMock()
+        mock_con.execute.return_value.fetchdf.return_value = pd.DataFrame()
+        mock_cm = MagicMock()
+        mock_cm.__enter__ = MagicMock(return_value=mock_con)
+        mock_cm.__exit__ = MagicMock(return_value=False)
 
         with patch("src.utils.db.experiment._db_connection", return_value=mock_cm):
             load_best_run("jp", "7203", "StockXGBoostModel", metric="rmse")
-        query = mock_con.cursor.return_value.execute.call_args[0][0]
+        query = mock_con.execute.call_args[0][0]
         self.assertIn("ASC", query)
 
     def test_directional_accuracy_uses_desc_order(self):
-        mock_cm = self._make_mock_with_row(None)
-        mock_con = mock_cm.__enter__.return_value
+        mock_con = MagicMock()
+        mock_con.execute.return_value.fetchdf.return_value = pd.DataFrame()
+        mock_cm = MagicMock()
+        mock_cm.__enter__ = MagicMock(return_value=mock_con)
+        mock_cm.__exit__ = MagicMock(return_value=False)
 
         with patch("src.utils.db.experiment._db_connection", return_value=mock_cm):
             load_best_run("jp", "7203", "StockXGBoostModel", metric="directional_accuracy")
-        query = mock_con.cursor.return_value.execute.call_args[0][0]
+        query = mock_con.execute.call_args[0][0]
         self.assertIn("DESC", query)
 
     def test_returns_none_on_error(self):
         mock_con = MagicMock()
-        mock_con.cursor.return_value.execute.side_effect = Exception("db error")
+        mock_con.execute.side_effect = Exception("db error")
         mock_cm = MagicMock()
         mock_cm.__enter__ = MagicMock(return_value=mock_con)
         mock_cm.__exit__ = MagicMock(return_value=False)

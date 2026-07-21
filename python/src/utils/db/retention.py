@@ -83,7 +83,7 @@ def purge_old_training_logs(
         key_join = " AND ".join(f't2.{k} = "{table}".{k}' for k in keys)
         # 保持日数より古く、かつ自グループの最新時刻ではない行のみ削除
         where = (
-            f"{time_col} < %s "
+            f"{time_col} < ? "
             f"AND {time_col} < "
             f'(SELECT MAX(t2.{time_col}) FROM "{table}" t2 WHERE {key_join})'
         )

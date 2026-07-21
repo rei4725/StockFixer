@@ -27,13 +27,9 @@ def save_model_metrics(
     with _db_connection() as con:
         con.execute(
             """
-            INSERT INTO model_metrics
+            INSERT OR REPLACE INTO model_metrics
                 (market, symbol, model_name, trained_at, rmse, directional_accuracy, n_samples)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (market, symbol, model_name, trained_at) DO UPDATE SET
-                rmse = EXCLUDED.rmse,
-                directional_accuracy = EXCLUDED.directional_accuracy,
-                n_samples = EXCLUDED.n_samples
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 market,
@@ -83,9 +79,9 @@ def load_model_weights(
         for name in model_names:
             rows = con.execute(
                 "SELECT predicted_ratio, actual_ratio FROM prediction_accuracy "
-                "WHERE market = %s AND symbol = %s AND model_name = %s "
+                "WHERE market = ? AND symbol = ? AND model_name = ? "
                 "AND predicted_ratio IS NOT NULL AND actual_ratio IS NOT NULL "
-                "ORDER BY predicted_at DESC LIMIT %s",
+                "ORDER BY predicted_at DESC LIMIT ?",
                 [market, symbol, name, recent_n],
             ).fetchall()
             if rows:
@@ -110,7 +106,7 @@ def load_model_weights(
         for name in model_names:
             row = con.execute(
                 "SELECT directional_accuracy FROM model_metrics "
-                "WHERE market = %s AND symbol = %s AND model_name = %s "
+                "WHERE market = ? AND symbol = ? AND model_name = ? "
                 "ORDER BY trained_at DESC LIMIT 1",
                 [market, symbol, name],
             ).fetchone()

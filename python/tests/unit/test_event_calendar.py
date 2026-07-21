@@ -338,9 +338,8 @@ class TestSaveEventDates(unittest.TestCase):
         _save_event_dates("us", "AAPL", pd.DatetimeIndex([]))
         mock_db.assert_not_called()
 
-    @patch("src.market_data.event_calendar.bulk_upsert")
     @patch("src.market_data.event_calendar._db_connection")
-    def test_inserts_dates_into_db(self, mock_db, mock_bulk_upsert):
+    def test_inserts_dates_into_db(self, mock_db):
         mock_con = MagicMock()
         mock_db.return_value.__enter__.return_value = mock_con
         mock_db.return_value.__exit__.return_value = None
@@ -348,11 +347,8 @@ class TestSaveEventDates(unittest.TestCase):
         dates = pd.DatetimeIndex([pd.Timestamp("2024-02-01"), pd.Timestamp("2024-05-01")])
         _save_event_dates("us", "AAPL", dates)
 
-        mock_bulk_upsert.assert_called_once()
-        args, kwargs = mock_bulk_upsert.call_args
-        assert args[0] is mock_con
-        assert args[1] == "earnings_calendar"
-        assert kwargs["key_cols"] == ["market", "symbol", "event_date"]
+        mock_con.register.assert_called_once()
+        mock_con.execute.assert_called_once()
 
     @patch("src.market_data.event_calendar._db_connection")
     def test_handles_db_exception_gracefully(self, mock_db):

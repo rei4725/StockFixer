@@ -18,11 +18,10 @@ LABEL org.opencontainers.image.title="StockFixer" \
 # 作業ディレクトリの設定
 WORKDIR /app
 
-# システム依存パッケージのインストール（LightGBM/XGBoost用、postgresql-clientはpg_dumpバックアップ用）
+# システム依存パッケージのインストール（LightGBM/XGBoost用）
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libgomp1 \
-    postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
 # 依存関係のインストール（キャッシュ効率化のため先にコピー）

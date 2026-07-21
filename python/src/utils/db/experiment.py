@@ -70,23 +70,12 @@ def save_experiment_run(
     with _db_connection() as con:
         con.execute(
             """
-            INSERT INTO experiment_runs
-                (run_id, market, symbol, model_name, trained_at, horizon,
-                 rmse, directional_accuracy, n_samples, n_features,
-                 feature_hash, params_json, created_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (run_id) DO UPDATE SET
-                market = EXCLUDED.market,
-                symbol = EXCLUDED.symbol,
-                model_name = EXCLUDED.model_name,
-                trained_at = EXCLUDED.trained_at,
-                horizon = EXCLUDED.horizon,
-                rmse = EXCLUDED.rmse,
-                directional_accuracy = EXCLUDED.directional_accuracy,
-                n_samples = EXCLUDED.n_samples,
-                n_features = EXCLUDED.n_features,
-                feature_hash = EXCLUDED.feature_hash,
-                params_json = EXCLUDED.params_json
+            INSERT OR REPLACE INTO experiment_runs (
+                run_id, market, symbol, model_name, trained_at, horizon,
+                rmse, directional_accuracy, n_samples,
+                n_features, feature_hash, params_json, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 run_id,
@@ -131,19 +120,19 @@ def load_experiment_runs(
     query = "SELECT * FROM experiment_runs WHERE 1=1"
     params: list = []
     if market is not None:
-        query += " AND market = %s"
+        query += " AND market = ?"
         params.append(market)
     if symbol is not None:
-        query += " AND symbol = %s"
+        query += " AND symbol = ?"
         params.append(symbol)
     if model_name is not None:
-        query += " AND model_name = %s"
+        query += " AND model_name = ?"
         params.append(model_name)
     query += f" ORDER BY created_at DESC LIMIT {int(limit)}"
 
     with _db_connection() as con:
         try:
-            return pd.read_sql(query, con, params=params)
+            return con.execute(query, params).fetchdf()
         except Exception as e:
             logger.error(f"experiment_runs 読み込み失敗: {e}", exc_info=True)
             return pd.DataFrame()
@@ -173,17 +162,16 @@ def load_best_run(
     order = "DESC" if metric == "directional_accuracy" else "ASC"
     with _db_connection() as con:
         try:
-            row = pd.read_sql(
+            row = con.execute(
                 f"""
                 SELECT * FROM experiment_runs
-                WHERE market = %s AND symbol = %s AND model_name = %s
+                WHERE market = ? AND symbol = ? AND model_name = ?
                   AND {metric} IS NOT NULL
                 ORDER BY {metric} {order}
                 LIMIT 1
                 """,
-                con,
-                params=[market, symbol, model_name],
-            )
+                [market, symbol, model_name],
+            ).fetchdf()
             if row.empty:
                 return None
             return row.iloc[0].to_dict()

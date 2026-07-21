@@ -81,7 +81,7 @@ def upsert_rule_best(
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
     with _db_connection() as con:
         con.execute(
-            "DELETE FROM rule_best_by_symbol WHERE market = %s AND symbol = %s",
+            "DELETE FROM rule_best_by_symbol WHERE market = ? AND symbol = ?",
             [market, symbol],
         )
         con.execute(
@@ -89,7 +89,7 @@ def upsert_rule_best(
             INSERT INTO rule_best_by_symbol
                 (market, symbol, best_rule, win_rate, net_profit, num_trades,
                  profit_factor, max_drawdown, backtest_start, backtest_end, evaluated_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 market,
@@ -111,11 +111,10 @@ def load_rule_best_all(market: str) -> pd.DataFrame:
     """有効な最優秀ルール一覧を返す（全銘柄）。"""
     ensure_rule_tables()
     with _db_connection() as con:
-        return pd.read_sql(
-            "SELECT * FROM rule_best_by_symbol WHERE market = %s ORDER BY win_rate DESC",
-            con,
-            params=[market],
-        )
+        return con.execute(
+            "SELECT * FROM rule_best_by_symbol WHERE market = ? ORDER BY win_rate DESC",
+            [market],
+        ).df()
 
 
 def load_effective_rules(
@@ -126,17 +125,16 @@ def load_effective_rules(
     """判定基準を満たす銘柄と最優秀ルールを返す。"""
     ensure_rule_tables()
     with _db_connection() as con:
-        return pd.read_sql(
+        return con.execute(
             """
             SELECT * FROM rule_best_by_symbol
-            WHERE market = %s
-              AND win_rate  >= %s
-              AND net_profit > %s
+            WHERE market = ?
+              AND win_rate  >= ?
+              AND net_profit > ?
             ORDER BY win_rate DESC, net_profit DESC
             """,
-            con,
-            params=[market, min_win_rate, min_net_profit],
-        )
+            [market, min_win_rate, min_net_profit],
+        ).df()
 
 
 # ---------------------------------------------------------------------------
@@ -158,14 +156,14 @@ def upsert_rule_signal(
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
     with _db_connection() as con:
         con.execute(
-            "DELETE FROM rule_daily_signals WHERE signal_date = %s AND market = %s AND symbol = %s",
+            "DELETE FROM rule_daily_signals WHERE signal_date = ? AND market = ? AND symbol = ?",
             [str(signal_date), market, symbol],
         )
         con.execute(
             """
             INSERT INTO rule_daily_signals
                 (signal_date, market, symbol, rule_name, signal, price, created_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             [str(signal_date), market, symbol, rule_name, signal, price, now],
         )
@@ -175,12 +173,11 @@ def load_rule_signals_by_date(signal_date: date | str, market: str) -> pd.DataFr
     """指定日・マーケットのシグナル一覧を返す。"""
     ensure_rule_tables()
     with _db_connection() as con:
-        return pd.read_sql(
+        return con.execute(
             """
             SELECT * FROM rule_daily_signals
-            WHERE signal_date = %s AND market = %s
+            WHERE signal_date = ? AND market = ?
             ORDER BY signal DESC, symbol
             """,
-            con,
-            params=[str(signal_date), market],
-        )
+            [str(signal_date), market],
+        ).df()

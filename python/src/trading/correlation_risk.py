@@ -29,25 +29,25 @@ def _load_recent_returns(symbols: list[str], market: str, window: int) -> pd.Dat
     if not symbols:
         return pd.DataFrame()
 
-    placeholders = ", ".join(["%s"] * len(symbols))
+    placeholders = ", ".join("?" * len(symbols))
     query = f"""
         WITH ranked AS (
             SELECT symbol, row_num, close,
                    ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY row_num DESC) AS rn
             FROM stock_features
-            WHERE market = %s
+            WHERE market = ?
               AND symbol IN ({placeholders})
               AND close IS NOT NULL
         )
         SELECT symbol, row_num, close
         FROM ranked
-        WHERE rn <= %s
+        WHERE rn <= ?
         ORDER BY symbol, row_num
     """
 
     try:
         with _db_connection() as con:
-            df = pd.read_sql(query, con, params=[market] + symbols + [window + 1])
+            df = con.execute(query, [market] + symbols + [window + 1]).df()
     except Exception as e:
         logger.error("相関計算用データ取得失敗: %s", e, exc_info=True)
         return pd.DataFrame()

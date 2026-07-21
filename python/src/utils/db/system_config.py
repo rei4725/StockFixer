@@ -11,7 +11,7 @@ logger = get_logger(__name__)
 def get_config_value(key: str, default: Optional[str] = None) -> Optional[str]:
     """system_config テーブルから設定値を取得する。"""
     with _db_connection() as con:
-        row = con.execute("SELECT value FROM system_config WHERE key = %s", [key]).fetchone()
+        row = con.execute("SELECT value FROM system_config WHERE key = ?", [key]).fetchone()
     return row[0] if row else default
 
 
@@ -21,7 +21,7 @@ def set_config_value(key: str, value: str) -> None:
         con.execute(
             """
             INSERT INTO system_config (key, value, updated_at)
-            VALUES (%s, %s, CURRENT_TIMESTAMP)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
             """,
             [key, value],

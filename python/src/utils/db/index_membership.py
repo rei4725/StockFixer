@@ -8,7 +8,6 @@ from datetime import date
 
 import pandas as pd
 
-from src.utils.db._bulk import bulk_upsert
 from src.utils.db._connection import _db_connection
 from src.utils.logger import get_logger
 
@@ -73,13 +72,13 @@ def save_index_membership_snapshot(
     )
 
     with _db_connection() as con:
-        bulk_upsert(
-            con,
-            "index_membership_history",
-            df,
-            key_cols=["market", "symbol", "snapshot_date"],
-            columns=["market", "symbol", "index_name", "snapshot_date", "source", "fetched_at"],
-        )
+        con.register("_index_membership_temp", df)
+        con.execute("""
+            INSERT OR REPLACE INTO index_membership_history
+                (market, symbol, index_name, snapshot_date, source, fetched_at)
+            SELECT market, symbol, index_name, snapshot_date, source, fetched_at
+            FROM _index_membership_temp
+            """)
 
     logger.info(
         f"DB保存完了: index_membership_history [{normalized_market}] "
@@ -106,7 +105,7 @@ def load_index_membership_symbols_as_of(as_of_date: str | date) -> list[tuple[st
                 market,
                 MAX(snapshot_date) AS snapshot_date
             FROM index_membership_history
-            WHERE snapshot_date <= %s
+            WHERE snapshot_date <= ?
             GROUP BY market
         )
         SELECT h.market, h.symbol

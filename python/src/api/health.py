@@ -22,9 +22,9 @@ from src.utils.logger import get_logger
 
 _SCHEDULER_STALE_SECS = 30 * 60  # 30分
 
-# health 用 DB チェックの接続待ち上限（秒）。
+# health 用 DB チェックのロック取得待ち上限（秒）。
 # Docker HEALTHCHECK の HTTP タイムアウト（8秒）内に必ず応答を返せるよう、
-# 既定の 30 秒ではなく短い値でプール接続待ちを打ち切る（#550）。
+# 既定の 120 秒ではなく短い値でロック待ちを打ち切る（#550）。
 _DB_CHECK_LOCK_TIMEOUT = 2.0
 
 logger = get_logger(__name__)
@@ -42,16 +42,18 @@ def _check_db() -> tuple[str, str | None, str | None]:
     """DB接続を確認する。(status, error_msg, last_prediction_at) を返す。
 
     health サーバは scheduler / bot と同一プロセスで動くため、read-only の別接続
-    （get_readonly_connection）は使わず、共有のプールから借用する _db_connection
-    経由で読む。
+    （get_readonly_connection）を開くと read-write 接続と設定が衝突する
+    （DuckDB は同一プロセスで同一ファイルへ異なる設定の接続を許さない）。
+    そのため共有の _db_connection（FileLock 直列化・設定統一）経由で読む。
 
-    プールが空でタイムアウトした場合は _DB_CHECK_LOCK_TIMEOUT 秒で打ち切り "busy"
-    を返す（#550）。busy は「別処理（日次パイプライン等）が DB を使用中 =
-    プロセスは生きている」ことを意味し、異常ではない。DB 破損のような真の異常は
-    接続取得後の失敗として "error" になる。
+    ロック待ちは _DB_CHECK_LOCK_TIMEOUT 秒で打ち切り "busy" を返す（#550）。
+    busy は「別処理（日次パイプライン等）が DB を使用中 = プロセスは生きている」
+    ことを意味し、異常ではない。DB 破損のような真の異常はロック取得後の
+    接続失敗として "error" になる。
 
-    接続は 1 回だけ張り、疎通確認と last_prediction_at 取得をまとめて行う
-    （#553）。
+    バッチと I/O 競合している間は duckdb.connect 自体に数秒かかるため（#553 実測:
+    接続 1 回あたり 4〜5 秒）、接続は 1 回だけ張り、疎通確認と last_prediction_at
+    取得をまとめて行う。
     """
     try:
         from src.utils.db._connection import DbLockTimeoutError, _db_connection

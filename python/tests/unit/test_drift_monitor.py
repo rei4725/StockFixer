@@ -13,7 +13,6 @@ from src.prediction.drift_monitor import (
     _load_weekly_hit_rates_from_snapshots,
     check_weekly_hit_rate_drift,
 )
-from src.utils.db._connection import _db_connection
 
 
 class TestLoadWeeklyHitRatesFromSnapshots(unittest.TestCase):
@@ -158,38 +157,22 @@ class TestCheckWeeklyHitRateDrift(unittest.TestCase):
 
 
 class TestLoadWeeklyHitRatesDirect(unittest.TestCase):
-    """_load_weekly_hit_rates_direct のテスト。
-
-    Postgres移行前は ``_db_connection`` を丸ごとモックし DuckDB 特有の
-    ``.execute().fetchdf()`` チェーンを差し替えていたが、実装が
-    ``pd.read_sql`` へ移行したことでこのモック構造は実際の呼び出し経路と
-    一致しなくなった。実Postgres接続（``_isolate_db`` フィクスチャ経由、
-    テスト終了時にロールバック）へ ``prediction_accuracy`` 行を直接
-    INSERT して検証するよう書き換えた。
-    """
-
-    def _insert_accuracy_row(self, con, checked_at: str, direction_match: bool) -> None:
-        con.execute(
-            """
-            INSERT INTO prediction_accuracy
-                (market, symbol, model_name, predicted_at, horizon, direction_match, checked_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-            """,
-            ["jp", "7203", "m1", checked_at[:10], 1, direction_match, checked_at],
+    @patch("src.prediction.drift_monitor._db_connection")
+    def test_returns_dataframe_on_success(self, mock_ctx):
+        mock_con = mock_ctx.return_value.__enter__.return_value
+        mock_con.execute.return_value.fetchdf.return_value = pd.DataFrame(
+            {"week_start": ["2026-05-04", "2026-04-27"], "hit_rate": [0.65, 0.70]}
         )
-
-    def test_returns_dataframe_on_success(self):
-        with _db_connection() as con:
-            self._insert_accuracy_row(con, "2026-05-04 00:00:00", True)
-            self._insert_accuracy_row(con, "2026-04-27 00:00:00", False)
-
         result = _load_weekly_hit_rates_direct(n_weeks=4, horizon=1)
         self.assertFalse(result.empty)
         self.assertIn("week_start", result.columns)
         self.assertIn("hit_rate", result.columns)
 
-    def test_returns_empty_on_empty_query(self):
-        result = _load_weekly_hit_rates_direct(n_weeks=4, horizon=999)
+    @patch("src.prediction.drift_monitor._db_connection")
+    def test_returns_empty_on_empty_query(self, mock_ctx):
+        mock_con = mock_ctx.return_value.__enter__.return_value
+        mock_con.execute.return_value.fetchdf.return_value = pd.DataFrame()
+        result = _load_weekly_hit_rates_direct(n_weeks=4, horizon=1)
         self.assertTrue(result.empty)
 
     @patch("src.prediction.drift_monitor._db_connection")

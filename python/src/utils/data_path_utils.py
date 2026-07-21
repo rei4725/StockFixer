@@ -105,14 +105,6 @@ def get_db_path() -> str:
     return os.path.join(get_data_dir(), "stockfixer.duckdb")
 
 
-def get_database_url() -> str:
-    """PostgreSQL接続文字列を返す（環境変数 DATABASE_URL 優先、未設定時はローカル既定値）"""
-    return os.environ.get(
-        "DATABASE_URL",
-        "postgresql://stockfixer:stockfixer_dev@localhost:5432/stockfixer",
-    )
-
-
 # ===== ユーティリティ =====
 def ensure_dir(path: str) -> str:
     """ディレクトリが存在しなければ作成し、パスを返す"""

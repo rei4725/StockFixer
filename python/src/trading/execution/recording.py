@@ -21,9 +21,9 @@ def _link_paper_order_metadata(
         con.execute(
             """
             UPDATE paper_orders
-            SET market = %s, predicted_at = %s, signal_price = %s,
-                horizon = %s, target_exit_date = %s
-            WHERE order_id = %s
+            SET market = ?, predicted_at = ?, signal_price = ?,
+                horizon = ?, target_exit_date = ?
+            WHERE order_id = ?
             """,
             [market, predicted_at, signal_price, horizon, target_exit_date, order_id],
         )
@@ -47,7 +47,7 @@ def _sync_live_execution_diffs(broker: BrokerBase) -> None:
                 """
                 SELECT market, symbol, predicted_at, side, signal_price
                 FROM paper_real_diff
-                WHERE real_order_id = %s
+                WHERE real_order_id = ?
                 """,
                 [order_id],
             ).fetchone()
@@ -88,7 +88,7 @@ def _record_order(
             """
             INSERT INTO orders
                 (order_id, symbol, side, qty, price, order_type, status, broker, mode, created_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             """,
             [
                 order_result.get("order_id", str(uuid.uuid4())[:12]),

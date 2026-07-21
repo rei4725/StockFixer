@@ -68,7 +68,7 @@ class TestMarketDataRawSetup(unittest.TestCase):
     def test_market_data_raw_table_exists_after_init(self):
         with db_module._db_connection() as con:
             tables = con.execute(
-                "SELECT table_name FROM information_schema.tables WHERE table_schema='public'"
+                "SELECT table_name FROM information_schema.tables WHERE table_schema='main'"
             ).fetchall()
         names = {r[0] for r in tables}
         self.assertIn("market_data_raw", names)
@@ -76,7 +76,7 @@ class TestMarketDataRawSetup(unittest.TestCase):
     def test_all_three_tables_created(self):
         with db_module._db_connection() as con:
             tables = con.execute(
-                "SELECT table_name FROM information_schema.tables WHERE table_schema='public'"
+                "SELECT table_name FROM information_schema.tables WHERE table_schema='main'"
             ).fetchall()
         names = {r[0] for r in tables}
         self.assertIn("stock_features", names)

@@ -226,10 +226,10 @@ def run_horizon_exit_check() -> None:
             """
             SELECT DISTINCT symbol
             FROM paper_orders
-            WHERE side = %s
+            WHERE side = ?
               AND status = 'filled'
               AND target_exit_date IS NOT NULL
-              AND CAST(target_exit_date AS VARCHAR) <= %s
+              AND CAST(target_exit_date AS VARCHAR) <= ?
             """,
             [int(OrderSide.BUY), today_str],
         ).fetchall()
@@ -465,13 +465,13 @@ def run_pre_close_alert() -> None:
 
 def run_daily_backup() -> None:
     """
-    毎日深夜実行: PostgreSQL を pg_dump（カスタムフォーマット）でタイムスタンプ付き
-    ディレクトリへ出力し、最大5世代を保持する。
+    毎日深夜実行: DuckDB をタイムスタンプ付きディレクトリへコピーし、最大5世代を保持する。
 
     手順:
-        1. pg_dump（-Fc）で data/backups/YYYYMMDD_HHMMSS/stockfixer.dump へ出力
-        2. 5世代超過分を古い順に削除
-        3. Discord に完了通知
+        1. CHECKPOINT で WAL をメインファイルへフラッシュ
+        2. data/backups/YYYYMMDD_HHMMSS/ へファイルコピー
+        3. 5世代超過分を古い順に削除
+        4. Discord に完了通知
     """
     from src.orchestration.backup_pipeline import run_db_backup
     from src.reporting.discord.discord_utils import send_backup_completion
