@@ -153,12 +153,13 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
                 from src.utils.db._connection import _db_connection
 
                 with _db_connection() as con:
-                    raw_dates = con.execute(
+                    raw_dates = pd.read_sql(
                         "SELECT ts FROM market_data_raw "
-                        "WHERE market = ? AND symbol = ? AND timeframe = 'daily' "
+                        "WHERE market = %s AND symbol = %s AND timeframe = 'daily' "
                         "ORDER BY ts",
-                        [market, symbol],
-                    ).fetchdf()
+                        con,
+                        params=[market, symbol],
+                    )
                 if not raw_dates.empty:
                     ts_series = pd.to_datetime(raw_dates["ts"])
                     # create_basic_lag_features(n_lags=10, target=1) で先頭10行・末尾1行が除去される

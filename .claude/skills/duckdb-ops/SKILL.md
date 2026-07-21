@@ -68,4 +68,3 @@ finally:
 ## References
 - [DATABASE_SCHEMA.md](../../../docs/DATABASE_SCHEMA.md) — テーブル定義・列定義・データフローの詳細
 - [db パッケージ](../../../python/src/utils/db/__init__.py) — 接続管理 + テーブル別モジュール
-- [run_db_compact.py](../../../python/run_db_compact.py) — DB コンパクション

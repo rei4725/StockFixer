@@ -40,6 +40,15 @@ run_step "import-linter" lint-imports
 # 3.5 ファイル行数ゲート（肥大化防止 / Issue #497 フォローアップ）
 run_step "file-size-check" python scripts/check_file_size.py
 
+# 3.6 PostgreSQL起動確認（テストは _isolate_db 経由で実DB接続が必要）
+echo "PostgreSQL起動確認..."
+docker compose up -d postgres
+docker compose exec postgres pg_isready -U stockfixer -d stockfixer || {
+    echo "PostgreSQLが起動していません。docker compose up -d postgres を確認してください。" >&2
+    exit 1
+}
+export DATABASE_URL="postgresql://stockfixer:stockfixer_dev@localhost:5432/stockfixer"
+
 # 4. テスト＋カバレッジゲート（設定は pytest.ini）
 run_step "unit tests (cov ≥80%)" \
   python -m pytest tests/unit/ -v --cov=src --cov-branch --cov-report=term-missing --cov-fail-under=80

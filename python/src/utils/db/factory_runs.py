@@ -63,12 +63,25 @@ def save_factory_run(
     with _db_connection() as con:
         con.execute(
             """
-            INSERT OR REPLACE INTO factory_runs (
-                hypothesis_hash, market, spec_json,
-                sharpe_ratio, win_rate, num_trades, max_drawdown, total_return,
-                dsr, pbo, gate_passed, gate_reasons, report_path, evaluated_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO factory_runs
+                (hypothesis_hash, market, spec_json, sharpe_ratio, win_rate, num_trades,
+                 max_drawdown, total_return, dsr, pbo, gate_passed, gate_reasons,
+                 report_path, evaluated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (hypothesis_hash) DO UPDATE SET
+                market = EXCLUDED.market,
+                spec_json = EXCLUDED.spec_json,
+                sharpe_ratio = EXCLUDED.sharpe_ratio,
+                win_rate = EXCLUDED.win_rate,
+                num_trades = EXCLUDED.num_trades,
+                max_drawdown = EXCLUDED.max_drawdown,
+                total_return = EXCLUDED.total_return,
+                dsr = EXCLUDED.dsr,
+                pbo = EXCLUDED.pbo,
+                gate_passed = EXCLUDED.gate_passed,
+                gate_reasons = EXCLUDED.gate_reasons,
+                report_path = EXCLUDED.report_path,
+                evaluated_at = EXCLUDED.evaluated_at
             """,
             [
                 hypothesis_hash,

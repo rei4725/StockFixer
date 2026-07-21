@@ -73,14 +73,14 @@ class PaperBroker(BrokerBase):
                 """
                 INSERT INTO paper_orders
                     (order_id, market, symbol, side, qty, price, order_type, status, created_at)
-                VALUES (?, 'jp', ?, ?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP)
+                VALUES (%s, 'jp', %s, %s, %s, %s, %s, 'pending', CURRENT_TIMESTAMP)
                 """,
                 [order_id, sym, int(side), qty, price, int(order_type)],
             )
             if side == OrderSide.SHORT:
                 # paper_short_positions に即時仮登録（加重平均単価更新）
                 existing_short = con.execute(
-                    "SELECT qty, avg_short_price FROM paper_short_positions WHERE symbol=?",
+                    "SELECT qty, avg_short_price FROM paper_short_positions WHERE symbol=%s",
                     [sym],
                 ).fetchone()
                 if existing_short:
@@ -88,15 +88,15 @@ class PaperBroker(BrokerBase):
                     new_qty = old_qty + qty
                     new_avg = (old_avg * old_qty + price * qty) / new_qty
                     con.execute(
-                        "UPDATE paper_short_positions SET qty=?, avg_short_price=?, "
-                        "updated_at=CURRENT_TIMESTAMP WHERE symbol=?",
+                        "UPDATE paper_short_positions SET qty=%s, avg_short_price=%s, "
+                        "updated_at=CURRENT_TIMESTAMP WHERE symbol=%s",
                         [new_qty, new_avg, sym],
                     )
                 else:
                     con.execute(
                         "INSERT INTO paper_short_positions "
                         "(symbol, qty, avg_short_price, opened_at, updated_at) "
-                        "VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                        "VALUES (%s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
                         [sym, qty, price],
                     )
             elif side == OrderSide.SHORT_COVER:
@@ -116,7 +116,7 @@ class PaperBroker(BrokerBase):
         """pending 状態の注文をキャンセルする"""
         with _db_connection() as con:
             con.execute(
-                "UPDATE paper_orders SET status='cancelled' WHERE order_id=? AND status='pending'",
+                "UPDATE paper_orders SET status='cancelled' WHERE order_id=%s AND status='pending'",
                 [order_id],
             )
         logger.info(f"[paper] 注文キャンセル: order_id={order_id}")
@@ -190,7 +190,7 @@ class PaperBroker(BrokerBase):
                         logger.info(f"[paper] {symbol}: 指値未達、失効")
                         with _db_connection() as con:
                             con.execute(
-                                "UPDATE paper_orders SET status='expired' WHERE order_id=?",
+                                "UPDATE paper_orders SET status='expired' WHERE order_id=%s",
                                 [order_id],
                             )
                         continue
@@ -200,7 +200,7 @@ class PaperBroker(BrokerBase):
                     self._apply_fill(con, order_id, symbol, side, qty, fill_price)
                     con.execute(
                         "UPDATE paper_orders SET status='filled', "
-                        "fill_price=?, filled_at=CURRENT_TIMESTAMP WHERE order_id=?",
+                        "fill_price=%s, filled_at=CURRENT_TIMESTAMP WHERE order_id=%s",
                         [fill_price, order_id],
                     )
                 if (
@@ -241,26 +241,26 @@ class PaperBroker(BrokerBase):
     ) -> None:
         """約定に合わせてポジションと残高を更新する"""
         existing = con.execute(
-            "SELECT qty, avg_price FROM paper_positions WHERE symbol=?", [symbol]
+            "SELECT qty, avg_price FROM paper_positions WHERE symbol=%s", [symbol]
         ).fetchone()
 
         if side == int(OrderSide.BUY):
             cost = qty * fill_price
             # 残高を減少
-            con.execute("UPDATE paper_balance SET balance = balance - ?", [cost])
+            con.execute("UPDATE paper_balance SET balance = balance - %s", [cost])
             if existing:
                 old_qty, old_avg = existing
                 new_qty = old_qty + qty
                 new_avg = (old_avg * old_qty + fill_price * qty) / new_qty
                 con.execute(
-                    "UPDATE paper_positions SET qty=?, avg_price=?, "
-                    "updated_at=CURRENT_TIMESTAMP WHERE symbol=?",
+                    "UPDATE paper_positions SET qty=%s, avg_price=%s, "
+                    "updated_at=CURRENT_TIMESTAMP WHERE symbol=%s",
                     [new_qty, new_avg, symbol],
                 )
             else:
                 con.execute(
                     "INSERT INTO paper_positions "
-                    "(symbol, qty, avg_price, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
+                    "(symbol, qty, avg_price, updated_at) VALUES (%s, %s, %s, CURRENT_TIMESTAMP)",
                     [symbol, qty, fill_price],
                 )
         elif side == int(OrderSide.SELL):
@@ -281,25 +281,25 @@ class PaperBroker(BrokerBase):
                     old_qty,
                 )
             proceeds = sell_qty * fill_price
-            con.execute("UPDATE paper_balance SET balance = balance + ?", [proceeds])
+            con.execute("UPDATE paper_balance SET balance = balance + %s", [proceeds])
             new_qty = old_qty - sell_qty
             if new_qty <= 0:
-                con.execute("DELETE FROM paper_positions WHERE symbol=?", [symbol])
+                con.execute("DELETE FROM paper_positions WHERE symbol=%s", [symbol])
             else:
                 con.execute(
-                    "UPDATE paper_positions SET qty=?, "
-                    "updated_at=CURRENT_TIMESTAMP WHERE symbol=?",
+                    "UPDATE paper_positions SET qty=%s, "
+                    "updated_at=CURRENT_TIMESTAMP WHERE symbol=%s",
                     [new_qty, symbol],
                 )
             realized_pnl = (fill_price - old_avg) * sell_qty
             con.execute(
-                "UPDATE paper_orders SET realized_pnl=? WHERE order_id=?",
+                "UPDATE paper_orders SET realized_pnl=%s WHERE order_id=%s",
                 [realized_pnl, order_id],
             )
         elif side == int(OrderSide.SHORT):
             # 空売り新規: send_order で仮登録済みの avg_short_price を実際の約定値段で上書きする
             existing_short = con.execute(
-                "SELECT qty, avg_short_price FROM paper_short_positions WHERE symbol=?",
+                "SELECT qty, avg_short_price FROM paper_short_positions WHERE symbol=%s",
                 [symbol],
             ).fetchone()
             if existing_short:
@@ -307,39 +307,39 @@ class PaperBroker(BrokerBase):
                 # 今回約定分のみで avg を再計算（send_order の仮登録を fill_price で補正）
                 new_avg = ((old_avg * old_qty) - (old_avg - fill_price) * qty) / old_qty
                 con.execute(
-                    "UPDATE paper_short_positions SET avg_short_price=?, "
-                    "updated_at=CURRENT_TIMESTAMP WHERE symbol=?",
+                    "UPDATE paper_short_positions SET avg_short_price=%s, "
+                    "updated_at=CURRENT_TIMESTAMP WHERE symbol=%s",
                     [new_avg, symbol],
                 )
             else:
                 con.execute(
                     "INSERT INTO paper_short_positions "
                     "(symbol, qty, avg_short_price, opened_at, updated_at) "
-                    "VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                    "VALUES (%s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
                     [symbol, qty, fill_price],
                 )
         elif side == int(OrderSide.SHORT_COVER):
             # 空売り返済: paper_short_positions から qty を減算し実現損益を記録
             existing_short = con.execute(
-                "SELECT qty, avg_short_price FROM paper_short_positions WHERE symbol=?",
+                "SELECT qty, avg_short_price FROM paper_short_positions WHERE symbol=%s",
                 [symbol],
             ).fetchone()
             if existing_short:
                 old_qty, old_avg = existing_short
                 new_qty = old_qty - qty
                 if new_qty <= 0:
-                    con.execute("DELETE FROM paper_short_positions WHERE symbol=?", [symbol])
+                    con.execute("DELETE FROM paper_short_positions WHERE symbol=%s", [symbol])
                 else:
                     con.execute(
-                        "UPDATE paper_short_positions SET qty=?, "
-                        "updated_at=CURRENT_TIMESTAMP WHERE symbol=?",
+                        "UPDATE paper_short_positions SET qty=%s, "
+                        "updated_at=CURRENT_TIMESTAMP WHERE symbol=%s",
                         [new_qty, symbol],
                     )
             else:
                 old_avg = fill_price  # ポジション不明時はPnL=0扱い
             realized_pnl = (old_avg - fill_price) * qty
             con.execute(
-                "UPDATE paper_orders SET realized_pnl=? WHERE order_id=?",
+                "UPDATE paper_orders SET realized_pnl=%s WHERE order_id=%s",
                 [realized_pnl, order_id],
             )
 
@@ -437,7 +437,7 @@ class PaperBroker(BrokerBase):
         with _db_connection() as con:
             row = con.execute(
                 "SELECT SUM(realized_pnl), COUNT(*), MIN(filled_at) "
-                "FROM paper_orders WHERE status='filled' AND side IN (?, ?) "
+                "FROM paper_orders WHERE status='filled' AND side IN (%s, %s) "
                 "AND realized_pnl IS NOT NULL",
                 [int(OrderSide.SELL), int(OrderSide.SHORT_COVER)],
             ).fetchone()

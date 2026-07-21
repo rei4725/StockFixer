@@ -15,12 +15,12 @@ def _load_latest_predictions(market: str) -> pd.DataFrame:
         confluence_score (desc order by diff_ratio)
     """
     with _db_connection() as con:
-        return con.execute(
+        return pd.read_sql(
             """
             WITH latest AS (
                 SELECT market, symbol, MAX(predicted_at) AS latest_at
                 FROM prediction_results
-                WHERE market = ?
+                WHERE market = %s
                 GROUP BY market, symbol
             )
             SELECT
@@ -40,5 +40,6 @@ def _load_latest_predictions(market: str) -> pd.DataFrame:
             WHERE pr.diff_ratio IS NOT NULL
             ORDER BY pr.diff_ratio DESC
             """,
-            [market],
-        ).df()
+            con,
+            params=[market],
+        )

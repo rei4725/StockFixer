@@ -6,19 +6,22 @@ stock_features テーブルの CRUD 操作
 
 from typing import Optional
 
-import duckdb
 import pandas as pd
+import psycopg
 
+from src.utils.db._bulk import bulk_insert
 from src.utils.db._connection import _db_connection
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 
-def _ensure_columns(con: duckdb.DuckDBPyConnection, df: pd.DataFrame) -> None:
+def _ensure_columns(con: psycopg.Connection, df: pd.DataFrame) -> None:
     """DataFrame の列が stock_features テーブルに存在しない場合 ALTER TABLE で追加する。
 
     型推定を行い、適切な SQL 型で列を追加する。
+    stock_features は特徴量エンジニアリングで列が頻繁に増えるため、
+    migrations一本化の原則の例外として動的ALTERを維持する。
     """
     existing_cols: set = set()
     try:
@@ -36,7 +39,7 @@ def _ensure_columns(con: duckdb.DuckDBPyConnection, df: pd.DataFrame) -> None:
             if pd.api.types.is_integer_dtype(dtype):
                 sql_type = "BIGINT"
             elif pd.api.types.is_float_dtype(dtype):
-                sql_type = "DOUBLE"
+                sql_type = "DOUBLE PRECISION"
             elif pd.api.types.is_bool_dtype(dtype):
                 sql_type = "BOOLEAN"
             elif pd.api.types.is_datetime64_any_dtype(dtype):
@@ -44,9 +47,10 @@ def _ensure_columns(con: duckdb.DuckDBPyConnection, df: pd.DataFrame) -> None:
             else:
                 sql_type = "VARCHAR"
             try:
-                con.execute(f'ALTER TABLE stock_features ADD COLUMN "{col}" {sql_type}')
+                con.execute(
+                    f'ALTER TABLE stock_features ADD COLUMN IF NOT EXISTS "{col}" {sql_type}'
+                )
             except Exception:
-                # 既に存在する場合（レースコンディション対策）は無視
                 logger.debug(f"カラム追加スキップ（既存）: {col}")
 
 
@@ -73,10 +77,10 @@ def upsert_stock_features(market: str, symbol: str, df: pd.DataFrame) -> None:
 
     with _db_connection() as con:
         _ensure_columns(con, save_df)
-        con.execute("DELETE FROM stock_features WHERE market = ? AND symbol = ?", [market, symbol])
-        cols = list(save_df.columns)
-        col_list = ", ".join(f'"{c}"' for c in cols)
-        con.execute(f"INSERT INTO stock_features ({col_list}) SELECT {col_list} FROM save_df")
+        con.execute(
+            "DELETE FROM stock_features WHERE market = %s AND symbol = %s", [market, symbol]
+        )
+        bulk_insert(con, "stock_features", save_df)
     logger.info(f"DB保存完了: stock_features [{market}_{symbol}] ({len(save_df)}行)")
 
 
@@ -89,10 +93,12 @@ def load_stock_features(market: str, symbol: str) -> Optional[pd.DataFrame]:
     """
     with _db_connection() as con:
         try:
-            df = con.execute(
-                "SELECT * FROM stock_features WHERE market = ? AND symbol = ? ORDER BY row_num",
-                [market, symbol],
-            ).fetchdf()
+            df = pd.read_sql(
+                "SELECT * FROM stock_features "
+                "WHERE market = %(market)s AND symbol = %(symbol)s ORDER BY row_num",
+                con,
+                params={"market": market, "symbol": symbol},
+            )
         except Exception as e:
             logger.error(f"stock_features 読み込み失敗 [{market}_{symbol}]: {e}", exc_info=True)
             return None
@@ -113,9 +119,7 @@ def load_all_stock_features() -> pd.DataFrame:
     """
     with _db_connection() as con:
         try:
-            df = con.execute(
-                "SELECT * FROM stock_features ORDER BY market, symbol, row_num"
-            ).fetchdf()
+            df = pd.read_sql("SELECT * FROM stock_features ORDER BY market, symbol, row_num", con)
         except Exception as e:
             logger.error(f"stock_features 全件読み込み失敗: {e}", exc_info=True)
             return pd.DataFrame()
@@ -133,7 +137,9 @@ def load_all_stock_features() -> pd.DataFrame:
 def delete_stock_features(market: str, symbol: str) -> None:
     """指定 market/symbol のデータを削除する"""
     with _db_connection() as con:
-        con.execute("DELETE FROM stock_features WHERE market = ? AND symbol = ?", [market, symbol])
+        con.execute(
+            "DELETE FROM stock_features WHERE market = %s AND symbol = %s", [market, symbol]
+        )
     logger.info(f"DB削除完了: stock_features [{market}_{symbol}]")
 
 
