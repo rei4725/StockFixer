@@ -2,10 +2,6 @@ name: File Size Check
 
 on:
   pull_request:
-    paths:
-      - "python/src/**"
-      - "python/scripts/check_file_size.py"
-      - ".github/workflows/file-size-check.yml"
   push:
     branches:
       - develop
