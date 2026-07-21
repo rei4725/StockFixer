@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 
 import pandas as pd
 
+from src.utils.db._bulk import bulk_insert
 from src.utils.db._connection import _db_connection
 from src.utils.logger import get_logger
 
@@ -29,11 +30,18 @@ def save_prediction_accuracy(rows: list[dict]) -> int:
             try:
                 con.execute(
                     """
-                    INSERT OR REPLACE INTO prediction_accuracy
+                    INSERT INTO prediction_accuracy
                         (market, symbol, model_name, predicted_at, horizon,
                          predicted_price, actual_price, predicted_ratio, actual_ratio,
                          direction_match, checked_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                    ON CONFLICT (market, symbol, model_name, predicted_at, horizon) DO UPDATE SET
+                        predicted_price = EXCLUDED.predicted_price,
+                        actual_price = EXCLUDED.actual_price,
+                        predicted_ratio = EXCLUDED.predicted_ratio,
+                        actual_ratio = EXCLUDED.actual_ratio,
+                        direction_match = EXCLUDED.direction_match,
+                        checked_at = EXCLUDED.checked_at
                     """,
                     [
                         row["market"],
@@ -76,13 +84,13 @@ def load_prediction_accuracy(
     Returns:
         pd.DataFrame（結果なし時は空 DataFrame）
     """
-    query = "SELECT * FROM prediction_accuracy WHERE horizon = ?"
+    query = "SELECT * FROM prediction_accuracy WHERE horizon = %s"
     params: list = [horizon]
     if market is not None:
-        query += " AND market = ?"
+        query += " AND market = %s"
         params.append(market)
     if symbol is not None:
-        query += " AND symbol = ?"
+        query += " AND symbol = %s"
         params.append(symbol)
     query += " ORDER BY predicted_at DESC"
     if limit:
@@ -90,7 +98,7 @@ def load_prediction_accuracy(
 
     with _db_connection() as con:
         try:
-            return con.execute(query, params).fetchdf()
+            return pd.read_sql(query, con, params=params)
         except Exception as e:
             logger.error(f"prediction_accuracy 読み込み失敗: {e}", exc_info=True)
             return pd.DataFrame()
@@ -119,22 +127,23 @@ def load_top_prediction_misses(
     since = (datetime.now() - timedelta(days=since_days)).strftime("%Y%m%d")
     with _db_connection() as con:
         try:
-            return con.execute(
+            return pd.read_sql(
                 f"""
                 SELECT
                     market, symbol, model_name, predicted_at, horizon,
                     predicted_ratio, actual_ratio,
                     ABS(predicted_ratio - actual_ratio) AS abs_error
                 FROM prediction_accuracy
-                WHERE horizon = ?
+                WHERE horizon = %s
                   AND actual_ratio IS NOT NULL
                   AND predicted_ratio IS NOT NULL
-                  AND predicted_at >= ?
+                  AND predicted_at >= %s
                 ORDER BY abs_error DESC
                 LIMIT {int(top_n)}
                 """,
-                [horizon, since],
-            ).fetchdf()
+                con,
+                params=[horizon, since],
+            )
         except Exception as e:
             logger.error(f"load_top_prediction_misses 失敗: {e}", exc_info=True)
             return pd.DataFrame()
@@ -153,7 +162,7 @@ def load_drift_summary(horizon: int = 1, recent_n: int = 30) -> pd.DataFrame:
     """
     with _db_connection() as con:
         try:
-            return con.execute(
+            return pd.read_sql(
                 f"""
                 WITH ranked AS (
                     SELECT *,
@@ -161,7 +170,7 @@ def load_drift_summary(horizon: int = 1, recent_n: int = 30) -> pd.DataFrame:
                             PARTITION BY market, symbol ORDER BY predicted_at DESC
                         ) AS rn
                     FROM prediction_accuracy
-                    WHERE horizon = ?
+                    WHERE horizon = %s
                 )
                 SELECT
                     market,
@@ -174,8 +183,9 @@ def load_drift_summary(horizon: int = 1, recent_n: int = 30) -> pd.DataFrame:
                 GROUP BY market, symbol
                 ORDER BY direction_accuracy ASC
                 """,
-                [horizon],
-            ).fetchdf()
+                con,
+                params=[horizon],
+            )
         except Exception as e:
             logger.error(f"load_drift_summary 失敗: {e}", exc_info=True)
             return pd.DataFrame()
@@ -200,15 +210,22 @@ def save_weekly_accuracy_snapshot(week_start: str, df: pd.DataFrame) -> None:
     with _db_connection() as con:
         try:
             con.execute(
-                "DELETE FROM accuracy_weekly_snapshots WHERE week_start = ?",
+                "DELETE FROM accuracy_weekly_snapshots WHERE week_start = %s",
                 [week_start],
             )
-            con.execute("""
-                INSERT INTO accuracy_weekly_snapshots
-                    (week_start, market, symbol, direction_accuracy, mean_abs_error, n_samples)
-                SELECT week_start, market, symbol, direction_accuracy, mean_abs_error, n_samples
-                FROM snap
-                """)
+            bulk_insert(
+                con,
+                "accuracy_weekly_snapshots",
+                snap,
+                columns=[
+                    "week_start",
+                    "market",
+                    "symbol",
+                    "direction_accuracy",
+                    "mean_abs_error",
+                    "n_samples",
+                ],
+            )
             logger.debug(f"accuracy_weekly_snapshots 保存: week_start={week_start}, {len(snap)}件")
         except Exception as e:
             logger.error(f"save_weekly_accuracy_snapshot 失敗: {e}", exc_info=True)
@@ -231,12 +248,15 @@ def load_weekly_accuracy_snapshots(n_weeks: int = 4) -> pd.DataFrame:
                 f"SELECT DISTINCT week_start FROM accuracy_weekly_snapshots "
                 f"ORDER BY week_start DESC LIMIT {int(n_weeks)}"
             )
-            return con.execute(f"""
+            return pd.read_sql(
+                f"""
                 SELECT week_start, market, symbol, direction_accuracy, mean_abs_error, n_samples
                 FROM accuracy_weekly_snapshots
                 WHERE week_start IN ({weeks_subq})
                 ORDER BY week_start DESC, market, symbol
-                """).fetchdf()
+                """,
+                con,
+            )
         except Exception as e:
             logger.error(f"load_weekly_accuracy_snapshots 失敗: {e}", exc_info=True)
             return pd.DataFrame()

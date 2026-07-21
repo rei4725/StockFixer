@@ -66,8 +66,7 @@ class Settings(BaseSettings):
     # 診断ログ（shap_values / feature_selection_log）の保持日数。
     # これより古い行は週次メンテで削除する（各グループの最新は常に保持）。
     DB_LOG_RETENTION_DAYS: int = Field(default=30)
-    # 月初週の週次メンテで物理コンパクション（再構築で死領域を回収）を実行するか。
-    # VACUUM はファイルを縮小しないため、定期的な再構築で肥大の再発を防ぐ。
+    # 月初週の週次メンテで VACUUM (ANALYZE) を実行し、肥大化・統計情報の陳腐化を防ぐか。
     DB_COMPACT_ENABLED: bool = Field(default=True)
     # 週次メンテ後の DB ファイルサイズがこの GB を超えたら Discord に警告する。
     DB_SIZE_ALERT_GB: float = Field(default=20.0)

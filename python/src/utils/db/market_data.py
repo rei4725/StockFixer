@@ -8,6 +8,7 @@ from typing import Optional
 
 import pandas as pd
 
+from src.utils.db._bulk import bulk_upsert
 from src.utils.db._connection import _db_connection
 from src.utils.logger import get_logger
 
@@ -36,6 +37,13 @@ def upsert_raw_ohlcv(rows: list[dict]) -> int:
     if "source" not in df.columns:
         df["source"] = "yfinance"
     df["ingested_at"] = pd.Timestamp.now("UTC")
+    if "volume" in df.columns:
+        # 呼び出し元（saver.py の DataFrame.iterrows()）は価格列と出来高列が
+        # 混在する行を反復するため、Volume が本来 int でも float64 へ
+        # 暗黙アップキャストされることがある。market_data_raw.volume は
+        # BIGINT のため、float のまま COPY すると "1234.0" のようなテキスト
+        # 表現になり Postgres が拒否する。ここで明示的に整数へ丸める。
+        df["volume"] = df["volume"].astype("Int64")
 
     cols = [
         "market",
@@ -55,15 +63,27 @@ def upsert_raw_ohlcv(rows: list[dict]) -> int:
     df = df[[c for c in cols if c in df.columns]]
 
     with _db_connection() as con:
-        con.register("_raw_ohlcv_temp", df)
-        con.execute("""
-            INSERT OR REPLACE INTO market_data_raw
-                (market, symbol, ticker, timeframe, ts,
-                 open, high, low, close, volume, adj_close, source, ingested_at)
-            SELECT market, symbol, ticker, timeframe, ts,
-                   open, high, low, close, volume, adj_close, source, ingested_at
-            FROM _raw_ohlcv_temp
-            """)
+        bulk_upsert(
+            con,
+            "market_data_raw",
+            df,
+            key_cols=["market", "symbol", "timeframe", "ts"],
+            columns=[
+                "market",
+                "symbol",
+                "ticker",
+                "timeframe",
+                "ts",
+                "open",
+                "high",
+                "low",
+                "close",
+                "volume",
+                "adj_close",
+                "source",
+                "ingested_at",
+            ],
+        )
     n = len(df)
     logger.info(
         f"DB保存完了: market_data_raw "
@@ -86,7 +106,7 @@ def load_all_raw_ohlcv_symbols(timeframe: str = "1d") -> list:
         try:
             rows = con.execute(
                 "SELECT DISTINCT market, symbol FROM market_data_raw"
-                " WHERE timeframe = ? ORDER BY market, symbol",
+                " WHERE timeframe = %s ORDER BY market, symbol",
                 [timeframe],
             ).fetchall()
             return [(r[0], r[1]) for r in rows]
@@ -114,22 +134,22 @@ def load_raw_ohlcv(
     query = """
         SELECT ts, open, high, low, close, volume, adj_close
         FROM market_data_raw
-        WHERE market = ? AND symbol = ? AND timeframe = ?
+        WHERE market = %s AND symbol = %s AND timeframe = %s
     """
     params: list = [market, symbol, timeframe]
 
     if start_date is not None:
-        query += " AND ts >= ?"
+        query += " AND ts >= %s"
         params.append(pd.to_datetime(start_date))
     if end_date is not None:
-        query += " AND ts <= ?"
+        query += " AND ts <= %s"
         params.append(pd.to_datetime(end_date))
 
     query += " ORDER BY ts"
 
     with _db_connection() as con:
         try:
-            df = con.execute(query, params).fetchdf()
+            df = pd.read_sql(query, con, params=params)
         except Exception as e:
             logger.error(f"market_data_raw 読み込み失敗 [{market}_{symbol}]: {e}", exc_info=True)
             return None
@@ -140,5 +160,5 @@ def load_raw_ohlcv(
     df = df.set_index("ts")
     df.index.name = "Date"
     # カラム名を yfinance 形式（先頭大文字）に揃える
-    df.columns = [c.capitalize() if c != "adj_close" else "Adj Close" for c in df.columns]
+    df.columns = pd.Index([c.capitalize() if c != "adj_close" else "Adj Close" for c in df.columns])
     return df

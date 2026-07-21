@@ -39,13 +39,16 @@ _QTY_SIGN = {int(OrderSide.BUY): +1, int(OrderSide.SELL): -1}
 def _load_filled_orders() -> pd.DataFrame:
     """約定済み注文を時系列順に取得する。"""
     with _db_connection() as con:
-        df = con.execute("""
+        df = pd.read_sql(
+            """
             SELECT market, symbol, side, qty, fill_price, filled_at
             FROM paper_orders
             WHERE status = 'filled' AND fill_price IS NOT NULL AND filled_at IS NOT NULL
-              AND NOT isnan(fill_price)
+              AND fill_price <> 'NaN'
             ORDER BY filled_at
-            """).fetchdf()
+            """,
+            con,
+        )
     return df
 
 

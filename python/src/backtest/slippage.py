@@ -23,7 +23,7 @@ from __future__ import annotations
 import math
 from typing import Callable
 
-import duckdb
+import psycopg
 
 from src.utils.logger import get_logger
 
@@ -63,7 +63,7 @@ def estimate_slippage(
     return float(alpha * math.sqrt(participation_rate))
 
 
-def calibrate_alpha(con: duckdb.DuckDBPyConnection, min_samples: int = 10) -> float:
+def calibrate_alpha(con: psycopg.Connection, min_samples: int = 10) -> float:
     """
     paper_real_diff テーブルの実績スリッページから alpha を推定する。
 
@@ -71,7 +71,7 @@ def calibrate_alpha(con: duckdb.DuckDBPyConnection, min_samples: int = 10) -> fl
     ゼロ以下・外れ値は除外した上で [0%, 5%] にクリップする。
 
     Args:
-        con: DuckDB 接続
+        con: Postgres 接続
         min_samples: 推定に必要な最低サンプル数（不足時はデフォルト値を返す）
 
     Returns:
@@ -141,13 +141,13 @@ def make_slippage_fn(alpha: float = _DEFAULT_ALPHA) -> Callable[[int, float, flo
 
 
 def get_calibrated_slippage_fn(
-    con: duckdb.DuckDBPyConnection,
+    con: psycopg.Connection,
 ) -> Callable[[int, float, float], float]:
     """
     paper_real_diff から alpha を校正したスリッページ関数を返す。
 
     Args:
-        con: DuckDB 接続
+        con: Postgres 接続
 
     Returns:
         校正済みスリッページ関数

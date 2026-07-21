@@ -134,7 +134,7 @@ class TestCheckDb:
     """_check_db のロックタイムアウト（busy）と異常（error）の区別（#550/#553）"""
 
     def test_busy_when_lock_timeout(self):
-        """FileLock 取得タイムアウト時は busy を返す（異常扱いしない）"""
+        """プール接続取得タイムアウト時は busy を返す（異常扱いしない）"""
         from src.api.health import _check_db
         from src.utils.db._connection import DbLockTimeoutError
 
@@ -203,22 +203,26 @@ class TestCheckDb:
 class TestDbConnectionLockTimeout:
     """_db_connection の lock_timeout 引数の動作（#550）"""
 
-    def test_raises_db_lock_timeout_error_when_locked(self):
-        """他がロック保持中に短い lock_timeout で DbLockTimeoutError が出ること"""
-        from filelock import FileLock
+    def teardown_method(self):
+        from src.utils.db._connection import close_connection
 
-        from src.utils.data_path_utils import get_db_path
-        from src.utils.db._connection import DbLockTimeoutError, _db_connection
+        close_connection()
 
-        # 別インスタンスの FileLock で先にロックを握る（他処理の DB 使用を模擬）
-        blocker = FileLock(get_db_path() + ".lock")
-        blocker.acquire()
-        try:
+    def test_raises_db_lock_timeout_error_when_pool_exhausted(self):
+        """コネクションプール枯渇時に短い lock_timeout で DbLockTimeoutError が出ること"""
+        from psycopg_pool import PoolTimeout
+
+        from src.utils.db._connection import DbLockTimeoutError, _db_connection, set_test_connection
+
+        # _isolate_db の注入接続を外し、プール経路を実際に通す
+        set_test_connection(None)
+        mock_pool = MagicMock()
+        mock_pool.connection.side_effect = PoolTimeout("exhausted")
+
+        with patch("src.utils.db._connection._get_pool", return_value=mock_pool):
             with pytest.raises(DbLockTimeoutError):
                 with _db_connection(lock_timeout=0.1):
                     pass
-        finally:
-            blocker.release()
 
     def test_default_timeout_still_raises_runtime_error_compatible(self):
         """DbLockTimeoutError は RuntimeError のサブクラス（既存呼び出し側と互換）"""

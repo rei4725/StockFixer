@@ -53,6 +53,22 @@ jobs:
     defaults:
       run:
         working-directory: python
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: stockfixer
+          POSTGRES_USER: stockfixer
+          POSTGRES_PASSWORD: stockfixer_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U stockfixer -d stockfixer"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://stockfixer:stockfixer_ci@localhost:5432/stockfixer
 
     steps:
       - name: Checkout
