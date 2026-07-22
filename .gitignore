@@ -28,6 +28,9 @@ python/coverage.json
 .coverage
 htmlcov/
 
+# Stray log files（Logs/ ディレクトリ配下以外に生成される単発ログ）
+*.log
+
 # Security scan reports
 bandit-report/
 
