@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import shutil
+import subprocess
 
 import pandas as pd
 import pytest
@@ -8,8 +10,22 @@ import pytest
 from src.backtest.sandbox_executor import prepare_sandbox_data, run_sandboxed_evaluation
 from src.backtest.types import FactoryHypothesis
 
+
+def _sandbox_image_available() -> bool:
+    if shutil.which("docker") is None:
+        return False
+    image = os.environ.get("FACTORY_SANDBOX_IMAGE", "stockfixer:dev")
+    result = subprocess.run(
+        ["docker", "image", "inspect", image],
+        capture_output=True,
+        check=False,
+    )
+    return result.returncode == 0
+
+
 pytestmark = pytest.mark.skipif(
-    shutil.which("docker") is None, reason="Docker が利用できない環境ではスキップ"
+    not _sandbox_image_available(),
+    reason="Docker またはサンドボックス用イメージ（stockfixer:dev 等）が利用できない環境ではスキップ",
 )
 
 
