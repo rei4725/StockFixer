@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import pandas as pd
 
+from src.domain.generated_rules import GENERATED_RULES
+
 
 class VolumeBreakoutRule:
     """
@@ -223,4 +225,5 @@ ALL_RULES: list = [
     BollingerBandRule(),
     MACDRSIRule(),
     VolatilityBreakoutRule(),
+    *GENERATED_RULES.values(),
 ]
