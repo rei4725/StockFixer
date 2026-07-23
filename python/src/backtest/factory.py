@@ -15,13 +15,16 @@ import json
 import math
 import os
 import random
+import shutil
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
 
 from config.settings import (
+    FACTORY_CLAUDE_RULEGEN_ENABLED,
     FACTORY_GATE_CHAMPION_MARGIN,
     FACTORY_GATE_MAX_DRAWDOWN,
     FACTORY_GATE_MAX_PBO,
@@ -29,6 +32,7 @@ from config.settings import (
     FACTORY_GATE_MIN_TRADES,
 )
 from src.backtest.backtester import Backtester
+from src.backtest.claude_rule_generator import generate_claude_hypotheses
 from src.backtest.data_port import get_backtest_data_port
 from src.backtest.factory_report import write_report
 from src.backtest.hypothesis_review import review_hypothesis
@@ -44,6 +48,7 @@ from src.backtest.rules import (
     VolatilityBreakoutRule,
     VolumeBreakoutRule,
 )
+from src.backtest.sandbox_executor import prepare_sandbox_data
 from src.backtest.types import FactoryBatchResult, FactoryEvaluation, FactoryHypothesis
 from src.utils.data_path_utils import get_ticker
 from src.utils.db import count_factory_runs, load_factory_hashes, save_factory_run
@@ -435,6 +440,21 @@ def run_factory_batch(
 
     windows = _window_bounds(start, end, n_windows)
     evaluations = [evaluate_hypothesis(h, data, windows) for h in batch]
+
+    if FACTORY_CLAUDE_RULEGEN_ENABLED:
+        control_sharpes_pre = [
+            e.sharpe_ratio for e in evaluations if e.hypothesis.is_control and e.num_trades > 0
+        ]
+        pre_champion_sharpe = max(control_sharpes_pre) if control_sharpes_pre else float("nan")
+        shared_data_dir, windows_file = prepare_sandbox_data(data, windows)
+        try:
+            claude_evaluations = generate_claude_hypotheses(
+                market, pre_champion_sharpe, shared_data_dir, windows_file
+            )
+            evaluations.extend(claude_evaluations)
+        finally:
+            shutil.rmtree(shared_data_dir, ignore_errors=True)
+            Path(windows_file).unlink(missing_ok=True)
 
     # PBO: バッチ全体（対照込み）の窓別リターン行列 (W, N)
     matrix = np.asarray([e.window_returns for e in evaluations], dtype=float).T
