@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import random
 from datetime import datetime, timedelta
 from typing import Any, Optional
@@ -108,6 +109,9 @@ _MIN_SYMBOL_ROWS = 100
 # ---------------------------------------------------------------------------
 
 
+_SANDBOX_ENV_FLAG = "STOCKFIXER_SANDBOX"
+
+
 def build_rule(spec: dict) -> TradingRule:
     """rule_spec（再帰構造）から TradingRule インスタンスを構築する。"""
     spec_type = spec.get("type")
@@ -121,7 +125,30 @@ def build_rule(spec: dict) -> TradingRule:
         if len(children) < 2:
             raise ValueError(f"合成ルールには2つ以上の子が必要: {spec}")
         return AndRule(children) if spec_type == "and" else OrRule(children)
+    if spec_type == "generated_code":
+        if os.environ.get(_SANDBOX_ENV_FLAG) != "1":
+            raise RuntimeError(
+                "generated_code スペックはサンドボックスコンテナ内でのみ構築できます"
+                f"（環境変数 {_SANDBOX_ENV_FLAG}=1 が必要）。信頼された本体プロセスから"
+                "未検証の生成コードをexecすることを防ぐガードです。"
+            )
+        return _build_generated_rule(spec)
     raise ValueError(f"未知の spec type: {spec_type}")
+
+
+def _build_generated_rule(spec: dict) -> TradingRule:
+    """generated_code spec からクラスをexecして TradingRule インスタンスを構築する。
+
+    呼び出し元（build_rule）がサンドボックス環境変数を検証済みであることが前提。
+    """
+    source_code = spec["source_code"]
+    class_name = spec["class_name"]
+    namespace: dict = {}
+    exec(compile(source_code, "<generated_rule>", "exec"), namespace)  # nosec B102
+    if class_name not in namespace:
+        raise ValueError(f"生成コードにクラス '{class_name}' が見つかりません")
+    rule_cls = namespace[class_name]
+    return rule_cls()
 
 
 # ---------------------------------------------------------------------------
