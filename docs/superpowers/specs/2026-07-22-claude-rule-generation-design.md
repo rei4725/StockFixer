@@ -175,6 +175,13 @@ auto-okラベルによる無人自動マージ、実績監視による自動reve
 | `promoted` | マージ済みか |
 | `generated_at` | 生成日時（UTC） |
 
+> **注（実装後追記）**: 上記の新テーブル案は設計段階の検討であり、実装計画の詰めの過程で
+> 「新テーブルは作らない」方針に変更された。`generated_code` spec も他の spec type 同様
+> JSON シリアライズ可能な dict であるため、実際には既存 `factory_runs` テーブルの
+> `spec_json` カラムをそのまま再利用している。詳細は実装計画の Global Constraints
+> セクション（`docs/superpowers/plans/2026-07-22-claude-rule-generation.md`）を参照。
+> 上記の表はその設計変更の経緯を残すため、あえて削除せず保持する。
+
 ## エラーハンドリング
 
 - サンドボックス自体の起動失敗・タイムアウト（コード起因でなくインフラ起因） → 修復予算を
