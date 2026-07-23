@@ -523,6 +523,8 @@ git commit -m "feat: Claude生成ルールの共有レジストリを追加し�
 `python/tests/unit/backtest/test_factory_build_rule_generated.py`:
 
 ```python
+from __future__ import annotations
+
 import os
 
 import pandas as pd
@@ -1137,6 +1139,8 @@ def run_sandboxed_evaluation(
 `python/tests/integration/backtest/test_sandbox_executor.py`:
 
 ```python
+from __future__ import annotations
+
 import shutil
 
 import pandas as pd
@@ -1591,6 +1595,8 @@ git commit -m "feat: Claudeルール生成・修復ループを追加"
 `python/tests/unit/backtest/test_factory_claude_integration.py`:
 
 ```python
+from __future__ import annotations
+
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -1727,6 +1733,8 @@ git commit -m "feat: run_factory_batch()にClaude生成候補を統合"
 `python/tests/unit/backtest/test_factory_report_generated.py`:
 
 ```python
+from __future__ import annotations
+
 from src.backtest.factory_report import write_report
 from src.backtest.types import FactoryEvaluation, FactoryHypothesis
 
