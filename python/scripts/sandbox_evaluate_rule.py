@@ -101,12 +101,12 @@ def main() -> int:
             )
         )
         return 0
-    except Exception:
+    except Exception as exc:
         print(
             json.dumps(
                 {
                     "status": "error",
-                    "error_type": "RuntimeError",
+                    "error_type": type(exc).__name__,
                     "traceback": traceback.format_exc(),
                 }
             )

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 
 import pandas as pd
@@ -33,6 +35,40 @@ def test_main_rejects_without_sandbox_flag(monkeypatch, capsys):
     out = json.loads(capsys.readouterr().out.strip())
     assert out["status"] == "error"
     assert "STOCKFIXER_SANDBOX" in out["traceback"]
+
+
+def test_main_reports_actual_exception_type_on_generic_failure(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("STOCKFIXER_SANDBOX", "1")
+
+    missing_source_file = tmp_path / "does_not_exist.py"
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "sandbox_evaluate_rule.py",
+            "--source-file",
+            str(missing_source_file),
+            "--class-name",
+            "X",
+            "--rule-name",
+            "x",
+            "--description",
+            "x",
+            "--market",
+            "us",
+            "--lookback-years",
+            "2",
+            "--data-dir",
+            "dummy_dir",
+            "--windows-file",
+            "dummy.json",
+        ],
+    )
+    rc = sandbox_script.main()
+    assert rc == 1
+    out = json.loads(capsys.readouterr().out.strip())
+    assert out["status"] == "error"
+    assert out["error_type"] == "FileNotFoundError"
 
 
 def test_main_success_path(monkeypatch, tmp_path, capsys):
