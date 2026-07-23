@@ -11,6 +11,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
+from src.domain.generated_rules import GENERATED_RULES
 from src.rule_engine.ports import OHLCVWithIndicatorsPort
 from src.rule_engine.rules import (
     BollingerBandRule,
@@ -34,6 +35,7 @@ _RULE_INSTANCES: dict[str, TradingRule] = {
     "bollinger_band": BollingerBandRule(),
     "macd_rsi": MACDRSIRule(),
     "volatility_breakout": VolatilityBreakoutRule(),
+    **GENERATED_RULES,
 }
 
 _LOOKBACK_DAYS = 90
