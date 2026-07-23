@@ -97,6 +97,22 @@ class Settings(BaseSettings):
     FACTORY_HYPOTHESIS_REVIEW_MODEL: str = Field(default="claude-opus-4-8")
     FACTORY_HYPOTHESIS_REVIEW_MAX_TOKENS: int = Field(default=2048)
 
+    # ---------- Claudeルール生成（backtest/claude_rule_generator.py） ----------
+    # 既定無効。夜間バッチでClaudeに新しいTradingRule実装を発想させ、Dockerサンドボックス
+    # で隔離実行してから既存の戦略ファクトリーのゲートに通す。ゲート合格分のみIssue化され、
+    # 人間のPRレビューを経て初めて本番反映される（Claudeは合否判定・本番反映に一切関与しない）。
+    FACTORY_CLAUDE_RULEGEN_ENABLED: bool = Field(default=False)
+    FACTORY_CLAUDE_RULEGEN_MODEL: str = Field(default="claude-opus-4-8")
+    FACTORY_CLAUDE_RULEGEN_MAX_TOKENS: int = Field(default=4096)
+    FACTORY_CLAUDE_RULEGEN_COUNT: int = Field(default=3)
+    # ゲート判定への修復リトライは行わない。静的検査違反・実行時例外・応答JSON不正のみ対象。
+    FACTORY_CLAUDE_RULEGEN_MAX_REPAIR_ATTEMPTS: int = Field(default=2)
+    # サンドボックス実行設定（docker run --network none で使用）
+    FACTORY_SANDBOX_IMAGE: str = Field(default="")
+    FACTORY_SANDBOX_TIMEOUT_SECONDS: int = Field(default=120)
+    FACTORY_SANDBOX_MEMORY_LIMIT: str = Field(default="1g")
+    FACTORY_SANDBOX_CPU_LIMIT: str = Field(default="1")
+
     # ---------- 戦略ファクトリー自動昇格ループ: 昇格記録（orchestration/jobs/periodic.py） ----------
     # 既定無効。マージ検知ジョブはこのフラグが true になるまで一切のGitHub API呼び出しを行わない。
     GITHUB_TOKEN: str = Field(default="")
@@ -221,6 +237,18 @@ BACKTEST_REVIEW_MAX_TOKENS: int = settings.BACKTEST_REVIEW_MAX_TOKENS
 FACTORY_HYPOTHESIS_REVIEW_ENABLED: bool = settings.FACTORY_HYPOTHESIS_REVIEW_ENABLED
 FACTORY_HYPOTHESIS_REVIEW_MODEL: str = settings.FACTORY_HYPOTHESIS_REVIEW_MODEL
 FACTORY_HYPOTHESIS_REVIEW_MAX_TOKENS: int = settings.FACTORY_HYPOTHESIS_REVIEW_MAX_TOKENS
+
+FACTORY_CLAUDE_RULEGEN_ENABLED: bool = settings.FACTORY_CLAUDE_RULEGEN_ENABLED
+FACTORY_CLAUDE_RULEGEN_MODEL: str = settings.FACTORY_CLAUDE_RULEGEN_MODEL
+FACTORY_CLAUDE_RULEGEN_MAX_TOKENS: int = settings.FACTORY_CLAUDE_RULEGEN_MAX_TOKENS
+FACTORY_CLAUDE_RULEGEN_COUNT: int = settings.FACTORY_CLAUDE_RULEGEN_COUNT
+FACTORY_CLAUDE_RULEGEN_MAX_REPAIR_ATTEMPTS: int = (
+    settings.FACTORY_CLAUDE_RULEGEN_MAX_REPAIR_ATTEMPTS
+)
+FACTORY_SANDBOX_IMAGE: str = settings.FACTORY_SANDBOX_IMAGE
+FACTORY_SANDBOX_TIMEOUT_SECONDS: int = settings.FACTORY_SANDBOX_TIMEOUT_SECONDS
+FACTORY_SANDBOX_MEMORY_LIMIT: str = settings.FACTORY_SANDBOX_MEMORY_LIMIT
+FACTORY_SANDBOX_CPU_LIMIT: str = settings.FACTORY_SANDBOX_CPU_LIMIT
 
 GITHUB_TOKEN: str = settings.GITHUB_TOKEN
 GITHUB_REPO: str = settings.GITHUB_REPO
