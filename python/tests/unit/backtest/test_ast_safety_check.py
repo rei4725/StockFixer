@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from src.backtest.ast_safety_check import check_source_safety
 
 
