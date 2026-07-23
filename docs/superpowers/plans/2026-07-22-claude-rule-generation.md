@@ -1247,6 +1247,133 @@ git commit -m "feat: サンドボックス起動オーケストレーターを�
 
 ---
 
+### Task 7.5: 生成コードのクラッシュをスモークテストで確実に検出する（Task 7実機検証で発覚）
+
+**背景**: Task 7の結合テストを実機（Docker）で実行したところ、`evaluate_hypothesis()`（既存コード、`src/backtest/factory.py`）が銘柄ごとの例外を握りつぶし「取引数0」として扱う既存仕様のため、`generate_signal()` 内でクラッシュする生成コードが「修復可能なエラー」ではなく「取引数0でゲート不合格」として扱われてしまうことが判明した。安全性への影響はない（クラッシュするルールが誤って昇格することはない）が、修復ループが最も直しやすいバグ（クラッシュ）に対して機能しないという実効性の問題がある。既存の`evaluate_hypothesis()`（パラメータ探索型パイプラインでも使われる共有コード）には手を入れず、サンドボックス側でクラッシュを先回りして検出する。
+
+**Files:**
+- Modify: `python/scripts/sandbox_evaluate_rule.py`（Task 6で作成済み）
+- Modify: `python/tests/unit/scripts/test_sandbox_evaluate_rule.py`（Task 6で作成済み）
+
+**Interfaces:**
+- 変更なし（`main()`の外部インターフェースは不変。内部で `evaluate_hypothesis()` 呼び出し前に1銘柄分だけ `rule.generate_signal()` を直接呼ぶスモークテストを追加するのみ）
+
+- [ ] **Step 1: 失敗するテストを書く**
+
+`python/tests/unit/scripts/test_sandbox_evaluate_rule.py` に追記:
+
+```python
+def test_main_reports_crash_in_generate_signal_as_repairable(monkeypatch, tmp_path, capsys):
+    """evaluate_hypothesis()は銘柄ごとの例外を握りつぶすため、generate_signal()の
+    クラッシュをスモークテストで先回りして検出できることを確認する（Task 7.5）。
+    このスモークテストが無いと、クラッシュは「取引数0でゲート不合格」に埋もれてしまう。
+    """
+    monkeypatch.setenv("STOCKFIXER_SANDBOX", "1")
+
+    source_file = tmp_path / "candidate.py"
+    source_file.write_text(
+        "class CrashingRule:\n"
+        "    name = 'crashing_rule'\n"
+        "    description = 'test'\n"
+        "    def generate_signal(self, df):\n"
+        "        raise ValueError('boom')\n",
+        encoding="utf-8",
+    )
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    dates = pd.date_range("2024-01-01", periods=60, freq="B")
+    df = pd.DataFrame(
+        {"Open": 100.0, "High": 101.0, "Low": 99.0, "Close": 100.0, "Volume": 1_000_000},
+        index=dates,
+    )
+    df.to_parquet(data_dir / "TEST.parquet")
+
+    windows_file = tmp_path / "windows.json"
+    windows_file.write_text(
+        json.dumps([["2024-01-01", "2024-02-01"], ["2024-02-01", "2024-03-01"]]),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "sandbox_evaluate_rule.py",
+            "--source-file",
+            str(source_file),
+            "--class-name",
+            "CrashingRule",
+            "--rule-name",
+            "crashing_rule",
+            "--description",
+            "test",
+            "--market",
+            "us",
+            "--lookback-years",
+            "2",
+            "--data-dir",
+            str(data_dir),
+            "--windows-file",
+            str(windows_file),
+        ],
+    )
+    rc = sandbox_script.main()
+    assert rc == 1
+    out = json.loads(capsys.readouterr().out.strip())
+    assert out["status"] == "error"
+    assert out["error_type"] == "ValueError"
+    assert "boom" in out["traceback"]
+```
+
+- [ ] **Step 2: テストが失敗することを確認**
+
+Run: `cd python && python -m pytest tests/unit/scripts/test_sandbox_evaluate_rule.py::test_main_reports_crash_in_generate_signal_as_repairable -v`
+Expected: FAIL（現状は `evaluate_hypothesis()` が例外を握りつぶし `rc == 0` になる。または `data_by_symbol` が1銘柄のみで `evaluate_hypothesis()` 内部の except で `warning` ログのみ出て正常終了する）
+
+- [ ] **Step 3: スモークテストを実装**
+
+`python/scripts/sandbox_evaluate_rule.py` の `main()` 内、`from src.backtest.factory import evaluate_hypothesis` の行を以下に変更:
+
+```python
+    from src.backtest.factory import build_rule, evaluate_hypothesis
+```
+
+同じ関数内、`data_by_symbol = _load_data_by_symbol(args.data_dir)` と `windows = _load_windows(args.windows_file)` の後、`evaluation = evaluate_hypothesis(hypothesis, data_by_symbol, windows)` の**前**に追加:
+
+```python
+        # evaluate_hypothesis() は銘柄ごとの例外を握りつぶし「取引数0」として扱うため、
+        # generate_signal() のクラッシュがそのままではゲート不合格（修復不能）に埋もれて
+        # しまう（Task 7の実機結合テストで発覚）。先に1銘柄分だけ直接呼び、クラッシュを
+        # 「修復可能」な失敗として正しく検出できるようにする。
+        if data_by_symbol:
+            smoke_symbol = sorted(data_by_symbol)[0]
+            smoke_rule = build_rule(hypothesis.rule_spec)
+            smoke_rule.generate_signal(data_by_symbol[smoke_symbol])
+```
+
+- [ ] **Step 4: テストが通ることを確認**
+
+Run: `cd python && python -m pytest tests/unit/scripts/test_sandbox_evaluate_rule.py -v`
+Expected: 全件 PASS（既存3件 + 新規1件 = 4件）
+
+- [ ] **Step 5: Dockerイメージを再ビルドし、Task 7の結合テストを再実行**
+
+Run:
+```bash
+docker build -t stockfixer:dev ./python
+cd python && python -m pytest tests/integration/backtest/test_sandbox_executor.py -v
+```
+Expected: 3件とも PASS（`test_crashing_rule_returns_repairable_with_traceback` がこれで正しく通るようになる）
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add python/scripts/sandbox_evaluate_rule.py python/tests/unit/scripts/test_sandbox_evaluate_rule.py
+git commit -m "fix: 生成コードのクラッシュをスモークテストで修復可能エラーとして検出"
+```
+
+---
+
 ### Task 8: Claude生成・修復ループ
 
 **Files:**
