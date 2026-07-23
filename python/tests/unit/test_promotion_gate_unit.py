@@ -303,8 +303,14 @@ class TestAutoPromoteModelSetting(unittest.TestCase):
         with patch.dict("os.environ", {}, clear=False):
             import importlib
 
+            import config.feature_flags as feature_flags_mod
             import config.settings as settings_mod
 
+            # AUTO_PROMOTE_MODEL は config.feature_flags.flags 側にある。
+            # settings_mod は `from config.feature_flags import flags` で束縛して
+            # いるだけなので、settings_mod を reload しても feature_flags_mod 側を
+            # 先に reload しないと古い flags インスタンスを再束縛するだけになる。
+            importlib.reload(feature_flags_mod)
             importlib.reload(settings_mod)
             self.assertFalse(settings_mod.AUTO_PROMOTE_MODEL)
 
@@ -313,8 +319,10 @@ class TestAutoPromoteModelSetting(unittest.TestCase):
         with patch.dict("os.environ", {"AUTO_PROMOTE_MODEL": "true"}, clear=False):
             import importlib
 
+            import config.feature_flags as feature_flags_mod
             import config.settings as settings_mod
 
+            importlib.reload(feature_flags_mod)
             importlib.reload(settings_mod)
             self.assertTrue(settings_mod.AUTO_PROMOTE_MODEL)
 
