@@ -55,6 +55,8 @@ def _spec_label(spec: dict) -> str:
             inner = ",".join(f"{k}={v}" for k, v in sorted(params.items()))
             return f"{spec['rule']}({inner})"
         return str(spec["rule"])
+    if spec.get("type") == "generated_code":
+        return str(spec.get("rule_name", "generated_code"))
     children = ", ".join(_spec_label(s) for s in spec.get("rules", []))
     return f"{spec.get('type', '?')}({children})"
 

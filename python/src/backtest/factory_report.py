@@ -59,6 +59,25 @@ def _build_review_section(review: Optional[dict]) -> str:
 {concerns_block}"""
 
 
+def _build_spec_section(spec: dict) -> str:
+    """ルールスペックを Markdown セクション化する。generated_code は python フェンスで表示。"""
+    if spec.get("type") == "generated_code":
+        return f"""### 生成ルール（Claude提案）
+
+**{spec.get('rule_name', '?')}**: {spec.get('description', '')}
+
+```python
+{spec.get('source_code', '')}
+```
+"""
+    return f"""### スペック
+
+```json
+{json.dumps(spec, ensure_ascii=False, indent=2)}
+```
+"""
+
+
 def _build_issue_body(
     evaluation: FactoryEvaluation,
     champion_sharpe: float,
@@ -77,17 +96,13 @@ def _build_issue_body(
         else ""
     )
     review_section = _build_review_section(review)
+    spec_section = _build_spec_section(h.rule_spec)
     return f"""## 戦略仮説（自動生成）
 
 夜間ファクトリーのゲートを通過した仮説です。`hypothesis_hash={h.hypothesis_hash}`
 {pbo_warning}
 
-### スペック
-
-```json
-{json.dumps(h.rule_spec, ensure_ascii=False, indent=2)}
-```
-
+{spec_section}
 - マーケット: {h.market}
 - 評価期間: {period[0]} 〜 {period[1]}（{h.lookback_years}年、銘柄数 {evaluation.n_symbols}）
 

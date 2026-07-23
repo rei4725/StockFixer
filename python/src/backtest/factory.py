@@ -13,14 +13,18 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import random
+import shutil
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
 
 from config.settings import (
+    FACTORY_CLAUDE_RULEGEN_ENABLED,
     FACTORY_GATE_CHAMPION_MARGIN,
     FACTORY_GATE_MAX_DRAWDOWN,
     FACTORY_GATE_MAX_PBO,
@@ -28,6 +32,7 @@ from config.settings import (
     FACTORY_GATE_MIN_TRADES,
 )
 from src.backtest.backtester import Backtester
+from src.backtest.claude_rule_generator import generate_claude_hypotheses
 from src.backtest.data_port import get_backtest_data_port
 from src.backtest.factory_report import write_report
 from src.backtest.hypothesis_review import review_hypothesis
@@ -43,6 +48,7 @@ from src.backtest.rules import (
     VolatilityBreakoutRule,
     VolumeBreakoutRule,
 )
+from src.backtest.sandbox_executor import prepare_sandbox_data
 from src.backtest.types import FactoryBatchResult, FactoryEvaluation, FactoryHypothesis
 from src.utils.data_path_utils import get_ticker
 from src.utils.db import count_factory_runs, load_factory_hashes, save_factory_run
@@ -108,6 +114,9 @@ _MIN_SYMBOL_ROWS = 100
 # ---------------------------------------------------------------------------
 
 
+_SANDBOX_ENV_FLAG = "STOCKFIXER_SANDBOX"
+
+
 def build_rule(spec: dict) -> TradingRule:
     """rule_spec（再帰構造）から TradingRule インスタンスを構築する。"""
     spec_type = spec.get("type")
@@ -121,7 +130,30 @@ def build_rule(spec: dict) -> TradingRule:
         if len(children) < 2:
             raise ValueError(f"合成ルールには2つ以上の子が必要: {spec}")
         return AndRule(children) if spec_type == "and" else OrRule(children)
+    if spec_type == "generated_code":
+        if os.environ.get(_SANDBOX_ENV_FLAG) != "1":
+            raise RuntimeError(
+                "generated_code スペックはサンドボックスコンテナ内でのみ構築できます"
+                f"（環境変数 {_SANDBOX_ENV_FLAG}=1 が必要）。信頼された本体プロセスから"
+                "未検証の生成コードをexecすることを防ぐガードです。"
+            )
+        return _build_generated_rule(spec)
     raise ValueError(f"未知の spec type: {spec_type}")
+
+
+def _build_generated_rule(spec: dict) -> TradingRule:
+    """generated_code spec からクラスをexecして TradingRule インスタンスを構築する。
+
+    呼び出し元（build_rule）がサンドボックス環境変数を検証済みであることが前提。
+    """
+    source_code = spec["source_code"]
+    class_name = spec["class_name"]
+    namespace: dict = {}
+    exec(compile(source_code, "<generated_rule>", "exec"), namespace)  # nosec B102
+    if class_name not in namespace:
+        raise ValueError(f"生成コードにクラス '{class_name}' が見つかりません")
+    rule_cls = namespace[class_name]
+    return rule_cls()
 
 
 # ---------------------------------------------------------------------------
@@ -409,14 +441,30 @@ def run_factory_batch(
     windows = _window_bounds(start, end, n_windows)
     evaluations = [evaluate_hypothesis(h, data, windows) for h in batch]
 
+    claude_evaluations: list[FactoryEvaluation] = []
+    if FACTORY_CLAUDE_RULEGEN_ENABLED:
+        control_sharpes_pre = [
+            e.sharpe_ratio for e in evaluations if e.hypothesis.is_control and e.num_trades > 0
+        ]
+        pre_champion_sharpe = max(control_sharpes_pre) if control_sharpes_pre else float("nan")
+        shared_data_dir, windows_file = prepare_sandbox_data(data, windows)
+        try:
+            claude_evaluations = generate_claude_hypotheses(
+                market, pre_champion_sharpe, shared_data_dir, windows_file
+            )
+            evaluations.extend(claude_evaluations)
+        finally:
+            shutil.rmtree(shared_data_dir, ignore_errors=True)
+            Path(windows_file).unlink(missing_ok=True)
+
     # PBO: バッチ全体（対照込み）の窓別リターン行列 (W, N)
     matrix = np.asarray([e.window_returns for e in evaluations], dtype=float).T
     batch_pbo = probability_of_backtest_overfitting(
         matrix, n_splits=min(10, n_windows - (n_windows % 2))
     )
 
-    # DSR: n_trials は累計評価数（過去全試行 + 今夜の候補数）
-    n_trials = count_factory_runs() + len(candidates)
+    # DSR: n_trials は累計評価数（過去全試行 + 今夜の候補数、Claude生成候補を含む）
+    n_trials = count_factory_runs() + len(candidates) + len(claude_evaluations)
     control_sharpes = [
         e.sharpe_ratio for e in evaluations if e.hypothesis.is_control and e.num_trades > 0
     ]
