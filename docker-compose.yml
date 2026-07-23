@@ -53,6 +53,7 @@ services:
       - LOG_FORMAT=json
       - OLLAMA_URL=http://ollama:11434
       - DATABASE_URL=postgresql://stockfixer:${POSTGRES_PASSWORD:-stockfixer_dev}@postgres:5432/stockfixer
+      - FACTORY_SANDBOX_IMAGE=stockfixer:${VERSION:-dev}
     env_file:
       - ./python/.env
     volumes:
@@ -62,6 +63,7 @@ services:
       - ./python/models:/app/models
       - ./python/results:/app/results
       - ./Logs:/app/logs
+      - /var/run/docker.sock:/var/run/docker.sock
     deploy:
       resources:
         limits:
