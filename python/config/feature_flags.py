@@ -63,5 +63,11 @@ class FeatureFlags(BaseSettings):
     # ---------- 戦略ファクトリー（#369 Phase 1） ----------
     FACTORY_ENABLED: bool = Field(default=False)
 
+    # ---------- Claudeルール生成（backtest/claude_rule_generator.py） ----------
+    # 既定無効。夜間バッチでClaudeに新しいTradingRule実装を発想させ、Dockerサンドボックス
+    # で隔離実行してから既存の戦略ファクトリーのゲートに通す。ゲート合格分のみIssue化され、
+    # 人間のPRレビューを経て初めて本番反映される（Claudeは合否判定・本番反映に一切関与しない）。
+    FACTORY_CLAUDE_RULEGEN_ENABLED: bool = Field(default=False)
+
 
 flags = FeatureFlags()
