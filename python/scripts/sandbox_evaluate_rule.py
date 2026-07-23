@@ -60,7 +60,7 @@ def main() -> int:
         )
         return 1
 
-    from src.backtest.factory import evaluate_hypothesis
+    from src.backtest.factory import build_rule, evaluate_hypothesis
     from src.backtest.types import FactoryHypothesis
 
     try:
@@ -80,6 +80,15 @@ def main() -> int:
         )
         data_by_symbol = _load_data_by_symbol(args.data_dir)
         windows = _load_windows(args.windows_file)
+
+        # evaluate_hypothesis() は銘柄ごとの例外を握りつぶし「取引数0」として扱うため、
+        # generate_signal() のクラッシュがそのままではゲート不合格（修復不能）に埋もれて
+        # しまう（Task 7の実機結合テストで発覚）。先に1銘柄分だけ直接呼び、クラッシュを
+        # 「修復可能」な失敗として正しく検出できるようにする。
+        if data_by_symbol:
+            smoke_symbol = sorted(data_by_symbol)[0]
+            smoke_rule = build_rule(hypothesis.rule_spec)
+            smoke_rule.generate_signal(data_by_symbol[smoke_symbol])
 
         evaluation = evaluate_hypothesis(hypothesis, data_by_symbol, windows)
 
