@@ -68,3 +68,53 @@ def test_claude_hypotheses_skipped_when_disabled(mock_load_data, mock_generate, 
     run_factory_batch(market="us", symbols=["TEST"], budget=1, n_windows=4)
 
     mock_generate.assert_not_called()
+
+
+@patch("src.backtest.factory.deflated_sharpe_ratio")
+@patch("src.backtest.factory.count_factory_runs")
+@patch("src.backtest.factory.prepare_sandbox_data")
+@patch("src.backtest.factory.generate_claude_hypotheses")
+@patch("src.backtest.factory._load_symbol_data")
+def test_n_trials_includes_claude_generated_candidates(
+    mock_load_data, mock_generate, mock_prepare, mock_count_runs, mock_dsr, monkeypatch
+):
+    """DSR の n_trials は Claude 生成候補もカウントすること（PBO と同じ扱い）。"""
+    monkeypatch.setattr("src.backtest.factory.FACTORY_CLAUDE_RULEGEN_ENABLED", True)
+    mock_load_data.return_value = {"TEST": _sample_data()}
+    mock_prepare.return_value = ("/tmp/dummy_data", "/tmp/dummy_windows.json")
+    mock_count_runs.return_value = 100
+    mock_dsr.return_value = 0.0
+
+    def _claude_eval(rule_name: str) -> FactoryEvaluation:
+        return FactoryEvaluation(
+            hypothesis=FactoryHypothesis(
+                rule_spec={
+                    "type": "generated_code",
+                    "source_code": "class X:\n    pass\n",
+                    "class_name": "X",
+                    "rule_name": rule_name,
+                    "description": "x",
+                },
+                market="us",
+            ),
+            sharpe_ratio=2.0,
+            sharpe_per_trade=0.1,
+            num_trades=40,
+            max_drawdown=-0.05,
+            window_returns=[0.02, 0.01, 0.03, 0.01],
+        )
+
+    mock_generate.return_value = [_claude_eval("claude_rule_1"), _claude_eval("claude_rule_2")]
+
+    budget = 1
+    result = run_factory_batch(market="us", symbols=["TEST"], budget=budget, n_windows=4)
+
+    n_candidates = len(result.candidates) - len(mock_generate.return_value)
+    expected_n_trials = (
+        mock_count_runs.return_value + n_candidates + len(mock_generate.return_value)
+    )
+
+    assert mock_dsr.call_count > 0
+    for call in mock_dsr.call_args_list:
+        n_trials_arg = call.args[1]
+        assert n_trials_arg == max(expected_n_trials, 1)

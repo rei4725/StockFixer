@@ -441,6 +441,7 @@ def run_factory_batch(
     windows = _window_bounds(start, end, n_windows)
     evaluations = [evaluate_hypothesis(h, data, windows) for h in batch]
 
+    claude_evaluations: list[FactoryEvaluation] = []
     if FACTORY_CLAUDE_RULEGEN_ENABLED:
         control_sharpes_pre = [
             e.sharpe_ratio for e in evaluations if e.hypothesis.is_control and e.num_trades > 0
@@ -462,8 +463,8 @@ def run_factory_batch(
         matrix, n_splits=min(10, n_windows - (n_windows % 2))
     )
 
-    # DSR: n_trials は累計評価数（過去全試行 + 今夜の候補数）
-    n_trials = count_factory_runs() + len(candidates)
+    # DSR: n_trials は累計評価数（過去全試行 + 今夜の候補数、Claude生成候補を含む）
+    n_trials = count_factory_runs() + len(candidates) + len(claude_evaluations)
     control_sharpes = [
         e.sharpe_ratio for e in evaluations if e.hypothesis.is_control and e.num_trades > 0
     ]
