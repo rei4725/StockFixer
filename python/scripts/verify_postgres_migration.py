@@ -20,7 +20,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import duckdb  # noqa: E402
-from scripts.migrate_to_postgres import _TABLES  # noqa: E402
+from scripts.migrate_to_postgres import _TABLES, _source_table_exists  # noqa: E402
 
 from src.utils.data_path_utils import get_database_url  # noqa: E402
 from src.utils.logger import get_logger  # noqa: E402
@@ -34,6 +34,14 @@ _SUM_CHECKS: dict[str, list[str]] = {
     "paper_orders": ["realized_pnl"],
 }
 
+# 移行時に意図的に除外した行がある場合、そのテーブルの検証もmigrate_to_postgres.py
+# 側と同じ絞り込みで件数を数える（本番切り替え時、prediction_resultsの
+# model_version IS NULLな古いレコード705件を除外した。詳細はmigrate_to_postgres.py
+# のmigrate_table()コメント参照）。
+_EXCLUDED_FILTERS: dict[str, str] = {
+    "prediction_results": ' WHERE "model_version" IS NOT NULL',
+}
+
 
 def _scalar(con: duckdb.DuckDBPyConnection, sql: str) -> object:
     """`fetchone()` は空結果だと None を返しうる（mypy対策）。
@@ -44,7 +52,8 @@ def _scalar(con: duckdb.DuckDBPyConnection, sql: str) -> object:
 
 
 def verify_table(src_con: duckdb.DuckDBPyConnection, table: str) -> bool:
-    src_count = _scalar(src_con, f'SELECT COUNT(*) FROM "{table}"')
+    where_clause = _EXCLUDED_FILTERS.get(table, "")
+    src_count = _scalar(src_con, f'SELECT COUNT(*) FROM "{table}"{where_clause}')
     pg_count = _scalar(src_con, f'SELECT COUNT(*) FROM pg."{table}"')
     if src_count != pg_count:
         logger.error(f"件数不一致: {table} DuckDB={src_count} Postgres={pg_count}")
@@ -75,6 +84,9 @@ def main() -> int:
 
     all_ok = True
     for table in _TABLES:
+        if not _source_table_exists(src_con, table):
+            logger.info(f"移行元に存在しないためスキップ: {table}")
+            continue
         if not verify_table(src_con, table):
             all_ok = False
 

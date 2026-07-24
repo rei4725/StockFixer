@@ -410,17 +410,50 @@ def migrate_table(src_con: duckdb.DuckDBPyConnection, table: str, columns: list[
     `stock_features` は動的に列が増えるテーブルのため、TRUNCATE/INSERTの前に
     Postgres移行先の不足カラムをALTERで補う（他テーブルは静的スキーマで
     移行先とすでに一致している前提のため、この処理は行わない）。
+
+    `prediction_results` は `model_version` にPostgres側でNOT NULL制約がある
+    一方、DuckDB側には2026-04-28の1バッチ分（705行）だけ `model_version` が
+    NULLの古いレコードが残っている（それ以降の全バッチでは常に埋まっている）。
+    本番切り替え時にこの古いレコードだけ除外することを確認済みのため、この
+    テーブルに限り `WHERE model_version IS NOT NULL` を付与する。
     """
     if table == "stock_features":
         _ensure_stock_features_target_columns(src_con)
 
     col_list = ", ".join(f'"{c}"' for c in columns)
+    where_clause = ""
+    if table == "prediction_results":
+        where_clause = ' WHERE "model_version" IS NOT NULL'
     src_con.execute(f'TRUNCATE TABLE pg."{table}"')
-    src_con.execute(f'INSERT INTO pg."{table}" ({col_list}) SELECT {col_list} FROM "{table}"')
+    src_con.execute(
+        f'INSERT INTO pg."{table}" ({col_list}) SELECT {col_list} FROM "{table}"{where_clause}'
+    )
     row = src_con.execute(f'SELECT COUNT(*) FROM pg."{table}"').fetchone()
     count = int(row[0]) if row else 0
     logger.info(f"移行完了: {table} ({count}行)")
     return count
+
+
+def _source_table_exists(src_con: duckdb.DuckDBPyConnection, table: str) -> bool:
+    """移行元DuckDBに当該テーブルが存在するかを判定する。
+
+    factory_runs・strategy_promotions・rule_best_by_symbol・rule_daily_signals
+    等、Task 2以降に追加された比較的新しいテーブルは、古いDuckDBスナップショット
+    には元々存在しないことがある（データが欠損しているのではなく、その機能自体が
+    DuckDB運用時にはまだ無かったため）。その場合は空のPostgresテーブルのまま
+    スキップしてよい。
+
+    `_get_dynamic_columns` と同じ理由で `table_catalog = current_database()`
+    による絞り込みが必須（ATTACH後は information_schema が pg カタログ側の
+    同名テーブルも横断して返すため、絞り込まないと移行先に既に存在する
+    テーブルを誤って「移行元にも存在する」と判定してしまう）。
+    """
+    row = src_con.execute(
+        "SELECT COUNT(*) FROM information_schema.tables "
+        "WHERE table_name = ? AND table_catalog = current_database()",
+        [table],
+    ).fetchone()
+    return bool(row and row[0] > 0)
 
 
 def main() -> None:
@@ -437,11 +470,19 @@ def main() -> None:
     src_con.execute(f"ATTACH '{get_database_url()}' AS pg (TYPE POSTGRES, READ_ONLY FALSE)")
 
     total = 0
+    skipped = []
     for table, columns in _TABLES.items():
+        if not _source_table_exists(src_con, table):
+            logger.info(f"移行元に存在しないためスキップ: {table}")
+            skipped.append(table)
+            continue
         cols = _get_dynamic_columns(src_con, table) if table == "stock_features" else columns
         total += migrate_table(src_con, table, cols)
 
-    logger.info(f"=== 移行完了: 全 {len(_TABLES)} テーブル、計 {total} 行 ===")
+    logger.info(
+        f"=== 移行完了: 全 {len(_TABLES)} テーブル中 {len(_TABLES) - len(skipped)} 件、"
+        f"計 {total} 行（スキップ: {skipped}） ==="
+    )
     src_con.close()
 
 
