@@ -99,6 +99,33 @@ def test_repairable_failure_retries_then_gives_up(mock_port_factory, mock_sandbo
 
 @patch("src.backtest.claude_rule_generator.run_sandboxed_evaluation")
 @patch("src.backtest.claude_rule_generator.get_text_review_port")
+def test_logs_success_summary(mock_port_factory, mock_sandbox, monkeypatch, caplog):
+    monkeypatch.setattr("src.backtest.claude_rule_generator.FACTORY_CLAUDE_RULEGEN_ENABLED", True)
+    monkeypatch.setattr("src.backtest.claude_rule_generator.FACTORY_CLAUDE_RULEGEN_COUNT", 2)
+
+    mock_port = MagicMock()
+    mock_port.complete.return_value = _VALID_RESPONSE
+    mock_port_factory.return_value = mock_port
+
+    evaluation = FactoryEvaluation(hypothesis=_make_hypothesis(), sharpe_ratio=1.5, num_trades=50)
+    mock_sandbox.side_effect = [
+        SandboxRunResult(kind="gate_evaluated", evaluation=evaluation),
+        SandboxRunResult(kind="infra_error", infra_detail="timeout"),
+    ]
+
+    with caplog.at_level("INFO", logger="src.backtest.claude_rule_generator"):
+        generate_claude_hypotheses(
+            market="us",
+            champion_sharpe=1.0,
+            shared_data_dir="dummy",
+            windows_file="dummy.json",
+        )
+
+    assert "生成完了: market=us 成功=1/2" in caplog.text
+
+
+@patch("src.backtest.claude_rule_generator.run_sandboxed_evaluation")
+@patch("src.backtest.claude_rule_generator.get_text_review_port")
 def test_infra_error_does_not_consume_repair_budget(mock_port_factory, mock_sandbox, monkeypatch):
     monkeypatch.setattr("src.backtest.claude_rule_generator.FACTORY_CLAUDE_RULEGEN_ENABLED", True)
     monkeypatch.setattr("src.backtest.claude_rule_generator.FACTORY_CLAUDE_RULEGEN_COUNT", 1)

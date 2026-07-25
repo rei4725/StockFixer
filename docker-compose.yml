@@ -78,6 +78,7 @@ services:
         condition: service_healthy
     environment:
       - LOG_FORMAT=json
+      - LOG_DIR=/app/logs
       - OLLAMA_URL=http://ollama:11434
       - DATABASE_URL=postgresql://stockfixer:${POSTGRES_PASSWORD:-stockfixer_dev}@postgres:5432/stockfixer
       - FACTORY_SANDBOX_IMAGE=stockfixer:${VERSION:-dev}

@@ -38,10 +38,16 @@ _LOG_FORMAT = "[%(asctime)s.%(msecs)03d] [%(levelname)-5s] [%(name)s] [%(run_id)
 _DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 # リポジトリルートディレクトリ（src/utils/logger.py から4階層上）
+# ローカル実行（<repo_root>/python/src/utils/logger.py）ではこの4階層上が
+# <repo_root> になり、Logs/ はそこに存在する。Dockerイメージは python/ の中身を
+# そのまま /app にコピーするため階層が1つ浅く、同じ計算では /app ではなく
+# コンテナの / （マウントされていない使い捨て領域）を指してしまう。そのため
+# 環境変数 LOG_DIR での明示指定を優先する（docker-compose.yml 側で
+# /app/logs を指定し、実際のボリュームマウント先と一致させる）。
 _REPO_ROOT = os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 )
-_LOG_DIR = os.path.join(_REPO_ROOT, "Logs")
+_LOG_DIR = os.environ.get("LOG_DIR", os.path.join(_REPO_ROOT, "Logs"))
 
 _root_configured = False
 
