@@ -64,6 +64,35 @@ def test_should_recover_false_after_success_event(tmp_path):
     assert manager.should_recover("daily_pipeline", now=now) is False
 
 
+def test_should_recover_false_for_cron_string_hour_instead_of_crashing(tmp_path):
+    """hour が "*/2" のようなcron式（1日複数回実行のジョブ）の場合、
+    datetime.replace() に渡せずクラッシュしていた（recovery_pollerが5分毎に
+    異常終了するバグ）。「所定の1時刻」の前提が成り立たないジョブは
+    補完ポーリング対象外としてFalseを返すのが正しい挙動。
+    """
+    counter = {}
+
+    def _promotion_check_func():
+        counter["promotion_check"] = counter.get("promotion_check", 0) + 1
+
+    config = {
+        "strategy_promotion_check": {
+            "func": _promotion_check_func,
+            "period": "daily",
+            "day_of_week": "mon-sun",
+            "hour": "*/2",
+            "minute": 30,
+            "recovery_delay_minutes": 30,
+            "max_executions_per_period": 12,
+        },
+    }
+    state_path = tmp_path / "scheduler_queue_state.json"
+    manager = SchedulerQueueManager(config, state_file_path=str(state_path))
+
+    now = datetime(2026, 3, 2, 19, 20, tzinfo=manager.tz)
+    assert manager.should_recover("strategy_promotion_check", now=now) is False
+
+
 def test_run_job_respects_execution_limit(tmp_path):
     counter = {}
     state_path = tmp_path / "scheduler_queue_state.json"
