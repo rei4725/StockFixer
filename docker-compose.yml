@@ -33,6 +33,33 @@ services:
       retries: 5
       start_period: 10s
 
+  # ローカル開発・ローカルpytest実行専用のテストDB。本番の `postgres`（5432）
+  # とは別ポート・別ボリュームで完全に分離する。`stockfixer` アプリサービスは
+  # 一切参照しない（depends_on に含めない）。
+  #
+  # get_database_url() のデフォルト値がこのサービスのポート（5433）を指すため、
+  # DATABASE_URL を明示的に指定しない限り、ローカルでの `pytest` 実行は常に
+  # このテスト専用インスタンスに繋がる（本番postgresが同じホストの5432で
+  # 稼働中でも、ポートが違うため誤って本番に到達することがない）。
+  postgres-test:
+    image: postgres:16-alpine
+    container_name: stockfixer-postgres-test
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=stockfixer
+      - POSTGRES_USER=stockfixer
+      - POSTGRES_PASSWORD=stockfixer_dev
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stockfixer -d stockfixer"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
   stockfixer:
     build:
       context: ./python
@@ -85,3 +112,4 @@ services:
 volumes:
   ollama_data:
   postgres_data:
+  postgres_test_data:
