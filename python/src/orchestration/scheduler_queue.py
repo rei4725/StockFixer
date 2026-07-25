@@ -294,6 +294,13 @@ class SchedulerQueueManager:
         config = self.schedule_config[job_id]
         now = now or self.now()
 
+        # hour が "*/2" のようなcron式（1日複数回実行のジョブ）の場合、
+        # 「所定の1時刻」という前提のdatetime.replace()が使えない。
+        # このようなジョブは自身の頻度で自然にリトライされるため、
+        # 補完ポーリングの対象外として扱う（クラッシュではなくスキップ）。
+        if not isinstance(config["hour"], int) or not isinstance(config["minute"], int):
+            return False
+
         if not self._is_scheduled_day(config, now):
             return False
 
