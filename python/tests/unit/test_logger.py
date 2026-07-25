@@ -36,6 +36,39 @@ class TestGetLogger(unittest.TestCase):
         self.assertIs(logger1, logger2)
 
 
+class TestLogDirOverride(unittest.TestCase):
+    """LOG_DIR 環境変数による _LOG_DIR 上書きのテスト"""
+
+    def test_log_dir_env_overrides_default(self):
+        """LOG_DIR が設定されている場合、_LOG_DIR がその値になること（Dockerでのマウント先ズレ対策）"""
+        import importlib
+
+        import src.utils.logger as logger_module
+
+        with patch.dict(os.environ, {"LOG_DIR": "/app/logs"}):
+            importlib.reload(logger_module)
+            try:
+                self.assertEqual(logger_module._LOG_DIR, "/app/logs")
+            finally:
+                importlib.reload(logger_module)
+
+    def test_log_dir_env_unset_falls_back_to_repo_root(self):
+        """LOG_DIR 未設定時は従来通り _REPO_ROOT/Logs になること"""
+        import importlib
+
+        import src.utils.logger as logger_module
+
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("LOG_DIR", None)
+            importlib.reload(logger_module)
+            try:
+                self.assertEqual(
+                    logger_module._LOG_DIR, os.path.join(logger_module._REPO_ROOT, "Logs")
+                )
+            finally:
+                importlib.reload(logger_module)
+
+
 class TestConfigureRoot(unittest.TestCase):
     """_configure_root のブランチカバレッジテスト（ファイルハンドラ・Streamをモック）"""
 

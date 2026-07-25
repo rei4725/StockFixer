@@ -172,4 +172,10 @@ def generate_claude_hypotheses(
         evaluation = _generate_and_evaluate_with_repair(market, shared_data_dir, windows_file)
         if evaluation is not None:
             evaluations.append(evaluation)
+    logger.info(
+        "[claude_rule_generator] 生成完了: market=%s 成功=%d/%d",
+        market,
+        len(evaluations),
+        FACTORY_CLAUDE_RULEGEN_COUNT,
+    )
     return evaluations
