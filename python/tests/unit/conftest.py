@@ -40,6 +40,38 @@ def _block_heartbeat_ping(monkeypatch):
 
 
 # ============================================
+# Claude/外部API実呼び出しガード（unit テスト全体に適用）
+# ============================================
+
+
+@pytest.fixture(autouse=True)
+def _block_real_claude_calls(monkeypatch):
+    """本番 .env で有効化されている *_ENABLED フラグが、ローカルの pytest 実行に
+    漏れ込んで実際に Claude CLI/API を呼び出すことを防ぐ（#548と同型の
+    「テストが本番リソースに到達する」事故の予防）。
+
+    これらのフラグは各消費モジュールが `from config.settings import XXX` で
+    モジュールレベル定数として束縛しているため、config.settings 側や
+    config.feature_flags 側を書き換えても反映されない。消費先モジュール
+    自身の名前空間を個別にFalseへ上書きする。
+    個々のテストがこれらのフラグの挙動を検証したい場合は、当該テスト内で
+    改めて `monkeypatch.setattr(...)` すればこの既定値を上書きできる。
+    """
+    monkeypatch.setattr("src.reporting.llm_review.LLM_REVIEW_ENABLED", False)
+    monkeypatch.setattr("src.backtest.critical_review.BACKTEST_REVIEW_ENABLED", False)
+    monkeypatch.setattr("src.backtest.hypothesis_review.FACTORY_HYPOTHESIS_REVIEW_ENABLED", False)
+    monkeypatch.setattr("src.backtest.claude_rule_generator.FACTORY_CLAUDE_RULEGEN_ENABLED", False)
+    monkeypatch.setattr("src.backtest.factory.FACTORY_CLAUDE_RULEGEN_ENABLED", False)
+    monkeypatch.setattr("src.quality.test_gap_review.TEST_GAP_ENABLED", False)
+    # CLAUDE_TRADER_ENABLED・FACTORY_ENABLED は消費先（run_claude_trader.py /
+    # run_nightly_strategy_factory()）が呼び出しの都度
+    # `from config.settings import XXX` と遅延importするため、消費先モジュール
+    # に固定の属性が存在しない。定義元（config.settings）側を上書きする。
+    monkeypatch.setattr("config.settings.CLAUDE_TRADER_ENABLED", False)
+    monkeypatch.setattr("config.settings.FACTORY_ENABLED", False)
+
+
+# ============================================
 # トランザクションロールバックによる DB 隔離（unit テスト全体に適用）
 # ============================================
 
@@ -48,9 +80,11 @@ def _block_heartbeat_ping(monkeypatch):
 def _test_database_ready():
     """テストセッション開始時に1回だけ、テスト用Postgresへマイグレーションを適用する。
 
-    DATABASE_URL は本番と共有の接続文字列だが、CI/ローカルとも
-    テスト専用のPostgresインスタンス（docker-composeのpostgresサービス、
-    または CI の services:postgres）を指す前提。
+    DATABASE_URL 未設定時は get_database_url() の既定値（docker-compose.yml の
+    `postgres-test` サービス、5433番ポート）を指す。本番の `postgres` サービス
+    （5432番ポート）とは別ポート・別ボリュームで完全に分離されているため、
+    同じホストで本番Postgresが稼働中でもテストが誤って到達することはない。
+    CIでは services:postgres（ジョブごとに使い捨ての専用インスタンス）を指す。
     """
     from src.utils.db._connection import _get_pool
 

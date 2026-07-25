@@ -106,10 +106,19 @@ def get_db_path() -> str:
 
 
 def get_database_url() -> str:
-    """PostgreSQL接続文字列を返す（環境変数 DATABASE_URL 優先、未設定時はローカル既定値）"""
+    """PostgreSQL接続文字列を返す（環境変数 DATABASE_URL 優先、未設定時はローカルのテスト専用DB）。
+
+    本番は docker-compose.yml の `stockfixer` サービスが DATABASE_URL を必ず
+    明示設定するため、この既定値を使うことはない。既定値は本番と同じホストで
+    動くローカルpostgres（5432）ではなく、docker-compose.yml の `postgres-test`
+    サービス（5433、本番とは別ポート・別ボリューム）を指す。DATABASE_URL 未設定
+    のままローカルで pytest やスクリプトを実行しても、誤って本番Postgresに
+    到達しないようにするための意図的な選択（#548と同型の「テストが本番リソース
+    に到達する」事故の再発防止）。
+    """
     return os.environ.get(
         "DATABASE_URL",
-        "postgresql://stockfixer:stockfixer_dev@localhost:5432/stockfixer",
+        "postgresql://stockfixer:stockfixer_dev@localhost:5433/stockfixer",
     )
 
 
