@@ -9,8 +9,8 @@ DuckDB の最新予測結果を読み込み、RiskManager のゲートチェッ�
     2. RiskManager.is_trading_allowed() で当日取引可否を確認
     3. 保有済みポジションを確認し重複買いを回避
     4. RiskManager.calc_position_size() で発注株数を算出
-    5. broker.send_order() で成行注文
-    6. orders テーブルに記録
+    5. broker.send_order() で成行注文（paper_orders への記録は broker 側の責務）
+    6. paper_orders への predicted_at/signal_price/horizon 等の補完・paper_real_diff 記録
 """
 
 import uuid

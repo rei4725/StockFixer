@@ -1,6 +1,5 @@
 """注文結果の記録と live 約定差分の同期。"""
 
-import uuid
 from datetime import date, timedelta
 from typing import Any
 
@@ -82,27 +81,15 @@ def _record_order(
     split_ratio: float = 1.0,
     horizon: int | None = None,
 ) -> None:
-    """注文結果を orders テーブルに保存する"""
-    with _db_connection() as con:
-        con.execute(
-            """
-            INSERT INTO orders
-                (order_id, symbol, side, qty, price, order_type, status, broker, mode, created_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
-            """,
-            [
-                order_result.get("order_id", str(uuid.uuid4())[:12]),
-                symbol,
-                int(side),
-                qty,
-                order_price,
-                int(order_type),
-                order_result.get("status", "unknown"),
-                broker.broker_name,
-                mode,
-            ],
-        )
+    """注文結果に付随するメタデータ（paper_orders 補完・paper/real diff）を記録する。
 
+    実際の注文行そのものは broker.send_order() が記録する
+    （PaperBroker は paper_orders、KabuBroker は Kabu Station 側）。
+    ここでは PaperBroker が書いた paper_orders 行に predicted_at/signal_price/
+    horizon/target_exit_date を補完し（mode=="paper" のみ）、paper/real 価格差分
+    （paper_real_diff）を記録する（#586: かつて存在しない `orders` テーブルへの
+    INSERT がここにあり、例外で以下の処理全体が握りつぶされていた）。
+    """
     order_id = str(order_result.get("order_id", ""))
     if mode == "paper" and order_id:
         target_exit_date: str | None = None
