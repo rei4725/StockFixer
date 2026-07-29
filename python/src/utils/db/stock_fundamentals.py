@@ -17,9 +17,13 @@ from typing import Optional, Protocol
 import pandas as pd
 
 from src.utils.db._connection import _db_connection
+from src.utils.db._read import coerce_object_numeric_columns
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+# 数値化しない列（as_of は timestamp、market/symbol は文字列）
+_NON_NUMERIC_COLUMNS = {"as_of", "market", "symbol"}
 
 # stock_fundamentals の保存対象カラム（DDL と一致させること）
 _COLUMNS = [
@@ -108,6 +112,7 @@ def load_fundamentals(market: str, symbol: str) -> Optional[dict]:
 
     if df.empty:
         return None
+    df = coerce_object_numeric_columns(df, exclude=_NON_NUMERIC_COLUMNS)
     return df.iloc[0].to_dict()
 
 
@@ -125,4 +130,6 @@ def load_all_fundamentals() -> pd.DataFrame:
             logger.error(f"stock_fundamentals 全件読み込み失敗: {e}", exc_info=True)
             return pd.DataFrame()
 
-    return df
+    if df.empty:
+        return df
+    return coerce_object_numeric_columns(df, exclude=_NON_NUMERIC_COLUMNS)
