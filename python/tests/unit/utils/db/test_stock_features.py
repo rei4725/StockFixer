@@ -47,3 +47,29 @@ def test_load_all_stock_features_combines_symbols():
     upsert_stock_features("us", "A2", pd.DataFrame({"close": [2.0]}))
     all_df = load_all_stock_features()
     assert set(all_df["symbol"]) >= {"A1", "A2"}
+
+
+def test_load_stock_features_coerces_all_null_column_to_numeric():
+    """Issue: ある銘柄で全行NULLの列が object dtype で返り、XGBoost予測が
+    KeyError: 'object' でスキップされていた（#Capital_Gains_lag系バグ）。
+
+    upsert 済みの他銘柄に数値列が存在する状態でも、対象銘柄のスライスが
+    全行NULLなら pd.read_sql は object dtype で返す。load_stock_features は
+    これを float64（NaN）へ強制変換すること。
+    """
+    upsert_stock_features("us", "HASVALUE", pd.DataFrame({"close": [1.0], "capital_gains": [0.5]}))
+    upsert_stock_features("us", "ALLNULL", pd.DataFrame({"close": [2.0], "capital_gains": [None]}))
+
+    loaded = load_stock_features("us", "ALLNULL")
+
+    assert loaded is not None
+    assert pd.api.types.is_float_dtype(loaded["capital_gains"])
+    assert loaded["capital_gains"].isna().all()
+
+
+def test_load_all_stock_features_coerces_all_null_column_to_numeric():
+    upsert_stock_features("us", "B1", pd.DataFrame({"close": [1.0], "capital_gains": [None]}))
+
+    all_df = load_all_stock_features()
+
+    assert pd.api.types.is_float_dtype(all_df["capital_gains"])

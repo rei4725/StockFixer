@@ -15,6 +15,26 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+# 数値化しない列（date は timestamp、market/symbol は呼び出し元で既に drop 済みだが念のため含める）
+_NON_NUMERIC_COLUMNS = {"date", "market", "symbol"}
+
+
+def _coerce_object_numeric_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """object dtype で読み込まれた数値列を float に強制変換する。
+
+    ある銘柄のスライスで特定列（例: Capital_Gains_lag*）が全行 NULL の場合、
+    psycopg 経由の pd.read_sql は当該列を float64 ではなく object dtype
+    （値は None）として返す。この object 列がそのまま XGBoost へ渡ると
+    `KeyError: 'object'` で予測がスキップされてしまう
+    （DuckDB の `.df()` 変換ではこの問題は起きなかった）。
+    """
+    for col in df.columns:
+        if col in _NON_NUMERIC_COLUMNS:
+            continue
+        if df[col].dtype == object:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+    return df
+
 
 def _ensure_columns(con: psycopg.Connection, df: pd.DataFrame) -> None:
     """DataFrame の列が stock_features テーブルに存在しない場合 ALTER TABLE で追加する。
@@ -107,7 +127,8 @@ def load_stock_features(market: str, symbol: str) -> Optional[pd.DataFrame]:
         return None
 
     drop_cols = [c for c in ["market", "symbol", "row_num"] if c in df.columns]
-    return df.drop(columns=drop_cols)
+    df = df.drop(columns=drop_cols)
+    return _coerce_object_numeric_columns(df)
 
 
 def load_all_stock_features() -> pd.DataFrame:
@@ -130,6 +151,7 @@ def load_all_stock_features() -> pd.DataFrame:
     if "row_num" in df.columns:
         df = df.drop(columns=["row_num"])
 
+    df = _coerce_object_numeric_columns(df)
     logger.info(f"DB読み込み完了: stock_features ({len(df)}行)")
     return df
 
