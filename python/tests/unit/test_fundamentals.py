@@ -205,6 +205,26 @@ class TestFundamentalsDb(unittest.TestCase):
         self.assertEqual(len(df), 2)
         self.assertSetEqual(set(df["symbol"]), {"AAPL", "MSFT"})
 
+    def _record_with_null_revenue_cagr(self, symbol="NULLCAGR"):
+        record = self._record(symbol=symbol)
+        record.revenue_cagr_3y = None
+        return record
+
+    def test_load_fundamentals_coerces_null_column_to_numeric(self):
+        """NULL値の列が object dtype で返っても load_fundamentals が float に補正すること
+        （stock_features.py と同型の pd.read_sql object dtype バグ対策）。
+        """
+        upsert_fundamentals(self._record_with_null_revenue_cagr())
+        loaded = load_fundamentals("us", "NULLCAGR")
+        self.assertIsNotNone(loaded)
+        self.assertTrue(pd.isna(loaded["revenue_cagr_3y"]))
+        self.assertEqual(loaded["revenue"], 400.0)
+
+    def test_load_all_fundamentals_coerces_null_column_to_numeric(self):
+        upsert_fundamentals(self._record_with_null_revenue_cagr(symbol="NULLCAGR2"))
+        df = load_all_fundamentals()
+        self.assertTrue(pd.api.types.is_float_dtype(df["revenue_cagr_3y"]))
+
 
 if __name__ == "__main__":
     unittest.main()
