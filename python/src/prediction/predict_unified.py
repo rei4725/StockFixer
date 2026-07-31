@@ -13,6 +13,7 @@ import pandas as pd
 import yfinance as yf
 
 from src.prediction.db import load_model_weights
+from src.prediction.remote_client import get_service_url, predict_via_service
 from src.prediction.types import PredictionResult
 from src.utils.data_path_utils import get_ticker
 from src.utils.db import get_all_symbols, load_stock_features
@@ -160,6 +161,27 @@ def predict_with_unified_model(
     if "market_encoded" not in latest_X.columns:
         market_codes = {"us": 0, "jp": 1}
         latest_X["market_encoded"] = market_codes.get(market, 0)
+
+    # 推論サービスが有効なときだけ委譲する。
+    # get_service_url() で先に判定するのは、未設定の既定パスで load_model_weights()
+    # の DB クエリを余計に走らせないため（銘柄数ぶん積み上がるため無視できない）。
+    if get_service_url() is not None:
+        service_weights = load_model_weights(market, symbol, model_types)
+        service_result = predict_via_service(
+            market=market,
+            symbol=symbol,
+            current_price=float(current_price),
+            features={
+                str(col): float(latest_X[col].iloc[0])
+                for col in latest_X.columns
+                if pd.notna(latest_X[col].iloc[0])
+            },
+            model_types=list(model_types),
+            model_weights=service_weights,
+        )
+        # None のときは下のインプロセス推論にそのままフォールバックする
+        if service_result is not None:
+            return service_result
 
     # 各モデルで予測（キャッシュされたモデルを使用）
     pred_prices = []
