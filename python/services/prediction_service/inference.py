@@ -148,8 +148,10 @@ def run_inference(request: PredictRequest) -> PredictResponse:
             aligned = _align_features(request.features, model)
             pred_return = _extract_prediction(model.predict(aligned))
         except Exception:
-            logger.warning(
-                "モデル推論スキップ: model=%s market=%s symbol=%s",
+            # WARNING では埋もれる。1モデル落ちてもアンサンブルは縮退したまま
+            # 予測値を返し続けるため、失敗が見えないと気づけない（#615）。
+            logger.error(
+                "モデル推論スキップ（アンサンブルが縮退します）: model=%s market=%s symbol=%s",
                 model_name,
                 request.market,
                 request.symbol,

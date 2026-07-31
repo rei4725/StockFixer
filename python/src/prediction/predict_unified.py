@@ -277,8 +277,10 @@ def predict_with_unified_model(
             pred_prices.append(pred_price)
             succeeded_model_names.append(model_name)
         except Exception:
-            logger.warning(
-                "モデル予測スキップ: model=%s market=%s symbol=%s",
+            # WARNING では埋もれる。1モデル落ちるとアンサンブルが単一モデルに
+            # 縮退したまま予測値は出続けるため、失敗が見えないと気づけない（#615）。
+            logger.error(
+                "モデル予測スキップ（アンサンブルが縮退します）: model=%s market=%s symbol=%s",
                 model_name,
                 market,
                 symbol,
