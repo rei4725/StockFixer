@@ -83,6 +83,7 @@ jobs:
           grep -v '^mlflow' requirements.txt | pip install -r /dev/stdin
           pip install "mlflow>=3.12.0" --no-deps
           pip install -r requirements-dev.txt
+          pip install -r requirements-service.txt
 
       - name: Pylint (errors only)
         run: python -m pylint src/ --rcfile=.pylintrc
