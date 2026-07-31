@@ -79,20 +79,18 @@ def _resolve_expected_features(model: Any) -> list[str] | None:
     （predict_unified.py）と違いラッパーを剥がす必要はない。本体にも同等の
     実装があるが、このサービスは独立したコンテナとして動くため、意図的に
     共有せず重複させている。
+
+    ``booster_.feature_name()`` へはフォールバックしない。numpy 配列で学習した
+    モデルでは booster が ``f0`` / ``Column_0`` といった合成名を返し、それを
+    本物の特徴量名として扱うと全列 0 埋めのフレームで predict が「成功」して
+    しまうためである。
     """
     for attr in ("feature_names_in_", "feature_name_"):
         resolved = _as_feature_list(getattr(model, attr, None))
         if resolved is not None:
             return resolved
 
-    booster = getattr(model, "booster_", None)
-    if booster is None:
-        return None
-    try:
-        return _as_feature_list(booster.feature_name())
-    except Exception:
-        logger.warning("booster から特徴量名を取得できません", exc_info=True)
-        return None
+    return None
 
 
 def _align_features(features: dict[str, float], model: Any) -> pd.DataFrame:

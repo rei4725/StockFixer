@@ -107,6 +107,12 @@ def resolve_expected_features(model: Any) -> Optional[List[str]]:
 
     引数は ModelManager のラッパー（``.model`` に推定器を持つ）でも生の推定器
     でもよい。
+
+    ``booster_.feature_name()`` へはフォールバックしない。DataFrame で学習した
+    モデルなら上の2属性で必ず解決でき、numpy 配列で学習したモデルでは booster が
+    ``f0`` / ``Column_0`` といった合成名を返すため、それを本物の特徴量名として
+    扱うと全列 0 埋めのフレームで predict が「成功」してしまう。解決できない
+    ことを None で表明する方が安全である。
     """
     estimator = getattr(model, "model", model)
 
@@ -115,14 +121,7 @@ def resolve_expected_features(model: Any) -> Optional[List[str]]:
         if resolved is not None:
             return resolved
 
-    booster = getattr(estimator, "booster_", None)
-    if booster is None:
-        return None
-    try:
-        return _as_feature_list(booster.feature_name())
-    except Exception:
-        logger.warning("booster から特徴量名を取得できません", exc_info=True)
-        return None
+    return None
 
 
 def predict_with_unified_model(
