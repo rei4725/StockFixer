@@ -94,6 +94,32 @@ class TestLegacyLightGBMPrecondition(unittest.TestCase):
         self.assertEqual(list(model.model.feature_names_in_), _EXPECTED_FEATURES)
 
 
+def _run_predict(models_by_name: dict, model_types: list[str], weights: list[float]):
+    """本番相当の入力で predict_with_unified_model を1銘柄ぶん走らせる。"""
+    from src.prediction.predict_unified import predict_with_unified_model
+
+    mock_ticker = MagicMock()
+    mock_ticker.history.return_value = pd.DataFrame(
+        {"Close": [1050.0]}, index=pd.date_range("2024-01-31", periods=1)
+    )
+
+    with (
+        patch(
+            "src.prediction.predict_unified.load_feature_data",
+            return_value=_feature_frame_with_date(),
+        ),
+        patch(
+            "src.prediction.predict_unified.get_cached_model",
+            side_effect=lambda name: models_by_name.get(name),
+        ),
+        patch("src.prediction.predict_unified.get_ticker", return_value="7203.T"),
+        patch("src.prediction.predict_unified.load_model_weights", return_value=weights),
+        patch("src.prediction.predict_unified.get_service_url", return_value=None),
+        patch("src.prediction.predict_unified.yf.Ticker", return_value=mock_ticker),
+    ):
+        return predict_with_unified_model("jp", "7203", model_types=model_types)
+
+
 class TestPredictWithUnifiedModelEnsemble(unittest.TestCase):
     def setUp(self):
         from src.prediction import predict_unified
@@ -101,28 +127,7 @@ class TestPredictWithUnifiedModelEnsemble(unittest.TestCase):
         predict_unified._model_cache.clear()
 
     def _run(self, models_by_name: dict, model_types: list[str], weights: list[float]):
-        from src.prediction.predict_unified import predict_with_unified_model
-
-        mock_ticker = MagicMock()
-        mock_ticker.history.return_value = pd.DataFrame(
-            {"Close": [1050.0]}, index=pd.date_range("2024-01-31", periods=1)
-        )
-
-        with (
-            patch(
-                "src.prediction.predict_unified.load_feature_data",
-                return_value=_feature_frame_with_date(),
-            ),
-            patch(
-                "src.prediction.predict_unified.get_cached_model",
-                side_effect=lambda name: models_by_name.get(name),
-            ),
-            patch("src.prediction.predict_unified.get_ticker", return_value="7203.T"),
-            patch("src.prediction.predict_unified.load_model_weights", return_value=weights),
-            patch("src.prediction.predict_unified.get_service_url", return_value=None),
-            patch("src.prediction.predict_unified.yf.Ticker", return_value=mock_ticker),
-        ):
-            return predict_with_unified_model("jp", "7203", model_types=model_types)
+        return _run_predict(models_by_name, model_types, weights)
 
     def test_lightgbm_alone_produces_a_prediction(self):
         """修正前は date 列混入で DTypePromotionError → None が返っていた。"""
@@ -156,6 +161,36 @@ class TestPredictWithUnifiedModelEnsemble(unittest.TestCase):
 
         self.assertIsNotNone(result)
         self.assertEqual(result.model_count, 2)
+
+
+class _RecordingModel:
+    """特徴量名を解決できないモデル（アラインメントがスキップされる経路）。"""
+
+    def __init__(self) -> None:
+        self.received: pd.DataFrame | None = None
+
+    def predict(self, X: pd.DataFrame) -> pd.Series:
+        self.received = X
+        return pd.Series([0.01], index=X.index)
+
+
+class TestFeatureColumnFiltering(unittest.TestCase):
+    """アラインメントを解決できない場合でも日付列は predict に渡らないこと。"""
+
+    def test_date_column_never_reaches_predict(self):
+        recorder = _RecordingModel()
+
+        result = _run_predict({"UnifiedStockXGBoost": recorder}, ["UnifiedStockXGBoost"], [1.0])
+
+        self.assertIsNotNone(result)
+        self.assertIsNotNone(recorder.received)
+        self.assertNotIn("date", recorder.received.columns)
+        self.assertFalse(
+            any(
+                pd.api.types.is_datetime64_any_dtype(recorder.received[c])
+                for c in recorder.received.columns
+            )
+        )
 
 
 if __name__ == "__main__":

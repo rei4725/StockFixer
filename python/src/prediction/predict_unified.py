@@ -163,9 +163,16 @@ def predict_with_unified_model(
     if "y" not in df.columns:
         return None
 
-    # 特徴量列（文字列列とyを除外）
-    exclude_cols = ["y", "market", "symbol"]
-    feature_cols = [c for c in df.columns if c not in exclude_cols]
+    # 特徴量列（文字列列・日付列・ターゲットを除外）
+    # 除外条件は学習側の prepare_unified_features() と揃えること。学習時に
+    # 存在しない date 列を予測時だけ通すと、アラインメントを解決できなかった
+    # 場合に日付が predict() へ流れ込んで失敗する（#615）。
+    exclude_cols = ["y", "market", "symbol", "date"]
+    feature_cols = [
+        c
+        for c in df.columns
+        if c not in exclude_cols and not pd.api.types.is_datetime64_any_dtype(df[c])
+    ]
     X = df[feature_cols]
 
     # 最新行を取得（必ずコピーを作成）
