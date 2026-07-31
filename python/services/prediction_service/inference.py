@@ -16,6 +16,7 @@ from threading import Lock
 from typing import Any
 
 import joblib
+import numpy as np
 import pandas as pd
 from services.prediction_service.types import PredictRequest, PredictResponse
 
@@ -62,8 +63,12 @@ def _align_features(features: dict[str, float], model: Any) -> pd.DataFrame:
     """
     df = pd.DataFrame([features])
 
-    inner = getattr(model, "model", None)
-    expected = getattr(inner, "feature_names_in_", None)
+    # load_model() は joblib.load() の戻り値（生の sklearn/xgboost 推定器）を
+    # 返すため、feature_names_in_ は推定器の直下にある。
+    # 本体（predict_unified.py）が model.model.feature_names_in_ という2段の
+    # パスを使っているのは、ModelManager がラッパーを被せているからであり、
+    # このサービスには当てはまらない。
+    expected = getattr(model, "feature_names_in_", None)
     if expected is None:
         return df
 
@@ -75,10 +80,15 @@ def _align_features(features: dict[str, float], model: Any) -> pd.DataFrame:
 
 
 def _extract_prediction(pred: Any) -> float:
-    """モデルの返り値（Series / list / スカラー）から float を取り出す。"""
+    """モデルの返り値（Series / ndarray / list / スカラー）から float を取り出す。
+
+    実際の sklearn/xgboost 推定器の predict() は ndarray を返すため、これを
+    扱えないと実運用では常に失敗する（テストが pd.Series のモックしか使って
+    いなかったため見逃されていた）。
+    """
     if isinstance(pred, pd.Series):
         return float(pred.iloc[-1])
-    if isinstance(pred, (list, tuple)):
+    if isinstance(pred, (list, tuple, np.ndarray)):
         return float(pred[-1])
     return float(pred)
 
