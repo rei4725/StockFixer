@@ -298,14 +298,16 @@ def _clear_cache():
 
 
 def _make_model(pred_return: float, expected_features: list[str] | None = None):
-    """指定した変化率を返すモックモデルを作る。"""
+    """指定した変化率を返すモックモデルを作る。
+
+    load_model() が返すのは joblib.load() の戻り値そのもの（生の sklearn /
+    xgboost 推定器）なので、モックも feature_names_in_ を直下に持たせる。
+    """
     model = MagicMock()
-    inner = MagicMock()
     if expected_features is not None:
-        inner.feature_names_in_ = expected_features
+        model.feature_names_in_ = expected_features
     else:
-        del inner.feature_names_in_
-    model.model = inner
+        del model.feature_names_in_
     model.predict.return_value = pd.Series([pred_return])
     return model
 
@@ -404,6 +406,36 @@ def test_partial_failure_renormalizes_weights(monkeypatch):
     assert resp.avg_pred_price == pytest.approx(1040.0)
 
 
+def test_real_load_model_path_aligns_features(tmp_path, monkeypatch):
+    """load_model() を monkeypatch せず、実際に joblib で保存した推定器を読んで
+    特徴量アラインメントが働くことを検証する。
+
+    他のテストは load_model() を差し替えているため、joblib.load() の戻り値の
+    形（生の推定器か、ラッパーか）の食い違いを検出できない。ここだけは実際の
+    ロード経路を通す。
+    """
+    import joblib
+    from sklearn.linear_model import LinearRegression
+
+    # feature_names_in_ を持つ実推定器を作って保存する
+    estimator = LinearRegression()
+    train_X = pd.DataFrame({"a": [1.0, 2.0], "b": [3.0, 4.0], "c": [5.0, 6.0]})
+    estimator.fit(train_X, pd.Series([0.0, 0.0]))
+    joblib.dump(estimator, tmp_path / "RealModel.joblib")
+
+    monkeypatch.setattr(
+        "services.prediction_service.inference.MODEL_DIR", str(tmp_path)
+    )
+
+    # 特徴量 "c" を欠いた状態で投げても、0 埋めされて推論が成功すること
+    resp = run_inference(
+        _request(features={"a": 1.0, "b": 2.0}, model_types=["RealModel"])
+    )
+
+    assert resp.model_count == 1
+    assert resp.used_models == ["RealModel"]
+
+
 def test_model_raising_exception_is_skipped(monkeypatch):
     """推論中に例外を投げるモデルはスキップして継続すること。"""
     bad = _make_model(0.0, expected_features=["a", "b"])
@@ -499,8 +531,12 @@ def _align_features(features: dict[str, float], model: Any) -> pd.DataFrame:
     """
     df = pd.DataFrame([features])
 
-    inner = getattr(model, "model", None)
-    expected = getattr(inner, "feature_names_in_", None)
+    # load_model() は joblib.load() の戻り値（生の sklearn/xgboost 推定器）を
+    # 返すため、feature_names_in_ は推定器の直下にある。
+    # 本体（predict_unified.py）が model.model.feature_names_in_ という2段の
+    # パスを使っているのは、ModelManager がラッパーを被せているからであり、
+    # このサービスには当てはまらない。
+    expected = getattr(model, "feature_names_in_", None)
     if expected is None:
         return df
 
@@ -588,7 +624,7 @@ def run_inference(request: PredictRequest) -> PredictResponse:
 - [ ] **Step 4: テストを実行して成功を確認**
 
 Run: `cd python && py -m pytest tests/unit/services/test_inference.py -v`
-Expected: PASS（6 tests）
+Expected: PASS（7 tests）
 
 - [ ] **Step 5: Lint と型チェックを通す**
 
