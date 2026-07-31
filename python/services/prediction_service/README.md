@@ -15,9 +15,26 @@
 
 ## ローカル起動
 
+**Bash:**
 ```bash
 cd python
 pip install -r requirements-service.txt
+
+# モデルディレクトリを明示する（既定値 /app/models/unified はコンテナ内のパスのため、
+# ローカル実行では設定しないとモデルが1つもロードされず model_count: 0 になる）
+export PREDICTION_MODEL_DIR="$(pwd)/models/unified"
+
+uvicorn services.prediction_service.app:app --host 0.0.0.0 --port 5200
+```
+
+**PowerShell:**
+```powershell
+cd python
+pip install -r requirements-service.txt
+
+# モデルディレクトリを明示する
+$env:PREDICTION_MODEL_DIR = "$PWD\models\unified"
+
 uvicorn services.prediction_service.app:app --host 0.0.0.0 --port 5200
 ```
 
