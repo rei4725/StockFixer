@@ -85,6 +85,37 @@ def preload_models(model_types: List[str] = None):
     logger.info("モデルの事前ロード完了")
 
 
+def resolve_expected_features(model: Any) -> Optional[List[str]]:
+    """モデルが学習時に使った特徴量名を解決する。解決できなければ None。
+
+    sklearn 互換の ``feature_names_in_`` だけを見ると LightGBM を取りこぼす。
+    lightgbm がこの属性を持つようになったのは 4.5.0 からで、それ以前に pickle
+    されたモデルは LightGBM 独自の ``feature_name_`` にしか名前を持たない。
+    属性が無い場合は AttributeError を送出するプロパティとして実装されている
+    ため、``hasattr`` ではなく getattr チェーンで順に解決する。
+
+    引数はラッパー（``.model`` に推定器を持つ）でも生の推定器でもよい。
+    """
+    estimator = getattr(model, "model", model)
+
+    for attr in ("feature_names_in_", "feature_name_"):
+        names = getattr(estimator, attr, None)
+        if names is not None and len(names) > 0:
+            return [str(name) for name in names]
+
+    booster = getattr(estimator, "booster_", None)
+    if booster is not None:
+        try:
+            names = booster.feature_name()
+        except Exception:
+            logger.warning("booster から特徴量名を取得できません", exc_info=True)
+            return None
+        if names:
+            return [str(name) for name in names]
+
+    return None
+
+
 def predict_with_unified_model(
     market: str,
     symbol: str,
@@ -203,9 +234,9 @@ def predict_with_unified_model(
                 continue
 
             # モデルの特徴量と入力特徴量を揃える（コピーを作成して変更）
-            if hasattr(model, "model") and hasattr(model.model, "feature_names_in_"):
-                expected_features = list(model.model.feature_names_in_)
-                latest_X_aligned = latest_X.copy()
+            latest_X_aligned = latest_X.copy()
+            expected_features = resolve_expected_features(model)
+            if expected_features is not None:
                 # 不足している特徴量は0で埋める
                 for feat in expected_features:
                     if feat not in latest_X_aligned.columns:
@@ -213,7 +244,10 @@ def predict_with_unified_model(
                 # 期待される特徴量のみ選択
                 latest_X_aligned = latest_X_aligned[expected_features]
             else:
-                latest_X_aligned = latest_X.copy()
+                logger.warning(
+                    "モデルの期待特徴量を解決できずアラインメントをスキップ: model=%s",
+                    model_name,
+                )
 
             pred = model.predict(latest_X_aligned)
             if isinstance(pred, pd.Series):
