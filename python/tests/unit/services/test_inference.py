@@ -5,6 +5,7 @@
 
 from unittest.mock import MagicMock
 
+import numpy as np
 import pandas as pd
 import pytest
 from services.prediction_service.inference import clear_model_cache, run_inference
@@ -141,6 +142,55 @@ def test_real_load_model_path_aligns_features(tmp_path, monkeypatch):
 
     assert resp.model_count == 1
     assert resp.used_models == ["RealModel"]
+
+
+def _fit_legacy_lightgbm(feature_names: list[str]):
+    """本番の UnifiedStockLightGBM と同じ属性の形をした実推定器を返す（#615）。
+
+    lightgbm が ``feature_names_in_`` を持つようになったのは 4.5.0 からで、
+    本番モデルはそれ以前に pickle されているためこの属性を持たない。裏にある
+    private フラグを消すことで、その状態を実物の推定器のまま再現する。
+    """
+    import lightgbm as lgb
+
+    rng = np.random.default_rng(42)
+    train_X = pd.DataFrame({name: rng.normal(size=60) for name in feature_names})
+    train_y = pd.Series(rng.normal(size=60))
+    estimator = lgb.LGBMRegressor(
+        n_estimators=5, min_child_samples=5, num_leaves=3, verbose=-1
+    ).fit(train_X, train_y)
+    del estimator.__dict__["_fitted_with_feature_names"]
+    return estimator
+
+
+def test_lightgbm_without_feature_names_in_is_still_aligned(monkeypatch):
+    """feature_names_in_ を持たない LightGBM でもアラインメントされること（#615）。
+
+    MagicMock ではなく実物の LGBMRegressor を使う。MagicMock の predict() は
+    列数が食い違う DataFrame も受け付けてしまい、このバグを検出できない。
+    """
+    expected = ["Close_lag1", "feature_a", "feature_b"]
+    model = _fit_legacy_lightgbm(expected)
+    assert not hasattr(model, "feature_names_in_")
+
+    monkeypatch.setattr("services.prediction_service.inference.load_model", lambda name: model)
+
+    # 期待特徴量 feature_b を欠き、未知の余剰特徴量を2つ含む状態で投げる
+    resp = run_inference(
+        _request(
+            features={
+                "Close_lag1": 1000.0,
+                "feature_a": 0.5,
+                "unused_extra": 9.9,
+                "another_extra": 1.0,
+            },
+            model_types=["UnifiedStockLightGBM"],
+            model_weights=[1.0],
+        )
+    )
+
+    assert resp.model_count == 1
+    assert resp.used_models == ["UnifiedStockLightGBM"]
 
 
 def test_model_raising_exception_is_skipped(monkeypatch):

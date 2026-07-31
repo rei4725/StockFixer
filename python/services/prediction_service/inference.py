@@ -55,28 +55,63 @@ def load_model(model_name: str) -> Any | None:
         return model
 
 
+def _as_feature_list(names: Any) -> list[str] | None:
+    """特徴量名の並びを list[str] に正規化する。名前として使えなければ None。"""
+    if names is None or isinstance(names, (str, bytes)):
+        return None
+    try:
+        items = list(names)
+    except TypeError:
+        return None
+    return [str(name) for name in items] if items else None
+
+
+def _resolve_expected_features(model: Any) -> list[str] | None:
+    """モデルが学習時に使った特徴量名を解決する。解決できなければ None。
+
+    sklearn 互換の ``feature_names_in_`` だけを見ると LightGBM を取りこぼす。
+    lightgbm がこの属性を持つようになったのは 4.5.0 からで、それ以前に pickle
+    されたモデルは LightGBM 独自の ``feature_name_`` にしか名前を持たない。
+    属性が無い場合は AttributeError を送出するプロパティとして実装されている
+    ため、``hasattr`` ではなく getattr チェーンで順に解決する（#615）。
+
+    load_model() は joblib.load() の戻り値（生の推定器）を返すので、本体
+    （predict_unified.py）と違いラッパーを剥がす必要はない。本体にも同等の
+    実装があるが、このサービスは独立したコンテナとして動くため、意図的に
+    共有せず重複させている。
+    """
+    for attr in ("feature_names_in_", "feature_name_"):
+        resolved = _as_feature_list(getattr(model, attr, None))
+        if resolved is not None:
+            return resolved
+
+    booster = getattr(model, "booster_", None)
+    if booster is None:
+        return None
+    try:
+        return _as_feature_list(booster.feature_name())
+    except Exception:
+        logger.warning("booster から特徴量名を取得できません", exc_info=True)
+        return None
+
+
 def _align_features(features: dict[str, float], model: Any) -> pd.DataFrame:
     """モデルが期待する特徴量に合わせて DataFrame を組み立てる。
 
     不足している特徴量は 0 で埋め、期待される順序に並べ替える。
-    モデルが feature_names_in_ を持たない場合は与えられた特徴量をそのまま使う。
+    特徴量名を解決できない場合のみ、与えられた特徴量をそのまま使う。
     """
     df = pd.DataFrame([features])
 
-    # load_model() は joblib.load() の戻り値（生の sklearn/xgboost 推定器）を
-    # 返すため、feature_names_in_ は推定器の直下にある。
-    # 本体（predict_unified.py）が model.model.feature_names_in_ という2段の
-    # パスを使っているのは、ModelManager がラッパーを被せているからであり、
-    # このサービスには当てはまらない。
-    expected = getattr(model, "feature_names_in_", None)
+    expected = _resolve_expected_features(model)
     if expected is None:
+        logger.warning("モデルの期待特徴量を解決できずアラインメントをスキップ")
         return df
 
-    expected_list = list(expected)
-    for feat in expected_list:
+    for feat in expected:
         if feat not in df.columns:
             df[feat] = 0
-    return df[expected_list]
+    return df[expected]
 
 
 def _extract_prediction(pred: Any) -> float:

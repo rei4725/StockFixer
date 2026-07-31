@@ -85,6 +85,17 @@ def preload_models(model_types: List[str] = None):
     logger.info("モデルの事前ロード完了")
 
 
+def _as_feature_list(names: Any) -> Optional[List[str]]:
+    """特徴量名の並びを list[str] に正規化する。名前として使えなければ None。"""
+    if names is None or isinstance(names, (str, bytes)):
+        return None
+    try:
+        items = list(names)
+    except TypeError:
+        return None
+    return [str(name) for name in items] if items else None
+
+
 def resolve_expected_features(model: Any) -> Optional[List[str]]:
     """モデルが学習時に使った特徴量名を解決する。解決できなければ None。
 
@@ -94,26 +105,24 @@ def resolve_expected_features(model: Any) -> Optional[List[str]]:
     属性が無い場合は AttributeError を送出するプロパティとして実装されている
     ため、``hasattr`` ではなく getattr チェーンで順に解決する。
 
-    引数はラッパー（``.model`` に推定器を持つ）でも生の推定器でもよい。
+    引数は ModelManager のラッパー（``.model`` に推定器を持つ）でも生の推定器
+    でもよい。
     """
     estimator = getattr(model, "model", model)
 
     for attr in ("feature_names_in_", "feature_name_"):
-        names = getattr(estimator, attr, None)
-        if names is not None and len(names) > 0:
-            return [str(name) for name in names]
+        resolved = _as_feature_list(getattr(estimator, attr, None))
+        if resolved is not None:
+            return resolved
 
     booster = getattr(estimator, "booster_", None)
-    if booster is not None:
-        try:
-            names = booster.feature_name()
-        except Exception:
-            logger.warning("booster から特徴量名を取得できません", exc_info=True)
-            return None
-        if names:
-            return [str(name) for name in names]
-
-    return None
+    if booster is None:
+        return None
+    try:
+        return _as_feature_list(booster.feature_name())
+    except Exception:
+        logger.warning("booster から特徴量名を取得できません", exc_info=True)
+        return None
 
 
 def predict_with_unified_model(
