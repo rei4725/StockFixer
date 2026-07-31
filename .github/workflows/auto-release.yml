@@ -80,7 +80,7 @@ jobs:
 
       - name: Set up Python
         if: steps.tag_check.outputs.exists == 'false'
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 

@@ -11,9 +11,13 @@ import psycopg
 
 from src.utils.db._bulk import bulk_insert
 from src.utils.db._connection import _db_connection
+from src.utils.db._read import coerce_object_numeric_columns
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+# 数値化しない列（date は timestamp、market/symbol は呼び出し元で既に drop 済みだが念のため含める）
+_NON_NUMERIC_COLUMNS = {"date", "market", "symbol"}
 
 
 def _ensure_columns(con: psycopg.Connection, df: pd.DataFrame) -> None:
@@ -107,7 +111,8 @@ def load_stock_features(market: str, symbol: str) -> Optional[pd.DataFrame]:
         return None
 
     drop_cols = [c for c in ["market", "symbol", "row_num"] if c in df.columns]
-    return df.drop(columns=drop_cols)
+    df = df.drop(columns=drop_cols)
+    return coerce_object_numeric_columns(df, exclude=_NON_NUMERIC_COLUMNS)
 
 
 def load_all_stock_features() -> pd.DataFrame:
@@ -130,6 +135,7 @@ def load_all_stock_features() -> pd.DataFrame:
     if "row_num" in df.columns:
         df = df.drop(columns=["row_num"])
 
+    df = coerce_object_numeric_columns(df, exclude=_NON_NUMERIC_COLUMNS)
     logger.info(f"DB読み込み完了: stock_features ({len(df)}行)")
     return df
 

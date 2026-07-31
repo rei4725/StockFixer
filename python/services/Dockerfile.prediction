@@ -1,0 +1,24 @@
+# 予測配信マイクロサービス用イメージ（本体 stockfixer とは別イメージ）。
+#
+# ビルド（python/ ディレクトリから）:
+#   docker build -f services/Dockerfile.prediction -t stockfixer-prediction:dev .
+#
+# 起動:
+#   docker run -p 5200:5200 -v "$(pwd)/models:/app/models:ro" stockfixer-prediction:dev
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# 推論に必要な依存のみをインストールする。
+# requirements.txt（本体用）は入れない — サービスは DB も yfinance も使わないため。
+# ML ライブラリのバージョンは requirements-service.txt 側で本体と同じピンに
+# 揃えてある（joblib モデルの互換性のため）。ここには直書きしない。
+COPY requirements-service.txt ./
+RUN pip install --no-cache-dir -r requirements-service.txt
+
+COPY services/ ./services/
+
+ENV PREDICTION_MODEL_DIR=/app/models/unified
+EXPOSE 5200
+
+CMD ["uvicorn", "services.prediction_service.app:app", "--host", "0.0.0.0", "--port", "5200"]
