@@ -18,7 +18,7 @@
 - サービス呼び出しの失敗（接続不可 / タイムアウト / 5xx）は例外を伝播させず、警告ログを出してインプロセス推論へフォールバックする
 - `services/` は `python/src/` の外に置く（import-linter のレイヤー契約の対象外とするため）
 - 本体の `src/` 配下から `services/` を import してはならない（逆方向も同様）
-- 新規依存（fastapi, uvicorn）は `requirements.txt` ではなく `requirements-service.txt` に記述する
+- サービスの依存はすべて `requirements-service.txt` に記述する（`requirements.txt` は変更しない）。ML ライブラリ（scikit-learn / xgboost / lightgbm / pandas）は joblib モデルの互換性のため **`requirements.txt` と同一のバージョンピン**を使う。Dockerfile にバージョンを直書きしないこと
 - 全モデルの推論が失敗した場合、HTTPステータスは 200 のまま `model_count: 0` で表現する
 - Conventional Commits 規約に従う（`feat:` / `test:` / `docs:` 等）
 - 本番設定（`python/.env`, `docker-compose.yml`）は今回変更しない
@@ -47,10 +47,21 @@
 `python/requirements-service.txt` を作成:
 
 ```
-# 予測配信マイクロサービス専用の依存。
-# 本体（requirements.txt）には含めない — サービスは別イメージでデプロイするため。
+# 予測配信マイクロサービス専用の依存定義。
+# fastapi/uvicorn は本体（requirements.txt）には含めない — サービスは別イメージで
+# デプロイするため。
 fastapi==0.120.1
 uvicorn==0.38.0
+
+# --- モデル読み込み・推論に必要な依存 ---
+# joblib モデルは本体が保存しサービスが読むため、バージョンがずれると
+# アンピクル失敗や推論結果の不一致を招く。requirements.txt と必ず同じピンを
+# 使うこと（本体側を更新する際はこちらも同時に更新する）。
+scikit-learn==1.9.0
+lightgbm==4.7.0
+xgboost==3.3.0
+pandas>=3.0.3,<4
+joblib>=1.4
 ```
 
 - [ ] **Step 2: パッケージの __init__.py を作成**
@@ -1323,14 +1334,10 @@ WORKDIR /app
 
 # 推論に必要な依存のみをインストールする。
 # requirements.txt（本体用）は入れない — サービスは DB も yfinance も使わないため。
+# ML ライブラリのバージョンは requirements-service.txt 側で本体と同じピンに
+# 揃えてある（joblib モデルの互換性のため）。ここには直書きしない。
 COPY requirements-service.txt ./
-RUN pip install --no-cache-dir -r requirements-service.txt \
-    && pip install --no-cache-dir \
-        "pandas>=2.2,<4" \
-        "scikit-learn>=1.5" \
-        "xgboost>=2.1" \
-        "lightgbm>=4.5" \
-        "joblib>=1.4"
+RUN pip install --no-cache-dir -r requirements-service.txt
 
 COPY services/ ./services/
 
