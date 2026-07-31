@@ -166,22 +166,32 @@ def predict_with_unified_model(
     # get_service_url() で先に判定するのは、未設定の既定パスで load_model_weights()
     # の DB クエリを余計に走らせないため（銘柄数ぶん積み上がるため無視できない）。
     if get_service_url() is not None:
-        service_weights = load_model_weights(market, symbol, model_types)
-        service_result = predict_via_service(
-            market=market,
-            symbol=symbol,
-            current_price=float(current_price),
-            features={
-                str(col): float(latest_X[col].iloc[0])
-                for col in latest_X.columns
-                if pd.notna(latest_X[col].iloc[0])
-            },
-            model_types=list(model_types),
-            model_weights=service_weights,
-        )
-        # None のときは下のインプロセス推論にそのままフォールバックする
-        if service_result is not None:
-            return service_result
+        try:
+            service_weights = load_model_weights(market, symbol, model_types)
+            numeric_X = latest_X.select_dtypes(include="number")
+            service_result = predict_via_service(
+                market=market,
+                symbol=symbol,
+                current_price=float(current_price),
+                features={
+                    str(col): float(numeric_X[col].iloc[0])
+                    for col in numeric_X.columns
+                    if pd.notna(numeric_X[col].iloc[0])
+                },
+                model_types=list(model_types),
+                model_weights=service_weights,
+            )
+            # None のときは下のインプロセス推論にそのままフォールバックする
+            if service_result is not None:
+                return service_result
+        except Exception:
+            logger.warning(
+                "推論サービス委譲処理で例外（インプロセス推論にフォールバック）: "
+                "market=%s symbol=%s",
+                market,
+                symbol,
+                exc_info=True,
+            )
 
     # 各モデルで予測（キャッシュされたモデルを使用）
     pred_prices = []

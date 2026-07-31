@@ -23,9 +23,7 @@ def client():
 
 def _make_model(pred_return: float):
     model = MagicMock()
-    inner = MagicMock()
-    inner.feature_names_in_ = ["a", "b"]
-    model.model = inner
+    model.feature_names_in_ = ["a", "b"]
     model.predict.return_value = pd.Series([pred_return])
     return model
 
