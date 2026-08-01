@@ -4,6 +4,7 @@ import unittest
 
 from src.prediction.output_invariants import (
     DEGRADED_SYMBOL_RATIO_THRESHOLD,
+    PredictionRunStats,
     evaluate_output_invariants,
 )
 from src.prediction.types import PredictionResult
@@ -161,6 +162,85 @@ class TestAsDetailsOutput(unittest.TestCase):
         # violations は A-3 のみ
         self.assertEqual(len(details["violations"]), 1)
         self.assertEqual(details["violations"][0]["id"], "A-3")
+
+
+class TestRegressionInvariants(unittest.TestCase):
+    def _healthy_previous(self) -> PredictionRunStats:
+        return PredictionRunStats(symbol_count=705, median_model_count=2.0, diff_ratio_stdev=0.01)
+
+    def test_b1_fires_on_large_symbol_drop(self):
+        report = evaluate_output_invariants(
+            requested_model_names=REQUESTED,
+            loaded_model_names=list(REQUESTED),
+            output_rows=make_rows(500, model_count=2),
+            previous_stats=self._healthy_previous(),
+        )
+        self.assertIn("B-1", report.violation_ids)
+        self.assertTrue(report.compared_with_previous)
+
+    def test_b1_silent_on_symbol_increase(self):
+        """銘柄追加は正常。片側判定であることを確認する。"""
+        report = evaluate_output_invariants(
+            requested_model_names=REQUESTED,
+            loaded_model_names=list(REQUESTED),
+            output_rows=make_rows(900, model_count=2),
+            previous_stats=self._healthy_previous(),
+        )
+        self.assertNotIn("B-1", report.violation_ids)
+
+    def test_b1_boundary_exactly_20_percent_drop_fires(self):
+        report = evaluate_output_invariants(
+            requested_model_names=REQUESTED,
+            loaded_model_names=list(REQUESTED),
+            output_rows=make_rows(564, model_count=2),  # 705 * 0.8
+            previous_stats=self._healthy_previous(),
+        )
+        self.assertIn("B-1", report.violation_ids)
+
+    def test_b2_fires_when_median_model_count_drops(self):
+        rows = make_rows(705, model_count=2)
+        for row in rows[:400]:
+            row.model_count = 1
+        report = evaluate_output_invariants(
+            requested_model_names=REQUESTED,
+            loaded_model_names=list(REQUESTED),
+            output_rows=rows,
+            previous_stats=self._healthy_previous(),
+        )
+        self.assertIn("B-2", report.violation_ids)
+
+    def test_b3_fires_when_stdev_shrinks_by_half(self):
+        report = evaluate_output_invariants(
+            requested_model_names=REQUESTED,
+            loaded_model_names=list(REQUESTED),
+            output_rows=make_rows(705, model_count=2, diff_ratio_step=0.00001),
+            previous_stats=self._healthy_previous(),
+        )
+        self.assertIn("B-3", report.violation_ids)
+
+    def test_b3_fires_on_zero_stdev_without_previous(self):
+        """全銘柄が同じ予測値。前回統計が無くても違反。"""
+        rows = make_rows(705, model_count=2)
+        for row in rows:
+            row.diff_ratio = 0.005
+        report = evaluate_output_invariants(
+            requested_model_names=REQUESTED,
+            loaded_model_names=list(REQUESTED),
+            output_rows=rows,
+        )
+        self.assertIn("B-3", report.violation_ids)
+
+    def test_regression_skipped_without_previous_stats(self):
+        """前回統計が無ければ急変ルールは評価されない。"""
+        rows = make_rows(1, model_count=2)
+        report = evaluate_output_invariants(
+            requested_model_names=REQUESTED,
+            loaded_model_names=list(REQUESTED),
+            output_rows=rows,
+        )
+        self.assertFalse(report.compared_with_previous)
+        for vid in ("B-1", "B-2"):
+            self.assertNotIn(vid, report.violation_ids)
 
 
 if __name__ == "__main__":

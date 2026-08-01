@@ -25,6 +25,13 @@ logger = get_logger(__name__)
 # A-2: model_count が期待値未満の銘柄が占める割合。これ以上で違反。
 DEGRADED_SYMBOL_RATIO_THRESHOLD = 0.5
 
+# B-1: 予測銘柄数の減少率。これ以上で違反（増加は鳴らさない）。
+SYMBOL_COUNT_DROP_THRESHOLD = 0.2
+
+# B-3: diff_ratio の標準偏差が前回比でこの倍率を下回る / 上回ると違反。
+DIFF_RATIO_STDEV_SHRINK_FACTOR = 0.5
+DIFF_RATIO_STDEV_GROW_FACTOR = 2.0
+
 
 # ---------------------------------------------------------------------------
 # データクラス
@@ -185,6 +192,76 @@ def _check_absolute(
 
 
 # ---------------------------------------------------------------------------
+# 急変チェック（前回ラン統計との比較）
+# ---------------------------------------------------------------------------
+
+
+def _check_regression(
+    stats: PredictionRunStats, previous: PredictionRunStats
+) -> list[InvariantViolation]:
+    violations: list[InvariantViolation] = []
+
+    # B-1: 予測銘柄数の急減（増加は正常なので片側判定）
+    if previous.symbol_count > 0:
+        drop_ratio = (previous.symbol_count - stats.symbol_count) / previous.symbol_count
+        if drop_ratio >= SYMBOL_COUNT_DROP_THRESHOLD:
+            violations.append(
+                InvariantViolation(
+                    violation_id="B-1",
+                    description=(
+                        f"予測銘柄数が急減: {previous.symbol_count} → {stats.symbol_count}"
+                    ),
+                    observed=drop_ratio,
+                    threshold=SYMBOL_COUNT_DROP_THRESHOLD,
+                )
+            )
+
+    # B-2: model_count 中央値の低下（上昇は改善なので片側判定）
+    if stats.median_model_count < previous.median_model_count:
+        violations.append(
+            InvariantViolation(
+                violation_id="B-2",
+                description=(
+                    f"model_count 中央値が低下: {previous.median_model_count} → "
+                    f"{stats.median_model_count}"
+                ),
+                observed=stats.median_model_count,
+                threshold=previous.median_model_count,
+            )
+        )
+
+    # B-3: 予測分布の急変
+    if previous.diff_ratio_stdev > 0:
+        ratio = stats.diff_ratio_stdev / previous.diff_ratio_stdev
+        if ratio < DIFF_RATIO_STDEV_SHRINK_FACTOR:
+            violations.append(
+                InvariantViolation(
+                    violation_id="B-3",
+                    description=(
+                        f"予測分散が急縮小: {previous.diff_ratio_stdev:.6f} → "
+                        f"{stats.diff_ratio_stdev:.6f}"
+                    ),
+                    observed=ratio,
+                    threshold=DIFF_RATIO_STDEV_SHRINK_FACTOR,
+                )
+            )
+        elif ratio > DIFF_RATIO_STDEV_GROW_FACTOR:
+            violations.append(
+                InvariantViolation(
+                    violation_id="B-3",
+                    description=(
+                        f"予測分散が急拡大: {previous.diff_ratio_stdev:.6f} → "
+                        f"{stats.diff_ratio_stdev:.6f}"
+                    ),
+                    observed=ratio,
+                    threshold=DIFF_RATIO_STDEV_GROW_FACTOR,
+                )
+            )
+
+    return violations
+
+
+# ---------------------------------------------------------------------------
 # 公開 API
 # ---------------------------------------------------------------------------
 
@@ -209,8 +286,25 @@ def evaluate_output_invariants(
     stats = build_run_stats_from_results(output_rows)
     violations = _check_absolute(requested_model_names, loaded_model_names, output_rows)
 
+    # B-3 の絶対条件: 全銘柄が同じ予測値（分散ゼロ）。前回統計を要さない。
+    # 1 銘柄しかない場合は分散 0 が自然なので除外する。
+    if stats is not None and stats.symbol_count >= 2 and stats.diff_ratio_stdev == 0.0:
+        violations.append(
+            InvariantViolation(
+                violation_id="B-3",
+                description="全銘柄の予測変化率が同一（分散ゼロ）",
+                observed=0.0,
+                threshold=0.0,
+            )
+        )
+
+    compared = False
+    if stats is not None and previous_stats is not None:
+        compared = True
+        violations.extend(_check_regression(stats, previous_stats))
+
     return InvariantReport(
         violations=violations,
         stats=stats,
-        compared_with_previous=False,
+        compared_with_previous=compared,
     )
