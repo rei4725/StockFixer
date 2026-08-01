@@ -288,6 +288,7 @@ def evaluate_output_invariants(
 
     # B-3 の絶対条件: 全銘柄が同じ予測値（分散ゼロ）。前回統計を要さない。
     # 1 銘柄しかない場合は分散 0 が自然なので除外する。
+    b3_absolute_fired = False
     if stats is not None and stats.symbol_count >= 2 and stats.diff_ratio_stdev == 0.0:
         violations.append(
             InvariantViolation(
@@ -297,11 +298,16 @@ def evaluate_output_invariants(
                 threshold=0.0,
             )
         )
+        b3_absolute_fired = True
 
     compared = False
     if stats is not None and previous_stats is not None:
         compared = True
-        violations.extend(_check_regression(stats, previous_stats))
+        regression_violations = _check_regression(stats, previous_stats)
+        # B-3 の絶対条件が発火している場合、回帰条件の B-3 を除外（二重発火防止）
+        if b3_absolute_fired:
+            regression_violations = [v for v in regression_violations if v.violation_id != "B-3"]
+        violations.extend(regression_violations)
 
     return InvariantReport(
         violations=violations,

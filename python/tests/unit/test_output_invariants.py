@@ -242,6 +242,28 @@ class TestRegressionInvariants(unittest.TestCase):
         for vid in ("B-1", "B-2"):
             self.assertNotIn(vid, report.violation_ids)
 
+    def test_b3_absolute_condition_takes_precedence_over_regression(self):
+        """分散ゼロ＋前回統計あり時の二重発火を防止。絶対条件が優先される。"""
+        rows = make_rows(705, model_count=2)
+        # 全銘柄を同じ値に設定（分散ゼロ）
+        for row in rows:
+            row.diff_ratio = 0.005
+
+        report = evaluate_output_invariants(
+            requested_model_names=REQUESTED,
+            loaded_model_names=list(REQUESTED),
+            output_rows=rows,
+            previous_stats=self._healthy_previous(),
+        )
+
+        # B-3 がちょうど 1 件だけ（二重発火しない）
+        self.assertEqual(report.violation_ids.count("B-3"), 1)
+
+        # 残った B-3 は絶対条件のもの（分散ゼロ）
+        b3_violations = [v for v in report.violations if v.violation_id == "B-3"]
+        self.assertEqual(len(b3_violations), 1)
+        self.assertIn("分散ゼロ", b3_violations[0].description)
+
 
 if __name__ == "__main__":
     unittest.main()
