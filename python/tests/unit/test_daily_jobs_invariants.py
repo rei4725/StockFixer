@@ -22,13 +22,24 @@ def _rows(count: int, model_count: int):
 
 
 class TestDailyPipelineInvariantWiring(unittest.TestCase):
-    def _run_pipeline(self, output_rows, loaded_models, previous):
+    def _run_pipeline(self, output_rows, loaded_models, previous, predict_side_effect=None):
         """日次パイプラインを最小のモックで走らせ、通知に渡った results を返す。"""
         captured = {}
 
         def fake_run_conditional_notification(results=None, **kwargs):
             captured["results"] = results
             return True
+
+        if predict_side_effect is not None:
+            predict_patch = patch(
+                "src.prediction.prediction_pipeline.predict_all_unified",
+                side_effect=predict_side_effect,
+            )
+        else:
+            predict_patch = patch(
+                "src.prediction.prediction_pipeline.predict_all_unified",
+                return_value=output_rows,
+            )
 
         with (
             patch("src.watchlist.batch_runner.load_target_symbols", return_value=[]),
@@ -41,10 +52,7 @@ class TestDailyPipelineInvariantWiring(unittest.TestCase):
                 "src.prediction.predict_unified.preload_models",
                 return_value=loaded_models,
             ),
-            patch(
-                "src.prediction.prediction_pipeline.predict_all_unified",
-                return_value=output_rows,
-            ),
+            predict_patch,
             patch("src.prediction.prediction_pipeline.output_top_worst_results"),
             patch(
                 "src.prediction.db.prediction_results.load_previous_run_stats",
@@ -57,6 +65,7 @@ class TestDailyPipelineInvariantWiring(unittest.TestCase):
             patch("src.reporting.discord.discord_utils.send_accuracy_summary"),
             patch("src.orchestration.jobs.daily.run_daily_drift_check"),
             patch("src.reporting.discord.discord_utils.send_daily_pipeline_completion"),
+            patch("src.reporting.discord.discord_utils.send_daily_pipeline_error"),
             patch(
                 "src.utils.alert_service.run_conditional_notification",
                 side_effect=fake_run_conditional_notification,
@@ -106,6 +115,23 @@ class TestDailyPipelineInvariantWiring(unittest.TestCase):
         )
         rule = next(r for r in results if r.rule_id == "NF-303-5")
         self.assertFalse(rule.triggered)
+
+    def test_prediction_stage_failure_propagates_without_notifying(self):
+        """[2/5] が CRITICAL 失敗した場合は例外が伝播し、通知段まで到達しない。
+
+        _handle_stage_error(PipelineStage.CRITICAL, ...) は常に True を返す
+        （src/orchestration/jobs/common.py 参照）ため、run_daily_pipeline() は
+        [2/5] の例外をそのまま re-raise する。[2.1/5]・[6/6] には到達しないので
+        NF-303-5 の A-0/A-3 分岐そのものはここでは検証しない
+        （その分岐は predict_all_unified が None を握りつぶす別経路で発生する）。
+        """
+        with self.assertRaises(RuntimeError):
+            self._run_pipeline(
+                output_rows=None,
+                loaded_models=["UnifiedStockXGBoost", "UnifiedStockLightGBM"],
+                previous=None,
+                predict_side_effect=RuntimeError("boom"),
+            )
 
 
 if __name__ == "__main__":
