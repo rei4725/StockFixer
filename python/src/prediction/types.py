@@ -16,6 +16,19 @@ from src.domain.types import PredictionResult as PredictionResult  # noqa: F401
 from src.domain.types import ShapFeatureContribution as ShapFeatureContribution  # noqa: F401
 from src.domain.types import SignalSnapshot as SignalSnapshot  # noqa: F401
 
+# 統合モデル（production, horizon=1d）の canonical なモデル名リスト。
+#
+# 「要求リスト」（orchestration/jobs/daily.py の requested_models）と
+# 「実際に推論へ使うリスト」（prediction_pipeline.py の predict_all_unified 内
+# model_types）が別々のリテラルだと、将来モデルを1本追加したときに片方だけ
+# 更新されて出力 invariant の A-1/A-2 がサイレントに沈黙・誤発火する
+# （設定ドリフトを検知する機構が設定ドリフトで壊れる、I-4 対策）。
+# 両方がこの定数を参照することで単一の情報源にする。
+#
+# shadow_evaluation.py の _UNIFIED_PRODUCTION_NAMES（Transformer を含む別集合）
+# とは別物なので混同しないこと。
+UNIFIED_PREDICTION_MODEL_NAMES: list[str] = ["UnifiedStockXGBoost", "UnifiedStockLightGBM"]
+
 
 @dataclass
 class TrainingMetrics:

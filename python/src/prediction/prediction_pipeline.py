@@ -130,8 +130,10 @@ def predict_all_unified(max_workers=MAX_WORKERS):
         list[PredictionResult]: 各銘柄の予測結果
     """
     from src.prediction.predict_unified import predict_with_unified_model, preload_models
+    from src.prediction.types import UNIFIED_PREDICTION_MODEL_NAMES
 
-    model_types = ["UnifiedStockXGBoost", "UnifiedStockLightGBM"]
+    # daily.py の requested_models と同じ定数を参照する（I-4 対策）。
+    model_types = list(UNIFIED_PREDICTION_MODEL_NAMES)
 
     # モデルを事前ロード（並列実行前に1回だけロード）
     preload_models(model_types)

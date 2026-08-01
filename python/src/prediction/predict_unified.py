@@ -77,7 +77,9 @@ def preload_models(model_types: List[str] = None) -> List[str]:
         出力 invariant の A-1 / A-2 が期待値としてこれを使う。
     """
     if model_types is None:
-        model_types = ["UnifiedStockXGBoost", "UnifiedStockLightGBM"]
+        from src.prediction.types import UNIFIED_PREDICTION_MODEL_NAMES
+
+        model_types = list(UNIFIED_PREDICTION_MODEL_NAMES)
 
     logger.info("モデルを事前ロード中: %s", model_types)
     loaded: List[str] = []
