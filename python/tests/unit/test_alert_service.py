@@ -448,6 +448,28 @@ class TestAlertResultDiscordLines(unittest.TestCase):
         lines = r.as_discord_lines()
         self.assertTrue(any("✅" in line for line in lines))
 
+    def test_violations_are_rendered(self):
+        r = AlertResult(
+            "NF-303-5",
+            "予測出力の健全性",
+            True,
+            1,
+            1,
+            details={
+                "violations": [
+                    {
+                        "id": "A-2",
+                        "description": "説明",
+                        "observed": 1.5,
+                        "threshold": 1.0,
+                    }
+                ]
+            },
+        )
+        lines = r.as_discord_lines()
+        self.assertTrue(any("A-2" in line for line in lines))
+        self.assertTrue(any("1.5" in line for line in lines))
+
 
 class TestCountConsecutiveFailuresEdgeCases(unittest.TestCase):
     def test_none_path_uses_results_dir(self):
