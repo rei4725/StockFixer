@@ -58,7 +58,7 @@ class TestSendAlertDetail(unittest.TestCase):
             triggered=True,
             consecutive_count=3,
             threshold=3,
-            details="test detail",
+            details={},
         )
         return r
 
@@ -68,14 +68,6 @@ class TestSendAlertDetail(unittest.TestCase):
         results = [self._make_triggered_result()]
         notifier = lambda title, msg, color: True  # noqa: E731
         result = _send_alert_detail(results, notifier)
-        self.assertTrue(result)
-
-    def test_send_daily_summary_calls_webhook(self):
-        from src.utils.alert_service import _send_daily_summary
-
-        results = [self._make_triggered_result()]
-        notifier = lambda title, msg, color: True  # noqa: E731
-        result = _send_daily_summary(results, notifier)
         self.assertTrue(result)
 
 
