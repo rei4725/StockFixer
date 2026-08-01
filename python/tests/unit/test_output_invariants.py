@@ -296,5 +296,52 @@ class TestPreloadModelsReturnValue(unittest.TestCase):
         self.assertEqual(loaded, ["UnifiedStockXGBoost", "UnifiedStockLightGBM"])
 
 
+class TestLoadPreviousRunStats(unittest.TestCase):
+    def _patched_connection(self, rows_for_timestamp, rows_for_data):
+        from unittest.mock import MagicMock, patch
+
+        cursor = MagicMock()
+        cursor.fetchone.return_value = rows_for_timestamp
+        cursor.fetchall.return_value = rows_for_data
+
+        con = MagicMock()
+        con.execute.return_value = cursor
+
+        ctx = MagicMock()
+        ctx.__enter__.return_value = con
+        ctx.__exit__.return_value = False
+
+        return patch("src.prediction.db.prediction_results._db_connection", return_value=ctx)
+
+    def test_returns_none_when_no_previous_run(self):
+        from src.prediction.db.prediction_results import load_previous_run_stats
+
+        with self._patched_connection(None, []):
+            result = load_previous_run_stats("20260801_073000")
+
+        self.assertIsNone(result)
+
+    def test_returns_model_counts_and_diff_ratios(self):
+        from src.prediction.db.prediction_results import load_previous_run_stats
+
+        with self._patched_connection(("20260731_073000",), [(2, 0.01), (2, -0.02), (1, 0.005)]):
+            result = load_previous_run_stats("20260801_073000")
+
+        self.assertEqual(result, ([2, 2, 1], [0.01, -0.02, 0.005]))
+
+    def test_returns_none_on_db_error(self):
+        from unittest.mock import patch
+
+        from src.prediction.db.prediction_results import load_previous_run_stats
+
+        with patch(
+            "src.prediction.db.prediction_results._db_connection",
+            side_effect=RuntimeError("connection refused"),
+        ):
+            result = load_previous_run_stats("20260801_073000")
+
+        self.assertIsNone(result)
+
+
 if __name__ == "__main__":
     unittest.main()

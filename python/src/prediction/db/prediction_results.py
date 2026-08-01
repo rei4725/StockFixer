@@ -91,6 +91,49 @@ def load_latest_prediction_timestamp() -> Optional[str]:
             return None
 
 
+def load_previous_run_stats(
+    exclude_predicted_at: str, model_version: str = "production"
+) -> Optional[tuple[list[int], list[float]]]:
+    """今回を除く直近ランの model_count / diff_ratio を返す。
+
+    出力 invariant の急変チェック（B-1/B-2/B-3）が使う。集計は行わず生の値を
+    返す。中央値・標準偏差の計算は Python 側で行い、SQL 方言差を持ち込まない。
+
+    Args:
+        exclude_predicted_at: 今回ランの predicted_at（これより前を対象にする）
+        model_version: 対象のモデルバージョン
+
+    Returns:
+        (model_counts, diff_ratios) のタプル。前回ランが無ければ None。
+    """
+    try:
+        with _db_connection() as con:
+            row = con.execute(
+                "SELECT predicted_at FROM prediction_results "
+                "WHERE model_version = %s AND predicted_at < %s "
+                "ORDER BY predicted_at DESC LIMIT 1",
+                (model_version, exclude_predicted_at),
+            ).fetchone()
+            if not row:
+                logger.info("前回ラン統計なし（比較をスキップ）")
+                return None
+
+            previous_at = row[0]
+            rows = con.execute(
+                "SELECT model_count, diff_ratio FROM prediction_results "
+                "WHERE predicted_at = %s AND model_version = %s",
+                (previous_at, model_version),
+            ).fetchall()
+
+        model_counts = [int(r[0]) for r in rows if r[0] is not None]
+        diff_ratios = [float(r[1]) for r in rows if r[1] is not None]
+        logger.info("前回ラン統計を取得: predicted_at=%s 件数=%d", previous_at, len(model_counts))
+        return model_counts, diff_ratios
+    except Exception as e:
+        logger.error(f"前回ラン統計の取得失敗: {e}", exc_info=True)
+        return None
+
+
 def load_prediction_results(
     predicted_at: str = None,
     market: str = None,
