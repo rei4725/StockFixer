@@ -282,6 +282,21 @@ def check_prediction_output_rule(
     if violation_ids is None:
         payload["violation_ids"] = ["A-0"]
         payload["note"] = "出力 invariant の評価が実行されなかった"
+        # as_discord_lines() は details["violations"] しか描画しない。ここを
+        # 空のままにすると、A-0 発報時に Discord 本文へ理由が一切出ず、運用者は
+        # 「連続回数: 1 / 閾値: 1」しか受け取れない（I-3 対策）。
+        payload["violations"] = [
+            {
+                "id": "A-0",
+                "description": (
+                    "出力 invariant の評価が実行されなかった"
+                    "（[2.1/5] 出力 invariant 評価ステージで例外が発生した可能性がある。"
+                    "ログを確認すること）"
+                ),
+                "observed": 0.0,
+                "threshold": 1.0,
+            }
+        ]
         logger.warning("予測出力チェック: 評価が実行されていない（違反として扱う）")
         return AlertResult(
             rule_id="NF-303-5",

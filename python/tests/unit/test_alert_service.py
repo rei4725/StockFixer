@@ -286,6 +286,26 @@ class TestPredictionOutputRule(unittest.TestCase):
         self.assertTrue(result.triggered)
         self.assertIn("A-0", result.details.get("violation_ids", []))
 
+    def test_unevaluated_populates_violations_for_discord_rendering(self):
+        """I-3: A-0（評価未実行）でも details['violations'] に理由が入ること。
+
+        as_discord_lines() は details['violations'] しか描画しない。ここが
+        空だと、評価が例外で落ちた朝に運用者が受け取る Discord 本文は
+        「連続回数: 1 / 閾値: 1」だけになり、何が起きたのか伝わらない。
+        """
+        from src.utils.alert_service import check_prediction_output_rule
+
+        result = check_prediction_output_rule(None)
+
+        violations = result.details.get("violations")
+        self.assertTrue(violations, "A-0 でも violations は空であってはならない")
+        self.assertEqual(violations[0]["id"], "A-0")
+        self.assertTrue(violations[0]["description"])
+
+        lines = result.as_discord_lines()
+        self.assertTrue(any("A-0" in line for line in lines))
+        self.assertTrue(any("評価が実行されなかった" in line for line in lines))
+
 
 # ---------------------------------------------------------------------------
 # evaluate_alert_conditions

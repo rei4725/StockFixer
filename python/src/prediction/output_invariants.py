@@ -180,8 +180,8 @@ def _check_absolute(
                 InvariantViolation(
                     violation_id="A-2",
                     description=(
-                        f"アンサンブル縮退: {degraded}/{len(output_rows)} 銘柄が "
-                        f"{loaded_count} モデル中 {loaded_count} 未満で予測されている"
+                        f"アンサンブル縮退: {degraded}/{len(output_rows)} 銘柄で "
+                        f"ロード済み {loaded_count} モデルのうち一部しか推論に成功していない"
                     ),
                     observed=ratio,
                     threshold=DEGRADED_SYMBOL_RATIO_THRESHOLD,
