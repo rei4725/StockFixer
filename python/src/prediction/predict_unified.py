@@ -85,6 +85,45 @@ def preload_models(model_types: List[str] = None):
     logger.info("モデルの事前ロード完了")
 
 
+def _as_feature_list(names: Any) -> Optional[List[str]]:
+    """特徴量名の並びを list[str] に正規化する。名前として使えなければ None。"""
+    if names is None or isinstance(names, (str, bytes)):
+        return None
+    try:
+        items = list(names)
+    except TypeError:
+        return None
+    return [str(name) for name in items] if items else None
+
+
+def resolve_expected_features(model: Any) -> Optional[List[str]]:
+    """モデルが学習時に使った特徴量名を解決する。解決できなければ None。
+
+    sklearn 互換の ``feature_names_in_`` だけを見ると LightGBM を取りこぼす。
+    lightgbm がこの属性を持つようになったのは 4.5.0 からで、それ以前に pickle
+    されたモデルは LightGBM 独自の ``feature_name_`` にしか名前を持たない。
+    属性が無い場合は AttributeError を送出するプロパティとして実装されている
+    ため、``hasattr`` ではなく getattr チェーンで順に解決する。
+
+    引数は ModelManager のラッパー（``.model`` に推定器を持つ）でも生の推定器
+    でもよい。
+
+    ``booster_.feature_name()`` へはフォールバックしない。DataFrame で学習した
+    モデルなら上の2属性で必ず解決でき、numpy 配列で学習したモデルでは booster が
+    ``f0`` / ``Column_0`` といった合成名を返すため、それを本物の特徴量名として
+    扱うと全列 0 埋めのフレームで predict が「成功」してしまう。解決できない
+    ことを None で表明する方が安全である。
+    """
+    estimator = getattr(model, "model", model)
+
+    for attr in ("feature_names_in_", "feature_name_"):
+        resolved = _as_feature_list(getattr(estimator, attr, None))
+        if resolved is not None:
+            return resolved
+
+    return None
+
+
 def predict_with_unified_model(
     market: str,
     symbol: str,
@@ -123,9 +162,16 @@ def predict_with_unified_model(
     if "y" not in df.columns:
         return None
 
-    # 特徴量列（文字列列とyを除外）
-    exclude_cols = ["y", "market", "symbol"]
-    feature_cols = [c for c in df.columns if c not in exclude_cols]
+    # 特徴量列（文字列列・日付列・ターゲットを除外）
+    # 除外条件は学習側の prepare_unified_features() と揃えること。学習時に
+    # 存在しない date 列を予測時だけ通すと、アラインメントを解決できなかった
+    # 場合に日付が predict() へ流れ込んで失敗する（#615）。
+    exclude_cols = ["y", "market", "symbol", "date"]
+    feature_cols = [
+        c
+        for c in df.columns
+        if c not in exclude_cols and not pd.api.types.is_datetime64_any_dtype(df[c])
+    ]
     X = df[feature_cols]
 
     # 最新行を取得（必ずコピーを作成）
@@ -203,9 +249,9 @@ def predict_with_unified_model(
                 continue
 
             # モデルの特徴量と入力特徴量を揃える（コピーを作成して変更）
-            if hasattr(model, "model") and hasattr(model.model, "feature_names_in_"):
-                expected_features = list(model.model.feature_names_in_)
-                latest_X_aligned = latest_X.copy()
+            latest_X_aligned = latest_X.copy()
+            expected_features = resolve_expected_features(model)
+            if expected_features is not None:
                 # 不足している特徴量は0で埋める
                 for feat in expected_features:
                     if feat not in latest_X_aligned.columns:
@@ -213,7 +259,10 @@ def predict_with_unified_model(
                 # 期待される特徴量のみ選択
                 latest_X_aligned = latest_X_aligned[expected_features]
             else:
-                latest_X_aligned = latest_X.copy()
+                logger.warning(
+                    "モデルの期待特徴量を解決できずアラインメントをスキップ: model=%s",
+                    model_name,
+                )
 
             pred = model.predict(latest_X_aligned)
             if isinstance(pred, pd.Series):
@@ -227,8 +276,10 @@ def predict_with_unified_model(
             pred_prices.append(pred_price)
             succeeded_model_names.append(model_name)
         except Exception:
-            logger.warning(
-                "モデル予測スキップ: model=%s market=%s symbol=%s",
+            # WARNING では埋もれる。1モデル落ちるとアンサンブルが単一モデルに
+            # 縮退したまま予測値は出続けるため、失敗が見えないと気づけない（#615）。
+            logger.error(
+                "モデル予測スキップ（アンサンブルが縮退します）: model=%s market=%s symbol=%s",
                 model_name,
                 market,
                 symbol,
