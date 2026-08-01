@@ -99,5 +99,69 @@ class TestAbsoluteInvariants(unittest.TestCase):
         self.assertIsNone(report.stats)
 
 
+class TestAsDetailsOutput(unittest.TestCase):
+    def test_as_details_with_violations(self):
+        """as_details() が違反を持つレポートを dict に変換できることを検証。"""
+        report = evaluate_output_invariants(
+            requested_model_names=REQUESTED,
+            loaded_model_names=["UnifiedStockXGBoost"],
+            output_rows=make_rows(705, model_count=1),
+        )
+        # A-1 と A-2 が両方発火するはず
+        self.assertTrue(report.has_violation)
+        self.assertGreaterEqual(len(report.violations), 1)
+
+        details = report.as_details()
+
+        # トップレベルのキーを検証
+        self.assertIn("compared_with_previous", details)
+        self.assertIn("symbol_count", details)
+        self.assertIn("median_model_count", details)
+        self.assertIn("diff_ratio_stdev", details)
+        self.assertIn("violations", details)
+
+        # stats の値を検証（予測がある場合）
+        self.assertIsInstance(details["symbol_count"], int)
+        self.assertIsInstance(details["median_model_count"], (int, float))
+        self.assertIsInstance(details["diff_ratio_stdev"], (int, float))
+        self.assertFalse(details["compared_with_previous"])
+
+        # violations が dict のリストであることを検証
+        self.assertIsInstance(details["violations"], list)
+        self.assertEqual(len(details["violations"]), len(report.violations))
+
+        for violation_dict in details["violations"]:
+            self.assertIn("id", violation_dict)
+            self.assertIn("description", violation_dict)
+            self.assertIn("observed", violation_dict)
+            self.assertIn("threshold", violation_dict)
+            self.assertIsInstance(violation_dict["id"], str)
+            self.assertIsInstance(violation_dict["description"], str)
+            self.assertIsInstance(violation_dict["observed"], (int, float))
+            self.assertIsInstance(violation_dict["threshold"], (int, float))
+
+    def test_as_details_with_stats_none(self):
+        """as_details() が stats=None のレポートで適切なデフォルト値を返すことを検証。"""
+        report = evaluate_output_invariants(
+            requested_model_names=REQUESTED,
+            loaded_model_names=list(REQUESTED),
+            output_rows=[],
+        )
+        # A-3 が発火し、stats は None になる
+        self.assertIn("A-3", report.violation_ids)
+        self.assertIsNone(report.stats)
+
+        details = report.as_details()
+
+        # stats=None のときは 0/0.0 がセットされるべき
+        self.assertEqual(details["symbol_count"], 0)
+        self.assertEqual(details["median_model_count"], 0.0)
+        self.assertEqual(details["diff_ratio_stdev"], 0.0)
+
+        # violations は A-3 のみ
+        self.assertEqual(len(details["violations"]), 1)
+        self.assertEqual(details["violations"][0]["id"], "A-3")
+
+
 if __name__ == "__main__":
     unittest.main()
