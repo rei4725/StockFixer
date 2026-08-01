@@ -67,22 +67,29 @@ def get_cached_model(model_name: str):
         return _model_cache[model_name]
 
 
-def preload_models(model_types: List[str] = None):
+def preload_models(model_types: List[str] = None) -> List[str]:
     """
     モデルを事前にロードしてキャッシュする
     並列処理の前に呼び出すことで、スレッド間でモデルを共有できる
+
+    Returns:
+        ロードに成功したモデル名のリスト（要求順）。
+        出力 invariant の A-1 / A-2 が期待値としてこれを使う。
     """
     if model_types is None:
         model_types = ["UnifiedStockXGBoost", "UnifiedStockLightGBM"]
 
     logger.info("モデルを事前ロード中: %s", model_types)
+    loaded: List[str] = []
     for model_name in model_types:
         model = get_cached_model(model_name)
         if model is not None:
             logger.info("  - %s: ロード完了", model_name)
+            loaded.append(model_name)
         else:
             logger.info("  - %s: 見つかりません", model_name)
-    logger.info("モデルの事前ロード完了")
+    logger.info("モデルの事前ロード完了: %d/%d", len(loaded), len(model_types))
+    return loaded
 
 
 def _as_feature_list(names: Any) -> Optional[List[str]]:

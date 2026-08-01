@@ -265,5 +265,36 @@ class TestRegressionInvariants(unittest.TestCase):
         self.assertIn("分散ゼロ", b3_violations[0].description)
 
 
+class TestPreloadModelsReturnValue(unittest.TestCase):
+    def test_returns_only_successfully_loaded_names(self):
+        from unittest.mock import patch
+
+        from src.prediction.predict_unified import preload_models
+
+        def fake_get_cached_model(name):
+            return object() if name == "UnifiedStockXGBoost" else None
+
+        with patch(
+            "src.prediction.predict_unified.get_cached_model",
+            side_effect=fake_get_cached_model,
+        ):
+            loaded = preload_models(["UnifiedStockXGBoost", "UnifiedStockLightGBM"])
+
+        self.assertEqual(loaded, ["UnifiedStockXGBoost"])
+
+    def test_returns_all_names_when_all_load(self):
+        from unittest.mock import patch
+
+        from src.prediction.predict_unified import preload_models
+
+        with patch(
+            "src.prediction.predict_unified.get_cached_model",
+            return_value=object(),
+        ):
+            loaded = preload_models(["UnifiedStockXGBoost", "UnifiedStockLightGBM"])
+
+        self.assertEqual(loaded, ["UnifiedStockXGBoost", "UnifiedStockLightGBM"])
+
+
 if __name__ == "__main__":
     unittest.main()
