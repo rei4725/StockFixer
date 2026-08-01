@@ -13,15 +13,18 @@ logger = get_logger(__name__)
 
 def run_daily_pipeline():
     """
-    毎日実行: データ取得 → 予測 → Challenger shadow 予測 → 精度チェック → ドリフト監視 → Discord通知
+    毎日実行: データ取得 → 予測 → 出力invariant評価 → Challenger shadow 予測
+             → 精度チェック → ドリフト監視 → Discord通知 → 運用アラート評価
 
     流れ:
         1. 全マーケットのデータを取得（バッチ）
         2. Top10/Worst10の予測を実行（production）
+        2.1. 出力 invariant 評価（非致命的。結果は 6 で通知する）
         2.5. Challenger shadow 予測（モデルが存在する場合のみ、非致命的）
         3. 前日予測の精度チェック: production / challenger それぞれ記録（非致命的）
         4. 日次ドリフトチェック（閾値超過銘柄を自動再学習）
         5. Discord通知
+        6. 運用アラート評価（NF-303。条件成立時のみ発報）
     """
     logger.info("=== 日次パイプライン開始 ===")
 
@@ -50,7 +53,19 @@ def run_daily_pipeline():
     logger.info("[2/5] 予測開始 (production)")
     from src.prediction.prediction_pipeline import output_top_worst_results, predict_all_unified
 
+    # 出力 invariant 用。None は「評価が実行されなかった」を意味する（#615 対策）
+    prediction_violation_ids: list[str] | None = None
+    prediction_details: dict | None = None
+
+    requested_models = ["UnifiedStockXGBoost", "UnifiedStockLightGBM"]
+    loaded_models: list[str] = []
+    output_rows: list = []
+
     try:
+        from src.prediction.predict_unified import preload_models
+
+        loaded_models = preload_models(requested_models)
+
         output_rows = predict_all_unified()
         output_top_worst_results(
             output_rows, mode="unified", shadow_mode=True, model_version="production"
@@ -64,6 +79,32 @@ def run_daily_pipeline():
             send_daily_pipeline_error,
         ):
             raise
+
+    # 2.1. 出力 invariant 評価（NON_CRITICAL: 健全性チェックが本体を止めてはならない）
+    logger.info("[2.1/5] 出力 invariant 評価開始")
+    try:
+        from src.prediction.db import load_latest_prediction_timestamp
+        from src.prediction.db.prediction_results import load_previous_run_stats
+        from src.prediction.output_invariants import build_run_stats, evaluate_output_invariants
+
+        previous_stats = None
+        current_at = load_latest_prediction_timestamp()
+        if current_at:
+            previous_raw = load_previous_run_stats(current_at)
+            if previous_raw is not None:
+                previous_stats = build_run_stats(previous_raw[0], previous_raw[1])
+
+        report = evaluate_output_invariants(
+            requested_model_names=requested_models,
+            loaded_model_names=loaded_models,
+            output_rows=output_rows,
+            previous_stats=previous_stats,
+        )
+        prediction_violation_ids = report.violation_ids
+        prediction_details = report.as_details()
+        logger.info("[2.1/5] 出力 invariant 評価完了: %s", prediction_details)
+    except Exception as e:
+        _handle_stage_error(PipelineStage.NON_CRITICAL, "[2.1/5] 出力 invariant 評価", e)
 
     # 2.5. Challenger shadow 予測（NON_CRITICAL: モデルが存在しない場合はスキップ、失敗しても継続）
     logger.info("[2.5/5] Challenger shadow 予測開始")
@@ -119,6 +160,21 @@ def run_daily_pipeline():
     except Exception as e:
         if _handle_stage_error(PipelineStage.CRITICAL, "[5/5] Discord通知", e):
             raise
+
+    # 6. 運用アラート評価（NON_CRITICAL: 条件成立時のみ Discord へ発報する）
+    logger.info("[6/6] 運用アラート評価開始")
+    try:
+        from src.reporting.discord.webhook_sender import send_webhook_notification
+        from src.utils.alert_service import evaluate_alert_conditions, run_conditional_notification
+
+        alert_results = evaluate_alert_conditions(
+            prediction_violation_ids=prediction_violation_ids,
+            prediction_details=prediction_details,
+        )
+        run_conditional_notification(results=alert_results, notifier=send_webhook_notification)
+        logger.info("[6/6] 運用アラート評価完了")
+    except Exception as e:
+        _handle_stage_error(PipelineStage.NON_CRITICAL, "[6/6] 運用アラート評価", e)
 
     logger.info("=== 日次パイプライン完了 ===")
 
