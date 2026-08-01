@@ -77,60 +77,78 @@ def save_prediction_results(predicted_at: str, results: list[PredictionResult]) 
     logger.info(f"DB保存完了: prediction_results [{predicted_at}] ({len(save_df)}行)")
 
 
-def load_latest_prediction_timestamp() -> Optional[str]:
-    """最新の predicted_at タイムスタンプを返す。なければ None。"""
+def load_latest_prediction_timestamp(model_version: Optional[str] = None) -> Optional[str]:
+    """最新の predicted_at タイムスタンプを返す。なければ None。
+
+    Args:
+        model_version: 指定時はそのモデルバージョンの行に限定して最新を取る。
+            None なら全バージョン横断で最新（従来互換）。
+
+            prediction_results には production / challenger が同居しており、
+            同一ランでも保存タイミングが異なるため predicted_at がバージョンごとに
+            ズレる（production 保存後に challenger を保存する）。バージョンを
+            指定せず「直近ラン」を特定しようとすると、別バージョンの新しい
+            タイムスタンプを誤って掴んでしまう（C-1 対策）。
+    """
+    query = "SELECT DISTINCT predicted_at FROM prediction_results"
+    params: list = []
+    if model_version is not None:
+        query += " WHERE model_version = %s"
+        params.append(model_version)
+    query += " ORDER BY predicted_at DESC LIMIT 1"
+
     with _db_connection() as con:
         try:
-            result = con.execute(
-                "SELECT DISTINCT predicted_at FROM prediction_results "
-                "ORDER BY predicted_at DESC LIMIT 1"
-            ).fetchone()
+            result = con.execute(query, params).fetchone()
             return result[0] if result else None
         except Exception as e:
             logger.error(f"最新予測タイムスタンプ取得失敗: {e}", exc_info=True)
             return None
 
 
-def load_previous_run_stats(
-    exclude_predicted_at: str, model_version: str = "production"
+def load_run_stats_at(
+    predicted_at: str, model_version: str = "production"
 ) -> Optional[tuple[list[int], list[float]]]:
-    """今回を除く直近ランの model_count / diff_ratio を返す。
+    """指定した predicted_at 時点の model_count / diff_ratio を返す。
 
-    出力 invariant の急変チェック（B-1/B-2/B-3）が使う。集計は行わず生の値を
+    出力 invariant の急変チェック（B-1/B-2/B-3）が使う。prediction_results は
+    銘柄ごとの最新1行だけを保持するスナップショットで、保存は Delete-Insert
+    方式のため、保存後に「前回ラン」を探そうとしても今回ランが上書き済みで
+    見つからない（C-1 対策）。そのため呼び出し元は **保存前** に、その時点の
+    最新 predicted_at（＝比較したい前回ラン）を渡すこと。集計は行わず生の値を
     返す。中央値・標準偏差の計算は Python 側で行い、SQL 方言差を持ち込まない。
 
     Args:
-        exclude_predicted_at: 今回ランの predicted_at（これより前を対象にする）
+        predicted_at: 対象ランの predicted_at（この時点そのものを対象にする。
+            「これより前」を探す旧 load_previous_run_stats とは意味が異なる）
         model_version: 対象のモデルバージョン
 
     Returns:
-        (model_counts, diff_ratios) のタプル。前回ランが無ければ None。
+        (model_counts, diff_ratios) のタプル。行が1件も無ければ None。
+
+        NULL は行単位でペアを保ったまま除外する。旧 load_previous_run_stats は
+        2つのリストを独立にフィルタしており、片方だけ NULL の行があると
+        2リストの長さがズレる不具合を持っていた。
     """
     try:
         with _db_connection() as con:
-            row = con.execute(
-                "SELECT predicted_at FROM prediction_results "
-                "WHERE model_version = %s AND predicted_at < %s "
-                "ORDER BY predicted_at DESC LIMIT 1",
-                (model_version, exclude_predicted_at),
-            ).fetchone()
-            if not row:
-                logger.info("前回ラン統計なし（比較をスキップ）")
-                return None
-
-            previous_at = row[0]
             rows = con.execute(
                 "SELECT model_count, diff_ratio FROM prediction_results "
                 "WHERE predicted_at = %s AND model_version = %s",
-                (previous_at, model_version),
+                (predicted_at, model_version),
             ).fetchall()
 
-        model_counts = [int(r[0]) for r in rows if r[0] is not None]
-        diff_ratios = [float(r[1]) for r in rows if r[1] is not None]
-        logger.info("前回ラン統計を取得: predicted_at=%s 件数=%d", previous_at, len(model_counts))
+        if not rows:
+            logger.info("指定ランの統計なし: predicted_at=%s", predicted_at)
+            return None
+
+        pairs = [(r[0], r[1]) for r in rows if r[0] is not None and r[1] is not None]
+        model_counts = [int(mc) for mc, _ in pairs]
+        diff_ratios = [float(dr) for _, dr in pairs]
+        logger.info("ラン統計を取得: predicted_at=%s 件数=%d", predicted_at, len(model_counts))
         return model_counts, diff_ratios
     except Exception as e:
-        logger.error(f"前回ラン統計の取得失敗: {e}", exc_info=True)
+        logger.error(f"ラン統計の取得失敗: {e}", exc_info=True)
         return None
 
 

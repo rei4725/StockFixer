@@ -296,12 +296,19 @@ class TestPreloadModelsReturnValue(unittest.TestCase):
         self.assertEqual(loaded, ["UnifiedStockXGBoost", "UnifiedStockLightGBM"])
 
 
-class TestLoadPreviousRunStats(unittest.TestCase):
-    def _patched_connection(self, rows_for_timestamp, rows_for_data):
+class TestLoadRunStatsAt(unittest.TestCase):
+    """load_run_stats_at のテスト。
+
+    C-1 対策: prediction_results は Delete-Insert のスナップショットテーブル
+    なので、保存後に「前回ラン」を探す旧 load_previous_run_stats は毎日
+    None を返していた（今回の保存で上書き済みのため）。保存前に「今この
+    瞬間の最新 predicted_at＝前回ラン」を指定して取得する新関数がこれ。
+    """
+
+    def _patched_connection(self, rows_for_data):
         from unittest.mock import MagicMock, patch
 
         cursor = MagicMock()
-        cursor.fetchone.return_value = rows_for_timestamp
         cursor.fetchall.return_value = rows_for_data
 
         con = MagicMock()
@@ -313,32 +320,55 @@ class TestLoadPreviousRunStats(unittest.TestCase):
 
         return patch("src.prediction.db.prediction_results._db_connection", return_value=ctx)
 
-    def test_returns_none_when_no_previous_run(self):
-        from src.prediction.db.prediction_results import load_previous_run_stats
+    def test_returns_none_when_no_rows(self):
+        from src.prediction.db.prediction_results import load_run_stats_at
 
-        with self._patched_connection(None, []):
-            result = load_previous_run_stats("20260801_073000")
+        with self._patched_connection([]):
+            result = load_run_stats_at("20260801_073000")
 
         self.assertIsNone(result)
 
     def test_returns_model_counts_and_diff_ratios(self):
-        from src.prediction.db.prediction_results import load_previous_run_stats
+        from src.prediction.db.prediction_results import load_run_stats_at
 
-        with self._patched_connection(("20260731_073000",), [(2, 0.01), (2, -0.02), (1, 0.005)]):
-            result = load_previous_run_stats("20260801_073000")
+        with self._patched_connection([(2, 0.01), (2, -0.02), (1, 0.005)]):
+            result = load_run_stats_at("20260801_073000")
 
         self.assertEqual(result, ([2, 2, 1], [0.01, -0.02, 0.005]))
+
+    def test_null_rows_are_excluded_pairwise(self):
+        """model_count / diff_ratio のどちらか片方だけ NULL の行があっても
+        2つのリストの長さがズレないこと。
+
+        旧 load_previous_run_stats は
+        `[int(r[0]) for r in rows if r[0] is not None]` と
+        `[float(r[1]) for r in rows if r[1] is not None]` を独立にフィルタ
+        しており、片方だけ NULL の行が混じると2リストの対応関係が崩れる
+        バグを持っていた。新関数はペア単位でフィルタしてこれを防ぐ。
+        """
+        from src.prediction.db.prediction_results import load_run_stats_at
+
+        rows = [
+            (2, 0.01),
+            (None, 0.02),  # model_count が NULL → ペアごと除外
+            (3, None),  # diff_ratio が NULL → ペアごと除外
+            (1, -0.01),
+        ]
+        with self._patched_connection(rows):
+            result = load_run_stats_at("20260801_073000")
+
+        self.assertEqual(result, ([2, 1], [0.01, -0.01]))
 
     def test_returns_none_on_db_error(self):
         from unittest.mock import patch
 
-        from src.prediction.db.prediction_results import load_previous_run_stats
+        from src.prediction.db.prediction_results import load_run_stats_at
 
         with patch(
             "src.prediction.db.prediction_results._db_connection",
             side_effect=RuntimeError("connection refused"),
         ):
-            result = load_previous_run_stats("20260801_073000")
+            result = load_run_stats_at("20260801_073000")
 
         self.assertIsNone(result)
 

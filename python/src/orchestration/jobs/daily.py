@@ -52,19 +52,44 @@ def run_daily_pipeline():
     # 2. 予測（CRITICAL: 失敗時はパイプライン停止 + Discord通知）
     logger.info("[2/5] 予測開始 (production)")
     from src.prediction.prediction_pipeline import output_top_worst_results, predict_all_unified
+    from src.prediction.types import UNIFIED_PREDICTION_MODEL_NAMES
 
     # 出力 invariant 用。None は「評価が実行されなかった」を意味する（#615 対策）
     prediction_violation_ids: list[str] | None = None
     prediction_details: dict | None = None
 
-    requested_models = ["UnifiedStockXGBoost", "UnifiedStockLightGBM"]
+    # daily.py の要求リストと prediction_pipeline.py の実推論リストが別々の
+    # リテラルだと設定ドリフトで A-1/A-2 が壊れるため、同じ定数を参照する（I-4 対策）。
+    requested_models = list(UNIFIED_PREDICTION_MODEL_NAMES)
     loaded_models: list[str] = []
     output_rows: list = []
+    # 保存前に退避しておく前回ラン統計（B-1/B-2/B-3 の急変チェックが使う）。
+    # prediction_results は Delete-Insert のスナップショットテーブルなので、
+    # 保存後に「前回ラン」を探すと今回の保存で上書き済みで見つからない
+    # （毎日 compared_with_previous=False になる、C-1 対策）。
+    # 取得に失敗しても致命的ではない（急変チェックがスキップされるだけ）。
+    previous_stats = None
 
     try:
         from src.prediction.predict_unified import preload_models
 
         loaded_models = preload_models(requested_models)
+
+        try:
+            from src.prediction.db import load_latest_prediction_timestamp
+            from src.prediction.db.prediction_results import load_run_stats_at
+            from src.prediction.output_invariants import build_run_stats
+
+            previous_at = load_latest_prediction_timestamp(model_version="production")
+            if previous_at:
+                previous_raw = load_run_stats_at(previous_at, model_version="production")
+                if previous_raw is not None:
+                    previous_stats = build_run_stats(previous_raw[0], previous_raw[1])
+        except Exception as e:
+            previous_stats = None
+            logger.error(
+                "[2/5] 前回ラン統計の取得に失敗（急変チェックをスキップ）: %s", e, exc_info=True
+            )
 
         output_rows = predict_all_unified()
         output_top_worst_results(
@@ -83,16 +108,7 @@ def run_daily_pipeline():
     # 2.1. 出力 invariant 評価（NON_CRITICAL: 健全性チェックが本体を止めてはならない）
     logger.info("[2.1/5] 出力 invariant 評価開始")
     try:
-        from src.prediction.db import load_latest_prediction_timestamp
-        from src.prediction.db.prediction_results import load_previous_run_stats
-        from src.prediction.output_invariants import build_run_stats, evaluate_output_invariants
-
-        previous_stats = None
-        current_at = load_latest_prediction_timestamp()
-        if current_at:
-            previous_raw = load_previous_run_stats(current_at)
-            if previous_raw is not None:
-                previous_stats = build_run_stats(previous_raw[0], previous_raw[1])
+        from src.prediction.output_invariants import evaluate_output_invariants
 
         report = evaluate_output_invariants(
             requested_model_names=requested_models,
