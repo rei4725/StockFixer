@@ -4,6 +4,11 @@
 ドリフト監視・バックアップ・ルールシグナルのオーケストレーション。
 """
 
+from src.orchestration.jobs.alerting import (
+    evaluate_and_notify_alerts,
+    evaluate_output_invariants_stage,
+    fetch_previous_run_stats,
+)
 from src.orchestration.jobs.common import _handle_stage_error
 from src.orchestration.types import PipelineStage
 from src.utils.logger import get_logger
@@ -75,21 +80,7 @@ def run_daily_pipeline():
 
         loaded_models = preload_models(requested_models)
 
-        try:
-            from src.prediction.db import load_latest_prediction_timestamp
-            from src.prediction.db.prediction_results import load_run_stats_at
-            from src.prediction.output_invariants import build_run_stats
-
-            previous_at = load_latest_prediction_timestamp(model_version="production")
-            if previous_at:
-                previous_raw = load_run_stats_at(previous_at, model_version="production")
-                if previous_raw is not None:
-                    previous_stats = build_run_stats(previous_raw[0], previous_raw[1])
-        except Exception as e:
-            previous_stats = None
-            logger.error(
-                "[2/5] 前回ラン統計の取得に失敗（急変チェックをスキップ）: %s", e, exc_info=True
-            )
+        previous_stats = fetch_previous_run_stats(model_version="production")
 
         output_rows = predict_all_unified()
         output_top_worst_results(
@@ -108,16 +99,9 @@ def run_daily_pipeline():
     # 2.1. 出力 invariant 評価（NON_CRITICAL: 健全性チェックが本体を止めてはならない）
     logger.info("[2.1/5] 出力 invariant 評価開始")
     try:
-        from src.prediction.output_invariants import evaluate_output_invariants
-
-        report = evaluate_output_invariants(
-            requested_model_names=requested_models,
-            loaded_model_names=loaded_models,
-            output_rows=output_rows,
-            previous_stats=previous_stats,
+        prediction_violation_ids, prediction_details = evaluate_output_invariants_stage(
+            requested_models, loaded_models, output_rows, previous_stats
         )
-        prediction_violation_ids = report.violation_ids
-        prediction_details = report.as_details()
         logger.info("[2.1/5] 出力 invariant 評価完了: %s", prediction_details)
     except Exception as e:
         _handle_stage_error(PipelineStage.NON_CRITICAL, "[2.1/5] 出力 invariant 評価", e)
@@ -180,14 +164,7 @@ def run_daily_pipeline():
     # 6. 運用アラート評価（NON_CRITICAL: 条件成立時のみ Discord へ発報する）
     logger.info("[6/6] 運用アラート評価開始")
     try:
-        from src.reporting.discord.webhook_sender import send_webhook_notification
-        from src.utils.alert_service import evaluate_alert_conditions, run_conditional_notification
-
-        alert_results = evaluate_alert_conditions(
-            prediction_violation_ids=prediction_violation_ids,
-            prediction_details=prediction_details,
-        )
-        run_conditional_notification(results=alert_results, notifier=send_webhook_notification)
+        evaluate_and_notify_alerts(prediction_violation_ids, prediction_details)
         logger.info("[6/6] 運用アラート評価完了")
     except Exception as e:
         _handle_stage_error(PipelineStage.NON_CRITICAL, "[6/6] 運用アラート評価", e)
