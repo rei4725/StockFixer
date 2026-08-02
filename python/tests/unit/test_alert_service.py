@@ -6,7 +6,7 @@ import json
 import os
 import tempfile
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 from src.utils.alert_service import (
     DRIFT_WARN_THRESHOLD,
@@ -257,6 +257,57 @@ class TestHealthDegradedStreak(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# ルール 5: 予測出力の健全性
+# ---------------------------------------------------------------------------
+
+
+class TestPredictionOutputRule(unittest.TestCase):
+    def test_no_violation_is_not_triggered(self):
+        from src.utils.alert_service import check_prediction_output_rule
+
+        result = check_prediction_output_rule([], {"symbol_count": 705})
+        self.assertFalse(result.triggered)
+        self.assertEqual(result.rule_id, "NF-303-5")
+
+    def test_single_violation_triggers_immediately(self):
+        """ストリークを使わない。1 回の違反で即発報する。"""
+        from src.utils.alert_service import check_prediction_output_rule
+
+        result = check_prediction_output_rule(["A-2"], {"symbol_count": 705})
+        self.assertTrue(result.triggered)
+        self.assertEqual(result.consecutive_count, 1)
+        self.assertEqual(result.threshold, 1)
+
+    def test_unevaluated_is_treated_as_violation(self):
+        """評価が実行されなかった場合を正常と見分けられるようにする。"""
+        from src.utils.alert_service import check_prediction_output_rule
+
+        result = check_prediction_output_rule(None)
+        self.assertTrue(result.triggered)
+        self.assertIn("A-0", result.details.get("violation_ids", []))
+
+    def test_unevaluated_populates_violations_for_discord_rendering(self):
+        """I-3: A-0（評価未実行）でも details['violations'] に理由が入ること。
+
+        as_discord_lines() は details['violations'] しか描画しない。ここが
+        空だと、評価が例外で落ちた朝に運用者が受け取る Discord 本文は
+        「連続回数: 1 / 閾値: 1」だけになり、何が起きたのか伝わらない。
+        """
+        from src.utils.alert_service import check_prediction_output_rule
+
+        result = check_prediction_output_rule(None)
+
+        violations = result.details.get("violations")
+        self.assertTrue(violations, "A-0 でも violations は空であってはならない")
+        self.assertEqual(violations[0]["id"], "A-0")
+        self.assertTrue(violations[0]["description"])
+
+        lines = result.as_discord_lines()
+        self.assertTrue(any("A-0" in line for line in lines))
+        self.assertTrue(any("評価が実行されなかった" in line for line in lines))
+
+
+# ---------------------------------------------------------------------------
 # evaluate_alert_conditions
 # ---------------------------------------------------------------------------
 
@@ -268,9 +319,10 @@ class TestEvaluateAlertConditions(unittest.TestCase):
             AlertResult("NF-303-2", "B", False, 0, 3),
             AlertResult("NF-303-3", "C", False, 0, 2),
             AlertResult("NF-303-4", "D", False, 0, 2),
+            AlertResult("NF-303-5", "E", False, 0, 1),
         ]
 
-    def test_returns_four_results(self):
+    def test_returns_five_results(self):
         with (
             patch(
                 "src.utils.alert_service.check_pipeline_fail_rule",
@@ -288,9 +340,13 @@ class TestEvaluateAlertConditions(unittest.TestCase):
                 "src.utils.alert_service.check_health_degraded_rule",
                 return_value=AlertResult("NF-303-4", "D", False, 0, 2),
             ),
+            patch(
+                "src.utils.alert_service.check_prediction_output_rule",
+                return_value=AlertResult("NF-303-5", "E", False, 0, 1),
+            ),
         ):
-            results = evaluate_alert_conditions()
-        self.assertEqual(len(results), 4)
+            results = evaluate_alert_conditions(prediction_violation_ids=[])
+        self.assertEqual(len(results), 5)
 
     def test_all_ok_no_triggered(self):
         with (
@@ -310,8 +366,12 @@ class TestEvaluateAlertConditions(unittest.TestCase):
                 "src.utils.alert_service.check_health_degraded_rule",
                 return_value=AlertResult("NF-303-4", "D", False, 0, 2),
             ),
+            patch(
+                "src.utils.alert_service.check_prediction_output_rule",
+                return_value=AlertResult("NF-303-5", "E", False, 0, 1),
+            ),
         ):
-            results = evaluate_alert_conditions()
+            results = evaluate_alert_conditions(prediction_violation_ids=[])
         self.assertFalse(any(r.triggered for r in results))
 
     def test_one_triggered(self):
@@ -332,8 +392,12 @@ class TestEvaluateAlertConditions(unittest.TestCase):
                 "src.utils.alert_service.check_health_degraded_rule",
                 return_value=AlertResult("NF-303-4", "D", False, 0, 2),
             ),
+            patch(
+                "src.utils.alert_service.check_prediction_output_rule",
+                return_value=AlertResult("NF-303-5", "E", False, 0, 1),
+            ),
         ):
-            results = evaluate_alert_conditions()
+            results = evaluate_alert_conditions(prediction_violation_ids=[])
         triggered = [r for r in results if r.triggered]
         self.assertEqual(len(triggered), 1)
         self.assertEqual(triggered[0].rule_id, "NF-303-1")
@@ -353,33 +417,26 @@ class TestRunConditionalNotification(unittest.TestCase):
             AlertResult("NF-303-4", "ヘルス", False, 0, 2),
         ]
         notifier = Mock(return_value=True)
-        with (
-            patch("src.utils.alert_service._send_alert_detail", return_value=True) as mock_detail,
-            patch("src.utils.alert_service._send_daily_summary") as mock_summary,
-        ):
+        with patch("src.utils.alert_service._send_alert_detail", return_value=True) as mock_detail:
             ok = run_conditional_notification(results=results, notifier=notifier)
 
         mock_detail.assert_called_once_with(results, notifier)
-        mock_summary.assert_not_called()
         self.assertTrue(ok)
 
-    def test_sends_summary_when_all_ok(self):
+    def test_does_not_send_summary_when_all_ok(self):
+        """条件非成立時は Discord へ何も送らない（違反時のみ発報する）。"""
         results = [
             AlertResult("NF-303-1", "A", False, 0, 2),
             AlertResult("NF-303-2", "B", False, 0, 3),
             AlertResult("NF-303-3", "C", False, 0, 2),
             AlertResult("NF-303-4", "D", False, 0, 2),
+            AlertResult("NF-303-5", "E", False, 0, 1),
         ]
-        notifier = Mock(return_value=True)
-        with (
-            patch("src.utils.alert_service._send_alert_detail") as mock_detail,
-            patch("src.utils.alert_service._send_daily_summary", return_value=True) as mock_summary,
-        ):
+        notifier = MagicMock(return_value=True)
+        with patch("src.utils.alert_service._send_alert_detail") as mock_detail:
             ok = run_conditional_notification(results=results, notifier=notifier)
-
-        mock_summary.assert_called_once_with(results, notifier)
+        self.assertFalse(ok)
         mock_detail.assert_not_called()
-        self.assertTrue(ok)
 
     def test_evaluates_conditions_when_results_none(self):
         all_ok = [
@@ -388,12 +445,9 @@ class TestRunConditionalNotification(unittest.TestCase):
             AlertResult("NF-303-3", "C", False, 0, 2),
             AlertResult("NF-303-4", "D", False, 0, 2),
         ]
-        with (
-            patch(
-                "src.utils.alert_service.evaluate_alert_conditions", return_value=all_ok
-            ) as mock_eval,
-            patch("src.utils.alert_service._send_daily_summary", return_value=True),
-        ):
+        with patch(
+            "src.utils.alert_service.evaluate_alert_conditions", return_value=all_ok
+        ) as mock_eval:
             run_conditional_notification(results=None)
         mock_eval.assert_called_once()
 
@@ -413,6 +467,28 @@ class TestAlertResultDiscordLines(unittest.TestCase):
         r = AlertResult("NF-303-1", "テスト", False, 1, 2)
         lines = r.as_discord_lines()
         self.assertTrue(any("✅" in line for line in lines))
+
+    def test_violations_are_rendered(self):
+        r = AlertResult(
+            "NF-303-5",
+            "予測出力の健全性",
+            True,
+            1,
+            1,
+            details={
+                "violations": [
+                    {
+                        "id": "A-2",
+                        "description": "説明",
+                        "observed": 1.5,
+                        "threshold": 1.0,
+                    }
+                ]
+            },
+        )
+        lines = r.as_discord_lines()
+        self.assertTrue(any("A-2" in line for line in lines))
+        self.assertTrue(any("1.5" in line for line in lines))
 
 
 class TestCountConsecutiveFailuresEdgeCases(unittest.TestCase):

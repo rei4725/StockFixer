@@ -33,6 +33,7 @@ from .prediction_results import (  # noqa: F401
     load_latest_prediction_timestamp,
     load_prediction_markets,
     load_prediction_results,
+    load_run_stats_at,
     load_shadow_comparison,
     save_prediction_results,
 )
@@ -41,8 +42,9 @@ __all__ = [
     # prediction_results
     "save_prediction_results",
     "load_latest_prediction_timestamp",
-    "load_prediction_results",
     "load_prediction_markets",
+    "load_prediction_results",
+    "load_run_stats_at",
     "load_shadow_comparison",
     # paper_real_diff
     "upsert_paper_real_diff",

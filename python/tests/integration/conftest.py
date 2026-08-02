@@ -2,6 +2,30 @@
 import pytest
 
 # ============================================
+# Discord 実送信ガード（integration テスト全体に適用）
+# ============================================
+
+
+@pytest.fixture(autouse=True)
+def _block_discord_http(monkeypatch):
+    """Block real Discord HTTP calls from all integration tests.
+
+    DISCORD_WEBHOOK_URL を除去することで _post_webhook が早期 return し、
+    どのテストからも実際の webhook エンドポイントに到達しなくなる
+    （tests/unit/conftest.py の同名フィクスチャと同じ理由）。
+
+    Task 6 レビュー I-4: run_daily_pipeline() を呼ぶ integration テスト
+    （tests/integration/test_scheduler_pipeline.py 等）は [6/6] 運用アラート
+    評価の notifier=send_webhook_notification を patch していないため、
+    ローカルに .env があると本物の Discord へ「🚨 運用アラート発報」等が
+    送信されてしまう。CI は DISCORD_WEBHOOK_URL 未設定のため無害だが、
+    ローカル実行の事故を構造的に防ぐため unit 側と同じガードを適用する。
+    Discord 送信の有無を検証したいテストは @patch で個別に制御する。
+    """
+    monkeypatch.delenv("DISCORD_WEBHOOK_URL", raising=False)
+
+
+# ============================================
 # 環境チェック Marker
 # ============================================
 

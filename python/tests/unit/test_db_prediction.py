@@ -155,6 +155,28 @@ class TestLoadLatestPredictionTimestamp(_TmpDbTestCase):
         ts = load_latest_prediction_timestamp()
         self.assertEqual(ts, "20260403_090000")
 
+    def test_model_version_filter_ignores_newer_other_version(self):
+        """model_version 指定時は、他バージョンの新しいタイムスタンプを無視すること。
+
+        production 保存後に challenger を保存すると predicted_at がバージョン
+        ごとにズレる。model_version 未指定だと challenger の新しい方を掴んで
+        しまい、production の前回ランを取り違える（C-1 対策）。
+        """
+        production_row = PredictionResult(
+            "us", "AAPL", 100.0, 101.0, 0.01, 2, model_version="production"
+        )
+        challenger_row = PredictionResult(
+            "us", "AAPL", 100.0, 101.0, 0.01, 2, model_version="challenger"
+        )
+        save_prediction_results("20260403_070000", [production_row])
+        save_prediction_results("20260403_080000", [challenger_row])
+
+        ts = load_latest_prediction_timestamp(model_version="production")
+        self.assertEqual(ts, "20260403_070000")
+
+        ts_unfiltered = load_latest_prediction_timestamp()
+        self.assertEqual(ts_unfiltered, "20260403_080000")
+
 
 class TestLoadPredictionResults(_TmpDbTestCase):
     """load_prediction_results のテスト"""
