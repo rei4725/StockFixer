@@ -2,7 +2,7 @@
 # fastapi/uvicorn は本体（requirements.txt）には含めない — サービスは別イメージで
 # デプロイするため。
 fastapi==0.120.1
-uvicorn==0.38.0
+uvicorn==0.52.0
 
 # --- モデル読み込み・推論に必要な依存 ---
 # joblib モデルは本体が保存しサービスが読むため、バージョンがずれると
