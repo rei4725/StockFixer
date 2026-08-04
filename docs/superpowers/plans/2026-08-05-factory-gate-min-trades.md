@@ -348,23 +348,23 @@ class TestEvaluateHypothesisFilter(unittest.TestCase):
         self.signal = pd.Series([1] * 10, index=index)
 
     def _run(self, metrics_list: list[dict], min_trades_per_symbol: int):
+        """スタブを差し込んだ状態で evaluate_hypothesis を1回実行する。"""
         data = {"AAA": self.df, "BBB": self.df}
         hypothesis = FactoryHypothesis(rule_spec=_SPEC, market="jp")
-        return factory.evaluate_hypothesis(
-            hypothesis,
-            data,
-            windows=[],
-            min_trades_per_symbol=min_trades_per_symbol,
-        )
-
-    def test_low_trade_symbol_is_excluded_from_average(self):
-        metrics_list = [_metrics(2, 25.0), _metrics(8, 0.5)]
         with unittest.mock.patch.object(
             factory, "build_rule", return_value=_StubRule(self.signal)
         ), unittest.mock.patch.object(
             factory, "_make_backtester", return_value=_StubBacktester(metrics_list)
         ):
-            result = self._run(metrics_list, min_trades_per_symbol=3)
+            return factory.evaluate_hypothesis(
+                hypothesis,
+                data,
+                windows=[],
+                min_trades_per_symbol=min_trades_per_symbol,
+            )
+
+    def test_low_trade_symbol_is_excluded_from_average(self):
+        result = self._run([_metrics(2, 25.0), _metrics(8, 0.5)], min_trades_per_symbol=3)
 
         self.assertEqual(result.n_symbols, 2)
         self.assertEqual(result.n_symbols_with_signal, 2)
@@ -374,13 +374,7 @@ class TestEvaluateHypothesisFilter(unittest.TestCase):
         self.assertAlmostEqual(result.avg_trades_per_symbol, 5.0)
 
     def test_threshold_one_keeps_every_symbol(self):
-        metrics_list = [_metrics(2, 25.0), _metrics(8, 0.5)]
-        with unittest.mock.patch.object(
-            factory, "build_rule", return_value=_StubRule(self.signal)
-        ), unittest.mock.patch.object(
-            factory, "_make_backtester", return_value=_StubBacktester(metrics_list)
-        ):
-            result = self._run(metrics_list, min_trades_per_symbol=1)
+        result = self._run([_metrics(2, 25.0), _metrics(8, 0.5)], min_trades_per_symbol=1)
 
         self.assertEqual(result.n_effective_symbols, 2)
         self.assertAlmostEqual(result.sharpe_ratio, 12.75)
