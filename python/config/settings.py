@@ -165,6 +165,9 @@ class Settings(BaseSettings):
     FACTORY_GATE_MIN_TRADES_PER_SYMBOL: int = Field(
         default=3
     )  # 少取引銘柄の Sharpe は発散するため集計から除外する（#625）
+    FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS: int = Field(
+        default=20
+    )  # 有効銘柄がこの数未満なら極端な集中とみなし不合格（#625）
     FACTORY_GATE_MIN_DSR: float = Field(default=0.95)
     FACTORY_GATE_MAX_PBO: float = Field(
         default=0.5
@@ -281,6 +284,7 @@ FACTORY_LOOKBACK_YEARS: int = settings.FACTORY_LOOKBACK_YEARS
 FACTORY_N_WINDOWS: int = settings.FACTORY_N_WINDOWS
 FACTORY_GATE_MIN_TRADES: int = settings.FACTORY_GATE_MIN_TRADES
 FACTORY_GATE_MIN_TRADES_PER_SYMBOL: int = settings.FACTORY_GATE_MIN_TRADES_PER_SYMBOL
+FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS: int = settings.FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS
 FACTORY_GATE_MIN_DSR: float = settings.FACTORY_GATE_MIN_DSR
 FACTORY_GATE_MAX_PBO: float = settings.FACTORY_GATE_MAX_PBO
 FACTORY_GATE_MAX_DRAWDOWN: float = settings.FACTORY_GATE_MAX_DRAWDOWN

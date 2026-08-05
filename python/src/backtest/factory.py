@@ -29,6 +29,7 @@ from config.settings import (
     FACTORY_GATE_MAX_DRAWDOWN,
     FACTORY_GATE_MAX_PBO,
     FACTORY_GATE_MIN_DSR,
+    FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS,
     FACTORY_GATE_MIN_TRADES,
     FACTORY_GATE_MIN_TRADES_PER_SYMBOL,
 )
@@ -388,10 +389,17 @@ def apply_gate(evaluation: FactoryEvaluation, champion_sharpe: float) -> None:
     PBO はバッチ全体で1値となる性質上、per-hypothesis ゲートに使うと「一晩全滅」に
     なるため、ここでは判定しない（バッチ診断としてレポート/通知に警告表示する）。
     DSR はトレード単位 Sharpe（年率化を打ち消した値）で算出済みのため飽和しない。
+    有効銘柄数（銘柄あたり最低取引数を満たした銘柄の数）が下限未満の場合も不合格とする。
+    合計取引数だけでは「2銘柄 × 20取引」のような極端な集中を弾けないため（#625）。
     """
     reasons: list[str] = []
     if evaluation.num_trades < FACTORY_GATE_MIN_TRADES:
         reasons.append(f"num_trades {evaluation.num_trades} < {FACTORY_GATE_MIN_TRADES}")
+    if evaluation.n_effective_symbols < FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS:
+        reasons.append(
+            f"effective_symbols {evaluation.n_effective_symbols}"
+            f" < {FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS}"
+        )
     if math.isnan(evaluation.dsr) or evaluation.dsr < FACTORY_GATE_MIN_DSR:
         reasons.append(f"dsr {evaluation.dsr:.3f} < {FACTORY_GATE_MIN_DSR}")
     if evaluation.max_drawdown < FACTORY_GATE_MAX_DRAWDOWN:
