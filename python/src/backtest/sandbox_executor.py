@@ -186,6 +186,11 @@ def run_sandboxed_evaluation(
             )
 
         ev = payload["evaluation"]
+        # n_symbols_with_signal / n_effective_symbols / avg_trades_per_symbol は
+        # サンドボックスコンテナ（固定イメージ FACTORY_SANDBOX_IMAGE）がホストより
+        # 古いバージョンだと出力しない可能性がある。旧イメージ由来のペイロードで
+        # KeyError にしてバッチ全体を落とさないよう、dataclass 既定値と同じ値で
+        # .get() フォールバックする（#625）。
         evaluation = FactoryEvaluation(
             hypothesis=hypothesis,
             sharpe_ratio=ev["sharpe_ratio"],
@@ -196,5 +201,8 @@ def run_sandboxed_evaluation(
             total_return=ev["total_return"],
             window_returns=ev["window_returns"],
             n_symbols=ev["n_symbols"],
+            n_symbols_with_signal=ev.get("n_symbols_with_signal", 0),
+            n_effective_symbols=ev.get("n_effective_symbols", 0),
+            avg_trades_per_symbol=ev.get("avg_trades_per_symbol", 0.0),
         )
         return SandboxRunResult(kind="gate_evaluated", evaluation=evaluation)
