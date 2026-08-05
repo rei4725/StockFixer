@@ -30,10 +30,12 @@ from config.settings import (
     FACTORY_GATE_MAX_PBO,
     FACTORY_GATE_MIN_DSR,
     FACTORY_GATE_MIN_TRADES,
+    FACTORY_GATE_MIN_TRADES_PER_SYMBOL,
 )
 from src.backtest.backtester import Backtester
 from src.backtest.claude_rule_generator import generate_claude_hypotheses
 from src.backtest.data_port import get_backtest_data_port
+from src.backtest.factory_aggregation import SymbolMetrics, aggregate_symbol_metrics
 from src.backtest.factory_report import write_report
 from src.backtest.hypothesis_review import review_hypothesis
 from src.backtest.metrics import deflated_sharpe_ratio, probability_of_backtest_overfitting
@@ -297,21 +299,22 @@ def evaluate_hypothesis(
     fee_rate: float = 0.001,
     slippage: float = 0.001,
     stop_loss_pct: Optional[float] = 0.07,
+    min_trades_per_symbol: Optional[int] = None,
 ) -> FactoryEvaluation:
     """1仮説を全銘柄 × 全期間 + 窓別に評価する。
 
-    - 全期間メトリクス: 銘柄ごとの全期間シミュレーションを平均（取引数は合計、DD は最悪値）
-    - 窓別リターン: 各窓を独立にシミュレーションし銘柄平均（PBO の行列要素になる）
+    - 全期間メトリクス: 銘柄あたり最低取引数を満たす銘柄のみで集計する（#625）。
+      取引が 2 回だけの銘柄は Sharpe が発散するため、混ぜると平均が壊れる。
+    - 窓別リターン: 各窓を独立にシミュレーションし全銘柄で平均する。
+      こちらは意図的にフィルタしない。PBO はバッチ単位の診断指標であり
+      apply_gate の判定に使われないため、母数を変えると PBO の意味が変わる。
     """
+    if min_trades_per_symbol is None:
+        min_trades_per_symbol = FACTORY_GATE_MIN_TRADES_PER_SYMBOL
     rule = build_rule(hypothesis.rule_spec)
     backtester = _make_backtester(initial_cash, fee_rate, slippage, stop_loss_pct)
 
-    sharpes: list[float] = []
-    sharpes_per_trade: list[float] = []
-    win_rates: list[float] = []
-    total_returns: list[float] = []
-    drawdowns: list[float] = []
-    num_trades = 0
+    symbol_rows: list[SymbolMetrics] = []
     window_returns_by_symbol: list[list[float]] = []
 
     for symbol, df in data_by_symbol.items():
@@ -322,12 +325,17 @@ def evaluate_hypothesis(
                 continue
 
             _, metrics = backtester.simulate_trading(df, signal)
-            sharpes.append(float(metrics.get("sharpe_ratio", 0.0) or 0.0))
-            sharpes_per_trade.append(float(metrics.get("sharpe_per_trade", 0.0) or 0.0))
-            win_rates.append(float(metrics.get("win_rate", 0.0) or 0.0))
-            total_returns.append(float(metrics.get("total_return", 0.0) or 0.0))
-            drawdowns.append(float(metrics.get("max_drawdown", 0.0) or 0.0))
-            num_trades += int(metrics.get("num_trades", 0) or 0)
+            symbol_rows.append(
+                SymbolMetrics(
+                    symbol=symbol,
+                    num_trades=int(metrics.get("num_trades", 0) or 0),
+                    sharpe_ratio=float(metrics.get("sharpe_ratio", 0.0) or 0.0),
+                    sharpe_per_trade=float(metrics.get("sharpe_per_trade", 0.0) or 0.0),
+                    win_rate=float(metrics.get("win_rate", 0.0) or 0.0),
+                    total_return=float(metrics.get("total_return", 0.0) or 0.0),
+                    max_drawdown=float(metrics.get("max_drawdown", 0.0) or 0.0),
+                )
+            )
 
             sym_window_returns = []
             for w_start, w_end in windows:
@@ -347,6 +355,7 @@ def evaluate_hypothesis(
                 exc_info=True,
             )
 
+    aggregated = aggregate_symbol_metrics(symbol_rows, min_trades_per_symbol)
     window_returns = (
         np.mean(np.asarray(window_returns_by_symbol, dtype=float), axis=0).tolist()
         if window_returns_by_symbol
@@ -354,14 +363,17 @@ def evaluate_hypothesis(
     )
     return FactoryEvaluation(
         hypothesis=hypothesis,
-        sharpe_ratio=float(np.mean(sharpes)) if sharpes else 0.0,
-        sharpe_per_trade=float(np.mean(sharpes_per_trade)) if sharpes_per_trade else 0.0,
-        win_rate=float(np.mean(win_rates)) if win_rates else 0.0,
-        num_trades=num_trades,
-        max_drawdown=float(min(drawdowns)) if drawdowns else 0.0,
-        total_return=float(np.mean(total_returns)) if total_returns else 0.0,
+        sharpe_ratio=aggregated.sharpe_ratio,
+        sharpe_per_trade=aggregated.sharpe_per_trade,
+        win_rate=aggregated.win_rate,
+        num_trades=aggregated.num_trades,
+        max_drawdown=aggregated.max_drawdown,
+        total_return=aggregated.total_return,
         window_returns=window_returns,
         n_symbols=len(data_by_symbol),
+        n_symbols_with_signal=aggregated.n_symbols_with_signal,
+        n_effective_symbols=aggregated.n_effective_symbols,
+        avg_trades_per_symbol=aggregated.avg_trades_per_symbol,
     )
 
 

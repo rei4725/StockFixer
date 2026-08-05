@@ -74,6 +74,9 @@ class FactoryEvaluation:
     total_return: float = 0.0
     window_returns: list[float] = field(default_factory=list)
     n_symbols: int = 0
+    n_symbols_with_signal: int = 0
+    n_effective_symbols: int = 0
+    avg_trades_per_symbol: float = 0.0
     dsr: float = float("nan")
     pbo: float = float("nan")
     gate_passed: bool = False
