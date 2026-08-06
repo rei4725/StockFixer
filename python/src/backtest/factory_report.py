@@ -22,7 +22,9 @@ from config.settings import (
     FACTORY_GATE_MAX_DRAWDOWN,
     FACTORY_GATE_MAX_PBO,
     FACTORY_GATE_MIN_DSR,
+    FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS,
     FACTORY_GATE_MIN_TRADES,
+    FACTORY_GATE_MIN_TRADES_PER_SYMBOL,
 )
 from src.backtest.types import FactoryEvaluation
 from src.utils.data_path_utils import ensure_dir, get_results_dir
@@ -97,6 +99,10 @@ def _build_issue_body(
     )
     review_section = _build_review_section(review)
     spec_section = _build_spec_section(h.rule_spec)
+    effective_symbols_row = (
+        f"| 有効銘柄（{FACTORY_GATE_MIN_TRADES_PER_SYMBOL}取引以上） "
+        f"| {evaluation.n_effective_symbols} | >= {FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS} |"
+    )
     return f"""## 戦略仮説（自動生成）
 
 夜間ファクトリーのゲートを通過した仮説です。`hypothesis_hash={h.hypothesis_hash}`
@@ -104,19 +110,22 @@ def _build_issue_body(
 
 {spec_section}
 - マーケット: {h.market}
-- 評価期間: {period[0]} 〜 {period[1]}（{h.lookback_years}年、銘柄数 {evaluation.n_symbols}）
+- 評価期間: {period[0]} 〜 {period[1]}（{h.lookback_years}年、データ取得銘柄数 {evaluation.n_symbols}）
 
 ### メトリクス
 
 | 指標 | 値 | ゲート |
 |---|---|---|
-| Sharpe（銘柄平均） | {evaluation.sharpe_ratio:.3f} | {champion_cell} |
+| Sharpe（有効銘柄平均） | {evaluation.sharpe_ratio:.3f} | {champion_cell} |
 | Deflated Sharpe | {evaluation.dsr:.3f} | >= {FACTORY_GATE_MIN_DSR} |
 | PBO | {evaluation.pbo:.3f} | <= {FACTORY_GATE_MAX_PBO} |
-| 取引数（合計） | {evaluation.num_trades} | >= {FACTORY_GATE_MIN_TRADES} |
+| 取引数（有効銘柄合計） | {evaluation.num_trades} | >= {FACTORY_GATE_MIN_TRADES} |
+| シグナル発生銘柄 | {evaluation.n_symbols_with_signal} | - |
+{effective_symbols_row}
+| 銘柄あたり平均取引数 | {evaluation.avg_trades_per_symbol:.2f} | - |
 | 最大DD（最悪銘柄） | {evaluation.max_drawdown:.2%} | >= {FACTORY_GATE_MAX_DRAWDOWN:.0%} |
-| 勝率（銘柄平均） | {evaluation.win_rate:.2%} | - |
-| リターン（銘柄平均） | {evaluation.total_return:.2%} | - |
+| 勝率（有効銘柄平均） | {evaluation.win_rate:.2%} | - |
+| リターン（有効銘柄平均） | {evaluation.total_return:.2%} | - |
 
 ### 窓別リターン（銘柄平均）
 
@@ -151,6 +160,9 @@ def write_report(
             "num_trades": evaluation.num_trades,
             "max_drawdown": evaluation.max_drawdown,
             "champion_sharpe": champion_sharpe,
+            "n_symbols_with_signal": evaluation.n_symbols_with_signal,
+            "n_effective_symbols": evaluation.n_effective_symbols,
+            "avg_trades_per_symbol": evaluation.avg_trades_per_symbol,
         },
         "spec": h.rule_spec,
         "market": h.market,
