@@ -90,7 +90,7 @@ def test_issue_body_reports_symbol_denominators(tmp_path, monkeypatch):
         f"| 16 | >= {FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS} |"
     )
     assert effective_symbols_row in body
-    assert "銘柄あたり平均取引数" in body
+    assert "銘柄あたり平均取引数（シグナル発生銘柄基準）" in body
     assert "1.23" in body
     # 母数が曖昧だった旧ラベルは残っていない
     assert "Sharpe（銘柄平均）" not in body
