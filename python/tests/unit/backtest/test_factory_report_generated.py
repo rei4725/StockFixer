@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from config.settings import FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS, FACTORY_GATE_MIN_TRADES_PER_SYMBOL
 from src.backtest.factory_report import write_report
 from src.backtest.types import FactoryEvaluation, FactoryHypothesis
 
@@ -80,7 +81,15 @@ def test_issue_body_reports_symbol_denominators(tmp_path, monkeypatch):
     assert "データ取得銘柄数 194" in body
     assert "シグナル発生銘柄" in body
     assert "| 69 |" in body
-    assert "有効銘柄" in body
+    # 有効銘柄の行はラベル・値・ゲート列をまとめてピン留めする。
+    # n_effective_symbols が別フィールド（例: n_symbols_with_signal）に
+    # 誤配線されていても、"有効銘柄" という部分文字列だけでは
+    # 「Sharpe（有効銘柄平均）」等の他の行にも一致してしまい検出できないため。
+    effective_symbols_row = (
+        f"| 有効銘柄（{FACTORY_GATE_MIN_TRADES_PER_SYMBOL}取引以上） "
+        f"| 16 | >= {FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS} |"
+    )
+    assert effective_symbols_row in body
     assert "銘柄あたり平均取引数" in body
     assert "1.23" in body
     # 母数が曖昧だった旧ラベルは残っていない
