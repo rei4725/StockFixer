@@ -127,6 +127,7 @@ class TestBuildReviewContext(unittest.TestCase):
 
         self.assertIn("データ取得銘柄数: 194", context)
         self.assertIn("Sharpe（有効銘柄平均）: 1.600", context)
+        self.assertIn("最大DD（有効銘柄の最悪値）: -19.00%", context)
         self.assertIn("取引数（有効銘柄合計）: 85", context)
         self.assertIn("シグナル発生銘柄数: 69", context)
         self.assertIn("有効銘柄数（集計母数）: 16", context)

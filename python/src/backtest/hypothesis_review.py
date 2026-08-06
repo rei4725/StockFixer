@@ -76,12 +76,12 @@ def _build_review_context(evaluation: FactoryEvaluation, champion_sharpe: float)
 - シグナル発生銘柄数: {evaluation.n_symbols_with_signal}
 - 有効銘柄数（集計母数）: {evaluation.n_effective_symbols}
 - 銘柄あたり平均取引数（シグナル発生銘柄基準）: {evaluation.avg_trades_per_symbol:.2f}
-- 最大DD（最悪銘柄）: {evaluation.max_drawdown:.2%}
+- 最大DD（有効銘柄の最悪値）: {evaluation.max_drawdown:.2%}
 - 勝率（有効銘柄平均）: {evaluation.win_rate:.2%}
 - リターン（有効銘柄平均）: {evaluation.total_return:.2%}
 - {champion_line}
 
-## 窓別リターン（銘柄平均）
+## 窓別リターン（全銘柄平均・シグナル無しは0）
 {window_lines}
 """
 

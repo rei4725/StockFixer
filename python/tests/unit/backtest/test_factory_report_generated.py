@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from config.settings import FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS, FACTORY_GATE_MIN_TRADES_PER_SYMBOL
+from config.settings import (
+    FACTORY_GATE_MAX_DRAWDOWN,
+    FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS,
+    FACTORY_GATE_MIN_TRADES_PER_SYMBOL,
+)
 from src.backtest.factory_report import write_report
 from src.backtest.types import FactoryEvaluation, FactoryHypothesis
 
@@ -95,6 +99,11 @@ def test_issue_body_reports_symbol_denominators(tmp_path, monkeypatch):
     # 母数が曖昧だった旧ラベルは残っていない
     assert "Sharpe（銘柄平均）" not in body
     assert "Sharpe（有効銘柄平均）" in body
+    # 最大DD は有効銘柄の中での最悪値であることをラベル・値ごとピン留めする（#625 Finding 1）。
+    max_drawdown_row = (
+        f"| 最大DD（有効銘柄の最悪値） | -19.00% | >= {FACTORY_GATE_MAX_DRAWDOWN:.0%} |"
+    )
+    assert max_drawdown_row in body
 
     assert report["gate"]["n_symbols_with_signal"] == 69
     assert report["gate"]["n_effective_symbols"] == 16

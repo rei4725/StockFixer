@@ -489,6 +489,16 @@ def run_factory_batch(
         e.sharpe_ratio for e in evaluations if e.hypothesis.is_control and e.num_trades > 0
     ]
     champion_sharpe = max(control_sharpes) if control_sharpes else float("nan")
+    if not control_sharpes and controls:
+        # num_trades は有効銘柄フィルタ後の合計。対照群が1件以上評価されたにも
+        # かかわらず全滅した場合、apply_gate はチャンピオン条件を素通りさせる
+        # （fail-open は既存仕様のため維持）。せめて今夜のバッチでチャンピオン
+        # 比較を行わなかった事実をログに残す（#625）。
+        logger.warning(
+            "[factory] 対照群が全て有効取引数フィルタで除外されたため、"
+            "今回のバッチではチャンピオン比較をスキップします: 評価済み対照数=%d",
+            len(controls),
+        )
 
     for evaluation in evaluations:
         evaluation.pbo = float(batch_pbo)

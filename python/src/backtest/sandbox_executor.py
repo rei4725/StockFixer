@@ -18,6 +18,7 @@ from typing import Optional
 import pandas as pd
 
 from config.settings import (
+    FACTORY_GATE_MIN_TRADES_PER_SYMBOL,
     FACTORY_SANDBOX_CPU_LIMIT,
     FACTORY_SANDBOX_IMAGE,
     FACTORY_SANDBOX_MEMORY_LIMIT,
@@ -124,6 +125,12 @@ def run_sandboxed_evaluation(
             "STOCKFIXER_SANDBOX=1",
             "-e",
             "PYTHONPATH=/app",
+            # .env はサンドボックスコンテナにマウントされないため、ホスト側の実効値を
+            # 明示的に渡さないとコンテナ内は config/settings.py のデフォルト（3）に
+            # 固定されてしまう。ホスト側で FACTORY_GATE_MIN_TRADES_PER_SYMBOL を
+            # 変更しても Claude 生成候補だけ旧閾値で集計される不整合を防ぐ（#625）。
+            "-e",
+            f"FACTORY_GATE_MIN_TRADES_PER_SYMBOL={FACTORY_GATE_MIN_TRADES_PER_SYMBOL}",
             "-v",
             f"{src_dir}:/sandbox/src:ro",
             "-v",
@@ -190,7 +197,21 @@ def run_sandboxed_evaluation(
         # サンドボックスコンテナ（固定イメージ FACTORY_SANDBOX_IMAGE）がホストより
         # 古いバージョンだと出力しない可能性がある。旧イメージ由来のペイロードで
         # KeyError にしてバッチ全体を落とさないよう、dataclass 既定値と同じ値で
-        # .get() フォールバックする（#625）。
+        # .get() フォールバックする（#625）。ただしこのフォールバックは
+        # 「n_effective_symbols=0 でゲート不合格」という、ルール自体が悪いのか
+        # イメージが古いのか見分けがつかない事故を静かに起こしうるため、
+        # フォールバックが発動した事実を必ずログに残す。
+        missing_keys = [
+            key
+            for key in ("n_symbols_with_signal", "n_effective_symbols", "avg_trades_per_symbol")
+            if key not in ev
+        ]
+        if missing_keys:
+            logger.warning(
+                "[factory] サンドボックス出力に鍵が欠落しています（サンドボックスイメージが"
+                "ホストより古い可能性が高い）: missing_keys=%s",
+                missing_keys,
+            )
         evaluation = FactoryEvaluation(
             hypothesis=hypothesis,
             sharpe_ratio=ev["sharpe_ratio"],
