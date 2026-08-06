@@ -66,19 +66,22 @@ def _build_review_context(evaluation: FactoryEvaluation, champion_sharpe: float)
 ```json
 {json.dumps(h.rule_spec, ensure_ascii=False, indent=2)}
 ```
-マーケット: {h.market} / 評価期間: {h.lookback_years}年 / 対象銘柄数: {evaluation.n_symbols}
+マーケット: {h.market} / 評価期間: {h.lookback_years}年 / データ取得銘柄数: {evaluation.n_symbols}
 
 ## メトリクス
-- Sharpe（銘柄平均）: {evaluation.sharpe_ratio:.3f}
+- Sharpe（有効銘柄平均）: {evaluation.sharpe_ratio:.3f}
 - Deflated Sharpe (DSR): {evaluation.dsr:.3f}
 - PBO: {evaluation.pbo:.3f}
-- 取引数（合計）: {evaluation.num_trades}
-- 最大DD（最悪銘柄）: {evaluation.max_drawdown:.2%}
-- 勝率（銘柄平均）: {evaluation.win_rate:.2%}
-- リターン（銘柄平均）: {evaluation.total_return:.2%}
+- 取引数（有効銘柄合計）: {evaluation.num_trades}
+- シグナル発生銘柄数: {evaluation.n_symbols_with_signal}
+- 有効銘柄数（集計母数）: {evaluation.n_effective_symbols}
+- 銘柄あたり平均取引数（シグナル発生銘柄基準）: {evaluation.avg_trades_per_symbol:.2f}
+- 最大DD（有効銘柄の最悪値）: {evaluation.max_drawdown:.2%}
+- 勝率（有効銘柄平均）: {evaluation.win_rate:.2%}
+- リターン（有効銘柄平均）: {evaluation.total_return:.2%}
 - {champion_line}
 
-## 窓別リターン（銘柄平均）
+## 窓別リターン（全銘柄平均・シグナル無しは0）
 {window_lines}
 """
 

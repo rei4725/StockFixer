@@ -150,6 +150,7 @@ class TestApplyGate(unittest.TestCase):
             max_drawdown=-0.10,
             dsr=0.97,
             pbo=0.30,
+            n_effective_symbols=50,
         )
         defaults.update(kwargs)
         return FactoryEvaluation(**defaults)
@@ -336,6 +337,7 @@ class TestRunFactoryBatch(unittest.TestCase):
         port.add_technical_indicators.side_effect = lambda df: df
         return port
 
+    @patch("src.backtest.factory.FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS", 1)
     @patch("src.backtest.factory.save_factory_run")
     @patch("src.backtest.factory.count_factory_runs", return_value=0)
     @patch("src.backtest.factory.load_factory_hashes", return_value=set())
@@ -376,6 +378,7 @@ class TestRunFactoryBatch(unittest.TestCase):
         self.assertEqual(result.evaluated, [])
         mock_save.assert_not_called()
 
+    @patch("src.backtest.factory.FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS", 1)
     @patch("src.backtest.factory.review_hypothesis")
     @patch("src.backtest.factory.save_factory_run")
     @patch("src.backtest.factory.count_factory_runs", return_value=0)
@@ -395,6 +398,7 @@ class TestRunFactoryBatch(unittest.TestCase):
 
         self.assertEqual(mock_review.call_count, len(result.passed))
 
+    @patch("src.backtest.factory.FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS", 1)
     @patch("src.backtest.factory.review_hypothesis", return_value=None)
     @patch("src.backtest.factory.save_factory_run")
     @patch("src.backtest.factory.count_factory_runs", return_value=0)

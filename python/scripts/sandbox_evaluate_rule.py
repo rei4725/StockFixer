@@ -105,6 +105,9 @@ def main() -> int:
                         "total_return": evaluation.total_return,
                         "window_returns": evaluation.window_returns,
                         "n_symbols": evaluation.n_symbols,
+                        "n_symbols_with_signal": evaluation.n_symbols_with_signal,
+                        "n_effective_symbols": evaluation.n_effective_symbols,
+                        "avg_trades_per_symbol": evaluation.avg_trades_per_symbol,
                     },
                 }
             )

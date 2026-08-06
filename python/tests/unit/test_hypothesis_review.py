@@ -102,6 +102,39 @@ class TestBuildReviewContext(unittest.TestCase):
         self.assertIn("0.970", context)  # dsr
         self.assertIn("窓1", context)
 
+    def test_context_includes_symbol_denominators(self):
+        """レビュアーが Sharpe の母数を誤認しないよう母数を渡す（#625）。"""
+        evaluation = FactoryEvaluation(
+            hypothesis=FactoryHypothesis(
+                rule_spec={"type": "atomic", "rule": "rsi_contrarian", "params": {}},
+                market="jp",
+            ),
+            sharpe_ratio=1.6,
+            dsr=0.99,
+            pbo=0.1,
+            num_trades=85,
+            max_drawdown=-0.19,
+            win_rate=0.85,
+            total_return=0.09,
+            window_returns=[0.01],
+            n_symbols=194,
+            n_symbols_with_signal=69,
+            n_effective_symbols=16,
+            avg_trades_per_symbol=1.23,
+        )
+
+        context = hypothesis_review._build_review_context(evaluation, champion_sharpe=1.083)
+
+        self.assertIn("データ取得銘柄数: 194", context)
+        self.assertIn("Sharpe（有効銘柄平均）: 1.600", context)
+        self.assertIn("最大DD（有効銘柄の最悪値）: -19.00%", context)
+        self.assertIn("取引数（有効銘柄合計）: 85", context)
+        self.assertIn("シグナル発生銘柄数: 69", context)
+        self.assertIn("有効銘柄数（集計母数）: 16", context)
+        self.assertIn("銘柄あたり平均取引数（シグナル発生銘柄基準）: 1.23", context)
+        self.assertIn("勝率（有効銘柄平均）: 85.00%", context)
+        self.assertIn("リターン（有効銘柄平均）: 9.00%", context)
+
 
 if __name__ == "__main__":
     unittest.main()
