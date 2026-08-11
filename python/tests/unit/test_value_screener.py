@@ -1,11 +1,14 @@
 """value_screener のユニットテスト。"""
 
+import os
+import tempfile
 import unittest
 from unittest.mock import patch
 
 import pandas as pd
 
-from src.screening.value_screener import screen_value_candidates
+from src.screening.types import ValueCandidate
+from src.screening.value_screener import save_value_candidates, screen_value_candidates
 
 
 def _row(
@@ -117,6 +120,82 @@ class TestScreenValueCandidates(unittest.TestCase):
         with _patch_loader(rows):
             result = screen_value_candidates(market="jp", max_per=10.0)
         self.assertEqual(result, [])
+
+
+class TestSaveValueCandidates(unittest.TestCase):
+    """save_value_candidates の CSV 書き込みを検証する。
+
+    出力先は ``get_results_dir`` をテスト用一時ディレクトリにモックし、実リポジトリの
+    results/ ディレクトリを汚さない。一時ディレクトリは with ブロックを抜ける際に
+    自動削除される。
+    """
+
+    def test_happy_path_writes_expected_csv(self):
+        candidates = [
+            ValueCandidate(
+                market="jp",
+                symbol="GOOD",
+                trailing_pe=8.0,
+                payout_ratio=0.20,
+                debt_to_equity=50.0,
+                net_income=100.0,
+                market_cap=1000.0,
+            ),
+            ValueCandidate(
+                market="jp",
+                symbol="GOOD2",
+                trailing_pe=6.0,
+                payout_ratio=0.10,
+                debt_to_equity=30.0,
+                net_income=200.0,
+                market_cap=2000.0,
+            ),
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            with patch(
+                "src.screening.value_screener.get_results_dir",
+                return_value=tmp_dir,
+            ):
+                path = save_value_candidates(candidates, "jp")
+
+            self.assertTrue(os.path.exists(path))
+            self.assertTrue(path.startswith(tmp_dir))
+
+            df = pd.read_csv(path)
+            self.assertEqual(len(df), 2)
+            expected_columns = {
+                "market",
+                "symbol",
+                "trailing_pe",
+                "payout_ratio",
+                "debt_to_equity",
+                "net_income",
+                "market_cap",
+            }
+            self.assertTrue(expected_columns.issubset(set(df.columns)))
+            self.assertEqual(list(df["symbol"]), ["GOOD", "GOOD2"])
+            self.assertEqual(list(df["market"]), ["jp", "jp"])
+            self.assertEqual(list(df["trailing_pe"]), [8.0, 6.0])
+            self.assertEqual(list(df["payout_ratio"]), [0.20, 0.10])
+            self.assertEqual(list(df["debt_to_equity"]), [50.0, 30.0])
+            self.assertEqual(list(df["net_income"]), [100.0, 200.0])
+            self.assertEqual(list(df["market_cap"]), [1000.0, 2000.0])
+
+    def test_empty_candidates_writes_without_error(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            with patch(
+                "src.screening.value_screener.get_results_dir",
+                return_value=tmp_dir,
+            ):
+                path = save_value_candidates([], "jp")
+
+            self.assertTrue(os.path.exists(path))
+            with open(path, encoding="utf-8") as f:
+                content = f.read()
+            # 空リストならデータ行は無い（ヘッダ無し、またはヘッダのみ）。
+            lines = [line for line in content.strip().splitlines() if line]
+            self.assertLessEqual(len(lines), 1)
 
 
 if __name__ == "__main__":
