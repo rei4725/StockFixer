@@ -35,6 +35,8 @@ class FundamentalRecord:
         market_cap: 時価総額
         shares_outstanding: 発行済株式数
         revenue_cagr_3y: 売上高 CAGR（3年、算出不能時は None）
+        trailing_pe: 実績PER（yfinance trailingPE）
+        payout_ratio: 配当性向（0〜1のfraction、yfinance payoutRatio）
     """
 
     market: str
@@ -52,3 +54,5 @@ class FundamentalRecord:
     market_cap: Optional[float] = None
     shares_outstanding: Optional[float] = None
     revenue_cagr_3y: Optional[float] = None
+    trailing_pe: Optional[float] = None
+    payout_ratio: Optional[float] = None

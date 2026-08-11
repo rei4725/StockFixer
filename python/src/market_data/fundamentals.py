@@ -57,7 +57,7 @@ def _row_series(df: Optional[pd.DataFrame], keys: tuple[str, ...]) -> Optional[p
         return None
     for key in keys:
         if key in df.index:
-            return df.loc[key]
+            return df.loc[key]  # type: ignore[return-value]
     return None
 
 
@@ -163,6 +163,8 @@ def fetch_fundamentals(market: str, symbol: str) -> Optional[FundamentalRecord]:
     market_cap = _safe_float(info.get("marketCap"))
     shares_outstanding = _safe_float(info.get("sharesOutstanding"))
     revenue_cagr_3y = _revenue_cagr_3y(financials)
+    trailing_pe = _safe_float(info.get("trailingPE"))
+    payout_ratio = _safe_float(info.get("payoutRatio"))
 
     record = FundamentalRecord(
         market=market,
@@ -180,6 +182,8 @@ def fetch_fundamentals(market: str, symbol: str) -> Optional[FundamentalRecord]:
         market_cap=market_cap,
         shares_outstanding=shares_outstanding,
         revenue_cagr_3y=revenue_cagr_3y,
+        trailing_pe=trailing_pe,
+        payout_ratio=payout_ratio,
     )
 
     # 全フィールドが空（実質データ無し）なら取得失敗扱い
