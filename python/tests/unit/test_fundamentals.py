@@ -173,7 +173,7 @@ class TestFundamentalsDb(unittest.TestCase):
         if os.path.exists(self.tmp_dir):
             shutil.rmtree(self.tmp_dir, ignore_errors=True)
 
-    def _record(self, symbol="AAPL", revenue=400.0):
+    def _record(self, symbol="AAPL", revenue=400.0, trailing_pe=8.48, payout_ratio=0.27):
         return FundamentalRecord(
             market="us",
             symbol=symbol,
@@ -190,6 +190,8 @@ class TestFundamentalsDb(unittest.TestCase):
             market_cap=9999.0,
             shares_outstanding=1000.0,
             revenue_cagr_3y=0.5,
+            trailing_pe=trailing_pe,
+            payout_ratio=payout_ratio,
         )
 
     def test_upsert_load_roundtrip(self):
@@ -199,6 +201,8 @@ class TestFundamentalsDb(unittest.TestCase):
         self.assertEqual(loaded["revenue"], 400.0)
         self.assertEqual(loaded["eps"], 5.5)
         self.assertEqual(loaded["symbol"], "AAPL")
+        self.assertEqual(loaded["trailing_pe"], 8.48)
+        self.assertEqual(loaded["payout_ratio"], 0.27)
 
     def test_upsert_is_idempotent(self):
         upsert_fundamentals(self._record(revenue=100.0))
