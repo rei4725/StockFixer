@@ -80,6 +80,22 @@ class TestScreenValueCandidates(unittest.TestCase):
         self.assertIn("GOOD", codes)
         self.assertNotIn("LOSS", codes)
 
+    def test_zero_payout_ratio_excluded(self):
+        rows = [_row("GOOD"), _row("NOPAYOUT", payout_ratio=0.0)]
+        with _patch_loader(rows):
+            result = screen_value_candidates(market="jp")
+        codes = [c.symbol for c in result]
+        self.assertIn("GOOD", codes)
+        self.assertNotIn("NOPAYOUT", codes)
+
+    def test_extremely_low_per_excluded(self):
+        rows = [_row("GOOD"), _row("LOWPER", trailing_pe=0.5)]
+        with _patch_loader(rows):
+            result = screen_value_candidates(market="jp")
+        codes = [c.symbol for c in result]
+        self.assertIn("GOOD", codes)
+        self.assertNotIn("LOWPER", codes)
+
     def test_missing_field_excluded(self):
         rows = [_row("GOOD"), _row("MISSING", trailing_pe=None)]
         with _patch_loader(rows):

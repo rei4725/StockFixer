@@ -24,7 +24,9 @@ logger = get_logger(__name__)
 
 def screen_value_candidates(
     market: str = "jp",
+    min_per: float = 1.0,  # 実績PER下限（極端に低いPERは一時的な特別利益・データ異常の可能性が高いため除外）
     max_per: float = 10.0,
+    min_payout_ratio: float = 0.05,  # 配当性向下限（0だと無配当銘柄が入り、将来の増配トリガーが存在しないため除外）
     max_payout_ratio: float = 0.30,
     max_debt_to_equity: float = 100.0,
     top_n: int = 30,
@@ -32,8 +34,8 @@ def screen_value_candidates(
     """低PER・低配当性向・財務安定な銘柄を抽出し、PER昇順でランキングする。
 
     ハードゲート（すべて満たす銘柄のみ残す）:
-        - trailing_pe が存在し max_per 以下
-        - payout_ratio が存在し max_payout_ratio 以下
+        - trailing_pe が存在し min_per 以上 max_per 以下
+        - payout_ratio が存在し min_payout_ratio 以上 max_payout_ratio 以下
         - debt_to_equity が存在し max_debt_to_equity 以下（パーセントポイント単位）
         - net_income が存在し 0 より大きい（黒字）
 
@@ -60,7 +62,9 @@ def screen_value_candidates(
     universe = universe[mask]
 
     universe = universe[
-        (universe["trailing_pe"] <= max_per)
+        (universe["trailing_pe"] >= min_per)
+        & (universe["trailing_pe"] <= max_per)
+        & (universe["payout_ratio"] >= min_payout_ratio)
         & (universe["payout_ratio"] <= max_payout_ratio)
         & (universe["debt_to_equity"] <= max_debt_to_equity)
         & (universe["net_income"] > 0)

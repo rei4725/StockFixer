@@ -7,6 +7,7 @@ stock_fundamentals の最新スナップショットのみを使い、割安・�
 使用例:
     py run_value_screen.py --market jp
     py run_value_screen.py --market jp --max-per 8.0 --max-payout-ratio 0.25
+    py run_value_screen.py --market jp --min-per 2.0 --min-payout-ratio 0.10
 """
 
 import argparse
@@ -24,7 +25,16 @@ def parse_args():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("--market", type=str, default="jp", help="マーケット識別子")
+    parser.add_argument(
+        "--min-per", type=float, default=1.0, help="実績PER下限（極端に低いPERは除外）"
+    )
     parser.add_argument("--max-per", type=float, default=10.0, help="実績PER上限")
+    parser.add_argument(
+        "--min-payout-ratio",
+        type=float,
+        default=0.05,
+        help="配当性向下限（無配当銘柄は将来の増配トリガーが無いため除外）",
+    )
     parser.add_argument("--max-payout-ratio", type=float, default=0.30, help="配当性向上限（0〜1）")
     parser.add_argument(
         "--max-debt-to-equity",
@@ -39,7 +49,9 @@ def parse_args():
 def run(args) -> None:
     candidates = screen_value_candidates(
         market=args.market,
+        min_per=args.min_per,
         max_per=args.max_per,
+        min_payout_ratio=args.min_payout_ratio,
         max_payout_ratio=args.max_payout_ratio,
         max_debt_to_equity=args.max_debt_to_equity,
         top_n=args.top_n,
