@@ -85,3 +85,16 @@ class MultibaggerCandidate:
     debt_to_equity: Optional[float]  # 負債資本倍率(D/E)
     market_cap: Optional[float]  # 時価総額
     fundamentals_missing: bool  # 財務欠損で penalize 扱いか
+
+
+@dataclass
+class ValueCandidate:
+    """バリュー・スクリーナー（低PER・低配当性向・財務安定）が返す候補銘柄。"""
+
+    market: str
+    symbol: str
+    trailing_pe: float
+    payout_ratio: float
+    debt_to_equity: float  # パーセントポイント単位（yfinance実測準拠、例: 78.4 = D/E比0.78）
+    net_income: float
+    market_cap: Optional[float]  # 表示用。ゲート対象外のため欠損を許容する

@@ -42,6 +42,8 @@ _COLUMNS = [
     "market_cap",
     "shares_outstanding",
     "revenue_cagr_3y",
+    "trailing_pe",
+    "payout_ratio",
 ]
 
 
@@ -63,6 +65,8 @@ class _FundamentalRecordLike(Protocol):
     market_cap: Optional[float]
     shares_outstanding: Optional[float]
     revenue_cagr_3y: Optional[float]
+    trailing_pe: Optional[float]
+    payout_ratio: Optional[float]
 
 
 def upsert_fundamentals(record: _FundamentalRecordLike) -> None:

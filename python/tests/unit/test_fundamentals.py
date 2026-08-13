@@ -67,6 +67,8 @@ class TestFetchFundamentals(unittest.TestCase):
             "totalCash": 123.0,
             "marketCap": 9999.0,
             "sharesOutstanding": 1000.0,
+            "trailingPE": 8.48,
+            "payoutRatio": 0.27,
         }
         with patch("src.market_data.fundamentals.yf.Ticker", return_value=_make_ticker(info)):
             rec = fetch_fundamentals("us", "AAPL")
@@ -84,6 +86,8 @@ class TestFetchFundamentals(unittest.TestCase):
         self.assertEqual(rec.cash, 123.0)
         self.assertEqual(rec.market_cap, 9999.0)
         self.assertEqual(rec.shares_outstanding, 1000.0)
+        self.assertEqual(rec.trailing_pe, 8.48)
+        self.assertEqual(rec.payout_ratio, 0.27)
         # income_stmt（=financials）から営業利益
         self.assertEqual(rec.operating_income, 100.0)
 
@@ -103,6 +107,15 @@ class TestFetchFundamentals(unittest.TestCase):
         self.assertAlmostEqual(rec.net_margin, 0.20)
         # 現金は balance_sheet から
         self.assertEqual(rec.cash, 50.0)
+
+    def test_missing_pe_and_payout_ratio_are_none(self):
+        """info に trailingPE / payoutRatio が無ければ None のまま（フォールバック計算はしない）。"""
+        info = {"marketCap": 1.0}
+        with patch("src.market_data.fundamentals.yf.Ticker", return_value=_make_ticker(info)):
+            rec = fetch_fundamentals("us", "NOPE")
+        self.assertIsNotNone(rec)
+        self.assertIsNone(rec.trailing_pe)
+        self.assertIsNone(rec.payout_ratio)
 
     def test_revenue_cagr(self):
         """売上 CAGR: 100 → 400 を3年で = (4)^(1/3) - 1 ≈ 0.587。"""
@@ -160,7 +173,7 @@ class TestFundamentalsDb(unittest.TestCase):
         if os.path.exists(self.tmp_dir):
             shutil.rmtree(self.tmp_dir, ignore_errors=True)
 
-    def _record(self, symbol="AAPL", revenue=400.0):
+    def _record(self, symbol="AAPL", revenue=400.0, trailing_pe=8.48, payout_ratio=0.27):
         return FundamentalRecord(
             market="us",
             symbol=symbol,
@@ -177,6 +190,8 @@ class TestFundamentalsDb(unittest.TestCase):
             market_cap=9999.0,
             shares_outstanding=1000.0,
             revenue_cagr_3y=0.5,
+            trailing_pe=trailing_pe,
+            payout_ratio=payout_ratio,
         )
 
     def test_upsert_load_roundtrip(self):
@@ -186,6 +201,8 @@ class TestFundamentalsDb(unittest.TestCase):
         self.assertEqual(loaded["revenue"], 400.0)
         self.assertEqual(loaded["eps"], 5.5)
         self.assertEqual(loaded["symbol"], "AAPL")
+        self.assertEqual(loaded["trailing_pe"], 8.48)
+        self.assertEqual(loaded["payout_ratio"], 0.27)
 
     def test_upsert_is_idempotent(self):
         upsert_fundamentals(self._record(revenue=100.0))
