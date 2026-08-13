@@ -17,8 +17,9 @@
 
 import について:
     backtest BC から screening BC の純粋関数（`screen_trend_candidates` /
-    `simulate_position`）を参照する。screening は .importlinter の独立性契約の
-    modules に含まれないため契約違反にはならない（lint-imports contracts kept）。
+    `simulate_position`）を参照する。既存のBC間依存であり、.importlinter の
+    layers/independence 両契約に ignore_imports として明示登録済み（#638）。
+    将来はBT専用ポート経由に切り出す想定（ロードマップ分類 [D]）。
 """
 
 from __future__ import annotations
