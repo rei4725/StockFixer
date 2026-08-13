@@ -26,7 +26,7 @@ def _fund(**overrides) -> dict:
     base = {
         "revenue_cagr_3y": 0.30,
         "roe": 0.25,
-        "debt_to_equity": 0.5,
+        "debt_to_equity": 50.0,  # yfinance debtToEquity はパーセントポイント単位（D/E比率0.5相当）
         "market_cap": 5e9,
         "op_margin": 0.20,
         "net_margin": 0.15,
@@ -71,10 +71,23 @@ class TestApplyQualityGate(unittest.TestCase):
     def test_high_debt_excluded(self):
         """D/E が上限超なら除外される。"""
         cands = [_candidate("HIDEBT")]
-        fmap = {("us", "HIDEBT"): _fund(debt_to_equity=3.0)}
+        fmap = {("us", "HIDEBT"): _fund(debt_to_equity=300.0)}  # D/E比率3.0相当
         with _patch_loader(fmap):
             result = apply_quality_gate(cands)
         self.assertEqual(result, [])
+
+    def test_realistic_yfinance_scale_debt_passes(self):
+        """yfinance実測値スケール（パーセントポイント）のD/Eが正しく通過する。
+
+        既存の debtToEquity は AAPL=78.445 / MSFT=29.118 のようにパーセントポイント
+        単位で返る。旧デフォルト(max_debt_to_equity=1.5)ではこの水準の銘柄が
+        すべて誤って除外されていた（#637）。
+        """
+        cands = [_candidate("AAPL_LIKE")]
+        fmap = {("us", "AAPL_LIKE"): _fund(debt_to_equity=78.445)}
+        with _patch_loader(fmap):
+            result = apply_quality_gate(cands)
+        self.assertEqual([c.symbol for c in result], ["AAPL_LIKE"])
 
     def test_large_cap_excluded(self):
         """時価総額が上限超なら除外される。"""
