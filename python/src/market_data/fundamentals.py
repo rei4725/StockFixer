@@ -57,6 +57,10 @@ def _row_series(df: Optional[pd.DataFrame], keys: tuple[str, ...]) -> Optional[p
         return None
     for key in keys:
         if key in df.index:
+            # pre-commitフックのmypy(pandas-stubs同梱、requirements-dev.txt非連動)では
+            # df.loc[key] の戻り値が Series | DataFrame | Scalar と推論され、
+            # 宣言した Optional[pd.Series] に対し return-value エラーとなる。
+            # CI側の `mypy src/`（リポジトリのpandas-stubsピン）では発生しない差異。
             return df.loc[key]  # type: ignore[return-value]
     return None
 

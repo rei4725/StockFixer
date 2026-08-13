@@ -137,6 +137,46 @@ class TestScreenValueCandidates(unittest.TestCase):
             result = screen_value_candidates(market="jp", max_per=10.0)
         self.assertEqual(result, [])
 
+    def test_boundary_values_are_inclusive(self):
+        """min/max ちょうど境界の値は通過する（>=/<= 判定の境界値テスト）。"""
+        rows = [
+            _row(
+                "EDGE",
+                trailing_pe=1.0,
+                payout_ratio=0.05,
+                debt_to_equity=100.0,
+            )
+        ]
+        with _patch_loader(rows):
+            result = screen_value_candidates(
+                market="jp",
+                min_per=1.0,
+                max_per=1.0,
+                min_payout_ratio=0.05,
+                max_payout_ratio=0.05,
+                max_debt_to_equity=100.0,
+            )
+        self.assertEqual([c.symbol for c in result], ["EDGE"])
+
+    def test_min_per_greater_than_max_per_raises(self):
+        with self.assertRaises(ValueError):
+            screen_value_candidates(market="jp", min_per=10.0, max_per=1.0)
+
+    def test_min_payout_ratio_greater_than_max_payout_ratio_raises(self):
+        with self.assertRaises(ValueError):
+            screen_value_candidates(market="jp", min_payout_ratio=0.5, max_payout_ratio=0.1)
+
+    def test_tie_break_by_symbol_when_per_equal(self):
+        """trailing_pe が同値の場合、symbol昇順で安定的に並ぶ。"""
+        rows = [
+            _row("ZZZ", trailing_pe=5.0),
+            _row("AAA", trailing_pe=5.0),
+            _row("MMM", trailing_pe=5.0),
+        ]
+        with _patch_loader(rows):
+            result = screen_value_candidates(market="jp")
+        self.assertEqual([c.symbol for c in result], ["AAA", "MMM", "ZZZ"])
+
 
 class TestSaveValueCandidates(unittest.TestCase):
     """save_value_candidates の CSV 書き込みを検証する。

@@ -44,7 +44,18 @@ def screen_value_candidates(
     Returns:
         trailing_pe 昇順の ValueCandidate リスト（最大 top_n 件）。
         該当なしなら空リスト。
+
+    Raises:
+        ValueError: min_per > max_per または min_payout_ratio > max_payout_ratio の場合。
     """
+    if min_per > max_per:
+        raise ValueError(f"min_per({min_per}) は max_per({max_per}) 以下にすること")
+    if min_payout_ratio > max_payout_ratio:
+        raise ValueError(
+            f"min_payout_ratio({min_payout_ratio}) は "
+            f"max_payout_ratio({max_payout_ratio}) 以下にすること"
+        )
+
     df = load_all_fundamentals()
     if df.empty:
         logger.warning("stock_fundamentals が空です")
@@ -61,6 +72,10 @@ def screen_value_candidates(
         mask &= universe[col].notna()
     universe = universe[mask]
 
+    if universe.empty:
+        logger.warning(f"財務データ未取得（欠損）で判定不能: market={market}")
+        return []
+
     universe = universe[
         (universe["trailing_pe"] >= min_per)
         & (universe["trailing_pe"] <= max_per)
@@ -71,10 +86,12 @@ def screen_value_candidates(
     ]
 
     if universe.empty:
-        logger.warning("バリュー・スクリーン通過銘柄なし")
+        logger.warning(f"バリュー・スクリーン通過銘柄なし（条件不一致）: market={market}")
         return []
 
-    universe = universe.sort_values("trailing_pe", ascending=True).head(top_n)
+    universe = universe.sort_values(["trailing_pe", "symbol"], ascending=True, kind="stable").head(
+        top_n
+    )
 
     candidates = [
         ValueCandidate(
@@ -84,7 +101,7 @@ def screen_value_candidates(
             payout_ratio=float(row["payout_ratio"]),
             debt_to_equity=float(row["debt_to_equity"]),
             net_income=float(row["net_income"]),
-            market_cap=(float(row["market_cap"]) if pd.notna(row.get("market_cap")) else None),
+            market_cap=(float(row["market_cap"]) if pd.notna(row["market_cap"]) else None),
         )
         for _, row in universe.iterrows()
     ]
