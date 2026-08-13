@@ -111,6 +111,12 @@ _PARAM_GRID: dict[str, list[dict[str, Any]]] = {
 
 _MIN_SYMBOL_ROWS = 100
 
+# 指標の助走（ウォームアップ）区間が評価期間に混入しないための前倒しダウンロード日数（#629）。
+# 探索空間の最長ウィンドウ（volume_breakout の breakout_window=40 / ema_momentum の
+# slow_window=50 等、トレーディング日数）に、週末・祝日を考慮した安全マージンを載せた
+# カレンダー日数。
+_WARMUP_CALENDAR_DAYS = 120
+
 
 # ---------------------------------------------------------------------------
 # ルール構築
@@ -250,17 +256,33 @@ def control_hypotheses(market: str, lookback_years: int = 2) -> list[FactoryHypo
 def _load_symbol_data(
     market: str, symbols: list[str], start: str, end: str
 ) -> dict[str, pd.DataFrame]:
-    """銘柄ごとに OHLCV + テクニカル指標を1回だけ取得する。"""
+    """銘柄ごとに OHLCV + テクニカル指標を1回だけ取得する。
+
+    指標（EMA/MACD/出来高ブレイクアウト等）の助走区間が評価期間 [start, end) に
+    混入すると評価値がデータ取得開始日に依存してしまうため、start より
+    _WARMUP_CALENDAR_DAYS 日前からダウンロードして指標を計算し、その後
+    評価対象期間へスライスしてから返す（#629）。
+    """
     port = get_backtest_data_port()
+    warmup_start = (pd.Timestamp(start) - pd.Timedelta(days=_WARMUP_CALENDAR_DAYS)).strftime(
+        "%Y-%m-%d"
+    )
+    eval_start = pd.Timestamp(start)
+
     data: dict[str, pd.DataFrame] = {}
     for symbol in symbols:
         try:
-            df = port.download(get_ticker(market, symbol), start=start, end=end)
-            if df is None or len(df) < _MIN_SYMBOL_ROWS:
+            df = port.download(get_ticker(market, symbol), start=warmup_start, end=end)
+            if df is None or df.empty:
                 logger.warning("データ不足のためスキップ: %s/%s", market, symbol)
                 continue
             df = port.add_technical_indicators(df)
-            data[symbol] = df.dropna(subset=["Close"])
+            df = df.dropna(subset=["Close"])
+            df = df[df.index >= eval_start]
+            if len(df) < _MIN_SYMBOL_ROWS:
+                logger.warning("データ不足のためスキップ: %s/%s", market, symbol)
+                continue
+            data[symbol] = df
         except Exception:
             logger.warning("データ取得失敗のためスキップ: %s/%s", market, symbol, exc_info=True)
     return data

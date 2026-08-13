@@ -11,6 +11,9 @@ import numpy as np
 import pandas as pd
 
 from src.backtest.factory import (
+    _MIN_SYMBOL_ROWS,
+    _WARMUP_CALENDAR_DAYS,
+    _load_symbol_data,
     _window_bounds,
     apply_gate,
     build_rule,
@@ -195,6 +198,76 @@ class TestApplyGate(unittest.TestCase):
         ev = self._make_eval(sharpe_ratio=0.5, dsr=0.97, pbo=0.3)
         apply_gate(ev, champion_sharpe=float("nan"))
         self.assertTrue(ev.gate_passed)
+
+
+class TestLoadSymbolData(unittest.TestCase):
+    """_load_symbol_data の助走（ウォームアップ）区間処理のテスト（#629）"""
+
+    def _ohlcv(self, start, periods=400):
+        dates = pd.bdate_range(start=start, periods=periods)
+        close = 100 + np.arange(len(dates), dtype=float)
+        return pd.DataFrame(
+            {
+                "Open": close,
+                "High": close + 1,
+                "Low": close - 1,
+                "Close": close,
+                "Volume": np.full(len(dates), 10000.0),
+            },
+            index=dates,
+        )
+
+    @patch("src.backtest.factory.get_backtest_data_port")
+    def test_download_start_is_extended_by_warmup(self, mock_get_port):
+        port = MagicMock()
+        recorded = {}
+
+        def _download(ticker, start=None, end=None):
+            recorded["start"] = start
+            recorded["end"] = end
+            return self._ohlcv(start="2024-01-01")
+
+        port.download.side_effect = _download
+        port.add_technical_indicators.side_effect = lambda df: df
+        mock_get_port.return_value = port
+
+        _load_symbol_data("jp", ["AAA"], start="2024-06-01", end="2024-12-01")
+
+        expected_warmup_start = (
+            pd.Timestamp("2024-06-01") - pd.Timedelta(days=_WARMUP_CALENDAR_DAYS)
+        ).strftime("%Y-%m-%d")
+        self.assertEqual(recorded["start"], expected_warmup_start)
+        self.assertEqual(recorded["end"], "2024-12-01")
+
+    @patch("src.backtest.factory.get_backtest_data_port")
+    def test_warmup_rows_are_trimmed_from_result(self, mock_get_port):
+        """助走区間ぶんダウンロードしても、返却データはstart以降のみ。"""
+        port = MagicMock()
+        port.download.side_effect = lambda ticker, start=None, end=None: self._ohlcv(start=start)
+        port.add_technical_indicators.side_effect = lambda df: df
+        mock_get_port.return_value = port
+
+        data = _load_symbol_data("jp", ["AAA"], start="2024-06-01", end="2024-12-01")
+
+        self.assertIn("AAA", data)
+        self.assertGreaterEqual(data["AAA"].index.min(), pd.Timestamp("2024-06-01"))
+
+    @patch("src.backtest.factory.get_backtest_data_port")
+    def test_thin_eval_window_is_skipped_even_with_enough_raw_rows(self, mock_get_port):
+        """助走込みの生データが_MIN_SYMBOL_ROWS以上でも、評価期間側が薄ければ除外する。"""
+        port = MagicMock()
+        # 助走開始日から _MIN_SYMBOL_ROWS を超える営業日数を返すが、大半が助走区間に
+        # 落ちるため、start以降（評価期間側）は _MIN_SYMBOL_ROWS を割り込む設定。
+        raw_periods = _MIN_SYMBOL_ROWS + 30
+        port.download.side_effect = lambda ticker, start=None, end=None: self._ohlcv(
+            start=start, periods=raw_periods
+        )
+        port.add_technical_indicators.side_effect = lambda df: df
+        mock_get_port.return_value = port
+
+        data = _load_symbol_data("jp", ["AAA"], start="2024-06-01", end="2024-12-01")
+
+        self.assertNotIn("AAA", data)
 
 
 class TestEvaluateHypothesis(unittest.TestCase):
