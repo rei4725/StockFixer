@@ -24,6 +24,7 @@ from src.backtest.factory import (
     write_report,
 )
 from src.backtest.types import FactoryEvaluation, FactoryHypothesis
+from src.market_data.technical import add_technical_indicators
 
 _ATOMIC_SPEC = {
     "type": "atomic",
@@ -402,36 +403,84 @@ class TestWriteReport(unittest.TestCase):
 class TestRunFactoryBatch(unittest.TestCase):
     """run_factory_batch の結合テスト（ポート・DB をモック）"""
 
+    # #628: この銘柄・データパラメータ・budget/seed の組み合わせは、実際に合格仮説
+    # （macd_rsi(rsi_filter=70.0): trades=56, dsr=0.970, dd=-0.183, sharpe=1.414,
+    # champion=1.286）が1件出ることを事前に確認済み（決定論的・再現性確認済み）。
+    # 単なる合成データではなく実際のシグナルが出るよう、port.add_technical_indicators
+    # には本物の実装を使う（旧: 恒等関数だったため bb/macd/rsi/atr 依存のルールが
+    # 一切シグナルを出せず、合格経路が実質テストされていなかった）。
+    _PASSING_SYMBOLS = ["SYM_0", "SYM_1", "SYM_2"]
+    _PASSING_BATCH_KWARGS = {"budget": 8, "n_windows": 6, "seed": 1}
+    _PASSING_DATA_PERIODS = 700
+    _PASSING_DATA_TREND = 0.002
+    _PASSING_DATA_VOL = 0.015
+    _PASSING_DATA_SEED_BASE = 1
+
     def _fake_port(self):
+        """本物の add_technical_indicators を使い、実際に合格候補が出る合成データを返す。
+
+        データは「今日」を終端とする営業日レンジで生成する（日付ドリフトに強い。
+        固定開始日だと将来のテスト実行で評価期間との重なりが薄れていく）。
+        """
+        seeds = {
+            symbol: self._PASSING_DATA_SEED_BASE + i
+            for i, symbol in enumerate(self._PASSING_SYMBOLS)
+        }
+
+        def _ohlcv_ending_today(seed):
+            rng = np.random.default_rng(seed)
+            end = pd.Timestamp.now().normalize()
+            dates = pd.bdate_range(end=end, periods=self._PASSING_DATA_PERIODS)
+            trend, vol = self._PASSING_DATA_TREND, self._PASSING_DATA_VOL
+            close = 100 * np.exp(np.cumsum(rng.normal(trend, vol, len(dates))))
+            return pd.DataFrame(
+                {
+                    "Open": close * (1 + rng.normal(0, 0.003, len(dates))),
+                    "High": close * (1 + abs(rng.normal(0, vol / 2, len(dates)))),
+                    "Low": close * (1 - abs(rng.normal(0, vol / 2, len(dates)))),
+                    "Close": close,
+                    "Volume": rng.integers(1000, 50000, len(dates)).astype(float),
+                },
+                index=dates,
+            )
+
+        def _download(ticker, start=None, end=None):
+            for symbol, seed in seeds.items():
+                if ticker.startswith(symbol):
+                    return _ohlcv_ending_today(seed)
+            raise AssertionError(f"想定外のticker: {ticker}")
+
         port = MagicMock()
-        port.download.side_effect = lambda ticker, start=None, end=None: _make_ohlcv(
-            seed=hash(ticker) % 100
-        )
-        port.add_technical_indicators.side_effect = lambda df: df
+        port.download.side_effect = _download
+        port.add_technical_indicators.side_effect = add_technical_indicators
         return port
 
+    @patch("src.backtest.factory.FACTORY_CLAUDE_RULEGEN_ENABLED", False)
+    @patch("src.backtest.factory.review_hypothesis", return_value=None)
     @patch("src.backtest.factory.FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS", 1)
     @patch("src.backtest.factory.save_factory_run")
     @patch("src.backtest.factory.count_factory_runs", return_value=0)
     @patch("src.backtest.factory.load_factory_hashes", return_value=set())
     @patch("src.backtest.factory.get_backtest_data_port")
     def test_batch_evaluates_and_records_candidates(
-        self, mock_port, mock_hashes, mock_count, mock_save
+        self, mock_port, mock_hashes, mock_count, mock_save, mock_review
     ):
         mock_port.return_value = self._fake_port()
 
         with tempfile.TemporaryDirectory() as tmp:
             with patch("src.backtest.factory_report.get_results_dir", return_value=tmp):
                 result = run_factory_batch(
-                    market="jp", symbols=["AAA", "BBB"], budget=4, n_windows=6, seed=123
+                    market="jp", symbols=self._PASSING_SYMBOLS, **self._PASSING_BATCH_KWARGS
                 )
 
-                self.assertEqual(len(result.candidates), 4)
+                self.assertEqual(len(result.candidates), self._PASSING_BATCH_KWARGS["budget"])
                 # 候補は全件 DB 記録される
-                self.assertEqual(mock_save.call_count, 4)
+                self.assertEqual(mock_save.call_count, self._PASSING_BATCH_KWARGS["budget"])
                 # DSR / PBO が全候補に付与される
                 for ev in result.candidates:
                     self.assertFalse(math.isnan(ev.dsr))
+                # 合格経路が実際に実行されていることを検証する（#628）
+                self.assertGreater(len(result.passed), 0)
                 # 合格仮説にはレポートが書かれている
                 for ev in result.passed:
                     self.assertIsNotNone(ev.report_path)
@@ -451,6 +500,7 @@ class TestRunFactoryBatch(unittest.TestCase):
         self.assertEqual(result.evaluated, [])
         mock_save.assert_not_called()
 
+    @patch("src.backtest.factory.FACTORY_CLAUDE_RULEGEN_ENABLED", False)
     @patch("src.backtest.factory.FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS", 1)
     @patch("src.backtest.factory.review_hypothesis")
     @patch("src.backtest.factory.save_factory_run")
@@ -466,11 +516,15 @@ class TestRunFactoryBatch(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with patch("src.backtest.factory_report.get_results_dir", return_value=tmp):
                 result = run_factory_batch(
-                    market="jp", symbols=["AAA", "BBB"], budget=4, n_windows=6, seed=123
+                    market="jp", symbols=self._PASSING_SYMBOLS, **self._PASSING_BATCH_KWARGS
                 )
 
+        # 合格経路が実際に実行されていることを検証する（#628: result.passed が常に
+        # 空だと call_count の 0 == 0 比較で自明に真になってしまっていた）
+        self.assertGreater(len(result.passed), 0)
         self.assertEqual(mock_review.call_count, len(result.passed))
 
+    @patch("src.backtest.factory.FACTORY_CLAUDE_RULEGEN_ENABLED", False)
     @patch("src.backtest.factory.FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS", 1)
     @patch("src.backtest.factory.review_hypothesis", return_value=None)
     @patch("src.backtest.factory.save_factory_run")
@@ -487,15 +541,20 @@ class TestRunFactoryBatch(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with patch("src.backtest.factory_report.get_results_dir", return_value=tmp):
                 result = run_factory_batch(
-                    market="jp", symbols=["AAA", "BBB"], budget=4, n_windows=6, seed=123
+                    market="jp", symbols=self._PASSING_SYMBOLS, **self._PASSING_BATCH_KWARGS
                 )
 
-        for evaluation in result.passed:
-            self.assertIsNotNone(evaluation.report_path)
-            self.assertTrue(os.path.exists(evaluation.report_path))
-            with open(evaluation.report_path, encoding="utf-8") as f:
-                report = json.load(f)
-            self.assertIsNone(report["review"])
+            # 合格経路が実際に実行されていることを検証する（#628）。
+            # tempdir が生きている間にファイル存在チェックまで行う（#628調査中に
+            # 発見: 元のコードは tempdir を抜けた後に os.path.exists していたため、
+            # result.passed が常に空だった旧実装ではこのバグも顕在化していなかった）。
+            self.assertGreater(len(result.passed), 0)
+            for evaluation in result.passed:
+                self.assertIsNotNone(evaluation.report_path)
+                self.assertTrue(os.path.exists(evaluation.report_path))
+                with open(evaluation.report_path, encoding="utf-8") as f:
+                    report = json.load(f)
+                self.assertIsNone(report["review"])
 
 
 if __name__ == "__main__":
