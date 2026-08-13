@@ -88,7 +88,7 @@ def apply_quality_gate(
     candidates: list[TrendCandidate],
     min_revenue_cagr: float = 0.15,  # 売上CAGR(3年) >= 15%
     min_roe: float = 0.10,  # ROE >= 10%
-    max_debt_to_equity: float = 1.5,  # D/E <= 1.5
+    max_debt_to_equity: float = 150.0,  # D/E <= 1.5相当（fund["debt_to_equity"]はパーセントポイント単位。#637）
     max_market_cap: float = 2e10,  # 時価総額上限（小型〜中型に限定, 例 $20B）
     require_margin_not_declining: bool = True,
     on_missing: str = "exclude",  # 財務欠損銘柄: "exclude" | "penalize"

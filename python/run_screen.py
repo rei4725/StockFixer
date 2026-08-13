@@ -51,7 +51,12 @@ def parse_args():
     )
     parser.add_argument("--min-revenue-cagr", type=float, default=0.15, help="売上CAGR(3年)の下限")
     parser.add_argument("--min-roe", type=float, default=0.10, help="ROE の下限")
-    parser.add_argument("--max-debt-to-equity", type=float, default=1.5, help="D/E の上限")
+    parser.add_argument(
+        "--max-debt-to-equity",
+        type=float,
+        default=150.0,
+        help="D/E の上限（パーセントポイント単位。例: 150 = D/E比率1.5相当）",
+    )
     parser.add_argument("--max-market-cap", type=float, default=2e10, help="時価総額の上限")
     parser.add_argument(
         "--on-missing",
