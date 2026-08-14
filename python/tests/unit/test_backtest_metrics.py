@@ -522,6 +522,53 @@ class TestComputeMetricsAvgWinLoss:
         metrics = compute_metrics(log, initial_cash)
         assert metrics["avg_loss"] == pytest.approx(0.05)
 
+
+class TestComputeMetricsTradeReturns:
+    """trade_returns（符号付き取引リターン率）のテスト（#630: DSRを複数銘柄で
+    プールする際、価格スケールに依存しない%リターンを使うための出力）。
+    """
+
+    def test_returns_signed_percentage_returns(self):
+        initial_cash = 1_000_000
+        log = _trade_log(
+            [
+                {
+                    "date": "2024-01-02",
+                    "action": "buy",
+                    "price": 100.0,
+                    "qty": 100,
+                    "cash": 990_000,
+                },
+                {
+                    "date": "2024-01-10",
+                    "action": "sell",
+                    "price": 110.0,
+                    "qty": 100,
+                    "cash": 1_001_000,
+                },
+                {
+                    "date": "2024-01-12",
+                    "action": "buy",
+                    "price": 200.0,
+                    "qty": 50,
+                    "cash": 991_000,
+                },
+                {
+                    "date": "2024-01-20",
+                    "action": "sell",
+                    "price": 190.0,
+                    "qty": 50,
+                    "cash": 995_500,
+                },
+            ]
+        )
+        metrics = compute_metrics(log, initial_cash)
+        assert sorted(metrics["trade_returns"]) == pytest.approx(sorted([0.10, -0.05]))
+
+    def test_empty_when_no_trades(self):
+        metrics = compute_metrics(pd.DataFrame(), initial_cash=1_000_000)
+        assert metrics["trade_returns"] == []
+
     def test_all_wins_avg_loss_zero(self):
         """全トレードが勝ちの場合、avg_loss == 0.0"""
         initial_cash = 1_000_000
