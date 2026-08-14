@@ -116,6 +116,46 @@ class TestEMAMomentumRule(unittest.TestCase):
         sig = EMAMomentumRule().generate_signal(_make_base(50))
         self.assertTrue(sig.isin([-1, 0, 1]).all())
 
+    def test_non_default_window_ignores_precomputed_columns(self):
+        """fast_window/slow_windowが既定値(12/26)と異なる場合、precomputed列を
+        無視し自前計算する（#642: 従来はここが常にprecomputed列を使ってしまい、
+        探索グリッドのema_momentumパラメータ差が実質すべて無効化されていた）。
+        """
+        n = 40
+        idx = pd.date_range("2024-01-01", periods=n, freq="B")
+        df = pd.DataFrame(
+            {
+                "Close": np.linspace(1000.0, 1200.0, n),  # 一貫上昇
+                # わざと逆向きの値を仕込む: precomputed列をそのまま使うなら
+                # ema_fast(900) < ema_slow(1000) が常に真になり bullish は出ない。
+                "ema_fast": np.full(n, 900.0),
+                "ema_slow": np.full(n, 1000.0),
+            },
+            index=idx,
+        )
+        rule = EMAMomentumRule(fast_window=5, slow_window=10)
+        sig = rule.generate_signal(df)
+        # 自前計算なら上昇トレンドで ema_fast > ema_slow となり buy が出るはず。
+        self.assertIn(1, sig.values)
+
+    def test_default_window_still_uses_precomputed_columns(self):
+        """既定値(12/26)のままなら従来通りprecomputed列を使う（回帰確認）。"""
+        n = 40
+        idx = pd.date_range("2024-01-01", periods=n, freq="B")
+        df = pd.DataFrame(
+            {
+                "Close": np.linspace(1000.0, 1200.0, n),
+                "ema_fast": np.full(n, 900.0),
+                "ema_slow": np.full(n, 1000.0),
+            },
+            index=idx,
+        )
+        rule = EMAMomentumRule()
+        sig = rule.generate_signal(df)
+        # precomputed列を使うなら ema_fast(900) < ema_slow(1000) が常に真 → bullish無し。
+        self.assertNotIn(1, sig.values)
+        self.assertIn(-1, sig.values)
+
 
 class TestRSIContrarianRule(unittest.TestCase):
     def test_no_rsi_column_returns_zero(self):

@@ -65,6 +65,13 @@ class EMAMomentumRule:
     name = "ema_momentum"
     description = "EMAゴールデンクロス + 終値がEMA上方"
 
+    # market_data.technical.add_technical_indicators() の _DEFAULT_TA_PARAMS が
+    # df["ema_fast"]/df["ema_slow"] を計算する際の固定ウィンドウ。自身の
+    # fast_window/slow_window がこれと一致する場合のみ precomputed 列を再利用してよい。
+    # 一致しない場合に列を使うと、パラメータ違いが黙って無視される（#642）。
+    _PRECOMPUTED_FAST_WINDOW = 12
+    _PRECOMPUTED_SLOW_WINDOW = 26
+
     def __init__(self, fast_window: int = 12, slow_window: int = 26):
         self.fast_window = fast_window
         self.slow_window = slow_window
@@ -72,7 +79,11 @@ class EMAMomentumRule:
     def generate_signal(self, df: pd.DataFrame) -> pd.Series:
         close = df["Close"]
 
-        if "ema_fast" in df.columns and "ema_slow" in df.columns:
+        matches_precomputed_window = (
+            self.fast_window == self._PRECOMPUTED_FAST_WINDOW
+            and self.slow_window == self._PRECOMPUTED_SLOW_WINDOW
+        )
+        if matches_precomputed_window and "ema_fast" in df.columns and "ema_slow" in df.columns:
             ema_fast = df["ema_fast"]
             ema_slow = df["ema_slow"]
         else:
