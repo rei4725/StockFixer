@@ -5,6 +5,7 @@ from __future__ import annotations
 import unittest
 
 from src.backtest.factory_aggregation import SymbolMetrics, aggregate_symbol_metrics
+from src.backtest.metrics import _sharpe_per_trade
 
 
 def _row(symbol: str, num_trades: int, sharpe: float, **kwargs) -> SymbolMetrics:
@@ -80,6 +81,38 @@ class TestAggregateSymbolMetrics(unittest.TestCase):
         self.assertEqual(result.n_symbols_with_signal, 0)
         self.assertEqual(result.avg_trades_per_symbol, 0.0)
         self.assertEqual(result.sharpe_ratio, 0.0)
+
+    def test_sharpe_per_trade_pools_trade_returns_across_effective_symbols(self):
+        """DSR入力のsharpe_per_tradeは、有効銘柄の取引リターンを1系列にプールして
+        算出する。銘柄別sharpe_per_tradeの単純平均ではない（#630）。
+        """
+        rows = [
+            _row("AAA", 5, 0.8, trade_returns=[0.02, -0.01, 0.03, 0.01, -0.02]),
+            _row("BBB", 4, 0.6, trade_returns=[0.01, 0.02, -0.01, 0.04]),
+        ]
+
+        result = aggregate_symbol_metrics(rows, min_trades_per_symbol=3)
+
+        pooled = [0.02, -0.01, 0.03, 0.01, -0.02, 0.01, 0.02, -0.01, 0.04]
+        self.assertAlmostEqual(result.sharpe_per_trade, _sharpe_per_trade(pooled))
+        # 単純平均（旧実装）とは一致しないことを確認する
+        naive_average = (
+            _sharpe_per_trade([0.02, -0.01, 0.03, 0.01, -0.02])
+            + _sharpe_per_trade([0.01, 0.02, -0.01, 0.04])
+        ) / 2
+        self.assertNotAlmostEqual(result.sharpe_per_trade, naive_average)
+
+    def test_sharpe_per_trade_pool_excludes_ineffective_symbols(self):
+        """最低取引数を満たさない銘柄の取引リターンはプールに含めない。"""
+        rows = [
+            _row("AAA", 2, 25.0, trade_returns=[0.50, -0.40]),  # 除外対象
+            _row("BBB", 5, 0.5, trade_returns=[0.01, 0.02, -0.01, 0.01, 0.00]),
+        ]
+
+        result = aggregate_symbol_metrics(rows, min_trades_per_symbol=3)
+
+        expected = _sharpe_per_trade([0.01, 0.02, -0.01, 0.01, 0.00])
+        self.assertAlmostEqual(result.sharpe_per_trade, expected)
 
     def test_max_drawdown_is_worst_of_effective_symbols(self):
         # 除外される銘柄(-0.90)の DD は採用されない

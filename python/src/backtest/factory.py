@@ -357,6 +357,7 @@ def evaluate_hypothesis(
                     win_rate=float(metrics.get("win_rate", 0.0) or 0.0),
                     total_return=float(metrics.get("total_return", 0.0) or 0.0),
                     max_drawdown=float(metrics.get("max_drawdown", 0.0) or 0.0),
+                    trade_returns=list(metrics.get("trade_returns", []) or []),
                 )
             )
 

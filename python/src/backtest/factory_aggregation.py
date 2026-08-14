@@ -10,7 +10,9 @@ factory.py から切り出した純関数であり DataFrame に依存しない�
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+from src.backtest.metrics import _sharpe_per_trade
 
 
 @dataclass(frozen=True)
@@ -24,6 +26,8 @@ class SymbolMetrics:
     win_rate: float
     total_return: float
     max_drawdown: float
+    # 符号付き取引リターン率（%）。DSR算出のため複数銘柄でプールする（#630）。
+    trade_returns: list[float] = field(default_factory=list)
 
 
 @dataclass
@@ -70,9 +74,15 @@ def aggregate_symbol_metrics(
         )
 
     n = len(effective)
+    # DSRの入力（sharpe_per_trade, num_trades）が同一母集団になるよう、有効銘柄の
+    # 取引リターンを1系列にプールしてから算出する。銘柄別Sharpeの単純平均は
+    # 「銘柄横断でプールしたnum_trades」と対応しないため使わない（#630）。
+    pooled_returns = [r for row in effective for r in row.trade_returns]
+    pooled_sharpe_per_trade = _sharpe_per_trade(pooled_returns)
+
     return AggregatedMetrics(
         sharpe_ratio=sum(r.sharpe_ratio for r in effective) / n,
-        sharpe_per_trade=sum(r.sharpe_per_trade for r in effective) / n,
+        sharpe_per_trade=pooled_sharpe_per_trade,
         win_rate=sum(r.win_rate for r in effective) / n,
         total_return=sum(r.total_return for r in effective) / n,
         max_drawdown=min(r.max_drawdown for r in effective),

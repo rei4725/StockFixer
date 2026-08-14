@@ -90,6 +90,10 @@ def compute_metrics(
 
     avg_win = float(np.mean(win_returns)) if win_returns else 0.0
     avg_loss = float(np.mean(loss_returns)) if loss_returns else 0.0
+    # 符号付き取引リターン率（%）。複数銘柄の取引をプールしてSharpe/DSRを算出する際、
+    # 銘柄間で価格スケールが異なる trade_pnls（$建て）をそのまま混ぜると高価格銘柄に
+    # 偏るため、スケール非依存なリターン率で揃える（#630）。
+    trade_returns = win_returns + [-r for r in loss_returns]
 
     # --- Sharpe ratio（取引ごとの損益列から） ---
     # 取引単位 Sharpe（非年率）を素に、実取引頻度で年率化する。
@@ -148,6 +152,7 @@ def compute_metrics(
         "atr_fallback_trades": atr_fallback_trades,
         "avg_win": round(avg_win, 6),
         "avg_loss": round(avg_loss, 6),
+        "trade_returns": trade_returns,
     }
     if n_trials > 0:
         # DSR には非年率の取引単位 Sharpe を渡す（年率化済み Sharpe だと z 値が
@@ -179,6 +184,7 @@ def _empty_metrics(initial_cash: float) -> dict[str, Any]:
         "atr_fallback_trades": 0,
         "avg_win": 0.0,
         "avg_loss": 0.0,
+        "trade_returns": [],
     }
 
 
