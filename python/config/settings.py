@@ -136,6 +136,10 @@ class Settings(BaseSettings):
     # ---------- 予測並列化（#266） ----------
     PREDICTION_MAX_WORKERS: int = Field(default=max(1, (os.cpu_count() or 2) // 2))
 
+    # ---------- 予測レンジクリップ（ATR ベース） ----------
+    # 予測変化率の絶対値がこの倍率 × ATR/現在価格 を超えたら丸める。
+    PREDICTION_ATR_CLIP_MULTIPLIER: float = Field(default=3.0)
+
     # ---------- スケジューラリトライ設定 ----------
     SCHEDULER_MAX_RETRIES: int = Field(default=3)
     SCHEDULER_RETRY_BASE_WAIT_SECONDS: float = Field(default=30.0)
@@ -263,6 +267,7 @@ DRIFT_ALERT_WEEKS: int = settings.DRIFT_ALERT_WEEKS
 DRIFT_ALERT_THRESHOLD: float = settings.DRIFT_ALERT_THRESHOLD
 
 PREDICTION_MAX_WORKERS: int = settings.PREDICTION_MAX_WORKERS
+PREDICTION_ATR_CLIP_MULTIPLIER: float = settings.PREDICTION_ATR_CLIP_MULTIPLIER
 SCHEDULER_MAX_RETRIES: int = settings.SCHEDULER_MAX_RETRIES
 SCHEDULER_RETRY_BASE_WAIT_SECONDS: float = settings.SCHEDULER_RETRY_BASE_WAIT_SECONDS
 VOLUME_FILTER_WINDOW_DAYS: int = settings.VOLUME_FILTER_WINDOW_DAYS

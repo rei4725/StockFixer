@@ -6,9 +6,11 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
+from config.settings import PREDICTION_ATR_CLIP_MULTIPLIER
 from src.prediction.db import load_model_weights
 from src.prediction.manager import ModelManager
 from src.prediction.ports import get_market_data_port
+from src.prediction.range_clipping import clip_diff_ratio_to_atr_range
 from src.prediction.types import HorizonResult, PredictionResult
 from src.utils.data_path_utils import get_models_subdir, get_ticker, normalize_col
 from src.utils.logger import get_logger
@@ -75,6 +77,45 @@ def _fetch_current_price(market: str, symbol: str, df: pd.DataFrame) -> "float |
     except Exception:
         logger.warning("df末尾Close取得失敗: market=%s symbol=%s", market, symbol, exc_info=True)
         return None
+
+
+def _estimate_atr_from_ohlc(df: pd.DataFrame, window: int = 14) -> "float | None":
+    """OHLC から直近の ATR（価格単位）を概算する。
+
+    stock_features テーブルにはラグ特徴量しか保存されておらず生の
+    High/Low を持たないため（predict_unified 側は atr_lag1 列を使う）、
+    predict_single 側はここで raw な OHLCV df から都度計算し直す。
+
+    Args:
+        df: OHLCV DataFrame
+        window: True Range の移動平均ウィンドウ（デフォルト14営業日）
+
+    Returns:
+        直近の ATR（価格単位）。計算不能なら None。
+    """
+    if not {"High", "Low", "Close"}.issubset(df.columns):
+        return None
+    high = df["High"]
+    low = df["Low"]
+    close = df["Close"]
+    if isinstance(high, pd.DataFrame):
+        high = high.iloc[:, 0]
+    if isinstance(low, pd.DataFrame):
+        low = low.iloc[:, 0]
+    if isinstance(close, pd.DataFrame):
+        close = close.iloc[:, 0]
+    prev_close = close.shift(1)
+    true_range = pd.concat(
+        [(high - low).abs(), (high - prev_close).abs(), (low - prev_close).abs()],
+        axis=1,
+    ).max(axis=1)
+    atr_series = true_range.rolling(window=window, min_periods=1).mean()
+    if atr_series.empty:
+        return None
+    latest = atr_series.iloc[-1]
+    if pd.isna(latest):
+        return None
+    return float(latest)
 
 
 def _run_single_model_prediction(
@@ -149,6 +190,8 @@ def _build_prediction_result(
     pred_prices: list,
     pred_returns: list,
     model_names: "list[str] | None" = None,
+    atr: "float | None" = None,
+    horizon: int = 1,
 ) -> "PredictionResult | None":
     """
     複数モデルの予測を集計して PredictionResult を構築する（純粋関数）。
@@ -163,6 +206,9 @@ def _build_prediction_result(
         pred_prices: 各モデルの予測絶対価格リスト
         pred_returns: 各モデルの予測変化率リスト
         model_names: モデルファイルのベース名リスト（重み取得に使用）
+        atr: 直近の ATR（価格単位）。ATR ベースの妥当なレンジへのクリップに使う。
+            None の場合はクリップしない。
+        horizon: 予測ホライズン（営業日）。クリップのレンジ計算に使う。
 
     Returns:
         集計済み PredictionResult。pred_prices が空の場合は None。
@@ -180,6 +226,15 @@ def _build_prediction_result(
 
     avg_pred_price = float(sum(p * w for p, w in zip(pred_prices, weights)))
     diff_ratio = (avg_pred_price - current_price) / current_price
+    # ATR ベースの妥当なレンジへクリップ（あり得ない外れ値予測の丸め）。
+    diff_ratio = clip_diff_ratio_to_atr_range(
+        diff_ratio,
+        atr,
+        current_price,
+        horizon=horizon,
+        atr_multiplier=PREDICTION_ATR_CLIP_MULTIPLIER,
+    )
+    avg_pred_price = float(current_price * (1 + diff_ratio))
     model_std = float(np.std(pred_returns)) if len(pred_returns) > 1 else 0.0
     confidence_ratio = 1.0 / (1.0 + model_std)
 
@@ -222,6 +277,7 @@ def predict_single_stock(
     pred_returns = []
     succeeded_model_types = []
     current_price = None
+    atr_value = None
     for model_type in resolved_model_types:
         model_path = os.path.join(get_models_subdir(market, symbol), model_type)
         if not os.path.exists(model_path):
@@ -243,6 +299,7 @@ def predict_single_stock(
             if current_price is None:
                 print(f"[{symbol}] 価格取得失敗")
                 continue
+            atr_value = _estimate_atr_from_ohlc(df)
             result = _run_single_model_prediction(model_path, market, symbol, df, current_price)
             if result is None:
                 print(f"[{symbol}] 特徴量生成失敗")
@@ -256,7 +313,14 @@ def predict_single_stock(
             continue
 
     return _build_prediction_result(
-        market, symbol, current_price, pred_prices, pred_returns, succeeded_model_types
+        market,
+        symbol,
+        current_price,
+        pred_prices,
+        pred_returns,
+        succeeded_model_types,
+        atr=atr_value,
+        horizon=horizon,
     )
 
 
