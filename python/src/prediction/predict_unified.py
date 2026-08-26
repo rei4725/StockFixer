@@ -12,7 +12,9 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 import yfinance as yf
 
+from config.settings import PREDICTION_ATR_CLIP_MULTIPLIER
 from src.prediction.db import load_model_weights
+from src.prediction.range_clipping import clip_diff_ratio_to_atr_range
 from src.prediction.remote_client import get_service_url, predict_via_service
 from src.prediction.types import PredictionResult
 from src.utils.data_path_utils import get_ticker
@@ -303,6 +305,24 @@ def predict_with_unified_model(
     weights = load_model_weights(market, symbol, succeeded_model_names)
     avg_pred_price = float(sum(p * w for p, w in zip(pred_prices, weights)))
     diff_ratio = (avg_pred_price - current_price) / current_price
+
+    # ATR ベースの妥当なレンジへクリップ（あり得ない外れ値予測の丸め）。
+    # stock_features には生の High/Low は残らずラグ特徴量しか無いため、
+    # 直近1営業日分の ATR として atr_lag1 を使う（predict_single 側は
+    # 生 OHLC から都度計算するのと対照的）。
+    atr_value: Optional[float] = None
+    if "atr_lag1" in latest_X.columns:
+        raw_atr = latest_X["atr_lag1"].iloc[0]
+        if pd.notna(raw_atr):
+            atr_value = float(raw_atr)
+    diff_ratio = clip_diff_ratio_to_atr_range(
+        diff_ratio,
+        atr_value,
+        current_price,
+        horizon=horizon,
+        atr_multiplier=PREDICTION_ATR_CLIP_MULTIPLIER,
+    )
+    avg_pred_price = float(current_price * (1 + diff_ratio))
 
     return PredictionResult(
         market=market,

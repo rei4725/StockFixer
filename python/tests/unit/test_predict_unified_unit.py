@@ -20,6 +20,12 @@ def _make_feature_df(n: int = 30) -> pd.DataFrame:
     return pd.DataFrame(data, index=idx)
 
 
+def _make_feature_df_with_atr(n: int = 30, atr_lag1_value: float = 5.0) -> pd.DataFrame:
+    df = _make_feature_df(n)
+    df["atr_lag1"] = atr_lag1_value
+    return df
+
+
 class TestLoadFeatureData(unittest.TestCase):
     def test_returns_dataframe_on_success(self):
         from src.prediction.predict_unified import load_feature_data
@@ -227,6 +233,64 @@ class TestPredictWithUnifiedModel(unittest.TestCase):
             predict_with_unified_model("jp", "7203", horizon=5)
 
         self.assertTrue(any("5d" in name for name in called_with))
+
+
+class TestAtrClipping(unittest.TestCase):
+    def setUp(self):
+        from src.prediction import predict_unified
+
+        predict_unified._model_cache.clear()
+
+    def test_outlier_prediction_is_clipped_using_atr_lag1(self):
+        from src.prediction.predict_unified import predict_with_unified_model
+
+        df = _make_feature_df_with_atr(atr_lag1_value=5.0)
+        mock_model = MagicMock()
+        mock_model.predict.return_value = pd.Series([0.50])  # 50%は外れ値
+
+        mock_ticker = MagicMock()
+        mock_ticker.history.return_value = pd.DataFrame(
+            {"Close": [1000.0]}, index=pd.date_range("2024-01-31", periods=1)
+        )
+
+        with (
+            patch("src.prediction.predict_unified.load_feature_data", return_value=df),
+            patch("src.prediction.predict_unified.get_cached_model", return_value=mock_model),
+            patch("src.prediction.predict_unified.get_ticker", return_value="7203.T"),
+            patch("src.prediction.predict_unified.load_model_weights", return_value=[1.0]),
+            patch("src.prediction.predict_unified.yf.Ticker", return_value=mock_ticker),
+        ):
+            result = predict_with_unified_model("jp", "7203")
+
+        self.assertIsNotNone(result)
+        # PREDICTION_ATR_CLIP_MULTIPLIER(既定3.0) * (5.0/1000.0) = 0.015
+        self.assertAlmostEqual(result.diff_ratio, 0.015)
+        self.assertAlmostEqual(result.avg_pred_price, 1015.0)
+
+    def test_no_atr_lag1_column_does_not_clip(self):
+        """atr_lag1列が無い場合は従来通りクリップされないこと"""
+        from src.prediction.predict_unified import predict_with_unified_model
+
+        df = _make_feature_df()  # atr_lag1 なし
+        mock_model = MagicMock()
+        mock_model.predict.return_value = pd.Series([0.50])
+
+        mock_ticker = MagicMock()
+        mock_ticker.history.return_value = pd.DataFrame(
+            {"Close": [1000.0]}, index=pd.date_range("2024-01-31", periods=1)
+        )
+
+        with (
+            patch("src.prediction.predict_unified.load_feature_data", return_value=df),
+            patch("src.prediction.predict_unified.get_cached_model", return_value=mock_model),
+            patch("src.prediction.predict_unified.get_ticker", return_value="7203.T"),
+            patch("src.prediction.predict_unified.load_model_weights", return_value=[1.0]),
+            patch("src.prediction.predict_unified.yf.Ticker", return_value=mock_ticker),
+        ):
+            result = predict_with_unified_model("jp", "7203")
+
+        self.assertIsNotNone(result)
+        self.assertAlmostEqual(result.diff_ratio, 0.50)
 
 
 class TestPredictAllWithUnifiedModel(unittest.TestCase):

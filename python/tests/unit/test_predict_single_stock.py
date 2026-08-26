@@ -130,10 +130,12 @@ class TestFetchCurrentPrice(unittest.TestCase):
 
 
 class TestBuildPredictionResult(unittest.TestCase):
-    def _fn(self, market, symbol, current, prices, returns):
+    def _fn(self, market, symbol, current, prices, returns, atr=None, horizon=1):
         from src.prediction.predict_single import _build_prediction_result
 
-        return _build_prediction_result(market, symbol, current, prices, returns)
+        return _build_prediction_result(
+            market, symbol, current, prices, returns, atr=atr, horizon=horizon
+        )
 
     def test_returns_none_on_empty_prices(self):
         result = self._fn("us", "AAPL", 100.0, [], [])
@@ -209,6 +211,53 @@ class TestBuildPredictionResult(unittest.TestCase):
         result = self._fn("jp", "7203", 2000.0, [2100.0], [0.05])
         self.assertEqual(result.market, "jp")
         self.assertEqual(result.symbol, "7203")
+
+    def test_atr_none_does_not_clip(self):
+        """atr未指定（None）なら従来通りクリップされないこと"""
+        result = self._fn("us", "AAPL", 100.0, [150.0], [0.50], atr=None)
+        self.assertAlmostEqual(result.diff_ratio, 0.50)
+
+    def test_atr_clips_outlier_prediction(self):
+        """外れ値予測がATRベースのレンジへ丸められること"""
+        result = self._fn("us", "AAPL", 100.0, [150.0], [0.50], atr=1.0)
+        # PREDICTION_ATR_CLIP_MULTIPLIER(既定3.0) * (1.0/100.0) = 0.03
+        self.assertAlmostEqual(result.diff_ratio, 0.03)
+        self.assertAlmostEqual(result.avg_pred_price, 103.0)
+
+    def test_atr_clip_widens_with_horizon(self):
+        """horizonが大きいほどクリップ幅が広がること"""
+        result_h1 = self._fn("us", "AAPL", 100.0, [150.0], [0.50], atr=1.0, horizon=1)
+        result_h4 = self._fn("us", "AAPL", 100.0, [150.0], [0.50], atr=1.0, horizon=4)
+        self.assertGreater(result_h4.diff_ratio, result_h1.diff_ratio)
+
+    def test_atr_does_not_clip_within_range(self):
+        """レンジ内の予測はクリップされないこと"""
+        result = self._fn("us", "AAPL", 100.0, [101.0], [0.01], atr=1.0)
+        self.assertAlmostEqual(result.diff_ratio, 0.01)
+
+
+class TestEstimateAtrFromOhlc(unittest.TestCase):
+    def test_returns_positive_atr_for_normal_data(self):
+        from src.prediction.predict_single import _estimate_atr_from_ohlc
+
+        df = _make_price_df(30)
+        result = _estimate_atr_from_ohlc(df)
+        self.assertIsNotNone(result)
+        self.assertGreater(result, 0.0)
+
+    def test_returns_none_when_missing_columns(self):
+        from src.prediction.predict_single import _estimate_atr_from_ohlc
+
+        df = pd.DataFrame({"Close": [100.0, 101.0, 102.0]})
+        result = _estimate_atr_from_ohlc(df)
+        self.assertIsNone(result)
+
+    def test_returns_none_when_empty(self):
+        from src.prediction.predict_single import _estimate_atr_from_ohlc
+
+        df = pd.DataFrame({"High": [], "Low": [], "Close": []})
+        result = _estimate_atr_from_ohlc(df)
+        self.assertIsNone(result)
 
 
 # ──────────────────────────────────────────────────────────────────
