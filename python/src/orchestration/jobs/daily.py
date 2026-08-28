@@ -18,15 +18,18 @@ logger = get_logger(__name__)
 
 def run_daily_pipeline():
     """
-    毎日実行: データ取得 → 予測 → 出力invariant評価 → Challenger shadow 予測
-             → 精度チェック → ドリフト監視 → Discord通知 → 運用アラート評価
+    毎日実行: データ取得 → 精度チェック → 予測 → 出力invariant評価
+             → Challenger shadow 予測 → ドリフト監視 → Discord通知 → 運用アラート評価
 
     流れ:
         1. 全マーケットのデータを取得（バッチ）
-        2. Top10/Worst10の予測を実行（production）
-        2.1. 出力 invariant 評価（非致命的。結果は 6 で通知する）
-        2.5. Challenger shadow 予測（モデルが存在する場合のみ、非致命的）
-        3. 前日予測の精度チェック: production / challenger それぞれ記録（非致命的）
+        2. 前日予測の精度チェック: production / challenger それぞれ記録（非致命的）
+            prediction_results は Delete-Insert のスナップショットテーブルなので、
+            3 で当日分を保存する前＝前日分がまだ残っている段階で読む必要がある
+            （後段で読むと 3 の保存で前日分が上書き消滅済みで永久に0件採点になる）。
+        3. Top10/Worst10の予測を実行（production）
+        3.1. 出力 invariant 評価（非致命的。結果は 6 で通知する）
+        3.5. Challenger shadow 予測（モデルが存在する場合のみ、非致命的）
         4. 日次ドリフトチェック（閾値超過銘柄を自動再学習）
         5. Discord通知
         6. 運用アラート評価（NF-303。条件成立時のみ発報）
@@ -34,12 +37,13 @@ def run_daily_pipeline():
     logger.info("=== 日次パイプライン開始 ===")
 
     from src.reporting.discord.discord_utils import (
+        send_accuracy_summary,
         send_daily_pipeline_completion,
         send_daily_pipeline_error,
     )
 
     # 1. データ取得（CRITICAL: 失敗時はパイプライン停止 + Discord通知）
-    logger.info("[1/5] データ取得開始")
+    logger.info("[1/6] データ取得開始")
     from src.infrastructure.discord_notification_adapter import DiscordNotificationAdapter
     from src.market_data.pipeline import run_batch_pipeline
     from src.watchlist.batch_runner import load_target_symbols
@@ -47,15 +51,37 @@ def run_daily_pipeline():
     try:
         tasks = load_target_symbols()
         run_batch_pipeline(tasks, notification_port=DiscordNotificationAdapter())
-        logger.info("[1/5] データ取得完了")
+        logger.info("[1/6] データ取得完了")
     except Exception as e:
         if _handle_stage_error(
-            PipelineStage.CRITICAL, "[1/5] データ取得", e, send_daily_pipeline_error
+            PipelineStage.CRITICAL, "[1/6] データ取得", e, send_daily_pipeline_error
         ):
             raise
 
-    # 2. 予測（CRITICAL: 失敗時はパイプライン停止 + Discord通知）
-    logger.info("[2/5] 予測開始 (production)")
+    # 2. 前日予測の精度チェック（NON_CRITICAL: 失敗しても後続処理を継続）
+    # 3 で当日分の prediction_results を保存する前に読む（Delete-Insert 対策）。
+    logger.info("[2/6] 予測精度チェック開始")
+    try:
+        from src.prediction.prediction_pipeline import run_accuracy_check
+
+        summary = run_accuracy_check(
+            horizon=1, model_name="production", model_version_filter="production"
+        )
+        send_accuracy_summary(summary, horizon=1)
+        logger.info("[2/6] 予測精度チェック完了 (production)")
+    except Exception as e:
+        _handle_stage_error(PipelineStage.NON_CRITICAL, "[2/6] 予測精度チェック (production)", e)
+
+    try:
+        from src.prediction.prediction_pipeline import run_accuracy_check
+
+        run_accuracy_check(horizon=1, model_name="challenger", model_version_filter="challenger")
+        logger.info("[2/6] 予測精度チェック完了 (challenger)")
+    except Exception as e:
+        _handle_stage_error(PipelineStage.NON_CRITICAL, "[2/6] 予測精度チェック (challenger)", e)
+
+    # 3. 予測（CRITICAL: 失敗時はパイプライン停止 + Discord通知）
+    logger.info("[3/6] 予測開始 (production)")
     from src.prediction.prediction_pipeline import output_top_worst_results, predict_all_unified
     from src.prediction.types import UNIFIED_PREDICTION_MODEL_NAMES
 
@@ -86,28 +112,28 @@ def run_daily_pipeline():
         output_top_worst_results(
             output_rows, mode="unified", shadow_mode=True, model_version="production"
         )
-        logger.info("[2/5] 予測完了 (production): %d 銘柄", len(output_rows))
+        logger.info("[3/6] 予測完了 (production): %d 銘柄", len(output_rows))
     except Exception as e:
         if _handle_stage_error(
             PipelineStage.CRITICAL,
-            "[2/5] 予測 (production)",
+            "[3/6] 予測 (production)",
             e,
             send_daily_pipeline_error,
         ):
             raise
 
-    # 2.1. 出力 invariant 評価（NON_CRITICAL: 健全性チェックが本体を止めてはならない）
-    logger.info("[2.1/5] 出力 invariant 評価開始")
+    # 3.1. 出力 invariant 評価（NON_CRITICAL: 健全性チェックが本体を止めてはならない）
+    logger.info("[3.1/6] 出力 invariant 評価開始")
     try:
         prediction_violation_ids, prediction_details = evaluate_output_invariants_stage(
             requested_models, loaded_models, output_rows, previous_stats
         )
-        logger.info("[2.1/5] 出力 invariant 評価完了: %s", prediction_details)
+        logger.info("[3.1/6] 出力 invariant 評価完了: %s", prediction_details)
     except Exception as e:
-        _handle_stage_error(PipelineStage.NON_CRITICAL, "[2.1/5] 出力 invariant 評価", e)
+        _handle_stage_error(PipelineStage.NON_CRITICAL, "[3.1/6] 出力 invariant 評価", e)
 
-    # 2.5. Challenger shadow 予測（NON_CRITICAL: モデルが存在しない場合はスキップ、失敗しても継続）
-    logger.info("[2.5/5] Challenger shadow 予測開始")
+    # 3.5. Challenger shadow 予測（NON_CRITICAL: モデルが存在しない場合はスキップ、失敗しても継続）
+    logger.info("[3.5/6] Challenger shadow 予測開始")
     try:
         from src.prediction.shadow_evaluation import predict_with_challenger_unified
 
@@ -116,49 +142,27 @@ def run_daily_pipeline():
             output_top_worst_results(
                 challenger_rows, mode="unified", shadow_mode=True, model_version="challenger"
             )
-            logger.info("[2.5/5] Challenger shadow 予測完了: %d 銘柄", len(challenger_rows))
+            logger.info("[3.5/6] Challenger shadow 予測完了: %d 銘柄", len(challenger_rows))
         else:
-            logger.info("[2.5/5] Challenger モデルなし（スキップ）")
+            logger.info("[3.5/6] Challenger モデルなし（スキップ）")
     except Exception as e:
-        _handle_stage_error(PipelineStage.NON_CRITICAL, "[2.5/5] Challenger shadow 予測", e)
-
-    # 3. 前日予測の精度チェック（NON_CRITICAL: 失敗しても後続処理を継続）
-    logger.info("[3/5] 予測精度チェック開始")
-    try:
-        from src.prediction.prediction_pipeline import run_accuracy_check
-        from src.reporting.discord.discord_utils import send_accuracy_summary
-
-        summary = run_accuracy_check(
-            horizon=1, model_name="production", model_version_filter="production"
-        )
-        send_accuracy_summary(summary, horizon=1)
-        logger.info("[3/5] 予測精度チェック完了 (production)")
-    except Exception as e:
-        _handle_stage_error(PipelineStage.NON_CRITICAL, "[3/5] 予測精度チェック (production)", e)
-
-    try:
-        from src.prediction.prediction_pipeline import run_accuracy_check
-
-        run_accuracy_check(horizon=1, model_name="challenger", model_version_filter="challenger")
-        logger.info("[3/5] 予測精度チェック完了 (challenger)")
-    except Exception as e:
-        _handle_stage_error(PipelineStage.NON_CRITICAL, "[3/5] 予測精度チェック (challenger)", e)
+        _handle_stage_error(PipelineStage.NON_CRITICAL, "[3.5/6] Challenger shadow 予測", e)
 
     # 4. 日次ドリフトチェック（NON_CRITICAL: 失敗しても後続処理を継続）
-    logger.info("[4/5] 日次ドリフトチェック開始")
+    logger.info("[4/6] 日次ドリフトチェック開始")
     try:
         run_daily_drift_check()
-        logger.info("[4/5] 日次ドリフトチェック完了")
+        logger.info("[4/6] 日次ドリフトチェック完了")
     except Exception as e:
-        _handle_stage_error(PipelineStage.NON_CRITICAL, "[4/5] 日次ドリフトチェック", e)
+        _handle_stage_error(PipelineStage.NON_CRITICAL, "[4/6] 日次ドリフトチェック", e)
 
     # 5. Discord通知（CRITICAL: 失敗時はパイプライン停止）
-    logger.info("[5/5] Discord通知送信")
+    logger.info("[5/6] Discord通知送信")
     try:
         send_daily_pipeline_completion()
-        logger.info("[5/5] Discord通知完了")
+        logger.info("[5/6] Discord通知完了")
     except Exception as e:
-        if _handle_stage_error(PipelineStage.CRITICAL, "[5/5] Discord通知", e):
+        if _handle_stage_error(PipelineStage.CRITICAL, "[5/6] Discord通知", e):
             raise
 
     # 6. 運用アラート評価（NON_CRITICAL: 条件成立時のみ Discord へ発報する）
