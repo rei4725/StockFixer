@@ -128,17 +128,20 @@ def test_example(sample_price_df, sample_signal_series):
 ## 開発フロー推奨例
 
 ```powershell
-# 1. 機能開発中：Unit Test を実行（高速フィードバック）
+# 1. 機能開発中：Unit Test を実行（高速フィードバック、外部依存なし）
 python -m pytest tests/unit/test_backtester_unit.py -v
 
-# 2. ローカル検証完了：全テスト実行
-python -m pytest tests/ -v
+# 2. PR 前：ローカルCI相当の一括チェック（unitのみ、check-ci.ps1と同等）
+cd python; .\check-ci.ps1
 
-# 3. PR 前：カバレッジ確認
-python -m pytest tests/unit/ -v --cov=src --cov-report=term-missing --cov-fail-under=80
+# 3. integration/e2e は PR作成後にCIが自動実行する（PR: unit + integration + 軽量e2e）
+#    ローカルで個別に確認したい場合のみ、対象を絞って実行する:
+python -m pytest tests/integration/test_xxx.py -v
 
-# 4. CI/CD で Integration Test も含めて検証
-python -m pytest tests/integration/ -v
+# 4. 重量級の e2e（実DB + 実モデル学習）は develop push 後 / 手動発火でのみ実行される。
+#    ローカルで確認したい場合（Postgres起動が必要）:
+docker compose up -d postgres
+python -m pytest tests/e2e/ -v --timeout=300 -m "slow"
 ```
 
 ## Unit Test 実装チェックリスト
