@@ -9,7 +9,7 @@ from src.orchestration.jobs.alerting import (
     evaluate_output_invariants_stage,
     fetch_previous_run_stats,
 )
-from src.orchestration.jobs.common import _handle_stage_error
+from src.orchestration.jobs.common import _drift_check_lock, _handle_stage_error, skip_if_running
 from src.orchestration.types import PipelineStage
 from src.utils.logger import get_logger
 
@@ -377,6 +377,7 @@ def run_daily_paper_trade_report():
         logger.error("ペーパートレードレポート送信失敗: %s", e, exc_info=True)
 
 
+@skip_if_running(_drift_check_lock, "日次ドリフトチェック")
 def run_daily_drift_check():
     """
     日次ドリフト監視: 直近 20 営業日の MAE / Hit Rate を監視し、閾値超過銘柄を自動再学習する。
