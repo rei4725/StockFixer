@@ -18,7 +18,7 @@ from unittest.mock import patch
 
 import pytest
 
-pytestmark = pytest.mark.timeout(300)
+pytestmark = [pytest.mark.timeout(300), pytest.mark.slow]
 
 
 class TestRawOHLCV:

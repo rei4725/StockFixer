@@ -23,7 +23,7 @@ import math
 
 import pytest
 
-pytestmark = pytest.mark.timeout(300)
+pytestmark = [pytest.mark.timeout(300), pytest.mark.slow]
 
 # ---------------------------------------------------------------------------
 # 必須メトリクスキー（backtester.simulate_trading の戻り値に必ず含まれるべきキー）
