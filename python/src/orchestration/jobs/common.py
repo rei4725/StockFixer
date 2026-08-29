@@ -4,6 +4,8 @@
 エラーハンドリングと日付判定ユーティリティを提供する。
 """
 
+import threading
+from functools import wraps
 from typing import TYPE_CHECKING, Callable, Optional
 
 from src.orchestration.types import PipelineStage
@@ -13,6 +15,32 @@ if TYPE_CHECKING:
     from datetime import datetime
 
 logger = get_logger(__name__)
+
+# run_daily_drift_check() 専用の多重起動防止ロック（daily.py / skip_if_running から共有）。
+_drift_check_lock = threading.Lock()
+
+
+def skip_if_running(lock: threading.Lock, job_label: str) -> Callable:
+    """同一プロセス内で多重起動された場合、後続の呼び出しは実処理をスキップするデコレータ。
+
+    複数の呼び出し経路（cronジョブ・日次パイプライン内・手動実行）を持つ
+    重い処理が並行実行されるのを防ぐための最終防衛ライン。
+    """
+
+    def decorator(func: Callable) -> Callable:
+        @wraps(func)
+        def wrapper(*args: object, **kwargs: object) -> object:
+            if not lock.acquire(blocking=False):
+                logger.warning("%s: 既に実行中のためスキップ（多重起動防止）", job_label)
+                return None
+            try:
+                return func(*args, **kwargs)
+            finally:
+                lock.release()
+
+        return wrapper
+
+    return decorator
 
 
 def _handle_stage_error(

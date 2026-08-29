@@ -242,13 +242,13 @@ class TestRunDailyDriftCheck(unittest.TestCase):
         mock_load_symbols.assert_not_called()
         mock_train.assert_not_called()
 
-    def test_skips_when_already_running(self):
+    @patch("src.prediction.db.load_drift_summary")
+    def test_skips_when_already_running(self, mock_load_summary):
         """同一プロセス内で多重起動された場合、後続の呼び出しは実処理をスキップする。"""
-        with patch.object(daily_job_module, "_run_daily_drift_check_impl") as mock_impl:
-            with daily_job_module._drift_check_lock:
-                run_daily_drift_check()
+        with daily_job_module._drift_check_lock:
+            run_daily_drift_check()
 
-            mock_impl.assert_not_called()
+        mock_load_summary.assert_not_called()
 
 
 class TestDailyDriftCheckScheduleConfig(unittest.TestCase):
