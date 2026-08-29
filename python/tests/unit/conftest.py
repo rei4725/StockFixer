@@ -87,10 +87,18 @@ def _block_real_yfinance_calls(monkeypatch):
     到達する」事故の予防。Discord/healthchecks.io と異なりオフ用の環境変数が
     存在しないため、yfinance の Ticker.info プロパティ自体をブロックする）。
 
-    このフィクスチャに引っかかった場合は「どのテストが何をモックし忘れているか」を
-    示す明確なエラーとして失敗させる（無言でNoneやfalsy値を返すと問題を隠してしまう
-    ため、意図的に例外を送出する設計にしている）。実データが必要なテストは
-    個別に `@patch("yfinance.Ticker.info", ...)` 等で上書きすること。
+    このフィクスチャの主目的は実ネットワーク往復（＝テストの遅延）を防ぐことである。
+    `yf.Ticker.info` プロパティをブロックし例外を送出するが、呼び出し元の実装次第では
+    テスト失敗として顕在化しない点に注意。例えば
+    `src.utils.sector_constraints.get_symbol_sector` は広い `except Exception` で
+    この RuntimeError を握りつぶし、警告ログを出してフォールバック値を返す設計のため、
+    このフィクスチャに引っかかってもテストは失敗せず黙って通ってしまう
+    （＝「どのテストが何をモックし忘れているか」を明確なエラーで検知できる保証はない）。
+    また `Ticker.history` や `get_earnings_dates` など `Ticker.info` を経由しない
+    呼び出し経路は、そもそもこのフィクスチャの対象外である。同種の速度問題や
+    モック漏れが他の経路で見つかった場合は、個別に追加のガードやモックが必要になる。
+    実データが必要なテストは個別に `@patch("yfinance.Ticker.info", ...)` 等で
+    上書きすること。
     """
 
     def _raise(self):
