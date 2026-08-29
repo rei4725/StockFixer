@@ -277,6 +277,9 @@ SCHEDULE_CONFIG = {
         "recovery_delay_minutes": 20,
         "max_executions_per_period": 1,
         "description": "毎営業日 16:00 - ドリフト監視と再学習トリガー",
+        # run_daily_pipeline() の step4 で同じ run_daily_drift_check() を毎朝実行済みのため、
+        # 独立cronとしては自動起動しない（二重実行防止）。--run-now drift による手動実行のみ許可。
+        "auto_schedule": False,
     },
     "weekly_db_maintenance": {
         "func": job_weekly_db_maintenance,
@@ -385,6 +388,9 @@ SCHEDULE_CONFIG = {
 def _register_jobs(scheduler, queue_manager):
     """スケジューラにジョブを登録する"""
     for job_id, config in SCHEDULE_CONFIG.items():
+        if not config.get("auto_schedule", True):
+            logger.info(f"ジョブ登録スキップ: {job_id}（auto_schedule=False、手動実行のみ）")
+            continue
 
         def _managed_runner(_job_id=job_id):
             queue_manager.run_job(_job_id, reason="scheduled")
@@ -428,7 +434,10 @@ def _poll_recovery_jobs(queue_manager):
 
     now = queue_manager.now()
 
-    for job_id in SCHEDULE_CONFIG.keys():
+    for job_id, config in SCHEDULE_CONFIG.items():
+        if not config.get("auto_schedule", True):
+            continue
+
         # 当日分の補完
         if queue_manager.should_recover(job_id, now=now):
             logger.warning(f"補完実行を開始: {job_id}")

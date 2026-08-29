@@ -4,6 +4,8 @@
 ドリフト監視・バックアップ・ルールシグナルのオーケストレーション。
 """
 
+import threading
+
 from src.orchestration.jobs.alerting import (
     evaluate_and_notify_alerts,
     evaluate_output_invariants_stage,
@@ -14,6 +16,10 @@ from src.orchestration.types import PipelineStage
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+# run_daily_drift_check() は複数経路（日次パイプライン内 / 手動実行）から
+# 呼ばれうるため、同一プロセス内での多重実行を防ぐロック。
+_drift_check_lock = threading.Lock()
 
 
 def run_daily_pipeline():
@@ -389,6 +395,16 @@ def run_daily_drift_check():
         - 閾値超過銘柄が存在する場合に銘柄別モデルを再学習
         - 再学習トリガーを Discord に通知
     """
+    if not _drift_check_lock.acquire(blocking=False):
+        logger.warning("日次ドリフトチェック: 既に実行中のためスキップ（多重起動防止）")
+        return
+    try:
+        _run_daily_drift_check_impl()
+    finally:
+        _drift_check_lock.release()
+
+
+def _run_daily_drift_check_impl():
     import os
 
     from src.prediction.db import load_drift_summary
