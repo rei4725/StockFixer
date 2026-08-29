@@ -10,6 +10,10 @@ on:
       - "!python/experiments/**"
       - ".github/workflows/unit-tests.yml"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint:
     name: Lint (black / isort / flake8 / mypy)
