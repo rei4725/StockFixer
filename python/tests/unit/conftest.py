@@ -136,26 +136,47 @@ def _test_database_ready():
     yield
 
 
+@pytest.fixture(scope="session")
+def _shared_test_connection(_test_database_ready):
+    """テストセッション全体で使い回す共有DB接続。
+
+    従来は各テストで psycopg.connect() → rollback() → close() を繰り返しており、
+    接続確立コスト（実測: 1回あたり中央値約23ms、2686件で合計約54秒）が
+    unitテスト全体の実行時間の半分近くを占めていた。このフィクスチャで接続
+    そのものはセッション中1本だけ張り、テストごとの分離は `_isolate_db` 側の
+    「テストごとにトランザクションを開始してロールバックする」という既存の
+    仕組みでそのまま担保する（分離の強度は変えず、接続確立の回数だけを減らす）。
+    """
+    import psycopg
+
+    from src.utils.data_path_utils import get_database_url
+
+    con = psycopg.connect(get_database_url(), autocommit=False)
+    yield con
+    con.close()
+
+
 @pytest.fixture(autouse=True)
-def _isolate_db(_test_database_ready):
+def _isolate_db(_shared_test_connection):
     """全 unit テストを1トランザクションに包み、テスト終了時にロールバックする。
 
     _connection.py は呼び出し側が commit() しない設計のため、共有接続を
     そのままロールバックするだけで全ての書き込みを巻き戻せる
     （#548: 本番DB破損事故 / PR#556: filelock起因のCI一斉失敗、両方の
     事故クラスがこの方式では構造的に発生しなくなる）。
-    """
-    import psycopg
 
-    from src.utils.data_path_utils import get_database_url
+    接続自体は `_shared_test_connection`（セッションスコープ）で使い回し、
+    ここではテストごとに「トランザクションの開始（SELECT 1）」と
+    「ロールバック」だけを行う。
+    """
     from src.utils.db._connection import close_connection, set_test_connection
 
-    con = psycopg.connect(get_database_url(), autocommit=False)
+    con = _shared_test_connection
     # 接続を明示的にトランザクション開始状態にしてから注入する。こうしないと
     # _connection.py 側で `with con.transaction():` のようなネスト保護を
     # 使った場合、テスト最初の呼び出しが「ネストではなく最外殻」と誤認されて
     # 誤ってCOMMITしてしまう（テスト分離が壊れ、本物のPostgresへ書き込みが
-    # 漏れる）。SELECT 1 で最初のトランザクションを確実に開始させておく。
+    # 漏れる）。SELECT 1 で毎テストの最初のトランザクションを確実に開始させておく。
     con.execute("SELECT 1")
     set_test_connection(con)
     try:
@@ -163,7 +184,6 @@ def _isolate_db(_test_database_ready):
     finally:
         con.rollback()
         set_test_connection(None)
-        con.close()
         close_connection()
 
 
