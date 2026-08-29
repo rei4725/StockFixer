@@ -34,7 +34,7 @@ python -m pytest tests/e2e/ -v -m "not slow"
 
 ### E2E Test のみ（重量級: `@pytest.mark.slow` 付きテストのみ、Postgres起動が必要・数分かかる）
 ```powershell
-docker compose up -d postgres
+docker compose up -d postgres-test
 python -m pytest tests/e2e/ -v --timeout=300 -m "slow"
 ```
 
@@ -103,6 +103,7 @@ Backtester（基本機能・詳細・ストップロス・テイクプロフィ�
   - **CI**: PR の `e2e-test` ジョブで毎回実行される（`-m "not slow"`）
 - **重量級e2e**（`@pytest.mark.slow` 付き）
   - 対象: `test_full_pipeline.py`, `test_backtest_regression.py`, `test_data_quality.py`
+    （`test_cli_smoke.py` にも一部 `@pytest.mark.slow` テストが含まれる。実引数でのCLI実行検証）
   - **実行時間**: 数分単位（実DB起動・実モデル学習を伴う）
   - **CI**: `e2e-test-slow` ジョブとして、develop への push 後または手動発火（`workflow_dispatch`）でのみ実行される（`-m "slow"`）。PR では実行されない
 
@@ -164,7 +165,7 @@ python -m pytest tests/integration/test_xxx.py -v
 
 # 4. 重量級の e2e（実DB + 実モデル学習）は develop push 後 / 手動発火でのみ実行される。
 #    ローカルで確認したい場合（Postgres起動が必要）:
-docker compose up -d postgres
+docker compose up -d postgres-test
 python -m pytest tests/e2e/ -v --timeout=300 -m "slow"
 ```
 
