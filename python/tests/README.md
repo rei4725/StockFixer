@@ -6,26 +6,36 @@
 tests/
 ├── unit/                    # Unit Test（全Mockingで隔離）
 ├── integration/             # Integration Test（実依存）
+├── e2e/                     # E2E Test（実DB(Postgres) + 実モデル学習を含むフルパイプライン検証）
 ├── conftest.py             # pytest fixture 共有定義
 └── README.md               # このファイル
 ```
 
 ## テスト実行方法
 
-### 全テスト実行
-```powershell
-cd python
-python -m pytest tests/ -v
-```
+日常の開発ループでは、目的に応じて **レイヤーごとに絞って実行する**（詳細は後述の「開発フロー推奨例」参照）。
+`tests/` 配下を無条件に一括実行するコマンドは `tests/e2e/` の重量級テスト（実DB起動が必要・数分かかる）まで含んでしまうため、通常は使わない。全レイヤーの一括確認はCIの `e2e-test` / `e2e-test-slow` ジョブ（develop push後 または 手動発火）に任せる。
 
 ### Unit Test のみ（高速）
 ```powershell
+cd python
 python -m pytest tests/unit/ -v
 ```
 
 ### Integration Test のみ
 ```powershell
 python -m pytest tests/integration/ -v
+```
+
+### E2E Test のみ（軽量: `@pytest.mark.slow` 無しのテストのみ）
+```powershell
+python -m pytest tests/e2e/ -v -m "not slow"
+```
+
+### E2E Test のみ（重量級: `@pytest.mark.slow` 付きテストのみ、Postgres起動が必要・数分かかる）
+```powershell
+docker compose up -d postgres
+python -m pytest tests/e2e/ -v --timeout=300 -m "slow"
 ```
 
 ### 特定ファイルテストのみ
@@ -38,10 +48,11 @@ python -m pytest tests/unit/test_backtester_unit.py -v
 python -m pytest tests/unit/test_backtester_unit.py::TestBacktesterSimulateTradingBasic::test_no_trades_on_all_hold_signal -v
 ```
 
-### カバレッジ計測
+### カバレッジ計測（CIのカバレッジゲートと同じ対象: Unit Test のみ）
 ```powershell
-python -m pytest tests/ --cov=src --cov-report=html
+python -m pytest tests/unit/ --cov=src --cov-branch --cov-report=html
 ```
+integration/e2e を含めたカバレッジ計測はCIのカバレッジゲート対象外のため、通常は行わない。
 
 ### unittest ベース（pytest 非使用）
 ```powershell
@@ -81,6 +92,19 @@ Backtester（基本機能・詳細・ストップロス・テイクプロフィ�
 
 **対象テスト**:
 バックテストE2E、最適化E2E、バッチ処理、データ取得（yfinance）、データパイプライン統合、DuckDB操作、Discord Bot、モデル学習パイプライン、予測パイプライン、スケジューラー統合、最適パラメータ読込E2E
+
+### E2E Test（`tests/e2e/`）
+**目的**: 実DB（Postgres）＋実モデル学習を含む、フルパイプライン検証
+**特徴**: `@pytest.mark.slow` の有無で「軽量e2e」と「重量級e2e」の2種類に分かれる
+
+- **軽量e2e**（`@pytest.mark.slow` 無し）
+  - 例: `test_cli_smoke.py`（CLIエントリポイントの `--help` チェック等）
+  - **実行時間**: 数秒〜数十秒
+  - **CI**: PR の `e2e-test` ジョブで毎回実行される（`-m "not slow"`）
+- **重量級e2e**（`@pytest.mark.slow` 付き）
+  - 対象: `test_full_pipeline.py`, `test_backtest_regression.py`, `test_data_quality.py`
+  - **実行時間**: 数分単位（実DB起動・実モデル学習を伴う）
+  - **CI**: `e2e-test-slow` ジョブとして、develop への push 後または手動発火（`workflow_dispatch`）でのみ実行される（`-m "slow"`）。PR では実行されない
 
 ## conftest.py（共有 Fixture）
 
