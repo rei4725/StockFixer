@@ -169,6 +169,26 @@ docker compose up -d postgres-test
 python -m pytest tests/e2e/ -v --timeout=300 -m "slow"
 ```
 
+### ショートカットスクリプト
+
+上記の各コマンドは `test.ps1` / `test.sh` でも実行できる:
+
+```powershell
+# Windows
+.\test.ps1 unit          # unitテスト（カバレッジゲート付き）
+.\test.ps1 integration   # integrationテスト
+.\test.ps1 e2e           # e2e軽量部分（PRと同じ条件）
+.\test.ps1 e2e-slow      # e2e重量級（develop push/手動発火と同じ条件、Postgres起動が必要）
+```
+
+```bash
+# Linux/Mac
+./test.sh unit
+./test.sh integration
+./test.sh e2e
+./test.sh e2e-slow
+```
+
 ## Unit Test 実装チェックリスト
 
 - テスト対象は1つの責務に絞る（1テスト1意図）

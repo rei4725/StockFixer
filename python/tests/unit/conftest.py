@@ -72,6 +72,47 @@ def _block_real_claude_calls(monkeypatch):
 
 
 # ============================================
+# yfinance 実ネットワーク呼び出しガード（unit テスト全体に適用）
+# ============================================
+
+
+@pytest.fixture(autouse=True)
+def _block_real_yfinance_calls(monkeypatch):
+    """Block real yfinance API calls from all unit tests.
+
+    cProfile調査で判明: src.utils.sector_constraints.get_symbol_sector 等、
+    yfinance の Ticker.info を呼ぶコードパスが一部の unit テストで未モックのまま
+    実行され、実ネットワーク往復（Yahoo Finance のクッキー/crumb 認証を含む）で
+    テストが数秒単位で遅くなっていた（#548 と同型の「テストが本番相当のリソースに
+    到達する」事故の予防。Discord/healthchecks.io と異なりオフ用の環境変数が
+    存在しないため、yfinance の Ticker.info プロパティ自体をブロックする）。
+
+    このフィクスチャの主目的は実ネットワーク往復（＝テストの遅延）を防ぐことである。
+    `yf.Ticker.info` プロパティをブロックし例外を送出するが、呼び出し元の実装次第では
+    テスト失敗として顕在化しない点に注意。例えば
+    `src.utils.sector_constraints.get_symbol_sector` は広い `except Exception` で
+    この RuntimeError を握りつぶし、警告ログを出してフォールバック値を返す設計のため、
+    このフィクスチャに引っかかってもテストは失敗せず黙って通ってしまう
+    （＝「どのテストが何をモックし忘れているか」を明確なエラーで検知できる保証はない）。
+    また `Ticker.history` や `get_earnings_dates` など `Ticker.info` を経由しない
+    呼び出し経路は、そもそもこのフィクスチャの対象外である。同種の速度問題や
+    モック漏れが他の経路で見つかった場合は、個別に追加のガードやモックが必要になる。
+    実データが必要なテストは個別に `@patch("yfinance.Ticker.info", ...)` 等で
+    上書きすること。
+    """
+
+    def _raise(self):
+        raise RuntimeError(
+            "unit テストから実 yfinance API (Ticker.info) が呼ばれました。"
+            "呼び出し元のモックが不足しています。"
+            "テスト側で該当関数（例: src.utils.sector_constraints.get_symbol_sector）を"
+            "individually patch するか、yf.Ticker.info を個別にモックしてください。"
+        )
+
+    monkeypatch.setattr("yfinance.Ticker.info", property(_raise))
+
+
+# ============================================
 # トランザクションロールバックによる DB 隔離（unit テスト全体に適用）
 # ============================================
 

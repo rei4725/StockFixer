@@ -112,6 +112,10 @@ class TestRunDailyOrders(unittest.TestCase):
                 return_value=0,
             ),
             patch(
+                "src.trading.execution.selection.get_symbol_sector",
+                side_effect=lambda market, symbol: f"UNKNOWN:{market}:{symbol}",
+            ),
+            patch(
                 "src.trading.execution.runner.save_order_run_summary",
             ),
         ]
@@ -192,6 +196,9 @@ class TestRunDailyOrders(unittest.TestCase):
         try:
             stats = run_daily_orders(broker, market="jp", mode="paper")
             self.assertLessEqual(stats["buy_orders"], MAX_ORDERS_PER_RUN)
+            # 銘柄ごとに異なるセクターを返すため、セクター上限ではなく
+            # MAX_ORDERS_PER_RUN で頭打ちになっていることを確認する
+            self.assertEqual(stats["buy_orders"], MAX_ORDERS_PER_RUN)
         finally:
             self._stop_patches(patch_list)
 
@@ -955,6 +962,10 @@ class TestSplitRatio(unittest.TestCase):
             patch(
                 "src.trading.risk_manager.RiskManager._get_consecutive_losses",
                 return_value=0,
+            ),
+            patch(
+                "src.trading.execution.selection.get_symbol_sector",
+                side_effect=lambda market, symbol: f"UNKNOWN:{market}:{symbol}",
             ),
             patch("src.trading.execution.runner.save_order_run_summary"),
         ]
