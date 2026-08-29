@@ -114,3 +114,54 @@ jobs:
         with:
           name: e2e-test-logs
           path: Logs/
+
+  e2e-test-slow:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: python
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: stockfixer
+          POSTGRES_USER: stockfixer
+          POSTGRES_PASSWORD: stockfixer_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U stockfixer -d stockfixer"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://stockfixer:stockfixer_ci@localhost:5432/stockfixer
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # mlflow>=3.12.0 は pandas<3 を要求するため requirements.txt に競合がある。
+          # mlflow を --no-deps で別途インストールすることで競合を回避する。
+          grep -v '^mlflow' requirements.txt | pip install -r /dev/stdin
+          pip install "mlflow>=3.12.0" --no-deps
+          pip install -r requirements-dev.txt
+
+      - name: Run E2E tests (slow)
+        run: python -m pytest tests/e2e/ -v --timeout=300 -m "slow"
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-test-slow-logs
+          path: Logs/
