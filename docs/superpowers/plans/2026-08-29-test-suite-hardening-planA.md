@@ -19,7 +19,7 @@
 
 ---
 
-### Task A: 実sleep依存テストの解消 + テスト用タスクランナースクリプト追加
+### Task 1: 実sleep依存テストの解消 + テスト用タスクランナースクリプト追加
 
 **Files:**
 - Modify: `python/tests/unit/test_discord_rate_limiter.py`
@@ -230,7 +230,7 @@ git commit -m "test: rate_limiterテストの実sleep依存を解消しテスト
 
 ---
 
-### Task B: `tests/integration/test_backtest_pipeline.py` をPostgres実データパスで書き直す
+### Task 2: `tests/integration/test_backtest_pipeline.py` をPostgres実データパスで書き直す
 
 **Files:**
 - Modify: `python/tests/integration/test_backtest_pipeline.py`（全面書き換え）
@@ -433,7 +433,7 @@ git commit -m "test: test_backtest_pipeline.pyを旧DuckDB依存からPostgres�
 
 ---
 
-### Task C: unitテストにおける実yfinanceネットワーク呼び出しの遮断 + 該当テストの修正
+### Task 3: unitテストにおける実yfinanceネットワーク呼び出しの遮断 + 該当テストの修正
 
 **Files:**
 - Modify: `python/tests/unit/conftest.py`
