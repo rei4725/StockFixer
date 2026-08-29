@@ -72,6 +72,39 @@ def _block_real_claude_calls(monkeypatch):
 
 
 # ============================================
+# yfinance 実ネットワーク呼び出しガード（unit テスト全体に適用）
+# ============================================
+
+
+@pytest.fixture(autouse=True)
+def _block_real_yfinance_calls(monkeypatch):
+    """Block real yfinance API calls from all unit tests.
+
+    cProfile調査で判明: src.utils.sector_constraints.get_symbol_sector 等、
+    yfinance の Ticker.info を呼ぶコードパスが一部の unit テストで未モックのまま
+    実行され、実ネットワーク往復（Yahoo Finance のクッキー/crumb 認証を含む）で
+    テストが数秒単位で遅くなっていた（#548 と同型の「テストが本番相当のリソースに
+    到達する」事故の予防。Discord/healthchecks.io と異なりオフ用の環境変数が
+    存在しないため、yfinance の Ticker.info プロパティ自体をブロックする）。
+
+    このフィクスチャに引っかかった場合は「どのテストが何をモックし忘れているか」を
+    示す明確なエラーとして失敗させる（無言でNoneやfalsy値を返すと問題を隠してしまう
+    ため、意図的に例外を送出する設計にしている）。実データが必要なテストは
+    個別に `@patch("yfinance.Ticker.info", ...)` 等で上書きすること。
+    """
+
+    def _raise(self):
+        raise RuntimeError(
+            "unit テストから実 yfinance API (Ticker.info) が呼ばれました。"
+            "呼び出し元のモックが不足しています。"
+            "テスト側で該当関数（例: src.utils.sector_constraints.get_symbol_sector）を"
+            "individually patch するか、yf.Ticker.info を個別にモックしてください。"
+        )
+
+    monkeypatch.setattr("yfinance.Ticker.info", property(_raise))
+
+
+# ============================================
 # トランザクションロールバックによる DB 隔離（unit テスト全体に適用）
 # ============================================
 

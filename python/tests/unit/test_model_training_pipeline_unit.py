@@ -77,6 +77,10 @@ class TestLoadFeaturesForTraining(unittest.TestCase):
             index=dates,
         )
 
+    @patch(
+        "src.market_data.loader.get_earnings_dates",
+        new=MagicMock(return_value=pd.DatetimeIndex([])),
+    )
     @patch("src.prediction.training_pipeline._features.load_stock_features")
     def test_success_with_valid_data(self, mock_load):
         """DBにデータがある場合は status=success で X/y が付与されること"""
@@ -121,6 +125,10 @@ class TestLoadFeaturesForTraining(unittest.TestCase):
         self.assertIsNotNone(result.error)
         self.assertIn("db connection error", result.error)
 
+    @patch(
+        "src.market_data.loader.get_earnings_dates",
+        new=MagicMock(return_value=pd.DatetimeIndex([])),
+    )
     @patch("src.prediction.training_pipeline._features.load_stock_features")
     def test_exclude_cols_not_in_X(self, mock_load):
         """y / market / symbol / date カラムは X から除外されること"""
@@ -132,6 +140,10 @@ class TestLoadFeaturesForTraining(unittest.TestCase):
             for col in ("y", "market", "symbol", "date"):
                 self.assertNotIn(col, result.X.columns)
 
+    @patch(
+        "src.market_data.loader.get_earnings_dates",
+        new=MagicMock(return_value=pd.DatetimeIndex([])),
+    )
     @patch("src.prediction.training_pipeline._features.load_stock_features")
     def test_feature_column_names_normalized(self, mock_load):
         """特徴量カラム名に含まれる非英数字が '_' に置換されること"""
@@ -175,6 +187,10 @@ class TestLoadFeaturesForTraining(unittest.TestCase):
         self.assertLess(len(result.X), len(df))
         self.assertNotIn(pd.Timestamp("2024-01-10"), result.X.index)
 
+    @patch(
+        "src.market_data.loader.get_earnings_dates",
+        new=MagicMock(return_value=pd.DatetimeIndex([])),
+    )
     @patch("src.prediction.training_pipeline._features.load_excluded_features")
     @patch("src.prediction.training_pipeline._features.load_stock_features")
     def test_load_features_applies_saved_exclusions(self, mock_load, mock_excluded):

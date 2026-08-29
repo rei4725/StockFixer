@@ -112,6 +112,10 @@ class TestRunDailyOrders(unittest.TestCase):
                 return_value=0,
             ),
             patch(
+                "src.trading.execution.selection.get_symbol_sector",
+                return_value="Unknown",
+            ),
+            patch(
                 "src.trading.execution.runner.save_order_run_summary",
             ),
         ]
@@ -955,6 +959,10 @@ class TestSplitRatio(unittest.TestCase):
             patch(
                 "src.trading.risk_manager.RiskManager._get_consecutive_losses",
                 return_value=0,
+            ),
+            patch(
+                "src.trading.execution.selection.get_symbol_sector",
+                return_value="Unknown",
             ),
             patch("src.trading.execution.runner.save_order_run_summary"),
         ]
