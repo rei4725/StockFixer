@@ -123,7 +123,7 @@ def test_example(sample_price_df, sample_signal_series):
 
 **検証テスト**:
 - `test_backtest_optimize_unit.py::TestComputeMetrics`
-- `test_backtest_optimize_e2e.py::TestBacktestOptimizeE2E::test_optimization_metrics_dtype_fix`
+- `test_backtest_optimize.py::TestBacktestOptimizeE2E::test_optimization_metrics_dtype_fix`
 
 ## 開発フロー推奨例
 
