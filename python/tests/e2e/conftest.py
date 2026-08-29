@@ -57,7 +57,7 @@ def _wire_ports_for_e2e():
 # ---------------------------------------------------------------------------
 # 1. 合成 OHLCV fixture（モジュール全体で共有）
 # ---------------------------------------------------------------------------
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")
 def e2e_ohlcv() -> pd.DataFrame:
     """200 営業日分の固定 OHLCV DataFrame（yfinance 戻り値と同形式）。"""
     rng = np.random.default_rng(42)
@@ -91,16 +91,19 @@ def e2e_ohlcv() -> pd.DataFrame:
 #    - DB / モデルパス関数をすべてパッチ
 #    - 合成データを投入してモデルを学習済みにする
 # ---------------------------------------------------------------------------
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")
 def e2e_db_env(e2e_ohlcv, tmp_path_factory):
     """
     E2E テスト用の孤立環境を構築して yield する。
 
-    tests/unit・tests/integration と異なり、このフィクスチャはモジュール全体で
-    1つの環境を共有する（各テストごとにロールバックしない）。そのため専用の
-    Postgres接続をモジュールスコープで開き、モジュールの全テスト終了後に
-    まとめてロールバックする。tests/unit/conftest.py の _isolate_db と同じ理由で、
-    接続をトランザクション開始状態にしてから注入する（詳細はそちらのコメント参照）。
+    tests/e2e/ 配下でこのフィクスチャを使う全モジュールが「セッションで1つ」
+    の環境を共有する（各テストごと・各モジュールごとにロールバックしない）。
+    合成データ投入・特徴量生成・実モデル学習は3ファイル分同一内容のため、
+    重複実行を避けるためセッションスコープにしている。
+    そのため専用のPostgres接続をセッションスコープで開き、セッションの全テスト
+    終了後にまとめてロールバックする。tests/unit/conftest.py の _isolate_db と
+    同じ理由で、接続をトランザクション開始状態にしてから注入する
+    （詳細はそちらのコメント参照）。
 
     yield する辞書:
         models_dir: 一時モデルディレクトリ

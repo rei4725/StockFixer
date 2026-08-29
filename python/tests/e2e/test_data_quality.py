@@ -18,7 +18,7 @@ e2e_db_env で生成した合成データに対して「書き込まれたデー
 import numpy as np
 import pytest
 
-pytestmark = pytest.mark.timeout(120)
+pytestmark = [pytest.mark.timeout(120), pytest.mark.slow]
 
 
 # ---------------------------------------------------------------------------
