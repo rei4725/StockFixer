@@ -9,19 +9,19 @@ pytest-testmon>=2.2.0
 hypothesis>=6.165.10
 
 # 型チェック
-mypy==2.3.0
+mypy==2.3.1
 types-requests==2.33.0.20260712
 types-PyYAML==6.0.12.20260724
 types-tabulate==0.10.0.20260508
 
 # コード品質
-pylint==4.0.6
+pylint==4.0.7
 flake8==7.3.0
 black==26.5.1
 isort==8.0.1
 
 # pre-commit
-pre-commit==4.6.1
+pre-commit==4.6.2
 
 # セキュリティスキャン
 pip-audit>=2.10.1
