@@ -424,6 +424,13 @@ class TestRunFactoryBatch(unittest.TestCase):
     # （2026-08-30(日)にローカル・CI双方で再現・確認済み）。
     # 「今日」への依存自体を無くし、以前実際に合格することを確認済みの日付
     # (2026-08-29、develop上のCIで合格実績あり)へ凍結することで解消する。
+    #
+    # 注意: 2026-08-29自体も土曜（非営業日）であり、暦日ベースの境界と
+    # 営業日データの「ズレ」そのものが無くなったわけではない。このズレが
+    # たまたまPBO<=0.50側に落ちる1点にピン留めしただけである。将来
+    # _PASSING_DATA_PERIODS・budget・symbols数などを変更した場合、
+    # 同じ理由で再びこの固定値でも閾値をまたぐ可能性はゼロではない
+    # （その場合はここを別の実際に合格する日付へ張り替えること）。
     _FROZEN_NOW = datetime(2026, 8, 29)
 
     def _fake_port(self):
@@ -431,6 +438,13 @@ class TestRunFactoryBatch(unittest.TestCase):
 
         データは _FROZEN_NOW を終端とする営業日レンジで生成する（実行日の
         カレンダー日付には一切依存しないため、いつ実行しても結果は同じになる）。
+
+        重要: このメソッドを使う全テストは、必ず
+        `@patch("src.backtest.factory.datetime")` を併用し
+        `mock_datetime.now.return_value = self._FROZEN_NOW` を設定すること。
+        片方だけ凍結すると run_factory_batch 側の start/end 計算だけが
+        実行日依存のまま残り、このクラスで一度直したのと同じ曜日依存の
+        flaky が静かに再発する。
         """
         seeds = {
             symbol: self._PASSING_DATA_SEED_BASE + i
