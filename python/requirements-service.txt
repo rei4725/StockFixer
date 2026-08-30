@@ -10,6 +10,6 @@ uvicorn==0.52.4
 # 使うこと（本体側を更新する際はこちらも同時に更新する）。
 scikit-learn==1.9.0
 lightgbm==4.7.0
-xgboost==3.4.0
+xgboost==3.4.1
 pandas>=3.0.3,<4
 joblib>=1.5.3
