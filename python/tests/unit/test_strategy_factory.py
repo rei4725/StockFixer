@@ -5,6 +5,7 @@ import math
 import os
 import tempfile
 import unittest
+from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -415,21 +416,31 @@ class TestRunFactoryBatch(unittest.TestCase):
     _PASSING_DATA_TREND = 0.002
     _PASSING_DATA_VOL = 0.015
     _PASSING_DATA_SEED_BASE = 1
+    # #628当初は「今日」を終端とする営業日レンジで合成データを生成していたが、
+    # run_factory_batch側もdatetime.now()でstart/end文字列を計算しており、
+    # 暦日ベースのウィンドウ境界と営業日のみのデータ点が噛み合うかどうかが
+    # 実行日の曜日次第でわずかに変動し、PBOがちょうど0.50のしきい値付近を
+    # 跨いで合格件数が0になる（=このテストが落ちる）ことがあった
+    # （2026-08-30(日)にローカル・CI双方で再現・確認済み）。
+    # 「今日」への依存自体を無くし、以前実際に合格することを確認済みの日付
+    # (2026-08-29、develop上のCIで合格実績あり)へ凍結することで解消する。
+    _FROZEN_NOW = datetime(2026, 8, 29)
 
     def _fake_port(self):
         """本物の add_technical_indicators を使い、実際に合格候補が出る合成データを返す。
 
-        データは「今日」を終端とする営業日レンジで生成する（日付ドリフトに強い。
-        固定開始日だと将来のテスト実行で評価期間との重なりが薄れていく）。
+        データは _FROZEN_NOW を終端とする営業日レンジで生成する（実行日の
+        カレンダー日付には一切依存しないため、いつ実行しても結果は同じになる）。
         """
         seeds = {
             symbol: self._PASSING_DATA_SEED_BASE + i
             for i, symbol in enumerate(self._PASSING_SYMBOLS)
         }
+        frozen_now = self._FROZEN_NOW
 
         def _ohlcv_ending_today(seed):
             rng = np.random.default_rng(seed)
-            end = pd.Timestamp.now().normalize()
+            end = pd.Timestamp(frozen_now).normalize()
             dates = pd.bdate_range(end=end, periods=self._PASSING_DATA_PERIODS)
             trend, vol = self._PASSING_DATA_TREND, self._PASSING_DATA_VOL
             close = 100 * np.exp(np.cumsum(rng.normal(trend, vol, len(dates))))
@@ -455,6 +466,7 @@ class TestRunFactoryBatch(unittest.TestCase):
         port.add_technical_indicators.side_effect = add_technical_indicators
         return port
 
+    @patch("src.backtest.factory.datetime")
     @patch("src.backtest.factory.FACTORY_CLAUDE_RULEGEN_ENABLED", False)
     @patch("src.backtest.factory.review_hypothesis", return_value=None)
     @patch("src.backtest.factory.FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS", 1)
@@ -463,8 +475,9 @@ class TestRunFactoryBatch(unittest.TestCase):
     @patch("src.backtest.factory.load_factory_hashes", return_value=set())
     @patch("src.backtest.factory.get_backtest_data_port")
     def test_batch_evaluates_and_records_candidates(
-        self, mock_port, mock_hashes, mock_count, mock_save, mock_review
+        self, mock_port, mock_hashes, mock_count, mock_save, mock_review, mock_datetime
     ):
+        mock_datetime.now.return_value = self._FROZEN_NOW
         mock_port.return_value = self._fake_port()
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -500,6 +513,7 @@ class TestRunFactoryBatch(unittest.TestCase):
         self.assertEqual(result.evaluated, [])
         mock_save.assert_not_called()
 
+    @patch("src.backtest.factory.datetime")
     @patch("src.backtest.factory.FACTORY_CLAUDE_RULEGEN_ENABLED", False)
     @patch("src.backtest.factory.FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS", 1)
     @patch("src.backtest.factory.review_hypothesis")
@@ -508,8 +522,9 @@ class TestRunFactoryBatch(unittest.TestCase):
     @patch("src.backtest.factory.load_factory_hashes", return_value=set())
     @patch("src.backtest.factory.get_backtest_data_port")
     def test_batch_calls_review_only_for_passed_hypotheses(
-        self, mock_port, mock_hashes, mock_count, mock_save, mock_review
+        self, mock_port, mock_hashes, mock_count, mock_save, mock_review, mock_datetime
     ):
+        mock_datetime.now.return_value = self._FROZEN_NOW
         mock_port.return_value = self._fake_port()
         mock_review.return_value = None
 
@@ -524,6 +539,7 @@ class TestRunFactoryBatch(unittest.TestCase):
         self.assertGreater(len(result.passed), 0)
         self.assertEqual(mock_review.call_count, len(result.passed))
 
+    @patch("src.backtest.factory.datetime")
     @patch("src.backtest.factory.FACTORY_CLAUDE_RULEGEN_ENABLED", False)
     @patch("src.backtest.factory.FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS", 1)
     @patch("src.backtest.factory.review_hypothesis", return_value=None)
@@ -532,10 +548,11 @@ class TestRunFactoryBatch(unittest.TestCase):
     @patch("src.backtest.factory.load_factory_hashes", return_value=set())
     @patch("src.backtest.factory.get_backtest_data_port")
     def test_review_none_still_writes_report(
-        self, mock_port, mock_hashes, mock_count, mock_save, mock_review
+        self, mock_port, mock_hashes, mock_count, mock_save, mock_review, mock_datetime
     ):
         # review_hypothesis はグレースフルデグラデーション契約により失敗時 None を返す
         # （例外を投げない）。None が返ってもレポート書き込みは通常通り完了する。
+        mock_datetime.now.return_value = self._FROZEN_NOW
         mock_port.return_value = self._fake_port()
 
         with tempfile.TemporaryDirectory() as tmp:
