@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("unit", "integration", "e2e", "e2e-slow", "all")]
+    [ValidateSet("unit", "integration", "e2e", "e2e-slow", "all", "changed")]
     [string]$Layer = "unit"
 )
 
@@ -9,4 +9,5 @@ switch ($Layer) {
     "e2e"         { py -m pytest tests/e2e/ -v --timeout=60 -m "not slow" }
     "e2e-slow"    { py -m pytest tests/e2e/ -v --timeout=300 -m "slow" }
     "all"         { py -m pytest tests/unit/ tests/integration/ tests/e2e/ -v -m "not slow" }
+    "changed"     { py -m pytest tests/unit/ --testmon -q }
 }

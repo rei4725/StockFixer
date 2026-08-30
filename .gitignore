@@ -38,6 +38,10 @@ bandit-report/
 python/.pytest_tmp/
 python/.pytest_tmp_runs/
 
+# pytest-testmon の依存関係キャッシュ（マシンローカル、コミット対象外。
+# SQLite WALモードの副ファイル -shm/-wal も含めて無視する）
+python/.testmondata*
+
 # AI tool settings (local only — skills/agents は git 管理)
 .claude/*
 !.claude/skills
