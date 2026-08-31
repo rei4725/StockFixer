@@ -81,3 +81,21 @@ class TestDriftThresholdDriven(unittest.TestCase):
 
         self.assertIn("drift.mae_threshold", get_calls)
         self.assertIn("drift.hit_rate_threshold", get_calls)
+
+    def test_uses_db_config_value_for_min_samples_and_max_retrain(self):
+        get_calls = []
+
+        def mock_get(key, default=None):
+            get_calls.append(key)
+            return default
+
+        with (
+            patch("src.prediction.db.load_drift_summary", return_value=None),
+            patch("src.utils.db.system_config.get_config_value", side_effect=mock_get),
+        ):
+            from src.orchestration import scheduler
+
+            scheduler.run_daily_drift_check()
+
+        self.assertIn("drift.min_samples", get_calls)
+        self.assertIn("drift.max_retrain_per_run", get_calls)

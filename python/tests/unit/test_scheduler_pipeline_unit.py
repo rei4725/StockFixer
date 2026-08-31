@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 
 from src.domain.types import SymbolTask
-from src.orchestration.jobs import daily as daily_job_module
+from src.orchestration.jobs import drift_check as drift_check_module
 from src.orchestration.scheduler import run_daily_auto_order, run_daily_drift_check
 
 
@@ -106,12 +106,14 @@ class TestRunDailyDriftCheck(unittest.TestCase):
                     "symbol": "7203",
                     "mean_abs_error": 0.03,
                     "direction_accuracy": 0.40,
+                    "n_samples": 20,
                 },
                 {
                     "market": "jp",
                     "symbol": "7201",
                     "mean_abs_error": 0.01,
                     "direction_accuracy": 0.60,
+                    "n_samples": 20,
                 },
             ]
         )
@@ -167,6 +169,7 @@ class TestRunDailyDriftCheck(unittest.TestCase):
                     "symbol": "7203",
                     "mean_abs_error": 0.03,
                     "direction_accuracy": 0.40,
+                    "n_samples": 20,
                 }
             ]
         )
@@ -203,6 +206,7 @@ class TestRunDailyDriftCheck(unittest.TestCase):
                     "symbol": "7203",
                     "mean_abs_error": 0.03,
                     "direction_accuracy": 0.40,
+                    "n_samples": 20,
                 }
             ]
         )
@@ -232,6 +236,7 @@ class TestRunDailyDriftCheck(unittest.TestCase):
                     "symbol": "7203",
                     "mean_abs_error": 0.01,
                     "direction_accuracy": 0.60,
+                    "n_samples": 20,
                 }
             ]
         )
@@ -245,10 +250,103 @@ class TestRunDailyDriftCheck(unittest.TestCase):
     @patch("src.prediction.db.load_drift_summary")
     def test_skips_when_already_running(self, mock_load_summary):
         """同一プロセス内で多重起動された場合、後続の呼び出しは実処理をスキップする。"""
-        with daily_job_module._drift_check_lock:
+        with drift_check_module._drift_check_lock:
             run_daily_drift_check()
 
         mock_load_summary.assert_not_called()
+
+    @patch("src.prediction.training_pipeline.train_models_for_symbol_task")
+    @patch("src.watchlist.batch_runner.load_target_symbols")
+    @patch("src.reporting.discord.discord_utils.send_drift_retrain_notification")
+    @patch("src.prediction.db.load_drift_summary")
+    def test_symbols_with_insufficient_samples_are_excluded(
+        self,
+        mock_load_summary,
+        mock_notify,
+        mock_load_symbols,
+        mock_train,
+    ):
+        """直近サンプル数が最小件数未満の銘柄は、閾値を超えていても再学習対象から除外する。"""
+        mock_load_summary.return_value = pd.DataFrame(
+            [
+                {
+                    "market": "jp",
+                    "symbol": "7203",
+                    "mean_abs_error": 0.05,
+                    "direction_accuracy": 0.0,
+                    "n_samples": 1,
+                },
+                {
+                    "market": "jp",
+                    "symbol": "7201",
+                    "mean_abs_error": 0.03,
+                    "direction_accuracy": 0.40,
+                    "n_samples": 20,
+                },
+            ]
+        )
+        mock_load_symbols.return_value = [
+            SymbolTask(market="jp", symbol="7203"),
+            SymbolTask(market="jp", symbol="7201"),
+        ]
+        mock_train.return_value = {"status": "success"}
+
+        run_daily_drift_check()
+
+        mock_train.assert_called_once()
+        task = mock_train.call_args.args[0]
+        self.assertEqual(task.symbol, "7201")
+
+    @patch("src.prediction.training_pipeline.train_models_for_symbol_task")
+    @patch("src.watchlist.batch_runner.load_target_symbols")
+    @patch("src.reporting.discord.discord_utils.send_drift_retrain_notification")
+    @patch("src.prediction.db.load_drift_summary")
+    def test_retrain_capped_at_max_per_run_worst_first(
+        self,
+        mock_load_summary,
+        mock_notify,
+        mock_load_symbols,
+        mock_train,
+    ):
+        """検知件数が上限を超える場合、MAEが悪い順に上位N件のみ再学習する。"""
+        mock_load_summary.return_value = pd.DataFrame(
+            [
+                {
+                    "market": "jp",
+                    "symbol": "AAA",
+                    "mean_abs_error": 0.03,
+                    "direction_accuracy": 0.40,
+                    "n_samples": 20,
+                },
+                {
+                    "market": "jp",
+                    "symbol": "BBB",
+                    "mean_abs_error": 0.09,
+                    "direction_accuracy": 0.40,
+                    "n_samples": 20,
+                },
+                {
+                    "market": "jp",
+                    "symbol": "CCC",
+                    "mean_abs_error": 0.05,
+                    "direction_accuracy": 0.40,
+                    "n_samples": 20,
+                },
+            ]
+        )
+        mock_load_symbols.return_value = [
+            SymbolTask(market="jp", symbol="AAA"),
+            SymbolTask(market="jp", symbol="BBB"),
+            SymbolTask(market="jp", symbol="CCC"),
+        ]
+        mock_train.return_value = {"status": "success"}
+
+        with patch.dict("os.environ", {"DRIFT_MAX_RETRAIN_PER_RUN": "2"}, clear=False):
+            run_daily_drift_check()
+
+        self.assertEqual(mock_train.call_count, 2)
+        trained_symbols = {call.args[0].symbol for call in mock_train.call_args_list}
+        self.assertEqual(trained_symbols, {"BBB", "CCC"})
 
 
 class TestDailyDriftCheckScheduleConfig(unittest.TestCase):
