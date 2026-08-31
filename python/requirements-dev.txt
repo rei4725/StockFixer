@@ -11,7 +11,7 @@ hypothesis>=6.165.10
 # 型チェック
 mypy==2.3.1
 types-requests==2.33.0.20260712
-types-PyYAML==6.0.12.20260724
+types-PyYAML==6.0.12.20260815
 types-tabulate==0.10.0.20260508
 
 # コード品質
