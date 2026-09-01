@@ -339,3 +339,44 @@ def send_strategy_promotion_detected(
         f"昇格直前ベースライン Sharpe: {pre_promotion_baseline:.3f}",
     ]
     return send_webhook_text_chunked("\n".join(lines))
+
+
+def send_allocation_rebalance_report(
+    action: str,
+    tqqq_price: float,
+    shy_price: float,
+    tqqq_qty_before: float,
+    shy_qty_before: float,
+    cash_before: float,
+    tqqq_qty_after: float,
+    shy_qty_after: float,
+    cash_after: float,
+) -> bool:
+    """配分戦略(TQQQ/短期債)の初期建玉作成・リバランス結果を Discord に通知する。
+
+    Args:
+        action: "initial"（初期建玉作成）または "rebalance"（リバランス）
+    """
+    from src.reporting.discord.discord_notification_specs import ALLOCATION_REBALANCE_COMPLETION
+
+    action_label = "初期建玉作成" if action == "initial" else "リバランス"
+    fields = [
+        {"name": "🕐 時刻", "value": format_jst(fmt=DISCORD_DATETIME_FORMAT), "inline": True},
+        {"name": "📌 種別", "value": action_label, "inline": True},
+        {
+            "name": "TQQQ",
+            "value": f"{tqqq_qty_before:.4f}株 → {tqqq_qty_after:.4f}株 @ ${tqqq_price:,.2f}",
+            "inline": False,
+        },
+        {
+            "name": "SHY",
+            "value": f"{shy_qty_before:.4f}株 → {shy_qty_after:.4f}株 @ ${shy_price:,.2f}",
+            "inline": False,
+        },
+        {
+            "name": "現金",
+            "value": f"${cash_before:,.2f} → ${cash_after:,.2f}",
+            "inline": False,
+        },
+    ]
+    return send_status_fields(ALLOCATION_REBALANCE_COMPLETION, fields)
