@@ -34,6 +34,19 @@ def run_allocation_rebalance(market_data_port: MarketDataPort) -> Optional[Rebal
         ALLOCATION_STRATEGY_TQQQ_SYMBOL,
     )
 
+    if not 0 <= ALLOCATION_STRATEGY_TQQQ_RATIO <= 1:
+        logger.error(
+            "配分戦略: ALLOCATION_STRATEGY_TQQQ_RATIO が不正な値のため中止（%s）",
+            ALLOCATION_STRATEGY_TQQQ_RATIO,
+        )
+        return None
+    if ALLOCATION_STRATEGY_TQQQ_SYMBOL == ALLOCATION_STRATEGY_BOND_SYMBOL:
+        logger.error(
+            "配分戦略: TQQQ/BOND シンボルが同一のため中止（%s）",
+            ALLOCATION_STRATEGY_TQQQ_SYMBOL,
+        )
+        return None
+
     latest = get_latest_snapshot()
     now = datetime.now()
 

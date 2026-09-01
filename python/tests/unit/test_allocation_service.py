@@ -164,6 +164,60 @@ class TestRunAllocationRebalance(unittest.TestCase):
         self.assertIsNone(outcome)
         mock_insert.assert_not_called()
 
+    @patch("src.trading.allocation_strategy.service.insert_snapshot")
+    @patch("src.trading.allocation_strategy.service.get_latest_snapshot")
+    @patch("src.trading.allocation_strategy.service.datetime")
+    def test_aborts_when_ratio_is_invalid(self, mock_datetime, mock_get_latest, mock_insert):
+        mock_datetime.now.return_value = datetime(2026, 1, 1)
+        mock_get_latest.return_value = None
+        mock_adapter = MagicMock()
+
+        settings_patches = [
+            patch("config.settings.ALLOCATION_STRATEGY_TQQQ_RATIO", 1.5),
+            patch("config.settings.ALLOCATION_STRATEGY_TQQQ_SYMBOL", "TQQQ"),
+            patch("config.settings.ALLOCATION_STRATEGY_BOND_SYMBOL", "SHY"),
+            patch("config.settings.ALLOCATION_STRATEGY_INITIAL_CAPITAL", 100_000.0),
+            patch("config.settings.ALLOCATION_STRATEGY_REBALANCE_YEARS", 2),
+        ]
+        for p in settings_patches:
+            p.start()
+        self.addCleanup(lambda: [p.stop() for p in settings_patches])
+
+        from src.trading.allocation_strategy.service import run_allocation_rebalance
+
+        outcome = run_allocation_rebalance(mock_adapter)
+
+        self.assertIsNone(outcome)
+        mock_insert.assert_not_called()
+        mock_adapter.get_latest_price.assert_not_called()
+
+    @patch("src.trading.allocation_strategy.service.insert_snapshot")
+    @patch("src.trading.allocation_strategy.service.get_latest_snapshot")
+    @patch("src.trading.allocation_strategy.service.datetime")
+    def test_aborts_when_symbols_are_identical(self, mock_datetime, mock_get_latest, mock_insert):
+        mock_datetime.now.return_value = datetime(2026, 1, 1)
+        mock_get_latest.return_value = None
+        mock_adapter = MagicMock()
+
+        settings_patches = [
+            patch("config.settings.ALLOCATION_STRATEGY_TQQQ_RATIO", 0.8),
+            patch("config.settings.ALLOCATION_STRATEGY_TQQQ_SYMBOL", "TQQQ"),
+            patch("config.settings.ALLOCATION_STRATEGY_BOND_SYMBOL", "TQQQ"),
+            patch("config.settings.ALLOCATION_STRATEGY_INITIAL_CAPITAL", 100_000.0),
+            patch("config.settings.ALLOCATION_STRATEGY_REBALANCE_YEARS", 2),
+        ]
+        for p in settings_patches:
+            p.start()
+        self.addCleanup(lambda: [p.stop() for p in settings_patches])
+
+        from src.trading.allocation_strategy.service import run_allocation_rebalance
+
+        outcome = run_allocation_rebalance(mock_adapter)
+
+        self.assertIsNone(outcome)
+        mock_insert.assert_not_called()
+        mock_adapter.get_latest_price.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
