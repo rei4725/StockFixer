@@ -251,3 +251,43 @@ def run_strategy_promotion_check(force: bool = False) -> None:
             send_strategy_promotion_detected(**d)
         except Exception as e:
             logger.error("戦略昇格通知失敗: %s", e, exc_info=True)
+
+
+def run_allocation_rebalance_job() -> None:
+    """
+    配分戦略(TQQQ 80% / 短期債 20%目安、約2年ごとリバランス)のペーパートレードを実行する。
+
+    ON/OFFフラグは設けない。自動実行させない安全装置は run_scheduler.py の
+    SCHEDULE_CONFIG 側（auto_schedule: False）にあり、実行するかどうかは
+    --run-now allocation_rebalance を叩く人間の判断に委ねる。
+    """
+    logger.info("=== 配分戦略 実行開始 ===")
+    try:
+        from src.infrastructure.yfinance_market_data_adapter import YFinanceMarketDataAdapter
+        from src.trading.allocation_strategy.service import run_allocation_rebalance
+
+        outcome = run_allocation_rebalance(YFinanceMarketDataAdapter())
+    except Exception as e:
+        logger.error("配分戦略の実行に失敗しました: %s", e, exc_info=True)
+        return
+    logger.info("=== 配分戦略 実行完了 ===")
+
+    if outcome is None:
+        return
+
+    try:
+        from src.reporting.discord.discord_utils import send_allocation_rebalance_report
+
+        send_allocation_rebalance_report(
+            action=outcome.action,
+            tqqq_price=outcome.tqqq_price,
+            shy_price=outcome.shy_price,
+            tqqq_qty_before=outcome.tqqq_qty_before,
+            shy_qty_before=outcome.shy_qty_before,
+            cash_before=outcome.cash_before,
+            tqqq_qty_after=outcome.tqqq_qty_after,
+            shy_qty_after=outcome.shy_qty_after,
+            cash_after=outcome.cash_after,
+        )
+    except Exception as e:
+        logger.error("配分戦略通知失敗: %s", e, exc_info=True)
