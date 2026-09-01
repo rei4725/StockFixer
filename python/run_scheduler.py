@@ -167,6 +167,13 @@ def job_strategy_promotion_check():
     run_strategy_promotion_check()
 
 
+def job_allocation_rebalance():
+    """配分戦略(TQQQ/短期債)ペーパートレード実行（SCHEDULE_CONFIGでauto_schedule: False、既定は手動実行のみ）"""
+    from src.orchestration.scheduler import run_allocation_rebalance_job
+
+    run_allocation_rebalance_job()
+
+
 # ── イベントリスナー ──────────────────────────────────
 def _job_listener(event):
     """ジョブ実行結果のログ出力"""
@@ -382,6 +389,21 @@ SCHEDULE_CONFIG = {
         "max_executions_per_period": 12,
         "description": "2時間ごと(毎時30分) - 戦略ファクトリー由来マージPRの昇格記録",
     },
+    "allocation_rebalance": {
+        "func": job_allocation_rebalance,
+        "trigger": "cron",
+        "period": "daily",
+        "day_of_week": "mon-sun",
+        "hour": 6,
+        "minute": 0,
+        "recovery_delay_minutes": 30,
+        "max_executions_per_period": 1,
+        "description": "毎日 06:00 - 配分戦略(TQQQ/短期債)リバランス判定",
+        # 既定では自動起動しない。--run-now allocation_rebalance による手動実行のみ許可。
+        # 自動スケジュールを有効化する（auto_schedule: True に変更する）かどうかは
+        # ユーザー自身の判断で後日行う。
+        "auto_schedule": False,
+    },
 }
 
 
@@ -557,6 +579,8 @@ def run_now(pipeline: str):
         queue_manager.run_job("nightly_strategy_factory", reason="manual", force=True)
     elif pipeline == "promotion_check":
         queue_manager.run_job("strategy_promotion_check", reason="manual", force=True)
+    elif pipeline == "allocation_rebalance":
+        queue_manager.run_job("allocation_rebalance", reason="manual", force=True)
     else:
         print(f"不明なパイプライン: {pipeline}")
         print(
@@ -598,6 +622,7 @@ def main():
             "multibagger",
             "factory",
             "promotion_check",
+            "allocation_rebalance",
         ],
         help=(
             "指定パイプラインを即時実行して終了する（テスト用）。"
