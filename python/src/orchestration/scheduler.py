@@ -23,6 +23,7 @@ from src.orchestration.jobs.daily import (
     run_pre_close_alert,
 )
 from src.orchestration.jobs.periodic import (
+    run_allocation_rebalance_job,
     run_monthly_report_job,
     run_nightly_strategy_factory,
     run_strategy_promotion_check,
@@ -78,4 +79,5 @@ __all__ = [
     "run_monthly_report_job",
     "run_nightly_strategy_factory",
     "run_strategy_promotion_check",
+    "run_allocation_rebalance_job",
 ]
