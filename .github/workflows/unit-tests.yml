@@ -30,6 +30,8 @@ jobs:
         uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: python/requirements-dev.txt
 
       - name: Install lint tools
         run: |
@@ -78,6 +80,11 @@ jobs:
         uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: |
+            python/requirements.txt
+            python/requirements-dev.txt
+            python/requirements-service.txt
 
       - name: Install dependencies
         run: |
@@ -93,4 +100,13 @@ jobs:
         run: python -m pylint src/ --rcfile=.pylintrc
 
       - name: Run unit tests with coverage gate
-        run: python -m pytest tests/unit/ -v --cov=src --cov-branch --cov-report=term-missing --cov-fail-under=80
+        # LightGBM/XGBoost を実学習させる回帰テスト(#615)は、xdist の並列ワーカー間で
+        # ネイティブ拡張の内部処理が競合し、CPUが限られたCI環境ではワーカー数を
+        # 絞っても・n_jobs=1に固定しても flaky 化することを確認したため、このファイルだけ
+        # 並列実行から除外し直列で実行する（カバレッジは --cov-append で合算）。
+        run: |
+          python -m pytest tests/unit/ -n 2 -v \
+            --ignore=tests/unit/test_predict_unified_lightgbm_alignment.py \
+            --cov=src --cov-branch --cov-report= --cov-fail-under=0
+          python -m pytest tests/unit/test_predict_unified_lightgbm_alignment.py -v \
+            --cov=src --cov-branch --cov-append --cov-report=term-missing --cov-fail-under=80

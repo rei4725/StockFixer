@@ -46,7 +46,14 @@ pre-commit run --all-files
 ### Tests
 ```bash
 # Unit tests with coverage gate (≥80% required — same as CI)
-python -m pytest tests/unit/ -v --cov=src --cov-branch --cov-report=term-missing --cov-fail-under=80
+# The LightGBM/XGBoost real-fit regression test (#615) is run separately,
+# serially: under pytest-xdist its native-extension internals contend across
+# workers and go flaky on CPU-constrained runners, even at -n 2 or n_jobs=1.
+python -m pytest tests/unit/ -n 2 -v \
+  --ignore=tests/unit/test_predict_unified_lightgbm_alignment.py \
+  --cov=src --cov-branch --cov-report= --cov-fail-under=0
+python -m pytest tests/unit/test_predict_unified_lightgbm_alignment.py -v \
+  --cov=src --cov-branch --cov-append --cov-report=term-missing --cov-fail-under=80
 
 # Integration tests (real DB/API, takes minutes)
 python -m pytest tests/integration/ -v
@@ -144,10 +151,10 @@ Brokers are injected into services; never referenced concretely from above layer
 
 各 BC 配下に配置:
 - `market_data/pipeline.py` — fetch → technical analysis → DuckDB
-- `prediction/training_pipeline.py` — train per-symbol XGBoost/LightGBM
+- `prediction/training_pipeline/` — train per-symbol XGBoost/LightGBM
 - `prediction/unified_model_pipeline.py` — train ensemble across all symbols
 - `prediction/prediction_pipeline.py` — predict + rank top10/worst10
-- `backtest/pipeline.py` — backtesting execution
+- `backtest/pipeline/` — backtesting execution
 - `orchestration/scheduler.py` — wires APScheduler daily/weekly jobs
 
 ### Storage

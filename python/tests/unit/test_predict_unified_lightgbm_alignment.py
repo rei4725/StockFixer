@@ -46,8 +46,15 @@ def _fit_legacy_lightgbm_wrapper(feature_names: list[str]):
     from src.prediction.models.lightgbm import LightGBMModel
 
     X, y = _training_frame(feature_names)
+    # n_jobs=1: pytest-xdist の並列ワーカー間でネイティブ拡張の内部スレッドプールが
+    # 競合し、CPUリソースが限られたCI環境でfit()後に本来設定されるはずの属性が
+    # 欠落することがあるため、テストの安定性のため明示的にシングルスレッド化する。
     model = LightGBMModel(
-        model_name="UnifiedStockLightGBM", n_estimators=5, min_child_samples=5, num_leaves=3
+        model_name="UnifiedStockLightGBM",
+        n_estimators=5,
+        min_child_samples=5,
+        num_leaves=3,
+        n_jobs=1,
     )
     model.train(X, y)
     # 4.5.0 未満で pickle された本番モデルの状態を再現する
@@ -59,7 +66,8 @@ def _fit_xgboost_wrapper(feature_names: list[str]):
     from src.prediction.models.xgboost import XGBoostModel
 
     X, y = _training_frame(feature_names)
-    model = XGBoostModel(model_name="UnifiedStockXGBoost", n_estimators=5, max_depth=2)
+    # n_jobs=1: LightGBM側と同じ理由（xdist並列実行時のネイティブ拡張スレッド競合対策）
+    model = XGBoostModel(model_name="UnifiedStockXGBoost", n_estimators=5, max_depth=2, n_jobs=1)
     model.train(X, y)
     return model
 
