@@ -46,7 +46,10 @@ pre-commit run --all-files
 ### Tests
 ```bash
 # Unit tests with coverage gate (≥80% required — same as CI)
-python -m pytest tests/unit/ -v --cov=src --cov-branch --cov-report=term-missing --cov-fail-under=80
+# -n 2: matches CI (ubuntu-latest, 2vCPU). Don't use -n auto on multi-core
+# machines — the LightGBM real-fit regression test (#615) gets flaky under
+# heavier worker counts due to internal resource contention.
+python -m pytest tests/unit/ -n 2 -v --cov=src --cov-branch --cov-report=term-missing --cov-fail-under=80
 
 # Integration tests (real DB/API, takes minutes)
 python -m pytest tests/integration/ -v
@@ -144,10 +147,10 @@ Brokers are injected into services; never referenced concretely from above layer
 
 各 BC 配下に配置:
 - `market_data/pipeline.py` — fetch → technical analysis → DuckDB
-- `prediction/training_pipeline.py` — train per-symbol XGBoost/LightGBM
+- `prediction/training_pipeline/` — train per-symbol XGBoost/LightGBM
 - `prediction/unified_model_pipeline.py` — train ensemble across all symbols
 - `prediction/prediction_pipeline.py` — predict + rank top10/worst10
-- `backtest/pipeline.py` — backtesting execution
+- `backtest/pipeline/` — backtesting execution
 - `orchestration/scheduler.py` — wires APScheduler daily/weekly jobs
 
 ### Storage

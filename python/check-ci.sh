@@ -50,8 +50,10 @@ docker compose exec postgres pg_isready -U stockfixer -d stockfixer || {
 export DATABASE_URL="postgresql://stockfixer:stockfixer_dev@localhost:5432/stockfixer"
 
 # 4. テスト＋カバレッジゲート（設定は pytest.ini）
+# -n 2: CI(ubuntu-latest, 2vCPU)と揃える。LightGBM実学習を伴う回帰テスト(#615)が
+# ワーカー過多だと内部リソース競合で flaky 化するため、-n auto は使わない。
 run_step "unit tests (cov ≥80%)" \
-  python -m pytest tests/unit/ -v --cov=src --cov-branch --cov-report=term-missing --cov-fail-under=80
+  python -m pytest tests/unit/ -n 2 -v --cov=src --cov-branch --cov-report=term-missing --cov-fail-under=80
 
 # 5. SAST
 if command -v bandit &>/dev/null; then

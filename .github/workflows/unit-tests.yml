@@ -30,6 +30,8 @@ jobs:
         uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: python/requirements-dev.txt
 
       - name: Install lint tools
         run: |
@@ -78,6 +80,11 @@ jobs:
         uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: |
+            python/requirements.txt
+            python/requirements-dev.txt
+            python/requirements-service.txt
 
       - name: Install dependencies
         run: |
@@ -93,4 +100,7 @@ jobs:
         run: python -m pylint src/ --rcfile=.pylintrc
 
       - name: Run unit tests with coverage gate
-        run: python -m pytest tests/unit/ -v --cov=src --cov-branch --cov-report=term-missing --cov-fail-under=80
+        # -n auto ではなく固定 2 を使う: ubuntu-latest runner は標準2vCPUで安定動作を
+        # 確認済みだが、LightGBM を実学習させる回帰テスト(#615)がワーカー過多だと
+        # 内部リソース競合で flaky 化することをローカル(多コア環境)で確認したため。
+        run: python -m pytest tests/unit/ -n 2 -v --cov=src --cov-branch --cov-report=term-missing --cov-fail-under=80
