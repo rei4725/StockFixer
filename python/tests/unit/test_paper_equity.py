@@ -8,7 +8,7 @@ from unittest.mock import patch
 import numpy as np
 import pandas as pd
 
-from src.reporting.equity_chart import build_equity_chart
+from src.reporting.equity_chart import _is_benchmark, build_equity_chart
 from src.trading.paper_equity import build_equity_series, get_paper_equity_curve
 
 _INITIAL = 1_000_000.0
@@ -140,7 +140,7 @@ class TestBuildEquityChart(unittest.TestCase):
         benchmark = pd.Series(np.linspace(5000, 5200, len(equity)), index=equity.index)
         with tempfile.TemporaryDirectory() as tmp:
             out = os.path.join(tmp, "equity.png")
-            path = build_equity_chart(equity, benchmark, out)
+            path = build_equity_chart({"Paper Trading": equity, "S&P 500": benchmark}, out)
             self.assertEqual(path, out)
             self.assertGreater(os.path.getsize(out), 1000)
 
@@ -148,12 +148,53 @@ class TestBuildEquityChart(unittest.TestCase):
         equity = self._equity()
         with tempfile.TemporaryDirectory() as tmp:
             out = os.path.join(tmp, "equity.png")
-            build_equity_chart(equity, None, out)
+            build_equity_chart({"Paper Trading": equity}, out)
             self.assertTrue(os.path.exists(out))
 
-    def test_raises_on_empty_equity(self):
+    def test_writes_png_with_three_series(self):
+        equity = self._equity()
+        allocation = self._equity() * 0.5
+        benchmark = pd.Series(np.linspace(5000, 5200, len(equity)), index=equity.index)
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "equity.png")
+            build_equity_chart(
+                {"Paper Trading": equity, "Allocation Bot": allocation, "S&P 500": benchmark},
+                out,
+            )
+            self.assertGreater(os.path.getsize(out), 1000)
+
+    def test_skips_empty_series_but_still_renders(self):
+        equity = self._equity()
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "equity.png")
+            build_equity_chart(
+                {"Paper Trading": equity, "Allocation Bot": pd.Series(dtype=float)}, out
+            )
+            self.assertTrue(os.path.exists(out))
+
+    def test_raises_on_empty_dict(self):
         with self.assertRaises(ValueError):
-            build_equity_chart(pd.Series(dtype=float), None, "unused.png")
+            build_equity_chart({}, "unused.png")
+
+    def test_raises_when_all_series_empty(self):
+        with self.assertRaises(ValueError):
+            build_equity_chart({"Paper Trading": pd.Series(dtype=float)}, "unused.png")
+
+
+class TestIsBenchmark(unittest.TestCase):
+    """_is_benchmark（開始日サフィックス付きラベルの前方一致判定）のテスト"""
+
+    def test_exact_label_matches(self):
+        self.assertTrue(_is_benchmark("S&P 500", frozenset({"S&P 500"})))
+
+    def test_label_with_start_date_suffix_matches(self):
+        self.assertTrue(_is_benchmark("S&P 500 (since 2026-01-05)", frozenset({"S&P 500"})))
+
+    def test_unrelated_label_does_not_match(self):
+        self.assertFalse(_is_benchmark("Allocation Bot (since 2026-01-05)", frozenset({"S&P 500"})))
+
+    def test_accidental_prefix_does_not_match(self):
+        self.assertFalse(_is_benchmark("S&P 500X", frozenset({"S&P 500"})))
 
 
 if __name__ == "__main__":

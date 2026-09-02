@@ -7,8 +7,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 import matplotlib
 import pandas as pd
 
@@ -20,48 +18,72 @@ from src.utils.logger import get_logger  # noqa: E402
 logger = get_logger(__name__)
 
 
+_DEFAULT_BENCHMARK_LABELS = frozenset({"S&P 500"})
+
+
+def _is_benchmark(label: str, benchmark_labels: frozenset[str]) -> bool:
+    """ラベルがベンチマーク系列かどうかを判定する。
+
+    呼び出し元が系列ラベルに "(since YYYY-MM-DD)" のような開始日サフィックスを
+    付与することがあるため、完全一致に加えて "<ラベル> " で始まる場合も一致とみなす。
+    """
+    return any(label == b or label.startswith(f"{b} ") for b in benchmark_labels)
+
+
 def build_equity_chart(
-    equity: pd.Series,
-    benchmark: Optional[pd.Series],
+    series: dict[str, pd.Series],
     out_path: str,
-    title: str = "Paper Trading Equity vs S&P 500",
+    title: str = "Paper Trading Equity Comparison",
+    benchmark_labels: frozenset[str] = _DEFAULT_BENCHMARK_LABELS,
 ) -> str:
-    """エクイティ vs ベンチマークの正規化チャートを PNG 保存してパスを返す。
+    """複数のエクイティ系列を正規化して重ね描きした PNG を保存しパスを返す。
+
+    各系列は自身の先頭値を 100 として個別に正規化する（絶対額でなく相対推移で比較）。
+    benchmark_labels に含まれるラベルの系列は点線で描画する。
 
     Args:
-        equity: 日次評価額 Series（DatetimeIndex）
-        benchmark: ベンチマーク終値 Series（None ならエクイティのみ描画）
+        series: {ラベル: 日次評価額 Series（DatetimeIndex）}
         out_path: 保存先 PNG パス
         title: チャートタイトル
+        benchmark_labels: 点線で描くラベルの集合
 
     Raises:
-        ValueError: equity が空、または正規化基準が取れない場合
+        ValueError: series が空、または有効な（空でも0基準でもない）系列が1つも無い場合
     """
-    if equity is None or equity.empty:
-        raise ValueError("エクイティ系列が空です")
-
-    equity = equity.dropna()
-    base = equity.iloc[0]
-    if base == 0:
-        raise ValueError("エクイティ初期値が 0 のため正規化できません")
-    equity_norm = equity / base * 100.0
+    if not series:
+        raise ValueError("系列が空です")
 
     fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(equity_norm.index, equity_norm.values, label="Paper Trading", linewidth=2)
+    plotted = 0
 
-    if benchmark is not None and not benchmark.dropna().empty:
-        bench = benchmark.dropna()
-        bench.index = pd.to_datetime(bench.index).tz_localize(None)
-        bench = bench.reindex(equity_norm.index).ffill().bfill()
-        if not bench.dropna().empty and bench.iloc[0] != 0:
-            bench_norm = bench / bench.iloc[0] * 100.0
-            ax.plot(
-                bench_norm.index,
-                bench_norm.values,
-                label="S&P 500",
-                linewidth=1.5,
-                linestyle="--",
-            )
+    for label, values in series.items():
+        if values is None:
+            continue
+        cleaned = values.dropna()
+        if cleaned.empty:
+            logger.info("エクイティ系列が空のため描画から除外: %s", label)
+            continue
+        base = cleaned.iloc[0]
+        if base == 0:
+            logger.warning("エクイティ初期値が 0 のため描画から除外: %s", label)
+            continue
+        cleaned.index = pd.to_datetime(cleaned.index).tz_localize(None)
+        normalized = cleaned / base * 100.0
+        is_benchmark = _is_benchmark(label, benchmark_labels)
+        linestyle = "--" if is_benchmark else "-"
+        linewidth = 1.5 if is_benchmark else 2.0
+        ax.plot(
+            normalized.index,
+            normalized.values,
+            label=label,
+            linewidth=linewidth,
+            linestyle=linestyle,
+        )
+        plotted += 1
+
+    if plotted == 0:
+        plt.close(fig)
+        raise ValueError("描画可能な系列がありません")
 
     ax.set_title(title)
     ax.set_ylabel("Normalized (start = 100)")

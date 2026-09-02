@@ -5,9 +5,44 @@
 
 from typing import Optional
 
+import pandas as pd
+
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+_MIN_EQUITY_POINTS = 5
+
+
+def _label_with_start_date(label: str, series: pd.Series) -> str:
+    """系列自身の開始日をラベルに付与する（運用開始日が系列ごとに異なるため）。"""
+    start = series.dropna().index[0].strftime("%Y-%m-%d")
+    return f"{label} (since {start})"
+
+
+def _build_monthly_equity_series(
+    paper_equity: pd.Series,
+    allocation_equity: pd.Series,
+    benchmark: Optional[pd.Series],
+) -> dict[str, pd.Series]:
+    """月次損益曲線チャート用の系列 dict を組み立てる。
+
+    各系列は運用開始日が異なるため、正規化は開始来推移として扱い、ラベルに
+    開始日を明記して読者が誤って絶対水準を比較しないようにする。
+    データ点数が少ない系列（運用開始直後）はノイズとして除外する。
+
+    前提: paper_equity は呼び出し元（run_monthly_report_job）で
+    len(equity.dropna()) >= _MIN_EQUITY_POINTS を確認済みであること。
+    """
+    series: dict[str, pd.Series] = {
+        _label_with_start_date("Paper Trading", paper_equity): paper_equity
+    }
+    if allocation_equity is not None and len(allocation_equity.dropna()) >= _MIN_EQUITY_POINTS:
+        series[_label_with_start_date("Allocation Bot", allocation_equity)] = allocation_equity
+    if benchmark is not None and len(benchmark.dropna()) >= _MIN_EQUITY_POINTS:
+        series[_label_with_start_date("S&P 500", benchmark)] = benchmark
+    return series
 
 
 def run_monthly_report_job() -> None:
@@ -51,13 +86,16 @@ def run_monthly_report_job() -> None:
     except Exception as e:
         logger.error("月次レポート通知失敗: %s", e, exc_info=True)
 
-    # 損益曲線 vs S&P500 チャートを生成して送信（NON_CRITICAL: 失敗しても月次レポートは成立）
+    # 損益曲線比較チャート（Paper Trading / 配分戦略Bot / S&P500）を生成して送信
+    # NON_CRITICAL: 失敗しても月次レポートは成立
     try:
         import os
 
+        from src.infrastructure.yfinance_market_data_adapter import YFinanceMarketDataAdapter
         from src.market_data.backtest_adapter import BacktestMarketDataAdapter
         from src.reporting.discord.discord_utils import send_webhook_file
         from src.reporting.equity_chart import build_equity_chart
+        from src.trading.allocation_strategy.equity import get_allocation_equity_curve
         from src.trading.paper_equity import get_paper_equity_curve
         from src.utils.data_path_utils import get_results_dir
 
@@ -75,13 +113,22 @@ def run_monthly_report_job() -> None:
             except Exception as e:
                 logger.warning("S&P500 取得失敗（エクイティのみ描画）: %s", e)
 
+            try:
+                allocation_equity = get_allocation_equity_curve(
+                    YFinanceMarketDataAdapter(), days=180
+                )
+            except Exception as e:
+                logger.warning("配分戦略エクイティ取得失敗（Paper/S&P500のみ描画）: %s", e)
+                allocation_equity = pd.Series(dtype=float)
+
             chart_dir = os.path.join(get_results_dir(), "monthly")
             os.makedirs(chart_dir, exist_ok=True)
             chart_path = os.path.join(chart_dir, f"{summary.target_month}_equity.png")
-            build_equity_chart(equity, benchmark, chart_path)
-            send_webhook_file(
-                chart_path, title="📈 ペーパートレード損益曲線 vs S&P500（直近180日）"
+            series = _build_monthly_equity_series(equity, allocation_equity, benchmark)
+            build_equity_chart(
+                series, chart_path, title="Paper Trading vs Allocation Bot vs S&P 500"
             )
+            send_webhook_file(chart_path, title="📈 ペーパートレード損益曲線比較（直近180日）")
             logger.info("損益曲線チャート送信完了: %s", chart_path)
     except Exception as e:
         logger.error("損益曲線チャート生成失敗: %s", e, exc_info=True)

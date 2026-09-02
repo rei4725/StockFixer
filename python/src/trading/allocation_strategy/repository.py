@@ -37,6 +37,34 @@ def get_latest_snapshot() -> Optional[AllocationSnapshot]:
     )
 
 
+def list_snapshots() -> list[AllocationSnapshot]:
+    """全スナップショットを実行日時の昇順で返す。1行も無ければ空リスト。"""
+    with _db_connection() as con:
+        rows = con.execute("""
+            SELECT id, executed_at, action, tqqq_price, shy_price,
+                   tqqq_qty_before, shy_qty_before, cash_before,
+                   tqqq_qty_after, shy_qty_after, cash_after
+            FROM allocation_rebalance_log
+            ORDER BY id ASC
+            """).fetchall()
+    return [
+        AllocationSnapshot(
+            id=row[0],
+            executed_at=row[1],
+            action=row[2],
+            tqqq_price=row[3],
+            shy_price=row[4],
+            tqqq_qty_before=row[5],
+            shy_qty_before=row[6],
+            cash_before=row[7],
+            tqqq_qty_after=row[8],
+            shy_qty_after=row[9],
+            cash_after=row[10],
+        )
+        for row in rows
+    ]
+
+
 def insert_snapshot(
     action: str,
     tqqq_price: float,
