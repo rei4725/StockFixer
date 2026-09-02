@@ -118,7 +118,7 @@ def _block_real_yfinance_calls(monkeypatch):
 
 
 @pytest.fixture(scope="session")
-def _test_database_ready():
+def _test_database_ready(tmp_path_factory, worker_id):
     """テストセッション開始時に1回だけ、テスト用Postgresへマイグレーションを適用する。
 
     DATABASE_URL 未設定時は get_database_url() の既定値（docker-compose.yml の
@@ -126,14 +126,35 @@ def _test_database_ready():
     （5432番ポート）とは別ポート・別ボリュームで完全に分離されているため、
     同じホストで本番Postgresが稼働中でもテストが誤って到達することはない。
     CIでは services:postgres（ジョブごとに使い捨ての専用インスタンス）を指す。
+
+    pytest-xdist 使用時、session スコープのフィクスチャは「プロセス全体で1回」ではなく
+    「ワーカーごとに1回」実行される。複数ワーカーが同時に同じ未初期化DBへ
+    `CREATE TABLE IF NOT EXISTS` を実行すると、PostgreSQL のシステムカタログ挿入が
+    競合し `UniqueViolation: duplicate key value ... pg_type_typname_nsp_index` で
+    失敗する。pytest-xdist 公式推奨の FileLock パターンで、最初の1ワーカーだけが
+    実際にマイグレーションを実行し、残りは完了を待ってスキップするようにする。
     """
     from src.utils.db._connection import _get_pool
+    from src.utils.db.migration_runner import run_migrations
 
-    with _get_pool().connection() as con:
-        from src.utils.db.migration_runner import run_migrations
+    def _apply():
+        with _get_pool().connection() as con:
+            run_migrations(con)
 
-        run_migrations(con)
-    yield
+    if worker_id == "master":
+        # xdist 未使用（通常の pytest 実行）: 競合相手がいないためそのまま実行
+        _apply()
+        return
+
+    from filelock import FileLock
+
+    root_tmp_dir = tmp_path_factory.getbasetemp().parent
+    lock_path = root_tmp_dir / "db_migration.lock"
+    done_path = root_tmp_dir / "db_migration.done"
+    with FileLock(str(lock_path)):
+        if not done_path.is_file():
+            _apply()
+            done_path.write_text("done")
 
 
 @pytest.fixture(scope="session")
