@@ -46,10 +46,14 @@ pre-commit run --all-files
 ### Tests
 ```bash
 # Unit tests with coverage gate (≥80% required — same as CI)
-# -n 2: matches CI (ubuntu-latest, 2vCPU). Don't use -n auto on multi-core
-# machines — the LightGBM real-fit regression test (#615) gets flaky under
-# heavier worker counts due to internal resource contention.
-python -m pytest tests/unit/ -n 2 -v --cov=src --cov-branch --cov-report=term-missing --cov-fail-under=80
+# The LightGBM/XGBoost real-fit regression test (#615) is run separately,
+# serially: under pytest-xdist its native-extension internals contend across
+# workers and go flaky on CPU-constrained runners, even at -n 2 or n_jobs=1.
+python -m pytest tests/unit/ -n 2 -v \
+  --ignore=tests/unit/test_predict_unified_lightgbm_alignment.py \
+  --cov=src --cov-branch --cov-report= --cov-fail-under=0
+python -m pytest tests/unit/test_predict_unified_lightgbm_alignment.py -v \
+  --cov=src --cov-branch --cov-append --cov-report=term-missing --cov-fail-under=80
 
 # Integration tests (real DB/API, takes minutes)
 python -m pytest tests/integration/ -v

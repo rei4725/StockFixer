@@ -50,10 +50,18 @@ docker compose exec postgres pg_isready -U stockfixer -d stockfixer || {
 export DATABASE_URL="postgresql://stockfixer:stockfixer_dev@localhost:5432/stockfixer"
 
 # 4. テスト＋カバレッジゲート（設定は pytest.ini）
-# -n 2: CI(ubuntu-latest, 2vCPU)と揃える。LightGBM実学習を伴う回帰テスト(#615)が
-# ワーカー過多だと内部リソース競合で flaky 化するため、-n auto は使わない。
-run_step "unit tests (cov ≥80%)" \
-  python -m pytest tests/unit/ -n 2 -v --cov=src --cov-branch --cov-report=term-missing --cov-fail-under=80
+# LightGBM/XGBoost を実学習させる回帰テスト(#615)は、xdist の並列ワーカー間で
+# ネイティブ拡張の内部処理が競合し、CPUが限られた環境ではワーカー数を絞っても・
+# n_jobs=1に固定しても flaky 化することを確認したため、このファイルだけ並列実行から
+# 除外し直列で実行する（カバレッジは --cov-append で合算）。
+run_unit_tests() {
+  python -m pytest tests/unit/ -n 2 -v \
+    --ignore=tests/unit/test_predict_unified_lightgbm_alignment.py \
+    --cov=src --cov-branch --cov-report= --cov-fail-under=0 \
+  && python -m pytest tests/unit/test_predict_unified_lightgbm_alignment.py -v \
+    --cov=src --cov-branch --cov-append --cov-report=term-missing --cov-fail-under=80
+}
+run_step "unit tests (cov ≥80%)" run_unit_tests
 
 # 5. SAST
 if command -v bandit &>/dev/null; then
