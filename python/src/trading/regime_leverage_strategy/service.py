@@ -164,3 +164,69 @@ def decide_weekly_exit(
         equity_now_jpy=exit_equity,
         maintenance_ratio=None,
     )
+
+
+def decide_daily_check(
+    snapshot: RegimeLeverageSnapshot,
+    day_low_usd: float,
+    usdjpy_rate: float,
+    now: datetime,
+) -> RegimeLeverageDecision:
+    """保有中の日次判定: マージンコール→初期損切りの優先順位で当日安値ベースに判定する
+    (バックテストのrun_levered_regimeと同じ優先順位)。
+    """
+    day_low_jpy = day_low_usd * usdjpy_rate
+    equity_at_low = compute_equity_now(snapshot, day_low_jpy, now)
+    value_at_low = day_low_jpy * snapshot.shares
+    maintenance_ratio = equity_at_low / value_at_low if value_at_low > 0 else 0.0
+
+    if value_at_low > 0 and maintenance_ratio < REGIME_LEVERAGE_MARGIN_MAINTENANCE:
+        exit_price_jpy = day_low_jpy * (1 - REGIME_LEVERAGE_SLIPPAGE_PCT)
+        exit_equity = compute_equity_now(snapshot, exit_price_jpy, now)
+        return RegimeLeverageDecision(
+            action="exit",
+            reason="margin_call",
+            spy_price_usd=day_low_usd,
+            usdjpy_rate=usdjpy_rate,
+            shares=0.0,
+            entry_date=None,
+            entry_price_jpy=None,
+            entry_commission_jpy=None,
+            equity_at_entry_jpy=None,
+            stop_price_jpy=None,
+            equity_now_jpy=exit_equity,
+            maintenance_ratio=maintenance_ratio,
+        )
+
+    if snapshot.stop_price_jpy is not None and day_low_jpy <= snapshot.stop_price_jpy:
+        exit_price_jpy = snapshot.stop_price_jpy * (1 - REGIME_LEVERAGE_SLIPPAGE_PCT)
+        exit_equity = compute_equity_now(snapshot, exit_price_jpy, now)
+        return RegimeLeverageDecision(
+            action="exit",
+            reason="initial_stop",
+            spy_price_usd=day_low_usd,
+            usdjpy_rate=usdjpy_rate,
+            shares=0.0,
+            entry_date=None,
+            entry_price_jpy=None,
+            entry_commission_jpy=None,
+            equity_at_entry_jpy=None,
+            stop_price_jpy=None,
+            equity_now_jpy=exit_equity,
+            maintenance_ratio=maintenance_ratio,
+        )
+
+    return RegimeLeverageDecision(
+        action="noop",
+        reason="daily_noop",
+        spy_price_usd=day_low_usd,
+        usdjpy_rate=usdjpy_rate,
+        shares=snapshot.shares,
+        entry_date=snapshot.entry_date,
+        entry_price_jpy=snapshot.entry_price_jpy,
+        entry_commission_jpy=snapshot.entry_commission_jpy,
+        equity_at_entry_jpy=snapshot.equity_at_entry_jpy,
+        stop_price_jpy=snapshot.stop_price_jpy,
+        equity_now_jpy=equity_at_low,
+        maintenance_ratio=maintenance_ratio,
+    )

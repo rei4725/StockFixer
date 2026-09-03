@@ -147,5 +147,77 @@ class TestComputeEquityNow(unittest.TestCase):
         self.assertAlmostEqual(equity, snap.equity_at_entry_jpy + expected_unrealized, places=2)
 
 
+class TestDecideDailyCheck(unittest.TestCase):
+    def test_noop_when_above_stop_and_maintenance(self):
+        from src.trading.regime_leverage_strategy.service import decide_daily_check
+
+        snap = _holding_snapshot()
+        decision = decide_daily_check(
+            snap, day_low_usd=510.0, usdjpy_rate=146.0, now=datetime(2026, 1, 5)
+        )
+        self.assertEqual(decision.action, "noop")
+        self.assertEqual(decision.reason, "daily_noop")
+        self.assertEqual(decision.shares, snap.shares)
+        self.assertIsNotNone(decision.maintenance_ratio)
+        # 手計算した期待値を直接検証する(維持率が閾値0.20を大きく上回ることを確認するため)
+        # day_low_jpy = 510.0 * 146.0 = 74,460.0
+        # unrealized_pnl = (74,460.0 - 72,500.0) * 27 = 52,920.0
+        # days_held = (2026-01-05 - 2026-01-02).days = 3
+        # interest_accrued = 72,500.0 * 27 * 0.030 / 365 * 3 = 482.8767...
+        # equity_at_low = 1,000,000.0 + 52,920.0 - 482.8767... - 0.0 = 1,052,437.3288
+        # value_at_low = 74,460.0 * 27 = 2,010,420.0
+        # maintenance_ratio = 1,052,437.3288 / 2,010,420.0 = 0.523491...
+        self.assertAlmostEqual(decision.equity_now_jpy, 1052437.3288, places=2)
+        self.assertAlmostEqual(decision.maintenance_ratio, 0.5234912748, places=6)
+
+    def test_initial_stop_triggers_exit(self):
+        from src.trading.regime_leverage_strategy.service import decide_daily_check
+
+        snap = _holding_snapshot(stop_price_jpy=70000.0)
+        # day_low_usdを円換算するとstop_price_jpy(70000)を下回る値にする
+        decision = decide_daily_check(
+            snap, day_low_usd=470.0, usdjpy_rate=145.0, now=datetime(2026, 1, 5)
+        )
+        self.assertEqual(decision.action, "exit")
+        self.assertEqual(decision.reason, "initial_stop")
+        self.assertEqual(decision.shares, 0.0)
+        # 維持率は0.20を上回っており(margin_callではない)、initial_stopの優先順位が
+        # 正しく2番目に判定されたことを確認する
+        # day_low_jpy = 470.0 * 145.0 = 68,150.0
+        # maintenance_ratio(day_low基準) = 882,067.3288 / 1,840,050.0 = 0.479371...
+        self.assertAlmostEqual(decision.maintenance_ratio, 0.4793713914, places=6)
+        self.assertGreater(decision.maintenance_ratio, 0.20)
+        # exit_price_jpy = stop_price_jpy(70,000.0) * (1 - 0.001) = 69,930.0 (損切りのスリッページ)
+        # unrealized_pnl = (69,930.0 - 72,500.0) * 27 = -69,390.0
+        # interest_accrued = 482.8767...(上と同じ, days_held=3)
+        # equity = 1,000,000.0 - 69,390.0 - 482.8767... - 0.0 = 930,127.3288
+        self.assertAlmostEqual(decision.equity_now_jpy, 930127.3288, places=2)
+
+    def test_margin_call_triggers_exit_before_stop_check(self):
+        from src.trading.regime_leverage_strategy.service import decide_daily_check
+
+        # レバレッジ2倍で建てた直後に急落し、維持率が0.20を割るケース
+        snap = _holding_snapshot(
+            shares=4000.0,
+            entry_price_jpy=72500.0,
+            equity_at_entry_jpy=1_000_000.0,
+            entry_commission_jpy=0.0,
+            stop_price_jpy=1000.0,  # stopには触れない値(day_low_jpy=29,000.0 > 1,000.0)
+        )
+        decision = decide_daily_check(
+            snap, day_low_usd=200.0, usdjpy_rate=145.0, now=datetime(2026, 1, 5)
+        )
+        self.assertEqual(decision.action, "exit")
+        self.assertEqual(decision.reason, "margin_call")
+        # 維持率がマイナスまで急落しており、0.20の閾値を明確に下回ることを確認する
+        # (initial_stopではなくmargin_callが優先されたことの裏付け)
+        # day_low_jpy = 200.0 * 145.0 = 29,000.0
+        # value_at_low = 29,000.0 * 4,000 = 116,000,000.0
+        # equity_at_low = 1,000,000.0 + (29,000.0-72,500.0)*4,000 - interest = -173,071,506.8493...
+        # maintenance_ratio = -173,071,506.8493... / 116,000,000.0 = -1.491996...
+        self.assertAlmostEqual(decision.maintenance_ratio, -1.491995749, places=6)
+        self.assertLess(decision.maintenance_ratio, 0.20)
+
+
 if __name__ == "__main__":
     unittest.main()
