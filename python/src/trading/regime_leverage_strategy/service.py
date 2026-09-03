@@ -79,6 +79,34 @@ def _cash_preserved_noop(
     )
 
 
+def _closed_position_decision(
+    reason: str,
+    spy_price_usd: float,
+    usdjpy_rate: float,
+    equity_now_jpy: float,
+    maintenance_ratio: Optional[float] = None,
+) -> RegimeLeverageDecision:
+    """ポジション解消(exit)時の共通レスポンス生成(建玉関連フィールドは全てNone/0にリセットする)。
+
+    regime_flip(週次)・margin_call/initial_stop(日次)の3箇所で同一の
+    フィールド構成が必要になるため共通化する。
+    """
+    return RegimeLeverageDecision(
+        action="exit",
+        reason=reason,
+        spy_price_usd=spy_price_usd,
+        usdjpy_rate=usdjpy_rate,
+        shares=0.0,
+        entry_date=None,
+        entry_price_jpy=None,
+        entry_commission_jpy=None,
+        equity_at_entry_jpy=None,
+        stop_price_jpy=None,
+        equity_now_jpy=equity_now_jpy,
+        maintenance_ratio=maintenance_ratio,
+    )
+
+
 def decide_weekly_entry(
     cash_jpy: float,
     week_close_usd: float,
@@ -150,19 +178,11 @@ def decide_weekly_exit(
 
     exit_price_jpy = current_price_jpy * (1 - REGIME_LEVERAGE_SLIPPAGE_PCT)
     exit_equity = compute_equity_now(snapshot, exit_price_jpy, now)
-    return RegimeLeverageDecision(
-        action="exit",
+    return _closed_position_decision(
         reason="regime_flip",
         spy_price_usd=week_close_usd,
         usdjpy_rate=usdjpy_rate,
-        shares=0.0,
-        entry_date=None,
-        entry_price_jpy=None,
-        entry_commission_jpy=None,
-        equity_at_entry_jpy=None,
-        stop_price_jpy=None,
         equity_now_jpy=exit_equity,
-        maintenance_ratio=None,
     )
 
 
@@ -183,17 +203,10 @@ def decide_daily_check(
     if value_at_low > 0 and maintenance_ratio < REGIME_LEVERAGE_MARGIN_MAINTENANCE:
         exit_price_jpy = day_low_jpy * (1 - REGIME_LEVERAGE_SLIPPAGE_PCT)
         exit_equity = compute_equity_now(snapshot, exit_price_jpy, now)
-        return RegimeLeverageDecision(
-            action="exit",
+        return _closed_position_decision(
             reason="margin_call",
             spy_price_usd=day_low_usd,
             usdjpy_rate=usdjpy_rate,
-            shares=0.0,
-            entry_date=None,
-            entry_price_jpy=None,
-            entry_commission_jpy=None,
-            equity_at_entry_jpy=None,
-            stop_price_jpy=None,
             equity_now_jpy=exit_equity,
             maintenance_ratio=maintenance_ratio,
         )
@@ -201,17 +214,10 @@ def decide_daily_check(
     if snapshot.stop_price_jpy is not None and day_low_jpy <= snapshot.stop_price_jpy:
         exit_price_jpy = snapshot.stop_price_jpy * (1 - REGIME_LEVERAGE_SLIPPAGE_PCT)
         exit_equity = compute_equity_now(snapshot, exit_price_jpy, now)
-        return RegimeLeverageDecision(
-            action="exit",
+        return _closed_position_decision(
             reason="initial_stop",
             spy_price_usd=day_low_usd,
             usdjpy_rate=usdjpy_rate,
-            shares=0.0,
-            entry_date=None,
-            entry_price_jpy=None,
-            entry_commission_jpy=None,
-            equity_at_entry_jpy=None,
-            stop_price_jpy=None,
             equity_now_jpy=exit_equity,
             maintenance_ratio=maintenance_ratio,
         )

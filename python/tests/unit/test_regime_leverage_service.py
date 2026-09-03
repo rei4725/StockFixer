@@ -163,8 +163,8 @@ class TestDecideDailyCheck(unittest.TestCase):
         # day_low_jpy = 510.0 * 146.0 = 74,460.0
         # unrealized_pnl = (74,460.0 - 72,500.0) * 27 = 52,920.0
         # days_held = (2026-01-05 - 2026-01-02).days = 3
-        # interest_accrued = 72,500.0 * 27 * 0.030 / 365 * 3 = 482.8767...
-        # equity_at_low = 1,000,000.0 + 52,920.0 - 482.8767... - 0.0 = 1,052,437.3288
+        # interest_accrued = 72,500.0 * 27 * 0.030 / 365 * 3 = 482.6712...
+        # equity_at_low = 1,000,000.0 + 52,920.0 - 482.6712... - 0.0 = 1,052,437.3288
         # value_at_low = 74,460.0 * 27 = 2,010,420.0
         # maintenance_ratio = 1,052,437.3288 / 2,010,420.0 = 0.523491...
         self.assertAlmostEqual(decision.equity_now_jpy, 1052437.3288, places=2)
@@ -189,8 +189,8 @@ class TestDecideDailyCheck(unittest.TestCase):
         self.assertGreater(decision.maintenance_ratio, 0.20)
         # exit_price_jpy = stop_price_jpy(70,000.0) * (1 - 0.001) = 69,930.0 (損切りのスリッページ)
         # unrealized_pnl = (69,930.0 - 72,500.0) * 27 = -69,390.0
-        # interest_accrued = 482.8767...(上と同じ, days_held=3)
-        # equity = 1,000,000.0 - 69,390.0 - 482.8767... - 0.0 = 930,127.3288
+        # interest_accrued = 482.6712...(上と同じ, days_held=3)
+        # equity = 1,000,000.0 - 69,390.0 - 482.6712... - 0.0 = 930,127.3288
         self.assertAlmostEqual(decision.equity_now_jpy, 930127.3288, places=2)
 
     def test_margin_call_triggers_exit_before_stop_check(self):
@@ -217,6 +217,42 @@ class TestDecideDailyCheck(unittest.TestCase):
         # maintenance_ratio = -173,071,506.8493... / 116,000,000.0 = -1.491996...
         self.assertAlmostEqual(decision.maintenance_ratio, -1.491995749, places=6)
         self.assertLess(decision.maintenance_ratio, 0.20)
+
+    def test_margin_call_wins_over_stop_when_both_conditions_true(self):
+        """両方の条件が同時に真になるフィクスチャで、margin_callが優先されることを検証する。
+
+        test_margin_call_triggers_exit_before_stop_check は stop_price_jpy=1000.0 と
+        いう、初期損切り条件(day_low_jpy <= stop_price_jpy)がそもそも真にならない値を
+        使っているため、判定順序が逆転(初期損切りを先にチェック)しても検知できない。
+        このテストでは stop_price_jpy=50000.0 とし、day_low_jpy(29,000.0) <= 50,000.0 も
+        真にする。両条件が真の状態でも margin_call が返ること、かつ exit 価格が
+        day_low_jpy(margin_call側)を使っており stop_price_jpy(initial_stop側)を
+        使っていないことを equity_now_jpy の厳密値で確認する。
+        """
+        from src.trading.regime_leverage_strategy.service import decide_daily_check
+
+        snap = _holding_snapshot(
+            shares=4000.0,
+            entry_price_jpy=72500.0,
+            equity_at_entry_jpy=1_000_000.0,
+            entry_commission_jpy=0.0,
+            stop_price_jpy=50000.0,  # day_low_jpy(29,000.0) <= 50,000.0 も真になる値
+        )
+        decision = decide_daily_check(
+            snap, day_low_usd=200.0, usdjpy_rate=145.0, now=datetime(2026, 1, 5)
+        )
+        self.assertEqual(decision.action, "exit")
+        self.assertEqual(decision.reason, "margin_call")
+        self.assertLess(decision.maintenance_ratio, 0.20)
+        # day_low_jpy = 200.0 * 145.0 = 29,000.0 (<= stop_price_jpy=50,000.0 も真だが、
+        # margin_callが先にreturnするためinitial_stop分岐へは到達しないはず)
+        # exit_price_jpy(margin_call) = 29,000.0 * (1 - 0.001) = 28,971.0
+        # equity = 1,000,000.0 + (28,971.0-72,500.0)*4,000 - interest - 0.0 = -173,187,506.8493
+        # もしinitial_stopが誤って先に判定されると
+        # exit_price_jpy = 50,000.0*(1-0.001) = 49,950.0 となり
+        # equity = -89,271,506.8493 という全く異なる値になるため、
+        # この厳密値アサーションは優先順位バグを確実に検知できる
+        self.assertAlmostEqual(decision.equity_now_jpy, -173187506.8493, places=1)
 
 
 if __name__ == "__main__":
