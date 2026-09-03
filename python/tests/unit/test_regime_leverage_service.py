@@ -282,6 +282,118 @@ class TestRunRegimeLeverageWeeklyCheck(unittest.TestCase):
         decision = run_regime_leverage_weekly_check(mock_port)
 
         self.assertEqual(decision.action, "entry")
+        # 初回実行(snapshot=None)では自己資金としてREGIME_LEVERAGE_INITIAL_CAPITAL_JPY
+        # (1,000,000)が使われるべき。誤った資金源(例: 0円やハードコードされた別の値)が
+        # 使われていても検知できるよう、equity_at_entry_jpyを厳密に検証する。
+        self.assertEqual(decision.equity_at_entry_jpy, 1_000_000.0)
+        mock_insert.assert_called_once()
+
+    @patch("src.trading.regime_leverage_strategy.service.insert_snapshot")
+    @patch("src.trading.regime_leverage_strategy.service.get_latest_snapshot")
+    def test_reuses_previous_equity_now_after_closed_position(self, mock_latest, mock_insert):
+        """2回目以降(直前のポジションが決済済み: shares=0)は、直前snapshotの
+        equity_now_jpyを新規エントリーの自己資金として使うべき
+        (REGIME_LEVERAGE_INITIAL_CAPITAL_JPYに戻ってはいけない)。
+        """
+        from src.trading.regime_leverage_strategy.service import run_regime_leverage_weekly_check
+
+        mock_latest.return_value = _holding_snapshot(shares=0.0, equity_now_jpy=1_200_000.0)
+        mock_port = MagicMock()
+        idx = pd.bdate_range("2025-01-01", periods=260)
+        prices = pd.Series(np.linspace(400.0, 500.0, 260), index=idx)
+        df = pd.DataFrame(
+            {
+                "Open": prices,
+                "High": prices + 2,
+                "Low": prices - 2,
+                "Close": prices,
+                "Volume": 1_000_000,
+            },
+            index=idx,
+        )
+        mock_port.get_stock_data.return_value = df
+        fx_df = pd.DataFrame({"Close": [145.0]}, index=[idx[-1]])
+        mock_port.get_forex_data.return_value = fx_df
+
+        decision = run_regime_leverage_weekly_check(mock_port)
+
+        self.assertEqual(decision.action, "entry")
+        self.assertEqual(decision.equity_at_entry_jpy, 1_200_000.0)
+        mock_insert.assert_called_once()
+
+    @patch("src.trading.regime_leverage_strategy.service.insert_snapshot")
+    @patch("src.trading.regime_leverage_strategy.service.get_latest_snapshot")
+    def test_holding_and_regime_still_up_calls_decide_weekly_exit_as_noop(
+        self, mock_latest, mock_insert
+    ):
+        """保有中(shares>0)の分岐ではdecide_weekly_exitが呼ばれるべき。
+        レジームが上昇継続の週足を与え、noopで既存ポジションが維持されることを検証する。
+        """
+        from src.trading.regime_leverage_strategy.service import run_regime_leverage_weekly_check
+
+        snap = _holding_snapshot()
+        mock_latest.return_value = snap
+        mock_port = MagicMock()
+        # 200日線を大きく上回る右肩上がりの価格系列(レジーム上昇継続)
+        idx = pd.bdate_range("2025-01-01", periods=260)
+        prices = pd.Series(np.linspace(400.0, 600.0, 260), index=idx)
+        df = pd.DataFrame(
+            {
+                "Open": prices,
+                "High": prices + 2,
+                "Low": prices - 2,
+                "Close": prices,
+                "Volume": 1_000_000,
+            },
+            index=idx,
+        )
+        mock_port.get_stock_data.return_value = df
+        fx_df = pd.DataFrame({"Close": [146.0]}, index=[idx[-1]])
+        mock_port.get_forex_data.return_value = fx_df
+
+        decision = run_regime_leverage_weekly_check(mock_port)
+
+        self.assertEqual(decision.action, "noop")
+        self.assertEqual(decision.reason, "weekly_noop")
+        self.assertEqual(decision.shares, snap.shares)
+        mock_insert.assert_called_once()
+
+    @patch("src.trading.regime_leverage_strategy.service.insert_snapshot")
+    @patch("src.trading.regime_leverage_strategy.service.get_latest_snapshot")
+    def test_holding_and_regime_down_calls_decide_weekly_exit_as_exit(
+        self, mock_latest, mock_insert
+    ):
+        """保有中(shares>0)でレジームが下降転換した週足を与えると、decide_weekly_exit
+        経由でexitが返ることを検証する(holding分岐がdecide_weekly_exitを正しく
+        呼んでいることの裏付け)。
+        """
+        from src.trading.regime_leverage_strategy.service import run_regime_leverage_weekly_check
+
+        snap = _holding_snapshot()
+        mock_latest.return_value = snap
+        mock_port = MagicMock()
+        # 200日線を大きく下回る右肩下がりの価格系列(レジーム下降転換)
+        idx = pd.bdate_range("2025-01-01", periods=260)
+        prices = pd.Series(np.linspace(600.0, 400.0, 260), index=idx)
+        df = pd.DataFrame(
+            {
+                "Open": prices,
+                "High": prices + 2,
+                "Low": prices - 2,
+                "Close": prices,
+                "Volume": 1_000_000,
+            },
+            index=idx,
+        )
+        mock_port.get_stock_data.return_value = df
+        fx_df = pd.DataFrame({"Close": [146.0]}, index=[idx[-1]])
+        mock_port.get_forex_data.return_value = fx_df
+
+        decision = run_regime_leverage_weekly_check(mock_port)
+
+        self.assertEqual(decision.action, "exit")
+        self.assertEqual(decision.reason, "regime_flip")
+        self.assertEqual(decision.shares, 0.0)
         mock_insert.assert_called_once()
 
 
