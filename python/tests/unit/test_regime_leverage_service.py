@@ -255,5 +255,49 @@ class TestDecideDailyCheck(unittest.TestCase):
         self.assertAlmostEqual(decision.equity_now_jpy, -173187506.8493, places=1)
 
 
+class TestRunRegimeLeverageWeeklyCheck(unittest.TestCase):
+    @patch("src.trading.regime_leverage_strategy.service.insert_snapshot")
+    @patch("src.trading.regime_leverage_strategy.service.get_latest_snapshot")
+    def test_first_run_uses_initial_capital_and_enters_on_uptrend(self, mock_latest, mock_insert):
+        from src.trading.regime_leverage_strategy.service import run_regime_leverage_weekly_check
+
+        mock_latest.return_value = None
+        mock_port = MagicMock()
+        idx = pd.bdate_range("2025-01-01", periods=260)
+        prices = pd.Series(np.linspace(400.0, 500.0, 260), index=idx)
+        df = pd.DataFrame(
+            {
+                "Open": prices,
+                "High": prices + 2,
+                "Low": prices - 2,
+                "Close": prices,
+                "Volume": 1_000_000,
+            },
+            index=idx,
+        )
+        mock_port.get_stock_data.return_value = df
+        fx_df = pd.DataFrame({"Close": [145.0]}, index=[idx[-1]])
+        mock_port.get_forex_data.return_value = fx_df
+
+        decision = run_regime_leverage_weekly_check(mock_port)
+
+        self.assertEqual(decision.action, "entry")
+        mock_insert.assert_called_once()
+
+
+class TestRunRegimeLeverageDailyMarginCheck(unittest.TestCase):
+    @patch("src.trading.regime_leverage_strategy.service.get_latest_snapshot")
+    def test_returns_none_when_not_holding(self, mock_latest):
+        from src.trading.regime_leverage_strategy.service import (
+            run_regime_leverage_daily_margin_check,
+        )
+
+        mock_latest.return_value = None
+        mock_port = MagicMock()
+        result = run_regime_leverage_daily_margin_check(mock_port)
+        self.assertIsNone(result)
+        mock_port.get_stock_data.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

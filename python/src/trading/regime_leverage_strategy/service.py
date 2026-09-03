@@ -7,16 +7,21 @@ STRATEGY.md 7章の週次(レジーム転換・新規エントリー)・日次(�
 
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Optional  # noqa: F401  # Task 5/6の型ヒントで使用予定
+from datetime import datetime, timedelta
+from typing import Optional
 
-from config.settings import (  # noqa: F401  # Task 5のマージンコール判定で使用予定
+import pandas as pd
+
+from config.settings import (
     REGIME_LEVERAGE_INITIAL_STOP_ATR_MULT,
     REGIME_LEVERAGE_INTEREST_ANNUAL,
     REGIME_LEVERAGE_MARGIN_MAINTENANCE,
     REGIME_LEVERAGE_RATIO,
     REGIME_LEVERAGE_SLIPPAGE_PCT,
 )
+from src.domain.ports import MarketDataPort
+from src.trading.regime_leverage_strategy.indicators import build_weekly_frame
+from src.trading.regime_leverage_strategy.repository import get_latest_snapshot, insert_snapshot
 from src.trading.regime_leverage_strategy.types import (
     RegimeLeverageDecision,
     RegimeLeverageSnapshot,
@@ -236,3 +241,73 @@ def decide_daily_check(
         equity_now_jpy=equity_at_low,
         maintenance_ratio=maintenance_ratio,
     )
+
+
+def _load_spy_daily(market_data_port: MarketDataPort, symbol: str) -> pd.DataFrame:
+    end = datetime.now()
+    start = end - timedelta(days=400)  # 200日線を計算するため十分な余裕を持って取得
+    df = market_data_port.get_stock_data(
+        symbol, "us", start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
+    )
+    return build_weekly_frame(df)
+
+
+def _load_latest_usdjpy(market_data_port: MarketDataPort) -> float:
+    end = datetime.now()
+    start = end - timedelta(days=10)
+    fx_df = market_data_port.get_forex_data(
+        "JPY=X", start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
+    )
+    return float(fx_df["Close"].iloc[-1])
+
+
+def run_regime_leverage_weekly_check(market_data_port: MarketDataPort) -> RegimeLeverageDecision:
+    """週次ジョブ本体: レジーム転換の判定、または未保有時の新規エントリー判定を行い、
+    結果をDBに記録して返す。
+    """
+    from config.settings import REGIME_LEVERAGE_SYMBOL
+
+    df = _load_spy_daily(market_data_port, REGIME_LEVERAGE_SYMBOL)
+    usdjpy_rate = _load_latest_usdjpy(market_data_port)
+    latest_row = df.iloc[-1]
+    week_close_usd = float(latest_row["Close"])
+    ma200_usd = float(latest_row["MA200"])
+    atr14_usd = float(latest_row["ATR14"])
+    now = datetime.now()
+
+    snapshot = get_latest_snapshot()
+
+    if snapshot is None or snapshot.shares <= 0:
+        from config.settings import REGIME_LEVERAGE_INITIAL_CAPITAL_JPY
+
+        cash_jpy = (
+            snapshot.equity_now_jpy if snapshot is not None else REGIME_LEVERAGE_INITIAL_CAPITAL_JPY
+        )
+        decision = decide_weekly_entry(
+            cash_jpy, week_close_usd, ma200_usd, atr14_usd, usdjpy_rate, now
+        )
+    else:
+        decision = decide_weekly_exit(snapshot, week_close_usd, ma200_usd, usdjpy_rate, now)
+
+    insert_snapshot(decision)
+    return decision
+
+
+def run_regime_leverage_daily_margin_check(
+    market_data_port: MarketDataPort,
+) -> Optional[RegimeLeverageDecision]:
+    """日次ジョブ本体: 保有中の場合のみ、初期損切り・マージンコールを判定する。"""
+    from config.settings import REGIME_LEVERAGE_SYMBOL
+
+    snapshot = get_latest_snapshot()
+    if snapshot is None or snapshot.shares <= 0:
+        return None
+
+    df = _load_spy_daily(market_data_port, REGIME_LEVERAGE_SYMBOL)
+    usdjpy_rate = _load_latest_usdjpy(market_data_port)
+    day_low_usd = float(df.iloc[-1]["Low"])
+    now = datetime.now()
+
+    decision = decide_daily_check(snapshot, day_low_usd, usdjpy_rate, now)
+    insert_snapshot(decision)
+    return decision
