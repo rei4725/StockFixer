@@ -73,6 +73,13 @@ class TestDecideWeeklyEntry(unittest.TestCase):
         self.assertIsNotNone(decision.entry_price_jpy)
         self.assertIsNotNone(decision.stop_price_jpy)
         self.assertLess(decision.stop_price_jpy, decision.entry_price_jpy)
+        # 手計算した期待値を直接検証する(floor divisionのオフバイワンやスリッページ符号反転を検知するため)
+        # shares = floor(((1,000,000/145.0)*2.0) / 500.5) = floor(27.5648...) = 27
+        # entry_price_jpy = 500.5 * 145.0 = 72,572.5
+        # stop_price_jpy = (500.0 - 3.0*5.0) * 145.0 = 485.0 * 145.0 = 70,325.0
+        self.assertEqual(decision.shares, 27)
+        self.assertAlmostEqual(decision.entry_price_jpy, 72572.5, places=2)
+        self.assertAlmostEqual(decision.stop_price_jpy, 70325.0, places=2)
 
 
 class TestDecideWeeklyExit(unittest.TestCase):
@@ -100,6 +107,26 @@ class TestDecideWeeklyExit(unittest.TestCase):
         self.assertEqual(decision.action, "exit")
         self.assertEqual(decision.reason, "regime_flip")
         self.assertEqual(decision.shares, 0.0)
+        # exit時のequity_now_jpyをcompute_equity_nowと同じ計算式で手計算し検証する
+        # current_price_jpy = 470.0 * 146.0 = 68,620.0
+        # exit_price_jpy = 68,620.0 * (1 - 0.001) = 68,551.38 (売却スリッページ)
+        # unrealized_pnl = (68,551.38 - 72,500.0) * 27 = -106,612.74
+        # days_held = (2026-01-16 - 2026-01-02).days = 14
+        # interest_accrued = 72,500.0 * 27 * 0.030 / 365 * 14 = 2,252.4657...
+        # equity = 1,000,000.0 - 106,612.74 - 2,252.4657... - 0.0 = 891,134.79
+        current_price_jpy = 470.0 * 146.0
+        exit_price_jpy = current_price_jpy * (1 - 0.001)
+        expected_unrealized = (exit_price_jpy - snap.entry_price_jpy) * snap.shares
+        days_held = (datetime(2026, 1, 16).date() - snap.entry_date.date()).days
+        expected_interest = snap.entry_price_jpy * snap.shares * 0.030 / 365 * days_held
+        expected_equity = (
+            snap.equity_at_entry_jpy
+            + expected_unrealized
+            - expected_interest
+            - snap.entry_commission_jpy
+        )
+        self.assertAlmostEqual(decision.equity_now_jpy, expected_equity, places=2)
+        self.assertAlmostEqual(decision.equity_now_jpy, 891134.79, places=2)
 
 
 class TestComputeEquityNow(unittest.TestCase):
