@@ -1,10 +1,9 @@
 name: Performance Benchmark
 
 on:
-  pull_request:
-    paths:
-      - "python/**"
-      - ".github/workflows/perf-benchmark.yml"
+  # develop へのマージ後にのみ実行する。PR時に実行しないのは、性能劣化は
+  # 循環依存等と違って「本番でしばらく動いても致命的ではない」性質のため、
+  # PRのCI待ち時間短縮を優先する判断（unit/integration/e2e はPRブロッキングを維持）。
   push:
     branches:
       - develop
@@ -15,9 +14,6 @@ on:
 jobs:
   benchmark:
     runs-on: ubuntu-latest
-    permissions:
-      issues: write
-      pull-requests: write
     defaults:
       run:
         working-directory: python
@@ -90,29 +86,26 @@ jobs:
 
       - name: Check for performance regression
         id: regression-check
-        if: github.event_name == 'pull_request'
         shell: bash
         run: |
           python tests/perf/check_regression.py
           echo "REGRESSION_FOUND=false" >> "$GITHUB_ENV"
         continue-on-error: true
 
-      - name: Post regression warning comment on PR
-        if: github.event_name == 'pull_request' && steps.regression-check.outcome == 'failure'
-        uses: actions/github-script@v9
-        with:
-          script: |
-            const fs = require('fs');
-            const warnFile = 'python/regression_warning.txt';
-            const body = fs.existsSync(warnFile)
-              ? fs.readFileSync(warnFile, 'utf8')
-              : '## ⚠️ パフォーマンスリグレッション検出\n\n前回比 20% 以上遅くなったベンチマークがあります。調査してください。';
-            await github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body,
-            });
+      - name: Append regression warning to Step Summary
+        if: steps.regression-check.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f regression_warning.txt ]; then
+            cat regression_warning.txt >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "## ⚠️ パフォーマンスリグレッション検出"
+              echo ""
+              echo "前回比 20% 以上遅くなったベンチマークがあります。調査してください。"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Save benchmark results to cache
         if: always()

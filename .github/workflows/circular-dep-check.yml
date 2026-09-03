@@ -1,10 +1,9 @@
 name: Circular Dependency Check
 
 on:
-  pull_request:
-    paths:
-      - "python/src/**"
-      - ".github/workflows/circular-dep-check.yml"
+  # develop へのマージ後にのみ実行する。PR時に実行しないのは、循環依存の混入は
+  # 数分〜数時間本番で気づかれなくても致命的ではない性質のため、PRのCI待ち時間
+  # 短縮を優先する判断（unit/integration/e2e はPRブロッキングを維持）。
   push:
     branches:
       - develop
