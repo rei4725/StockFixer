@@ -410,6 +410,152 @@ class TestRunRegimeLeverageDailyMarginCheck(unittest.TestCase):
         self.assertIsNone(result)
         mock_port.get_stock_data.assert_not_called()
 
+    @patch("src.trading.regime_leverage_strategy.service.insert_snapshot")
+    @patch("src.trading.regime_leverage_strategy.service.get_latest_snapshot")
+    def test_holding_and_above_stop_and_maintenance_calls_decide_daily_check_as_noop(
+        self, mock_latest, mock_insert
+    ):
+        """保有中(shares>0)で当日安値がstop_price_jpyにも維持率にも抵触しない場合、
+        decide_daily_checkがnoopを返し、その結果がinsert_snapshotへ渡されることを検証する
+        (これまでholding分岐は未保有の早期returnしかテストされていなかった)。
+        """
+        from src.trading.regime_leverage_strategy.service import (
+            run_regime_leverage_daily_margin_check,
+        )
+
+        snap = _holding_snapshot()  # stop_price_jpy=65000.0, shares=27.0
+        mock_latest.return_value = snap
+        mock_port = MagicMock()
+        idx = pd.bdate_range("2025-01-01", periods=260)
+        prices = pd.Series(np.linspace(400.0, 500.0, 260), index=idx)
+        # 最終行(当日安値)を510.0ドルにする: day_low_jpy = 510.0*146.0 = 74,460.0
+        # (stop_price_jpy=65,000.0を大きく上回り、維持率も0.20を大きく上回るため
+        # margin_call/initial_stopいずれにも抵触しない = noopとなるはず)
+        lows = prices - 2
+        lows.iloc[-1] = 510.0
+        df = pd.DataFrame(
+            {
+                "Open": prices,
+                "High": prices + 2,
+                "Low": lows,
+                "Close": prices,
+                "Volume": 1_000_000,
+            },
+            index=idx,
+        )
+        mock_port.get_stock_data.return_value = df
+        fx_df = pd.DataFrame({"Close": [146.0]}, index=[idx[-1]])
+        mock_port.get_forex_data.return_value = fx_df
+
+        decision = run_regime_leverage_daily_margin_check(mock_port)
+
+        self.assertIsNotNone(decision)
+        self.assertEqual(decision.action, "noop")
+        self.assertEqual(decision.reason, "daily_noop")
+        self.assertEqual(decision.shares, snap.shares)
+        self.assertIsNotNone(decision.maintenance_ratio)
+        self.assertGreater(decision.maintenance_ratio, 0.20)
+        mock_insert.assert_called_once_with(decision)
+
+    @patch("src.trading.regime_leverage_strategy.service.insert_snapshot")
+    @patch("src.trading.regime_leverage_strategy.service.get_latest_snapshot")
+    def test_returns_none_and_skips_insert_when_day_low_is_nan(self, mock_latest, mock_insert):
+        """当日安値(Low)がNaN(データ劣化時)の場合、判定を行わずNoneを返し、DBにも
+        書き込まないこと(NaN比較は常にFalseになり誤ってnoop/exitと判定してしまうため)。
+        """
+        from src.trading.regime_leverage_strategy.service import (
+            run_regime_leverage_daily_margin_check,
+        )
+
+        mock_latest.return_value = _holding_snapshot()
+        mock_port = MagicMock()
+        idx = pd.bdate_range("2025-01-01", periods=260)
+        prices = pd.Series(np.linspace(400.0, 500.0, 260), index=idx)
+        df = pd.DataFrame(
+            {
+                "Open": prices,
+                "High": prices + 2,
+                "Low": prices - 2,
+                "Close": prices,
+                "Volume": 1_000_000,
+            },
+            index=idx,
+        )
+        df.loc[df.index[-1], "Low"] = np.nan
+        mock_port.get_stock_data.return_value = df
+        fx_df = pd.DataFrame({"Close": [145.0]}, index=[idx[-1]])
+        mock_port.get_forex_data.return_value = fx_df
+
+        result = run_regime_leverage_daily_margin_check(mock_port)
+
+        self.assertIsNone(result)
+        mock_insert.assert_not_called()
+
+
+class TestRegimeLeverageNaNGuard(unittest.TestCase):
+    """Finding 2: MA200/ATR14がNaNの場合、判定を行わずDBにも書き込まないこと。"""
+
+    @patch("src.trading.regime_leverage_strategy.service.insert_snapshot")
+    @patch("src.trading.regime_leverage_strategy.service.get_latest_snapshot")
+    def test_weekly_check_returns_none_when_ma200_is_nan(self, mock_latest, mock_insert):
+        from src.trading.regime_leverage_strategy.service import run_regime_leverage_weekly_check
+
+        mock_latest.return_value = None
+        mock_port = MagicMock()
+        # 200日線が計算できるだけの行数(200)に満たないデータ(150行)を与え、
+        # 最終行のMA200がNaNになるようにする。
+        idx = pd.bdate_range("2025-01-01", periods=150)
+        prices = pd.Series(np.linspace(400.0, 500.0, 150), index=idx)
+        df = pd.DataFrame(
+            {
+                "Open": prices,
+                "High": prices + 2,
+                "Low": prices - 2,
+                "Close": prices,
+                "Volume": 1_000_000,
+            },
+            index=idx,
+        )
+        mock_port.get_stock_data.return_value = df
+        fx_df = pd.DataFrame({"Close": [145.0]}, index=[idx[-1]])
+        mock_port.get_forex_data.return_value = fx_df
+
+        decision = run_regime_leverage_weekly_check(mock_port)
+
+        self.assertIsNone(decision)
+        mock_insert.assert_not_called()
+
+    @patch("src.trading.regime_leverage_strategy.service.insert_snapshot")
+    @patch("src.trading.regime_leverage_strategy.service.get_latest_snapshot")
+    def test_weekly_check_holding_returns_none_when_ma200_is_nan_and_does_not_liquidate(
+        self, mock_latest, mock_insert
+    ):
+        """保有中にMA200がNaNになった場合でも、誤って regime_flip 決済してはならない。"""
+        from src.trading.regime_leverage_strategy.service import run_regime_leverage_weekly_check
+
+        mock_latest.return_value = _holding_snapshot()
+        mock_port = MagicMock()
+        idx = pd.bdate_range("2025-01-01", periods=150)
+        prices = pd.Series(np.linspace(400.0, 500.0, 150), index=idx)
+        df = pd.DataFrame(
+            {
+                "Open": prices,
+                "High": prices + 2,
+                "Low": prices - 2,
+                "Close": prices,
+                "Volume": 1_000_000,
+            },
+            index=idx,
+        )
+        mock_port.get_stock_data.return_value = df
+        fx_df = pd.DataFrame({"Close": [145.0]}, index=[idx[-1]])
+        mock_port.get_forex_data.return_value = fx_df
+
+        decision = run_regime_leverage_weekly_check(mock_port)
+
+        self.assertIsNone(decision)
+        mock_insert.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

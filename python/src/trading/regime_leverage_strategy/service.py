@@ -26,6 +26,9 @@ from src.trading.regime_leverage_strategy.types import (
     RegimeLeverageDecision,
     RegimeLeverageSnapshot,
 )
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 # 米国株信用の手数料(trading-strategy/backtest.pyのCOMMISSION_PCT["USD"]と同じ値)
 _COMMISSION_PCT_USD = 0.0033
@@ -261,9 +264,15 @@ def _load_latest_usdjpy(market_data_port: MarketDataPort) -> float:
     return float(fx_df["Close"].iloc[-1])
 
 
-def run_regime_leverage_weekly_check(market_data_port: MarketDataPort) -> RegimeLeverageDecision:
+def run_regime_leverage_weekly_check(
+    market_data_port: MarketDataPort,
+) -> Optional[RegimeLeverageDecision]:
     """週次ジョブ本体: レジーム転換の判定、または未保有時の新規エントリー判定を行い、
     結果をDBに記録して返す。
+
+    MA200/ATR14がNaN(取得データが200/14日分に満たない等、データ劣化時)の場合は
+    判定を行わずNoneを返す(NaN比較は常にFalseになるため、誤って「レジーム下降」と
+    解釈して保有ポジションを強制決済してしまうことを防ぐ)。
     """
     from config.settings import REGIME_LEVERAGE_SYMBOL
 
@@ -273,6 +282,14 @@ def run_regime_leverage_weekly_check(market_data_port: MarketDataPort) -> Regime
     week_close_usd = float(latest_row["Close"])
     ma200_usd = float(latest_row["MA200"])
     atr14_usd = float(latest_row["ATR14"])
+    if pd.isna(ma200_usd) or pd.isna(atr14_usd):
+        logger.warning(
+            "レジームレバレッジ戦略(週次): MA200またはATR14がNaNのため判定を中止します"
+            "(ma200_usd=%s, atr14_usd=%s)",
+            ma200_usd,
+            atr14_usd,
+        )
+        return None
     now = datetime.now()
 
     snapshot = get_latest_snapshot()
@@ -296,7 +313,10 @@ def run_regime_leverage_weekly_check(market_data_port: MarketDataPort) -> Regime
 def run_regime_leverage_daily_margin_check(
     market_data_port: MarketDataPort,
 ) -> Optional[RegimeLeverageDecision]:
-    """日次ジョブ本体: 保有中の場合のみ、初期損切り・マージンコールを判定する。"""
+    """日次ジョブ本体: 保有中の場合のみ、初期損切り・マージンコールを判定する。
+
+    当日安値(Low)がNaN(データ劣化時)の場合は判定を行わずNoneを返す。
+    """
     from config.settings import REGIME_LEVERAGE_SYMBOL
 
     snapshot = get_latest_snapshot()
@@ -306,6 +326,9 @@ def run_regime_leverage_daily_margin_check(
     df = _load_spy_daily(market_data_port, REGIME_LEVERAGE_SYMBOL)
     usdjpy_rate = _load_latest_usdjpy(market_data_port)
     day_low_usd = float(df.iloc[-1]["Low"])
+    if pd.isna(day_low_usd):
+        logger.warning("レジームレバレッジ戦略(日次): 当日安値(Low)がNaNのため判定を中止します")
+        return None
     now = datetime.now()
 
     decision = decide_daily_check(snapshot, day_low_usd, usdjpy_rate, now)

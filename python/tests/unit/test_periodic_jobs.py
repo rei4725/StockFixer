@@ -78,6 +78,21 @@ class TestRunRegimeLeverageWeeklyJob(unittest.TestCase):
 
     @patch("src.trading.regime_leverage_strategy.service.run_regime_leverage_weekly_check")
     @patch("src.infrastructure.yfinance_market_data_adapter.YFinanceMarketDataAdapter")
+    def test_does_not_log_decision_when_none(self, mock_adapter_cls, mock_run):
+        """MA200/ATR14がNaNの場合など、serviceがNoneを返した際はaction=...のログを
+        出さず(decision.actionへのアクセスでAttributeErrorにならず)正常終了すること。
+        """
+        from src.orchestration.jobs.periodic import run_regime_leverage_weekly_job
+
+        mock_run.return_value = None
+
+        with self.assertLogs("src.orchestration.jobs.periodic", level="INFO") as logs:
+            run_regime_leverage_weekly_job()
+
+        self.assertFalse(any("action=" in message for message in logs.output))
+
+    @patch("src.trading.regime_leverage_strategy.service.run_regime_leverage_weekly_check")
+    @patch("src.infrastructure.yfinance_market_data_adapter.YFinanceMarketDataAdapter")
     def test_does_not_raise_on_failure(self, mock_adapter_cls, mock_run):
         from src.orchestration.jobs.periodic import run_regime_leverage_weekly_job
 
@@ -145,6 +160,23 @@ class TestRunRegimeLeverageDailyMarginJob(unittest.TestCase):
         run_regime_leverage_daily_margin_job()  # 例外を吸収してログのみ出すこと
 
         mock_run.assert_called_once()
+
+
+class TestRegimeLeverageScheduleConfig(unittest.TestCase):
+    """未建玉のためデフォルト無効(auto_schedule: False)であることを検証する
+    (allocation_rebalanceと同じ安全ロールアウト手順。手動 --run-now で初回エントリーを
+    確認してから True に切り替える運用のため、切り替え忘れ・意図しない有効化を検知する)。
+    """
+
+    def test_daily_margin_not_auto_scheduled(self):
+        from run_scheduler import SCHEDULE_CONFIG
+
+        self.assertIs(SCHEDULE_CONFIG["regime_leverage_daily_margin"]["auto_schedule"], False)
+
+    def test_weekly_not_auto_scheduled(self):
+        from run_scheduler import SCHEDULE_CONFIG
+
+        self.assertIs(SCHEDULE_CONFIG["regime_leverage_weekly"]["auto_schedule"], False)
 
 
 if __name__ == "__main__":

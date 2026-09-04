@@ -175,14 +175,14 @@ def job_allocation_rebalance():
 
 
 def job_regime_leverage_weekly():
-    """レジームレバレッジ戦略(SPY・レバレッジ2.0倍)の週次判定（毎週金曜06:30）"""
+    """レジームレバレッジ戦略(SPY・レバレッジ2.0倍)の週次判定（毎週土曜06:30）"""
     from src.orchestration.scheduler import run_regime_leverage_weekly_job
 
     run_regime_leverage_weekly_job()
 
 
 def job_regime_leverage_daily_margin():
-    """レジームレバレッジ戦略の日次マージンコールチェック（毎日06:15）"""
+    """レジームレバレッジ戦略の日次マージンコールチェック（毎日07:30）"""
     from src.orchestration.scheduler import run_regime_leverage_daily_margin_job
 
     run_regime_leverage_daily_margin_job()
@@ -422,10 +422,10 @@ SCHEDULE_CONFIG = {
         "trigger": "cron",
         "period": "daily",
         "day_of_week": "mon-fri",
-        "hour": 6,
-        "minute": 15,
+        "hour": 7,
+        "minute": 30,
         "recovery_delay_minutes": 30,
-        "description": "毎日06:15 - レジームレバレッジ戦略(SPY)の日次マージンコールチェック",
+        "description": "毎日07:30 - レジームレバレッジ戦略(SPY)の日次マージンコールチェック",
         # 未建玉のためデフォルト無効。ユーザーが --run-now regime_leverage_weekly で
         # 初回エントリーを実行し、運用開始を確認してから auto_schedule: True に切り替える
         # （allocation_rebalance と同じ安全ロールアウト手順）。
@@ -435,11 +435,11 @@ SCHEDULE_CONFIG = {
         "func": job_regime_leverage_weekly,
         "trigger": "cron",
         "period": "weekly",
-        "day_of_week": "fri",
+        "day_of_week": "sat",
         "hour": 6,
         "minute": 30,
         "recovery_delay_minutes": 30,
-        "description": "毎週金曜06:30 - レジームレバレッジ戦略(SPY)のレジーム転換・新規エントリー判定",
+        "description": "毎週土曜06:30 - レジームレバレッジ戦略(SPY)のレジーム転換・新規エントリー判定",
         # 未建玉のためデフォルト無効。ユーザーが --run-now regime_leverage_weekly で
         # 初回エントリーを実行し、運用開始を確認してから auto_schedule: True に切り替える
         # （allocation_rebalance と同じ安全ロールアウト手順）。
