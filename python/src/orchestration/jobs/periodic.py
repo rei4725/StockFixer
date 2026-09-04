@@ -338,3 +338,49 @@ def run_allocation_rebalance_job() -> None:
         )
     except Exception as e:
         logger.error("配分戦略通知失敗: %s", e, exc_info=True)
+
+
+def run_regime_leverage_weekly_job() -> None:
+    """
+    レジームレバレッジ戦略(STRATEGY.md 7章、SPY・レバレッジ2.0倍・円建て)の
+    週次判定(レジーム転換・新規エントリー)を実行する。
+    """
+    logger.info("=== レジームレバレッジ戦略(週次) 実行開始 ===")
+    try:
+        from src.infrastructure.yfinance_market_data_adapter import YFinanceMarketDataAdapter
+        from src.trading.regime_leverage_strategy.service import run_regime_leverage_weekly_check
+
+        decision = run_regime_leverage_weekly_check(YFinanceMarketDataAdapter())
+        logger.info(
+            "レジームレバレッジ戦略(週次): action=%s reason=%s", decision.action, decision.reason
+        )
+    except Exception as e:
+        logger.error("レジームレバレッジ戦略(週次)の実行に失敗しました: %s", e, exc_info=True)
+        return
+    logger.info("=== レジームレバレッジ戦略(週次) 実行完了 ===")
+
+
+def run_regime_leverage_daily_margin_job() -> None:
+    """
+    レジームレバレッジ戦略の日次判定(初期損切り・マージンコール)を実行する。
+    未保有の場合は何もしない。
+    """
+    logger.info("=== レジームレバレッジ戦略(日次) 実行開始 ===")
+    try:
+        from src.infrastructure.yfinance_market_data_adapter import YFinanceMarketDataAdapter
+        from src.trading.regime_leverage_strategy.service import (
+            run_regime_leverage_daily_margin_check,
+        )
+
+        decision = run_regime_leverage_daily_margin_check(YFinanceMarketDataAdapter())
+        if decision is not None:
+            logger.info(
+                "レジームレバレッジ戦略(日次): action=%s reason=%s maintenance_ratio=%s",
+                decision.action,
+                decision.reason,
+                decision.maintenance_ratio,
+            )
+    except Exception as e:
+        logger.error("レジームレバレッジ戦略(日次)の実行に失敗しました: %s", e, exc_info=True)
+        return
+    logger.info("=== レジームレバレッジ戦略(日次) 実行完了 ===")

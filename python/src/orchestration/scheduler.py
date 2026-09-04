@@ -26,6 +26,8 @@ from src.orchestration.jobs.periodic import (
     run_allocation_rebalance_job,
     run_monthly_report_job,
     run_nightly_strategy_factory,
+    run_regime_leverage_daily_margin_job,
+    run_regime_leverage_weekly_job,
     run_strategy_promotion_check,
 )
 from src.orchestration.jobs.weekly import (
@@ -80,4 +82,6 @@ __all__ = [
     "run_nightly_strategy_factory",
     "run_strategy_promotion_check",
     "run_allocation_rebalance_job",
+    "run_regime_leverage_daily_margin_job",
+    "run_regime_leverage_weekly_job",
 ]
