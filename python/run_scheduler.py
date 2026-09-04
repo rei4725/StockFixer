@@ -426,6 +426,10 @@ SCHEDULE_CONFIG = {
         "minute": 15,
         "recovery_delay_minutes": 30,
         "description": "毎日06:15 - レジームレバレッジ戦略(SPY)の日次マージンコールチェック",
+        # 未建玉のためデフォルト無効。ユーザーが --run-now regime_leverage_weekly で
+        # 初回エントリーを実行し、運用開始を確認してから auto_schedule: True に切り替える
+        # （allocation_rebalance と同じ安全ロールアウト手順）。
+        "auto_schedule": False,
     },
     "regime_leverage_weekly": {
         "func": job_regime_leverage_weekly,
@@ -436,6 +440,10 @@ SCHEDULE_CONFIG = {
         "minute": 30,
         "recovery_delay_minutes": 30,
         "description": "毎週金曜06:30 - レジームレバレッジ戦略(SPY)のレジーム転換・新規エントリー判定",
+        # 未建玉のためデフォルト無効。ユーザーが --run-now regime_leverage_weekly で
+        # 初回エントリーを実行し、運用開始を確認してから auto_schedule: True に切り替える
+        # （allocation_rebalance と同じ安全ロールアウト手順）。
+        "auto_schedule": False,
     },
 }
 
