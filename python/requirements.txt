@@ -23,7 +23,7 @@ duckdb==1.5.5
 psycopg[binary,pool]>=3.3.4
 apscheduler==3.11.3
 streamlit>=1.62.0
-plotly>=6.9.0
+plotly>=7.0.0
 filelock>=3.32.4
 optuna>=4.9.0
 pydantic-settings>=2.15.0
