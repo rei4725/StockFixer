@@ -174,6 +174,20 @@ def job_allocation_rebalance():
     run_allocation_rebalance_job()
 
 
+def job_regime_leverage_weekly():
+    """レジームレバレッジ戦略(SPY・レバレッジ2.0倍)の週次判定（毎週土曜06:30）"""
+    from src.orchestration.scheduler import run_regime_leverage_weekly_job
+
+    run_regime_leverage_weekly_job()
+
+
+def job_regime_leverage_daily_margin():
+    """レジームレバレッジ戦略の日次マージンコールチェック（毎日07:30）"""
+    from src.orchestration.scheduler import run_regime_leverage_daily_margin_job
+
+    run_regime_leverage_daily_margin_job()
+
+
 # ── イベントリスナー ──────────────────────────────────
 def _job_listener(event):
     """ジョブ実行結果のログ出力"""
@@ -403,6 +417,34 @@ SCHEDULE_CONFIG = {
         # チェックする（未到来なら service.py 側の判定で即座にno-op）。
         "auto_schedule": True,
     },
+    "regime_leverage_daily_margin": {
+        "func": job_regime_leverage_daily_margin,
+        "trigger": "cron",
+        "period": "daily",
+        "day_of_week": "mon-fri",
+        "hour": 7,
+        "minute": 30,
+        "recovery_delay_minutes": 30,
+        "description": "毎日07:30 - レジームレバレッジ戦略(SPY)の日次マージンコールチェック",
+        # 未建玉のためデフォルト無効。ユーザーが --run-now regime_leverage_weekly で
+        # 初回エントリーを実行し、運用開始を確認してから auto_schedule: True に切り替える
+        # （allocation_rebalance と同じ安全ロールアウト手順）。
+        "auto_schedule": False,
+    },
+    "regime_leverage_weekly": {
+        "func": job_regime_leverage_weekly,
+        "trigger": "cron",
+        "period": "weekly",
+        "day_of_week": "sat",
+        "hour": 6,
+        "minute": 30,
+        "recovery_delay_minutes": 30,
+        "description": "毎週土曜06:30 - レジームレバレッジ戦略(SPY)のレジーム転換・新規エントリー判定",
+        # 未建玉のためデフォルト無効。ユーザーが --run-now regime_leverage_weekly で
+        # 初回エントリーを実行し、運用開始を確認してから auto_schedule: True に切り替える
+        # （allocation_rebalance と同じ安全ロールアウト手順）。
+        "auto_schedule": False,
+    },
 }
 
 
@@ -580,6 +622,10 @@ def run_now(pipeline: str):
         queue_manager.run_job("strategy_promotion_check", reason="manual", force=True)
     elif pipeline == "allocation_rebalance":
         queue_manager.run_job("allocation_rebalance", reason="manual", force=True)
+    elif pipeline == "regime_leverage_daily_margin":
+        queue_manager.run_job("regime_leverage_daily_margin", reason="manual", force=True)
+    elif pipeline == "regime_leverage_weekly":
+        queue_manager.run_job("regime_leverage_weekly", reason="manual", force=True)
     else:
         print(f"不明なパイプライン: {pipeline}")
         print(
@@ -622,6 +668,8 @@ def main():
             "factory",
             "promotion_check",
             "allocation_rebalance",
+            "regime_leverage_daily_margin",
+            "regime_leverage_weekly",
         ],
         help=(
             "指定パイプラインを即時実行して終了する（テスト用）。"
