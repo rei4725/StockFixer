@@ -139,6 +139,38 @@ mcp_gitkraken_git_worktree(
 )
 ```
 
+### 8. GitHub CLI操作（Issue作成・PR作成・マージ）
+GitKraken MCP はローカルGit操作が中心で、Issue作成やPRマージのオプション指定は `gh` CLI を直接使う方が速い。
+
+#### Issue作成
+```bash
+gh issue create --title "バグ: ○○が動作しない" --body "## 再現手順\n1. ○○を実行\n2. ○○が発生"
+gh issue create --title "機能要望: ○○" --label "enhancement"
+gh issue create --title "タスク: ○○" --assignee "@me"
+```
+
+#### PR作成
+```bash
+# 本文テンプレートは docs/VERSIONING_POLICY.md セクション3からコピー
+gh pr create --title "feat: <概要>" --body "$(cat <<'EOF'
+（テンプレートをここに貼る）
+EOF
+)"
+gh pr create --draft   # ドラフトPRとして作成
+```
+
+#### PRマージ
+```bash
+gh pr merge                  # 現在のブランチのPRをインタラクティブにマージ
+gh pr merge 123              # PR番号指定
+gh pr merge --merge          # 通常マージ（個別コミット保持）— 本リポジトリの標準
+gh pr merge --rebase         # リベースマージ
+gh pr merge --delete-branch  # マージ後にローカルブランチ削除
+gh pr merge --auto --squash  # CI通過後の自動マージ
+```
+
+> **注意（本リポジトリの方針）**: PRマージは `--squash` ではなく通常マージ（個別コミット保持）を使うこと。過去に誤って `--squash` でマージし、コミット履歴が失われたため revert + 再マージで対応した実例がある。
+
 ## Common Workflows
 
 ### 作業開始前の必須手順（スキップ禁止）
@@ -188,43 +220,10 @@ mcp_gitkraken_git_pull(directory="c:\\src\\StockFixer")
 
 ### PR作成前のボディ検証チェック（必須）
 
-PR を作成・更新する前に、以下のセクションが **すべて** 含まれていることを確認すること。
+PR を作成・更新する前に、必須セクション（`## version_impact` / `## version_rationale` / `## VERSION 更新` / `## VERSION 未更新理由`）が全て揃っているか確認すること。
 不足があると `PR Body Validation` CI が失敗する。
 
-| セクション見出し | 必須条件 |
-|---|---|
-| `## version_impact` | `major` / `minor` / `patch` / `none` のいずれか1語 |
-| `## version_rationale` | 空・プレースホルダー不可。変更根拠を1文以上記述 |
-| `## VERSION 更新` | `version_update_required: yes` または `version_update_required: no` を含む |
-| `## VERSION 未更新理由` | **常に見出しが必要**（`version_update_required: yes` の場合は「該当なし」等で可） |
-
-**`version_update_required` と `version_impact` の対応ルール:**
-
-| version_impact | version_update_required | VERSION 未更新理由 |
-|---|---|---|
-| major / minor / patch | `yes` 必須 | 見出しのみ（「該当なし」等でOK） |
-| none | `no` 必須 | 未更新理由を必ず記述 |
-
-**PR ボディテンプレート（コピー用）:**
-```markdown
-## version_impact
-
-minor
-
-## version_rationale
-
-（変更根拠を記述）
-
-## VERSION 更新
-
-- version_update_required: yes
-- version_before: X.Y.Z
-- version_after: X.Y.Z
-
-## VERSION 未更新理由
-
-（該当なし。version_update_required: yes のため不要）
-```
+判定ルール・コピー用テンプレートの正本は **[docs/VERSIONING_POLICY.md](../../../docs/VERSIONING_POLICY.md)**（セクション3）を参照する。ここには複製しない。
 
 > **なぜ必要か**: CI の `validate-pr-body` ジョブは4つのセクション見出しを `require_section` で常時チェックする。`version_update_required: yes` でも `## VERSION 未更新理由` 見出しが存在しないと失敗する。
 

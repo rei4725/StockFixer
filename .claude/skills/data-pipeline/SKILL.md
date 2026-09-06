@@ -25,7 +25,7 @@ py run_data_creation.py --batch
 ```
 - 対象銘柄は `python/config/watchlist.json` から読み込む
 - **フェーズ1**: データ取得＋特徴量生成（並列 max_workers=5）
-- **フェーズ2**: DB書込（逐次実行、DuckDBロック制約回避）
+- **フェーズ2**: DB書込（逐次実行）— 並列書込禁止の理由・詳細は [duckdb-ops スキル](../duckdb-ops/SKILL.md) 参照
 
 ### 内部処理フロー
 1. `src/market_data/pipeline.py` → `fetch_stock_data_with_features()` でyfinanceからOHLCV取得

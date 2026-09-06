@@ -12,25 +12,9 @@ compatibility: "Docker, docker-compose, PowerShell 5.1+。C:\\src\\StockFixer �
 
 ## 手動デプロイ手順（標準フロー）
 
-### Step 1: パッチバージョンを上げる
-```powershell
-cd C:\src\StockFixer
+### Step 1〜2: バージョンを上げてコミット・タグ
 
-# VERSIONファイルを読んでパッチ+1
-$current = (Get-Content VERSION).Trim()
-$parts   = $current.Split(".")
-$newVer  = "$($parts[0]).$($parts[1]).$([int]$parts[2] + 1)"
-
-Set-Content VERSION $newVer
-Write-Host "バージョン: $current -> $newVer"
-```
-
-### Step 2: コミット & タグ
-```powershell
-git add VERSION
-git commit -m "chore: bump version to $newVer"
-git tag -a "v$newVer" -m "Release v$newVer"
-```
+バージョンbump（PATCH/MINOR/MAJOR）のPowerShellスクリプトは **[version-mgmt スキル](../version-mgmt/SKILL.md)** が正本。ここには複製しない。通常デプロイではPATCHバージョンアップの手順を実行する。
 
 ### Step 3: デプロイ実行（weekly_redeploy.ps1）
 ```powershell
