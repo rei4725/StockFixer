@@ -11,11 +11,7 @@ StockFixerで発生しやすいエラーの原因特定と解決を迅速に行�
 ### DuckDB書込エラー（ロック競合）
 **症状**: `IOException: Could not set lock on file` 等
 **原因**: 複数プロセス/スレッドから同時にDB書込を試みている
-**対処**:
-1. DB書込は必ず逐次実行にする（並列NG）
-2. バッチ処理のフェーズ2（DB書込）は逐次設計になっているか確認
-3. 別プロセスからの読み取りは `get_readonly_connection()` を使用
-4. 書込中のプロセスが残っていないか確認してから再実行
+**対処**: 並列書込禁止ルール・2フェーズ化・`get_readonly_connection()`の使い方は [duckdb-ops スキル](../duckdb-ops/SKILL.md) の「重要な注意事項」が正本。まずそちらを確認する。
 
 ### yfinanceエラー
 **症状**: `No data found` / `Ticker not found` / `Too Many Requests` / `Rate limited` 等

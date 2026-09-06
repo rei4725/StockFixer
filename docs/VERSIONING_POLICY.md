@@ -39,6 +39,32 @@ PR 本文には次の見出しを必須とする（テンプレート準拠）�
 - `major/minor/patch` の場合、`version_update_required: yes` かつ `version_before` / `version_after` の実値（SemVer）を必須とする
 - `version_update_required: no` の場合、`## VERSION 未更新理由` の記載を必須とする
 
+### コピー用テンプレート
+
+PR 本文に以下をそのまま貼り付けて使う（他ドキュメント・スキールはこのテンプレートを参照し、複製しないこと）。
+
+```markdown
+## version_impact
+
+minor
+
+## version_rationale
+
+（変更根拠を記述）
+
+## VERSION 更新
+
+- version_update_required: yes
+- version_before: X.Y.Z
+- version_after: X.Y.Z
+
+## VERSION 未更新理由
+
+（該当なし。version_update_required: yes のため不要）
+```
+
+`version_impact: none` の場合は `version_update_required: no` とし、`## VERSION 未更新理由` に理由を記述する。
+
 ## 4. none の許容条件（例外条件）
 
 `version_impact: none` を使えるのは、外部動作に影響しない変更に限る。

@@ -63,7 +63,11 @@ finally:
 ### 重要な注意事項
 - DB格納パス: `python/data/stockfixer.duckdb`
 - 列はDataFrameに合わせて `_ensure_columns` で動的追加（ALTER TABLE ADD COLUMN）
-- **並列書込禁止**: DuckDBはロック競合を起こすため、DB書込は必ず逐次実行
+- **並列書込禁止（本プロジェクト全体の正本ルール）**: DuckDBはロック競合を起こすため、DB書込は必ず逐次実行する。他スキル・コードレビューでこのルールに触れる場合は、ここを参照して複製しないこと。
+  - `ThreadPoolExecutor` 等で並列処理する場合は **2フェーズ化**する（フェーズ1: 並列でI/O・計算 → フェーズ2: 結果を逐次でDB書込）
+  - `upsert_raw_ohlcv()` を並列フェーズ内から呼びたい場合は `defer_raw_save=True` で書込を遅延させ、フェーズ2でまとめて実行する
+  - 別プロセスからの読み取りのみなら `get_readonly_connection()` を使う（ロック競合を回避できる）
+  - `IOException: Could not set lock on file` が出た場合は、書込中の別プロセスが残っていないか確認してから再実行する
 
 ## References
 - [DATABASE_SCHEMA.md](../../../docs/DATABASE_SCHEMA.md) — テーブル定義・列定義・データフローの詳細

@@ -272,23 +272,8 @@ py -m pip install -r requirements.txt --dry-run 2>&1 | Select-String "Cannot|con
 
 ### [P8] PR ボディ必須セクション欠落
 
-PR 本文に以下が全て含まれることを確認:
-
-```markdown
-## version_impact
-none
-
-## version_rationale
-（変更根拠を1文以上）
-
-## VERSION 更新
-- version_update_required: no
-- version_before: X.Y.Z
-- version_after: X.Y.Z
-
-## VERSION 未更新理由
-（理由を記述）
-```
+PR 本文に `## version_impact` / `## version_rationale` / `## VERSION 更新` / `## VERSION 未更新理由` が全て含まれることを確認する。
+判定ルール・コピー用テンプレートの正本は [docs/VERSIONING_POLICY.md](../../../docs/VERSIONING_POLICY.md)（セクション3）を参照する。
 
 ---
 

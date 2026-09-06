@@ -24,6 +24,8 @@ cd C:\src\StockFixer
 .\.venv\Scripts\python .\.github\hooks\check_file_lock.py python/src/data/*.py python/src/services/*.py
 ```
 
+並列書込禁止の一般ルールは [`.claude/skills/duckdb-ops/SKILL.md`](../skills/duckdb-ops/SKILL.md) が正本。以下はコードレビュー向けの具体パターン。
+
 **DuckDB チェック対象パターン:**
 | Severity | パターン | 対策 |
 |---|---|---|
