@@ -163,20 +163,21 @@ class TestRunRegimeLeverageDailyMarginJob(unittest.TestCase):
 
 
 class TestRegimeLeverageScheduleConfig(unittest.TestCase):
-    """未建玉のためデフォルト無効(auto_schedule: False)であることを検証する
-    (allocation_rebalanceと同じ安全ロールアウト手順。手動 --run-now で初回エントリーを
-    確認してから True に切り替える運用のため、切り替え忘れ・意図しない有効化を検知する)。
+    """auto_schedule設定値を検証する(allocation_rebalanceと同じ安全ロールアウト手順)。
+
+    2026-09-06: 手動 --run-now で初回エントリー・日次/週次動作を確認し、
+    ユーザーの運用開始判断によりauto_schedule: Trueへ切り替え済み。
     """
 
-    def test_daily_margin_not_auto_scheduled(self):
+    def test_daily_margin_is_auto_scheduled(self):
         from run_scheduler import SCHEDULE_CONFIG
 
-        self.assertIs(SCHEDULE_CONFIG["regime_leverage_daily_margin"]["auto_schedule"], False)
+        self.assertIs(SCHEDULE_CONFIG["regime_leverage_daily_margin"]["auto_schedule"], True)
 
-    def test_weekly_not_auto_scheduled(self):
+    def test_weekly_is_auto_scheduled(self):
         from run_scheduler import SCHEDULE_CONFIG
 
-        self.assertIs(SCHEDULE_CONFIG["regime_leverage_weekly"]["auto_schedule"], False)
+        self.assertIs(SCHEDULE_CONFIG["regime_leverage_weekly"]["auto_schedule"], True)
 
 
 if __name__ == "__main__":
