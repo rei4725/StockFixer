@@ -20,7 +20,7 @@ lxml>=6.1.2
 discord.py==2.7.1
 ta==0.11.0
 duckdb==1.5.5
-psycopg[binary,pool]>=3.3.4
+psycopg[binary,pool]>=3.3.5
 apscheduler==3.11.3
 streamlit>=1.62.0
 plotly>=6.9.0
