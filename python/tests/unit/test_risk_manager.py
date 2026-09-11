@@ -499,6 +499,32 @@ class TestFetchLatestVix(unittest.TestCase):
 
         self.assertIsNone(vix)
 
+    def test_queries_vix_close_lag1_not_raw_vix_close(self):
+        """回帰テスト（#697）: stock_features には生の vix_close 列は保存されず
+        vix_close_lag1 のみが存在する。誤って存在しない vix_close 列を参照すると
+        本番で UndefinedColumn エラーになるため、実行される SQL が
+        vix_close_lag1 を参照していることを固定する。
+        """
+        from contextlib import contextmanager
+
+        from src.trading.risk_manager import fetch_latest_vix
+
+        mock_con = MagicMock()
+        mock_con.execute.return_value.fetchone.return_value = (28.5,)
+
+        @contextmanager
+        def mock_db():
+            yield mock_con
+
+        with patch("src.trading.risk_manager._db_connection", new=mock_db):
+            fetch_latest_vix()
+
+        executed_sql = mock_con.execute.call_args[0][0]
+        self.assertIn("vix_close_lag1", executed_sql)
+        self.assertNotIn("SELECT vix_close\n", executed_sql)
+        # row_num は symbol ごとに採番され銘柄横断で比較不能なため date でソートする
+        self.assertIn("ORDER BY date DESC", executed_sql)
+
 
 class TestCalcPositionSizeVixScale(unittest.TestCase):
     """calc_position_size() が VIX スケールを適用するテスト"""
@@ -591,6 +617,95 @@ class TestCalcPositionSizeRegime(unittest.TestCase):
     def test_unknown_regime_does_not_raise_and_defaults_to_one(self):
         """未知レジームは例外を出さず乗数=1.0 として動作する"""
         self.assertEqual(self._qty("unknown"), self._qty(None))
+
+
+class TestTotalEquityBasedDrawdown(unittest.TestCase):
+    """DD 判定が現金残高ではなく総資産を基準にすることのテスト（#696）"""
+
+    def _positions(self):
+        return [
+            {"symbol": "7203", "qty": 100, "avg_price": 2_000.0, "current_price": 2_500.0},
+            {"symbol": "6758", "qty": 50, "avg_price": 1_000.0, "current_price": 900.0},
+        ]
+
+    def test_total_equity_includes_position_market_value(self):
+        broker = _make_broker(balance=500_000.0, positions=self._positions())
+        risk = RiskManager(broker)
+        # 現金 500,000 + (100×2,500) + (50×900) = 795,000
+        self.assertAlmostEqual(risk.get_total_equity(), 795_000.0)
+
+    def test_total_equity_is_cached_across_calls(self):
+        """発注ループ中に銘柄ごとへ再取得しないこと（ポジション時価取得は高コスト）"""
+        broker = _make_broker(balance=500_000.0, positions=self._positions())
+        risk = RiskManager(broker)
+        risk.get_total_equity()
+        risk.get_total_equity()
+        self.assertEqual(broker.get_positions.call_count, 1)
+
+    def test_dd_ratio_zero_when_cash_dropped_but_equity_intact(self):
+        """現金が減っても株に変わっているだけならドローダウンは 0% になる（#696 の本質）"""
+        from contextlib import contextmanager
+
+        broker = _make_broker(balance=100_000.0, positions=self._positions())
+        risk = RiskManager(broker)
+
+        mock_con = MagicMock()
+        # peak_balance は総資産と同額（100,000 + 250,000 + 45,000 = 395,000）
+        mock_con.execute.return_value.fetchone.return_value = (395_000.0,)
+
+        @contextmanager
+        def mock_db():
+            yield mock_con
+
+        with patch("src.trading.risk_manager._db_connection", new=mock_db):
+            dd = risk.get_current_dd_ratio()
+
+        # 現金だけ見れば (395,000-100,000)/395,000 = 74.7% の偽DDになるところ
+        self.assertAlmostEqual(dd, 0.0)
+
+    def test_dd_ratio_reflects_real_loss_on_equity(self):
+        """総資産が実際に目減りした場合はドローダウンとして検出される"""
+        from contextlib import contextmanager
+
+        broker = _make_broker(balance=100_000.0, positions=self._positions())
+        risk = RiskManager(broker)
+
+        mock_con = MagicMock()
+        mock_con.execute.return_value.fetchone.return_value = (1_000_000.0,)
+
+        @contextmanager
+        def mock_db():
+            yield mock_con
+
+        with patch("src.trading.risk_manager._db_connection", new=mock_db):
+            dd = risk.get_current_dd_ratio()
+
+        # 総資産 = 100,000 + 250,000 + 45,000 = 395,000 → (1,000,000-395,000)/1,000,000
+        self.assertAlmostEqual(dd, 0.605)
+
+    def test_update_peak_balance_uses_total_equity(self):
+        """peak_balance の更新も総資産基準で行われる"""
+        from contextlib import contextmanager
+
+        broker = _make_broker(balance=500_000.0, positions=self._positions())
+        risk = RiskManager(broker)
+
+        mock_con = MagicMock()
+        mock_con.execute.return_value.fetchone.return_value = (700_000.0,)
+
+        @contextmanager
+        def mock_db():
+            yield mock_con
+
+        with patch("src.trading.risk_manager._db_connection", new=mock_db):
+            risk.update_peak_balance()
+
+        update_calls = [
+            c for c in mock_con.execute.call_args_list if "UPDATE dd_state" in str(c[0][0])
+        ]
+        self.assertEqual(len(update_calls), 1)
+        # 総資産 795,000 > peak 700,000 なので更新される
+        self.assertAlmostEqual(update_calls[0][0][1][0], 795_000.0)
 
 
 if __name__ == "__main__":
