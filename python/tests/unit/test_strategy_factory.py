@@ -196,10 +196,16 @@ class TestApplyGate(unittest.TestCase):
         self.assertFalse(ev.gate_passed)
         self.assertTrue(any("sharpe" in r for r in ev.gate_reasons))
 
-    def test_champion_nan_skips_champion_condition(self):
+    def test_champion_nan_fails_closed(self):
+        """champion_sharpe が NaN（対照群全滅）のときは fail-closed で不合格にする（#627）。
+
+        以前は「チャンピオン条件を丸ごとスキップ」する fail-open だったため、
+        最も強いゲートが無言で外れて質の悪い仮説が通過し得た。
+        """
         ev = self._make_eval(sharpe_ratio=0.5, dsr=0.97, pbo=0.3)
         apply_gate(ev, champion_sharpe=float("nan"))
-        self.assertTrue(ev.gate_passed)
+        self.assertFalse(ev.gate_passed)
+        self.assertTrue(any("champion_sharpe" in r for r in ev.gate_reasons))
 
 
 class TestLoadSymbolData(unittest.TestCase):
