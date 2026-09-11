@@ -30,8 +30,8 @@ COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir --upgrade "pip>=25.3" && \
     pip install --no-cache-dir -r /tmp/requirements.txt && \
     pip install --no-cache-dir --upgrade \
-        "jaraco.context>=6.1.0" \
-        "wheel>=0.46.2" && \
+        "jaraco.context>=6.1.2" \
+        "wheel>=0.48.0" && \
     rm /tmp/requirements.txt
 
 # Claude Code CLI（LLM_BACKEND=cli でサブスク認証経由の LLM 呼び出しに使用）
@@ -45,7 +45,10 @@ ENV PATH="/root/.local/bin:${PATH}"
 # Docker CLI（静的バイナリ、サンドボックス実行の docker run に使用）
 # docker.sock をマウントして兄弟コンテナを起動する Docker-outside-of-Docker 構成。
 # daemon 自体は不要なため CLI のみをダウンロードする。
-RUN curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-29.6.2.tgz -o /tmp/docker.tgz \
+# バージョンは trivy の gobinary スキャン対象になるため、Go 標準ライブラリの
+# 修正版（go1.25.13 / go1.26.6 以上）でビルドされたものを選ぶこと。
+# 29.8.0 は go1.26.8 ビルド（バイナリ埋め込み文字列で確認済み）。
+RUN curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-29.8.0.tgz -o /tmp/docker.tgz \
     && tar xzf /tmp/docker.tgz -C /tmp \
     && mv /tmp/docker/docker /usr/local/bin/docker \
     && rm -rf /tmp/docker.tgz /tmp/docker
