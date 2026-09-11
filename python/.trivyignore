@@ -14,3 +14,22 @@ CVE-2026-23949
 # CVE-2026-24049: wheel privilege escalation via malicious wheel file
 # Base image layer contains 0.45.1, but pip upgrade installs 0.47.0 (fixed: >=0.46.2)
 CVE-2026-24049
+
+# --------------------------------------------------------------------------
+# 以下の2件は pip 自身が同梱する vendored ライブラリに起因する。
+# 実体は /usr/local/lib/python3.12/site-packages/pip/_vendor/vendor.txt が固定しており、
+# pip 26.2.1（2026-09 時点の最新）では msgpack==1.1.2 / setuptools==70.3.0 のまま。
+# site-packages 側を pip install で上げても pip._vendor 配下の同梱コピーは残るため、
+# requirements.txt / Dockerfile のどちらからも解消できない。
+# 上流の pip が vendor を更新するまでの暫定除外とする。
+#
+# 実害の評価: pip._vendor 名前空間の同梱コピーはパッケージインストール時に pip 自身が
+# 使うのみで、アプリケーションコードからは import されない。本システムが信頼できない
+# 入力を pip 経由で処理することはない。
+# --------------------------------------------------------------------------
+
+# GHSA-6v7p-g79w-8964: msgpack out-of-bounds read (pip._vendor.msgpack 1.1.2)
+GHSA-6v7p-g79w-8964
+
+# CVE-2025-47273: setuptools path traversal (pip._vendor 同梱の setuptools 70.3.0)
+CVE-2025-47273
