@@ -31,8 +31,7 @@ RUN pip install --no-cache-dir --upgrade "pip>=25.3" && \
     pip install --no-cache-dir -r /tmp/requirements.txt && \
     pip install --no-cache-dir --upgrade \
         "jaraco.context>=6.1.2" \
-        "wheel>=0.48.0" \
-        "setuptools>=78.1.1" && \
+        "wheel>=0.48.0" && \
     rm /tmp/requirements.txt
 
 # Claude Code CLI（LLM_BACKEND=cli でサブスク認証経由の LLM 呼び出しに使用）
