@@ -46,17 +46,22 @@ DISABLE_DAILY_LOSS_GUARD_ENV = "DISABLE_DAILY_LOSS_GUARD"
 
 
 def fetch_latest_vix() -> Optional[float]:
-    """DuckDB の stock_features から最新の VIX 値を取得する（R-406）。
+    """stock_features から最新の VIX 値を取得する（R-406）。
 
-    stock_features に vix_close 列が存在しない、またはデータがない場合は None を返す。
+    stock_features は生の VIX 値（vix_close）を保持しない
+    （market_data.pipeline がラグ特徴量のみを保存するため）。
+    そのため直近営業日の値として vix_close_lag1 を代替値に用いる。
+    row_num は symbol ごとに採番され直すため銘柄横断の時系列順序を保証しない。
+    date で降順ソートして全銘柄横断で最新の値を取得する。
+    データが存在しない場合は None を返す。
     """
     try:
         with _db_connection() as con:
             row = con.execute("""
-                SELECT vix_close
+                SELECT vix_close_lag1
                 FROM stock_features
-                WHERE vix_close IS NOT NULL
-                ORDER BY row_num DESC
+                WHERE vix_close_lag1 IS NOT NULL
+                ORDER BY date DESC
                 LIMIT 1
                 """).fetchone()
         if row is None:
@@ -110,6 +115,8 @@ class RiskManager:
         self._market = market
         self.stop_loss_pct: Optional[float] = None
         self.take_profit_pct: Optional[float] = None
+        # 総資産は発注ループ中に銘柄ごとに参照されるため、インスタンス単位でキャッシュする
+        self._total_equity_cache: Optional[float] = None
 
         # Kelly 入力パラメータ（BT実績値をロード、なければデフォルト値）
         self.kelly_win_rate: float = DEFAULT_WIN_RATE
@@ -370,11 +377,30 @@ class RiskManager:
     # R-307: DD適応型資本配分
     # ------------------------------------------------------------------
 
+    def get_total_equity(self) -> float:
+        """総資産（現金残高 + 保有ポジション時価評価額）を返す（#696）。
+
+        現金残高のみを DD 判定に使うと、資金を株に振り向けるほど「損失」と誤判定され
+        DD適応縮小が不当に働き続けるため、総資産を基準にする。
+        発注ループ中は銘柄ごとに参照されるためインスタンス単位でキャッシュする
+        （買付は現金→株の振替であり総資産は変動しないため、ラン中の再計算は不要）。
+        """
+        if self._total_equity_cache is not None:
+            return self._total_equity_cache
+
+        balance = self._broker.get_balance()
+        market_value = sum(
+            float(p.get("qty", 0)) * float(p.get("current_price", 0.0))
+            for p in self._broker.get_positions()
+        )
+        self._total_equity_cache = balance + market_value
+        return self._total_equity_cache
+
     def update_peak_balance(self) -> None:
-        """現在残高が過去最高値を超えた場合に peak_balance を更新する。
+        """総資産が過去最高値を超えた場合に peak_balance を更新する。
         run_daily_orders の先頭で呼び出すこと。
         """
-        current = self._broker.get_balance()
+        current = self.get_total_equity()
         with _db_connection() as con:
             row = con.execute("SELECT peak_balance FROM dd_state WHERE id = 1").fetchone()
             if row is None:
@@ -383,8 +409,8 @@ class RiskManager:
                 con.execute("UPDATE dd_state SET peak_balance = %s WHERE id = 1", [current])
 
     def get_current_dd_ratio(self) -> float:
-        """現在のドローダウン率（peak_balance との差分比）を返す。"""
-        current = self._broker.get_balance()
+        """現在のドローダウン率（peak_balance と総資産の差分比）を返す。"""
+        current = self.get_total_equity()
         with _db_connection() as con:
             row = con.execute("SELECT peak_balance FROM dd_state WHERE id = 1").fetchone()
         if row is None or float(row[0]) <= 0:

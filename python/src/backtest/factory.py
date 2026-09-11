@@ -414,6 +414,10 @@ def apply_gate(evaluation: FactoryEvaluation, champion_sharpe: float) -> None:
     DSR はトレード単位 Sharpe（年率化を打ち消した値）で算出済みのため飽和しない。
     有効銘柄数（銘柄あたり最低取引数を満たした銘柄の数）が下限未満の場合も不合格とする。
     合計取引数だけでは「2銘柄 × 20取引」のような極端な集中を弾けないため（#625）。
+
+    champion_sharpe が NaN の場合は「対照群が全滅してチャンピオン比較ができない」ことを
+    意味する。以前はこの条件を丸ごとスキップしていた（fail-open）が、最も強いゲートが
+    無言で外れて質の悪い仮説が通ってしまうため、fail-closed（不合格）に倒す（#627）。
     """
     reasons: list[str] = []
     if evaluation.num_trades < FACTORY_GATE_MIN_TRADES:
@@ -427,7 +431,9 @@ def apply_gate(evaluation: FactoryEvaluation, champion_sharpe: float) -> None:
         reasons.append(f"dsr {evaluation.dsr:.3f} < {FACTORY_GATE_MIN_DSR}")
     if evaluation.max_drawdown < FACTORY_GATE_MAX_DRAWDOWN:
         reasons.append(f"max_drawdown {evaluation.max_drawdown:.3f} < {FACTORY_GATE_MAX_DRAWDOWN}")
-    if not math.isnan(champion_sharpe):
+    if math.isnan(champion_sharpe):
+        reasons.append("champion_sharpe が NaN（対照群が全滅しチャンピオン比較不能）のため不合格")
+    else:
         required = champion_sharpe * FACTORY_GATE_CHAMPION_MARGIN
         if evaluation.sharpe_ratio <= required:
             reasons.append(
@@ -487,7 +493,10 @@ def run_factory_batch(
     claude_evaluations: list[FactoryEvaluation] = []
     if FACTORY_CLAUDE_RULEGEN_ENABLED:
         control_sharpes_pre = [
-            e.sharpe_ratio for e in evaluations if e.hypothesis.is_control and e.num_trades > 0
+            e.sharpe_ratio
+            for e in evaluations
+            if e.hypothesis.is_control
+            and e.n_effective_symbols >= FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS
         ]
         pre_champion_sharpe = max(control_sharpes_pre) if control_sharpes_pre else float("nan")
         shared_data_dir, windows_file = prepare_sandbox_data(data, windows)
@@ -508,18 +517,23 @@ def run_factory_batch(
 
     # DSR: n_trials は累計評価数（過去全試行 + 今夜の候補数、Claude生成候補を含む）
     n_trials = count_factory_runs() + len(candidates) + len(claude_evaluations)
+    # チャンピオンプールの選抜条件は候補ゲートの有効銘柄数下限と揃える（#627）。
+    # 以前は num_trades > 0 だったため銘柄あたり最低取引数フィルタ後も
+    # 1取引あれば通ってしまい、実質チェックとして機能していなかった。
     control_sharpes = [
-        e.sharpe_ratio for e in evaluations if e.hypothesis.is_control and e.num_trades > 0
+        e.sharpe_ratio
+        for e in evaluations
+        if e.hypothesis.is_control and e.n_effective_symbols >= FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS
     ]
     champion_sharpe = max(control_sharpes) if control_sharpes else float("nan")
     if not control_sharpes and controls:
-        # num_trades は有効銘柄フィルタ後の合計。対照群が1件以上評価されたにも
-        # かかわらず全滅した場合、apply_gate はチャンピオン条件を素通りさせる
-        # （fail-open は既存仕様のため維持）。せめて今夜のバッチでチャンピオン
-        # 比較を行わなかった事実をログに残す（#625）。
+        # 対照群が1件以上評価されたにもかかわらず全滅した場合、apply_gate は
+        # champion_sharpe=NaN を fail-closed（不合格）として扱う（#627）。
+        # 一晩探索が止まるが、最強のゲートが無言で外れて質の悪い仮説が
+        # 通過するより安全側に倒す判断とする。
         logger.warning(
-            "[factory] 対照群が全て有効取引数フィルタで除外されたため、"
-            "今回のバッチではチャンピオン比較をスキップします: 評価済み対照数=%d",
+            "[factory] 対照群が全て有効銘柄数フィルタで除外されたため、"
+            "今回のバッチは全候補を不合格（fail-closed）とします: 評価済み対照数=%d",
             len(controls),
         )
 
