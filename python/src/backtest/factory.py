@@ -16,6 +16,7 @@ import math
 import os
 import random
 import shutil
+import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
@@ -460,7 +461,13 @@ def run_factory_batch(
     """夜間バッチ1回分: サンプリング → 評価 → ゲート → 記録 → レポート出力。
 
     symbols は呼び出し元（orchestration）が load_target_symbols() 等で注入する。
+
+    本関数だけが batch_run_id を払い出し、レポートの産地情報として write_report に渡す（#703）。
+    write_report を直接呼ぶ経路には batch_run_id が渡らないため provenance.source は
+    "unknown" となり、IssueAgent の intake が起票を拒否する。
     """
+    batch_run_id = str(uuid.uuid4())
+    logger.info("[factory] バッチ開始: batch_run_id=%s 銘柄数=%d", batch_run_id, len(symbols))
     end = datetime.now().strftime("%Y-%m-%d")
     start = (datetime.now() - timedelta(days=int(lookback_years * 365))).strftime("%Y-%m-%d")
     if seed is None:
@@ -561,7 +568,12 @@ def run_factory_batch(
         if evaluation.gate_passed:
             review = review_hypothesis(evaluation, champion_sharpe)
             evaluation.report_path = write_report(
-                evaluation, champion_sharpe, (start, end), review=review
+                evaluation,
+                champion_sharpe,
+                (start, end),
+                review=review,
+                batch_run_id=batch_run_id,
+                symbol_universe_size=len(symbols),
             )
         save_factory_run(
             hypothesis_hash=evaluation.hypothesis.hypothesis_hash,
