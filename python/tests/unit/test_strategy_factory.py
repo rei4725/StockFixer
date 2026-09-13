@@ -490,7 +490,11 @@ class TestRunFactoryBatch(unittest.TestCase):
     @patch("src.backtest.factory.datetime")
     @patch("src.backtest.factory.FACTORY_CLAUDE_RULEGEN_ENABLED", False)
     @patch("src.backtest.factory.review_hypothesis", return_value=None)
+    # apply_gate は factory_gate.py へ切り出したため、ゲート判定側の閾値は
+    # factory_gate の名前空間で patch する必要がある。factory 側の同名定数は
+    # run_factory_batch のチャンピオンプール選抜が読むため両方を差し替える。
     @patch("src.backtest.factory.FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS", 1)
+    @patch("src.backtest.factory_gate.FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS", 1)
     @patch("src.backtest.factory.save_factory_run")
     @patch("src.backtest.factory.count_factory_runs", return_value=0)
     @patch("src.backtest.factory.load_factory_hashes", return_value=set())
@@ -536,7 +540,11 @@ class TestRunFactoryBatch(unittest.TestCase):
 
     @patch("src.backtest.factory.datetime")
     @patch("src.backtest.factory.FACTORY_CLAUDE_RULEGEN_ENABLED", False)
+    # apply_gate は factory_gate.py へ切り出したため、ゲート判定側の閾値は
+    # factory_gate の名前空間で patch する必要がある。factory 側の同名定数は
+    # run_factory_batch のチャンピオンプール選抜が読むため両方を差し替える。
     @patch("src.backtest.factory.FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS", 1)
+    @patch("src.backtest.factory_gate.FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS", 1)
     @patch("src.backtest.factory.review_hypothesis")
     @patch("src.backtest.factory.save_factory_run")
     @patch("src.backtest.factory.count_factory_runs", return_value=0)
@@ -562,7 +570,11 @@ class TestRunFactoryBatch(unittest.TestCase):
 
     @patch("src.backtest.factory.datetime")
     @patch("src.backtest.factory.FACTORY_CLAUDE_RULEGEN_ENABLED", False)
+    # apply_gate は factory_gate.py へ切り出したため、ゲート判定側の閾値は
+    # factory_gate の名前空間で patch する必要がある。factory 側の同名定数は
+    # run_factory_batch のチャンピオンプール選抜が読むため両方を差し替える。
     @patch("src.backtest.factory.FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS", 1)
+    @patch("src.backtest.factory_gate.FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS", 1)
     @patch("src.backtest.factory.review_hypothesis", return_value=None)
     @patch("src.backtest.factory.save_factory_run")
     @patch("src.backtest.factory.count_factory_runs", return_value=0)
