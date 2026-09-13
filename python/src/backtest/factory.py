@@ -16,6 +16,7 @@ import math
 import os
 import random
 import shutil
+import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
@@ -25,18 +26,18 @@ import pandas as pd
 
 from config.settings import (
     FACTORY_CLAUDE_RULEGEN_ENABLED,
-    FACTORY_GATE_CHAMPION_MARGIN,
-    FACTORY_GATE_MAX_DRAWDOWN,
     FACTORY_GATE_MAX_PBO,
-    FACTORY_GATE_MIN_DSR,
     FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS,
-    FACTORY_GATE_MIN_TRADES,
     FACTORY_GATE_MIN_TRADES_PER_SYMBOL,
 )
 from src.backtest.backtester import Backtester
 from src.backtest.claude_rule_generator import generate_claude_hypotheses
 from src.backtest.data_port import get_backtest_data_port
 from src.backtest.factory_aggregation import SymbolMetrics, aggregate_symbol_metrics
+
+# apply_gate は factory_gate.py へ切り出したが、既存の
+# `from src.backtest.factory import apply_gate` を維持するため再エクスポートする。
+from src.backtest.factory_gate import apply_gate  # noqa: F401
 from src.backtest.factory_report import write_report
 from src.backtest.hypothesis_review import review_hypothesis
 from src.backtest.metrics import deflated_sharpe_ratio, probability_of_backtest_overfitting
@@ -402,49 +403,6 @@ def evaluate_hypothesis(
 
 
 # ---------------------------------------------------------------------------
-# ゲート
-# ---------------------------------------------------------------------------
-
-
-def apply_gate(evaluation: FactoryEvaluation, champion_sharpe: float) -> None:
-    """ゲート条件を判定し evaluation.gate_passed / gate_reasons を更新する。
-
-    PBO はバッチ全体で1値となる性質上、per-hypothesis ゲートに使うと「一晩全滅」に
-    なるため、ここでは判定しない（バッチ診断としてレポート/通知に警告表示する）。
-    DSR はトレード単位 Sharpe（年率化を打ち消した値）で算出済みのため飽和しない。
-    有効銘柄数（銘柄あたり最低取引数を満たした銘柄の数）が下限未満の場合も不合格とする。
-    合計取引数だけでは「2銘柄 × 20取引」のような極端な集中を弾けないため（#625）。
-
-    champion_sharpe が NaN の場合は「対照群が全滅してチャンピオン比較ができない」ことを
-    意味する。以前はこの条件を丸ごとスキップしていた（fail-open）が、最も強いゲートが
-    無言で外れて質の悪い仮説が通ってしまうため、fail-closed（不合格）に倒す（#627）。
-    """
-    reasons: list[str] = []
-    if evaluation.num_trades < FACTORY_GATE_MIN_TRADES:
-        reasons.append(f"num_trades {evaluation.num_trades} < {FACTORY_GATE_MIN_TRADES}")
-    if evaluation.n_effective_symbols < FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS:
-        reasons.append(
-            f"effective_symbols {evaluation.n_effective_symbols}"
-            f" < {FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS}"
-        )
-    if math.isnan(evaluation.dsr) or evaluation.dsr < FACTORY_GATE_MIN_DSR:
-        reasons.append(f"dsr {evaluation.dsr:.3f} < {FACTORY_GATE_MIN_DSR}")
-    if evaluation.max_drawdown < FACTORY_GATE_MAX_DRAWDOWN:
-        reasons.append(f"max_drawdown {evaluation.max_drawdown:.3f} < {FACTORY_GATE_MAX_DRAWDOWN}")
-    if math.isnan(champion_sharpe):
-        reasons.append("champion_sharpe が NaN（対照群が全滅しチャンピオン比較不能）のため不合格")
-    else:
-        required = champion_sharpe * FACTORY_GATE_CHAMPION_MARGIN
-        if evaluation.sharpe_ratio <= required:
-            reasons.append(
-                f"sharpe {evaluation.sharpe_ratio:.3f} <= champion×{FACTORY_GATE_CHAMPION_MARGIN}"
-                f" ({required:.3f})"
-            )
-    evaluation.gate_reasons = reasons
-    evaluation.gate_passed = not reasons
-
-
-# ---------------------------------------------------------------------------
 # バッチ実行（orchestration から呼ばれるエントリ）
 # ---------------------------------------------------------------------------
 
@@ -460,7 +418,13 @@ def run_factory_batch(
     """夜間バッチ1回分: サンプリング → 評価 → ゲート → 記録 → レポート出力。
 
     symbols は呼び出し元（orchestration）が load_target_symbols() 等で注入する。
+
+    本関数だけが batch_run_id を払い出し、レポートの産地情報として write_report に渡す（#703）。
+    write_report を直接呼ぶ経路には batch_run_id が渡らないため provenance.source は
+    "unknown" となり、IssueAgent の intake が起票を拒否する。
     """
+    batch_run_id = str(uuid.uuid4())
+    logger.info("[factory] バッチ開始: batch_run_id=%s 銘柄数=%d", batch_run_id, len(symbols))
     end = datetime.now().strftime("%Y-%m-%d")
     start = (datetime.now() - timedelta(days=int(lookback_years * 365))).strftime("%Y-%m-%d")
     if seed is None:
@@ -561,7 +525,12 @@ def run_factory_batch(
         if evaluation.gate_passed:
             review = review_hypothesis(evaluation, champion_sharpe)
             evaluation.report_path = write_report(
-                evaluation, champion_sharpe, (start, end), review=review
+                evaluation,
+                champion_sharpe,
+                (start, end),
+                review=review,
+                batch_run_id=batch_run_id,
+                symbol_universe_size=len(symbols),
             )
         save_factory_run(
             hypothesis_hash=evaluation.hypothesis.hypothesis_hash,

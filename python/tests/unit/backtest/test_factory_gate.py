@@ -5,8 +5,8 @@ from __future__ import annotations
 import unittest
 import unittest.mock
 
-from src.backtest import factory
-from src.backtest.factory import apply_gate
+from src.backtest import factory_gate
+from src.backtest.factory_gate import apply_gate
 from src.backtest.types import FactoryEvaluation, FactoryHypothesis
 
 _SPEC = {"type": "atomic", "rule": "rsi_contrarian", "params": {}}
@@ -45,7 +45,7 @@ class TestEffectiveSymbolsGate(unittest.TestCase):
     def test_threshold_is_configurable(self):
         ev = _make_eval(n_effective_symbols=5)
 
-        with unittest.mock.patch.object(factory, "FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS", 3):
+        with unittest.mock.patch.object(factory_gate, "FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS", 3):
             apply_gate(ev, champion_sharpe=1.0)
 
         self.assertTrue(ev.gate_passed)

@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import socket
 from datetime import datetime
 from typing import Optional
 
@@ -31,11 +32,60 @@ from src.utils.data_path_utils import ensure_dir, get_results_dir
 
 _REPORT_SCHEMA_VERSION = 1
 
+# 産地不明を表す値。write_report に batch_run_id が渡されなかった経路（テストが
+# write_report を直接呼ぶ等）はこれになり、IssueAgent 側の intake が起票を拒否する。
+PROVENANCE_SOURCE_BATCH = "batch"
+PROVENANCE_SOURCE_UNKNOWN = "unknown"
+
 
 def _reports_dir() -> str:
     path = os.path.join(get_results_dir(), "factory", "reports")
     ensure_dir(path)
     return path
+
+
+def _running_in_container() -> bool:
+    """Docker コンテナ内で動いているかを判定する。
+
+    公式イメージのビルド時に Docker が置く /.dockerenv の存在で判定する。
+    判定できない環境では False（＝ホスト扱い）に倒す。
+    """
+    return os.path.exists("/.dockerenv")
+
+
+def _image_version() -> Optional[str]:
+    """イメージ/チェックアウトのバージョン文字列を返す（取得できなければ None）。"""
+    python_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+    version_path = os.path.join(python_root, "VERSION")
+    try:
+        with open(version_path, encoding="utf-8") as f:
+            return f.read().strip() or None
+    except OSError:
+        return None
+
+
+def _build_provenance(
+    batch_run_id: Optional[str],
+    symbol_universe_size: Optional[int],
+) -> dict:
+    """レポートの産地情報を組み立てる（#703）。
+
+    ローカル/テスト実行の成果物が本番候補として Issue 起票された事故（#644/#645/#646/#649）の
+    再発防止。判定の主軸は **呼び出し経路** であり、環境の推測ではない。
+
+    batch_run_id は run_factory_batch だけが払い出す。write_report を直接呼ぶ経路
+    （テスト等）には渡らないため source は "unknown" になり、IssueAgent 側で弾かれる。
+    in_container / hostname / image_version は診断用に併記するが、
+    ホスト実行を起票対象から外すため in_container も IssueAgent 側の判定材料に含める。
+    """
+    return {
+        "source": PROVENANCE_SOURCE_BATCH if batch_run_id else PROVENANCE_SOURCE_UNKNOWN,
+        "batch_run_id": batch_run_id,
+        "in_container": _running_in_container(),
+        "hostname": socket.gethostname(),
+        "image_version": _image_version(),
+        "symbol_universe_size": symbol_universe_size,
+    }
 
 
 def _build_review_section(review: Optional[dict]) -> str:
@@ -143,8 +193,16 @@ def write_report(
     champion_sharpe: float,
     period: tuple[str, str],
     review: Optional[dict] = None,
+    *,
+    batch_run_id: Optional[str] = None,
+    symbol_universe_size: Optional[int] = None,
 ) -> str:
-    """ゲート合格仮説の不変 JSON レポートを原子的に書き出してパスを返す。"""
+    """ゲート合格仮説の不変 JSON レポートを原子的に書き出してパスを返す。
+
+    batch_run_id / symbol_universe_size は run_factory_batch が渡す産地情報（#703）。
+    省略した場合 provenance.source は "unknown" となり、IssueAgent の intake は
+    そのレポートを起票しない。テストから直接呼ぶ場合は省略してよい。
+    """
     h = evaluation.hypothesis
     report = {
         "schema_version": _REPORT_SCHEMA_VERSION,
@@ -167,6 +225,7 @@ def write_report(
         "spec": h.rule_spec,
         "market": h.market,
         "review": review,
+        "provenance": _build_provenance(batch_run_id, symbol_universe_size),
     }
     path = os.path.join(_reports_dir(), f"{h.hypothesis_hash}.json")
     tmp_path = path + ".tmp"

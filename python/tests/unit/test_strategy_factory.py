@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pandas as pd
 
+from src.backtest import factory_report
 from src.backtest.factory import (
     _MIN_SYMBOL_ROWS,
     _WARMUP_CALENDAR_DAYS,
@@ -489,7 +490,11 @@ class TestRunFactoryBatch(unittest.TestCase):
     @patch("src.backtest.factory.datetime")
     @patch("src.backtest.factory.FACTORY_CLAUDE_RULEGEN_ENABLED", False)
     @patch("src.backtest.factory.review_hypothesis", return_value=None)
+    # apply_gate は factory_gate.py へ切り出したため、ゲート判定側の閾値は
+    # factory_gate の名前空間で patch する必要がある。factory 側の同名定数は
+    # run_factory_batch のチャンピオンプール選抜が読むため両方を差し替える。
     @patch("src.backtest.factory.FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS", 1)
+    @patch("src.backtest.factory_gate.FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS", 1)
     @patch("src.backtest.factory.save_factory_run")
     @patch("src.backtest.factory.count_factory_runs", return_value=0)
     @patch("src.backtest.factory.load_factory_hashes", return_value=set())
@@ -535,7 +540,11 @@ class TestRunFactoryBatch(unittest.TestCase):
 
     @patch("src.backtest.factory.datetime")
     @patch("src.backtest.factory.FACTORY_CLAUDE_RULEGEN_ENABLED", False)
+    # apply_gate は factory_gate.py へ切り出したため、ゲート判定側の閾値は
+    # factory_gate の名前空間で patch する必要がある。factory 側の同名定数は
+    # run_factory_batch のチャンピオンプール選抜が読むため両方を差し替える。
     @patch("src.backtest.factory.FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS", 1)
+    @patch("src.backtest.factory_gate.FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS", 1)
     @patch("src.backtest.factory.review_hypothesis")
     @patch("src.backtest.factory.save_factory_run")
     @patch("src.backtest.factory.count_factory_runs", return_value=0)
@@ -561,7 +570,11 @@ class TestRunFactoryBatch(unittest.TestCase):
 
     @patch("src.backtest.factory.datetime")
     @patch("src.backtest.factory.FACTORY_CLAUDE_RULEGEN_ENABLED", False)
+    # apply_gate は factory_gate.py へ切り出したため、ゲート判定側の閾値は
+    # factory_gate の名前空間で patch する必要がある。factory 側の同名定数は
+    # run_factory_batch のチャンピオンプール選抜が読むため両方を差し替える。
     @patch("src.backtest.factory.FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS", 1)
+    @patch("src.backtest.factory_gate.FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS", 1)
     @patch("src.backtest.factory.review_hypothesis", return_value=None)
     @patch("src.backtest.factory.save_factory_run")
     @patch("src.backtest.factory.count_factory_runs", return_value=0)
@@ -596,3 +609,77 @@ class TestRunFactoryBatch(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestReportProvenance(unittest.TestCase):
+    """レポート産地情報のテスト（#703）
+
+    ローカル/テスト実行の成果物が本番候補として Issue 起票された事故
+    （#644/#645/#646/#649）の再発防止。判定の主軸は呼び出し経路であり環境の推測ではない。
+    """
+
+    def _make_evaluation(self) -> FactoryEvaluation:
+        return FactoryEvaluation(
+            hypothesis=FactoryHypothesis(rule_spec=_ATOMIC_SPEC, market="jp"),
+            sharpe_ratio=1.5,
+            dsr=0.96,
+            pbo=0.2,
+            num_trades=40,
+            max_drawdown=-0.1,
+            window_returns=[0.01] * 8,
+            n_symbols=3,
+        )
+
+    def _write_and_load(self, **kwargs) -> dict:
+        ev = self._make_evaluation()
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("src.backtest.factory_report.get_results_dir", return_value=tmp):
+                path = write_report(
+                    ev, champion_sharpe=1.0, period=("2024-01-01", "2026-01-01"), **kwargs
+                )
+            with open(path, encoding="utf-8") as f:
+                return json.load(f)
+
+    def test_direct_call_is_marked_unknown(self):
+        """write_report を直接呼ぶ経路（テスト等）は source=unknown になる。
+
+        これが 2026-08-13 の事故（テストが実ディレクトリへレポートを書き落とし、
+        intake が本番候補として起票した）を弾く主軸の判定。
+        """
+        report = self._write_and_load()
+
+        self.assertEqual(report["provenance"]["source"], "unknown")
+        self.assertIsNone(report["provenance"]["batch_run_id"])
+
+    def test_batch_run_id_marks_source_as_batch(self):
+        report = self._write_and_load(batch_run_id="test-run-id", symbol_universe_size=120)
+
+        self.assertEqual(report["provenance"]["source"], "batch")
+        self.assertEqual(report["provenance"]["batch_run_id"], "test-run-id")
+        self.assertEqual(report["provenance"]["symbol_universe_size"], 120)
+
+    def test_provenance_records_environment_facts(self):
+        """診断用の環境情報が揃っていること（判定の主軸ではない）。"""
+        report = self._write_and_load(batch_run_id="test-run-id", symbol_universe_size=120)
+        prov = report["provenance"]
+
+        self.assertIn("in_container", prov)
+        self.assertIsInstance(prov["in_container"], bool)
+        self.assertTrue(prov["hostname"])
+        self.assertIn("image_version", prov)
+
+    def test_schema_version_stays_1(self):
+        """provenance は追加フィールドであり schema_version は据え置く。
+
+        IssueAgent の intake は schema_version != 1 を invalid として弾くため、
+        ここを上げると既存の intake が全レポートを拒否する。
+        """
+        report = self._write_and_load(batch_run_id="test-run-id")
+
+        self.assertEqual(report["schema_version"], 1)
+
+    def test_in_container_reflects_dockerenv(self):
+        with patch("src.backtest.factory_report.os.path.exists", return_value=True):
+            self.assertTrue(factory_report._running_in_container())
+        with patch("src.backtest.factory_report.os.path.exists", return_value=False):
+            self.assertFalse(factory_report._running_in_container())
