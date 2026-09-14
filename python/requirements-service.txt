@@ -8,7 +8,7 @@ uvicorn==0.52.4
 # joblib モデルは本体が保存しサービスが読むため、バージョンがずれると
 # アンピクル失敗や推論結果の不一致を招く。requirements.txt と必ず同じピンを
 # 使うこと（本体側を更新する際はこちらも同時に更新する）。
-scikit-learn==1.9.0
+scikit-learn==1.9.1
 lightgbm==4.7.0
 xgboost==3.4.1
 pandas>=3.0.3,<4
