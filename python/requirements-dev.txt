@@ -29,7 +29,7 @@ pip-audit>=2.10.1
 bandit>=1.9.4
 
 # 循環依存検出
-pydeps>=3.0.7
+pydeps>=3.0.8
 
 # アーキテクチャ契約検証
 import-linter>=2.15
