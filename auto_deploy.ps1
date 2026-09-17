@@ -125,6 +125,14 @@ function Clear-OldPytestTmp([string]$root, [int]$keep = 3) {
     }
 }
 
+# ---- Docker エンジンのウォッチドッグ（停止していれば起動し直す） ----
+# デプロイ本体の邪魔をしないよう、失敗しても握り潰して続行する。
+try {
+    & (Join-Path $repoDir "docker_watchdog.ps1")
+} catch {
+    Write-Log "[watchdog] 呼び出しに失敗: $_"
+}
+
 # ---- ロック（多重起動防止） ----
 if (Test-Path $lockFile) {
     $age = (New-TimeSpan -Start (Get-Item $lockFile).LastWriteTime -End (Get-Date)).TotalMinutes
