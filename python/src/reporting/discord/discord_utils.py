@@ -307,7 +307,11 @@ def send_watchlist_update_report(diffs) -> bool:
     Returns:
         成功時 True、失敗時 False（送信不要な場合も True）
     """
-    changed = [d for d in diffs if d.has_changes or d.removed_unverified]
+    changed = [
+        d
+        for d in diffs
+        if d.has_changes or d.removed_unverified or getattr(d, "fetch_failed", False)
+    ]
     if not changed:
         logger.info("ウォッチリスト変更なし。Discord通知をスキップします。")
         return True
@@ -318,6 +322,13 @@ def send_watchlist_update_report(diffs) -> bool:
     for diff in diffs:
         emoji = get_market_emoji(diff.market)
         lines.append(f"\n{emoji} **{diff.market.upper()}**")
+
+        if getattr(diff, "fetch_failed", False):
+            lines.append(
+                "🚨 指数構成銘柄の取得失敗のため更新をスキップしました"
+                "（上場廃止銘柄が残り続けます。要調査）"
+            )
+            continue
 
         if diff.added:
             syms = ", ".join(f"`{s}`" for s in diff.added)

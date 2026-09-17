@@ -31,6 +31,10 @@ MARKET_KEY_MAP = {
     "jp": "jp",
 }
 
+# Wikipedia は既定の User-Agent を 403 で拒否するため、連絡先を含む UA を明示する。
+# （Wikimedia の User-Agent ポリシーに従い、プロジェクト名と URL を含める）
+WIKIPEDIA_STORAGE_OPTIONS = {"User-Agent": "StockFixer/1.0 (https://github.com/rei4725/StockFixer)"}
+
 
 # ── データクラス ──────────────────────────────────────────
 
@@ -45,6 +49,7 @@ class WatchlistDiff:
     removed_unverified: list[str] = field(default_factory=list)  # 確認できず保留した銘柄
     kept: list[str] = field(default_factory=list)
     capped: bool = False  # 安全弁が発動したか
+    fetch_failed: bool = False  # 指数銘柄の取得自体に失敗したか
 
     @property
     def has_changes(self) -> bool:
@@ -65,7 +70,9 @@ def fetch_sp500_symbols() -> list[str]:
 
     url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
     try:
-        tables = pd.read_html(url, attrs={"id": "constituents"})
+        tables = pd.read_html(
+            url, attrs={"id": "constituents"}, storage_options=WIKIPEDIA_STORAGE_OPTIONS
+        )
         df = tables[0]
         symbols = df["Symbol"].str.replace(".", "-", regex=False).tolist()
         logger.info(f"S&P500構成銘柄取得完了: {len(symbols)}件")
@@ -86,7 +93,7 @@ def fetch_nikkei225_symbols() -> list[str]:
 
     url = "https://en.wikipedia.org/wiki/Nikkei_225"
     try:
-        tables = pd.read_html(url)
+        tables = pd.read_html(url, storage_options=WIKIPEDIA_STORAGE_OPTIONS)
         # "Code" 列を含むテーブルを探す
         for df in tables:
             if "Code" in df.columns:
@@ -331,7 +338,10 @@ def run_watchlist_refresh(markets: Optional[list[str]] = None) -> list[Watchlist
 
         fetched = fetch_index_symbols(market)
         if not fetched:
+            # 取得失敗時に差分を作ると全銘柄が削除候補になるため更新はしない。
+            # ただし黙って握り潰すと失敗が誰にも見えないので diff として報告する。
             logger.warning(f"[{market}] 指数銘柄の取得に失敗したためスキップ")
+            diffs.append(WatchlistDiff(market=market, fetch_failed=True))
             continue
         try:
             save_index_membership_snapshot(market=market, symbols=fetched)
