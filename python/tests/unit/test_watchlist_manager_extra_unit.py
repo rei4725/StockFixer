@@ -134,7 +134,12 @@ class TestApplyWatchlistUpdate(unittest.TestCase):
 
 
 class TestRunWatchlistRefresh(unittest.TestCase):
-    def test_returns_empty_diffs_when_fetch_fails(self):
+    def test_reports_fetch_failure_without_changing_watchlist(self):
+        """指数取得に失敗したら fetch_failed の diff を返し、変更は出さないこと
+
+        以前は空リストを返していたが、それでは失敗が呼び出し元にも
+        Discord にも伝わらず、上場廃止銘柄が黙って残り続けていた。
+        """
         from src.watchlist.manager import run_watchlist_refresh
 
         with (
@@ -143,7 +148,9 @@ class TestRunWatchlistRefresh(unittest.TestCase):
         ):
             result = run_watchlist_refresh(markets=["jp"])
 
-        self.assertEqual(result, [])
+        self.assertEqual(len(result), 1)
+        self.assertTrue(result[0].fetch_failed)
+        self.assertFalse(result[0].has_changes)
 
     def test_returns_diffs_when_symbols_fetched(self):
         from src.watchlist.manager import run_watchlist_refresh
