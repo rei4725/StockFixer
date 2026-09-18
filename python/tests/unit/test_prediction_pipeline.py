@@ -241,7 +241,7 @@ class TestOutputTopWorstResults(unittest.TestCase):
 class TestPredictAllUnified(unittest.TestCase):
     """predict_all_unified のテスト"""
 
-    @patch("src.prediction.prediction_pipeline.get_all_symbols")
+    @patch("src.prediction.prediction_pipeline.get_active_symbols")
     @patch("src.prediction.predict_unified.preload_models")
     @patch("src.prediction.predict_unified.predict_with_unified_model")
     def test_returns_list_of_prediction_results(self, mock_predict, mock_preload, mock_symbols):
@@ -264,7 +264,7 @@ class TestPredictAllUnified(unittest.TestCase):
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0].symbol, "7203")
 
-    @patch("src.prediction.prediction_pipeline.get_all_symbols")
+    @patch("src.prediction.prediction_pipeline.get_active_symbols")
     @patch("src.prediction.predict_unified.preload_models")
     def test_returns_empty_when_no_symbols(self, mock_preload, mock_symbols):
         """銘柄がない場合は空リストが返ること"""
@@ -275,7 +275,7 @@ class TestPredictAllUnified(unittest.TestCase):
         results = predict_all_unified()
         self.assertEqual(results, [])
 
-    @patch("src.prediction.prediction_pipeline.get_all_symbols")
+    @patch("src.prediction.prediction_pipeline.get_active_symbols")
     @patch("src.prediction.predict_unified.preload_models")
     @patch("src.prediction.predict_unified.predict_with_unified_model")
     def test_predict_exception_returns_empty(self, mock_predict, mock_preload, mock_symbols):
@@ -363,7 +363,7 @@ class TestRunAccuracyCheck(unittest.TestCase):
 class TestPredictAllUnifiedMultiHorizon(unittest.TestCase):
     """predict_all_unified_multi_horizon のテスト"""
 
-    @patch("src.prediction.prediction_pipeline.get_all_symbols")
+    @patch("src.prediction.prediction_pipeline.get_active_symbols")
     @patch("src.prediction.predict_unified.preload_models")
     @patch("src.prediction.predict_unified.predict_with_unified_model")
     def test_multi_horizon_returns_results(self, mock_predict, mock_preload, mock_symbols):
@@ -392,7 +392,7 @@ class TestPredictAllUnifiedMultiHorizon(unittest.TestCase):
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0].symbol, "7203")
 
-    @patch("src.prediction.prediction_pipeline.get_all_symbols")
+    @patch("src.prediction.prediction_pipeline.get_active_symbols")
     @patch("src.prediction.predict_unified.preload_models")
     def test_empty_symbols_returns_empty(self, mock_preload, mock_symbols):
         """銘柄リストが空の場合は空リストが返ること"""
@@ -404,7 +404,7 @@ class TestPredictAllUnifiedMultiHorizon(unittest.TestCase):
         results = predict_all_unified_multi_horizon(horizons=[1, 3])
         self.assertEqual(results, [])
 
-    @patch("src.prediction.prediction_pipeline.get_all_symbols")
+    @patch("src.prediction.prediction_pipeline.get_active_symbols")
     @patch("src.prediction.predict_unified.preload_models")
     @patch("src.prediction.predict_unified.predict_with_unified_model")
     def test_single_horizon_works(self, mock_predict, mock_preload, mock_symbols):
@@ -429,7 +429,7 @@ class TestPredictAllUnifiedMultiHorizon(unittest.TestCase):
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0].symbol, "AAPL")
 
-    @patch("src.prediction.prediction_pipeline.get_all_symbols")
+    @patch("src.prediction.prediction_pipeline.get_active_symbols")
     @patch("src.prediction.predict_unified.preload_models")
     @patch("src.prediction.predict_unified.predict_with_unified_model")
     def test_exception_skips_symbol(self, mock_predict, mock_preload, mock_symbols):
