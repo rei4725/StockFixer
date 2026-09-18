@@ -299,7 +299,7 @@ class TestPredictAllWithUnifiedModel(unittest.TestCase):
 
         with (
             patch("src.prediction.predict_unified.preload_models"),
-            patch("src.prediction.predict_unified.get_all_symbols", return_value=[]),
+            patch("src.prediction.predict_unified.get_active_symbols", return_value=[]),
         ):
             result = predict_all_with_unified_model()
         self.assertTrue(result.empty)
@@ -323,7 +323,7 @@ class TestPredictAllWithUnifiedModel(unittest.TestCase):
         with (
             patch("src.prediction.predict_unified.preload_models"),
             patch(
-                "src.prediction.predict_unified.get_all_symbols",
+                "src.prediction.predict_unified.get_active_symbols",
                 return_value=[("jp", "7203")],
             ),
             patch(

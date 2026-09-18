@@ -18,7 +18,7 @@ from src.prediction.range_clipping import clip_diff_ratio_to_atr_range
 from src.prediction.remote_client import get_service_url, predict_via_service
 from src.prediction.types import PredictionResult
 from src.utils.data_path_utils import get_ticker
-from src.utils.db import get_all_symbols, load_stock_features
+from src.utils.db import get_active_symbols, load_stock_features
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -359,7 +359,7 @@ def predict_all_with_unified_model(
         pass  # DBから直接取得するため不要
 
     # 全銘柄をDBから取得
-    all_keys = get_all_symbols()
+    all_keys = get_active_symbols()
 
     print(f"予測対象: {len(all_keys)}銘柄")
 
