@@ -138,6 +138,19 @@ def load_factory_hashes() -> set[str]:
     return {r[0] for r in rows}
 
 
+def load_factory_specs() -> list[tuple[str, str]]:
+    """評価済み仮説の (market, spec_json) を返す。
+
+    AND/OR の子の順序が違うだけの同一戦略は、保存されているハッシュが
+    正準形と一致しない。呼び出し側がスペックを正規化してハッシュを再計算し、
+    保存ハッシュとの和集合を重複排除に使うために生のスペックを返す。
+    """
+    ensure_factory_tables()
+    with _db_connection() as con:
+        rows = con.execute("SELECT market, spec_json FROM factory_runs").fetchall()
+    return [(r[0], r[1]) for r in rows]
+
+
 def count_factory_runs() -> int:
     """累計評価数を返す（Deflated Sharpe の n_trials 補正に使用）。"""
     ensure_factory_tables()

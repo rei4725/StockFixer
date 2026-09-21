@@ -46,6 +46,7 @@ from src.utils.db.factory_runs import (  # noqa: F401
     count_factory_runs,
     ensure_factory_tables,
     load_factory_hashes,
+    load_factory_specs,
     save_factory_run,
 )
 

@@ -45,6 +45,7 @@ from src.backtest.factory_report import write_report
 from src.backtest.factory_sampling import (  # noqa: F401
     _PARAM_GRID,
     _RULE_CLASSES,
+    canonical_rule_spec,
     control_hypotheses,
     sample_hypotheses,
 )
@@ -54,7 +55,12 @@ from src.backtest.rules import AndRule, OrRule, TradingRule
 from src.backtest.sandbox_executor import prepare_sandbox_data
 from src.backtest.types import FactoryBatchResult, FactoryEvaluation, FactoryHypothesis
 from src.utils.data_path_utils import get_ticker
-from src.utils.db import count_factory_runs, load_factory_hashes, save_factory_run
+from src.utils.db import (
+    count_factory_runs,
+    load_factory_hashes,
+    load_factory_specs,
+    save_factory_run,
+)
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -182,6 +188,28 @@ def _make_backtester(
         take_profit_pct=None,
         position_sizing="full",
     )
+
+
+def _evaluated_hashes(market: str, lookback_years: int) -> set[str]:
+    """重複排除に使う「評価済み」ハッシュ集合を返す。
+
+    保存ハッシュだけでは足りない。AND/OR の子が非整列のまま保存された行は
+    正準形と別ハッシュになっており、そのままではサンプラーが同じ戦略を
+    もう一度引いてしまう（台帳 893 件のうち 189 組がこれで二重評価された）。
+    保存スペックを正規化して再計算したハッシュも足した和集合を返す。
+    """
+    hashes = set(load_factory_hashes())
+    for stored_market, spec_json in load_factory_specs():
+        if stored_market != market:
+            continue
+        try:
+            spec = json.loads(spec_json)
+        except (TypeError, ValueError):
+            logger.warning("[factory] spec_json を解釈できないため重複排除から除外します")
+            continue
+        hypothesis = FactoryHypothesis(canonical_rule_spec(spec), stored_market, lookback_years)
+        hashes.add(hypothesis.hypothesis_hash)
+    return hashes
 
 
 def _gate_sharpe(evaluation: FactoryEvaluation) -> float:
@@ -345,7 +373,7 @@ def run_factory_batch(
     if seed is None:
         seed = int(datetime.now().strftime("%Y%m%d"))
 
-    existing = load_factory_hashes()
+    existing = _evaluated_hashes(market, lookback_years)
     candidates = sample_hypotheses(
         market, budget, existing, seed=seed, lookback_years=lookback_years
     )
