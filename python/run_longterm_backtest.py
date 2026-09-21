@@ -74,7 +74,7 @@ def _print_summary(metrics: dict) -> None:
         "total_return",
         "cagr",
         "max_drawdown",
-        "n_trades",
+        "num_trades",
         "n_2x",
         "n_3x",
         "n_5x",
@@ -83,6 +83,9 @@ def _print_summary(metrics: dict) -> None:
         "avg_win_multiple",
         "avg_loss",
         "avg_held_days",
+        "sharpe_ratio",
+        "profit_factor",
+        "calmar_ratio",
         "benchmark_return",
         "alpha",
     ):
@@ -109,7 +112,7 @@ def main():
     _print_summary(metrics)
 
     print("\n===== 結論 =====")
-    print(build_conclusion(metrics, args.market, args.start, args.end, args.max_positions))
+    print(build_conclusion(metrics, config))
 
     if not equity_df.empty:
         equity_path, trades_path = save_results(equity_df, trades_df, args.market)
