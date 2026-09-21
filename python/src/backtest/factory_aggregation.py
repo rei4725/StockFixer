@@ -47,6 +47,8 @@ class AggregatedMetrics:
     n_symbols_with_signal: int = 0
     n_effective_symbols: int = 0
     avg_trades_per_symbol: float = 0.0
+    # 集計に採用した銘柄名。ポートフォリオ equity を同じ母集団で合成するために返す。
+    effective_symbols: list[str] = field(default_factory=list)
 
 
 def aggregate_symbol_metrics(
@@ -90,4 +92,5 @@ def aggregate_symbol_metrics(
         n_symbols_with_signal=n_with_signal,
         n_effective_symbols=n,
         avg_trades_per_symbol=avg_trades,
+        effective_symbols=[r.symbol for r in effective],
     )

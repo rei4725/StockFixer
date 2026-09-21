@@ -125,7 +125,11 @@ class Backtester:
         return result_df, metrics
 
     def simulate_trading(
-        self, df: pd.DataFrame, signal: pd.Series, pred: Optional[pd.Series] = None
+        self,
+        df: pd.DataFrame,
+        signal: pd.Series,
+        pred: Optional[pd.Series] = None,
+        collect_equity: bool = False,
     ) -> tuple[pd.DataFrame, dict[str, Any]]:
         """
         仮想売買シミュレーションを実行する。
@@ -136,6 +140,10 @@ class Backtester:
             df: Close 列を含む DataFrame
             signal: シグナル Series (1=buy, -1=sell, 0=hold)
             pred: 予測値 Series（ポジションサイジング "confidence" モードで使用）
+            collect_equity: True のとき metrics["equity_curve"] に日次 mark-to-market
+                equity（net）を載せる。複数銘柄のポートフォリオ equity を合成する
+                用途向け。既定 False では従来どおり載せない（metrics を JSON/DB に
+                そのまま流す既存経路に Series が混入しないようにするため）。
 
         Returns:
             (result_df, metrics) のタプル
@@ -411,6 +419,8 @@ class Backtester:
             equity_gross=equity_gross,
             include_monte_carlo=self.include_monte_carlo,
         )
+        if collect_equity:
+            metrics["equity_curve"] = equity_net
         # ショートメトリクスを追加
         if short_trade_log:
             metrics["short_return"] = round(

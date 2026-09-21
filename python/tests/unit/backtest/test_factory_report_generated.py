@@ -65,6 +65,7 @@ def test_issue_body_reports_symbol_denominators(tmp_path, monkeypatch):
         pbo=0.1,
         num_trades=85,
         max_drawdown=-0.19,
+        portfolio_max_drawdown=-0.07,
         win_rate=0.85,
         total_return=0.09,
         window_returns=[0.01, 0.02],
@@ -99,12 +100,55 @@ def test_issue_body_reports_symbol_denominators(tmp_path, monkeypatch):
     # 母数が曖昧だった旧ラベルは残っていない
     assert "Sharpe（銘柄平均）" not in body
     assert "Sharpe（有効銘柄平均）" in body
-    # 最大DD は有効銘柄の中での最悪値であることをラベル・値ごとピン留めする（#625 Finding 1）。
-    max_drawdown_row = (
-        f"| 最大DD（有効銘柄の最悪値） | -19.00% | >= {FACTORY_GATE_MAX_DRAWDOWN:.0%} |"
+    # DD は2行に分かれる。ゲート列が付くのはポートフォリオDD、最悪銘柄DDは診断用。
+    # どちらの数字がゲート判定に使われたかをレビュー時に取り違えないようピン留めする。
+    portfolio_dd_row = (
+        f"| 最大DD（有効銘柄を等金額保有したポートフォリオ） "
+        f"| -7.00% | >= {FACTORY_GATE_MAX_DRAWDOWN:.0%} |"
     )
-    assert max_drawdown_row in body
+    assert portfolio_dd_row in body
+    assert "| 最大DD（有効銘柄の最悪値・診断用） | -19.00% | - |" in body
 
     assert report["gate"]["n_symbols_with_signal"] == 69
     assert report["gate"]["n_effective_symbols"] == 16
     assert report["gate"]["avg_trades_per_symbol"] == 1.23
+    assert report["gate"]["portfolio_max_drawdown"] == -0.07
+
+
+def test_issue_body_marks_worst_symbol_dd_as_gate_input_when_portfolio_dd_missing(
+    tmp_path, monkeypatch
+):
+    """equity 曲線が取れずフォールバックしたことがレポートから判別できること。
+
+    ポートフォリオDDが算出できなかった夜に、最悪銘柄DDで判定されたことを
+    読み手が気づけないと、ゲートが無言で従来挙動に戻っていても分からない。
+    """
+    monkeypatch.setattr("src.backtest.factory_report.get_results_dir", lambda: str(tmp_path))
+
+    evaluation = FactoryEvaluation(
+        hypothesis=FactoryHypothesis(
+            rule_spec={"type": "atomic", "rule": "rsi_contrarian", "params": {}}, market="jp"
+        ),
+        sharpe_ratio=1.6,
+        dsr=0.99,
+        pbo=0.1,
+        num_trades=85,
+        max_drawdown=-0.19,
+        win_rate=0.85,
+        total_return=0.09,
+        window_returns=[0.01],
+        n_symbols=20,
+    )
+
+    path = write_report(evaluation, champion_sharpe=1.0, period=("2024-01-01", "2025-01-01"))
+
+    import json
+
+    with open(path, encoding="utf-8") as f:
+        report = json.load(f)
+
+    body = report["issue_body"]
+    assert "曲線欠損によりゲート判定に使用" in body
+    assert "等金額保有したポートフォリオ" not in body
+    # NaN は JSON に書かず null にする
+    assert report["gate"]["portfolio_max_drawdown"] is None

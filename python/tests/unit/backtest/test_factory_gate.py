@@ -61,5 +61,47 @@ class TestEffectiveSymbolsGate(unittest.TestCase):
         self.assertTrue(any("effective_symbols" in r for r in ev.gate_reasons))
 
 
+class TestDrawdownGateUsesPortfolioDrawdown(unittest.TestCase):
+    """DD ゲートは最悪銘柄DDではなくポートフォリオDDを見る。
+
+    最悪銘柄DD（min over symbols）は有効銘柄数を増やすほど必ず悪化する最小値統計であり、
+    等金額で20銘柄以上を保有する運用者が実際に経験する数字ではない。
+    """
+
+    def test_passes_when_portfolio_drawdown_is_within_threshold(self):
+        # 最悪銘柄は -60% でも、ポートフォリオDDが -10% なら通す
+        ev = _make_eval(max_drawdown=-0.60, portfolio_max_drawdown=-0.10)
+
+        apply_gate(ev, champion_sharpe=1.0)
+
+        self.assertTrue(ev.gate_passed, ev.gate_reasons)
+
+    def test_fails_when_portfolio_drawdown_breaches_threshold(self):
+        # 最悪銘柄が浅くてもポートフォリオDDが閾値超過なら落とす
+        ev = _make_eval(max_drawdown=-0.01, portfolio_max_drawdown=-0.40)
+
+        apply_gate(ev, champion_sharpe=1.0)
+
+        self.assertFalse(ev.gate_passed)
+        self.assertTrue(any("portfolio_max_drawdown" in r for r in ev.gate_reasons))
+        self.assertFalse(any(r.startswith("max_drawdown") for r in ev.gate_reasons))
+
+    def test_falls_back_to_worst_symbol_drawdown_when_portfolio_is_nan(self):
+        # 曲線が1本も取れなかった場合は安全側（従来指標）で判定する
+        ev = _make_eval(max_drawdown=-0.60, portfolio_max_drawdown=float("nan"))
+
+        apply_gate(ev, champion_sharpe=1.0)
+
+        self.assertFalse(ev.gate_passed)
+        self.assertTrue(any("max_drawdown" in r for r in ev.gate_reasons))
+
+    def test_threshold_is_unchanged(self):
+        ev = _make_eval(portfolio_max_drawdown=-0.25)
+
+        apply_gate(ev, champion_sharpe=1.0)
+
+        self.assertTrue(ev.gate_passed, ev.gate_reasons)
+
+
 if __name__ == "__main__":
     unittest.main()

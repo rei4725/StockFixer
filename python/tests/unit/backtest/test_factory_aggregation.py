@@ -126,6 +126,29 @@ class TestAggregateSymbolMetrics(unittest.TestCase):
 
         self.assertAlmostEqual(result.max_drawdown, -0.20)
 
+    def test_effective_symbols_lists_adopted_symbols_in_input_order(self):
+        """ポートフォリオDDの合成対象を呼び出し側が特定できるよう銘柄名を返す。
+
+        集計に採用した銘柄と、ポートフォリオ equity を合成する銘柄が一致していないと
+        Sharpe と DD が別母集団の数字になってしまう。
+        """
+        rows = [
+            _row("AAA", 2, 25.0),  # 除外
+            _row("BBB", 5, 0.5),
+            _row("CCC", 6, 0.5),
+        ]
+
+        result = aggregate_symbol_metrics(rows, min_trades_per_symbol=3)
+
+        self.assertEqual(result.effective_symbols, ["BBB", "CCC"])
+
+    def test_effective_symbols_is_empty_when_no_symbol_qualifies(self):
+        rows = [_row("AAA", 1, 0.0), _row("BBB", 2, 25.0)]
+
+        result = aggregate_symbol_metrics(rows, min_trades_per_symbol=3)
+
+        self.assertEqual(result.effective_symbols, [])
+
 
 if __name__ == "__main__":
     unittest.main()

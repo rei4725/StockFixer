@@ -46,8 +46,7 @@ def apply_gate(evaluation: FactoryEvaluation, champion_sharpe: float) -> None:
         )
     if math.isnan(evaluation.dsr) or evaluation.dsr < FACTORY_GATE_MIN_DSR:
         reasons.append(f"dsr {evaluation.dsr:.3f} < {FACTORY_GATE_MIN_DSR}")
-    if evaluation.max_drawdown < FACTORY_GATE_MAX_DRAWDOWN:
-        reasons.append(f"max_drawdown {evaluation.max_drawdown:.3f} < {FACTORY_GATE_MAX_DRAWDOWN}")
+    _append_drawdown_reason(evaluation, reasons)
     if math.isnan(champion_sharpe):
         reasons.append("champion_sharpe が NaN（対照群が全滅しチャンピオン比較不能）のため不合格")
     else:
@@ -59,3 +58,22 @@ def apply_gate(evaluation: FactoryEvaluation, champion_sharpe: float) -> None:
             )
     evaluation.gate_reasons = reasons
     evaluation.gate_passed = not reasons
+
+
+def _append_drawdown_reason(evaluation: FactoryEvaluation, reasons: list[str]) -> None:
+    """DD ゲートはポートフォリオDDで判定する。
+
+    最悪銘柄DD（min over symbols）は有効銘柄数を増やすほど必ず悪化する最小値統計で
+    あり、等金額で20銘柄以上を保有する運用者が経験する数字ではない。閾値
+    FACTORY_GATE_MAX_DRAWDOWN は据え置き、比較する「量」だけを是正する。
+
+    equity 曲線が1本も得られずポートフォリオDDが算出できなかった場合（NaN）は、
+    ゲートを無言で外さないよう従来の最悪銘柄DDにフォールバックする。
+    """
+    value = evaluation.portfolio_max_drawdown
+    label = "portfolio_max_drawdown"
+    if math.isnan(value):
+        value = evaluation.max_drawdown
+        label = "max_drawdown"
+    if value < FACTORY_GATE_MAX_DRAWDOWN:
+        reasons.append(f"{label} {value:.3f} < {FACTORY_GATE_MAX_DRAWDOWN}")

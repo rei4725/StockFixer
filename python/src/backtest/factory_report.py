@@ -130,6 +130,27 @@ def _build_spec_section(spec: dict) -> str:
 """
 
 
+def _nullable(value: float) -> Optional[float]:
+    """NaN を None に落とす（JSON に NaN を書かないため）。"""
+    return None if math.isnan(value) else value
+
+
+def _build_drawdown_rows(evaluation: FactoryEvaluation) -> str:
+    """DD 行を組み立てる。ゲート対象はポートフォリオDD、最悪銘柄DDは診断値として併記。"""
+    portfolio_dd = evaluation.portfolio_max_drawdown
+    if math.isnan(portfolio_dd):
+        # 曲線が取れずフォールバックした場合は、判定に使った最悪銘柄DDにゲート列を付ける
+        return (
+            f"| 最大DD（有効銘柄の最悪値・曲線欠損によりゲート判定に使用） "
+            f"| {evaluation.max_drawdown:.2%} | >= {FACTORY_GATE_MAX_DRAWDOWN:.0%} |"
+        )
+    return (
+        f"| 最大DD（有効銘柄を等金額保有したポートフォリオ） "
+        f"| {portfolio_dd:.2%} | >= {FACTORY_GATE_MAX_DRAWDOWN:.0%} |\n"
+        f"| 最大DD（有効銘柄の最悪値・診断用） | {evaluation.max_drawdown:.2%} | - |"
+    )
+
+
 def _build_issue_body(
     evaluation: FactoryEvaluation,
     champion_sharpe: float,
@@ -153,6 +174,7 @@ def _build_issue_body(
         f"| 有効銘柄（{FACTORY_GATE_MIN_TRADES_PER_SYMBOL}取引以上） "
         f"| {evaluation.n_effective_symbols} | >= {FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS} |"
     )
+    drawdown_rows = _build_drawdown_rows(evaluation)
     return f"""## 戦略仮説（自動生成）
 
 夜間ファクトリーのゲートを通過した仮説です。`hypothesis_hash={h.hypothesis_hash}`
@@ -173,7 +195,7 @@ def _build_issue_body(
 | シグナル発生銘柄 | {evaluation.n_symbols_with_signal} | - |
 {effective_symbols_row}
 | 銘柄あたり平均取引数（シグナル発生銘柄基準） | {evaluation.avg_trades_per_symbol:.2f} | - |
-| 最大DD（有効銘柄の最悪値） | {evaluation.max_drawdown:.2%} | >= {FACTORY_GATE_MAX_DRAWDOWN:.0%} |
+{drawdown_rows}
 | 勝率（有効銘柄平均） | {evaluation.win_rate:.2%} | - |
 | リターン（有効銘柄平均） | {evaluation.total_return:.2%} | - |
 
@@ -217,6 +239,10 @@ def write_report(
             "pbo": evaluation.pbo,
             "num_trades": evaluation.num_trades,
             "max_drawdown": evaluation.max_drawdown,
+            # NaN は厳密な JSON として不正なため、算出不能時は null で書く。
+            # schema_version は 1 のまま（IssueAgent の intake が == 1 を要求しており、
+            # フィールド追加は後方互換であるため上げない）。
+            "portfolio_max_drawdown": _nullable(evaluation.portfolio_max_drawdown),
             "champion_sharpe": champion_sharpe,
             "n_symbols_with_signal": evaluation.n_symbols_with_signal,
             "n_effective_symbols": evaluation.n_effective_symbols,

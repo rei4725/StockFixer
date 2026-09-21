@@ -38,6 +38,7 @@ from src.backtest.factory_aggregation import SymbolMetrics, aggregate_symbol_met
 # apply_gate は factory_gate.py へ切り出したが、既存の
 # `from src.backtest.factory import apply_gate` を維持するため再エクスポートする。
 from src.backtest.factory_gate import apply_gate  # noqa: F401
+from src.backtest.factory_portfolio import portfolio_max_drawdown
 from src.backtest.factory_report import write_report
 from src.backtest.hypothesis_review import review_hypothesis
 from src.backtest.metrics import deflated_sharpe_ratio, probability_of_backtest_overfitting
@@ -340,6 +341,7 @@ def evaluate_hypothesis(
 
     symbol_rows: list[SymbolMetrics] = []
     window_returns_by_symbol: list[list[float]] = []
+    equity_by_symbol: dict[str, pd.Series] = {}
 
     for symbol, df in data_by_symbol.items():
         try:
@@ -348,7 +350,10 @@ def evaluate_hypothesis(
                 window_returns_by_symbol.append([0.0] * len(windows))
                 continue
 
-            _, metrics = backtester.simulate_trading(df, signal)
+            _, metrics = backtester.simulate_trading(df, signal, collect_equity=True)
+            equity = metrics.get("equity_curve")
+            if equity is not None and not equity.empty:
+                equity_by_symbol[symbol] = equity
             symbol_rows.append(
                 SymbolMetrics(
                     symbol=symbol,
@@ -381,6 +386,11 @@ def evaluate_hypothesis(
             )
 
     aggregated = aggregate_symbol_metrics(symbol_rows, min_trades_per_symbol)
+    # ゲートの DD 指標は、集計と同じ有効銘柄だけを等金額で保有したポートフォリオDD
+    portfolio_dd = portfolio_max_drawdown(
+        [equity_by_symbol[s] for s in aggregated.effective_symbols if s in equity_by_symbol],
+        initial_cash,
+    )
     window_returns = (
         np.mean(np.asarray(window_returns_by_symbol, dtype=float), axis=0).tolist()
         if window_returns_by_symbol
@@ -393,6 +403,7 @@ def evaluate_hypothesis(
         win_rate=aggregated.win_rate,
         num_trades=aggregated.num_trades,
         max_drawdown=aggregated.max_drawdown,
+        portfolio_max_drawdown=portfolio_dd,
         total_return=aggregated.total_return,
         window_returns=window_returns,
         n_symbols=len(data_by_symbol),
@@ -540,6 +551,11 @@ def run_factory_batch(
             win_rate=evaluation.win_rate,
             num_trades=evaluation.num_trades,
             max_drawdown=evaluation.max_drawdown,
+            portfolio_max_drawdown=(
+                None
+                if math.isnan(evaluation.portfolio_max_drawdown)
+                else evaluation.portfolio_max_drawdown
+            ),
             total_return=evaluation.total_return,
             dsr=evaluation.dsr,
             pbo=evaluation.pbo,
