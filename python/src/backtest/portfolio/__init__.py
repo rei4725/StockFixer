@@ -27,6 +27,7 @@ from typing import Any, Optional
 import pandas as pd
 
 from config.settings import MAX_SECTOR_POSITIONS
+from src.backtest.execution import ExecutionModel, TradingCosts
 from src.utils.logger import get_logger
 
 from .metrics import (  # noqa: F401
@@ -56,6 +57,16 @@ logger = get_logger(__name__)
 # ─────────────────────────────────────────
 
 
+def _build_execution(
+    market: Optional[str], fee_rate: float, slippage: Optional[float]
+) -> ExecutionModel:
+    """市場別の既定コストから ExecutionModel を組む。
+
+    market=None（全マーケット混在）は US 既定にフォールバックする。
+    """
+    return ExecutionModel(TradingCosts.for_market(market or "us", fee_rate, slippage))
+
+
 def run_portfolio_backtest(
     market: Optional[str] = None,
     model_type: str = "XGBoostModel",
@@ -65,6 +76,7 @@ def run_portfolio_backtest(
     source: str = "file",
     initial_cash: float = 1_000_000,
     fee_rate: float = 0.001,
+    slippage: Optional[float] = None,
     threshold: float = 0.0,
     ensemble: bool = False,
     max_sector_positions: int = MAX_SECTOR_POSITIONS,
@@ -82,6 +94,8 @@ def run_portfolio_backtest(
         source: データソース ("file" / "raw")
         initial_cash: 初期資金
         fee_rate: 片道手数料率
+        slippage: 片道スリッページ率。None のとき market 別の既定（#494）を使う。
+            market=None（全マーケット）のときは US 既定を用いる。
         threshold: 買いシグナル発生の最低予測上昇率（0.0=制限なし）
         ensemble: XGBoost+LightGBM アンサンブルを使用
         max_sector_positions: 同一セクターで許容する最大銘柄数（0 以下で無効）
@@ -125,7 +139,7 @@ def run_portfolio_backtest(
         rebalance_dates=rebalance_dates,
         top_n=top_n,
         initial_cash=initial_cash,
-        fee_rate=fee_rate,
+        execution=_build_execution(market, fee_rate, slippage),
         max_sector_positions=max_sector_positions,
         use_sector_rotation=use_sector_rotation,
     )
@@ -150,6 +164,7 @@ def compare_sector_rotation_kpi(
     source: str = "file",
     initial_cash: float = 1_000_000,
     fee_rate: float = 0.001,
+    slippage: Optional[float] = None,
     ensemble: bool = False,
     max_sector_positions: int = MAX_SECTOR_POSITIONS,
 ) -> dict[str, Any]:
@@ -180,13 +195,14 @@ def compare_sector_rotation_kpi(
 
     rebalance_dates = _get_rebalance_dates(pd.DatetimeIndex(score_matrix.index), rebalance_freq)
 
+    execution = _build_execution(market, fee_rate, slippage)
     eq_off, _ = _simulate_portfolio(
         score_matrix,
         close_matrix,
         rebalance_dates,
         top_n,
         initial_cash,
-        fee_rate,
+        execution,
         max_sector_positions,
         use_sector_rotation=False,
     )
@@ -196,7 +212,7 @@ def compare_sector_rotation_kpi(
         rebalance_dates,
         top_n,
         initial_cash,
-        fee_rate,
+        execution,
         max_sector_positions,
         use_sector_rotation=True,
     )

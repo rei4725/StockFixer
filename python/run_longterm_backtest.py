@@ -14,11 +14,8 @@ r"""長期コホート・バイ&ホールド・バックテスト実行スクリ
 import argparse
 import sys
 
-from src.backtest.longterm_backtest import (
-    build_conclusion,
-    run_longterm_backtest,
-    save_results,
-)
+from src.backtest.execution import DEFAULT_FEE_RATE
+from src.backtest.longterm_backtest import build_conclusion, run_longterm_backtest, save_results
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -42,7 +39,13 @@ def parse_args():
     parser.add_argument("--top-n", type=int, default=30, help="スクリーンで返す候補数")
     parser.add_argument("--initial-cash", type=float, default=1_000_000.0, help="初期資金")
     parser.add_argument("--max-positions", type=int, default=10, help="同時保有上限")
-    parser.add_argument("--fee-rate", type=float, default=0.001, help="売買手数料率")
+    parser.add_argument("--fee-rate", type=float, default=DEFAULT_FEE_RATE, help="売買手数料率")
+    parser.add_argument(
+        "--slippage",
+        type=float,
+        default=None,
+        help="片道スリッページ率（未指定なら市場別の既定値を使う）",
+    )
     parser.add_argument("--benchmark", type=str, default="^GSPC", help="ベンチマークティッカー")
     return parser.parse_args()
 
@@ -81,6 +84,7 @@ def main():
         initial_cash=args.initial_cash,
         max_positions=args.max_positions,
         fee_rate=args.fee_rate,
+        slippage=args.slippage,
         benchmark_ticker=args.benchmark,
     )
 

@@ -10,6 +10,8 @@ from unittest.mock import patch
 import numpy as np
 import pandas as pd
 
+from src.backtest.execution import ExecutionModel, TradingCosts
+
 
 class TestGetRegimeSectorWeight(unittest.TestCase):
     """get_regime_sector_weight のテスト"""
@@ -146,7 +148,7 @@ class TestSimulatePortfolioWithSectorRotation(unittest.TestCase):
             rebalance_dates,
             top_n=2,
             initial_cash=1_000_000,
-            fee_rate=0.001,
+            execution=ExecutionModel(TradingCosts(fee_rate=0.001)),
             max_sector_positions=3,
             use_sector_rotation=True,
         )
@@ -169,7 +171,7 @@ class TestSimulatePortfolioWithSectorRotation(unittest.TestCase):
             rebalance_dates,
             top_n=2,
             initial_cash=1_000_000,
-            fee_rate=0.001,
+            execution=ExecutionModel(TradingCosts(fee_rate=0.001)),
             max_sector_positions=3,
             use_sector_rotation=False,
         )
@@ -179,7 +181,7 @@ class TestSimulatePortfolioWithSectorRotation(unittest.TestCase):
             rebalance_dates,
             top_n=2,
             initial_cash=1_000_000,
-            fee_rate=0.001,
+            execution=ExecutionModel(TradingCosts(fee_rate=0.001)),
             max_sector_positions=3,
             use_sector_rotation=True,
         )

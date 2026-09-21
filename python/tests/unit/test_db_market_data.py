@@ -11,7 +11,12 @@ import pandas as pd
 
 import src.utils.data_path_utils as path_utils
 import src.utils.db as db_module
-from src.utils.db.market_data import load_all_raw_ohlcv_symbols, load_raw_ohlcv, upsert_raw_ohlcv
+from src.utils.db.market_data import (
+    load_all_raw_ohlcv_symbols,
+    load_raw_closes,
+    load_raw_ohlcv,
+    upsert_raw_ohlcv,
+)
 
 
 class _TmpDbTestCase(unittest.TestCase):
@@ -245,3 +250,49 @@ class TestLoadAllRawOhlcvSymbols(_TmpDbTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestLoadRawCloses(_TmpDbTestCase):
+    """load_raw_closes（N+1 回避の一括読み出し）のテスト"""
+
+    def _seed(self):
+        upsert_raw_ohlcv(self._make_rows(market="us", symbol="AAPL", n=3))
+        upsert_raw_ohlcv(self._make_rows(market="us", symbol="MSFT", n=3))
+        upsert_raw_ohlcv(self._make_rows(market="jp", symbol="7203", n=3))
+
+    def test_returns_all_symbols_of_market_in_one_frame(self):
+        self._seed()
+        df = load_raw_closes("us")
+        self.assertEqual(sorted(df["symbol"].unique()), ["AAPL", "MSFT"])
+        self.assertEqual(len(df), 6)
+
+    def test_columns_are_symbol_ts_close(self):
+        self._seed()
+        df = load_raw_closes("us")
+        self.assertEqual(list(df.columns), ["symbol", "ts", "close"])
+
+    def test_excludes_other_markets(self):
+        self._seed()
+        df = load_raw_closes("jp")
+        self.assertEqual(sorted(df["symbol"].unique()), ["7203"])
+
+    def test_end_date_filters_in_sql(self):
+        self._seed()
+        df = load_raw_closes("us", end_date="2026-01-02")
+        self.assertEqual(len(df), 4)  # 2 銘柄 x 2 日
+
+    def test_start_date_filters_in_sql(self):
+        self._seed()
+        df = load_raw_closes("us", start_date="2026-01-03")
+        self.assertEqual(len(df), 2)  # 2 銘柄 x 1 日
+
+    def test_returns_empty_frame_for_unknown_market(self):
+        self._seed()
+        df = load_raw_closes("xx")
+        self.assertTrue(df.empty)
+
+    def test_sorted_by_symbol_then_ts(self):
+        self._seed()
+        df = load_raw_closes("us")
+        expected = df.sort_values(["symbol", "ts"]).reset_index(drop=True)
+        pd.testing.assert_frame_equal(df.reset_index(drop=True), expected)

@@ -3,6 +3,7 @@ from typing import Any, Callable, Optional
 import pandas as pd
 
 from src.backtest.data_port import get_backtest_data_port
+from src.backtest.execution import ExecutionModel, TradingCosts
 from src.backtest.metrics import compute_cost_comparison_metrics
 from src.backtest.position_sizing import calc_position_details
 from src.backtest.task import BacktestTask, ReturnRegressionTask
@@ -57,6 +58,11 @@ class Backtester:
         self.atr_max_fraction = min(1.0, max(0.0, atr_max_fraction))
         self.enable_short = enable_short
         self.slippage_fn = slippage_fn  # R-210: 動的スリッページ関数 (qty, price, avg_vol) -> rate
+        # 手数料・スリッページの演算はすべて ExecutionModel に委譲する（Phase 1 / PR-1）。
+        self.execution = ExecutionModel(
+            TradingCosts(fee_rate=fee_rate, slippage_rate=slippage),
+            slippage_fn=slippage_fn,
+        )
         # #493: シグナル約定の実行ラグ（バー数）。1=翌バー約定（引け後シグナル→翌寄り）。
         # 0 で従来の同バー(当日Close)約定に戻す（後方互換）。
         self.execution_lag = max(0, int(execution_lag))
@@ -65,14 +71,10 @@ class Backtester:
     def _get_slippage(self, qty: int, price: float, volume: float = 0.0) -> float:
         """有効スリッページ率を返す（#494）。
 
-        基準スプレッド（フラット self.slippage）に、slippage_fn が設定されていれば
-        サイズ・流動性依存のマーケットインパクト（R-210 平方根モデル）を加算する。
-        出来高不明（volume<=0）や数量0の場合はフラット基準のみ。
+        実装は ExecutionModel.effective_slippage にある。既存の呼び出し元と
+        テストのために薄い委譲として残している。
         """
-        base = self.slippage
-        if self.slippage_fn is not None and volume > 0 and qty > 0:
-            return base + self.slippage_fn(qty, price, volume)
-        return base
+        return self.execution.effective_slippage(qty, price, volume)
 
     def run(
         self,
@@ -191,8 +193,7 @@ class Backtester:
                 change_from_entry = (price - position_price) / position_price
 
                 if self.stop_loss_pct is not None and change_from_entry <= -self.stop_loss_pct:
-                    slip = self._get_slippage(position, price, vol)
-                    proceeds = position * price * (1 - self.fee_rate - slip)
+                    proceeds = self.execution.sell_proceeds(position, price, vol)
                     proceeds_gross = position * price
                     cash += proceeds
                     cash_gross += proceeds_gross
@@ -216,8 +217,7 @@ class Backtester:
                     continue
 
                 if self.take_profit_pct is not None and change_from_entry >= self.take_profit_pct:
-                    slip = self._get_slippage(position, price, vol)
-                    proceeds = position * price * (1 - self.fee_rate - slip)
+                    proceeds = self.execution.sell_proceeds(position, price, vol)
                     proceeds_gross = position * price
                     cash += proceeds
                     cash_gross += proceeds_gross
@@ -245,10 +245,9 @@ class Backtester:
             if sig == 1 and self.enable_short and short_position > 0:
                 # エントリー売り: short_price * qty * (1 - fee - slip)
                 # カバー買い: exec_price * qty * (1 + fee + slip)
-                slip = self._get_slippage(short_position, exec_price, vol)
-                net_pnl = short_price * short_position * (
-                    1 - self.fee_rate - slip
-                ) - exec_price * short_position * (1 + self.fee_rate + slip)
+                net_pnl = self.execution.sell_proceeds(
+                    short_position, short_price, vol
+                ) - self.execution.buy_cost(short_position, exec_price, vol)
                 pnl = (short_price - exec_price) * short_position
                 cash += net_pnl
                 cash_gross += pnl
@@ -283,8 +282,7 @@ class Backtester:
                 )
                 qty = position_details["qty"]
                 if qty > 0:
-                    slip = self._get_slippage(qty, exec_price, vol)
-                    cost = qty * exec_price * (1 + self.fee_rate + slip)
+                    cost = self.execution.buy_cost(qty, exec_price, vol)
                     cost_gross = qty * exec_price
                     cash -= cost
                     cash_gross -= cost_gross
@@ -309,8 +307,7 @@ class Backtester:
                     )
             elif sig == -1 and position > 0:
                 # Sell (ロング決済・翌バー始値 exec_price で約定)
-                slip = self._get_slippage(position, exec_price, vol)
-                proceeds = position * exec_price * (1 - self.fee_rate - slip)
+                proceeds = self.execution.sell_proceeds(position, exec_price, vol)
                 proceeds_gross = position * exec_price
                 cash += proceeds
                 cash_gross += proceeds_gross
@@ -361,8 +358,7 @@ class Backtester:
         final_vol = float(avg_vol.iloc[-1]) if len(avg_vol) else 0.0
         if position > 0:
             price = df.iloc[-1][close_col]
-            slip = self._get_slippage(position, price, final_vol)
-            proceeds = position * price * (1 - self.fee_rate - slip)
+            proceeds = self.execution.sell_proceeds(position, price, final_vol)
             proceeds_gross = position * price
             cash += proceeds
             cash_gross += proceeds_gross
@@ -383,10 +379,9 @@ class Backtester:
             price = df.iloc[-1][close_col]
             # エントリー売り: short_price * qty * (1 - fee - slip)
             # カバー買い: price * qty * (1 + fee + slip)
-            slip = self._get_slippage(short_position, price, final_vol)
-            net_pnl = short_price * short_position * (
-                1 - self.fee_rate - slip
-            ) - price * short_position * (1 + self.fee_rate + slip)
+            net_pnl = self.execution.sell_proceeds(
+                short_position, short_price, final_vol
+            ) - self.execution.buy_cost(short_position, price, final_vol)
             pnl = (short_price - price) * short_position
             cash += net_pnl
             cash_gross += pnl
@@ -452,9 +447,9 @@ class Backtester:
         """
         long_value = position * price
         if short_position > 0:
-            short_net = short_price * short_position * (
-                1 - self.fee_rate - self.slippage
-            ) - price * short_position * (1 + self.fee_rate + self.slippage)
+            short_net = self.execution.sell_proceeds(
+                short_position, short_price
+            ) - self.execution.buy_cost(short_position, price)
             short_gross = (short_price - price) * short_position
         else:
             short_net = 0.0
@@ -506,8 +501,7 @@ class Backtester:
             atr_multiplier=self.atr_multiplier,
             atr_min_fraction=self.atr_min_fraction,
             atr_max_fraction=self.atr_max_fraction,
-            fee_rate=self.fee_rate,
-            slippage=self.slippage,
+            execution=self.execution,
             pred_value=pred_value,
             atr_value=atr_value,
         )
