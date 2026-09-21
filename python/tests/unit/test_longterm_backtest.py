@@ -240,7 +240,7 @@ if __name__ == "__main__":
 
 
 class TestMakeRescreenDates(unittest.TestCase):
-    """_make_rescreen_dates の二分探索化（PR-3）が旧実装と一致することの回帰テスト。"""
+    """make_rescreen_dates の二分探索化（PR-3）が旧実装と一致することの回帰テスト。"""
 
     @staticmethod
     def _reference(calendar, start, freq):

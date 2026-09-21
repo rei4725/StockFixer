@@ -7,9 +7,6 @@ from bisect import bisect_left
 import pandas as pd
 
 from src.utils.db.market_data import load_raw_closes
-from src.utils.logger import get_logger
-
-logger = get_logger(__name__)
 
 # rescreen_freq -> pandas DateOffset（リスクリーン間隔）
 FREQ_OFFSETS: dict[str, pd.DateOffset] = {

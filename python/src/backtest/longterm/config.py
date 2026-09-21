@@ -13,9 +13,12 @@ from src.screening.types import HoldRules
 class LongtermBacktestConfig:
     """1 回の長期バックテストを定義する不変の設定。
 
-    execution_lag: エントリー約定をリスクリーン日から何営業日ずらすか。
-                   0 = 当日 Close 約定（従来）、1 = 翌営業日 Close 約定。
-    n_trials:      DSR（過学習ガード）の試行回数。0 なら DSR を計算しない。
+    execution_lag: エントリー約定をリスクリーン日から何営業日ずらすかを表す想定の
+                   フィールド。**未配線（現時点ではどの値を渡しても効果が無い）**。
+                   PR-5 でエンジンに配線される予定。
+    n_trials:      DSR（過学習ガード）の試行回数を表す想定のフィールド。
+                   **未配線（現時点ではどの値を渡しても効果が無い）**。
+                   PR-6 で配線される予定。
     """
 
     market: str = "us"
