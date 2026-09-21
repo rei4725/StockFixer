@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 
 from src.backtest import longterm_backtest as lb
+from src.backtest.longterm import prices as lb_prices
 from src.screening.types import TrendCandidate
 
 _PHASE_A = 400  # トレンド形成期間（営業日）
@@ -127,7 +128,7 @@ def _run(symbols, screen=None, call_log=None, **kwargs):
             df = df[df["ts"] <= pd.Timestamp(end_date)]
         return df.reset_index(drop=True)
 
-    with patch.object(lb, "load_raw_closes", side_effect=_load_closes), patch.object(
+    with patch.object(lb_prices, "load_raw_closes", side_effect=_load_closes), patch.object(
         lb, "screen_trend_candidates", side_effect=screen
     ), patch.object(
         lb,
@@ -209,7 +210,9 @@ class TestLongtermBacktest(unittest.TestCase):
     def test_empty_universe(self):
         """対象データなしでも例外なく空の結果を返す。"""
         with patch.object(
-            lb, "load_raw_closes", return_value=pd.DataFrame(columns=["symbol", "ts", "close"])
+            lb_prices,
+            "load_raw_closes",
+            return_value=pd.DataFrame(columns=["symbol", "ts", "close"]),
         ), patch.object(
             lb,
             "fetch_benchmark_returns",
