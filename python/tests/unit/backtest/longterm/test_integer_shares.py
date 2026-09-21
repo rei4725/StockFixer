@@ -74,7 +74,7 @@ class TestEnterCandidatesIntegerSizing(unittest.TestCase):
         with patch.object(
             engine, "screen_trend_candidates", return_value=[candidate]
         ), patch.object(engine, "simulate_position", return_value=[ev]):
-            engine.enter_candidates(cfg, portfolio, self._DATE, price_map, execution)
+            engine.enter_candidates(cfg, portfolio, self._DATE, self._DATE, price_map, execution)
 
         return portfolio, execution
 

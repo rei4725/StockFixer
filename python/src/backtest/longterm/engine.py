@@ -24,7 +24,8 @@ import について:
 
 from __future__ import annotations
 
-from typing import Any
+from bisect import bisect_left
+from typing import Any, Optional
 
 import pandas as pd
 
@@ -86,14 +87,32 @@ def _peak_multiple(
     return peak / entry_price if entry_price > 0 else 0.0
 
 
+def resolve_entry_date(calendar: list[str], screen_date: str, lag: int) -> Optional[str]:
+    """スクリーン日から lag 営業日後の約定日を返す。
+
+    screen_date がカレンダーに存在しない場合、またはカレンダー末尾を越える
+    場合は None（そのリスクリーン日はエントリーを見送る）。
+    """
+    i = bisect_left(calendar, screen_date)
+    if i >= len(calendar) or calendar[i] != screen_date:
+        return None
+    j = i + lag
+    return calendar[j] if j < len(calendar) else None
+
+
 def enter_candidates(
     config: LongtermBacktestConfig,
     portfolio: Portfolio,
-    date: str,
+    screen_date: str,
+    entry_date: str,
     price_map: dict[str, pd.DataFrame],
     execution: ExecutionModel,
 ) -> None:
-    """リスクリーン日 date で空き枠に新規エントリーする。
+    """リスクリーン日 screen_date でスクリーンし、entry_date の終値で約定する。
+
+    ルックアヘッド禁止のため、候補選定（`screen_trend_candidates`）は
+    screen_date の as_of で行い、価格の引き当てと `simulate_position` の
+    起点は execution_lag だけ後ろの entry_date で行う。
 
     現金は `portfolio.cash` を読み、`portfolio.enter` が減算する。
     """
@@ -102,7 +121,9 @@ def enter_candidates(
     if empty_slots <= 0 or cash <= 0:
         return
 
-    candidates = screen_trend_candidates(market=config.market, top_n=config.top_n, as_of=date)
+    candidates = screen_trend_candidates(
+        market=config.market, top_n=config.top_n, as_of=screen_date
+    )
     new_syms = [
         c for c in candidates if c.symbol not in portfolio.positions and c.symbol in price_map
     ][:empty_slots]
@@ -116,7 +137,7 @@ def enter_candidates(
         symbol = cand.symbol
         # price_map は load_price_map が SQL 側で end まで切り詰め済み。
         series = price_map[symbol]
-        entry_row = series[series["date"] == date]
+        entry_row = series[series["date"] == entry_date]
         if entry_row.empty:
             continue
         entry_price = float(entry_row["Close"].iloc[0])
@@ -131,14 +152,14 @@ def enter_candidates(
 
         # イベント生成を enter の前に済ませることで、空イベント時の
         # 現金巻き戻しが不要になる（simulate_position は現金に依存しない）。
-        events = simulate_position(series, entry_date=date, rules=config.rules)
+        events = simulate_position(series, entry_date=entry_date, rules=config.rules)
         if not events:
             continue
 
         portfolio.enter(
             OpenPosition(
                 symbol=symbol,
-                entry_date=date,
+                entry_date=entry_date,
                 entry_price=entry_price,
                 shares=shares,
                 current_hf=1.0,
@@ -238,9 +259,11 @@ def run_longterm_backtest(
                     # 撤退後の同日イベントは保有が無いので処理しない。
                     break
 
-        # 2) リスクリーン日なら空き枠にエントリー
+        # 2) リスクリーン日なら空き枠にエントリー（約定は execution_lag 営業日後）
         if date in rescreen_dates:
-            enter_candidates(config, portfolio, date, price_map, execution)
+            entry_date = resolve_entry_date(calendar, date, config.execution_lag)
+            if entry_date is not None:
+                enter_candidates(config, portfolio, date, entry_date, price_map, execution)
 
         # 3) 日次ポートフォリオ評価額
         equity_rows.append(

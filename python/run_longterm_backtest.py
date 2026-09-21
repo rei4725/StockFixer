@@ -49,6 +49,12 @@ def parse_args():
         help="片道スリッページ率（未指定なら市場別の既定値を使う）",
     )
     parser.add_argument("--benchmark", type=str, default="^GSPC", help="ベンチマークティッカー")
+    parser.add_argument(
+        "--execution-lag",
+        type=int,
+        default=1,
+        help="エントリー約定をリスクリーン日から何営業日ずらすか（0=当日Close）",
+    )
     return parser.parse_args()
 
 
@@ -88,6 +94,7 @@ def main():
         fee_rate=args.fee_rate,
         slippage=args.slippage,
         benchmark_ticker=args.benchmark,
+        execution_lag=args.execution_lag,
     )
     equity_df, metrics, trades_df = run_longterm_backtest(config)
 

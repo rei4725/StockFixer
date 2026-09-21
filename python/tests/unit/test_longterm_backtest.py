@@ -147,17 +147,31 @@ def _run(symbols, screen=None, call_log=None, **kwargs):
 
 class TestLongtermBacktest(unittest.TestCase):
     def test_multiple_distribution(self):
-        """既知の 1.5倍・3倍・8倍軌道（全て満期保有）で到達倍率カウントが正しい。"""
+        """既知の 1.5倍・3倍・8倍軌道（全て満期保有）で到達倍率カウントが正しい。
+
+        execution_lag（既定 1）導入により、エントリーはスクリーン日
+        （Phase B 開始日＝価格 100.0 の日）の翌営業日に 1 日ずれる。
+        Phase B は linspace(start, 300/800/150, 500) の等差数列なので
+        1 ステップ = (終値-100)/499 だけ entry_price が始値より高くなり、
+        期待倍率は「区間の最終日（=最高値、単調増加のため）÷ entry_price」
+        として厳密に計算し直せる:
+            MID:  300 / (100 + 200/499) = 1497/501  ≈ 2.9880（旧 3.0）
+            HIGH: 800 / (100 + 700/499) = 399200/50600 ≈ 7.8893（旧 8.0）
+            LOW:  150 / (100 + 50/499)  = 74850/49950 ≈ 1.4985（旧 1.5）
+        いずれも 2倍/5倍/10倍の到達判定（n_2x/n_5x/n_10x）は変えないので
+        カウント自体は従来のまま。execution_lag=0 で旧実装と完全一致する
+        ことは別途スクリプトで検証済み（PR 本文参照）。
+        """
         _, metrics, trades = _run(["MID", "HIGH", "LOW"], max_positions=10)
         self.assertEqual(metrics["n_trades"], 3)
-        # MID(3x), HIGH(8x) が 2倍到達。LOW(1.5x) は未到達。
+        # MID(~2.99x), HIGH(~7.89x) が 2倍到達。LOW(~1.50x) は未到達。
         self.assertEqual(metrics["n_2x"], 2)
         self.assertEqual(metrics["n_5x"], 1)  # HIGH のみ
         self.assertEqual(metrics["n_10x"], 0)
         mm = dict(zip(trades["symbol"], trades["max_multiple"]))
-        self.assertAlmostEqual(mm["MID"], 3.0, places=2)
-        self.assertAlmostEqual(mm["HIGH"], 8.0, places=2)
-        self.assertAlmostEqual(mm["LOW"], 1.5, places=2)
+        self.assertAlmostEqual(mm["MID"], 1497 / 501, places=4)
+        self.assertAlmostEqual(mm["HIGH"], 399200 / 50600, places=4)
+        self.assertAlmostEqual(mm["LOW"], 74850 / 49950, places=4)
 
     def test_exit_reasons_recorded(self):
         """撤退理由が記録される（上昇銘柄=end_of_data, 崩落=stop 系）。"""
