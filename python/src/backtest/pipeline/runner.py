@@ -7,7 +7,7 @@ from typing import Any, Callable, Optional, Tuple
 
 import pandas as pd
 
-from config.settings import DEFAULT_SLIPPAGE_JP, DEFAULT_SLIPPAGE_US
+from src.backtest.execution import default_slippage_for
 from src.backtest.pipeline.features import load_features
 from src.backtest.ports import get_model_manager
 from src.backtest.slippage import make_slippage_fn
@@ -15,10 +15,9 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-
-def default_slippage_for(market: str) -> float:
-    """市場別のデフォルト片道スリッページ率を返す（#494）。"""
-    return DEFAULT_SLIPPAGE_JP if market == "jp" else DEFAULT_SLIPPAGE_US
+# default_slippage_for の実装は src.backtest.execution にある。本 module 内でも
+# _resolve_slippage が使うが、既存の呼び出し元とテストが runner 経由で import して
+# いるため、この import は re-export も兼ねている。
 
 
 def _resolve_slippage(
