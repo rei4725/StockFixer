@@ -4,7 +4,8 @@ Issue #511: 肥大化した metrics.py を責務別モジュールに分割。
 public/internal API は本 __init__ で再公開し、`from src.backtest.metrics import X`
 の後方互換を維持する。
 
-- core.py:        compute_metrics / コスト比較 / レジーム別 / Sharpe・DD ヘルパ
+- core.py:        compute_metrics / コスト比較 / レジーム別
+- stats.py:       入力形状に依存しない純粋統計関数（Sharpe / MaxDD / PF / CAGR）
 - overfitting.py: DSR / PBO (CSCV) / モンテカルロ equity
 - reporting.py:   plot_backtest / fetch_benchmark_returns / BENCHMARK_TICKERS
 """
@@ -31,6 +32,13 @@ from src.backtest.metrics.reporting import (  # noqa: F401
     fetch_benchmark_returns,
     plot_backtest,
 )
+from src.backtest.metrics.stats import (  # noqa: F401
+    annualize_sharpe,
+    cagr,
+    max_drawdown,
+    profit_factor,
+    sharpe_per_trade,
+)
 
 __all__ = [
     "compute_metrics",
@@ -49,4 +57,9 @@ __all__ = [
     "plot_backtest",
     "fetch_benchmark_returns",
     "BENCHMARK_TICKERS",
+    "max_drawdown",
+    "sharpe_per_trade",
+    "annualize_sharpe",
+    "profit_factor",
+    "cagr",
 ]
