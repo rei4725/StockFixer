@@ -23,6 +23,14 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+def _non_negative_int(value: str) -> int:
+    """execution_lag 用の argparse type。負数は明示的に拒否する。"""
+    ivalue = int(value)
+    if ivalue < 0:
+        raise argparse.ArgumentTypeError(f"execution_lag は 0 以上である必要があります: {value}")
+    return ivalue
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description="長期コホート・バイ&ホールド・バックテストを実行する",
@@ -49,6 +57,12 @@ def parse_args():
         help="片道スリッページ率（未指定なら市場別の既定値を使う）",
     )
     parser.add_argument("--benchmark", type=str, default="^GSPC", help="ベンチマークティッカー")
+    parser.add_argument(
+        "--execution-lag",
+        type=_non_negative_int,
+        default=1,
+        help="エントリー約定をリスクリーン日から何営業日ずらすか（0=当日Close、負数は不可）",
+    )
     return parser.parse_args()
 
 
@@ -88,6 +102,7 @@ def main():
         fee_rate=args.fee_rate,
         slippage=args.slippage,
         benchmark_ticker=args.benchmark,
+        execution_lag=args.execution_lag,
     )
     equity_df, metrics, trades_df = run_longterm_backtest(config)
 

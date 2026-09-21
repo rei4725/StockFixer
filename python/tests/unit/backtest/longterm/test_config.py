@@ -28,11 +28,6 @@ class TestBuild(unittest.TestCase):
         self.assertEqual(cfg.n_trials, 0)
         self.assertEqual(cfg.benchmark_ticker, "^GSPC")
 
-    def test_execution_lag_defaults_to_zero_in_pr4(self):
-        """PR-4 は振る舞い不変。lag の既定を 1 にするのは PR-5。"""
-        cfg = LongtermBacktestConfig.build(market="us")
-        self.assertEqual(cfg.execution_lag, 0)
-
     def test_is_frozen(self):
         cfg = LongtermBacktestConfig.build(market="us")
         with self.assertRaises(FrozenInstanceError):

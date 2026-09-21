@@ -13,7 +13,11 @@ import pandas as pd
 
 from src.backtest.execution import DEFAULT_FEE_RATE
 from src.backtest.longterm.config import LongtermBacktestConfig
-from src.backtest.longterm.engine import enter_candidates  # noqa: F401
+
+# enter_candidates はファサードから re-export しない: シグネチャが
+# スクリーン済み候補リスト受け取り前提に非互換変更されており、呼び出し元は
+# 内部の day loop（src.backtest.longterm.engine）のみ。外部から安定 API として
+# 使われることを避けるため、必要なら src.backtest.longterm.engine から直接 import すること。
 from src.backtest.longterm.engine import run_longterm_backtest as _run_with_config
 from src.backtest.longterm.reporting import build_conclusion, save_results  # noqa: F401
 from src.screening.types import HoldRules
@@ -37,6 +41,7 @@ def run_longterm_backtest(
     fee_rate: float = DEFAULT_FEE_RATE,
     slippage: Optional[float] = None,
     benchmark_ticker: str = "^GSPC",
+    execution_lag: int = 1,
     rules: Optional[HoldRules] = None,
 ) -> tuple[pd.DataFrame, dict, pd.DataFrame]:
     """旧シグネチャの互換ラッパ。新規の呼び出しは Config 版を使うこと。"""
@@ -51,6 +56,7 @@ def run_longterm_backtest(
         fee_rate=fee_rate,
         slippage=slippage,
         benchmark_ticker=benchmark_ticker,
+        execution_lag=execution_lag,
         rules=rules,
     )
     return _run_with_config(config)

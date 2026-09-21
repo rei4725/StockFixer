@@ -23,7 +23,7 @@ class OpenPosition:
     symbol: str
     entry_date: str
     entry_price: float
-    shares: float
+    shares: int
     current_hf: float = 1.0
     cost_basis: float = 0.0
     realized: float = 0.0
