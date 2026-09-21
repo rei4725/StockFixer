@@ -14,9 +14,11 @@ class LongtermBacktestConfig:
     """1 回の長期バックテストを定義する不変の設定。
 
     execution_lag: エントリー約定をリスクリーン日から何営業日ずらすか。
-                   `enter_candidates` はスクリーン（as_of）をリスクリーン日で行い、
-                   価格の引き当てと `simulate_position` の起点はこの値だけ後ろの
-                   営業日（`resolve_entry_date`）で行う。0 なら従来通りスクリーン
+                   スクリーン（as_of）は day loop 側がリスクリーン日で行い、
+                   `enter_candidates` はそのスクリーン済み候補リストを受け取って
+                   約定するだけである。価格の引き当てと `simulate_position` の
+                   起点はスクリーン日からこの値だけ後ろの営業日
+                   （`resolve_entry_date`）になる。0 なら従来通りスクリーン
                    当日の終値で約定する。リスクリーン日がカレンダー末尾から
                    lag 営業日以内の場合、その回のエントリーは見送られる。
     n_trials:      DSR（過学習ガード）の試行回数を表す想定のフィールド。

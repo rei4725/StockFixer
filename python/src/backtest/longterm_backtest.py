@@ -13,7 +13,11 @@ import pandas as pd
 
 from src.backtest.execution import DEFAULT_FEE_RATE
 from src.backtest.longterm.config import LongtermBacktestConfig
-from src.backtest.longterm.engine import enter_candidates  # noqa: F401
+
+# enter_candidates はファサードから re-export しない: シグネチャが
+# スクリーン済み候補リスト受け取り前提に非互換変更されており、呼び出し元は
+# 内部の day loop（src.backtest.longterm.engine）のみ。外部から安定 API として
+# 使われることを避けるため、必要なら src.backtest.longterm.engine から直接 import すること。
 from src.backtest.longterm.engine import run_longterm_backtest as _run_with_config
 from src.backtest.longterm.reporting import build_conclusion, save_results  # noqa: F401
 from src.screening.types import HoldRules
