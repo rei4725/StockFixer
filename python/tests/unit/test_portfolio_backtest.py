@@ -189,7 +189,7 @@ class TestSavePortfolioResults:
         )
         metrics = {"total_return": 0.01}
 
-        with patch("src.utils.data_path_utils.get_results_dir", return_value=str(tmp_path)):
+        with patch("src.utils.results_io.get_results_dir", return_value=str(tmp_path)):
             save_portfolio_results(
                 equity_df,
                 metrics,

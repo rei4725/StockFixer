@@ -24,7 +24,6 @@ import について:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Any, Optional
 
 import pandas as pd
@@ -34,9 +33,9 @@ from src.backtest.metrics import _max_drawdown, fetch_benchmark_returns
 from src.screening.hold_engine import simulate_position
 from src.screening.trend_screener import screen_trend_candidates
 from src.screening.types import HoldRules
-from src.utils.data_path_utils import ensure_dir, get_results_dir
 from src.utils.db.market_data import load_all_raw_ohlcv_symbols, load_raw_ohlcv
 from src.utils.logger import get_logger
+from src.utils.results_io import save_result_csvs
 
 logger = get_logger(__name__)
 
@@ -426,14 +425,11 @@ def _compute_metrics(
 
 def save_results(equity_df: pd.DataFrame, trades_df: pd.DataFrame, market: str) -> tuple[str, str]:
     """equity / trades を results/backtest/longterm/ に CSV 保存しパスを返す。"""
-    out_dir = ensure_dir(f"{get_results_dir()}/backtest/longterm")
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    equity_path = f"{out_dir}/equity_{market}_{ts}.csv"
-    trades_path = f"{out_dir}/trades_{market}_{ts}.csv"
-    equity_df.to_csv(equity_path, index=False)
-    trades_df.to_csv(trades_path, index=False)
-    logger.info("結果を保存: %s / %s", equity_path, trades_path)
-    return equity_path, trades_path
+    paths = save_result_csvs(
+        {f"equity_{market}": equity_df, f"trades_{market}": trades_df},
+        "backtest/longterm",
+    )
+    return paths[f"equity_{market}"], paths[f"trades_{market}"]
 
 
 def build_conclusion(metrics: dict, market: str, start: str, end: str, max_positions: int) -> str:

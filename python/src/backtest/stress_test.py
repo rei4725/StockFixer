@@ -10,7 +10,6 @@ run_stress_test.py はこのモジュールの関数を呼び出すラッパー�
 from __future__ import annotations
 
 import os
-from datetime import datetime
 from typing import Any, Optional
 
 import pandas as pd
@@ -19,6 +18,7 @@ from src.backtest.pipeline import run_backtest_single
 from src.backtest.types import StressTestResult
 from src.domain.types import SymbolTask
 from src.utils.logger import get_logger
+from src.utils.results_io import results_timestamp, save_csv
 
 logger = get_logger(__name__)
 
@@ -255,9 +255,9 @@ def save_stress_test_results(
         for r in results
     ]
     df = pd.DataFrame(rows)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filepath = os.path.join(output_dir, f"stress_test_{timestamp}.csv")
-    df.to_csv(filepath, index=False, encoding="utf-8-sig")
+    filepath = save_csv(
+        df, output_dir, f"stress_test_{results_timestamp()}.csv", encoding="utf-8-sig"
+    )
     logger.info(f"[stress_test] 結果を保存しました: {filepath}")
     return filepath
 

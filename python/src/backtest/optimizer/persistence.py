@@ -11,8 +11,9 @@ from typing import Any, Dict, Optional
 
 import pandas as pd
 
-from src.utils.data_path_utils import ensure_dir, get_results_dir
+from src.utils.data_path_utils import ensure_dir
 from src.utils.logger import get_logger
+from src.utils.results_io import save_result_csvs
 
 logger = get_logger(__name__)
 
@@ -116,12 +117,7 @@ def save_optimization_results(
     Returns:
         保存先ファイルパス
     """
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_dir = os.path.join(get_results_dir(), "optimize", f"{market}_{symbol}")
-    ensure_dir(out_dir)
-    path = os.path.join(out_dir, f"optimize_{ts}.csv")
-    result_df.to_csv(path, index=False)
-    return path
+    return save_result_csvs({"optimize": result_df}, f"optimize/{market}_{symbol}")["optimize"]
 
 
 def save_optimal_params_json(
