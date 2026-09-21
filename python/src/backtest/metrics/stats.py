@@ -51,6 +51,11 @@ def profit_factor(wins: list[float], losses: list[float]) -> float:
     `core.py` のインライン式と同じ集計だが、取引が皆無の場合のみ 0.0 を返す
     （`core.py` 側は `math.inf` を返し呼び出し側が None に変換するため、
     互換性維持の観点から `core.py` のインライン式は置き換えていない）。
+
+    この差はそのまま出荷仕様になっている: 取引数ゼロのとき、
+    `core.compute_metrics` は `profit_factor: None` を返すのに対し、
+    `compute_longterm_metrics`（本関数を呼ぶ）は `profit_factor: 0.0` を返す。
+    同じキー名で2つのバックテスターが異なる空状態の値を返す点に注意すること。
     """
     gross_profit = sum(w for w in wins if w > 0)
     gross_loss = abs(sum(loss for loss in losses if loss < 0))

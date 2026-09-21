@@ -23,7 +23,9 @@ class LongtermBacktestConfig:
                    lag 営業日以内の場合、その回のエントリーは見送られる。
     n_trials:      DSR（過学習ガード）の試行回数。`compute_longterm_metrics` が
                    これが 0 より大きいときだけ `metrics["dsr"]` を計算する
-                   （既定の 0 では DSR は出力されない）。
+                   （既定の 0 では DSR は出力されない）。エンジン側では機能するが、
+                   CLI からこの値を指定するフラグは未提供（呼び出し元コードから
+                   設定する必要がある）。
     """
 
     market: str = "us"

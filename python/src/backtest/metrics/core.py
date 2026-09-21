@@ -14,11 +14,9 @@ import pandas as pd
 
 from src.backtest.data_port import get_backtest_data_port
 from src.backtest.metrics.overfitting import deflated_sharpe_ratio, monte_carlo_equity
-from src.backtest.metrics.stats import annualize_sharpe, max_drawdown, sharpe_per_trade
-
-_max_drawdown = max_drawdown
-_sharpe_per_trade = sharpe_per_trade
-_annualize_sharpe = annualize_sharpe
+from src.backtest.metrics.stats import annualize_sharpe as _annualize_sharpe
+from src.backtest.metrics.stats import max_drawdown as _max_drawdown
+from src.backtest.metrics.stats import sharpe_per_trade as _sharpe_per_trade
 
 
 def compute_metrics(
@@ -91,6 +89,9 @@ def compute_metrics(
 
     gross_profit = sum(w for w in wins if w > 0)
     gross_loss = abs(sum(loss for loss in losses if loss < 0))
+    # stats.profit_factor と同じ集計だが、取引ゼロ時の値が異なる（意図的、非統一）:
+    # ここは math.inf を返し、呼び出し側（下の result 組み立て）で None に変換する。
+    # stats.profit_factor は取引ゼロ時に 0.0 を返す。詳細は stats.profit_factor の docstring。
     profit_factor = gross_profit / gross_loss if gross_loss > 0 else math.inf
 
     avg_win = float(np.mean(win_returns)) if win_returns else 0.0
@@ -290,6 +291,10 @@ def _estimate_trades_per_year(
     旧実装は一律 252 取引/年と仮定して年率化していたが、これは実取引頻度を無視し
     Sharpe を頻度非整合に膨張させていた。期間が不明な場合のみ従来挙動（252）に
     フォールバックする。
+
+    長期コホートバックテスト（`longterm/metrics.py`）は意図的に異なる分母
+    （実取引日付スパンではなく config の設定期間全体）を使う。理由は
+    `longterm/metrics.py` の trades_per_year 算出箇所のコメントを参照。
     """
     if num_trades < 1 or "date" not in trade_log.columns:
         return float(trading_days_per_year)
