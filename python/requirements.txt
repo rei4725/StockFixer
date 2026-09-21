@@ -22,7 +22,7 @@ ta==0.11.0
 duckdb==1.5.5
 psycopg[binary,pool]>=3.3.5
 apscheduler==3.11.3
-streamlit>=1.63.0
+streamlit>=1.64.0
 plotly>=7.1.0
 filelock>=3.32.6
 optuna>=4.9.0
