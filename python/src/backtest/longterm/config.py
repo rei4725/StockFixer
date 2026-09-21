@@ -37,6 +37,10 @@ class LongtermBacktestConfig:
     costs: TradingCosts = field(default_factory=TradingCosts)
     rules: HoldRules = field(default_factory=HoldRules)
 
+    def __post_init__(self) -> None:
+        if self.execution_lag < 0:
+            raise ValueError(f"execution_lag は 0 以上である必要があります: {self.execution_lag}")
+
     @classmethod
     def build(
         cls,

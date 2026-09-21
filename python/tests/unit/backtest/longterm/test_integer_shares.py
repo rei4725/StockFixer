@@ -71,10 +71,8 @@ class TestEnterCandidatesIntegerSizing(unittest.TestCase):
         execution = ExecutionModel(cfg.costs)
         portfolio = Portfolio(cash=self._PER_POSITION)
 
-        with patch.object(
-            engine, "screen_trend_candidates", return_value=[candidate]
-        ), patch.object(engine, "simulate_position", return_value=[ev]):
-            engine.enter_candidates(cfg, portfolio, self._DATE, self._DATE, price_map, execution)
+        with patch.object(engine, "simulate_position", return_value=[ev]):
+            engine.enter_candidates(cfg, portfolio, self._DATE, [candidate], price_map, execution)
 
         return portfolio, execution
 

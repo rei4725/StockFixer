@@ -37,6 +37,7 @@ def run_longterm_backtest(
     fee_rate: float = DEFAULT_FEE_RATE,
     slippage: Optional[float] = None,
     benchmark_ticker: str = "^GSPC",
+    execution_lag: int = 1,
     rules: Optional[HoldRules] = None,
 ) -> tuple[pd.DataFrame, dict, pd.DataFrame]:
     """旧シグネチャの互換ラッパ。新規の呼び出しは Config 版を使うこと。"""
@@ -51,6 +52,7 @@ def run_longterm_backtest(
         fee_rate=fee_rate,
         slippage=slippage,
         benchmark_ticker=benchmark_ticker,
+        execution_lag=execution_lag,
         rules=rules,
     )
     return _run_with_config(config)
