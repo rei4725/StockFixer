@@ -163,7 +163,7 @@ class TestLongtermBacktest(unittest.TestCase):
         ことは別途スクリプトで検証済み（PR 本文参照）。
         """
         _, metrics, trades = _run(["MID", "HIGH", "LOW"], max_positions=10)
-        self.assertEqual(metrics["n_trades"], 3)
+        self.assertEqual(metrics["num_trades"], 3)
         # MID(~2.99x), HIGH(~7.89x) が 2倍到達。LOW(~1.50x) は未到達。
         self.assertEqual(metrics["n_2x"], 2)
         self.assertEqual(metrics["n_5x"], 1)  # HIGH のみ
@@ -189,7 +189,7 @@ class TestLongtermBacktest(unittest.TestCase):
         # 5 銘柄を候補にするが上限 2 → 上位 2（HIGH, MID）のみ保有
         symbols = ["HIGH", "MID", "CRASH"]
         _, metrics, trades = _run(symbols, max_positions=2)
-        self.assertLessEqual(metrics["n_trades"], 2)
+        self.assertLessEqual(metrics["num_trades"], 2)
         # スコア上位 2 銘柄が選ばれる
         self.assertEqual(set(trades["symbol"]), {"HIGH", "MID"})
 
@@ -238,7 +238,7 @@ class TestLongtermBacktest(unittest.TestCase):
             )
         self.assertTrue(equity.empty)
         self.assertTrue(trades.empty)
-        self.assertEqual(metrics["n_trades"], 0)
+        self.assertEqual(metrics["num_trades"], 0)
         self.assertEqual(metrics["final_cash"], 1_000_000.0)
 
     def test_conclusion_contains_survivorship_note(self):

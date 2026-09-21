@@ -74,7 +74,7 @@ def _print_summary(metrics: dict) -> None:
         "total_return",
         "cagr",
         "max_drawdown",
-        "n_trades",
+        "num_trades",
         "n_2x",
         "n_3x",
         "n_5x",
@@ -83,6 +83,9 @@ def _print_summary(metrics: dict) -> None:
         "avg_win_multiple",
         "avg_loss",
         "avg_held_days",
+        "sharpe_ratio",
+        "profit_factor",
+        "calmar_ratio",
         "benchmark_return",
         "alpha",
     ):

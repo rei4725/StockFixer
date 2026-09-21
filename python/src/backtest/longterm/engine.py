@@ -187,7 +187,7 @@ def _empty_result(
     benchmark = fetch_benchmark_returns(config.benchmark_ticker, config.start, config.end)
     return (
         empty_equity,
-        compute_longterm_metrics(empty_equity, empty_trades, config, benchmark),
+        compute_longterm_metrics(empty_equity, empty_trades, config, benchmark, []),
         empty_trades,
     )
 
@@ -306,5 +306,5 @@ def run_longterm_backtest(
     trades_df = _trades_frame(portfolio)
 
     benchmark = fetch_benchmark_returns(config.benchmark_ticker, config.start, config.end)
-    metrics = compute_longterm_metrics(equity_df, trades_df, config, benchmark)
+    metrics = compute_longterm_metrics(equity_df, trades_df, config, benchmark, portfolio.closed)
     return equity_df, metrics, trades_df
