@@ -244,7 +244,10 @@ class TestLongtermBacktest(unittest.TestCase):
     def test_conclusion_contains_survivorship_note(self):
         """結論文に生存者バイアスの注意書きが含まれる。"""
         _, metrics, _ = _run(["MID", "HIGH"], max_positions=10)
-        text = lb.build_conclusion(metrics, "us", _ENTRY_DATE, _END, 10)
+        cfg = lb.LongtermBacktestConfig.build(
+            market="us", start=_ENTRY_DATE, end=_END, rescreen_freq="quarterly", max_positions=10
+        )
+        text = lb.build_conclusion(metrics, cfg)
         self.assertIn("生存者バイアス", text)
         self.assertIn("到達", text)
 

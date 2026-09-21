@@ -7,7 +7,16 @@ from __future__ import annotations
 
 import pandas as pd
 
+from src.backtest.longterm.config import LongtermBacktestConfig
 from src.utils.results_io import save_result_csvs
+
+_FREQ_LABELS = {
+    "weekly": "週次",
+    "monthly": "月次",
+    "quarterly": "四半期",
+    "yearly": "年次",
+    "annual": "年次",
+}
 
 
 def save_results(equity_df: pd.DataFrame, trades_df: pd.DataFrame, market: str) -> tuple[str, str]:
@@ -19,7 +28,7 @@ def save_results(equity_df: pd.DataFrame, trades_df: pd.DataFrame, market: str) 
     return paths[f"equity_{market}"], paths[f"trades_{market}"]
 
 
-def build_conclusion(metrics: dict, market: str, start: str, end: str, max_positions: int) -> str:
+def build_conclusion(metrics: dict, config: LongtermBacktestConfig) -> str:
     """metrics から結論文を組み立てる（サマリ出力用）。"""
     initial = metrics.get("initial_cash", 0.0)
     final = metrics.get("final_cash", 0.0)
@@ -36,9 +45,11 @@ def build_conclusion(metrics: dict, market: str, start: str, end: str, max_posit
         if bench is not None and alpha is not None
         else "ベンチマーク比較はデータ取得失敗のため省略。"
     )
+    freq_label = _FREQ_LABELS.get(config.rescreen_freq, config.rescreen_freq)
+    ma_weeks = config.rules.trail_ma_weeks
     return (
-        f"{market} を {start}〜{end} に四半期スクリーン・最大{max_positions}銘柄保有・"
-        f"40週線割れまでホールドの規律で運用した場合、"
+        f"{config.market} を {config.start}〜{config.end} に{freq_label}スクリーン・"
+        f"最大{config.max_positions}銘柄保有・{ma_weeks}週線割れまでホールドの規律で運用した場合、"
         f"資産は {initial:,.0f}円→{final:,.0f}円（{mult:.2f}倍, 総リターン {total_ret:+.1%}, "
         f"CAGR {cagr:+.1%}）、最大DD {max_dd:.1%}。"
         f"期間中に 2倍到達 {metrics.get('n_2x', 0)}件 / 3倍 {metrics.get('n_3x', 0)}件 / "

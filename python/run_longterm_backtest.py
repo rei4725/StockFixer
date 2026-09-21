@@ -112,7 +112,7 @@ def main():
     _print_summary(metrics)
 
     print("\n===== 結論 =====")
-    print(build_conclusion(metrics, args.market, args.start, args.end, args.max_positions))
+    print(build_conclusion(metrics, config))
 
     if not equity_df.empty:
         equity_path, trades_path = save_results(equity_df, trades_df, args.market)
