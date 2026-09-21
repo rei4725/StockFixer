@@ -66,8 +66,11 @@ class FactoryEvaluation:
     """1仮説の評価結果（全期間メトリクス + 窓別リターン + ゲート判定）。"""
 
     hypothesis: FactoryHypothesis
+    # 銘柄別・年率化 Sharpe の単純平均（診断用。ゲート判定には使わない）
     sharpe_ratio: float = 0.0
     sharpe_per_trade: float = 0.0
+    # プール済み per-trade Sharpe を1回だけ年率化した値（ゲート判定に使う。不能なら NaN）
+    portfolio_sharpe_ratio: float = float("nan")
     win_rate: float = 0.0
     num_trades: int = 0
     # 有効銘柄のうち最悪の1銘柄の DD（診断用。ゲート判定には使わない）

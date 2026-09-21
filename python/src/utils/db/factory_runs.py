@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS factory_runs (
     market           VARCHAR   NOT NULL,
     spec_json        VARCHAR   NOT NULL,
     sharpe_ratio     DOUBLE PRECISION,
+    portfolio_sharpe_ratio DOUBLE PRECISION,
     win_rate         DOUBLE PRECISION,
     num_trades       INTEGER,
     max_drawdown     DOUBLE PRECISION,
@@ -48,6 +49,10 @@ def ensure_factory_tables() -> None:
             "ALTER TABLE factory_runs ADD COLUMN IF NOT EXISTS "
             "portfolio_max_drawdown DOUBLE PRECISION"
         )
+        con.execute(
+            "ALTER TABLE factory_runs ADD COLUMN IF NOT EXISTS "
+            "portfolio_sharpe_ratio DOUBLE PRECISION"
+        )
 
 
 def save_factory_run(
@@ -65,6 +70,7 @@ def save_factory_run(
     gate_reasons: Optional[str] = None,
     report_path: Optional[str] = None,
     portfolio_max_drawdown: Optional[float] = None,
+    portfolio_sharpe_ratio: Optional[float] = None,
 ) -> None:
     """評価済み仮説を factory_runs に保存する（同一ハッシュは置換）。"""
     ensure_factory_tables()
@@ -74,8 +80,9 @@ def save_factory_run(
             INSERT INTO factory_runs
                 (hypothesis_hash, market, spec_json, sharpe_ratio, win_rate, num_trades,
                  max_drawdown, total_return, dsr, pbo, gate_passed, gate_reasons,
-                 report_path, evaluated_at, portfolio_max_drawdown)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 report_path, evaluated_at, portfolio_max_drawdown,
+                 portfolio_sharpe_ratio)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (hypothesis_hash) DO UPDATE SET
                 market = EXCLUDED.market,
                 spec_json = EXCLUDED.spec_json,
@@ -90,7 +97,8 @@ def save_factory_run(
                 gate_reasons = EXCLUDED.gate_reasons,
                 report_path = EXCLUDED.report_path,
                 evaluated_at = EXCLUDED.evaluated_at,
-                portfolio_max_drawdown = EXCLUDED.portfolio_max_drawdown
+                portfolio_max_drawdown = EXCLUDED.portfolio_max_drawdown,
+                portfolio_sharpe_ratio = EXCLUDED.portfolio_sharpe_ratio
             """,
             [
                 hypothesis_hash,
@@ -108,6 +116,7 @@ def save_factory_run(
                 report_path,
                 datetime.now(),
                 portfolio_max_drawdown,
+                portfolio_sharpe_ratio,
             ],
         )
     logger.debug(

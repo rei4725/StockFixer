@@ -135,6 +135,20 @@ def _nullable(value: float) -> Optional[float]:
     return None if math.isnan(value) else value
 
 
+def _build_sharpe_rows(evaluation: FactoryEvaluation, champion_cell: str) -> str:
+    """Sharpe 行を組み立てる。champion 比較に使うのはプール済み per-trade ベースの値。"""
+    pooled = evaluation.portfolio_sharpe_ratio
+    if math.isnan(pooled):
+        return (
+            f"| Sharpe（有効銘柄平均・プール値算出不能によりゲート判定に使用） "
+            f"| {evaluation.sharpe_ratio:.3f} | {champion_cell} |"
+        )
+    return (
+        f"| Sharpe（プール済み取引リターンを年率化） | {pooled:.3f} | {champion_cell} |\n"
+        f"| Sharpe（有効銘柄平均・診断用） | {evaluation.sharpe_ratio:.3f} | - |"
+    )
+
+
 def _build_drawdown_rows(evaluation: FactoryEvaluation) -> str:
     """DD 行を組み立てる。ゲート対象はポートフォリオDD、最悪銘柄DDは診断値として併記。"""
     portfolio_dd = evaluation.portfolio_max_drawdown
@@ -175,6 +189,7 @@ def _build_issue_body(
         f"| {evaluation.n_effective_symbols} | >= {FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS} |"
     )
     drawdown_rows = _build_drawdown_rows(evaluation)
+    sharpe_rows = _build_sharpe_rows(evaluation, champion_cell)
     return f"""## 戦略仮説（自動生成）
 
 夜間ファクトリーのゲートを通過した仮説です。`hypothesis_hash={h.hypothesis_hash}`
@@ -188,7 +203,7 @@ def _build_issue_body(
 
 | 指標 | 値 | ゲート |
 |---|---|---|
-| Sharpe（有効銘柄平均） | {evaluation.sharpe_ratio:.3f} | {champion_cell} |
+{sharpe_rows}
 | Deflated Sharpe | {evaluation.dsr:.3f} | >= {FACTORY_GATE_MIN_DSR} |
 | PBO | {evaluation.pbo:.3f} | <= {FACTORY_GATE_MAX_PBO} |
 | 取引数（有効銘柄合計） | {evaluation.num_trades} | >= {FACTORY_GATE_MIN_TRADES} |
@@ -235,6 +250,7 @@ def write_report(
         "labels": ["strategy-factory"],
         "gate": {
             "sharpe_ratio": evaluation.sharpe_ratio,
+            "portfolio_sharpe_ratio": _nullable(evaluation.portfolio_sharpe_ratio),
             "dsr": evaluation.dsr,
             "pbo": evaluation.pbo,
             "num_trades": evaluation.num_trades,

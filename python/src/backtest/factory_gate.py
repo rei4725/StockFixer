@@ -50,14 +50,36 @@ def apply_gate(evaluation: FactoryEvaluation, champion_sharpe: float) -> None:
     if math.isnan(champion_sharpe):
         reasons.append("champion_sharpe が NaN（対照群が全滅しチャンピオン比較不能）のため不合格")
     else:
-        required = champion_sharpe * FACTORY_GATE_CHAMPION_MARGIN
-        if evaluation.sharpe_ratio <= required:
-            reasons.append(
-                f"sharpe {evaluation.sharpe_ratio:.3f} <= champion×{FACTORY_GATE_CHAMPION_MARGIN}"
-                f" ({required:.3f})"
-            )
+        _append_champion_reason(evaluation, champion_sharpe, reasons)
     evaluation.gate_reasons = reasons
     evaluation.gate_passed = not reasons
+
+
+def _append_champion_reason(
+    evaluation: FactoryEvaluation, champion_sharpe: float, reasons: list[str]
+) -> None:
+    """champion 比較はプール済み per-trade ベースの Sharpe で行う。
+
+    従来の sharpe_ratio は「銘柄別・年率化 Sharpe の単純平均」で、銘柄あたり3取引で
+    採用される（FACTORY_GATE_MIN_TRADES_PER_SYMBOL=3）ため発散した値が平均に混ざる。
+    台帳の再現ペア（同一戦略が別日に再評価された130組）で自己相関は 0.446 しかなく、
+    取引数 0.994 / DD 0.958 / リターン 0.898 と比べて著しく不安定だった。
+    97% の候補を落とすゲートの判定基準としてはノイズが支配的である。
+
+    portfolio_sharpe_ratio が算出不能（NaN）の場合は、ゲートを無言で外さないよう
+    従来の銘柄別平均へフォールバックする。champion_sharpe は呼び出し側が同じ指標で
+    算出したものを渡す前提である。
+    """
+    value = evaluation.portfolio_sharpe_ratio
+    label = "portfolio_sharpe"
+    if math.isnan(value):
+        value = evaluation.sharpe_ratio
+        label = "sharpe"
+    required = champion_sharpe * FACTORY_GATE_CHAMPION_MARGIN
+    if value <= required:
+        reasons.append(
+            f"{label} {value:.3f} <= champion×{FACTORY_GATE_CHAMPION_MARGIN} ({required:.3f})"
+        )
 
 
 def _append_drawdown_reason(evaluation: FactoryEvaluation, reasons: list[str]) -> None:

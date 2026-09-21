@@ -316,6 +316,39 @@ def _make_backtester(
     )
 
 
+def _gate_sharpe(evaluation: FactoryEvaluation) -> float:
+    """ゲート判定に使う Sharpe。候補と対照で同じ指標を使うための共通ヘルパ。
+
+    プール済み per-trade ベースの値を優先し、算出不能なら従来の銘柄別平均に落とす
+    （factory_gate._append_champion_reason のフォールバックと同じ規則）。
+    """
+    value = evaluation.portfolio_sharpe_ratio
+    return evaluation.sharpe_ratio if math.isnan(value) else value
+
+
+def _nullable(value: float) -> Optional[float]:
+    """NaN を None に落とす（DB に NaN を書かないため）。"""
+    return None if math.isnan(value) else value
+
+
+def _span_years(data_by_symbol: dict[str, pd.DataFrame]) -> float:
+    """評価データが実際にカバーする期間の年数を返す（算出できなければ 0.0）。
+
+    宣言値 lookback_years ではなく実データの範囲を使う。データ取得が短く終わった
+    夜に取引頻度を過小評価して Sharpe を不当に低く見積もらないため。
+    """
+    starts, ends = [], []
+    for df in data_by_symbol.values():
+        if df is None or df.empty:
+            continue
+        starts.append(df.index.min())
+        ends.append(df.index.max())
+    if not starts:
+        return 0.0
+    span_days = (max(ends) - min(starts)).days
+    return span_days / 365.25 if span_days > 0 else 0.0
+
+
 def evaluate_hypothesis(
     hypothesis: FactoryHypothesis,
     data_by_symbol: dict[str, pd.DataFrame],
@@ -385,7 +418,9 @@ def evaluate_hypothesis(
                 exc_info=True,
             )
 
-    aggregated = aggregate_symbol_metrics(symbol_rows, min_trades_per_symbol)
+    aggregated = aggregate_symbol_metrics(
+        symbol_rows, min_trades_per_symbol, span_years=_span_years(data_by_symbol)
+    )
     # ゲートの DD 指標は、集計と同じ有効銘柄だけを等金額で保有したポートフォリオDD
     portfolio_dd = portfolio_max_drawdown(
         [equity_by_symbol[s] for s in aggregated.effective_symbols if s in equity_by_symbol],
@@ -400,6 +435,7 @@ def evaluate_hypothesis(
         hypothesis=hypothesis,
         sharpe_ratio=aggregated.sharpe_ratio,
         sharpe_per_trade=aggregated.sharpe_per_trade,
+        portfolio_sharpe_ratio=aggregated.portfolio_sharpe_ratio,
         win_rate=aggregated.win_rate,
         num_trades=aggregated.num_trades,
         max_drawdown=aggregated.max_drawdown,
@@ -468,7 +504,7 @@ def run_factory_batch(
     claude_evaluations: list[FactoryEvaluation] = []
     if FACTORY_CLAUDE_RULEGEN_ENABLED:
         control_sharpes_pre = [
-            e.sharpe_ratio
+            _gate_sharpe(e)
             for e in evaluations
             if e.hypothesis.is_control
             and e.n_effective_symbols >= FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS
@@ -496,7 +532,7 @@ def run_factory_batch(
     # 以前は num_trades > 0 だったため銘柄あたり最低取引数フィルタ後も
     # 1取引あれば通ってしまい、実質チェックとして機能していなかった。
     control_sharpes = [
-        e.sharpe_ratio
+        _gate_sharpe(e)
         for e in evaluations
         if e.hypothesis.is_control and e.n_effective_symbols >= FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS
     ]
@@ -548,14 +584,11 @@ def run_factory_batch(
             market=market,
             spec_json=json.dumps(evaluation.hypothesis.rule_spec, ensure_ascii=False),
             sharpe_ratio=evaluation.sharpe_ratio,
+            portfolio_sharpe_ratio=_nullable(evaluation.portfolio_sharpe_ratio),
             win_rate=evaluation.win_rate,
             num_trades=evaluation.num_trades,
             max_drawdown=evaluation.max_drawdown,
-            portfolio_max_drawdown=(
-                None
-                if math.isnan(evaluation.portfolio_max_drawdown)
-                else evaluation.portfolio_max_drawdown
-            ),
+            portfolio_max_drawdown=_nullable(evaluation.portfolio_max_drawdown),
             total_return=evaluation.total_return,
             dsr=evaluation.dsr,
             pbo=evaluation.pbo,

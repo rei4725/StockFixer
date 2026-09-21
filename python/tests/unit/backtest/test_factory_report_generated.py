@@ -61,6 +61,7 @@ def test_issue_body_reports_symbol_denominators(tmp_path, monkeypatch):
     evaluation = FactoryEvaluation(
         hypothesis=hypothesis,
         sharpe_ratio=1.6,
+        portfolio_sharpe_ratio=0.94,
         dsr=0.99,
         pbo=0.1,
         num_trades=85,
@@ -99,7 +100,9 @@ def test_issue_body_reports_symbol_denominators(tmp_path, monkeypatch):
     assert "1.23" in body
     # 母数が曖昧だった旧ラベルは残っていない
     assert "Sharpe（銘柄平均）" not in body
-    assert "Sharpe（有効銘柄平均）" in body
+    # Sharpe も2行。champion 列が付くのはプール済み per-trade ベースの値。
+    assert "| Sharpe（プール済み取引リターンを年率化） | 0.940 |" in body
+    assert "| Sharpe（有効銘柄平均・診断用） | 1.600 | - |" in body
     # DD は2行に分かれる。ゲート列が付くのはポートフォリオDD、最悪銘柄DDは診断用。
     # どちらの数字がゲート判定に使われたかをレビュー時に取り違えないようピン留めする。
     portfolio_dd_row = (
@@ -113,6 +116,7 @@ def test_issue_body_reports_symbol_denominators(tmp_path, monkeypatch):
     assert report["gate"]["n_effective_symbols"] == 16
     assert report["gate"]["avg_trades_per_symbol"] == 1.23
     assert report["gate"]["portfolio_max_drawdown"] == -0.07
+    assert report["gate"]["portfolio_sharpe_ratio"] == 0.94
 
 
 def test_issue_body_marks_worst_symbol_dd_as_gate_input_when_portfolio_dd_missing(
@@ -148,7 +152,9 @@ def test_issue_body_marks_worst_symbol_dd_as_gate_input_when_portfolio_dd_missin
         report = json.load(f)
 
     body = report["issue_body"]
+    assert "プール値算出不能によりゲート判定に使用" in body
     assert "曲線欠損によりゲート判定に使用" in body
     assert "等金額保有したポートフォリオ" not in body
     # NaN は JSON に書かず null にする
     assert report["gate"]["portfolio_max_drawdown"] is None
+    assert report["gate"]["portfolio_sharpe_ratio"] is None
