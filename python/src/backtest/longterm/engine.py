@@ -123,11 +123,11 @@ def enter_candidates(
         if entry_price <= 0 or per_position <= 0:
             continue
 
-        # 予算 per_position を使い切る株数（端株可）。buy_cost の逆算なので
-        # 手数料・スリッページは entry_price に上乗せされる。
-        shares = per_position / execution.unit_buy_cost(entry_price)
+        # 予算 per_position で買える整数株数。端株は買わず、余剰は現金として温存する。
+        shares = execution.max_affordable_qty(per_position, entry_price)
         if shares <= 0:
             continue
+        cost = execution.buy_cost(shares, entry_price)
 
         # イベント生成を enter の前に済ませることで、空イベント時の
         # 現金巻き戻しが不要になる（simulate_position は現金に依存しない）。
@@ -142,7 +142,7 @@ def enter_candidates(
                 entry_price=entry_price,
                 shares=shares,
                 current_hf=1.0,
-                cost_basis=per_position,
+                cost_basis=cost,
                 events_by_date=group_events_by_date(events),
             )
         )
