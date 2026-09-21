@@ -237,3 +237,43 @@ PR が Phase 1 の範囲を超えるためである。`ExecutionModel` を直接
   `lint-imports` は exit 0 で通り、`ignore_imports` は longterm → screening の
   3 行のみである。
 - `src/strategy/` と `src/features/` が空ディレクトリとして残っている。
+
+---
+
+## Phase 1 実施結果（2026-09-21 追記）
+
+ブランチ `feature/execution-model`（develop から分岐）に 7 コミット。ユニット
+テスト 2868 件パス、`lint-imports` exit 0、mypy 通過。23 ファイル / +1040 −154。
+**未 push・PR 未作成。**
+
+| PR | 状態 | 主なコミット |
+|---|---|---|
+| PR-1 ExecutionModel | 完了 | `b5af091` `75cf62d` `3a0a59f` `1483b28` |
+| PR-2 CSV 保存ヘルパー | 完了 | `d3d369e` |
+| PR-3 N+1 解消ほか | 完了（一部方針変更） | `3237ab1` |
+
+### 設計から変更した判断
+
+**1. CSV ヘルパーの置き場を `src/backtest/` から `src/utils/results_io.py` へ。**
+5 箇所目の `trend_screener.py` は screening BC にあり、backtest 配下に置くと
+screening からの参照が BC 独立性契約に違反するため。
+
+**2. リバランス暦の共用は見送った。** `_get_rebalance_dates`（`pd.Grouper`・暦に
+固定）と `_make_rescreen_dates`（`DateOffset`・開始日に固定）は重複ではなく別方針
+であり、一本化するとどちらかの振る舞いが変わる。開始日に固定するのは長期
+バックテストの正当な要件である。portfolio 側に quarterly の利用者も現状おらず、
+既存テストは quarterly が `ValueError` になることを検証している。代わりに効率上の
+実害 2 点（カレンダー線形走査、`_try_enter` の無条件に真となる再スライス）を潰した。
+
+**3. longterm のエントリー株数は端株のまま維持した。** 一度 `max_affordable_qty`
+（整数株）を当てたが、これはコスト以外の振る舞い変更で本 spec の範囲外。
+`per_position / unit_buy_cost(price)` の逆算に改め、`buy_cost(shares, price) ==
+per_position` が厳密に成立することを確認した。
+
+### 未完了
+
+- **実データの旧新差分レポートが未作成。** 本番 DB の読み取りが auto mode の
+  classifier に "Production Reads" として拒否されたため。合成データでは受け入れ
+  基準（悪化幅 ≒ 往復スリッページ率 × 売買回数）を満たすことを確認している
+  （weekly: 理論上限 10.0pt に対し実測 8.09pt、monthly: 2.4pt に対し 1.94pt）。
+- push と PR 作成。
