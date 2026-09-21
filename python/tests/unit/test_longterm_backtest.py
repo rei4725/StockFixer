@@ -11,6 +11,8 @@ import numpy as np
 import pandas as pd
 
 from src.backtest import longterm_backtest as lb
+from src.backtest.longterm import engine as lb_engine
+from src.backtest.longterm import prices as lb_prices
 from src.screening.types import TrendCandidate
 
 _PHASE_A = 400  # トレンド形成期間（営業日）
@@ -127,10 +129,10 @@ def _run(symbols, screen=None, call_log=None, **kwargs):
             df = df[df["ts"] <= pd.Timestamp(end_date)]
         return df.reset_index(drop=True)
 
-    with patch.object(lb, "load_raw_closes", side_effect=_load_closes), patch.object(
-        lb, "screen_trend_candidates", side_effect=screen
+    with patch.object(lb_prices, "load_raw_closes", side_effect=_load_closes), patch.object(
+        lb_engine, "screen_trend_candidates", side_effect=screen
     ), patch.object(
-        lb,
+        lb_engine,
         "fetch_benchmark_returns",
         return_value={"ticker": "^GSPC", "total_return": 0.5, "start": "", "end": ""},
     ):
@@ -209,9 +211,11 @@ class TestLongtermBacktest(unittest.TestCase):
     def test_empty_universe(self):
         """対象データなしでも例外なく空の結果を返す。"""
         with patch.object(
-            lb, "load_raw_closes", return_value=pd.DataFrame(columns=["symbol", "ts", "close"])
+            lb_prices,
+            "load_raw_closes",
+            return_value=pd.DataFrame(columns=["symbol", "ts", "close"]),
         ), patch.object(
-            lb,
+            lb_engine,
             "fetch_benchmark_returns",
             return_value={"ticker": "^GSPC", "total_return": None},
         ):
@@ -236,14 +240,14 @@ if __name__ == "__main__":
 
 
 class TestMakeRescreenDates(unittest.TestCase):
-    """_make_rescreen_dates の二分探索化（PR-3）が旧実装と一致することの回帰テスト。"""
+    """make_rescreen_dates の二分探索化（PR-3）が旧実装と一致することの回帰テスト。"""
 
     @staticmethod
     def _reference(calendar, start, freq):
         """bisect 化する前の線形走査による実装（比較用の正解）。"""
         if not calendar:
             return []
-        offset = lb._FREQ_OFFSETS.get(freq, lb._FREQ_OFFSETS["quarterly"])
+        offset = lb_prices.FREQ_OFFSETS.get(freq, lb_prices.FREQ_OFFSETS["quarterly"])
         last = pd.Timestamp(calendar[-1])
         target = pd.Timestamp(max(start, calendar[0]))
         out, seen = [], set()
@@ -258,7 +262,7 @@ class TestMakeRescreenDates(unittest.TestCase):
 
     def _assert_matches(self, calendar, start, freq):
         self.assertEqual(
-            lb._make_rescreen_dates(calendar, start, freq),
+            lb_prices.make_rescreen_dates(calendar, start, freq),
             self._reference(calendar, start, freq),
             f"freq={freq} start={start}",
         )
@@ -281,14 +285,14 @@ class TestMakeRescreenDates(unittest.TestCase):
     def test_unknown_freq_falls_back_to_quarterly(self):
         cal = pd.date_range("2024-01-01", periods=400, freq="B").strftime("%Y-%m-%d").tolist()
         self.assertEqual(
-            lb._make_rescreen_dates(cal, cal[0], "fortnightly"),
-            lb._make_rescreen_dates(cal, cal[0], "quarterly"),
+            lb_prices.make_rescreen_dates(cal, cal[0], "fortnightly"),
+            lb_prices.make_rescreen_dates(cal, cal[0], "quarterly"),
         )
 
     def test_empty_calendar_returns_empty(self):
-        self.assertEqual(lb._make_rescreen_dates([], "2024-01-01", "weekly"), [])
+        self.assertEqual(lb_prices.make_rescreen_dates([], "2024-01-01", "weekly"), [])
 
     def test_no_duplicate_dates(self):
         cal = ["2024-01-02", "2024-01-03", "2024-06-03", "2024-06-04", "2024-12-02"]
-        out = lb._make_rescreen_dates(cal, "2024-01-02", "weekly")
+        out = lb_prices.make_rescreen_dates(cal, "2024-01-02", "weekly")
         self.assertEqual(len(out), len(set(out)))
