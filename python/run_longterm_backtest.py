@@ -15,7 +15,9 @@ import argparse
 import sys
 
 from src.backtest.execution import DEFAULT_FEE_RATE
-from src.backtest.longterm_backtest import build_conclusion, run_longterm_backtest, save_results
+from src.backtest.longterm.config import LongtermBacktestConfig
+from src.backtest.longterm.engine import run_longterm_backtest
+from src.backtest.longterm.reporting import build_conclusion, save_results
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -75,7 +77,7 @@ def _print_summary(metrics: dict) -> None:
 
 def main():
     args = parse_args()
-    equity_df, metrics, trades_df = run_longterm_backtest(
+    config = LongtermBacktestConfig.build(
         market=args.market,
         start=args.start,
         end=args.end,
@@ -87,6 +89,7 @@ def main():
         slippage=args.slippage,
         benchmark_ticker=args.benchmark,
     )
+    equity_df, metrics, trades_df = run_longterm_backtest(config)
 
     _print_summary(metrics)
 

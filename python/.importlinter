@@ -26,8 +26,8 @@ layers =
 # longterm.config は LongtermBacktestConfig の rules フィールドが HoldRules を保持。
 ignore_imports =
     src.backtest.longterm_backtest -> src.screening.types
-    src.backtest.longterm_backtest -> src.screening.hold_engine
-    src.backtest.longterm_backtest -> src.screening.trend_screener
+    src.backtest.longterm.engine -> src.screening.hold_engine
+    src.backtest.longterm.engine -> src.screening.trend_screener
     src.backtest.longterm.config -> src.screening.types
     src.backtest.longterm.portfolio -> src.screening.types
 
@@ -71,7 +71,7 @@ modules =
 # backtest -> screening: layers契約と同じ既存依存（詳細はContract 1参照）
 ignore_imports =
     src.backtest.longterm_backtest -> src.screening.types
-    src.backtest.longterm_backtest -> src.screening.hold_engine
-    src.backtest.longterm_backtest -> src.screening.trend_screener
+    src.backtest.longterm.engine -> src.screening.hold_engine
+    src.backtest.longterm.engine -> src.screening.trend_screener
     src.backtest.longterm.config -> src.screening.types
     src.backtest.longterm.portfolio -> src.screening.types
