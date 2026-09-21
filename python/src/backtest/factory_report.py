@@ -54,11 +54,17 @@ def _running_in_container() -> bool:
 
 
 def _image_version() -> Optional[str]:
-    """イメージ/チェックアウトのバージョン文字列を返す（取得できなければ None）。"""
+    """イメージ/チェックアウトのバージョン文字列を返す（取得できなければ None）。
+
+    utf-8-sig で読むのは BOM 対策。Windows の PowerShell 5.1 は
+    `Set-Content -Encoding utf8` で BOM 付きファイルを書くため、VERSION に BOM が
+    混入しうる。PowerShell 側（auto_deploy.ps1 の Get-Content）は BOM を剥がすので
+    気づかないまま、Python 側だけが "﻿2.10.0" をレポートの産地情報へ書き込む。
+    """
     python_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
     version_path = os.path.join(python_root, "VERSION")
     try:
-        with open(version_path, encoding="utf-8") as f:
+        with open(version_path, encoding="utf-8-sig") as f:
             return f.read().strip() or None
     except OSError:
         return None
