@@ -29,6 +29,7 @@ ignore_imports =
     src.backtest.longterm_backtest -> src.screening.hold_engine
     src.backtest.longterm_backtest -> src.screening.trend_screener
     src.backtest.longterm.config -> src.screening.types
+    src.backtest.longterm.portfolio -> src.screening.types
 
 # ============================================================
 # Contract 2: BC 独立性契約
@@ -73,3 +74,4 @@ ignore_imports =
     src.backtest.longterm_backtest -> src.screening.hold_engine
     src.backtest.longterm_backtest -> src.screening.trend_screener
     src.backtest.longterm.config -> src.screening.types
+    src.backtest.longterm.portfolio -> src.screening.types
