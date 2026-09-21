@@ -130,6 +130,41 @@ def _build_spec_section(spec: dict) -> str:
 """
 
 
+def _nullable(value: float) -> Optional[float]:
+    """NaN を None に落とす（JSON に NaN を書かないため）。"""
+    return None if math.isnan(value) else value
+
+
+def _build_sharpe_rows(evaluation: FactoryEvaluation, champion_cell: str) -> str:
+    """Sharpe 行を組み立てる。champion 比較に使うのはプール済み per-trade ベースの値。"""
+    pooled = evaluation.portfolio_sharpe_ratio
+    if math.isnan(pooled):
+        return (
+            f"| Sharpe（有効銘柄平均・プール値算出不能によりゲート判定に使用） "
+            f"| {evaluation.sharpe_ratio:.3f} | {champion_cell} |"
+        )
+    return (
+        f"| Sharpe（プール済み取引リターンを年率化） | {pooled:.3f} | {champion_cell} |\n"
+        f"| Sharpe（有効銘柄平均・診断用） | {evaluation.sharpe_ratio:.3f} | - |"
+    )
+
+
+def _build_drawdown_rows(evaluation: FactoryEvaluation) -> str:
+    """DD 行を組み立てる。ゲート対象はポートフォリオDD、最悪銘柄DDは診断値として併記。"""
+    portfolio_dd = evaluation.portfolio_max_drawdown
+    if math.isnan(portfolio_dd):
+        # 曲線が取れずフォールバックした場合は、判定に使った最悪銘柄DDにゲート列を付ける
+        return (
+            f"| 最大DD（有効銘柄の最悪値・曲線欠損によりゲート判定に使用） "
+            f"| {evaluation.max_drawdown:.2%} | >= {FACTORY_GATE_MAX_DRAWDOWN:.0%} |"
+        )
+    return (
+        f"| 最大DD（有効銘柄を等金額保有したポートフォリオ） "
+        f"| {portfolio_dd:.2%} | >= {FACTORY_GATE_MAX_DRAWDOWN:.0%} |\n"
+        f"| 最大DD（有効銘柄の最悪値・診断用） | {evaluation.max_drawdown:.2%} | - |"
+    )
+
+
 def _build_issue_body(
     evaluation: FactoryEvaluation,
     champion_sharpe: float,
@@ -153,6 +188,8 @@ def _build_issue_body(
         f"| 有効銘柄（{FACTORY_GATE_MIN_TRADES_PER_SYMBOL}取引以上） "
         f"| {evaluation.n_effective_symbols} | >= {FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS} |"
     )
+    drawdown_rows = _build_drawdown_rows(evaluation)
+    sharpe_rows = _build_sharpe_rows(evaluation, champion_cell)
     return f"""## 戦略仮説（自動生成）
 
 夜間ファクトリーのゲートを通過した仮説です。`hypothesis_hash={h.hypothesis_hash}`
@@ -166,14 +203,14 @@ def _build_issue_body(
 
 | 指標 | 値 | ゲート |
 |---|---|---|
-| Sharpe（有効銘柄平均） | {evaluation.sharpe_ratio:.3f} | {champion_cell} |
+{sharpe_rows}
 | Deflated Sharpe | {evaluation.dsr:.3f} | >= {FACTORY_GATE_MIN_DSR} |
 | PBO | {evaluation.pbo:.3f} | <= {FACTORY_GATE_MAX_PBO} |
 | 取引数（有効銘柄合計） | {evaluation.num_trades} | >= {FACTORY_GATE_MIN_TRADES} |
 | シグナル発生銘柄 | {evaluation.n_symbols_with_signal} | - |
 {effective_symbols_row}
 | 銘柄あたり平均取引数（シグナル発生銘柄基準） | {evaluation.avg_trades_per_symbol:.2f} | - |
-| 最大DD（有効銘柄の最悪値） | {evaluation.max_drawdown:.2%} | >= {FACTORY_GATE_MAX_DRAWDOWN:.0%} |
+{drawdown_rows}
 | 勝率（有効銘柄平均） | {evaluation.win_rate:.2%} | - |
 | リターン（有効銘柄平均） | {evaluation.total_return:.2%} | - |
 
@@ -213,10 +250,15 @@ def write_report(
         "labels": ["strategy-factory"],
         "gate": {
             "sharpe_ratio": evaluation.sharpe_ratio,
+            "portfolio_sharpe_ratio": _nullable(evaluation.portfolio_sharpe_ratio),
             "dsr": evaluation.dsr,
             "pbo": evaluation.pbo,
             "num_trades": evaluation.num_trades,
             "max_drawdown": evaluation.max_drawdown,
+            # NaN は厳密な JSON として不正なため、算出不能時は null で書く。
+            # schema_version は 1 のまま（IssueAgent の intake が == 1 を要求しており、
+            # フィールド追加は後方互換であるため上げない）。
+            "portfolio_max_drawdown": _nullable(evaluation.portfolio_max_drawdown),
             "champion_sharpe": champion_sharpe,
             "n_symbols_with_signal": evaluation.n_symbols_with_signal,
             "n_effective_symbols": evaluation.n_effective_symbols,

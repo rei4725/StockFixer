@@ -29,7 +29,7 @@ class _StubBacktester:
     def __init__(self, metrics_list: list[dict]) -> None:
         self._it = iter(metrics_list)
 
-    def simulate_trading(self, df, signal):
+    def simulate_trading(self, df, signal, collect_equity: bool = False):
         return None, next(self._it)
 
 
