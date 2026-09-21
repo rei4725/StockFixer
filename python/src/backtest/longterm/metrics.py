@@ -68,6 +68,16 @@ def compute_longterm_metrics(
     wins_pnl = [p for p in pnls if p >= 0]
     losses_pnl = [p for p in pnls if p < 0]
     spt = stats.sharpe_per_trade(pnls)
+    # trades_per_year の分母は `core._estimate_trades_per_year` と意図的に異なる。
+    # core: 実際の取引日付（trade_log["date"]）の最大-最小スパンを使い、取引が
+    # 無ければ 252 にフォールバックする（単一銘柄の売買頻度を測る想定）。
+    # ここ: config.start〜end の設定期間全体（`years`）を分母にする。ポートフォリオ
+    # 戦略はリスクリーン日ごとに評価し続けており、たまたま新規約定が無い期間も
+    # 「稼働中」であるため設定期間を使うのが妥当。取引が短期間に集中する場合は
+    # core 方式より低頻度に出て sharpe_ratio を減衰させるが、これは damp 方向（
+    # 戦略ファクトリーのゲートに近い指標として安全な向き）であり許容する。
+    # 取引が無い場合は 0.0（252 埋めはしない: 取引が無ければリスク調整後リターン
+    # も無いはずで、取引頻度を仮定するのは誤った信号になるため）。
     trades_per_year = len(pnls) / years if pnls else 0.0
     pf = stats.profit_factor(wins_pnl, losses_pnl)
 
