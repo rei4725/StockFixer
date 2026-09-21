@@ -24,6 +24,7 @@ import について:
 
 from __future__ import annotations
 
+from bisect import bisect_left
 from typing import Any, Optional
 
 import pandas as pd
@@ -33,7 +34,7 @@ from src.backtest.metrics import _max_drawdown, fetch_benchmark_returns
 from src.screening.hold_engine import simulate_position
 from src.screening.trend_screener import screen_trend_candidates
 from src.screening.types import HoldRules
-from src.utils.db.market_data import load_all_raw_ohlcv_symbols, load_raw_ohlcv
+from src.utils.db.market_data import load_raw_closes
 from src.utils.logger import get_logger
 from src.utils.results_io import save_result_csvs
 
@@ -52,25 +53,25 @@ _FREQ_OFFSETS: dict[str, pd.DateOffset] = {
 def _load_price_map(market: str, end: str) -> dict[str, pd.DataFrame]:
     """market の全銘柄について date / Close を持つ価格系列を読み込む。
 
-    end までに切り詰める（バックテスト窓外を評価しないため）。
+    end までの切り詰めは SQL 側で行う（バックテスト窓外を評価しないため）。
+    銘柄ごとに 1 クエリ投げると N+1 になるので一括読み出しを使う。
     """
+    raw = load_raw_closes(market, end_date=end)
+    if raw.empty:
+        return {}
+
+    normalized = pd.DataFrame(
+        {
+            "symbol": raw["symbol"].to_numpy(),
+            "date": pd.to_datetime(raw["ts"]).dt.strftime("%Y-%m-%d"),
+            "Close": raw["close"].astype(float).to_numpy(),
+        }
+    )
     price_map: dict[str, pd.DataFrame] = {}
-    for m, symbol in load_all_raw_ohlcv_symbols():
-        if m != market:
-            continue
-        raw = load_raw_ohlcv(m, symbol)
-        if raw is None or raw.empty or "Close" not in raw.columns:
-            continue
-        # load_raw_ohlcv は日付を index に持つ。内部形式（date 文字列 + Close）に正規化する。
-        df = pd.DataFrame(
-            {
-                "date": pd.to_datetime(raw.index).strftime("%Y-%m-%d"),
-                "Close": raw["Close"].astype(float).to_numpy(),
-            }
-        )
-        df = df[df["date"] <= end].sort_values("date").reset_index(drop=True)
+    for symbol, group in normalized.groupby("symbol", sort=False):
+        df = group[["date", "Close"]].sort_values("date").reset_index(drop=True)
         if not df.empty:
-            price_map[symbol] = df
+            price_map[str(symbol)] = df
     return price_map
 
 
@@ -96,14 +97,16 @@ def _make_rescreen_dates(calendar: list[str], start: str, freq: str) -> list[str
     target = pd.Timestamp(max(start, calendar[0]))
 
     out: list[str] = []
-    seen: set[str] = set()
     while target <= last:
         target_str = target.strftime("%Y-%m-%d")
-        # target 以降で最初の取引日
-        nxt = next((d for d in calendar if d >= target_str), None)
-        if nxt is not None and nxt not in seen:
-            out.append(nxt)
-            seen.add(nxt)
+        # calendar は昇順なので二分探索で「target 以降の最初の取引日」を引く。
+        i = bisect_left(calendar, target_str)
+        if i < len(calendar):
+            nxt = calendar[i]
+            # 長期休場を跨ぐと隣接ターゲットが同じ取引日に丸まりうる。target は
+            # 単調増加ゆえ nxt も単調非減少なので、直前の採用分とだけ比較すればよい。
+            if not out or out[-1] != nxt:
+                out.append(nxt)
         target = target + offset
     return out
 
@@ -167,7 +170,6 @@ def _try_enter(
     max_positions: int,
     execution: ExecutionModel,
     rules: HoldRules,
-    end: str,
     cash: float,
     open_positions: dict[str, dict[str, Any]],
     price_map: dict[str, pd.DataFrame],
@@ -188,8 +190,8 @@ def _try_enter(
     per_position = cash / empty_slots
     for cand in new_syms:
         symbol = cand.symbol
+        # price_map は _load_price_map が SQL 側で end まで切り詰め済み。
         series = price_map[symbol]
-        series = series[series["date"] <= end]
         entry_row = series[series["date"] == date]
         if entry_row.empty:
             continue
@@ -320,7 +322,6 @@ def run_longterm_backtest(
                 max_positions,
                 execution,
                 rules,
-                end,
                 cash,
                 open_positions,
                 price_map,
