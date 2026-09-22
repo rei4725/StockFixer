@@ -10,6 +10,8 @@ from typing import Any, Optional
 
 import pandas as pd
 
+from src.domain.types import OrderRunSummary
+
 
 class AlertLevel(Enum):
     INFO = "info"
@@ -71,6 +73,18 @@ class PredictionResultRepository(ABC):
     @abstractmethod
     def get_latest_by_market(self, market: str) -> pd.DataFrame:
         """マーケットごとに銘柄別最新予測を取得する（発注パイプライン用）"""
+
+
+class OrderRunSink(ABC):
+    """発注実行サマリーの書き込みポート。
+
+    trading BC は自らの実行結果を記録するが、記録先（テーブル・DB）を知らない。
+    実装は src/infrastructure/persistence/ に置き、合成ルートが注入する。
+    """
+
+    @abstractmethod
+    def save(self, summary: OrderRunSummary) -> None:
+        """発注実行サマリーを 1 件保存する"""
 
 
 class StockFeatureRepository(ABC):

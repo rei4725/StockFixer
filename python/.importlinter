@@ -4,19 +4,30 @@ root_packages =
 
 # ============================================================
 # Contract 1: レイヤー階層契約
-#   utils < BC群 < orchestration/api
+#   domain < utils < BC群 < orchestration/api
 #   上位レイヤーが下位レイヤーを参照するのは合法。逆は禁止。
+#
+# src.domain は型とポートのみを持つ共有カーネルであり、src.domain.types 以外を
+# 一切 import しない真の最下層。2026-09-22 の設計判断でこれを恒久的な位置づけとした
+# （docs/superpowers/specs/2026-09-22-db-ownership-decoupling-design.md §3）。
+#
+# src.infrastructure は意図的に layers へ載せていない。
+#   src/infrastructure/* -> src.market_data（アダプタが BC を参照）
+#   src/backtest/*, src/reporting/*, src/quality/* -> src.infrastructure
+# とパッケージ単位で循環しているため、層に追加した時点で契約が落ちる。
+# 循環の解消は別 Issue とする。
 #
 # ignore_imports は両契約とも未使用（例外 0 件が現状）。
 # 例外を追加する際は必ずレビューを経ること。
 # ============================================================
 [importlinter:contract:layers]
-name = Layered architecture (utils < BC < orchestration/api)
+name = Layered architecture (domain < utils < BC < orchestration/api)
 type = layers
 layers =
     src.api | src.orchestration
     src.backtest | src.prediction | src.trading | src.reporting | src.watchlist | src.market_data | src.rule_engine | src.quality | src.screening
     src.utils
+    src.domain
 
 # ============================================================
 # Contract 2: BC 独立性契約
@@ -37,10 +48,44 @@ layers =
 [importlinter:contract:independence]
 name = BC independence (BCs must not import each other)
 type = independence
-# utils.db が prediction.db を re-export している間接依存は #338 で根本解消予定
-# それまでは indirect check を無効化して direct import のみ検証する
+# utils.db が prediction.db を再輸出している間接依存は Phase 4（2026-09-22 設計書）で解消中。
+# 解消完了までは indirect check を無効化して direct import のみ検証する。
+# allow_indirect_imports の削除は Phase 4b (PR-5) の完了条件。
 allow_indirect_imports = True
 modules =
+    src.backtest
+    src.prediction
+    src.trading
+    src.reporting
+    src.watchlist
+    src.market_data
+    src.rule_engine
+    src.quality
+    src.screening
+
+# ============================================================
+# Contract 3: domain purity 契約
+#   src.domain は src.domain 自身以外の src.* を一切 import しない。
+#
+# Contract 1（layers）は src.domain が src.utils・BC群・src.api/src.orchestration より
+# 下位にあることは証明するが、src.infrastructure については何も証明しない。
+# src.infrastructure は BC 群との間でパッケージ単位の循環があり（Contract 1 のコメント参照）、
+# 意図的に layers 契約へ載せていないため、"layers" という型ではこの性質を表現できない。
+# そのため forbidden 型の独立した契約として domain の純粋性のみを直接検証する。
+#
+# ignore_imports は未使用（例外 0 件が現状）。
+# 例外を追加する際は必ずレビューを経ること。
+# ============================================================
+[importlinter:contract:domain-purity]
+name = domain purity (src.domain imports nothing outside itself)
+type = forbidden
+source_modules =
+    src.domain
+forbidden_modules =
+    src.api
+    src.orchestration
+    src.infrastructure
+    src.utils
     src.backtest
     src.prediction
     src.trading

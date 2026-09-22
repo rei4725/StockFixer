@@ -12,9 +12,11 @@ from src.domain.ports import (
     BrokerPort,
     MarketDataPort,
     NotificationPort,
+    OrderRunSink,
     PredictionResultRepository,
     StockFeatureRepository,
 )
+from src.domain.types import OrderRunSummary
 
 
 class InMemoryPredictionRepository(PredictionResultRepository):
@@ -188,3 +190,13 @@ class InMemoryBrokerAdapter(BrokerPort):
 
     def get_orders(self) -> list[dict[str, Any]]:
         return self._orders
+
+
+class InMemoryOrderRunSink(OrderRunSink):
+    """インメモリ発注サマリー Sink（テスト用）"""
+
+    def __init__(self) -> None:
+        self.saved: list[OrderRunSummary] = []
+
+    def save(self, summary: OrderRunSummary) -> None:
+        self.saved.append(summary)

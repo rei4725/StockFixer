@@ -8,7 +8,6 @@ DuckDB データベースアクセスパッケージ
 モジュール構成:
     _connection.py     - 接続管理（短命接続 + リトライ）・スキーマ DDL
     stock_features.py  - stock_features テーブル操作
-    prediction.py      - prediction_results / model_metrics / prediction_accuracy テーブル操作
     market_data.py     - market_data_raw テーブル操作
     index_membership.py - index_membership_history テーブル操作
     experiment.py      - experiment_runs テーブル操作（R-211 実験トラッキング）
@@ -114,7 +113,6 @@ class _DbPackageProxy(types.ModuleType):
             "load_weekly_accuracy_snapshots",
             "save_feature_selection",
             "save_model_metrics",
-            "save_order_run_summary",
             "save_prediction_accuracy",
             "save_prediction_results",
             "save_shap_values",

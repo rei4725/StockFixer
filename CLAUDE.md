@@ -102,7 +102,7 @@ screening/ rule_engine/
           Bounded contexts — each owns its own types.py and pipelines
     ↓
 domain/           Shared kernel — 共有型 (SymbolTask 等) + ports (NotificationPort 等)
-infrastructure/   Adapters — domain ports の実装 (yfinance / Discord / in-memory)
+infrastructure/   Adapters — domain ports の実装 (yfinance / Discord / in-memory / persistence)
 utils/            DB, logging, retry, path helpers
 ```
 
@@ -130,7 +130,7 @@ utils/            DB, logging, retry, path helpers
 - `domain/types.py` — BC 横断の共有型 (`SymbolTask`, `PredictionResult`, `BatchResult` 等)
 - `domain/ports.py` — ポート定義 (`NotificationPort`, `MarketDataPort` 等)
 - `domain/trading_rules.py` — 取引ルール定数
-- `infrastructure/` — ポートの実装アダプタ (yfinance / Discord / log / in-memory)
+- `infrastructure/` — ポートの実装アダプタ (yfinance / Discord / log / in-memory / `infrastructure/persistence/`: domain のリポジトリ／sink ポートを実装する Postgres アダプタ、1 テーブル 1 モジュール)
 
 ### Key Data Types (defined in each BC's `types.py`)
 

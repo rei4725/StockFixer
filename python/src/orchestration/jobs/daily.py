@@ -185,6 +185,7 @@ def run_daily_auto_order():
     """
     import os
 
+    from src.infrastructure.persistence.order_run_repository import PostgresOrderRunSink
     from src.infrastructure.yfinance_market_data_adapter import YFinanceMarketDataAdapter
     from src.trading.brokers.paper.paper_broker import PaperBroker
     from src.trading.execution import run_daily_orders
@@ -206,7 +207,13 @@ def run_daily_auto_order():
         )
 
     try:
-        stats = run_daily_orders(broker=broker, market="jp", mode=mode, market_data=market_data)
+        stats = run_daily_orders(
+            broker=broker,
+            order_run_sink=PostgresOrderRunSink(),
+            market="jp",
+            mode=mode,
+            market_data=market_data,
+        )
         logger.info(
             "=== 自動発注完了: 買い=%s 売り=%s ===", stats["buy_orders"], stats["sell_orders"]
         )

@@ -27,15 +27,16 @@ from src.domain.ports import (
     AlertLevel,
     MarketDataPort,
     NotificationPort,
+    OrderRunSink,
     PredictionResultRepository,
 )
 from src.domain.trading_rules import get_lot_size
+from src.domain.types import OrderRunSummary
 from src.trading.brokers.base import BrokerBase, BrokerError, OrderSide
 from src.trading.correlation_risk import evaluate_correlation_gate
 from src.trading.risk_manager import RiskManager
 from src.trading.signal_generator import apply_multi_horizon_score_column
 from src.trading.types import TradingGateStatus
-from src.utils.db import save_order_run_summary
 from src.utils.logger import get_logger
 
 from .params import (
@@ -63,6 +64,8 @@ logger = get_logger(__name__)
 
 def run_daily_orders(
     broker: BrokerBase,
+    *,
+    order_run_sink: OrderRunSink,
     market: str = "jp",
     mode: str = "paper",
     market_data: MarketDataPort | None = None,
@@ -570,17 +573,19 @@ def run_daily_orders(
     # 発注サマリーを保存（R-214）
     _run_id = str(uuid.uuid4())[:12]
     try:
-        save_order_run_summary(
-            run_id=_run_id,
-            market=market,
-            mode=mode,
-            buy_orders=stats["buy_orders"],
-            sell_orders=stats["sell_orders"],
-            short_orders=stats["short_orders"],
-            skipped=stats["skipped"],
-            skipped_min_change=stats["skipped_min_change"],
-            total_turnover=stats["total_turnover"],
-            min_change_ratio=MIN_CHANGE_RATIO,
+        order_run_sink.save(
+            OrderRunSummary(
+                run_id=_run_id,
+                market=market,
+                mode=mode,
+                buy_orders=stats["buy_orders"],
+                sell_orders=stats["sell_orders"],
+                short_orders=stats["short_orders"],
+                skipped=stats["skipped"],
+                skipped_min_change=stats["skipped_min_change"],
+                total_turnover=stats["total_turnover"],
+                min_change_ratio=MIN_CHANGE_RATIO,
+            )
         )
     except Exception:
         logger.error("[exec] order_run_summary 保存失敗", exc_info=True)
