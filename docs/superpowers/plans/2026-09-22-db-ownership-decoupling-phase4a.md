@@ -18,8 +18,8 @@
 - 作業開始前に `git fetch` / `git status` / 必要なら `git pull` を行う（ベースブランチは `develop`）。
 - コミットメッセージは Conventional Commits（`<type>: <subject>`、日本語本文可）。
 - `python/VERSION` の更新は PR 単位で行い、本計画の完了時点で `2.15.0` とする（現在 `2.14.2`）。
-- pre-commit フックが cp932 で落ちる場合は `PYTHONUTF8=1` を設定して再実行する。
-- import-linter の実挙動は `py -c "from importlinter.cli import lint_imports_command; lint_imports_command()"` でのみ確認できる。`py -m importlinter.cli lint-imports` は無出力 exit 0 を返すため使わない。
+- **Windows では `PYTHONUTF8=1` を常に設定しておく。** `.importlinter` には日本語コメントがあり、素のまま import-linter を走らせると `'cp932' codec can't decode byte ...` で落ちる。pre-commit フックが cp932 で落ちる場合も同じ対処。PowerShell では `$env:PYTHONUTF8 = "1"`、bash では `export PYTHONUTF8=1`。
+- import-linter の実挙動は `py -c "from importlinter.cli import lint_imports_command; lint_imports_command()"` でのみ確認できる。`py -m importlinter.cli lint-imports` は無出力 exit 0 を返すため使わない。緑の場合の出力は `Contracts: 2 kept, 0 broken.` である。
 - `tests/unit/` は `tests/unit/conftest.py` の autouse `_isolate_db` フィクスチャによりテスト専用 Postgres に接続する。unit テストから実 DB を触ることは既存の作法であり、禁止ではない。
 
 ## 本計画のスコープと、設計書からの変更点
