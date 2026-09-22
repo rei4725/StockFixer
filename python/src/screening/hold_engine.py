@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+from typing import Optional
+
 import pandas as pd
 
 from src.screening.types import HoldRules, PositionEvent
@@ -61,7 +63,7 @@ def _scale_reason(level: float) -> str:
 def simulate_position(
     prices: pd.DataFrame,
     entry_date: str,
-    rules: HoldRules = HoldRules(),
+    rules: Optional[HoldRules] = None,
 ) -> list[PositionEvent]:
     """エントリー後のポジションを日次ループでシミュレートする。
 
@@ -78,6 +80,8 @@ def simulate_position(
         未来データを参照しない（ルックアヘッド禁止）。各営業日の判定は、
         その日までの終値のみから計算する（rolling MA も trailing）。
     """
+    if rules is None:
+        rules = HoldRules()
     if prices is None or prices.empty:
         logger.warning("simulate_position: prices が空です")
         return []
