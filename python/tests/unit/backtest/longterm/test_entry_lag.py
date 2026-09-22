@@ -10,7 +10,36 @@ from src.backtest.longterm import engine
 from src.backtest.longterm.config import LongtermBacktestConfig
 from src.backtest.longterm.engine import resolve_entry_date
 from src.backtest.longterm.portfolio import Portfolio
+from src.backtest.screening_port import set_backtest_screening_port
 from src.domain.types import PositionEvent, TrendCandidate
+
+
+class _StubScreeningPort:
+    """engine が呼ぶ screening ポートの差し替え用スタブ。
+
+    engine はポート経由で screening を呼ぶようになったため、従来の
+    `patch.object(engine, "screen_trend_candidates"/"simulate_position", ...)`
+    の代わりにこれを注入する。`None` を渡した側は screening BC の実装へ委譲し、
+    偽装したい側だけを関数で差し替える（従来の patch と同じ範囲を保つ）。
+    """
+
+    def __init__(self, screen_fn=None, simulate_fn=None):
+        self._screen_fn = screen_fn
+        self._simulate_fn = simulate_fn
+
+    def screen_trend_candidates(self, market, top_n, as_of):
+        if self._screen_fn is not None:
+            return self._screen_fn(market=market, top_n=top_n, as_of=as_of)
+        from src.screening.trend_screener import screen_trend_candidates
+
+        return screen_trend_candidates(market=market, top_n=top_n, as_of=as_of)
+
+    def simulate_position(self, prices, entry_date, rules):
+        if self._simulate_fn is not None:
+            return self._simulate_fn(prices, entry_date=entry_date, rules=rules)
+        from src.screening.hold_engine import simulate_position
+
+        return simulate_position(prices, entry_date=entry_date, rules=rules)
 
 
 class TestResolveEntryDate(unittest.TestCase):
@@ -109,10 +138,8 @@ class TestEnterCandidatesFillsAtGivenDate(unittest.TestCase):
             simulate_entry_dates.append(entry_date)
             return [ev]
 
-        with patch.object(engine, "simulate_position", side_effect=_simulate):
-            engine.enter_candidates(
-                cfg, portfolio, self._ENTRY_DATE, [candidate], price_map, execution
-            )
+        set_backtest_screening_port(_StubScreeningPort(simulate_fn=_simulate))
+        engine.enter_candidates(cfg, portfolio, self._ENTRY_DATE, [candidate], price_map, execution)
 
         self.assertEqual(simulate_entry_dates, [self._ENTRY_DATE])
         self.assertIn("X", portfolio.positions)
@@ -184,14 +211,11 @@ class TestRunLoopDefersEntryToEntryDate(unittest.TestCase):
             initial_cash=self._INITIAL_CASH,
         )
 
+        set_backtest_screening_port(_StubScreeningPort(screen_fn=_screen, simulate_fn=_simulate))
         with patch.object(engine, "load_price_map", return_value=price_map), patch.object(
             engine, "build_calendar", return_value=calendar_dates
         ), patch.object(
             engine, "make_rescreen_dates", return_value=[self._SCREEN_DATE]
-        ), patch.object(
-            engine, "screen_trend_candidates", side_effect=_screen
-        ), patch.object(
-            engine, "simulate_position", side_effect=_simulate
         ), patch.object(
             engine,
             "fetch_benchmark_returns",

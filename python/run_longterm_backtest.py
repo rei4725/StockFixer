@@ -93,6 +93,9 @@ def _print_summary(metrics: dict) -> None:
 
 
 def main():
+    from src.orchestration.port_wiring import wire_ports
+
+    wire_ports()
     args = parse_args()
     config = LongtermBacktestConfig.build(
         market=args.market,
