@@ -314,15 +314,31 @@ layers =
 
 ## 9. PR 分割
 
+分割の単位は **方向（書き / 読み）ではなくテーブル** とする。`paper_real_diff.py` は
+`upsert_paper_real_diff`（書き）と `load_paper_real_diff_summary`（読み）が同一モジュールに同居しており、
+方向で切ると 1 つのテーブルの SQL が 2 箇所に分かれる期間が生じるためである。
+
 | PR | 内容 | 挙動変化 |
 |---|---|---|
-| **PR-1** | ADR + 資料整合 + `layers` に `src.domain` 追加 + 動的 import 禁止ガード | なし |
-| **PR-2** | 束① 書き側: ポート 2 本 + dataclass 2 本 + `infrastructure/persistence/` アダプタ + in-memory 偽物 + trading と合成ルートの結線 | なし（SQL 無変更） |
-| **PR-3** | 束①② 読み側: `AnalyticsQuery` + 押し上げ + reporting 4 ファイル + テスト書き換え | なし |
-| **PR-4** | 後片付け: プロキシ縮小（18→3）・越境消費者なし 7 件と orchestration のみ 2 件の再輸出を削除・呼び出し元ゼロ関数 2 本削除・`src/prediction/db/` 整理 | なし |
+| **PR-1** | ADR + 資料整合 + `layers` に `src.domain` 追加 + 動的 import 禁止ガード（ratchet 方式） | なし |
+| **PR-2** | `order_run_summary`: `OrderRunSummary` + `OrderRunSink` + `infrastructure/persistence/` アダプタ + in-memory 偽物 + trading と合成ルートの結線 + `load_turnover_comparison` 削除 | なし（SQL 無変更） |
+| **PR-3** | `paper_real_diff`: `TradeDiffRecord` + `TradeDiffSink` + `AnalyticsQuery.paper_real_diff_summary` + 読み側の押し上げ | なし |
+| **PR-4** | 束②（accuracy / drift / weekly）: `AnalyticsQuery` の残り 3 メソッド + reporting の押し上げ + テスト書き換え | なし |
+| **PR-5** | 後片付け: プロキシ縮小（18→3）・越境消費者なし 7 件と orchestration のみ 2 件の再輸出を削除・`src/prediction/db/` 整理 | なし |
 
 PR-1 を先頭に置く。教義を文書で確定してからコードを動かさなければ、PR-2 のレビューで
 「domain に型を置いてよいのか」が蒸し返される。
+
+PR-2 に `order_run_summary` を選ぶのは、80 行・書き手 1 箇所・越境読み手ゼロで、
+**ポートの型を確立するのに必要な要素だけを含み余計な波及がない**ためである。
+PR-3 以降は PR-2 で確立した「値オブジェクト → ポート → アダプタ → 合成ルート結線 → 旧経路撤去」の
+5 ステップをテーブルごとになぞる。
+
+### 動的 import 禁止ガードの補足
+
+`src/utils/db/__init__.py` の 2 箇所は PR-5 まで残るため、ガードは ratchet 方式とする
+（既知の違反のみを許容リストに載せ、新規追加を禁じる）。許容リストが空になることが Phase 4 の完了条件であり、
+リポジトリ既存のファイル行数ゲート（GRANDFATHERED 方式）と同じ流儀である。
 
 ---
 
@@ -371,7 +387,7 @@ grep -rn "src\.prediction\.db" src/ tests/
 
 ## 13. 完了条件
 
-- [ ] PR-1〜4 がすべて `develop` にマージされている
+- [ ] PR-1〜5 がすべて `develop` にマージされている
 - [ ] `src/reporting/*` と `src/trading/*` から `src.utils.db` 経由の束①② 参照が消えている
 - [ ] `_DbPackageProxy._PREDICTION_DB` が 3 要素（束③ のみ）になっている
 - [ ] `src/` 配下の `importlib.import_module("src....")` が 0 件であり、ガードテストがそれを保証している
