@@ -243,3 +243,24 @@ class TrendCandidate:
     return_6m: float  # 6ヶ月リターン
     return_12m: float  # 12ヶ月リターン
     avg_volume: float  # 平均出来高（流動性）
+
+
+@dataclass(frozen=True)
+class OrderRunSummary:
+    """発注実行 1 回分のサマリー（order_run_summary テーブルの 1 行に対応）。
+
+    run_id: 実行ごとに採番される短縮 UUID
+    mode: "paper" または "live"
+    min_change_ratio: この実行で適用された最小変化率しきい値
+    """
+
+    run_id: str
+    market: str
+    mode: str
+    buy_orders: int
+    sell_orders: int
+    short_orders: int
+    skipped: int
+    skipped_min_change: int
+    total_turnover: float
+    min_change_ratio: float
