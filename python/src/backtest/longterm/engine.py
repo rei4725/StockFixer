@@ -40,9 +40,9 @@ from src.backtest.longterm.prices import (
     make_rescreen_dates,
 )
 from src.backtest.metrics import fetch_benchmark_returns
+from src.domain.types import TrendCandidate
 from src.screening.hold_engine import simulate_position
 from src.screening.trend_screener import screen_trend_candidates
-from src.screening.types import TrendCandidate
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)

@@ -4,7 +4,7 @@ import unittest
 
 from src.backtest.longterm.config import LongtermBacktestConfig
 from src.backtest.longterm.reporting import build_conclusion
-from src.screening.types import HoldRules
+from src.domain.types import HoldRules
 
 _METRICS = {
     "initial_cash": 1_000_000.0,

@@ -9,7 +9,7 @@ from src.backtest.execution import ExecutionModel, TradingCosts
 from src.backtest.longterm import engine
 from src.backtest.longterm.config import LongtermBacktestConfig
 from src.backtest.longterm.portfolio import Portfolio
-from src.screening.types import PositionEvent, TrendCandidate
+from src.domain.types import PositionEvent, TrendCandidate
 
 
 class TestIntegerShares(unittest.TestCase):

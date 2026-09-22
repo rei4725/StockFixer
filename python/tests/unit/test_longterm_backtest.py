@@ -13,7 +13,7 @@ import pandas as pd
 from src.backtest import longterm_backtest as lb
 from src.backtest.longterm import engine as lb_engine
 from src.backtest.longterm import prices as lb_prices
-from src.screening.types import TrendCandidate
+from src.domain.types import TrendCandidate
 
 _PHASE_A = 400  # トレンド形成期間（営業日）
 _PHASE_B = 500  # ホールド期間（営業日）

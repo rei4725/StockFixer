@@ -8,7 +8,7 @@ import pandas as pd
 from src.backtest.longterm import engine
 from src.backtest.longterm.config import LongtermBacktestConfig
 from src.backtest.longterm.portfolio import Portfolio
-from src.screening.types import TrendCandidate
+from src.domain.types import TrendCandidate
 
 _START = "2024-01-02"
 _END = "2024-06-28"

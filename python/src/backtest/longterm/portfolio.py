@@ -9,7 +9,7 @@ import pandas as pd
 
 from src.backtest.execution import ExecutionModel
 from src.backtest.longterm.ledger import TradeLedger
-from src.screening.types import PositionEvent
+from src.domain.types import PositionEvent
 
 
 @dataclass
