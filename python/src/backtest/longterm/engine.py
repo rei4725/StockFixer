@@ -16,10 +16,12 @@
     生存者バイアスにより**楽観方向に歪む**。結果は上限寄りの目安として解釈すること。
 
 import について:
-    backtest BC から screening BC の純粋関数（`screen_trend_candidates` /
-    `simulate_position`）を参照する。既存のBC間依存であり、.importlinter の
-    layers/independence 両契約に ignore_imports として明示登録済み（#638）。
-    将来はBT専用ポート経由に切り出す想定（ロードマップ分類 [D]）。
+    screening BC の純粋関数（`screen_trend_candidates` / `simulate_position`）は
+    直接 import せず、`src.backtest.screening_port.BacktestScreeningPort` 経由で
+    呼ぶ。具体アダプタ（`src.screening.backtest_adapter.BacktestScreeningAdapter`）
+    の注入は orchestration の合成ルート `wire_ports()` が行う。
+    これにより backtest -> screening の直接依存が無くなったため、
+    .importlinter への ignore_imports 登録は不要になった（#638 の後始末）。
 """
 
 from __future__ import annotations
@@ -40,9 +42,8 @@ from src.backtest.longterm.prices import (
     make_rescreen_dates,
 )
 from src.backtest.metrics import fetch_benchmark_returns
+from src.backtest.screening_port import get_backtest_screening_port
 from src.domain.types import TrendCandidate
-from src.screening.hold_engine import simulate_position
-from src.screening.trend_screener import screen_trend_candidates
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -161,7 +162,9 @@ def enter_candidates(
 
         # イベント生成を enter の前に済ませることで、空イベント時の
         # 現金巻き戻しが不要になる（simulate_position は現金に依存しない）。
-        events = simulate_position(series, entry_date=entry_date, rules=config.rules)
+        events = get_backtest_screening_port().simulate_position(
+            series, entry_date=entry_date, rules=config.rules
+        )
         if not events:
             continue
 
@@ -288,7 +291,7 @@ def run_longterm_backtest(
         if date in rescreen_dates:
             entry_date = resolve_entry_date(calendar, date, config.execution_lag)
             if entry_date is not None:
-                pending_entries[entry_date] = screen_trend_candidates(
+                pending_entries[entry_date] = get_backtest_screening_port().screen_trend_candidates(
                     market=config.market, top_n=config.top_n, as_of=date
                 )
 

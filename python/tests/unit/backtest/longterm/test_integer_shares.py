@@ -1,7 +1,6 @@
 """エントリー株数が整数で、予算を超えないこと。"""
 
 import unittest
-from unittest.mock import patch
 
 import pandas as pd
 
@@ -9,7 +8,29 @@ from src.backtest.execution import ExecutionModel, TradingCosts
 from src.backtest.longterm import engine
 from src.backtest.longterm.config import LongtermBacktestConfig
 from src.backtest.longterm.portfolio import Portfolio
+from src.backtest.screening_port import set_backtest_screening_port
 from src.domain.types import PositionEvent, TrendCandidate
+
+
+class _StubScreeningPort:
+    """`simulate_position` だけを固定イベントに差し替える screening ポートのスタブ。
+
+    engine がポート経由になったため、従来の
+    `patch.object(engine, "simulate_position", return_value=[ev])` の置き換え。
+    `screen_trend_candidates` はこのテストの経路（`enter_candidates` 直呼び）
+    では呼ばれないが、挙動を変えないよう screening BC の実装へ委譲しておく。
+    """
+
+    def __init__(self, events):
+        self._events = events
+
+    def screen_trend_candidates(self, market, top_n, as_of):
+        from src.screening.trend_screener import screen_trend_candidates
+
+        return screen_trend_candidates(market=market, top_n=top_n, as_of=as_of)
+
+    def simulate_position(self, prices, entry_date, rules):
+        return self._events
 
 
 class TestIntegerShares(unittest.TestCase):
@@ -71,8 +92,8 @@ class TestEnterCandidatesIntegerSizing(unittest.TestCase):
         execution = ExecutionModel(cfg.costs)
         portfolio = Portfolio(cash=self._PER_POSITION)
 
-        with patch.object(engine, "simulate_position", return_value=[ev]):
-            engine.enter_candidates(cfg, portfolio, self._DATE, [candidate], price_map, execution)
+        set_backtest_screening_port(_StubScreeningPort([ev]))
+        engine.enter_candidates(cfg, portfolio, self._DATE, [candidate], price_map, execution)
 
         return portfolio, execution
 

@@ -8,6 +8,7 @@ import pandas as pd
 from src.backtest.longterm import engine
 from src.backtest.longterm.config import LongtermBacktestConfig
 from src.backtest.longterm.portfolio import Portfolio
+from src.backtest.screening_port import set_backtest_screening_port
 from src.domain.types import TrendCandidate
 
 _START = "2024-01-02"
@@ -39,6 +40,27 @@ def _candidate(symbol, score):
     )
 
 
+class _StubScreeningPort:
+    """screen は固定候補を返し、simulate は screening BC の実装へ委譲する。
+
+    従来 `patch.object(engine, "screen_trend_candidates", ...)` で行っていた
+    差し替えの置き換え。engine がポート経由になったため、engine のモジュール
+    属性ではなくポート実装を差し替える。`simulate_position` は従来どおり
+    本物を使う（ここで偽装すると保有/撤退の実挙動を検証できなくなる）。
+    """
+
+    def __init__(self, screen_fn):
+        self._screen_fn = screen_fn
+
+    def screen_trend_candidates(self, market, top_n, as_of):
+        return self._screen_fn(market=market, top_n=top_n, as_of=as_of)
+
+    def simulate_position(self, prices, entry_date, rules):
+        from src.screening.hold_engine import simulate_position
+
+        return simulate_position(prices, entry_date=entry_date, rules=rules)
+
+
 def _run(**kw):
     def _load(market, end_date=None):
         df = _closes()
@@ -52,9 +74,10 @@ def _run(**kw):
     cfg = LongtermBacktestConfig.build(
         market="us", start=_START, end=_END, rescreen_freq="monthly", **kw
     )
+    set_backtest_screening_port(_StubScreeningPort(_screen))
     with patch.object(
         engine, "load_price_map", side_effect=lambda m, e: _price_map(_load(m, e))
-    ), patch.object(engine, "screen_trend_candidates", side_effect=_screen), patch.object(
+    ), patch.object(
         engine,
         "fetch_benchmark_returns",
         return_value={"ticker": "^GSPC", "total_return": 0.1},
@@ -83,7 +106,8 @@ def _run_with_portfolio(**kw):
     既存テストに波及するため変更しない。代わりに `engine.Portfolio` を薄い
     スパイ（コンストラクタで自分自身を捕捉するだけのサブクラス）で差し替える、
     最小侵襲なテスト側だけの観測手段を使う。`load_price_map` 等を
-    `patch.object(engine, ...)` で差し替えている既存の `_run` と同じ作法。
+    `patch.object(engine, ...)` で差し替え、screening は偽ポート注入で差し替える
+    既存の `_run` と同じ作法。
     """
     captured: dict = {}
 
@@ -104,9 +128,10 @@ def _run_with_portfolio(**kw):
     cfg = LongtermBacktestConfig.build(
         market="us", start=_START, end=_END, rescreen_freq="monthly", **kw
     )
+    set_backtest_screening_port(_StubScreeningPort(_screen))
     with patch.object(
         engine, "load_price_map", side_effect=lambda m, e: _price_map(_load(m, e))
-    ), patch.object(engine, "screen_trend_candidates", side_effect=_screen), patch.object(
+    ), patch.object(
         engine,
         "fetch_benchmark_returns",
         return_value={"ticker": "^GSPC", "total_return": 0.1},

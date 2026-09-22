@@ -13,6 +13,7 @@ import pandas as pd
 from src.backtest import longterm_backtest as lb
 from src.backtest.longterm import engine as lb_engine
 from src.backtest.longterm import prices as lb_prices
+from src.backtest.screening_port import set_backtest_screening_port
 from src.domain.types import TrendCandidate
 
 _PHASE_A = 400  # トレンド形成期間（営業日）
@@ -120,6 +121,27 @@ def _closes_frame(symbols):
     return pd.concat(frames, ignore_index=True).sort_values(["symbol", "ts"])
 
 
+class _StubScreeningPort:
+    """screen だけを擬似スクリーンに差し替える screening ポートのスタブ。
+
+    engine がポート経由になったため、従来の
+    `patch.object(lb_engine, "screen_trend_candidates", side_effect=screen)`
+    の置き換え。`simulate_position` は従来どおり screening BC の実装を使う
+    （保有/撤退の実挙動こそがこのテストの検証対象のため）。
+    """
+
+    def __init__(self, screen_fn):
+        self._screen_fn = screen_fn
+
+    def screen_trend_candidates(self, market, top_n, as_of):
+        return self._screen_fn(market=market, top_n=top_n, as_of=as_of)
+
+    def simulate_position(self, prices, entry_date, rules):
+        from src.screening.hold_engine import simulate_position
+
+        return simulate_position(prices, entry_date=entry_date, rules=rules)
+
+
 def _run(symbols, screen=None, call_log=None, **kwargs):
     screen = screen or _make_screen(symbols, call_log)
 
@@ -129,9 +151,8 @@ def _run(symbols, screen=None, call_log=None, **kwargs):
             df = df[df["ts"] <= pd.Timestamp(end_date)]
         return df.reset_index(drop=True)
 
+    set_backtest_screening_port(_StubScreeningPort(screen))
     with patch.object(lb_prices, "load_raw_closes", side_effect=_load_closes), patch.object(
-        lb_engine, "screen_trend_candidates", side_effect=screen
-    ), patch.object(
         lb_engine,
         "fetch_benchmark_returns",
         return_value={"ticker": "^GSPC", "total_return": 0.5, "start": "", "end": ""},
