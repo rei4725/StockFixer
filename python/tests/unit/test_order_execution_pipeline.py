@@ -481,7 +481,7 @@ class TestRunDailyOrders(unittest.TestCase):
         finally:
             self._stop_patches(patch_list)
 
-    def test_save_order_run_summary_called(self):
+    def test_order_run_sink_save_called(self):
         """run_daily_orders 実行後に order_run_sink.save が呼ばれる"""
         broker = _make_broker()
         predictions = _make_predictions(n_buy=1)
@@ -522,7 +522,7 @@ class TestRunDailyOrders(unittest.TestCase):
     def test_order_run_sink_is_required(self):
         """order_run_sink を渡さない呼び出しは TypeError になること。"""
         broker = _make_broker()
-        with self.assertRaises(TypeError):
+        with self.assertRaisesRegex(TypeError, "order_run_sink"):
             run_daily_orders(broker, market="jp", mode="paper")  # type: ignore[call-arg]
 
 

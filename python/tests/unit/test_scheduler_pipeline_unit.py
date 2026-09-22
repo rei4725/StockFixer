@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 
 from src.domain.types import SymbolTask
+from src.infrastructure.persistence.order_run_repository import PostgresOrderRunSink
 from src.orchestration.jobs import drift_check as drift_check_module
 from src.orchestration.scheduler import run_daily_auto_order, run_daily_drift_check
 
@@ -43,6 +44,7 @@ class TestRunDailyAutoOrder(unittest.TestCase):
         self.assertEqual(call_kwargs["market"], "jp")
         self.assertEqual(call_kwargs["mode"], "paper")
         self.assertIn("market_data", call_kwargs)
+        self.assertIsInstance(call_kwargs["order_run_sink"], PostgresOrderRunSink)
         mock_send_completion.assert_called_once_with(
             buy_orders=0,
             sell_orders=0,
@@ -84,6 +86,7 @@ class TestRunDailyAutoOrder(unittest.TestCase):
         self.assertEqual(call_kwargs["broker"], broker)
         self.assertEqual(call_kwargs["market"], "jp")
         self.assertEqual(call_kwargs["mode"], "live")
+        self.assertIsInstance(call_kwargs["order_run_sink"], PostgresOrderRunSink)
         mock_send_completion.assert_called_once()
 
 
