@@ -7,8 +7,8 @@ root_packages =
 #   utils < BC群 < orchestration/api
 #   上位レイヤーが下位レイヤーを参照するのは合法。逆は禁止。
 #
-# ignore_imports: 既存違反（将来的な解消対象）を明示列挙。
-# 新規違反を追加する際は必ずレビューを経ること。
+# ignore_imports は両契約とも未使用（例外 0 件が現状）。
+# 例外を追加する際は必ずレビューを経ること。
 # ============================================================
 [importlinter:contract:layers]
 name = Layered architecture (utils < BC < orchestration/api)
@@ -24,11 +24,9 @@ layers =
 #   ignore_imports に追加する際は必ず理由コメントを付けること。
 #
 # 違反分類ロードマップ:
-#   [A] types.py 共有で解消可能 (短期 Q3-2026):
-#       reporting → prediction/watchlist: 共有 types を domain/ に集約
-#   [B] イベント/コールバック駆動で解消可能 (中期 Q4-2026):
-#       market_data/watchlist/prediction → reporting: 通知をイベント経由に
-#       backtest → prediction/market_data: BT 専用ポートを定義
+#   [A] reporting → prediction/watchlist は解消済み（対象の import が存在しない）
+#   [B] market_data/watchlist/prediction → reporting、backtest → prediction/market_data も
+#       解消済み（対象の import が存在しない）
 #
 # [C] prediction.rule_signal_pipeline → trading/backtest は rule_engine BC (#340) で解消済み
 # [D] backtest → screening は PR-8 (screening port wiring) でポート経由に反転し解消済み
