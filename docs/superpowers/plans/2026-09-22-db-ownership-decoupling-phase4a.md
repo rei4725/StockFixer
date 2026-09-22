@@ -306,8 +306,10 @@ src/watchlist/ src/market_data/ src/screening/ src/rule_engine/ src/quality/
     ↓
 src/utils/                  DB 接続・ロギング・リトライ等の技術的ユーティリティ
     ↓
-src/domain/                 共有カーネル: 型（types.py）とポート（ports.py）のみ。
-                            何も import しない最下層
+src/domain/                 共有カーネル: 型（types.py）・ポート（ports.py）・
+                            取引ルール定数（trading_rules.py）・生成ルール
+                            （generated_rules.py）・例外（exceptions.py）。
+                            src.domain 以外の src.* を一切 import しない最下層
 ```
 
 `src/infrastructure/` はポートの実装アダプタ（yfinance / Discord / LLM）を置く場所である。

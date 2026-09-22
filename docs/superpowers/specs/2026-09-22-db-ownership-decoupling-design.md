@@ -150,7 +150,8 @@ infrastructure/              domain のポートを実装するアダプタ（DB
         ↓
 backtest / prediction / trading / reporting / ...
         ↓                    BC は domain と純粋 utils（logger 等）しか知らない
-domain/                      型とポートのみ。何も import しない
+domain/                      共有カーネル: 型・ポート・ルール定数・例外。
+                             src.domain 以外の src.* を一切 import しない
 ```
 
 ### 却下した代替案
