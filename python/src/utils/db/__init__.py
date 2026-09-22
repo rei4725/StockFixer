@@ -8,7 +8,6 @@ DuckDB データベースアクセスパッケージ
 モジュール構成:
     _connection.py     - 接続管理（短命接続 + リトライ）・スキーマ DDL
     stock_features.py  - stock_features テーブル操作
-    prediction.py      - prediction_results / model_metrics / prediction_accuracy テーブル操作
     market_data.py     - market_data_raw テーブル操作
     index_membership.py - index_membership_history テーブル操作
     experiment.py      - experiment_runs テーブル操作（R-211 実験トラッキング）

@@ -40,7 +40,7 @@ python/
 ├── src/
 │   ├── api/                    # API・Discord Bot（最上位層） ※旧パス・削除済み
 │   ├── services/               # オーケストレーション層（データパイプライン等）
-│   ├── domain/                 # ドメイン型定義 ※旧パス・削除済み（各BC の types.py に移行）
+│   ├── domain/                 # 共有カーネル（型の正本 types.py + ports.py）。恒久的に維持（削除しない）
 │   ├── backtest/               # バックテスト BC
 │   ├── models/                 # AI予測モデル
 │   ├── strategy/               # シグナル生成

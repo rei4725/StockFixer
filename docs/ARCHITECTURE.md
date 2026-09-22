@@ -112,15 +112,13 @@ StockFixer/
     │   │   ├── types.py                 # SymbolTask（バッチ実行単位）
     │   │   └── ticker_list.py           # S&P500 / NASDAQ100 銘柄リスト取得
     │   │
-    │   ├── analysis/            # レガシー（→ prediction/ 統合移行中）
-    │   │   ├── types.py                 # FeatureLoadResult
-    │   │   └── market_regime.py         # マーケットレジーム判定
+    │   ├── domain/               # 共有カーネル（BC 横断の型・ポート定義。何も import しない最下層）
+    │   │   ├── types.py                 # 型定義の正本（各 BC の types.py が re-export）
+    │   │   └── ports.py                 # NotificationPort 等のポート定義
     │   │
-    │   ├── strategy/            # レガシー（→ prediction/ 統合移行中）
-    │   │   ├── signal_generator.py      # 売買シグナル生成
-    │   │   └── optimal_params_loader.py # 最適パラメータ読込
+    │   ├── infrastructure/      # ポートの実装アダプタ（yfinance / Discord / LLM）
     │   │
-    │   └── utils/               # ユーティリティ層（最下層）
+    │   └── utils/               # ユーティリティ層
     │       ├── logger.py                # 統一ロガーファクトリー
     │       ├── db/                      # DuckDB 接続・CRUD パッケージ
     │       │   ├── stock_features.py    # stock_features テーブル CRUD
@@ -163,50 +161,35 @@ StockFixer/
 本システムは**クリーンアーキテクチャ**に近い階層構造を採用しています。
 **上位層は下位層のみを参照**し、逆方向の依存は禁止されています。
 
-```
-┌─────────────────────────────────────────────────┐
-│  run_*.py （エントリーポイント）                 │
-│  - 引数パースのみ。ビジネスロジックを持たない   │
-└─────────────────────────────────────────────────┘
-                        ↓
-┌─────────────────────────────────────────────────┐
-│  reporting/discord/ (discord_bot.py)            │
-│  - Discord コマンド受付・Webhook 通知           │
-│  api/ (metrics.py)                              │
-│  - ヘルスチェック・メトリクスエンドポイント     │
-└─────────────────────────────────────────────────┘
-                        ↓
-┌─────────────────────────────────────────────────┐
-│  Bounded Contexts（各 BC は独立した types.py）  │
-│                                                 │
-│  backtest/      バックテスト・最適化・BT評価    │
-│  prediction/    モデル学習・予測・ランキング     │
-│  market_data/   データ取得・特徴量・DuckDB保存  │
-│  reporting/     月次レポート・Discord クエリ     │
-│  watchlist/     銘柄リスト・SymbolTask 管理      │
-│  orchestration/ APScheduler ジョブ定義・キュー  │
-└─────────────────────────────────────────────────┘
-                        ↓
-┌─────────────────────────────────────────────────┐
-│  trading/brokers/ (BrokerBase DI)               │
-│  - 証券会社連携の抽象化（paper / kabu）         │
-│  - 上位 BC は BrokerBase のみを参照（DI）       │
-└─────────────────────────────────────────────────┘
-                        ↓
-┌─────────────────────────────────────────────────┐
-│  analysis/ + strategy/ （レガシー）             │
-│  - market_regime.py, signal_generator.py 等     │
-│  - 段階的に各 BC へ統合予定                     │
-└─────────────────────────────────────────────────┘
-                        ↓
-┌─────────────────────────────────────────────────┐
-│  utils層 (db/, logger.py, japan_time.py 等)     │
-│  - 汎用ユーティリティ・DB アクセス（最下層）   │
-└─────────────────────────────────────────────────┘
+> `analysis/` `strategy/` の各レガシーディレクトリは各 Bounded Context への統合が完了し、
+> 現在は存在しません。共有型は `src/domain/types.py`（正本）と各 BC の `types.py`（re-export）に
+> 置かれています。以下は現行のレイヤー構造です。
 
-> **共有型定義** は各 Bounded Context の `types.py` に配置されます（例: `src.watchlist.types.SymbolTask`、`src.prediction.types.PredictionResult`）。BC をまたぐデータ受け渡しにはこれらを直接 import します。
-> **config/settings.py** は全 BC に共通な設定値を一元管理し、環境変数でオーバーライド可能です。
+### 現行のレイヤー構造（2026-09-22 時点）
+
 ```
+run_*.py                    CLI エントリポイント（引数解析のみ）
+    ↓
+src/api/  src/orchestration/    合成ルート: アダプタを構築し BC へ注入する
+    ↓
+src/backtest/ src/prediction/ src/trading/ src/reporting/
+src/watchlist/ src/market_data/ src/screening/ src/rule_engine/ src/quality/
+                            Bounded Context（相互参照禁止）
+    ↓
+src/utils/                  DB 接続・ロギング・リトライ等の技術的ユーティリティ
+    ↓
+src/domain/                 共有カーネル: 型（types.py）とポート（ports.py）のみ。
+                            何も import しない最下層
+```
+
+`src/infrastructure/` はポートの実装アダプタ（yfinance / Discord / LLM）を置く場所である。
+現時点では `src.market_data` を参照する一方で複数の BC から参照されており、パッケージ単位で
+循環しているため import-linter の layers 契約には含めていない（別 Issue で解消予定）。
+
+レイヤー契約の正本は `.importlinter` である。
+
+> **共有型定義** は `src/domain/types.py`（正本）と各 Bounded Context の `types.py`（re-export、例: `src.watchlist.types.SymbolTask`、`src.prediction.types.PredictionResult`）に配置されます。BC をまたぐデータ受け渡しにはこれらを直接 import します。
+> **config/settings.py** は全 BC に共通な設定値を一元管理し、環境変数でオーバーライド可能です。
 
 ---
 
