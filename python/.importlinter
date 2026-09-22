@@ -1,8 +1,6 @@
 [importlinter]
 root_packages =
     src
-# "No matches" な ignore_imports エントリを error ではなく warning として扱う
-unmatched_ignores = warn
 
 # ============================================================
 # Contract 1: レイヤー階層契約
@@ -19,10 +17,6 @@ layers =
     src.api | src.orchestration
     src.backtest | src.prediction | src.trading | src.reporting | src.watchlist | src.market_data | src.rule_engine | src.quality | src.screening
     src.utils
-# backtest -> screening: 長期バックテストが screening の純粋関数
-# (screen_trend_candidates / simulate_position) を直接参照している既存依存。
-# #638 で src.screening を契約対象に追加した際に顕在化した。将来はBT専用
-# ポート経由に切り出す想定（Contract 2 のロードマップ [B] 相当）。
 
 # ============================================================
 # Contract 2: BC 独立性契約
@@ -37,13 +31,10 @@ layers =
 #       backtest → prediction/market_data: BT 専用ポートを定義
 #
 # [C] prediction.rule_signal_pipeline → trading/backtest は rule_engine BC (#340) で解消済み
-# [D] backtest → screening: BT専用ポート経由に切り出しで解消可能 (中期 Q4-2026、[B]と同分類)
-#     #638 で src.screening を契約対象に追加した際に顕在化した既存依存
+# [D] backtest → screening は PR-8 (screening port wiring) でポート経由に反転し解消済み
 #
-# 削減目標:
-#   現状: 47件 (2026-08, #638 で screening 登録により [D] 3件が新規に可視化)
-#   Q3-2026: 30件以下 (分類 A を解消)
-#   Q4-2026: 20件以下 (分類 B・D を解消)
+# 現状: ignore_imports は両契約とも 0 件。これが目標状態であり、
+# 新規に追加する場合は必ずレビューを経ること（恒常的な 0 件維持が前提）。
 # ============================================================
 [importlinter:contract:independence]
 name = BC independence (BCs must not import each other)
@@ -61,4 +52,3 @@ modules =
     src.rule_engine
     src.quality
     src.screening
-# backtest -> screening: layers契約と同じ既存依存（詳細はContract 1参照）
