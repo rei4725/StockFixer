@@ -77,7 +77,7 @@ importlinter の BC 間接依存検出を回避する」と、**契約を通す�
 | 束③ | 3 | `load_latest_prediction_timestamp` / `load_prediction_markets` / `load_prediction_results` |
 
 前半 9 件はプロキシから外すだけで済む（消費者は `src.prediction.db` を直接 import するか、
-そもそも prediction 内にいる）。Phase 4 は続く 6 件を扱い、残る 3 件が Phase 5 の対象となる。
+そもそも prediction 内にいる）。Phase 4 は続く 6 件を扱い、残る 3 件が Phase 4b の対象となる。
 
 reporting 側で DB を読んでいるファイルは 4 本のみ:
 `dashboard.py` / `kpi.py` / `discord/notifications_report.py` / `query_service.py`。
@@ -176,9 +176,9 @@ Phase 4 は **束① + 束②** を扱う。作業の自然な単位は「束」
 | | 内容 | 成果 |
 |---|---|---|
 | **Phase 4（本設計）** | 束①（書き: ポート＋アダプタ）＋ 束②（読み: 押し上げ＋入口ポート） | reporting 4 ファイルと trading が越境を断つ。プロキシ 18 → 3 |
-| **Phase 5（後続）** | 束③（`prediction_results`。`PredictionResultRepository` を完成） | プロキシ全撤去・`allow_indirect_imports` 削除 |
+| **Phase 4b（後続）** | 束③（`prediction_results`。`PredictionResultRepository` を完成） | プロキシ全撤去・`allow_indirect_imports` 削除 |
 
-`allow_indirect_imports = True` の削除は **Phase 5 の完了条件**である。Phase 4 では外せない。
+`allow_indirect_imports = True` の削除は **Phase 4b の完了条件**である。Phase 4 では外せない。
 
 ---
 
@@ -290,7 +290,7 @@ layers =
 `src/backtest/*` `src/reporting/*` `src/quality/*` が `src.infrastructure` を import しており、
 パッケージ単位で循環している。層に追加した時点で契約が落ちる。理由をコメントに明記し、別 Issue を起票する。
 
-`allow_indirect_imports = True` は Phase 5 まで残す。
+`allow_indirect_imports = True` は Phase 4b まで残す。
 
 ### 7.2 動的 import 禁止ガード
 
@@ -362,7 +362,7 @@ python -m pytest tests/unit/ -n 2 -q
 # import-linter（この呼び方でしか実挙動が見えない）
 py -c "from importlinter.cli import lint_imports_command; lint_imports_command()"
 
-# 残留確認: Phase 5 対象と model_metrics のみが残ること
+# 残留確認: Phase 4b 対象と model_metrics のみが残ること
 grep -rn "src\.prediction\.db" src/ tests/
 ```
 
@@ -380,7 +380,7 @@ grep -rn "src\.prediction\.db" src/ tests/
 ## 12. Phase 4 の対象外
 
 - `model_metrics.py`（`TrainingMetrics` 依存・越境消費者なし）— prediction 内に留め、`db/` パッケージを畳むに留める
-- 束③ `prediction_results` — Phase 5
+- 束③ `prediction_results` — Phase 4b
 - `src/infrastructure` のパッケージ循環 — 別 Issue
 - `src/strategy/` `src/features/` の空ディレクトリ残骸、`python/src/utils/db/_connection.py.orig` / `.rej`（git 未追跡）— 別 PR
 

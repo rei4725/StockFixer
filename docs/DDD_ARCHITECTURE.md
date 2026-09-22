@@ -409,7 +409,7 @@ Get-ChildItem -Recurse -Filter "*.py" python/ | ForEach-Object {
 > 詳細と根拠: [DB 所有権の疎結合化 設計書 §3](superpowers/specs/2026-09-22-db-ownership-decoupling-design.md#3-資料の不整合先に解決すべき教義問題)
 
 - **決定日**: 2026-04-27
-- **ステータス**: Accepted
+- **ステータス**: Superseded（2026-09-22）
 - **コンテキスト**: 型定義を各 BC に移動するとすべての import が壊れる
 - **決定**: 型を各 BC の `types.py` に移動したうえで、`domain/types.py` は re-export のみとする。フェーズ 4 で削除する
 - **結果**: 既存コードへの影響ゼロで段階移行できる
