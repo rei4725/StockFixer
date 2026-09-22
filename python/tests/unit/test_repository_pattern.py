@@ -11,7 +11,11 @@ import pandas as pd
 import pytest
 
 from src.domain.ports import PredictionResultRepository
-from src.infrastructure.in_memory import InMemoryBrokerAdapter, InMemoryPredictionRepository
+from src.infrastructure.in_memory import (
+    InMemoryBrokerAdapter,
+    InMemoryOrderRunSink,
+    InMemoryPredictionRepository,
+)
 from src.trading.brokers.base import OrderType
 from src.trading.execution import run_daily_orders
 from src.trading.types import TradingGateStatus
@@ -127,7 +131,6 @@ _COMMON_PATCHES = [
     patch("src.trading.execution.RiskManager.calc_position_size", return_value=100),
     patch("src.trading.risk_manager.RiskManager._get_daily_realized_loss", return_value=0.0),
     patch("src.trading.risk_manager.RiskManager._get_consecutive_losses", return_value=0),
-    patch("src.trading.execution.runner.save_order_run_summary"),
 ]
 
 
@@ -140,7 +143,13 @@ class TestRunDailyOrdersWithRepository:
 
         _ = [p.start() for p in _COMMON_PATCHES]
         try:
-            stats = run_daily_orders(broker, market="jp", mode="paper", prediction_repo=repo)
+            stats = run_daily_orders(
+                broker,
+                order_run_sink=InMemoryOrderRunSink(),
+                market="jp",
+                mode="paper",
+                prediction_repo=repo,
+            )
             assert stats["buy_orders"] > 0
             assert stats["errors"] == 0
         finally:
@@ -153,7 +162,13 @@ class TestRunDailyOrdersWithRepository:
 
         _ = [p.start() for p in _COMMON_PATCHES]
         try:
-            stats = run_daily_orders(broker, market="jp", mode="paper", prediction_repo=repo)
+            stats = run_daily_orders(
+                broker,
+                order_run_sink=InMemoryOrderRunSink(),
+                market="jp",
+                mode="paper",
+                prediction_repo=repo,
+            )
             assert stats["buy_orders"] == 0
         finally:
             for p in _COMMON_PATCHES:
@@ -169,7 +184,13 @@ class TestRunDailyOrdersWithRepository:
         ) as mock_load:
             _ = [p.start() for p in _COMMON_PATCHES]
             try:
-                run_daily_orders(broker, market="jp", mode="paper", prediction_repo=None)
+                run_daily_orders(
+                    broker,
+                    order_run_sink=InMemoryOrderRunSink(),
+                    market="jp",
+                    mode="paper",
+                    prediction_repo=None,
+                )
                 mock_load.assert_called_once_with("jp")
             finally:
                 for p in _COMMON_PATCHES:
@@ -183,7 +204,13 @@ class TestRunDailyOrdersWithRepository:
         with patch("src.trading.execution.runner._load_latest_predictions") as mock_load:
             _ = [p.start() for p in _COMMON_PATCHES]
             try:
-                run_daily_orders(broker, market="jp", mode="paper", prediction_repo=repo)
+                run_daily_orders(
+                    broker,
+                    order_run_sink=InMemoryOrderRunSink(),
+                    market="jp",
+                    mode="paper",
+                    prediction_repo=repo,
+                )
                 mock_load.assert_not_called()
             finally:
                 for p in _COMMON_PATCHES:

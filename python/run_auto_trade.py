@@ -20,6 +20,7 @@ run_auto_trade.py — 自動発注 CLIエントリーポイント
 import argparse
 import sys
 
+from src.infrastructure.persistence.order_run_repository import PostgresOrderRunSink
 from src.orchestration.port_wiring import wire_ports
 from src.utils.logger import get_logger
 
@@ -89,7 +90,12 @@ if __name__ == "__main__":
         else:
             from src.trading.execution import run_daily_orders
 
-            stats = run_daily_orders(broker=broker, market=args.market, mode=args.mode)
+            stats = run_daily_orders(
+                broker=broker,
+                order_run_sink=PostgresOrderRunSink(),
+                market=args.market,
+                mode=args.mode,
+            )
             print(
                 f"発注完了 — 買い: {stats['buy_orders']} 売り: {stats['sell_orders']} "
                 f"スキップ: {stats['skipped']} エラー: {stats['errors']}"
