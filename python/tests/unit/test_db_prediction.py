@@ -21,11 +21,9 @@ from src.prediction.db import (
     load_prediction_markets,
     load_prediction_results,
     load_shap_latest,
-    load_turnover_comparison,
     load_weekly_accuracy_snapshots,
     save_feature_selection,
     save_model_metrics,
-    save_order_run_summary,
     save_prediction_accuracy,
     save_prediction_results,
     save_shap_values,
@@ -773,132 +771,6 @@ class TestWeeklyAccuracySnapshot(_TmpDbTestCase):
         """データがないとき空 DataFrame を返すこと"""
         result = load_weekly_accuracy_snapshots(n_weeks=4)
         self.assertTrue(result.empty)
-
-
-class TestSaveOrderRunSummary(_TmpDbTestCase):
-    """save_order_run_summary のテスト"""
-
-    def _save_summary(self, run_id="run-001", market="jp", mode="paper", **kwargs):
-        defaults = dict(
-            buy_orders=3,
-            sell_orders=1,
-            short_orders=0,
-            skipped=2,
-            skipped_min_change=1,
-            total_turnover=300000.0,
-            min_change_ratio=0.003,
-        )
-        defaults.update(kwargs)
-        save_order_run_summary(
-            run_id=run_id,
-            market=market,
-            mode=mode,
-            **defaults,
-        )
-
-    def test_save_inserts_row(self):
-        """保存後に load_turnover_comparison で取得できること"""
-        self._save_summary()
-        df = load_turnover_comparison("jp")
-        self.assertEqual(len(df), 1)
-        self.assertEqual(df["run_id"].iloc[0], "run-001")
-
-    def test_fields_stored_correctly(self):
-        """各フィールドが正しく保存されること"""
-        self._save_summary(buy_orders=5, sell_orders=2, total_turnover=500000.0)
-        df = load_turnover_comparison("jp")
-        self.assertFalse(df.empty)
-        self.assertEqual(df["buy_orders"].iloc[0], 5)
-        self.assertEqual(df["sell_orders"].iloc[0], 2)
-        self.assertAlmostEqual(df["total_turnover"].iloc[0], 500000.0)
-
-    def test_multiple_runs_saved(self):
-        """複数回の実行サマリーを保存できること"""
-        self._save_summary(run_id="run-001")
-        self._save_summary(run_id="run-002", buy_orders=1)
-        df = load_turnover_comparison("jp")
-        self.assertEqual(len(df), 2)
-
-
-class TestLoadTurnoverComparison(_TmpDbTestCase):
-    """load_turnover_comparison のテスト"""
-
-    def _save(self, run_id, market="jp", buy_orders=1, total_turnover=10000.0):
-        save_order_run_summary(
-            run_id=run_id,
-            market=market,
-            mode="paper",
-            buy_orders=buy_orders,
-            sell_orders=0,
-            short_orders=0,
-            skipped=0,
-            skipped_min_change=0,
-            total_turnover=total_turnover,
-            min_change_ratio=0.003,
-        )
-
-    def test_empty_returns_empty_df(self):
-        """データがない場合は空DataFrameを返すこと"""
-        df = load_turnover_comparison("jp")
-        self.assertTrue(df.empty)
-
-    def test_filters_by_market(self):
-        """market フィルタが機能すること"""
-        self._save("r-jp", market="jp")
-        self._save("r-us", market="us")
-        df = load_turnover_comparison("jp")
-        self.assertEqual(len(df), 1)
-        self.assertEqual(df["market"].iloc[0], "jp")
-
-    def test_limit_parameter(self):
-        """limit パラメータが機能すること"""
-        for i in range(5):
-            self._save(f"r-{i:03d}", total_turnover=float(i * 1000))
-        df = load_turnover_comparison("jp", limit=3)
-        self.assertLessEqual(len(df), 3)
-
-    def test_contains_expected_columns(self):
-        """必要な列が含まれること"""
-        self._save("r-001")
-        df = load_turnover_comparison("jp")
-        for col in ("run_id", "market", "mode", "total_turnover", "buy_orders", "sell_orders"):
-            self.assertIn(col, df.columns)
-
-    def test_ordered_by_run_at_desc(self):
-        """run_at 降順で返ること（最新が先頭）
-
-        save_order_run_summary は run_at に SQL側の CURRENT_TIMESTAMP を使う。
-        Postgres の CURRENT_TIMESTAMP はトランザクション開始時刻で固定される
-        （transaction_timestamp() 相当）ため、テスト全体を1トランザクションに
-        包んでロールバックする _isolate_db フィクスチャ配下では、同一テスト内で
-        2回 INSERT しても run_at が同一値になり順序が不定になる。
-        そのためこのテストだけは save_order_run_summary を経由せず、
-        run_at を明示的に異なる値にして直接 INSERT する。
-        """
-        from src.utils.db._connection import _db_connection
-
-        with _db_connection() as con:
-            con.execute(
-                """
-                INSERT INTO order_run_summary
-                    (run_id, market, mode, run_at, buy_orders, sell_orders, short_orders,
-                     skipped, skipped_min_change, total_turnover, min_change_ratio)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """,
-                ["r-001", "jp", "paper", "2026-07-19 10:00:00", 1, 0, 0, 0, 0, 10000.0, 0.003],
-            )
-            con.execute(
-                """
-                INSERT INTO order_run_summary
-                    (run_id, market, mode, run_at, buy_orders, sell_orders, short_orders,
-                     skipped, skipped_min_change, total_turnover, min_change_ratio)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """,
-                ["r-002", "jp", "paper", "2026-07-19 11:00:00", 2, 0, 0, 0, 0, 10000.0, 0.003],
-            )
-        df = load_turnover_comparison("jp")
-        # 後から挿入されたものが先頭（run_at が新しい）
-        self.assertEqual(df["run_id"].iloc[0], "r-002")
 
 
 class TestSavePredictionAccuracyPartialFailure(unittest.TestCase):
