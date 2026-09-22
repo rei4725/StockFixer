@@ -6,6 +6,7 @@ multibagger 候補を抽出・ランキングする。予測はせず「現に�
 依存は `utils` のみ（他 BC を import しない純粋 BC）。
 """
 
+from src.domain.types import TrendCandidate
 from src.screening.positions import (
     add_position,
     close_position,
@@ -14,7 +15,7 @@ from src.screening.positions import (
     update_position,
 )
 from src.screening.trend_screener import save_candidates, screen_trend_candidates
-from src.screening.types import Position, TrendCandidate
+from src.screening.types import Position
 
 __all__ = [
     "TrendCandidate",

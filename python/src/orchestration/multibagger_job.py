@@ -18,11 +18,12 @@ from typing import Optional
 
 import pandas as pd
 
+from src.domain.types import PositionEvent
 from src.screening.hold_engine import simulate_position
 from src.screening.positions import close_position, list_positions, update_position
 from src.screening.quality_gate import apply_quality_gate
 from src.screening.trend_screener import screen_trend_candidates
-from src.screening.types import MultibaggerCandidate, Position, PositionEvent
+from src.screening.types import MultibaggerCandidate, Position
 from src.utils.db.stock_features import load_stock_features
 from src.utils.logger import get_logger
 

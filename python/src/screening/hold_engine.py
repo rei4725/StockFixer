@@ -14,7 +14,7 @@ from typing import Optional
 
 import pandas as pd
 
-from src.screening.types import HoldRules, PositionEvent
+from src.domain.types import HoldRules, PositionEvent
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)

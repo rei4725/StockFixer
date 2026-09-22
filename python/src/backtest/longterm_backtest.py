@@ -20,7 +20,7 @@ from src.backtest.longterm.config import LongtermBacktestConfig
 # 使われることを避けるため、必要なら src.backtest.longterm.engine から直接 import すること。
 from src.backtest.longterm.engine import run_longterm_backtest as _run_with_config
 from src.backtest.longterm.reporting import build_conclusion, save_results  # noqa: F401
-from src.screening.types import HoldRules
+from src.domain.types import HoldRules
 
 __all__ = [
     "LongtermBacktestConfig",

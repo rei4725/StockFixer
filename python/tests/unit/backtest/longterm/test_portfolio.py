@@ -4,7 +4,7 @@ import unittest
 
 from src.backtest.execution import ExecutionModel, TradingCosts
 from src.backtest.longterm.portfolio import OpenPosition, Portfolio
-from src.screening.types import PositionEvent
+from src.domain.types import PositionEvent
 
 
 def _exec(fee=0.0, slip=0.0):

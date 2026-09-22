@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from src.backtest.execution import DEFAULT_FEE_RATE, TradingCosts
-from src.screening.types import HoldRules
+from src.domain.types import HoldRules
 
 
 @dataclass(frozen=True)

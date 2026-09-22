@@ -3,10 +3,11 @@
 import pandas as pd
 import pytest
 
+from src.domain.types import PositionEvent
 from src.orchestration import multibagger_job
 from src.screening import positions as positions_mod
 from src.screening.positions import add_position, close_position, list_positions, update_position
-from src.screening.types import MultibaggerCandidate, PositionEvent
+from src.screening.types import MultibaggerCandidate
 
 
 @pytest.fixture

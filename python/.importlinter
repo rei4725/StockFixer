@@ -23,17 +23,9 @@ layers =
 # (screen_trend_candidates / simulate_position) を直接参照している既存依存。
 # #638 で src.screening を契約対象に追加した際に顕在化した。将来はBT専用
 # ポート経由に切り出す想定（Contract 2 のロードマップ [B] 相当）。
-# longterm.config は LongtermBacktestConfig の rules フィールドが HoldRules を保持。
-# longterm.engine -> screening.types はエントリー約定ラグ導入（Task 8）で
-# screen_trend_candidates の戻り値（TrendCandidate のリスト）をキューへ
-# 積むための型ヒントとして追加。
 ignore_imports =
-    src.backtest.longterm_backtest -> src.screening.types
     src.backtest.longterm.engine -> src.screening.hold_engine
     src.backtest.longterm.engine -> src.screening.trend_screener
-    src.backtest.longterm.engine -> src.screening.types
-    src.backtest.longterm.config -> src.screening.types
-    src.backtest.longterm.portfolio -> src.screening.types
 
 # ============================================================
 # Contract 2: BC 独立性契約
@@ -74,9 +66,5 @@ modules =
     src.screening
 # backtest -> screening: layers契約と同じ既存依存（詳細はContract 1参照）
 ignore_imports =
-    src.backtest.longterm_backtest -> src.screening.types
     src.backtest.longterm.engine -> src.screening.hold_engine
     src.backtest.longterm.engine -> src.screening.trend_screener
-    src.backtest.longterm.engine -> src.screening.types
-    src.backtest.longterm.config -> src.screening.types
-    src.backtest.longterm.portfolio -> src.screening.types

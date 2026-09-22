@@ -13,7 +13,7 @@ from typing import Optional
 
 import pandas as pd
 
-from src.screening.types import TrendCandidate
+from src.domain.types import TrendCandidate
 from src.utils.db.market_data import load_all_raw_ohlcv_symbols, load_raw_ohlcv
 from src.utils.logger import get_logger
 from src.utils.results_io import save_result_csvs
