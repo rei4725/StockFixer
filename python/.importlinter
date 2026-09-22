@@ -62,3 +62,36 @@ modules =
     src.rule_engine
     src.quality
     src.screening
+
+# ============================================================
+# Contract 3: domain purity 契約
+#   src.domain は src.domain 自身以外の src.* を一切 import しない。
+#
+# Contract 1（layers）は src.domain が src.utils・BC群・src.api/src.orchestration より
+# 下位にあることは証明するが、src.infrastructure については何も証明しない。
+# src.infrastructure は BC 群との間でパッケージ単位の循環があり（Contract 1 のコメント参照）、
+# 意図的に layers 契約へ載せていないため、"layers" という型ではこの性質を表現できない。
+# そのため forbidden 型の独立した契約として domain の純粋性のみを直接検証する。
+#
+# ignore_imports は未使用（例外 0 件が現状）。
+# 例外を追加する際は必ずレビューを経ること。
+# ============================================================
+[importlinter:contract:domain-purity]
+name = domain purity (src.domain imports nothing outside itself)
+type = forbidden
+source_modules =
+    src.domain
+forbidden_modules =
+    src.api
+    src.orchestration
+    src.infrastructure
+    src.utils
+    src.backtest
+    src.prediction
+    src.trading
+    src.reporting
+    src.watchlist
+    src.market_data
+    src.rule_engine
+    src.quality
+    src.screening
