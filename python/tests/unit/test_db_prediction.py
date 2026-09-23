@@ -15,8 +15,6 @@ from src.prediction.db import (
     load_drift_summary,
     load_excluded_features,
     load_latest_prediction_timestamp,
-    load_open_close_advantage_summary,
-    load_paper_real_diff_summary,
     load_prediction_accuracy,
     load_prediction_markets,
     load_prediction_results,
@@ -28,7 +26,6 @@ from src.prediction.db import (
     save_prediction_results,
     save_shap_values,
     save_weekly_accuracy_snapshot,
-    upsert_paper_real_diff,
 )
 from src.prediction.types import PredictionResult, TrainingMetrics
 
@@ -609,110 +606,6 @@ class TestLoadShapLatest(_TmpDbTestCase):
         result = load_shap_latest("us", "AAPL", "StockXGBoostModel")
         for col in ["feature", "shap_mean", "shap_rank", "trained_at"]:
             self.assertIn(col, result.columns)
-
-
-class TestPaperRealDiff(_TmpDbTestCase):
-    def test_upsert_paper_then_live_populates_diff(self):
-        upsert_paper_real_diff(
-            market="jp",
-            symbol="7203",
-            predicted_at="20260405_085000",
-            side=1,
-            signal_price=1000.0,
-            mode="paper",
-            order_id="paper-1",
-            actual_price=1005.0,
-        )
-        upsert_paper_real_diff(
-            market="jp",
-            symbol="7203",
-            predicted_at="20260405_085000",
-            side=1,
-            signal_price=1000.0,
-            mode="live",
-            order_id="real-1",
-            actual_price=1008.0,
-        )
-
-        with db_module._db_connection() as con:
-            row = con.execute(
-                "SELECT paper_price, real_price, price_diff, paper_slippage, real_slippage "
-                "FROM paper_real_diff WHERE market='jp' AND symbol='7203'"
-            ).fetchone()
-
-        self.assertEqual(row[0], 1005.0)
-        self.assertEqual(row[1], 1008.0)
-        self.assertAlmostEqual(row[2], 3.0)
-        self.assertAlmostEqual(row[3], 0.005)
-        self.assertAlmostEqual(row[4], 0.008)
-
-    def test_load_paper_real_diff_summary_returns_aggregates(self):
-        upsert_paper_real_diff(
-            market="jp",
-            symbol="7203",
-            predicted_at="20260405_085000",
-            side=1,
-            signal_price=1000.0,
-            mode="paper",
-            order_id="paper-1",
-            actual_price=1005.0,
-        )
-        upsert_paper_real_diff(
-            market="jp",
-            symbol="7203",
-            predicted_at="20260405_085000",
-            side=1,
-            signal_price=1000.0,
-            mode="live",
-            order_id="real-1",
-            actual_price=995.0,
-        )
-
-        summary = load_paper_real_diff_summary(recent_days=30)
-
-        self.assertEqual(summary["tracked_count"], 1)
-        self.assertEqual(summary["comparable_count"], 1)
-        self.assertAlmostEqual(summary["avg_abs_price_diff"], 10.0)
-        self.assertAlmostEqual(summary["avg_abs_diff_ratio"], 0.01)
-
-    def test_load_open_close_advantage_summary_groups_by_session(self):
-        """order_session 別にスリップ集計が行われること"""
-        upsert_paper_real_diff(
-            market="jp",
-            symbol="7203",
-            predicted_at="20260405_085000",
-            side=1,
-            signal_price=1000.0,
-            mode="paper",
-            order_id="paper-open",
-            actual_price=1002.0,
-            order_session="open",
-        )
-        upsert_paper_real_diff(
-            market="jp",
-            symbol="7204",
-            predicted_at="20260405_085000",
-            side=1,
-            signal_price=2000.0,
-            mode="paper",
-            order_id="paper-close",
-            actual_price=2010.0,
-            order_session="close",
-        )
-
-        result = load_open_close_advantage_summary(recent_days=30)
-
-        self.assertIn("open", result)
-        self.assertIn("close", result)
-        self.assertEqual(result["open"]["count"], 1)
-        self.assertEqual(result["close"]["count"], 1)
-        self.assertAlmostEqual(result["open"]["avg_slippage"], 0.002)
-        self.assertAlmostEqual(result["close"]["avg_slippage"], 0.005)
-
-    def test_load_open_close_advantage_summary_empty_when_no_fills(self):
-        """約定なしのとき空辞書を返すこと"""
-        result = load_open_close_advantage_summary(recent_days=30)
-        self.assertEqual(result, {})
 
 
 class TestWeeklyAccuracySnapshot(_TmpDbTestCase):

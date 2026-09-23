@@ -107,7 +107,6 @@ class _DbPackageProxy(types.ModuleType):
             "load_feature_exclusion_candidates",
             "load_latest_prediction_timestamp",
             "load_model_weights",
-            "load_paper_real_diff_summary",
             "load_prediction_accuracy",
             "load_prediction_markets",
             "load_prediction_results",
@@ -118,7 +117,6 @@ class _DbPackageProxy(types.ModuleType):
             "save_prediction_results",
             "save_shap_values",
             "save_weekly_accuracy_snapshot",
-            "upsert_paper_real_diff",
         ]
     )
 
