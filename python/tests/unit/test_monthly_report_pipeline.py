@@ -10,7 +10,7 @@ from unittest.mock import patch
 import pandas as pd
 
 from src.infrastructure.in_memory import InMemoryAnalyticsQuery
-from src.reporting.kpi import MonthlyKPI, _compute_hit_rate, get_monthly_kpis
+from src.reporting.kpi import _EMPTY_DIFF, MonthlyKPI, _compute_hit_rate, get_monthly_kpis
 from src.reporting.monthly import _load_latest_wf_summary, _mean_metric, run_monthly_report
 
 # ---------------------------------------------------------------------------
@@ -142,6 +142,16 @@ class TestComputeAvgSlippage(unittest.TestCase):
     def test_returns_none_when_key_missing(self, _hit, _drift):
         kpi = get_monthly_kpis(diff_summary={})
         self.assertIsNone(kpi.avg_slippage)
+
+    @patch("src.reporting.kpi._compute_drift_count", return_value=0)
+    @patch("src.reporting.kpi._compute_hit_rate", return_value=0.6)
+    def test_none_diff_summary_means_avg_slippage_is_none_not_zero(self, _hit, _drift):
+        """diff_summary=None（読み取り失敗を表す）のとき avg_slippage は None であり、
+        _EMPTY_DIFF の 0.0 と混同してはならない（false な「計測されたゼロ」を防ぐ）。
+        """
+        kpi = get_monthly_kpis(diff_summary=None)
+        self.assertIsNone(kpi.avg_slippage)
+        self.assertEqual(kpi.diff_summary, _EMPTY_DIFF)
 
 
 # ---------------------------------------------------------------------------

@@ -40,17 +40,26 @@ class MonthlyKPI:
     diff_summary: dict = field(default_factory=dict)
 
 
-def get_monthly_kpis(days: int = _REPORT_DAYS, *, diff_summary: dict) -> MonthlyKPI:
+def get_monthly_kpis(days: int = _REPORT_DAYS, *, diff_summary: Optional[dict]) -> MonthlyKPI:
     """hit_rate / avg_slippage / drift_count を集約して返す。
 
     diff_summary は入口が AnalyticsQuery から取得して渡す（自分では読みに行かない）。
+    取得に失敗した場合は None を渡すこと。None のときは avg_slippage を
+    「計測されたゼロ」(0.0) ではなく「データなし」(None) として扱い、
+    diff_summary フィールドには表示用の _EMPTY_DIFF を補う。
     """
-    avg_slippage = diff_summary.get("avg_paper_slippage")
+    if diff_summary is None:
+        avg_slippage = None
+        resolved_diff_summary = dict(_EMPTY_DIFF)
+    else:
+        raw_avg_slippage = diff_summary.get("avg_paper_slippage")
+        avg_slippage = float(raw_avg_slippage) if raw_avg_slippage is not None else None
+        resolved_diff_summary = diff_summary
     return MonthlyKPI(
         hit_rate=_compute_hit_rate(days),
-        avg_slippage=float(avg_slippage) if avg_slippage is not None else None,
+        avg_slippage=avg_slippage,
         drift_count=_compute_drift_count(days),
-        diff_summary=diff_summary,
+        diff_summary=resolved_diff_summary,
     )
 
 

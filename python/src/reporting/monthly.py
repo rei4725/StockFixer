@@ -18,7 +18,7 @@ from typing import Any, Callable, Optional
 import pandas as pd
 
 from src.domain.ports import AnalyticsQuery
-from src.reporting.kpi import _EMPTY_DIFF, get_monthly_kpis
+from src.reporting.kpi import get_monthly_kpis
 from src.reporting.types import MonthlyReportSummary
 from src.utils.data_path_utils import get_results_dir
 from src.utils.logger import get_logger
@@ -98,7 +98,7 @@ def run_monthly_report(
         diff_summary = analytics.paper_real_diff_summary(recent_days=30)
     except Exception as e:
         logger.error(f"diff_summary 取得失敗: {e}", exc_info=True)
-        diff_summary = dict(_EMPTY_DIFF)
+        diff_summary = None
     kpi = get_monthly_kpis(diff_summary=diff_summary)
     hit_rate = kpi.hit_rate
     avg_slippage = kpi.avg_slippage
@@ -156,7 +156,7 @@ def save_monthly_report_to_file(
         _diff_summary = analytics.paper_real_diff_summary(recent_days=30)
     except Exception as e:
         logger.error(f"diff_summary 取得失敗: {e}", exc_info=True)
-        _diff_summary = dict(_EMPTY_DIFF)
+        _diff_summary = None
     _kpi = get_monthly_kpis(diff_summary=_diff_summary)
     diff = _kpi.diff_summary
     drift_count = _kpi.drift_count
