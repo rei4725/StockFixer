@@ -2100,7 +2100,7 @@ EOF
 - Modify: `python/src/reporting/discord/notifications_report.py`（27-31 行の署名、51-55 行の関数内 import、136-137 行の None フォールバック）
 - Modify: `python/run_dashboard.py` / `python/run_monthly_report.py`
 - Modify: `python/src/orchestration/jobs/periodic.py`（61-68 行）/ `python/src/orchestration/jobs/weekly.py`（153-175 行）
-- Test: `python/tests/unit/test_dashboard.py` / `test_monthly_report_pipeline.py` / `test_scheduler_pipeline_unit.py`
+- Test: `python/tests/unit/test_dashboard.py` / `test_monthly_report_pipeline.py` / `test_scheduler_pipeline_unit.py` / `test_discord_utils.py`（565 / 876 / 886 行の `send_weekly_report` 呼び出し）
 
 **Interfaces:**
 - Consumes: `AnalyticsQuery` / `PostgresAnalyticsQuery` / `InMemoryAnalyticsQuery`（Task 8）
@@ -2110,7 +2110,7 @@ EOF
   - `save_monthly_report_to_file(..., *, analytics: AnalyticsQuery)`（既存引数はそのまま）
   - `run_dashboard(recent_days: int = 30, drift_n: int = 20, *, analytics: AnalyticsQuery) -> None`
   - `_section_paper_real_diff(diff: dict) -> list[list]`
-  - `send_weekly_report(accuracy_df, horizon: int, diff_summary: dict, llm_review: Optional[str]) -> bool`（`diff_summary` が必須になる）
+  - `send_weekly_report(accuracy_df, horizon: int = 1, *, diff_summary: dict, llm_review: Optional[str] = None) -> bool`（`diff_summary` がキーワード専用の必須引数になる）
   - `get_monthly_report_summary(target_month: str | None = None, *, analytics: AnalyticsQuery) -> MonthlyReportSummary`（`query_service.py`）
 
 設計書 §6.2 の線引きに従う。`dashboard` / `query_service` / `monthly` は入口ゆえポートを持ち、`kpi` と `discord/notifications_report` は内側ゆえデータを受け取る。`drift_summary` / `prediction_accuracy` は束②（Phase 4c）のため、`kpi.py` の `_compute_hit_rate` / `_compute_drift_count` は**本計画では変更しない**。`kpi.py` の `from src.utils.db import ...` の行は `load_drift_summary, load_prediction_accuracy` のみが残る。
@@ -2201,9 +2201,12 @@ def _section_monthly_kpi(analytics: AnalyticsQuery) -> Optional[list[list]]:
 `_section_paper_real_diff` をデータ受け取りに変える:
 
 ```python
-def _section_paper_real_diff(diff: dict) -> list[list]:
-    """paper/real 乖離サマリーを表形式の行リストで返す。"""
-    d = diff
+def _section_paper_real_diff(d: dict) -> list[list]:
+    """paper/real 乖離サマリーを表形式の行リストで返す。
+
+    Args:
+        d: AnalyticsQuery.paper_real_diff_summary() の戻り値
+    """
     return [
         ["追跡件数", str(d["tracked_count"])],
         ["比較可能件数", str(d["comparable_count"])],
@@ -2297,11 +2300,22 @@ def send_weekly_report(
 ```python
 def send_weekly_report(
     accuracy_df,
-    horizon: int,
+    horizon: int = 1,
+    *,
     diff_summary: dict,
     llm_review: Optional[str] = None,
 ) -> bool:
 ```
+
+**`horizon` の既定値 `1` は残す。** 既存テスト `tests/unit/test_discord_utils.py:876` が `horizon` を省略して呼んでいるためで、必須化の対象は「自分で DB を読む保険」を持っていた `diff_summary` だけである。`diff_summary` はキーワード専用の必須引数にする。
+
+これにより `tests/unit/test_discord_utils.py:886` の `send_weekly_report(accuracy_df=None)` が `TypeError` になる。同テストは「精度データが無ければ False を返す」ことを確かめているので、`diff_summary={"tracked_count": 0}` を渡す形に直す:
+
+```python
+        result = send_weekly_report(accuracy_df=None, diff_summary={"tracked_count": 0})
+```
+
+同ファイル 876 行も `diff_summary` を既に渡しているためそのままでよい。
 
 51-55 行の関数内 import から `load_paper_real_diff_summary` を削除する:
 
