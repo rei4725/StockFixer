@@ -883,7 +883,7 @@ class TestSendWeeklyReportExtra(unittest.TestCase):
         from src.reporting.discord.discord_utils import send_weekly_report
 
         mock_load.return_value = pd.DataFrame()
-        result = send_weekly_report(accuracy_df=None)
+        result = send_weekly_report(accuracy_df=None, diff_summary={"tracked_count": 0})
         self.assertFalse(result)
 
 

@@ -9,7 +9,8 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from src.reporting.kpi import MonthlyKPI, _compute_avg_slippage, _compute_hit_rate
+from src.infrastructure.in_memory import InMemoryAnalyticsQuery
+from src.reporting.kpi import MonthlyKPI, _compute_hit_rate, get_monthly_kpis
 from src.reporting.monthly import _load_latest_wf_summary, _mean_metric, run_monthly_report
 
 # ---------------------------------------------------------------------------
@@ -130,25 +131,17 @@ class TestComputeHitRate(unittest.TestCase):
 
 
 class TestComputeAvgSlippage(unittest.TestCase):
-    @patch("src.reporting.kpi.load_paper_real_diff_summary")
-    def test_returns_slippage_from_summary(self, mock_summary):
-        mock_summary.return_value = {"avg_paper_slippage": 0.002}
-        result = _compute_avg_slippage()
-        self.assertAlmostEqual(result, 0.002)
+    @patch("src.reporting.kpi._compute_drift_count", return_value=0)
+    @patch("src.reporting.kpi._compute_hit_rate", return_value=0.6)
+    def test_avg_slippage_comes_from_injected_summary(self, _hit, _drift):
+        kpi = get_monthly_kpis(diff_summary={"avg_paper_slippage": 0.0123})
+        self.assertAlmostEqual(kpi.avg_slippage, 0.0123)
 
-    @patch("src.reporting.kpi.load_paper_real_diff_summary")
-    def test_returns_none_when_key_missing(self, mock_summary):
-        mock_summary.return_value = {}
-        result = _compute_avg_slippage()
-        self.assertIsNone(result)
-
-    @patch(
-        "src.reporting.kpi.load_paper_real_diff_summary",
-        side_effect=Exception("DB error"),
-    )
-    def test_returns_none_on_exception(self, _mock):
-        result = _compute_avg_slippage()
-        self.assertIsNone(result)
+    @patch("src.reporting.kpi._compute_drift_count", return_value=0)
+    @patch("src.reporting.kpi._compute_hit_rate", return_value=0.6)
+    def test_returns_none_when_key_missing(self, _hit, _drift):
+        kpi = get_monthly_kpis(diff_summary={})
+        self.assertIsNone(kpi.avg_slippage)
 
 
 # ---------------------------------------------------------------------------
@@ -184,7 +177,7 @@ class TestRunMonthlyReport(unittest.TestCase):
     )
     def test_aggregates_all_kpi_fields(self, _mock_wf, mock_kpi):
         mock_kpi.return_value = MonthlyKPI(hit_rate=0.6, avg_slippage=0.001, drift_count=0)
-        summary = run_monthly_report(target_month="2026-04")
+        summary = run_monthly_report(target_month="2026-04", analytics=InMemoryAnalyticsQuery())
 
         self.assertEqual(summary.target_month, "2026-04")
         self.assertAlmostEqual(summary.net_return, 0.05)
@@ -202,7 +195,7 @@ class TestRunMonthlyReport(unittest.TestCase):
     )
     def test_returns_none_kpis_when_no_data(self, _mock_wf, mock_kpi):
         mock_kpi.return_value = MonthlyKPI(hit_rate=None, avg_slippage=None, drift_count=0)
-        summary = run_monthly_report(target_month="2026-04")
+        summary = run_monthly_report(target_month="2026-04", analytics=InMemoryAnalyticsQuery())
 
         self.assertIsNone(summary.net_return)
         self.assertIsNone(summary.sharpe_ratio)
@@ -220,7 +213,7 @@ class TestRunMonthlyReport(unittest.TestCase):
     def test_uses_current_month_when_not_specified(self, _mock_wf, mock_kpi):
         mock_kpi.return_value = MonthlyKPI(hit_rate=None, avg_slippage=None, drift_count=0)
         expected_month = datetime.now().strftime("%Y-%m")
-        summary = run_monthly_report()
+        summary = run_monthly_report(analytics=InMemoryAnalyticsQuery())
         self.assertEqual(summary.target_month, expected_month)
 
 

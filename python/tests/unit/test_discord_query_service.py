@@ -10,6 +10,7 @@ from unittest.mock import patch
 import pandas as pd
 
 from src.domain.types import PredictionResult
+from src.infrastructure.in_memory import InMemoryAnalyticsQuery
 from src.reporting.query_service import (
     get_latest_market_prediction_snapshots,
     get_ranked_prediction_results,
@@ -128,10 +129,11 @@ class TestDiscordQueryService(unittest.TestCase):
             wf_snapshot_file="wf_summary_20260401.csv",
         )
         mock_run.return_value = expected
+        analytics = InMemoryAnalyticsQuery()
 
-        result = get_monthly_report_summary("2026-04")
+        result = get_monthly_report_summary("2026-04", analytics=analytics)
 
-        mock_run.assert_called_once_with(target_month="2026-04")
+        mock_run.assert_called_once_with(target_month="2026-04", analytics=analytics)
         self.assertEqual(result.target_month, "2026-04")
         self.assertAlmostEqual(result.net_return, 0.03)
 
@@ -150,9 +152,10 @@ class TestDiscordQueryService(unittest.TestCase):
             avg_slippage=None,
         )
 
-        get_monthly_report_summary()
+        analytics = InMemoryAnalyticsQuery()
+        get_monthly_report_summary(analytics=analytics)
 
-        mock_run.assert_called_once_with(target_month=None)
+        mock_run.assert_called_once_with(target_month=None, analytics=analytics)
 
     # ------------------------------------------------------------------
     # get_latest_market_prediction_snapshots — no timestamp

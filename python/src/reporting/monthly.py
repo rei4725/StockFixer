@@ -17,7 +17,8 @@ from typing import Any, Callable, Optional
 
 import pandas as pd
 
-from src.reporting.kpi import get_monthly_kpis
+from src.domain.ports import AnalyticsQuery
+from src.reporting.kpi import _EMPTY_DIFF, get_monthly_kpis
 from src.reporting.types import MonthlyReportSummary
 from src.utils.data_path_utils import get_results_dir
 from src.utils.logger import get_logger
@@ -59,12 +60,17 @@ def _mean_metric(df: pd.DataFrame, col: str) -> Optional[float]:
 # ---------------------------------------------------------------------------
 
 
-def run_monthly_report(target_month: Optional[str] = None) -> MonthlyReportSummary:
+def run_monthly_report(
+    target_month: Optional[str] = None,
+    *,
+    analytics: AnalyticsQuery,
+) -> MonthlyReportSummary:
     """
     月次KPIサマリーを集計して MonthlyReportSummary を返す。
 
     Args:
         target_month: 対象年月 "YYYY-MM"（省略時は当月）
+        analytics: paper/real 乖離サマリーの読み取りポート
 
     Returns:
         MonthlyReportSummary
@@ -88,7 +94,12 @@ def run_monthly_report(target_month: Optional[str] = None) -> MonthlyReportSumma
         symbol_count = len(wf_df)
 
     # ---- 補助KPI ----
-    kpi = get_monthly_kpis()
+    try:
+        diff_summary = analytics.paper_real_diff_summary(recent_days=30)
+    except Exception as e:
+        logger.error(f"diff_summary 取得失敗: {e}", exc_info=True)
+        diff_summary = dict(_EMPTY_DIFF)
+    kpi = get_monthly_kpis(diff_summary=diff_summary)
     hit_rate = kpi.hit_rate
     avg_slippage = kpi.avg_slippage
 
@@ -114,6 +125,8 @@ def run_monthly_report(target_month: Optional[str] = None) -> MonthlyReportSumma
 def save_monthly_report_to_file(
     summary: MonthlyReportSummary,
     drift_checker: Optional[Callable[[], Any]] = None,
+    *,
+    analytics: AnalyticsQuery,
 ) -> str:
     """
     月次KPIサマリーを Markdown ファイルとして保存する（R-203）。
@@ -123,6 +136,7 @@ def save_monthly_report_to_file(
     Args:
         summary: run_monthly_report() が返す MonthlyReportSummary
         drift_checker: 週次 Hit Rate ドリフト検査を実行するコールバック（省略可）
+        analytics: paper/real 乖離サマリーの読み取りポート
 
     Returns:
         保存先ファイルパス
@@ -138,7 +152,12 @@ def save_monthly_report_to_file(
         return f"{val:.2f}" if val is not None else "N/A"
 
     # paper/real 乖離サマリー・ドリフト集計
-    _kpi = get_monthly_kpis()
+    try:
+        _diff_summary = analytics.paper_real_diff_summary(recent_days=30)
+    except Exception as e:
+        logger.error(f"diff_summary 取得失敗: {e}", exc_info=True)
+        _diff_summary = dict(_EMPTY_DIFF)
+    _kpi = get_monthly_kpis(diff_summary=_diff_summary)
     diff = _kpi.diff_summary
     drift_count = _kpi.drift_count
 

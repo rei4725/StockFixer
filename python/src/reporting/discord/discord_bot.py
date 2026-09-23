@@ -6,6 +6,7 @@ from discord.utils import escape_markdown
 from dotenv import load_dotenv
 
 from src.domain.types import PredictionResult
+from src.infrastructure.persistence.analytics_query import PostgresAnalyticsQuery
 from src.reporting.discord.discord_formatters import (
     build_prediction_list,
     convert_df_for_discord,
@@ -290,7 +291,7 @@ async def handle_monthlyreport_command(message):
         allowed_mentions=None,
     )
     try:
-        summary = get_monthly_report_summary(target_month)
+        summary = get_monthly_report_summary(target_month, analytics=PostgresAnalyticsQuery())
     except Exception as e:
         await message.channel.send(
             escape_markdown(f"月次レポートの取得に失敗しました: {e}"),

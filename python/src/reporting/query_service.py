@@ -8,6 +8,7 @@ import os
 
 import pandas as pd
 
+from src.domain.ports import AnalyticsQuery
 from src.domain.types import PredictionResult, ShapFeatureContribution, SignalSnapshot
 from src.reporting.ports import ExplainShapFn, PredictSingleFn
 from src.reporting.types import (
@@ -181,8 +182,12 @@ def get_scheduler_job_statuses(state_file_path: str | None = None) -> list[Sched
     ]
 
 
-def get_monthly_report_summary(target_month: str | None = None) -> MonthlyReportSummary:
+def get_monthly_report_summary(
+    target_month: str | None = None,
+    *,
+    analytics: AnalyticsQuery,
+) -> MonthlyReportSummary:
     """月次KPIサマリーを取得する。Discord /monthlyreport コマンド向け。"""
     from src.reporting.monthly import run_monthly_report
 
-    return run_monthly_report(target_month=target_month)
+    return run_monthly_report(target_month=target_month, analytics=analytics)

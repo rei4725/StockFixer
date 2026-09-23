@@ -8,6 +8,7 @@ Walk-Forward レポートおよび DuckDB から集計して標準出力へ表�
 import argparse
 import sys
 
+from src.infrastructure.persistence.analytics_query import PostgresAnalyticsQuery
 from src.reporting.monthly import run_monthly_report
 from src.utils.logger import get_logger
 
@@ -30,7 +31,7 @@ def main():
 
     wire_ports()
     args = parse_args()
-    summary = run_monthly_report(target_month=args.month)
+    summary = run_monthly_report(target_month=args.month, analytics=PostgresAnalyticsQuery())
 
     def _fmt_pct(val):
         return f"{val * 100:.2f}%" if val is not None else "データなし"
