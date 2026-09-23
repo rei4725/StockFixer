@@ -53,6 +53,7 @@ def evaluate_positions(market_data_port=None) -> list[PositionAlert]:
     """
     import os
 
+    from src.infrastructure.persistence.trade_diff_repository import PostgresTradeDiffSink
     from src.trading.brokers.paper.paper_broker import PaperBroker
     from src.utils.db import load_latest_prediction_timestamp, load_prediction_results
 
@@ -61,7 +62,10 @@ def evaluate_positions(market_data_port=None) -> list[PositionAlert]:
         logger.info("live モードのため引け前アラートをスキップ（kabuポジション未対応）")
         return []
 
-    broker = PaperBroker(market_data_port=market_data_port)
+    broker = PaperBroker(
+        market_data_port=market_data_port,
+        trade_diff_sink=PostgresTradeDiffSink(),
+    )
     positions = broker.get_positions()
     if not positions:
         logger.info("保有ポジションなし — 引け前アラートをスキップ")

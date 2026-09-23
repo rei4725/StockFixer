@@ -11,6 +11,7 @@ from unittest.mock import MagicMock
 import pandas as pd
 
 from src.domain.ports import MarketDataPort
+from src.infrastructure.in_memory import InMemoryTradeDiffSink
 from src.trading.brokers.base import OrderSide
 from src.trading.brokers.paper.paper_broker import PaperBroker
 from src.utils.db._connection import _db_connection
@@ -36,7 +37,9 @@ class TestPaperBrokerOrder(unittest.TestCase):
             con.execute("DELETE FROM paper_orders")
             con.execute("DELETE FROM paper_positions")
             con.execute("UPDATE paper_balance SET balance = 1000000.0")
-        self.broker = PaperBroker(market_data_port=_make_market_data_mock())
+        self.broker = PaperBroker(
+            market_data_port=_make_market_data_mock(), trade_diff_sink=InMemoryTradeDiffSink()
+        )
 
     def test_send_order_returns_pending(self):
         result = self.broker.send_order("7203", OrderSide.BUY, 100)
@@ -77,10 +80,10 @@ class TestPaperBrokerSettle(unittest.TestCase):
             con.execute("DELETE FROM paper_positions")
             con.execute("UPDATE paper_balance SET balance = 1000000.0")
         self._mock_market_data = _make_market_data_mock()
-        self._mock_record_diff = MagicMock()
+        self._trade_diff_sink = InMemoryTradeDiffSink()
         self.broker = PaperBroker(
             market_data_port=self._mock_market_data,
-            record_diff=self._mock_record_diff,
+            trade_diff_sink=self._trade_diff_sink,
         )
 
     def test_settle_market_buy(self):
@@ -170,10 +173,12 @@ class TestPaperBrokerSettle(unittest.TestCase):
 
         self.broker.settle_pending_orders()
 
-        self._mock_record_diff.assert_called_once()
-        self.assertEqual(self._mock_record_diff.call_args.kwargs["market"], "jp")
-        self.assertEqual(self._mock_record_diff.call_args.kwargs["symbol"], "7203")
-        self.assertAlmostEqual(self._mock_record_diff.call_args.kwargs["actual_price"], 1000.0)
+        self.assertEqual(len(self._trade_diff_sink.recorded), 1)
+        rec = self._trade_diff_sink.recorded[0]
+        self.assertEqual(rec.market, "jp")
+        self.assertEqual(rec.symbol, "7203")
+        self.assertAlmostEqual(rec.actual_price, 1000.0)
+        self.assertEqual(rec.mode, "paper")
 
 
 class TestPaperBrokerShort(unittest.TestCase):
@@ -184,7 +189,9 @@ class TestPaperBrokerShort(unittest.TestCase):
             con.execute("DELETE FROM paper_short_positions")
             con.execute("UPDATE paper_balance SET balance = 1000000.0")
         self._mock_market_data = _make_market_data_mock()
-        self.broker = PaperBroker(market_data_port=self._mock_market_data)
+        self.broker = PaperBroker(
+            market_data_port=self._mock_market_data, trade_diff_sink=InMemoryTradeDiffSink()
+        )
 
     def test_send_short_order_returns_pending(self):
         result = self.broker.send_order("7203", OrderSide.SHORT, 100, price=1500.0)
@@ -311,7 +318,9 @@ class TestPaperBrokerShort(unittest.TestCase):
 
 class TestPaperBrokerGetToken(unittest.TestCase):
     def setUp(self):
-        self.broker = PaperBroker(market_data_port=_make_market_data_mock())
+        self.broker = PaperBroker(
+            market_data_port=_make_market_data_mock(), trade_diff_sink=InMemoryTradeDiffSink()
+        )
 
     def test_get_token_returns_paper_mode(self):
         self.assertEqual(self.broker.get_token(), "paper_mode")
@@ -324,7 +333,9 @@ class TestPaperBrokerGetBalance(unittest.TestCase):
     def setUp(self):
         with _db_connection() as con:
             con.execute("UPDATE paper_balance SET balance = 1000000.0")
-        self.broker = PaperBroker(market_data_port=_make_market_data_mock())
+        self.broker = PaperBroker(
+            market_data_port=_make_market_data_mock(), trade_diff_sink=InMemoryTradeDiffSink()
+        )
 
     def test_get_balance_returns_current_value(self):
         with _db_connection() as con:
@@ -347,7 +358,9 @@ class TestPaperBrokerGetOrders(unittest.TestCase):
             con.execute("DELETE FROM paper_orders")
             con.execute("DELETE FROM paper_positions")
             con.execute("UPDATE paper_balance SET balance = 1000000.0")
-        self.broker = PaperBroker(market_data_port=_make_market_data_mock())
+        self.broker = PaperBroker(
+            market_data_port=_make_market_data_mock(), trade_diff_sink=InMemoryTradeDiffSink()
+        )
 
     def test_get_orders_returns_list(self):
         result = self.broker.get_orders()
@@ -381,7 +394,9 @@ class TestPaperBrokerGetPositionsAdditional(unittest.TestCase):
             con.execute("DELETE FROM paper_positions")
             con.execute("UPDATE paper_balance SET balance = 1000000.0")
         self._mock_market_data = _make_market_data_mock()
-        self.broker = PaperBroker(market_data_port=self._mock_market_data)
+        self.broker = PaperBroker(
+            market_data_port=self._mock_market_data, trade_diff_sink=InMemoryTradeDiffSink()
+        )
 
     def test_get_positions_returns_position_with_pnl(self):
         with _db_connection() as con:
@@ -413,7 +428,9 @@ class TestPaperBrokerGetPnlSummary(unittest.TestCase):
             con.execute("DELETE FROM paper_orders")
             con.execute("DELETE FROM paper_positions")
             con.execute("UPDATE paper_balance SET balance = 1000000.0")
-        self.broker = PaperBroker(market_data_port=_make_market_data_mock())
+        self.broker = PaperBroker(
+            market_data_port=_make_market_data_mock(), trade_diff_sink=InMemoryTradeDiffSink()
+        )
 
     def test_get_pnl_summary_returns_dict(self):
         result = self.broker.get_pnl_summary()

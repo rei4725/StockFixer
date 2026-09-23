@@ -36,7 +36,12 @@ def execute_rule_paper_trades(
     Returns:
         {"buy_orders": int, "sell_orders": int, "skipped": int}
     """
-    broker = PaperBroker(market_data_port=market_data_port)
+    from src.infrastructure.persistence.trade_diff_repository import PostgresTradeDiffSink
+
+    broker = PaperBroker(
+        market_data_port=market_data_port,
+        trade_diff_sink=PostgresTradeDiffSink(),
+    )
     risk = RiskManager(broker, market=market)
     lot = get_lot_size(market)
     buy_orders = 0
