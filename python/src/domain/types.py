@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Optional
 
 import pandas as pd
@@ -264,3 +265,25 @@ class OrderRunSummary:
     skipped_min_change: int
     total_turnover: float
     min_change_ratio: float
+
+
+@dataclass
+class TradeDiffRecord:
+    """paper / real 約定価格の乖離追跡 1 件（paper_real_diff テーブルの 1 行に対応）。
+
+    フィールドは旧 upsert_paper_real_diff() の引数をそのまま写したもの。
+    side: OrderSide の整数値。mode: "paper" / "live"。
+    order_session: "open"（寄付）または "close"（引け）。
+    """
+
+    market: str
+    symbol: str
+    predicted_at: str
+    side: int
+    signal_price: float
+    mode: str
+    order_id: str
+    actual_price: Optional[float] = None
+    checked_at: Optional[datetime] = None
+    order_session: str = "open"
+    split_ratio: Optional[float] = None
