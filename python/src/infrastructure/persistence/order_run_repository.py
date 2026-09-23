@@ -2,7 +2,7 @@
 
 from src.domain.ports import OrderRunSink
 from src.domain.types import OrderRunSummary
-from src.utils.db._connection import _db_connection
+from src.utils.db import db_connection
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -12,7 +12,7 @@ class PostgresOrderRunSink(OrderRunSink):
     """order_run_summary テーブルへ書き込む OrderRunSink 実装。"""
 
     def save(self, summary: OrderRunSummary) -> None:
-        with _db_connection() as con:
+        with db_connection() as con:
             con.execute(
                 """
                 INSERT INTO order_run_summary

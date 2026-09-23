@@ -30,6 +30,7 @@ from src.utils.db import _connection as _conn_module  # noqa: E402
 from src.utils.db._connection import (
     _db_connection,
     close_connection,
+    db_connection,
     get_readonly_connection,
     init_tables,
     set_test_connection,
