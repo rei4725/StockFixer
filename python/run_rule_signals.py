@@ -22,6 +22,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+from src.infrastructure.persistence.trade_diff_repository import PostgresTradeDiffSink  # noqa: E402
 from src.infrastructure.yfinance_market_data_adapter import YFinanceMarketDataAdapter  # noqa: E402
 from src.rule_engine.pipeline import run_rule_signal_pipeline  # noqa: E402
 from src.trading.rule_execution import execute_rule_paper_trades  # noqa: E402
@@ -120,6 +121,7 @@ def main() -> None:
             signals=signals,
             market=args.market,
             initial_budget_per_trade=args.budget_per_trade,
+            trade_diff_sink=PostgresTradeDiffSink(),
         )
         buy_orders = trade_stats["buy_orders"]
         sell_orders = trade_stats["sell_orders"]

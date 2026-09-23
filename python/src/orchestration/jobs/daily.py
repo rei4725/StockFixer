@@ -410,10 +410,14 @@ def run_pre_close_alert() -> None:
 
     logger.info("=== 引け前ポジション再評価アラート開始 ===")
     try:
+        from src.infrastructure.persistence.trade_diff_repository import PostgresTradeDiffSink
         from src.infrastructure.yfinance_market_data_adapter import YFinanceMarketDataAdapter
         from src.trading.pre_close_alert_service import get_pre_close_alerts
 
-        lines = get_pre_close_alerts(market_data_port=YFinanceMarketDataAdapter())
+        lines = get_pre_close_alerts(
+            market_data_port=YFinanceMarketDataAdapter(),
+            trade_diff_sink=PostgresTradeDiffSink(),
+        )
         logger.info("引け前アラート評価完了: %d行", len(lines))
     except Exception as e:
         logger.error("引け前アラート評価失敗: %s", e, exc_info=True)
@@ -481,6 +485,7 @@ def run_daily_rule_signals() -> None:
     market = os.environ.get("RULE_EVAL_MARKET", "jp")
 
     try:
+        from src.infrastructure.persistence.trade_diff_repository import PostgresTradeDiffSink
         from src.infrastructure.yfinance_market_data_adapter import YFinanceMarketDataAdapter
         from src.rule_engine.pipeline import run_rule_signal_pipeline
         from src.trading.rule_execution import execute_rule_paper_trades
@@ -488,7 +493,10 @@ def run_daily_rule_signals() -> None:
         market_data_adapter = YFinanceMarketDataAdapter()
         signals = run_rule_signal_pipeline(market=market, market_data_port=market_data_adapter)
         trade_stats = execute_rule_paper_trades(
-            signals=signals, market=market, market_data_port=market_data_adapter
+            signals=signals,
+            market=market,
+            market_data_port=market_data_adapter,
+            trade_diff_sink=PostgresTradeDiffSink(),
         )
         logger.info(
             "=== 日次ルールシグナル完了: BUY=%s SELL=%s ===",
