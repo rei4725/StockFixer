@@ -333,5 +333,169 @@ class TestRunRuleSignalsCompositionRoot(unittest.TestCase):
         self.assertIsInstance(captured.get("trade_diff_sink"), PostgresTradeDiffSink)
 
 
+class TestRunDashboardCompositionRoot(unittest.TestCase):
+    def test_main_injects_postgres_analytics_query(self):
+        import run_dashboard
+
+        captured: dict = {}
+
+        def _capture(**kwargs):
+            captured.update(kwargs)
+
+        with patch.object(run_dashboard, "run_dashboard", side_effect=_capture), patch(
+            "src.orchestration.port_wiring.wire_ports"
+        ), patch("sys.argv", ["run_dashboard.py"]):
+            run_dashboard.main()
+
+        self.assertIsInstance(captured.get("analytics"), PostgresAnalyticsQuery)
+
+
+class TestRunMonthlyReportCliCompositionRoot(unittest.TestCase):
+    def test_main_injects_postgres_analytics_query(self):
+        import run_monthly_report
+
+        captured: dict = {}
+
+        def _capture(*, target_month, analytics):
+            captured["analytics"] = analytics
+            return MonthlyReportSummary(
+                generated_at="2026-09-24T00:00:00",
+                target_month="2026-09",
+                net_return=None,
+                max_drawdown=None,
+                sharpe_ratio=None,
+                hit_rate=None,
+                avg_slippage=None,
+                wf_snapshot_file=None,
+                symbol_count=None,
+            )
+
+        with patch.object(run_monthly_report, "run_monthly_report", side_effect=_capture), patch(
+            "src.orchestration.port_wiring.wire_ports"
+        ), patch("sys.argv", ["run_monthly_report.py"]):
+            run_monthly_report.main()
+
+        self.assertIsInstance(captured.get("analytics"), PostgresAnalyticsQuery)
+
+
+class TestRunWeeklyReportCompositionRoot(unittest.TestCase):
+    def test_run_weekly_report_uses_postgres_analytics_query_for_diff_summary(self):
+        """diff_summary が PostgresAnalyticsQuery から得られたものであることを検証する。
+
+        run_weekly_report は analytics= を渡す形ではなく、その場で
+        PostgresAnalyticsQuery().paper_real_diff_summary() を呼んで結果を
+        send_weekly_report の diff_summary 引数に渡す。InMemory 実装が
+        紛れ込むと send_weekly_report は呼ばれ続けるが値が常にゼロになる。
+        """
+        from src.orchestration.jobs import weekly
+
+        sentinel_diff_summary = {"tracked_count": 42}
+        captured: dict = {}
+
+        fake_query_instance = MagicMock()
+        fake_query_instance.paper_real_diff_summary.return_value = sentinel_diff_summary
+
+        def _fake_send_weekly_report(**kwargs):
+            captured.update(kwargs)
+
+        with patch(
+            "src.infrastructure.persistence.analytics_query.PostgresAnalyticsQuery",
+            return_value=fake_query_instance,
+        ) as mock_cls, patch(
+            "src.prediction.db.load_drift_summary", return_value=MagicMock()
+        ), patch(
+            "src.prediction.db.save_weekly_accuracy_snapshot"
+        ), patch(
+            "src.reporting.discord.discord_utils.send_weekly_report",
+            side_effect=_fake_send_weekly_report,
+        ), patch(
+            "src.reporting.llm_review.generate_weekly_review", return_value=None
+        ), patch(
+            "src.prediction.db.load_top_prediction_misses", return_value=MagicMock()
+        ), patch(
+            "src.prediction.miss_analysis.run_miss_analysis_batch", return_value=[]
+        ), patch(
+            "src.reporting.discord.discord_utils.send_miss_analysis_summary"
+        ):
+            weekly.run_weekly_report()
+
+        mock_cls.assert_called_once_with()
+        fake_query_instance.paper_real_diff_summary.assert_called_once_with(recent_days=7)
+        self.assertIs(captured.get("diff_summary"), sentinel_diff_summary)
+
+
+class TestExternalV1MonthlyReportCompositionRoot(unittest.TestCase):
+    def test_monthly_report_endpoint_injects_postgres_analytics_query(self):
+        from src.api.health import app
+
+        captured: dict = {}
+
+        def _capture(*, target_month, analytics):
+            captured["analytics"] = analytics
+            return MonthlyReportSummary(
+                generated_at="2026-09-24T00:00:00",
+                target_month="2026-09",
+                net_return=None,
+                max_drawdown=None,
+                sharpe_ratio=None,
+                hit_rate=None,
+                avg_slippage=None,
+                wf_snapshot_file=None,
+                symbol_count=None,
+            )
+
+        app.config["TESTING"] = True
+        with patch(
+            "src.api.external_v1._load_api_keys", return_value=frozenset(["test-key"])
+        ), patch("src.api.external_v1._is_rate_limited", return_value=False), patch(
+            "src.reporting.query_service.get_monthly_report_summary", side_effect=_capture
+        ):
+            with app.test_client() as client:
+                resp = client.get("/api/v1/reports/monthly", headers={"X-API-Key": "test-key"})
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertIsInstance(captured.get("analytics"), PostgresAnalyticsQuery)
+
+
+class TestDiscordBotMonthlyReportCompositionRoot(unittest.TestCase):
+    def test_handle_monthlyreport_command_injects_postgres_analytics_query(self):
+        import asyncio
+
+        from src.reporting.discord.discord_bot import handle_monthlyreport_command
+
+        captured: dict = {}
+
+        def _capture(target_month, *, analytics):
+            captured["analytics"] = analytics
+            return MonthlyReportSummary(
+                generated_at="2026-09-24T00:00:00",
+                target_month="2026-09",
+                net_return=None,
+                max_drawdown=None,
+                sharpe_ratio=None,
+                hit_rate=None,
+                avg_slippage=None,
+                wf_snapshot_file=None,
+                symbol_count=None,
+            )
+
+        message = MagicMock()
+        message.content = "/monthlyreport"
+        message.channel = MagicMock()
+
+        async def _send(*args, **kwargs):
+            return None
+
+        message.channel.send = _send
+
+        with patch(
+            "src.reporting.discord.discord_bot.get_monthly_report_summary",
+            side_effect=_capture,
+        ):
+            asyncio.run(handle_monthlyreport_command(message))
+
+        self.assertIsInstance(captured.get("analytics"), PostgresAnalyticsQuery)
+
+
 if __name__ == "__main__":
     unittest.main()
