@@ -99,6 +99,21 @@ class TradeDiffSink(ABC):
         """約定乖離レコードを 1 件記録する（同一キーは上書き）"""
 
 
+class AnalyticsQuery(ABC):
+    """reporting BC 向けの読み取り専用問い合わせポート。
+
+    reporting は整形屋であり、データを自分で取りに行かない。最外周の入口
+    （run_*.py / orchestration / Discord Bot / api）がこのポートを構築して渡す。
+
+    メソッド数が 10 を超えた場合はファサード化の兆候とみなし、設計を見直すこと。
+    Phase 4c で drift_summary / prediction_accuracy / weekly_accuracy_snapshots が加わる。
+    """
+
+    @abstractmethod
+    def paper_real_diff_summary(self, recent_days: int = 7) -> dict:
+        """直近期間の paper / real 乖離サマリーを返す"""
+
+
 class StockFeatureRepository(ABC):
     """株式特徴量の永続化ポート"""
 
