@@ -33,6 +33,11 @@ class PostgresAnalyticsQuery(AnalyticsQuery):
                 [since],
             ).fetchone()
 
+        if row is None:
+            # COUNT / AVG の集約クエリは必ず 1 行返るが、型は Optional のため
+            # 防御的に全ゼロ相当の行として扱う。
+            row = (0, 0, None, None, None, None, None)
+
         return {
             "tracked_count": int(row[0] or 0),
             "comparable_count": int(row[1] or 0),
