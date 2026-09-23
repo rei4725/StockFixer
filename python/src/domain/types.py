@@ -271,7 +271,7 @@ class OrderRunSummary:
 class TradeDiffRecord:
     """paper / real 約定価格の乖離追跡 1 件（paper_real_diff テーブルの 1 行に対応）。
 
-    フィールドは旧 upsert_paper_real_diff() の引数をそのまま写したもの。
+    フィールドは TradeDiffSink 導入前に存在した直接書き込み経路の引数をそのまま写したもの。
     side: OrderSide の整数値。mode: "paper" / "live"。
     order_session: "open"（寄付）または "close"（引け）。
     """

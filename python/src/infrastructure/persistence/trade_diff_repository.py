@@ -6,9 +6,6 @@ from typing import Any
 from src.domain.ports import TradeDiffSink
 from src.domain.types import TradeDiffRecord
 from src.utils.db import db_connection
-from src.utils.logger import get_logger
-
-logger = get_logger(__name__)
 
 
 class PostgresTradeDiffSink(TradeDiffSink):

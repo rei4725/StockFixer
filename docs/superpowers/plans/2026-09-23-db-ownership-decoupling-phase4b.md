@@ -2729,7 +2729,8 @@ https://claude.ai/code/session_01N4FK4xZ3jgfaWpZcMDv964
 本計画の完了後、残りを 1 冊にまとめる。
 
 1. **束②**（accuracy / drift / weekly snapshot）— `AnalyticsQuery` に `drift_summary` / `prediction_accuracy` / `weekly_accuracy_snapshots` の 3 メソッドを足し、`dashboard.py` / `kpi.py` / `notifications_report.py` / `query_service.py` の残りの読み取りを押し上げる
-2. **束③**（`prediction_results`）— 定義済みで実装の無い `PredictionResultRepository` の Postgres アダプタを新設し、`runner.py:70` の `prediction_repo: PredictionResultRepository | None = None` を必須注入に直す
+2. **束③**（`prediction_results`）— 定義済みで実装の無い `PredictionResultRepository` の Postgres アダプタを新設し、`runner.py:70` の `prediction_repo: PredictionResultRepository | None = None` を必須注入に直す。
+   **注意**: `python/src/trading/pre_close_alert_service.py` も関数内 import で `src.utils.db` の `load_latest_prediction_timestamp` / `load_prediction_results` をプロキシ経由で消費している（束③のスコープ一覧には未記載）。この 2 関数を `PredictionResultRepository` 経由へ配線し直す対象に **`pre_close_alert_service.py` を追加すること**。漏らすと `_PREDICTION_DB` を空にしてプロキシを撤去した時点で `ImportError` となり、`src/orchestration/jobs/daily.py` から到達する本番の引け前アラートジョブが実行時に落ちる。
 3. **後片付け** — `_PREDICTION_DB` を空にしてプロキシの `importlib.import_module` 2 箇所を撤去、`.importlinter` の `allow_indirect_imports = True` を削除、`GRANDFATHERED_DYNAMIC_IMPORTS` を空にする
 
 `src/infrastructure` のパッケージ循環（`infrastructure`→`market_data`、`backtest`/`reporting`/`quality`→`infrastructure`）は Phase 4 の対象外であり、別 Issue として扱う。

@@ -18,7 +18,7 @@ from typing import Any, Callable, Optional
 import pandas as pd
 
 from src.domain.ports import AnalyticsQuery
-from src.reporting.kpi import get_monthly_kpis
+from src.reporting.kpi import _REPORT_DAYS, get_monthly_kpis
 from src.reporting.types import MonthlyReportSummary
 from src.utils.data_path_utils import get_results_dir
 from src.utils.logger import get_logger
@@ -95,7 +95,7 @@ def run_monthly_report(
 
     # ---- 補助KPI ----
     try:
-        diff_summary = analytics.paper_real_diff_summary(recent_days=30)
+        diff_summary = analytics.paper_real_diff_summary(recent_days=_REPORT_DAYS)
     except Exception as e:
         logger.error(f"diff_summary 取得失敗: {e}", exc_info=True)
         diff_summary = None
@@ -153,7 +153,7 @@ def save_monthly_report_to_file(
 
     # paper/real 乖離サマリー・ドリフト集計
     try:
-        _diff_summary = analytics.paper_real_diff_summary(recent_days=30)
+        _diff_summary = analytics.paper_real_diff_summary(recent_days=_REPORT_DAYS)
     except Exception as e:
         logger.error(f"diff_summary 取得失敗: {e}", exc_info=True)
         _diff_summary = None
