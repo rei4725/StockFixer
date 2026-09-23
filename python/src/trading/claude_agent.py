@@ -27,6 +27,7 @@ from config.settings import (
     MAX_ORDERS_PER_RUN,
     MIN_CHANGE_RATIO,
 )
+from src.domain.ports import TradeDiffSink
 from src.trading.brokers.base import BrokerBase, BrokerError, OrderSide
 from src.trading.claude_reasoning_log import save_reasoning_log
 from src.trading.execution import (
@@ -238,6 +239,8 @@ def _handle_place_order(
     predictions_cache: pd.DataFrame,
     mode: str,
     stats: dict[str, Any],
+    *,
+    trade_diff_sink: TradeDiffSink,
 ) -> dict[str, Any]:
     """
     RiskManager ゲートとポジションサイジングを強制適用して注文を発注する。
@@ -332,6 +335,7 @@ def _handle_place_order(
             broker=broker,
             mode=mode,
             order_session=order_session,
+            trade_diff_sink=trade_diff_sink,
         )
         if side == OrderSide.BUY:
             stats["buy_orders"] += 1
@@ -372,6 +376,8 @@ def run_claude_trader(
     broker: BrokerBase,
     market: str = "jp",
     mode: str = "paper",
+    *,
+    trade_diff_sink: TradeDiffSink,
 ) -> dict[str, Any]:
     """
     Claude Opus を用いたトレード判断エージェントを実行する。
@@ -380,6 +386,7 @@ def run_claude_trader(
         broker: BrokerBase 実装（推奨: PaperBroker）
         market: 対象マーケット
         mode: "paper" or "live"
+        trade_diff_sink: 約定乖離の記録先（TradeDiffSink 実装。合成ルートが必ず渡す）
 
     Returns:
         buy_orders, sell_orders, skipped, errors 等の実行統計
@@ -531,6 +538,7 @@ market: {market}, mode: {mode}
                     predictions_cache=predictions_cache,
                     mode=mode,
                     stats=stats,
+                    trade_diff_sink=trade_diff_sink,
                 )
             else:
                 result = {"error": f"未知の tool: {tool_name}"}

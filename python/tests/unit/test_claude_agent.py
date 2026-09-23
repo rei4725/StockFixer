@@ -16,6 +16,7 @@ if "anthropic" not in sys.modules:
     _mock_anthropic = MagicMock()
     sys.modules["anthropic"] = _mock_anthropic
 
+from src.infrastructure.in_memory import InMemoryTradeDiffSink
 from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
 from src.trading.types import TradingGateStatus
 
@@ -125,6 +126,7 @@ class TestHandlePlaceOrder(unittest.TestCase):
             predictions_cache=self.predictions,
             mode="paper",
             stats=stats,
+            trade_diff_sink=InMemoryTradeDiffSink(),
         )
 
     @patch("src.trading.claude_agent._record_order")
@@ -274,7 +276,9 @@ class TestRunClaudeTrader(unittest.TestCase):
         ), patch(
             "src.trading.claude_agent.apply_multi_horizon_score_column", return_value=pd.DataFrame()
         ):
-            stats = run_claude_trader(broker=broker, market="jp", mode="paper")
+            stats = run_claude_trader(
+                broker=broker, market="jp", mode="paper", trade_diff_sink=InMemoryTradeDiffSink()
+            )
 
         self.assertIn("buy_orders", stats)
         self.assertIn("sell_orders", stats)
@@ -295,7 +299,9 @@ class TestRunClaudeTrader(unittest.TestCase):
 
         from src.trading.claude_agent import run_claude_trader
 
-        stats = run_claude_trader(broker=broker, market="jp", mode="paper")
+        stats = run_claude_trader(
+            broker=broker, market="jp", mode="paper", trade_diff_sink=InMemoryTradeDiffSink()
+        )
 
         self.assertTrue(stats["trading_stopped"])
         self.assertIsNotNone(stats["stop_reason"])
@@ -335,7 +341,9 @@ class TestRunClaudeTrader(unittest.TestCase):
         ), patch(
             "src.trading.claude_agent.apply_multi_horizon_score_column", return_value=pd.DataFrame()
         ):
-            run_claude_trader(broker=broker, market="jp", mode="paper")
+            run_claude_trader(
+                broker=broker, market="jp", mode="paper", trade_diff_sink=InMemoryTradeDiffSink()
+            )
 
         # 2回呼ばれているはず（tool_use → end_turn）
         self.assertEqual(client.messages.create.call_count, 2)
@@ -346,7 +354,7 @@ class TestRunClaudeTrader(unittest.TestCase):
             from src.trading.claude_agent import run_claude_trader
 
             with self.assertRaises((ImportError, TypeError)):
-                run_claude_trader(broker=broker)
+                run_claude_trader(broker=broker, trade_diff_sink=InMemoryTradeDiffSink())
 
 
 class TestSaveReasoningLog(unittest.TestCase):

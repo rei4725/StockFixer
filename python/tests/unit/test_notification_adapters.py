@@ -6,6 +6,7 @@ from src.domain.ports import AlertLevel, NotificationPort
 from src.infrastructure.in_memory import (
     InMemoryNotificationAdapter,
     InMemoryOrderRunSink,
+    InMemoryTradeDiffSink,
     NullNotificationAdapter,
 )
 from src.infrastructure.log_notification_adapter import LogNotificationAdapter
@@ -123,6 +124,7 @@ class TestRunDailyOrdersNotifierDI:
         stats = run_daily_orders(
             broker,
             order_run_sink=InMemoryOrderRunSink(),
+            trade_diff_sink=InMemoryTradeDiffSink(),
             market="jp",
             mode="paper",
             notifier=notifier,
@@ -143,7 +145,12 @@ class TestRunDailyOrdersNotifierDI:
         broker.get_token.side_effect = BrokerError("token error")
 
         stats = run_daily_orders(
-            broker, order_run_sink=InMemoryOrderRunSink(), market="jp", mode="paper", notifier=None
+            broker,
+            order_run_sink=InMemoryOrderRunSink(),
+            trade_diff_sink=InMemoryTradeDiffSink(),
+            market="jp",
+            mode="paper",
+            notifier=None,
         )
 
         assert stats["buy_orders"] == 0
@@ -162,6 +169,7 @@ class TestRunDailyOrdersNotifierDI:
         stats = run_daily_orders(
             broker,
             order_run_sink=InMemoryOrderRunSink(),
+            trade_diff_sink=InMemoryTradeDiffSink(),
             market="jp",
             mode="paper",
             notifier=notifier,
