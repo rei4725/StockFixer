@@ -173,5 +173,165 @@ class TestMonthlyReportJobCompositionRoot(unittest.TestCase):
         self.assertIs(analytics_for_run, analytics_for_save)
 
 
+class TestRunHorizonExitCheckCompositionRoot(unittest.TestCase):
+    def test_run_horizon_exit_check_injects_postgres_trade_diff_sink(self):
+        from src.orchestration.jobs import daily
+
+        captured: dict = {}
+
+        def _fake_paper_broker(**kwargs):
+            captured.update(kwargs)
+            broker = MagicMock()
+            broker.get_positions.return_value = []
+            return broker
+
+        fake_con = MagicMock()
+        fake_con.execute.return_value.fetchall.return_value = [("AAPL",)]
+        fake_cm = MagicMock()
+        fake_cm.__enter__.return_value = fake_con
+        fake_cm.__exit__.return_value = False
+
+        with patch(
+            "src.trading.brokers.paper.paper_broker.PaperBroker",
+            side_effect=_fake_paper_broker,
+        ), patch(
+            "src.infrastructure.yfinance_market_data_adapter.YFinanceMarketDataAdapter"
+        ), patch(
+            "src.utils.db._connection._db_connection", return_value=fake_cm
+        ), patch.dict(
+            "os.environ", {"AUTO_TRADE_MODE": "paper"}
+        ):
+            daily.run_horizon_exit_check()
+
+        self.assertIsInstance(captured.get("trade_diff_sink"), PostgresTradeDiffSink)
+
+
+class TestRunDailyPaperTradeReportCompositionRoot(unittest.TestCase):
+    def test_run_daily_paper_trade_report_injects_postgres_trade_diff_sink(self):
+        from src.orchestration.jobs import daily
+
+        captured: dict = {}
+
+        def _fake_paper_broker(**kwargs):
+            captured.update(kwargs)
+            broker = MagicMock()
+            broker.get_positions.return_value = []
+            broker.get_pnl_summary.return_value = {}
+            return broker
+
+        with patch(
+            "src.trading.brokers.paper.paper_broker.PaperBroker",
+            side_effect=_fake_paper_broker,
+        ), patch(
+            "src.infrastructure.yfinance_market_data_adapter.YFinanceMarketDataAdapter"
+        ), patch(
+            "src.reporting.discord.discord_utils.send_paper_trade_position_report"
+        ), patch.dict(
+            "os.environ", {"AUTO_TRADE_MODE": "paper"}
+        ):
+            daily.run_daily_paper_trade_report()
+
+        self.assertIsInstance(captured.get("trade_diff_sink"), PostgresTradeDiffSink)
+
+
+class TestRunPreCloseAlertCompositionRoot(unittest.TestCase):
+    def test_run_pre_close_alert_injects_postgres_trade_diff_sink(self):
+        from src.orchestration.jobs import daily
+
+        captured: dict = {}
+
+        def _fake_get_pre_close_alerts(**kwargs):
+            captured.update(kwargs)
+            return []
+
+        with patch(
+            "src.trading.pre_close_alert_service.get_pre_close_alerts",
+            side_effect=_fake_get_pre_close_alerts,
+        ), patch(
+            "src.infrastructure.yfinance_market_data_adapter.YFinanceMarketDataAdapter"
+        ), patch(
+            "src.reporting.discord.discord_utils.send_webhook_notification"
+        ), patch.dict(
+            "os.environ", {"AUTO_TRADE_MODE": "paper"}
+        ):
+            daily.run_pre_close_alert()
+
+        self.assertIsInstance(captured.get("trade_diff_sink"), PostgresTradeDiffSink)
+
+
+class TestRunDailyRuleSignalsCompositionRoot(unittest.TestCase):
+    def test_run_daily_rule_signals_injects_postgres_trade_diff_sink(self):
+        from src.orchestration.jobs import daily
+
+        captured: dict = {}
+
+        def _fake_execute_rule_paper_trades(**kwargs):
+            captured.update(kwargs)
+            return {"buy_orders": 0, "sell_orders": 0}
+
+        with patch("src.rule_engine.pipeline.run_rule_signal_pipeline", return_value=[]), patch(
+            "src.trading.rule_execution.execute_rule_paper_trades",
+            side_effect=_fake_execute_rule_paper_trades,
+        ), patch(
+            "src.infrastructure.yfinance_market_data_adapter.YFinanceMarketDataAdapter"
+        ), patch(
+            "src.reporting.discord.discord_utils.send_rule_daily_signals"
+        ):
+            daily.run_daily_rule_signals()
+
+        self.assertIsInstance(captured.get("trade_diff_sink"), PostgresTradeDiffSink)
+
+
+class TestRunClaudeTraderCompositionRoot(unittest.TestCase):
+    def test_main_injects_postgres_trade_diff_sink(self):
+        import run_claude_trader
+
+        captured: dict = {}
+
+        def _capture(**kwargs):
+            captured.update(kwargs)
+            return {"buy_orders": 0, "sell_orders": 0, "skipped": 0, "errors": 0}
+
+        with patch("config.settings.CLAUDE_TRADER_ENABLED", True), patch(
+            "src.trading.claude_agent.run_claude_trader", side_effect=_capture
+        ), patch.object(run_claude_trader, "build_broker", return_value=MagicMock()):
+            rc = run_claude_trader.main(["--mode", "paper", "--market", "jp"])
+
+        self.assertEqual(rc, 0)
+        self.assertIsInstance(captured.get("trade_diff_sink"), PostgresTradeDiffSink)
+
+
+class TestRunRuleSignalsCompositionRoot(unittest.TestCase):
+    def test_main_injects_postgres_trade_diff_sink(self):
+        import run_rule_signals
+
+        captured: dict = {}
+
+        def _fake_execute_rule_paper_trades(**kwargs):
+            captured.update(kwargs)
+            return {"buy_orders": 0, "sell_orders": 0}
+
+        fake_signal = {
+            "symbol": "AAPL",
+            "rule": "dummy_rule",
+            "price": 100.0,
+            "win_rate": 0.5,
+            "net_profit": 0.0,
+            "signal": 1,
+        }
+
+        with patch("run_rule_signals.YFinanceMarketDataAdapter"), patch(
+            "run_rule_signals.run_rule_signal_pipeline", return_value=[fake_signal]
+        ), patch(
+            "run_rule_signals.execute_rule_paper_trades",
+            side_effect=_fake_execute_rule_paper_trades,
+        ), patch(
+            "sys.argv", ["run_rule_signals.py", "--market", "jp"]
+        ):
+            run_rule_signals.main()
+
+        self.assertIsInstance(captured.get("trade_diff_sink"), PostgresTradeDiffSink)
+
+
 if __name__ == "__main__":
     unittest.main()
