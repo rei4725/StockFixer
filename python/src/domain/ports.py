@@ -10,7 +10,7 @@ from typing import Any, Optional
 
 import pandas as pd
 
-from src.domain.types import OrderRunSummary
+from src.domain.types import OrderRunSummary, TradeDiffRecord
 
 
 class AlertLevel(Enum):
@@ -85,6 +85,18 @@ class OrderRunSink(ABC):
     @abstractmethod
     def save(self, summary: OrderRunSummary) -> None:
         """発注実行サマリーを 1 件保存する"""
+
+
+class TradeDiffSink(ABC):
+    """paper / real 約定価格の乖離記録の書き込みポート。
+
+    trading BC は自らの約定結果を記録するが、記録先（テーブル・DB）を知らない。
+    実装は src/infrastructure/persistence/ に置き、合成ルートが注入する。
+    """
+
+    @abstractmethod
+    def record(self, record: TradeDiffRecord) -> None:
+        """約定乖離レコードを 1 件記録する（同一キーは上書き）"""
 
 
 class StockFeatureRepository(ABC):

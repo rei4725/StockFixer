@@ -15,8 +15,9 @@ from src.domain.ports import (
     OrderRunSink,
     PredictionResultRepository,
     StockFeatureRepository,
+    TradeDiffSink,
 )
-from src.domain.types import OrderRunSummary
+from src.domain.types import OrderRunSummary, TradeDiffRecord
 
 
 class InMemoryPredictionRepository(PredictionResultRepository):
@@ -200,3 +201,13 @@ class InMemoryOrderRunSink(OrderRunSink):
 
     def save(self, summary: OrderRunSummary) -> None:
         self.saved.append(summary)
+
+
+class InMemoryTradeDiffSink(TradeDiffSink):
+    """インメモリ約定乖離 Sink（テスト用）"""
+
+    def __init__(self) -> None:
+        self.recorded: list[TradeDiffRecord] = []
+
+    def record(self, record: TradeDiffRecord) -> None:
+        self.recorded.append(record)
