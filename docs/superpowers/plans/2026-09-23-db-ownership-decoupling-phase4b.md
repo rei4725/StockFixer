@@ -1151,7 +1151,7 @@ Expected: FAIL（`_record_order` の呼び出し側が `trade_diff_sink` を渡�
 - Consumes: Task 5 の `_record_order` / `_sync_live_execution_diffs` 新署名
 - Produces:
   - `run_daily_orders(broker, *, order_run_sink: OrderRunSink, trade_diff_sink: TradeDiffSink, market="jp", mode="paper", market_data=None, notifier=None, prediction_repo=None) -> OrderExecutionStats`
-  - `_check_sl_tp_exits(broker, market, mode, market_data, stats, trade_diff_sink: TradeDiffSink) -> bool`
+  - `_check_sl_tp_exits(broker, market, mode, market_data, stats, trade_diff_sink: TradeDiffSink) -> set[str]`（返り値は SL/TP が発動した銘柄の集合。`runner.py:210` が `predictions["symbol"].isin(...)` で使う。**返り値の型は変更しない**）
   - `run_claude_trader(broker, market="jp", mode="paper", *, trade_diff_sink: TradeDiffSink) -> dict[str, Any]`
   - `_handle_place_order(symbol, side_str, reasoning, market, broker, risk, predictions_cache, mode, stats, *, trade_diff_sink: TradeDiffSink) -> dict[str, Any]`
 
@@ -1175,8 +1175,10 @@ def _check_sl_tp_exits(
     market_data: MarketDataPort | None,
     stats: OrderExecutionStats,
     trade_diff_sink: TradeDiffSink,
-) -> bool:
+) -> set[str]:
 ```
+
+**返り値の型注記は現行のまま `set[str]` を維持すること。** 追加するのは `trade_diff_sink` 引数のみである。
 
 58 行付近の `_record_order(` 呼び出しの引数末尾（`order_session=order_session,` の次の行）に追加:
 
