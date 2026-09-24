@@ -14,6 +14,7 @@ import unittest.mock
 from src.backtest import factory
 from src.backtest.factory_sampling import canonical_rule_spec
 from src.backtest.types import FactoryHypothesis
+from src.infrastructure.in_memory import InMemoryTextReviewPort
 
 _A = {"type": "atomic", "rule": "bollinger_band", "params": {"sell_at_upper": False}}
 _B = {"type": "atomic", "rule": "rsi_contrarian", "params": {"oversold": 25.0, "overbought": 75.0}}
@@ -45,7 +46,13 @@ class TestBatchDedupeIncludesCanonicalHashes(unittest.TestCase):
         ), unittest.mock.patch.object(
             factory, "_load_symbol_data", return_value={}
         ):
-            factory.run_factory_batch(market="jp", symbols=["X"], budget=1, n_windows=4)
+            factory.run_factory_batch(
+                market="jp",
+                symbols=["X"],
+                budget=1,
+                n_windows=4,
+                review_port=InMemoryTextReviewPort(),
+            )
 
         self.assertIn(stored_hash, captured["hashes"])
         self.assertIn(canonical_hash, captured["hashes"])
@@ -68,7 +75,13 @@ class TestBatchDedupeIncludesCanonicalHashes(unittest.TestCase):
         ), unittest.mock.patch.object(
             factory, "_load_symbol_data", return_value={}
         ):
-            factory.run_factory_batch(market="jp", symbols=["X"], budget=1, n_windows=4)
+            factory.run_factory_batch(
+                market="jp",
+                symbols=["X"],
+                budget=1,
+                n_windows=4,
+                review_port=InMemoryTextReviewPort(),
+            )
 
         # us 市場のスペックから導いたハッシュは jp のバッチには渡らない
         self.assertNotIn(us_hash, captured["hashes"])
@@ -89,7 +102,13 @@ class TestBatchDedupeIncludesCanonicalHashes(unittest.TestCase):
         ), unittest.mock.patch.object(
             factory, "_load_symbol_data", return_value={}
         ):
-            factory.run_factory_batch(market="jp", symbols=["X"], budget=1, n_windows=4)
+            factory.run_factory_batch(
+                market="jp",
+                symbols=["X"],
+                budget=1,
+                n_windows=4,
+                review_port=InMemoryTextReviewPort(),
+            )
 
         self.assertEqual(captured["hashes"], {"deadbeef0001"})
 

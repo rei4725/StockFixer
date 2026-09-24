@@ -6,6 +6,7 @@ import pandas as pd
 
 from src.backtest.factory import run_factory_batch
 from src.backtest.types import FactoryEvaluation, FactoryHypothesis
+from src.infrastructure.in_memory import InMemoryTextReviewPort
 
 
 def _sample_data():
@@ -52,11 +53,16 @@ def test_claude_hypotheses_included_when_enabled(
         )
     ]
 
-    result = run_factory_batch(market="us", symbols=["TEST"], budget=1, n_windows=4)
+    review_port = InMemoryTextReviewPort()
+    result = run_factory_batch(
+        market="us", symbols=["TEST"], budget=1, n_windows=4, review_port=review_port
+    )
 
     labels = [e.hypothesis.rule_spec.get("rule_name") for e in result.evaluated]
     assert "claude_rule" in labels
     mock_generate.assert_called_once()
+    # 合成ルートが注入したポートがそのまま生成器へ渡ること（#741）
+    assert mock_generate.call_args.kwargs["review_port"] is review_port
 
 
 @patch("src.backtest.factory.generate_claude_hypotheses")
@@ -65,7 +71,13 @@ def test_claude_hypotheses_skipped_when_disabled(mock_load_data, mock_generate, 
     monkeypatch.setattr("src.backtest.factory.FACTORY_CLAUDE_RULEGEN_ENABLED", False)
     mock_load_data.return_value = {"TEST": _sample_data()}
 
-    run_factory_batch(market="us", symbols=["TEST"], budget=1, n_windows=4)
+    run_factory_batch(
+        market="us",
+        symbols=["TEST"],
+        budget=1,
+        n_windows=4,
+        review_port=InMemoryTextReviewPort(),
+    )
 
     mock_generate.assert_not_called()
 
@@ -107,7 +119,13 @@ def test_n_trials_includes_claude_generated_candidates(
     mock_generate.return_value = [_claude_eval("claude_rule_1"), _claude_eval("claude_rule_2")]
 
     budget = 1
-    result = run_factory_batch(market="us", symbols=["TEST"], budget=budget, n_windows=4)
+    result = run_factory_batch(
+        market="us",
+        symbols=["TEST"],
+        budget=budget,
+        n_windows=4,
+        review_port=InMemoryTextReviewPort(),
+    )
 
     n_candidates = len(result.candidates) - len(mock_generate.return_value)
     expected_n_trials = (

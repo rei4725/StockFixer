@@ -499,3 +499,85 @@ class TestDiscordBotMonthlyReportCompositionRoot(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTextReviewPortCompositionRoots(unittest.TestCase):
+    """LLM を使う 4 つの合成ルートが factory 製の TextReviewPort を注入すること（#741）。
+
+    BC は factory を直接呼ばなくなったため、合成ルートが渡し忘れると
+    TypeError で落ちる。渡す物が factory 製であることをここで固定する。
+    """
+
+    def test_run_weekly_report_injects_factory_port(self):
+        from src.orchestration.jobs import weekly
+
+        sentinel_port = MagicMock(name="text_review_port")
+        with patch(
+            "src.infrastructure.llm.factory.get_text_review_port", return_value=sentinel_port
+        ), patch("src.infrastructure.persistence.analytics_query.PostgresAnalyticsQuery"), patch(
+            "src.prediction.db.load_drift_summary", return_value=MagicMock()
+        ), patch(
+            "src.prediction.db.save_weekly_accuracy_snapshot"
+        ), patch(
+            "src.reporting.discord.discord_utils.send_weekly_report"
+        ), patch(
+            "src.reporting.llm_review.generate_weekly_review", return_value=None
+        ) as mock_review, patch(
+            "src.prediction.db.load_top_prediction_misses", return_value=MagicMock()
+        ), patch(
+            "src.prediction.miss_analysis.run_miss_analysis_batch", return_value=[]
+        ), patch(
+            "src.reporting.discord.discord_utils.send_miss_analysis_summary"
+        ):
+            weekly.run_weekly_report()
+
+        mock_review.assert_called_once()
+        self.assertIs(mock_review.call_args.kwargs["review_port"], sentinel_port)
+
+    def test_run_nightly_strategy_factory_injects_factory_port(self):
+        from src.domain.types import SymbolTask
+        from src.orchestration.jobs import periodic
+
+        sentinel_port = MagicMock(name="text_review_port")
+        with patch(
+            "src.infrastructure.llm.factory.get_text_review_port", return_value=sentinel_port
+        ), patch(
+            "src.watchlist.batch_runner.load_target_symbols",
+            return_value=[SymbolTask(market="jp", symbol="7203")],
+        ), patch(
+            "src.backtest.factory.run_factory_batch"
+        ) as mock_batch, patch(
+            "src.reporting.discord.discord_utils.send_factory_completion"
+        ):
+            periodic.run_nightly_strategy_factory(market="jp", budget=1, force=True)
+
+        mock_batch.assert_called_once()
+        self.assertIs(mock_batch.call_args.kwargs["review_port"], sentinel_port)
+
+    def test_run_backtest_review_main_injects_factory_port(self):
+        import run_backtest_review
+
+        sentinel_port = MagicMock(name="text_review_port")
+        with patch.object(
+            run_backtest_review, "get_text_review_port", return_value=sentinel_port
+        ), patch.object(
+            run_backtest_review, "run_backtest_review", return_value=[]
+        ) as mock_run, patch(
+            "sys.argv", ["run_backtest_review.py", "--dry-run"]
+        ):
+            run_backtest_review.main()
+
+        self.assertIs(mock_run.call_args.kwargs["review_port"], sentinel_port)
+
+    def test_run_test_gap_main_injects_factory_port(self):
+        import run_test_gap
+
+        sentinel_port = MagicMock(name="text_review_port")
+        with patch.object(
+            run_test_gap, "get_text_review_port", return_value=sentinel_port
+        ), patch.object(run_test_gap, "run_test_gap_review", return_value=[]) as mock_run, patch(
+            "sys.argv", ["run_test_gap.py", "--dry-run"]
+        ):
+            run_test_gap.main()
+
+        self.assertIs(mock_run.call_args.kwargs["review_port"], sentinel_port)

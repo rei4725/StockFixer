@@ -16,6 +16,7 @@ from src.domain.ports import (
     OrderRunSink,
     PredictionResultRepository,
     StockFeatureRepository,
+    TextReviewPort,
     TradeDiffSink,
 )
 from src.domain.types import OrderRunSummary, TradeDiffRecord
@@ -237,3 +238,41 @@ class InMemoryAnalyticsQuery(AnalyticsQuery):
 
     def paper_real_diff_summary(self, recent_days: int = 7) -> dict:
         return self._paper_real_diff
+
+
+class InMemoryTextReviewPort(TextReviewPort):
+    """インメモリ LLM レビューポート（テスト用）。
+
+    responses を先頭から順に返す（使い切ったら最後の要素を返し続ける）。
+    error を渡すと complete() がそれを送出する。受け取った引数は calls に残る。
+    """
+
+    def __init__(
+        self, responses: Optional[list[str]] = None, error: Optional[Exception] = None
+    ) -> None:
+        self._responses = list(responses) if responses else [""]
+        self._error = error
+        self.calls: list[dict[str, Any]] = []
+
+    def complete(
+        self,
+        *,
+        system: str,
+        user: str,
+        model: str,
+        max_tokens: int,
+        schema: Optional[dict] = None,
+    ) -> str:
+        self.calls.append(
+            {
+                "system": system,
+                "user": user,
+                "model": model,
+                "max_tokens": max_tokens,
+                "schema": schema,
+            }
+        )
+        if self._error is not None:
+            raise self._error
+        index = min(len(self.calls) - 1, len(self._responses) - 1)
+        return self._responses[index]
