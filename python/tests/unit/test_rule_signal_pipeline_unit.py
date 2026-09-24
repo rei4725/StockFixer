@@ -9,6 +9,8 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pandas as pd
 
+from src.infrastructure.in_memory import InMemoryTradeDiffSink
+
 
 class _MockMarketDataPort:
     """OHLCVWithIndicatorsPort の最小モック実装"""
@@ -167,7 +169,7 @@ class TestExecuteRulePaperTrades(unittest.TestCase):
             patch("src.trading.rule_execution.PaperBroker", return_value=mock_broker),
             patch("src.trading.rule_execution.RiskManager", return_value=self._mock_risk()),
         ):
-            result = execute_rule_paper_trades([], "jp")
+            result = execute_rule_paper_trades([], "jp", trade_diff_sink=InMemoryTradeDiffSink())
         self.assertEqual(result["buy_orders"], 0)
         self.assertEqual(result["sell_orders"], 0)
 
@@ -183,7 +185,9 @@ class TestExecuteRulePaperTrades(unittest.TestCase):
             patch("src.trading.rule_execution.RiskManager", return_value=self._mock_risk(qty=100)),
             patch("src.trading.rule_execution.get_ticker", return_value="7203.T"),
         ):
-            result = execute_rule_paper_trades(signals, "jp")
+            result = execute_rule_paper_trades(
+                signals, "jp", trade_diff_sink=InMemoryTradeDiffSink()
+            )
         self.assertEqual(result["buy_orders"], 1)
         mock_broker.send_order.assert_called_once()
 
@@ -203,7 +207,9 @@ class TestExecuteRulePaperTrades(unittest.TestCase):
             ),
             patch("src.trading.rule_execution.get_ticker", return_value="7203.T"),
         ):
-            result = execute_rule_paper_trades(signals, "jp")
+            result = execute_rule_paper_trades(
+                signals, "jp", trade_diff_sink=InMemoryTradeDiffSink()
+            )
         self.assertEqual(result["buy_orders"], 0)
         self.assertEqual(result["skipped"], 1)
         mock_broker.send_order.assert_not_called()
@@ -225,7 +231,9 @@ class TestExecuteRulePaperTrades(unittest.TestCase):
             patch("src.trading.rule_execution.RiskManager", return_value=self._mock_risk()),
             patch("src.trading.rule_execution.get_ticker", return_value="7203.T"),
         ):
-            result = execute_rule_paper_trades(signals, "jp")
+            result = execute_rule_paper_trades(
+                signals, "jp", trade_diff_sink=InMemoryTradeDiffSink()
+            )
         self.assertEqual(result["buy_orders"], 0)
         mock_broker.send_order.assert_not_called()
 
@@ -242,7 +250,9 @@ class TestExecuteRulePaperTrades(unittest.TestCase):
             patch("src.trading.rule_execution.RiskManager", return_value=self._mock_risk(qty=0)),
             patch("src.trading.rule_execution.get_ticker", return_value="7203.T"),
         ):
-            result = execute_rule_paper_trades(signals, "jp")
+            result = execute_rule_paper_trades(
+                signals, "jp", trade_diff_sink=InMemoryTradeDiffSink()
+            )
         self.assertEqual(result["buy_orders"], 0)
         mock_broker.send_order.assert_not_called()
 
@@ -258,7 +268,9 @@ class TestExecuteRulePaperTrades(unittest.TestCase):
             patch("src.trading.rule_execution.RiskManager", return_value=self._mock_risk()),
             patch("src.trading.rule_execution.get_ticker", return_value="7203.T"),
         ):
-            result = execute_rule_paper_trades(signals, "jp")
+            result = execute_rule_paper_trades(
+                signals, "jp", trade_diff_sink=InMemoryTradeDiffSink()
+            )
         self.assertEqual(result["sell_orders"], 1)
 
     def test_sell_allowed_even_when_gate_blocked(self):
@@ -277,7 +289,9 @@ class TestExecuteRulePaperTrades(unittest.TestCase):
             ),
             patch("src.trading.rule_execution.get_ticker", return_value="7203.T"),
         ):
-            result = execute_rule_paper_trades(signals, "jp")
+            result = execute_rule_paper_trades(
+                signals, "jp", trade_diff_sink=InMemoryTradeDiffSink()
+            )
         self.assertEqual(result["sell_orders"], 1)
 
     def test_hold_signal_is_skipped(self):
@@ -291,7 +305,9 @@ class TestExecuteRulePaperTrades(unittest.TestCase):
             patch("src.trading.rule_execution.PaperBroker", return_value=mock_broker),
             patch("src.trading.rule_execution.RiskManager", return_value=self._mock_risk()),
         ):
-            result = execute_rule_paper_trades(signals, "jp")
+            result = execute_rule_paper_trades(
+                signals, "jp", trade_diff_sink=InMemoryTradeDiffSink()
+            )
         self.assertEqual(result["skipped"], 1)
 
     def test_broker_exception_is_caught(self):
@@ -306,7 +322,9 @@ class TestExecuteRulePaperTrades(unittest.TestCase):
             patch("src.trading.rule_execution.RiskManager", return_value=self._mock_risk()),
             patch("src.trading.rule_execution.get_ticker", return_value="7203.T"),
         ):
-            result = execute_rule_paper_trades(signals, "jp")
+            result = execute_rule_paper_trades(
+                signals, "jp", trade_diff_sink=InMemoryTradeDiffSink()
+            )
         self.assertIsInstance(result, dict)
 
 

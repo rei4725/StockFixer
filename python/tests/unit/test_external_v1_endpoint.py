@@ -1,6 +1,6 @@
 """src/api/external_v1.py の単体テスト"""
 
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 import pytest
 
@@ -325,7 +325,7 @@ class TestExternalV1ReportsMonthly:
         ):
             resp = self._get(client, month="2026-03")
         assert resp.status_code == 200
-        mock_get.assert_called_once_with(target_month="2026-03")
+        mock_get.assert_called_once_with(target_month="2026-03", analytics=ANY)
 
     def test_internal_error_returns_500(self, client):
         with (

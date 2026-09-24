@@ -185,9 +185,12 @@ def register_routes(flask_app: Flask) -> None:
         target_month = request.args.get("month")
 
         try:
+            from src.infrastructure.persistence.analytics_query import PostgresAnalyticsQuery
             from src.reporting.query_service import get_monthly_report_summary
 
-            summary = get_monthly_report_summary(target_month=target_month)
+            summary = get_monthly_report_summary(
+                target_month=target_month, analytics=PostgresAnalyticsQuery()
+            )
             return jsonify(_to_public_monthly_dict(summary)), 200
 
         except Exception:

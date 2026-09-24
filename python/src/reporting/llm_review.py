@@ -76,7 +76,7 @@ def generate_weekly_review(
 
     Args:
         accuracy_df: load_drift_summary() の戻り値 DataFrame
-        diff_summary: load_paper_real_diff_summary() の戻り値 dict（任意）
+        diff_summary: paper/real 乖離サマリー dict（AnalyticsQuery.paper_real_diff_summary() の戻り値・任意）
         horizon: 対象ホライズン
 
     Returns:

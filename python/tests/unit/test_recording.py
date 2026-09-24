@@ -12,7 +12,9 @@ DB を直接叩く経路は tests/unit/conftest.py の autouse `_isolate_db` フ
 """
 
 import unittest
+from unittest.mock import MagicMock, patch
 
+from src.infrastructure.in_memory import InMemoryTradeDiffSink
 from src.trading.brokers.base import OrderSide, OrderType
 from src.trading.execution.recording import _record_order
 from src.utils.db._connection import _db_connection
@@ -45,6 +47,7 @@ class TestRecordOrder(unittest.TestCase):
             broker=None,
             mode="paper",
             horizon=3,
+            trade_diff_sink=InMemoryTradeDiffSink(),
         )
 
         with _db_connection() as con:
@@ -63,7 +66,13 @@ class TestRecordOrder(unittest.TestCase):
         self.assertIsNotNone(row[4])
 
     def test_paper_mode_records_paper_real_diff(self):
-        """paper モードで paper_real_diff にも正しく記録されること。"""
+        """paper モードで注入された TradeDiffSink にも正しく記録されること。
+
+        （旧実装は paper_real_diff テーブルへ直接 upsert していたが、Phase 4b で
+        TradeDiffSink 経由に置き換わったため、DB 直接検証ではなく Sink の
+        recorded を検証する。）
+        """
+        sink = InMemoryTradeDiffSink()
         _record_order(
             market="jp",
             predicted_at="2026-05-19T10:00:00",
@@ -76,21 +85,20 @@ class TestRecordOrder(unittest.TestCase):
             order_result={"order_id": "ORD-REC-001", "status": "filled", "fill_price": 1502.0},
             broker=None,
             mode="paper",
+            trade_diff_sink=sink,
         )
 
-        with _db_connection() as con:
-            row = con.execute(
-                "SELECT paper_order_id, paper_price FROM paper_real_diff "
-                "WHERE market = %s AND symbol = %s AND predicted_at = %s AND side = %s",
-                ["jp", "7203", "2026-05-19T10:00:00", int(OrderSide.BUY)],
-            ).fetchone()
-
-        self.assertIsNotNone(row)
-        self.assertEqual(row[0], "ORD-REC-001")
-        self.assertAlmostEqual(row[1], 1502.0)
+        self.assertEqual(len(sink.recorded), 1)
+        rec = sink.recorded[0]
+        self.assertEqual(rec.order_id, "ORD-REC-001")
+        self.assertAlmostEqual(rec.actual_price, 1502.0)
 
     def test_live_mode_does_not_link_paper_metadata(self):
-        """live モードでは paper_orders の補完（_link_paper_order_metadata）を行わないこと。"""
+        """live モードでは paper_orders の補完（_link_paper_order_metadata）を行わないこと。
+
+        TradeDiffSink への記録は行うこと（Sink の recorded を検証する）。
+        """
+        sink = InMemoryTradeDiffSink()
         _record_order(
             market="jp",
             predicted_at="2026-05-19T10:00:00",
@@ -103,6 +111,7 @@ class TestRecordOrder(unittest.TestCase):
             order_result={"order_id": "ORD-REC-002", "status": "filled", "fill_price": 1503.0},
             broker=None,
             mode="live",
+            trade_diff_sink=sink,
         )
 
         with _db_connection() as con:
@@ -112,15 +121,48 @@ class TestRecordOrder(unittest.TestCase):
             ).fetchone()
         self.assertIsNone(row)
 
-        with _db_connection() as con:
-            diff_row = con.execute(
-                "SELECT real_order_id, real_price FROM paper_real_diff "
-                "WHERE market = %s AND symbol = %s AND predicted_at = %s AND side = %s",
-                ["jp", "7203", "2026-05-19T10:00:00", int(OrderSide.BUY)],
-            ).fetchone()
-        self.assertIsNotNone(diff_row)
-        self.assertEqual(diff_row[0], "ORD-REC-002")
-        self.assertAlmostEqual(diff_row[1], 1503.0)
+        self.assertEqual(len(sink.recorded), 1)
+        rec = sink.recorded[0]
+        self.assertEqual(rec.order_id, "ORD-REC-002")
+        self.assertAlmostEqual(rec.actual_price, 1503.0)
+
+
+class TestRecordOrderUsesInjectedSink(unittest.TestCase):
+    """_record_order が注入された Sink へ記録すること（module-level import 撤去の回帰）。"""
+
+    @patch("src.trading.execution.recording._link_paper_order_metadata")
+    def test_records_into_injected_sink(self, _mock_link):
+        from src.infrastructure.in_memory import InMemoryTradeDiffSink
+        from src.trading.brokers.base import OrderSide, OrderType
+
+        sink = InMemoryTradeDiffSink()
+        _record_order(
+            market="jp",
+            predicted_at="2026-09-23T00:00:00",
+            symbol="7203",
+            side=OrderSide.BUY,
+            qty=100,
+            signal_price=1000.0,
+            order_price=1000.0,
+            order_type=OrderType.MARKET,
+            order_result={"order_id": "ord-1", "fill_price": 1002.0},
+            broker=MagicMock(),
+            mode="paper",
+            trade_diff_sink=sink,
+        )
+
+        self.assertEqual(len(sink.recorded), 1)
+        rec = sink.recorded[0]
+        self.assertEqual(rec.symbol, "7203")
+        self.assertEqual(rec.mode, "paper")
+        self.assertEqual(rec.order_id, "ord-1")
+        self.assertEqual(rec.actual_price, 1002.0)
+
+    def test_module_has_no_prediction_db_import(self):
+        """src.utils.db からの関数 import が残っていないこと。"""
+        import src.trading.execution.recording as mod
+
+        self.assertFalse(hasattr(mod, "upsert_paper_real_diff"))
 
 
 if __name__ == "__main__":

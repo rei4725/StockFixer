@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from config.settings import MAX_ORDERS_PER_RUN, MAX_POSITIONS
+from src.domain.ports import TradeDiffSink
 from src.domain.trading_rules import get_lot_size
 from src.trading.brokers.base import OrderSide, OrderType
 from src.trading.brokers.paper.paper_broker import PaperBroker
@@ -20,6 +21,8 @@ def execute_rule_paper_trades(
     market: str,
     initial_budget_per_trade: float = 100_000,
     market_data_port=None,
+    *,
+    trade_diff_sink: TradeDiffSink,
 ) -> dict[str, int]:
     """
     シグナルに基づきペーパートレードを実行する。
@@ -32,11 +35,15 @@ def execute_rule_paper_trades(
         market: マーケット識別子
         initial_budget_per_trade: 1銘柄あたりの最大投資額（概算）
         market_data_port: MarketDataPort 実装（呼び出し元から注入）
+        trade_diff_sink: 約定乖離の記録先（TradeDiffSink 実装。合成ルートが必ず渡す）
 
     Returns:
         {"buy_orders": int, "sell_orders": int, "skipped": int}
     """
-    broker = PaperBroker(market_data_port=market_data_port)
+    broker = PaperBroker(
+        market_data_port=market_data_port,
+        trade_diff_sink=trade_diff_sink,
+    )
     risk = RiskManager(broker, market=market)
     lot = get_lot_size(market)
     buy_orders = 0

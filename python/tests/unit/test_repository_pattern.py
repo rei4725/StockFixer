@@ -15,6 +15,7 @@ from src.infrastructure.in_memory import (
     InMemoryBrokerAdapter,
     InMemoryOrderRunSink,
     InMemoryPredictionRepository,
+    InMemoryTradeDiffSink,
 )
 from src.trading.brokers.base import OrderType
 from src.trading.execution import run_daily_orders
@@ -146,6 +147,7 @@ class TestRunDailyOrdersWithRepository:
             stats = run_daily_orders(
                 broker,
                 order_run_sink=InMemoryOrderRunSink(),
+                trade_diff_sink=InMemoryTradeDiffSink(),
                 market="jp",
                 mode="paper",
                 prediction_repo=repo,
@@ -165,6 +167,7 @@ class TestRunDailyOrdersWithRepository:
             stats = run_daily_orders(
                 broker,
                 order_run_sink=InMemoryOrderRunSink(),
+                trade_diff_sink=InMemoryTradeDiffSink(),
                 market="jp",
                 mode="paper",
                 prediction_repo=repo,
@@ -187,6 +190,7 @@ class TestRunDailyOrdersWithRepository:
                 run_daily_orders(
                     broker,
                     order_run_sink=InMemoryOrderRunSink(),
+                    trade_diff_sink=InMemoryTradeDiffSink(),
                     market="jp",
                     mode="paper",
                     prediction_repo=None,
@@ -207,6 +211,7 @@ class TestRunDailyOrdersWithRepository:
                 run_daily_orders(
                     broker,
                     order_run_sink=InMemoryOrderRunSink(),
+                    trade_diff_sink=InMemoryTradeDiffSink(),
                     market="jp",
                     mode="paper",
                     prediction_repo=repo,

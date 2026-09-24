@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import pandas as pd
 
+from src.infrastructure.in_memory import InMemoryAnalyticsQuery
 from src.reporting.dashboard import (
     _section_drift,
     _section_model_accuracy,
@@ -35,7 +36,7 @@ class TestSectionMonthlyKpi(unittest.TestCase):
             symbol_count=10,
             wf_snapshot_file="wf_summary.csv",
         )
-        rows = _section_monthly_kpi()
+        rows = _section_monthly_kpi(InMemoryAnalyticsQuery())
         self.assertIsNotNone(rows)
         labels = [r[0] for r in rows]
         self.assertIn("Net Return", labels)
@@ -53,7 +54,7 @@ class TestSectionMonthlyKpi(unittest.TestCase):
             hit_rate=None,
             avg_slippage=None,
         )
-        rows = _section_monthly_kpi()
+        rows = _section_monthly_kpi(InMemoryAnalyticsQuery())
         # N/A が表示されること
         values = [r[1] for r in rows]
         self.assertIn("N/A", values)
@@ -122,21 +123,20 @@ class TestSectionDrift(unittest.TestCase):
 
 
 class TestSectionPaperRealDiff(unittest.TestCase):
-    @patch("src.reporting.dashboard.load_paper_real_diff_summary")
-    def test_returns_rows(self, mock_load):
-        mock_load.return_value = {
-            "tracked_count": 10,
-            "comparable_count": 8,
-            "avg_paper_slippage": 0.002,
-            "avg_real_slippage": 0.003,
-            "avg_abs_diff_ratio": 0.001,
-            "max_abs_price_diff": 50.0,
-        }
-        rows = _section_paper_real_diff(30)
-        labels = [r[0] for r in rows]
-        self.assertIn("追跡件数", labels)
-        self.assertIn("比較可能件数", labels)
-        self.assertIn("Paper Slippage 平均", labels)
+    def test_section_paper_real_diff_formats_percentages(self):
+        rows = _section_paper_real_diff(
+            {
+                "tracked_count": 10,
+                "comparable_count": 7,
+                "avg_paper_slippage": 0.001,
+                "avg_real_slippage": 0.002,
+                "avg_abs_price_diff": 3.5,
+                "avg_abs_diff_ratio": 0.0035,
+                "max_abs_price_diff": 9.0,
+            }
+        )
+        self.assertEqual(rows[0], ["追跡件数", "10"])
+        self.assertEqual(rows[2], ["Paper Slippage 平均", "0.1000%"])
 
 
 # ---------------------------------------------------------------------------
@@ -204,7 +204,7 @@ class TestRunDashboard(unittest.TestCase):
     )
     def test_runs_without_error(self, *_mocks):
         """全モックで run_dashboard が例外なく完走することを確認する。"""
-        run_dashboard(recent_days=7, drift_n=10)
+        run_dashboard(recent_days=7, drift_n=10, analytics=InMemoryAnalyticsQuery())
 
     @patch(
         "src.reporting.dashboard._section_model_accuracy",
@@ -229,7 +229,7 @@ class TestRunDashboard(unittest.TestCase):
     def test_continues_on_section_failure(self, *_mocks):
         """各セクションが例外を起こしても run_dashboard が最後まで実行されること。"""
         # 例外が伝播しないことを確認（print で失敗メッセージが出るだけ）
-        run_dashboard(recent_days=7, drift_n=10)
+        run_dashboard(recent_days=7, drift_n=10, analytics=InMemoryAnalyticsQuery())
 
 
 if __name__ == "__main__":

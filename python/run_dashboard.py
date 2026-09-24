@@ -14,6 +14,7 @@ DuckDB と既存レポート結果から損益・ドリフト・paper/real 乖�
 import argparse
 import sys
 
+from src.infrastructure.persistence.analytics_query import PostgresAnalyticsQuery
 from src.reporting.dashboard import run_dashboard
 from src.utils.logger import get_logger
 
@@ -44,7 +45,7 @@ def main() -> None:
 
     wire_ports()
     args = parse_args()
-    run_dashboard(recent_days=args.days, drift_n=args.drift_n)
+    run_dashboard(recent_days=args.days, drift_n=args.drift_n, analytics=PostgresAnalyticsQuery())
 
 
 if __name__ == "__main__":

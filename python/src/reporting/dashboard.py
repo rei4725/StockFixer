@@ -5,8 +5,9 @@
 将来の C#/Web UI にも流用しやすいよう各セクションを独立した集計関数に分離している。
 
 使い方:
+    from src.infrastructure.persistence.analytics_query import PostgresAnalyticsQuery
     from src.reporting.dashboard import run_dashboard
-    run_dashboard(recent_days=30, drift_n=20)
+    run_dashboard(recent_days=30, drift_n=20, analytics=PostgresAnalyticsQuery())
 """
 
 from __future__ import annotations
@@ -18,9 +19,9 @@ from typing import Optional
 import pandas as pd
 from tabulate import tabulate  # type: ignore[import-untyped]
 
+from src.domain.ports import AnalyticsQuery
 from src.reporting.monthly import run_monthly_report
-from src.utils.db import load_drift_summary, load_experiment_runs, load_paper_real_diff_summary
-from src.utils.db._connection import _db_connection
+from src.utils.db import db_connection, load_drift_summary, load_experiment_runs
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -41,9 +42,9 @@ def _now_jst_str() -> str:
 # ---------------------------------------------------------------------------
 
 
-def _section_monthly_kpi() -> Optional[list[list]]:
+def _section_monthly_kpi(analytics: AnalyticsQuery) -> Optional[list[list]]:
     """月次 KPI を表形式の行リストで返す。なければ None。"""
-    summary = run_monthly_report()
+    summary = run_monthly_report(analytics=analytics)
 
     def _pct(val: Optional[float]) -> str:
         return f"{val * 100:.2f}%" if val is not None else "N/A"
@@ -101,9 +102,12 @@ def _section_drift(drift_n: int) -> tuple[list[list], int]:
     return rows, len(exceeded)
 
 
-def _section_paper_real_diff(recent_days: int) -> list[list]:
-    """paper/real 乖離サマリーを表形式の行リストで返す。"""
-    d = load_paper_real_diff_summary(recent_days=recent_days)
+def _section_paper_real_diff(d: dict) -> list[list]:
+    """paper/real 乖離サマリーを表形式の行リストで返す。
+
+    Args:
+        d: AnalyticsQuery.paper_real_diff_summary() の戻り値
+    """
     return [
         ["追跡件数", str(d["tracked_count"])],
         ["比較可能件数", str(d["comparable_count"])],
@@ -122,7 +126,7 @@ def _section_paper_balance() -> list[list]:
     含み損益（空売り）: paper_short_positions.unrealized_pnl の合計
     ロングポジションの含み損益はリアルタイム価格なしでは算出不可のため表示しない。
     """
-    with _db_connection() as con:
+    with db_connection() as con:
         bal_row = con.execute("SELECT balance FROM paper_balance LIMIT 1").fetchone()
         balance = float(bal_row[0]) if bal_row else 0.0
 
@@ -194,7 +198,12 @@ def _section_model_accuracy(limit: int) -> list[list]:
 # ---------------------------------------------------------------------------
 
 
-def run_dashboard(recent_days: int = 30, drift_n: int = 20) -> None:
+def run_dashboard(
+    recent_days: int = 30,
+    drift_n: int = 20,
+    *,
+    analytics: AnalyticsQuery,
+) -> None:
     """
     運用監視ダッシュボードを標準出力に表示する（read-only）。
 
@@ -204,6 +213,7 @@ def run_dashboard(recent_days: int = 30, drift_n: int = 20) -> None:
     Args:
         recent_days: paper/real 乖離・月次 KPI の集計期間（日）
         drift_n: ドリフト判定に使う直近サンプル数（銘柄ごと）
+        analytics: paper/real 乖離サマリーの読み取りポート
     """
     print("=" * 60)
     print("  StockFixer 運用監視ダッシュボード")
@@ -215,7 +225,7 @@ def run_dashboard(recent_days: int = 30, drift_n: int = 20) -> None:
     # --- [1] 月次 KPI ---
     print("--- [1] 月次 KPI ---")
     try:
-        rows = _section_monthly_kpi()
+        rows = _section_monthly_kpi(analytics)
         if rows:
             print(tabulate(rows, headers=["指標", "値"], tablefmt="simple"))
         else:
@@ -252,7 +262,7 @@ def run_dashboard(recent_days: int = 30, drift_n: int = 20) -> None:
     # --- [3] paper/real 乖離 ---
     print(f"--- [3] paper/real 乖離（直近 {recent_days} 日）---")
     try:
-        rows = _section_paper_real_diff(recent_days)
+        rows = _section_paper_real_diff(analytics.paper_real_diff_summary(recent_days=recent_days))
         print(tabulate(rows, headers=["指標", "値"], tablefmt="simple"))
     except Exception as e:
         logger.error("paper/real 乖離取得失敗: %s", e, exc_info=True)

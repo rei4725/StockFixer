@@ -2,7 +2,7 @@
 
 import asyncio
 import unittest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 from src.prediction.types import PredictionResult
 from src.reporting.discord.discord_bot import (
@@ -174,7 +174,7 @@ class TestDiscordBotHelpers(unittest.TestCase):
 
         asyncio.run(handle_monthlyreport_command(message))
 
-        mock_get.assert_called_once_with(None)
+        mock_get.assert_called_once_with(None, analytics=ANY)
         calls = message.channel.send.call_args_list
         full_text = " ".join(str(c) for c in calls)
         self.assertIn("月次KPIレポート", full_text)
@@ -192,7 +192,7 @@ class TestDiscordBotHelpers(unittest.TestCase):
 
         asyncio.run(handle_monthlyreport_command(message))
 
-        mock_get.assert_called_once_with("2026-03")
+        mock_get.assert_called_once_with("2026-03", analytics=ANY)
 
     @patch(
         "src.reporting.discord.discord_bot.get_monthly_report_summary",

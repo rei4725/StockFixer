@@ -151,11 +151,8 @@ def run_weekly_report():
     try:
         from datetime import date, timedelta
 
-        from src.prediction.db import (
-            load_drift_summary,
-            load_paper_real_diff_summary,
-            save_weekly_accuracy_snapshot,
-        )
+        from src.infrastructure.persistence.analytics_query import PostgresAnalyticsQuery
+        from src.prediction.db import load_drift_summary, save_weekly_accuracy_snapshot
         from src.reporting.discord.discord_utils import send_weekly_report
         from src.reporting.llm_review import generate_weekly_review
 
@@ -166,7 +163,7 @@ def run_weekly_report():
         week_start = (today - timedelta(days=today.weekday())).isoformat()
         save_weekly_accuracy_snapshot(week_start, summary)
 
-        diff_summary = load_paper_real_diff_summary(recent_days=7)
+        diff_summary = PostgresAnalyticsQuery().paper_real_diff_summary(recent_days=7)
         # Claude 講評（LLM_REVIEW_ENABLED=False の既定では None を返す・非致命的）
         llm_review = generate_weekly_review(summary, diff_summary=diff_summary, horizon=1)
         send_weekly_report(

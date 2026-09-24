@@ -1,6 +1,6 @@
 """SL/TP トリガーによる保有ポジションの強制クローズ。"""
 
-from src.domain.ports import MarketDataPort
+from src.domain.ports import MarketDataPort, TradeDiffSink
 from src.trading.brokers.base import BrokerBase, OrderSide
 from src.trading.risk_manager import RiskManager
 from src.utils.logger import get_logger
@@ -18,6 +18,7 @@ def _check_sl_tp_exits(
     mode: str,
     market_data: MarketDataPort | None,
     stats: OrderExecutionStats,
+    trade_diff_sink: TradeDiffSink,
 ) -> set[str]:
     """保有ポジションを走査し SL/TP トリガーで成行売りを発行する。
 
@@ -68,6 +69,7 @@ def _check_sl_tp_exits(
                 broker=broker,
                 mode=mode,
                 order_session=order_session,
+                trade_diff_sink=trade_diff_sink,
             )
             logger.info(
                 "[exec] SL/TP発動 → 成行売り: %s %d株 @ %.1f (%s)",

@@ -9,14 +9,16 @@ import pandas as pd
 
 from src.domain.ports import (
     AlertLevel,
+    AnalyticsQuery,
     BrokerPort,
     MarketDataPort,
     NotificationPort,
     OrderRunSink,
     PredictionResultRepository,
     StockFeatureRepository,
+    TradeDiffSink,
 )
-from src.domain.types import OrderRunSummary
+from src.domain.types import OrderRunSummary, TradeDiffRecord
 
 
 class InMemoryPredictionRepository(PredictionResultRepository):
@@ -200,3 +202,38 @@ class InMemoryOrderRunSink(OrderRunSink):
 
     def save(self, summary: OrderRunSummary) -> None:
         self.saved.append(summary)
+
+
+class InMemoryTradeDiffSink(TradeDiffSink):
+    """インメモリ約定乖離 Sink（テスト用）"""
+
+    def __init__(self) -> None:
+        self.recorded: list[TradeDiffRecord] = []
+
+    def record(self, record: TradeDiffRecord) -> None:
+        self.recorded.append(record)
+
+
+class InMemoryAnalyticsQuery(AnalyticsQuery):
+    """インメモリ読み取りクエリ（テスト用）。
+
+    コンストラクタで返り値を仕込む。仕込まない場合はゼロ値を返す。
+    """
+
+    _EMPTY_PAPER_REAL_DIFF: dict = {
+        "tracked_count": 0,
+        "comparable_count": 0,
+        "avg_paper_slippage": 0.0,
+        "avg_real_slippage": 0.0,
+        "avg_abs_price_diff": 0.0,
+        "avg_abs_diff_ratio": 0.0,
+        "max_abs_price_diff": 0.0,
+    }
+
+    def __init__(self, paper_real_diff: Optional[dict] = None) -> None:
+        self._paper_real_diff = (
+            paper_real_diff if paper_real_diff is not None else dict(self._EMPTY_PAPER_REAL_DIFF)
+        )
+
+    def paper_real_diff_summary(self, recent_days: int = 7) -> dict:
+        return self._paper_real_diff

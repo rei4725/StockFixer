@@ -30,6 +30,7 @@ from src.utils.db import _connection as _conn_module  # noqa: E402
 from src.utils.db._connection import (
     _db_connection,
     close_connection,
+    db_connection,
     get_readonly_connection,
     init_tables,
     set_test_connection,
@@ -106,7 +107,6 @@ class _DbPackageProxy(types.ModuleType):
             "load_feature_exclusion_candidates",
             "load_latest_prediction_timestamp",
             "load_model_weights",
-            "load_paper_real_diff_summary",
             "load_prediction_accuracy",
             "load_prediction_markets",
             "load_prediction_results",
@@ -117,7 +117,6 @@ class _DbPackageProxy(types.ModuleType):
             "save_prediction_results",
             "save_shap_values",
             "save_weekly_accuracy_snapshot",
-            "upsert_paper_real_diff",
         ]
     )
 

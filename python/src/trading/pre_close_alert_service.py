@@ -7,6 +7,7 @@
 from dataclasses import dataclass
 from enum import Enum
 
+from src.domain.ports import TradeDiffSink
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -36,7 +37,9 @@ class PositionAlert:
     alert_type: AlertType
 
 
-def evaluate_positions(market_data_port=None) -> list[PositionAlert]:
+def evaluate_positions(
+    market_data_port=None, *, trade_diff_sink: TradeDiffSink
+) -> list[PositionAlert]:
     """
     保有ポジション × 直近予測の差分を計算し推奨アクションを分類する。
 
@@ -47,6 +50,7 @@ def evaluate_positions(market_data_port=None) -> list[PositionAlert]:
 
     Args:
         market_data_port: MarketDataPort 実装（呼び出し元から注入）
+        trade_diff_sink: 約定乖離の記録先（TradeDiffSink 実装。合成ルートが必ず渡す）
 
     Returns:
         PositionAlert リスト（ポジションなし・予測データなしの場合は空リスト）
@@ -61,7 +65,10 @@ def evaluate_positions(market_data_port=None) -> list[PositionAlert]:
         logger.info("live モードのため引け前アラートをスキップ（kabuポジション未対応）")
         return []
 
-    broker = PaperBroker(market_data_port=market_data_port)
+    broker = PaperBroker(
+        market_data_port=market_data_port,
+        trade_diff_sink=trade_diff_sink,
+    )
     positions = broker.get_positions()
     if not positions:
         logger.info("保有ポジションなし — 引け前アラートをスキップ")
@@ -126,14 +133,14 @@ def evaluate_positions(market_data_port=None) -> list[PositionAlert]:
     return alerts
 
 
-def get_pre_close_alerts(market_data_port=None) -> list[str]:
+def get_pre_close_alerts(market_data_port=None, *, trade_diff_sink: TradeDiffSink) -> list[str]:
     """evaluate_positions() の結果をフォーマット済み文字列リストで返す。"""
     from src.utils.japan_time import format_jst
 
     MINUTE_FORMAT = "%Y-%m-%d %H:%M JST"
     now = format_jst(fmt=MINUTE_FORMAT)
 
-    alerts = evaluate_positions(market_data_port=market_data_port)
+    alerts = evaluate_positions(market_data_port=market_data_port, trade_diff_sink=trade_diff_sink)
 
     if not alerts:
         return [f"時刻: {now}", "保有ポジションなし"]

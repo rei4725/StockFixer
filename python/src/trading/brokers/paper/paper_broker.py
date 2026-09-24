@@ -11,10 +11,11 @@ kabu STATION® API が利用できない環境（APIキー未取得・テスト�
 
 import math
 import uuid
-from typing import Any, Callable
+from typing import Any
 
 from config.settings import PAPER_INITIAL_BALANCE
-from src.domain.ports import MarketDataPort
+from src.domain.ports import MarketDataPort, TradeDiffSink
+from src.domain.types import TradeDiffRecord
 from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
 from src.utils.db._connection import _db_connection
 from src.utils.logger import get_logger
@@ -38,10 +39,10 @@ class PaperBroker(BrokerBase):
     def __init__(
         self,
         market_data_port: MarketDataPort,
-        record_diff: Callable[..., None] | None = None,
+        trade_diff_sink: TradeDiffSink,
     ) -> None:
         self._market_data = market_data_port
-        self._record_diff = record_diff
+        self._trade_diff_sink = trade_diff_sink
 
     def get_token(self) -> str:
         """ペーパートレードはトークン不要。ダミー文字列を返す"""
@@ -203,21 +204,18 @@ class PaperBroker(BrokerBase):
                         "fill_price=%s, filled_at=CURRENT_TIMESTAMP WHERE order_id=%s",
                         [fill_price, order_id],
                     )
-                if (
-                    market
-                    and predicted_at
-                    and signal_price is not None
-                    and self._record_diff is not None
-                ):
-                    self._record_diff(
-                        market=str(market),
-                        symbol=str(symbol),
-                        predicted_at=str(predicted_at),
-                        side=int(side),
-                        signal_price=float(signal_price),
-                        mode="paper",
-                        order_id=str(order_id),
-                        actual_price=fill_price,
+                if market and predicted_at and signal_price is not None:
+                    self._trade_diff_sink.record(
+                        TradeDiffRecord(
+                            market=str(market),
+                            symbol=str(symbol),
+                            predicted_at=str(predicted_at),
+                            side=int(side),
+                            signal_price=float(signal_price),
+                            mode="paper",
+                            order_id=str(order_id),
+                            actual_price=fill_price,
+                        )
                     )
                 logger.info(
                     f"[paper] 約定: {symbol} {OrderSide(side).name} {qty}株 @ {fill_price:.1f}円"

@@ -23,11 +23,6 @@ from .features import (  # noqa: F401
     save_shap_values,
 )
 from .model_metrics import load_model_weights, save_model_metrics  # noqa: F401
-from .paper_real_diff import (  # noqa: F401
-    load_open_close_advantage_summary,
-    load_paper_real_diff_summary,
-    upsert_paper_real_diff,
-)
 from .prediction_results import (  # noqa: F401
     load_latest_prediction_timestamp,
     load_prediction_markets,
@@ -45,10 +40,6 @@ __all__ = [
     "load_prediction_results",
     "load_run_stats_at",
     "load_shadow_comparison",
-    # paper_real_diff
-    "upsert_paper_real_diff",
-    "load_paper_real_diff_summary",
-    "load_open_close_advantage_summary",
     # model_metrics
     "save_model_metrics",
     "load_model_weights",

@@ -25,9 +25,10 @@ logger = logging.getLogger(__name__)
 
 
 def send_weekly_report(
-    accuracy_df=None,
+    accuracy_df,
     horizon: int = 1,
-    diff_summary: Optional[dict] = None,
+    *,
+    diff_summary: dict,
     llm_review: Optional[str] = None,
 ) -> bool:
     """
@@ -38,9 +39,9 @@ def send_weekly_report(
     全体 Hit Rate が連続 N 週低下していた場合はアラートも送る。
 
     Args:
-        accuracy_df: load_drift_summary() の戻り値 DataFrame（None の場合はDB から取得）
+        accuracy_df: load_drift_summary() の戻り値 DataFrame
         horizon: 対象ホライズン
-        diff_summary: paper/real 乖離サマリー（None の場合は DB から取得）
+        diff_summary: paper/real 乖離サマリー（入口が AnalyticsQuery から取得して渡す）
         llm_review: Claude が生成した講評テキスト（None の場合は講評節を省略）
 
     Returns:
@@ -48,11 +49,7 @@ def send_weekly_report(
     """
     import pandas as pd
 
-    from src.utils.db import (
-        load_drift_summary,
-        load_paper_real_diff_summary,
-        load_weekly_accuracy_snapshots,
-    )
+    from src.utils.db import load_drift_summary, load_weekly_accuracy_snapshots
 
     if accuracy_df is None or (isinstance(accuracy_df, pd.DataFrame) and accuracy_df.empty):
         accuracy_df = load_drift_summary(horizon=horizon)
@@ -133,8 +130,6 @@ def send_weekly_report(
                     f" ({weeks_str})"
                 )
 
-    if diff_summary is None:
-        diff_summary = load_paper_real_diff_summary(recent_days=7)
     if diff_summary.get("tracked_count", 0) > 0:
         lines.append("\n**paper/real 乖離サマリー（直近7日）**")
         lines.append(

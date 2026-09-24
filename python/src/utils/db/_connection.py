@@ -128,3 +128,9 @@ def init_tables() -> None:
     """外部から明示的にテーブル初期化する場合に使用"""
     with _db_connection() as con:
         run_migrations(con)
+
+
+# 公開別名。infrastructure/persistence/ のアダプタはこちらを使う。
+# （モジュール名が `_connection` である以上、`_db_connection` は二重に私的であり、
+#   アダプタごとに私的シンボルを参照して回る形を避ける）
+db_connection = _db_connection

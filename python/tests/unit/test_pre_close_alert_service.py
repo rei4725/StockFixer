@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pandas as pd
 
+from src.infrastructure.in_memory import InMemoryTradeDiffSink
 from src.trading.pre_close_alert_service import (
     STOP_LOSS_PRED_THRESHOLD,
     TAKE_PROFIT_HOLD_THRESHOLD,
@@ -52,7 +53,7 @@ class TestAlertTypeClassification(unittest.TestCase):
             broker.get_positions.return_value = [position]
             mock_broker_cls.return_value = broker
 
-            alerts = evaluate_positions()
+            alerts = evaluate_positions(trade_diff_sink=InMemoryTradeDiffSink())
 
         self.assertEqual(len(alerts), 1)
         return alerts[0]
@@ -115,7 +116,7 @@ class TestEvaluatePositionsEarlyExit(unittest.TestCase):
 
     def test_returns_empty_list_in_live_mode(self):
         with patch.dict("os.environ", {"AUTO_TRADE_MODE": "live"}, clear=False):
-            result = evaluate_positions()
+            result = evaluate_positions(trade_diff_sink=InMemoryTradeDiffSink())
         self.assertEqual(result, [])
 
     def test_returns_empty_list_when_no_positions(self):
@@ -126,7 +127,7 @@ class TestEvaluatePositionsEarlyExit(unittest.TestCase):
             broker = MagicMock()
             broker.get_positions.return_value = []
             mock_broker_cls.return_value = broker
-            result = evaluate_positions()
+            result = evaluate_positions(trade_diff_sink=InMemoryTradeDiffSink())
         self.assertEqual(result, [])
 
     def test_returns_empty_list_when_no_prediction_timestamp(self):
@@ -141,7 +142,7 @@ class TestEvaluatePositionsEarlyExit(unittest.TestCase):
             broker = MagicMock()
             broker.get_positions.return_value = [_make_position("7203", 100, 1000.0, 1010.0)]
             mock_broker_cls.return_value = broker
-            result = evaluate_positions()
+            result = evaluate_positions(trade_diff_sink=InMemoryTradeDiffSink())
         self.assertEqual(result, [])
 
     def test_multiple_positions_classified_independently(self):
@@ -172,7 +173,7 @@ class TestEvaluatePositionsEarlyExit(unittest.TestCase):
             broker = MagicMock()
             broker.get_positions.return_value = positions
             mock_broker_cls.return_value = broker
-            alerts = evaluate_positions()
+            alerts = evaluate_positions(trade_diff_sink=InMemoryTradeDiffSink())
 
         self.assertEqual(len(alerts), 3)
         alert_map = {a.symbol: a.alert_type for a in alerts}
@@ -191,7 +192,7 @@ class TestGetPreCloseAlerts(unittest.TestCase):
             broker = MagicMock()
             broker.get_positions.return_value = []
             mock_broker_cls.return_value = broker
-            lines = get_pre_close_alerts()
+            lines = get_pre_close_alerts(trade_diff_sink=InMemoryTradeDiffSink())
 
         self.assertIsInstance(lines, list)
         self.assertTrue(any("保有ポジションなし" in line for line in lines))
@@ -214,7 +215,7 @@ class TestGetPreCloseAlerts(unittest.TestCase):
             broker = MagicMock()
             broker.get_positions.return_value = [pos]
             mock_broker_cls.return_value = broker
-            lines = get_pre_close_alerts()
+            lines = get_pre_close_alerts(trade_diff_sink=InMemoryTradeDiffSink())
 
         self.assertIsInstance(lines, list)
         self.assertTrue(len(lines) > 0)
