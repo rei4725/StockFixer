@@ -4,11 +4,13 @@ stock_features テーブルの CRUD 操作
 銘柄ごとのテクニカル指標・特徴量データを管理する。
 """
 
+import json
 from typing import Optional
 
 import pandas as pd
 import psycopg
 
+from src.utils.data_path_utils import get_watchlist_path
 from src.utils.db._bulk import bulk_insert
 from src.utils.db._connection import _db_connection
 from src.utils.db._read import coerce_object_numeric_columns
@@ -165,3 +167,43 @@ def get_all_symbols() -> list:
         except Exception as e:
             logger.error(f"stock_features 銘柄一覧取得失敗: {e}", exc_info=True)
             return []
+
+
+def get_active_symbols() -> list:
+    """
+    stock_features に存在し、かつ現在の監視対象である銘柄のリストを返す。
+
+    stock_features には上場廃止・改称した銘柄の履歴がそのまま残る。
+    予測対象をここから素直に取ると廃止銘柄が Top10 に混ざるため
+    （#717 の AVB が実際に2位に出た）、config/watchlist.json との
+    積集合を取る。
+
+    watchlist が読めない・空の場合は全銘柄を返す（フェイルオープン）。
+    予測が丸ごと止まる方が、廃止銘柄が混ざるより遥かに重大なため。
+
+    Returns:
+        list of (market, symbol) tuples
+    """
+    all_symbols = get_all_symbols()
+
+    try:
+        with open(get_watchlist_path(), encoding="utf-8") as f:
+            watchlist = json.load(f)
+    except Exception as e:
+        logger.error(f"watchlist 読み込み失敗のため全銘柄を対象にします: {e}", exc_info=True)
+        return all_symbols
+
+    allowed = {
+        (str(market).lower(), str(symbol).upper())
+        for market, symbols in watchlist.items()
+        for symbol in symbols or []
+    }
+    if not allowed:
+        logger.warning("watchlist が空のため全銘柄を対象にします")
+        return all_symbols
+
+    active = [s for s in all_symbols if (str(s[0]).lower(), str(s[1]).upper()) in allowed]
+    excluded = len(all_symbols) - len(active)
+    if excluded:
+        logger.info(f"監視対象外の {excluded} 銘柄を予測対象から除外しました")
+    return active

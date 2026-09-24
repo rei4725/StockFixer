@@ -20,7 +20,7 @@ from src.prediction.db import save_prediction_results
 from src.prediction.predict_single import predict_single_stock
 from src.prediction.types import PredictionResult
 from src.utils.data_path_utils import get_models_dir
-from src.utils.db import get_all_symbols
+from src.utils.db import get_active_symbols
 from src.utils.df_to_string import df_to_pretty_string
 from src.utils.logger import get_logger
 from src.utils.run_context import new_run_context
@@ -138,7 +138,7 @@ def predict_all_unified(max_workers=MAX_WORKERS):
     # モデルを事前ロード（並列実行前に1回だけロード）
     preload_models(model_types)
 
-    all_keys = get_all_symbols()
+    all_keys = get_active_symbols()
 
     def wrapper(args):
         market, symbol = args
@@ -186,7 +186,7 @@ def predict_all_unified_multi_horizon(
         model_names.extend([f"UnifiedStockXGBoost{suffix}", f"UnifiedStockLightGBM{suffix}"])
     preload_models(model_names)
 
-    all_keys = get_all_symbols()
+    all_keys = get_active_symbols()
     output_rows: list[PredictionResult] = []
     logger.info(f"多ホライズン予測開始（統合モデル）: {len(all_keys)}銘柄, horizons={horizons}")
 

@@ -328,7 +328,7 @@ def predict_with_challenger_unified() -> list:
 
     from src.prediction.predict_unified import get_cached_model, predict_with_unified_model
     from src.utils.data_path_utils import get_models_dir
-    from src.utils.db import get_all_symbols
+    from src.utils.db import get_active_symbols
 
     # challenger ファイルが存在するものだけ使用する（一部欠損は許容）
     unified_dir = os.path.join(get_models_dir(), "unified")
@@ -348,7 +348,7 @@ def predict_with_challenger_unified() -> list:
     for name in available_challengers:
         get_cached_model(name)
 
-    all_keys = get_all_symbols()
+    all_keys = get_active_symbols()
     logger.info(f"Challenger shadow 予測開始: {len(all_keys)} 銘柄")
 
     def _predict(args):

@@ -68,7 +68,7 @@ from src.utils.db.quality_log import insert_quality_log  # noqa: F401
 from src.utils.db.stock_features import _ensure_columns  # noqa: F401
 from src.utils.db.stock_features import delete_stock_features  # noqa: F401
 from src.utils.db.stock_features import upsert_stock_features  # noqa: F401
-from src.utils.db.stock_features import get_all_symbols, load_all_stock_features
+from src.utils.db.stock_features import get_active_symbols, get_all_symbols, load_all_stock_features
 from src.utils.db.stock_features import load_stock_features as load_stock_features  # noqa: F401
 
 # --- strategy_promotions（戦略ファクトリー自動昇格ループ） ---
