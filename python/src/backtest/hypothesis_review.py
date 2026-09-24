@@ -53,6 +53,41 @@ _REVIEW_SCHEMA: dict[str, Any] = {
 }
 
 
+def _sharpe_lines(evaluation: FactoryEvaluation) -> str:
+    """Sharpe 行。チャンピオンと比べる値はゲートと同じ指標であることを明示する（#738）。
+
+    ゲート（factory._gate_sharpe）はプール済み取引リターンの年率値を使い、算出不能なら
+    銘柄平均へ落ちる。レビュアーに銘柄平均だけを渡すと、プール値のチャンピオンと
+    単位の違う数字を比べて誤読する。
+    """
+    pooled = evaluation.portfolio_sharpe_ratio
+    if math.isnan(pooled):
+        return (
+            "- Sharpe（有効銘柄平均・プール値算出不能によりゲート判定に使用）: "
+            f"{evaluation.sharpe_ratio:.3f}"
+        )
+    return (
+        f"- Sharpe（プール済み取引リターンを年率化・ゲート判定用）: {pooled:.3f}\n"
+        f"- 1取引あたり Sharpe（プール済み）: {evaluation.sharpe_per_trade:.3f}\n"
+        f"- Sharpe（有効銘柄平均・診断用）: {evaluation.sharpe_ratio:.3f}"
+    )
+
+
+def _drawdown_lines(evaluation: FactoryEvaluation) -> str:
+    """DD 行。ゲート対象はポートフォリオDDで、最悪銘柄DDは診断値（#738）。"""
+    portfolio_dd = evaluation.portfolio_max_drawdown
+    if math.isnan(portfolio_dd):
+        return (
+            "- 最大DD（有効銘柄の最悪値・曲線欠損によりゲート判定に使用）: "
+            f"{evaluation.max_drawdown:.2%}"
+        )
+    return (
+        "- 最大DD（有効銘柄を等金額保有したポートフォリオ・ゲート判定用）: "
+        f"{portfolio_dd:.2%}\n"
+        f"- 最大DD（有効銘柄の最悪値・診断用）: {evaluation.max_drawdown:.2%}"
+    )
+
+
 def _build_review_context(evaluation: FactoryEvaluation, champion_sharpe: float) -> str:
     h = evaluation.hypothesis
     window_lines = "\n".join(
@@ -61,7 +96,7 @@ def _build_review_context(evaluation: FactoryEvaluation, champion_sharpe: float)
     champion_line = (
         "対照群（チャンピオン）Sharpe: なし"
         if math.isnan(champion_sharpe)
-        else f"対照群（チャンピオン）Sharpe: {champion_sharpe:.3f}"
+        else f"対照群（チャンピオン）Sharpe（ゲート判定用と同じ指標）: {champion_sharpe:.3f}"
     )
     return f"""## 仮説スペック
 ```json
@@ -70,14 +105,14 @@ def _build_review_context(evaluation: FactoryEvaluation, champion_sharpe: float)
 マーケット: {h.market} / 評価期間: {h.lookback_years}年 / データ取得銘柄数: {evaluation.n_symbols}
 
 ## メトリクス
-- Sharpe（有効銘柄平均）: {evaluation.sharpe_ratio:.3f}
+{_sharpe_lines(evaluation)}
 - Deflated Sharpe (DSR): {evaluation.dsr:.3f}
-- PBO: {evaluation.pbo:.3f}
+- PBO（バッチ全体の診断値・ゲート判定には不使用）: {evaluation.pbo:.3f}
 - 取引数（有効銘柄合計）: {evaluation.num_trades}
 - シグナル発生銘柄数: {evaluation.n_symbols_with_signal}
 - 有効銘柄数（集計母数）: {evaluation.n_effective_symbols}
 - 銘柄あたり平均取引数（シグナル発生銘柄基準）: {evaluation.avg_trades_per_symbol:.2f}
-- 最大DD（有効銘柄の最悪値）: {evaluation.max_drawdown:.2%}
+{_drawdown_lines(evaluation)}
 - 勝率（有効銘柄平均）: {evaluation.win_rate:.2%}
 - リターン（有効銘柄平均）: {evaluation.total_return:.2%}
 - {champion_line}

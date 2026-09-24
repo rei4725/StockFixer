@@ -211,7 +211,7 @@ def _build_issue_body(
 |---|---|---|
 {sharpe_rows}
 | Deflated Sharpe | {evaluation.dsr:.3f} | >= {FACTORY_GATE_MIN_DSR} |
-| PBO | {evaluation.pbo:.3f} | <= {FACTORY_GATE_MAX_PBO} |
+| PBO（バッチ全体の診断値） | {evaluation.pbo:.3f} | - （ゲート判定には不使用） |
 | 取引数（有効銘柄合計） | {evaluation.num_trades} | >= {FACTORY_GATE_MIN_TRADES} |
 | シグナル発生銘柄 | {evaluation.n_symbols_with_signal} | - |
 {effective_symbols_row}
