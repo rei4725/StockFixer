@@ -20,6 +20,9 @@ run_auto_trade.py — 自動発注 CLIエントリーポイント
 import argparse
 import sys
 
+from src.domain.ports import TradeDiffSink
+from src.infrastructure.persistence.order_run_repository import PostgresOrderRunSink
+from src.infrastructure.persistence.trade_diff_repository import PostgresTradeDiffSink
 from src.orchestration.port_wiring import wire_ports
 from src.utils.logger import get_logger
 
@@ -28,7 +31,7 @@ logger = get_logger(__name__)
 wire_ports()
 
 
-def _build_broker(mode: str):
+def build_broker(mode: str, trade_diff_sink: TradeDiffSink):
     """mode に応じた Broker インスタンスを返す"""
     if mode == "live":
         import os
@@ -45,16 +48,15 @@ def _build_broker(mode: str):
         return KabuBroker(api_password=api_password)
     else:
         from src.infrastructure.yfinance_market_data_adapter import YFinanceMarketDataAdapter
-        from src.prediction.db import upsert_paper_real_diff
         from src.trading.brokers.paper.paper_broker import PaperBroker
 
         return PaperBroker(
             market_data_port=YFinanceMarketDataAdapter(),
-            record_diff=upsert_paper_real_diff,
+            trade_diff_sink=trade_diff_sink,
         )
 
 
-if __name__ == "__main__":
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="StockFixer 自動発注スクリプト")
     parser.add_argument(
         "--mode",
@@ -72,15 +74,21 @@ if __name__ == "__main__":
         action="store_true",
         help="ペーパートレードの pending 注文を約定処理する",
     )
-    args = parser.parse_args()
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    """合成ルート。本番アダプタを構築して発注パイプラインへ注入する。"""
+    args = parse_args(argv)
 
     try:
-        broker = _build_broker(args.mode)
+        trade_diff_sink = PostgresTradeDiffSink()
+        broker = build_broker(args.mode, trade_diff_sink)
 
         if args.settle:
             if args.mode != "paper":
                 logger.warning("--settle は paper モードでのみ有効です")
-                sys.exit(1)
+                return 1
 
             settled = broker.settle_pending_orders()
             print(f"約定処理完了: {len(settled)} 件")
@@ -89,12 +97,23 @@ if __name__ == "__main__":
         else:
             from src.trading.execution import run_daily_orders
 
-            stats = run_daily_orders(broker=broker, market=args.market, mode=args.mode)
+            stats = run_daily_orders(
+                broker=broker,
+                order_run_sink=PostgresOrderRunSink(),
+                trade_diff_sink=trade_diff_sink,
+                market=args.market,
+                mode=args.mode,
+            )
             print(
                 f"発注完了 — 買い: {stats['buy_orders']} 売り: {stats['sell_orders']} "
                 f"スキップ: {stats['skipped']} エラー: {stats['errors']}"
             )
+        return 0
 
     except Exception as e:
         logger.critical(f"自動発注スクリプト 致命的エラー: {e}", exc_info=True)
-        sys.exit(1)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

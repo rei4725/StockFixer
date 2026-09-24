@@ -1,7 +1,7 @@
 """長期コホート・バックテスト(#431)の単体テスト。
 
-合成の生 OHLCV（既知の価格軌道）を load_raw_ohlcv / load_all_raw_ohlcv_symbols
-モックで与え、fetch_benchmark_returns もモックして検証する。
+合成の生 OHLCV（既知の価格軌道）を load_raw_closes モックで与え、
+fetch_benchmark_returns もモックして検証する。
 """
 
 import unittest
@@ -11,7 +11,10 @@ import numpy as np
 import pandas as pd
 
 from src.backtest import longterm_backtest as lb
-from src.screening.types import TrendCandidate
+from src.backtest.longterm import engine as lb_engine
+from src.backtest.longterm import prices as lb_prices
+from src.backtest.screening_port import set_backtest_screening_port
+from src.domain.types import TrendCandidate
 
 _PHASE_A = 400  # トレンド形成期間（営業日）
 _PHASE_B = 500  # ホールド期間（営業日）
@@ -100,17 +103,57 @@ def _make_screen(symbols, call_log=None):
     return _screen
 
 
-def _loader(market, symbol):
-    return _DF_MAP.get(symbol)
+def _closes_frame(symbols):
+    """load_raw_closes 風（columns=[symbol, ts, close]）の合成フレームを作る。"""
+    frames = [
+        pd.DataFrame(
+            {
+                "symbol": s,
+                "ts": _DF_MAP[s].index,
+                "close": _DF_MAP[s]["Close"].to_numpy(),
+            }
+        )
+        for s in symbols
+        if s in _DF_MAP
+    ]
+    if not frames:
+        return pd.DataFrame(columns=["symbol", "ts", "close"])
+    return pd.concat(frames, ignore_index=True).sort_values(["symbol", "ts"])
+
+
+class _StubScreeningPort:
+    """screen だけを擬似スクリーンに差し替える screening ポートのスタブ。
+
+    engine がポート経由になったため、従来の
+    `patch.object(lb_engine, "screen_trend_candidates", side_effect=screen)`
+    の置き換え。`simulate_position` は従来どおり screening BC の実装を使う
+    （保有/撤退の実挙動こそがこのテストの検証対象のため）。
+    """
+
+    def __init__(self, screen_fn):
+        self._screen_fn = screen_fn
+
+    def screen_trend_candidates(self, market, top_n, as_of):
+        return self._screen_fn(market=market, top_n=top_n, as_of=as_of)
+
+    def simulate_position(self, prices, entry_date, rules):
+        from src.screening.hold_engine import simulate_position
+
+        return simulate_position(prices, entry_date=entry_date, rules=rules)
 
 
 def _run(symbols, screen=None, call_log=None, **kwargs):
-    syms = [("us", s) for s in symbols]
     screen = screen or _make_screen(symbols, call_log)
-    with patch.object(lb, "load_all_raw_ohlcv_symbols", return_value=syms), patch.object(
-        lb, "load_raw_ohlcv", side_effect=_loader
-    ), patch.object(lb, "screen_trend_candidates", side_effect=screen), patch.object(
-        lb,
+
+    def _load_closes(market, start_date=None, end_date=None, timeframe="1d"):
+        df = _closes_frame(symbols)
+        if end_date is not None and not df.empty:
+            df = df[df["ts"] <= pd.Timestamp(end_date)]
+        return df.reset_index(drop=True)
+
+    set_backtest_screening_port(_StubScreeningPort(screen))
+    with patch.object(lb_prices, "load_raw_closes", side_effect=_load_closes), patch.object(
+        lb_engine,
         "fetch_benchmark_returns",
         return_value={"ticker": "^GSPC", "total_return": 0.5, "start": "", "end": ""},
     ):
@@ -125,17 +168,31 @@ def _run(symbols, screen=None, call_log=None, **kwargs):
 
 class TestLongtermBacktest(unittest.TestCase):
     def test_multiple_distribution(self):
-        """既知の 1.5倍・3倍・8倍軌道（全て満期保有）で到達倍率カウントが正しい。"""
+        """既知の 1.5倍・3倍・8倍軌道（全て満期保有）で到達倍率カウントが正しい。
+
+        execution_lag（既定 1）導入により、エントリーはスクリーン日
+        （Phase B 開始日＝価格 100.0 の日）の翌営業日に 1 日ずれる。
+        Phase B は linspace(start, 300/800/150, 500) の等差数列なので
+        1 ステップ = (終値-100)/499 だけ entry_price が始値より高くなり、
+        期待倍率は「区間の最終日（=最高値、単調増加のため）÷ entry_price」
+        として厳密に計算し直せる:
+            MID:  300 / (100 + 200/499) = 1497/501  ≈ 2.9880（旧 3.0）
+            HIGH: 800 / (100 + 700/499) = 399200/50600 ≈ 7.8893（旧 8.0）
+            LOW:  150 / (100 + 50/499)  = 74850/49950 ≈ 1.4985（旧 1.5）
+        いずれも 2倍/5倍/10倍の到達判定（n_2x/n_5x/n_10x）は変えないので
+        カウント自体は従来のまま。execution_lag=0 で旧実装と完全一致する
+        ことは別途スクリプトで検証済み（PR 本文参照）。
+        """
         _, metrics, trades = _run(["MID", "HIGH", "LOW"], max_positions=10)
-        self.assertEqual(metrics["n_trades"], 3)
-        # MID(3x), HIGH(8x) が 2倍到達。LOW(1.5x) は未到達。
+        self.assertEqual(metrics["num_trades"], 3)
+        # MID(~2.99x), HIGH(~7.89x) が 2倍到達。LOW(~1.50x) は未到達。
         self.assertEqual(metrics["n_2x"], 2)
         self.assertEqual(metrics["n_5x"], 1)  # HIGH のみ
         self.assertEqual(metrics["n_10x"], 0)
         mm = dict(zip(trades["symbol"], trades["max_multiple"]))
-        self.assertAlmostEqual(mm["MID"], 3.0, places=2)
-        self.assertAlmostEqual(mm["HIGH"], 8.0, places=2)
-        self.assertAlmostEqual(mm["LOW"], 1.5, places=2)
+        self.assertAlmostEqual(mm["MID"], 1497 / 501, places=4)
+        self.assertAlmostEqual(mm["HIGH"], 399200 / 50600, places=4)
+        self.assertAlmostEqual(mm["LOW"], 74850 / 49950, places=4)
 
     def test_exit_reasons_recorded(self):
         """撤退理由が記録される（上昇銘柄=end_of_data, 崩落=stop 系）。"""
@@ -153,7 +210,7 @@ class TestLongtermBacktest(unittest.TestCase):
         # 5 銘柄を候補にするが上限 2 → 上位 2（HIGH, MID）のみ保有
         symbols = ["HIGH", "MID", "CRASH"]
         _, metrics, trades = _run(symbols, max_positions=2)
-        self.assertLessEqual(metrics["n_trades"], 2)
+        self.assertLessEqual(metrics["num_trades"], 2)
         # スコア上位 2 銘柄が選ばれる
         self.assertEqual(set(trades["symbol"]), {"HIGH", "MID"})
 
@@ -188,10 +245,12 @@ class TestLongtermBacktest(unittest.TestCase):
 
     def test_empty_universe(self):
         """対象データなしでも例外なく空の結果を返す。"""
-        with patch.object(lb, "load_all_raw_ohlcv_symbols", return_value=[]), patch.object(
-            lb, "load_raw_ohlcv", return_value=None
+        with patch.object(
+            lb_prices,
+            "load_raw_closes",
+            return_value=pd.DataFrame(columns=["symbol", "ts", "close"]),
         ), patch.object(
-            lb,
+            lb_engine,
             "fetch_benchmark_returns",
             return_value={"ticker": "^GSPC", "total_return": None},
         ):
@@ -200,16 +259,78 @@ class TestLongtermBacktest(unittest.TestCase):
             )
         self.assertTrue(equity.empty)
         self.assertTrue(trades.empty)
-        self.assertEqual(metrics["n_trades"], 0)
+        self.assertEqual(metrics["num_trades"], 0)
         self.assertEqual(metrics["final_cash"], 1_000_000.0)
 
     def test_conclusion_contains_survivorship_note(self):
         """結論文に生存者バイアスの注意書きが含まれる。"""
         _, metrics, _ = _run(["MID", "HIGH"], max_positions=10)
-        text = lb.build_conclusion(metrics, "us", _ENTRY_DATE, _END, 10)
+        cfg = lb.LongtermBacktestConfig.build(
+            market="us", start=_ENTRY_DATE, end=_END, rescreen_freq="quarterly", max_positions=10
+        )
+        text = lb.build_conclusion(metrics, cfg)
         self.assertIn("生存者バイアス", text)
         self.assertIn("到達", text)
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestMakeRescreenDates(unittest.TestCase):
+    """make_rescreen_dates の二分探索化（PR-3）が旧実装と一致することの回帰テスト。"""
+
+    @staticmethod
+    def _reference(calendar, start, freq):
+        """bisect 化する前の線形走査による実装（比較用の正解）。"""
+        if not calendar:
+            return []
+        offset = lb_prices.FREQ_OFFSETS.get(freq, lb_prices.FREQ_OFFSETS["quarterly"])
+        last = pd.Timestamp(calendar[-1])
+        target = pd.Timestamp(max(start, calendar[0]))
+        out, seen = [], set()
+        while target <= last:
+            target_str = target.strftime("%Y-%m-%d")
+            nxt = next((d for d in calendar if d >= target_str), None)
+            if nxt is not None and nxt not in seen:
+                out.append(nxt)
+                seen.add(nxt)
+            target = target + offset
+        return out
+
+    def _assert_matches(self, calendar, start, freq):
+        self.assertEqual(
+            lb_prices.make_rescreen_dates(calendar, start, freq),
+            self._reference(calendar, start, freq),
+            f"freq={freq} start={start}",
+        )
+
+    def test_matches_reference_for_each_freq(self):
+        cal = pd.date_range("2020-01-01", periods=900, freq="B").strftime("%Y-%m-%d").tolist()
+        for freq in ("weekly", "monthly", "quarterly", "yearly", "annual"):
+            self._assert_matches(cal, cal[0], freq)
+
+    def test_matches_reference_with_start_before_calendar(self):
+        cal = pd.date_range("2022-03-01", periods=300, freq="B").strftime("%Y-%m-%d").tolist()
+        self._assert_matches(cal, "2019-01-01", "quarterly")
+
+    def test_matches_reference_with_long_gaps(self):
+        """長期休場を跨ぐと隣接ターゲットが同じ取引日に丸まる経路を踏ませる。"""
+        cal = ["2024-01-02", "2024-01-03", "2024-06-03", "2024-06-04", "2024-12-02"]
+        for freq in ("weekly", "monthly"):
+            self._assert_matches(cal, "2024-01-02", freq)
+
+    def test_unknown_freq_falls_back_to_quarterly(self):
+        cal = pd.date_range("2024-01-01", periods=400, freq="B").strftime("%Y-%m-%d").tolist()
+        self.assertEqual(
+            lb_prices.make_rescreen_dates(cal, cal[0], "fortnightly"),
+            lb_prices.make_rescreen_dates(cal, cal[0], "quarterly"),
+        )
+
+    def test_empty_calendar_returns_empty(self):
+        self.assertEqual(lb_prices.make_rescreen_dates([], "2024-01-01", "weekly"), [])
+
+    def test_no_duplicate_dates(self):
+        cal = ["2024-01-02", "2024-01-03", "2024-06-03", "2024-06-04", "2024-12-02"]
+        out = lb_prices.make_rescreen_dates(cal, "2024-01-02", "weekly")
+        self.assertEqual(len(out), len(set(out)))

@@ -8,8 +8,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from src.domain.types import HoldRules, PositionEvent
 from src.screening.hold_engine import simulate_position
-from src.screening.types import HoldRules, PositionEvent
 
 
 def _make_df(closes) -> pd.DataFrame:

@@ -9,12 +9,17 @@ import pandas as pd
 
 from src.domain.ports import (
     AlertLevel,
+    AnalyticsQuery,
     BrokerPort,
     MarketDataPort,
     NotificationPort,
+    OrderRunSink,
     PredictionResultRepository,
     StockFeatureRepository,
+    TextReviewPort,
+    TradeDiffSink,
 )
+from src.domain.types import OrderRunSummary, TradeDiffRecord
 
 
 class InMemoryPredictionRepository(PredictionResultRepository):
@@ -188,3 +193,86 @@ class InMemoryBrokerAdapter(BrokerPort):
 
     def get_orders(self) -> list[dict[str, Any]]:
         return self._orders
+
+
+class InMemoryOrderRunSink(OrderRunSink):
+    """インメモリ発注サマリー Sink（テスト用）"""
+
+    def __init__(self) -> None:
+        self.saved: list[OrderRunSummary] = []
+
+    def save(self, summary: OrderRunSummary) -> None:
+        self.saved.append(summary)
+
+
+class InMemoryTradeDiffSink(TradeDiffSink):
+    """インメモリ約定乖離 Sink（テスト用）"""
+
+    def __init__(self) -> None:
+        self.recorded: list[TradeDiffRecord] = []
+
+    def record(self, record: TradeDiffRecord) -> None:
+        self.recorded.append(record)
+
+
+class InMemoryAnalyticsQuery(AnalyticsQuery):
+    """インメモリ読み取りクエリ（テスト用）。
+
+    コンストラクタで返り値を仕込む。仕込まない場合はゼロ値を返す。
+    """
+
+    _EMPTY_PAPER_REAL_DIFF: dict = {
+        "tracked_count": 0,
+        "comparable_count": 0,
+        "avg_paper_slippage": 0.0,
+        "avg_real_slippage": 0.0,
+        "avg_abs_price_diff": 0.0,
+        "avg_abs_diff_ratio": 0.0,
+        "max_abs_price_diff": 0.0,
+    }
+
+    def __init__(self, paper_real_diff: Optional[dict] = None) -> None:
+        self._paper_real_diff = (
+            paper_real_diff if paper_real_diff is not None else dict(self._EMPTY_PAPER_REAL_DIFF)
+        )
+
+    def paper_real_diff_summary(self, recent_days: int = 7) -> dict:
+        return self._paper_real_diff
+
+
+class InMemoryTextReviewPort(TextReviewPort):
+    """インメモリ LLM レビューポート（テスト用）。
+
+    responses を先頭から順に返す（使い切ったら最後の要素を返し続ける）。
+    error を渡すと complete() がそれを送出する。受け取った引数は calls に残る。
+    """
+
+    def __init__(
+        self, responses: Optional[list[str]] = None, error: Optional[Exception] = None
+    ) -> None:
+        self._responses = list(responses) if responses else [""]
+        self._error = error
+        self.calls: list[dict[str, Any]] = []
+
+    def complete(
+        self,
+        *,
+        system: str,
+        user: str,
+        model: str,
+        max_tokens: int,
+        schema: Optional[dict] = None,
+    ) -> str:
+        self.calls.append(
+            {
+                "system": system,
+                "user": user,
+                "model": model,
+                "max_tokens": max_tokens,
+                "schema": schema,
+            }
+        )
+        if self._error is not None:
+            raise self._error
+        index = min(len(self.calls) - 1, len(self._responses) - 1)
+        return self._responses[index]

@@ -112,15 +112,17 @@ StockFixer/
     │   │   ├── types.py                 # SymbolTask（バッチ実行単位）
     │   │   └── ticker_list.py           # S&P500 / NASDAQ100 銘柄リスト取得
     │   │
-    │   ├── analysis/            # レガシー（→ prediction/ 統合移行中）
-    │   │   ├── types.py                 # FeatureLoadResult
-    │   │   └── market_regime.py         # マーケットレジーム判定
+    │   ├── domain/               # 共有カーネル（BC 横断の型・ポート・ルール定数・例外。何も import しない最下層）
+    │   │   ├── types.py                 # 型定義の正本（各 BC の types.py が re-export）
+    │   │   ├── ports.py                 # NotificationPort 等のポート定義
+    │   │   ├── trading_rules.py         # 取引ルール定数
+    │   │   ├── generated_rules.py       # 生成ルール定義
+    │   │   └── exceptions.py            # ドメイン例外
     │   │
-    │   ├── strategy/            # レガシー（→ prediction/ 統合移行中）
-    │   │   ├── signal_generator.py      # 売買シグナル生成
-    │   │   └── optimal_params_loader.py # 最適パラメータ読込
+    │   ├── infrastructure/      # ポートの実装アダプタ（yfinance / Discord / LLM）
+    │   │   └── persistence/          # domain のリポジトリ／sink ポートを実装する Postgres アダプタ（1 テーブル 1 モジュール）
     │   │
-    │   └── utils/               # ユーティリティ層（最下層）
+    │   └── utils/               # ユーティリティ層
     │       ├── logger.py                # 統一ロガーファクトリー
     │       ├── db/                      # DuckDB 接続・CRUD パッケージ
     │       │   ├── stock_features.py    # stock_features テーブル CRUD
@@ -163,50 +165,39 @@ StockFixer/
 本システムは**クリーンアーキテクチャ**に近い階層構造を採用しています。
 **上位層は下位層のみを参照**し、逆方向の依存は禁止されています。
 
-```
-┌─────────────────────────────────────────────────┐
-│  run_*.py （エントリーポイント）                 │
-│  - 引数パースのみ。ビジネスロジックを持たない   │
-└─────────────────────────────────────────────────┘
-                        ↓
-┌─────────────────────────────────────────────────┐
-│  reporting/discord/ (discord_bot.py)            │
-│  - Discord コマンド受付・Webhook 通知           │
-│  api/ (metrics.py)                              │
-│  - ヘルスチェック・メトリクスエンドポイント     │
-└─────────────────────────────────────────────────┘
-                        ↓
-┌─────────────────────────────────────────────────┐
-│  Bounded Contexts（各 BC は独立した types.py）  │
-│                                                 │
-│  backtest/      バックテスト・最適化・BT評価    │
-│  prediction/    モデル学習・予測・ランキング     │
-│  market_data/   データ取得・特徴量・DuckDB保存  │
-│  reporting/     月次レポート・Discord クエリ     │
-│  watchlist/     銘柄リスト・SymbolTask 管理      │
-│  orchestration/ APScheduler ジョブ定義・キュー  │
-└─────────────────────────────────────────────────┘
-                        ↓
-┌─────────────────────────────────────────────────┐
-│  trading/brokers/ (BrokerBase DI)               │
-│  - 証券会社連携の抽象化（paper / kabu）         │
-│  - 上位 BC は BrokerBase のみを参照（DI）       │
-└─────────────────────────────────────────────────┘
-                        ↓
-┌─────────────────────────────────────────────────┐
-│  analysis/ + strategy/ （レガシー）             │
-│  - market_regime.py, signal_generator.py 等     │
-│  - 段階的に各 BC へ統合予定                     │
-└─────────────────────────────────────────────────┘
-                        ↓
-┌─────────────────────────────────────────────────┐
-│  utils層 (db/, logger.py, japan_time.py 等)     │
-│  - 汎用ユーティリティ・DB アクセス（最下層）   │
-└─────────────────────────────────────────────────┘
+> `analysis/` `strategy/` の各レガシーディレクトリは各 Bounded Context への統合が完了し、
+> 現在は存在しません。共有型は `src/domain/types.py`（正本）と各 BC の `types.py`（re-export）に
+> 置かれています。以下は現行のレイヤー構造です。
 
-> **共有型定義** は各 Bounded Context の `types.py` に配置されます（例: `src.watchlist.types.SymbolTask`、`src.prediction.types.PredictionResult`）。BC をまたぐデータ受け渡しにはこれらを直接 import します。
-> **config/settings.py** は全 BC に共通な設定値を一元管理し、環境変数でオーバーライド可能です。
+### 現行のレイヤー構造（2026-09-22 時点）
+
 ```
+run_*.py                    CLI エントリポイント（引数解析のみ）
+    ↓
+src/api/  src/orchestration/    合成ルート: アダプタを構築し BC へ注入する
+    ↓
+src/backtest/ src/prediction/ src/trading/ src/reporting/
+src/watchlist/ src/market_data/ src/screening/ src/rule_engine/ src/quality/
+                            Bounded Context（相互参照禁止）
+    ↓
+src/utils/                  DB 接続・ロギング・リトライ等の技術的ユーティリティ
+    ↓
+src/domain/                 共有カーネル: 型（types.py）・ポート（ports.py）・
+                            取引ルール定数（trading_rules.py）・生成ルール
+                            （generated_rules.py）・例外（exceptions.py）。
+                            src.domain 以外の src.* を一切 import しない最下層
+```
+
+`src/infrastructure/` はポートの実装アダプタ（yfinance / Discord / LLM）を置く場所である。
+`persistence/` サブパッケージは domain のリポジトリ／sink ポートを実装する Postgres アダプタを
+1 テーブル 1 モジュールで持つ（例: `order_run_repository.py` が `OrderRunSink` を実装）。
+現時点では `src.market_data` を参照する一方で複数の BC から参照されており、パッケージ単位で
+循環しているため import-linter の layers 契約には含めていない（別 Issue で解消予定）。
+
+レイヤー契約の正本は `.importlinter` である。
+
+> **共有型定義** は `src/domain/types.py`（正本）と各 Bounded Context の `types.py`（re-export、例: `src.watchlist.types.SymbolTask`、`src.prediction.types.PredictionResult`）に配置されます。BC をまたぐデータ受け渡しにはこれらを直接 import します。
+> **config/settings.py** は全 BC に共通な設定値を一元管理し、環境変数でオーバーライド可能です。
 
 ---
 
@@ -219,7 +210,7 @@ DDDフェーズ4完了により、共有型は各 BC の `types.py` に分散配
 | クラス | 配置先モジュール | 説明 |
 |--------|----------------|------|
 | `SymbolTask` | `src.watchlist.types` | バッチ実行の単位タスク。`market`, `symbol`, `horizon` |
-| `FeatureLoadResult` | `src.analysis.types` | 特徴量ロード結果。`is_success` プロパティで判定（→ `src.market_data` 統合予定） |
+| `FeatureLoadResult` | `src.prediction.types` | 特徴量ロード結果。`is_success` プロパティで判定 |
 | `TrainingMetrics` | `src.prediction.types` | モデル学習指標。`rmse`, `directional_accuracy`, `n_samples` |
 | `PredictionResult` | `src.prediction.types` | 単一銘柄の予測結果。`to_dataframe(results)` で DataFrame 変換 |
 
@@ -324,19 +315,6 @@ DDDフェーズ4完了により、共有型は各 BC の `types.py` に分散配
 #### `brokers/kabu/`（KabuBroker）
 - `BrokerBase` を継承した **kabu STATION® API** 実装
 - 国内株リアル発注・照会に対応
-
-### analysis/ + strategy/（レガシー層）
-
-> ⚠️ これらは旧レイヤー分割時代のモジュールです。段階的に各 BC へ統合予定。
-
-#### `analysis/market_regime.py`
-- マーケットレジーム判定（強気・弱気・中立）
-- → `prediction/` BC への統合予定
-
-#### `strategy/signal_generator.py`
-- テクニカル分析結果と AI 予測を組み合わせて売買シグナル生成
-- シグナル: `Buy` / `Sell` / `Hold`、予測変化率 > 0.5% → Buy、< -0.5% → Sell
-- → `trading/` BC への統合予定
 
 ### market_data/ BC（データ取得）
 
@@ -524,7 +502,7 @@ DDDフェーズ4完了により、共有型は各 BC の `types.py` に分散配
 - 設定用CSV（データ取得対象.csv等）はそのまま維持
 
 ### 6. 型安全なデータ受け渡し（BC 内 types.py）
-- 各 Bounded Context の `types.py` が **Single Source of Truth**（`src.watchlist.types`・`src.analysis.types`・`src.prediction.types` 等）
+- `src/domain/types.py` が BC 横断の型の **Single Source of Truth**。各 BC の `types.py`（`src.watchlist.types`・`src.prediction.types` 等）は BC 固有の型を持ち、共有する型については `domain` から再輸出する
 - `dict` / 生 `pd.DataFrame` 返却を廃止し、意図を明示する dataclass に置き換えた
 - ML ライブラリ（XGBoost / LightGBM）が直接必要とする特徴量行列 `X` のみ `pd.DataFrame` のまま維持
 - `FeatureLoadResult` の dict 互換メソッドにより、既存コードへの影響を最小化
@@ -536,7 +514,7 @@ DDDフェーズ4完了により、共有型は各 BC の `types.py` に分散配
 
 ### 8. アーキテクチャの方向性（DDD 移行）
 
-DDD フェーズ 3 完了により、`src/services/` は廃止され、各機能は **Bounded Context**（`backtest/`, `prediction/`, `market_data/`, `reporting/`, `trading/`, `watchlist/`, `orchestration/`）に分解されました。残りの移行作業（`analysis/`, `strategy/` の BC 統合）は今後のフェーズで実施予定です。
+DDD フェーズ 3 完了により、`src/services/` は廃止され、各機能は **Bounded Context**（`backtest/`, `prediction/`, `market_data/`, `reporting/`, `trading/`, `watchlist/`, `orchestration/`）に分解されました。`analysis/`, `strategy/` の BC 統合も完了しており、両ディレクトリは存在しません。
 
 ターゲット構成・移行スケジュール・判断根拠は以下のドキュメントを参照のこと。
 

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import math
 import unittest
 
 from src.backtest.factory_aggregation import SymbolMetrics, aggregate_symbol_metrics
-from src.backtest.metrics import _sharpe_per_trade
+from src.backtest.metrics import _annualize_sharpe, _sharpe_per_trade
 
 
 def _row(symbol: str, num_trades: int, sharpe: float, **kwargs) -> SymbolMetrics:
@@ -55,8 +56,9 @@ class TestAggregateSymbolMetrics(unittest.TestCase):
         # 全銘柄が閾値以上なら、フィルタの有無で結果が一致する（回帰テスト）
         rows = [_row("AAA", 5, 0.8), _row("BBB", 9, 0.4), _row("CCC", 12, 0.6)]
 
-        filtered = aggregate_symbol_metrics(rows, min_trades_per_symbol=3)
-        unfiltered = aggregate_symbol_metrics(rows, min_trades_per_symbol=1)
+        # NaN 同士は等価比較できないため、span_years を与えて全フィールドを実数にする
+        filtered = aggregate_symbol_metrics(rows, min_trades_per_symbol=3, span_years=2.0)
+        unfiltered = aggregate_symbol_metrics(rows, min_trades_per_symbol=1, span_years=2.0)
 
         self.assertEqual(filtered, unfiltered)
         self.assertAlmostEqual(filtered.sharpe_ratio, 0.6)
@@ -125,6 +127,85 @@ class TestAggregateSymbolMetrics(unittest.TestCase):
         result = aggregate_symbol_metrics(rows, min_trades_per_symbol=3)
 
         self.assertAlmostEqual(result.max_drawdown, -0.20)
+
+    def test_effective_symbols_lists_adopted_symbols_in_input_order(self):
+        """ポートフォリオDDの合成対象を呼び出し側が特定できるよう銘柄名を返す。
+
+        集計に採用した銘柄と、ポートフォリオ equity を合成する銘柄が一致していないと
+        Sharpe と DD が別母集団の数字になってしまう。
+        """
+        rows = [
+            _row("AAA", 2, 25.0),  # 除外
+            _row("BBB", 5, 0.5),
+            _row("CCC", 6, 0.5),
+        ]
+
+        result = aggregate_symbol_metrics(rows, min_trades_per_symbol=3)
+
+        self.assertEqual(result.effective_symbols, ["BBB", "CCC"])
+
+
+class TestPortfolioSharpe(unittest.TestCase):
+    """ゲート用 Sharpe はプール済み per-trade Sharpe を1回だけ年率化したもの。
+
+    従来の sharpe_ratio は「銘柄別・年率化 Sharpe の単純平均」で、銘柄あたり
+    3取引で採用される（MIN_TRADES_PER_SYMBOL=3）ため発散した値が平均に混ざる。
+    台帳の再現ペア130組では sharpe_ratio の自己相関が 0.446 しかなく、
+    取引数(0.994)・DD(0.958)・リターン(0.898)に比べて著しく不安定だった。
+    """
+
+    def test_annualizes_pooled_per_trade_sharpe_with_portfolio_frequency(self):
+        rows = [
+            _row("AAA", 5, 0.8, trade_returns=[0.02, -0.01, 0.03, 0.01, -0.02]),
+            _row("BBB", 4, 0.6, trade_returns=[0.01, 0.02, -0.01, 0.04]),
+        ]
+
+        result = aggregate_symbol_metrics(rows, min_trades_per_symbol=3, span_years=2.0)
+
+        pooled = [0.02, -0.01, 0.03, 0.01, -0.02, 0.01, 0.02, -0.01, 0.04]
+        expected = _annualize_sharpe(_sharpe_per_trade(pooled), 9 / 2.0)
+        self.assertAlmostEqual(result.portfolio_sharpe_ratio, expected)
+
+    def test_is_not_distorted_by_a_diverging_few_trade_symbol(self):
+        """発散銘柄を混ぜても、プール後の Sharpe は穏当な水準にとどまる。
+
+        従来の単純平均では除外閾値(3取引)をわずかに超えた銘柄の発散 Sharpe が
+        そのまま平均に効いてしまう。
+        """
+        calm = [0.01, 0.012, 0.009, 0.011, 0.010]
+        rows = [
+            # 3取引でほぼ同値 → 銘柄別 Sharpe は発散するが、プールでは3標本の寄与しかない
+            _row("WILD", 3, 200.0, trade_returns=[0.010, 0.0101, 0.0099]),
+            _row("CALM", 5, 0.5, trade_returns=calm),
+        ]
+
+        result = aggregate_symbol_metrics(rows, min_trades_per_symbol=3, span_years=2.0)
+
+        self.assertAlmostEqual(result.sharpe_ratio, (200.0 + 0.5) / 2)  # 旧指標は発散したまま
+        self.assertLess(result.portfolio_sharpe_ratio, 40.0)
+
+    def test_is_nan_when_span_is_unknown(self):
+        rows = [_row("AAA", 5, 0.8, trade_returns=[0.02, -0.01, 0.03, 0.01, -0.02])]
+
+        result = aggregate_symbol_metrics(rows, min_trades_per_symbol=3)
+
+        self.assertTrue(math.isnan(result.portfolio_sharpe_ratio))
+
+    def test_is_nan_when_no_effective_symbols(self):
+        result = aggregate_symbol_metrics(
+            [_row("AAA", 1, 0.0)], min_trades_per_symbol=3, span_years=2.0
+        )
+
+        self.assertTrue(math.isnan(result.portfolio_sharpe_ratio))
+
+
+class TestAggregateSymbolMetricsExtra(unittest.TestCase):
+    def test_effective_symbols_is_empty_when_no_symbol_qualifies(self):
+        rows = [_row("AAA", 1, 0.0), _row("BBB", 2, 25.0)]
+
+        result = aggregate_symbol_metrics(rows, min_trades_per_symbol=3)
+
+        self.assertEqual(result.effective_symbols, [])
 
 
 if __name__ == "__main__":

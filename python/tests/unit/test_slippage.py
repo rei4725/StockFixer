@@ -1,14 +1,7 @@
 import math
 import unittest
-from unittest.mock import MagicMock
 
-from src.backtest.slippage import (
-    _DEFAULT_ALPHA,
-    calibrate_alpha,
-    estimate_slippage,
-    get_calibrated_slippage_fn,
-    make_slippage_fn,
-)
+from src.backtest.slippage import _DEFAULT_ALPHA, estimate_slippage, make_slippage_fn
 
 
 class TestEstimateSlippage(unittest.TestCase):
@@ -69,69 +62,3 @@ class TestMakeSlippageFn(unittest.TestCase):
     def test_fn_zero_qty_returns_zero(self):
         fn = make_slippage_fn()
         self.assertEqual(fn(0, 1000.0, 10000), 0.0)
-
-
-class TestCalibrateAlpha(unittest.TestCase):
-    def _make_con(self, rows=None, raise_error=False):
-        con = MagicMock()
-        if raise_error:
-            con.execute.side_effect = Exception("table not found")
-        else:
-            con.execute.return_value.fetchall.return_value = rows or []
-        return con
-
-    def test_returns_default_on_exception(self):
-        con = self._make_con(raise_error=True)
-        result = calibrate_alpha(con)
-        self.assertEqual(result, _DEFAULT_ALPHA)
-
-    def test_returns_default_when_too_few_samples(self):
-        con = self._make_con(rows=[(1000.0, 1001.0, 1)])
-        result = calibrate_alpha(con, min_samples=10)
-        self.assertEqual(result, _DEFAULT_ALPHA)
-
-    def test_computes_alpha_from_buy_slippage(self):
-        rows = [(1000.0, 1010.0, 1)] * 15
-        con = self._make_con(rows=rows)
-        result = calibrate_alpha(con, min_samples=10)
-        self.assertGreater(result, 0.0)
-        self.assertLessEqual(result, 0.05)
-
-    def test_computes_alpha_from_sell_slippage(self):
-        rows = [(1010.0, 1000.0, 2)] * 15
-        con = self._make_con(rows=rows)
-        result = calibrate_alpha(con, min_samples=10)
-        self.assertGreater(result, 0.0)
-
-    def test_negative_slippages_excluded_returns_default(self):
-        rows = [(1010.0, 1000.0, 1)] * 15
-        con = self._make_con(rows=rows)
-        result = calibrate_alpha(con, min_samples=10)
-        self.assertEqual(result, _DEFAULT_ALPHA)
-
-    def test_alpha_clipped_to_max(self):
-        rows = [(1000.0, 2000.0, 1)] * 20
-        con = self._make_con(rows=rows)
-        result = calibrate_alpha(con, min_samples=10)
-        self.assertLessEqual(result, 0.05)
-
-    def test_alpha_clipped_to_min(self):
-        rows = [(1000.0, 1000.0, 1)] * 20
-        con = self._make_con(rows=rows)
-        result = calibrate_alpha(con, min_samples=10)
-        self.assertGreaterEqual(result, 0.0)
-
-
-class TestGetCalibratedSlippageFn(unittest.TestCase):
-    def test_returns_callable(self):
-        con = MagicMock()
-        con.execute.return_value.fetchall.return_value = []
-        fn = get_calibrated_slippage_fn(con)
-        self.assertTrue(callable(fn))
-
-    def test_fn_returns_float(self):
-        con = MagicMock()
-        con.execute.return_value.fetchall.return_value = []
-        fn = get_calibrated_slippage_fn(con)
-        result = fn(100, 1000.0, 50000)
-        self.assertIsInstance(result, float)

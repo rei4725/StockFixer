@@ -7,7 +7,7 @@ Claude にバックテストの方法論・設定・最適化メトリクスを�
 results/factory/reports/ に書き出す。IssueAgent の --factory-intake が
 GitHub Issue 草案として起票する（#492-497 を生んだ批判的レビューの自動化）。
 
-バックエンドは LLM_BACKEND で選択する（sdk=API 課金 / cli=サブスク認証）。
+LLM バックエンドは合成ルートが TextReviewPort として注入する（#741）。
 BACKTEST_REVIEW_ENABLED=False（既定）/生成・解析失敗時は空リストを返し、
 何も書き込まない（graceful degradation）。
 読み取り専用のレビューのみ（コード変更・発注判断には一切関与しない）。
@@ -24,6 +24,7 @@ from config.settings import (
     BACKTEST_REVIEW_MAX_TOKENS,
     BACKTEST_REVIEW_MODEL,
 )
+from src.domain.ports import TextReviewPort
 from src.utils.data_path_utils import get_results_dir
 from src.utils.logger import get_logger
 
@@ -197,12 +198,9 @@ def _write_finding_report(finding: dict) -> Optional[str]:
     return path
 
 
-def _request_findings(context: str) -> list[dict]:
+def _request_findings(context: str, review_port: TextReviewPort) -> list[dict]:
     """Claude に構造化出力でレビュー結果を要求する。"""
-    from src.infrastructure.llm.factory import get_text_review_port  # noqa: PLC0415
-
-    port = get_text_review_port()
-    text = port.complete(
+    text = review_port.complete(
         system=_SYSTEM_PROMPT,
         user=context,
         model=BACKTEST_REVIEW_MODEL,
@@ -214,10 +212,11 @@ def _request_findings(context: str) -> list[dict]:
     return findings if isinstance(findings, list) else []
 
 
-def run_backtest_review(dry_run: bool = False) -> list[dict]:
+def run_backtest_review(*, review_port: TextReviewPort, dry_run: bool = False) -> list[dict]:
     """バックテストを Claude で批判的レビューし、発見事項を Issue 草案 JSON 化する。
 
     Args:
+        review_port: レビューを生成する LLM ポート（合成ルートが注入する）
         dry_run: True なら JSON を書き込まず、検出した発見事項のみ返す。
 
     Returns:
@@ -229,7 +228,7 @@ def run_backtest_review(dry_run: bool = False) -> list[dict]:
 
     context = _gather_review_context()
     try:
-        findings = _request_findings(context)
+        findings = _request_findings(context, review_port)
     except Exception:
         logger.error("[bt_review] レビュー生成でエラー", exc_info=True)
         return []

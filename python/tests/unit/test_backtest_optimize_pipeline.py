@@ -167,7 +167,7 @@ class TestSaveOptimizationResults(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             with patch(
-                "src.backtest.optimizer.persistence.get_results_dir",
+                "src.utils.results_io.get_results_dir",
                 return_value=tmp_dir,
             ):
                 path = save_optimization_results(result_df, "jp", "7203")
@@ -188,7 +188,7 @@ class TestSaveOptimizationResults(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             with patch(
-                "src.backtest.optimizer.persistence.get_results_dir",
+                "src.utils.results_io.get_results_dir",
                 return_value=tmp_dir,
             ):
                 path = save_optimization_results(result_df, "jp", "7203")

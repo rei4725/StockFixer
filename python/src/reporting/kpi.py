@@ -12,7 +12,7 @@ from typing import Optional
 
 import pandas as pd
 
-from src.utils.db import load_drift_summary, load_paper_real_diff_summary, load_prediction_accuracy
+from src.utils.db import load_drift_summary, load_prediction_accuracy
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -40,13 +40,26 @@ class MonthlyKPI:
     diff_summary: dict = field(default_factory=dict)
 
 
-def get_monthly_kpis(days: int = _REPORT_DAYS) -> MonthlyKPI:
-    """hit_rate / avg_slippage / drift_count を集約して返す。"""
+def get_monthly_kpis(days: int = _REPORT_DAYS, *, diff_summary: Optional[dict]) -> MonthlyKPI:
+    """hit_rate / avg_slippage / drift_count を集約して返す。
+
+    diff_summary は入口が AnalyticsQuery から取得して渡す（自分では読みに行かない）。
+    取得に失敗した場合は None を渡すこと。None のときは avg_slippage を
+    「計測されたゼロ」(0.0) ではなく「データなし」(None) として扱い、
+    diff_summary フィールドには表示用の _EMPTY_DIFF を補う。
+    """
+    if diff_summary is None:
+        avg_slippage = None
+        resolved_diff_summary = dict(_EMPTY_DIFF)
+    else:
+        raw_avg_slippage = diff_summary.get("avg_paper_slippage")
+        avg_slippage = float(raw_avg_slippage) if raw_avg_slippage is not None else None
+        resolved_diff_summary = diff_summary
     return MonthlyKPI(
         hit_rate=_compute_hit_rate(days),
-        avg_slippage=_compute_avg_slippage(days),
+        avg_slippage=avg_slippage,
         drift_count=_compute_drift_count(days),
-        diff_summary=_load_diff_summary(days),
+        diff_summary=resolved_diff_summary,
     )
 
 
@@ -61,24 +74,6 @@ def _compute_hit_rate(days: int = _REPORT_DAYS) -> Optional[float]:
     if df.empty:
         return None
     return float(df["direction_match"].astype(float).mean())
-
-
-def _compute_avg_slippage(days: int = _REPORT_DAYS) -> Optional[float]:
-    try:
-        summary = load_paper_real_diff_summary(recent_days=days)
-        val = summary.get("avg_paper_slippage")
-        return float(val) if val is not None else None
-    except Exception as e:
-        logger.error(f"avg_slippage 取得失敗: {e}", exc_info=True)
-        return None
-
-
-def _load_diff_summary(days: int = _REPORT_DAYS) -> dict:
-    try:
-        return load_paper_real_diff_summary(recent_days=days)
-    except Exception as e:
-        logger.error(f"diff_summary 取得失敗: {e}", exc_info=True)
-        return dict(_EMPTY_DIFF)
 
 
 def _compute_drift_count(days: int = _REPORT_DAYS) -> int:

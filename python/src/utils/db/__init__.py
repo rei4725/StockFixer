@@ -8,7 +8,6 @@ DuckDB データベースアクセスパッケージ
 モジュール構成:
     _connection.py     - 接続管理（短命接続 + リトライ）・スキーマ DDL
     stock_features.py  - stock_features テーブル操作
-    prediction.py      - prediction_results / model_metrics / prediction_accuracy テーブル操作
     market_data.py     - market_data_raw テーブル操作
     index_membership.py - index_membership_history テーブル操作
     experiment.py      - experiment_runs テーブル操作（R-211 実験トラッキング）
@@ -31,6 +30,7 @@ from src.utils.db import _connection as _conn_module  # noqa: E402
 from src.utils.db._connection import (
     _db_connection,
     close_connection,
+    db_connection,
     get_readonly_connection,
     init_tables,
     set_test_connection,
@@ -46,6 +46,7 @@ from src.utils.db.factory_runs import (  # noqa: F401
     count_factory_runs,
     ensure_factory_tables,
     load_factory_hashes,
+    load_factory_specs,
     save_factory_run,
 )
 
@@ -106,19 +107,16 @@ class _DbPackageProxy(types.ModuleType):
             "load_feature_exclusion_candidates",
             "load_latest_prediction_timestamp",
             "load_model_weights",
-            "load_paper_real_diff_summary",
             "load_prediction_accuracy",
             "load_prediction_markets",
             "load_prediction_results",
             "load_weekly_accuracy_snapshots",
             "save_feature_selection",
             "save_model_metrics",
-            "save_order_run_summary",
             "save_prediction_accuracy",
             "save_prediction_results",
             "save_shap_values",
             "save_weekly_accuracy_snapshot",
-            "upsert_paper_real_diff",
         ]
     )
 

@@ -340,6 +340,9 @@ orchestration → すべての BC（統括）
 | 4-5 | ARCHITECTURE.md を最終形に更新（DDD_ARCHITECTURE.md の内容を統合） |
 | 4-6 | 全 linter（flake8・mypy）がクリーンであることを確認 |
 
+> **⚠️ タスク 4-1 / 4-3 は Superseded（2026-09-22）。** ADR-003 の注記を参照。
+> `domain/types.py` の re-export 削除と `domain/` の削除は行わない。
+
 完了条件: `python -m pytest tests/ -v` 全グリーン + flake8 / mypy エラーゼロ
 
 ---
@@ -397,8 +400,16 @@ Get-ChildItem -Recurse -Filter "*.py" python/ | ForEach-Object {
 
 ### ADR-003: `domain/types.py` は移行期間中 re-export モジュールとして維持
 
+> **⚠️ Superseded（2026-09-22）**
+> 本 ADR とフェーズ 4 のタスク 4-1 / 4-3（`domain/types.py` の re-export 削除、`domain/` フォルダ削除）は
+> 廃止された。実装は逆方向に進んでおり、`src/domain/types.py` が型の正本、
+> `src/prediction/types.py` が再輸出側となっている。また `src/domain/ports.py` と
+> `src/infrastructure/` の導入により、`domain` はヘキサゴナルアーキテクチャの
+> **恒久的な共有カーネル**として位置づけられた。
+> 詳細と根拠: [DB 所有権の疎結合化 設計書 §3](superpowers/specs/2026-09-22-db-ownership-decoupling-design.md#3-資料の不整合先に解決すべき教義問題)
+
 - **決定日**: 2026-04-27
-- **ステータス**: Accepted
+- **ステータス**: Superseded（2026-09-22）
 - **コンテキスト**: 型定義を各 BC に移動するとすべての import が壊れる
 - **決定**: 型を各 BC の `types.py` に移動したうえで、`domain/types.py` は re-export のみとする。フェーズ 4 で削除する
 - **結果**: 既存コードへの影響ゼロで段階移行できる

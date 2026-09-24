@@ -19,7 +19,7 @@ from config.settings import (
 )
 from src.backtest.sandbox_executor import SandboxRunResult, run_sandboxed_evaluation
 from src.backtest.types import FactoryEvaluation, FactoryHypothesis
-from src.infrastructure.llm.factory import get_text_review_port
+from src.domain.ports import TextReviewPort
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -66,9 +66,8 @@ def _parse_response(text: str) -> Optional[dict]:
 
 
 def _generate_one_candidate(
-    market: str, repair_context: Optional[str] = None
+    market: str, review_port: TextReviewPort, repair_context: Optional[str] = None
 ) -> Optional[FactoryHypothesis]:
-    port = get_text_review_port()
     user_prompt = f"マーケット: {market}\n新しいルールを1つ提案してください。"
     if repair_context:
         user_prompt += (
@@ -76,7 +75,7 @@ def _generate_one_candidate(
             f"ください:\n{repair_context}"
         )
     try:
-        text = port.complete(
+        text = review_port.complete(
             system=_SYSTEM_PROMPT,
             user=user_prompt,
             model=FACTORY_CLAUDE_RULEGEN_MODEL,
@@ -105,7 +104,7 @@ def _generate_one_candidate(
 
 
 def _generate_and_evaluate_with_repair(
-    market: str, shared_data_dir: str, windows_file: str
+    market: str, shared_data_dir: str, windows_file: str, review_port: TextReviewPort
 ) -> Optional[FactoryEvaluation]:
     """1候補につき初回生成＋最大 FACTORY_CLAUDE_RULEGEN_MAX_REPAIR_ATTEMPTS 回の修復。
 
@@ -117,7 +116,7 @@ def _generate_and_evaluate_with_repair(
     attempts = FACTORY_CLAUDE_RULEGEN_MAX_REPAIR_ATTEMPTS + 1
 
     for attempt in range(attempts):
-        hypothesis = _generate_one_candidate(market, repair_context=repair_context)
+        hypothesis = _generate_one_candidate(market, review_port, repair_context=repair_context)
         if hypothesis is None:
             # 応答JSON不正 or Claude呼び出し失敗も「機械的な壊れ方」として修復対象にする
             repair_context = (
@@ -154,6 +153,8 @@ def generate_claude_hypotheses(
     champion_sharpe: float,
     shared_data_dir: str,
     windows_file: str,
+    *,
+    review_port: TextReviewPort,
 ) -> list[FactoryEvaluation]:
     """1晩分のClaude生成候補を生成・サンドボックス評価する。
 
@@ -169,7 +170,9 @@ def generate_claude_hypotheses(
         logger.info(
             "[claude_rule_generator] 候補 %d/%d 生成中...", i + 1, FACTORY_CLAUDE_RULEGEN_COUNT
         )
-        evaluation = _generate_and_evaluate_with_repair(market, shared_data_dir, windows_file)
+        evaluation = _generate_and_evaluate_with_repair(
+            market, shared_data_dir, windows_file, review_port
+        )
         if evaluation is not None:
             evaluations.append(evaluation)
     logger.info(

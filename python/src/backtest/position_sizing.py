@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from src.backtest.execution import ExecutionModel
+
 
 def calc_position_details(
     cash: float,
@@ -17,8 +19,7 @@ def calc_position_details(
     atr_multiplier: float,
     atr_min_fraction: float,
     atr_max_fraction: float,
-    fee_rate: float,
-    slippage: float,
+    execution: ExecutionModel,
     pred_value: Optional[float] = None,
     atr_value: Optional[float] = None,
 ) -> dict[str, Any]:
@@ -34,15 +35,14 @@ def calc_position_details(
         atr_multiplier: ATRモード: ストップ幅とするATRの倍数
         atr_min_fraction: ATRモード: 建玉下限比率
         atr_max_fraction: ATRモード: 建玉上限比率
-        fee_rate: 取引手数料率
-        slippage: 片道スリッページ率
+        execution: 取引コストモデル（手数料・スリッページ）
         pred_value: 予測値（confidence モードで使用）
         atr_value: ATR値（atr モードで使用）
 
     Returns:
         購入数量と補助情報
     """
-    unit_cost = price * (1 + fee_rate + slippage)
+    unit_cost = execution.unit_buy_cost(price)
     fallback_used: bool = False
     if unit_cost <= 0 or cash <= 0:
         return {

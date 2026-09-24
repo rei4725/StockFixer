@@ -14,6 +14,9 @@ import pandas as pd
 
 from src.backtest.data_port import get_backtest_data_port
 from src.backtest.metrics.overfitting import deflated_sharpe_ratio, monte_carlo_equity
+from src.backtest.metrics.stats import annualize_sharpe as _annualize_sharpe
+from src.backtest.metrics.stats import max_drawdown as _max_drawdown
+from src.backtest.metrics.stats import sharpe_per_trade as _sharpe_per_trade
 
 
 def compute_metrics(
@@ -86,6 +89,9 @@ def compute_metrics(
 
     gross_profit = sum(w for w in wins if w > 0)
     gross_loss = abs(sum(loss for loss in losses if loss < 0))
+    # stats.profit_factor と同じ集計だが、取引ゼロ時の値が異なる（意図的、非統一）:
+    # ここは math.inf を返し、呼び出し側（下の result 組み立て）で None に変換する。
+    # stats.profit_factor は取引ゼロ時に 0.0 を返す。詳細は stats.profit_factor の docstring。
     profit_factor = gross_profit / gross_loss if gross_loss > 0 else math.inf
 
     avg_win = float(np.mean(win_returns)) if win_returns else 0.0
@@ -277,21 +283,6 @@ def compute_cost_comparison_metrics(
     return result
 
 
-def _sharpe_per_trade(pnl_list: list[float], risk_free_per_trade: float = 0.0) -> float:
-    """取引単位の Sharpe（mean/std、年率化なし）を返す。
-
-    DSR の入力（López de Prado の式は非年率の per-observation Sharpe を前提）と、
-    年率化 Sharpe の素として使う。
-    """
-    if len(pnl_list) < 2:
-        return 0.0
-    arr = np.array(pnl_list, dtype=float)
-    std = arr.std(ddof=1)
-    if std == 0:
-        return 0.0
-    return float((arr.mean() - risk_free_per_trade) / std)
-
-
 def _estimate_trades_per_year(
     trade_log: pd.DataFrame, num_trades: int, trading_days_per_year: int
 ) -> float:
@@ -300,6 +291,10 @@ def _estimate_trades_per_year(
     旧実装は一律 252 取引/年と仮定して年率化していたが、これは実取引頻度を無視し
     Sharpe を頻度非整合に膨張させていた。期間が不明な場合のみ従来挙動（252）に
     フォールバックする。
+
+    長期コホートバックテスト（`longterm/metrics.py`）は意図的に異なる分母
+    （実取引日付スパンではなく config の設定期間全体）を使う。理由は
+    `longterm/metrics.py` の trades_per_year 算出箇所のコメントを参照。
     """
     if num_trades < 1 or "date" not in trade_log.columns:
         return float(trading_days_per_year)
@@ -311,22 +306,6 @@ def _estimate_trades_per_year(
         return float(trading_days_per_year)
     years = span_days / 365.25
     return num_trades / years
-
-
-def _annualize_sharpe(sharpe_per_trade: float, trades_per_year: float) -> float:
-    """取引単位 Sharpe を実取引頻度で年率化する。"""
-    if trades_per_year <= 0:
-        return 0.0
-    return float(sharpe_per_trade * math.sqrt(trades_per_year))
-
-
-def _max_drawdown(equity: pd.Series) -> float:
-    """資産曲線から最大ドローダウン（負の小数）を計算する"""
-    if equity.empty:
-        return 0.0
-    roll_max = equity.cummax()
-    drawdown = (equity - roll_max) / roll_max
-    return float(drawdown.min())
 
 
 def compute_metrics_by_regime(

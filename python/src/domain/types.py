@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Optional
 
 import pandas as pd
@@ -204,3 +205,85 @@ class BatchResult:
     succeeded: list = field(default_factory=list)
     failed: list = field(default_factory=list)
     skipped: list = field(default_factory=list)
+
+
+@dataclass
+class HoldRules:
+    """保有/撤退エンジンのルール（差し替え可能なパラメータ）。"""
+
+    trail_ma_weeks: int = 40  # 40週(=200日)線割れで撤退
+    trail_stop_pct: float = 0.35  # 高値から -35% で撤退（MA割れと OR）
+    # 2倍/5倍で部分利確
+    scale_out_multiples: list[float] = field(default_factory=lambda: [2.0, 5.0])
+    scale_out_fraction: float = 0.20  # 各利確で保有の20%を売却（[] や 0 で「放置」=利確しない）
+
+
+@dataclass
+class PositionEvent:
+    """保有シミュレーション中に発生した約定イベント。"""
+
+    date: str  # YYYY-MM-DD
+    action: str  # "entry" | "hold" | "scale_out" | "exit"
+    price: float
+    held_fraction: float  # 約定後の保有比率（1.0=フル, 0.0=撤退完了）
+    reason: str  # "entry" | "ma_break" | "trail_stop" | "scale_2x" | "scale_5x" | "thesis_break"
+    multiple: float  # エントリー価格に対する現在倍率（price / entry_price）
+
+
+@dataclass
+class TrendCandidate:
+    """長期トレンド・スクリーナーが返す候補銘柄。"""
+
+    market: str
+    symbol: str
+    score: float  # 合成スコア（高いほど上位）
+    close: float  # 直近終値
+    dist_from_52w_high: float  # 52週高値からの下落率（0=高値更新, 負値=下にある）
+    above_200dma: bool  # 終値 > 200日SMA
+    sma200_rising: bool  # 200日SMAが上向き（直近20日で上昇）
+    return_6m: float  # 6ヶ月リターン
+    return_12m: float  # 12ヶ月リターン
+    avg_volume: float  # 平均出来高（流動性）
+
+
+@dataclass(frozen=True)
+class OrderRunSummary:
+    """発注実行 1 回分のサマリー（order_run_summary テーブルの 1 行に対応）。
+
+    run_id: 実行ごとに採番される短縮 UUID
+    mode: "paper" または "live"
+    min_change_ratio: この実行で適用された最小変化率しきい値
+    """
+
+    run_id: str
+    market: str
+    mode: str
+    buy_orders: int
+    sell_orders: int
+    short_orders: int
+    skipped: int
+    skipped_min_change: int
+    total_turnover: float
+    min_change_ratio: float
+
+
+@dataclass
+class TradeDiffRecord:
+    """paper / real 約定価格の乖離追跡 1 件（paper_real_diff テーブルの 1 行に対応）。
+
+    フィールドは TradeDiffSink 導入前に存在した直接書き込み経路の引数をそのまま写したもの。
+    side: OrderSide の整数値。mode: "paper" / "live"。
+    order_session: "open"（寄付）または "close"（引け）。
+    """
+
+    market: str
+    symbol: str
+    predicted_at: str
+    side: int
+    signal_price: float
+    mode: str
+    order_id: str
+    actual_price: Optional[float] = None
+    checked_at: Optional[datetime] = None
+    order_session: str = "open"
+    split_ratio: Optional[float] = None

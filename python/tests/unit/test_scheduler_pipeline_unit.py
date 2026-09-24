@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 
 from src.domain.types import SymbolTask
+from src.infrastructure.persistence.order_run_repository import PostgresOrderRunSink
 from src.orchestration.jobs import drift_check as drift_check_module
 from src.orchestration.scheduler import run_daily_auto_order, run_daily_drift_check
 
@@ -43,6 +44,7 @@ class TestRunDailyAutoOrder(unittest.TestCase):
         self.assertEqual(call_kwargs["market"], "jp")
         self.assertEqual(call_kwargs["mode"], "paper")
         self.assertIn("market_data", call_kwargs)
+        self.assertIsInstance(call_kwargs["order_run_sink"], PostgresOrderRunSink)
         mock_send_completion.assert_called_once_with(
             buy_orders=0,
             sell_orders=0,
@@ -84,6 +86,7 @@ class TestRunDailyAutoOrder(unittest.TestCase):
         self.assertEqual(call_kwargs["broker"], broker)
         self.assertEqual(call_kwargs["market"], "jp")
         self.assertEqual(call_kwargs["mode"], "live")
+        self.assertIsInstance(call_kwargs["order_run_sink"], PostgresOrderRunSink)
         mock_send_completion.assert_called_once()
 
 
@@ -387,9 +390,9 @@ class TestRunWeeklyReport(unittest.TestCase):
     """run_weekly_report のテスト"""
 
     @patch("src.reporting.discord.discord_utils.send_weekly_report")
-    @patch("src.prediction.db.load_paper_real_diff_summary")
+    @patch("src.infrastructure.persistence.analytics_query.PostgresAnalyticsQuery")
     @patch("src.prediction.db.load_drift_summary")
-    def test_calls_send_weekly_report(self, mock_drift, mock_diff, mock_send):
+    def test_calls_send_weekly_report(self, mock_drift, mock_analytics_cls, mock_send):
         from src.orchestration.scheduler import run_weekly_report
 
         mock_drift.return_value = pd.DataFrame(
@@ -403,7 +406,7 @@ class TestRunWeeklyReport(unittest.TestCase):
                 }
             ]
         )
-        mock_diff.return_value = {
+        mock_analytics_cls.return_value.paper_real_diff_summary.return_value = {
             "tracked_count": 12,
             "comparable_count": 8,
             "avg_paper_slippage": 0.001,
@@ -417,9 +420,9 @@ class TestRunWeeklyReport(unittest.TestCase):
         mock_send.assert_called_once()
 
     @patch("src.reporting.discord.discord_utils.send_weekly_report")
-    @patch("src.prediction.db.load_paper_real_diff_summary")
+    @patch("src.infrastructure.persistence.analytics_query.PostgresAnalyticsQuery")
     @patch("src.prediction.db.load_drift_summary")
-    def test_exception_does_not_propagate(self, mock_drift, mock_diff, mock_send):
+    def test_exception_does_not_propagate(self, mock_drift, mock_analytics_cls, mock_send):
         from src.orchestration.scheduler import run_weekly_report
 
         mock_drift.side_effect = Exception("DB エラー")

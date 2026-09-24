@@ -1,8 +1,8 @@
 import unittest
 from unittest.mock import patch
 
+from src.domain.types import TrendCandidate
 from src.screening.quality_gate import apply_quality_gate
-from src.screening.types import TrendCandidate
 
 
 def _candidate(symbol: str, score: float = 0.8) -> TrendCandidate:

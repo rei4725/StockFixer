@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pandas as pd
 
+from src.infrastructure.in_memory import InMemoryOrderRunSink, InMemoryTradeDiffSink
 from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
 from src.trading.execution import (
     BUY_THRESHOLD,
@@ -115,9 +116,6 @@ class TestRunDailyOrders(unittest.TestCase):
                 "src.trading.execution.selection.get_symbol_sector",
                 side_effect=lambda market, symbol: f"UNKNOWN:{market}:{symbol}",
             ),
-            patch(
-                "src.trading.execution.runner.save_order_run_summary",
-            ),
         ]
         return patches
 
@@ -135,7 +133,13 @@ class TestRunDailyOrders(unittest.TestCase):
         patches = self._patch_pipeline(predictions)
         _, patch_list = self._start_patches(patches)
         try:
-            stats = run_daily_orders(broker, market="jp", mode="paper")
+            stats = run_daily_orders(
+                broker,
+                order_run_sink=InMemoryOrderRunSink(),
+                trade_diff_sink=InMemoryTradeDiffSink(),
+                market="jp",
+                mode="paper",
+            )
             self.assertGreater(stats["buy_orders"], 0)
             self.assertEqual(stats["errors"], 0)
         finally:
@@ -147,7 +151,13 @@ class TestRunDailyOrders(unittest.TestCase):
         patches = self._patch_pipeline(predictions, risk_allowed=False)
         _, patch_list = self._start_patches(patches)
         try:
-            stats = run_daily_orders(broker, market="jp", mode="paper")
+            stats = run_daily_orders(
+                broker,
+                order_run_sink=InMemoryOrderRunSink(),
+                trade_diff_sink=InMemoryTradeDiffSink(),
+                market="jp",
+                mode="paper",
+            )
             self.assertEqual(stats["buy_orders"], 0)
             broker.send_order.assert_not_called()
         finally:
@@ -167,7 +177,13 @@ class TestRunDailyOrders(unittest.TestCase):
         patches = self._patch_pipeline(predictions, gate_status=gate_status)
         _, patch_list = self._start_patches(patches)
         try:
-            stats = run_daily_orders(broker, market="jp", mode="paper")
+            stats = run_daily_orders(
+                broker,
+                order_run_sink=InMemoryOrderRunSink(),
+                trade_diff_sink=InMemoryTradeDiffSink(),
+                market="jp",
+                mode="paper",
+            )
             self.assertTrue(stats["trading_stopped"])
             self.assertEqual(stats["reason_code"], "daily_loss_limit")
             self.assertEqual(stats["daily_loss"], 25_000.0)
@@ -182,7 +198,13 @@ class TestRunDailyOrders(unittest.TestCase):
         patches = self._patch_pipeline(pd.DataFrame())
         _, patch_list = self._start_patches(patches)
         try:
-            stats = run_daily_orders(broker, market="jp", mode="paper")
+            stats = run_daily_orders(
+                broker,
+                order_run_sink=InMemoryOrderRunSink(),
+                trade_diff_sink=InMemoryTradeDiffSink(),
+                market="jp",
+                mode="paper",
+            )
             self.assertEqual(stats["buy_orders"], 0)
         finally:
             self._stop_patches(patch_list)
@@ -194,7 +216,13 @@ class TestRunDailyOrders(unittest.TestCase):
         patches = self._patch_pipeline(predictions)
         _, patch_list = self._start_patches(patches)
         try:
-            stats = run_daily_orders(broker, market="jp", mode="paper")
+            stats = run_daily_orders(
+                broker,
+                order_run_sink=InMemoryOrderRunSink(),
+                trade_diff_sink=InMemoryTradeDiffSink(),
+                market="jp",
+                mode="paper",
+            )
             self.assertLessEqual(stats["buy_orders"], MAX_ORDERS_PER_RUN)
             # 銘柄ごとに異なるセクターを返すため、セクター上限ではなく
             # MAX_ORDERS_PER_RUN で頭打ちになっていることを確認する
@@ -212,7 +240,13 @@ class TestRunDailyOrders(unittest.TestCase):
         patches = self._patch_pipeline(predictions)
         _, patch_list = self._start_patches(patches)
         try:
-            stats = run_daily_orders(broker, market="jp", mode="paper")
+            stats = run_daily_orders(
+                broker,
+                order_run_sink=InMemoryOrderRunSink(),
+                trade_diff_sink=InMemoryTradeDiffSink(),
+                market="jp",
+                mode="paper",
+            )
             self.assertEqual(stats["buy_orders"], 0)
             broker.send_order.assert_not_called()
         finally:
@@ -226,7 +260,13 @@ class TestRunDailyOrders(unittest.TestCase):
         patches = self._patch_pipeline(predictions)
         _, patch_list = self._start_patches(patches)
         try:
-            stats = run_daily_orders(broker, market="jp", mode="paper")
+            stats = run_daily_orders(
+                broker,
+                order_run_sink=InMemoryOrderRunSink(),
+                trade_diff_sink=InMemoryTradeDiffSink(),
+                market="jp",
+                mode="paper",
+            )
             self.assertEqual(stats["buy_orders"], 0)
         finally:
             self._stop_patches(patch_list)
@@ -237,7 +277,13 @@ class TestRunDailyOrders(unittest.TestCase):
         patches = self._patch_pipeline(predictions, calc_qty=0)
         _, patch_list = self._start_patches(patches)
         try:
-            stats = run_daily_orders(broker, market="jp", mode="paper")
+            stats = run_daily_orders(
+                broker,
+                order_run_sink=InMemoryOrderRunSink(),
+                trade_diff_sink=InMemoryTradeDiffSink(),
+                market="jp",
+                mode="paper",
+            )
             self.assertEqual(stats["buy_orders"], 0)
             self.assertGreater(stats["skipped"], 0)
         finally:
@@ -251,7 +297,13 @@ class TestRunDailyOrders(unittest.TestCase):
         mocks, patch_list = self._start_patches(patches)
         try:
             calc_size_mock = mocks[4]
-            run_daily_orders(broker, market="jp", mode="paper")
+            run_daily_orders(
+                broker,
+                order_run_sink=InMemoryOrderRunSink(),
+                trade_diff_sink=InMemoryTradeDiffSink(),
+                market="jp",
+                mode="paper",
+            )
 
             self.assertTrue(calc_size_mock.called)
             self.assertAlmostEqual(calc_size_mock.call_args.kwargs["confidence_ratio"], 0.65)
@@ -303,7 +355,13 @@ class TestRunDailyOrders(unittest.TestCase):
         patches = self._patch_pipeline(predictions)
         _, patch_list = self._start_patches(patches)
         try:
-            stats = run_daily_orders(broker, market="jp", mode="paper")
+            stats = run_daily_orders(
+                broker,
+                order_run_sink=InMemoryOrderRunSink(),
+                trade_diff_sink=InMemoryTradeDiffSink(),
+                market="jp",
+                mode="paper",
+            )
             self.assertEqual(stats["buy_orders"], 0)
             broker.send_order.assert_not_called()
         finally:
@@ -354,7 +412,13 @@ class TestRunDailyOrders(unittest.TestCase):
         patches = self._patch_pipeline(predictions)
         _, patch_list = self._start_patches(patches)
         try:
-            stats = run_daily_orders(broker, market="jp", mode="paper")
+            stats = run_daily_orders(
+                broker,
+                order_run_sink=InMemoryOrderRunSink(),
+                trade_diff_sink=InMemoryTradeDiffSink(),
+                market="jp",
+                mode="paper",
+            )
             self.assertEqual(stats["sell_orders"], 0)
             broker.send_order.assert_not_called()
         finally:
@@ -402,7 +466,13 @@ class TestRunDailyOrders(unittest.TestCase):
         ]
         _, patch_list = self._start_patches(patches)
         try:
-            stats = run_daily_orders(broker, market="jp", mode="paper")
+            stats = run_daily_orders(
+                broker,
+                order_run_sink=InMemoryOrderRunSink(),
+                trade_diff_sink=InMemoryTradeDiffSink(),
+                market="jp",
+                mode="paper",
+            )
             self.assertEqual(stats["skipped_min_change"], 1)
             self.assertGreater(stats["skipped"], 0)
             self.assertEqual(stats["buy_orders"], 0)
@@ -451,24 +521,73 @@ class TestRunDailyOrders(unittest.TestCase):
         ]
         _, patch_list = self._start_patches(patches)
         try:
-            stats = run_daily_orders(broker, market="jp", mode="paper")
+            stats = run_daily_orders(
+                broker,
+                order_run_sink=InMemoryOrderRunSink(),
+                trade_diff_sink=InMemoryTradeDiffSink(),
+                market="jp",
+                mode="paper",
+            )
             self.assertEqual(stats["skipped_min_change"], 0)
             self.assertEqual(stats["buy_orders"], 1)
         finally:
             self._stop_patches(patch_list)
 
-    def test_save_order_run_summary_called(self):
-        """run_daily_orders 実行後に save_order_run_summary が呼ばれる"""
+    def test_order_run_sink_save_called(self):
+        """run_daily_orders 実行後に order_run_sink.save が呼ばれる"""
         broker = _make_broker()
         predictions = _make_predictions(n_buy=1)
         patches = self._patch_pipeline(predictions)
-        mocks, patch_list = self._start_patches(patches)
+        _, patch_list = self._start_patches(patches)
+        sink = InMemoryOrderRunSink()
         try:
-            run_daily_orders(broker, market="jp", mode="paper")
-            mock_save = mocks[-1]  # save_order_run_summary は _patch_pipeline の最後
-            mock_save.assert_called_once()
+            run_daily_orders(
+                broker,
+                order_run_sink=sink,
+                trade_diff_sink=InMemoryTradeDiffSink(),
+                market="jp",
+                mode="paper",
+            )
+            self.assertEqual(len(sink.saved), 1)
         finally:
             self._stop_patches(patch_list)
+
+    def test_order_run_sink_receives_summary_with_stats(self):
+        """注入された OrderRunSink に stats と一致するサマリーが渡されること。"""
+        broker = _make_broker()
+        predictions = _make_predictions(n_buy=3)
+        patches = self._patch_pipeline(predictions)
+        _, patch_list = self._start_patches(patches)
+        sink = InMemoryOrderRunSink()
+        try:
+            stats = run_daily_orders(
+                broker,
+                order_run_sink=sink,
+                trade_diff_sink=InMemoryTradeDiffSink(),
+                market="jp",
+                mode="paper",
+            )
+        finally:
+            self._stop_patches(patch_list)
+
+        self.assertEqual(len(sink.saved), 1)
+        saved = sink.saved[0]
+        self.assertEqual(saved.market, "jp")
+        self.assertEqual(saved.mode, "paper")
+        self.assertEqual(saved.buy_orders, stats["buy_orders"])
+        self.assertEqual(saved.sell_orders, stats["sell_orders"])
+        self.assertEqual(saved.short_orders, stats["short_orders"])
+        self.assertEqual(saved.skipped, stats["skipped"])
+        self.assertEqual(saved.skipped_min_change, stats["skipped_min_change"])
+        self.assertEqual(saved.total_turnover, stats["total_turnover"])
+        self.assertEqual(saved.min_change_ratio, MIN_CHANGE_RATIO)
+        self.assertNotEqual(saved.run_id, "")
+
+    def test_order_run_sink_is_required(self):
+        """order_run_sink を渡さない呼び出しは TypeError になること。"""
+        broker = _make_broker()
+        with self.assertRaisesRegex(TypeError, "order_run_sink"):
+            run_daily_orders(broker, market="jp", mode="paper")  # type: ignore[call-arg]
 
 
 class TestDynamicThresholdHelpers(unittest.TestCase):
@@ -637,7 +756,13 @@ class TestExecutionOrderTypeFlow(unittest.TestCase):
     ):
         broker = _make_broker()
 
-        stats = run_daily_orders(broker, market="jp", mode="paper")
+        stats = run_daily_orders(
+            broker,
+            order_run_sink=InMemoryOrderRunSink(),
+            trade_diff_sink=InMemoryTradeDiffSink(),
+            market="jp",
+            mode="paper",
+        )
 
         self.assertEqual(stats["buy_orders"], 1)
         broker.send_order.assert_called_once_with(
@@ -736,12 +861,17 @@ class TestShortSide(unittest.TestCase):
                 "src.trading.risk_manager.RiskManager._get_consecutive_losses",
                 return_value=0,
             ),
-            patch("src.trading.execution.runner.save_order_run_summary"),
         ]
         for p in patches:
             p.start()
         try:
-            stats = run_daily_orders(broker, market="jp", mode="paper")
+            stats = run_daily_orders(
+                broker,
+                order_run_sink=InMemoryOrderRunSink(),
+                trade_diff_sink=InMemoryTradeDiffSink(),
+                market="jp",
+                mode="paper",
+            )
             self.assertGreater(stats["short_orders"], 0)
             broker.send_order.assert_called_once_with(
                 "8001",
@@ -787,12 +917,17 @@ class TestShortSide(unittest.TestCase):
                 "src.trading.risk_manager.RiskManager._get_consecutive_losses",
                 return_value=0,
             ),
-            patch("src.trading.execution.runner.save_order_run_summary"),
         ]
         for p in patches:
             p.start()
         try:
-            stats = run_daily_orders(broker, market="jp", mode="paper")
+            stats = run_daily_orders(
+                broker,
+                order_run_sink=InMemoryOrderRunSink(),
+                trade_diff_sink=InMemoryTradeDiffSink(),
+                market="jp",
+                mode="paper",
+            )
             self.assertEqual(stats["short_orders"], 0)
             broker.send_order.assert_not_called()
         finally:
@@ -833,16 +968,21 @@ class TestShortSide(unittest.TestCase):
                 "src.trading.risk_manager.RiskManager._get_consecutive_losses",
                 return_value=0,
             ),
-            patch("src.trading.execution.runner.save_order_run_summary"),
         ]
-        mocks = [p.start() for p in patches]
+        for p in patches:
+            p.start()
+        sink = InMemoryOrderRunSink()
         try:
-            stats = run_daily_orders(broker, market="jp", mode="paper")
+            stats = run_daily_orders(
+                broker,
+                order_run_sink=sink,
+                trade_diff_sink=InMemoryTradeDiffSink(),
+                market="jp",
+                mode="paper",
+            )
             self.assertEqual(stats["short_orders"], 1)
-            # save_order_run_summary には short_orders=1 が渡される
-            mock_save = mocks[-1]
-            call_kwargs = mock_save.call_args.kwargs
-            self.assertEqual(call_kwargs["short_orders"], 1)
+            # order_run_sink には short_orders=1 が渡される
+            self.assertEqual(sink.saved[-1].short_orders, 1)
         finally:
             for p in patches:
                 p.stop()
@@ -887,7 +1027,13 @@ class TestSplitRatio(unittest.TestCase):
         patches = self._patch_pipeline(predictions)
         _, patch_list = self._start_patches(patches)
         try:
-            stats = run_daily_orders(broker, market="jp", mode="paper")
+            stats = run_daily_orders(
+                broker,
+                order_run_sink=InMemoryOrderRunSink(),
+                trade_diff_sink=InMemoryTradeDiffSink(),
+                market="jp",
+                mode="paper",
+            )
             self.assertEqual(stats["buy_orders"], 0)
             self.assertGreater(stats["skipped"], 0)
             broker.send_order.assert_not_called()
@@ -901,7 +1047,13 @@ class TestSplitRatio(unittest.TestCase):
         patches = self._patch_pipeline(predictions, calc_qty=200)
         _, patch_list = self._start_patches(patches)
         try:
-            stats = run_daily_orders(broker, market="jp", mode="paper")
+            stats = run_daily_orders(
+                broker,
+                order_run_sink=InMemoryOrderRunSink(),
+                trade_diff_sink=InMemoryTradeDiffSink(),
+                market="jp",
+                mode="paper",
+            )
             self.assertEqual(stats["buy_orders"], 1)
             call_args = broker.send_order.call_args
             sent_qty = call_args.args[2] if call_args.args else call_args.kwargs.get("qty")
@@ -916,7 +1068,13 @@ class TestSplitRatio(unittest.TestCase):
         patches = self._patch_pipeline(predictions, calc_qty=200)
         _, patch_list = self._start_patches(patches)
         try:
-            stats = run_daily_orders(broker, market="jp", mode="paper")
+            stats = run_daily_orders(
+                broker,
+                order_run_sink=InMemoryOrderRunSink(),
+                trade_diff_sink=InMemoryTradeDiffSink(),
+                market="jp",
+                mode="paper",
+            )
             self.assertEqual(stats["buy_orders"], 1)
             call_args = broker.send_order.call_args
             sent_qty = call_args.args[2] if call_args.args else call_args.kwargs.get("qty")
@@ -967,7 +1125,6 @@ class TestSplitRatio(unittest.TestCase):
                 "src.trading.execution.selection.get_symbol_sector",
                 side_effect=lambda market, symbol: f"UNKNOWN:{market}:{symbol}",
             ),
-            patch("src.trading.execution.runner.save_order_run_summary"),
         ]
 
     def _start_patches(self, patches):

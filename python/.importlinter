@@ -1,32 +1,33 @@
 [importlinter]
 root_packages =
     src
-# "No matches" な ignore_imports エントリを error ではなく warning として扱う
-unmatched_ignores = warn
 
 # ============================================================
 # Contract 1: レイヤー階層契約
-#   utils < BC群 < orchestration/api
+#   domain < utils < BC群 < orchestration/api
 #   上位レイヤーが下位レイヤーを参照するのは合法。逆は禁止。
 #
-# ignore_imports: 既存違反（将来的な解消対象）を明示列挙。
-# 新規違反を追加する際は必ずレビューを経ること。
+# src.domain は型とポートのみを持つ共有カーネルであり、src.domain.types 以外を
+# 一切 import しない真の最下層。2026-09-22 の設計判断でこれを恒久的な位置づけとした
+# （docs/superpowers/specs/2026-09-22-db-ownership-decoupling-design.md §3）。
+#
+# src.infrastructure は意図的に layers へ載せていない。
+#   src/infrastructure/* -> src.market_data（アダプタが BC を参照）
+#   src/backtest/*, src/reporting/*, src/quality/* -> src.infrastructure
+# とパッケージ単位で循環しているため、層に追加した時点で契約が落ちる。
+# 循環の解消は別 Issue とする。
+#
+# ignore_imports は両契約とも未使用（例外 0 件が現状）。
+# 例外を追加する際は必ずレビューを経ること。
 # ============================================================
 [importlinter:contract:layers]
-name = Layered architecture (utils < BC < orchestration/api)
+name = Layered architecture (domain < utils < BC < orchestration/api)
 type = layers
 layers =
     src.api | src.orchestration
     src.backtest | src.prediction | src.trading | src.reporting | src.watchlist | src.market_data | src.rule_engine | src.quality | src.screening
     src.utils
-# backtest -> screening: 長期バックテストが screening の純粋関数
-# (screen_trend_candidates / simulate_position) を直接参照している既存依存。
-# #638 で src.screening を契約対象に追加した際に顕在化した。将来はBT専用
-# ポート経由に切り出す想定（Contract 2 のロードマップ [B] 相当）。
-ignore_imports =
-    src.backtest.longterm_backtest -> src.screening.types
-    src.backtest.longterm_backtest -> src.screening.hold_engine
-    src.backtest.longterm_backtest -> src.screening.trend_screener
+    src.domain
 
 # ============================================================
 # Contract 2: BC 独立性契約
@@ -34,26 +35,22 @@ ignore_imports =
 #   ignore_imports に追加する際は必ず理由コメントを付けること。
 #
 # 違反分類ロードマップ:
-#   [A] types.py 共有で解消可能 (短期 Q3-2026):
-#       reporting → prediction/watchlist: 共有 types を domain/ に集約
-#   [B] イベント/コールバック駆動で解消可能 (中期 Q4-2026):
-#       market_data/watchlist/prediction → reporting: 通知をイベント経由に
-#       backtest → prediction/market_data: BT 専用ポートを定義
+#   [A] reporting → prediction/watchlist は解消済み（対象の import が存在しない）
+#   [B] market_data/watchlist/prediction → reporting、backtest → prediction/market_data も
+#       解消済み（対象の import が存在しない）
 #
 # [C] prediction.rule_signal_pipeline → trading/backtest は rule_engine BC (#340) で解消済み
-# [D] backtest → screening: BT専用ポート経由に切り出しで解消可能 (中期 Q4-2026、[B]と同分類)
-#     #638 で src.screening を契約対象に追加した際に顕在化した既存依存
+# [D] backtest → screening は PR-8 (screening port wiring) でポート経由に反転し解消済み
 #
-# 削減目標:
-#   現状: 47件 (2026-08, #638 で screening 登録により [D] 3件が新規に可視化)
-#   Q3-2026: 30件以下 (分類 A を解消)
-#   Q4-2026: 20件以下 (分類 B・D を解消)
+# 現状: ignore_imports は両契約とも 0 件。これが目標状態であり、
+# 新規に追加する場合は必ずレビューを経ること（恒常的な 0 件維持が前提）。
 # ============================================================
 [importlinter:contract:independence]
 name = BC independence (BCs must not import each other)
 type = independence
-# utils.db が prediction.db を re-export している間接依存は #338 で根本解消予定
-# それまでは indirect check を無効化して direct import のみ検証する
+# utils.db が prediction.db を再輸出している間接依存は Phase 4（2026-09-22 設計書）で解消中。
+# 解消完了までは indirect check を無効化して direct import のみ検証する。
+# allow_indirect_imports の削除は Phase 4b (PR-5) の完了条件。
 allow_indirect_imports = True
 modules =
     src.backtest
@@ -65,8 +62,36 @@ modules =
     src.rule_engine
     src.quality
     src.screening
-# backtest -> screening: layers契約と同じ既存依存（詳細はContract 1参照）
-ignore_imports =
-    src.backtest.longterm_backtest -> src.screening.types
-    src.backtest.longterm_backtest -> src.screening.hold_engine
-    src.backtest.longterm_backtest -> src.screening.trend_screener
+
+# ============================================================
+# Contract 3: domain purity 契約
+#   src.domain は src.domain 自身以外の src.* を一切 import しない。
+#
+# Contract 1（layers）は src.domain が src.utils・BC群・src.api/src.orchestration より
+# 下位にあることは証明するが、src.infrastructure については何も証明しない。
+# src.infrastructure は BC 群との間でパッケージ単位の循環があり（Contract 1 のコメント参照）、
+# 意図的に layers 契約へ載せていないため、"layers" という型ではこの性質を表現できない。
+# そのため forbidden 型の独立した契約として domain の純粋性のみを直接検証する。
+#
+# ignore_imports は未使用（例外 0 件が現状）。
+# 例外を追加する際は必ずレビューを経ること。
+# ============================================================
+[importlinter:contract:domain-purity]
+name = domain purity (src.domain imports nothing outside itself)
+type = forbidden
+source_modules =
+    src.domain
+forbidden_modules =
+    src.api
+    src.orchestration
+    src.infrastructure
+    src.utils
+    src.backtest
+    src.prediction
+    src.trading
+    src.reporting
+    src.watchlist
+    src.market_data
+    src.rule_engine
+    src.quality
+    src.screening

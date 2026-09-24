@@ -5,6 +5,7 @@ from unittest.mock import patch
 import pandas as pd
 import pytest
 
+from src.backtest.execution import ExecutionModel, TradingCosts
 from src.backtest.portfolio import _attach_regime_metrics, _limit_portfolio_candidates_by_sector
 
 
@@ -188,7 +189,7 @@ class TestSavePortfolioResults:
         )
         metrics = {"total_return": 0.01}
 
-        with patch("src.utils.data_path_utils.get_results_dir", return_value=str(tmp_path)):
+        with patch("src.utils.results_io.get_results_dir", return_value=str(tmp_path)):
             save_portfolio_results(
                 equity_df,
                 metrics,
@@ -266,7 +267,7 @@ class TestSimulatePortfolio(unittest.TestCase):
             rebalance_dates,
             top_n=2,
             initial_cash=1_000_000,
-            fee_rate=0.001,
+            execution=ExecutionModel(TradingCosts(fee_rate=0.001)),
             max_sector_positions=3,
         )
         assert "portfolio_value" in equity_df.columns
@@ -288,7 +289,7 @@ class TestSimulatePortfolio(unittest.TestCase):
             rebalance_dates,
             top_n=1,
             initial_cash=500_000,
-            fee_rate=0.001,
+            execution=ExecutionModel(TradingCosts(fee_rate=0.001)),
             max_sector_positions=2,
         )
         assert isinstance(holdings, list)

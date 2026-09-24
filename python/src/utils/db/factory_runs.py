@@ -22,13 +22,15 @@ CREATE TABLE IF NOT EXISTS factory_runs (
     hypothesis_hash  VARCHAR   NOT NULL,
     market           VARCHAR   NOT NULL,
     spec_json        VARCHAR   NOT NULL,
-    sharpe_ratio     DOUBLE,
-    win_rate         DOUBLE,
+    sharpe_ratio     DOUBLE PRECISION,
+    portfolio_sharpe_ratio DOUBLE PRECISION,
+    win_rate         DOUBLE PRECISION,
     num_trades       INTEGER,
-    max_drawdown     DOUBLE,
-    total_return     DOUBLE,
-    dsr              DOUBLE,
-    pbo              DOUBLE,
+    max_drawdown     DOUBLE PRECISION,
+    portfolio_max_drawdown DOUBLE PRECISION,
+    total_return     DOUBLE PRECISION,
+    dsr              DOUBLE PRECISION,
+    pbo              DOUBLE PRECISION,
     gate_passed      BOOLEAN   NOT NULL,
     gate_reasons     VARCHAR,
     report_path      VARCHAR,
@@ -41,6 +43,16 @@ CREATE TABLE IF NOT EXISTS factory_runs (
 def ensure_factory_tables() -> None:
     with _db_connection() as con:
         con.execute(_DDL_FACTORY_RUNS)
+        # 既存テーブルへの追加列（ゲート指標をポートフォリオDDへ是正）。
+        # 既存行は NULL のまま＝「最悪銘柄DDで判定した時代の記録」を意味する。
+        con.execute(
+            "ALTER TABLE factory_runs ADD COLUMN IF NOT EXISTS "
+            "portfolio_max_drawdown DOUBLE PRECISION"
+        )
+        con.execute(
+            "ALTER TABLE factory_runs ADD COLUMN IF NOT EXISTS "
+            "portfolio_sharpe_ratio DOUBLE PRECISION"
+        )
 
 
 def save_factory_run(
@@ -57,6 +69,8 @@ def save_factory_run(
     gate_passed: bool,
     gate_reasons: Optional[str] = None,
     report_path: Optional[str] = None,
+    portfolio_max_drawdown: Optional[float] = None,
+    portfolio_sharpe_ratio: Optional[float] = None,
 ) -> None:
     """評価済み仮説を factory_runs に保存する（同一ハッシュは置換）。"""
     ensure_factory_tables()
@@ -66,8 +80,9 @@ def save_factory_run(
             INSERT INTO factory_runs
                 (hypothesis_hash, market, spec_json, sharpe_ratio, win_rate, num_trades,
                  max_drawdown, total_return, dsr, pbo, gate_passed, gate_reasons,
-                 report_path, evaluated_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 report_path, evaluated_at, portfolio_max_drawdown,
+                 portfolio_sharpe_ratio)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (hypothesis_hash) DO UPDATE SET
                 market = EXCLUDED.market,
                 spec_json = EXCLUDED.spec_json,
@@ -81,7 +96,9 @@ def save_factory_run(
                 gate_passed = EXCLUDED.gate_passed,
                 gate_reasons = EXCLUDED.gate_reasons,
                 report_path = EXCLUDED.report_path,
-                evaluated_at = EXCLUDED.evaluated_at
+                evaluated_at = EXCLUDED.evaluated_at,
+                portfolio_max_drawdown = EXCLUDED.portfolio_max_drawdown,
+                portfolio_sharpe_ratio = EXCLUDED.portfolio_sharpe_ratio
             """,
             [
                 hypothesis_hash,
@@ -98,6 +115,8 @@ def save_factory_run(
                 gate_reasons,
                 report_path,
                 datetime.now(),
+                portfolio_max_drawdown,
+                portfolio_sharpe_ratio,
             ],
         )
     logger.debug(
@@ -117,6 +136,19 @@ def load_factory_hashes() -> set[str]:
     with _db_connection() as con:
         rows = con.execute("SELECT hypothesis_hash FROM factory_runs").fetchall()
     return {r[0] for r in rows}
+
+
+def load_factory_specs() -> list[tuple[str, str]]:
+    """評価済み仮説の (market, spec_json) を返す。
+
+    AND/OR の子の順序が違うだけの同一戦略は、保存されているハッシュが
+    正準形と一致しない。呼び出し側がスペックを正規化してハッシュを再計算し、
+    保存ハッシュとの和集合を重複排除に使うために生のスペックを返す。
+    """
+    ensure_factory_tables()
+    with _db_connection() as con:
+        rows = con.execute("SELECT market, spec_json FROM factory_runs").fetchall()
+    return [(r[0], r[1]) for r in rows]
 
 
 def count_factory_runs() -> int:

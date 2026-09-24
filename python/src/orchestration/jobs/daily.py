@@ -185,13 +185,16 @@ def run_daily_auto_order():
     """
     import os
 
+    from src.infrastructure.persistence.order_run_repository import PostgresOrderRunSink
+    from src.infrastructure.persistence.trade_diff_repository import PostgresTradeDiffSink
     from src.infrastructure.yfinance_market_data_adapter import YFinanceMarketDataAdapter
     from src.trading.brokers.paper.paper_broker import PaperBroker
     from src.trading.execution import run_daily_orders
-    from src.utils.db import upsert_paper_real_diff
 
     mode = os.environ.get("AUTO_TRADE_MODE", "paper")
     logger.info("=== 自動発注開始 (mode=%s) ===", mode)
+
+    trade_diff_sink = PostgresTradeDiffSink()
 
     if mode == "live":
         from src.trading.brokers.kabu.kabu_client import KabuBroker
@@ -202,11 +205,18 @@ def run_daily_auto_order():
         market_data = YFinanceMarketDataAdapter()
         broker = PaperBroker(
             market_data_port=market_data,
-            record_diff=upsert_paper_real_diff,
+            trade_diff_sink=trade_diff_sink,
         )
 
     try:
-        stats = run_daily_orders(broker=broker, market="jp", mode=mode, market_data=market_data)
+        stats = run_daily_orders(
+            broker=broker,
+            order_run_sink=PostgresOrderRunSink(),
+            trade_diff_sink=trade_diff_sink,
+            market="jp",
+            mode=mode,
+            market_data=market_data,
+        )
         logger.info(
             "=== 自動発注完了: 買い=%s 売り=%s ===", stats["buy_orders"], stats["sell_orders"]
         )
@@ -264,6 +274,7 @@ def run_horizon_exit_check() -> None:
     import os
     from datetime import date
 
+    from src.infrastructure.persistence.trade_diff_repository import PostgresTradeDiffSink
     from src.infrastructure.yfinance_market_data_adapter import YFinanceMarketDataAdapter
     from src.trading.brokers.base import OrderSide
     from src.trading.brokers.paper.paper_broker import PaperBroker
@@ -294,7 +305,10 @@ def run_horizon_exit_check() -> None:
         return
 
     logger.info("[horizon_exit] 期限切れポジション対象: %s", symbols_to_exit)
-    broker = PaperBroker(market_data_port=YFinanceMarketDataAdapter())
+    broker = PaperBroker(
+        market_data_port=YFinanceMarketDataAdapter(),
+        trade_diff_sink=PostgresTradeDiffSink(),
+    )
     exited: list[str] = []
     for symbol in symbols_to_exit:
         positions = broker.get_positions()
@@ -323,15 +337,15 @@ def run_daily_settle_orders():
         logger.info("live モードのため settle スキップ")
         return
 
+    from src.infrastructure.persistence.trade_diff_repository import PostgresTradeDiffSink
     from src.infrastructure.yfinance_market_data_adapter import YFinanceMarketDataAdapter
-    from src.prediction.db import upsert_paper_real_diff
     from src.trading.brokers.paper.paper_broker import PaperBroker
 
     logger.info("=== ペーパートレード約定処理開始 ===")
     try:
         broker = PaperBroker(
             market_data_port=YFinanceMarketDataAdapter(),
-            record_diff=upsert_paper_real_diff,
+            trade_diff_sink=PostgresTradeDiffSink(),
         )
         settled = broker.settle_pending_orders()
         logger.info("=== 約定処理完了: %s 件 ===", len(settled))
@@ -365,11 +379,15 @@ def run_daily_paper_trade_report():
 
     logger.info("=== ペーパートレード損益レポート送信開始 ===")
     try:
+        from src.infrastructure.persistence.trade_diff_repository import PostgresTradeDiffSink
         from src.infrastructure.yfinance_market_data_adapter import YFinanceMarketDataAdapter
         from src.reporting.discord.discord_utils import send_paper_trade_position_report
         from src.trading.brokers.paper.paper_broker import PaperBroker
 
-        broker = PaperBroker(market_data_port=YFinanceMarketDataAdapter())
+        broker = PaperBroker(
+            market_data_port=YFinanceMarketDataAdapter(),
+            trade_diff_sink=PostgresTradeDiffSink(),
+        )
         positions = broker.get_positions()
         summary = broker.get_pnl_summary()
         send_paper_trade_position_report(positions, summary)
@@ -392,10 +410,14 @@ def run_pre_close_alert() -> None:
 
     logger.info("=== 引け前ポジション再評価アラート開始 ===")
     try:
+        from src.infrastructure.persistence.trade_diff_repository import PostgresTradeDiffSink
         from src.infrastructure.yfinance_market_data_adapter import YFinanceMarketDataAdapter
         from src.trading.pre_close_alert_service import get_pre_close_alerts
 
-        lines = get_pre_close_alerts(market_data_port=YFinanceMarketDataAdapter())
+        lines = get_pre_close_alerts(
+            market_data_port=YFinanceMarketDataAdapter(),
+            trade_diff_sink=PostgresTradeDiffSink(),
+        )
         logger.info("引け前アラート評価完了: %d行", len(lines))
     except Exception as e:
         logger.error("引け前アラート評価失敗: %s", e, exc_info=True)
@@ -463,6 +485,7 @@ def run_daily_rule_signals() -> None:
     market = os.environ.get("RULE_EVAL_MARKET", "jp")
 
     try:
+        from src.infrastructure.persistence.trade_diff_repository import PostgresTradeDiffSink
         from src.infrastructure.yfinance_market_data_adapter import YFinanceMarketDataAdapter
         from src.rule_engine.pipeline import run_rule_signal_pipeline
         from src.trading.rule_execution import execute_rule_paper_trades
@@ -470,7 +493,10 @@ def run_daily_rule_signals() -> None:
         market_data_adapter = YFinanceMarketDataAdapter()
         signals = run_rule_signal_pipeline(market=market, market_data_port=market_data_adapter)
         trade_stats = execute_rule_paper_trades(
-            signals=signals, market=market, market_data_port=market_data_adapter
+            signals=signals,
+            market=market,
+            market_data_port=market_data_adapter,
+            trade_diff_sink=PostgresTradeDiffSink(),
         )
         logger.info(
             "=== 日次ルールシグナル完了: BUY=%s SELL=%s ===",

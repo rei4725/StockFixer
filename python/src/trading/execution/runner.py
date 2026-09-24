@@ -27,15 +27,17 @@ from src.domain.ports import (
     AlertLevel,
     MarketDataPort,
     NotificationPort,
+    OrderRunSink,
     PredictionResultRepository,
+    TradeDiffSink,
 )
 from src.domain.trading_rules import get_lot_size
+from src.domain.types import OrderRunSummary
 from src.trading.brokers.base import BrokerBase, BrokerError, OrderSide
 from src.trading.correlation_risk import evaluate_correlation_gate
 from src.trading.risk_manager import RiskManager
 from src.trading.signal_generator import apply_multi_horizon_score_column
 from src.trading.types import TradingGateStatus
-from src.utils.db import save_order_run_summary
 from src.utils.logger import get_logger
 
 from .params import (
@@ -63,6 +65,9 @@ logger = get_logger(__name__)
 
 def run_daily_orders(
     broker: BrokerBase,
+    *,
+    order_run_sink: OrderRunSink,
+    trade_diff_sink: TradeDiffSink,
     market: str = "jp",
     mode: str = "paper",
     market_data: MarketDataPort | None = None,
@@ -76,6 +81,7 @@ def run_daily_orders(
         broker: BrokerBase 実装（KabuBroker or PaperBroker）
         market: 対象マーケット（"jp" = 東証）
         mode: "paper" or "live"
+        trade_diff_sink: 約定乖離の記録先（TradeDiffSink 実装。合成ルートが必ず渡す）
 
     Returns:
         {"buy_orders": int, "sell_orders": int, "skipped": int, "errors": int}
@@ -189,7 +195,7 @@ def run_daily_orders(
     )
 
     # --- SL/TP チェック: 含み損益が閾値を超えたポジションを強制クローズ ---
-    sl_tp_triggered = _check_sl_tp_exits(broker, market, mode, market_data, stats)
+    sl_tp_triggered = _check_sl_tp_exits(broker, market, mode, market_data, stats, trade_diff_sink)
 
     # --- 決済シグナル: 保有株で売りシグナルが出ているものを先にクローズ ---
     # ML エグジットモデルが利用可能な場合、モデルのシグナルも売り判定に加える
@@ -255,6 +261,7 @@ def run_daily_orders(
                 broker=broker,
                 mode=mode,
                 order_session=order_session,
+                trade_diff_sink=trade_diff_sink,
             )
             logger.info(
                 f"[exec] 売り発注: {symbol} {qty}株 @ {order_type.name}({order_reason}) "
@@ -380,6 +387,7 @@ def run_daily_orders(
                 order_session=order_session,
                 split_ratio=split_ratio,
                 horizon=_determine_entry_horizon(row),
+                trade_diff_sink=trade_diff_sink,
             )
             logger.info(
                 f"[exec] 買い発注: {symbol} {qty}株 @ {order_type.name}({order_reason}) "
@@ -443,6 +451,7 @@ def run_daily_orders(
                     broker=broker,
                     mode=mode,
                     order_session=order_session,
+                    trade_diff_sink=trade_diff_sink,
                 )
                 logger.info(
                     f"[exec] SHORT_COVER発注: {symbol} {qty}株 @ {order_type.name}({order_reason}) "
@@ -549,6 +558,7 @@ def run_daily_orders(
                     order_session=order_session,
                     split_ratio=short_split_ratio,
                     horizon=_determine_entry_horizon(row),
+                    trade_diff_sink=trade_diff_sink,
                 )
                 logger.info(
                     f"[exec] ショート発注: {symbol} {qty}株 @ {order_type.name}({order_reason}) "
@@ -566,21 +576,23 @@ def run_daily_orders(
         f"ショート={stats['short_orders']} スキップ={stats['skipped']} エラー={stats['errors']} ==="
     )
     if mode == "live":
-        _sync_live_execution_diffs(broker)
+        _sync_live_execution_diffs(broker, trade_diff_sink)
     # 発注サマリーを保存（R-214）
     _run_id = str(uuid.uuid4())[:12]
     try:
-        save_order_run_summary(
-            run_id=_run_id,
-            market=market,
-            mode=mode,
-            buy_orders=stats["buy_orders"],
-            sell_orders=stats["sell_orders"],
-            short_orders=stats["short_orders"],
-            skipped=stats["skipped"],
-            skipped_min_change=stats["skipped_min_change"],
-            total_turnover=stats["total_turnover"],
-            min_change_ratio=MIN_CHANGE_RATIO,
+        order_run_sink.save(
+            OrderRunSummary(
+                run_id=_run_id,
+                market=market,
+                mode=mode,
+                buy_orders=stats["buy_orders"],
+                sell_orders=stats["sell_orders"],
+                short_orders=stats["short_orders"],
+                skipped=stats["skipped"],
+                skipped_min_change=stats["skipped_min_change"],
+                total_turnover=stats["total_turnover"],
+                min_change_ratio=MIN_CHANGE_RATIO,
+            )
         )
     except Exception:
         logger.error("[exec] order_run_summary 保存失敗", exc_info=True)

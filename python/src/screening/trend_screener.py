@@ -9,15 +9,14 @@ multibagger 候補を抽出・ランキングする。
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Optional
 
 import pandas as pd
 
-from src.screening.types import TrendCandidate
-from src.utils.data_path_utils import ensure_dir, get_results_dir
+from src.domain.types import TrendCandidate
 from src.utils.db.market_data import load_all_raw_ohlcv_symbols, load_raw_ohlcv
 from src.utils.logger import get_logger
+from src.utils.results_io import save_result_csvs
 
 logger = get_logger(__name__)
 
@@ -187,11 +186,7 @@ def screen_trend_candidates(
 
 def save_candidates(candidates: list[TrendCandidate], market: str) -> str:
     """候補リストを CSV に保存しパスを返す。"""
-    out_dir = ensure_dir(f"{get_results_dir()}/screening")
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    path = f"{out_dir}/trend_candidates_{market}_{timestamp}.csv"
-
     df = pd.DataFrame([c.__dict__ for c in candidates])
-    df.to_csv(path, index=False)
-    logger.info(f"候補を保存: {path}")
-    return path
+    return save_result_csvs({f"trend_candidates_{market}": df}, "screening")[
+        f"trend_candidates_{market}"
+    ]

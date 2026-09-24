@@ -3,7 +3,12 @@
 import logging
 
 from src.domain.ports import AlertLevel, NotificationPort
-from src.infrastructure.in_memory import InMemoryNotificationAdapter, NullNotificationAdapter
+from src.infrastructure.in_memory import (
+    InMemoryNotificationAdapter,
+    InMemoryOrderRunSink,
+    InMemoryTradeDiffSink,
+    NullNotificationAdapter,
+)
 from src.infrastructure.log_notification_adapter import LogNotificationAdapter
 
 # ---------------------------------------------------------------------------
@@ -116,7 +121,14 @@ class TestRunDailyOrdersNotifierDI:
 
         notifier = InMemoryNotificationAdapter()
 
-        stats = run_daily_orders(broker, market="jp", mode="paper", notifier=notifier)
+        stats = run_daily_orders(
+            broker,
+            order_run_sink=InMemoryOrderRunSink(),
+            trade_diff_sink=InMemoryTradeDiffSink(),
+            market="jp",
+            mode="paper",
+            notifier=notifier,
+        )
 
         assert len(notifier.sent_alerts) == 1
         assert notifier.sent_alerts[0]["level"] == AlertLevel.ERROR
@@ -132,7 +144,14 @@ class TestRunDailyOrdersNotifierDI:
         broker.broker_name = "paper"
         broker.get_token.side_effect = BrokerError("token error")
 
-        stats = run_daily_orders(broker, market="jp", mode="paper", notifier=None)
+        stats = run_daily_orders(
+            broker,
+            order_run_sink=InMemoryOrderRunSink(),
+            trade_diff_sink=InMemoryTradeDiffSink(),
+            market="jp",
+            mode="paper",
+            notifier=None,
+        )
 
         assert stats["buy_orders"] == 0
 
@@ -147,6 +166,13 @@ class TestRunDailyOrdersNotifierDI:
         broker.get_token.side_effect = BrokerError("token error")
 
         notifier = NullNotificationAdapter()
-        stats = run_daily_orders(broker, market="jp", mode="paper", notifier=notifier)
+        stats = run_daily_orders(
+            broker,
+            order_run_sink=InMemoryOrderRunSink(),
+            trade_diff_sink=InMemoryTradeDiffSink(),
+            market="jp",
+            mode="paper",
+            notifier=notifier,
+        )
 
         assert stats["buy_orders"] == 0

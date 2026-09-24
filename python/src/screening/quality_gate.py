@@ -15,7 +15,8 @@ from typing import Optional
 
 import pandas as pd
 
-from src.screening.types import MultibaggerCandidate, TrendCandidate
+from src.domain.types import TrendCandidate
+from src.screening.types import MultibaggerCandidate
 from src.utils.data_path_utils import ensure_dir, get_results_dir
 from src.utils.db.stock_fundamentals import load_fundamentals
 from src.utils.logger import get_logger

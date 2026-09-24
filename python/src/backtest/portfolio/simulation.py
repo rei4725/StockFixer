@@ -14,6 +14,7 @@ import pandas as pd
 
 from config.settings import MAX_SECTOR_POSITIONS
 from src.backtest.data_port import get_backtest_data_port
+from src.backtest.execution import ExecutionModel
 from src.utils.logger import get_logger
 from src.utils.regime_weights import get_regime_sector_weight
 from src.utils.sector_constraints import filter_by_sector_cap, get_symbol_sector
@@ -61,7 +62,7 @@ def _simulate_portfolio(
     rebalance_dates: list[Any],
     top_n: int,
     initial_cash: float,
-    fee_rate: float,
+    execution: ExecutionModel,
     max_sector_positions: int,
     use_sector_rotation: bool = False,
 ) -> tuple[pd.DataFrame, list[dict[str, Any]]]:
@@ -130,8 +131,7 @@ def _simulate_portfolio(
                 # 既存保有を全売却
                 for sym, pos in holdings.items():
                     if sym in prices_today.index:
-                        proceeds = pos["qty"] * prices_today[sym] * (1 - fee_rate)
-                        cash += proceeds
+                        cash += execution.sell_proceeds(pos["qty"], prices_today[sym])
 
                 holdings = {}
 
@@ -145,9 +145,9 @@ def _simulate_portfolio(
                     price = prices_today[sym]
                     if price <= 0:
                         continue
-                    qty = int(budget / (price * (1 + fee_rate)))
+                    qty = execution.max_affordable_qty(budget, price)
                     if qty > 0:
-                        cost = qty * price * (1 + fee_rate)
+                        cost = execution.buy_cost(qty, price)
                         cash -= cost
                         holdings[sym] = {"qty": qty, "price": price}
 
@@ -169,16 +169,16 @@ def _simulate_portfolio(
                 if valid_syms:
                     for sym, pos in eq_holdings.items():
                         if sym in prices_today.index:
-                            eq_cash += pos["qty"] * prices_today[sym] * (1 - fee_rate)
+                            eq_cash += execution.sell_proceeds(pos["qty"], prices_today[sym])
                     eq_holdings = {}
                     eq_per = eq_cash / len(valid_syms)
                     for sym in valid_syms:
                         price = prices_today[sym]
                         if price <= 0:
                             continue
-                        qty = int(eq_per / (price * (1 + fee_rate)))
+                        qty = execution.max_affordable_qty(eq_per, price)
                         if qty > 0:
-                            eq_cash -= qty * price * (1 + fee_rate)
+                            eq_cash -= execution.buy_cost(qty, price)
                             eq_holdings[sym] = {"qty": qty}
 
                 prev_symbols = new_symbols

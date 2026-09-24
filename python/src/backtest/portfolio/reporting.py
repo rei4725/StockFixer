@@ -11,6 +11,7 @@ from typing import Any, Optional
 import pandas as pd
 
 from src.utils.logger import get_logger
+from src.utils.results_io import save_result_csvs
 
 logger = get_logger(__name__)
 
@@ -24,18 +25,13 @@ def save_portfolio_results(
     rebalance_freq: str,
 ) -> str:
     """結果を CSV に保存する。保存先パスを返す。"""
-    from src.utils.data_path_utils import ensure_dir, get_results_dir
-
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_dir = f"{get_results_dir()}/backtest/portfolio"
-    ensure_dir(out_dir)
-
-    prefix = f"portfolio_{market or 'all'}_{rebalance_freq}_top{top_n}_{ts}"
-    equity_path = f"{out_dir}/{prefix}_equity.csv"
-    holdings_path = f"{out_dir}/{prefix}_holdings.csv"
-
-    equity_df.to_csv(equity_path, index=False)
-    holdings_df.to_csv(holdings_path, index=False)
+    stem = f"portfolio_{market or 'all'}_{rebalance_freq}_top{top_n}"
+    paths = save_result_csvs(
+        {f"{stem}_equity": equity_df, f"{stem}_holdings": holdings_df},
+        "backtest/portfolio",
+    )
+    equity_path = paths[f"{stem}_equity"]
+    holdings_path = paths[f"{stem}_holdings"]
 
     print(f"\nエクイティカーブ保存: {equity_path}")
     print(f"保有銘柄推移保存:     {holdings_path}")
