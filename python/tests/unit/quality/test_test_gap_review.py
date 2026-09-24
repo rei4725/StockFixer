@@ -1,25 +1,24 @@
 """ユニットテスト: テスト穴埋めボット（src/quality/test_gap_review.py）
 
-TextReviewPort はモックで差し替え、実 LLM 呼び出しは行わない。
-運用が cli でもテストは LLM_BACKEND="sdk" に固定し、ambient env 依存で
-実 claude CLI を起動しないようにする（#516 の教訓）。
+TextReviewPort は InMemoryTextReviewPort を注入し、実 LLM 呼び出しは行わない。
+factory を経由しないため、ambient な LLM_BACKEND で実 claude CLI が起動する
+余地も無い（#516 の教訓・#741）。
 """
 
 import json
 import os
 import tempfile
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
+from src.infrastructure.in_memory import InMemoryTextReviewPort
 from src.quality import test_gap_review
 from src.quality.types import CoverageTarget
 
 
-def _mock_port(suggestions):
-    """suggestions を構造化出力で返す TextReviewPort モックを返す。"""
-    port = MagicMock()
-    port.complete.return_value = json.dumps({"suggestions": suggestions})
-    return port
+def _port(suggestions):
+    """suggestions を構造化出力で返す InMemoryTextReviewPort を返す。"""
+    return InMemoryTextReviewPort([json.dumps({"suggestions": suggestions})])
 
 
 _SAMPLE = [
@@ -34,50 +33,43 @@ _SAMPLE = [
 _TARGETS = [CoverageTarget(path="src/foo/bar.py", percent_covered=50.0, missing_lines=[10, 11])]
 
 
-@patch("src.infrastructure.llm.factory.LLM_BACKEND", "sdk")
 @patch("src.quality.test_gap_review.TEST_GAP_ENABLED", True)
 @patch("src.quality.test_gap_review._gather_targets_context", return_value="ctx")
 @patch("src.quality.test_gap_review._select_targets", return_value=_TARGETS)
 @patch("src.quality.test_gap_review._load_coverage", return_value={"files": {}})
 class TestRunTestGap(unittest.TestCase):
-    @patch("src.infrastructure.llm.factory.get_text_review_port")
-    def test_dry_run_does_not_write(self, mock_get_port, *_):
-        mock_get_port.return_value = _mock_port(_SAMPLE)
+    def test_dry_run_does_not_write(self, *_):
         with patch("src.quality.test_gap_review._write_suggestion_report") as mock_write:
-            suggestions = test_gap_review.run_test_gap_review(dry_run=True)
+            suggestions = test_gap_review.run_test_gap_review(
+                review_port=_port(_SAMPLE), dry_run=True
+            )
         self.assertEqual(len(suggestions), 1)
         mock_write.assert_not_called()
 
-    @patch("src.infrastructure.llm.factory.get_text_review_port")
-    def test_writes_reports(self, mock_get_port, *_):
-        port = _mock_port(_SAMPLE)
-        mock_get_port.return_value = port
+    def test_writes_reports(self, *_):
+        port = _port(_SAMPLE)
         with patch("src.quality.test_gap_review._write_suggestion_report") as mock_write:
             mock_write.return_value = "path.json"
-            suggestions = test_gap_review.run_test_gap_review(dry_run=False)
+            suggestions = test_gap_review.run_test_gap_review(review_port=port, dry_run=False)
         self.assertEqual(len(suggestions), 1)
         mock_write.assert_called_once()
         # 構造化スキーマを要求していること
-        _, kwargs = port.complete.call_args
-        self.assertIsNotNone(kwargs.get("schema"))
+        self.assertEqual(port.calls[0]["schema"], test_gap_review._SUGGESTIONS_SCHEMA)
 
-    @patch("src.infrastructure.llm.factory.get_text_review_port")
-    def test_port_error_returns_empty(self, mock_get_port, *_):
-        port = MagicMock()
-        port.complete.side_effect = RuntimeError("CLI down")
-        mock_get_port.return_value = port
-        self.assertEqual(test_gap_review.run_test_gap_review(), [])
+    def test_port_error_returns_empty(self, *_):
+        port = InMemoryTextReviewPort(error=RuntimeError("CLI down"))
+        self.assertEqual(test_gap_review.run_test_gap_review(review_port=port), [])
 
-    @patch("src.infrastructure.llm.factory.get_text_review_port")
-    def test_no_suggestions_returns_empty(self, mock_get_port, *_):
-        mock_get_port.return_value = _mock_port([])
-        self.assertEqual(test_gap_review.run_test_gap_review(), [])
+    def test_no_suggestions_returns_empty(self, *_):
+        self.assertEqual(test_gap_review.run_test_gap_review(review_port=_port([])), [])
 
 
 @patch("src.quality.test_gap_review.TEST_GAP_ENABLED", False)
 class TestDisabled(unittest.TestCase):
     def test_disabled_returns_empty(self):
-        self.assertEqual(test_gap_review.run_test_gap_review(), [])
+        port = _port(_SAMPLE)
+        self.assertEqual(test_gap_review.run_test_gap_review(review_port=port), [])
+        self.assertEqual(port.calls, [])
 
 
 @patch("src.quality.test_gap_review.TEST_GAP_ENABLED", True)
@@ -85,11 +77,16 @@ class TestNoTargets(unittest.TestCase):
     @patch("src.quality.test_gap_review._load_coverage", return_value={"files": {}})
     def test_empty_coverage_returns_empty(self, _load):
         # 対象なし → port を呼ばず空リスト
-        self.assertEqual(test_gap_review.run_test_gap_review(), [])
+        port = _port(_SAMPLE)
+        self.assertEqual(test_gap_review.run_test_gap_review(review_port=port), [])
+        self.assertEqual(port.calls, [])
 
     def test_bad_coverage_path_returns_empty(self):
         self.assertEqual(
-            test_gap_review.run_test_gap_review(coverage_json="/no/such/coverage.json"), []
+            test_gap_review.run_test_gap_review(
+                review_port=_port(_SAMPLE), coverage_json="/no/such/coverage.json"
+            ),
+            [],
         )
 
 

@@ -26,6 +26,7 @@ from src.backtest.factory import (
     write_report,
 )
 from src.backtest.types import FactoryEvaluation, FactoryHypothesis
+from src.infrastructure.in_memory import InMemoryTextReviewPort
 from src.market_data.technical import add_technical_indicators
 
 _ATOMIC_SPEC = {
@@ -508,7 +509,10 @@ class TestRunFactoryBatch(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with patch("src.backtest.factory_report.get_results_dir", return_value=tmp):
                 result = run_factory_batch(
-                    market="jp", symbols=self._PASSING_SYMBOLS, **self._PASSING_BATCH_KWARGS
+                    market="jp",
+                    symbols=self._PASSING_SYMBOLS,
+                    review_port=InMemoryTextReviewPort(),
+                    **self._PASSING_BATCH_KWARGS,
                 )
 
                 self.assertEqual(len(result.candidates), self._PASSING_BATCH_KWARGS["budget"])
@@ -533,7 +537,13 @@ class TestRunFactoryBatch(unittest.TestCase):
         port.download.return_value = None
         mock_port.return_value = port
 
-        result = run_factory_batch(market="jp", symbols=["AAA"], budget=3, seed=1)
+        result = run_factory_batch(
+            market="jp",
+            symbols=["AAA"],
+            budget=3,
+            seed=1,
+            review_port=InMemoryTextReviewPort(),
+        )
 
         self.assertEqual(result.evaluated, [])
         mock_save.assert_not_called()
@@ -560,13 +570,19 @@ class TestRunFactoryBatch(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with patch("src.backtest.factory_report.get_results_dir", return_value=tmp):
                 result = run_factory_batch(
-                    market="jp", symbols=self._PASSING_SYMBOLS, **self._PASSING_BATCH_KWARGS
+                    market="jp",
+                    symbols=self._PASSING_SYMBOLS,
+                    review_port=InMemoryTextReviewPort(),
+                    **self._PASSING_BATCH_KWARGS,
                 )
 
         # 合格経路が実際に実行されていることを検証する（#628: result.passed が常に
         # 空だと call_count の 0 == 0 比較で自明に真になってしまっていた）
         self.assertGreater(len(result.passed), 0)
         self.assertEqual(mock_review.call_count, len(result.passed))
+        # 合成ルートが注入したポートがレビューへそのまま渡ること（#741）
+        for call in mock_review.call_args_list:
+            self.assertIsInstance(call.kwargs["review_port"], InMemoryTextReviewPort)
 
     @patch("src.backtest.factory.datetime")
     @patch("src.backtest.factory.FACTORY_CLAUDE_RULEGEN_ENABLED", False)
@@ -591,7 +607,10 @@ class TestRunFactoryBatch(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with patch("src.backtest.factory_report.get_results_dir", return_value=tmp):
                 result = run_factory_batch(
-                    market="jp", symbols=self._PASSING_SYMBOLS, **self._PASSING_BATCH_KWARGS
+                    market="jp",
+                    symbols=self._PASSING_SYMBOLS,
+                    review_port=InMemoryTextReviewPort(),
+                    **self._PASSING_BATCH_KWARGS,
                 )
 
             # 合格経路が実際に実行されていることを検証する（#628）。

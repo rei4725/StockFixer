@@ -4,7 +4,7 @@ Claude 週次レビュー講評生成モジュール
 週次の予測精度（ドリフト）と paper/real 乖離の指標を Claude に渡し、
 「今週の総評・懸念点・推奨アクション」を日本語で生成する。
 
-バックエンドは LLM_BACKEND で選択する（sdk=API 課金 / cli=サブスク認証）。
+LLM バックエンドは合成ルートが TextReviewPort として注入する（#741）。
 LLM_REVIEW_ENABLED=False（既定）または生成失敗時は None を返し、呼び出し元は
 講評なしで週次レポートを送信する（graceful degradation）。
 実弾の発注判断には一切関与しない（読み取り専用の講評のみ）。
@@ -15,6 +15,7 @@ from typing import Optional
 import pandas as pd
 
 from config.settings import LLM_REVIEW_ENABLED, LLM_REVIEW_MAX_TOKENS, LLM_REVIEW_MODEL
+from src.domain.ports import TextReviewPort
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -71,6 +72,8 @@ def generate_weekly_review(
     accuracy_df: Optional[pd.DataFrame],
     diff_summary: Optional[dict] = None,
     horizon: int = 1,
+    *,
+    review_port: TextReviewPort,
 ) -> Optional[str]:
     """週次指標から Claude の講評を生成する。
 
@@ -78,6 +81,7 @@ def generate_weekly_review(
         accuracy_df: load_drift_summary() の戻り値 DataFrame
         diff_summary: paper/real 乖離サマリー dict（AnalyticsQuery.paper_real_diff_summary() の戻り値・任意）
         horizon: 対象ホライズン
+        review_port: 講評を生成する LLM ポート（合成ルートが注入する）
 
     Returns:
         講評テキスト。無効・データなし・API 失敗時は None。
@@ -91,10 +95,7 @@ def generate_weekly_review(
     digest = _build_metrics_digest(accuracy_df, diff_summary, horizon)
 
     try:
-        from src.infrastructure.llm.factory import get_text_review_port  # noqa: PLC0415
-
-        port = get_text_review_port()
-        review = port.complete(
+        review = review_port.complete(
             system=_SYSTEM_PROMPT,
             user=digest,
             model=LLM_REVIEW_MODEL,

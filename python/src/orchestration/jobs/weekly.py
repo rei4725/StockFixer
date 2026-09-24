@@ -151,6 +151,7 @@ def run_weekly_report():
     try:
         from datetime import date, timedelta
 
+        from src.infrastructure.llm.factory import get_text_review_port
         from src.infrastructure.persistence.analytics_query import PostgresAnalyticsQuery
         from src.prediction.db import load_drift_summary, save_weekly_accuracy_snapshot
         from src.reporting.discord.discord_utils import send_weekly_report
@@ -165,7 +166,12 @@ def run_weekly_report():
 
         diff_summary = PostgresAnalyticsQuery().paper_real_diff_summary(recent_days=7)
         # Claude 講評（LLM_REVIEW_ENABLED=False の既定では None を返す・非致命的）
-        llm_review = generate_weekly_review(summary, diff_summary=diff_summary, horizon=1)
+        llm_review = generate_weekly_review(
+            summary,
+            diff_summary=diff_summary,
+            horizon=1,
+            review_port=get_text_review_port(),
+        )
         send_weekly_report(
             accuracy_df=summary, horizon=1, diff_summary=diff_summary, llm_review=llm_review
         )

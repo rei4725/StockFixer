@@ -1,28 +1,20 @@
 """ユニットテスト: バックテスト批判的レビュー（src/backtest/critical_review.py）
 
-anthropic クライアントは MagicMock で差し替え、API 呼び出しは行わない。
+LLM は InMemoryTextReviewPort を注入し、API 呼び出しは行わない。
 レポート書き込みは tmp ディレクトリへ向ける。
 """
 
 import json
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from src.backtest import critical_review
+from src.infrastructure.in_memory import InMemoryTextReviewPort
 
 
-def _mock_anthropic(findings):
-    """構造化出力 findings を返す anthropic モジュールモックを返す。"""
-    text_block = MagicMock()
-    text_block.type = "text"
-    text_block.text = json.dumps({"findings": findings})
-    response = MagicMock()
-    response.content = [text_block]
-    client = MagicMock()
-    client.messages.create.return_value = response
-    module = MagicMock()
-    module.Anthropic.return_value = client
-    return module, client
+def _port(findings):
+    """構造化出力 findings を返す InMemoryTextReviewPort を返す。"""
+    return InMemoryTextReviewPort([json.dumps({"findings": findings})])
 
 
 _SAMPLE = [
@@ -36,52 +28,44 @@ _SAMPLE = [
 ]
 
 
-# 環境変数 LLM_BACKEND に依存させず、anthropic モックが効く SDK 経路に固定する
-# （cli だと factory が実 claude CLI を起動してしまう）
-@patch("src.infrastructure.llm.factory.LLM_BACKEND", "sdk")
 class TestRunBacktestReview(unittest.TestCase):
     @patch("src.backtest.critical_review.BACKTEST_REVIEW_ENABLED", False)
     def test_disabled_returns_empty(self):
-        self.assertEqual(critical_review.run_backtest_review(), [])
+        port = _port(_SAMPLE)
+        self.assertEqual(critical_review.run_backtest_review(review_port=port), [])
+        self.assertEqual(port.calls, [])
 
     @patch("src.backtest.critical_review.BACKTEST_REVIEW_ENABLED", True)
     @patch("src.backtest.critical_review._gather_review_context", return_value="ctx")
     def test_dry_run_does_not_write(self, _ctx):
-        module, _client = _mock_anthropic(_SAMPLE)
-        with patch.dict("sys.modules", {"anthropic": module}):
-            with patch("src.backtest.critical_review._write_finding_report") as mock_write:
-                findings = critical_review.run_backtest_review(dry_run=True)
+        with patch("src.backtest.critical_review._write_finding_report") as mock_write:
+            findings = critical_review.run_backtest_review(review_port=_port(_SAMPLE), dry_run=True)
         self.assertEqual(len(findings), 1)
         mock_write.assert_not_called()
 
     @patch("src.backtest.critical_review.BACKTEST_REVIEW_ENABLED", True)
     @patch("src.backtest.critical_review._gather_review_context", return_value="ctx")
     def test_writes_reports(self, _ctx):
-        module, client = _mock_anthropic(_SAMPLE)
-        with patch.dict("sys.modules", {"anthropic": module}):
-            with patch("src.backtest.critical_review._write_finding_report") as mock_write:
-                mock_write.return_value = "path.json"
-                findings = critical_review.run_backtest_review(dry_run=False)
+        port = _port(_SAMPLE)
+        with patch("src.backtest.critical_review._write_finding_report") as mock_write:
+            mock_write.return_value = "path.json"
+            findings = critical_review.run_backtest_review(review_port=port, dry_run=False)
         self.assertEqual(len(findings), 1)
         mock_write.assert_called_once()
-        # 構造化出力（json_schema）を要求していること
-        _, kwargs = client.messages.create.call_args
-        self.assertIn("output_config", kwargs)
+        # 構造化出力（JSON Schema）を要求していること
+        self.assertEqual(port.calls[0]["schema"], critical_review._FINDINGS_SCHEMA)
+        self.assertEqual(port.calls[0]["user"], "ctx")
 
     @patch("src.backtest.critical_review.BACKTEST_REVIEW_ENABLED", True)
     @patch("src.backtest.critical_review._gather_review_context", return_value="ctx")
     def test_api_error_returns_empty(self, _ctx):
-        module = MagicMock()
-        module.Anthropic.side_effect = RuntimeError("API down")
-        with patch.dict("sys.modules", {"anthropic": module}):
-            self.assertEqual(critical_review.run_backtest_review(), [])
+        port = InMemoryTextReviewPort(error=RuntimeError("API down"))
+        self.assertEqual(critical_review.run_backtest_review(review_port=port), [])
 
     @patch("src.backtest.critical_review.BACKTEST_REVIEW_ENABLED", True)
     @patch("src.backtest.critical_review._gather_review_context", return_value="ctx")
     def test_no_findings_returns_empty(self, _ctx):
-        module, _client = _mock_anthropic([])
-        with patch.dict("sys.modules", {"anthropic": module}):
-            self.assertEqual(critical_review.run_backtest_review(), [])
+        self.assertEqual(critical_review.run_backtest_review(review_port=_port([])), [])
 
 
 class TestReportWriting(unittest.TestCase):

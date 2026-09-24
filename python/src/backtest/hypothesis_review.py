@@ -5,7 +5,7 @@
 過学習や偶然性のリスクを短く評価させる。人間の最終採否判断を補助するだけであり、
 ゲート判定（合格/不合格）には一切関与しない。
 
-バックエンドは LLM_BACKEND で選択する（sdk=API 課金 / cli=サブスク認証）。
+LLM バックエンドは合成ルートが TextReviewPort として注入する（#741）。
 FACTORY_HYPOTHESIS_REVIEW_ENABLED=False（既定）/生成・解析失敗時は None を返し、
 呼び出し元（factory.py）はレビューなしでレポートを書き出す（graceful degradation）。
 読み取り専用のレビューのみ（コード変更・発注判断には一切関与しない）。
@@ -24,6 +24,7 @@ from config.settings import (
     FACTORY_HYPOTHESIS_REVIEW_MODEL,
 )
 from src.backtest.types import FactoryEvaluation
+from src.domain.ports import TextReviewPort
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -86,7 +87,9 @@ def _build_review_context(evaluation: FactoryEvaluation, champion_sharpe: float)
 """
 
 
-def review_hypothesis(evaluation: FactoryEvaluation, champion_sharpe: float) -> Optional[dict]:
+def review_hypothesis(
+    evaluation: FactoryEvaluation, champion_sharpe: float, *, review_port: TextReviewPort
+) -> Optional[dict]:
     """仮説単位の批判的レビューを実行する。
 
     無効時・生成/解析失敗時は None を返す（呼び出し元はレビューなしでレポートを書き出す）。
@@ -94,12 +97,9 @@ def review_hypothesis(evaluation: FactoryEvaluation, champion_sharpe: float) -> 
     if not FACTORY_HYPOTHESIS_REVIEW_ENABLED:
         return None
 
-    from src.infrastructure.llm.factory import get_text_review_port  # noqa: PLC0415
-
     try:
         context = _build_review_context(evaluation, champion_sharpe)
-        port = get_text_review_port()
-        text = port.complete(
+        text = review_port.complete(
             system=_SYSTEM_PROMPT,
             user=context,
             model=FACTORY_HYPOTHESIS_REVIEW_MODEL,

@@ -184,6 +184,7 @@ def run_nightly_strategy_factory(
     result = None
     try:
         from src.backtest.factory import run_factory_batch
+        from src.infrastructure.llm.factory import get_text_review_port
         from src.watchlist.batch_runner import load_target_symbols
 
         tasks = load_target_symbols()
@@ -199,6 +200,7 @@ def run_nightly_strategy_factory(
             lookback_years=FACTORY_LOOKBACK_YEARS,
             n_windows=FACTORY_N_WINDOWS,
             seed=seed,
+            review_port=get_text_review_port(),
         )
         logger.info(
             "=== 戦略ファクトリー完了: 評価=%s 合格=%s ===",

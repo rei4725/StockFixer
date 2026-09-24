@@ -6,7 +6,7 @@ coverage の JSON レポートから低カバレッジ・未カバー行を抽�
 results/factory/reports/ に書き出す。IssueAgent の --factory-intake が
 GitHub Issue 草案として起票する（局所的・test 担保の auto-ok 適格な小粒を狙う）。
 
-バックエンドは LLM_BACKEND で選択する（sdk=API 課金 / cli=サブスク認証）。
+LLM バックエンドは合成ルートが TextReviewPort として注入する（#741）。
 運用既定は CLI（CLAUDE_CODE_OAUTH_TOKEN）で ANTHROPIC_API_KEY は不要。
 TEST_GAP_ENABLED=False（既定）/生成・解析失敗時は空リストを返し、何も
 書き込まない（graceful degradation）。
@@ -32,6 +32,7 @@ from config.settings import (
     TEST_GAP_MIN_COVERAGE,
     TEST_GAP_MODEL,
 )
+from src.domain.ports import TextReviewPort
 from src.quality.types import CoverageTarget
 from src.utils.data_path_utils import get_python_root, get_results_dir
 from src.utils.logger import get_logger
@@ -228,12 +229,9 @@ def _write_suggestion_report(suggestion: dict) -> Optional[str]:
     return path
 
 
-def _request_suggestions(context: str) -> list[dict]:
+def _request_suggestions(context: str, review_port: TextReviewPort) -> list[dict]:
     """Claude に構造化出力でテスト追加案を要求する。"""
-    from src.infrastructure.llm.factory import get_text_review_port  # noqa: PLC0415
-
-    port = get_text_review_port()
-    text = port.complete(
+    text = review_port.complete(
         system=_SYSTEM_PROMPT,
         user=context,
         model=TEST_GAP_MODEL,
@@ -245,10 +243,13 @@ def _request_suggestions(context: str) -> list[dict]:
     return suggestions if isinstance(suggestions, list) else []
 
 
-def run_test_gap_review(coverage_json: str = "coverage.json", dry_run: bool = False) -> list[dict]:
+def run_test_gap_review(
+    *, review_port: TextReviewPort, coverage_json: str = "coverage.json", dry_run: bool = False
+) -> list[dict]:
     """coverage の未カバー行を Claude でレビューし、テスト追加案を Issue 草案 JSON 化する。
 
     Args:
+        review_port: 提案を生成する LLM ポート（合成ルートが注入する）
         coverage_json: coverage JSON レポートのパス（既定 coverage.json）。
         dry_run: True なら JSON を書き込まず、得た提案のみ返す。
 
@@ -272,7 +273,7 @@ def run_test_gap_review(coverage_json: str = "coverage.json", dry_run: bool = Fa
 
     context = _gather_targets_context(targets)
     try:
-        suggestions = _request_suggestions(context)
+        suggestions = _request_suggestions(context, review_port)
     except Exception:
         logger.error("[test_gap] 提案生成でエラー", exc_info=True)
         return []

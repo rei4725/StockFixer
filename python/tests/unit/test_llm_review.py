@@ -1,13 +1,14 @@
 """ユニットテスト: Claude 週次レビュー講評生成（src/reporting/llm_review.py）
 
-anthropic クライアントは MagicMock で差し替え、API 呼び出しは行わない。
+LLM は InMemoryTextReviewPort を注入し、API 呼び出しは行わない。
 """
 
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pandas as pd
 
+from src.infrastructure.in_memory import InMemoryTextReviewPort
 from src.reporting import llm_review
 
 
@@ -44,65 +45,50 @@ def _make_diff_summary():
     }
 
 
-def _mock_anthropic(text="(1)総評 (2)懸念 (3)推奨"):
-    """anthropic.Anthropic を差し替えるモックを返す。"""
-    text_block = MagicMock()
-    text_block.type = "text"
-    text_block.text = text
-    response = MagicMock()
-    response.content = [text_block]
-    client = MagicMock()
-    client.messages.create.return_value = response
-    anthropic_module = MagicMock()
-    anthropic_module.Anthropic.return_value = client
-    return anthropic_module, client
-
-
-# 環境変数 LLM_BACKEND に依存させず、anthropic モックが効く SDK 経路に固定する
-# （cli だと factory が実 claude CLI を起動してしまう）
-@patch("src.infrastructure.llm.factory.LLM_BACKEND", "sdk")
 class TestGenerateWeeklyReview(unittest.TestCase):
     @patch("src.reporting.llm_review.LLM_REVIEW_ENABLED", False)
     def test_disabled_returns_none(self):
-        result = llm_review.generate_weekly_review(_make_accuracy_df())
+        port = InMemoryTextReviewPort(["unused"])
+        result = llm_review.generate_weekly_review(_make_accuracy_df(), review_port=port)
         self.assertIsNone(result)
+        self.assertEqual(port.calls, [])
 
     @patch("src.reporting.llm_review.LLM_REVIEW_ENABLED", True)
     def test_empty_df_returns_none(self):
-        result = llm_review.generate_weekly_review(pd.DataFrame())
+        port = InMemoryTextReviewPort(["unused"])
+        result = llm_review.generate_weekly_review(pd.DataFrame(), review_port=port)
         self.assertIsNone(result)
+        self.assertEqual(port.calls, [])
 
     @patch("src.reporting.llm_review.LLM_REVIEW_ENABLED", True)
     def test_none_df_returns_none(self):
-        result = llm_review.generate_weekly_review(None)
+        port = InMemoryTextReviewPort(["unused"])
+        result = llm_review.generate_weekly_review(None, review_port=port)
         self.assertIsNone(result)
+        self.assertEqual(port.calls, [])
 
     @patch("src.reporting.llm_review.LLM_REVIEW_ENABLED", True)
     def test_enabled_returns_review_text(self):
-        anthropic_module, client = _mock_anthropic("週次の総評テキスト")
-        with patch.dict("sys.modules", {"anthropic": anthropic_module}):
-            result = llm_review.generate_weekly_review(
-                _make_accuracy_df(), diff_summary=_make_diff_summary(), horizon=1
-            )
+        port = InMemoryTextReviewPort(["週次の総評テキスト"])
+        result = llm_review.generate_weekly_review(
+            _make_accuracy_df(), diff_summary=_make_diff_summary(), horizon=1, review_port=port
+        )
         self.assertEqual(result, "週次の総評テキスト")
         # モデル指定とプロンプト内容が渡っていること
-        _, kwargs = client.messages.create.call_args
-        self.assertIn("model", kwargs)
-        self.assertIn("7203", kwargs["messages"][0]["content"])
+        self.assertEqual(len(port.calls), 1)
+        self.assertEqual(port.calls[0]["model"], llm_review.LLM_REVIEW_MODEL)
+        self.assertIn("7203", port.calls[0]["user"])
 
     @patch("src.reporting.llm_review.LLM_REVIEW_ENABLED", True)
     def test_api_error_returns_none(self):
-        anthropic_module = MagicMock()
-        anthropic_module.Anthropic.side_effect = RuntimeError("API down")
-        with patch.dict("sys.modules", {"anthropic": anthropic_module}):
-            result = llm_review.generate_weekly_review(_make_accuracy_df())
+        port = InMemoryTextReviewPort(error=RuntimeError("API down"))
+        result = llm_review.generate_weekly_review(_make_accuracy_df(), review_port=port)
         self.assertIsNone(result)
 
     @patch("src.reporting.llm_review.LLM_REVIEW_ENABLED", True)
     def test_empty_response_returns_none(self):
-        anthropic_module, _ = _mock_anthropic(text="   ")
-        with patch.dict("sys.modules", {"anthropic": anthropic_module}):
-            result = llm_review.generate_weekly_review(_make_accuracy_df())
+        port = InMemoryTextReviewPort(["   "])
+        result = llm_review.generate_weekly_review(_make_accuracy_df(), review_port=port)
         self.assertIsNone(result)
 
     def test_build_metrics_digest_includes_key_figures(self):

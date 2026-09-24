@@ -54,6 +54,7 @@ from src.backtest.metrics import deflated_sharpe_ratio, probability_of_backtest_
 from src.backtest.rules import AndRule, OrRule, TradingRule
 from src.backtest.sandbox_executor import prepare_sandbox_data
 from src.backtest.types import FactoryBatchResult, FactoryEvaluation, FactoryHypothesis
+from src.domain.ports import TextReviewPort
 from src.utils.data_path_utils import get_ticker
 from src.utils.db import (
     count_factory_runs,
@@ -357,10 +358,13 @@ def run_factory_batch(
     lookback_years: int = 2,
     n_windows: int = 8,
     seed: Optional[int] = None,
+    *,
+    review_port: TextReviewPort,
 ) -> FactoryBatchResult:
     """夜間バッチ1回分: サンプリング → 評価 → ゲート → 記録 → レポート出力。
 
     symbols は呼び出し元（orchestration）が load_target_symbols() 等で注入する。
+    review_port（Claude 生成候補と仮説レビューが使う LLM ポート）も同様に注入する（#741）。
 
     本関数だけが batch_run_id を払い出し、レポートの産地情報として write_report に渡す（#703）。
     write_report を直接呼ぶ経路には batch_run_id が渡らないため provenance.source は
@@ -409,7 +413,11 @@ def run_factory_batch(
         shared_data_dir, windows_file = prepare_sandbox_data(data, windows)
         try:
             claude_evaluations = generate_claude_hypotheses(
-                market, pre_champion_sharpe, shared_data_dir, windows_file
+                market,
+                pre_champion_sharpe,
+                shared_data_dir,
+                windows_file,
+                review_port=review_port,
             )
             evaluations.extend(claude_evaluations)
         finally:
@@ -466,7 +474,7 @@ def run_factory_batch(
     # 記録 + レポート出力（候補のみ。逐次実行なので DuckDB 書き込み規約に適合）
     for evaluation in result_candidates(evaluations):
         if evaluation.gate_passed:
-            review = review_hypothesis(evaluation, champion_sharpe)
+            review = review_hypothesis(evaluation, champion_sharpe, review_port=review_port)
             evaluation.report_path = write_report(
                 evaluation,
                 champion_sharpe,

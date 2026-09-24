@@ -17,6 +17,7 @@ IssueAgent の --factory-intake が GitHub Issue 草案として起票する。
 import argparse
 
 from src.backtest.critical_review import run_backtest_review
+from src.infrastructure.llm.factory import get_text_review_port
 
 
 def main() -> None:
@@ -28,7 +29,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    findings = run_backtest_review(dry_run=args.dry_run)
+    findings = run_backtest_review(review_port=get_text_review_port(), dry_run=args.dry_run)
 
     if not findings:
         print("発見事項なし（または無効/失敗）。")

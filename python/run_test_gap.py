@@ -20,6 +20,7 @@ IssueAgent の --factory-intake が GitHub Issue 草案として起票する。
 
 import argparse
 
+from src.infrastructure.llm.factory import get_text_review_port
 from src.quality.test_gap_review import run_test_gap_review
 
 
@@ -37,7 +38,11 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    suggestions = run_test_gap_review(coverage_json=args.coverage_json, dry_run=args.dry_run)
+    suggestions = run_test_gap_review(
+        review_port=get_text_review_port(),
+        coverage_json=args.coverage_json,
+        dry_run=args.dry_run,
+    )
 
     if not suggestions:
         print("提案なし（または無効/対象なし/失敗）。")

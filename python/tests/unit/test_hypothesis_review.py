@@ -1,14 +1,15 @@
 """ユニットテスト: 仮説単位の批判的レビュー（src/backtest/hypothesis_review.py）
 
-anthropic クライアントは MagicMock で差し替え、API 呼び出しは行わない。
+LLM は InMemoryTextReviewPort を注入し、API 呼び出しは行わない。
 """
 
 import json
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from src.backtest import hypothesis_review
 from src.backtest.types import FactoryEvaluation, FactoryHypothesis
+from src.infrastructure.in_memory import InMemoryTextReviewPort
 
 _SPEC = {"type": "atomic", "rule": "ema_momentum", "params": {"fast_window": 8, "slow_window": 21}}
 
@@ -30,17 +31,8 @@ def _make_evaluation(**kwargs):
     return FactoryEvaluation(**defaults)
 
 
-def _mock_anthropic(review: dict):
-    text_block = MagicMock()
-    text_block.type = "text"
-    text_block.text = json.dumps(review)
-    response = MagicMock()
-    response.content = [text_block]
-    client = MagicMock()
-    client.messages.create.return_value = response
-    module = MagicMock()
-    module.Anthropic.return_value = client
-    return module, client
+def _port(review: dict) -> InMemoryTextReviewPort:
+    return InMemoryTextReviewPort([json.dumps(review)])
 
 
 _SAMPLE_REVIEW = {
@@ -50,46 +42,47 @@ _SAMPLE_REVIEW = {
 }
 
 
-# 環境変数 LLM_BACKEND に依存させず、anthropic モックが効く SDK 経路に固定する
-@patch("src.infrastructure.llm.factory.LLM_BACKEND", "sdk")
 class TestReviewHypothesis(unittest.TestCase):
     @patch("src.backtest.hypothesis_review.FACTORY_HYPOTHESIS_REVIEW_ENABLED", False)
     def test_disabled_returns_none(self):
         ev = _make_evaluation()
-        self.assertIsNone(hypothesis_review.review_hypothesis(ev, champion_sharpe=1.0))
+        port = _port(_SAMPLE_REVIEW)
+        self.assertIsNone(
+            hypothesis_review.review_hypothesis(ev, champion_sharpe=1.0, review_port=port)
+        )
+        self.assertEqual(port.calls, [])
 
     @patch("src.backtest.hypothesis_review.FACTORY_HYPOTHESIS_REVIEW_ENABLED", True)
     def test_enabled_returns_parsed_review(self):
         ev = _make_evaluation()
-        module, client = _mock_anthropic(_SAMPLE_REVIEW)
-        with patch.dict("sys.modules", {"anthropic": module}):
-            result = hypothesis_review.review_hypothesis(ev, champion_sharpe=1.0)
+        port = _port(_SAMPLE_REVIEW)
+        result = hypothesis_review.review_hypothesis(ev, champion_sharpe=1.0, review_port=port)
         self.assertEqual(result, _SAMPLE_REVIEW)
         # 構造化出力を要求していること
-        _, kwargs = client.messages.create.call_args
-        self.assertIn("output_config", kwargs)
+        self.assertEqual(port.calls[0]["schema"], hypothesis_review._REVIEW_SCHEMA)
 
     @patch("src.backtest.hypothesis_review.FACTORY_HYPOTHESIS_REVIEW_ENABLED", True)
     def test_api_error_returns_none(self):
         ev = _make_evaluation()
-        module = MagicMock()
-        module.Anthropic.side_effect = RuntimeError("API down")
-        with patch.dict("sys.modules", {"anthropic": module}):
-            self.assertIsNone(hypothesis_review.review_hypothesis(ev, champion_sharpe=1.0))
+        port = InMemoryTextReviewPort(error=RuntimeError("API down"))
+        self.assertIsNone(
+            hypothesis_review.review_hypothesis(ev, champion_sharpe=1.0, review_port=port)
+        )
 
     @patch("src.backtest.hypothesis_review.FACTORY_HYPOTHESIS_REVIEW_ENABLED", True)
     def test_malformed_schema_returns_none(self):
         ev = _make_evaluation()
-        module, _client = _mock_anthropic({"unexpected": "shape"})
-        with patch.dict("sys.modules", {"anthropic": module}):
-            self.assertIsNone(hypothesis_review.review_hypothesis(ev, champion_sharpe=1.0))
+        port = _port({"unexpected": "shape"})
+        self.assertIsNone(
+            hypothesis_review.review_hypothesis(ev, champion_sharpe=1.0, review_port=port)
+        )
 
     @patch("src.backtest.hypothesis_review.FACTORY_HYPOTHESIS_REVIEW_ENABLED", True)
     def test_champion_nan_does_not_raise(self):
         ev = _make_evaluation()
-        module, _client = _mock_anthropic(_SAMPLE_REVIEW)
-        with patch.dict("sys.modules", {"anthropic": module}):
-            result = hypothesis_review.review_hypothesis(ev, champion_sharpe=float("nan"))
+        result = hypothesis_review.review_hypothesis(
+            ev, champion_sharpe=float("nan"), review_port=_port(_SAMPLE_REVIEW)
+        )
         self.assertEqual(result, _SAMPLE_REVIEW)
 
 
