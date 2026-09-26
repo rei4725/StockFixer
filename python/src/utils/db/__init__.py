@@ -99,24 +99,15 @@ class _DbPackageProxy(types.ModuleType):
     # _connection モジュールへ転送する属性名
     _FORWARDED = frozenset(["_tables_initialized", "get_database_url"])
 
-    # prediction.db から遅延ロードする関数名
+    # prediction.db から遅延ロードする関数名。
+    # 束③（prediction_results）の越境消費者（reporting/query_service.py と
+    # trading/pre_close_alert_service.py）が残っているものだけ。PredictionResultRepository の
+    # アダプタへ移したら空にし、このプロキシごと撤去する。追加してはならない。
     _PREDICTION_DB = frozenset(
         [
-            "load_drift_summary",
-            "load_excluded_features",
-            "load_feature_exclusion_candidates",
             "load_latest_prediction_timestamp",
-            "load_model_weights",
-            "load_prediction_accuracy",
             "load_prediction_markets",
             "load_prediction_results",
-            "load_weekly_accuracy_snapshots",
-            "save_feature_selection",
-            "save_model_metrics",
-            "save_prediction_accuracy",
-            "save_prediction_results",
-            "save_shap_values",
-            "save_weekly_accuracy_snapshot",
         ]
     )
 

@@ -21,7 +21,7 @@ from tabulate import tabulate  # type: ignore[import-untyped]
 
 from src.domain.ports import AnalyticsQuery
 from src.reporting.monthly import run_monthly_report
-from src.utils.db import db_connection, load_drift_summary, load_experiment_runs
+from src.utils.db import db_connection, load_experiment_runs
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -64,7 +64,7 @@ def _section_monthly_kpi(analytics: AnalyticsQuery) -> Optional[list[list]]:
     ]
 
 
-def _section_drift(drift_n: int) -> tuple[list[list], int]:
+def _section_drift(analytics: AnalyticsQuery, drift_n: int) -> tuple[list[list], int]:
     """
     ドリフト超過銘柄の行リストと超過件数を返す。
 
@@ -73,7 +73,7 @@ def _section_drift(drift_n: int) -> tuple[list[list], int]:
         rows: tabulate 用の行リスト
         exceeded_count: 閾値超過銘柄数
     """
-    df = load_drift_summary(horizon=1, recent_n=drift_n)
+    df = analytics.drift_summary(horizon=1, recent_n=drift_n)
     if df is None or df.empty:
         return [], 0
 
@@ -213,7 +213,7 @@ def run_dashboard(
     Args:
         recent_days: paper/real 乖離・月次 KPI の集計期間（日）
         drift_n: ドリフト判定に使う直近サンプル数（銘柄ごと）
-        analytics: paper/real 乖離サマリーの読み取りポート
+        analytics: paper/real 乖離・予測精度・ドリフトの読み取りポート
     """
     print("=" * 60)
     print("  StockFixer 運用監視ダッシュボード")
@@ -242,7 +242,7 @@ def run_dashboard(
         f" または direction_accuracy <= {_DRIFT_ACCURACY_THRESHOLD}"
     )
     try:
-        rows, count = _section_drift(drift_n)
+        rows, count = _section_drift(analytics, drift_n)
         if count == 0:
             print("  閾値超過なし")
         else:

@@ -6,8 +6,10 @@ Phase 4a で生まれた失敗様式への対処。DI 後は「呼び出しが�
 """
 
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from src.infrastructure.in_memory import InMemoryAnalyticsQuery
 from src.infrastructure.persistence.analytics_query import PostgresAnalyticsQuery
 from src.infrastructure.persistence.order_run_repository import PostgresOrderRunSink
 from src.infrastructure.persistence.trade_diff_repository import PostgresTradeDiffSink
@@ -401,11 +403,7 @@ class TestRunWeeklyReportCompositionRoot(unittest.TestCase):
         with patch(
             "src.infrastructure.persistence.analytics_query.PostgresAnalyticsQuery",
             return_value=fake_query_instance,
-        ) as mock_cls, patch(
-            "src.prediction.db.load_drift_summary", return_value=MagicMock()
-        ), patch(
-            "src.prediction.db.save_weekly_accuracy_snapshot"
-        ), patch(
+        ) as mock_cls, patch("src.prediction.db.save_weekly_accuracy_snapshot"), patch(
             "src.reporting.discord.discord_utils.send_weekly_report",
             side_effect=_fake_send_weekly_report,
         ), patch(
@@ -422,6 +420,55 @@ class TestRunWeeklyReportCompositionRoot(unittest.TestCase):
         mock_cls.assert_called_once_with()
         fake_query_instance.paper_real_diff_summary.assert_called_once_with(recent_days=7)
         self.assertIs(captured.get("diff_summary"), sentinel_diff_summary)
+
+    def test_run_weekly_report_reads_snapshots_after_saving_this_week(self):
+        """前週比較用スナップショットは今週分を保存した後に読み、そのまま渡すこと。
+
+        以前は send_weekly_report が自分で読んでいたため、保存→読み取りの順序は
+        呼び出し順から暗黙に保証されていた。入口へ押し上げた今は入口が保証する。
+        """
+        from src.orchestration.jobs import weekly
+
+        order: list[str] = []
+        drift_df = MagicMock(name="drift_df")
+        snapshots_df = MagicMock(name="snapshots_df")
+        fake_query = MagicMock()
+        fake_query.drift_summary.return_value = drift_df
+        fake_query.paper_real_diff_summary.return_value = {"tracked_count": 0}
+
+        def _snapshots(**kwargs):
+            order.append("load_snapshots")
+            return snapshots_df
+
+        fake_query.weekly_accuracy_snapshots.side_effect = _snapshots
+        captured: dict = {}
+
+        with patch(
+            "src.infrastructure.persistence.analytics_query.PostgresAnalyticsQuery",
+            return_value=fake_query,
+        ), patch(
+            "src.prediction.db.save_weekly_accuracy_snapshot",
+            side_effect=lambda *a, **k: order.append("save_snapshot"),
+        ) as mock_save, patch(
+            "src.reporting.discord.discord_utils.send_weekly_report",
+            side_effect=lambda **kwargs: captured.update(kwargs),
+        ), patch(
+            "src.reporting.llm_review.generate_weekly_review", return_value=None
+        ), patch(
+            "src.prediction.db.load_top_prediction_misses", return_value=MagicMock()
+        ), patch(
+            "src.prediction.miss_analysis.run_miss_analysis_batch", return_value=[]
+        ), patch(
+            "src.reporting.discord.discord_utils.send_miss_analysis_summary"
+        ):
+            weekly.run_weekly_report()
+
+        self.assertEqual(order, ["save_snapshot", "load_snapshots"])
+        fake_query.drift_summary.assert_called_once_with(horizon=1)
+        fake_query.weekly_accuracy_snapshots.assert_called_once_with(n_weeks=4)
+        self.assertIs(mock_save.call_args.args[1], drift_df)
+        self.assertIs(captured.get("accuracy_df"), drift_df)
+        self.assertIs(captured.get("snapshots_df"), snapshots_df)
 
 
 class TestExternalV1MonthlyReportCompositionRoot(unittest.TestCase):
@@ -458,10 +505,38 @@ class TestExternalV1MonthlyReportCompositionRoot(unittest.TestCase):
 
 
 class TestDiscordBotMonthlyReportCompositionRoot(unittest.TestCase):
-    def test_handle_monthlyreport_command_injects_postgres_analytics_query(self):
+    def test_wire_ports_registers_postgres_analytics_query(self):
+        """Bot の 2 つの入口（run_discord_bot / run_scheduler --with-bot）が呼ぶ
+        wire_ports() が、Bot の使う AnalyticsQuery として Postgres 実装を注入すること。
+        """
+        from src.orchestration import port_wiring
+        from src.reporting import ports as reporting_ports
+
+        saved_wired = port_wiring._wired
+        try:
+            reporting_ports._analytics_query = None
+            port_wiring.wire_ports(force=True)
+            self.assertIsInstance(reporting_ports.get_analytics_query(), PostgresAnalyticsQuery)
+        finally:
+            port_wiring._wired = saved_wired
+
+    def test_bot_entrypoints_call_wire_ports(self):
+        """Bot を起動する合成ルートが wire_ports() を呼んでいること（未注入なら
+        /monthlyreport が RuntimeError でしか失敗を知らせないため、ここで固定する）。
+        """
+        root = Path(__file__).resolve().parents[2]
+        for name in ("run_discord_bot.py", "run_scheduler.py"):
+            with self.subTest(entrypoint=name):
+                self.assertIn("wire_ports()", (root / name).read_text(encoding="utf-8"))
+
+    def test_handle_monthlyreport_command_uses_injected_analytics_query(self):
         import asyncio
 
         from src.reporting.discord.discord_bot import handle_monthlyreport_command
+        from src.reporting.ports import set_analytics_query
+
+        sentinel = InMemoryAnalyticsQuery()
+        set_analytics_query(sentinel)
 
         captured: dict = {}
 
@@ -494,7 +569,7 @@ class TestDiscordBotMonthlyReportCompositionRoot(unittest.TestCase):
         ):
             asyncio.run(handle_monthlyreport_command(message))
 
-        self.assertIsInstance(captured.get("analytics"), PostgresAnalyticsQuery)
+        self.assertIs(captured.get("analytics"), sentinel)
 
 
 if __name__ == "__main__":
@@ -515,8 +590,6 @@ class TestTextReviewPortCompositionRoots(unittest.TestCase):
         with patch(
             "src.infrastructure.llm.factory.get_text_review_port", return_value=sentinel_port
         ), patch("src.infrastructure.persistence.analytics_query.PostgresAnalyticsQuery"), patch(
-            "src.prediction.db.load_drift_summary", return_value=MagicMock()
-        ), patch(
             "src.prediction.db.save_weekly_accuracy_snapshot"
         ), patch(
             "src.reporting.discord.discord_utils.send_weekly_report"

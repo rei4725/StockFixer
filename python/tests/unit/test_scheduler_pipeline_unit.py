@@ -391,11 +391,11 @@ class TestRunWeeklyReport(unittest.TestCase):
 
     @patch("src.reporting.discord.discord_utils.send_weekly_report")
     @patch("src.infrastructure.persistence.analytics_query.PostgresAnalyticsQuery")
-    @patch("src.prediction.db.load_drift_summary")
-    def test_calls_send_weekly_report(self, mock_drift, mock_analytics_cls, mock_send):
+    @patch("src.prediction.db.save_weekly_accuracy_snapshot")
+    def test_calls_send_weekly_report(self, _mock_save, mock_analytics_cls, mock_send):
         from src.orchestration.scheduler import run_weekly_report
 
-        mock_drift.return_value = pd.DataFrame(
+        mock_analytics_cls.return_value.drift_summary.return_value = pd.DataFrame(
             [
                 {
                     "market": "jp",
@@ -421,12 +421,13 @@ class TestRunWeeklyReport(unittest.TestCase):
 
     @patch("src.reporting.discord.discord_utils.send_weekly_report")
     @patch("src.infrastructure.persistence.analytics_query.PostgresAnalyticsQuery")
-    @patch("src.prediction.db.load_drift_summary")
-    def test_exception_does_not_propagate(self, mock_drift, mock_analytics_cls, mock_send):
+    def test_exception_does_not_propagate(self, mock_analytics_cls, mock_send):
         from src.orchestration.scheduler import run_weekly_report
 
-        mock_drift.side_effect = Exception("DB エラー")
+        mock_analytics_cls.return_value.drift_summary.side_effect = Exception("DB エラー")
         run_weekly_report()  # 例外が外に出ないこと
+        mock_analytics_cls.return_value.drift_summary.assert_called_once()
+        mock_send.assert_not_called()
 
 
 class TestRunDailySettle(unittest.TestCase):

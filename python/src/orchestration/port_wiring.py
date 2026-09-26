@@ -1,8 +1,8 @@
 """
 ポート合成ルート（composition root）
 
-BC（backtest / prediction）が定義するアクセスポート（market_data / screening）に、
-具体アダプタ（market_data BC / screening BC 側の実装）を注入する。
+BC（backtest / prediction / reporting）が定義するアクセスポートに、
+具体アダプタ（market_data BC / screening BC / infrastructure 側の実装）を注入する。
 
 レイヤー規約上、`market_data` / `screening` を import してよいのは上位レイヤー
 （orchestration / api）のみ。各 BC は自身の ports.py / data_port.py /
@@ -23,7 +23,7 @@ _wired = False
 
 
 def wire_ports(force: bool = False) -> None:
-    """BC ポートにデフォルトのアダプタ（market_data / screening）を注入する（冪等）。
+    """BC ポートにデフォルトのアダプタ（market_data / screening / analytics）を注入する（冪等）。
 
     Args:
         force: True のとき、既に注入済みでも再注入する（テスト用途）。
@@ -34,13 +34,19 @@ def wire_ports(force: bool = False) -> None:
 
     from src.backtest.data_port import set_backtest_data_port
     from src.backtest.screening_port import set_backtest_screening_port
+    from src.infrastructure.persistence.analytics_query import PostgresAnalyticsQuery
     from src.market_data.backtest_adapter import BacktestMarketDataAdapter
     from src.market_data.prediction_adapter import PredictionMarketDataAdapter
     from src.prediction.ports import set_market_data_port
+    from src.reporting.ports import set_analytics_query
     from src.screening.backtest_adapter import BacktestScreeningAdapter
 
     set_backtest_data_port(BacktestMarketDataAdapter())
     set_market_data_port(PredictionMarketDataAdapter())
     set_backtest_screening_port(BacktestScreeningAdapter())
+    # PostgresAnalyticsQuery はコンストラクタで DB に触れない（接続は各メソッド呼び出し時）
+    set_analytics_query(PostgresAnalyticsQuery())
     _wired = True
-    logger.debug("ポート注入完了: BacktestDataPort / MarketDataPort / BacktestScreeningPort")
+    logger.debug(
+        "ポート注入完了: BacktestDataPort / MarketDataPort / BacktestScreeningPort / AnalyticsQuery"
+    )

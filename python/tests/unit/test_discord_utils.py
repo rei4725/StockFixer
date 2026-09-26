@@ -562,7 +562,12 @@ class TestSendWeeklyReport(unittest.TestCase):
             "max_abs_price_diff": 7.0,
         }
 
-        result = send_weekly_report(accuracy_df=accuracy_df, horizon=1, diff_summary=diff_summary)
+        result = send_weekly_report(
+            accuracy_df=accuracy_df,
+            horizon=1,
+            diff_summary=diff_summary,
+            snapshots_df=pd.DataFrame(),
+        )
 
         self.assertTrue(result)
         sent_text = "\n".join(call.args[0] for call in mock_send.call_args_list)
@@ -871,20 +876,59 @@ class TestSendWeeklyReportExtra(unittest.TestCase):
                 "n_samples": [20],
             }
         )
-        # diff_summary を明示的に渡して DB アクセスを回避
         diff_summary = {"tracked_count": 0, "comparable_count": 0}
-        result = send_weekly_report(accuracy_df=accuracy_df, diff_summary=diff_summary)
+        result = send_weekly_report(
+            accuracy_df=accuracy_df, diff_summary=diff_summary, snapshots_df=pd.DataFrame()
+        )
         self.assertTrue(result)
         mock_send.assert_called()
 
-    @patch("src.prediction.db.load_drift_summary")
-    def test_returns_false_when_accuracy_df_none_and_db_empty(self, mock_load):
-        """accuracy_df=None かつ DB が空の場合は False が返ること"""
+    @patch("src.reporting.discord.webhook_sender.send_webhook_text", return_value=True)
+    def test_returns_false_without_reading_db_when_accuracy_df_none(self, mock_send):
+        """accuracy_df=None なら DB へ読み直しに行かず、送信せずに False を返すこと"""
         from src.reporting.discord.discord_utils import send_weekly_report
 
-        mock_load.return_value = pd.DataFrame()
-        result = send_weekly_report(accuracy_df=None, diff_summary={"tracked_count": 0})
+        with patch("src.prediction.db.accuracy.load_drift_summary") as mock_load:
+            result = send_weekly_report(
+                accuracy_df=None, diff_summary={"tracked_count": 0}, snapshots_df=pd.DataFrame()
+            )
         self.assertFalse(result)
+        mock_load.assert_not_called()
+        mock_send.assert_not_called()
+
+    @patch("src.reporting.discord.webhook_sender.send_webhook_text", return_value=True)
+    def test_week_over_week_uses_given_snapshots(self, mock_send):
+        """前週比較は引数で受け取ったスナップショットの 2 番目に新しい週と行う"""
+        from src.reporting.discord.discord_utils import send_weekly_report
+
+        accuracy_df = pd.DataFrame(
+            {
+                "market": ["jp"],
+                "symbol": ["7203"],
+                "direction_accuracy": [0.70],
+                "mean_abs_error": [0.012],
+                "n_samples": [20],
+            }
+        )
+        snapshots_df = pd.DataFrame(
+            {
+                "week_start": ["2026-09-21", "2026-09-14"],
+                "market": ["jp", "jp"],
+                "symbol": ["7203", "7203"],
+                "direction_accuracy": [0.70, 0.50],
+                "mean_abs_error": [0.012, 0.02],
+                "n_samples": [20, 20],
+            }
+        )
+        result = send_weekly_report(
+            accuracy_df=accuracy_df,
+            diff_summary={"tracked_count": 0},
+            snapshots_df=snapshots_df,
+        )
+        self.assertTrue(result)
+        sent_text = "\n".join(call.args[0] for call in mock_send.call_args_list)
+        self.assertIn("比較週: 2026-09-14", sent_text)
+        self.assertIn("50.0% → 70.0%", sent_text)
 
 
 class TestSendFeatureSuggestionNotification(unittest.TestCase):

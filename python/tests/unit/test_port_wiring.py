@@ -36,5 +36,29 @@ class TestWirePorts(unittest.TestCase):
         self.assertIsNot(sp.get_backtest_screening_port(), first)
 
 
+class TestAnalyticsQueryInjectionPoint(unittest.TestCase):
+    def setUp(self):
+        from src.reporting import ports as reporting_ports
+
+        self._ports = reporting_ports
+        self._saved = reporting_ports._analytics_query
+
+    def tearDown(self):
+        self._ports._analytics_query = self._saved
+
+    def test_raises_when_not_injected(self):
+        self._ports._analytics_query = None
+        with self.assertRaises(RuntimeError) as ctx:
+            self._ports.get_analytics_query()
+        self.assertIn("wire_ports", str(ctx.exception))
+
+    def test_returns_injected_query(self):
+        from src.infrastructure.in_memory import InMemoryAnalyticsQuery
+
+        query = InMemoryAnalyticsQuery()
+        self._ports.set_analytics_query(query)
+        self.assertIs(self._ports.get_analytics_query(), query)
+
+
 if __name__ == "__main__":
     unittest.main()

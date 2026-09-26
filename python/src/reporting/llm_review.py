@@ -78,7 +78,7 @@ def generate_weekly_review(
     """週次指標から Claude の講評を生成する。
 
     Args:
-        accuracy_df: load_drift_summary() の戻り値 DataFrame
+        accuracy_df: AnalyticsQuery.drift_summary() の戻り値 DataFrame
         diff_summary: paper/real 乖離サマリー dict（AnalyticsQuery.paper_real_diff_summary() の戻り値・任意）
         horizon: 対象ホライズン
         review_port: 講評を生成する LLM ポート（合成ルートが注入する）
