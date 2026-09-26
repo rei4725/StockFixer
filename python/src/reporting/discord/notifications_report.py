@@ -29,6 +29,7 @@ def send_weekly_report(
     horizon: int = 1,
     *,
     diff_summary: dict,
+    snapshots_df,
     llm_review: Optional[str] = None,
 ) -> bool:
     """
@@ -39,20 +40,17 @@ def send_weekly_report(
     全体 Hit Rate が連続 N 週低下していた場合はアラートも送る。
 
     Args:
-        accuracy_df: load_drift_summary() の戻り値 DataFrame
+        accuracy_df: AnalyticsQuery.drift_summary() の戻り値 DataFrame（空・None なら送信しない）
         horizon: 対象ホライズン
         diff_summary: paper/real 乖離サマリー（入口が AnalyticsQuery から取得して渡す）
+        snapshots_df: AnalyticsQuery.weekly_accuracy_snapshots(n_weeks=4) の戻り値。
+            前週比較に使うため、入口は今週分のスナップショットを保存した後に取得すること
         llm_review: Claude が生成した講評テキスト（None の場合は講評節を省略）
 
     Returns:
         成功時 True、失敗時 False
     """
     import pandas as pd
-
-    from src.utils.db import load_drift_summary, load_weekly_accuracy_snapshots
-
-    if accuracy_df is None or (isinstance(accuracy_df, pd.DataFrame) and accuracy_df.empty):
-        accuracy_df = load_drift_summary(horizon=horizon)
 
     if accuracy_df is None or (isinstance(accuracy_df, pd.DataFrame) and accuracy_df.empty):
         logger.info("週次レポート: 精度データなし")
@@ -79,12 +77,11 @@ def send_weekly_report(
     lines.append(f"\n**全体平均正解率**: {mean_acc:.1%} ({len(accuracy_df)}銘柄)")
 
     # 前週比較（週次スナップショットが 2 週分以上あれば）
-    snapshots = load_weekly_accuracy_snapshots(n_weeks=4)
-    if not snapshots.empty:
-        weeks = sorted(snapshots["week_start"].unique(), reverse=True)
+    if not snapshots_df.empty:
+        weeks = sorted(snapshots_df["week_start"].unique(), reverse=True)
         if len(weeks) >= 2:
             prev_week = weeks[1]
-            prev_df = snapshots[snapshots["week_start"] == prev_week][
+            prev_df = snapshots_df[snapshots_df["week_start"] == prev_week][
                 ["market", "symbol", "direction_accuracy"]
             ].rename(columns={"direction_accuracy": "prev_accuracy"})
 
@@ -118,7 +115,9 @@ def send_weekly_report(
         # 全体 Hit Rate の週次トレンドで連続低下を検出（N=3 週）
         _ALERT_CONSECUTIVE_DECLINE_WEEKS = 3
         weekly_mean = (
-            snapshots.groupby("week_start")["direction_accuracy"].mean().sort_index(ascending=False)
+            snapshots_df.groupby("week_start")["direction_accuracy"]
+            .mean()
+            .sort_index(ascending=False)
         )
         if len(weekly_mean) >= _ALERT_CONSECUTIVE_DECLINE_WEEKS:
             recent = weekly_mean.iloc[:_ALERT_CONSECUTIVE_DECLINE_WEEKS].tolist()

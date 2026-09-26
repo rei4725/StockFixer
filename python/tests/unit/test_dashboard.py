@@ -66,53 +66,60 @@ class TestSectionMonthlyKpi(unittest.TestCase):
 
 
 class TestSectionDrift(unittest.TestCase):
-    @patch("src.reporting.dashboard.load_drift_summary")
-    def test_returns_empty_when_no_data(self, mock_load):
-        mock_load.return_value = pd.DataFrame()
-        rows, count = _section_drift(20)
+    def test_returns_empty_when_no_data(self):
+        analytics = InMemoryAnalyticsQuery(drift=pd.DataFrame())
+        rows, count = _section_drift(analytics, 20)
         self.assertEqual(rows, [])
         self.assertEqual(count, 0)
 
-    @patch("src.reporting.dashboard.load_drift_summary")
-    def test_returns_exceeded_symbols(self, mock_load):
-        mock_load.return_value = pd.DataFrame(
-            [
-                {
-                    "market": "jp",
-                    "symbol": "7203",
-                    "mean_abs_error": 0.05,
-                    "direction_accuracy": 0.40,
-                    "n_samples": 20,
-                },
-                {
-                    "market": "jp",
-                    "symbol": "9984",
-                    "mean_abs_error": 0.01,
-                    "direction_accuracy": 0.60,
-                    "n_samples": 20,
-                },
-            ]
+    def test_queries_drift_with_given_window(self):
+        """drift_n がそのまま recent_n として問い合わせに渡ること。"""
+        analytics = InMemoryAnalyticsQuery()
+        _section_drift(analytics, 20)
+        self.assertEqual(analytics.calls, [("drift_summary", {"horizon": 1, "recent_n": 20})])
+
+    def test_returns_exceeded_symbols(self):
+        analytics = InMemoryAnalyticsQuery(
+            drift=pd.DataFrame(
+                [
+                    {
+                        "market": "jp",
+                        "symbol": "7203",
+                        "mean_abs_error": 0.05,
+                        "direction_accuracy": 0.40,
+                        "n_samples": 20,
+                    },
+                    {
+                        "market": "jp",
+                        "symbol": "9984",
+                        "mean_abs_error": 0.01,
+                        "direction_accuracy": 0.60,
+                        "n_samples": 20,
+                    },
+                ]
+            )
         )
-        rows, count = _section_drift(20)
+        rows, count = _section_drift(analytics, 20)
         # 7203 のみ閾値超過（mean_abs_error>=0.02 かつ direction_accuracy<=0.45）
         self.assertEqual(count, 1)
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0][1], "7203")
 
-    @patch("src.reporting.dashboard.load_drift_summary")
-    def test_no_exceeded_symbols(self, mock_load):
-        mock_load.return_value = pd.DataFrame(
-            [
-                {
-                    "market": "us",
-                    "symbol": "AAPL",
-                    "mean_abs_error": 0.005,
-                    "direction_accuracy": 0.70,
-                    "n_samples": 20,
-                }
-            ]
+    def test_no_exceeded_symbols(self):
+        analytics = InMemoryAnalyticsQuery(
+            drift=pd.DataFrame(
+                [
+                    {
+                        "market": "us",
+                        "symbol": "AAPL",
+                        "mean_abs_error": 0.005,
+                        "direction_accuracy": 0.70,
+                        "n_samples": 20,
+                    }
+                ]
+            )
         )
-        rows, count = _section_drift(20)
+        rows, count = _section_drift(analytics, 20)
         self.assertEqual(count, 0)
         self.assertEqual(rows, [])
 

@@ -89,7 +89,7 @@ def send_drift_alert(summary_df, horizon: int = 1, threshold: float = 0.45) -> b
     方向正解率が threshold 以下の銘柄が存在する場合にのみ送信する。
 
     Args:
-        summary_df: load_drift_summary() の戻り値 (DataFrame)
+        summary_df: AnalyticsQuery.drift_summary() の戻り値 (DataFrame)
         horizon: 対象ホライズン（メッセージ表示用）
         threshold: 警告する方向正解率の閾値（デフォルト 0.45 = 45%）
 
@@ -123,7 +123,7 @@ def send_accuracy_summary(summary_df, horizon: int = 1) -> bool:
     予測精度サマリー（方向正解率・MAE）を Discord Webhook に送信する。
 
     Args:
-        summary_df: load_drift_summary() の戻り値 (DataFrame)
+        summary_df: AnalyticsQuery.drift_summary() の戻り値 (DataFrame)
         horizon: 対象ホライズン（メッセージ表示用）
 
     Returns:

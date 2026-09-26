@@ -106,16 +106,13 @@ class TestSendWeeklyReportLlmSection(unittest.TestCase):
         mock_send.return_value = True
         from src.reporting.discord.notifications_report import send_weekly_report
 
-        with patch(
-            "src.utils.db.load_weekly_accuracy_snapshots",
-            return_value=pd.DataFrame(),
-        ):
-            send_weekly_report(
-                accuracy_df=_make_accuracy_df(),
-                horizon=1,
-                diff_summary={"tracked_count": 0},
-                llm_review="これはClaude講評です",
-            )
+        send_weekly_report(
+            accuracy_df=_make_accuracy_df(),
+            horizon=1,
+            diff_summary={"tracked_count": 0},
+            snapshots_df=pd.DataFrame(),
+            llm_review="これはClaude講評です",
+        )
 
         sent_text = mock_send.call_args[0][0]
         self.assertIn("🧠 Claude 講評", sent_text)
@@ -126,16 +123,13 @@ class TestSendWeeklyReportLlmSection(unittest.TestCase):
         mock_send.return_value = True
         from src.reporting.discord.notifications_report import send_weekly_report
 
-        with patch(
-            "src.utils.db.load_weekly_accuracy_snapshots",
-            return_value=pd.DataFrame(),
-        ):
-            send_weekly_report(
-                accuracy_df=_make_accuracy_df(),
-                horizon=1,
-                diff_summary={"tracked_count": 0},
-                llm_review=None,
-            )
+        send_weekly_report(
+            accuracy_df=_make_accuracy_df(),
+            horizon=1,
+            diff_summary={"tracked_count": 0},
+            snapshots_df=pd.DataFrame(),
+            llm_review=None,
+        )
 
         sent_text = mock_send.call_args[0][0]
         self.assertNotIn("Claude 講評", sent_text)

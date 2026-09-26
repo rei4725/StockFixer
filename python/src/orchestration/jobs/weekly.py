@@ -153,18 +153,21 @@ def run_weekly_report():
 
         from src.infrastructure.llm.factory import get_text_review_port
         from src.infrastructure.persistence.analytics_query import PostgresAnalyticsQuery
-        from src.prediction.db import load_drift_summary, save_weekly_accuracy_snapshot
+        from src.prediction.db import save_weekly_accuracy_snapshot
         from src.reporting.discord.discord_utils import send_weekly_report
         from src.reporting.llm_review import generate_weekly_review
 
-        summary = load_drift_summary(horizon=1)
+        analytics = PostgresAnalyticsQuery()
+        summary = analytics.drift_summary(horizon=1)
 
         # 今週月曜日を week_start として週次スナップショットを保存
         today = date.today()
         week_start = (today - timedelta(days=today.weekday())).isoformat()
         save_weekly_accuracy_snapshot(week_start, summary)
+        # 前週比較は今週分を含むスナップショットで行うため、保存の後に読む
+        snapshots = analytics.weekly_accuracy_snapshots(n_weeks=4)
 
-        diff_summary = PostgresAnalyticsQuery().paper_real_diff_summary(recent_days=7)
+        diff_summary = analytics.paper_real_diff_summary(recent_days=7)
         # Claude 講評（LLM_REVIEW_ENABLED=False の既定では None を返す・非致命的）
         llm_review = generate_weekly_review(
             summary,
@@ -173,7 +176,11 @@ def run_weekly_report():
             review_port=get_text_review_port(),
         )
         send_weekly_report(
-            accuracy_df=summary, horizon=1, diff_summary=diff_summary, llm_review=llm_review
+            accuracy_df=summary,
+            horizon=1,
+            diff_summary=diff_summary,
+            snapshots_df=snapshots,
+            llm_review=llm_review,
         )
         logger.info("=== 週次レポート送信完了 ===")
     except Exception as e:

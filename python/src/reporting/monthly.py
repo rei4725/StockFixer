@@ -6,7 +6,7 @@
 
 データソース:
     - Net Return / Sharpe / Max Drawdown : 最新の Walk-Forward レポート CSV
-    - Hit Rate / Avg Slippage / Drift    : prediction.kpi_service 経由
+    - Hit Rate / Avg Slippage / Drift    : AnalyticsQuery から取得し kpi.py で集約
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from typing import Any, Callable, Optional
 import pandas as pd
 
 from src.domain.ports import AnalyticsQuery
-from src.reporting.kpi import _REPORT_DAYS, get_monthly_kpis
+from src.reporting.kpi import _REPORT_DAYS, MonthlyKPI, get_monthly_kpis
 from src.reporting.types import MonthlyReportSummary
 from src.utils.data_path_utils import get_results_dir
 from src.utils.logger import get_logger
@@ -55,6 +55,24 @@ def _mean_metric(df: pd.DataFrame, col: str) -> Optional[float]:
     return float(val) if not pd.isna(val) else None
 
 
+def _load_monthly_kpis(analytics: AnalyticsQuery) -> MonthlyKPI:
+    """AnalyticsQuery から補助 KPI の材料を取得し、kpi.get_monthly_kpis で集約する。
+
+    diff_summary の取得失敗だけは握りつぶして None（＝データなし）として扱う。
+    精度・ドリフトの取得失敗は従来どおり呼び出し元へ伝播させる。
+    """
+    try:
+        diff_summary = analytics.paper_real_diff_summary(recent_days=_REPORT_DAYS)
+    except Exception as e:
+        logger.error(f"diff_summary 取得失敗: {e}", exc_info=True)
+        diff_summary = None
+    return get_monthly_kpis(
+        diff_summary=diff_summary,
+        accuracy_df=analytics.prediction_accuracy(horizon=1, limit=5000),
+        drift_df=analytics.drift_summary(horizon=1, recent_n=_REPORT_DAYS),
+    )
+
+
 # ---------------------------------------------------------------------------
 # パブリック API
 # ---------------------------------------------------------------------------
@@ -70,7 +88,7 @@ def run_monthly_report(
 
     Args:
         target_month: 対象年月 "YYYY-MM"（省略時は当月）
-        analytics: paper/real 乖離サマリーの読み取りポート
+        analytics: paper/real 乖離・予測精度・ドリフトの読み取りポート
 
     Returns:
         MonthlyReportSummary
@@ -94,12 +112,7 @@ def run_monthly_report(
         symbol_count = len(wf_df)
 
     # ---- 補助KPI ----
-    try:
-        diff_summary = analytics.paper_real_diff_summary(recent_days=_REPORT_DAYS)
-    except Exception as e:
-        logger.error(f"diff_summary 取得失敗: {e}", exc_info=True)
-        diff_summary = None
-    kpi = get_monthly_kpis(diff_summary=diff_summary)
+    kpi = _load_monthly_kpis(analytics)
     hit_rate = kpi.hit_rate
     avg_slippage = kpi.avg_slippage
 
@@ -136,7 +149,7 @@ def save_monthly_report_to_file(
     Args:
         summary: run_monthly_report() が返す MonthlyReportSummary
         drift_checker: 週次 Hit Rate ドリフト検査を実行するコールバック（省略可）
-        analytics: paper/real 乖離サマリーの読み取りポート
+        analytics: paper/real 乖離・予測精度・ドリフトの読み取りポート
 
     Returns:
         保存先ファイルパス
@@ -152,12 +165,7 @@ def save_monthly_report_to_file(
         return f"{val:.2f}" if val is not None else "N/A"
 
     # paper/real 乖離サマリー・ドリフト集計
-    try:
-        _diff_summary = analytics.paper_real_diff_summary(recent_days=_REPORT_DAYS)
-    except Exception as e:
-        logger.error(f"diff_summary 取得失敗: {e}", exc_info=True)
-        _diff_summary = None
-    _kpi = get_monthly_kpis(diff_summary=_diff_summary)
+    _kpi = _load_monthly_kpis(analytics)
     diff = _kpi.diff_summary
     drift_count = _kpi.drift_count
 
