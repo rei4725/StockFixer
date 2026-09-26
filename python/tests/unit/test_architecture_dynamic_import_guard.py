@@ -5,8 +5,8 @@ importlib.import_module("src....") は文字列ベースであるため import-l
 実際に src/utils/db/__init__.py がこの手段で src.prediction.db を参照し、
 utils(最下層) -> prediction(BC) の層逆転を隠していた。
 
-GRANDFATHERED_DYNAMIC_IMPORTS は解消途中の既知違反のみを列挙する ratchet である。
-項目を増やしてはならない。空になった時点でこの定数ごと削除してよい。
+既知違反を許容する ratchet（GRANDFATHERED_DYNAMIC_IMPORTS）は、プロキシ撤去で
+空になったため撤去した。例外を再導入してはならない。
 """
 
 import re
@@ -14,13 +14,6 @@ import unittest
 from pathlib import Path
 
 _SRC_ROOT = Path(__file__).resolve().parents[2] / "src"
-
-# Phase 4b (PR-5) でプロキシ撤去とともに空になる予定。項目を追加しないこと。
-GRANDFATHERED_DYNAMIC_IMPORTS = frozenset(
-    {
-        "utils/db/__init__.py",
-    }
-)
 
 _PATTERN = re.compile(r"""import_module\(\s*["']src[.\"']""")
 
@@ -37,11 +30,8 @@ class TestNoDynamicSelfImport(unittest.TestCase):
         """src/ 配下で importlib.import_module("src...") を新規に使っていないこと。"""
         offenders = []
         for path in _iter_python_files():
-            rel = path.relative_to(_SRC_ROOT).as_posix()
-            if rel in GRANDFATHERED_DYNAMIC_IMPORTS:
-                continue
             if _PATTERN.search(path.read_text(encoding="utf-8")):
-                offenders.append(rel)
+                offenders.append(path.relative_to(_SRC_ROOT).as_posix())
 
         self.assertEqual(
             offenders,
@@ -49,19 +39,4 @@ class TestNoDynamicSelfImport(unittest.TestCase):
             "src/ 配下で src.* の動的 import を検出した。"
             "レイヤー契約を迂回するため、静的 import かポート注入に置き換えること: "
             f"{offenders}",
-        )
-
-    def test_grandfathered_entries_still_violate(self):
-        """許容リストの項目が実際にまだ違反していること（解消後の削除漏れ検出）。"""
-        stale = []
-        for rel in sorted(GRANDFATHERED_DYNAMIC_IMPORTS):
-            path = _SRC_ROOT / rel
-            if not path.exists() or not _PATTERN.search(path.read_text(encoding="utf-8")):
-                stale.append(rel)
-
-        self.assertEqual(
-            stale,
-            [],
-            "許容リストに、もう違反していない項目が残っている。"
-            f"GRANDFATHERED_DYNAMIC_IMPORTS から削除すること: {stale}",
         )

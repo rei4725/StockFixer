@@ -48,10 +48,9 @@ layers =
 [importlinter:contract:independence]
 name = BC independence (BCs must not import each other)
 type = independence
-# utils.db が prediction.db を再輸出している間接依存は Phase 4（2026-09-22 設計書）で解消中。
-# 解消完了までは indirect check を無効化して direct import のみ検証する。
-# allow_indirect_imports の削除は Phase 4b (PR-5) の完了条件。
-allow_indirect_imports = True
+# 間接依存（A -> 非 BC モジュール -> B）も検査する。かつて utils.db が prediction.db を
+# importlib で再輸出していたため allow_indirect_imports = True で無効化していたが、
+# Phase 4c（2026-09-22 設計書）でプロキシを撤去し有効化した。
 modules =
     src.backtest
     src.prediction
