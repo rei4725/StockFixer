@@ -1,8 +1,18 @@
-"""reporting 向けの読み取り専用クエリのアダプタ。"""
+"""reporting 向けの読み取り専用クエリのアダプタ。
+
+paper_real_diff は trading が書き reporting だけが読むため、SQL をここに持つ。
+予測精度系（prediction_accuracy / accuracy_weekly_snapshots）は prediction BC 自身も
+promotion_gate / shadow_evaluation / drift_monitor で読み書きする所有テーブルであるため、
+SQL は src.prediction.db に残し、ここでは委譲するだけに留める（SQL を二重化しない）。
+"""
 
 from datetime import datetime, timedelta
+from typing import Optional
+
+import pandas as pd
 
 from src.domain.ports import AnalyticsQuery
+from src.prediction.db import accuracy as _accuracy
 from src.utils.db import db_connection
 
 
@@ -44,3 +54,20 @@ class PostgresAnalyticsQuery(AnalyticsQuery):
             "avg_abs_diff_ratio": float(row[5] or 0.0),
             "max_abs_price_diff": float(row[6] or 0.0),
         }
+
+    def drift_summary(self, horizon: int = 1, recent_n: int = 30) -> pd.DataFrame:
+        return _accuracy.load_drift_summary(horizon=horizon, recent_n=recent_n)
+
+    def prediction_accuracy(
+        self,
+        market: Optional[str] = None,
+        symbol: Optional[str] = None,
+        horizon: int = 1,
+        limit: int = 500,
+    ) -> pd.DataFrame:
+        return _accuracy.load_prediction_accuracy(
+            market=market, symbol=symbol, horizon=horizon, limit=limit
+        )
+
+    def weekly_accuracy_snapshots(self, n_weeks: int = 4) -> pd.DataFrame:
+        return _accuracy.load_weekly_accuracy_snapshots(n_weeks=n_weeks)

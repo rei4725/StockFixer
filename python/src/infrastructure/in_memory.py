@@ -231,13 +231,50 @@ class InMemoryAnalyticsQuery(AnalyticsQuery):
         "max_abs_price_diff": 0.0,
     }
 
-    def __init__(self, paper_real_diff: Optional[dict] = None) -> None:
+    def __init__(
+        self,
+        paper_real_diff: Optional[dict] = None,
+        drift: Optional[pd.DataFrame] = None,
+        accuracy: Optional[pd.DataFrame] = None,
+        weekly_snapshots: Optional[pd.DataFrame] = None,
+    ) -> None:
         self._paper_real_diff = (
             paper_real_diff if paper_real_diff is not None else dict(self._EMPTY_PAPER_REAL_DIFF)
         )
+        self._drift = drift if drift is not None else pd.DataFrame()
+        self._accuracy = accuracy if accuracy is not None else pd.DataFrame()
+        self._weekly_snapshots = (
+            weekly_snapshots if weekly_snapshots is not None else pd.DataFrame()
+        )
+        # 呼ばれたメソッド名と引数を順に残す（入口が正しい引数で問い合わせたかの検証用）
+        self.calls: list[tuple[str, dict[str, Any]]] = []
 
     def paper_real_diff_summary(self, recent_days: int = 7) -> dict:
+        self.calls.append(("paper_real_diff_summary", {"recent_days": recent_days}))
         return self._paper_real_diff
+
+    def drift_summary(self, horizon: int = 1, recent_n: int = 30) -> pd.DataFrame:
+        self.calls.append(("drift_summary", {"horizon": horizon, "recent_n": recent_n}))
+        return self._drift.copy()
+
+    def prediction_accuracy(
+        self,
+        market: Optional[str] = None,
+        symbol: Optional[str] = None,
+        horizon: int = 1,
+        limit: int = 500,
+    ) -> pd.DataFrame:
+        self.calls.append(
+            (
+                "prediction_accuracy",
+                {"market": market, "symbol": symbol, "horizon": horizon, "limit": limit},
+            )
+        )
+        return self._accuracy.copy()
+
+    def weekly_accuracy_snapshots(self, n_weeks: int = 4) -> pd.DataFrame:
+        self.calls.append(("weekly_accuracy_snapshots", {"n_weeks": n_weeks}))
+        return self._weekly_snapshots.copy()
 
 
 class InMemoryTextReviewPort(TextReviewPort):

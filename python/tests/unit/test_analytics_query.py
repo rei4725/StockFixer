@@ -4,6 +4,8 @@ import unittest
 from contextlib import contextmanager
 from unittest.mock import patch
 
+import pandas as pd
+
 from src.domain.ports import AnalyticsQuery
 from src.infrastructure.in_memory import InMemoryAnalyticsQuery
 from src.infrastructure.persistence.analytics_query import PostgresAnalyticsQuery
@@ -105,6 +107,52 @@ class TestPostgresAnalyticsQuery(unittest.TestCase):
         self.assertIn("FROM paper_real_diff", sql)
         self.assertIn("FILTER", sql)
         self.assertEqual(len(params), 1)
+
+
+class TestPostgresAnalyticsQueryAccuracyDelegation(unittest.TestCase):
+    """予測精度系 3 メソッドは prediction BC 所有の SQL へ引数をそのまま委譲する。"""
+
+    _MOD = "src.prediction.db.accuracy"
+
+    def test_drift_summary_delegates(self):
+        sentinel = pd.DataFrame({"x": [1]})
+        with patch(f"{self._MOD}.load_drift_summary", return_value=sentinel) as mock_load:
+            result = PostgresAnalyticsQuery().drift_summary(horizon=3, recent_n=20)
+        mock_load.assert_called_once_with(horizon=3, recent_n=20)
+        self.assertIs(result, sentinel)
+
+    def test_prediction_accuracy_delegates(self):
+        sentinel = pd.DataFrame({"x": [1]})
+        with patch(f"{self._MOD}.load_prediction_accuracy", return_value=sentinel) as mock_load:
+            result = PostgresAnalyticsQuery().prediction_accuracy(
+                market="jp", symbol="7203", horizon=5, limit=10
+            )
+        mock_load.assert_called_once_with(market="jp", symbol="7203", horizon=5, limit=10)
+        self.assertIs(result, sentinel)
+
+    def test_weekly_accuracy_snapshots_delegates(self):
+        sentinel = pd.DataFrame({"x": [1]})
+        with patch(
+            f"{self._MOD}.load_weekly_accuracy_snapshots", return_value=sentinel
+        ) as mock_load:
+            result = PostgresAnalyticsQuery().weekly_accuracy_snapshots(n_weeks=8)
+        mock_load.assert_called_once_with(n_weeks=8)
+        self.assertIs(result, sentinel)
+
+
+class TestInMemoryAnalyticsQueryAccuracy(unittest.TestCase):
+    def test_defaults_to_empty_frames(self):
+        q = InMemoryAnalyticsQuery()
+        self.assertTrue(q.drift_summary().empty)
+        self.assertTrue(q.prediction_accuracy().empty)
+        self.assertTrue(q.weekly_accuracy_snapshots().empty)
+
+    def test_returns_copy_of_seeded_frame(self):
+        """呼び出し側が返り値を書き換えても仕込んだ値は汚れない。"""
+        seeded = pd.DataFrame({"direction_match": [True]})
+        q = InMemoryAnalyticsQuery(accuracy=seeded)
+        q.prediction_accuracy()["direction_match"] = False
+        self.assertTrue(q.prediction_accuracy()["direction_match"].iloc[0])
 
 
 if __name__ == "__main__":

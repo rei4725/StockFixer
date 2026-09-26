@@ -106,12 +106,32 @@ class AnalyticsQuery(ABC):
     （run_*.py / orchestration / Discord Bot / api）がこのポートを構築して渡す。
 
     メソッド数が 10 を超えた場合はファサード化の兆候とみなし、設計を見直すこと。
-    Phase 4c で drift_summary / prediction_accuracy / weekly_accuracy_snapshots が加わる。
     """
 
     @abstractmethod
     def paper_real_diff_summary(self, recent_days: int = 7) -> dict:
         """直近期間の paper / real 乖離サマリーを返す"""
+
+    @abstractmethod
+    def drift_summary(self, horizon: int = 1, recent_n: int = 30) -> pd.DataFrame:
+        """銘柄ごとに直近 recent_n 件の方向正解率・平均誤差を返す。
+
+        列: market, symbol, direction_accuracy, mean_abs_error, n_samples
+        """
+
+    @abstractmethod
+    def prediction_accuracy(
+        self,
+        market: Optional[str] = None,
+        symbol: Optional[str] = None,
+        horizon: int = 1,
+        limit: int = 500,
+    ) -> pd.DataFrame:
+        """予測精度の明細を predicted_at 降順で返す"""
+
+    @abstractmethod
+    def weekly_accuracy_snapshots(self, n_weeks: int = 4) -> pd.DataFrame:
+        """直近 n_weeks 週分の週次精度スナップショットを week_start 降順で返す"""
 
 
 class StockFeatureRepository(ABC):
