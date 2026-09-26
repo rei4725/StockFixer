@@ -7,10 +7,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-import pandas as pd
-
 from src.domain.types import PredictionResult
-from src.infrastructure.in_memory import InMemoryAnalyticsQuery
+from src.infrastructure.in_memory import InMemoryAnalyticsQuery, InMemoryPredictionRepository
 from src.reporting.query_service import (
     get_latest_market_prediction_snapshots,
     get_ranked_prediction_results,
@@ -20,42 +18,34 @@ from src.reporting.query_service import (
 )
 
 
-class TestDiscordQueryService(unittest.TestCase):
-    @patch("src.reporting.query_service.load_prediction_results")
-    @patch("src.reporting.query_service.load_prediction_markets", return_value=["JP"])
-    @patch(
-        "src.reporting.query_service.load_latest_prediction_timestamp",
-        return_value="2026-04-06T00:00:00+00:00",
-    )
-    def test_get_latest_market_prediction_snapshots_builds_market_snapshots(
-        self,
-        _mock_ts,
-        _mock_markets,
-        mock_load_results,
-    ):
-        mock_load_results.side_effect = [
-            pd.DataFrame(
-                [
-                    {
-                        "market": "JP",
-                        "symbol": "7203",
-                        "current_price": 100.0,
-                        "avg_pred_price": 101.0,
-                        "diff_ratio": 0.01,
-                        "model_count": 2,
-                    }
-                ]
-            ),
-            pd.DataFrame(),
-        ]
+def _pred_row(market: str, symbol: str, diff_ratio: float) -> dict:
+    return {
+        "market": market,
+        "symbol": symbol,
+        "current_price": 100.0,
+        "avg_pred_price": 100.0 * (1 + diff_ratio),
+        "diff_ratio": diff_ratio,
+        "model_count": 2,
+    }
 
-        latest_ts, snapshots = get_latest_market_prediction_snapshots()
+
+class TestDiscordQueryService(unittest.TestCase):
+    def test_get_latest_market_prediction_snapshots_builds_market_snapshots(self):
+        repo = InMemoryPredictionRepository()
+        # 古い時点の行はスナップショットに混ざらないこと
+        repo.add("2026-04-05T00:00:00+00:00", [_pred_row("JP", "9999", 0.5)])
+        repo.add(
+            "2026-04-06T00:00:00+00:00",
+            [_pred_row("JP", "7203", 0.01), _pred_row("JP", "6758", -0.02)],
+        )
+
+        latest_ts, snapshots = get_latest_market_prediction_snapshots(predictions=repo)
 
         self.assertEqual(latest_ts, "2026-04-06T00:00:00+00:00")
         self.assertEqual(len(snapshots), 1)
         self.assertEqual(snapshots[0].market, "JP")
-        self.assertEqual(snapshots[0].top_results[0].symbol, "7203")
-        self.assertEqual(snapshots[0].worst_results, [])
+        self.assertEqual([r.symbol for r in snapshots[0].top_results], ["7203", "6758"])
+        self.assertEqual([r.symbol for r in snapshots[0].worst_results], ["6758", "7203"])
 
     @patch("src.reporting.query_service._explain_shap_fn")
     @patch("src.reporting.query_service._predict_single_fn")
@@ -161,12 +151,10 @@ class TestDiscordQueryService(unittest.TestCase):
     # get_latest_market_prediction_snapshots — no timestamp
     # ------------------------------------------------------------------
 
-    @patch(
-        "src.reporting.query_service.load_latest_prediction_timestamp",
-        return_value=None,
-    )
-    def test_get_latest_market_prediction_snapshots_returns_none_when_no_timestamp(self, _mock):
-        ts, snapshots = get_latest_market_prediction_snapshots()
+    def test_get_latest_market_prediction_snapshots_returns_none_when_no_timestamp(self):
+        ts, snapshots = get_latest_market_prediction_snapshots(
+            predictions=InMemoryPredictionRepository()
+        )
         self.assertIsNone(ts)
         self.assertEqual(snapshots, [])
 
@@ -174,11 +162,21 @@ class TestDiscordQueryService(unittest.TestCase):
     # get_ranked_prediction_results — else branch (all)
     # ------------------------------------------------------------------
 
-    @patch("src.reporting.query_service.load_prediction_results", return_value=pd.DataFrame())
-    def test_get_ranked_prediction_results_all_mode(self, mock_load):
-        result = get_ranked_prediction_results("us", "other")
-        self.assertEqual(result, [])
-        mock_load.assert_called_once()
+    def test_get_ranked_prediction_results_all_mode(self):
+        repo = InMemoryPredictionRepository()
+        repo.add("20260406_000000", [_pred_row("us", "AAPL", 0.01), _pred_row("jp", "7203", 0.02)])
+        result = get_ranked_prediction_results("us", "other", predictions=repo)
+        self.assertEqual([r.symbol for r in result], ["AAPL"])
+
+    def test_get_ranked_prediction_results_top10_limits_rows(self):
+        repo = InMemoryPredictionRepository()
+        repo.add(
+            "20260406_000000",
+            [_pred_row("us", f"S{i:02d}", 0.001 * i) for i in range(12)],
+        )
+        result = get_ranked_prediction_results("us", "top10", predictions=repo)
+        self.assertEqual(len(result), 10)
+        self.assertEqual(result[0].symbol, "S11")
 
     # ------------------------------------------------------------------
     # get_signal_snapshot — edge cases

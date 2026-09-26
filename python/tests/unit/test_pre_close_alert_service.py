@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pandas as pd
 
-from src.infrastructure.in_memory import InMemoryTradeDiffSink
+from src.infrastructure.in_memory import InMemoryPredictionRepository, InMemoryTradeDiffSink
 from src.trading.pre_close_alert_service import (
     STOP_LOSS_PRED_THRESHOLD,
     TAKE_PROFIT_HOLD_THRESHOLD,
@@ -14,6 +14,9 @@ from src.trading.pre_close_alert_service import (
     evaluate_positions,
     get_pre_close_alerts,
 )
+
+# 注入する予測リポジトリ。テストは latest_timestamp / results_at を patch.object で差し替える
+_PREDICTIONS = InMemoryPredictionRepository()
 
 
 def _make_position(symbol: str, qty: int, avg_price: float, current_price: float) -> dict:
@@ -40,12 +43,14 @@ class TestAlertTypeClassification(unittest.TestCase):
         with (
             patch.dict("os.environ", {"AUTO_TRADE_MODE": "paper"}, clear=False),
             patch("src.trading.brokers.paper.paper_broker.PaperBroker") as mock_broker_cls,
-            patch(
-                "src.prediction.db.load_latest_prediction_timestamp",
+            patch.object(
+                _PREDICTIONS,
+                "latest_timestamp",
                 return_value="20260101_150000",
             ),
-            patch(
-                "src.prediction.db.load_prediction_results",
+            patch.object(
+                _PREDICTIONS,
+                "results_at",
                 return_value=pred_df,
             ),
         ):
@@ -53,7 +58,9 @@ class TestAlertTypeClassification(unittest.TestCase):
             broker.get_positions.return_value = [position]
             mock_broker_cls.return_value = broker
 
-            alerts = evaluate_positions(trade_diff_sink=InMemoryTradeDiffSink())
+            alerts = evaluate_positions(
+                trade_diff_sink=InMemoryTradeDiffSink(), prediction_repo=_PREDICTIONS
+            )
 
         self.assertEqual(len(alerts), 1)
         return alerts[0]
@@ -116,7 +123,9 @@ class TestEvaluatePositionsEarlyExit(unittest.TestCase):
 
     def test_returns_empty_list_in_live_mode(self):
         with patch.dict("os.environ", {"AUTO_TRADE_MODE": "live"}, clear=False):
-            result = evaluate_positions(trade_diff_sink=InMemoryTradeDiffSink())
+            result = evaluate_positions(
+                trade_diff_sink=InMemoryTradeDiffSink(), prediction_repo=_PREDICTIONS
+            )
         self.assertEqual(result, [])
 
     def test_returns_empty_list_when_no_positions(self):
@@ -127,22 +136,27 @@ class TestEvaluatePositionsEarlyExit(unittest.TestCase):
             broker = MagicMock()
             broker.get_positions.return_value = []
             mock_broker_cls.return_value = broker
-            result = evaluate_positions(trade_diff_sink=InMemoryTradeDiffSink())
+            result = evaluate_positions(
+                trade_diff_sink=InMemoryTradeDiffSink(), prediction_repo=_PREDICTIONS
+            )
         self.assertEqual(result, [])
 
     def test_returns_empty_list_when_no_prediction_timestamp(self):
         with (
             patch.dict("os.environ", {"AUTO_TRADE_MODE": "paper"}, clear=False),
             patch("src.trading.brokers.paper.paper_broker.PaperBroker") as mock_broker_cls,
-            patch(
-                "src.prediction.db.load_latest_prediction_timestamp",
+            patch.object(
+                _PREDICTIONS,
+                "latest_timestamp",
                 return_value=None,
             ),
         ):
             broker = MagicMock()
             broker.get_positions.return_value = [_make_position("7203", 100, 1000.0, 1010.0)]
             mock_broker_cls.return_value = broker
-            result = evaluate_positions(trade_diff_sink=InMemoryTradeDiffSink())
+            result = evaluate_positions(
+                trade_diff_sink=InMemoryTradeDiffSink(), prediction_repo=_PREDICTIONS
+            )
         self.assertEqual(result, [])
 
     def test_multiple_positions_classified_independently(self):
@@ -161,19 +175,23 @@ class TestEvaluatePositionsEarlyExit(unittest.TestCase):
         with (
             patch.dict("os.environ", {"AUTO_TRADE_MODE": "paper"}, clear=False),
             patch("src.trading.brokers.paper.paper_broker.PaperBroker") as mock_broker_cls,
-            patch(
-                "src.prediction.db.load_latest_prediction_timestamp",
+            patch.object(
+                _PREDICTIONS,
+                "latest_timestamp",
                 return_value="20260101_150000",
             ),
-            patch(
-                "src.prediction.db.load_prediction_results",
+            patch.object(
+                _PREDICTIONS,
+                "results_at",
                 return_value=pred_df,
             ),
         ):
             broker = MagicMock()
             broker.get_positions.return_value = positions
             mock_broker_cls.return_value = broker
-            alerts = evaluate_positions(trade_diff_sink=InMemoryTradeDiffSink())
+            alerts = evaluate_positions(
+                trade_diff_sink=InMemoryTradeDiffSink(), prediction_repo=_PREDICTIONS
+            )
 
         self.assertEqual(len(alerts), 3)
         alert_map = {a.symbol: a.alert_type for a in alerts}
@@ -192,7 +210,9 @@ class TestGetPreCloseAlerts(unittest.TestCase):
             broker = MagicMock()
             broker.get_positions.return_value = []
             mock_broker_cls.return_value = broker
-            lines = get_pre_close_alerts(trade_diff_sink=InMemoryTradeDiffSink())
+            lines = get_pre_close_alerts(
+                trade_diff_sink=InMemoryTradeDiffSink(), prediction_repo=_PREDICTIONS
+            )
 
         self.assertIsInstance(lines, list)
         self.assertTrue(any("保有ポジションなし" in line for line in lines))
@@ -203,19 +223,23 @@ class TestGetPreCloseAlerts(unittest.TestCase):
         with (
             patch.dict("os.environ", {"AUTO_TRADE_MODE": "paper"}, clear=False),
             patch("src.trading.brokers.paper.paper_broker.PaperBroker") as mock_broker_cls,
-            patch(
-                "src.prediction.db.load_latest_prediction_timestamp",
+            patch.object(
+                _PREDICTIONS,
+                "latest_timestamp",
                 return_value="20260101_150000",
             ),
-            patch(
-                "src.prediction.db.load_prediction_results",
+            patch.object(
+                _PREDICTIONS,
+                "results_at",
                 return_value=pred_df,
             ),
         ):
             broker = MagicMock()
             broker.get_positions.return_value = [pos]
             mock_broker_cls.return_value = broker
-            lines = get_pre_close_alerts(trade_diff_sink=InMemoryTradeDiffSink())
+            lines = get_pre_close_alerts(
+                trade_diff_sink=InMemoryTradeDiffSink(), prediction_repo=_PREDICTIONS
+            )
 
         self.assertIsInstance(lines, list)
         self.assertTrue(len(lines) > 0)
@@ -226,3 +250,34 @@ class TestGetPreCloseAlerts(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPredictionRepositoryWiring(unittest.TestCase):
+    """注入されたリポジトリから「最新時点の予測」を読むこと。"""
+
+    def test_reads_results_at_latest_timestamp(self):
+        repo = InMemoryPredictionRepository()
+        repo.add("20260101_090000", [{"market": "jp", "symbol": "7203", "diff_ratio": 0.05}])
+        repo.add(
+            "20260101_150000",
+            [{"market": "jp", "symbol": "7203", "avg_pred_price": 960.0, "diff_ratio": -0.02}],
+        )
+        with (
+            patch.dict("os.environ", {"AUTO_TRADE_MODE": "paper"}, clear=False),
+            patch("src.trading.brokers.paper.paper_broker.PaperBroker") as mock_broker_cls,
+        ):
+            broker = MagicMock()
+            broker.get_positions.return_value = [_make_position("7203", 100, 1000.0, 980.0)]
+            mock_broker_cls.return_value = broker
+            alerts = evaluate_positions(
+                trade_diff_sink=InMemoryTradeDiffSink(), prediction_repo=repo
+            )
+
+        self.assertEqual(len(alerts), 1)
+        # 古い時点（+5%）ではなく最新時点（-2%）の予測で判定される
+        self.assertAlmostEqual(alerts[0].diff_ratio, -0.02)
+        self.assertEqual(alerts[0].alert_type, AlertType.STOP_LOSS)
+
+    def test_prediction_repo_is_required(self):
+        with self.assertRaisesRegex(TypeError, "prediction_repo"):
+            evaluate_positions(trade_diff_sink=InMemoryTradeDiffSink())  # type: ignore[call-arg]

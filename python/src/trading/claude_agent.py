@@ -27,14 +27,13 @@ from config.settings import (
     MAX_ORDERS_PER_RUN,
     MIN_CHANGE_RATIO,
 )
-from src.domain.ports import TradeDiffSink
+from src.domain.ports import PredictionResultRepository, TradeDiffSink
 from src.trading.brokers.base import BrokerBase, BrokerError, OrderSide
 from src.trading.claude_reasoning_log import save_reasoning_log
 from src.trading.execution import (
     _attach_dynamic_thresholds,
     _choose_order_params,
     _get_held_symbols,
-    _load_latest_predictions,
     _record_order,
     _resolve_kelly_params,
 )
@@ -141,10 +140,12 @@ _TOOLS: list[dict[str, Any]] = [
 # ---------------------------------------------------------------------------
 
 
-def _handle_get_predictions(market: str, broker: BrokerBase) -> dict[str, Any]:
+def _handle_get_predictions(
+    market: str, broker: BrokerBase, prediction_repo: PredictionResultRepository
+) -> dict[str, Any]:
     """閾値通過候補の予測を返す。トークン節約のため上位 N 行に絞る。"""
     try:
-        predictions = _load_latest_predictions(market)
+        predictions = prediction_repo.get_latest_by_market(market)
         if predictions.empty:
             return {"candidates": [], "message": "予測結果なし"}
 
@@ -378,6 +379,7 @@ def run_claude_trader(
     mode: str = "paper",
     *,
     trade_diff_sink: TradeDiffSink,
+    prediction_repo: PredictionResultRepository,
 ) -> dict[str, Any]:
     """
     Claude Opus を用いたトレード判断エージェントを実行する。
@@ -387,6 +389,7 @@ def run_claude_trader(
         market: 対象マーケット
         mode: "paper" or "live"
         trade_diff_sink: 約定乖離の記録先（TradeDiffSink 実装。合成ルートが必ず渡す）
+        prediction_repo: 予測結果の読み取り元（合成ルートが必ず渡す）
 
     Returns:
         buy_orders, sell_orders, skipped, errors 等の実行統計
@@ -437,7 +440,7 @@ def run_claude_trader(
         return stats
 
     # 予測キャッシュ（place_order ハンドラーで参照）
-    predictions_cache = _load_latest_predictions(market)
+    predictions_cache = prediction_repo.get_latest_by_market(market)
     if not predictions_cache.empty:
         predictions_cache = _attach_dynamic_thresholds(predictions_cache)
         predictions_cache = apply_multi_horizon_score_column(predictions_cache)
@@ -516,7 +519,9 @@ market: {market}, mode: {mode}
             logger.debug("[claude_agent] tool_use: %s input=%s", tool_name, tool_input)
 
             if tool_name == "get_predictions":
-                result = _handle_get_predictions(tool_input.get("market", market), broker)
+                result = _handle_get_predictions(
+                    tool_input.get("market", market), broker, prediction_repo
+                )
 
             elif tool_name == "get_positions":
                 result = _handle_get_positions(broker)

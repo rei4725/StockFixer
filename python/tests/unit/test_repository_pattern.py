@@ -7,7 +7,6 @@ DuckDB なしでテストできることを検証する
 
 from unittest.mock import patch
 
-import pandas as pd
 import pytest
 
 from src.domain.ports import PredictionResultRepository
@@ -48,16 +47,16 @@ class TestInMemoryPredictionRepositoryGetLatest:
 
     def test_returns_latest_per_symbol(self):
         repo = InMemoryPredictionRepository()
-        repo.save("20260501_090000", [self._make_result("jp", "7203", 0.01, "20260501_090000")])
-        repo.save("20260502_090000", [self._make_result("jp", "7203", 0.02, "20260502_090000")])
+        repo.add("20260501_090000", [self._make_result("jp", "7203", 0.01, "20260501_090000")])
+        repo.add("20260502_090000", [self._make_result("jp", "7203", 0.02, "20260502_090000")])
         df = repo.get_latest_by_market("jp")
         assert len(df) == 1
         assert float(df.iloc[0]["diff_ratio"]) == pytest.approx(0.02)
 
     def test_filters_by_market(self):
         repo = InMemoryPredictionRepository()
-        repo.save("20260501_090000", [self._make_result("jp", "7203", 0.01, "20260501_090000")])
-        repo.save("20260501_090000", [self._make_result("us", "AAPL", 0.02, "20260501_090000")])
+        repo.add("20260501_090000", [self._make_result("jp", "7203", 0.01, "20260501_090000")])
+        repo.add("20260501_090000", [self._make_result("us", "AAPL", 0.02, "20260501_090000")])
         df = repo.get_latest_by_market("jp")
         assert all(df["market"] == "jp")
         assert len(df) == 1
@@ -65,7 +64,7 @@ class TestInMemoryPredictionRepositoryGetLatest:
     def test_sorted_by_diff_ratio_desc(self):
         repo = InMemoryPredictionRepository()
         for sym, ratio in [("A", 0.01), ("B", 0.03), ("C", 0.02)]:
-            repo.save("20260501_090000", [self._make_result("jp", sym, ratio, "20260501_090000")])
+            repo.add("20260501_090000", [self._make_result("jp", sym, ratio, "20260501_090000")])
         df = repo.get_latest_by_market("jp")
         assert list(df["symbol"]) == ["B", "C", "A"]
 
@@ -115,7 +114,7 @@ def _make_repo_with_predictions(n: int = 3) -> InMemoryPredictionRepository:
             confidence_ratio=1.0,
             predicted_at="20260518_090000",
         )
-        repo.save("20260518_090000", [r])
+        repo.add("20260518_090000", [r])
     return repo
 
 
@@ -136,7 +135,7 @@ _COMMON_PATCHES = [
 
 
 class TestRunDailyOrdersWithRepository:
-    """prediction_repo パラメータ経由で _load_latest_predictions をパッチせずにテストする"""
+    """注入した prediction_repo から予測を読んで発注することをテストする"""
 
     def test_buy_orders_via_repository(self):
         broker = InMemoryBrokerAdapter(initial_balance=10_000_000.0)
@@ -177,46 +176,35 @@ class TestRunDailyOrdersWithRepository:
             for p in _COMMON_PATCHES:
                 p.stop()
 
-    def test_no_repo_falls_back_to_db(self):
-        """prediction_repo=None のとき、従来の _load_latest_predictions を使う（後方互換）"""
+    def test_prediction_repo_is_required(self):
+        """prediction_repo を渡さない呼び出しは TypeError になること（DB 直読みの旧経路は無い）"""
         broker = InMemoryBrokerAdapter()
+        with pytest.raises(TypeError, match="prediction_repo"):
+            run_daily_orders(  # type: ignore[call-arg]
+                broker,
+                order_run_sink=InMemoryOrderRunSink(),
+                trade_diff_sink=InMemoryTradeDiffSink(),
+                market="jp",
+                mode="paper",
+            )
 
-        with patch(
-            "src.trading.execution.runner._load_latest_predictions",
-            return_value=pd.DataFrame(),
-        ) as mock_load:
-            _ = [p.start() for p in _COMMON_PATCHES]
-            try:
-                run_daily_orders(
-                    broker,
-                    order_run_sink=InMemoryOrderRunSink(),
-                    trade_diff_sink=InMemoryTradeDiffSink(),
-                    market="jp",
-                    mode="paper",
-                    prediction_repo=None,
-                )
-                mock_load.assert_called_once_with("jp")
-            finally:
-                for p in _COMMON_PATCHES:
-                    p.stop()
-
-    def test_with_repo_skips_db_load(self):
-        """prediction_repo を渡したとき、_load_latest_predictions は呼ばれない"""
+    def test_reads_predictions_for_requested_market(self):
+        """runner は注入されたリポジトリから対象マーケットの最新予測を読む"""
         broker = InMemoryBrokerAdapter()
         repo = _make_repo_with_predictions(n=1)
 
-        with patch("src.trading.execution.runner._load_latest_predictions") as mock_load:
+        with patch.object(repo, "get_latest_by_market", wraps=repo.get_latest_by_market) as spy:
             _ = [p.start() for p in _COMMON_PATCHES]
             try:
                 run_daily_orders(
                     broker,
                     order_run_sink=InMemoryOrderRunSink(),
                     trade_diff_sink=InMemoryTradeDiffSink(),
+                    prediction_repo=repo,
                     market="jp",
                     mode="paper",
-                    prediction_repo=repo,
                 )
-                mock_load.assert_not_called()
+                spy.assert_called_once_with("jp")
             finally:
                 for p in _COMMON_PATCHES:
                     p.stop()

@@ -20,6 +20,14 @@ class TestGetTop10DiffStocksMessage(unittest.TestCase):
         path_utils.get_db_path = lambda: self.tmp_db
         db_module.get_db_path = lambda: self.tmp_db
         db_module._tables_initialized = False
+        # tests/conftest.py は空の InMemory を注入するため、実 DB を読む本テストでは
+        # 本番と同じ Postgres 実装を注入し直す
+        from src.infrastructure.persistence.prediction_result_repository import (
+            PostgresPredictionResultRepository,
+        )
+        from src.reporting.ports import set_prediction_result_repository
+
+        set_prediction_result_repository(PostgresPredictionResultRepository())
 
     def tearDown(self):
         db_module.close_connection()

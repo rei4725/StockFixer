@@ -12,7 +12,7 @@ from src.reporting.discord.discord_formatters import (
     get_market_emoji,
 )
 from src.reporting.discord.discord_text import DISCORD_TEXT_LIMIT, split_text_chunks
-from src.reporting.ports import get_analytics_query
+from src.reporting.ports import get_analytics_query, get_prediction_result_repository
 from src.reporting.query_service import (
     get_latest_market_prediction_snapshots,
     get_monthly_report_summary,
@@ -137,12 +137,16 @@ def build_prediction_list_message(market: str, label: str, results: list[Predict
 def get_top10_diff_stocks_message(market: str, rank_type: str, predicted_at: str = None) -> str:
     """DBから予測結果を取得してDiscord表示用テキストに変換する"""
     return build_prediction_table_text(
-        get_ranked_prediction_results(market, rank_type, predicted_at)
+        get_ranked_prediction_results(
+            market, rank_type, predicted_at, predictions=get_prediction_result_repository()
+        )
     )
 
 
 async def handle_forecast_command(message):
-    latest_ts, snapshots = get_latest_market_prediction_snapshots()
+    latest_ts, snapshots = get_latest_market_prediction_snapshots(
+        predictions=get_prediction_result_repository()
+    )
     if latest_ts is None:
         await message.channel.send(
             escape_markdown("予測結果が見つかりませんでした。"), allowed_mentions=None

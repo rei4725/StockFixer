@@ -60,15 +60,30 @@ class BrokerPort(ABC):
 
 
 class PredictionResultRepository(ABC):
-    """予測結果の永続化ポート"""
+    """予測結果（prediction_results）の読み取りポート。
+
+    prediction_results は prediction BC が書く所有テーブルである。trading（発注・引け前アラート）
+    と reporting（Discord / API の予測表示）はこのポート越しにのみ読む。
+    書き込みは所有者である prediction BC が直接行うため、ポートには載せない。
+    """
 
     @abstractmethod
-    def save(self, predicted_at: str, results: list) -> None:
-        """予測結果を保存する"""
+    def latest_timestamp(self, model_version: Optional[str] = None) -> Optional[str]:
+        """最新の predicted_at を返す。なければ None"""
 
     @abstractmethod
-    def load(self, market: str, limit: int = 100) -> pd.DataFrame:
-        """指定マーケットの予測結果を読み込む"""
+    def results_at(
+        self,
+        predicted_at: Optional[str] = None,
+        market: Optional[str] = None,
+        top_n: Optional[int] = None,
+        worst_n: Optional[int] = None,
+    ) -> pd.DataFrame:
+        """指定時点（None なら最新）の予測結果を diff_ratio 順で返す"""
+
+    @abstractmethod
+    def markets_at(self, predicted_at: Optional[str] = None) -> list:
+        """指定時点（None なら最新）の予測結果に含まれるマーケット一覧を返す"""
 
     @abstractmethod
     def get_latest_by_market(self, market: str) -> pd.DataFrame:

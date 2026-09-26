@@ -16,9 +16,12 @@ if "anthropic" not in sys.modules:
     _mock_anthropic = MagicMock()
     sys.modules["anthropic"] = _mock_anthropic
 
-from src.infrastructure.in_memory import InMemoryTradeDiffSink
+from src.infrastructure.in_memory import InMemoryPredictionRepository, InMemoryTradeDiffSink
 from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
 from src.trading.types import TradingGateStatus
+
+# claude_agent に注入する予測リポジトリ。テストは get_latest_by_market を patch.object で差し替える
+_PREDICTIONS = InMemoryPredictionRepository()
 
 # ---------------------------------------------------------------------------
 # テスト用ヘルパー
@@ -205,7 +208,7 @@ class TestHandlePlaceOrder(unittest.TestCase):
 
 
 class TestHandleGetPredictions(unittest.TestCase):
-    @patch("src.trading.claude_agent._load_latest_predictions")
+    @patch.object(_PREDICTIONS, "get_latest_by_market")
     @patch("src.trading.claude_agent._get_held_symbols", return_value={"7200"})
     def test_returns_buy_and_sell_candidates(self, _held, _load):
         df = _make_predictions_df(n=4)
@@ -224,7 +227,7 @@ class TestHandleGetPredictions(unittest.TestCase):
         ):
             from src.trading.claude_agent import _handle_get_predictions
 
-            result = _handle_get_predictions("jp", broker)
+            result = _handle_get_predictions("jp", broker, _PREDICTIONS)
 
         self.assertIn("buy_candidates", result)
         self.assertIn("sell_candidates", result)
@@ -233,14 +236,14 @@ class TestHandleGetPredictions(unittest.TestCase):
         buy_symbols = [r["symbol"] for r in result["buy_candidates"]]
         self.assertNotIn("7200", buy_symbols)
 
-    @patch("src.trading.claude_agent._load_latest_predictions")
+    @patch.object(_PREDICTIONS, "get_latest_by_market")
     def test_empty_predictions_returns_message(self, _load):
         _load.return_value = pd.DataFrame()
         broker = _make_broker()
 
         from src.trading.claude_agent import _handle_get_predictions
 
-        result = _handle_get_predictions("jp", broker)
+        result = _handle_get_predictions("jp", broker, _PREDICTIONS)
         self.assertIn("message", result)
 
 
@@ -258,7 +261,7 @@ class TestRunClaudeTrader(unittest.TestCase):
         return risk
 
     @patch("src.trading.claude_agent.RiskManager")
-    @patch("src.trading.claude_agent._load_latest_predictions")
+    @patch.object(_PREDICTIONS, "get_latest_by_market")
     @patch("anthropic.Anthropic")
     def test_returns_stats_on_success(self, mock_anthropic_cls, mock_load, mock_risk_cls):
         broker = _make_broker()
@@ -277,7 +280,11 @@ class TestRunClaudeTrader(unittest.TestCase):
             "src.trading.claude_agent.apply_multi_horizon_score_column", return_value=pd.DataFrame()
         ):
             stats = run_claude_trader(
-                broker=broker, market="jp", mode="paper", trade_diff_sink=InMemoryTradeDiffSink()
+                broker=broker,
+                market="jp",
+                mode="paper",
+                trade_diff_sink=InMemoryTradeDiffSink(),
+                prediction_repo=_PREDICTIONS,
             )
 
         self.assertIn("buy_orders", stats)
@@ -286,7 +293,7 @@ class TestRunClaudeTrader(unittest.TestCase):
         self.assertIn("errors", stats)
 
     @patch("src.trading.claude_agent.RiskManager")
-    @patch("src.trading.claude_agent._load_latest_predictions")
+    @patch.object(_PREDICTIONS, "get_latest_by_market")
     def test_risk_gate_blocked_returns_early(self, mock_load, mock_risk_cls):
         broker = _make_broker()
         mock_load.return_value = pd.DataFrame()
@@ -300,7 +307,11 @@ class TestRunClaudeTrader(unittest.TestCase):
         from src.trading.claude_agent import run_claude_trader
 
         stats = run_claude_trader(
-            broker=broker, market="jp", mode="paper", trade_diff_sink=InMemoryTradeDiffSink()
+            broker=broker,
+            market="jp",
+            mode="paper",
+            trade_diff_sink=InMemoryTradeDiffSink(),
+            prediction_repo=_PREDICTIONS,
         )
 
         self.assertTrue(stats["trading_stopped"])
@@ -310,7 +321,7 @@ class TestRunClaudeTrader(unittest.TestCase):
         self.assertEqual(stats["sell_orders"], 0)
 
     @patch("src.trading.claude_agent.RiskManager")
-    @patch("src.trading.claude_agent._load_latest_predictions")
+    @patch.object(_PREDICTIONS, "get_latest_by_market")
     @patch("anthropic.Anthropic")
     def test_tool_use_dispatched_correctly(self, mock_anthropic_cls, mock_load, mock_risk_cls):
         broker = _make_broker()
@@ -342,7 +353,11 @@ class TestRunClaudeTrader(unittest.TestCase):
             "src.trading.claude_agent.apply_multi_horizon_score_column", return_value=pd.DataFrame()
         ):
             run_claude_trader(
-                broker=broker, market="jp", mode="paper", trade_diff_sink=InMemoryTradeDiffSink()
+                broker=broker,
+                market="jp",
+                mode="paper",
+                trade_diff_sink=InMemoryTradeDiffSink(),
+                prediction_repo=_PREDICTIONS,
             )
 
         # 2回呼ばれているはず（tool_use → end_turn）
@@ -354,7 +369,11 @@ class TestRunClaudeTrader(unittest.TestCase):
             from src.trading.claude_agent import run_claude_trader
 
             with self.assertRaises((ImportError, TypeError)):
-                run_claude_trader(broker=broker, trade_diff_sink=InMemoryTradeDiffSink())
+                run_claude_trader(
+                    broker=broker,
+                    trade_diff_sink=InMemoryTradeDiffSink(),
+                    prediction_repo=_PREDICTIONS,
+                )
 
 
 class TestSaveReasoningLog(unittest.TestCase):

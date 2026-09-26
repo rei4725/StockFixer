@@ -22,6 +22,9 @@ import sys
 
 from src.domain.ports import TradeDiffSink
 from src.infrastructure.persistence.order_run_repository import PostgresOrderRunSink
+from src.infrastructure.persistence.prediction_result_repository import (
+    PostgresPredictionResultRepository,
+)
 from src.infrastructure.persistence.trade_diff_repository import PostgresTradeDiffSink
 from src.orchestration.port_wiring import wire_ports
 from src.utils.logger import get_logger
@@ -101,6 +104,7 @@ def main(argv: list[str] | None = None) -> int:
                 broker=broker,
                 order_run_sink=PostgresOrderRunSink(),
                 trade_diff_sink=trade_diff_sink,
+                prediction_repo=PostgresPredictionResultRepository(),
                 market=args.market,
                 mode=args.mode,
             )

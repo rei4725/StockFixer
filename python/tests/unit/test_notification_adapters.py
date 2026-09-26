@@ -6,6 +6,7 @@ from src.domain.ports import AlertLevel, NotificationPort
 from src.infrastructure.in_memory import (
     InMemoryNotificationAdapter,
     InMemoryOrderRunSink,
+    InMemoryPredictionRepository,
     InMemoryTradeDiffSink,
     NullNotificationAdapter,
 )
@@ -125,6 +126,7 @@ class TestRunDailyOrdersNotifierDI:
             broker,
             order_run_sink=InMemoryOrderRunSink(),
             trade_diff_sink=InMemoryTradeDiffSink(),
+            prediction_repo=InMemoryPredictionRepository(),
             market="jp",
             mode="paper",
             notifier=notifier,
@@ -148,6 +150,7 @@ class TestRunDailyOrdersNotifierDI:
             broker,
             order_run_sink=InMemoryOrderRunSink(),
             trade_diff_sink=InMemoryTradeDiffSink(),
+            prediction_repo=InMemoryPredictionRepository(),
             market="jp",
             mode="paper",
             notifier=None,
@@ -170,6 +173,7 @@ class TestRunDailyOrdersNotifierDI:
             broker,
             order_run_sink=InMemoryOrderRunSink(),
             trade_diff_sink=InMemoryTradeDiffSink(),
+            prediction_repo=InMemoryPredictionRepository(),
             market="jp",
             mode="paper",
             notifier=notifier,

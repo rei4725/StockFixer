@@ -91,25 +91,14 @@ class _DbPackageProxy(types.ModuleType):
     _db_connection() は _connection.__dict__ から get_database_url 等を動的参照するため、
     このプロキシ経由で setattr するとテスト時のモンキーパッチが正しく機能する。
 
-    prediction.db の関数は遅延ロード（#338 で根本解消予定）。
-    モジュールレベルの from src.prediction.db import ... を避けることで
-    importlinter の BC 間接依存検出を回避する。
+    かつてはここで src.prediction.db の関数を importlib で遅延再輸出していたが、
+    import-linter から見えない層逆転（utils -> prediction）だったため撤去した
+    （2026-09-22 DB 所有権の疎結合化 設計書）。予測系テーブルは domain のポートと
+    src/infrastructure/persistence/ のアダプタ越しに読むこと。
     """
 
     # _connection モジュールへ転送する属性名
     _FORWARDED = frozenset(["_tables_initialized", "get_database_url"])
-
-    # prediction.db から遅延ロードする関数名。
-    # 束③（prediction_results）の越境消費者（reporting/query_service.py と
-    # trading/pre_close_alert_service.py）が残っているものだけ。PredictionResultRepository の
-    # アダプタへ移したら空にし、このプロキシごと撤去する。追加してはならない。
-    _PREDICTION_DB = frozenset(
-        [
-            "load_latest_prediction_timestamp",
-            "load_prediction_markets",
-            "load_prediction_results",
-        ]
-    )
 
     def __setattr__(self, name: str, value) -> None:
         if name in _DbPackageProxy._FORWARDED:
@@ -120,27 +109,13 @@ class _DbPackageProxy(types.ModuleType):
     def __getattr__(self, name: str):
         if name in _DbPackageProxy._FORWARDED:
             return getattr(_conn_module, name)
-        if name in _DbPackageProxy._PREDICTION_DB:
-            import importlib
-
-            _pred_db = importlib.import_module("src.prediction.db")
-            return getattr(_pred_db, name)
         raise AttributeError(f"module 'src.utils.db' has no attribute {name!r}")
 
 
 def __getattr__(name: str):
-    """PEP 562 module-level __getattr__ for static analysis (runtime: _DbPackageProxy handles this).
-
-    Defines dynamic attributes so that type-checkers and pylint do not raise no-name-in-module
-    for names that are lazily loaded from src.prediction.db.
-    """
+    """PEP 562 module-level __getattr__ for static analysis (runtime: _DbPackageProxy handles this)."""
     if name in _DbPackageProxy._FORWARDED:
         return getattr(_conn_module, name)
-    if name in _DbPackageProxy._PREDICTION_DB:
-        import importlib
-
-        _pred_db = importlib.import_module("src.prediction.db")
-        return getattr(_pred_db, name)
     raise AttributeError(f"module 'src.utils.db' has no attribute {name!r}")
 
 

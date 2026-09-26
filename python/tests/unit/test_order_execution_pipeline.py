@@ -9,7 +9,11 @@ from unittest.mock import MagicMock, patch
 
 import pandas as pd
 
-from src.infrastructure.in_memory import InMemoryOrderRunSink, InMemoryTradeDiffSink
+from src.infrastructure.in_memory import (
+    InMemoryOrderRunSink,
+    InMemoryPredictionRepository,
+    InMemoryTradeDiffSink,
+)
 from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
 from src.trading.execution import (
     BUY_THRESHOLD,
@@ -24,6 +28,10 @@ from src.trading.execution import (
     run_daily_orders,
 )
 from src.trading.types import TradingGateStatus
+
+# run_daily_orders に注入する予測リポジトリ。各テストは get_latest_by_market を
+# patch.object で差し替えて予測を与える（runner が注入先を読まなければ予測は空になる）
+_PREDICTIONS = InMemoryPredictionRepository()
 
 
 def _make_broker(balance=1_000_000.0, positions=None):
@@ -85,8 +93,9 @@ class TestRunDailyOrders(unittest.TestCase):
         if gate_status is None:
             gate_status = self._make_gate_status(is_allowed=risk_allowed)
         patches = [
-            patch(
-                "src.trading.execution.runner._load_latest_predictions",
+            patch.object(
+                _PREDICTIONS,
+                "get_latest_by_market",
                 return_value=predictions,
             ),
             patch(
@@ -137,6 +146,7 @@ class TestRunDailyOrders(unittest.TestCase):
                 broker,
                 order_run_sink=InMemoryOrderRunSink(),
                 trade_diff_sink=InMemoryTradeDiffSink(),
+                prediction_repo=_PREDICTIONS,
                 market="jp",
                 mode="paper",
             )
@@ -155,6 +165,7 @@ class TestRunDailyOrders(unittest.TestCase):
                 broker,
                 order_run_sink=InMemoryOrderRunSink(),
                 trade_diff_sink=InMemoryTradeDiffSink(),
+                prediction_repo=_PREDICTIONS,
                 market="jp",
                 mode="paper",
             )
@@ -181,6 +192,7 @@ class TestRunDailyOrders(unittest.TestCase):
                 broker,
                 order_run_sink=InMemoryOrderRunSink(),
                 trade_diff_sink=InMemoryTradeDiffSink(),
+                prediction_repo=_PREDICTIONS,
                 market="jp",
                 mode="paper",
             )
@@ -202,6 +214,7 @@ class TestRunDailyOrders(unittest.TestCase):
                 broker,
                 order_run_sink=InMemoryOrderRunSink(),
                 trade_diff_sink=InMemoryTradeDiffSink(),
+                prediction_repo=_PREDICTIONS,
                 market="jp",
                 mode="paper",
             )
@@ -220,6 +233,7 @@ class TestRunDailyOrders(unittest.TestCase):
                 broker,
                 order_run_sink=InMemoryOrderRunSink(),
                 trade_diff_sink=InMemoryTradeDiffSink(),
+                prediction_repo=_PREDICTIONS,
                 market="jp",
                 mode="paper",
             )
@@ -244,6 +258,7 @@ class TestRunDailyOrders(unittest.TestCase):
                 broker,
                 order_run_sink=InMemoryOrderRunSink(),
                 trade_diff_sink=InMemoryTradeDiffSink(),
+                prediction_repo=_PREDICTIONS,
                 market="jp",
                 mode="paper",
             )
@@ -264,6 +279,7 @@ class TestRunDailyOrders(unittest.TestCase):
                 broker,
                 order_run_sink=InMemoryOrderRunSink(),
                 trade_diff_sink=InMemoryTradeDiffSink(),
+                prediction_repo=_PREDICTIONS,
                 market="jp",
                 mode="paper",
             )
@@ -281,6 +297,7 @@ class TestRunDailyOrders(unittest.TestCase):
                 broker,
                 order_run_sink=InMemoryOrderRunSink(),
                 trade_diff_sink=InMemoryTradeDiffSink(),
+                prediction_repo=_PREDICTIONS,
                 market="jp",
                 mode="paper",
             )
@@ -301,6 +318,7 @@ class TestRunDailyOrders(unittest.TestCase):
                 broker,
                 order_run_sink=InMemoryOrderRunSink(),
                 trade_diff_sink=InMemoryTradeDiffSink(),
+                prediction_repo=_PREDICTIONS,
                 market="jp",
                 mode="paper",
             )
@@ -359,6 +377,7 @@ class TestRunDailyOrders(unittest.TestCase):
                 broker,
                 order_run_sink=InMemoryOrderRunSink(),
                 trade_diff_sink=InMemoryTradeDiffSink(),
+                prediction_repo=_PREDICTIONS,
                 market="jp",
                 mode="paper",
             )
@@ -416,6 +435,7 @@ class TestRunDailyOrders(unittest.TestCase):
                 broker,
                 order_run_sink=InMemoryOrderRunSink(),
                 trade_diff_sink=InMemoryTradeDiffSink(),
+                prediction_repo=_PREDICTIONS,
                 market="jp",
                 mode="paper",
             )
@@ -470,6 +490,7 @@ class TestRunDailyOrders(unittest.TestCase):
                 broker,
                 order_run_sink=InMemoryOrderRunSink(),
                 trade_diff_sink=InMemoryTradeDiffSink(),
+                prediction_repo=_PREDICTIONS,
                 market="jp",
                 mode="paper",
             )
@@ -525,6 +546,7 @@ class TestRunDailyOrders(unittest.TestCase):
                 broker,
                 order_run_sink=InMemoryOrderRunSink(),
                 trade_diff_sink=InMemoryTradeDiffSink(),
+                prediction_repo=_PREDICTIONS,
                 market="jp",
                 mode="paper",
             )
@@ -545,6 +567,7 @@ class TestRunDailyOrders(unittest.TestCase):
                 broker,
                 order_run_sink=sink,
                 trade_diff_sink=InMemoryTradeDiffSink(),
+                prediction_repo=_PREDICTIONS,
                 market="jp",
                 mode="paper",
             )
@@ -564,6 +587,7 @@ class TestRunDailyOrders(unittest.TestCase):
                 broker,
                 order_run_sink=sink,
                 trade_diff_sink=InMemoryTradeDiffSink(),
+                prediction_repo=_PREDICTIONS,
                 market="jp",
                 mode="paper",
             )
@@ -697,8 +721,9 @@ class TestExecutionOrderTypeFlow(unittest.TestCase):
         return_value=0,
     )
     @patch("src.trading.execution.RiskManager.calc_position_size", return_value=100)
-    @patch(
-        "src.trading.execution.runner._load_latest_predictions",
+    @patch.object(
+        _PREDICTIONS,
+        "get_latest_by_market",
         return_value=pd.DataFrame(
             [
                 {
@@ -760,6 +785,7 @@ class TestExecutionOrderTypeFlow(unittest.TestCase):
             broker,
             order_run_sink=InMemoryOrderRunSink(),
             trade_diff_sink=InMemoryTradeDiffSink(),
+            prediction_repo=_PREDICTIONS,
             market="jp",
             mode="paper",
         )
@@ -836,8 +862,9 @@ class TestShortSide(unittest.TestCase):
         predictions = self._make_short_predictions()
 
         patches = [
-            patch(
-                "src.trading.execution.runner._load_latest_predictions",
+            patch.object(
+                _PREDICTIONS,
+                "get_latest_by_market",
                 return_value=predictions,
             ),
             patch("src.trading.execution.runner._record_order"),
@@ -869,6 +896,7 @@ class TestShortSide(unittest.TestCase):
                 broker,
                 order_run_sink=InMemoryOrderRunSink(),
                 trade_diff_sink=InMemoryTradeDiffSink(),
+                prediction_repo=_PREDICTIONS,
                 market="jp",
                 mode="paper",
             )
@@ -892,8 +920,9 @@ class TestShortSide(unittest.TestCase):
         predictions = self._make_short_predictions()
 
         patches = [
-            patch(
-                "src.trading.execution.runner._load_latest_predictions",
+            patch.object(
+                _PREDICTIONS,
+                "get_latest_by_market",
                 return_value=predictions,
             ),
             patch("src.trading.execution.runner._record_order"),
@@ -925,6 +954,7 @@ class TestShortSide(unittest.TestCase):
                 broker,
                 order_run_sink=InMemoryOrderRunSink(),
                 trade_diff_sink=InMemoryTradeDiffSink(),
+                prediction_repo=_PREDICTIONS,
                 market="jp",
                 mode="paper",
             )
@@ -943,8 +973,9 @@ class TestShortSide(unittest.TestCase):
         predictions = self._make_short_predictions()
 
         patches = [
-            patch(
-                "src.trading.execution.runner._load_latest_predictions",
+            patch.object(
+                _PREDICTIONS,
+                "get_latest_by_market",
                 return_value=predictions,
             ),
             patch("src.trading.execution.runner._record_order"),
@@ -977,6 +1008,7 @@ class TestShortSide(unittest.TestCase):
                 broker,
                 order_run_sink=sink,
                 trade_diff_sink=InMemoryTradeDiffSink(),
+                prediction_repo=_PREDICTIONS,
                 market="jp",
                 mode="paper",
             )
@@ -1031,6 +1063,7 @@ class TestSplitRatio(unittest.TestCase):
                 broker,
                 order_run_sink=InMemoryOrderRunSink(),
                 trade_diff_sink=InMemoryTradeDiffSink(),
+                prediction_repo=_PREDICTIONS,
                 market="jp",
                 mode="paper",
             )
@@ -1051,6 +1084,7 @@ class TestSplitRatio(unittest.TestCase):
                 broker,
                 order_run_sink=InMemoryOrderRunSink(),
                 trade_diff_sink=InMemoryTradeDiffSink(),
+                prediction_repo=_PREDICTIONS,
                 market="jp",
                 mode="paper",
             )
@@ -1072,6 +1106,7 @@ class TestSplitRatio(unittest.TestCase):
                 broker,
                 order_run_sink=InMemoryOrderRunSink(),
                 trade_diff_sink=InMemoryTradeDiffSink(),
+                prediction_repo=_PREDICTIONS,
                 market="jp",
                 mode="paper",
             )
@@ -1096,8 +1131,9 @@ class TestSplitRatio(unittest.TestCase):
         if gate_status is None:
             gate_status = self._make_gate_status(is_allowed=risk_allowed)
         return [
-            patch(
-                "src.trading.execution.runner._load_latest_predictions",
+            patch.object(
+                _PREDICTIONS,
+                "get_latest_by_market",
                 return_value=predictions,
             ),
             patch("src.trading.execution.runner._record_order"),

@@ -63,34 +63,43 @@ class TestInMemoryPredictionRepository:
 
         return _R(market=market, symbol=symbol, diff_ratio=0.02)
 
-    def test_save_and_load(self):
+    def _repo(self):
         repo = InMemoryPredictionRepository()
-        result = self._make_result("us", "AAPL")
-        repo.save("20260518_090000", [result])
-        df = repo.load("us")
-        assert not df.empty
-        assert df.iloc[0]["market"] == "us"
-        assert df.iloc[0]["symbol"] == "AAPL"
+        older = self._make_result("us", "AAPL")
+        older.diff_ratio = 0.01
+        repo.add("20260517_090000", [older])
+        repo.add(
+            "20260518_090000",
+            [self._make_result("us", "AAPL"), self._make_result("jp", "7203")],
+        )
+        return repo
 
-    def test_load_filters_by_market(self):
-        repo = InMemoryPredictionRepository()
-        repo.save("20260518_090000", [self._make_result("us", "AAPL")])
-        repo.save("20260518_090000", [self._make_result("jp", "7203")])
-        df = repo.load("us")
-        assert all(df["market"] == "us")
+    def test_latest_timestamp(self):
+        assert self._repo().latest_timestamp() == "20260518_090000"
 
-    def test_load_empty_returns_empty_df(self):
-        repo = InMemoryPredictionRepository()
-        df = repo.load("us")
-        assert df.empty
+    def test_latest_timestamp_empty_is_none(self):
+        assert InMemoryPredictionRepository().latest_timestamp() is None
 
-    def test_load_respects_limit(self):
+    def test_results_at_defaults_to_latest_and_filters_market(self):
+        df = self._repo().results_at(market="us")
+        assert list(df["symbol"]) == ["AAPL"]
+        assert df.iloc[0]["predicted_at"] == "20260518_090000"
+
+    def test_markets_at(self):
+        repo = self._repo()
+        assert repo.markets_at() == ["jp", "us"]
+        assert repo.markets_at("20260517_090000") == ["us"]
+
+    def test_get_latest_by_market_keeps_newest_row_per_symbol(self):
+        df = self._repo().get_latest_by_market("us")
+        assert len(df) == 1
+        assert df.iloc[0]["diff_ratio"] == 0.02
+
+    def test_empty_repo_returns_empty(self):
         repo = InMemoryPredictionRepository()
-        for i in range(5):
-            r = self._make_result("us", f"SYM{i}")
-            repo.save("20260518_090000", [r])
-        df = repo.load("us", limit=3)
-        assert len(df) == 3
+        assert repo.results_at().empty
+        assert repo.markets_at() == []
+        assert repo.get_latest_by_market("us").empty
 
 
 # ---------------------------------------------------------------------------

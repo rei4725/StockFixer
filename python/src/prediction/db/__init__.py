@@ -1,8 +1,9 @@
 """prediction.db パッケージ — 予測結果・モデル精度・精度追跡データの CRUD 操作。
 
 Issue #497: 肥大化した db.py をテーブル/関心別モジュールに分割。
-public API は本 __init__ で再公開し、`from src.prediction.db import X` および
-src.utils.db の遅延ロード（importlib.import_module 経由 getattr）の後方互換を維持する。
+public API は本 __init__ で再公開し、`from src.prediction.db import X` の後方互換を維持する。
+BC の外（trading / reporting）は直接 import せず、domain のポートと
+src/infrastructure/persistence/ のアダプタ越しに読む。
 """
 
 from src.utils.db._connection import _db_connection  # noqa: F401  patch target 後方互換
@@ -25,6 +26,7 @@ from .features import (  # noqa: F401
 from .model_metrics import load_model_weights, save_model_metrics  # noqa: F401
 from .prediction_results import (  # noqa: F401
     load_latest_prediction_timestamp,
+    load_latest_predictions_by_market,
     load_prediction_markets,
     load_prediction_results,
     load_run_stats_at,
@@ -36,6 +38,7 @@ __all__ = [
     # prediction_results
     "save_prediction_results",
     "load_latest_prediction_timestamp",
+    "load_latest_predictions_by_market",
     "load_prediction_markets",
     "load_prediction_results",
     "load_run_stats_at",

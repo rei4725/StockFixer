@@ -7,7 +7,7 @@
 from dataclasses import dataclass
 from enum import Enum
 
-from src.domain.ports import TradeDiffSink
+from src.domain.ports import PredictionResultRepository, TradeDiffSink
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -38,7 +38,10 @@ class PositionAlert:
 
 
 def evaluate_positions(
-    market_data_port=None, *, trade_diff_sink: TradeDiffSink
+    market_data_port=None,
+    *,
+    trade_diff_sink: TradeDiffSink,
+    prediction_repo: PredictionResultRepository,
 ) -> list[PositionAlert]:
     """
     保有ポジション × 直近予測の差分を計算し推奨アクションを分類する。
@@ -51,6 +54,7 @@ def evaluate_positions(
     Args:
         market_data_port: MarketDataPort 実装（呼び出し元から注入）
         trade_diff_sink: 約定乖離の記録先（TradeDiffSink 実装。合成ルートが必ず渡す）
+        prediction_repo: 予測結果の読み取り元（合成ルートが必ず渡す）
 
     Returns:
         PositionAlert リスト（ポジションなし・予測データなしの場合は空リスト）
@@ -58,7 +62,6 @@ def evaluate_positions(
     import os
 
     from src.trading.brokers.paper.paper_broker import PaperBroker
-    from src.utils.db import load_latest_prediction_timestamp, load_prediction_results
 
     mode = os.environ.get("AUTO_TRADE_MODE", "paper")
     if mode == "live":
@@ -74,12 +77,12 @@ def evaluate_positions(
         logger.info("保有ポジションなし — 引け前アラートをスキップ")
         return []
 
-    ts = load_latest_prediction_timestamp()
+    ts = prediction_repo.latest_timestamp()
     if ts is None:
         logger.warning("予測データなし — 引け前アラートをスキップ")
         return []
 
-    pred_df = load_prediction_results(predicted_at=ts)
+    pred_df = prediction_repo.results_at(predicted_at=ts)
     pred_map: dict[str, dict] = {}
     if not pred_df.empty:
         for _, row in pred_df.iterrows():
@@ -133,14 +136,23 @@ def evaluate_positions(
     return alerts
 
 
-def get_pre_close_alerts(market_data_port=None, *, trade_diff_sink: TradeDiffSink) -> list[str]:
+def get_pre_close_alerts(
+    market_data_port=None,
+    *,
+    trade_diff_sink: TradeDiffSink,
+    prediction_repo: PredictionResultRepository,
+) -> list[str]:
     """evaluate_positions() の結果をフォーマット済み文字列リストで返す。"""
     from src.utils.japan_time import format_jst
 
     MINUTE_FORMAT = "%Y-%m-%d %H:%M JST"
     now = format_jst(fmt=MINUTE_FORMAT)
 
-    alerts = evaluate_positions(market_data_port=market_data_port, trade_diff_sink=trade_diff_sink)
+    alerts = evaluate_positions(
+        market_data_port=market_data_port,
+        trade_diff_sink=trade_diff_sink,
+        prediction_repo=prediction_repo,
+    )
 
     if not alerts:
         return [f"時刻: {now}", "保有ポジションなし"]

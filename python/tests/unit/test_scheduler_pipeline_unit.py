@@ -594,6 +594,14 @@ class TestRunDailyPipeline:
         mock_predict.assert_called_once()
         mock_output.assert_called_once()
         mock_notify.assert_called_once()
+        from src.infrastructure.persistence.prediction_result_repository import (
+            PostgresPredictionResultRepository,
+        )
+
+        # 予測テーブルの読み取り元として Postgres 実装を注入していること
+        assert isinstance(
+            mock_notify.call_args.kwargs["predictions"], PostgresPredictionResultRepository
+        )
 
     @patch("src.reporting.discord.discord_utils.send_miss_analysis_summary")
     @patch("src.prediction.db.load_top_prediction_misses")
