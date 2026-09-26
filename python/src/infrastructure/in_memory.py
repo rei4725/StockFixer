@@ -23,32 +23,71 @@ from src.domain.types import OrderRunSummary, TradeDiffRecord
 
 
 class InMemoryPredictionRepository(PredictionResultRepository):
-    """インメモリ予測結果リポジトリ（テスト用）"""
+    """インメモリ予測結果リポジトリ（テスト用）。
+
+    add() で prediction_results 相当の行を仕込み、ポートの 4 メソッドで読む。
+    意味論は Postgres 実装（src.prediction.db.prediction_results）に合わせる。
+    """
 
     def __init__(self) -> None:
         self._records: list[dict] = []
 
-    def save(self, predicted_at: str, results: list) -> None:
+    def add(self, predicted_at: str, results: list) -> None:
+        """予測結果を追加する（PredictionResult などの dataclass か dict を受け取る）"""
         for r in results:
             row = vars(r).copy() if hasattr(r, "__dict__") else dict(r)
             row["predicted_at"] = predicted_at
             self._records.append(row)
 
-    def load(self, market: str, limit: int = 100) -> pd.DataFrame:
-        rows = [r for r in self._records if r.get("market") == market]
-        df = pd.DataFrame(rows)
-        if not df.empty and limit:
-            df = df.tail(limit)
-        return df
+    def _frame(self) -> pd.DataFrame:
+        return pd.DataFrame(self._records)
+
+    def latest_timestamp(self, model_version: Optional[str] = None) -> Optional[str]:
+        rows = [
+            r
+            for r in self._records
+            if model_version is None or r.get("model_version", "production") == model_version
+        ]
+        if not rows:
+            return None
+        return max(str(r["predicted_at"]) for r in rows)
+
+    def results_at(
+        self,
+        predicted_at: Optional[str] = None,
+        market: Optional[str] = None,
+        top_n: Optional[int] = None,
+        worst_n: Optional[int] = None,
+    ) -> pd.DataFrame:
+        if predicted_at is None:
+            predicted_at = self.latest_timestamp()
+            if predicted_at is None:
+                return pd.DataFrame()
+        df = self._frame()
+        df = df[df["predicted_at"] == predicted_at]
+        if market is not None:
+            df = df[df["market"] == market]
+        if worst_n is not None:
+            return df.sort_values("diff_ratio", ascending=True).head(worst_n).reset_index(drop=True)
+        df = df.sort_values("diff_ratio", ascending=False)
+        if top_n is not None:
+            df = df.head(top_n)
+        return df.reset_index(drop=True)
+
+    def markets_at(self, predicted_at: Optional[str] = None) -> list:
+        if predicted_at is None:
+            predicted_at = self.latest_timestamp()
+            if predicted_at is None:
+                return []
+        return sorted({r["market"] for r in self._records if r["predicted_at"] == predicted_at})
 
     def get_latest_by_market(self, market: str) -> pd.DataFrame:
         rows = [r for r in self._records if r.get("market") == market]
         if not rows:
             return pd.DataFrame()
         df = pd.DataFrame(rows)
-        if "predicted_at" in df.columns:
-            idx = df.groupby("symbol")["predicted_at"].idxmax()
-            df = df.loc[idx].reset_index(drop=True)
+        idx = df.groupby("symbol")["predicted_at"].idxmax()
+        df = df.loc[idx]
         if "diff_ratio" in df.columns:
             df = df[df["diff_ratio"].notna()].sort_values("diff_ratio", ascending=False)
         return df.reset_index(drop=True)

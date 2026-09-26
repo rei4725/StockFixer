@@ -257,6 +257,49 @@ def load_prediction_markets(predicted_at: str = None) -> list:
             return []
 
 
+def load_latest_predictions_by_market(market: str) -> pd.DataFrame:
+    """
+    指定マーケットについて銘柄ごとの最新予測を返す（発注パイプライン用）。
+
+    旧 src/trading/execution/predictions.py の _load_latest_predictions を所有者である
+    本モジュールへ移設したもの。SQL は変更していない。
+
+    Returns:
+        columns: market, symbol, predicted_at, current_price, diff_ratio,
+        confidence_ratio, diff_ratio_3d, diff_ratio_5d, diff_ratio_10d,
+        confluence_score (desc order by diff_ratio)
+    """
+    with _db_connection() as con:
+        return pd.read_sql(
+            """
+            WITH latest AS (
+                SELECT market, symbol, MAX(predicted_at) AS latest_at
+                FROM prediction_results
+                WHERE market = %s
+                GROUP BY market, symbol
+            )
+            SELECT
+                pr.market,
+                pr.symbol,
+                pr.predicted_at,
+                pr.current_price,
+                pr.diff_ratio,
+                pr.confidence_ratio,
+                pr.diff_ratio_3d,
+                pr.diff_ratio_5d,
+                pr.diff_ratio_10d,
+                pr.confluence_score
+            FROM prediction_results pr
+            JOIN latest l
+              ON pr.market = l.market AND pr.symbol = l.symbol AND pr.predicted_at = l.latest_at
+            WHERE pr.diff_ratio IS NOT NULL
+            ORDER BY pr.diff_ratio DESC
+            """,
+            con,
+            params=[market],
+        )
+
+
 def load_shadow_comparison(
     market: str = None,
     symbol: str = None,
