@@ -7,8 +7,9 @@ src.infrastructure は infrastructure -> market_data / reporting の逆参照が
 .importlinter の layers 契約に載せられず、この違反は import-linter では検出できない（#741）。
 ゆえに AST でここで検出する。関数内の遅延 import も対象とする。
 
-GRANDFATHERED_BC_INFRA_IMPORTS は解消途中の既知違反のみを列挙する ratchet である。
-項目を増やしてはならない。空になった時点でこの定数ごと削除してよい。
+既知違反を許容する ratchet（GRANDFATHERED_BC_INFRA_IMPORTS）は、最後の 1 件だった
+reporting/discord/discord_bot.py を AnalyticsQuery の注入口経由に改めたことで空になり撤去した。
+例外を再導入してはならない。
 """
 
 import ast
@@ -27,14 +28,6 @@ _BOUNDED_CONTEXTS = (
     "screening",
     "trading",
     "watchlist",
-)
-
-# discord_bot.py は Discord コマンドのハンドラ自身が合成ルートを兼ねている。
-# 項目を追加しないこと。
-GRANDFATHERED_BC_INFRA_IMPORTS = frozenset(
-    {
-        "reporting/discord/discord_bot.py",
-    }
 )
 
 
@@ -66,11 +59,8 @@ class TestNoBoundedContextInfrastructureImport(unittest.TestCase):
         """BC 配下で src.infrastructure を新規に import していないこと。"""
         offenders = []
         for path in _iter_bc_files():
-            rel = path.relative_to(_SRC_ROOT).as_posix()
-            if rel in GRANDFATHERED_BC_INFRA_IMPORTS:
-                continue
             if _imports_infrastructure(path):
-                offenders.append(rel)
+                offenders.append(path.relative_to(_SRC_ROOT).as_posix())
 
         self.assertEqual(
             offenders,
@@ -78,19 +68,4 @@ class TestNoBoundedContextInfrastructureImport(unittest.TestCase):
             "BC から src.infrastructure への import を検出した。"
             "domain のポートを引数で受け取り、合成ルートで注入すること: "
             f"{offenders}",
-        )
-
-    def test_grandfathered_entries_still_violate(self):
-        """許容リストの項目が実際にまだ違反していること（解消後の削除漏れ検出）。"""
-        stale = []
-        for rel in sorted(GRANDFATHERED_BC_INFRA_IMPORTS):
-            path = _SRC_ROOT / rel
-            if not path.exists() or not _imports_infrastructure(path):
-                stale.append(rel)
-
-        self.assertEqual(
-            stale,
-            [],
-            "許容リストに、もう違反していない項目が残っている。"
-            f"GRANDFATHERED_BC_INFRA_IMPORTS から削除すること: {stale}",
         )

@@ -6,13 +6,13 @@ from discord.utils import escape_markdown
 from dotenv import load_dotenv
 
 from src.domain.types import PredictionResult
-from src.infrastructure.persistence.analytics_query import PostgresAnalyticsQuery
 from src.reporting.discord.discord_formatters import (
     build_prediction_list,
     convert_df_for_discord,
     get_market_emoji,
 )
 from src.reporting.discord.discord_text import DISCORD_TEXT_LIMIT, split_text_chunks
+from src.reporting.ports import get_analytics_query
 from src.reporting.query_service import (
     get_latest_market_prediction_snapshots,
     get_monthly_report_summary,
@@ -291,7 +291,7 @@ async def handle_monthlyreport_command(message):
         allowed_mentions=None,
     )
     try:
-        summary = get_monthly_report_summary(target_month, analytics=PostgresAnalyticsQuery())
+        summary = get_monthly_report_summary(target_month, analytics=get_analytics_query())
     except Exception as e:
         await message.channel.send(
             escape_markdown(f"月次レポートの取得に失敗しました: {e}"),

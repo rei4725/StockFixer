@@ -84,14 +84,19 @@ def _wire_default_ports():
     """
     from src.backtest.data_port import set_backtest_data_port
     from src.backtest.screening_port import set_backtest_screening_port
+    from src.infrastructure.in_memory import InMemoryAnalyticsQuery
     from src.market_data.backtest_adapter import BacktestMarketDataAdapter
     from src.market_data.prediction_adapter import PredictionMarketDataAdapter
     from src.prediction.ports import set_market_data_port
+    from src.reporting.ports import set_analytics_query
     from src.screening.backtest_adapter import BacktestScreeningAdapter
 
     set_backtest_data_port(BacktestMarketDataAdapter())
     set_market_data_port(PredictionMarketDataAdapter())
     set_backtest_screening_port(BacktestScreeningAdapter())
+    # AnalyticsQuery だけは本番アダプタ（Postgres）でなく空の偽物を入れる。
+    # テストが意図せず DB を読みに行かないようにするため
+    set_analytics_query(InMemoryAnalyticsQuery())
     yield
 
 
