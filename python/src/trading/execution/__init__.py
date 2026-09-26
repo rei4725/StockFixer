@@ -22,7 +22,6 @@ from .params import (  # noqa: F401
     _resolve_base_threshold,
     _resolve_kelly_params,
 )
-from .predictions import _load_latest_predictions  # noqa: F401
 from .recording import (  # noqa: F401
     _link_paper_order_metadata,
     _record_order,
@@ -42,7 +41,6 @@ from .stats import OrderExecutionStats  # noqa: F401
 __all__ = [
     "OrderExecutionStats",
     "run_daily_orders",
-    "_load_latest_predictions",
     "_compute_market_threshold_scale",
     "_resolve_base_threshold",
     "_attach_dynamic_thresholds",

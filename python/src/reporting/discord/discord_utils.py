@@ -7,6 +7,7 @@ Webhookを使用したDiscord通知機能
 import logging
 from typing import Optional
 
+from src.domain.ports import PredictionResultRepository
 from src.reporting.discord.discord_formatters import build_prediction_list, get_market_emoji
 from src.reporting.discord.discord_notification_specs import (
     COLOR_INFO,
@@ -89,6 +90,8 @@ def send_daily_pipeline_completion(
     data_count: Optional[int] = None,
     prediction_markets: Optional[list] = None,
     include_forecast: bool = True,
+    *,
+    predictions: PredictionResultRepository,
 ) -> bool:
     """
     日次パイプライン完了通知（完了メッセージ + 予測結果テーブル）
@@ -97,6 +100,7 @@ def send_daily_pipeline_completion(
         data_count: 取得したデータ件数
         prediction_markets: 予測対象マーケット
         include_forecast: 予測結果テーブルを含めるかどうか
+        predictions: 予測結果の読み取り元（合成ルートが必ず渡す）
 
     Returns:
         成功時True、失敗時False
@@ -116,7 +120,7 @@ def send_daily_pipeline_completion(
     # 2. 予測結果をマーケット単位の「リスト型」embed で送信
     if include_forecast:
         try:
-            latest_ts, snapshots = get_latest_market_prediction_snapshots()
+            latest_ts, snapshots = get_latest_market_prediction_snapshots(predictions=predictions)
             if latest_ts and snapshots:
                 ts_label = latest_ts[:16] if len(latest_ts) >= 16 else latest_ts
                 for snapshot in snapshots:

@@ -8,7 +8,7 @@ import os
 
 import pandas as pd
 
-from src.domain.ports import AnalyticsQuery
+from src.domain.ports import AnalyticsQuery, PredictionResultRepository
 from src.domain.types import PredictionResult, ShapFeatureContribution, SignalSnapshot
 from src.reporting.ports import ExplainShapFn, PredictSingleFn
 from src.reporting.types import (
@@ -18,11 +18,6 @@ from src.reporting.types import (
     WatchlistPredictionView,
 )
 from src.utils.data_path_utils import get_monitor_list_path, get_results_dir
-from src.utils.db import (
-    load_latest_prediction_timestamp,
-    load_prediction_markets,
-    load_prediction_results,
-)
 from src.utils.logger import get_logger
 from src.utils.scheduler_types import SchedulerJobStatus
 
@@ -52,28 +47,37 @@ def get_ranked_prediction_results(
     market: str,
     rank_type: str,
     predicted_at: str | None = None,
+    *,
+    predictions: PredictionResultRepository,
 ) -> list[PredictionResult]:
     if rank_type == "top10":
-        df = load_prediction_results(predicted_at=predicted_at, market=market, top_n=10)
+        df = predictions.results_at(predicted_at=predicted_at, market=market, top_n=10)
     elif rank_type == "worst10":
-        df = load_prediction_results(predicted_at=predicted_at, market=market, worst_n=10)
+        df = predictions.results_at(predicted_at=predicted_at, market=market, worst_n=10)
     else:
-        df = load_prediction_results(predicted_at=predicted_at, market=market)
+        df = predictions.results_at(predicted_at=predicted_at, market=market)
     return _to_prediction_results(df)
 
 
-def get_latest_market_prediction_snapshots() -> tuple[str | None, list[MarketPredictionSnapshot]]:
-    latest_ts = load_latest_prediction_timestamp()
+def get_latest_market_prediction_snapshots(
+    *,
+    predictions: PredictionResultRepository,
+) -> tuple[str | None, list[MarketPredictionSnapshot]]:
+    latest_ts = predictions.latest_timestamp()
     if not latest_ts:
         return None, []
 
     snapshots: list[MarketPredictionSnapshot] = []
-    for market in sorted(load_prediction_markets(latest_ts) or []):
+    for market in sorted(predictions.markets_at(latest_ts) or []):
         snapshots.append(
             MarketPredictionSnapshot(
                 market=market,
-                top_results=get_ranked_prediction_results(market, "top10", latest_ts),
-                worst_results=get_ranked_prediction_results(market, "worst10", latest_ts),
+                top_results=get_ranked_prediction_results(
+                    market, "top10", latest_ts, predictions=predictions
+                ),
+                worst_results=get_ranked_prediction_results(
+                    market, "worst10", latest_ts, predictions=predictions
+                ),
             )
         )
     return latest_ts, snapshots

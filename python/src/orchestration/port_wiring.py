@@ -35,10 +35,13 @@ def wire_ports(force: bool = False) -> None:
     from src.backtest.data_port import set_backtest_data_port
     from src.backtest.screening_port import set_backtest_screening_port
     from src.infrastructure.persistence.analytics_query import PostgresAnalyticsQuery
+    from src.infrastructure.persistence.prediction_result_repository import (
+        PostgresPredictionResultRepository,
+    )
     from src.market_data.backtest_adapter import BacktestMarketDataAdapter
     from src.market_data.prediction_adapter import PredictionMarketDataAdapter
     from src.prediction.ports import set_market_data_port
-    from src.reporting.ports import set_analytics_query
+    from src.reporting.ports import set_analytics_query, set_prediction_result_repository
     from src.screening.backtest_adapter import BacktestScreeningAdapter
 
     set_backtest_data_port(BacktestMarketDataAdapter())
@@ -46,7 +49,9 @@ def wire_ports(force: bool = False) -> None:
     set_backtest_screening_port(BacktestScreeningAdapter())
     # PostgresAnalyticsQuery はコンストラクタで DB に触れない（接続は各メソッド呼び出し時）
     set_analytics_query(PostgresAnalyticsQuery())
+    set_prediction_result_repository(PostgresPredictionResultRepository())
     _wired = True
     logger.debug(
-        "ポート注入完了: BacktestDataPort / MarketDataPort / BacktestScreeningPort / AnalyticsQuery"
+        "ポート注入完了: BacktestDataPort / MarketDataPort / BacktestScreeningPort"
+        " / AnalyticsQuery / PredictionResultRepository"
     )

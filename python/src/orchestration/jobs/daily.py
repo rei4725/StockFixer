@@ -160,7 +160,11 @@ def run_daily_pipeline():
     # 5. Discord通知（CRITICAL: 失敗時はパイプライン停止）
     logger.info("[5/6] Discord通知送信")
     try:
-        send_daily_pipeline_completion()
+        from src.infrastructure.persistence.prediction_result_repository import (
+            PostgresPredictionResultRepository,
+        )
+
+        send_daily_pipeline_completion(predictions=PostgresPredictionResultRepository())
         logger.info("[5/6] Discord通知完了")
     except Exception as e:
         if _handle_stage_error(PipelineStage.CRITICAL, "[5/6] Discord通知", e):
@@ -186,6 +190,9 @@ def run_daily_auto_order():
     import os
 
     from src.infrastructure.persistence.order_run_repository import PostgresOrderRunSink
+    from src.infrastructure.persistence.prediction_result_repository import (
+        PostgresPredictionResultRepository,
+    )
     from src.infrastructure.persistence.trade_diff_repository import PostgresTradeDiffSink
     from src.infrastructure.yfinance_market_data_adapter import YFinanceMarketDataAdapter
     from src.trading.brokers.paper.paper_broker import PaperBroker
@@ -213,6 +220,7 @@ def run_daily_auto_order():
             broker=broker,
             order_run_sink=PostgresOrderRunSink(),
             trade_diff_sink=trade_diff_sink,
+            prediction_repo=PostgresPredictionResultRepository(),
             market="jp",
             mode=mode,
             market_data=market_data,
@@ -410,6 +418,9 @@ def run_pre_close_alert() -> None:
 
     logger.info("=== 引け前ポジション再評価アラート開始 ===")
     try:
+        from src.infrastructure.persistence.prediction_result_repository import (
+            PostgresPredictionResultRepository,
+        )
         from src.infrastructure.persistence.trade_diff_repository import PostgresTradeDiffSink
         from src.infrastructure.yfinance_market_data_adapter import YFinanceMarketDataAdapter
         from src.trading.pre_close_alert_service import get_pre_close_alerts
@@ -417,6 +428,7 @@ def run_pre_close_alert() -> None:
         lines = get_pre_close_alerts(
             market_data_port=YFinanceMarketDataAdapter(),
             trade_diff_sink=PostgresTradeDiffSink(),
+            prediction_repo=PostgresPredictionResultRepository(),
         )
         logger.info("引け前アラート評価完了: %d行", len(lines))
     except Exception as e:

@@ -48,7 +48,6 @@ from .params import (
     _choose_order_params,
     _resolve_kelly_params,
 )
-from .predictions import _load_latest_predictions
 from .recording import _record_order, _sync_live_execution_diffs
 from .selection import (
     _apply_buy_sector_limit,
@@ -68,11 +67,11 @@ def run_daily_orders(
     *,
     order_run_sink: OrderRunSink,
     trade_diff_sink: TradeDiffSink,
+    prediction_repo: PredictionResultRepository,
     market: str = "jp",
     mode: str = "paper",
     market_data: MarketDataPort | None = None,
     notifier: NotificationPort | None = None,
-    prediction_repo: PredictionResultRepository | None = None,
 ) -> OrderExecutionStats:
     """
     日次自動発注メインエントリーポイント。
@@ -82,6 +81,7 @@ def run_daily_orders(
         market: 対象マーケット（"jp" = 東証）
         mode: "paper" or "live"
         trade_diff_sink: 約定乖離の記録先（TradeDiffSink 実装。合成ルートが必ず渡す）
+        prediction_repo: 予測結果の読み取り元（PredictionResultRepository 実装。合成ルートが必ず渡す）
 
     Returns:
         {"buy_orders": int, "sell_orders": int, "skipped": int, "errors": int}
@@ -141,10 +141,7 @@ def run_daily_orders(
         )
         return stats
 
-    if prediction_repo is not None:
-        predictions = prediction_repo.get_latest_by_market(market)
-    else:
-        predictions = _load_latest_predictions(market)
+    predictions = prediction_repo.get_latest_by_market(market)
     if predictions.empty:
         logger.warning("[exec] 予測結果が存在しません。先に run_predict.py を実行してください。")
         stats.update(

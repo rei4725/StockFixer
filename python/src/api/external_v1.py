@@ -142,9 +142,14 @@ def register_routes(flask_app: Flask) -> None:
         market_filter = request.args.get("market")
 
         try:
+            from src.infrastructure.persistence.prediction_result_repository import (
+                PostgresPredictionResultRepository,
+            )
             from src.reporting.query_service import get_latest_market_prediction_snapshots
 
-            predicted_at, snapshots = get_latest_market_prediction_snapshots()
+            predicted_at, snapshots = get_latest_market_prediction_snapshots(
+                predictions=PostgresPredictionResultRepository()
+            )
             if not snapshots:
                 return jsonify({"predicted_at": None, "markets": []}), 200
 

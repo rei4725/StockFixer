@@ -12,6 +12,9 @@ from unittest.mock import MagicMock, patch
 from src.infrastructure.in_memory import InMemoryAnalyticsQuery
 from src.infrastructure.persistence.analytics_query import PostgresAnalyticsQuery
 from src.infrastructure.persistence.order_run_repository import PostgresOrderRunSink
+from src.infrastructure.persistence.prediction_result_repository import (
+    PostgresPredictionResultRepository,
+)
 from src.infrastructure.persistence.trade_diff_repository import PostgresTradeDiffSink
 from src.reporting.types import MonthlyReportSummary
 
@@ -42,6 +45,7 @@ class TestRunAutoTradeCompositionRoot(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIsInstance(captured["order_run_sink"], PostgresOrderRunSink)
         self.assertIsInstance(captured["trade_diff_sink"], PostgresTradeDiffSink)
+        self.assertIsInstance(captured["prediction_repo"], PostgresPredictionResultRepository)
 
     def test_broker_and_pipeline_share_one_sink(self):
         """broker に渡した Sink と run_daily_orders に渡す Sink が同一実体であること。"""
@@ -95,6 +99,7 @@ class TestDailyJobCompositionRoot(unittest.TestCase):
 
         self.assertIsInstance(captured.get("order_run_sink"), PostgresOrderRunSink)
         self.assertIsInstance(captured.get("trade_diff_sink"), PostgresTradeDiffSink)
+        self.assertIsInstance(captured.get("prediction_repo"), PostgresPredictionResultRepository)
 
     def test_run_daily_settle_orders_injects_postgres_trade_diff_sink(self):
         """settle_pending_orders() は PaperBroker 経由で唯一 trade diff を書く場所。
@@ -259,6 +264,8 @@ class TestRunPreCloseAlertCompositionRoot(unittest.TestCase):
             daily.run_pre_close_alert()
 
         self.assertIsInstance(captured.get("trade_diff_sink"), PostgresTradeDiffSink)
+        # 旧実装はプロキシ経由で予測を読んでいた。結線漏れは実行時まで露見しないため固定する
+        self.assertIsInstance(captured.get("prediction_repo"), PostgresPredictionResultRepository)
 
 
 class TestRunDailyRuleSignalsCompositionRoot(unittest.TestCase):
@@ -301,6 +308,7 @@ class TestRunClaudeTraderCompositionRoot(unittest.TestCase):
 
         self.assertEqual(rc, 0)
         self.assertIsInstance(captured.get("trade_diff_sink"), PostgresTradeDiffSink)
+        self.assertIsInstance(captured.get("prediction_repo"), PostgresPredictionResultRepository)
 
 
 class TestRunRuleSignalsCompositionRoot(unittest.TestCase):
@@ -471,6 +479,30 @@ class TestRunWeeklyReportCompositionRoot(unittest.TestCase):
         self.assertIs(captured.get("snapshots_df"), snapshots_df)
 
 
+class TestExternalV1PredictionsCompositionRoot(unittest.TestCase):
+    def test_top_predictions_endpoint_injects_postgres_repository(self):
+        from src.api.health import app
+
+        captured: dict = {}
+
+        def _capture(*, predictions):
+            captured["predictions"] = predictions
+            return None, []
+
+        app.config["TESTING"] = True
+        with patch(
+            "src.api.external_v1._load_api_keys", return_value=frozenset(["test-key"])
+        ), patch("src.api.external_v1._is_rate_limited", return_value=False), patch(
+            "src.reporting.query_service.get_latest_market_prediction_snapshots",
+            side_effect=_capture,
+        ):
+            with app.test_client() as client:
+                resp = client.get("/api/v1/predictions/top", headers={"X-API-Key": "test-key"})
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertIsInstance(captured.get("predictions"), PostgresPredictionResultRepository)
+
+
 class TestExternalV1MonthlyReportCompositionRoot(unittest.TestCase):
     def test_monthly_report_endpoint_injects_postgres_analytics_query(self):
         from src.api.health import app
@@ -519,6 +551,56 @@ class TestDiscordBotMonthlyReportCompositionRoot(unittest.TestCase):
             self.assertIsInstance(reporting_ports.get_analytics_query(), PostgresAnalyticsQuery)
         finally:
             port_wiring._wired = saved_wired
+
+    def test_wire_ports_registers_postgres_prediction_result_repository(self):
+        from src.orchestration import port_wiring
+        from src.reporting import ports as reporting_ports
+
+        saved_wired = port_wiring._wired
+        try:
+            reporting_ports._prediction_results = None
+            port_wiring.wire_ports(force=True)
+            self.assertIsInstance(
+                reporting_ports.get_prediction_result_repository(),
+                PostgresPredictionResultRepository,
+            )
+        finally:
+            port_wiring._wired = saved_wired
+
+    def test_forecast_and_ranking_use_injected_repository(self):
+        import asyncio
+
+        from src.infrastructure.in_memory import InMemoryPredictionRepository
+        from src.reporting.discord import discord_bot
+        from src.reporting.ports import set_prediction_result_repository
+
+        repo = InMemoryPredictionRepository()
+        repo.add(
+            "20260927_090000",
+            [
+                {
+                    "market": "jp",
+                    "symbol": "7203",
+                    "current_price": 100.0,
+                    "avg_pred_price": 101.0,
+                    "diff_ratio": 0.01,
+                    "model_count": 2,
+                }
+            ],
+        )
+        set_prediction_result_repository(repo)
+
+        self.assertIn("7203", discord_bot.get_top10_diff_stocks_message("jp", "top10"))
+
+        sent: list = []
+        message = MagicMock()
+
+        async def _send(content=None, **kwargs):
+            sent.append(content)
+
+        message.channel.send = _send
+        asyncio.run(discord_bot.handle_forecast_command(message))
+        self.assertTrue(any("7203" in str(c) for c in sent))
 
     def test_bot_entrypoints_call_wire_ports(self):
         """Bot を起動する合成ルートが wire_ports() を呼んでいること（未注入なら
