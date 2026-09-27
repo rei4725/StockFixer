@@ -35,7 +35,6 @@ class TestPostgresPredictionResultRepository(unittest.TestCase):
         self.assertEqual(repo.latest_timestamp(), "20990101_090000")
         self.assertIn("us", repo.markets_at("20990101_090000"))
 
-        # NULL を含まないマーケットで順位付けを確かめる（Postgres の DESC は NULLS FIRST。別 Issue）
         top = repo.results_at(predicted_at="20990101_090000", market="jp", top_n=1)
         self.assertEqual(list(top["symbol"]), ["ZZK"])
 
@@ -46,6 +45,26 @@ class TestPostgresPredictionResultRepository(unittest.TestCase):
         self.assertLess(symbols.index("ZZB"), symbols.index("ZZA"))
         self.assertNotIn("ZZJ", symbols)
         self.assertIn("confluence_score", latest.columns)
+
+    def test_null_diff_ratio_is_ranked_last(self):
+        """diff_ratio が NULL の行は上位にも全件の先頭にも来ない（#748）。
+
+        Postgres の DESC は既定で NULLS FIRST。DuckDB 時代（NULLS LAST）と同じ並びに揃える。
+        """
+        save_prediction_results(
+            "20990102_090000",
+            [_result("NLA", 0.01), _result("NLB", None), _result("NLC", 0.03)],
+        )
+        repo = PostgresPredictionResultRepository()
+
+        top = repo.results_at(predicted_at="20990102_090000", market="us", top_n=2)
+        self.assertEqual(list(top["symbol"]), ["NLC", "NLA"])
+
+        every = repo.results_at(predicted_at="20990102_090000", market="us")
+        self.assertEqual(list(every["symbol"]), ["NLC", "NLA", "NLB"])
+
+        worst = repo.results_at(predicted_at="20990102_090000", market="us", worst_n=2)
+        self.assertEqual(list(worst["symbol"]), ["NLA", "NLC"])
 
 
 if __name__ == "__main__":

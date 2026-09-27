@@ -95,6 +95,17 @@ class TestInMemoryPredictionRepository:
         assert len(df) == 1
         assert df.iloc[0]["diff_ratio"] == 0.02
 
+    def test_results_at_ranks_null_diff_ratio_last(self):
+        """Postgres 実装（DESC NULLS LAST・#748）と同じく NULL は上位にも下位にも先頭に来ない"""
+        repo = InMemoryPredictionRepository()
+        rows = [self._make_result("us", s) for s in ("A", "B", "C")]
+        rows[0].diff_ratio = 0.01
+        rows[1].diff_ratio = None
+        rows[2].diff_ratio = 0.03
+        repo.add("20260518_090000", rows)
+        assert list(repo.results_at(top_n=2)["symbol"]) == ["C", "A"]
+        assert list(repo.results_at(worst_n=2)["symbol"]) == ["A", "C"]
+
     def test_empty_repo_returns_empty(self):
         repo = InMemoryPredictionRepository()
         assert repo.results_at().empty

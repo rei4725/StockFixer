@@ -212,14 +212,16 @@ def load_prediction_results(
         query += " AND model_version = %s"
         params.append(model_version)
 
+    # Postgres の DESC は既定で NULLS FIRST。diff_ratio が NULL の行が「上位」の先頭に
+    # 来ないよう NULLS LAST を明示する（DuckDB 時代の既定と同じ並び。#748）
     if worst_n is not None:
         query += " ORDER BY diff_ratio ASC LIMIT %s"
         params.append(worst_n)
     elif top_n is not None:
-        query += " ORDER BY diff_ratio DESC LIMIT %s"
+        query += " ORDER BY diff_ratio DESC NULLS LAST LIMIT %s"
         params.append(top_n)
     else:
-        query += " ORDER BY diff_ratio DESC"
+        query += " ORDER BY diff_ratio DESC NULLS LAST"
 
     with _db_connection() as con:
         try:
