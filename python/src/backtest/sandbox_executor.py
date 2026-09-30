@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import posixpath
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -22,6 +23,8 @@ from config.settings import (
     FACTORY_SANDBOX_CPU_LIMIT,
     FACTORY_SANDBOX_IMAGE,
     FACTORY_SANDBOX_MEMORY_LIMIT,
+    FACTORY_SANDBOX_SHARE_DIR,
+    FACTORY_SANDBOX_SHARE_VOLUME,
     FACTORY_SANDBOX_TIMEOUT_SECONDS,
 )
 from src.backtest.ast_safety_check import check_source_safety
@@ -40,12 +43,70 @@ class SandboxRunResult:
         "repairable"     — AST違反・実行時例外。repair_detail に修復用の情報。
                             ゲート判定結果はここに含まれない（別経路）。
         "infra_error"    — Dockerの起動失敗・タイムアウト等、コード起因でない。
+
+    environment_broken=True は、サンドボックスが入力（候補ソース・株価データ）を
+    読めなかったことを表す。候補を替えても直らないため、呼び出し元はその晩の生成を
+    打ち切ること（修復を Claude に依頼しても API を空費するだけ。#757）。
     """
 
     kind: str
     evaluation: Optional[FactoryEvaluation] = None
     repair_detail: Optional[str] = None
     infra_detail: Optional[str] = None
+    environment_broken: bool = False
+
+
+# サンドボックス内で共有ボリュームをマウントする場所
+_SANDBOX_SHARE_MOUNT = "/sandbox_share"
+
+
+def _share_config() -> Optional[tuple[str, str]]:
+    """共有ボリューム方式の設定 (本体内ディレクトリ, ボリューム名) を返す。未設定なら None。
+
+    片方だけの設定は、一時ファイルをどこに置いてもサンドボックスから見えない誤設定のため
+    例外にする（無言で bind mount 方式に落ちると #757 と同じ全滅が再発する）。
+    """
+    if FACTORY_SANDBOX_SHARE_DIR and FACTORY_SANDBOX_SHARE_VOLUME:
+        return FACTORY_SANDBOX_SHARE_DIR, FACTORY_SANDBOX_SHARE_VOLUME
+    if FACTORY_SANDBOX_SHARE_DIR or FACTORY_SANDBOX_SHARE_VOLUME:
+        raise RuntimeError(
+            "FACTORY_SANDBOX_SHARE_DIR と FACTORY_SANDBOX_SHARE_VOLUME は両方設定するか"
+            "両方未設定にしてください（片方だけではサンドボックスに入力が渡りません）"
+        )
+    return None
+
+
+def _workspace_dir() -> Optional[str]:
+    """サンドボックスに渡す一時ファイルを作る親ディレクトリ（None なら OS 既定の一時領域）。"""
+    config = _share_config()
+    return config[0] if config else None
+
+
+def _mount_args(paths: dict[str, str]) -> tuple[list[str], dict[str, str]]:
+    """docker run の -v 引数と、サンドボックス内で見えるパスへの対応を返す。
+
+    paths は {役割: 本体側のパス}。共有ボリューム方式ではボリューム全体を読み取り専用で
+    1 回だけマウントし、各パスをボリューム内の相対パスで読み替える。
+    bind mount 方式（ホスト実行）では従来どおり各パスを個別に /sandbox/<役割> へ渡す。
+    """
+    config = _share_config()
+    if config is None:
+        args: list[str] = []
+        mapped: dict[str, str] = {}
+        for role, local in paths.items():
+            target = f"/sandbox/{role}"
+            args += ["-v", f"{local}:{target}:ro"]
+            mapped[role] = target
+        return args, mapped
+
+    share_dir, volume = config
+    mapped = {}
+    for role, local in paths.items():
+        rel = os.path.relpath(local, share_dir)
+        if rel.startswith(".."):
+            raise RuntimeError(f"サンドボックス入力が共有ディレクトリの外にあります: {local}")
+        mapped[role] = posixpath.join(_SANDBOX_SHARE_MOUNT, *rel.split(os.sep))
+    return ["-v", f"{volume}:{_SANDBOX_SHARE_MOUNT}:ro"], mapped
 
 
 def _nan_if_none(value: Optional[float]) -> float:
@@ -73,11 +134,14 @@ def prepare_sandbox_data(
     run_sandboxed_evaluation に渡す。呼び出し元は使用後にディレクトリを
     削除する責務を持つ（tempfile.TemporaryDirectory 等で管理）。
     """
-    data_dir = tempfile.mkdtemp(prefix="factory_sandbox_data_")
+    workspace = _workspace_dir()
+    data_dir = tempfile.mkdtemp(prefix="factory_sandbox_data_", dir=workspace)
     for symbol, df in data_by_symbol.items():
         df.to_parquet(os.path.join(data_dir, f"{symbol}.parquet"))
 
-    windows_fd, windows_path = tempfile.mkstemp(prefix="factory_sandbox_windows_", suffix=".json")
+    windows_fd, windows_path = tempfile.mkstemp(
+        prefix="factory_sandbox_windows_", suffix=".json", dir=workspace
+    )
     raw = [[w[0].isoformat(), w[1].isoformat()] for w in windows]
     with os.fdopen(windows_fd, "w", encoding="utf-8") as f:
         json.dump(raw, f)
@@ -115,10 +179,15 @@ def run_sandboxed_evaluation(
         detail = "; ".join(f"{v.line}行目: {v.reason}" for v in safety.violations)
         return SandboxRunResult(kind="repairable", repair_detail=f"静的検査で拒否: {detail}")
 
-    with tempfile.TemporaryDirectory(prefix="factory_sandbox_src_") as src_dir:
+    with tempfile.TemporaryDirectory(
+        prefix="factory_sandbox_src_", dir=_workspace_dir()
+    ) as src_dir:
         source_path = os.path.join(src_dir, "candidate.py")
         with open(source_path, "w", encoding="utf-8") as f:
             f.write(source_code)
+        mount_args, mapped = _mount_args(
+            {"src": src_dir, "data": shared_data_dir, "windows.json": windows_file}
+        )
 
         image = FACTORY_SANDBOX_IMAGE or _detect_self_image()
         cmd = [
@@ -146,17 +215,12 @@ def run_sandboxed_evaluation(
             # 変更しても Claude 生成候補だけ旧閾値で集計される不整合を防ぐ（#625）。
             "-e",
             f"FACTORY_GATE_MIN_TRADES_PER_SYMBOL={FACTORY_GATE_MIN_TRADES_PER_SYMBOL}",
-            "-v",
-            f"{src_dir}:/sandbox/src:ro",
-            "-v",
-            f"{shared_data_dir}:/sandbox/data:ro",
-            "-v",
-            f"{windows_file}:/sandbox/windows.json:ro",
+            *mount_args,
             image,
             "python",
             "scripts/sandbox_evaluate_rule.py",
             "--source-file",
-            "/sandbox/src/candidate.py",
+            posixpath.join(mapped["src"], "candidate.py"),
             "--class-name",
             spec["class_name"],
             "--rule-name",
@@ -168,9 +232,9 @@ def run_sandboxed_evaluation(
             "--lookback-years",
             str(hypothesis.lookback_years),
             "--data-dir",
-            "/sandbox/data",
+            mapped["data"],
             "--windows-file",
-            "/sandbox/windows.json",
+            mapped["windows.json"],
         ]
 
         try:
@@ -199,6 +263,14 @@ def run_sandboxed_evaluation(
             return SandboxRunResult(
                 kind="infra_error",
                 infra_detail=f"サンドボックス出力の解析に失敗: {proc.stdout[-2000:]}",
+            )
+
+        if payload.get("status") == "input_missing":
+            # 候補のコードではなく受け渡しの問題。修復しても直らない（#757）
+            return SandboxRunResult(
+                kind="infra_error",
+                infra_detail=f"サンドボックスが入力を読めません: {payload.get('detail', '')}",
+                environment_broken=True,
             )
 
         if payload.get("status") == "error":

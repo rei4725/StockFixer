@@ -42,38 +42,65 @@ def test_main_rejects_without_sandbox_flag(monkeypatch, capsys):
     assert "STOCKFIXER_SANDBOX" in out["traceback"]
 
 
-def test_main_reports_actual_exception_type_on_generic_failure(monkeypatch, tmp_path, capsys):
+def _argv(source_file, data_dir, windows_file):
+    return [
+        "sandbox_evaluate_rule.py",
+        "--source-file",
+        str(source_file),
+        "--class-name",
+        "X",
+        "--rule-name",
+        "x",
+        "--description",
+        "x",
+        "--market",
+        "us",
+        "--lookback-years",
+        "2",
+        "--data-dir",
+        str(data_dir),
+        "--windows-file",
+        str(windows_file),
+    ]
+
+
+def test_main_reports_missing_inputs_separately_from_code_errors(monkeypatch, tmp_path, capsys):
+    """入力が見えないのは受け渡しの問題であり、修復対象の実行時エラーとは別に報告する（#757）。
+
+    本体コンテナの /tmp をホストの Docker が解決できず、毎晩この状態で
+    Claude に「修復」を依頼して API を空費していた。
+    """
     monkeypatch.setenv("STOCKFIXER_SANDBOX", "1")
-
-    missing_source_file = tmp_path / "does_not_exist.py"
-
     monkeypatch.setattr(
         "sys.argv",
-        [
-            "sandbox_evaluate_rule.py",
-            "--source-file",
-            str(missing_source_file),
-            "--class-name",
-            "X",
-            "--rule-name",
-            "x",
-            "--description",
-            "x",
-            "--market",
-            "us",
-            "--lookback-years",
-            "2",
-            "--data-dir",
-            "dummy_dir",
-            "--windows-file",
-            "dummy.json",
-        ],
+        _argv(tmp_path / "missing.py", tmp_path / "no_data", tmp_path / "no_windows.json"),
     )
+
     rc = sandbox_script.main()
+
+    assert rc == 1
+    out = json.loads(capsys.readouterr().out.strip())
+    assert out["status"] == "input_missing"
+    for name in ("missing.py", "no_data", "no_windows.json"):
+        assert name in out["detail"]
+
+
+def test_main_reports_actual_exception_type_on_generic_failure(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("STOCKFIXER_SANDBOX", "1")
+    source_file = tmp_path / "candidate.py"
+    source_file.write_text("class X:\n    pass\n", encoding="utf-8")
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    windows_file = tmp_path / "windows.json"
+    windows_file.write_text("{ not json", encoding="utf-8")  # 入力は揃っているが壊れている
+    monkeypatch.setattr("sys.argv", _argv(source_file, data_dir, windows_file))
+
+    rc = sandbox_script.main()
+
     assert rc == 1
     out = json.loads(capsys.readouterr().out.strip())
     assert out["status"] == "error"
-    assert out["error_type"] == "FileNotFoundError"
+    assert out["error_type"] == "JSONDecodeError"
 
 
 def test_main_success_path(monkeypatch, tmp_path, capsys):

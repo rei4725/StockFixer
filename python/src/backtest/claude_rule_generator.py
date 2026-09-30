@@ -103,6 +103,10 @@ def _generate_one_candidate(
     )
 
 
+class SandboxEnvironmentBroken(Exception):
+    """サンドボックスが入力を読めない。候補を替えても直らないため、その晩の生成を打ち切る。"""
+
+
 def _generate_and_evaluate_with_repair(
     market: str, shared_data_dir: str, windows_file: str, review_port: TextReviewPort
 ) -> Optional[FactoryEvaluation]:
@@ -129,6 +133,8 @@ def _generate_and_evaluate_with_repair(
         )
         if result.kind == "gate_evaluated":
             return result.evaluation
+        if result.kind == "infra_error" and result.environment_broken:
+            raise SandboxEnvironmentBroken(result.infra_detail or "")
         if result.kind == "infra_error":
             logger.warning(
                 "[claude_rule_generator] インフラ起因の失敗のためこの候補をスキップ: %s",
@@ -170,9 +176,19 @@ def generate_claude_hypotheses(
         logger.info(
             "[claude_rule_generator] 候補 %d/%d 生成中...", i + 1, FACTORY_CLAUDE_RULEGEN_COUNT
         )
-        evaluation = _generate_and_evaluate_with_repair(
-            market, shared_data_dir, windows_file, review_port
-        )
+        try:
+            evaluation = _generate_and_evaluate_with_repair(
+                market, shared_data_dir, windows_file, review_port
+            )
+        except SandboxEnvironmentBroken as e:
+            # 残りの候補も同じ理由で全滅するため、Claude API を呼ばずに打ち切る（#757）
+            logger.error(
+                "[claude_rule_generator] サンドボックスが入力を読めないため、今夜の Claude 生成を"
+                "打ち切ります（設定 FACTORY_SANDBOX_SHARE_DIR / FACTORY_SANDBOX_SHARE_VOLUME を"
+                "確認してください）: %s",
+                e,
+            )
+            break
         if evaluation is not None:
             evaluations.append(evaluation)
     logger.info(

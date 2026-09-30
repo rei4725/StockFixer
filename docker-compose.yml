@@ -82,6 +82,10 @@ services:
       - OLLAMA_URL=http://ollama:11434
       - DATABASE_URL=postgresql://stockfixer:${POSTGRES_PASSWORD:-stockfixer_dev}@postgres:5432/stockfixer
       - FACTORY_SANDBOX_IMAGE=stockfixer:${VERSION:-dev}
+      # Claude 生成ルールのサンドボックスへ入力を渡す共有ボリューム（#757）。
+      # サンドボックスはホストの Docker が起動するため、本体の /tmp は見えない
+      - FACTORY_SANDBOX_SHARE_DIR=/app/sandbox_share
+      - FACTORY_SANDBOX_SHARE_VOLUME=stockfixer_factory_sandbox
     env_file:
       - ./python/.env
     volumes:
@@ -92,6 +96,7 @@ services:
       - ./python/results:/app/results
       - ./Logs:/app/logs
       - /var/run/docker.sock:/var/run/docker.sock
+      - factory_sandbox:/app/sandbox_share
     deploy:
       resources:
         limits:
@@ -111,6 +116,9 @@ services:
     tty: true
 
 volumes:
+  # 名前を固定する（プロジェクト名の接頭辞が付くと FACTORY_SANDBOX_SHARE_VOLUME と食い違う）
+  factory_sandbox:
+    name: stockfixer_factory_sandbox
   ollama_data:
   postgres_data:
   postgres_test_data:
