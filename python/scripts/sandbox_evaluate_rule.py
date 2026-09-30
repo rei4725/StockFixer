@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 import traceback
@@ -23,6 +24,21 @@ def _load_data_by_symbol(data_dir: str) -> dict[str, pd.DataFrame]:
         symbol = name[: -len(".parquet")]
         data[symbol] = pd.read_parquet(os.path.join(data_dir, name))
     return data
+
+
+def _finite_or_none(value: float) -> float | None:
+    """JSON に NaN を書かない（ホスト側は None を「算出不能」として扱う）。"""
+    return None if value is None or math.isnan(value) else float(value)
+
+
+def _series_payload(returns: pd.Series | None) -> dict | None:
+    """ポートフォリオ日次リターンを JSON で運べる形にする。"""
+    if returns is None:
+        return None
+    return {
+        "dates": [ts.isoformat() for ts in returns.index],
+        "values": [float(v) for v in returns.to_numpy()],
+    }
 
 
 def _load_windows(windows_file: str) -> list[tuple[pd.Timestamp, pd.Timestamp]]:
@@ -108,6 +124,15 @@ def main() -> int:
                         "n_symbols_with_signal": evaluation.n_symbols_with_signal,
                         "n_effective_symbols": evaluation.n_effective_symbols,
                         "avg_trades_per_symbol": evaluation.avg_trades_per_symbol,
+                        # ゲートはポートフォリオ日次リターンで判定するため、ホスト側で
+                        # チャンピオンとの検定・DSR ができるよう系列ごと返す
+                        "portfolio_sharpe_ratio": _finite_or_none(
+                            evaluation.portfolio_sharpe_ratio
+                        ),
+                        "portfolio_max_drawdown": _finite_or_none(
+                            evaluation.portfolio_max_drawdown
+                        ),
+                        "portfolio_returns": _series_payload(evaluation.portfolio_returns),
                     },
                 }
             )

@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
+from tests.unit.backtest.factory_gate_synthetic import champion_evaluation, daily_return_series
 
 from src.backtest import factory_report
 from src.backtest.factory import (
@@ -147,9 +148,9 @@ class TestSampler(unittest.TestCase):
 
 
 class TestApplyGate(unittest.TestCase):
-    """apply_gate のテスト"""
+    """apply_gate のテスト（チャンピオン比較は日次リターンの Sharpe 差の検定）"""
 
-    def _make_eval(self, **kwargs):
+    def _make_eval(self, candidate_mean: float = 0.003, **kwargs):
         defaults = dict(
             hypothesis=FactoryHypothesis(rule_spec=_ATOMIC_SPEC, market="jp"),
             sharpe_ratio=2.0,
@@ -158,56 +159,65 @@ class TestApplyGate(unittest.TestCase):
             dsr=0.97,
             pbo=0.30,
             n_effective_symbols=50,
+            portfolio_returns=daily_return_series(candidate_mean, seed=0),
         )
         defaults.update(kwargs)
         return FactoryEvaluation(**defaults)
 
     def test_passes_when_all_conditions_met(self):
         ev = self._make_eval()
-        apply_gate(ev, champion_sharpe=1.0)
+        apply_gate(ev, champion_evaluation())
         self.assertTrue(ev.gate_passed)
         self.assertEqual(ev.gate_reasons, [])
+        self.assertGreater(ev.champion_z, 1.645)
 
     def test_fails_on_low_trades(self):
         ev = self._make_eval(num_trades=10)
-        apply_gate(ev, champion_sharpe=1.0)
+        apply_gate(ev, champion_evaluation())
         self.assertFalse(ev.gate_passed)
         self.assertTrue(any("num_trades" in r for r in ev.gate_reasons))
 
     def test_fails_on_low_dsr(self):
         ev = self._make_eval(dsr=0.80)
-        apply_gate(ev, champion_sharpe=1.0)
+        apply_gate(ev, champion_evaluation())
         self.assertFalse(ev.gate_passed)
 
     def test_high_pbo_does_not_block_gate(self):
         # PBO はバッチ診断へ降格。高 PBO でも他条件を満たせばゲートは通る。
         ev = self._make_eval(pbo=0.70)
-        apply_gate(ev, champion_sharpe=1.0)
+        apply_gate(ev, champion_evaluation())
         self.assertTrue(ev.gate_passed)
         self.assertFalse(any("pbo" in r for r in ev.gate_reasons))
 
     def test_fails_on_deep_drawdown(self):
         ev = self._make_eval(max_drawdown=-0.40)
-        apply_gate(ev, champion_sharpe=1.0)
+        apply_gate(ev, champion_evaluation())
         self.assertFalse(ev.gate_passed)
 
-    def test_fails_when_not_beating_champion(self):
-        # champion マージン=1.0: champion 以下なら不合格
-        ev = self._make_eval(sharpe_ratio=0.9)
-        apply_gate(ev, champion_sharpe=1.0)  # 必要値 1.0
+    def test_fails_when_not_significantly_beating_champion(self):
+        # 候補とチャンピオンが同じ実力なら、Sharpe 差は有意にならず不合格
+        ev = self._make_eval(candidate_mean=0.001)
+        apply_gate(ev, champion_evaluation(daily_mean=0.001))
         self.assertFalse(ev.gate_passed)
-        self.assertTrue(any("sharpe" in r for r in ev.gate_reasons))
+        self.assertTrue(any("z=" in r for r in ev.gate_reasons))
 
-    def test_champion_nan_fails_closed(self):
-        """champion_sharpe が NaN（対照群全滅）のときは fail-closed で不合格にする（#627）。
+    def test_fails_when_candidate_has_no_daily_returns(self):
+        """日次リターンが無い候補は検定できないため不合格に倒す（別の物差しで比べない）。"""
+        ev = self._make_eval(portfolio_returns=None)
+        apply_gate(ev, champion_evaluation())
+        self.assertFalse(ev.gate_passed)
+        self.assertTrue(any("検定できない" in r for r in ev.gate_reasons))
+
+    def test_champion_missing_fails_closed(self):
+        """チャンピオンが無い（対照群全滅）ときは fail-closed で不合格にする（#627）。
 
         以前は「チャンピオン条件を丸ごとスキップ」する fail-open だったため、
         最も強いゲートが無言で外れて質の悪い仮説が通過し得た。
         """
-        ev = self._make_eval(sharpe_ratio=0.5, dsr=0.97, pbo=0.3)
-        apply_gate(ev, champion_sharpe=float("nan"))
+        ev = self._make_eval()
+        apply_gate(ev, None)
         self.assertFalse(ev.gate_passed)
-        self.assertTrue(any("champion_sharpe" in r for r in ev.gate_reasons))
+        self.assertTrue(any("チャンピオン" in r for r in ev.gate_reasons))
 
 
 class TestLoadSymbolData(unittest.TestCase):
@@ -496,6 +506,11 @@ class TestRunFactoryBatch(unittest.TestCase):
     # run_factory_batch のチャンピオンプール選抜が読むため両方を差し替える。
     @patch("src.backtest.factory.FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS", 1)
     @patch("src.backtest.factory_gate.FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS", 1)
+    # 3 銘柄の合成データでは統計的な有意性（DSR・チャンピオン差の検定）に届かない。
+    # ここで検証するのは「合格した候補が記録・レポート・レビューに流れる経路」であり、
+    # ゲートの統計的な正しさは test_factory_gate_classification.py が担う。
+    @patch("src.backtest.factory_gate.FACTORY_GATE_MIN_DSR", 0.0)
+    @patch("src.backtest.factory_gate.FACTORY_GATE_CHAMPION_MIN_Z", float("-inf"))
     @patch("src.backtest.factory.save_factory_run")
     @patch("src.backtest.factory.count_factory_runs", return_value=0)
     @patch("src.backtest.factory.load_factory_hashes", return_value=set())
@@ -518,9 +533,12 @@ class TestRunFactoryBatch(unittest.TestCase):
                 self.assertEqual(len(result.candidates), self._PASSING_BATCH_KWARGS["budget"])
                 # 候補は全件 DB 記録される
                 self.assertEqual(mock_save.call_count, self._PASSING_BATCH_KWARGS["budget"])
-                # DSR / PBO が全候補に付与される
+                # DSR は日次リターンが得られた候補には必ず付与され、得られない候補は
+                # 算出不能（NaN）としてゲートで不合格になる
                 for ev in result.candidates:
-                    self.assertFalse(math.isnan(ev.dsr))
+                    self.assertEqual(math.isnan(ev.dsr), ev.portfolio_returns is None)
+                    if ev.portfolio_returns is None:
+                        self.assertFalse(ev.gate_passed)
                 # 合格経路が実際に実行されていることを検証する（#628）
                 self.assertGreater(len(result.passed), 0)
                 # 合格仮説にはレポートが書かれている
@@ -555,6 +573,11 @@ class TestRunFactoryBatch(unittest.TestCase):
     # run_factory_batch のチャンピオンプール選抜が読むため両方を差し替える。
     @patch("src.backtest.factory.FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS", 1)
     @patch("src.backtest.factory_gate.FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS", 1)
+    # 3 銘柄の合成データでは統計的な有意性（DSR・チャンピオン差の検定）に届かない。
+    # ここで検証するのは「合格した候補が記録・レポート・レビューに流れる経路」であり、
+    # ゲートの統計的な正しさは test_factory_gate_classification.py が担う。
+    @patch("src.backtest.factory_gate.FACTORY_GATE_MIN_DSR", 0.0)
+    @patch("src.backtest.factory_gate.FACTORY_GATE_CHAMPION_MIN_Z", float("-inf"))
     @patch("src.backtest.factory.review_hypothesis")
     @patch("src.backtest.factory.save_factory_run")
     @patch("src.backtest.factory.count_factory_runs", return_value=0)
@@ -591,6 +614,11 @@ class TestRunFactoryBatch(unittest.TestCase):
     # run_factory_batch のチャンピオンプール選抜が読むため両方を差し替える。
     @patch("src.backtest.factory.FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS", 1)
     @patch("src.backtest.factory_gate.FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS", 1)
+    # 3 銘柄の合成データでは統計的な有意性（DSR・チャンピオン差の検定）に届かない。
+    # ここで検証するのは「合格した候補が記録・レポート・レビューに流れる経路」であり、
+    # ゲートの統計的な正しさは test_factory_gate_classification.py が担う。
+    @patch("src.backtest.factory_gate.FACTORY_GATE_MIN_DSR", 0.0)
+    @patch("src.backtest.factory_gate.FACTORY_GATE_CHAMPION_MIN_Z", float("-inf"))
     @patch("src.backtest.factory.review_hypothesis", return_value=None)
     @patch("src.backtest.factory.save_factory_run")
     @patch("src.backtest.factory.count_factory_runs", return_value=0)

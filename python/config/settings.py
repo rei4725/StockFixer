@@ -193,9 +193,9 @@ class Settings(BaseSettings):
         default=0.5
     )  # バッチ診断の閾値（per-hypothesis ゲートではない）
     FACTORY_GATE_MAX_DRAWDOWN: float = Field(default=-0.25)
-    FACTORY_GATE_CHAMPION_MARGIN: float = Field(
-        default=1.0
-    )  # チャンピオン超え（×1.1 は到達不能だったため 1.0）
+    FACTORY_GATE_CHAMPION_MIN_Z: float = Field(
+        default=1.645
+    )  # チャンピオンとの Sharpe 差の検定 z 値の下限（片側 5%）。点推定の比較では同等の候補が約半数通った
 
 
 settings = Settings()
@@ -323,4 +323,4 @@ FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS: int = settings.FACTORY_GATE_MIN_EFFECTIVE_SY
 FACTORY_GATE_MIN_DSR: float = settings.FACTORY_GATE_MIN_DSR
 FACTORY_GATE_MAX_PBO: float = settings.FACTORY_GATE_MAX_PBO
 FACTORY_GATE_MAX_DRAWDOWN: float = settings.FACTORY_GATE_MAX_DRAWDOWN
-FACTORY_GATE_CHAMPION_MARGIN: float = settings.FACTORY_GATE_CHAMPION_MARGIN
+FACTORY_GATE_CHAMPION_MIN_Z: float = settings.FACTORY_GATE_CHAMPION_MIN_Z

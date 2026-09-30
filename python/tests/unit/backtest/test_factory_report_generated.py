@@ -100,8 +100,10 @@ def test_issue_body_reports_symbol_denominators(tmp_path, monkeypatch):
     assert "1.23" in body
     # 母数が曖昧だった旧ラベルは残っていない
     assert "Sharpe（銘柄平均）" not in body
-    # Sharpe も2行。champion 列が付くのはプール済み per-trade ベースの値。
-    assert "| Sharpe（プール済み取引リターンを年率化） | 0.940 |" in body
+    # Sharpe 行。champion 列が付くのはポートフォリオ日次リターンの年率値で、
+    # チャンピオンとの Sharpe 差の検定 z 値を併記する。
+    assert "| Sharpe（有効銘柄を等金額保有したポートフォリオの日次・年率） | 0.940 |" in body
+    assert "| チャンピオンとの Sharpe 差の z 値 |" in body
     assert "| Sharpe（有効銘柄平均・診断用） | 1.600 | - |" in body
     # DD は2行に分かれる。ゲート列が付くのはポートフォリオDD、最悪銘柄DDは診断用。
     # どちらの数字がゲート判定に使われたかをレビュー時に取り違えないようピン留めする。
@@ -152,9 +154,10 @@ def test_issue_body_marks_worst_symbol_dd_as_gate_input_when_portfolio_dd_missin
         report = json.load(f)
 
     body = report["issue_body"]
-    assert "プール値算出不能によりゲート判定に使用" in body
+    # ゲートの Sharpe が算出不能なら、別の指標に落とさず「算出不能」と表示する
+    assert "ポートフォリオの日次・年率） | 算出不能 |" in body
     assert "曲線欠損によりゲート判定に使用" in body
-    assert "等金額保有したポートフォリオ" not in body
+    assert "| 最大DD（有効銘柄を等金額保有したポートフォリオ）" not in body
     # NaN は JSON に書かず null にする
     assert report["gate"]["portfolio_max_drawdown"] is None
     assert report["gate"]["portfolio_sharpe_ratio"] is None

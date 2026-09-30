@@ -2,8 +2,10 @@
 戦略ファクトリー Phase 1（#369）: 合格ゲート判定
 
 factory.py から切り出した純粋なゲート判定（#704 でファイル行数ゲートに抵触したため）。
-factory_aggregation.py と同じく、factory.py の肥大化を抑えるための分離であり
-ロジックは変更していない。
+
+ゲートの論理的な正しさは、正解ラベル付きの合成戦略で統計的に検証している
+（tests/unit/backtest/test_factory_gate_classification.py）。判定の「量」を変える場合は
+このテストが緑のままであることを確認すること。
 
 apply_gate は `src.backtest.factory` からも再エクスポートしているため、
 既存の `from src.backtest.factory import apply_gate` は引き続き動作する。
@@ -12,29 +14,49 @@ apply_gate は `src.backtest.factory` からも再エクスポートしている
 from __future__ import annotations
 
 import math
+from typing import Optional
 
 from config.settings import (
-    FACTORY_GATE_CHAMPION_MARGIN,
+    FACTORY_GATE_CHAMPION_MIN_Z,
     FACTORY_GATE_MAX_DRAWDOWN,
     FACTORY_GATE_MIN_DSR,
     FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS,
     FACTORY_GATE_MIN_TRADES,
 )
+from src.backtest.factory_significance import per_period_sharpe, return_moments, sharpe_difference_z
+from src.backtest.metrics import deflated_sharpe_ratio
 from src.backtest.types import FactoryEvaluation
 
 
-def apply_gate(evaluation: FactoryEvaluation, champion_sharpe: float) -> None:
-    """ゲート条件を判定し evaluation.gate_passed / gate_reasons を更新する。
+def portfolio_dsr(evaluation: FactoryEvaluation, n_trials: int) -> float:
+    """ポートフォリオ日次リターンの Deflated Sharpe Ratio。算出不能なら NaN。
+
+    観測数は日数、歪度・尖度は実測値を使う。以前は 1 取引あたり Sharpe と取引数で
+    算出していたが、同じ日に多数の銘柄で建つ取引は独立な観測ではないため、取引の多い
+    戦略ほど DSR が 1.0 に張り付き、多重比較の補正として機能していなかった。
+    """
+    returns = evaluation.portfolio_returns
+    if returns is None:
+        return math.nan
+    sr = per_period_sharpe(returns)
+    if math.isnan(sr):
+        return math.nan
+    skew, kurt = return_moments(returns)
+    return deflated_sharpe_ratio(sr, max(n_trials, 1), len(returns), skew, kurt)
+
+
+def apply_gate(evaluation: FactoryEvaluation, champion: Optional[FactoryEvaluation]) -> None:
+    """ゲート条件を判定し evaluation.gate_passed / gate_reasons / champion_z を更新する。
+
+    evaluation.dsr は呼び出し側が portfolio_dsr で設定しておくこと。
 
     PBO はバッチ全体で1値となる性質上、per-hypothesis ゲートに使うと「一晩全滅」に
     なるため、ここでは判定しない（バッチ診断としてレポート/通知に警告表示する）。
-    DSR はトレード単位 Sharpe（年率化を打ち消した値）で算出済みのため飽和しない。
     有効銘柄数（銘柄あたり最低取引数を満たした銘柄の数）が下限未満の場合も不合格とする。
     合計取引数だけでは「2銘柄 × 20取引」のような極端な集中を弾けないため（#625）。
 
-    champion_sharpe が NaN の場合は「対照群が全滅してチャンピオン比較ができない」ことを
-    意味する。以前はこの条件を丸ごとスキップしていた（fail-open）が、最も強いゲートが
-    無言で外れて質の悪い仮説が通ってしまうため、fail-closed（不合格）に倒す（#627）。
+    champion が None の場合は「対照群が全滅してチャンピオン比較ができない」ことを
+    意味する。最も強いゲートが無言で外れないよう fail-closed（不合格）に倒す（#627）。
     """
     reasons: list[str] = []
     if evaluation.num_trades < FACTORY_GATE_MIN_TRADES:
@@ -47,38 +69,32 @@ def apply_gate(evaluation: FactoryEvaluation, champion_sharpe: float) -> None:
     if math.isnan(evaluation.dsr) or evaluation.dsr < FACTORY_GATE_MIN_DSR:
         reasons.append(f"dsr {evaluation.dsr:.3f} < {FACTORY_GATE_MIN_DSR}")
     _append_drawdown_reason(evaluation, reasons)
-    if math.isnan(champion_sharpe):
-        reasons.append("champion_sharpe が NaN（対照群が全滅しチャンピオン比較不能）のため不合格")
+    if champion is None:
+        reasons.append("チャンピオンが無い（対照群が全滅しチャンピオン比較不能）ため不合格")
     else:
-        _append_champion_reason(evaluation, champion_sharpe, reasons)
+        _append_champion_reason(evaluation, champion, reasons)
     evaluation.gate_reasons = reasons
     evaluation.gate_passed = not reasons
 
 
 def _append_champion_reason(
-    evaluation: FactoryEvaluation, champion_sharpe: float, reasons: list[str]
+    evaluation: FactoryEvaluation, champion: FactoryEvaluation, reasons: list[str]
 ) -> None:
-    """champion 比較はプール済み per-trade ベースの Sharpe で行う。
+    """チャンピオン比較は、同じ日付の日次リターン同士の Sharpe 差の検定で行う。
 
-    従来の sharpe_ratio は「銘柄別・年率化 Sharpe の単純平均」で、銘柄あたり3取引で
-    採用される（FACTORY_GATE_MIN_TRADES_PER_SYMBOL=3）ため発散した値が平均に混ざる。
-    台帳の再現ペア（同一戦略が別日に再評価された130組）で自己相関は 0.446 しかなく、
-    取引数 0.994 / DD 0.958 / リターン 0.898 と比べて著しく不安定だった。
-    97% の候補を落とすゲートの判定基準としてはノイズが支配的である。
-
-    portfolio_sharpe_ratio が算出不能（NaN）の場合は、ゲートを無言で外さないよう
-    従来の銘柄別平均へフォールバックする。champion_sharpe は呼び出し側が同じ指標で
-    算出したものを渡す前提である。
+    点推定の大小比較（候補 Sharpe > チャンピオン Sharpe）では、推定誤差だけで
+    チャンピオンと同等の候補が約半数合格していた。z 値が FACTORY_GATE_CHAMPION_MIN_Z
+    を超えた場合のみ「チャンピオンより有意に良い」とみなす。
+    日次リターンが無く検定できない場合は不合格に倒す。
     """
-    value = evaluation.portfolio_sharpe_ratio
-    label = "portfolio_sharpe"
-    if math.isnan(value):
-        value = evaluation.sharpe_ratio
-        label = "sharpe"
-    required = champion_sharpe * FACTORY_GATE_CHAMPION_MARGIN
-    if value <= required:
+    z = sharpe_difference_z(evaluation.portfolio_returns, champion.portfolio_returns)
+    evaluation.champion_z = z
+    if math.isnan(z):
+        reasons.append("チャンピオンとの Sharpe 差を検定できない（日次リターンが無い）")
+    elif z <= FACTORY_GATE_CHAMPION_MIN_Z:
         reasons.append(
-            f"{label} {value:.3f} <= champion×{FACTORY_GATE_CHAMPION_MARGIN} ({required:.3f})"
+            f"portfolio_sharpe {evaluation.portfolio_sharpe_ratio:.3f} vs champion "
+            f"{champion.portfolio_sharpe_ratio:.3f}: 差の z={z:.2f} <= {FACTORY_GATE_CHAMPION_MIN_Z}"
         )
 
 

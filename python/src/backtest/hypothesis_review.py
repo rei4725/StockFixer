@@ -56,19 +56,18 @@ _REVIEW_SCHEMA: dict[str, Any] = {
 def _sharpe_lines(evaluation: FactoryEvaluation) -> str:
     """Sharpe 行。チャンピオンと比べる値はゲートと同じ指標であることを明示する（#738）。
 
-    ゲート（factory._gate_sharpe）はプール済み取引リターンの年率値を使い、算出不能なら
-    銘柄平均へ落ちる。レビュアーに銘柄平均だけを渡すと、プール値のチャンピオンと
-    単位の違う数字を比べて誤読する。
+    ゲートはポートフォリオ日次リターンの年率 Sharpe と、チャンピオンとの Sharpe 差の
+    検定 z 値で判定する。レビュアーに銘柄平均だけを渡すと、単位の違う数字を比べて誤読する。
     """
-    pooled = evaluation.portfolio_sharpe_ratio
-    if math.isnan(pooled):
-        return (
-            "- Sharpe（有効銘柄平均・プール値算出不能によりゲート判定に使用）: "
-            f"{evaluation.sharpe_ratio:.3f}"
-        )
+    z = evaluation.champion_z
+    z_text = f"{z:.2f}" if not math.isnan(z) else "算出不能"
+    sharpe = evaluation.portfolio_sharpe_ratio
+    sharpe_text = f"{sharpe:.3f}" if not math.isnan(sharpe) else "算出不能"
     return (
-        f"- Sharpe（プール済み取引リターンを年率化・ゲート判定用）: {pooled:.3f}\n"
-        f"- 1取引あたり Sharpe（プール済み）: {evaluation.sharpe_per_trade:.3f}\n"
+        "- Sharpe（有効銘柄を等金額保有したポートフォリオの日次・年率・ゲート判定用）: "
+        f"{sharpe_text}\n"
+        f"- チャンピオンとの Sharpe 差の z 値: {z_text}\n"
+        f"- 1取引あたり Sharpe（プール済み・診断用）: {evaluation.sharpe_per_trade:.3f}\n"
         f"- Sharpe（有効銘柄平均・診断用）: {evaluation.sharpe_ratio:.3f}"
     )
 

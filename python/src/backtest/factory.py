@@ -32,12 +32,12 @@ from config.settings import (
 from src.backtest.backtester import Backtester
 from src.backtest.claude_rule_generator import generate_claude_hypotheses
 from src.backtest.data_port import get_backtest_data_port
-from src.backtest.factory_aggregation import SymbolMetrics, aggregate_symbol_metrics
+from src.backtest.factory_aggregation import SymbolMetrics
+from src.backtest.factory_evaluation import build_evaluation
 
 # apply_gate は factory_gate.py へ切り出したが、既存の
 # `from src.backtest.factory import apply_gate` を維持するため再エクスポートする。
-from src.backtest.factory_gate import apply_gate  # noqa: F401
-from src.backtest.factory_portfolio import portfolio_max_drawdown
+from src.backtest.factory_gate import apply_gate, portfolio_dsr  # noqa: F401
 from src.backtest.factory_report import write_report
 
 # 探索空間とサンプラーは factory_sampling.py へ切り出したが、既存の
@@ -50,7 +50,7 @@ from src.backtest.factory_sampling import (  # noqa: F401
     sample_hypotheses,
 )
 from src.backtest.hypothesis_review import review_hypothesis
-from src.backtest.metrics import deflated_sharpe_ratio, probability_of_backtest_overfitting
+from src.backtest.metrics import probability_of_backtest_overfitting
 from src.backtest.rules import AndRule, OrRule, TradingRule
 from src.backtest.sandbox_executor import prepare_sandbox_data
 from src.backtest.types import FactoryBatchResult, FactoryEvaluation, FactoryHypothesis
@@ -213,37 +213,9 @@ def _evaluated_hashes(market: str, lookback_years: int) -> set[str]:
     return hashes
 
 
-def _gate_sharpe(evaluation: FactoryEvaluation) -> float:
-    """ゲート判定に使う Sharpe。候補と対照で同じ指標を使うための共通ヘルパ。
-
-    プール済み per-trade ベースの値を優先し、算出不能なら従来の銘柄別平均に落とす
-    （factory_gate._append_champion_reason のフォールバックと同じ規則）。
-    """
-    value = evaluation.portfolio_sharpe_ratio
-    return evaluation.sharpe_ratio if math.isnan(value) else value
-
-
 def _nullable(value: float) -> Optional[float]:
     """NaN を None に落とす（DB に NaN を書かないため）。"""
     return None if math.isnan(value) else value
-
-
-def _span_years(data_by_symbol: dict[str, pd.DataFrame]) -> float:
-    """評価データが実際にカバーする期間の年数を返す（算出できなければ 0.0）。
-
-    宣言値 lookback_years ではなく実データの範囲を使う。データ取得が短く終わった
-    夜に取引頻度を過小評価して Sharpe を不当に低く見積もらないため。
-    """
-    starts, ends = [], []
-    for df in data_by_symbol.values():
-        if df is None or df.empty:
-            continue
-        starts.append(df.index.min())
-        ends.append(df.index.max())
-    if not starts:
-        return 0.0
-    span_days = (max(ends) - min(starts)).days
-    return span_days / 365.25 if span_days > 0 else 0.0
 
 
 def evaluate_hypothesis(
@@ -315,34 +287,21 @@ def evaluate_hypothesis(
                 exc_info=True,
             )
 
-    aggregated = aggregate_symbol_metrics(
-        symbol_rows, min_trades_per_symbol, span_years=_span_years(data_by_symbol)
-    )
-    # ゲートの DD 指標は、集計と同じ有効銘柄だけを等金額で保有したポートフォリオDD
-    portfolio_dd = portfolio_max_drawdown(
-        [equity_by_symbol[s] for s in aggregated.effective_symbols if s in equity_by_symbol],
-        initial_cash,
-    )
     window_returns = (
         np.mean(np.asarray(window_returns_by_symbol, dtype=float), axis=0).tolist()
         if window_returns_by_symbol
         else [0.0] * len(windows)
     )
-    return FactoryEvaluation(
-        hypothesis=hypothesis,
-        sharpe_ratio=aggregated.sharpe_ratio,
-        sharpe_per_trade=aggregated.sharpe_per_trade,
-        portfolio_sharpe_ratio=aggregated.portfolio_sharpe_ratio,
-        win_rate=aggregated.win_rate,
-        num_trades=aggregated.num_trades,
-        max_drawdown=aggregated.max_drawdown,
-        portfolio_max_drawdown=portfolio_dd,
-        total_return=aggregated.total_return,
-        window_returns=window_returns,
+    # 集計・ポートフォリオ指標（ゲートの Sharpe / DD / 日次リターン）の組み立ては
+    # 合成戦略の分類テストと共通の build_evaluation に一本化している
+    return build_evaluation(
+        hypothesis,
+        symbol_rows,
+        equity_by_symbol,
+        initial_cash=initial_cash,
+        min_trades_per_symbol=min_trades_per_symbol,
         n_symbols=len(data_by_symbol),
-        n_symbols_with_signal=aggregated.n_symbols_with_signal,
-        n_effective_symbols=aggregated.n_effective_symbols,
-        avg_trades_per_symbol=aggregated.avg_trades_per_symbol,
+        window_returns=window_returns,
     )
 
 
@@ -403,13 +362,10 @@ def run_factory_batch(
 
     claude_evaluations: list[FactoryEvaluation] = []
     if FACTORY_CLAUDE_RULEGEN_ENABLED:
-        control_sharpes_pre = [
-            _gate_sharpe(e)
-            for e in evaluations
-            if e.hypothesis.is_control
-            and e.n_effective_symbols >= FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS
-        ]
-        pre_champion_sharpe = max(control_sharpes_pre) if control_sharpes_pre else float("nan")
+        pre_champion = select_champion(evaluations)
+        pre_champion_sharpe = (
+            pre_champion.portfolio_sharpe_ratio if pre_champion is not None else float("nan")
+        )
         shared_data_dir, windows_file = prepare_sandbox_data(data, windows)
         try:
             claude_evaluations = generate_claude_hypotheses(
@@ -432,16 +388,9 @@ def run_factory_batch(
 
     # DSR: n_trials は累計評価数（過去全試行 + 今夜の候補数、Claude生成候補を含む）
     n_trials = count_factory_runs() + len(candidates) + len(claude_evaluations)
-    # チャンピオンプールの選抜条件は候補ゲートの有効銘柄数下限と揃える（#627）。
-    # 以前は num_trades > 0 だったため銘柄あたり最低取引数フィルタ後も
-    # 1取引あれば通ってしまい、実質チェックとして機能していなかった。
-    control_sharpes = [
-        _gate_sharpe(e)
-        for e in evaluations
-        if e.hypothesis.is_control and e.n_effective_symbols >= FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS
-    ]
-    champion_sharpe = max(control_sharpes) if control_sharpes else float("nan")
-    if not control_sharpes and controls:
+    champion = select_champion(evaluations)
+    champion_sharpe = champion.portfolio_sharpe_ratio if champion is not None else float("nan")
+    if champion is None and controls:
         # 対照群が1件以上評価されたにもかかわらず全滅した場合、apply_gate は
         # champion_sharpe=NaN を fail-closed（不合格）として扱う（#627）。
         # 一晩探索が止まるが、最強のゲートが無言で外れて質の悪い仮説が
@@ -454,13 +403,10 @@ def run_factory_batch(
 
     for evaluation in evaluations:
         evaluation.pbo = float(batch_pbo)
-        # DSR には非年率の取引単位 Sharpe を渡す（compute_metrics が直接出力する。
-        # metrics 側で年率化が実取引頻度ベースに是正されたため、旧 √252 de-scale は不要）。
-        evaluation.dsr = deflated_sharpe_ratio(
-            evaluation.sharpe_per_trade, max(n_trials, 1), max(evaluation.num_trades, 1)
-        )
+        # DSR はポートフォリオ日次リターンで算出する（観測数は日数）
+        evaluation.dsr = portfolio_dsr(evaluation, n_trials)
         if not evaluation.hypothesis.is_control:
-            apply_gate(evaluation, champion_sharpe)
+            apply_gate(evaluation, champion)
 
     # PBO はバッチ単位の過学習診断。高ければログ警告（レポートにも注記される）。
     if not math.isnan(batch_pbo) and batch_pbo > FACTORY_GATE_MAX_PBO:
@@ -494,7 +440,7 @@ def run_factory_batch(
             max_drawdown=evaluation.max_drawdown,
             portfolio_max_drawdown=_nullable(evaluation.portfolio_max_drawdown),
             total_return=evaluation.total_return,
-            dsr=evaluation.dsr,
+            dsr=_nullable(evaluation.dsr),
             pbo=evaluation.pbo,
             gate_passed=evaluation.gate_passed,
             gate_reasons="; ".join(evaluation.gate_reasons) or None,
@@ -513,6 +459,24 @@ def run_factory_batch(
         batch_pbo if not math.isnan(batch_pbo) else float("nan"),
     )
     return result
+
+
+def select_champion(evaluations: list[FactoryEvaluation]) -> Optional[FactoryEvaluation]:
+    """対照群のうちポートフォリオ Sharpe が最大のものをチャンピオンとして返す。
+
+    選抜条件は候補ゲートの有効銘柄数下限と揃える（#627）。ポートフォリオ Sharpe が
+    算出できない対照は、別の指標で比べることにならないよう選抜から除く。
+    該当が無ければ None（apply_gate は不合格に倒す）。
+    """
+    pool = [
+        e
+        for e in evaluations
+        if e.hypothesis.is_control
+        and e.n_effective_symbols >= FACTORY_GATE_MIN_EFFECTIVE_SYMBOLS
+        and not math.isnan(e.portfolio_sharpe_ratio)
+        and e.portfolio_returns is not None
+    ]
+    return max(pool, key=lambda e: e.portfolio_sharpe_ratio) if pool else None
 
 
 def result_candidates(evaluations: list[FactoryEvaluation]) -> list[FactoryEvaluation]:
