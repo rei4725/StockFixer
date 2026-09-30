@@ -9,6 +9,7 @@ from __future__ import annotations
 import math
 import unittest
 
+import numpy as np
 import pandas as pd
 
 from src.backtest.factory_portfolio import build_portfolio_equity, portfolio_max_drawdown
@@ -18,6 +19,57 @@ _INITIAL = 100.0
 
 def _curve(dates: list[str], values: list[float]) -> pd.Series:
     return pd.Series(values, index=pd.to_datetime(dates), dtype=float)
+
+
+def _reference_build_portfolio_equity(curves: list[pd.Series], initial_cash: float) -> pd.Series:
+    """numpy 化する前の実装（pandas の union / reindex）。等価性の検証用に残す。"""
+    usable = [c for c in curves if c is not None and not c.empty]
+    if not usable or initial_cash <= 0:
+        return pd.Series(dtype=float)
+    normalized = [c.astype(float) / initial_cash for c in usable]
+    index = normalized[0].index
+    for curve in normalized[1:]:
+        index = index.union(curve.index)
+    index = index.sort_values()
+    aligned = [c.reindex(index).ffill().fillna(1.0) for c in normalized]
+    return pd.concat(aligned, axis=1).mean(axis=1)
+
+
+class TestBuildPortfolioEquityMatchesReference(unittest.TestCase):
+    """numpy 実装が従来の pandas 実装と完全に一致すること（開始日・終了日・欠損日がばらばら）。"""
+
+    def test_matches_reference_on_ragged_random_curves(self):
+        dates = pd.bdate_range("2024-01-01", periods=300)
+        for seed in range(20):
+            rng = np.random.default_rng(seed)
+            curves = []
+            for _ in range(int(rng.integers(1, 30))):
+                start = int(rng.integers(0, 150))
+                end = int(rng.integers(start + 1, 300))
+                idx = dates[start:end]
+                keep = rng.random(len(idx)) > 0.1  # 記録の隙間
+                idx = idx[keep] if keep.any() else idx[:1]
+                values = _INITIAL * np.cumprod(1 + rng.normal(0, 0.02, len(idx)))
+                curves.append(pd.Series(values, index=idx))
+            curves.append(pd.Series(dtype=float))  # 空曲線は無視される
+            expected = _reference_build_portfolio_equity(curves, _INITIAL)
+            actual = build_portfolio_equity(curves, _INITIAL)
+            pd.testing.assert_series_equal(actual, expected, check_names=False, check_freq=False)
+
+    def test_matches_reference_when_all_curves_share_dates(self):
+        """全銘柄が同じ日付列の近道（突き合わせ省略）でも一致すること。NaN を含めば通常経路。"""
+        dates = pd.to_datetime(pd.bdate_range("2024-01-01", periods=120).to_numpy())
+        rng = np.random.default_rng(0)
+        curves = [
+            pd.Series(_INITIAL * np.cumprod(1 + rng.normal(0, 0.02, 120)), index=dates)
+            for _ in range(10)
+        ]
+        with_gap = [c.copy() for c in curves]
+        with_gap[3].iloc[40:45] = np.nan
+        for case in (curves, with_gap):
+            expected = _reference_build_portfolio_equity(case, _INITIAL)
+            actual = build_portfolio_equity(case, _INITIAL)
+            pd.testing.assert_series_equal(actual, expected, check_names=False, check_freq=False)
 
 
 class TestBuildPortfolioEquity(unittest.TestCase):
