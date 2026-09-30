@@ -122,6 +122,12 @@ class Settings(BaseSettings):
     FACTORY_SANDBOX_TIMEOUT_SECONDS: int = Field(default=120)
     FACTORY_SANDBOX_MEMORY_LIMIT: str = Field(default="1g")
     FACTORY_SANDBOX_CPU_LIMIT: str = Field(default="1")
+    # 本体がコンテナの中からホストの Docker でサンドボックスを起動する構成では、本体の
+    # /tmp のパスをホストの Docker は解決できない（#757）。本体とサンドボックスの双方が
+    # 同じ実体を見られる名前付きボリュームを経由させる。両方未設定ならホスト実行とみなし
+    # 一時ディレクトリを bind mount する（パスが一致するため）。
+    FACTORY_SANDBOX_SHARE_DIR: str = Field(default="")  # 本体内のマウント先
+    FACTORY_SANDBOX_SHARE_VOLUME: str = Field(default="")  # ホストの Docker が知るボリューム名
 
     # ---------- 戦略ファクトリー自動昇格ループ: 昇格記録（orchestration/jobs/periodic.py） ----------
     # 既定無効。マージ検知ジョブはこのフラグが true になるまで一切のGitHub API呼び出しを行わない。
@@ -277,6 +283,8 @@ FACTORY_SANDBOX_IMAGE: str = settings.FACTORY_SANDBOX_IMAGE
 FACTORY_SANDBOX_TIMEOUT_SECONDS: int = settings.FACTORY_SANDBOX_TIMEOUT_SECONDS
 FACTORY_SANDBOX_MEMORY_LIMIT: str = settings.FACTORY_SANDBOX_MEMORY_LIMIT
 FACTORY_SANDBOX_CPU_LIMIT: str = settings.FACTORY_SANDBOX_CPU_LIMIT
+FACTORY_SANDBOX_SHARE_DIR: str = settings.FACTORY_SANDBOX_SHARE_DIR
+FACTORY_SANDBOX_SHARE_VOLUME: str = settings.FACTORY_SANDBOX_SHARE_VOLUME
 
 GITHUB_TOKEN: str = settings.GITHUB_TOKEN
 GITHUB_REPO: str = settings.GITHUB_REPO

@@ -76,6 +76,21 @@ def main() -> int:
         )
         return 1
 
+    # 入力が見えないのは候補コードの誤りではなく受け渡しの問題（#757）。
+    # 実行時エラー（修復対象）と区別して報告し、ホスト側が Claude に修復を頼まないようにする
+    missing = [
+        path
+        for path, exists in (
+            (args.source_file, os.path.isfile(args.source_file)),
+            (args.data_dir, os.path.isdir(args.data_dir)),
+            (args.windows_file, os.path.isfile(args.windows_file)),
+        )
+        if not exists
+    ]
+    if missing:
+        print(json.dumps({"status": "input_missing", "detail": f"見つからない入力: {missing}"}))
+        return 1
+
     from src.backtest.factory import build_rule, evaluate_hypothesis
     from src.backtest.types import FactoryHypothesis
 
