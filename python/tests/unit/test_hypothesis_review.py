@@ -120,8 +120,10 @@ class TestBuildReviewContext(unittest.TestCase):
 
         self.assertIn("データ取得銘柄数: 194", context)
         self.assertIn(
-            "Sharpe（有効銘柄平均・プール値算出不能によりゲート判定に使用）: 1.600", context
+            "Sharpe（有効銘柄を等金額保有したポートフォリオの日次・年率・ゲート判定用）: 算出不能",
+            context,
         )
+        self.assertIn("Sharpe（有効銘柄平均・診断用）: 1.600", context)
         self.assertIn(
             "最大DD（有効銘柄の最悪値・曲線欠損によりゲート判定に使用）: -19.00%", context
         )
@@ -150,18 +152,22 @@ class TestBuildReviewContext(unittest.TestCase):
         return FactoryEvaluation(**values)
 
     def test_context_puts_gate_sharpe_next_to_champion(self):
-        """チャンピオンと比べる Sharpe は、ゲートと同じプール済み年率値であること（#738）。
+        """チャンピオンと比べる Sharpe は、ゲートと同じポートフォリオ日次の年率値であること（#738）。
 
-        銘柄別平均（0.573）しか渡さないと、プール値のチャンピオン（7.199）と
-        単位の違う数字を比べて「桁違いに低い」と誤読される。
+        銘柄別平均（0.573）しか渡さないと、チャンピオン（7.199）と単位の違う数字を比べて
+        「桁違いに低い」と誤読される。検定の z 値も併せて渡す。
         """
         context = hypothesis_review._build_review_context(
-            self._pooled_evaluation(), champion_sharpe=7.199
+            self._pooled_evaluation(champion_z=2.5), champion_sharpe=7.199
         )
 
-        self.assertIn("Sharpe（プール済み取引リターンを年率化・ゲート判定用）: 8.841", context)
+        self.assertIn(
+            "Sharpe（有効銘柄を等金額保有したポートフォリオの日次・年率・ゲート判定用）: 8.841",
+            context,
+        )
+        self.assertIn("チャンピオンとの Sharpe 差の z 値: 2.50", context)
         self.assertIn("対照群（チャンピオン）Sharpe（ゲート判定用と同じ指標）: 7.199", context)
-        self.assertIn("1取引あたり Sharpe（プール済み）: 0.263", context)
+        self.assertIn("1取引あたり Sharpe（プール済み・診断用）: 0.263", context)
         self.assertIn("Sharpe（有効銘柄平均・診断用）: 0.573", context)
 
     def test_context_puts_portfolio_drawdown_before_worst_symbol(self):
@@ -183,8 +189,8 @@ class TestBuildReviewContext(unittest.TestCase):
 
         self.assertIn("PBO（バッチ全体の診断値・ゲート判定には不使用）: 0.543", context)
 
-    def test_context_falls_back_to_mean_sharpe_when_pooled_is_nan(self):
-        """プール値が算出不能ならゲートと同じく銘柄平均を判定用として渡す。"""
+    def test_context_marks_gate_sharpe_unavailable_when_nan(self):
+        """ゲートの Sharpe が算出不能なら、銘柄平均を判定用と偽らず「算出不能」と渡す。"""
         context = hypothesis_review._build_review_context(
             self._pooled_evaluation(
                 portfolio_sharpe_ratio=float("nan"), portfolio_max_drawdown=float("nan")
@@ -193,12 +199,14 @@ class TestBuildReviewContext(unittest.TestCase):
         )
 
         self.assertIn(
-            "Sharpe（有効銘柄平均・プール値算出不能によりゲート判定に使用）: 0.573", context
+            "Sharpe（有効銘柄を等金額保有したポートフォリオの日次・年率・ゲート判定用）: 算出不能",
+            context,
         )
+        self.assertIn("Sharpe（有効銘柄平均・診断用）: 0.573", context)
         self.assertIn(
             "最大DD（有効銘柄の最悪値・曲線欠損によりゲート判定に使用）: -67.83%", context
         )
-        self.assertNotIn("ポートフォリオ", context)
+        self.assertNotIn("最大DD（有効銘柄を等金額保有したポートフォリオ", context)
 
 
 if __name__ == "__main__":

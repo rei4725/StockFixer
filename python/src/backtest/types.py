@@ -9,6 +9,10 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 
 @dataclass(frozen=True)
@@ -69,7 +73,8 @@ class FactoryEvaluation:
     # 銘柄別・年率化 Sharpe の単純平均（診断用。ゲート判定には使わない）
     sharpe_ratio: float = 0.0
     sharpe_per_trade: float = 0.0
-    # プール済み per-trade Sharpe を1回だけ年率化した値（ゲート判定に使う。不能なら NaN）
+    # 有効銘柄を等金額で保有したポートフォリオの日次リターンの年率 Sharpe
+    # （ゲート判定・チャンピオン選抜に使う。算出不能なら NaN）
     portfolio_sharpe_ratio: float = float("nan")
     win_rate: float = 0.0
     num_trades: int = 0
@@ -84,10 +89,15 @@ class FactoryEvaluation:
     n_effective_symbols: int = 0
     avg_trades_per_symbol: float = 0.0
     dsr: float = float("nan")
+    # チャンピオンとの Sharpe 差の検定 z 値（apply_gate が設定する。算出不能なら NaN）
+    champion_z: float = float("nan")
     pbo: float = float("nan")
     gate_passed: bool = False
     gate_reasons: list[str] = field(default_factory=list)
     report_path: str | None = None
+    # 上記ポートフォリオの日次リターン。チャンピオン比較（Sharpe 差の検定）と DSR に使う。
+    # DB・レポートには保存しない（算出不能なら None）
+    portfolio_returns: Optional["pd.Series"] = field(default=None, repr=False)
 
 
 @dataclass

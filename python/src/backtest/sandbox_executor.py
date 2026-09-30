@@ -48,6 +48,21 @@ class SandboxRunResult:
     infra_detail: Optional[str] = None
 
 
+def _nan_if_none(value: Optional[float]) -> float:
+    return float("nan") if value is None else float(value)
+
+
+def _returns_from_payload(payload: Optional[dict]) -> Optional[pd.Series]:
+    """サンドボックスが返したポートフォリオ日次リターンを Series に戻す（無ければ None）。"""
+    if not payload:
+        return None
+    return pd.Series(
+        [float(v) for v in payload["values"]],
+        index=pd.to_datetime(payload["dates"]),
+        dtype=float,
+    )
+
+
 def prepare_sandbox_data(
     data_by_symbol: dict[str, pd.DataFrame],
     windows: list[tuple[pd.Timestamp, pd.Timestamp]],
@@ -212,6 +227,16 @@ def run_sandboxed_evaluation(
                 "ホストより古い可能性が高い）: missing_keys=%s",
                 missing_keys,
             )
+        portfolio_keys = ("portfolio_sharpe_ratio", "portfolio_max_drawdown", "portfolio_returns")
+        if any(key not in ev for key in portfolio_keys):
+            # ゲートはポートフォリオ日次リターンで判定する。欠けていれば検定できず
+            # 不合格に倒れるため、イメージの版ずれを疑えるようログに残す
+            logger.warning(
+                "[factory] サンドボックス出力にポートフォリオ指標が欠落しています"
+                "（サンドボックスイメージがホストより古い可能性が高い）。"
+                "この候補はゲートで判定不能として不合格になります: missing_keys=%s",
+                [key for key in portfolio_keys if key not in ev],
+            )
         evaluation = FactoryEvaluation(
             hypothesis=hypothesis,
             sharpe_ratio=ev["sharpe_ratio"],
@@ -225,5 +250,8 @@ def run_sandboxed_evaluation(
             n_symbols_with_signal=ev.get("n_symbols_with_signal", 0),
             n_effective_symbols=ev.get("n_effective_symbols", 0),
             avg_trades_per_symbol=ev.get("avg_trades_per_symbol", 0.0),
+            portfolio_sharpe_ratio=_nan_if_none(ev.get("portfolio_sharpe_ratio")),
+            portfolio_max_drawdown=_nan_if_none(ev.get("portfolio_max_drawdown")),
+            portfolio_returns=_returns_from_payload(ev.get("portfolio_returns")),
         )
         return SandboxRunResult(kind="gate_evaluated", evaluation=evaluation)

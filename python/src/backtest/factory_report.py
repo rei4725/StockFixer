@@ -19,7 +19,7 @@ from datetime import datetime
 from typing import Optional
 
 from config.settings import (
-    FACTORY_GATE_CHAMPION_MARGIN,
+    FACTORY_GATE_CHAMPION_MIN_Z,
     FACTORY_GATE_MAX_DRAWDOWN,
     FACTORY_GATE_MAX_PBO,
     FACTORY_GATE_MIN_DSR,
@@ -142,15 +142,17 @@ def _nullable(value: float) -> Optional[float]:
 
 
 def _build_sharpe_rows(evaluation: FactoryEvaluation, champion_cell: str) -> str:
-    """Sharpe 行を組み立てる。champion 比較に使うのはプール済み per-trade ベースの値。"""
-    pooled = evaluation.portfolio_sharpe_ratio
-    if math.isnan(pooled):
-        return (
-            f"| Sharpe（有効銘柄平均・プール値算出不能によりゲート判定に使用） "
-            f"| {evaluation.sharpe_ratio:.3f} | {champion_cell} |"
-        )
+    """Sharpe 行を組み立てる。ゲートが使うのはポートフォリオ日次リターンの年率 Sharpe と、
+    チャンピオンとの Sharpe 差の検定 z 値。
+    """
+    z = evaluation.champion_z
+    z_text = f"{z:.2f}" if not math.isnan(z) else "算出不能"
+    sharpe = evaluation.portfolio_sharpe_ratio
+    sharpe_text = f"{sharpe:.3f}" if not math.isnan(sharpe) else "算出不能"
     return (
-        f"| Sharpe（プール済み取引リターンを年率化） | {pooled:.3f} | {champion_cell} |\n"
+        f"| Sharpe（有効銘柄を等金額保有したポートフォリオの日次・年率） "
+        f"| {sharpe_text} | {champion_cell} |\n"
+        f"| チャンピオンとの Sharpe 差の z 値 | {z_text} | > {FACTORY_GATE_CHAMPION_MIN_Z} |\n"
         f"| Sharpe（有効銘柄平均・診断用） | {evaluation.sharpe_ratio:.3f} | - |"
     )
 
@@ -181,7 +183,7 @@ def _build_issue_body(
     window_rows = "\n".join(
         f"| {i + 1} | {r:+.2%} |" for i, r in enumerate(evaluation.window_returns)
     )
-    champion_cell = f"> チャンピオン {champion_sharpe:.3f} × {FACTORY_GATE_CHAMPION_MARGIN}"
+    champion_cell = f"チャンピオン {champion_sharpe:.3f} より有意に大"
     pbo_warning = (
         f"\n> ⚠️ **バッチPBO={evaluation.pbo:.3f} > {FACTORY_GATE_MAX_PBO}**: "
         "この夜のバッチは選択過程の過学習リスクが高い。OOS 劣化に注意してレビューすること。\n"

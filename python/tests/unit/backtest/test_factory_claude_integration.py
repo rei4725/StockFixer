@@ -82,7 +82,7 @@ def test_claude_hypotheses_skipped_when_disabled(mock_load_data, mock_generate, 
     mock_generate.assert_not_called()
 
 
-@patch("src.backtest.factory.deflated_sharpe_ratio")
+@patch("src.backtest.factory.portfolio_dsr")
 @patch("src.backtest.factory.count_factory_runs")
 @patch("src.backtest.factory.prepare_sandbox_data")
 @patch("src.backtest.factory.generate_claude_hypotheses")

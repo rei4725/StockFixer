@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import subprocess
 
 import pandas as pd
@@ -236,6 +237,11 @@ def test_new_aggregate_fields_survive_sandbox_round_trip(monkeypatch, tmp_path, 
         n_symbols_with_signal=3,
         n_effective_symbols=2,
         avg_trades_per_symbol=21.0,
+        portfolio_sharpe_ratio=1.87,
+        portfolio_max_drawdown=-0.07,
+        portfolio_returns=pd.Series(
+            [0.01, -0.005, 0.002], index=pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
+        ),
     )
     monkeypatch.setattr(
         "src.backtest.factory.evaluate_hypothesis", lambda *args, **kwargs: fake_evaluation
@@ -311,6 +317,16 @@ def test_new_aggregate_fields_survive_sandbox_round_trip(monkeypatch, tmp_path, 
     assert result.evaluation.n_symbols_with_signal == 3
     assert result.evaluation.n_effective_symbols == 2
     assert result.evaluation.avg_trades_per_symbol == 21.0
+    # ゲートが使うポートフォリオ指標と日次リターン（チャンピオン比較・DSR の入力）も
+    # 往復で失われないこと。片側だけ書き忘れると Claude 生成候補だけ別の物差しで判定される
+    assert result.evaluation.portfolio_sharpe_ratio == 1.87
+    assert result.evaluation.portfolio_max_drawdown == -0.07
+    pd.testing.assert_series_equal(
+        result.evaluation.portfolio_returns,
+        fake_evaluation.portfolio_returns,
+        check_names=False,
+        check_freq=False,
+    )
 
 
 def test_old_sandbox_payload_without_new_fields_falls_back_to_defaults(monkeypatch):
@@ -358,3 +374,6 @@ def test_old_sandbox_payload_without_new_fields_falls_back_to_defaults(monkeypat
     assert result.evaluation.n_symbols_with_signal == 0
     assert result.evaluation.n_effective_symbols == 0
     assert result.evaluation.avg_trades_per_symbol == 0.0
+    # ポートフォリオ指標が無ければ「算出不能」になり、ゲートは検定できず不合格に倒れる
+    assert math.isnan(result.evaluation.portfolio_sharpe_ratio)
+    assert result.evaluation.portfolio_returns is None
