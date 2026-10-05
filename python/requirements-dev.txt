@@ -10,13 +10,13 @@ pytest-xdist>=3.8.0
 hypothesis>=6.168.1
 
 # 型チェック
-mypy==2.3.1
+mypy==2.4.0
 types-requests==2.33.0.20260906
 types-PyYAML==6.0.12.20260906
 types-tabulate==0.10.0.20260508
 
 # コード品質
-pylint==4.0.9
+pylint==4.1.1
 flake8==7.4.1
 black==26.5.1
 isort==8.0.1
