@@ -13,6 +13,16 @@
 | [ROADMAP_IDEAS.md](ROADMAP_IDEAS.md) | 収益改善ロードマップ（優先度、KPI、四半期計画、進捗管理） |
 | [IMPLEMENTATION_BACKTEST_OPTIMIZE.md](IMPLEMENTATION_BACKTEST_OPTIMIZE.md) | ⭐ バックテスト最適化実装詳細、テスト結果、技術仕様 |
 | [OPTIMAL_PARAMS_GUIDE.md](OPTIMAL_PARAMS_GUIDE.md) | ⭐ 最適化パラメータ運用ガイド、利用方法、トラブルシューティング |
+| [DDD_ARCHITECTURE.md](DDD_ARCHITECTURE.md) | DDD アーキテクチャ移行計画、Bounded Context 定義、BC 間の依存ルール、移行スケジュール |
+| [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md) | DuckDB テーブル定義（stock_features・prediction_results・market_data_raw・experiment_runs） |
+| [API_SPEC.md](API_SPEC.md) | Flask REST API エンドポイントと Discord スラッシュコマンドの仕様、公開範囲の区別 |
+| [RUNBOOK_DEPLOY.md](RUNBOOK_DEPLOY.md) | デプロイ Runbook、Docker 単一プロセス起動の制約、正常デプロイ手順 |
+| [INCIDENT_RESPONSE.md](INCIDENT_RESPONSE.md) | 障害対応フロー、障害レベル定義（P1〜P3）、初動対応、エスカレーション、ポストモーテム |
+| [runbooks/postgres_cutover.md](runbooks/postgres_cutover.md) | DuckDB → PostgreSQL 切り替えランブック（本番実施用の前提と手順） |
+| [LOCK_DETECTION_GUIDE.md](LOCK_DETECTION_GUIDE.md) | DuckDB・ファイル操作のロック問題をコミット前に自動検出する仕組みと検出パターン |
+| [PRE_COMMIT_GUIDE.md](PRE_COMMIT_GUIDE.md) | Pre-Commit 自動コードレビューのセットアップと、コミット前のチェック内容 |
+| [VERSIONING_POLICY.md](VERSIONING_POLICY.md) | バージョン管理の正本（SemVer 基準、version_impact の定義、PR 必須要件） |
+| [STRESS_TEST_PERIODS.md](STRESS_TEST_PERIODS.md) | ストレステスト対象の暴落期間定義（正本）、シナリオ一覧、合格基準 |
 
 ## ADR（Architecture Decision Records）
 
