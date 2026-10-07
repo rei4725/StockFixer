@@ -66,7 +66,7 @@ def purge_old_training_logs(
     """各診断ログテーブルの古い行を削除し、テーブルごとの削除件数を返す。
 
     Args:
-        con: DuckDB 接続（書き込み可能なもの）。
+        con: PostgreSQL 接続（書き込み可能なもの）。
         retention_days: 保持日数。これより古い行を削除（各グループの最新を除く）。
         now: 基準時刻（テスト用。省略時は現在 UTC）。
 
