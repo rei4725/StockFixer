@@ -76,9 +76,9 @@ def upsert_rule_best(
     backtest_end: str,
 ) -> None:
     ensure_rule_tables()
-    from datetime import datetime
+    from datetime import datetime, timezone
 
-    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     with _db_connection() as con:
         con.execute(
             "DELETE FROM rule_best_by_symbol WHERE market = %s AND symbol = %s",
@@ -153,9 +153,9 @@ def upsert_rule_signal(
     price: float | None,
 ) -> None:
     ensure_rule_tables()
-    from datetime import datetime
+    from datetime import datetime, timezone
 
-    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     with _db_connection() as con:
         con.execute(
             "DELETE FROM rule_daily_signals WHERE signal_date = %s AND market = %s AND symbol = %s",
