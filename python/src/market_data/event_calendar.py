@@ -182,7 +182,7 @@ def _save_event_dates(market: str, symbol: str, dates: pd.DatetimeIndex) -> None
         for d in dates
     ]
     df = pd.DataFrame(rows)
-    df["fetched_at"] = pd.Timestamp.utcnow().tz_localize(None)
+    df["fetched_at"] = pd.Timestamp.now(tz="UTC").tz_localize(None)
     try:
         with _db_connection() as con:
             bulk_upsert(
