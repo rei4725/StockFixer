@@ -51,9 +51,14 @@ class PredictionMarketDataAdapter:
         n_lags: int = 10,
         feature_cols: Optional[List[str]] = None,
         target_horizon: int = 1,
+        drop_missing_target: bool = True,
     ) -> Tuple[pd.DataFrame, pd.Series]:
         from src.market_data.technical import create_basic_lag_features
 
         return create_basic_lag_features(
-            df, n_lags=n_lags, feature_cols=feature_cols, target_horizon=target_horizon
+            df,
+            n_lags=n_lags,
+            feature_cols=feature_cols,
+            target_horizon=target_horizon,
+            drop_missing_target=drop_missing_target,
         )

@@ -322,5 +322,114 @@ class TestExplainPredictionShapBody(unittest.TestCase):
         self.assertIsNone(result)
 
 
+def _make_real_lag_port(df: pd.DataFrame) -> MagicMock:
+    """ラグ特徴量だけ本物の create_basic_lag_features を使う MarketDataPort のモック。"""
+    from src.market_data.technical import create_basic_lag_features
+
+    mock_port = MagicMock()
+    mock_port.get_stock_data.return_value = df
+    mock_port.add_technical_indicators.side_effect = lambda d: d.copy()
+    mock_port.fetch_cross_asset_features.return_value = None
+    mock_port.create_basic_lag_features.side_effect = create_basic_lag_features
+    return mock_port
+
+
+class TestPredictUsesLatestRow(unittest.TestCase):
+    """予測に渡る特徴量の行が、渡した株価データの最後の日の行であること。"""
+
+    def _capturing_model(self, captured: list) -> MagicMock:
+        def fake_predict(X):
+            captured.append(X.copy())
+            return np.array([0.01])
+
+        mock_model = MagicMock()
+        mock_model.predict.side_effect = fake_predict
+        return mock_model
+
+    def test_run_single_model_prediction_uses_last_day_row(self):
+        from src.prediction.predict_single import _run_single_model_prediction
+
+        df = _make_df()
+        captured: list = []
+        mock_mm = MagicMock()
+        mock_mm.load_model.return_value = self._capturing_model(captured)
+
+        with (
+            patch(
+                "src.prediction.predict_single.get_market_data_port",
+                return_value=_make_real_lag_port(df),
+            ),
+            patch("src.prediction.predict_single.ModelManager", return_value=mock_mm),
+            patch("src.prediction.predict_single.normalize_col", side_effect=lambda x: x),
+        ):
+            result = _run_single_model_prediction(
+                "StockXGBoostModel.joblib", "jp", "7203", df, float(df["Close"].iloc[-1])
+            )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(len(captured), 1)
+        latest_X = captured[0]
+        self.assertEqual(len(latest_X), 1)
+        self.assertEqual(latest_X.index[-1], df.index[-1])
+        self.assertAlmostEqual(latest_X["Close_lag1"].iloc[0], df["Close"].iloc[-2])
+
+    def test_run_single_model_prediction_keeps_dropping_earnings_rows(self):
+        from src.prediction.predict_single import _run_single_model_prediction
+
+        df = _make_df()
+        df["earnings_flag"] = 0
+        df.loc[df.index[-1], "earnings_flag"] = 1
+        captured: list = []
+        mock_mm = MagicMock()
+        mock_mm.load_model.return_value = self._capturing_model(captured)
+
+        with (
+            patch(
+                "src.prediction.predict_single.get_market_data_port",
+                return_value=_make_real_lag_port(df),
+            ),
+            patch("src.prediction.predict_single.ModelManager", return_value=mock_mm),
+            patch("src.prediction.predict_single.normalize_col", side_effect=lambda x: x),
+        ):
+            _run_single_model_prediction(
+                "StockXGBoostModel.joblib", "jp", "7203", df, float(df["Close"].iloc[-1])
+            )
+
+        # 決算前後の行は学習と同じく落とす（今の扱いを変えない）
+        self.assertEqual(captured[0].index[-1], df.index[-2])
+
+    def test_explain_prediction_shap_uses_last_day_row(self):
+        from src.prediction.predict_single import explain_prediction_shap
+
+        df = _make_df()
+        captured: list = []
+        mock_mm = MagicMock()
+        mock_mm.load_model.return_value = self._capturing_model(captured)
+        mock_shap = MagicMock()
+        mock_shap.TreeExplainer.return_value.shap_values.side_effect = lambda X: np.zeros(
+            (1, X.shape[1])
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with open(os.path.join(tmpdir, "StockXGBoostModel_3d.joblib"), "wb") as f:
+                f.write(b"dummy")
+            with (
+                patch.dict("sys.modules", {"shap": mock_shap}),
+                patch("src.prediction.predict_single.get_models_subdir", return_value=tmpdir),
+                patch(
+                    "src.prediction.predict_single.get_market_data_port",
+                    return_value=_make_real_lag_port(df),
+                ),
+                patch("src.prediction.predict_single.ModelManager", return_value=mock_mm),
+                patch("src.prediction.predict_single.normalize_col", side_effect=lambda x: x),
+            ):
+                result = explain_prediction_shap("jp", "7203", horizon=3)
+
+        self.assertIsNotNone(result)
+        latest_X = captured[0]
+        self.assertEqual(latest_X.index[-1], df.index[-1])
+        self.assertAlmostEqual(latest_X["Close_lag1"].iloc[0], df["Close"].iloc[-2])
+
+
 if __name__ == "__main__":
     unittest.main()
