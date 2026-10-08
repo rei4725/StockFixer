@@ -153,13 +153,14 @@ def _run_single_model_prediction(
             df_feat = df_feat.join(cross_asset, how="left")
             for col in cross_asset.columns:
                 if col in df_feat.columns:
-                    df_feat[col] = df_feat[col].ffill().bfill()
+                    df_feat[col] = df_feat[col].ffill()
     except Exception:
         logger.warning(
             "クロスアセット特徴量付与スキップ: market=%s symbol=%s", market, symbol, exc_info=True
         )
 
-    X, _ = _mds.create_basic_lag_features(df_feat)
+    # 最新の日は target が未確定（NaN）なので、落とさずに残す
+    X, _ = _mds.create_basic_lag_features(df_feat, drop_missing_target=False)
     if X.empty:
         return None
     # 学習パイプラインと同じ特徴量名正規化・market_encoded 付与
@@ -436,7 +437,9 @@ def explain_prediction_shap(
             return None
 
         df_feat = _mds.add_technical_indicators(df)
-        X, _ = _mds.create_basic_lag_features(df_feat, target_horizon=horizon)
+        X, _ = _mds.create_basic_lag_features(
+            df_feat, target_horizon=horizon, drop_missing_target=False
+        )
         if X.empty:
             return None
         # 学習パイプラインと同じ特徴量名正規化・market_encoded 付与

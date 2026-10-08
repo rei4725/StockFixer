@@ -124,6 +124,15 @@ class TestTechnicalAnalysis(unittest.TestCase):
         self.assertEqual(flagged.loc["2023-01-11", "earnings_flag"], 1)
         self.assertEqual(flagged.loc["2023-01-12", "earnings_flag"], 0)
 
+    def test_create_basic_lag_features_keeps_unlabeled_latest_row(self):
+        X_train, y_train = technical_analysis.create_basic_lag_features(self.df, n_lags=2)
+        X, y = technical_analysis.create_basic_lag_features(
+            self.df, n_lags=2, drop_missing_target=False
+        )
+        self.assertEqual(X.index[-1], self.df.index[-1])
+        self.assertTrue(pd.isna(y.iloc[-1]))
+        pd.testing.assert_frame_equal(X.iloc[:-1], X_train)
+
     def test_create_basic_lag_features_drops_earnings_flag_rows(self):
         df = technical_analysis.add_earnings_flag(
             self.df.copy(), pd.DatetimeIndex([pd.Timestamp("2023-01-10")]), lookaround_days=1

@@ -26,7 +26,11 @@ _DEFAULT_TA_PARAMS = {
 
 
 def create_basic_lag_features(
-    df: pd.DataFrame, n_lags: int = 10, feature_cols=None, target_horizon: int = 1
+    df: pd.DataFrame,
+    n_lags: int = 10,
+    feature_cols=None,
+    target_horizon: int = 1,
+    drop_missing_target: bool = True,
 ):
     """
     指定した数値列（または全数値列）について、過去n日分のラグ特徴量を作成する
@@ -36,6 +40,8 @@ def create_basic_lag_features(
         n_lags (int): ラグ数（過去何日分を特徴量にするか）
         feature_cols (list or None): ラグ付与対象の列名リスト。Noneなら全ての数値列。
         target_horizon (int): 予測ホライズン（何営業日後の変化率を予測するか）。デフォルト=1（翌日）。
+        drop_missing_target (bool): True（学習用）なら target が NaN の行も落とす。
+            予測では False にし、target が未確定の最新の行を残す。
 
     Returns:
         X (pd.DataFrame): 特徴量データ
@@ -56,7 +62,10 @@ def create_basic_lag_features(
     # 予測ターゲットは target_horizon 日後の変化率（リターン）
     new_cols["target"] = (df["Close"].shift(-target_horizon) - df["Close"]) / df["Close"]
     df = pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
-    df = df.dropna()
+    if drop_missing_target:
+        df = df.dropna()
+    else:
+        df = df.dropna(subset=[c for c in df.columns if c != "target"])
     if "earnings_flag" in df.columns:
         df = df[df["earnings_flag"] == 0]
     lag_feature_cols = [f"{col}_lag{lag}" for col in feature_cols for lag in range(1, n_lags + 1)]

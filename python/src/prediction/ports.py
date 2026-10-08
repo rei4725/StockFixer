@@ -36,6 +36,7 @@ class MarketDataPort(Protocol):
         n_lags: int = 10,
         feature_cols: Optional[List[str]] = None,
         target_horizon: int = 1,
+        drop_missing_target: bool = True,
     ) -> Tuple[pd.DataFrame, pd.Series]: ...
 
 
