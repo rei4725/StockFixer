@@ -222,6 +222,14 @@ def fetch_stock_data_with_features(
         )
         return None
 
+    # 最新日の行は翌日の終値が未確定のため create_basic_lag_features の dropna で
+    # 落ちる。予測は最新日の行で行う必要があるため、y を NaN のまま末尾に足す。
+    # y を使う読み手（学習・バックテスト）は y が NaN の行を除いて使う。
+    latest_X = _build_latest_feature_row(df, list(X.columns))
+    if latest_X is not None and latest_X.index[0] not in X.index:
+        X = pd.concat([X, latest_X])
+        y = y.reindex(X.index)
+
     # 特徴量名の正規化
     X.columns = [normalize_col(c) for c in X.columns]
 
@@ -238,6 +246,41 @@ def fetch_stock_data_with_features(
     data["y"] = y
 
     return (market, symbol, data, raw_data_to_save, quality_result)
+
+
+def _build_latest_feature_row(df: pd.DataFrame, lag_columns: list) -> Optional[pd.DataFrame]:
+    """
+    df の最終日の行のラグ特徴量を、create_basic_lag_features と同じ規則で作る。
+
+    create_basic_lag_features は target（翌日の変化率）が NaN の行を落とすため、
+    最終日の行を返さない。ここではその行だけを作る。target 以外の欠損と
+    earnings_flag の扱いは create_basic_lag_features に揃える。
+
+    Args:
+        df: create_basic_lag_features に渡したのと同じ DataFrame
+        lag_columns: create_basic_lag_features が返した X の列名（"<列>_lag<N>"）
+
+    Returns:
+        最終日1行の DataFrame。作れない（欠損・決算近傍）なら None。
+    """
+    if df.empty or not lag_columns:
+        return None
+    last = df.iloc[-1]
+    if last.isnull().any():
+        return None
+    if "earnings_flag" in df.columns and last["earnings_flag"] != 0:
+        return None
+
+    values = {}
+    for name in lag_columns:
+        col, _, lag = str(name).rpartition("_lag")
+        if col not in df.columns or not lag.isdigit() or int(lag) >= len(df):
+            return None
+        values[name] = df[col].iloc[-1 - int(lag)]
+    row = pd.DataFrame([values], index=df.index[-1:], columns=lag_columns)
+    if row.isnull().any().any():
+        return None
+    return row
 
 
 def save_features_to_db(
