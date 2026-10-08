@@ -158,7 +158,8 @@ def fetch_stock_data_with_features(
         df = df.join(cross_asset, how="left")
         for col in cross_asset.columns:
             if col in df.columns:
-                df[col] = df[col].ffill().bfill()
+                # bfill は未来情報リーク（ルックアヘッド）になるため ffill のみ
+                df[col] = df[col].ffill()
         logger.debug(f"クロスアセット特徴量を付与: {list(cross_asset.columns)} ({market}/{symbol})")
 
     # 追加マクロ特徴量を結合（R-201：S&P500 / ドルインデックス / 金先物）
@@ -170,7 +171,8 @@ def fetch_stock_data_with_features(
         df = df.join(additional_macro, how="left")
         for col in additional_macro.columns:
             if col in df.columns:
-                df[col] = df[col].ffill().bfill()
+                # bfill は未来情報リーク（ルックアヘッド）になるため ffill のみ
+                df[col] = df[col].ffill()
         logger.debug(
             "追加マクロ特徴量を付与: %s (%s/%s)", list(additional_macro.columns), market, symbol
         )
@@ -195,12 +197,18 @@ def fetch_stock_data_with_features(
     pageview_df = fetch_pageview_features(symbol, market, start_date, end_date)
     df = add_pageview_features(df, pageview_df=pageview_df)
 
-    # 部分的なNaN値を前方/後方補完（OHLCV欠損日等によるdropna行数増大を防ぐ）
+    # 部分的なNaN値を前方補完（OHLCV欠損日等によるdropna行数増大を防ぐ）。
+    # 時系列前処理では ffill のみ（過去→現在方向の補完）。
+    # bfill は未来情報リーク（ルックアヘッド）になるため使わず、
+    # 先頭の埋められない NaN 行は dropna で除去する（backtest/pipeline/features.py と同じ扱い）。
     nan_before = int(df.isnull().sum().sum())
     if nan_before > 0:
-        df = df.ffill().bfill()
-        nan_after = int(df.isnull().sum().sum())
-        logger.debug(f"NaN補完: {nan_before}個→{nan_after}個 ({market}/{symbol})")
+        rows_before = len(df)
+        df = df.ffill().dropna()
+        logger.debug(
+            f"NaN補完: {nan_before}個, 先頭の埋められない行を除去 "
+            f"{rows_before}行→{len(df)}行 ({market}/{symbol})"
+        )
 
     # 行数不足チェック（TA指標の最大ウィンドウ26 + ラグ5 + ターゲット1 = 実用最低30行）
     _MIN_ROWS = 30

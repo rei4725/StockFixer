@@ -118,6 +118,51 @@ class TestFetchStockDataWithFeatures(_TmpDbTestCase):
 
         self.assertIsNone(result)
 
+    @patch("src.market_data.pipeline.fetch_pageview_features", return_value=None)
+    @patch("src.market_data.pipeline.fetch_news_sentiment_with_llm", return_value=None)
+    @patch("src.market_data.pipeline.fetch_additional_macro_features")
+    @patch("src.market_data.pipeline.fetch_cross_asset_features")
+    @patch("src.market_data.pipeline.should_fetch_fresh_data")
+    @patch("src.market_data.pipeline.get_raw_ohlcv_from_db")
+    def test_leading_nan_not_backfilled_from_future(
+        self,
+        mock_from_db,
+        mock_fresh_check,
+        mock_cross_asset,
+        mock_macro,
+        _mock_sentiment,
+        _mock_pageview,
+    ):
+        """先頭に欠けのある列が後ろの値で埋められず、その行が落ちることを確認（ルックアヘッド防止）"""
+        ohlcv = self._make_ohlcv(120)
+        mock_from_db.return_value = ohlcv
+        mock_fresh_check.return_value = False
+        vix_start = ohlcv.index[50]
+        sp500_start = ohlcv.index[55]
+        vix = pd.DataFrame({"vix_close": np.arange(70, dtype=float) + 10.0}, index=ohlcv.index[50:])
+        sp500 = pd.DataFrame(
+            {"sp500_close": np.arange(65, dtype=float) + 4000.0}, index=ohlcv.index[55:]
+        )
+        mock_cross_asset.return_value = vix
+        mock_macro.return_value = sp500
+
+        result = fetch_stock_data_with_features(
+            market="us", symbol="AAPL", start_date="2023-01-01", end_date="2023-04-30"
+        )
+
+        self.assertIsNotNone(result)
+        _market, _symbol, data, _raw, _quality = result
+        self.assertGreater(len(data), 0)
+        one_day = pd.Timedelta(days=1)
+        # 最古のラグ（lag10）まで実データの日付から作られている
+        self.assertGreaterEqual(data.index.min() - 10 * one_day, sp500_start)
+        self.assertGreaterEqual(data.index.min() - 10 * one_day, vix_start)
+        # 各行のラグ値は、その行より前の日付の実データと一致する
+        for ts, val in data["sp500_close_lag1"].items():
+            self.assertEqual(val, sp500.loc[ts - one_day, "sp500_close"])
+        for ts, val in data["vix_close_lag1"].items():
+            self.assertEqual(val, vix.loc[ts - one_day, "vix_close"])
+
 
 class TestSaveFeaturesDb(_TmpDbTestCase):
     """save_features_to_db 関数のテスト"""
