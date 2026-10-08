@@ -79,6 +79,10 @@ def get_stock_data_from_db(
     if df is None or df.empty:
         raise FileNotFoundError(f"DBにデータが存在しません: {market}_{symbol}")
 
+    # 最新日の行は y（翌日変化率）が未確定の NaN で保存される（予測用）
+    if "y" in df.columns:
+        df = df[df["y"].notna()].copy()
+
     # Date列があれば期間フィルタ
     if "Date" in df.columns and start_date is not None and end_date is not None:
         df["Date"] = pd.to_datetime(df["Date"])

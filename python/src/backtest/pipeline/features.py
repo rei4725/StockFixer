@@ -131,6 +131,10 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
             )
             sys.exit(1)
 
+        # 最新日の行は y（翌日変化率）が未確定の NaN で保存される（予測用）
+        if "y" in df.columns:
+            df = df[df["y"].notna()].copy()
+
         # 100% NULL の列を除去（Dividends、Capital_Gains、Stock_Splits など）
         df = df.dropna(axis=1, how="all")
 

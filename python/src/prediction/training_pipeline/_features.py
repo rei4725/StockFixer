@@ -130,6 +130,8 @@ def load_features_for_training(market: str, symbol: str, horizon: int = 1) -> Fe
                 )
 
             df = _mask_earnings_rows(df, market, symbol)
+            # 最新日の行は y（翌日変化率）が未確定の NaN で保存される（予測用）
+            df = df[df["y"].notna()]
 
             exclude_cols = ["y", "market", "symbol", "date"]
             feature_cols = [c for c in df.columns if c not in exclude_cols]
