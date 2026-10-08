@@ -3,7 +3,7 @@ name: Auto-arm next multibagger issue
 # 目的:
 #   multibagger ロードマップ（EPIC #428）の依存関係に従い、前提 issue が
 #   完了クローズされたら、次の issue に `auto-ok` ラベルを自動付与して
-#   IssueAgent が順番に自動着手できるようにする。
+#   ai-company の開発部が順番に着手候補として拾えるようにする。
 #
 # 仕組み:
 #   issue が closed になると発火し、その issue を前提とする後続 issue を探し、
@@ -92,7 +92,7 @@ jobs:
               });
               await github.rest.issues.createComment({
                 owner, repo, issue_number: d,
-                body: `前提 issue (#${closed}) が完了したため \`${LABEL}\` を自動付与しました。IssueAgent が次の定期実行で着手します。`,
+                body: `前提 issue (#${closed}) が完了したため \`${LABEL}\` を自動付与しました。ai-company の開発部が着手候補として拾います。`,
               });
               core.info(`#${d} に ${LABEL} を付与しました。`);
             }
