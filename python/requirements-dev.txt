@@ -16,9 +16,9 @@ types-PyYAML==6.0.12.20260906
 types-tabulate==0.10.0.20261006
 
 # コード品質
-pylint==4.1.1
+pylint==4.1.2
 flake8==7.4.1
-black==26.5.1
+black==26.10.0
 isort==8.0.1
 
 # pre-commit
