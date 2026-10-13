@@ -279,6 +279,7 @@ class Backtester:
                     exec_price,
                     exec_pred.get(date) if exec_pred is not None else None,
                     atr_value=atr_value,
+                    volume=vol,
                 )
                 qty = position_details["qty"]
                 if qty > 0:
@@ -490,6 +491,7 @@ class Backtester:
         price: float,
         pred_value: Optional[float] = None,
         atr_value: Optional[float] = None,
+        volume: float = 0.0,
     ) -> dict[str, Any]:
         """ポジションサイジングに基づいて購入数量を算出する（実装: position_sizing.py）。"""
         return calc_position_details(
@@ -504,6 +506,7 @@ class Backtester:
             execution=self.execution,
             pred_value=pred_value,
             atr_value=atr_value,
+            volume=volume,
         )
 
     def _load_from_raw(self) -> pd.DataFrame:

@@ -22,6 +22,7 @@ def calc_position_details(
     execution: ExecutionModel,
     pred_value: Optional[float] = None,
     atr_value: Optional[float] = None,
+    volume: float = 0.0,
 ) -> dict[str, Any]:
     """
     ポジションサイジングに基づいて購入数量を算出する。
@@ -38,6 +39,7 @@ def calc_position_details(
         execution: 取引コストモデル（手数料・スリッページ）
         pred_value: 予測値（confidence モードで使用）
         atr_value: ATR値（atr モードで使用）
+        volume: 平均出来高（動的スリッページ込みの約定代金で検算する）
 
     Returns:
         購入数量と補助情報
@@ -86,6 +88,7 @@ def calc_position_details(
             if min_qty > effective_max_qty:
                 min_qty = effective_max_qty
             qty = max(min_qty, qty)
+        qty = _cap_to_cash(qty, cash, price, volume, execution)
         return build_position_details(
             qty=qty,
             cash=cash,
@@ -100,7 +103,7 @@ def calc_position_details(
         available = cash
         fallback_used = position_sizing == "atr"
 
-    qty = int(available // unit_cost)
+    qty = _cap_to_cash(int(available // unit_cost), cash, price, volume, execution)
     return build_position_details(
         qty=qty,
         cash=cash,
@@ -109,6 +112,19 @@ def calc_position_details(
         atr_value=atr_value,
         atr_fallback_used=fallback_used if position_sizing == "atr" else False,
     )
+
+
+def _cap_to_cash(
+    qty: int, cash: float, price: float, volume: float, execution: ExecutionModel
+) -> int:
+    """約定代金（動的スリッページ込み）が cash を超える場合に qty を切り下げる。
+
+    unit_cost はフラット率のみで見積もるため、動的スリッページが乗ると
+    代金が現金を超えうる（過剰買付 #483 の再発防止）。
+    """
+    if qty > 0 and execution.buy_cost(qty, price, volume) > cash:
+        return min(qty, execution.max_affordable_qty(cash, price, volume))
+    return qty
 
 
 def build_position_details(

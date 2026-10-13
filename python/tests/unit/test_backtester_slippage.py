@@ -76,6 +76,29 @@ class TestSimulateTradingCost:
         assert metrics["num_trades"] >= 1
 
 
+class TestBuyCashCheckWithDynamicSlippage:
+    """動的スリッページ込みの買付代金が現金を超えないこと（過剰買付 #483 の再発防止）。"""
+
+    def test_full_sizing_low_volume_cash_never_negative(self):
+        idx = pd.date_range("2024-01-01", periods=3, freq="D")
+        df = pd.DataFrame(
+            {"Close": [100.0, 100.0, 100.0], "Volume": [1000.0, 1000.0, 1000.0]},
+            index=idx,
+        )
+        signal = pd.Series([1, 0, 0], index=idx)
+        bt = _make_bt(slippage=0.001, slippage_fn=make_slippage_fn(alpha=0.10))
+        result_df, _ = bt.simulate_trading(df, signal)
+
+        buys = result_df[result_df["action"] == "buy"]
+        assert len(buys) == 1
+        qty = int(buys["qty"].iloc[0])
+        assert qty > 0
+        assert buys["cash"].iloc[0] >= 0
+        # 1 株増やすと現金を超える（必要以上に切り下げていない）
+        cost_plus_one = bt.execution.buy_cost(qty + 1, 100.0, 1000.0)
+        assert cost_plus_one > 1_000_000
+
+
 class TestDefaultSlippageResolution:
     def test_default_by_market(self):
         assert default_slippage_for("us") == pytest.approx(0.0005)
