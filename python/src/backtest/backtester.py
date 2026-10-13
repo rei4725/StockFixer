@@ -180,11 +180,19 @@ class Backtester:
         else:
             exec_signal = signal
             exec_pred = pred
+        # シグナル約定（execution_lag > 0 なら翌バー始値）のコスト・サイジングには、
+        # 約定時点で既知の前バーまでの平均出来高を使う（当バー出来高の先読みを防ぐ）。
+        # 先頭バーは前バーが無いため 0（フラットのみ適用）。SL/TP は当バー Close 約定なので avg_vol のまま。
+        if self.execution_lag > 0:
+            exec_avg_vol = avg_vol.shift(1).fillna(0.0)
+        else:
+            exec_avg_vol = avg_vol
 
         for date in df.index:
             price = df.loc[date, close_col]
             exec_price = df.loc[date, exec_col]
             vol = float(avg_vol.loc[date]) if date in avg_vol.index else 0.0
+            exec_vol = float(exec_avg_vol.loc[date]) if date in exec_avg_vol.index else 0.0
             raw_sig = exec_signal.get(date, 0) if date in exec_signal.index else 0
             sig = 0 if pd.isna(raw_sig) else int(raw_sig)
 
@@ -246,8 +254,8 @@ class Backtester:
                 # エントリー売り: short_price * qty * (1 - fee - slip)
                 # カバー買い: exec_price * qty * (1 + fee + slip)
                 net_pnl = self.execution.sell_proceeds(
-                    short_position, short_price, vol
-                ) - self.execution.buy_cost(short_position, exec_price, vol)
+                    short_position, short_price, exec_vol
+                ) - self.execution.buy_cost(short_position, exec_price, exec_vol)
                 pnl = (short_price - exec_price) * short_position
                 cash += net_pnl
                 cash_gross += pnl
@@ -279,11 +287,11 @@ class Backtester:
                     exec_price,
                     exec_pred.get(date) if exec_pred is not None else None,
                     atr_value=atr_value,
-                    volume=vol,
+                    volume=exec_vol,
                 )
                 qty = position_details["qty"]
                 if qty > 0:
-                    cost = self.execution.buy_cost(qty, exec_price, vol)
+                    cost = self.execution.buy_cost(qty, exec_price, exec_vol)
                     cost_gross = qty * exec_price
                     cash -= cost
                     cash_gross -= cost_gross
@@ -308,7 +316,7 @@ class Backtester:
                     )
             elif sig == -1 and position > 0:
                 # Sell (ロング決済・翌バー始値 exec_price で約定)
-                proceeds = self.execution.sell_proceeds(position, exec_price, vol)
+                proceeds = self.execution.sell_proceeds(position, exec_price, exec_vol)
                 proceeds_gross = position * exec_price
                 cash += proceeds
                 cash_gross += proceeds_gross

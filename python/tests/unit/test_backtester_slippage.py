@@ -99,6 +99,46 @@ class TestBuyCashCheckWithDynamicSlippage:
         assert cost_plus_one > 1_000_000
 
 
+class TestExecutionVolumeNoLookahead:
+    """翌バー始値約定のコストに、約定バー自身の出来高を使わないこと。"""
+
+    @staticmethod
+    def _run(exec_bar_volume, signal_values, exec_bar):
+        idx = pd.date_range("2024-01-01", periods=5, freq="D")
+        volume = [1000.0] * 5
+        volume[exec_bar] = exec_bar_volume
+        df = pd.DataFrame(
+            {
+                "Open": [100.0, 101.0, 102.0, 103.0, 104.0],
+                "Close": [100.0, 101.0, 102.0, 103.0, 104.0],
+                "Volume": volume,
+            },
+            index=idx,
+        )
+        signal = pd.Series(signal_values, index=idx)
+        bt = _make_bt(slippage=0.001, slippage_fn=make_slippage_fn(alpha=0.10))
+        assert bt.execution_lag > 0
+        result_df, _ = bt.simulate_trading(df, signal)
+        return result_df
+
+    def test_buy_cost_ignores_execution_bar_volume(self):
+        # bar0 の買いシグナルは bar1 始値で約定。bar1 の出来高だけを変える
+        low = self._run(1000.0, [1, 0, 0, 0, 0], exec_bar=1)
+        high = self._run(1_000_000_000.0, [1, 0, 0, 0, 0], exec_bar=1)
+        buy_low = low[low["action"] == "buy"].iloc[0]
+        buy_high = high[high["action"] == "buy"].iloc[0]
+        assert buy_low["qty"] == buy_high["qty"]
+        assert buy_low["cash"] == pytest.approx(buy_high["cash"])
+
+    def test_sell_proceeds_ignores_execution_bar_volume(self):
+        # bar0 買い→bar1 約定、bar2 売り→bar3 始値で約定。bar3 の出来高だけを変える
+        low = self._run(1000.0, [1, 0, -1, 0, 0], exec_bar=3)
+        high = self._run(1_000_000_000.0, [1, 0, -1, 0, 0], exec_bar=3)
+        sell_low = low[low["action"] == "sell"].iloc[0]
+        sell_high = high[high["action"] == "sell"].iloc[0]
+        assert sell_low["cash"] == pytest.approx(sell_high["cash"])
+
+
 class TestDefaultSlippageResolution:
     def test_default_by_market(self):
         assert default_slippage_for("us") == pytest.approx(0.0005)
