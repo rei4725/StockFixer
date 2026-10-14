@@ -33,3 +33,17 @@ GHSA-6v7p-g79w-8964
 
 # CVE-2025-47273: setuptools path traversal (pip._vendor 同梱の setuptools 70.3.0)
 CVE-2025-47273
+
+# --------------------------------------------------------------------------
+# 以下の2件も pip 自身が同梱する urllib3 に起因する（上の msgpack / setuptools と同じ理由）。
+# pip 26.2.1（2026-10 時点の最新）の vendor.txt は urllib3==2.7.0 で、
+# pypa/pip の main ブランチも 2026-10-14 時点で 2.7.0 のまま。
+# アプリが使う site-packages 側の urllib3 は requirements.txt の urllib3>=2.8.0 で修正済み。
+# 外す条件: pip の vendor.txt が urllib3>=2.8.0 になり、Dockerfile がその pip を入れるようになったら外す。
+# --------------------------------------------------------------------------
+
+# CVE-2026-97687: urllib3 traffic interception via HTTPS proxy TLS configuration override (pip._vendor 同梱の urllib3 2.7.0)
+CVE-2026-97687
+
+# CVE-2026-97689: urllib3 DoS via unbounded memory allocation in chunk parser (pip._vendor 同梱の urllib3 2.7.0)
+CVE-2026-97689
