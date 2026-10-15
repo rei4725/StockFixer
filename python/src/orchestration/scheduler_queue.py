@@ -12,6 +12,7 @@ import logging
 import os
 import random
 import time
+import uuid
 from datetime import datetime, timedelta
 from typing import Any, Callable, Optional
 from zoneinfo import ZoneInfo
@@ -129,9 +130,22 @@ class SchedulerQueueManager:
             return False
 
         started_at = self.now()
-        self._in_progress_jobs.add(job_id)
         status = "success"
         error_message = None
+        run_id = uuid.uuid4().hex
+
+        # プロセスごと落ちて finally が走らなくても回数に数えるため、始める前に記録する
+        self._append_event(
+            {
+                "job_id": job_id,
+                "reason": reason,
+                "status": "started",
+                "period_key": period_key,
+                "run_id": run_id,
+                "started_at": isoformat_utc(started_at),
+            }
+        )
+        self._in_progress_jobs.add(job_id)
 
         self._emit_job_log(
             "info",
@@ -182,6 +196,7 @@ class SchedulerQueueManager:
                     "reason": reason,
                     "status": status,
                     "period_key": period_key,
+                    "run_id": run_id,
                     "started_at": isoformat_utc(started_at),
                     "finished_at": isoformat_utc(finished_at),
                     "duration_seconds": duration_seconds,
@@ -337,13 +352,21 @@ class SchedulerQueueManager:
         return False
 
     def get_execution_count(self, job_id: str, period_key: str) -> int:
+        """success・error の記録に、終わりの記録が無い started（途中で落ちた実行）を足して数える。"""
         count = 0
+        started_run_ids: set[str] = set()
+        finished_run_ids: set[str] = set()
         for event in self._state.get("events", []):
             if event.get("job_id") != job_id or event.get("period_key") != period_key:
                 continue
-            if event.get("status") in {"success", "error"}:
+            status = event.get("status")
+            if status in {"success", "error"}:
                 count += 1
-        return count
+                if event.get("run_id"):
+                    finished_run_ids.add(event["run_id"])
+            elif status == "started" and event.get("run_id"):
+                started_run_ids.add(event["run_id"])
+        return count + len(started_run_ids - finished_run_ids)
 
     def _build_period_key(self, config: dict[str, Any], now: datetime) -> str:
         period_type = config.get("period", "daily")
