@@ -11,7 +11,10 @@ kabu STATION® API が利用できない環境（APIキー未取得・テスト�
 
 import math
 import uuid
+from datetime import date, datetime
 from typing import Any
+
+import pandas as pd
 
 from config.settings import PAPER_INITIAL_BALANCE
 from src.domain.ports import MarketDataPort, TradeDiffSink
@@ -23,6 +26,31 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 _INITIAL_BALANCE = PAPER_INITIAL_BALANCE
+_JST = "Asia/Tokyo"
+
+
+def _parse_predicted_date(predicted_at: Any) -> date | None:
+    """predicted_at（例: "20260213_142903"）からシグナルを作った日を返す。読めなければ None"""
+    if not predicted_at:
+        return None
+    text = str(predicted_at)
+    try:
+        return datetime.strptime(text[:8], "%Y%m%d").date()
+    except ValueError:
+        pass
+    try:
+        return date.fromisoformat(text[:10])
+    except ValueError:
+        logger.warning(f"[paper] predicted_at を日付として読めません: {text}")
+        return None
+
+
+def _bar_date_jst(index_value: Any) -> date:
+    """OHLCV の行の日付を JST の日付で返す（tz なしの index はそのまま日付とみなす）"""
+    ts = pd.Timestamp(index_value)
+    if ts.tzinfo is not None:
+        ts = ts.tz_convert(_JST)
+    return ts.date()
 
 
 class PaperBroker(BrokerBase):
@@ -160,6 +188,18 @@ class PaperBroker(BrokerBase):
                 hist = self._market_data.get_ohlcv(ticker, "2d")
                 if hist.empty:
                     logger.warning(f"[paper] {symbol}: 株価取得失敗、スキップ")
+                    continue
+
+                # 9:05 時点で当日の行がまだ無いと、最後の行はシグナルを作った日以前の行になる。
+                # その行で約定させると前営業日の値段で約定してしまうため、pending のまま
+                # 据え置いて次回リトライさせる（当日の値を見ていないので指値の失効も判断しない）。
+                signal_date = _parse_predicted_date(predicted_at)
+                bar_date = _bar_date_jst(hist.index[-1])
+                if signal_date is not None and bar_date <= signal_date:
+                    logger.warning(
+                        f"[paper] {symbol}: 当日の行が未取得（最後の行={bar_date} "
+                        f"シグナル日={signal_date}）のため約定スキップ（pending 据え置き）"
+                    )
                     continue
 
                 today_row = hist.iloc[-1]

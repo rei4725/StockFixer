@@ -12,7 +12,7 @@ import pandas as pd
 
 from src.domain.ports import MarketDataPort
 from src.infrastructure.in_memory import InMemoryTradeDiffSink
-from src.trading.brokers.base import OrderSide
+from src.trading.brokers.base import OrderSide, OrderType
 from src.trading.brokers.paper.paper_broker import PaperBroker
 from src.utils.db._connection import _db_connection
 
@@ -162,11 +162,72 @@ class TestPaperBrokerSettle(unittest.TestCase):
         self.assertEqual(status, "pending")
         self.assertAlmostEqual(balance, 1_000_000.0)
 
+    def _set_predicted_at(self, order_id: str, predicted_at: str) -> None:
+        with _db_connection() as con:
+            con.execute(
+                "UPDATE paper_orders SET market='jp', predicted_at=%s, "
+                "signal_price=995.0 WHERE order_id=%s",
+                [predicted_at, order_id],
+            )
+
+    def _assert_still_pending(self, order_id: str) -> None:
+        with _db_connection() as con:
+            status = con.execute(
+                "SELECT status FROM paper_orders WHERE order_id=%s", [order_id]
+            ).fetchone()[0]
+            balance = con.execute("SELECT balance FROM paper_balance").fetchone()[0]
+            pos = con.execute("SELECT qty FROM paper_positions WHERE symbol='7203'").fetchone()
+        self.assertEqual(status, "pending")
+        self.assertAlmostEqual(balance, 1_000_000.0)
+        self.assertIsNone(pos)
+        self.assertEqual(self._trade_diff_sink.recorded, [])
+
+    def test_settle_defers_when_last_bar_is_signal_day(self):
+        """最後の行がシグナルを作った日の行（当日の行がまだ無い）なら約定させず pending 据え置き。"""
+        # 最後の行 = 2026-03-15、predicted_at = 2026-03-15 夜
+        result = self.broker.send_order("7203", OrderSide.BUY, 100)
+        self._set_predicted_at(result["order_id"], "20260315_200000")
+        settled = self.broker.settle_pending_orders()
+        self.assertEqual(settled, [])
+        self._assert_still_pending(result["order_id"])
+
+    def test_settle_defers_limit_order_without_expiring(self):
+        """当日の行が無いときは指値未達でも失効させない（当日の値を見ていないため）。"""
+        result = self.broker.send_order(
+            "7203", OrderSide.BUY, 100, price=900.0, order_type=OrderType.LIMIT
+        )
+        self._set_predicted_at(result["order_id"], "20260316_200000")
+        settled = self.broker.settle_pending_orders()
+        self.assertEqual(settled, [])
+        self._assert_still_pending(result["order_id"])
+
+    def test_settle_compares_bar_date_in_jst(self):
+        """tz つきの行の日付は JST に直して比べる（UTC では前日に見える当日の行で約定する）。"""
+        jst_df = pd.DataFrame(
+            {"Open": [1000.0], "High": [1050.0], "Low": [990.0], "Close": [1020.0]},
+            index=pd.DatetimeIndex(["2026-03-16 00:00"]).tz_localize("Asia/Tokyo"),
+        )
+        self._mock_market_data.get_ohlcv.return_value = jst_df
+        result = self.broker.send_order("7203", OrderSide.BUY, 100)
+        self._set_predicted_at(result["order_id"], "20260315_200000")
+        settled = self.broker.settle_pending_orders()
+        self.assertEqual(len(settled), 1)
+        self.assertAlmostEqual(settled[0]["fill_price"], 1000.0)
+
+    def test_settle_fills_when_today_bar_present(self):
+        """最後の行が predicted_at より後の営業日なら今までどおり約定する。"""
+        result = self.broker.send_order("7203", OrderSide.BUY, 100)
+        self._set_predicted_at(result["order_id"], "20260314_200000")
+        settled = self.broker.settle_pending_orders()
+        self.assertEqual(len(settled), 1)
+        self.assertAlmostEqual(settled[0]["fill_price"], 1000.0)
+        self.assertEqual(len(self._trade_diff_sink.recorded), 1)
+
     def test_settle_updates_paper_real_diff(self):
         result = self.broker.send_order("7203", OrderSide.BUY, 100)
         with _db_connection() as con:
             con.execute(
-                "UPDATE paper_orders SET market='jp', predicted_at='20260405_085000', "
+                "UPDATE paper_orders SET market='jp', predicted_at='20260314_085000', "
                 "signal_price=995.0 WHERE order_id=%s",
                 [result["order_id"]],
             )
