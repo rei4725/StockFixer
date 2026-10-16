@@ -25,29 +25,34 @@ logger = get_logger(__name__)
 
 
 def _load_recent_returns(symbols: list[str], market: str, window: int) -> pd.DataFrame:
-    """stock_features から直近 window 日分の終値リターンを取得する。"""
+    """market_data_raw から直近 window 日分の日足終値リターンを取得する。
+
+    stock_features はラグ特徴量（Close_lag1 等）しか保存しないため生の終値を持たない。
+    終値は生 OHLCV の market_data_raw.close から読み、日付（ts）で銘柄を揃える。
+    """
     if not symbols:
         return pd.DataFrame()
 
     placeholders = ", ".join(["%s"] * len(symbols))
     query = f"""
         WITH ranked AS (
-            SELECT symbol, row_num, close,
-                   ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY row_num DESC) AS rn
-            FROM stock_features
+            SELECT symbol, ts, close,
+                   ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY ts DESC) AS rn
+            FROM market_data_raw
             WHERE market = %s
+              AND timeframe = %s
               AND symbol IN ({placeholders})
               AND close IS NOT NULL
         )
-        SELECT symbol, row_num, close
+        SELECT symbol, ts, close
         FROM ranked
         WHERE rn <= %s
-        ORDER BY symbol, row_num
+        ORDER BY symbol, ts
     """
 
     try:
         with _db_connection() as con:
-            df = pd.read_sql(query, con, params=[market] + symbols + [window + 1])
+            df = pd.read_sql(query, con, params=[market, "1d"] + symbols + [window + 1])
     except Exception as e:
         logger.error("相関計算用データ取得失敗: %s", e, exc_info=True)
         return pd.DataFrame()
@@ -55,7 +60,7 @@ def _load_recent_returns(symbols: list[str], market: str, window: int) -> pd.Dat
     if df.empty:
         return pd.DataFrame()
 
-    pivot = df.pivot(index="row_num", columns="symbol", values="close")
+    pivot = df.pivot(index="ts", columns="symbol", values="close")
     returns = pivot.pct_change().dropna()
     return returns
 
