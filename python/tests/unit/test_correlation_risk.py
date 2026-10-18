@@ -5,17 +5,73 @@ DuckDB は MagicMock で差し替える。
 """
 
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
 
 from src.trading.correlation_risk import (
+    _load_recent_returns,
     compute_enc,
     evaluate_correlation_gate,
     filter_correlated_candidates,
 )
 from src.trading.types import CorrelationGateResult
+
+
+class TestLoadRecentReturns(unittest.TestCase):
+    """終値は stock_features ではなく market_data_raw の close から読む。
+
+    stock_features はラグ特徴量（Close_lag1 等）しか持たず、引用符なしの
+    close は本番の Postgres で "column does not exist" になっていた。
+    """
+
+    def _run(self, frame: pd.DataFrame):
+        captured: dict = {}
+
+        def fake_read_sql(query, con, params=None):
+            captured["query"] = query
+            captured["params"] = params
+            return frame
+
+        conn_cm = MagicMock()
+        conn_cm.__enter__.return_value = MagicMock()
+        with (
+            patch("src.trading.correlation_risk._db_connection", return_value=conn_cm),
+            patch("src.trading.correlation_risk.pd.read_sql", side_effect=fake_read_sql),
+        ):
+            result = _load_recent_returns(["A", "B"], "us", 2)
+        return result, captured
+
+    def test_reads_close_from_market_data_raw_daily_bars(self):
+        frame = pd.DataFrame(
+            {
+                "symbol": ["A", "A", "A", "B", "B", "B"],
+                "ts": pd.to_datetime(["2026-10-13", "2026-10-14", "2026-10-15"] * 2),
+                "close": [100.0, 110.0, 99.0, 50.0, 55.0, 60.5],
+            }
+        )
+        returns, captured = self._run(frame)
+
+        query = " ".join(captured["query"].split())
+        self.assertIn("FROM market_data_raw", query)
+        self.assertNotIn("stock_features", query)
+        self.assertIn("timeframe = %s", query)
+        self.assertIn("PARTITION BY symbol ORDER BY ts DESC", query)
+        self.assertEqual(captured["params"], ["us", "1d", "A", "B", 3])
+
+        self.assertEqual(list(returns.columns), ["A", "B"])
+        self.assertEqual(len(returns), 2)
+        self.assertAlmostEqual(returns["A"].iloc[0], 0.10)
+        self.assertAlmostEqual(returns["A"].iloc[1], -0.10)
+        self.assertAlmostEqual(returns["B"].iloc[1], 0.10)
+
+    def test_query_failure_returns_empty(self):
+        conn_cm = MagicMock()
+        conn_cm.__enter__.side_effect = RuntimeError("boom")
+        with patch("src.trading.correlation_risk._db_connection", return_value=conn_cm):
+            result = _load_recent_returns(["A", "B"], "us", 2)
+        self.assertTrue(result.empty)
 
 
 class TestComputeEnc(unittest.TestCase):
