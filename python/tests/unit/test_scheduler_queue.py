@@ -105,6 +105,83 @@ def test_run_job_respects_execution_limit(tmp_path):
     assert counter["daily"] == 2
 
 
+def test_recovery_stops_at_limit_when_process_is_killed_mid_job(tmp_path):
+    """ジョブの途中でプロセスが消えた（finally が走らない）実行も回数に数え、
+    同じ period_key の補完が max_executions_per_period 回で止まること。"""
+    state_path = tmp_path / "scheduler_queue_state.json"
+    calls = {"n": 0}
+    snapshot: dict[str, bytes] = {}
+
+    def _killed_func():
+        calls["n"] += 1
+        # プロセスが消えた時点でディスクに残っている状態を写し取る
+        snapshot["state"] = state_path.read_bytes() if state_path.exists() else b""
+
+    config = {
+        "weekly_model_training": {
+            "func": _killed_func,
+            "period": "weekly",
+            "day_of_week": "sat",
+            "hour": 3,
+            "minute": 0,
+            "recovery_delay_minutes": 15,
+            "max_executions_per_period": 2,
+            "max_retries": 0,
+        }
+    }
+
+    # 2026-03-07 は土曜
+    tz = SchedulerQueueManager(config, state_file_path=str(state_path)).tz
+    now = datetime(2026, 3, 7, 3, 20, tzinfo=tz)
+
+    for _ in range(10):
+        # 再起動したプロセスとして状態ファイルを読み直す
+        manager = SchedulerQueueManager(config, state_file_path=str(state_path))
+        manager.now = lambda: now  # type: ignore[method-assign]
+        if not manager.should_recover("weekly_model_training", now=now):
+            break
+        manager.run_job("weekly_model_training", reason="recovery")
+        # finally が書いた記録を捨て、消えた時点の状態に戻す
+        if snapshot["state"]:
+            state_path.write_bytes(snapshot["state"])
+        else:
+            state_path.unlink()
+
+    assert calls["n"] == 2
+    manager = SchedulerQueueManager(config, state_file_path=str(state_path))
+    assert manager.has_success("weekly_model_training", "2026-W10") is False
+    assert manager.get_execution_count("weekly_model_training", "2026-W10") == 2
+
+
+def test_execution_count_reads_legacy_state_without_started_events(tmp_path):
+    """started の記録が無い前の版の状態ファイルでも、success・error を数えること"""
+    state_path = tmp_path / "scheduler_queue_state.json"
+    legacy_events = [
+        {"job_id": "daily_pipeline", "period_key": "2026-03-02", "status": "error"},
+        {"job_id": "daily_pipeline", "period_key": "2026-03-02", "status": "retry"},
+        {"job_id": "daily_pipeline", "period_key": "2026-03-02", "status": "success"},
+        {"job_id": "daily_pipeline", "period_key": "2026-03-02", "status": "skipped_limit"},
+    ]
+    state_path.write_text(json.dumps({"events": legacy_events}), encoding="utf-8")
+    manager = SchedulerQueueManager(_build_config({}), state_file_path=str(state_path))
+
+    assert manager.get_execution_count("daily_pipeline", "2026-03-02") == 2
+
+
+def test_finished_run_is_counted_once(tmp_path):
+    """始めの記録と終わりの記録がそろった実行は1回に数えること"""
+    counter = {}
+    state_path = tmp_path / "scheduler_queue_state.json"
+    manager = SchedulerQueueManager(_build_config(counter), state_file_path=str(state_path))
+
+    manager.run_job("daily_pipeline", reason="scheduled", period_key="2026-03-02")
+
+    saved = json.loads(state_path.read_text(encoding="utf-8"))
+    statuses = [e["status"] for e in saved["events"]]
+    assert statuses == ["started", "success"]
+    assert manager.get_execution_count("daily_pipeline", "2026-03-02") == 1
+
+
 def test_run_job_force_bypasses_execution_limit(tmp_path):
     counter = {}
     state_path = tmp_path / "scheduler_queue_state.json"
