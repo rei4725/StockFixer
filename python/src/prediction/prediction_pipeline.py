@@ -411,6 +411,14 @@ def run_accuracy_check(
         return pd.DataFrame()
 
     new_rows: list[dict] = []
+    # 採点を飛ばした件数を continue の分かれ道ごとに数え、完了ログに出す（0件の原因の切り分け用）
+    skipped = {
+        "必須の値なし": 0,
+        "predicted_at形式不正": 0,
+        "予想値段なし": 0,
+        "足なし": 0,
+        "まだデータなし": 0,
+    }
 
     for _, pred in df_pred.iterrows():
         market = pred.get("market")
@@ -419,27 +427,34 @@ def run_accuracy_check(
         predicted_price = pred.get("avg_pred_price")
         current_price = pred.get("current_price")
 
-        if not market or not symbol or not predicted_at_str:
+        # 文字列の列でも NULL は NaN になり、NaN は真と判定されるため pd.isna でも確かめる
+        if any(pd.isna(v) or not v for v in (market, symbol, predicted_at_str)):
+            skipped["必須の値なし"] += 1
             continue
 
         # predicted_at は YYYYMMDD_HHMMSS 形式
         try:
             pred_date = datetime.strptime(predicted_at_str[:8], "%Y%m%d")
         except ValueError:
+            skipped["predicted_at形式不正"] += 1
             continue
 
-        if predicted_price is None or current_price is None:
+        # DB の NULL は DataFrame では NaN になるため、None と同じく欠けとして扱う
+        if pd.isna(predicted_price) or pd.isna(current_price):
+            skipped["予想値段なし"] += 1
             continue
 
         # 翌 horizon 営業日後の実績終値を取得
         ohlcv = load_raw_ohlcv(market, symbol)
         if ohlcv is None or ohlcv.empty:
+            skipped["足なし"] += 1
             continue
 
         ohlcv = ohlcv.sort_index()
         future_dates = ohlcv.index[ohlcv.index > pred_date]
         if len(future_dates) < horizon:
-            continue  # まだデータなし
+            skipped["まだデータなし"] += 1
+            continue
 
         actual_price = float(ohlcv.loc[future_dates[horizon - 1], "Close"])
         predicted_ratio = (
@@ -472,5 +487,9 @@ def run_accuracy_check(
 
     # サマリーを返す
     summary = load_drift_summary(horizon=horizon)
-    logger.info(f"精度チェック完了: {len(new_rows)}件 採点")
+    skipped_str = ", ".join(f"{reason}={count}" for reason, count in skipped.items())
+    logger.info(
+        f"精度チェック完了: {len(new_rows)}件 採点 "
+        f"(読み込み={len(df_pred)}件, 飛ばした理由: {skipped_str})"
+    )
     return summary

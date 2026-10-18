@@ -557,6 +557,55 @@ class TestRunAccuracyCheckAdditional(unittest.TestCase):
         saved_rows = mock_save.call_args[0][0]
         self.assertEqual(len(saved_rows), 2)
 
+    @patch("src.prediction.db.load_drift_summary")
+    @patch("src.prediction.db.save_prediction_accuracy")
+    @patch("src.utils.db.load_raw_ohlcv")
+    @patch("src.prediction.db.load_prediction_results")
+    def test_completion_log_counts_skips_by_reason(
+        self, mock_load, mock_ohlcv, mock_save, mock_drift
+    ):
+        """完了ログに、採点を飛ばした件数が理由ごとに出ること"""
+        import pandas as pd
+
+        from src.prediction.prediction_pipeline import run_accuracy_check
+
+        mock_load.return_value = pd.DataFrame(
+            {
+                "market": [None, "jp", "jp", "jp", "jp", "jp", "jp"],
+                "symbol": ["1", "bad", "noprice", "noohlcv", "nofuture", "nofuture2", "ok"],
+                "predicted_at": [
+                    "20260416_120000",
+                    "badvalue",
+                    "20260416_120000",
+                    "20260416_120000",
+                    "20260417_000500",
+                    "20260417_000500",
+                    "20260416_120000",
+                ],
+                "avg_pred_price": [1050.0, 1050.0, None, 1050.0, 1050.0, 1050.0, 1050.0],
+                "current_price": [1000.0] * 7,
+            }
+        )
+        ohlcv = pd.DataFrame({"Close": [1040.0]}, index=pd.to_datetime(["2026-04-17"]))
+        mock_ohlcv.side_effect = lambda market, symbol: (
+            pd.DataFrame() if symbol == "noohlcv" else ohlcv
+        )
+        mock_drift.return_value = pd.DataFrame()
+
+        with self.assertLogs("src.prediction.prediction_pipeline", level="INFO") as cm:
+            run_accuracy_check(horizon=1)
+
+        done = [m for m in cm.output if "精度チェック完了" in m]
+        self.assertEqual(len(done), 1)
+        msg = done[0]
+        self.assertIn("1件 採点", msg)
+        self.assertIn("読み込み=7件", msg)
+        self.assertIn("必須の値なし=1", msg)
+        self.assertIn("predicted_at形式不正=1", msg)
+        self.assertIn("予想値段なし=1", msg)
+        self.assertIn("足なし=1", msg)
+        self.assertIn("まだデータなし=2", msg)
+
 
 if __name__ == "__main__":
     unittest.main()
