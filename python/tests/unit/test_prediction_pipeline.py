@@ -606,6 +606,85 @@ class TestRunAccuracyCheckAdditional(unittest.TestCase):
         self.assertIn("足なし=1", msg)
         self.assertIn("まだデータなし=2", msg)
 
+    @patch("src.prediction.db.load_drift_summary")
+    @patch("src.prediction.db.save_prediction_accuracy")
+    @patch("src.utils.db.load_raw_ohlcv")
+    @patch("src.prediction.db.load_prediction_results")
+    def test_scores_previous_day_prediction_with_next_business_day_bar(
+        self, mock_load, mock_ohlcv, mock_save, mock_drift
+    ):
+        """前の日（UTC 22時台）の予想は、その次の営業日の足で採点されること"""
+        import pandas as pd
+
+        from src.prediction.prediction_pipeline import run_accuracy_check
+
+        # 本番の日次の道は UTC 22:3x に走り、predicted_at はその UTC の時刻になる
+        mock_load.return_value = pd.DataFrame(
+            {
+                "market": ["jp", "us"],
+                "symbol": ["7203", "AAPL"],
+                "predicted_at": ["20261015_223736", "20261015_223736"],
+                "avg_pred_price": [1050.0, 210.0],
+                "current_price": [1000.0, 200.0],
+            }
+        )
+        # market_data_raw の ts は TIMESTAMP（tz なし、取引所の日付の 00:00）
+        mock_ohlcv.return_value = pd.DataFrame(
+            {"Close": [1000.0, 1040.0]},
+            index=pd.DatetimeIndex(pd.to_datetime(["2026-10-15", "2026-10-16"]), name="Date"),
+        )
+        mock_drift.return_value = pd.DataFrame()
+
+        run_accuracy_check(horizon=1)
+
+        mock_save.assert_called_once()
+        rows = mock_save.call_args[0][0]
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["actual_price"], 1040.0)
+
+    @patch("src.prediction.db.load_drift_summary")
+    @patch("src.prediction.db.save_prediction_accuracy")
+    @patch("src.utils.db.load_raw_ohlcv")
+    @patch("src.prediction.db.load_prediction_results")
+    def test_logs_samples_of_no_future_bar_skips(
+        self, mock_load, mock_ohlcv, mock_save, mock_drift
+    ):
+        """まだデータなしで飛ばした行の pred_date・足の最後の日付・足の日付の型が数件ログに出ること"""
+        import pandas as pd
+
+        from src.prediction.prediction_pipeline import run_accuracy_check
+
+        n = 8
+        mock_load.return_value = pd.DataFrame(
+            {
+                "market": ["jp"] * n,
+                "symbol": [f"S{i}" for i in range(n)],
+                "predicted_at": ["20261016_013000"] * n,
+                "avg_pred_price": [1050.0] * n,
+                "current_price": [1000.0] * n,
+            }
+        )
+        mock_ohlcv.return_value = pd.DataFrame(
+            {"Close": [1000.0, 1010.0]},
+            index=pd.DatetimeIndex(pd.to_datetime(["2026-10-15", "2026-10-16"]), name="Date"),
+        )
+        mock_drift.return_value = pd.DataFrame()
+
+        with self.assertLogs("src.prediction.prediction_pipeline", level="INFO") as cm:
+            run_accuracy_check(horizon=1)
+
+        samples = [m for m in cm.output if "まだデータなしの例" in m]
+        self.assertEqual(len(samples), 1)
+        msg = samples[0]
+        self.assertIn("jp/S0", msg)
+        self.assertIn("predicted_at=20261016_013000", msg)
+        self.assertIn("pred_date=2026-10-16", msg)
+        self.assertIn("足の最後=2026-10-16 00:00:00", msg)
+        self.assertIn("datetime64", msg)
+        # 数件に絞る（全件は出さない）
+        self.assertNotIn(f"jp/S{n - 1}", msg)
+        mock_save.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
