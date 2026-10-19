@@ -1,7 +1,7 @@
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -91,6 +91,92 @@ def test_should_recover_false_for_cron_string_hour_instead_of_crashing(tmp_path)
 
     now = datetime(2026, 3, 2, 19, 20, tzinfo=manager.tz)
     assert manager.should_recover("strategy_promotion_check", now=now) is False
+
+
+def _build_production_like_daily_config(func):
+    """本番と同じ 07:30 JST（22:30Z）・上限3回の日次ジョブ設定"""
+    return {
+        "daily_pipeline": {
+            "func": func,
+            "period": "daily",
+            "day_of_week": "mon-fri",
+            "hour": 7,
+            "minute": 30,
+            "recovery_delay_minutes": 10,
+            "max_executions_per_period": 3,
+        }
+    }
+
+
+def test_should_recover_false_while_scheduled_run_is_in_progress(tmp_path):
+    """22:30Z の回が動いている間は、補完ポーリングが補完を始めないこと（#806）。
+    以前は should_recover が True を返し、5分おきに「補完実行を開始」の行が出ていた。"""
+    import threading
+
+    started = threading.Event()
+    released = threading.Event()
+
+    def slow_func():
+        started.set()
+        released.wait()
+
+    state_path = tmp_path / "scheduler_queue_state.json"
+    manager = SchedulerQueueManager(
+        _build_production_like_daily_config(slow_func), state_file_path=str(state_path)
+    )
+    # 2026-10-19 は月曜。07:30 JST（2026-10-18 22:30Z）の定時の回
+    scheduled_now = datetime(2026, 10, 19, 7, 30, tzinfo=manager.tz)
+    manager.now = lambda: scheduled_now  # type: ignore[method-assign]
+
+    t = threading.Thread(target=lambda: manager.run_job("daily_pipeline", reason="scheduled"))
+    t.start()
+    try:
+        assert started.wait(timeout=5)
+        # 07:40〜08:10 JST（22:40Z〜23:10Z）の補完ポーリング
+        for minute_offset in range(0, 35, 5):
+            poll_now = datetime(2026, 10, 19, 7, 40, tzinfo=manager.tz) + timedelta(
+                minutes=minute_offset
+            )
+            assert manager.should_recover("daily_pipeline", now=poll_now) is False
+    finally:
+        released.set()
+        t.join()
+
+
+def test_should_recover_false_after_scheduled_run_completes_same_day(tmp_path):
+    """22:30Z の回が完了した日は、その日の補完が始まらないこと（#806）。
+    完了の記録の period_key と should_recover の period_key が同じ JST の日付になる。"""
+    counter = {"n": 0}
+
+    def _func():
+        counter["n"] += 1
+
+    state_path = tmp_path / "scheduler_queue_state.json"
+    manager = SchedulerQueueManager(
+        _build_production_like_daily_config(_func), state_file_path=str(state_path)
+    )
+    scheduled_now = datetime(2026, 10, 19, 7, 30, tzinfo=manager.tz)
+    manager.now = lambda: scheduled_now  # type: ignore[method-assign]
+
+    assert manager.run_job("daily_pipeline", reason="scheduled") is True
+    assert manager.has_success("daily_pipeline", "2026-10-19") is True
+
+    for poll_now in (
+        datetime(2026, 10, 19, 8, 15, tzinfo=manager.tz),
+        datetime(2026, 10, 19, 23, 55, tzinfo=manager.tz),
+    ):
+        assert manager.should_recover("daily_pipeline", now=poll_now) is False
+    # 再起動の後も同じ
+    reloaded = SchedulerQueueManager(
+        _build_production_like_daily_config(_func), state_file_path=str(state_path)
+    )
+    assert (
+        reloaded.should_recover(
+            "daily_pipeline", now=datetime(2026, 10, 19, 8, 15, tzinfo=reloaded.tz)
+        )
+        is False
+    )
+    assert counter["n"] == 1
 
 
 def test_run_job_respects_execution_limit(tmp_path):
