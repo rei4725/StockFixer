@@ -319,6 +319,123 @@ def test_get_missed_past_periods_skips_non_scheduled_days(tmp_path):
     assert "2026-03-08" not in missed
 
 
+# ============================================
+# 月次ジョブの期間キーと補完判定
+# ============================================
+
+
+def _build_monthly_config():
+    return {
+        "monthly_report": {
+            "func": lambda: None,
+            "period": "monthly",
+            "day_of_week": "mon-sun",
+            "day": 1,
+            "hour": 3,
+            "minute": 0,
+            "recovery_delay_minutes": 60,
+            "max_executions_per_period": 1,
+        },
+    }
+
+
+def test_build_period_key_returns_month_for_monthly(tmp_path):
+    manager = SchedulerQueueManager(
+        _build_monthly_config(), state_file_path=str(tmp_path / "state.json")
+    )
+    config = manager.schedule_config["monthly_report"]
+
+    now = datetime(2026, 10, 15, 12, 0, tzinfo=manager.tz)
+    assert manager._build_period_key(config, now) == "2026-10"
+
+
+def test_should_recover_monthly_false_after_success_on_first_day(tmp_path):
+    """10-01 に成功があれば、同じ月の 10-15 には補完しない"""
+    manager = SchedulerQueueManager(
+        _build_monthly_config(), state_file_path=str(tmp_path / "state.json")
+    )
+    first_day = datetime(2026, 10, 1, 3, 0, tzinfo=manager.tz)
+    manager.now = lambda: first_day  # type: ignore[method-assign]
+    manager.run_job("monthly_report", reason="scheduled")
+
+    now = datetime(2026, 10, 15, 12, 0, tzinfo=manager.tz)
+    assert manager.should_recover("monthly_report", now=now) is False
+
+
+def test_should_recover_monthly_true_when_first_day_missed(tmp_path):
+    """10-01 に成功が無ければ、10-02 に補完する"""
+    manager = SchedulerQueueManager(
+        _build_monthly_config(), state_file_path=str(tmp_path / "state.json")
+    )
+
+    now = datetime(2026, 10, 2, 8, 0, tzinfo=manager.tz)
+    assert manager.should_recover("monthly_report", now=now) is True
+
+
+def test_should_recover_monthly_false_before_scheduled_time_on_first_day(tmp_path):
+    """11-01 の所定の時刻の前は、前の月の鍵でも新しい月の鍵でも補完しない"""
+    manager = SchedulerQueueManager(
+        _build_monthly_config(), state_file_path=str(tmp_path / "state.json")
+    )
+
+    now = datetime(2026, 11, 1, 3, 30, tzinfo=manager.tz)
+    assert manager.should_recover("monthly_report", now=now) is False
+
+
+def test_should_recover_monthly_new_month_ignores_previous_month_success(tmp_path):
+    """前の月の成功は新しい月の判定に数えない（月の鍵で区切る）"""
+    manager = SchedulerQueueManager(
+        _build_monthly_config(), state_file_path=str(tmp_path / "state.json")
+    )
+    first_day = datetime(2026, 10, 1, 3, 0, tzinfo=manager.tz)
+    manager.now = lambda: first_day  # type: ignore[method-assign]
+    manager.run_job("monthly_report", reason="scheduled")
+    assert manager.has_success("monthly_report", "2026-10") is True
+
+    assert (
+        manager.should_recover(
+            "monthly_report", now=datetime(2026, 10, 31, 12, 0, tzinfo=manager.tz)
+        )
+        is False
+    )
+    assert (
+        manager.should_recover(
+            "monthly_report", now=datetime(2026, 11, 1, 4, 30, tzinfo=manager.tz)
+        )
+        is True
+    )
+
+
+def test_should_recover_monthly_false_before_configured_day(tmp_path):
+    """設定の day より前の日は補完しない"""
+    config = _build_monthly_config()
+    config["monthly_report"]["day"] = 15
+    manager = SchedulerQueueManager(config, state_file_path=str(tmp_path / "state.json"))
+
+    assert (
+        manager.should_recover(
+            "monthly_report", now=datetime(2026, 10, 14, 12, 0, tzinfo=manager.tz)
+        )
+        is False
+    )
+    assert (
+        manager.should_recover(
+            "monthly_report", now=datetime(2026, 10, 15, 4, 30, tzinfo=manager.tz)
+        )
+        is True
+    )
+
+
+def test_get_missed_past_periods_empty_for_monthly(tmp_path):
+    """monthly の取りこぼしは should_recover が月の鍵で拾うため、過去日の探索は空を返す"""
+    manager = SchedulerQueueManager(
+        _build_monthly_config(), state_file_path=str(tmp_path / "state.json")
+    )
+
+    now = datetime(2026, 10, 2, 1, 0, tzinfo=manager.tz)
+    assert manager.get_missed_past_periods("monthly_report", lookback_days=2, now=now) == []
+
+
 def test_run_job_persists_timestamps_in_utc(tmp_path):
     counter = {}
     state_path = tmp_path / "scheduler_queue_state.json"

@@ -324,7 +324,18 @@ class SchedulerQueueManager:
         if not self._is_scheduled_day(config, now):
             return False
 
+        # monthly は設定の day の日（とそれ以後の同じ月）だけ補完を考え、
+        # 所定時刻はその月の day の日の時刻とする
+        scheduled_day = now.day
+        if config.get("period", "daily") == "monthly":
+            scheduled_day = config.get("day", 1)
+            if not isinstance(scheduled_day, int):
+                return False
+            if now.day < scheduled_day:
+                return False
+
         scheduled_dt = now.replace(
+            day=scheduled_day,
             hour=config["hour"],
             minute=config["minute"],
             second=0,
@@ -378,6 +389,8 @@ class SchedulerQueueManager:
         if period_type == "weekly":
             iso = now.isocalendar()
             return f"{iso.year}-W{iso.week:02d}"
+        if period_type == "monthly":
+            return now.strftime("%Y-%m")
         return now.strftime("%Y-%m-%d")
 
     def _is_scheduled_day(self, config: dict[str, Any], now: datetime) -> bool:
