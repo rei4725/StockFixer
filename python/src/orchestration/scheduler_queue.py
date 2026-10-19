@@ -306,6 +306,11 @@ class SchedulerQueueManager:
         if job_id not in self.schedule_config:
             return False
 
+        # 定時の回が動いている間は補完しない（run_job でも飛ばすが、
+        # ここで返さないと5分おきに補完の始まりの行が出る。#806）
+        if job_id in self._in_progress_jobs:
+            return False
+
         config = self.schedule_config[job_id]
         now = now or self.now()
 
