@@ -32,6 +32,8 @@ logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 logger = get_logger(__name__)
 
 MAX_WORKERS = MAX_PREDICTION_WORKERS
+# 精度チェックで「まだデータなし」の行をログに出す件数の上限
+_NO_FUTURE_SAMPLE_LIMIT = 5
 
 
 def get_optimal_params(market: str, symbol: str) -> dict:
@@ -419,6 +421,8 @@ def run_accuracy_check(
         "足なし": 0,
         "まだデータなし": 0,
     }
+    # まだデータなしで飛ばした行の値を数件だけ残し、日付の比べが合わない原因の切り分けに使う
+    no_future_samples: list[str] = []
 
     for _, pred in df_pred.iterrows():
         market = pred.get("market")
@@ -454,6 +458,12 @@ def run_accuracy_check(
         future_dates = ohlcv.index[ohlcv.index > pred_date]
         if len(future_dates) < horizon:
             skipped["まだデータなし"] += 1
+            if len(no_future_samples) < _NO_FUTURE_SAMPLE_LIMIT:
+                no_future_samples.append(
+                    f"{market}/{symbol} predicted_at={predicted_at_str} "
+                    f"pred_date={pred_date.date()} 足の最後={ohlcv.index[-1]} "
+                    f"足の日付の型={ohlcv.index.dtype}"
+                )
             continue
 
         actual_price = float(ohlcv.loc[future_dates[horizon - 1], "Close"])
@@ -481,6 +491,9 @@ def run_accuracy_check(
                 "direction_match": direction_match,
             }
         )
+
+    if no_future_samples:
+        logger.info("まだデータなしの例: %s", " | ".join(no_future_samples))
 
     if new_rows:
         save_prediction_accuracy(new_rows)
