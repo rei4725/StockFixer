@@ -163,6 +163,52 @@ class TestFetchStockDataWithFeatures(_TmpDbTestCase):
         for ts, val in data["vix_close_lag1"].items():
             self.assertEqual(val, vix.loc[ts - one_day, "vix_close"])
 
+    @patch("src.market_data.pipeline.fetch_pageview_features", return_value=None)
+    @patch("src.market_data.pipeline.fetch_news_sentiment_with_llm", return_value=None)
+    @patch("src.market_data.pipeline.fetch_additional_macro_features", return_value=None)
+    @patch("src.market_data.pipeline.fetch_cross_asset_features", return_value=None)
+    @patch("src.market_data.pipeline.get_stock_data")
+    @patch("src.market_data.pipeline.should_fetch_fresh_data", return_value=True)
+    @patch("src.market_data.pipeline.get_raw_ohlcv_from_db")
+    def test_diff_fetch_with_corporate_action_columns_keeps_db_rows(
+        self,
+        mock_from_db,
+        _mock_fresh_check,
+        mock_get_data,
+        _mock_cross_asset,
+        _mock_macro,
+        _mock_sentiment,
+        _mock_pageview,
+    ):
+        """差分の足にだけ Dividends / Stock Splits があっても、DB の足が落ちないことを確認
+
+        DB の足はこの2列を保存しないため、合わせると古い行が NaN になる。
+        出来事の無い日は 0 なので 0 で埋め、dropna で古い行が消えないようにする。
+        """
+        ohlcv = self._make_ohlcv(66)
+        mock_from_db.return_value = ohlcv.iloc[:60]
+        fresh = ohlcv.iloc[60:].copy()
+        fresh["Dividends"] = 0.0
+        fresh["Stock Splits"] = 0.0
+        mock_get_data.return_value = fresh
+
+        result = fetch_stock_data_with_features(
+            market="jp",
+            symbol="1332",
+            start_date="2023-01-01",
+            end_date="2023-03-07",
+            defer_raw_save=True,
+        )
+
+        self.assertIsNotNone(result)
+        _market, _symbol, data, raw, _quality = result
+        # 新しい足は保存のために返る
+        self.assertEqual(len(raw), 6)
+        # DB の足から作った行が残っている（新しい 6 行だけにならない）
+        self.assertGreater(len(data), 6)
+        self.assertLess(data.index.min(), fresh.index.min())
+        self.assertTrue((data["Dividends_lag1"] == 0.0).all())
+
 
 class TestSaveFeaturesDb(_TmpDbTestCase):
     """save_features_to_db 関数のテスト"""

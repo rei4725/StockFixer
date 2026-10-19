@@ -7,22 +7,22 @@ pytest-timeout==2.4.0
 pytest-cov==7.1.0
 pytest-testmon>=2.2.0
 pytest-xdist>=3.8.0
-hypothesis>=6.168.5
+hypothesis>=6.170.0
 
 # 型チェック
 mypy==2.4.0
-types-requests==2.33.0.20260906
+types-requests==2.33.0.20261006
 types-PyYAML==6.0.12.20260906
 types-tabulate==0.10.0.20261006
 
 # コード品質
-pylint==4.1.2
+pylint==4.1.3
 flake8==7.4.1
-black==26.10.0
+black==26.10.1
 isort==8.0.1
 
 # pre-commit
-pre-commit==4.6.2
+pre-commit==4.7.0
 
 # セキュリティスキャン
 pip-audit>=2.10.1

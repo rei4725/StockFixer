@@ -22,13 +22,13 @@ ta==0.11.0
 duckdb==1.5.6
 psycopg[binary,pool]>=3.3.6
 apscheduler==3.11.3
-streamlit>=1.65.0
+streamlit>=1.66.0
 plotly>=7.1.0
 filelock>=3.32.6
 optuna>=4.9.0
-pydantic-settings>=2.15.0
+pydantic-settings>=2.16.0
 prometheus-client>=0.26.0
-anthropic>=1.12.1
+anthropic>=1.15.0
 
 
 # セキュリティ修正: 脆弱性のある推移的依存関係を安全なバージョンに固定

@@ -40,6 +40,9 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+# yfinance の配当・分割の列（出来事の無い日は 0）
+_CORPORATE_ACTION_COLUMNS = ("Dividends", "Stock Splits")
+
 
 def fetch_stock_data_with_features(
     market: str,
@@ -142,6 +145,12 @@ def fetch_stock_data_with_features(
     if all_nan_cols:
         logger.debug(f"全NaN列を除去: {all_nan_cols}")
         df = df.drop(columns=all_nan_cols)
+
+    # 配当・分割の列は DB に保存しないため、差分の足と合わせると DB の行だけ NaN になる。
+    # 出来事の無い日は 0 なので 0 で埋める（埋めないと後段の dropna で DB の行が消える）
+    for col in _CORPORATE_ACTION_COLUMNS:
+        if col in df.columns:
+            df[col] = df[col].fillna(0.0)
 
     # データ品質チェック（TA指標追加・NaN補完前の生OHLCVで実施）
     quality_result = run_quality_checks(market, symbol, df)
