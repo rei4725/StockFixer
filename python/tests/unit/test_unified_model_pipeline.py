@@ -103,6 +103,43 @@ class TestPrepareUnifiedFeatures(unittest.TestCase):
 
         self.assertNotIn("rsi", X.columns)
 
+    def test_warns_symbols_whose_rows_all_dropped(self):
+        """列の組が違う銘柄が混ざると、全部落ちた銘柄の数と市場ごとの落ちた行の数を WARNING に出す"""
+        full = _make_df(n=10)
+        full["extra_lag1"] = 1.0
+        missing = _make_df(n=10)
+        missing["market"] = "jp"
+        missing["symbol"] = "5202"
+        missing["extra_lag1"] = float("nan")
+        df = pd.concat([full, missing], ignore_index=True)
+
+        with self.assertLogs("src.prediction.unified_model_pipeline", level="WARNING") as cm:
+            X, _ = self._fn(df)
+
+        self.assertEqual(len(X), 10)
+        output = "\n".join(cm.output)
+        self.assertIn("全部落ちた銘柄: 1", output)
+        self.assertIn("jp/5202", output)
+        self.assertIn("'jp': 10", output)
+
+    def test_corporate_action_lag_columns_do_not_drop_rows(self):
+        """表に残る Dividends / Stock_Splits のラグの列が NULL の銘柄も、行が落ちない"""
+        with_actions = _make_df(n=10)
+        with_actions["Dividends_lag1"] = 0.0
+        with_actions["Stock_Splits_lag1"] = 0.0
+        without = _make_df(n=10)
+        without["symbol"] = "MSFT"
+        without["Dividends_lag1"] = float("nan")
+        without["Stock_Splits_lag1"] = float("nan")
+        df = pd.concat([with_actions, without], ignore_index=True)
+
+        X, y = self._fn(df)
+
+        self.assertEqual(len(X), 20)
+        self.assertEqual(len(y), 20)
+        self.assertNotIn("Dividends_lag1", X.columns)
+        self.assertNotIn("Stock_Splits_lag1", X.columns)
+
 
 class TestUnifiedEarningsMask(unittest.TestCase):
     @patch("src.prediction.unified_model_pipeline.get_market_data_port")
