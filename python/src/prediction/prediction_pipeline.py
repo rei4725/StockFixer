@@ -141,11 +141,18 @@ def predict_all_unified(max_workers=MAX_WORKERS):
     preload_models(model_types)
 
     all_keys = get_active_symbols()
+    # 特徴量が古いため予想を出さなかった銘柄（list.append はスレッドをまたいでも安全）
+    stale_keys: list[tuple[str, str]] = []
+
+    def on_stale(market: str, symbol: str) -> None:
+        stale_keys.append((market, symbol))
 
     def wrapper(args):
         market, symbol = args
         try:
-            return predict_with_unified_model(market, symbol, model_types=model_types)
+            return predict_with_unified_model(
+                market, symbol, model_types=model_types, on_stale=on_stale
+            )
         except Exception as e:
             logger.error(f"[{market}_{symbol}] 予測エラー: {e}", exc_info=True)
             return None
@@ -160,6 +167,10 @@ def predict_all_unified(max_workers=MAX_WORKERS):
             if result is not None:
                 output_rows.append(result)
 
+    logger.info(
+        f"並列予測完了（統合モデル）: {len(output_rows)}/{len(all_keys)}銘柄, "
+        f"特徴量が古いため予想なし: {len(stale_keys)}銘柄"
+    )
     return output_rows
 
 
