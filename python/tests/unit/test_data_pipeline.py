@@ -261,6 +261,64 @@ class TestFetchStockDataWithFeatures(_TmpDbTestCase):
         for name, cols in columns.items():
             self.assertEqual(cols, columns["db_enough"], name)
 
+    @patch("src.market_data.pipeline.fetch_pageview_features", return_value=None)
+    @patch("src.market_data.pipeline.fetch_news_sentiment_with_llm", return_value=None)
+    @patch("src.market_data.pipeline.fetch_additional_macro_features", return_value=None)
+    @patch("src.market_data.pipeline.fetch_cross_asset_features", return_value=None)
+    @patch("src.market_data.pipeline.get_stock_data")
+    @patch("src.market_data.pipeline.should_fetch_fresh_data")
+    @patch("src.market_data.pipeline.get_raw_ohlcv_from_db")
+    def test_diff_fetch_with_capital_gains_keeps_db_rows_and_columns(
+        self,
+        mock_from_db,
+        mock_fresh_check,
+        mock_get_data,
+        _mock_cross_asset,
+        _mock_macro,
+        _mock_sentiment,
+        _mock_pageview,
+    ):
+        """ETF の差分の足にだけ Capital Gains があっても、DB の足が落ちず列の組も同じになる
+
+        yfinance は ETF（jp/1570 など）に Capital Gains を返すが、DB には保存しない。
+        合わせると DB の行だけ NaN になり、dropna で古い行が全部消えていた（#839）。
+        """
+        ohlcv = self._make_ohlcv(66)
+        fresh = ohlcv.iloc[60:].copy()
+        fresh["Dividends"] = 0.0
+        fresh["Stock Splits"] = 0.0
+        fresh["Capital Gains"] = 0.0
+
+        mock_from_db.return_value = ohlcv
+        mock_fresh_check.return_value = False
+        db_only = fetch_stock_data_with_features(
+            market="jp",
+            symbol="1570",
+            start_date="2023-01-01",
+            end_date="2023-03-07",
+            defer_raw_save=True,
+        )
+
+        mock_from_db.return_value = ohlcv.iloc[:60]
+        mock_fresh_check.return_value = True
+        mock_get_data.return_value = fresh
+        diff = fetch_stock_data_with_features(
+            market="jp",
+            symbol="1570",
+            start_date="2023-01-01",
+            end_date="2023-03-07",
+            defer_raw_save=True,
+        )
+
+        self.assertIsNotNone(db_only)
+        self.assertIsNotNone(diff)
+        data = diff[2]
+        # DB の足から作った行が残っている（新しい 6 行だけにならない）
+        self.assertGreater(len(data), 6)
+        self.assertLess(data.index.min(), fresh.index.min())
+        self.assertEqual(sorted(data.columns), sorted(db_only[2].columns))
+        self.assertNotIn("Capital_Gains_lag1", data.columns)
+
     def _make_ohlcv_until(self, last_date: str, periods: int = 60) -> pd.DataFrame:
         """last_date で終わる平日の足を作る"""
         df = self._make_ohlcv(periods)
