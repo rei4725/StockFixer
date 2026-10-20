@@ -62,6 +62,40 @@ class TestGetTodaySignal(unittest.TestCase):
         self.assertIn(signal, [-1, 0, 1])
         self.assertIsInstance(price, float)
 
+    def test_stale_last_bar_returns_none_with_warning(self):
+        """最後の足が平日で N 日を超えて古ければシグナルを出さず WARNING を出す。"""
+        from src.rule_engine.pipeline import _get_today_signal
+
+        # 2026-09-30（水）で止まった足を、2026-10-20（火）の回で読む
+        df = _make_ohlcv()
+        df.index = pd.bdate_range(end="2026-09-30", periods=len(df))
+        mock_port = _MockMarketDataPort(df)
+        with self.assertLogs("src.rule_engine.pipeline", level="WARNING") as logs:
+            result = _get_today_signal(
+                "jp", "5202", "rsi_contrarian", mock_port, signal_date=date(2026, 10, 20)
+            )
+        self.assertIsNone(result)
+        joined = "\n".join(logs.output)
+        self.assertIn("jp/5202", joined)
+        self.assertIn("2026-09-30", joined)
+
+    def test_short_gap_after_holiday_still_returns_signal(self):
+        """祝日明けの1〜2平日の空きなら今までどおりシグナルを出す。"""
+        from src.rule_engine.pipeline import _get_today_signal
+
+        # 2026-10-09（金）の足まで、10-12（月・祝）を挟んで 10-13（火）の回
+        df = _make_ohlcv()
+        df.index = pd.bdate_range(end="2026-10-09", periods=len(df))
+        mock_port = _MockMarketDataPort(df)
+        result = _get_today_signal(
+            "jp", "7203", "rsi_contrarian", mock_port, signal_date=date(2026, 10, 13)
+        )
+        self.assertIsNotNone(result)
+        assert result is not None
+        signal, price = result
+        self.assertIn(signal, [-1, 0, 1])
+        self.assertIsInstance(price, float)
+
 
 class TestRunRuleSignalPipeline(unittest.TestCase):
     def test_empty_effective_rules_returns_empty(self):
@@ -102,10 +136,47 @@ class TestRunRuleSignalPipeline(unittest.TestCase):
             ),
             patch("src.rule_engine.pipeline.upsert_rule_signal"),
         ):
-            result = run_rule_signal_pipeline("jp", market_data_port=mock_port)
+            # 足の最後（2024-03-22）の日の回とする（今日だと足が止まった扱いになる）
+            result = run_rule_signal_pipeline(
+                "jp", signal_date=date(2024, 3, 22), market_data_port=mock_port
+            )
         self.assertEqual(len(result), 2)
         self.assertIn("symbol", result[0])
         self.assertIn("signal_label", result[0])
+
+    def test_stale_symbol_is_not_saved(self):
+        """足が止まった銘柄は BUY・SELL・HOLD のどれとしても保存しない。"""
+        from src.rule_engine.pipeline import run_rule_signal_pipeline
+
+        effective_df = pd.DataFrame(
+            [
+                {
+                    "symbol": "5202",
+                    "best_rule": "rsi_contrarian",
+                    "win_rate": 0.6,
+                    "net_profit": 1000,
+                },
+            ]
+        )
+        df = _make_ohlcv()
+        df.index = pd.bdate_range(end="2026-09-30", periods=len(df))
+        mock_port = _MockMarketDataPort(df)
+        with (
+            patch(
+                "src.rule_engine.pipeline.load_effective_rules",
+                return_value=effective_df,
+            ),
+            patch("src.rule_engine.pipeline.upsert_rule_signal") as mock_upsert,
+            self.assertLogs("src.rule_engine.pipeline", level="WARNING") as logs,
+        ):
+            result = run_rule_signal_pipeline(
+                "jp", signal_date=date(2026, 10, 20), market_data_port=mock_port
+            )
+        self.assertEqual(result, [])
+        mock_upsert.assert_not_called()
+        joined = "\n".join(logs.output)
+        self.assertIn("jp/5202", joined)
+        self.assertIn("2026-09-30", joined)
 
     def test_signal_exception_is_caught(self):
         from src.rule_engine.pipeline import run_rule_signal_pipeline

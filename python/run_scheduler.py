@@ -199,6 +199,8 @@ def _job_listener(event):
 
 # ── スケジュール設定 ──────────────────────────────────
 # 時刻はすべてJST（Asia/Tokyo）想定
+# backfill: True のジョブだけ、前日分の取りこぼしを翌日に補完する。発注・約定・その日の
+# 相場の知らせなど、日をまたいでやり直すと当日分と二重になるジョブには付けない（#825）。
 SCHEDULE_CONFIG = {
     "daily_pipeline": {
         "func": job_daily_pipeline,
@@ -210,6 +212,7 @@ SCHEDULE_CONFIG = {
         "recovery_delay_minutes": 10,
         "max_executions_per_period": 3,
         "description": "毎営業日 07:30 - データ取得 → 予測",
+        "backfill": True,
     },
     "weekly_model_training": {
         "func": job_weekly_model_training,
@@ -356,6 +359,7 @@ SCHEDULE_CONFIG = {
         "recovery_delay_minutes": 60,
         "max_executions_per_period": 1,
         "description": "毎日 03:30 - DuckDB バックアップ（最大5世代保持）",
+        "backfill": True,
     },
     "monthly_report": {
         "func": job_monthly_report,
@@ -391,6 +395,7 @@ SCHEDULE_CONFIG = {
         "recovery_delay_minutes": 60,
         "max_executions_per_period": 1,
         "description": "毎日 05:00 - 戦略ファクトリー夜間バッチ（jp/us 日替わり、#369）",
+        "backfill": True,
     },
     "strategy_promotion_check": {
         "func": job_strategy_promotion_check,
@@ -402,6 +407,7 @@ SCHEDULE_CONFIG = {
         "recovery_delay_minutes": 30,
         "max_executions_per_period": 12,
         "description": "2時間ごと(毎時30分) - 戦略ファクトリー由来マージPRの昇格記録",
+        "backfill": True,
     },
     "allocation_rebalance": {
         "func": job_allocation_rebalance,
