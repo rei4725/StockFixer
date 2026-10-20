@@ -554,6 +554,7 @@ class TestRunDailyPaperTradeReport(unittest.TestCase):
 class TestRunDailyPipeline:
     """run_daily_pipeline のテスト"""
 
+    @patch("src.prediction.accuracy_report.write_daily_accuracy_report")
     @patch("src.reporting.discord.discord_utils.send_miss_analysis_summary")
     @patch("src.prediction.db.load_top_prediction_misses")
     @patch("src.reporting.discord.discord_utils.send_daily_pipeline_error")
@@ -576,6 +577,7 @@ class TestRunDailyPipeline:
         mock_error,
         mock_load_misses,
         mock_send_misses,
+        mock_write_report,
     ):
         """全ステップが順番に実行されること"""
         from src.orchestration.scheduler import run_daily_pipeline
@@ -591,6 +593,7 @@ class TestRunDailyPipeline:
         run_daily_pipeline()
 
         mock_data.assert_called_once()
+        mock_write_report.assert_called_once()
         mock_predict.assert_called_once()
         mock_output.assert_called_once()
         mock_notify.assert_called_once()
@@ -603,6 +606,7 @@ class TestRunDailyPipeline:
             mock_notify.call_args.kwargs["predictions"], PostgresPredictionResultRepository
         )
 
+    @patch("src.prediction.accuracy_report.write_daily_accuracy_report")
     @patch("src.reporting.discord.discord_utils.send_miss_analysis_summary")
     @patch("src.prediction.db.load_top_prediction_misses")
     @patch("src.reporting.discord.discord_utils.send_daily_pipeline_error")
@@ -625,6 +629,7 @@ class TestRunDailyPipeline:
         mock_error,
         mock_load_misses,
         mock_send_misses,
+        mock_write_report,
     ):
         """精度チェックが失敗しても後続ステップが実行されること"""
         from src.orchestration.scheduler import run_daily_pipeline
