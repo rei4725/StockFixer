@@ -17,7 +17,8 @@ from src.prediction.types import PredictionResult
 def _feature_df():
     return pd.DataFrame(
         {
-            "date": pd.to_datetime(["2026-07-28", "2026-07-29"]),
+            # 最後の行は今日にする。古いと予想を出さない（#829）
+            "date": pd.bdate_range(end=pd.Timestamp.now().normalize(), periods=2),
             "Close_lag1": [1000.0, 1010.0],
             "rsi_lag1": [50.0, 55.0],
             # 最新行(末尾)がNaN — pd.notna によるフィルタが数値限定と両立することを検証する
