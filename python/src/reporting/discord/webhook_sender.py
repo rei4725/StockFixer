@@ -14,11 +14,68 @@ import requests
 
 from src.reporting.discord import rate_limiter as _rate_limiter
 from src.reporting.discord.discord_notification_specs import NotificationSpec
-from src.reporting.discord.discord_text import DISCORD_TEXT_LIMIT, split_text_chunks
+from src.reporting.discord.discord_text import (
+    DISCORD_CONTENT_LIMIT,
+    DISCORD_EMBED_DESCRIPTION_LIMIT,
+    DISCORD_EMBED_FIELD_NAME_LIMIT,
+    DISCORD_EMBED_FIELD_VALUE_LIMIT,
+    DISCORD_EMBED_FIELDS_LIMIT,
+    DISCORD_EMBED_FOOTER_LIMIT,
+    DISCORD_EMBED_TITLE_LIMIT,
+    DISCORD_EMBED_TOTAL_LIMIT,
+    DISCORD_TEXT_LIMIT,
+    fit_lines,
+    split_text_chunks,
+    truncate_text,
+)
 from src.utils.japan_time import isoformat_jst
 from src.utils.run_context import get_run_id
 
 logger = logging.getLogger(__name__)
+
+_ERROR_BODY_LIMIT = 1000
+
+
+def _describe_error(exc: requests.exceptions.RequestException) -> str:
+    """送信の失敗を、webhook の URL を含めずに、状態コードと応答の本文で表す（#810）。"""
+    response = getattr(exc, "response", None)
+    if response is None:
+        return type(exc).__name__
+    body = response.text if isinstance(response.text, str) else ""
+    return f"HTTP {response.status_code} 応答={body[:_ERROR_BODY_LIMIT]}"
+
+
+def _fit_embed(embed: dict) -> dict:
+    """embed を Discord の上限（title・description・fields・合計の字数）の内に収める。"""
+    embed["title"] = truncate_text(embed.get("title", ""), DISCORD_EMBED_TITLE_LIMIT)
+    fields = embed.get("fields")
+    if fields:
+        embed["fields"] = [
+            {
+                **field,
+                "name": truncate_text(str(field.get("name", "")), DISCORD_EMBED_FIELD_NAME_LIMIT),
+                "value": truncate_text(
+                    str(field.get("value", "")), DISCORD_EMBED_FIELD_VALUE_LIMIT
+                ),
+            }
+            for field in fields[:DISCORD_EMBED_FIELDS_LIMIT]
+        ]
+    footer = embed.get("footer")
+    if footer:
+        footer["text"] = truncate_text(footer.get("text", ""), DISCORD_EMBED_FOOTER_LIMIT)
+
+    others = len(embed["title"]) + len(footer["text"] if footer else "")
+    for field in embed.get("fields", []):
+        others += len(field["name"]) + len(field["value"])
+    # fields だけで合計の上限を超えるときは、後ろの field から落とす
+    while embed.get("fields") and others > DISCORD_EMBED_TOTAL_LIMIT:
+        dropped = embed["fields"].pop()
+        others -= len(dropped["name"]) + len(dropped["value"])
+    description_limit = min(DISCORD_EMBED_DESCRIPTION_LIMIT, DISCORD_EMBED_TOTAL_LIMIT - others)
+    embed["description"] = fit_lines(
+        str(embed.get("description", "")).split("\n"), limit=description_limit
+    )
+    return embed
 
 
 def _get_webhook_url() -> str | None:
@@ -106,7 +163,7 @@ def send_webhook_notification(
             try:
                 _post_webhook(json_payload={"content": suppression_summary}, timeout=10)
             except requests.exceptions.RequestException as e:
-                logger.error("抑止サマリー送信失敗: %s", e, exc_info=True)
+                logger.error("抑止サマリー送信失敗: %s", _describe_error(e), exc_info=True)
 
         run_id = get_run_id()
         embed: dict = {
@@ -119,7 +176,7 @@ def send_webhook_notification(
             embed["fields"] = fields
         if run_id:
             embed["footer"] = {"text": f"run_id: {run_id}"}
-        embed_data = {"embeds": [embed]}
+        embed_data = {"embeds": [_fit_embed(embed)]}
 
         response = _post_webhook(json_payload=embed_data, timeout=10)
         if response is None:
@@ -130,7 +187,7 @@ def send_webhook_notification(
         return True
 
     except requests.exceptions.RequestException as e:
-        logger.error("Discord通知送信失敗: %s", e, exc_info=True)
+        logger.error("Discord通知送信失敗: %s: %s", title, _describe_error(e), exc_info=True)
         return False
 
 
@@ -138,24 +195,27 @@ def send_webhook_text(text: str) -> bool:
     """
     プレーンテキストメッセージをWebhookで送信する
 
+    Discord の1通の上限（DISCORD_CONTENT_LIMIT 字）を超える文は、行を保って複数の通に分ける。
+
     Args:
         text: 送信テキスト（コードフェンス込み）
 
     Returns:
         成功時True、失敗時False
     """
+    chunks = [text] if len(text) <= DISCORD_CONTENT_LIMIT else split_text_chunks(text)
     try:
-        payload = {"content": text}
-        response = _post_webhook(json_payload=payload, timeout=10)
-        if response is None:
-            return False
-        response.raise_for_status()
+        for chunk in chunks:
+            response = _post_webhook(json_payload={"content": chunk}, timeout=10)
+            if response is None:
+                return False
+            response.raise_for_status()
 
         logger.info("Discord通知送信成功: テキストメッセージ")
         return True
 
     except requests.exceptions.RequestException as e:
-        logger.error("Discord通知送信失敗: %s", e, exc_info=True)
+        logger.error("Discord通知送信失敗: %s", _describe_error(e), exc_info=True)
         return False
 
 
@@ -189,7 +249,7 @@ def send_webhook_file(file_path: str, title: str = "") -> bool:
         logger.info("Discordファイル送信成功: %s", filename)
         return True
     except requests.exceptions.RequestException as e:
-        logger.error("Discordファイル送信失敗: %s", e)
+        logger.error("Discordファイル送信失敗: %s", _describe_error(e))
         return False
 
 
