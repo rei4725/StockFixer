@@ -276,12 +276,18 @@ class SchedulerQueueManager:
 
         コンテナ再起動などで当日スケジュール時刻前に起動した場合に、
         前日分の欠落を検出して補完実行するために使用する。
+
+        対象は設定に ``backfill: True`` を持つジョブだけ。印の無いジョブ（発注・約定など
+        その日の相場にしか意味の無いジョブ）は、当日分と別の鍵で同じ日に二度動かないよう
+        前日分を補完しない（#825）。
         """
         if job_id not in self.schedule_config:
             return []
 
         config = self.schedule_config[job_id]
         if config.get("period", "daily") != "daily":
+            return []
+        if not config.get("backfill", False):
             return []
 
         now = now or self.now()

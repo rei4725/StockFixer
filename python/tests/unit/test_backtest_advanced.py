@@ -345,5 +345,67 @@ class TestATRPositionSizing(unittest.TestCase):
         self.assertGreater(metrics["avg_position_fraction"], 0.0)
 
 
+class TestATRSizingNoLookahead(unittest.TestCase):
+    """翌バー約定のATRサイジングが約定バー当日のATRを読まないことを検証する (#800)"""
+
+    def _df(self, atr_col: str, exec_bar_atr: float) -> pd.DataFrame:
+        # bar0 でシグナル → bar1 始値で約定。約定バー(bar1)の ATR だけを変える
+        idx = pd.date_range("2024-01-01", periods=3, freq="B")
+        return pd.DataFrame(
+            {
+                "Open": [1000.0, 1000.0, 1000.0],
+                "Close": [1000.0, 1000.0, 1000.0],
+                atr_col: [50.0, exec_bar_atr, 50.0],
+            },
+            index=idx,
+        )
+
+    def _entry_qty(self, df: pd.DataFrame, sig_value: int) -> int:
+        bt = Backtester(
+            model_manager=MagicMock(),
+            signal_generator=MagicMock(),
+            data_loader=MagicMock(),
+            start_date="2024-01-01",
+            end_date="2024-12-31",
+            market="jp",
+            symbol="7203",
+            initial_cash=1_000_000,
+            fee_rate=0.0,
+            slippage=0.0,
+            position_sizing="atr",
+            atr_risk_pct=0.02,
+            atr_multiplier=1.0,
+            atr_min_fraction=0.1,
+            atr_max_fraction=1.0,
+            enable_short=True,
+            execution_lag=1,
+        )
+        sig = pd.Series([sig_value, 0, 0], index=df.index)
+        result_df, _ = bt.simulate_trading(df, sig)
+        action = "buy" if sig_value == 1 else "short"
+        entries = result_df[result_df["action"] == action]
+        self.assertEqual(len(entries), 1)
+        return int(entries.iloc[0]["qty"])
+
+    def test_buy_qty_ignores_exec_bar_atr(self):
+        """買い: 約定バーの atr だけを大きくしても株数が変わらない"""
+        # 前バーの ATR=50 → 20_000 / 50 = 400株
+        self.assertEqual(self._entry_qty(self._df("atr", 50.0), 1), 400)
+        self.assertEqual(self._entry_qty(self._df("atr", 500.0), 1), 400)
+
+    def test_short_qty_ignores_exec_bar_atr(self):
+        """ショート: 約定バーの atr だけを大きくしても株数が変わらない"""
+        self.assertEqual(self._entry_qty(self._df("atr", 50.0), -1), 400)
+        self.assertEqual(self._entry_qty(self._df("atr", 500.0), -1), 400)
+
+    def test_atr_lag1_is_read_at_exec_bar(self):
+        """file 経路の atr_lag1 は約定バーの値（=前バーのATR）をそのまま使う"""
+        df = self._df("atr_lag1", 100.0)
+        df["atr"] = df["atr_lag1"]
+        # 約定バーの atr_lag1=100 → 20_000 / 100 = 200株
+        self.assertEqual(self._entry_qty(df, 1), 200)
+        self.assertEqual(self._entry_qty(df, -1), 200)
+
+
 if __name__ == "__main__":
     unittest.main()

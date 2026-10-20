@@ -28,6 +28,7 @@ def _build_config(counter: dict[str, int]):
             "minute": 0,
             "recovery_delay_minutes": 10,
             "max_executions_per_period": 2,
+            "backfill": True,
         },
         "weekly_model_training": {
             "func": _weekly_func,
@@ -317,6 +318,41 @@ def test_get_missed_past_periods_skips_non_scheduled_days(tmp_path):
     now = datetime(2026, 3, 9, 8, 0, tzinfo=manager.tz)
     missed = manager.get_missed_past_periods("daily_pipeline", lookback_days=1, now=now)
     assert "2026-03-08" not in missed
+
+
+@pytest.mark.parametrize(
+    "job_id", ["daily_auto_order", "daily_settle_orders", "daily_rule_signals"]
+)
+def test_get_missed_past_periods_skips_order_jobs_in_schedule_config(tmp_path, job_id):
+    """発注・約定のジョブは前日分の鍵で動かさない（同じ営業日の二重発注を防ぐ。#825）"""
+    from run_scheduler import SCHEDULE_CONFIG
+
+    manager = SchedulerQueueManager(SCHEDULE_CONFIG, state_file_path=str(tmp_path / "state.json"))
+
+    # 2026-03-03 (火) 10:00 → 前日 2026-03-02 (月) 分は未実行
+    now = datetime(2026, 3, 3, 10, 0, tzinfo=manager.tz)
+    assert manager.get_missed_past_periods(job_id, lookback_days=2, now=now) == []
+
+
+def test_get_missed_past_periods_backfills_daily_pipeline_in_schedule_config(tmp_path):
+    """daily_pipeline は前日分の補完を続ける"""
+    from run_scheduler import SCHEDULE_CONFIG
+
+    manager = SchedulerQueueManager(SCHEDULE_CONFIG, state_file_path=str(tmp_path / "state.json"))
+
+    now = datetime(2026, 3, 3, 10, 0, tzinfo=manager.tz)
+    missed = manager.get_missed_past_periods("daily_pipeline", lookback_days=2, now=now)
+    assert "2026-03-02" in missed
+
+
+def test_get_missed_past_periods_empty_without_backfill_flag(tmp_path):
+    """backfill の印が無い daily ジョブは前日分を補完しない（既定で安全な側）"""
+    config = _build_config({})
+    del config["daily_pipeline"]["backfill"]
+    manager = SchedulerQueueManager(config, state_file_path=str(tmp_path / "state.json"))
+
+    now = datetime(2026, 3, 3, 8, 0, tzinfo=manager.tz)
+    assert manager.get_missed_past_periods("daily_pipeline", lookback_days=2, now=now) == []
 
 
 # ============================================
