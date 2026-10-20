@@ -6,10 +6,11 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
-from config.settings import PREDICTION_ATR_CLIP_MULTIPLIER
+from config.settings import PREDICTION_ATR_CLIP_MULTIPLIER, STALE_BARS_MAX_WEEKDAYS
 from src.prediction.db import load_model_weights
 from src.prediction.manager import ModelManager
 from src.prediction.ports import get_market_data_port
+from src.prediction.predict_unified import _count_weekdays_behind
 from src.prediction.range_clipping import clip_diff_ratio_to_atr_range
 from src.prediction.types import HorizonResult, PredictionResult
 from src.utils.data_path_utils import get_models_subdir, get_ticker, normalize_col
@@ -77,6 +78,40 @@ def _fetch_current_price(market: str, symbol: str, df: pd.DataFrame) -> "float |
     except Exception:
         logger.warning("df末尾Close取得失敗: market=%s symbol=%s", market, symbol, exc_info=True)
         return None
+
+
+def _is_stale_bars(market: str, symbol: str, df: pd.DataFrame) -> bool:
+    """
+    取得した足の最後の日付が線（STALE_BARS_MAX_WEEKDAYS）より古ければ WARNING を出して True。
+
+    足の止まった銘柄では最後の行が止まった日のままになり、その日の特徴量で
+    今日の予想を出してしまう（#854）。数え方は統合モデルの確かめ（#829）と同じ。
+    index が日付でなければ確かめられないため False を返す。
+
+    Args:
+        market: マーケット識別子
+        symbol: 銘柄コード
+        df: 株価DataFrame（index が日付）
+
+    Returns:
+        古ければ True。
+    """
+    if not isinstance(df.index, pd.DatetimeIndex) or df.empty:
+        return False
+    last_date = pd.Timestamp(df.index[-1])
+    stale_weekdays = _count_weekdays_behind(last_date)
+    if stale_weekdays <= STALE_BARS_MAX_WEEKDAYS:
+        return False
+    logger.warning(
+        "足が古いため予想をスキップ: market=%s symbol=%s "
+        "最後の足の日付=%s（平日で %d日 > %d日 古い）",
+        market,
+        symbol,
+        last_date.strftime("%Y-%m-%d"),
+        stale_weekdays,
+        STALE_BARS_MAX_WEEKDAYS,
+    )
+    return True
 
 
 def _estimate_atr_from_ohlc(df: pd.DataFrame, window: int = 14) -> "float | None":
@@ -296,6 +331,8 @@ def predict_single_stock(
             if df.empty or "Close" not in df.columns:
                 print(f"[{symbol}] 株価データ取得失敗")
                 continue
+            if _is_stale_bars(market, symbol, df):
+                return None
             current_price = _fetch_current_price(market, symbol, df)
             if current_price is None:
                 print(f"[{symbol}] 価格取得失敗")
@@ -434,6 +471,8 @@ def explain_prediction_shap(
             pd.Timestamp.today(),
         )
         if df.empty or "Close" not in df.columns:
+            return None
+        if _is_stale_bars(market, symbol, df):
             return None
 
         df_feat = _mds.add_technical_indicators(df)
