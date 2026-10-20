@@ -187,6 +187,17 @@ class Backtester:
             exec_avg_vol = avg_vol.shift(1).fillna(0.0)
         else:
             exec_avg_vol = avg_vol
+        # #800: ATR サイジングも約定時点で既知の前バーまでの ATR を使う。
+        # atr_lag1 があれば各行の前バー ATR としてそのまま使い（file/api/raw で同じ意味）、
+        # 無ければ当バー高安引けを含む atr を 1 本ずらす。同バー約定は当バー atr のまま。
+        exec_atr: Optional[pd.Series] = None
+        if self.execution_lag > 0:
+            if "atr_lag1" in df.columns:
+                exec_atr = df["atr_lag1"]
+            elif "atr" in df.columns:
+                exec_atr = df["atr"].shift(1)
+        elif "atr" in df.columns:
+            exec_atr = df["atr"]
 
         for date in df.index:
             price = df.loc[date, close_col]
@@ -281,7 +292,7 @@ class Backtester:
                 short_price = 0.0
             elif sig == 1 and position == 0:
                 # Buy（翌バー始値 exec_price で約定）
-                atr_value = df.loc[date, "atr"] if "atr" in df.columns else None
+                atr_value = exec_atr.loc[date] if exec_atr is not None else None
                 position_details = self._calc_position_details(
                     cash,
                     exec_price,
@@ -334,7 +345,7 @@ class Backtester:
                 position_price = 0.0
             elif sig == -1 and self.enable_short and position == 0 and short_position == 0:
                 # ショートエントリー（翌バー始値 exec_price で約定）
-                atr_value = df.loc[date, "atr"] if "atr" in df.columns else None
+                atr_value = exec_atr.loc[date] if exec_atr is not None else None
                 position_details = self._calc_position_details(
                     cash,
                     exec_price,

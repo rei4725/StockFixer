@@ -178,6 +178,11 @@ class Settings(BaseSettings):
     # ---------- センチメント特徴量（R-404） ----------
     SENTIMENT_LOOKBACK_DAYS: int = Field(default=30)
 
+    # ---------- 足の止まりの判定（#815） ----------
+    # 差分の足が空で、DB の最新の足があるべき最新の営業日より平日でこの日数を超えて古ければ、
+    # 特徴量を作らずスキップする。祝日の分の余裕を取る
+    STALE_BARS_MAX_WEEKDAYS: int = Field(default=3)
+
     # ---------- バックテストのデフォルトスリッページ（#494・片道率） ----------
     # 流動性差を反映: 米大型株はタイト、日本株はやや広い。
     DEFAULT_SLIPPAGE_US: float = Field(default=0.0005)  # 5bps
@@ -318,6 +323,7 @@ VOLUME_FILTER_WINDOW_DAYS: int = settings.VOLUME_FILTER_WINDOW_DAYS
 VOLUME_FILTER_MULTIPLIER: float = settings.VOLUME_FILTER_MULTIPLIER
 AUTO_PROMOTE_MODEL: bool = flags.AUTO_PROMOTE_MODEL
 SENTIMENT_LOOKBACK_DAYS: int = settings.SENTIMENT_LOOKBACK_DAYS
+STALE_BARS_MAX_WEEKDAYS: int = settings.STALE_BARS_MAX_WEEKDAYS
 DEFAULT_SLIPPAGE_US: float = settings.DEFAULT_SLIPPAGE_US
 DEFAULT_SLIPPAGE_JP: float = settings.DEFAULT_SLIPPAGE_JP
 DB_LOG_RETENTION_DAYS: int = settings.DB_LOG_RETENTION_DAYS
