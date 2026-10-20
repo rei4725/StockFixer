@@ -9,7 +9,11 @@ Discord ドリフト / 予測精度通知
 import logging
 
 from src.reporting.discord.discord_notification_specs import HIT_RATE_DRIFT_ALERT
-from src.reporting.discord.discord_text import DISCORD_DATE_FORMAT, DISCORD_MINUTE_FORMAT
+from src.reporting.discord.discord_text import (
+    DISCORD_DATE_FORMAT,
+    DISCORD_MINUTE_FORMAT,
+    fit_lines,
+)
 from src.reporting.discord.webhook_sender import (
     send_status_fields,
     send_webhook_notification,
@@ -115,7 +119,7 @@ def send_drift_alert(summary_df, horizon: int = 1, threshold: float = 0.45) -> b
             f"• `{row['market']}/{row['symbol']}` " f"正解率={acc:.1%}, 平均誤差={err:.4f}, N={n}"
         )
 
-    return send_webhook_text("\n".join(lines))
+    return send_webhook_text(fit_lines(lines, unit="銘柄"))
 
 
 def send_accuracy_summary(summary_df, horizon: int = 1) -> bool:
@@ -147,7 +151,8 @@ def send_accuracy_summary(summary_df, horizon: int = 1) -> bool:
             f"• `{row['market']}/{row['symbol']}` " f"正解率={acc:.1%}, 平均誤差={err:.4f}, N={n}"
         )
 
-    return send_webhook_text("\n".join(lines))
+    # 銘柄が多いと1通の上限を超えて 400 になるため、正解率の低い順に収まるだけ載せる（#810）
+    return send_webhook_text(fit_lines(lines, unit="銘柄"))
 
 
 def send_drift_retrain_notification(
@@ -182,7 +187,7 @@ def send_drift_retrain_notification(
             f"HitRate={sym.get('direction_accuracy', 0):.1%}"
         )
 
-    return send_webhook_text("\n".join(lines))
+    return send_webhook_text(fit_lines(lines, unit="銘柄"))
 
 
 def send_hit_rate_drift_alert(result) -> bool:
