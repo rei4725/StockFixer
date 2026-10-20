@@ -200,6 +200,28 @@ def run_weekly_report():
     except Exception as e:
         logger.error("外れ原因分析失敗: %s", e, exc_info=True)
 
+    run_weekly_paper_results()
+
+
+def run_weekly_paper_results() -> None:
+    """紙の売買の週の成績を results/paper/YYYY-Www.json に書く（#812・非致命的）。"""
+    logger.info("紙の売買の週の成績の書き出し開始")
+    try:
+        import os
+        from datetime import date
+
+        from src.backtest.metrics import fetch_benchmark_returns
+        from src.trading.paper_equity import write_paper_weekly_results
+        from src.utils.data_path_utils import get_results_dir
+
+        write_paper_weekly_results(
+            date.today(),
+            fetch_benchmark_returns,
+            os.path.join(get_results_dir(), "paper"),
+        )
+    except Exception as e:
+        logger.error("紙の売買の週の成績の書き出し失敗: %s", e, exc_info=True)
+
 
 def run_weekly_optimization():
     """

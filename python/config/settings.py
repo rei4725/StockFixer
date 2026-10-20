@@ -162,6 +162,11 @@ class Settings(BaseSettings):
     # 予測変化率の絶対値がこの倍率 × ATR/現在価格 を超えたら丸める。
     PREDICTION_ATR_CLIP_MULTIPLIER: float = Field(default=3.0)
 
+    # ---------- 日次データ取得の失敗判定（orchestration/jobs/daily.py [1/6]） ----------
+    # 取得のスキップ+エラーが対象銘柄数のこの割合を超えた日は CRITICAL の失敗にし、
+    # 古い特徴量での予測保存を止める（#811）。
+    DAILY_FETCH_MAX_UNAVAILABLE_RATIO: float = Field(default=0.5)
+
     # ---------- スケジューラリトライ設定 ----------
     SCHEDULER_MAX_RETRIES: int = Field(default=3)
     SCHEDULER_RETRY_BASE_WAIT_SECONDS: float = Field(default=30.0)
@@ -311,6 +316,7 @@ DRIFT_ALERT_THRESHOLD: float = settings.DRIFT_ALERT_THRESHOLD
 
 PREDICTION_MAX_WORKERS: int = settings.PREDICTION_MAX_WORKERS
 PREDICTION_ATR_CLIP_MULTIPLIER: float = settings.PREDICTION_ATR_CLIP_MULTIPLIER
+DAILY_FETCH_MAX_UNAVAILABLE_RATIO: float = settings.DAILY_FETCH_MAX_UNAVAILABLE_RATIO
 SCHEDULER_MAX_RETRIES: int = settings.SCHEDULER_MAX_RETRIES
 SCHEDULER_RETRY_BASE_WAIT_SECONDS: float = settings.SCHEDULER_RETRY_BASE_WAIT_SECONDS
 VOLUME_FILTER_WINDOW_DAYS: int = settings.VOLUME_FILTER_WINDOW_DAYS
