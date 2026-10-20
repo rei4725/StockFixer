@@ -728,6 +728,108 @@ class TestBacktesterShortSimulation:
         assert "sell" in actions
 
 
+class TestBacktesterShortEntryVolume:
+    """#801: ショートのエントリー売り代金は、エントリーの時点で分かる出来高で決める"""
+
+    @staticmethod
+    def _spy_bt(calls: list, execution_lag: int = 0) -> Backtester:
+        def _slippage_fn(qty: int, price: float, avg_volume: float) -> float:
+            calls.append((qty, price, avg_volume))
+            return 0.01 * (qty / avg_volume) ** 0.5
+
+        return Backtester(
+            model_manager=MagicMock(),
+            signal_generator=MagicMock(),
+            data_loader=MagicMock(),
+            start_date=None,
+            end_date=None,
+            market="jp",
+            symbol="7203",
+            initial_cash=1_000_000,
+            fee_rate=0.0,
+            slippage=0.0,
+            slippage_fn=_slippage_fn,
+            enable_short=True,
+            execution_lag=execution_lag,
+        )
+
+    @staticmethod
+    def _df(later_volume: float) -> pd.DataFrame:
+        # エントリー（同バーは bar0、翌バーは bar1 始値で bar0 までの出来高）より後の
+        # bar2・bar3 の出来高だけを later_volume にする
+        idx = pd.date_range("2024-01-01", periods=4, freq="B")
+        return pd.DataFrame(
+            {
+                "Open": [100.0, 100.0, 90.0, 80.0],
+                "Close": [100.0, 100.0, 90.0, 80.0],
+                "Volume": [50_000.0, 50_000.0, later_volume, later_volume],
+            },
+            index=idx,
+        )
+
+    @staticmethod
+    def _signal(df: pd.DataFrame, execution_lag: int, cover: bool) -> pd.Series:
+        if not cover:
+            return pd.Series([-1, 0, 0, 0], index=df.index)
+        # 同バー約定は bar3 終値でカバー、翌バー約定は bar3 始値でカバー
+        return pd.Series([-1, 0, 0, 1] if execution_lag == 0 else [-1, 0, 1, 0], index=df.index)
+
+    @pytest.mark.parametrize("execution_lag", [0, 1])
+    @pytest.mark.parametrize("cover", [True, False])
+    def test_entry_slippage_uses_entry_time_volume(self, execution_lag, cover):
+        """エントリー価格（100）での代金計算は、エントリーの時点で分かる平均出来高だけを使う"""
+        df = self._df(later_volume=5_000_000.0)
+        calls: list = []
+        bt = self._spy_bt(calls, execution_lag=execution_lag)
+        result_df, _ = bt.simulate_trading(df, self._signal(df, execution_lag, cover))
+
+        exit_action = "short_cover" if cover else "final_short_cover"
+        assert exit_action in result_df["action"].values
+        # 同バーは bar0 の平均、翌バーは前バー bar0 までの平均（どちらも 50_000）
+        entry_calls = [c for c in calls if c[1] == 100.0]
+        assert entry_calls
+        assert [c[2] for c in entry_calls] == pytest.approx([50_000.0] * len(entry_calls))
+
+    @pytest.mark.parametrize("execution_lag", [0, 1])
+    @pytest.mark.parametrize("cover", [True, False])
+    def test_entry_proceeds_independent_of_later_volume(self, execution_lag, cover):
+        """エントリーより後の出来高を変えても、エントリーの売り代金は変わらない
+
+        決済後の cash からカバーの買い代金を足し戻した値（＝エントリーの売り代金）を比べる。
+        """
+        entry_proceeds = []
+        for later_volume in (50_000.0, 5_000_000.0):
+            df = self._df(later_volume)
+            calls: list = []
+            bt = self._spy_bt(calls, execution_lag=execution_lag)
+            result_df, _ = bt.simulate_trading(df, self._signal(df, execution_lag, cover))
+            qty = int(result_df.loc[result_df["action"] == "short", "qty"].iloc[0])
+            exit_row = result_df[result_df["action"].isin(["short_cover", "final_short_cover"])]
+            exit_price = float(exit_row["price"].iloc[0])
+            cover_cost = bt.execution.buy_cost(
+                qty, exit_price, [c for c in calls if c[1] == exit_price][-1][2]
+            )
+            entry_proceeds.append(float(exit_row["cash"].iloc[0]) - 1_000_000 + cover_cost)
+
+        assert entry_proceeds[0] == pytest.approx(entry_proceeds[1], rel=1e-12)
+
+    def test_short_qty_capped_by_volume_like_buy(self):
+        """ショートの株数にも、買いと同じく出来高込みのコストでの上限が効く"""
+        idx = pd.date_range("2024-01-01", periods=2, freq="B")
+        df = pd.DataFrame({"Close": [100.0, 100.0], "Volume": [5_000.0, 5_000.0]}, index=idx)
+
+        long_calls: list = []
+        long_bt = self._spy_bt(long_calls)
+        long_df, _ = long_bt.simulate_trading(df, pd.Series([1, 0], index=idx))
+        short_calls: list = []
+        short_bt = self._spy_bt(short_calls)
+        short_df, _ = short_bt.simulate_trading(df, pd.Series([-1, 0], index=idx))
+
+        buy_qty = int(long_df.loc[long_df["action"] == "buy", "qty"].iloc[0])
+        short_qty = int(short_df.loc[short_df["action"] == "short", "qty"].iloc[0])
+        assert short_qty == buy_qty
+
+
 class TestBacktesterExecutionLag:
     """#493: 実行ラグ（翌バー約定）の検証"""
 
