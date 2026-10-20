@@ -14,11 +14,12 @@ if TYPE_CHECKING:
 import pandas as pd
 
 from config.data import MAX_DATA_WORKERS
-from config.settings import SENTIMENT_LOOKBACK_DAYS
+from config.settings import SENTIMENT_LOOKBACK_DAYS, STALE_BARS_MAX_WEEKDAYS
 from src.domain.ports import AlertLevel, NotificationPort
 from src.market_data.base import DataSourceBase
 from src.market_data.loader import (
     fetch_cross_asset_features,
+    get_latest_business_day,
     get_raw_ohlcv_from_db,
     get_stock_data,
     merge_market_data,
@@ -110,6 +111,16 @@ def fetch_stock_data_with_features(
                     except Exception as e:
                         logger.error(f"Raw OHLCV保存エラー（処理継続）: {e}", exc_info=True)
             else:
+                stale_weekdays = _count_weekdays_behind(db_latest_date, end_date)
+                if stale_weekdays > STALE_BARS_MAX_WEEKDAYS:
+                    # 取得の失敗も yf_client が空で返すため、ここでは止まった足と区別できない
+                    logger.warning(
+                        f"足が止まったため特徴量生成をスキップ: {market}/{symbol} "
+                        f"（DB の最新の足 {db_latest_date.strftime('%Y-%m-%d')}、"
+                        f"平日で {stale_weekdays}日 > {STALE_BARS_MAX_WEEKDAYS}日 古く、"
+                        "差分データなし。取得の失敗か上場廃止の可能性）"
+                    )
+                    return None
                 logger.warning("差分データなし（営業日外の可能性）")
         else:
             # DB内無データ：フル取得
@@ -263,6 +274,24 @@ def fetch_stock_data_with_features(
     data["y"] = y
 
     return (market, symbol, data, raw_data_to_save, quality_result)
+
+
+def _count_weekdays_behind(db_latest_date: pd.Timestamp, end_date: str) -> int:
+    """
+    DB の最新の足の翌日から、あるべき最新の営業日までの平日の数を返す。
+
+    Args:
+        db_latest_date: DB 内の最新の足の日付
+        end_date: 目標終了日（YYYY-MM-DD）
+
+    Returns:
+        足りない平日の数（祝日は数え分けない）。
+    """
+    expected_latest = pd.Timestamp(get_latest_business_day(end_date)).normalize()
+    if db_latest_date.tzinfo is not None:
+        db_latest_date = db_latest_date.tz_localize(None)
+    next_day = db_latest_date.normalize() + timedelta(days=1)
+    return len(pd.bdate_range(next_day, expected_latest))
 
 
 def _build_latest_feature_row(df: pd.DataFrame, lag_columns: list) -> Optional[pd.DataFrame]:
