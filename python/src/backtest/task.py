@@ -19,24 +19,20 @@ def _build_threshold_series(
     min_scale: float = 0.5,
     max_scale: float = 2.0,
 ) -> pd.Series:
-    """予測値の分散に応じて売買閾値を動的調整する。"""
+    """予測値の分散に応じて売買閾値を動的調整する。
+
+    基準 (baseline) は前日までの正の rolling std の expanding median とし、
+    日 t の閾値が t より後の予測に依らないようにする (#848)。
+    基準がまだ無い区間は scale 1.0。
+    """
     threshold = pd.Series(float(base_threshold), index=pred.index, dtype=float)
-    if base_threshold <= 0 or len(pred) < window:
+    if base_threshold <= 0:
         return threshold
 
     min_periods = min(window, max(5, window // 2))
     rolling_std = pred.rolling(window=window, min_periods=min_periods).std()
-    valid_std = rolling_std.dropna()
-    if valid_std.empty:
-        return threshold
-
-    positive_std = valid_std[valid_std > 0]
-    if positive_std.empty:
-        return threshold
-
-    baseline = float(positive_std.median())
-    if baseline <= 0:
-        return threshold
+    positive_std = rolling_std.where(rolling_std > 0)
+    baseline = positive_std.expanding().median().shift(1)
 
     scale = (rolling_std / baseline).clip(lower=min_scale, upper=max_scale).fillna(1.0)
     return threshold * scale

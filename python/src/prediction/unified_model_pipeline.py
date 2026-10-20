@@ -131,6 +131,28 @@ def _compute_and_save_unified_feature_selection(model, X: pd.DataFrame, y: pd.Se
     )
 
 
+_CORPORATE_ACTION_LAG_PREFIXES = ("Dividends_lag", "Stock_Splits_lag")
+
+
+def _warn_dropped_rows(valid: pd.Series, market: pd.Series, symbol: pd.Series) -> None:
+    """NaN で落ちる行の数を、全部落ちた銘柄の数と市場ごとの行の数で WARNING に出す。"""
+    dropped = ~valid
+    if not dropped.any():
+        return
+    keys = pd.DataFrame({"market": market, "symbol": symbol, "valid": valid})
+    kept_per_symbol = keys.groupby(["market", "symbol"])["valid"].sum()
+    all_dropped = [f"{m}/{s}" for (m, s), n in kept_per_symbol.items() if n == 0]
+    dropped_per_market = {
+        str(m): int(n) for m, n in keys.loc[dropped, "market"].value_counts().sort_index().items()
+    }
+    logger.warning(
+        "統合の学習で NaN の行を落とす: 全部落ちた銘柄: %d (%s), 市場ごとの落ちた行: %s",
+        len(all_dropped),
+        ", ".join(all_dropped[:20]),
+        dropped_per_market,
+    )
+
+
 def prepare_unified_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:
     """
     統合モデル用の特徴量を準備する
@@ -162,8 +184,14 @@ def prepare_unified_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]
         # y列がない場合は作成（翌日終値）
         raise ValueError("y列がデータに含まれていません。特徴量生成済みのCSVを使用してください。")
 
+    # 配当・分割のラグの列は特徴量にしない。取得の道で有り無しが変わっていたため、
+    # 表には銘柄によって全行 NULL のまま残っている（#816）
+    X = X.drop(columns=[c for c in X.columns if str(c).startswith(_CORPORATE_ACTION_LAG_PREFIXES)])
+
     # NaNを除去
     valid_idx = X.notna().all(axis=1) & y.notna()
+    if "market" in df.columns and "symbol" in df.columns:
+        _warn_dropped_rows(valid_idx, df["market"], df["symbol"])
     X = X[valid_idx]
     y = y[valid_idx]
 
@@ -297,6 +325,7 @@ def _load_all_ohlcv_for_unified(horizon: int) -> Tuple[pd.DataFrame, pd.Series]:
 
     all_X = []
     all_y = []
+    all_keys = []
 
     _mds = get_market_data_port()
     symbols = load_all_raw_ohlcv_symbols()
@@ -340,6 +369,7 @@ def _load_all_ohlcv_for_unified(horizon: int) -> Tuple[pd.DataFrame, pd.Series]:
 
             all_X.append(X_sym)
             all_y.append(y_sym)
+            all_keys.append(pd.DataFrame({"market": market, "symbol": symbol}, index=X_sym.index))
         except Exception as e:
             logger.warning(f"OHLCV特徴量生成スキップ [{market}/{symbol}]: {e}", exc_info=True)
 
@@ -348,8 +378,10 @@ def _load_all_ohlcv_for_unified(horizon: int) -> Tuple[pd.DataFrame, pd.Series]:
 
     X = pd.concat(all_X, ignore_index=True)
     y = pd.concat(all_y, ignore_index=True)
+    keys = pd.concat(all_keys, ignore_index=True)
 
     valid = X.notna().all(axis=1) & y.notna()
+    _warn_dropped_rows(valid, keys["market"], keys["symbol"])
     return X[valid], y[valid]
 
 

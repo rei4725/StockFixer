@@ -6,13 +6,14 @@
 
 import logging
 import warnings
+from datetime import datetime, timedelta
 from threading import Lock
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import pandas as pd
 import yfinance as yf
 
-from config.settings import PREDICTION_ATR_CLIP_MULTIPLIER
+from config.settings import PREDICTION_ATR_CLIP_MULTIPLIER, STALE_BARS_MAX_WEEKDAYS
 from src.prediction.db import load_model_weights
 from src.prediction.range_clipping import clip_diff_ratio_to_atr_range
 from src.prediction.remote_client import get_service_url, predict_via_service
@@ -135,12 +136,46 @@ def resolve_expected_features(model: Any) -> Optional[List[str]]:
     return None
 
 
+def _count_weekdays_behind(last_date: pd.Timestamp, today: Optional[datetime] = None) -> int:
+    """
+    特徴量の最後の行の翌日から、あるべき最新の営業日までの平日の数を返す。
+
+    数え方は market_data.pipeline の同名の関数（#815）に揃える。BC 同士は
+    import できないため写している。
+
+    Args:
+        last_date: 特徴量の最後の行の日付
+        today: 基準日（省略時は今日）
+
+    Returns:
+        足りない平日の数（祝日は数え分けない）。
+    """
+    expected_latest = pd.Timestamp(today if today is not None else datetime.now()).normalize()
+    while expected_latest.weekday() >= 5:
+        expected_latest -= timedelta(days=1)
+    if last_date.tzinfo is not None:
+        last_date = last_date.tz_localize(None)
+    next_day = last_date.normalize() + timedelta(days=1)
+    return len(pd.bdate_range(next_day, expected_latest))
+
+
+def _last_feature_date(df: pd.DataFrame) -> Optional[pd.Timestamp]:
+    """特徴量の最後の行の日付。date 列が無いか読めなければ None。"""
+    if "date" not in df.columns:
+        return None
+    last_date = pd.to_datetime(df["date"].iloc[-1], errors="coerce")
+    if pd.isna(last_date):
+        return None
+    return pd.Timestamp(last_date)
+
+
 def predict_with_unified_model(
     market: str,
     symbol: str,
     model_types: List[str] = None,
     lookback_days: int = 90,
     horizon: int = 1,
+    on_stale: Optional[Callable[[str, str], None]] = None,
 ) -> Optional[PredictionResult]:
     """
     統合モデルを使用して1銘柄の予測を行う
@@ -151,6 +186,7 @@ def predict_with_unified_model(
         model_types: 使用するモデル名のリスト
         lookback_days: データ取得日数（未使用、互換性のため残す）
         horizon: 予測ホライズン（営業日）。1=翌日, 3=3日後, 5=5日後, 10=10日後。
+        on_stale: 特徴量が古いため予想を出さなかったときに (market, symbol) で呼ぶ
 
     Returns:
         予測結果のDataFrame または None
@@ -172,6 +208,25 @@ def predict_with_unified_model(
     # y列（予測ターゲット）と特徴量を分離
     if "y" not in df.columns:
         return None
+
+    # 足が止まった銘柄は特徴量の生成でスキップされ（#815）、止まった日を最後の行と
+    # する前の特徴量が残る。その行で予想を出し続けないよう、最後の行の日付を見る（#829）
+    last_date = _last_feature_date(df)
+    if last_date is not None:
+        stale_weekdays = _count_weekdays_behind(last_date)
+        if stale_weekdays > STALE_BARS_MAX_WEEKDAYS:
+            logger.warning(
+                "特徴量が古いため予想をスキップ: market=%s symbol=%s "
+                "最後の行の日付=%s（平日で %d日 > %d日 古い）",
+                market,
+                symbol,
+                last_date.strftime("%Y-%m-%d"),
+                stale_weekdays,
+                STALE_BARS_MAX_WEEKDAYS,
+            )
+            if on_stale is not None:
+                on_stale(market, symbol)
+            return None
 
     # 特徴量列（文字列列・日付列・ターゲットを除外）
     # 除外条件は学習側の prepare_unified_features() と揃えること。学習時に
