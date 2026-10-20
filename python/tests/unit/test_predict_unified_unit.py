@@ -184,7 +184,8 @@ class TestPredictWithUnifiedModel(unittest.TestCase):
         self.assertEqual(result.market, "jp")
         self.assertEqual(result.symbol, "7203")
 
-    def test_fallback_price_when_yf_fails(self):
+    def test_no_prediction_when_yf_fails(self):
+        """取れないときは Close_lag1 を基準にせず予想を出さない（#845）"""
         from src.prediction.predict_unified import predict_with_unified_model
 
         df = _make_feature_df()
@@ -203,7 +204,8 @@ class TestPredictWithUnifiedModel(unittest.TestCase):
         ):
             result = predict_with_unified_model("jp", "7203")
 
-        self.assertIsNotNone(result)
+        self.assertIsNone(result)
+        mock_model.predict.assert_not_called()
 
     def test_uses_horizon_specific_model_names(self):
         from src.prediction.predict_unified import predict_with_unified_model
