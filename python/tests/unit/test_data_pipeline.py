@@ -207,7 +207,59 @@ class TestFetchStockDataWithFeatures(_TmpDbTestCase):
         # DB の足から作った行が残っている（新しい 6 行だけにならない）
         self.assertGreater(len(data), 6)
         self.assertLess(data.index.min(), fresh.index.min())
-        self.assertTrue((data["Dividends_lag1"] == 0.0).all())
+        self.assertNotIn("Dividends_lag1", data.columns)
+
+    @patch("src.market_data.pipeline.fetch_pageview_features", return_value=None)
+    @patch("src.market_data.pipeline.fetch_news_sentiment_with_llm", return_value=None)
+    @patch("src.market_data.pipeline.fetch_additional_macro_features", return_value=None)
+    @patch("src.market_data.pipeline.fetch_cross_asset_features", return_value=None)
+    @patch("src.market_data.pipeline.get_stock_data")
+    @patch("src.market_data.pipeline.should_fetch_fresh_data")
+    @patch("src.market_data.pipeline.get_raw_ohlcv_from_db")
+    def test_feature_columns_same_on_every_fetch_path(
+        self,
+        mock_from_db,
+        mock_fresh_check,
+        mock_get_data,
+        _mock_cross_asset,
+        _mock_macro,
+        _mock_sentiment,
+        _mock_pageview,
+    ):
+        """DB で足りる・差分が空・差分を取れた・初めての取得の4つの道で、列の組が同じになる
+
+        yfinance の足だけが Dividends / Stock Splits を持ち、DB の足は持たない。
+        道によって列の組が変わると、stock_features に銘柄ごとに全行 NULL の列ができ、
+        統合の学習でその銘柄の行が全部落ちる（#816）。
+        """
+        ohlcv = self._make_ohlcv(66)
+        with_actions = ohlcv.copy()
+        with_actions["Dividends"] = 0.0
+        with_actions["Stock Splits"] = 0.0
+        paths = {
+            "db_enough": (ohlcv, False, None),
+            "diff_empty": (ohlcv, True, pd.DataFrame()),
+            "diff_fetched": (ohlcv.iloc[:60], True, with_actions.iloc[60:]),
+            "first_fetch": (None, True, with_actions),
+        }
+
+        columns = {}
+        for name, (from_db, fresh, fetched) in paths.items():
+            mock_from_db.return_value = from_db
+            mock_fresh_check.return_value = fresh
+            mock_get_data.return_value = fetched
+            result = fetch_stock_data_with_features(
+                market="jp",
+                symbol="5202",
+                start_date="2023-01-01",
+                end_date="2023-03-07",
+                defer_raw_save=True,
+            )
+            self.assertIsNotNone(result, name)
+            columns[name] = sorted(result[2].columns)
+
+        for name, cols in columns.items():
+            self.assertEqual(cols, columns["db_enough"], name)
 
 
 class TestSaveFeaturesDb(_TmpDbTestCase):

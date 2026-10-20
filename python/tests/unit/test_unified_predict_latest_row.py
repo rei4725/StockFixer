@@ -118,6 +118,45 @@ class TestPredictUsesLatestRow(unittest.TestCase):
         expected = stored.drop(columns=["y"]).iloc[-1]
         pd.testing.assert_series_equal(passed.iloc[0][expected.index], expected, check_names=False)
 
+    def test_predict_with_model_expecting_corporate_action_lags(self):
+        """配当・分割のラグの列で学習した今のモデルでも、列を外した特徴量で予想が出る（#816）"""
+        from src.prediction.predict_unified import predict_with_unified_model
+
+        ohlcv = _make_ohlcv(60)
+        ohlcv["Dividends"] = 0.0
+        ohlcv["Stock Splits"] = 0.0
+        data = _fetch_features(ohlcv)
+        stored = data.drop(columns=["market", "symbol"])
+        self.assertNotIn("Dividends_lag1", stored.columns)
+        action_lags = [
+            f"{col}_lag{n}" for col in ("Dividends", "Stock_Splits") for n in range(1, 11)
+        ]
+        expected_features = [c for c in stored.columns if c != "y"] + action_lags
+
+        mock_model = MagicMock()
+        mock_model.predict.return_value = pd.Series([0.01])
+        mock_ticker = MagicMock()
+        mock_ticker.history.return_value = pd.DataFrame({"Close": [100.0]})
+
+        with (
+            patch("src.prediction.predict_unified.load_feature_data", return_value=stored),
+            patch("src.prediction.predict_unified.get_cached_model", return_value=mock_model),
+            patch(
+                "src.prediction.predict_unified.resolve_expected_features",
+                return_value=expected_features,
+            ),
+            patch("src.prediction.predict_unified.get_service_url", return_value=None),
+            patch("src.prediction.predict_unified.get_ticker", return_value="AAPL"),
+            patch("src.prediction.predict_unified.load_model_weights", return_value=[1.0]),
+            patch("src.prediction.predict_unified.yf.Ticker", return_value=mock_ticker),
+        ):
+            result = predict_with_unified_model("us", "AAPL", model_types=["UnifiedStockXGBoost"])
+
+        self.assertIsNotNone(result)
+        passed = mock_model.predict.call_args[0][0]
+        self.assertEqual(list(passed.columns), expected_features)
+        self.assertTrue((passed[action_lags] == 0).all().all())
+
 
 class TestReadersDropUndeterminedY(unittest.TestCase):
     def _stored_frame(self) -> pd.DataFrame:
