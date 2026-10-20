@@ -8,8 +8,10 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
+
+import pandas as pd
 
 from src.domain.generated_rules import GENERATED_RULES
 from src.rule_engine.ports import OHLCVWithIndicatorsPort
@@ -40,14 +42,29 @@ _RULE_INSTANCES: dict[str, TradingRule] = {
 
 _LOOKBACK_DAYS = 90
 
+# 最後の足が signal_date の直近の営業日より平日でこの日数を超えて古ければ、足が止まったとみなす。
+# PR 828 の config.settings.STALE_BARS_MAX_WEEKDAYS と同じ値。828 のマージ後に1つにまとめる
+_STALE_BARS_MAX_WEEKDAYS = 3
+
+
+def _count_weekdays_behind(last_bar: date, signal_date: date) -> int:
+    """最後の足の翌日から signal_date までの平日の数を返す（祝日は数え分けない）。"""
+    if last_bar >= signal_date:
+        return 0
+    return len(pd.bdate_range(last_bar + timedelta(days=1), signal_date))
+
 
 def _get_today_signal(
     market: str,
     symbol: str,
     rule_name: str,
     market_data_port: OHLCVWithIndicatorsPort,
-) -> tuple[int, float | None]:
-    """当日のシグナルと終値を返す。Returns: (signal, price) signal は 1=buy, -1=sell, 0=hold"""
+    signal_date: date | None = None,
+) -> tuple[int, float | None] | None:
+    """当日のシグナルと終値を返す。Returns: (signal, price) signal は 1=buy, -1=sell, 0=hold
+
+    signal_date を渡したとき、最後の足が古すぎれば None を返す（シグナルを出さない）。
+    """
     rule = _RULE_INSTANCES.get(rule_name)
     if rule is None:
         logger.warning(f"未知のルール: {rule_name}")
@@ -58,6 +75,17 @@ def _get_today_signal(
     if df is None or df.empty or len(df) < 20:
         logger.warning(f"データ不足: {ticker}")
         return 0, None
+
+    if signal_date is not None and isinstance(df.index, pd.DatetimeIndex):
+        last_bar = pd.Timestamp(df.index[-1]).date()
+        behind = _count_weekdays_behind(last_bar, signal_date)
+        if behind > _STALE_BARS_MAX_WEEKDAYS:
+            logger.warning(
+                f"足が止まったためシグナルを出さない: {market}/{symbol} "
+                f"（最後の足 {last_bar}、平日で {behind}日 > {_STALE_BARS_MAX_WEEKDAYS}日 古い。"
+                "取得の失敗か上場廃止の可能性）"
+            )
+            return None
 
     signal_series = rule.generate_signal(df)
 
@@ -107,7 +135,10 @@ def run_rule_signal_pipeline(
         logger.info(f"  {symbol} → [{rule_name}] シグナル計算中...")
 
         try:
-            signal, price = _get_today_signal(market, symbol, rule_name, market_data_port)
+            today = _get_today_signal(market, symbol, rule_name, market_data_port, signal_date)
+            if today is None:
+                continue
+            signal, price = today
             upsert_rule_signal(signal_date, market, symbol, rule_name, signal, price)
 
             label = {1: "BUY", -1: "SELL", 0: "HOLD"}.get(signal, "HOLD")

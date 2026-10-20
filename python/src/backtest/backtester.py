@@ -156,6 +156,8 @@ class Backtester:
         position_price = 0.0
         short_position = 0
         short_price = 0.0
+        # #801: ショートのエントリー売り代金は、エントリーの時点で分かる平均出来高で決める
+        short_entry_vol = 0.0
         short_trade_log: list[dict[str, Any]] = []
         trade_log = []
         # 各バーの mark-to-market equity 記録 (date, equity_net, equity_gross) — #492
@@ -262,10 +264,10 @@ class Backtester:
             # シグナルに基づく売買
             # ショートカバー: 買いシグナル + ショートポジション保有
             if sig == 1 and self.enable_short and short_position > 0:
-                # エントリー売り: short_price * qty * (1 - fee - slip)
+                # エントリー売り: short_price * qty * (1 - fee - slip)（エントリー時点の出来高）
                 # カバー買い: exec_price * qty * (1 + fee + slip)
                 net_pnl = self.execution.sell_proceeds(
-                    short_position, short_price, exec_vol
+                    short_position, short_price, short_entry_vol
                 ) - self.execution.buy_cost(short_position, exec_price, exec_vol)
                 pnl = (short_price - exec_price) * short_position
                 cash += net_pnl
@@ -290,6 +292,7 @@ class Backtester:
                 )
                 short_position = 0
                 short_price = 0.0
+                short_entry_vol = 0.0
             elif sig == 1 and position == 0:
                 # Buy（翌バー始値 exec_price で約定）
                 atr_value = exec_atr.loc[date] if exec_atr is not None else None
@@ -351,11 +354,13 @@ class Backtester:
                     exec_price,
                     exec_pred.get(date) if exec_pred is not None else None,
                     atr_value=atr_value,
+                    volume=exec_vol,
                 )
                 qty = position_details["qty"]
                 if qty > 0:
                     short_position = qty
                     short_price = exec_price
+                    short_entry_vol = exec_vol
                     trade_log.append(
                         {
                             "date": date,
@@ -397,10 +402,10 @@ class Backtester:
         # 最終日に未決済ショートを強制返済
         if self.enable_short and short_position > 0:
             price = df.iloc[-1][close_col]
-            # エントリー売り: short_price * qty * (1 - fee - slip)
+            # エントリー売り: short_price * qty * (1 - fee - slip)（エントリー時点の出来高）
             # カバー買い: price * qty * (1 + fee + slip)
             net_pnl = self.execution.sell_proceeds(
-                short_position, short_price, final_vol
+                short_position, short_price, short_entry_vol
             ) - self.execution.buy_cost(short_position, price, final_vol)
             pnl = (short_price - price) * short_position
             cash += net_pnl
