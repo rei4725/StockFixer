@@ -73,11 +73,14 @@ def _fit_xgboost_wrapper(feature_names: list[str]):
 
 
 def _feature_frame_with_date() -> pd.DataFrame:
-    """本番の load_stock_features 相当。date 列と未知の余剰列を含む。"""
+    """本番の load_stock_features 相当。date 列と未知の余剰列を含む。
+
+    最後の行は今日にする。古いと予想を出さない（#829）。
+    """
     n = 10
     return pd.DataFrame(
         {
-            "date": pd.date_range("2024-01-01", periods=n, freq="B"),
+            "date": pd.bdate_range(end=pd.Timestamp.now().normalize(), periods=n),
             "y": np.linspace(0.001, 0.01, n),
             "Close_lag1": np.linspace(998, 1098, n),
             "feature_a": np.linspace(-1, 1, n),
