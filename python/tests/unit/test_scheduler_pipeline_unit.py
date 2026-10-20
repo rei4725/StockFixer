@@ -658,6 +658,100 @@ class TestRunDailyPipeline:
         with pytest.raises(RuntimeError):
             run_daily_pipeline()
 
+    @patch("src.reporting.discord.discord_utils.send_miss_analysis_summary")
+    @patch("src.prediction.db.load_top_prediction_misses")
+    @patch("src.reporting.discord.discord_utils.send_daily_pipeline_error")
+    @patch("src.reporting.discord.discord_utils.send_daily_pipeline_completion")
+    @patch("src.orchestration.jobs.daily.run_daily_drift_check")
+    @patch("src.prediction.prediction_pipeline.run_accuracy_check")
+    @patch("src.prediction.prediction_pipeline.output_top_worst_results")
+    @patch("src.prediction.prediction_pipeline.predict_all_unified")
+    @patch("src.market_data.pipeline.run_batch_pipeline")
+    @patch("src.watchlist.batch_runner.load_target_symbols")
+    def test_data_step_mostly_skipped_fails_without_saving_predictions(
+        self,
+        mock_symbols,
+        mock_data,
+        mock_predict,
+        mock_output,
+        mock_accuracy,
+        mock_drift,
+        mock_notify,
+        mock_error,
+        mock_load_misses,
+        mock_send_misses,
+    ):
+        """取得のスキップ+エラーが対象の半分を超えたら CRITICAL で失敗し、予測を保存しないこと
+
+        本番 2026-10-08〜10-18 の [1/6] は 成功 2 / スキップ 698 / エラー 0 で
+        例外が出ないため「完了」扱いになり、古い特徴量で予測を保存し続けた。
+        """
+        import pytest
+
+        from src.domain.types import BatchResult
+        from src.orchestration.scheduler import run_daily_pipeline
+
+        mock_symbols.return_value = [object()] * 700
+        mock_data.return_value = BatchResult(succeeded=[{}] * 2, failed=[], skipped=[{}] * 698)
+        mock_predict.return_value = []
+        mock_output.return_value = ([], [])
+        mock_load_misses.return_value = pd.DataFrame()
+
+        with pytest.raises(RuntimeError):
+            run_daily_pipeline()
+
+        mock_error.assert_called_once()
+        mock_predict.assert_not_called()
+        mock_output.assert_not_called()
+        mock_notify.assert_not_called()
+
+    @patch("src.reporting.discord.discord_utils.send_miss_analysis_summary")
+    @patch("src.prediction.db.load_top_prediction_misses")
+    @patch("src.reporting.discord.discord_utils.send_daily_pipeline_error")
+    @patch("src.reporting.discord.discord_utils.send_daily_pipeline_completion")
+    @patch("src.orchestration.jobs.daily.run_daily_drift_check")
+    @patch("src.prediction.prediction_pipeline.run_accuracy_check")
+    @patch("src.prediction.prediction_pipeline.output_top_worst_results")
+    @patch("src.prediction.prediction_pipeline.predict_all_unified")
+    @patch("src.market_data.pipeline.run_batch_pipeline")
+    @patch("src.watchlist.batch_runner.load_target_symbols")
+    def test_data_step_half_skipped_continues(
+        self,
+        mock_symbols,
+        mock_data,
+        mock_predict,
+        mock_output,
+        mock_accuracy,
+        mock_drift,
+        mock_notify,
+        mock_error,
+        mock_load_misses,
+        mock_send_misses,
+    ):
+        """スキップ+エラーがちょうど半分以下なら今までどおり予測まで進むこと"""
+        from src.domain.types import BatchFailure, BatchResult
+        from src.orchestration.scheduler import run_daily_pipeline
+
+        mock_symbols.return_value = [object()] * 700
+        mock_data.return_value = BatchResult(
+            succeeded=[{}] * 350,
+            failed=[BatchFailure(market="jp", symbol="X", error="e")] * 50,
+            skipped=[{}] * 300,
+        )
+        mock_predict.return_value = []
+        mock_output.return_value = ([], [])
+        mock_accuracy.return_value = None
+        mock_drift.return_value = None
+        mock_notify.return_value = True
+        mock_load_misses.return_value = pd.DataFrame()
+
+        run_daily_pipeline()
+
+        mock_error.assert_not_called()
+        mock_predict.assert_called_once()
+        mock_output.assert_called_once()
+        mock_notify.assert_called_once()
+
 
 class TestRunWeeklyDbMaintenance(unittest.TestCase):
     """run_weekly_db_maintenance のテスト"""

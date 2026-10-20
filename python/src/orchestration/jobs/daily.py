@@ -4,6 +4,8 @@
 ドリフト監視・バックアップ・ルールシグナルのオーケストレーション。
 """
 
+from typing import TYPE_CHECKING
+
 from src.orchestration.jobs.alerting import (
     evaluate_and_notify_alerts,
     evaluate_output_invariants_stage,
@@ -14,7 +16,29 @@ from src.orchestration.jobs.drift_check import run_daily_drift_check
 from src.orchestration.types import PipelineStage
 from src.utils.logger import get_logger
 
+if TYPE_CHECKING:
+    from src.domain.types import BatchResult
+
 logger = get_logger(__name__)
+
+
+def _raise_if_fetch_mostly_unavailable(total: int, batch_result: "BatchResult") -> None:
+    """取得のスキップ+エラーが対象の線を超えたら RuntimeError を投げる（#811）。
+
+    run_batch_pipeline は銘柄ごとのスキップ・エラーを例外にしないため、全銘柄が
+    スキップされても [1/6] が「完了」になり、古い特徴量で予測を保存し続けた。
+    """
+    from config.settings import DAILY_FETCH_MAX_UNAVAILABLE_RATIO
+
+    if total <= 0:
+        return
+    unavailable = len(batch_result.skipped) + len(batch_result.failed)
+    if unavailable / total > DAILY_FETCH_MAX_UNAVAILABLE_RATIO:
+        raise RuntimeError(
+            f"取得できなかった銘柄が多すぎる: スキップ {len(batch_result.skipped)}"
+            f" + エラー {len(batch_result.failed)} / 対象 {total}"
+            f"（線 {DAILY_FETCH_MAX_UNAVAILABLE_RATIO:.0%}）"
+        )
 
 
 def run_daily_pipeline():
@@ -51,7 +75,8 @@ def run_daily_pipeline():
 
     try:
         tasks = load_target_symbols()
-        run_batch_pipeline(tasks, notification_port=DiscordNotificationAdapter())
+        batch_result = run_batch_pipeline(tasks, notification_port=DiscordNotificationAdapter())
+        _raise_if_fetch_mostly_unavailable(len(tasks), batch_result)
         logger.info("[1/6] データ取得完了")
     except Exception as e:
         if _handle_stage_error(
