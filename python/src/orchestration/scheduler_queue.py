@@ -3,6 +3,10 @@
 
 所定時刻以降に実行ログが無いジョブを補完実行し、
 実行結果ログと実行回数制御を提供する。
+
+状態ファイルは常駐のスケジューラーと手での即時実行（別プロセス）が共に使うため、
+判定の前に読み直し、書くときはファイルのロックの内で読み直して足し、
+一時ファイルから置き換える（#826）。
 """
 
 from __future__ import annotations
@@ -11,11 +15,15 @@ import json
 import logging
 import os
 import random
+import tempfile
+import threading
 import time
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Optional
 from zoneinfo import ZoneInfo
+
+from filelock import FileLock
 
 from config.settings import settings
 from src.utils.data_path_utils import ensure_dir, get_results_dir
@@ -52,7 +60,16 @@ class SchedulerQueueManager:
         self.state_file_path = state_file_path
         self._in_progress_jobs: set[str] = set()
         self._error_notifier = error_notifier
-        self._state = self._load_state()
+        # 同じプロセスのスレッドの間（定時のジョブと補完のポーリング）を _lock で、
+        # プロセスの間（手での即時実行）を _file_lock で守る。取る順は必ず _lock が先
+        self._lock = threading.Lock()
+        ensure_dir(os.path.dirname(os.path.abspath(state_file_path)))
+        self._file_lock = FileLock(f"{state_file_path}.lock")
+        # 壊れた状態ファイルを退避したら、このプロセスの間は補完を止める
+        self._state_corrupted = False
+        self._state: dict[str, Any] = {"events": []}
+        with self._lock, self._file_lock:
+            self._reload_state()
 
     def now(self) -> datetime:
         return datetime.now(self.tz)
@@ -91,61 +108,65 @@ class SchedulerQueueManager:
         if period_key is None:
             period_key = self._build_period_key(config, now)
 
-        if job_id in self._in_progress_jobs:
-            self._emit_job_log(
-                "info",
-                "skip",
-                job_id=job_id,
-                reason=reason,
-                period_key=period_key,
-                status="skipped_in_progress",
-            )
-            return False
+        # 実行中の確かめ・回数の確かめ・始めの記録を、ロックの内でひと続きに行う。
+        # 回数は別のプロセスの記録も数えるため、ファイルを読み直してから数える
+        with self._lock, self._file_lock:
+            if job_id in self._in_progress_jobs:
+                self._emit_job_log(
+                    "info",
+                    "skip",
+                    job_id=job_id,
+                    reason=reason,
+                    period_key=period_key,
+                    status="skipped_in_progress",
+                )
+                return False
 
-        current_count = self.get_execution_count(job_id, period_key)
-        max_executions = config.get("max_executions_per_period", 1)
-        if not force and current_count >= max_executions:
-            self._append_event(
+            self._reload_state()
+            current_count = self.get_execution_count(job_id, period_key)
+            max_executions = config.get("max_executions_per_period", 1)
+            if not force and current_count >= max_executions:
+                self._append_event_locked(
+                    {
+                        "job_id": job_id,
+                        "reason": reason,
+                        "status": "skipped_limit",
+                        "period_key": period_key,
+                        "started_at": isoformat_utc(now),
+                        "finished_at": isoformat_utc(now),
+                        "duration_seconds": 0.0,
+                        "error": None,
+                    }
+                )
+                self._emit_job_log(
+                    "info",
+                    "skip",
+                    job_id=job_id,
+                    reason=reason,
+                    period_key=period_key,
+                    status="skipped_limit",
+                    current_count=current_count,
+                    max_executions=max_executions,
+                )
+                return False
+
+            started_at = self.now()
+            status = "success"
+            error_message = None
+            run_id = uuid.uuid4().hex
+
+            # プロセスごと落ちて finally が走らなくても回数に数えるため、始める前に記録する
+            self._append_event_locked(
                 {
                     "job_id": job_id,
                     "reason": reason,
-                    "status": "skipped_limit",
+                    "status": "started",
                     "period_key": period_key,
-                    "started_at": isoformat_utc(now),
-                    "finished_at": isoformat_utc(now),
-                    "duration_seconds": 0.0,
-                    "error": None,
+                    "run_id": run_id,
+                    "started_at": isoformat_utc(started_at),
                 }
             )
-            self._emit_job_log(
-                "info",
-                "skip",
-                job_id=job_id,
-                reason=reason,
-                period_key=period_key,
-                status="skipped_limit",
-                current_count=current_count,
-                max_executions=max_executions,
-            )
-            return False
-
-        started_at = self.now()
-        status = "success"
-        error_message = None
-        run_id = uuid.uuid4().hex
-
-        # プロセスごと落ちて finally が走らなくても回数に数えるため、始める前に記録する
-        self._append_event(
-            {
-                "job_id": job_id,
-                "reason": reason,
-                "status": "started",
-                "period_key": period_key,
-                "run_id": run_id,
-                "started_at": isoformat_utc(started_at),
-            }
-        )
-        self._in_progress_jobs.add(job_id)
+            self._in_progress_jobs.add(job_id)
 
         self._emit_job_log(
             "info",
@@ -203,7 +224,8 @@ class SchedulerQueueManager:
                     "error": error_message,
                 }
             )
-            self._in_progress_jobs.discard(job_id)
+            with self._lock:
+                self._in_progress_jobs.discard(job_id)
             # 外部死活監視（#496）: 実行したジョブのみ ping（skip 経路は送らない）
             ping_heartbeat(job_id, success=(status == "success"))
 
@@ -289,6 +311,8 @@ class SchedulerQueueManager:
             return []
         if not config.get("backfill", False):
             return []
+        if not self._reload_state_for_recovery():
+            return []
 
         now = now or self.now()
         missed: list[str] = []
@@ -314,8 +338,9 @@ class SchedulerQueueManager:
 
         # 定時の回が動いている間は補完しない（run_job でも飛ばすが、
         # ここで返さないと5分おきに補完の始まりの行が出る。#806）
-        if job_id in self._in_progress_jobs:
-            return False
+        with self._lock:
+            if job_id in self._in_progress_jobs:
+                return False
 
         config = self.schedule_config[job_id]
         now = now or self.now()
@@ -350,6 +375,9 @@ class SchedulerQueueManager:
         recovery_delay = timedelta(minutes=config.get("recovery_delay_minutes", 10))
 
         if now < (scheduled_dt + recovery_delay):
+            return False
+
+        if not self._reload_state_for_recovery():
             return False
 
         period_key = self._build_period_key(config, now)
@@ -430,29 +458,83 @@ class SchedulerQueueManager:
                     weekdays.add(value)
         return weekdays
 
-    def _load_state(self) -> dict[str, Any]:
+    def _reload_state_for_recovery(self) -> bool:
+        """補完の判定の前に読み直す。補完してよい履歴が手元にあれば True。"""
+        with self._lock, self._file_lock:
+            reloaded = self._reload_state()
+        return reloaded and not self._state_corrupted
+
+    def _reload_state(self) -> bool:
+        """状態ファイルを読み直す（ロックの内で呼ぶ）。読めなければ手元の記録を残して False。"""
         if not os.path.exists(self.state_file_path):
-            return {"events": []}
+            self._state = {"events": []}
+            return True
 
         try:
             with open(self.state_file_path, "r", encoding="utf-8") as file:
                 state = json.load(file)
-            if not isinstance(state, dict):
-                return {"events": []}
-            events = state.get("events")
-            if not isinstance(events, list):
-                state["events"] = []
-            return state
-        except (json.JSONDecodeError, OSError) as exc:
-            logger.warning(f"スケジューラ状態ファイル読込失敗: {exc}")
-            return {"events": []}
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            self._quarantine_state_file(str(exc))
+            return False
+        except OSError:
+            logger.error("スケジューラ状態ファイル読込失敗", exc_info=True)
+            return False
+
+        if not isinstance(state, dict):
+            self._quarantine_state_file(f"最上位が dict ではない: {type(state).__name__}")
+            return False
+        events = state.get("events")
+        if not isinstance(events, list):
+            state["events"] = []
+        self._state = state
+        return True
+
+    def _quarantine_state_file(self, detail: str) -> None:
+        """壊れた状態ファイルを隣へ日時つきで退避し、このプロセスの補完を止める。
+
+        空の履歴で続けると、済んだ日次のジョブ（発注を含む）を補完でやり直すため。
+        """
+        self._state_corrupted = True
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        quarantine_path = f"{self.state_file_path}.corrupt-{stamp}"
+        try:
+            os.replace(self.state_file_path, quarantine_path)
+        except OSError:
+            logger.error(
+                f"壊れたスケジューラ状態ファイルの退避に失敗: {self.state_file_path}",
+                exc_info=True,
+            )
+            return
+        logger.error(
+            "スケジューラ状態ファイルが読めないため退避し、補完実行を止めます"
+            f"（定時のジョブは続けます）: {detail} 退避先={quarantine_path}"
+        )
 
     def _save_state(self) -> None:
-        ensure_dir(os.path.dirname(self.state_file_path))
-        with open(self.state_file_path, "w", encoding="utf-8") as file:
-            json.dump(self._state, file, ensure_ascii=False, indent=2)
+        """一時ファイルに書いてから置き換える（ロックの内で呼ぶ）。"""
+        state_dir = os.path.dirname(os.path.abspath(self.state_file_path))
+        ensure_dir(state_dir)
+        fd, tmp_path = tempfile.mkstemp(
+            dir=state_dir, prefix=f"{os.path.basename(self.state_file_path)}.", suffix=".tmp"
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as file:
+                json.dump(self._state, file, ensure_ascii=False, indent=2)
+                file.flush()
+                os.fsync(file.fileno())
+            os.replace(tmp_path, self.state_file_path)
+        except BaseException:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+            raise
 
     def _append_event(self, event: dict[str, Any]) -> None:
+        with self._lock, self._file_lock:
+            # 別のプロセスがその間に足した記録を消さないよう、読み直してから足す
+            self._reload_state()
+            self._append_event_locked(event)
+
+    def _append_event_locked(self, event: dict[str, Any]) -> None:
         self._state.setdefault("events", []).append(event)
         max_events = 5000
         if len(self._state["events"]) > max_events:
