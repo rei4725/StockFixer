@@ -11,8 +11,10 @@ paper_orders（status='filled'）を時系列に適用して現金残高と保�
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
-from typing import Callable, Optional
+import json
+import os
+from datetime import date, datetime, timedelta
+from typing import Any, Callable, Optional
 
 import pandas as pd
 
@@ -34,6 +36,10 @@ _CASH_SIGN = {
 }
 # 保有数量の増減（ロングのみ）
 _QTY_SIGN = {int(OrderSide.BUY): +1, int(OrderSide.SELL): -1}
+# 週の成績で市場ごとに比べるベンチマーク（#812）
+WEEKLY_BENCHMARKS = {"jp": "1306.T", "us": "^GSPC"}
+
+BenchmarkFetcher = Callable[[str, str, str], dict[str, Any]]
 
 
 def _load_filled_orders() -> pd.DataFrame:
@@ -154,3 +160,114 @@ def get_paper_equity_curve(days: int = 180) -> pd.Series:
         float(PAPER_INITIAL_BALANCE),
         index,
     )
+
+
+def _fetch_benchmark_return(
+    fetcher: BenchmarkFetcher, ticker: str, start: str, end: str
+) -> Optional[float]:
+    """ベンチマークの期間リターンを返す。取得できなければ None（週の道は止めない）。"""
+    try:
+        value = fetcher(ticker, start, end).get("total_return")
+    except Exception:
+        logger.warning("ベンチマーク取得失敗のため null にする: %s", ticker, exc_info=True)
+        return None
+    return None if value is None else float(value)
+
+
+def compute_weekly_results(
+    orders: pd.DataFrame,
+    price_loader: Callable[[str, str], Optional[pd.Series]],
+    initial_balance: float,
+    as_of: date,
+    benchmark_fetcher: BenchmarkFetcher,
+) -> dict[str, Any]:
+    """as_of 以前の直近の営業日を含む ISO 週の、市場ごとの紙の売買の成績を返す（純粋ロジック）。
+
+    週の騰落率は前週の最終営業日の評価額から今週の金曜の評価額まで。
+    ベンチマークも同じ期間（前週の最終営業日の終値 → 今週の終値）で比べる。
+
+    Returns:
+        {"week", "start", "end", "markets": {market: {weekly_return, benchmark_ticker,
+        benchmark_return, excess_return, fills}}}。取れない値は None
+    """
+    last_bday = pd.Timestamp(as_of)
+    while last_bday.weekday() >= 5:
+        last_bday -= pd.Timedelta(days=1)
+    week_start = last_bday - pd.Timedelta(days=last_bday.weekday())
+    week_end = week_start + pd.Timedelta(days=4)
+    base_day = week_start - pd.offsets.BDay(1)
+    iso = week_end.isocalendar()
+
+    work = orders.copy()
+    if not work.empty:
+        work["filled_at"] = pd.to_datetime(work["filled_at"]).dt.tz_localize(None).dt.normalize()
+
+    markets: dict[str, dict[str, Any]] = {}
+    for market, ticker in WEEKLY_BENCHMARKS.items():
+        market_orders = work[work["market"] == market] if not work.empty else work
+        fills = 0
+        weekly_return: Optional[float] = 0.0
+        if not market_orders.empty:
+            in_week = market_orders["filled_at"].between(week_start, week_end)
+            fills = int(in_week.sum())
+            first_fill = market_orders["filled_at"].min()
+            index = pd.bdate_range(start=min(first_fill, base_day), end=week_end)
+            equity = build_equity_series(market_orders, price_loader, initial_balance, index)
+            base_value = float(equity.loc[base_day])
+            end_value = float(equity.loc[week_end])
+            weekly_return = end_value / base_value - 1 if base_value else None
+
+        benchmark_return = _fetch_benchmark_return(
+            benchmark_fetcher,
+            ticker,
+            base_day.date().isoformat(),
+            (week_end + pd.Timedelta(days=1)).date().isoformat(),
+        )
+        excess_return = (
+            None
+            if weekly_return is None or benchmark_return is None
+            else weekly_return - benchmark_return
+        )
+        markets[market] = {
+            "weekly_return": None if weekly_return is None else round(weekly_return, 6),
+            "benchmark_ticker": ticker,
+            "benchmark_return": benchmark_return,
+            "excess_return": None if excess_return is None else round(excess_return, 6),
+            "fills": fills,
+        }
+
+    return {
+        "week": f"{iso[0]}-W{iso[1]:02d}",
+        "start": week_start.date().isoformat(),
+        "end": week_end.date().isoformat(),
+        "markets": markets,
+    }
+
+
+def write_paper_weekly_results(
+    as_of: date,
+    benchmark_fetcher: BenchmarkFetcher,
+    output_dir: str,
+) -> Optional[str]:
+    """紙の売買の週の成績を output_dir/YYYY-Www.json に書き、そのパスを返す。
+
+    約定が1件もない場合は書かずに None を返す。
+    """
+    orders = _load_filled_orders()
+    if orders.empty:
+        logger.info("約定済みペーパー注文がないため週の成績は書かない")
+        return None
+
+    result = compute_weekly_results(
+        orders,
+        _default_price_loader,
+        float(PAPER_INITIAL_BALANCE),
+        as_of,
+        benchmark_fetcher,
+    )
+    os.makedirs(output_dir, exist_ok=True)
+    path = os.path.join(output_dir, f"{result['week']}.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(result, f, ensure_ascii=False, indent=2)
+    logger.info("紙の売買の週の成績を書いた: %s", path)
+    return path

@@ -4,6 +4,8 @@
 ドリフト監視・バックアップ・ルールシグナルのオーケストレーション。
 """
 
+from typing import TYPE_CHECKING
+
 from src.orchestration.jobs.alerting import (
     evaluate_and_notify_alerts,
     evaluate_output_invariants_stage,
@@ -14,7 +16,29 @@ from src.orchestration.jobs.drift_check import run_daily_drift_check
 from src.orchestration.types import PipelineStage
 from src.utils.logger import get_logger
 
+if TYPE_CHECKING:
+    from src.domain.types import BatchResult
+
 logger = get_logger(__name__)
+
+
+def _raise_if_fetch_mostly_unavailable(total: int, batch_result: "BatchResult") -> None:
+    """取得のスキップ+エラーが対象の線を超えたら RuntimeError を投げる（#811）。
+
+    run_batch_pipeline は銘柄ごとのスキップ・エラーを例外にしないため、全銘柄が
+    スキップされても [1/6] が「完了」になり、古い特徴量で予測を保存し続けた。
+    """
+    from config.settings import DAILY_FETCH_MAX_UNAVAILABLE_RATIO
+
+    if total <= 0:
+        return
+    unavailable = len(batch_result.skipped) + len(batch_result.failed)
+    if unavailable / total > DAILY_FETCH_MAX_UNAVAILABLE_RATIO:
+        raise RuntimeError(
+            f"取得できなかった銘柄が多すぎる: スキップ {len(batch_result.skipped)}"
+            f" + エラー {len(batch_result.failed)} / 対象 {total}"
+            f"（線 {DAILY_FETCH_MAX_UNAVAILABLE_RATIO:.0%}）"
+        )
 
 
 def run_daily_pipeline():
@@ -28,6 +52,7 @@ def run_daily_pipeline():
             prediction_results は Delete-Insert のスナップショットテーブルなので、
             3 で当日分を保存する前＝前日分がまだ残っている段階で読む必要がある
             （後段で読むと 3 の保存で前日分が上書き消滅済みで永久に0件採点になる）。
+            採点の後、results/accuracy/YYYY-MM-DD.json に的中率を書く（非致命的）。
         3. Top10/Worst10の予測を実行（production）
         3.1. 出力 invariant 評価（非致命的。結果は 6 で通知する）
         3.5. Challenger shadow 予測（モデルが存在する場合のみ、非致命的）
@@ -51,7 +76,8 @@ def run_daily_pipeline():
 
     try:
         tasks = load_target_symbols()
-        run_batch_pipeline(tasks, notification_port=DiscordNotificationAdapter())
+        batch_result = run_batch_pipeline(tasks, notification_port=DiscordNotificationAdapter())
+        _raise_if_fetch_mostly_unavailable(len(tasks), batch_result)
         logger.info("[1/6] データ取得完了")
     except Exception as e:
         if _handle_stage_error(
@@ -80,6 +106,16 @@ def run_daily_pipeline():
         logger.info("[2/6] 予測精度チェック完了 (challenger)")
     except Exception as e:
         _handle_stage_error(PipelineStage.NON_CRITICAL, "[2/6] 予測精度チェック (challenger)", e)
+
+    # 採点の JSON（results/accuracy/YYYY-MM-DD.json）も、3 の保存の前に書く
+    # （今日の採点の行を prediction_results のスナップショットで見分けるため）
+    try:
+        from src.prediction.accuracy_report import write_daily_accuracy_report
+
+        write_daily_accuracy_report()
+        logger.info("[2/6] 採点の JSON 書き出し完了")
+    except Exception as e:
+        _handle_stage_error(PipelineStage.NON_CRITICAL, "[2/6] 採点の JSON 書き出し", e)
 
     # 3. 予測（CRITICAL: 失敗時はパイプライン停止 + Discord通知）
     logger.info("[3/6] 予測開始 (production)")

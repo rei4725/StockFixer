@@ -253,6 +253,12 @@ class TestLoadFeaturesRawSource:
 class TestLoadFeaturesFileSource:
     """load_features(source='file') のテスト"""
 
+    @pytest.fixture(autouse=True)
+    def _no_raw_ohlcv(self):
+        # market_data_raw（実 DB）を読みに行かない。取れないときの従来の動きを確かめる
+        with patch("src.market_data.loader.get_raw_ohlcv_from_db", return_value=None):
+            yield
+
     @patch("src.utils.db.load_stock_features")
     def test_load_features_file_with_date_column(self, mock_load):
         """date 列がある場合は DatetimeIndex に変換されること"""
