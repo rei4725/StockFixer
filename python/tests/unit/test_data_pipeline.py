@@ -546,6 +546,49 @@ class TestRunBatchPipeline(_TmpDbTestCase):
         self.assertEqual(len(result.succeeded), 0)
         self.assertEqual(len(result.failed), 0)
         mock_save.assert_not_called()
+        mock_save_raw.assert_not_called()
+
+    @patch("src.market_data.pipeline.save_raw_ohlcv")
+    @patch("src.market_data.pipeline.save_features_to_db")
+    @patch("src.market_data.pipeline.fetch_pageview_features", return_value=None)
+    @patch("src.market_data.pipeline.fetch_news_sentiment_with_llm", return_value=None)
+    @patch("src.market_data.pipeline.fetch_additional_macro_features", return_value=None)
+    @patch("src.market_data.pipeline.fetch_cross_asset_features", return_value=None)
+    @patch("src.market_data.pipeline.should_fetch_fresh_data", return_value=True)
+    @patch("src.market_data.pipeline.get_stock_data")
+    @patch("src.market_data.pipeline.get_raw_ohlcv_from_db")
+    def test_batch_feature_skip_still_saves_fetched_raw_bars(
+        self,
+        mock_from_db,
+        mock_get_data,
+        _mock_fresh_check,
+        _mock_cross_asset,
+        _mock_macro,
+        _mock_sentiment,
+        _mock_pageview,
+        mock_save,
+        mock_save_raw,
+    ):
+        """行の不足で特徴量をスキップしても、取った差分の足は market_data_raw に保存する（#840）"""
+        from src.market_data.pipeline import run_batch_pipeline
+
+        db_bars = self._make_ohlcv(10)
+        db_bars.index = pd.bdate_range(end="2023-03-01", periods=10)
+        fresh_bars = self._make_ohlcv(5)
+        fresh_bars.index = pd.bdate_range(start="2023-03-02", periods=5)
+        mock_from_db.return_value = db_bars
+        mock_get_data.return_value = fresh_bars
+
+        result = run_batch_pipeline(self._make_tasks()[:1])
+
+        self.assertEqual(len(result.skipped), 1)
+        self.assertEqual(len(result.succeeded), 0)
+        self.assertEqual(len(result.failed), 0)
+        mock_save.assert_not_called()
+        mock_save_raw.assert_called_once()
+        market, symbol, saved = mock_save_raw.call_args.args
+        self.assertEqual((market, symbol), ("us", "TEST1"))
+        pd.testing.assert_frame_equal(saved, fresh_bars)
 
 
 if __name__ == "__main__":
