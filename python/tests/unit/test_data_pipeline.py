@@ -209,6 +209,67 @@ class TestFetchStockDataWithFeatures(_TmpDbTestCase):
         self.assertLess(data.index.min(), fresh.index.min())
         self.assertTrue((data["Dividends_lag1"] == 0.0).all())
 
+    def _make_ohlcv_until(self, last_date: str, periods: int = 60) -> pd.DataFrame:
+        """last_date で終わる平日の足を作る"""
+        df = self._make_ohlcv(periods)
+        df.index = pd.bdate_range(end=last_date, periods=periods)
+        return df
+
+    @patch("src.market_data.pipeline.fetch_pageview_features", return_value=None)
+    @patch("src.market_data.pipeline.fetch_news_sentiment_with_llm", return_value=None)
+    @patch("src.market_data.pipeline.fetch_additional_macro_features", return_value=None)
+    @patch("src.market_data.pipeline.fetch_cross_asset_features", return_value=None)
+    @patch("src.market_data.pipeline.get_stock_data")
+    @patch("src.market_data.pipeline.get_raw_ohlcv_from_db")
+    def test_stale_db_bars_with_empty_diff_are_skipped(
+        self,
+        mock_from_db,
+        mock_get_data,
+        _mock_cross_asset,
+        _mock_macro,
+        _mock_sentiment,
+        _mock_pageview,
+    ):
+        """差分が空で DB の最新の足が平日で N 日を超えて古ければ、特徴量を作らずスキップする（#815）"""
+        mock_from_db.return_value = self._make_ohlcv_until("2026-09-30")
+        mock_get_data.return_value = pd.DataFrame()
+
+        with self.assertLogs("src.market_data.pipeline", level="WARNING") as logs:
+            result = fetch_stock_data_with_features(
+                market="jp", symbol="5202", start_date="2021-10-20", end_date="2026-10-20"
+            )
+
+        self.assertIsNone(result)
+        stale_logs = [m for m in logs.output if "2026-09-30" in m]
+        self.assertEqual(len(stale_logs), 1)
+        self.assertIn("jp/5202", stale_logs[0])
+
+    @patch("src.market_data.pipeline.fetch_pageview_features", return_value=None)
+    @patch("src.market_data.pipeline.fetch_news_sentiment_with_llm", return_value=None)
+    @patch("src.market_data.pipeline.fetch_additional_macro_features", return_value=None)
+    @patch("src.market_data.pipeline.fetch_cross_asset_features", return_value=None)
+    @patch("src.market_data.pipeline.get_stock_data")
+    @patch("src.market_data.pipeline.get_raw_ohlcv_from_db")
+    def test_short_gap_with_empty_diff_still_builds_features(
+        self,
+        mock_from_db,
+        mock_get_data,
+        _mock_cross_asset,
+        _mock_macro,
+        _mock_sentiment,
+        _mock_pageview,
+    ):
+        """祝日明けのような1〜2平日の空きなら、差分が空でも今までどおり特徴量を作る（#815）"""
+        # 金曜 10-09 の足まで。月曜 10-12 は祝日、火曜 10-13 の朝に回す
+        mock_from_db.return_value = self._make_ohlcv_until("2026-10-09")
+        mock_get_data.return_value = pd.DataFrame()
+
+        result = fetch_stock_data_with_features(
+            market="jp", symbol="7203", start_date="2021-10-13", end_date="2026-10-13"
+        )
+
+        self.assertIsNotNone(result)
+
 
 class TestSaveFeaturesDb(_TmpDbTestCase):
     """save_features_to_db 関数のテスト"""
@@ -399,6 +460,40 @@ class TestRunBatchPipeline(_TmpDbTestCase):
             mock_save.assert_not_called()
 
         self.assertEqual(len(result.succeeded), 1)
+
+    @patch("src.market_data.pipeline.save_raw_ohlcv")
+    @patch("src.market_data.pipeline.save_features_to_db")
+    @patch("src.market_data.pipeline.fetch_pageview_features", return_value=None)
+    @patch("src.market_data.pipeline.fetch_news_sentiment_with_llm", return_value=None)
+    @patch("src.market_data.pipeline.fetch_additional_macro_features", return_value=None)
+    @patch("src.market_data.pipeline.fetch_cross_asset_features", return_value=None)
+    @patch("src.market_data.pipeline.get_stock_data")
+    @patch("src.market_data.pipeline.get_raw_ohlcv_from_db")
+    def test_batch_stale_bars_count_as_skip_without_db_write(
+        self,
+        mock_from_db,
+        mock_get_data,
+        _mock_cross_asset,
+        _mock_macro,
+        _mock_sentiment,
+        _mock_pageview,
+        mock_save,
+        mock_save_raw,
+    ):
+        """足が止まって差分も空の銘柄はスキップに数え、stock_features を上書きしない（#815）"""
+        from src.market_data.pipeline import run_batch_pipeline
+
+        ohlcv = self._make_ohlcv(60)
+        ohlcv.index = pd.bdate_range(end="2023-03-01", periods=60)
+        mock_from_db.return_value = ohlcv
+        mock_get_data.return_value = pd.DataFrame()
+
+        result = run_batch_pipeline(self._make_tasks()[:1])
+
+        self.assertEqual(len(result.skipped), 1)
+        self.assertEqual(len(result.succeeded), 0)
+        self.assertEqual(len(result.failed), 0)
+        mock_save.assert_not_called()
 
 
 if __name__ == "__main__":
