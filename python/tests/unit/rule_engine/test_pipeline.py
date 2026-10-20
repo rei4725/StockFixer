@@ -112,7 +112,10 @@ class TestRunRuleSignalPipeline(unittest.TestCase):
             patch("src.rule_engine.pipeline.load_effective_rules", return_value=effective_df),
             patch("src.rule_engine.pipeline.upsert_rule_signal"),
         ):
-            result = run_rule_signal_pipeline("jp", market_data_port=mock_port)
+            # 足の最後（2024-03-22）の日の回とする（今日だと足が止まった扱いになる）
+            result = run_rule_signal_pipeline(
+                "jp", signal_date=date(2024, 3, 22), market_data_port=mock_port
+            )
         self.assertEqual(len(result), 2)
         self.assertIn("signal_label", result[0])
 

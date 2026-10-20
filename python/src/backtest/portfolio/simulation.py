@@ -93,9 +93,14 @@ def _simulate_portfolio(
     eq_cash = initial_cash
     eq_holdings: dict[str, dict[str, Any]] = {}
 
+    # Issue #846: 評価と売却は、その日までの最後の値段（過去の方向にだけ埋めた値）で行う。
+    # 購入はその日に値段のある銘柄だけにする。
+    last_close_matrix = close_matrix.sort_index().ffill()
+
     for date in score_matrix.index:
         date_str = str(date)[:10]
         prices_today = close_matrix.loc[date].dropna()
+        last_prices = last_close_matrix.loc[date].dropna()
 
         # ─ リバランス ─
         if date_str in rebalance_set:
@@ -130,8 +135,8 @@ def _simulate_portfolio(
 
                 # 既存保有を全売却
                 for sym, pos in holdings.items():
-                    if sym in prices_today.index:
-                        cash += execution.sell_proceeds(pos["qty"], prices_today[sym])
+                    if sym in last_prices.index:
+                        cash += execution.sell_proceeds(pos["qty"], last_prices[sym])
 
                 holdings = {}
 
@@ -168,8 +173,8 @@ def _simulate_portfolio(
                 valid_syms = [s for s in scores_today.index if s in prices_today.index]
                 if valid_syms:
                     for sym, pos in eq_holdings.items():
-                        if sym in prices_today.index:
-                            eq_cash += execution.sell_proceeds(pos["qty"], prices_today[sym])
+                        if sym in last_prices.index:
+                            eq_cash += execution.sell_proceeds(pos["qty"], last_prices[sym])
                     eq_holdings = {}
                     eq_per = eq_cash / len(valid_syms)
                     for sym in valid_syms:
@@ -185,10 +190,10 @@ def _simulate_portfolio(
 
         # ─ 日次ポートフォリオ価値 ─
         pf_value = cash + sum(
-            pos["qty"] * prices_today.get(sym, pos.get("price", 0)) for sym, pos in holdings.items()
+            pos["qty"] * last_prices.get(sym, pos.get("price", 0)) for sym, pos in holdings.items()
         )
         eq_value = eq_cash + sum(
-            pos["qty"] * prices_today.get(sym, 0) for sym, pos in eq_holdings.items()
+            pos["qty"] * last_prices.get(sym, 0) for sym, pos in eq_holdings.items()
         )
 
         equity_rows.append(

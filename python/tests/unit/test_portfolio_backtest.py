@@ -295,6 +295,68 @@ class TestSimulatePortfolio(unittest.TestCase):
         assert isinstance(holdings, list)
 
 
+class TestSimulatePortfolioMissingPrice(unittest.TestCase):
+    """Issue #846: 値段の欠けた日は、その日までの最後の値段で評価・売却する。"""
+
+    def _run(self, score_matrix, close_matrix, rebalance_dates, top_n):
+        from src.backtest.portfolio import _simulate_portfolio
+
+        with patch(
+            "src.backtest.portfolio.simulation._get_portfolio_symbol_sector",
+            return_value="Technology",
+        ):
+            equity_df, _ = _simulate_portfolio(
+                score_matrix,
+                close_matrix,
+                rebalance_dates,
+                top_n=top_n,
+                initial_cash=10_000,
+                execution=ExecutionModel(TradingCosts(fee_rate=0.0)),
+                max_sector_positions=5,
+            )
+        return equity_df.set_index("date")
+
+    def test_missing_day_is_valued_at_last_price(self):
+        """欠けた日の評価が買値に戻らず、基準も0にならないこと"""
+        dates = pd.date_range("2026-01-05", periods=4, freq="B")
+        score_matrix = pd.DataFrame({"A": [0.5, 0.5, 0.5, 0.5]}, index=dates)
+        close_matrix = pd.DataFrame({"A": [100.0, 120.0, float("nan"), 130.0]}, index=dates)
+
+        equity = self._run(score_matrix, close_matrix, [dates[0]], top_n=1)
+
+        missing_day = str(dates[2])[:10]
+        assert equity.loc[missing_day, "portfolio_value"] == pytest.approx(12_000)
+        assert equity.loc[missing_day, "equal_weight_value"] == pytest.approx(12_000)
+
+    def test_rebalance_sells_missing_holding_at_last_price(self):
+        """リバランスの日に欠けた保有が最後の値段で現金に戻ること（戦略と基準）"""
+        dates = pd.date_range("2026-01-05", periods=3, freq="B")
+        score_matrix = pd.DataFrame({"A": [0.9, 0.9, 0.1], "B": [0.1, 0.1, 0.9]}, index=dates)
+        close_matrix = pd.DataFrame(
+            {"A": [100.0, 120.0, float("nan")], "B": [50.0, 50.0, 50.0]}, index=dates
+        )
+
+        equity = self._run(score_matrix, close_matrix, [dates[0], dates[2]], top_n=1)
+
+        rebalance_day = str(dates[2])[:10]
+        # 戦略: A を 100 株 @120 で売り 12,000 を B に回す
+        assert equity.loc[rebalance_day, "portfolio_value"] == pytest.approx(12_000)
+        # 基準: A 50 株 @120 + B 100 株 @50 = 11,000
+        assert equity.loc[rebalance_day, "equal_weight_value"] == pytest.approx(11_000)
+
+    def test_no_backfill_before_first_price(self):
+        """始めの日より前に値段が無い銘柄は、後ろの値で埋めて買わないこと"""
+        dates = pd.date_range("2026-01-05", periods=2, freq="B")
+        score_matrix = pd.DataFrame({"A": [0.9, 0.9]}, index=dates)
+        close_matrix = pd.DataFrame({"A": [float("nan"), 100.0]}, index=dates)
+
+        equity = self._run(score_matrix, close_matrix, [dates[0]], top_n=1)
+
+        first_day = str(dates[0])[:10]
+        assert equity.loc[first_day, "portfolio_value"] == pytest.approx(10_000)
+        assert equity.loc[first_day, "equal_weight_value"] == pytest.approx(10_000)
+
+
 class TestPlotPortfolio(unittest.TestCase):
     """plot_portfolio のテスト"""
 
