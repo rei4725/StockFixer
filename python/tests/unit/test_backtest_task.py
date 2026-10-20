@@ -124,27 +124,80 @@ class TestAdaptiveThresholdSeries(unittest.TestCase):
 
         self.assertTrue((threshold == 0.005).all())
 
+    _HISTORY = [0.005, -0.005] * 10
+    _CALM = [0.001] * 20
+    _VOLATILE = [0.020, -0.018, 0.022, -0.021, 0.019, -0.020, 0.018, -0.019, 0.017, 0.006]
+
     def test_high_volatility_expands_threshold(self):
-        pred = self._pred(
-            [0.001] * 20
-            + [0.020, -0.018, 0.022, -0.021, 0.019, -0.020, 0.018, -0.019, 0.017, 0.006]
-        )
+        """過去の基準より静かなら閾値を下げ、荒れていれば上げる"""
+        pred = self._pred(self._HISTORY + self._CALM + self._VOLATILE)
 
         threshold = _build_threshold_series(pred, base_threshold=0.005, window=20)
 
-        self.assertLess(threshold.iloc[19], 0.005)
+        self.assertLess(threshold.iloc[39], 0.005)
         self.assertGreater(threshold.iloc[-1], 0.005)
 
     def test_make_signal_suppresses_borderline_buy_in_high_volatility(self):
-        pred = self._pred(
-            [0.001] * 20
-            + [0.020, -0.018, 0.022, -0.021, 0.019, -0.020, 0.018, -0.019, 0.017, 0.006]
-        )
+        pred = self._pred(self._HISTORY + self._CALM + self._VOLATILE)
         task = ReturnRegressionTask(threshold=0.005, adaptive_window=20)
 
         signal = task.make_signal(pred)
 
         self.assertEqual(signal.iloc[-1], 0)
+
+    def _varying_pred(self, n: int) -> pd.Series:
+        values = [0.004 * ((i % 7) - 3) / 3 + 0.001 * (i % 3) for i in range(n)]
+        return self._pred(values)
+
+    def test_threshold_does_not_depend_on_future_predictions(self):
+        """日 t の閾値とシグナルは t より後の予測を変えても変わらない (#848)"""
+        pred = self._varying_pred(60)
+        cut = 40
+        future_changed = pred.copy()
+        future_changed.iloc[cut + 1 :] = future_changed.iloc[cut + 1 :] * 10.0
+        task = ReturnRegressionTask(threshold=0.003, adaptive_window=20)
+
+        threshold = _build_threshold_series(pred, base_threshold=0.003, window=20)
+        threshold_changed = _build_threshold_series(future_changed, base_threshold=0.003, window=20)
+
+        pd.testing.assert_series_equal(threshold.iloc[: cut + 1], threshold_changed.iloc[: cut + 1])
+        pd.testing.assert_series_equal(
+            task.make_signal(pred).iloc[: cut + 1],
+            task.make_signal(future_changed).iloc[: cut + 1],
+        )
+
+    def test_threshold_does_not_depend_on_series_length(self):
+        """日 t の閾値は系列が t で終わっていても同じになる"""
+        pred = self._varying_pred(60)
+        cut = 30
+
+        threshold = _build_threshold_series(pred, base_threshold=0.003, window=20)
+        threshold_truncated = _build_threshold_series(
+            pred.iloc[: cut + 1], base_threshold=0.003, window=20
+        )
+
+        pd.testing.assert_series_equal(threshold.iloc[: cut + 1], threshold_truncated)
+
+    def test_zero_threshold_signal_is_sign_of_prediction(self):
+        """閾値 0 のシグナルは予測の符号そのまま (動的調整は効かない)"""
+        pred = self._varying_pred(60)
+        task = ReturnRegressionTask(threshold=0.0, adaptive_window=20)
+
+        signal = task.make_signal(pred)
+
+        expected = pd.Series(0, index=pred.index, name="signal")
+        expected[pred > 0] = 1
+        expected[pred < 0] = -1
+        pd.testing.assert_series_equal(signal, expected)
+
+    def test_first_valid_window_uses_unit_scale(self):
+        """基準がまだ無い初めの区間は scale 1.0 (base の閾値のまま)"""
+        pred = self._varying_pred(60)
+
+        threshold = _build_threshold_series(pred, base_threshold=0.003, window=20)
+
+        # min_periods=10 なので rolling std は index 9 から。基準はその翌日から
+        self.assertTrue((threshold.iloc[:10] == 0.003).all())
 
 
 class TestBacktestTaskProtocol(unittest.TestCase):
