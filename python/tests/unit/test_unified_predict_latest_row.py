@@ -211,7 +211,10 @@ class TestReadersDropUndeterminedY(unittest.TestCase):
     def test_backtest_file_source_drops_nan_y(self):
         from src.backtest.pipeline.features import load_features
 
-        with patch("src.utils.db.load_stock_features", return_value=self._stored_frame()):
+        with (
+            patch("src.utils.db.load_stock_features", return_value=self._stored_frame()),
+            patch("src.market_data.loader.get_raw_ohlcv_from_db", return_value=None),
+        ):
             df = load_features("us", "AAPL", "file")
 
         self.assertEqual(len(df), 3)

@@ -162,6 +162,11 @@ class Settings(BaseSettings):
     # 予測変化率の絶対値がこの倍率 × ATR/現在価格 を超えたら丸める。
     PREDICTION_ATR_CLIP_MULTIPLIER: float = Field(default=3.0)
 
+    # ---------- 日次データ取得の失敗判定（orchestration/jobs/daily.py [1/6]） ----------
+    # 取得のスキップ+エラーが対象銘柄数のこの割合を超えた日は CRITICAL の失敗にし、
+    # 古い特徴量での予測保存を止める（#811）。
+    DAILY_FETCH_MAX_UNAVAILABLE_RATIO: float = Field(default=0.5)
+
     # ---------- スケジューラリトライ設定 ----------
     SCHEDULER_MAX_RETRIES: int = Field(default=3)
     SCHEDULER_RETRY_BASE_WAIT_SECONDS: float = Field(default=30.0)
@@ -172,6 +177,11 @@ class Settings(BaseSettings):
 
     # ---------- センチメント特徴量（R-404） ----------
     SENTIMENT_LOOKBACK_DAYS: int = Field(default=30)
+
+    # ---------- 足の止まりの判定（#815） ----------
+    # 差分の足が空で、DB の最新の足があるべき最新の営業日より平日でこの日数を超えて古ければ、
+    # 特徴量を作らずスキップする。祝日の分の余裕を取る
+    STALE_BARS_MAX_WEEKDAYS: int = Field(default=3)
 
     # ---------- バックテストのデフォルトスリッページ（#494・片道率） ----------
     # 流動性差を反映: 米大型株はタイト、日本株はやや広い。
@@ -306,12 +316,14 @@ DRIFT_ALERT_THRESHOLD: float = settings.DRIFT_ALERT_THRESHOLD
 
 PREDICTION_MAX_WORKERS: int = settings.PREDICTION_MAX_WORKERS
 PREDICTION_ATR_CLIP_MULTIPLIER: float = settings.PREDICTION_ATR_CLIP_MULTIPLIER
+DAILY_FETCH_MAX_UNAVAILABLE_RATIO: float = settings.DAILY_FETCH_MAX_UNAVAILABLE_RATIO
 SCHEDULER_MAX_RETRIES: int = settings.SCHEDULER_MAX_RETRIES
 SCHEDULER_RETRY_BASE_WAIT_SECONDS: float = settings.SCHEDULER_RETRY_BASE_WAIT_SECONDS
 VOLUME_FILTER_WINDOW_DAYS: int = settings.VOLUME_FILTER_WINDOW_DAYS
 VOLUME_FILTER_MULTIPLIER: float = settings.VOLUME_FILTER_MULTIPLIER
 AUTO_PROMOTE_MODEL: bool = flags.AUTO_PROMOTE_MODEL
 SENTIMENT_LOOKBACK_DAYS: int = settings.SENTIMENT_LOOKBACK_DAYS
+STALE_BARS_MAX_WEEKDAYS: int = settings.STALE_BARS_MAX_WEEKDAYS
 DEFAULT_SLIPPAGE_US: float = settings.DEFAULT_SLIPPAGE_US
 DEFAULT_SLIPPAGE_JP: float = settings.DEFAULT_SLIPPAGE_JP
 DB_LOG_RETENTION_DAYS: int = settings.DB_LOG_RETENTION_DAYS
