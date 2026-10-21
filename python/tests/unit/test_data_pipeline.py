@@ -380,6 +380,166 @@ class TestFetchStockDataWithFeatures(_TmpDbTestCase):
 
         self.assertIsNotNone(result)
 
+    def _make_split_case(self):
+        """2分割の前の DB の足、分割の行を含む差分の足、取り直した全期間の足を作る"""
+        ohlcv = self._make_ohlcv(66)
+        adjusted = ohlcv.copy()
+        for col in ("Open", "High", "Low", "Close"):
+            adjusted[col] = adjusted[col] / 2.0
+        adjusted["Dividends"] = 0.0
+        adjusted["Stock Splits"] = 0.0
+        adjusted.iloc[60, adjusted.columns.get_loc("Stock Splits")] = 2.0
+        db_bars = ohlcv.iloc[:60]
+        fresh = adjusted.iloc[60:].copy()
+        return db_bars, fresh, adjusted
+
+    @patch("src.market_data.pipeline.fetch_pageview_features", return_value=None)
+    @patch("src.market_data.pipeline.fetch_news_sentiment_with_llm", return_value=None)
+    @patch("src.market_data.pipeline.fetch_additional_macro_features", return_value=None)
+    @patch("src.market_data.pipeline.fetch_cross_asset_features", return_value=None)
+    @patch("src.market_data.pipeline.get_stock_data")
+    @patch("src.market_data.pipeline.should_fetch_fresh_data", return_value=True)
+    @patch("src.market_data.pipeline.get_raw_ohlcv_from_db")
+    def test_split_in_diff_refetches_full_history(
+        self,
+        mock_from_db,
+        _mock_fresh_check,
+        mock_get_data,
+        _mock_cross_asset,
+        _mock_macro,
+        _mock_sentiment,
+        _mock_pageview,
+    ):
+        """差分の足に分割の行があれば全期間を取り直し、終値に分割の比の段差を残さない（#817）"""
+        db_bars, fresh, adjusted = self._make_split_case()
+        mock_from_db.return_value = db_bars
+        mock_get_data.side_effect = [fresh, adjusted]
+
+        with self.assertLogs("src.market_data.pipeline", level="INFO") as logs:
+            result = fetch_stock_data_with_features(
+                market="us",
+                symbol="NVDA",
+                start_date="2023-01-01",
+                end_date="2023-03-07",
+                defer_raw_save=True,
+            )
+
+        self.assertEqual(mock_get_data.call_count, 2)
+        refetch_args = mock_get_data.call_args_list[1].args
+        self.assertEqual(refetch_args[2], "2023-01-01")
+        self.assertEqual(refetch_args[3], "2023-03-07")
+        self.assertIsNotNone(result)
+        _market, _symbol, data, raw, _quality = result
+        # market_data_raw は取り直した全期間の足で上書きする
+        self.assertEqual(len(raw), len(adjusted))
+        self.assertAlmostEqual(raw["Close"].iloc[0], adjusted["Close"].iloc[0])
+        # つないだ表の終値に分割の比（約半分）の段差が無い
+        self.assertLess(data["Close_lag1"].pct_change().abs().max(), 0.1)
+        refetch_logs = [m for m in logs.output if "us/NVDA" in m and "2.0" in m]
+        self.assertEqual(len(refetch_logs), 1)
+
+    @patch("src.market_data.pipeline.save_raw_ohlcv")
+    @patch("src.market_data.pipeline.fetch_pageview_features", return_value=None)
+    @patch("src.market_data.pipeline.fetch_news_sentiment_with_llm", return_value=None)
+    @patch("src.market_data.pipeline.fetch_additional_macro_features", return_value=None)
+    @patch("src.market_data.pipeline.fetch_cross_asset_features", return_value=None)
+    @patch("src.market_data.pipeline.get_stock_data")
+    @patch("src.market_data.pipeline.should_fetch_fresh_data", return_value=True)
+    @patch("src.market_data.pipeline.get_raw_ohlcv_from_db")
+    def test_split_refetch_saves_full_history_without_defer(
+        self,
+        mock_from_db,
+        _mock_fresh_check,
+        mock_get_data,
+        _mock_cross_asset,
+        _mock_macro,
+        _mock_sentiment,
+        _mock_pageview,
+        mock_save_raw,
+    ):
+        """defer_raw_save=False でも、取り直した全期間の足を market_data_raw に保存する（#817）"""
+        db_bars, fresh, adjusted = self._make_split_case()
+        mock_from_db.return_value = db_bars
+        mock_get_data.side_effect = [fresh, adjusted]
+
+        result = fetch_stock_data_with_features(
+            market="us", symbol="NVDA", start_date="2023-01-01", end_date="2023-03-07"
+        )
+
+        self.assertIsNotNone(result)
+        mock_save_raw.assert_called_once()
+        self.assertEqual(len(mock_save_raw.call_args.args[2]), len(adjusted))
+
+    @patch("src.market_data.pipeline.save_raw_ohlcv")
+    @patch("src.market_data.pipeline.fetch_pageview_features", return_value=None)
+    @patch("src.market_data.pipeline.fetch_news_sentiment_with_llm", return_value=None)
+    @patch("src.market_data.pipeline.fetch_additional_macro_features", return_value=None)
+    @patch("src.market_data.pipeline.fetch_cross_asset_features", return_value=None)
+    @patch("src.market_data.pipeline.get_stock_data")
+    @patch("src.market_data.pipeline.should_fetch_fresh_data", return_value=True)
+    @patch("src.market_data.pipeline.get_raw_ohlcv_from_db")
+    def test_split_refetch_failure_skips_symbol(
+        self,
+        mock_from_db,
+        _mock_fresh_check,
+        mock_get_data,
+        _mock_cross_asset,
+        _mock_macro,
+        _mock_sentiment,
+        _mock_pageview,
+        mock_save_raw,
+    ):
+        """取り直しに失敗したら、段差のある足で特徴量を作らず、差分の足も保存せずスキップする（#817）"""
+        db_bars, fresh, _adjusted = self._make_split_case()
+        for refetched in (None, pd.DataFrame()):
+            mock_from_db.return_value = db_bars
+            mock_get_data.side_effect = [fresh, refetched]
+
+            result = fetch_stock_data_with_features(
+                market="us", symbol="NVDA", start_date="2023-01-01", end_date="2023-03-07"
+            )
+
+            self.assertIsNone(result)
+        mock_save_raw.assert_not_called()
+
+    @patch("src.market_data.pipeline.fetch_pageview_features", return_value=None)
+    @patch("src.market_data.pipeline.fetch_news_sentiment_with_llm", return_value=None)
+    @patch("src.market_data.pipeline.fetch_additional_macro_features", return_value=None)
+    @patch("src.market_data.pipeline.fetch_cross_asset_features", return_value=None)
+    @patch("src.market_data.pipeline.get_stock_data")
+    @patch("src.market_data.pipeline.should_fetch_fresh_data", return_value=True)
+    @patch("src.market_data.pipeline.get_raw_ohlcv_from_db")
+    def test_diff_without_split_fetches_only_diff(
+        self,
+        mock_from_db,
+        _mock_fresh_check,
+        mock_get_data,
+        _mock_cross_asset,
+        _mock_macro,
+        _mock_sentiment,
+        _mock_pageview,
+    ):
+        """分割の無い差分では、今までどおり差分だけを取り、差分だけを保存に回す（#817）"""
+        ohlcv = self._make_ohlcv(66)
+        fresh = ohlcv.iloc[60:].copy()
+        fresh["Dividends"] = 0.0
+        fresh["Stock Splits"] = 0.0
+        mock_from_db.return_value = ohlcv.iloc[:60]
+        mock_get_data.return_value = fresh
+
+        result = fetch_stock_data_with_features(
+            market="us",
+            symbol="AAPL",
+            start_date="2023-01-01",
+            end_date="2023-03-07",
+            defer_raw_save=True,
+        )
+
+        mock_get_data.assert_called_once()
+        self.assertEqual(mock_get_data.call_args.args[2], "2023-03-02")
+        self.assertIsNotNone(result)
+        self.assertEqual(len(result[3]), 6)
+
 
 class TestSaveFeaturesDb(_TmpDbTestCase):
     """save_features_to_db 関数のテスト"""
