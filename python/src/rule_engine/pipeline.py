@@ -24,6 +24,7 @@ from src.rule_engine.rules import (
     VolatilityBreakoutRule,
     VolumeBreakoutRule,
 )
+from src.rule_engine.types import RuleSignalBatch, UnavailableRuleSymbol
 from src.utils.data_path_utils import get_ticker
 from src.utils.db.rule_results import load_effective_rules, upsert_rule_signal
 from src.utils.logger import get_logger
@@ -60,21 +61,22 @@ def _get_today_signal(
     rule_name: str,
     market_data_port: OHLCVWithIndicatorsPort,
     signal_date: date | None = None,
-) -> tuple[int, float | None] | None:
+) -> tuple[int, float] | None:
     """当日のシグナルと終値を返す。Returns: (signal, price) signal は 1=buy, -1=sell, 0=hold
 
-    signal_date を渡したとき、最後の足が古すぎれば None を返す（シグナルを出さない）。
+    未知のルール・データ不足、または signal_date を渡したときに最後の足が古すぎれば
+    None を返す（シグナルを出さない。HOLD とは分ける #822）。
     """
     rule = _RULE_INSTANCES.get(rule_name)
     if rule is None:
         logger.warning(f"未知のルール: {rule_name}")
-        return 0, None
+        return None
 
     ticker = get_ticker(market, symbol)
     df = market_data_port.get_ohlcv_with_indicators(ticker, _LOOKBACK_DAYS)
     if df is None or df.empty or len(df) < 20:
         logger.warning(f"データ不足: {ticker}")
-        return 0, None
+        return None
 
     if signal_date is not None and isinstance(df.index, pd.DatetimeIndex):
         last_bar = pd.Timestamp(df.index[-1]).date()
@@ -111,7 +113,25 @@ def run_rule_signal_pipeline(
         signal_date: シグナル日付（Noneで今日）
 
     Returns:
-        各銘柄のシグナル情報リスト
+        各銘柄のシグナル情報リスト（シグナルを出せなかった銘柄は含まない）
+    """
+    return generate_rule_signals(
+        market, min_win_rate, min_net_profit, signal_date, market_data_port
+    ).signals
+
+
+def generate_rule_signals(
+    market: str,
+    min_win_rate: float = 0.5,
+    min_net_profit: float = 0.0,
+    signal_date: date | None = None,
+    market_data_port: OHLCVWithIndicatorsPort | None = None,
+) -> RuleSignalBatch:
+    """
+    run_rule_signal_pipeline と同じくシグナルを生成・保存し、出せなかった銘柄も返す（#822）。
+
+    データ不足・未知のルール・足の停止・例外の銘柄は HOLD として保存せず、
+    unavailable に入れる。total は対象の銘柄数。
     """
     if market_data_port is None:
         raise ValueError(
@@ -124,10 +144,11 @@ def run_rule_signal_pipeline(
     effective_df = load_effective_rules(market, min_win_rate, min_net_profit)
     if effective_df.empty:
         logger.warning("有効なルールを持つ銘柄がありません（週次評価を先に実行してください）")
-        return []
+        return RuleSignalBatch()
 
     logger.info(f"シグナル生成: {len(effective_df)} 銘柄 ({market})")
     results = []
+    unavailable: list[UnavailableRuleSymbol] = []
 
     for _, row in effective_df.iterrows():
         symbol = row["symbol"]
@@ -137,6 +158,7 @@ def run_rule_signal_pipeline(
         try:
             today = _get_today_signal(market, symbol, rule_name, market_data_port, signal_date)
             if today is None:
+                unavailable.append(UnavailableRuleSymbol(symbol, rule_name, "シグナルなし"))
                 continue
             signal, price = today
             upsert_rule_signal(signal_date, market, symbol, rule_name, signal, price)
@@ -157,5 +179,6 @@ def run_rule_signal_pipeline(
 
         except Exception as exc:
             logger.error(f"  {symbol} シグナル生成失敗: {exc}", exc_info=True)
+            unavailable.append(UnavailableRuleSymbol(symbol, rule_name, "例外"))
 
-    return results
+    return RuleSignalBatch(signals=results, unavailable=unavailable, total=len(effective_df))
