@@ -65,7 +65,9 @@ def fetch_stock_data_with_features(
         defer_raw_save: Trueの場合、raw OHLCVのDB保存を行わず呼び出し元に委譲する
 
     Returns:
-        (market, symbol, data, raw_data_to_save) のタプル。失敗時はNone。
+        (market, symbol, data, raw_data_to_save, quality_result) のタプル。失敗時はNone。
+        defer_raw_save=True で足を取れたが特徴量を作れなかったときは、取れた足を
+        呼び出し元が保存できるよう data と quality_result を None にしたタプルを返す（#840）。
     """
     raw_data_to_save = None
 
@@ -234,7 +236,7 @@ def fetch_stock_data_with_features(
         logger.warning(
             f"特徴量生成をスキップ: {market}/{symbol} " f"（{len(df)}行 < 最低{_MIN_ROWS}行）"
         )
-        return None
+        return _raw_only_result(market, symbol, raw_data_to_save)
 
     logger.info(f"特徴量生成（全数値列ラグ特徴量）... {market}/{symbol} ({len(df)}行)")
     X, y = create_basic_lag_features(df, n_lags=10, feature_cols=None)
@@ -246,7 +248,7 @@ def fetch_stock_data_with_features(
         logger.warning(
             f"特徴量生成に失敗しました: {market}/{symbol} " f"（元データ {len(df)}行, {detail}）"
         )
-        return None
+        return _raw_only_result(market, symbol, raw_data_to_save)
 
     # 最新日の行は翌日の終値が未確定のため create_basic_lag_features の dropna で
     # 落ちる。予測は最新日の行で行う必要があるため、y を NaN のまま末尾に足す。
@@ -272,6 +274,13 @@ def fetch_stock_data_with_features(
     data["y"] = y
 
     return (market, symbol, data, raw_data_to_save, quality_result)
+
+
+def _raw_only_result(market: str, symbol: str, raw_data_to_save) -> Optional[tuple]:
+    """特徴量を作れなかった銘柄の結果を返す。保存を任された足が無ければ None。"""
+    if raw_data_to_save is None or raw_data_to_save.empty:
+        return None
+    return (market, symbol, None, raw_data_to_save, None)
 
 
 def _count_weekdays_behind(db_latest_date: pd.Timestamp, end_date: str) -> int:
@@ -457,9 +466,11 @@ def run_batch_pipeline(
                 symbol=symbol,
                 defer_raw_save=True,
             )
-            if result is None:
+            if result is None or result[2] is None:
                 logger.info(f"[データ取得スキップ] {market}/{symbol}")
-                return {"market": market, "symbol": symbol, "status": "skip"}
+                # 特徴量を作れなくても、取れた足はフェーズ2で market_data_raw に保存する（#840）
+                raw_data = result[3] if result is not None else None
+                return {"market": market, "symbol": symbol, "status": "skip", "raw_data": raw_data}
             logger.info(f"[データ取得完了] {market}/{symbol}")
             return {"market": market, "symbol": symbol, "status": "success", "data": result}
         except Exception as e:
@@ -513,6 +524,16 @@ def run_batch_pipeline(
         return batch_result
 
     # フェーズ2: DB書き込み（逐次） - DuckDB排他ロック制約のため直列実行
+    # 特徴量をスキップした銘柄も、取れた足だけは保存する。スキップの数え方は変えない（#840）
+    skipped_raw = [r for r in batch_result.skipped if r.get("raw_data") is not None]
+    if skipped_raw:
+        logger.info(f"Raw保存開始（特徴量スキップ分） 対象件数: {len(skipped_raw)}")
+    for r in skipped_raw:
+        try:
+            save_raw_ohlcv(r["market"], r["symbol"], r["raw_data"])
+        except Exception as e:
+            logger.error(f"[Raw保存エラー] {r['market']}/{r['symbol']}: {e}", exc_info=True)
+
     success_data = [r for r in batch_result.succeeded if r.get("data")]
     logger.info(f"DB書き込み開始（逐次） 対象件数: {len(success_data)}")
 
