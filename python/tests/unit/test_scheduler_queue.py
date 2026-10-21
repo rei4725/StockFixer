@@ -656,6 +656,95 @@ def test_load_state_with_non_dict_state(tmp_path):
     assert manager._state == {"events": []}
 
 
+# ============================================
+# 複数のプロセス・スレッドからの状態ファイルの扱い（#826）
+# ============================================
+
+
+def _build_once_daily_config(counter: dict[str, int]):
+    def _func():
+        counter["n"] = counter.get("n", 0) + 1
+
+    return {
+        "daily_auto_order": {
+            "func": _func,
+            "period": "daily",
+            "day_of_week": "mon-fri",
+            "hour": 8,
+            "minute": 50,
+            "recovery_delay_minutes": 10,
+            "max_executions_per_period": 1,
+            "max_retries": 0,
+            "backfill": True,
+        }
+    }
+
+
+def test_other_manager_success_is_counted_by_run_job_and_should_recover(tmp_path):
+    """手での即時実行（別の manager）の成功を、常駐の manager が数えること（#826）"""
+    counter: dict[str, int] = {}
+    state_path = str(tmp_path / "scheduler_queue_state.json")
+    resident = SchedulerQueueManager(_build_once_daily_config(counter), state_file_path=state_path)
+    manual = SchedulerQueueManager(_build_once_daily_config(counter), state_file_path=state_path)
+    # 2026-10-19 は月曜
+    run_now = datetime(2026, 10, 19, 8, 30, tzinfo=resident.tz)
+    resident.now = lambda: run_now  # type: ignore[method-assign]
+    manual.now = lambda: run_now  # type: ignore[method-assign]
+
+    assert manual.run_job("daily_auto_order", reason="manual") is True
+
+    poll_now = datetime(2026, 10, 19, 9, 5, tzinfo=resident.tz)
+    assert resident.should_recover("daily_auto_order", now=poll_now) is False
+    assert resident.run_job("daily_auto_order", reason="scheduled") is False
+    assert counter["n"] == 1
+
+
+def test_alternating_managers_do_not_drop_each_others_events(tmp_path):
+    """2つの manager が交互に記録を足しても、どちらの記録も残ること（#826）"""
+    state_file = tmp_path / "scheduler_queue_state.json"
+    state_path = str(state_file)
+    first = SchedulerQueueManager(_build_config({}), state_file_path=state_path)
+    second = SchedulerQueueManager(_build_config({}), state_file_path=state_path)
+
+    first.run_job("daily_pipeline", reason="scheduled", period_key="2026-03-02")
+    second.run_job("daily_pipeline", reason="manual", period_key="2026-03-03")
+    first.run_job("daily_pipeline", reason="scheduled", period_key="2026-03-04")
+
+    saved = json.loads(state_file.read_text(encoding="utf-8"))
+    keys = [e["period_key"] for e in saved["events"] if e["status"] == "success"]
+    assert keys == ["2026-03-02", "2026-03-03", "2026-03-04"]
+
+    reloaded = SchedulerQueueManager(_build_config({}), state_file_path=state_path)
+    for key in ("2026-03-02", "2026-03-03", "2026-03-04"):
+        assert reloaded.has_success("daily_pipeline", key) is True
+
+
+def test_corrupted_state_file_stops_recovery_and_logs_error(tmp_path, caplog):
+    """途中で切れた状態ファイルは退避し、ERROR を出して補完を止めること（#826）"""
+    counter: dict[str, int] = {}
+    state_path = tmp_path / "scheduler_queue_state.json"
+    state_path.write_text('{"events": [{"job_id": "daily_auto_order", "sta', encoding="utf-8")
+
+    with caplog.at_level("ERROR", logger="scheduler"):
+        manager = SchedulerQueueManager(
+            _build_once_daily_config(counter), state_file_path=str(state_path)
+        )
+    assert any(r.levelname == "ERROR" for r in caplog.records)
+    quarantined = list(tmp_path.glob("scheduler_queue_state.json.corrupt-*"))
+    assert len(quarantined) == 1
+
+    # 2026-10-20 は火曜。当日分も前日分も、記録が無ければ補完の対象になる時刻
+    poll_now = datetime(2026, 10, 20, 9, 5, tzinfo=manager.tz)
+    assert manager.should_recover("daily_auto_order", now=poll_now) is False
+    assert manager.get_missed_past_periods("daily_auto_order", now=poll_now) == []
+
+    # 定時のジョブは止めない。書いた後も補完は止めたまま
+    manager.now = lambda: poll_now  # type: ignore[method-assign]
+    assert manager.run_job("daily_auto_order", reason="scheduled") is True
+    assert counter["n"] == 1
+    assert manager.get_missed_past_periods("daily_auto_order", now=poll_now) == []
+
+
 def test_run_job_error_propagates(tmp_path):
     """func が例外を出した場合、例外が再送出されること"""
     state_path = tmp_path / "state.json"

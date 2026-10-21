@@ -17,6 +17,7 @@ from src.infrastructure.persistence.prediction_result_repository import (
 )
 from src.infrastructure.persistence.trade_diff_repository import PostgresTradeDiffSink
 from src.reporting.types import MonthlyReportSummary
+from src.rule_engine.types import RuleSignalBatch
 
 
 class TestRunAutoTradeCompositionRoot(unittest.TestCase):
@@ -278,7 +279,9 @@ class TestRunDailyRuleSignalsCompositionRoot(unittest.TestCase):
             captured.update(kwargs)
             return {"buy_orders": 0, "sell_orders": 0}
 
-        with patch("src.rule_engine.pipeline.run_rule_signal_pipeline", return_value=[]), patch(
+        with patch(
+            "src.rule_engine.pipeline.generate_rule_signals", return_value=RuleSignalBatch()
+        ), patch(
             "src.trading.rule_execution.execute_rule_paper_trades",
             side_effect=_fake_execute_rule_paper_trades,
         ), patch(
