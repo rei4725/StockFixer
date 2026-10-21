@@ -72,9 +72,8 @@ class TestPredictSingleStockWithMocks(unittest.TestCase):
         ohlcv = _make_ohlcv(periods)
         mock_get_port.return_value.get_stock_data.return_value = ohlcv
 
-        hist_df = pd.DataFrame(
-            {"Close": [current_price]}, index=pd.date_range("2024-03-01", periods=1)
-        )
+        # 基準の値段の足は予想に使う足の最後の日と同じ日（#867）
+        hist_df = pd.DataFrame({"Close": [current_price]}, index=ohlcv.index[-1:])
         ticker_obj = MagicMock()
         ticker_obj.history.return_value = hist_df
         mock_yf.Ticker.return_value = ticker_obj
@@ -244,9 +243,10 @@ class TestPredictSingleStockEdgeCases(unittest.TestCase):
 
         mock_subdir.return_value = "/models/us_AAPL"
         mock_exists.return_value = True
-        mock_get_port.return_value.get_stock_data.return_value = _make_ohlcv(30)
+        ohlcv = _make_ohlcv(30)
+        mock_get_port.return_value.get_stock_data.return_value = ohlcv
 
-        hist_df = pd.DataFrame({"Close": [100.0]}, index=pd.date_range("2024-01-01", periods=1))
+        hist_df = pd.DataFrame({"Close": [100.0]}, index=ohlcv.index[-1:])
         mock_yf.Ticker.return_value = MagicMock()
         mock_yf.Ticker.return_value.history.return_value = hist_df
 
