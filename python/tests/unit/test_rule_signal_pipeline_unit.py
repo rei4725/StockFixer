@@ -381,22 +381,26 @@ class TestExecuteRulePaperTrades(unittest.TestCase):
             )
         self.assertEqual(result["skipped"], 1)
 
-    def test_broker_exception_is_caught(self):
+    def test_get_positions_failure_raises_without_orders(self):
+        """保有の読み込みに失敗したら、空の保有で進めずに例外で終わり、注文を出さない。"""
         from src.trading.rule_execution import execute_rule_paper_trades
 
         mock_broker = MagicMock()
         mock_broker.get_positions.side_effect = RuntimeError("broker error")
 
-        signals = [{"symbol": "7203", "signal": 1, "price": 1000.0}]
+        signals = [
+            {"symbol": "7203", "signal": 1, "price": 1000.0},
+            {"symbol": "6758", "signal": -1, "price": 2000.0},
+        ]
         with (
             patch("src.trading.rule_execution.PaperBroker", return_value=mock_broker),
             patch("src.trading.rule_execution.RiskManager", return_value=self._mock_risk()),
             patch("src.trading.rule_execution.get_ticker", return_value="7203.T"),
+            self.assertLogs("src.trading.rule_execution", level="ERROR"),
         ):
-            result = execute_rule_paper_trades(
-                signals, "jp", trade_diff_sink=InMemoryTradeDiffSink()
-            )
-        self.assertIsInstance(result, dict)
+            with self.assertRaises(RuntimeError):
+                execute_rule_paper_trades(signals, "jp", trade_diff_sink=InMemoryTradeDiffSink())
+        mock_broker.send_order.assert_not_called()
 
 
 if __name__ == "__main__":
