@@ -459,9 +459,12 @@ class TestRunRegimeLeverageDailyMarginCheck(unittest.TestCase):
 
     @patch("src.trading.regime_leverage_strategy.service.insert_snapshot")
     @patch("src.trading.regime_leverage_strategy.service.get_latest_snapshot")
-    def test_returns_none_and_skips_insert_when_day_low_is_nan(self, mock_latest, mock_insert):
-        """当日安値(Low)がNaN(データ劣化時)の場合、判定を行わずNoneを返し、DBにも
+    def test_raises_and_skips_insert_when_holding_and_day_low_is_nan(
+        self, mock_latest, mock_insert
+    ):
+        """保有中に当日安値(Low)がNaN(データ劣化時)の場合、判定を行わず例外を送出し、DBにも
         書き込まないこと(NaN比較は常にFalseになり誤ってnoop/exitと判定してしまうため)。
+        未保有のNone(何もしない)と区別し、スケジューラーのリトライ・Discord通知に乗せる(#860)。
         """
         from src.trading.regime_leverage_strategy.service import (
             run_regime_leverage_daily_margin_check,
@@ -486,9 +489,9 @@ class TestRunRegimeLeverageDailyMarginCheck(unittest.TestCase):
         fx_df = pd.DataFrame({"Close": [145.0]}, index=[idx[-1]])
         mock_port.get_forex_data.return_value = fx_df
 
-        result = run_regime_leverage_daily_margin_check(mock_port)
+        with self.assertRaises(RuntimeError):
+            run_regime_leverage_daily_margin_check(mock_port)
 
-        self.assertIsNone(result)
         mock_insert.assert_not_called()
 
 

@@ -322,7 +322,7 @@ def run_allocation_rebalance_job() -> None:
         outcome = run_allocation_rebalance(YFinanceMarketDataAdapter())
     except Exception as e:
         logger.error("配分戦略の実行に失敗しました: %s", e, exc_info=True)
-        return
+        raise
     logger.info("=== 配分戦略 実行完了 ===")
 
     if outcome is None:
@@ -365,7 +365,7 @@ def run_regime_leverage_weekly_job() -> None:
             )
     except Exception as e:
         logger.error("レジームレバレッジ戦略(週次)の実行に失敗しました: %s", e, exc_info=True)
-        return
+        raise
     logger.info("=== レジームレバレッジ戦略(週次) 実行完了 ===")
 
 
@@ -391,5 +391,5 @@ def run_regime_leverage_daily_margin_job() -> None:
             )
     except Exception as e:
         logger.error("レジームレバレッジ戦略(日次)の実行に失敗しました: %s", e, exc_info=True)
-        return
+        raise
     logger.info("=== レジームレバレッジ戦略(日次) 実行完了 ===")
