@@ -41,8 +41,8 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-# yfinance の配当・分割の列（出来事の無い日は 0）
-_CORPORATE_ACTION_COLUMNS = ("Dividends", "Stock Splits")
+# yfinance の配当・分割・ETF の分配（Capital Gains）の列（出来事の無い日は 0）
+_CORPORATE_ACTION_COLUMNS = ("Dividends", "Stock Splits", "Capital Gains")
 
 
 def fetch_stock_data_with_features(

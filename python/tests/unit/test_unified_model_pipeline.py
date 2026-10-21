@@ -140,6 +140,26 @@ class TestPrepareUnifiedFeatures(unittest.TestCase):
         self.assertNotIn("Dividends_lag1", X.columns)
         self.assertNotIn("Stock_Splits_lag1", X.columns)
 
+    def test_capital_gains_lag_columns_do_not_drop_rows(self):
+        """表に残る Capital_Gains のラグの列が全 NULL の銘柄も、値のある銘柄も行が残る（#839）"""
+        with_gains = _make_df(n=10)
+        with_gains["market"] = "jp"
+        with_gains["symbol"] = "1570"
+        with_gains["Capital_Gains_lag1"] = 0.0
+        with_gains["Capital_Gains_lag2"] = 0.0
+        without = _make_df(n=10)
+        without["symbol"] = "MSFT"
+        without["Capital_Gains_lag1"] = float("nan")
+        without["Capital_Gains_lag2"] = float("nan")
+        df = pd.concat([with_gains, without], ignore_index=True)
+
+        X, y = self._fn(df)
+
+        self.assertEqual(len(X), 20)
+        self.assertEqual(len(y), 20)
+        self.assertNotIn("Capital_Gains_lag1", X.columns)
+        self.assertNotIn("Capital_Gains_lag2", X.columns)
+
 
 class TestUnifiedEarningsMask(unittest.TestCase):
     @patch("src.prediction.unified_model_pipeline.get_market_data_port")
