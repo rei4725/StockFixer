@@ -10,7 +10,7 @@ from config.settings import PREDICTION_ATR_CLIP_MULTIPLIER, STALE_BARS_MAX_WEEKD
 from src.prediction.db import load_model_weights
 from src.prediction.manager import ModelManager
 from src.prediction.ports import get_market_data_port
-from src.prediction.predict_unified import _count_weekdays_behind
+from src.prediction.predict_unified import count_weekdays_behind
 from src.prediction.range_clipping import clip_diff_ratio_to_atr_range
 from src.prediction.types import HorizonResult, PredictionResult
 from src.utils.data_path_utils import get_models_subdir, get_ticker, normalize_col
@@ -99,7 +99,7 @@ def _is_stale_bars(market: str, symbol: str, df: pd.DataFrame) -> bool:
     if not isinstance(df.index, pd.DatetimeIndex) or df.empty:
         return False
     last_date = pd.Timestamp(df.index[-1])
-    stale_weekdays = _count_weekdays_behind(last_date)
+    stale_weekdays = count_weekdays_behind(last_date)
     if stale_weekdays <= STALE_BARS_MAX_WEEKDAYS:
         return False
     logger.warning(

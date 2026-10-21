@@ -1,5 +1,6 @@
 """predict_unified モジュールのユニットテスト"""
 
+import os
 import sys
 import unittest
 from unittest.mock import MagicMock, patch
@@ -105,15 +106,85 @@ class TestGetCachedModel(unittest.TestCase):
         self.assertIsNone(result)
 
     @patch("src.prediction.unified_model_pipeline.load_unified_model")
-    def test_caches_none_on_load_failure(self, mock_load):
-        """ロード失敗時も None がキャッシュされ、再ロードされないこと"""
+    def test_does_not_cache_none_on_load_failure(self, mock_load):
+        """ロード失敗時は None をキャッシュせず、次の呼び出しで再びロードを試みること"""
         from src.prediction.predict_unified import get_cached_model
 
         mock_load.side_effect = FileNotFoundError("見つかりません")
         get_cached_model("MissingModel")
         get_cached_model("MissingModel")
-        # FileNotFoundError が起きても再試行されない（キャッシュに None が入る）
-        mock_load.assert_called_once()
+        self.assertEqual(mock_load.call_count, 2)
+
+
+class TestGetCachedModelReload(unittest.TestCase):
+    """get_cached_model がディスク上のファイルの変化に追従すること（#887）"""
+
+    def setUp(self):
+        import tempfile
+
+        import src.prediction.predict_unified as mod
+
+        mod._model_cache.clear()
+        self._tmp = tempfile.TemporaryDirectory()
+        self.unified_dir = os.path.join(self._tmp.name, "unified")
+        os.makedirs(self.unified_dir)
+        dir_patcher = patch(
+            "src.prediction.predict_unified.get_models_dir", return_value=self._tmp.name
+        )
+        dir_patcher.start()
+        self.addCleanup(dir_patcher.stop)
+
+    def tearDown(self):
+        import src.prediction.predict_unified as mod
+
+        mod._model_cache.clear()
+        self._tmp.cleanup()
+
+    def _write_model(self, name: str, mtime: float) -> None:
+        path = os.path.join(self.unified_dir, f"{name}.joblib")
+        with open(path, "wb") as f:
+            f.write(b"model")
+        os.utime(path, (mtime, mtime))
+
+    @patch("src.prediction.unified_model_pipeline.load_unified_model")
+    def test_loads_after_file_appears(self, mock_load):
+        """ファイルが無くて None を返した後にファイルができたら、次の呼び出しで読み込むこと"""
+        from src.prediction.predict_unified import get_cached_model
+
+        new_model = MagicMock(name="new")
+        mock_load.side_effect = [FileNotFoundError("見つかりません"), new_model]
+
+        self.assertIsNone(get_cached_model("LateModel"))
+        self._write_model("LateModel", 1_700_000_000)
+        self.assertIs(get_cached_model("LateModel"), new_model)
+
+    @patch("src.prediction.unified_model_pipeline.load_unified_model")
+    def test_reloads_when_file_replaced(self, mock_load):
+        """キャッシュ後にファイルを置き替えたら（昇格・学習し直し）、新しいモデルを返すこと"""
+        from src.prediction.predict_unified import get_cached_model
+
+        old_model = MagicMock(name="old")
+        new_model = MagicMock(name="new")
+        mock_load.side_effect = [old_model, new_model]
+
+        self._write_model("SwapModel", 1_700_000_000)
+        self.assertIs(get_cached_model("SwapModel"), old_model)
+        self._write_model("SwapModel", 1_700_000_100)
+        self.assertIs(get_cached_model("SwapModel"), new_model)
+        self.assertEqual(mock_load.call_count, 2)
+
+    @patch("src.prediction.unified_model_pipeline.load_unified_model")
+    def test_does_not_reload_while_file_unchanged(self, mock_load):
+        """ファイルが変わらない間は読み直さないこと（銘柄ごとに読み込まない）"""
+        from src.prediction.predict_unified import get_cached_model
+
+        model = MagicMock(name="model")
+        mock_load.return_value = model
+
+        self._write_model("StableModel", 1_700_000_000)
+        for _ in range(5):
+            self.assertIs(get_cached_model("StableModel"), model)
+        mock_load.assert_called_once_with("StableModel")
 
 
 class TestPreloadModels(unittest.TestCase):
