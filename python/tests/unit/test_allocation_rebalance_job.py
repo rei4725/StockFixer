@@ -1,5 +1,7 @@
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from src.orchestration.jobs.periodic import run_allocation_rebalance_job
 
 
@@ -55,8 +57,10 @@ class TestRunAllocationRebalanceJob:
         "src.trading.allocation_strategy.service.run_allocation_rebalance",
         side_effect=Exception("network error"),
     )
-    def test_does_not_raise_on_service_failure(self, mock_run, mock_adapter_cls):
-        run_allocation_rebalance_job()  # 例外を送出しないことを確認
+    def test_reraises_on_service_failure(self, mock_run, mock_adapter_cls):
+        """例外は再送出し、スケジューラーのリトライ・Discord通知に乗せる(#860)。"""
+        with pytest.raises(Exception, match="network error"):
+            run_allocation_rebalance_job()
 
     @patch(
         "src.reporting.discord.discord_utils.send_allocation_rebalance_report",

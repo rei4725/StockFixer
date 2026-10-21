@@ -96,14 +96,46 @@ class TestBuildEquitySeries(unittest.TestCase):
 
         self.assertAlmostEqual(equity.iloc[0], _INITIAL)  # 現金 -10,000 + 評価 +10,000
 
-    def test_missing_price_excludes_position(self):
-        """価格データのない銘柄は評価から除外され現金のみになること"""
+    def test_missing_price_values_at_fill_price(self):
+        """価格データのない銘柄は0円でなく約定の値段で評価されること（#850）"""
         idx = _index()
         orders = _orders([("jp", "9999", 1, 10, 500.0, idx[0])])
 
         equity = build_equity_series(orders, lambda m, s: None, _INITIAL, idx)
 
-        self.assertAlmostEqual(equity.iloc[-1], _INITIAL - 5_000.0)
+        # 現金 -5,000 + 10株 × 約定 500円 = 差し引きゼロ
+        self.assertAlmostEqual(equity.iloc[0], _INITIAL)
+        self.assertAlmostEqual(equity.iloc[-1], _INITIAL)
+
+    def test_price_series_starting_after_buy_does_not_use_later_price(self):
+        """値段の系列が買った日より後に始まるとき、その前の保有日を後の値段で埋めないこと"""
+        idx = _index()
+        orders = _orders([("jp", "7203", 1, 10, 500.0, idx[0])])
+
+        def late_loader(market, symbol):
+            return pd.Series(600.0, index=idx[3:])
+
+        equity = build_equity_series(orders, late_loader, _INITIAL, idx)
+
+        # 値段の無い保有日は約定の 500円、値段が出てからは 600円
+        self.assertAlmostEqual(equity.iloc[0], _INITIAL)
+        self.assertAlmostEqual(equity.iloc[2], _INITIAL)
+        self.assertAlmostEqual(equity.iloc[3], _INITIAL + 1_000.0)
+        self.assertAlmostEqual(equity.iloc[-1], _INITIAL + 1_000.0)
+
+    def test_price_gap_uses_last_known_price(self):
+        """値段の系列が途中で切れたら、最後に分かる値段で評価すること"""
+        idx = _index()
+        orders = _orders([("jp", "7203", 1, 100, 100.0, idx[0])])
+
+        def ending_loader(market, symbol):
+            prices = pd.Series(100.0, index=idx[:5])
+            prices[idx[4]] = 120.0
+            return prices
+
+        equity = build_equity_series(orders, ending_loader, _INITIAL, idx)
+
+        self.assertAlmostEqual(equity.iloc[-1], _INITIAL + 2_000.0)
 
     def test_short_affects_cash_only(self):
         """SHORT（side=3）は現金にのみ反映され保有評価を持たないこと"""

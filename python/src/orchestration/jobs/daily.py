@@ -18,6 +18,7 @@ from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
     from src.domain.types import BatchResult
+    from src.rule_engine.types import RuleSignalBatch
 
 logger = get_logger(__name__)
 
@@ -37,6 +38,24 @@ def _raise_if_fetch_mostly_unavailable(total: int, batch_result: "BatchResult") 
         raise RuntimeError(
             f"取得できなかった銘柄が多すぎる: スキップ {len(batch_result.skipped)}"
             f" + エラー {len(batch_result.failed)} / 対象 {total}"
+            f"（線 {DAILY_FETCH_MAX_UNAVAILABLE_RATIO:.0%}）"
+        )
+
+
+def _raise_if_rule_signals_mostly_unavailable(batch: "RuleSignalBatch") -> None:
+    """シグナルを出せなかった銘柄が対象の線を超えたら RuntimeError を投げる（#822）。
+
+    データが取れない日に保有銘柄の SELL が出ないまま「完了」と記録されるのを止める。
+    線は日次の取得（#811）と同じ DAILY_FETCH_MAX_UNAVAILABLE_RATIO を使う。
+    """
+    from config.settings import DAILY_FETCH_MAX_UNAVAILABLE_RATIO
+
+    if batch.total <= 0:
+        return
+    unavailable = len(batch.unavailable)
+    if unavailable / batch.total > DAILY_FETCH_MAX_UNAVAILABLE_RATIO:
+        raise RuntimeError(
+            f"ルールシグナルを出せなかった銘柄が多すぎる: {unavailable} / 対象 {batch.total}"
             f"（線 {DAILY_FETCH_MAX_UNAVAILABLE_RATIO:.0%}）"
         )
 
@@ -548,11 +567,13 @@ def run_daily_rule_signals() -> None:
     try:
         from src.infrastructure.persistence.trade_diff_repository import PostgresTradeDiffSink
         from src.infrastructure.yfinance_market_data_adapter import YFinanceMarketDataAdapter
-        from src.rule_engine.pipeline import run_rule_signal_pipeline
+        from src.rule_engine.pipeline import generate_rule_signals
         from src.trading.rule_execution import execute_rule_paper_trades
 
         market_data_adapter = YFinanceMarketDataAdapter()
-        signals = run_rule_signal_pipeline(market=market, market_data_port=market_data_adapter)
+        batch = generate_rule_signals(market=market, market_data_port=market_data_adapter)
+        _raise_if_rule_signals_mostly_unavailable(batch)
+        signals = batch.signals
         trade_stats = execute_rule_paper_trades(
             signals=signals,
             market=market,
@@ -560,9 +581,11 @@ def run_daily_rule_signals() -> None:
             trade_diff_sink=PostgresTradeDiffSink(),
         )
         logger.info(
-            "=== 日次ルールシグナル完了: BUY=%s SELL=%s ===",
+            "=== 日次ルールシグナル完了: BUY=%s SELL=%s 取れなかった=%s 対象=%s ===",
             trade_stats["buy_orders"],
             trade_stats["sell_orders"],
+            len(batch.unavailable),
+            batch.total,
         )
     except Exception as e:
         logger.error("日次ルールシグナル失敗: %s", e, exc_info=True)

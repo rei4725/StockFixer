@@ -1,0 +1,16 @@
+# バックテスト結果を手元で見る UI（run_backtest_ui.py / run_backtest_ui.bat）だけの依存。
+# 本番の Docker イメージと CI には入れない。
+#
+# streamlit は pillow<13 を要るが、requirements.txt は脆弱性修正のため pillow>=13.0.0 を要る。
+# 同じ venv には入れられないので、requirements.txt とは別の venv に入れる。
+# run_backtest_ui.py は src/ を import するため、その venv には requirements.txt の依存も
+# pillow の行を除いて入れる（-r requirements.txt はここに書かない。pillow が衝突する）。
+#
+# 手順（python/ で）:
+#   py -m venv .venv-ui
+#   .venv-ui/Scripts/python -m pip install -r requirements-ui.txt
+#   requirements.txt から pillow の行を除いたものを同じ venv に入れる
+#   .venv-ui/Scripts/python -m streamlit run run_backtest_ui.py
+#
+# streamlit が pillow 13 以上を受けるようになったら、この行を requirements.txt に戻してよい。
+streamlit>=1.66.0
