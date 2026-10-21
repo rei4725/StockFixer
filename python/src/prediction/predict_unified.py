@@ -169,6 +169,77 @@ def _last_feature_date(df: pd.DataFrame) -> Optional[pd.Timestamp]:
     return pd.Timestamp(last_date)
 
 
+def _last_bar_date(hist: pd.DataFrame) -> Optional[pd.Timestamp]:
+    """yfinance の最後の足の取引所の日付。index が日時でなければ None。
+
+    yfinance の index は取引所のタイムゾーンの 0 時である。stock_features の
+    date 列も取引所の日付をタイムゾーン無しの 0 時で持つ（yf_client が
+    tz_localize(None) で落とす）ため、UTC へは変換せずタイムゾーンだけを落とす。
+    """
+    if not isinstance(hist.index, pd.DatetimeIndex) or len(hist.index) == 0:
+        return None
+    bar_date = pd.Timestamp(hist.index[-1])
+    if bar_date.tzinfo is not None:
+        bar_date = bar_date.tz_localize(None)
+    return bar_date.normalize()
+
+
+def _fetch_current_price(
+    market: str, symbol: str, feature_date: Optional[pd.Timestamp]
+) -> Optional[float]:
+    """
+    基準の値段（特徴量の最後の行の日の終値）を yfinance から取る。
+
+    取れない・最後の足が特徴量の最後の行と別の日のときは None を返す。
+    Close_lag1 は前の営業日の終値、y は変化率で、どちらも基準にならない（#845）。
+
+    Args:
+        market: 市場名
+        symbol: 銘柄コード
+        feature_date: 特徴量の最後の行の日付（不明なら None で、日付は比べない）
+
+    Returns:
+        終値。使えなければ None。
+    """
+    try:
+        yf_ticker = get_ticker(market, symbol)
+        hist = yf.Ticker(yf_ticker).history(period="1d")
+    except Exception:
+        logger.warning(
+            "現在価格取得失敗のため予想をスキップ: market=%s symbol=%s",
+            market,
+            symbol,
+            exc_info=True,
+        )
+        return None
+
+    if hist is None or hist.empty or "Close" not in hist.columns:
+        logger.warning("現在価格が空のため予想をスキップ: market=%s symbol=%s", market, symbol)
+        return None
+
+    bar_date = _last_bar_date(hist)
+    if feature_date is not None and bar_date is not None:
+        if feature_date.tzinfo is not None:
+            feature_date = feature_date.tz_localize(None)
+        feature_day = feature_date.normalize()
+        if bar_date != feature_day:
+            logger.warning(
+                "現在価格の足の日付が特徴量と合わないため予想をスキップ: market=%s symbol=%s "
+                "足の日付=%s 特徴量の最後の行の日付=%s",
+                market,
+                symbol,
+                bar_date.strftime("%Y-%m-%d"),
+                feature_day.strftime("%Y-%m-%d"),
+            )
+            return None
+
+    close = hist["Close"].iloc[-1]
+    if pd.isna(close):
+        logger.warning("現在価格が欠損のため予想をスキップ: market=%s symbol=%s", market, symbol)
+        return None
+    return float(close)
+
+
 def predict_with_unified_model(
     market: str,
     symbol: str,
@@ -243,31 +314,11 @@ def predict_with_unified_model(
     # 最新行を取得（必ずコピーを作成）
     latest_X = X.iloc[[-1]].copy()
 
-    # 現在価格をyfinanceからリアルタイムで取得
-    try:
-        yf_ticker = get_ticker(market, symbol)
-        ticker_obj = yf.Ticker(yf_ticker)
-        hist = ticker_obj.history(period="1d")
-        if not hist.empty:
-            current_price = float(hist["Close"].iloc[-1])
-        else:
-            # フォールバック: CSVのClose_lag1を使用
-            if "Close_lag1" in df.columns:
-                current_price = float(df["Close_lag1"].iloc[-1])
-            else:
-                current_price = float(df["y"].iloc[-2]) if len(df) > 1 else float(df["y"].iloc[-1])
-    except Exception:
-        logger.warning(
-            "現在価格取得失敗（フォールバック使用）: market=%s symbol=%s",
-            market,
-            symbol,
-            exc_info=True,
-        )
-        # エラー時はフォールバック
-        if "Close_lag1" in df.columns:
-            current_price = float(df["Close_lag1"].iloc[-1])
-        else:
-            current_price = float(df["y"].iloc[-2]) if len(df) > 1 else float(df["y"].iloc[-1])
+    # 基準の値段は特徴量の最後の行の日の終値。足の日付が合わない・取れないときは
+    # 1日ずれた値段で予想の値段を出さないよう、予想を出さない（#845）
+    current_price = _fetch_current_price(market, symbol, last_date)
+    if current_price is None:
+        return None
 
     # market_encoded列がない場合のみ追加（後方互換性）
     if "market_encoded" not in latest_X.columns:
