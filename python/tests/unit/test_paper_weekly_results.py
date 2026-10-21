@@ -107,6 +107,29 @@ class TestComputeWeeklyResults(unittest.TestCase):
         )
         # 1,000 株 × 10 円 = +10,000
         self.assertAlmostEqual(result["markets"]["jp"]["weekly_return"], 0.01)
+        self.assertEqual(result["markets"]["jp"]["valued_at_fill_price"], [])
+
+    def test_missing_price_is_not_counted_as_zero(self):
+        """値段の取れない保有は0円でなく約定の値段で評価し、その銘柄を結果に残すこと（#850）"""
+        orders = _orders(
+            [
+                ("jp", "7203", 1, 1000, 100.0, pd.Timestamp("2026-10-13")),
+                ("jp", "9999", 1, 1000, 100.0, pd.Timestamp("2026-10-13")),
+            ]
+        )
+
+        def loader(market, symbol):
+            return _price_loader(market, symbol) if symbol == "7203" else None
+
+        result = compute_weekly_results(
+            orders, loader, _INITIAL, date(2026, 10, 17), _benchmark_fetcher
+        )
+        jp = result["markets"]["jp"]
+        # 7203 の +10,000 だけ。9999 は約定の 100 円で評価し、代金 100,000 を損に数えない
+        self.assertAlmostEqual(jp["weekly_return"], 0.01)
+        self.assertAlmostEqual(jp["excess_return"], -0.01)
+        self.assertEqual(jp["valued_at_fill_price"], ["9999"])
+        self.assertEqual(result["markets"]["us"]["valued_at_fill_price"], [])
 
 
 class TestWritePaperWeeklyResults(unittest.TestCase):

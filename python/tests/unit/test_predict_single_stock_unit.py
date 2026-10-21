@@ -11,8 +11,8 @@ from src.prediction.types import PredictionResult
 
 
 def _make_ohlcv(periods=60):
-    """テスト用 OHLCV DataFrame を生成する"""
-    dates = pd.date_range("2024-01-01", periods=periods, freq="B")
+    """テスト用 OHLCV DataFrame を生成する（最後の足は直近の平日。古い足は予想しない #854）"""
+    dates = pd.bdate_range(end=pd.Timestamp.today().normalize(), periods=periods)
     return pd.DataFrame(
         {
             "Open": np.linspace(99, 119, periods),
@@ -81,7 +81,7 @@ class TestPredictSingleStockWithMocks(unittest.TestCase):
 
         mock_get_port.return_value.add_technical_indicators.return_value = ohlcv
         mock_get_port.return_value.fetch_cross_asset_features.return_value = None
-        dates = pd.date_range("2024-01-01", periods=periods, freq="B")
+        dates = ohlcv.index
         X = pd.DataFrame({"f1": range(periods), "f2": range(periods)}, index=dates)
         y = pd.Series(np.zeros(periods), index=dates)
         mock_get_port.return_value.create_basic_lag_features.return_value = (X, y)
