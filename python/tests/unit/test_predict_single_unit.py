@@ -12,7 +12,8 @@ import pandas as pd
 
 
 def _make_df(n: int = 60) -> pd.DataFrame:
-    idx = pd.date_range("2024-01-01", periods=n, freq="B")
+    # 最後の足は直近の平日（古い足は予想しない #854）
+    idx = pd.bdate_range(end=pd.Timestamp.today().normalize(), periods=n)
     close = np.linspace(1000, 1100, n)
     return pd.DataFrame(
         {

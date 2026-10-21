@@ -131,7 +131,7 @@ def _compute_and_save_unified_feature_selection(model, X: pd.DataFrame, y: pd.Se
     )
 
 
-_CORPORATE_ACTION_LAG_PREFIXES = ("Dividends_lag", "Stock_Splits_lag")
+_CORPORATE_ACTION_LAG_PREFIXES = ("Dividends_lag", "Stock_Splits_lag", "Capital_Gains_lag")
 
 
 def _warn_dropped_rows(valid: pd.Series, market: pd.Series, symbol: pd.Series) -> None:

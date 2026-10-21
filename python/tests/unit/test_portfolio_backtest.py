@@ -357,6 +357,98 @@ class TestSimulatePortfolioMissingPrice(unittest.TestCase):
         assert equity.loc[first_day, "equal_weight_value"] == pytest.approx(10_000)
 
 
+class TestPortfolioMarketSlippage(unittest.TestCase):
+    """Issue #847: 全市場の実行は、銘柄の鍵の市場ごとの既定スリッページで売買する。"""
+
+    _INITIAL_CASH = 1_000_000
+
+    def _run(self, symbols, market, slippage=None):
+        from src.backtest.portfolio import run_portfolio_backtest
+
+        dates = pd.date_range("2026-01-05", periods=3, freq="B")
+        prices = {"jp_7203": 100.0, "us_AAPL": 200.0}
+        score_matrix = pd.DataFrame({s: [0.5, 0.5, 0.5] for s in symbols}, index=dates)
+        close_matrix = pd.DataFrame({s: [prices[s]] * 3 for s in symbols}, index=dates)
+        all_symbols = [tuple(s.split("_", 1)) for s in symbols]
+
+        with (
+            patch("src.utils.db.stock_features.get_all_symbols", return_value=all_symbols),
+            patch(
+                "src.backtest.portfolio._build_signal_matrix",
+                return_value=(score_matrix, close_matrix),
+            ),
+            patch(
+                "src.backtest.portfolio._attach_regime_metrics",
+                side_effect=lambda eq, _close: (eq, {}),
+            ),
+            patch(
+                "src.backtest.portfolio.simulation._get_portfolio_symbol_sector",
+                return_value="Technology",
+            ),
+        ):
+            equity_df, _, _ = run_portfolio_backtest(
+                market=market,
+                top_n=len(symbols),
+                rebalance_freq="weekly",
+                initial_cash=self._INITIAL_CASH,
+                fee_rate=0.0,
+                slippage=slippage,
+            )
+        return equity_df.iloc[0]
+
+    def _expected_value(self, slippage_by_symbol, prices):
+        """各銘柄に予算を等分し、その銘柄のスリッページで買った直後の評価額。"""
+        budget = self._INITIAL_CASH / len(slippage_by_symbol)
+        value = float(self._INITIAL_CASH)
+        for sym, slip in slippage_by_symbol.items():
+            execution = ExecutionModel(TradingCosts(fee_rate=0.0, slippage_rate=slip))
+            qty = execution.max_affordable_qty(budget, prices[sym])
+            value += qty * prices[sym] - execution.buy_cost(qty, prices[sym])
+        return round(value, 2)
+
+    def test_all_markets_uses_per_symbol_market_default(self):
+        """market=None で jp_ は日本の既定、us_ は米国の既定で売買すること"""
+        from config.settings import DEFAULT_SLIPPAGE_JP, DEFAULT_SLIPPAGE_US
+
+        row = self._run(["jp_7203", "us_AAPL"], market=None)
+
+        expected = self._expected_value(
+            {"jp_7203": DEFAULT_SLIPPAGE_JP, "us_AAPL": DEFAULT_SLIPPAGE_US},
+            {"jp_7203": 100.0, "us_AAPL": 200.0},
+        )
+        assert row["portfolio_value"] == pytest.approx(expected)
+        assert row["equal_weight_value"] == pytest.approx(expected)
+
+    def test_all_markets_jp_only_matches_market_jp(self):
+        """日本株だけなら、market=None と market=jp の結果が同じこと"""
+        none_row = self._run(["jp_7203"], market=None)
+        jp_row = self._run(["jp_7203"], market="jp")
+        assert none_row["portfolio_value"] == pytest.approx(jp_row["portfolio_value"])
+
+    def test_explicit_market_unchanged(self):
+        """market=jp と us の明示は、それぞれの市場の既定を当てること"""
+        from config.settings import DEFAULT_SLIPPAGE_JP, DEFAULT_SLIPPAGE_US
+
+        jp_row = self._run(["jp_7203"], market="jp")
+        us_row = self._run(["us_AAPL"], market="us")
+        assert jp_row["portfolio_value"] == pytest.approx(
+            self._expected_value({"jp_7203": DEFAULT_SLIPPAGE_JP}, {"jp_7203": 100.0})
+        )
+        assert us_row["portfolio_value"] == pytest.approx(
+            self._expected_value({"us_AAPL": DEFAULT_SLIPPAGE_US}, {"us_AAPL": 200.0})
+        )
+
+    def test_explicit_slippage_applies_to_all_symbols(self):
+        """slippage を明示したときは、全市場でも全銘柄にその値を当てること"""
+        row = self._run(["jp_7203", "us_AAPL"], market=None, slippage=0.002)
+
+        expected = self._expected_value(
+            {"jp_7203": 0.002, "us_AAPL": 0.002},
+            {"jp_7203": 100.0, "us_AAPL": 200.0},
+        )
+        assert row["portfolio_value"] == pytest.approx(expected)
+
+
 class TestPlotPortfolio(unittest.TestCase):
     """plot_portfolio のテスト"""
 

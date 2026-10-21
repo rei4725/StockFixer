@@ -63,8 +63,22 @@ def _build_execution(
     """市場別の既定コストから ExecutionModel を組む。
 
     market=None（全マーケット混在）は US 既定にフォールバックする。
+    銘柄ごとの市場別の既定は _build_market_executions が担う（#847）。
     """
     return ExecutionModel(TradingCosts.for_market(market or "us", fee_rate, slippage))
+
+
+def _build_market_executions(
+    market: Optional[str], fee_rate: float, slippage: Optional[float]
+) -> Optional[dict[str, ExecutionModel]]:
+    """全マーケット混在で slippage 未指定のとき、市場別の ExecutionModel を返す（#847）。
+
+    銘柄の鍵の市場（jp_・us_）ごとに既定スリッページを当てるために使う。
+    market を明示したとき、または slippage を明示したときは None（全銘柄に同じコスト）。
+    """
+    if market or slippage is not None:
+        return None
+    return {m: ExecutionModel(TradingCosts.for_market(m, fee_rate, None)) for m in ("jp", "us")}
 
 
 def run_portfolio_backtest(
@@ -95,7 +109,7 @@ def run_portfolio_backtest(
         initial_cash: 初期資金
         fee_rate: 片道手数料率
         slippage: 片道スリッページ率。None のとき market 別の既定（#494）を使う。
-            market=None（全マーケット）のときは US 既定を用いる。
+            market=None（全マーケット）のときは銘柄の鍵の市場ごとの既定を用いる（#847）。
         threshold: 買いシグナル発生の最低予測上昇率（0.0=制限なし）
         ensemble: XGBoost+LightGBM アンサンブルを使用
         max_sector_positions: 同一セクターで許容する最大銘柄数（0 以下で無効）
@@ -142,6 +156,7 @@ def run_portfolio_backtest(
         execution=_build_execution(market, fee_rate, slippage),
         max_sector_positions=max_sector_positions,
         use_sector_rotation=use_sector_rotation,
+        execution_by_market=_build_market_executions(market, fee_rate, slippage),
     )
 
     metrics = _compute_portfolio_metrics(equity_df, initial_cash)
@@ -196,6 +211,7 @@ def compare_sector_rotation_kpi(
     rebalance_dates = _get_rebalance_dates(pd.DatetimeIndex(score_matrix.index), rebalance_freq)
 
     execution = _build_execution(market, fee_rate, slippage)
+    execution_by_market = _build_market_executions(market, fee_rate, slippage)
     eq_off, _ = _simulate_portfolio(
         score_matrix,
         close_matrix,
@@ -205,6 +221,7 @@ def compare_sector_rotation_kpi(
         execution,
         max_sector_positions,
         use_sector_rotation=False,
+        execution_by_market=execution_by_market,
     )
     eq_on, _ = _simulate_portfolio(
         score_matrix,
@@ -215,6 +232,7 @@ def compare_sector_rotation_kpi(
         execution,
         max_sector_positions,
         use_sector_rotation=True,
+        execution_by_market=execution_by_market,
     )
 
     metrics_off = _compute_portfolio_metrics(eq_off, initial_cash)

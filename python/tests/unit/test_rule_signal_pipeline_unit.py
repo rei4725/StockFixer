@@ -38,20 +38,18 @@ def _make_ohlcv(n: int = 60) -> pd.DataFrame:
 
 
 class TestGetTodaySignal(unittest.TestCase):
-    def test_unknown_rule_returns_hold(self):
+    def test_unknown_rule_returns_none(self):
+        """未知のルールは HOLD にせず、シグナルを出さない（#822）。"""
         from src.rule_engine.pipeline import _get_today_signal
 
-        signal, price = _get_today_signal("jp", "7203", "unknown_rule", MagicMock())
-        self.assertEqual(signal, 0)
-        self.assertIsNone(price)
+        self.assertIsNone(_get_today_signal("jp", "7203", "unknown_rule", MagicMock()))
 
-    def test_empty_df_returns_hold(self):
+    def test_empty_df_returns_none(self):
+        """データ不足は HOLD にせず、シグナルを出さない（#822）。"""
         from src.rule_engine.pipeline import _get_today_signal
 
         mock_port = _MockMarketDataPort(pd.DataFrame())
-        signal, price = _get_today_signal("jp", "7203", "rsi_contrarian", mock_port)
-        self.assertEqual(signal, 0)
-        self.assertIsNone(price)
+        self.assertIsNone(_get_today_signal("jp", "7203", "rsi_contrarian", mock_port))
 
     def test_valid_df_returns_signal_and_price(self):
         from src.rule_engine.pipeline import _get_today_signal
@@ -206,6 +204,42 @@ class TestRunRuleSignalPipeline(unittest.TestCase):
         ):
             result = run_rule_signal_pipeline("jp", signal_date=None, market_data_port=MagicMock())
         self.assertEqual(result, [])
+
+    def test_unavailable_symbols_are_counted_apart_from_hold_and_not_saved(self):
+        """データ不足・未知のルール・例外の銘柄は HOLD と別に数え、保存しない（#822）。"""
+        from src.rule_engine.pipeline import generate_rule_signals
+
+        effective_df = pd.DataFrame(
+            [
+                {"symbol": "7203", "best_rule": "rsi_contrarian", "win_rate": 0.6, "net_profit": 1},
+                {"symbol": "6758", "best_rule": "unknown_rule", "win_rate": 0.6, "net_profit": 1},
+                {"symbol": "9984", "best_rule": "rsi_contrarian", "win_rate": 0.6, "net_profit": 1},
+                {"symbol": "8306", "best_rule": "rsi_contrarian", "win_rate": 0.6, "net_profit": 1},
+            ]
+        )
+        good = _make_ohlcv()
+        short = _make_ohlcv(5)
+
+        class _Port:
+            def get_ohlcv_with_indicators(self, ticker, lookback_days):
+                if ticker.startswith("9984"):
+                    return short
+                if ticker.startswith("8306"):
+                    raise RuntimeError("fetch error")
+                return good
+
+        with (
+            patch("src.rule_engine.pipeline.load_effective_rules", return_value=effective_df),
+            patch("src.rule_engine.pipeline.upsert_rule_signal") as mock_upsert,
+        ):
+            batch = generate_rule_signals(
+                "jp", signal_date=date(2024, 3, 22), market_data_port=_Port()
+            )
+        self.assertEqual(batch.total, 4)
+        self.assertEqual([s["symbol"] for s in batch.signals], ["7203"])
+        self.assertEqual(sorted(u.symbol for u in batch.unavailable), ["6758", "8306", "9984"])
+        mock_upsert.assert_called_once()
+        self.assertEqual(mock_upsert.call_args.args[2], "7203")
 
     def test_custom_signal_date(self):
         from src.rule_engine.pipeline import run_rule_signal_pipeline
