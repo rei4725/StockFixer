@@ -377,6 +377,14 @@ class SchedulerQueueManager:
         if now < (scheduled_dt + recovery_delay):
             return False
 
+        # recovery_until (hour, minute) を持つジョブは、その日のその時刻から補完しない。
+        # 発注のようにその日の相場の前にしか意味の無いジョブを、引けの後や夜に動かさない（#835）
+        recovery_until = config.get("recovery_until")
+        if recovery_until is not None:
+            until_hour, until_minute = recovery_until
+            if now >= now.replace(hour=until_hour, minute=until_minute, second=0, microsecond=0):
+                return False
+
         if not self._reload_state_for_recovery():
             return False
 
