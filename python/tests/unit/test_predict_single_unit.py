@@ -60,9 +60,7 @@ class TestFetchCurrentPrice(unittest.TestCase):
 
         df = _make_df()
         mock_ticker = MagicMock()
-        mock_ticker.history.return_value = pd.DataFrame(
-            {"Close": [1050.0]}, index=pd.date_range("2024-01-31", periods=1)
-        )
+        mock_ticker.history.return_value = pd.DataFrame({"Close": [1050.0]}, index=df.index[-1:])
 
         with (
             patch("src.prediction.predict_single.get_ticker", return_value="7203.T"),

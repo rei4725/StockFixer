@@ -356,6 +356,59 @@ def test_get_missed_past_periods_empty_without_backfill_flag(tmp_path):
 
 
 # ============================================
+# 当日分の補完の締め（recovery_until。#835）
+# ============================================
+
+
+def test_should_recover_daily_auto_order_true_before_cutoff(tmp_path):
+    """daily_auto_order の当日分の補完は、締めより前なら今のとおり動く"""
+    from run_scheduler import SCHEDULE_CONFIG
+
+    manager = SchedulerQueueManager(SCHEDULE_CONFIG, state_file_path=str(tmp_path / "state.json"))
+
+    # 2026-03-02 は月曜。08:50 + 10分を過ぎ、締めより前
+    now = datetime(2026, 3, 2, 9, 10, tzinfo=manager.tz)
+    assert manager.should_recover("daily_auto_order", now=now) is True
+
+
+@pytest.mark.parametrize("hour, minute", [(9, 30), (11, 0), (16, 0), (23, 55)])
+def test_should_recover_daily_auto_order_false_after_cutoff(tmp_path, hour, minute):
+    """daily_auto_order の当日分の補完は、締めを過ぎたら動かない（引けの後の発注を防ぐ）"""
+    from run_scheduler import SCHEDULE_CONFIG
+
+    manager = SchedulerQueueManager(SCHEDULE_CONFIG, state_file_path=str(tmp_path / "state.json"))
+
+    now = datetime(2026, 3, 2, hour, minute, tzinfo=manager.tz)
+    assert manager.should_recover("daily_auto_order", now=now) is False
+
+
+@pytest.mark.parametrize("job_id", ["daily_pipeline", "daily_settle_orders", "daily_rule_signals"])
+def test_should_recover_jobs_without_cutoff_still_recover_late(tmp_path, job_id):
+    """締めの欄の無いジョブの当日分の補完は、夜でも今のとおり動く"""
+    from run_scheduler import SCHEDULE_CONFIG
+
+    assert "recovery_until" not in SCHEDULE_CONFIG[job_id]
+    manager = SchedulerQueueManager(SCHEDULE_CONFIG, state_file_path=str(tmp_path / "state.json"))
+
+    now = datetime(2026, 3, 2, 23, 0, tzinfo=manager.tz)
+    assert manager.should_recover(job_id, now=now) is True
+
+
+def test_should_recover_respects_recovery_until_in_config(tmp_path):
+    """recovery_until を持つジョブは、締めの時刻ちょうどから補完しない"""
+    config = _build_config({})
+    config["daily_pipeline"]["recovery_until"] = (21, 0)
+    manager = SchedulerQueueManager(config, state_file_path=str(tmp_path / "state.json"))
+
+    assert manager.should_recover(
+        "daily_pipeline", now=datetime(2026, 3, 2, 20, 59, tzinfo=manager.tz)
+    )
+    assert not manager.should_recover(
+        "daily_pipeline", now=datetime(2026, 3, 2, 21, 0, tzinfo=manager.tz)
+    )
+
+
+# ============================================
 # 月次ジョブの期間キーと補完判定
 # ============================================
 
