@@ -65,13 +65,23 @@ def _simulate_portfolio(
     execution: ExecutionModel,
     max_sector_positions: int,
     use_sector_rotation: bool = False,
+    execution_by_market: Optional[dict[str, ExecutionModel]] = None,
 ) -> tuple[pd.DataFrame, list[dict[str, Any]]]:
     """
     ポートフォリオシミュレーションを実行する。
 
     毎リバランス日に Top-N 銘柄をスコア比例配分で保有し、
     日次の portfolio_value と equal_weight_value を記録する。
+
+    execution_by_market を与えると、銘柄の鍵の市場（jp_・us_）ごとにその
+    ExecutionModel で売買のコストを計算する（#847）。無い市場は execution を使う。
     """
+
+    def _exec(sym: str) -> ExecutionModel:
+        if not execution_by_market:
+            return execution
+        return execution_by_market.get(_split_symbol_key(sym)[0], execution)
+
     # セクターローテーション用に市場レジームを事前計算
     regime_series: Optional[pd.Series] = None
     if use_sector_rotation:
@@ -136,7 +146,7 @@ def _simulate_portfolio(
                 # 既存保有を全売却
                 for sym, pos in holdings.items():
                     if sym in last_prices.index:
-                        cash += execution.sell_proceeds(pos["qty"], last_prices[sym])
+                        cash += _exec(sym).sell_proceeds(pos["qty"], last_prices[sym])
 
                 holdings = {}
 
@@ -150,9 +160,9 @@ def _simulate_portfolio(
                     price = prices_today[sym]
                     if price <= 0:
                         continue
-                    qty = execution.max_affordable_qty(budget, price)
+                    qty = _exec(sym).max_affordable_qty(budget, price)
                     if qty > 0:
-                        cost = execution.buy_cost(qty, price)
+                        cost = _exec(sym).buy_cost(qty, price)
                         cash -= cost
                         holdings[sym] = {"qty": qty, "price": price}
 
@@ -174,16 +184,16 @@ def _simulate_portfolio(
                 if valid_syms:
                     for sym, pos in eq_holdings.items():
                         if sym in last_prices.index:
-                            eq_cash += execution.sell_proceeds(pos["qty"], last_prices[sym])
+                            eq_cash += _exec(sym).sell_proceeds(pos["qty"], last_prices[sym])
                     eq_holdings = {}
                     eq_per = eq_cash / len(valid_syms)
                     for sym in valid_syms:
                         price = prices_today[sym]
                         if price <= 0:
                             continue
-                        qty = execution.max_affordable_qty(eq_per, price)
+                        qty = _exec(sym).max_affordable_qty(eq_per, price)
                         if qty > 0:
-                            eq_cash -= execution.buy_cost(qty, price)
+                            eq_cash -= _exec(sym).buy_cost(qty, price)
                             eq_holdings[sym] = {"qty": qty}
 
                 prev_symbols = new_symbols
