@@ -6,16 +6,22 @@
 
 import json
 import os
-from datetime import datetime
-from typing import Any, Dict, Optional
+import tempfile
+from datetime import datetime, timezone
+from typing import Any, Dict, NoReturn, Optional
 
 import pandas as pd
+from filelock import FileLock
 
 from src.utils.data_path_utils import ensure_dir
 from src.utils.logger import get_logger
 from src.utils.results_io import save_result_csvs
 
 logger = get_logger(__name__)
+
+
+class OptimalParamsCorruptedError(RuntimeError):
+    """既存の optimal_params.json が壊れていて、退避して保存を止めたことを表す。"""
 
 
 def print_optimization_results(result_df: pd.DataFrame, sort_by: str) -> None:
@@ -223,23 +229,76 @@ def save_optimal_params_json(
     ensure_dir(config_dir)
     json_path = os.path.join(config_dir, "optimal_params.json")
 
-    all_params = {}
-    if os.path.exists(json_path):
-        try:
-            with open(json_path, "r", encoding="utf-8") as f:
-                all_params = json.load(f)
-        except Exception as e:
-            logger.warning(f"既存JSONの読み込みエラー（空として初期化）: {e}", exc_info=True)
+    # 別のプロセス（手での実行とスケジューラ）が足した銘柄を消さないよう、ロックの内で読み直してから足す
+    with FileLock(f"{json_path}.lock"):
+        all_params = _load_params_for_update(json_path)
 
-    # マーケット・シンボルをキーに保存
-    key = f"{market}_{symbol}"
-    all_params[key] = optimal_param
+        # マーケット・シンボルをキーに保存
+        key = f"{market}_{symbol}"
+        all_params[key] = optimal_param
 
-    # JSON を保存
-    with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(all_params, f, ensure_ascii=False, indent=2)
+        _write_params_atomically(json_path, all_params)
 
     return json_path
+
+
+def _load_params_for_update(json_path: str) -> Dict[str, Any]:
+    """既存の JSON を読む（ロックの内で呼ぶ）。壊れていれば退避して例外を投げる。
+
+    空として続けると、1銘柄だけのファイルで全銘柄の閾値と metrics を消すため。
+    """
+    if not os.path.exists(json_path):
+        return {}
+
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            all_params = json.load(f)
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        _quarantine_params_file(json_path, str(e))
+    except OSError:
+        logger.error(
+            f"最適パラメータJSONの読み込みに失敗したため保存を止めます: {json_path}", exc_info=True
+        )
+        raise
+
+    if not isinstance(all_params, dict):
+        _quarantine_params_file(json_path, f"最上位が dict ではない: {type(all_params).__name__}")
+    return all_params
+
+
+def _quarantine_params_file(json_path: str, detail: str) -> NoReturn:
+    """壊れた JSON を隣へ日時つきで退避し、保存を止める。"""
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    quarantine_path = f"{json_path}.corrupt-{stamp}"
+    try:
+        os.replace(json_path, quarantine_path)
+    except OSError:
+        logger.error(f"壊れた最適パラメータJSONの退避に失敗: {json_path}", exc_info=True)
+        raise OptimalParamsCorruptedError(f"壊れた最適パラメータJSON（退避失敗）: {json_path}")
+    logger.error(
+        "最適パラメータJSONが読めないため退避し、保存を止めます"
+        f": {detail} 退避先={quarantine_path}"
+    )
+    raise OptimalParamsCorruptedError(f"壊れた最適パラメータJSONを退避しました: {quarantine_path}")
+
+
+def _write_params_atomically(json_path: str, all_params: Dict[str, Any]) -> None:
+    """同じフォルダの一時ファイルに書いてから置き換える（ロックの内で呼ぶ）。"""
+    fd, tmp_path = tempfile.mkstemp(
+        dir=os.path.dirname(os.path.abspath(json_path)),
+        prefix=f"{os.path.basename(json_path)}.",
+        suffix=".tmp",
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(all_params, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, json_path)
+    except BaseException:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        raise
 
 
 def get_optimal_params(
