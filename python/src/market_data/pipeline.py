@@ -33,6 +33,8 @@ from src.market_data.macro_features import (
 from src.market_data.quality_check import QualityCheckResult, run_quality_checks
 from src.market_data.saver import save_raw_ohlcv
 from src.market_data.sentiment_features import add_sentiment_features, fetch_news_sentiment_with_llm
+from src.market_data.split_refetch import refetch_full_history
+from src.market_data.split_refetch import stock_split_ratios as _stock_split_ratios
 from src.market_data.technical import add_technical_indicators, create_basic_lag_features
 from src.market_data.wikipedia_features import add_pageview_features, fetch_pageview_features
 from src.utils.data_path_utils import get_ticker, normalize_col
@@ -103,24 +105,20 @@ def fetch_stock_data_with_features(
                 fresh_data = get_stock_data(market, ticker, fetch_start, end_date)
             split_ratios = _stock_split_ratios(fresh_data)
             if split_ratios:
-                # yfinance は分割の前の足も調整し直して返すが、DB の古い足は分割前の値段の
-                # まま。差分とつなぐと分割の比の段差になるため、全期間を取り直す（#817）
-                logger.info(
-                    f"株式分割のため全期間を取り直す: {market}/{symbol} "
-                    f"（分割の比 {split_ratios}、{start_date}～{end_date}）"
+                # 分割の前の足と段差にならないよう、全期間を取り直す（#817）
+                fresh_data = refetch_full_history(
+                    market,
+                    symbol,
+                    ticker,
+                    start_date,
+                    end_date,
+                    split_ratios,
+                    data_source,
+                    get_stock_data,
                 )
-                if data_source is not None:
-                    full_data = data_source.get_stock_data(symbol, market, start_date, end_date)
-                else:
-                    full_data = get_stock_data(market, ticker, start_date, end_date)
-                if full_data is None or full_data.empty:
-                    logger.warning(
-                        f"株式分割の取り直しに失敗したため特徴量生成をスキップ: {market}/{symbol}"
-                        "（段差のある足で特徴量を作らない）"
-                    )
+                if fresh_data is None:
                     return None
-                df = full_data
-                fresh_data = full_data
+                df = fresh_data
             if fresh_data is not None and not fresh_data.empty:
                 if not split_ratios:
                     df = merge_market_data(df, fresh_data)
@@ -302,14 +300,6 @@ def _raw_only_result(market: str, symbol: str, raw_data_to_save) -> Optional[tup
     if raw_data_to_save is None or raw_data_to_save.empty:
         return None
     return (market, symbol, None, raw_data_to_save, None)
-
-
-def _stock_split_ratios(fresh_data: Optional[pd.DataFrame]) -> list:
-    """差分の足の Stock Splits の列から、0 でない分割の比を返す。列が無ければ空。"""
-    if fresh_data is None or "Stock Splits" not in fresh_data.columns:
-        return []
-    splits = pd.to_numeric(fresh_data["Stock Splits"], errors="coerce").fillna(0.0)
-    return [float(v) for v in splits[splits != 0]]
 
 
 def _count_weekdays_behind(db_latest_date: pd.Timestamp, end_date: str) -> int:

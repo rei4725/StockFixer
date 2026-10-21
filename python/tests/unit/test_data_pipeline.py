@@ -415,7 +415,8 @@ class TestFetchStockDataWithFeatures(_TmpDbTestCase):
         mock_from_db.return_value = db_bars
         mock_get_data.side_effect = [fresh, adjusted]
 
-        with self.assertLogs("src.market_data.pipeline", level="INFO") as logs:
+        # 取り直しのログは split_refetch が出すため、親の src.market_data で受ける
+        with self.assertLogs("src.market_data", level="INFO") as logs:
             result = fetch_stock_data_with_features(
                 market="us",
                 symbol="NVDA",
