@@ -1,6 +1,8 @@
 """日次の採点の JSON 書き出し（src/prediction/accuracy_report.py）のテスト。"""
 
 import json
+import os
+import tempfile
 from datetime import date
 from unittest.mock import MagicMock, patch
 
@@ -236,7 +238,7 @@ def test_report_failure_does_not_stop_prediction(
     from src.orchestration.jobs.daily import run_daily_pipeline
 
     with patch(
-        "src.prediction.accuracy_report.write_daily_accuracy_report",
+        "src.prediction.accuracy_report.prepare_daily_accuracy_report",
         side_effect=RuntimeError("disk full"),
     ) as mock_write:
         run_daily_pipeline()
@@ -244,3 +246,63 @@ def test_report_failure_does_not_stop_prediction(
     mock_write.assert_called_once()
     assert mock_accuracy.call_count == 2
     mock_predict.assert_called_once()
+
+
+@patch("src.reporting.discord.discord_utils.send_daily_pipeline_error")
+@patch("src.reporting.discord.discord_utils.send_daily_pipeline_completion")
+@patch("src.reporting.discord.discord_utils.send_accuracy_summary")
+@patch("src.orchestration.jobs.daily.run_daily_drift_check")
+@patch("src.prediction.shadow_evaluation.predict_with_challenger_unified", return_value=[])
+@patch("src.prediction.predict_unified.preload_models", return_value=[])
+@patch("src.orchestration.jobs.daily.fetch_previous_run_stats", return_value=None)
+@patch("src.orchestration.jobs.daily.evaluate_output_invariants_stage", return_value=([], {}))
+@patch("src.orchestration.jobs.daily.evaluate_and_notify_alerts")
+@patch("src.prediction.prediction_pipeline.run_accuracy_check", return_value=pd.DataFrame())
+@patch("src.prediction.prediction_pipeline.output_top_worst_results")
+@patch("src.market_data.pipeline.run_batch_pipeline")
+@patch("src.watchlist.batch_runner.load_target_symbols", return_value=[])
+def test_sector_lookup_runs_after_prediction_not_before(*_mocks):
+    """[2/6] から [3/6] の予測の開始までに yfinance の業種を引かず、道の最後に引いて JSON に出すこと"""
+    from src.orchestration.jobs.daily import run_daily_pipeline
+
+    events: list[str] = []
+
+    def _sector(market, symbol):
+        events.append("sector")
+        if symbol == "MSFT":
+            raise RuntimeError("429 Too Many Requests")
+        return _SECTORS[symbol]
+
+    def _predict():
+        events.append("predict")
+        return []
+
+    with (
+        tempfile.TemporaryDirectory() as results_dir,
+        patch("src.prediction.accuracy_report.get_results_dir", return_value=results_dir),
+        patch("src.prediction.db.load_prediction_accuracy", return_value=_accuracy_rows()),
+        patch(
+            "src.prediction.db.load_prediction_results",
+            side_effect=lambda **kw: _snapshot(kw.get("model_version")),
+        ),
+        patch("src.utils.sector_constraints.get_symbol_sector", side_effect=_sector),
+        patch("src.prediction.prediction_pipeline.predict_all_unified", side_effect=_predict),
+        patch(
+            "src.prediction.accuracy_report.now_jst",
+            return_value=pd.Timestamp("2026-10-20 07:00", tz="Asia/Tokyo"),
+        ),
+    ):
+        run_daily_pipeline()
+
+        assert "predict" in events
+        assert "sector" not in events[: events.index("predict")]
+        assert events.count("sector") == 4
+
+        with open(os.path.join(results_dir, "accuracy", "2026-10-20.json"), encoding="utf-8") as f:
+            prod = json.load(f)["models"]["production"]["1"]
+
+    assert prod["n_scored"] == 4
+    assert prod["four_week"]["n_scored"] == 6
+    assert prod["by_sector"]["Technology"]["n_scored"] == 2
+    assert prod["by_sector"]["Consumer Cyclical"]["n_scored"] == 1
+    assert prod["by_sector"]["UNKNOWN"]["n_scored"] == 1
