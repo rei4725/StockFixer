@@ -106,22 +106,39 @@ def _set_streak(key: str, value: int) -> None:
 # ---------------------------------------------------------------------------
 
 
+class SchedulerStateUnreadableError(Exception):
+    """スケジューラ状態ファイルが在るのに読めない（#924）。"""
+
+
 def _count_consecutive_pipeline_failures(state_file_path: str | None = None) -> int:
-    """scheduler_queue_state.json から daily_pipeline の連続失敗回数を返す。"""
+    """scheduler_queue_state.json から daily_pipeline の連続失敗回数を返す。
+
+    ファイルが無いだけ（初回の起動）なら 0。在るのに読めない、または壊れて
+    退避された跡（.corrupt-*）だけが残っているときは SchedulerStateUnreadableError
+    を投げる（0 回と数えて黙らないため、#924）。
+    """
     if state_file_path is None:
         from src.utils.data_path_utils import get_results_dir
 
         state_file_path = os.path.join(get_results_dir(), "scheduler_queue_state.json")
 
     if not os.path.exists(state_file_path):
+        quarantined = _find_quarantined_state(state_file_path)
+        if quarantined:
+            raise SchedulerStateUnreadableError(
+                f"状態ファイルが退避されたまま本体が無い: {quarantined}"
+            )
         return 0
 
     try:
         with open(state_file_path, "r", encoding="utf-8") as fh:
             state = json.load(fh)
-    except (OSError, json.JSONDecodeError) as exc:
-        logger.warning("スケジューラ状態ファイル読込失敗: %s", exc)
-        return 0
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise SchedulerStateUnreadableError(f"状態ファイルが読めない: {exc}") from exc
+    if not isinstance(state, dict):
+        raise SchedulerStateUnreadableError(
+            f"状態ファイルが読めない: 最上位が dict ではない: {type(state).__name__}"
+        )
 
     events = [
         e
@@ -140,9 +157,34 @@ def _count_consecutive_pipeline_failures(state_file_path: str | None = None) -> 
     return consecutive
 
 
+def _find_quarantined_state(state_file_path: str) -> str | None:
+    """state_file_path の隣に退避された状態ファイル（.corrupt-*）の最新の名前を返す。"""
+    state_dir = os.path.dirname(os.path.abspath(state_file_path))
+    prefix = f"{os.path.basename(state_file_path)}.corrupt-"
+    try:
+        names = [name for name in os.listdir(state_dir) if name.startswith(prefix)]
+    except OSError:
+        return None
+    return max(names) if names else None
+
+
 def check_pipeline_fail_rule(state_file_path: str | None = None) -> AlertResult:
-    """日次パイプライン連続失敗ルールを評価する。"""
-    count = _count_consecutive_pipeline_failures(state_file_path)
+    """日次パイプライン連続失敗ルールを評価する。
+
+    状態ファイルが読めないときは、連続回数を数えられないこと自体を発報する（#924）。
+    """
+    try:
+        count = _count_consecutive_pipeline_failures(state_file_path)
+    except SchedulerStateUnreadableError as exc:
+        logger.error("パイプライン連続失敗チェック: スケジューラ状態ファイルが読めない: %s", exc)
+        return AlertResult(
+            rule_id="NF-303-1",
+            name="日次パイプライン連続失敗（スケジューラの状態ファイルが読めない）",
+            triggered=True,
+            consecutive_count=0,
+            threshold=PIPELINE_FAIL_THRESHOLD,
+            details={"job_id": _DAILY_PIPELINE_JOB_ID, "state_error": str(exc)},
+        )
     triggered = count >= PIPELINE_FAIL_THRESHOLD
     logger.info("パイプライン連続失敗チェック: count=%d triggered=%s", count, triggered)
     return AlertResult(

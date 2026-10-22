@@ -77,17 +77,36 @@ def _query_last_prediction_at(con: Any) -> str | None:
         return None
 
 
+class SchedulerStateUnreadableError(Exception):
+    """スケジューラ状態ファイルが在るのに読めない（#924）。"""
+
+
 def _load_scheduler_last_runs() -> dict[str, str | None]:
-    """スケジューラ状態ファイルから各ジョブの最終成功実行時刻を返す。"""
-    state_path = os.path.join(get_results_dir(), "scheduler_queue_state.json")
+    """スケジューラ状態ファイルから各ジョブの最終成功実行時刻を返す。
+
+    ファイルが無いだけ（初回の起動）なら空 dict。在るのに読めない、または
+    壊れて退避された跡（.corrupt-*）だけが残っているときは
+    SchedulerStateUnreadableError を投げる（履歴なし＝正常と黙らないため、#924）。
+    """
+    results_dir = get_results_dir()
+    state_path = os.path.join(results_dir, "scheduler_queue_state.json")
     if not os.path.exists(state_path):
+        quarantined = _find_quarantined_state(results_dir)
+        if quarantined:
+            raise SchedulerStateUnreadableError(
+                f"状態ファイルが退避されたまま本体が無い: {quarantined}"
+            )
         return {}
 
     try:
         with open(state_path, "r", encoding="utf-8") as f:
             state = json.load(f)
-    except (OSError, json.JSONDecodeError):
-        return {}
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise SchedulerStateUnreadableError(f"状態ファイルが読めない: {exc}") from exc
+    if not isinstance(state, dict):
+        raise SchedulerStateUnreadableError(
+            f"状態ファイルが読めない: 最上位が dict ではない: {type(state).__name__}"
+        )
 
     latest: dict[str, str | None] = {}
     for event in state.get("events", []):
@@ -100,6 +119,19 @@ def _load_scheduler_last_runs() -> dict[str, str | None]:
                 latest[job_id] = finished_at
 
     return latest
+
+
+def _find_quarantined_state(results_dir: str) -> str | None:
+    """退避された状態ファイル（scheduler_queue_state.json.corrupt-*）の最新の名前を返す。"""
+    try:
+        names = [
+            name
+            for name in os.listdir(results_dir)
+            if name.startswith("scheduler_queue_state.json.corrupt-")
+        ]
+    except OSError:
+        return None
+    return max(names) if names else None
 
 
 # ---------------------------------------------------------------------------
@@ -117,7 +149,13 @@ _register_external_v1(app)
 @app.route("/health")
 def health() -> tuple[Response, int]:
     db_status, db_error, last_prediction_at = _check_db()
-    scheduler_runs = _load_scheduler_last_runs()
+    scheduler_state_error: str | None = None
+    try:
+        scheduler_runs = _load_scheduler_last_runs()
+    except SchedulerStateUnreadableError as exc:
+        logger.error("スケジューラ状態ファイルが読めない: %s", exc)
+        scheduler_runs = {}
+        scheduler_state_error = str(exc)
 
     scheduler_stale = False
     if scheduler_runs:
@@ -134,7 +172,8 @@ def health() -> tuple[Response, int]:
                 pass
 
     # busy = 別処理（バッチ等）が DB 使用中で、プロセスとしては健全（#550）
-    overall = "ok" if db_status in ("ok", "busy") and not scheduler_stale else "degraded"
+    healthy = db_status in ("ok", "busy") and not scheduler_stale
+    overall = "ok" if healthy and scheduler_state_error is None else "degraded"
 
     payload: dict[str, Any] = {
         "status": overall,
@@ -143,6 +182,8 @@ def health() -> tuple[Response, int]:
         "last_prediction_at": last_prediction_at,
         "checked_at": datetime.now(timezone.utc).isoformat(),
     }
+    if scheduler_state_error is not None:
+        payload["scheduler_state_error"] = scheduler_state_error
 
     http_status = 200 if db_status in ("ok", "busy") else 503
     return jsonify(payload), http_status
