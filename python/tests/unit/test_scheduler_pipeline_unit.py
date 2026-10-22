@@ -6,11 +6,22 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
+import pytest
 
 from src.domain.types import SymbolTask
 from src.infrastructure.persistence.order_run_repository import PostgresOrderRunSink
 from src.orchestration.jobs import drift_check as drift_check_module
 from src.orchestration.scheduler import run_daily_auto_order, run_daily_drift_check
+
+
+@pytest.fixture(autouse=True)
+def _isolate_results_dir(monkeypatch, tmp_path):
+    """get_results_dir() をテストごとの tmp_path に向ける。
+
+    run_daily_pipeline 等が採点の JSON や scheduler_queue_state.json を書くため、
+    本番の results/ を上書きしないようにする（#902）。
+    """
+    monkeypatch.setenv("STOCKFIXER_RESULTS_DIR", str(tmp_path / "results"))
 
 
 class TestRunDailyAutoOrder(unittest.TestCase):
@@ -710,6 +721,8 @@ class TestRunDailyPipeline:
         mock_output.assert_not_called()
         mock_notify.assert_not_called()
 
+    @patch("src.orchestration.jobs.daily.append_accuracy_json_sectors")
+    @patch("src.orchestration.jobs.daily.write_accuracy_json_without_sectors")
     @patch("src.reporting.discord.discord_utils.send_miss_analysis_summary")
     @patch("src.prediction.db.load_top_prediction_misses")
     @patch("src.reporting.discord.discord_utils.send_daily_pipeline_error")
@@ -732,6 +745,8 @@ class TestRunDailyPipeline:
         mock_error,
         mock_load_misses,
         mock_send_misses,
+        mock_write_accuracy_json,
+        mock_append_sectors,
     ):
         """スキップ+エラーがちょうど半分以下なら今までどおり予測まで進むこと"""
         from src.domain.types import BatchFailure, BatchResult
