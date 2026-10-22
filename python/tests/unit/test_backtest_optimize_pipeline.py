@@ -4,7 +4,7 @@ import json
 import os
 import tempfile
 import unittest
-from unittest.mock import mock_open, patch
+from unittest.mock import patch
 
 import pandas as pd
 
@@ -304,6 +304,24 @@ class TestRunOptimization(unittest.TestCase):
 # ──────────────────────────────────────────────────────────────────
 
 
+def _patch_config_root(root):
+    """persistence の保存先 config/ を root/config へ向ける（実ファイルに触れない）。"""
+    from src.backtest.optimizer import persistence
+
+    fake_file = os.path.join(root, "src", "backtest", "optimizer", "persistence.py")
+    return patch.object(persistence, "__file__", fake_file)
+
+
+def _save_and_read(df):
+    """save_optimal_params_json を一時フォルダに実行し、書き込まれた dict を返す。"""
+    from src.backtest.optimizer import save_optimal_params_json
+
+    with tempfile.TemporaryDirectory() as root, _patch_config_root(root):
+        path = save_optimal_params_json(df, "jp", "7203")
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+
 class TestSaveOptimalParamsJson(unittest.TestCase):
     """save_optimal_params_json のテスト"""
 
@@ -331,21 +349,19 @@ class TestSaveOptimalParamsJson(unittest.TestCase):
 
     def test_saves_json_with_params(self):
         """最適パラメータが JSON ファイルに保存されること"""
-        from unittest.mock import mock_open as mopen
-
         from src.backtest.optimizer import save_optimal_params_json
 
-        m = mopen()
-        with patch("os.path.exists", return_value=False), patch(
-            "src.backtest.optimizer.persistence.ensure_dir"
-        ), patch("builtins.open", m):
+        with tempfile.TemporaryDirectory() as root, _patch_config_root(root):
             path = save_optimal_params_json(
                 self._make_result_df(), "jp", "7203", sort_by="sharpe_ratio"
             )
+            with open(path, "r", encoding="utf-8") as f:
+                saved = json.load(f)
 
         self.assertIsNotNone(path)
         self.assertNotEqual(path, "")
         self.assertTrue(path.endswith("optimal_params.json"))
+        self.assertIn("jp_7203", saved)
 
     def test_returns_empty_on_empty_df(self):
         """DataFrame が空の場合、空文字列が返ること"""
@@ -356,31 +372,25 @@ class TestSaveOptimalParamsJson(unittest.TestCase):
 
     def test_merges_with_existing_json(self):
         """既存 JSON と結果が統合されること"""
-        import json as _json
-
         from src.backtest.optimizer import save_optimal_params_json
 
         existing_data = {"jp_AAPL": {"threshold": 0.01}}
-        captured: dict = {}
 
-        def fake_dump(obj, fp, **kwargs):
-            captured["obj"] = obj
-
-        m = mock_open(read_data=_json.dumps(existing_data))
-        with patch("os.path.exists", return_value=True), patch(
-            "src.backtest.optimizer.persistence.ensure_dir"
-        ), patch("builtins.open", m), patch("json.dump", side_effect=fake_dump):
+        with tempfile.TemporaryDirectory() as root, _patch_config_root(root):
+            os.makedirs(os.path.join(root, "config"))
+            with open(os.path.join(root, "config", "optimal_params.json"), "w") as f:
+                json.dump(existing_data, f)
             path = save_optimal_params_json(
                 self._make_result_df(), "jp", "7203", sort_by="sharpe_ratio"
             )
+            with open(path, "r", encoding="utf-8") as f:
+                merged = json.load(f)
 
         self.assertIsNotNone(path)
         self.assertNotEqual(path, "")
-        if captured:
-            merged = captured["obj"]
-            self.assertIsInstance(merged, dict)
-            self.assertIn("jp_AAPL", merged)
-            self.assertIn("jp_7203", merged)
+        self.assertIsInstance(merged, dict)
+        self.assertIn("jp_AAPL", merged)
+        self.assertIn("jp_7203", merged)
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -512,15 +522,7 @@ class TestSaveOptimalParamsDSR(unittest.TestCase):
 
     def _save_and_capture(self, df):
         """save_optimal_params_json を実ファイルに触れず実行し、書き込まれた dict を返す。"""
-        from src.backtest.optimizer import save_optimal_params_json
-
-        with patch("src.backtest.optimizer.persistence.os.path.exists", return_value=False), patch(
-            "src.backtest.optimizer.persistence.ensure_dir"
-        ), patch("builtins.open", mock_open()), patch(
-            "src.backtest.optimizer.persistence.json.dump"
-        ) as mock_dump:
-            save_optimal_params_json(df, "jp", "7203")
-        return mock_dump.call_args[0][0]
+        return _save_and_read(df)
 
     def test_records_dsr_when_present(self):
         saved = self._save_and_capture(self._best_df(with_dsr=True))
@@ -678,15 +680,7 @@ class TestSaveOptimalParamsPBO(unittest.TestCase):
         return pd.DataFrame(data)
 
     def _save_and_capture(self, df):
-        from src.backtest.optimizer import save_optimal_params_json
-
-        with patch("src.backtest.optimizer.persistence.os.path.exists", return_value=False), patch(
-            "src.backtest.optimizer.persistence.ensure_dir"
-        ), patch("builtins.open", mock_open()), patch(
-            "src.backtest.optimizer.persistence.json.dump"
-        ) as mock_dump:
-            save_optimal_params_json(df, "jp", "7203")
-        return mock_dump.call_args[0][0]
+        return _save_and_read(df)
 
     def test_records_pbo_when_present(self):
         saved = self._save_and_capture(self._best_df(with_pbo=True))

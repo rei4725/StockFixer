@@ -109,15 +109,17 @@ def _run_predict(models_by_name: dict, model_types: list[str], weights: list[flo
     """本番相当の入力で predict_with_unified_model を1銘柄ぶん走らせる。"""
     from src.prediction.predict_unified import predict_with_unified_model
 
+    features = _feature_frame_with_date()
+    # 足の日付は特徴量の最後の行と同じ日にする。合わないと予想を出さない（#845）
     mock_ticker = MagicMock()
     mock_ticker.history.return_value = pd.DataFrame(
-        {"Close": [1050.0]}, index=pd.date_range("2024-01-31", periods=1)
+        {"Close": [1050.0]}, index=pd.DatetimeIndex([features["date"].iloc[-1]])
     )
 
     with (
         patch(
             "src.prediction.predict_unified.load_feature_data",
-            return_value=_feature_frame_with_date(),
+            return_value=features,
         ),
         patch(
             "src.prediction.predict_unified.get_cached_model",

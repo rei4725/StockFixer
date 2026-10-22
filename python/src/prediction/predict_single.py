@@ -6,10 +6,11 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
-from config.settings import PREDICTION_ATR_CLIP_MULTIPLIER
+from config.settings import PREDICTION_ATR_CLIP_MULTIPLIER, STALE_BARS_MAX_WEEKDAYS
 from src.prediction.db import load_model_weights
 from src.prediction.manager import ModelManager
 from src.prediction.ports import get_market_data_port
+from src.prediction.predict_unified import _count_weekdays_behind, _last_bar_date
 from src.prediction.range_clipping import clip_diff_ratio_to_atr_range
 from src.prediction.types import HorizonResult, PredictionResult
 from src.utils.data_path_utils import get_models_subdir, get_ticker, normalize_col
@@ -45,22 +46,33 @@ def _resolve_model_types(horizon: int, model_types=None) -> list:
 
 def _fetch_current_price(market: str, symbol: str, df: pd.DataFrame) -> "float | None":
     """
-    yfinanceでリアルタイム価格を取得し、失敗時はdfの末尾Close値を使用する。
+    基準の値段（予想に使う足 df の最後の行の日の終値）を yfinance から取る。
+
+    yfinance が取れない・空のときは df の末尾の Close を使う（同じ日の終値）。
+    yfinance の足の日付が df の最後の行の日付と違う・終値が NaN のときは
+    WARNING を出して None を返す（#867。統合モデルの #845 と同じ確かめ）。
 
     Args:
         market: マーケット識別子
         symbol: 銘柄コード
-        df: 株価DataFrame（fallback用）
+        df: 株価DataFrame（index が日付。日付の比べと fallback に使う）
 
     Returns:
-        現在価格（float）。取得不能な場合は None。
+        現在価格（float）。使えなければ None。
     """
+    feature_day = None
+    if isinstance(df.index, pd.DatetimeIndex) and len(df.index) > 0:
+        feature_day = pd.Timestamp(df.index[-1])
+        if feature_day.tzinfo is not None:
+            feature_day = feature_day.tz_localize(None)
+        feature_day = feature_day.normalize()
+    feature_day_str = feature_day.strftime("%Y-%m-%d") if feature_day is not None else "不明"
+
+    hist = None
     try:
         yf_ticker = get_ticker(market, symbol)
         ticker_obj = yf.Ticker(yf_ticker)
         hist = ticker_obj.history(period="1d")
-        if not hist.empty:
-            return float(hist["Close"].iloc[-1])
     except Exception:
         logger.warning(
             "yfinance現在価格取得失敗（フォールバック使用）: market=%s symbol=%s",
@@ -68,15 +80,86 @@ def _fetch_current_price(market: str, symbol: str, df: pd.DataFrame) -> "float |
             symbol,
             exc_info=True,
         )
-    # yfinance失敗時はdfの末尾を使用（fallback）
+
+    if hist is not None and not hist.empty and "Close" in hist.columns:
+        bar_date = _last_bar_date(hist)
+        bar_date_str = bar_date.strftime("%Y-%m-%d") if bar_date is not None else "不明"
+        if feature_day is not None and bar_date is not None and bar_date != feature_day:
+            logger.warning(
+                "現在価格の足の日付が予想に使う足と合わないため予想をスキップ: "
+                "market=%s symbol=%s 足の日付=%s 予想に使う足の最後の日付=%s",
+                market,
+                symbol,
+                bar_date_str,
+                feature_day_str,
+            )
+            return None
+        close = hist["Close"].iloc[-1]
+        if pd.isna(close):
+            logger.warning(
+                "現在価格が欠損のため予想をスキップ: market=%s symbol=%s "
+                "足の日付=%s 予想に使う足の最後の日付=%s",
+                market,
+                symbol,
+                bar_date_str,
+                feature_day_str,
+            )
+            return None
+        return float(close)
+
+    # yfinance が取れない・空のときは df の末尾を使用（fallback。予想に使う足と同じ日）
     try:
         close_col = df["Close"]
         if isinstance(close_col, pd.DataFrame):
             close_col = close_col.iloc[:, 0]
-        return float(close_col.iloc[-1])
+        close = close_col.iloc[-1]
     except Exception:
         logger.warning("df末尾Close取得失敗: market=%s symbol=%s", market, symbol, exc_info=True)
         return None
+    if pd.isna(close):
+        logger.warning(
+            "df末尾Closeが欠損のため予想をスキップ: market=%s symbol=%s "
+            "予想に使う足の最後の日付=%s",
+            market,
+            symbol,
+            feature_day_str,
+        )
+        return None
+    return float(close)
+
+
+def _is_stale_bars(market: str, symbol: str, df: pd.DataFrame) -> bool:
+    """
+    取得した足の最後の日付が線（STALE_BARS_MAX_WEEKDAYS）より古ければ WARNING を出して True。
+
+    足の止まった銘柄では最後の行が止まった日のままになり、その日の特徴量で
+    今日の予想を出してしまう（#854）。数え方は統合モデルの確かめ（#829）と同じ。
+    index が日付でなければ確かめられないため False を返す。
+
+    Args:
+        market: マーケット識別子
+        symbol: 銘柄コード
+        df: 株価DataFrame（index が日付）
+
+    Returns:
+        古ければ True。
+    """
+    if not isinstance(df.index, pd.DatetimeIndex) or df.empty:
+        return False
+    last_date = pd.Timestamp(df.index[-1])
+    stale_weekdays = _count_weekdays_behind(last_date)
+    if stale_weekdays <= STALE_BARS_MAX_WEEKDAYS:
+        return False
+    logger.warning(
+        "足が古いため予想をスキップ: market=%s symbol=%s "
+        "最後の足の日付=%s（平日で %d日 > %d日 古い）",
+        market,
+        symbol,
+        last_date.strftime("%Y-%m-%d"),
+        stale_weekdays,
+        STALE_BARS_MAX_WEEKDAYS,
+    )
+    return True
 
 
 def _estimate_atr_from_ohlc(df: pd.DataFrame, window: int = 14) -> "float | None":
@@ -279,6 +362,7 @@ def predict_single_stock(
     succeeded_model_types = []
     current_price = None
     atr_value = None
+    df = pd.DataFrame()
     for model_type in resolved_model_types:
         model_path = os.path.join(get_models_subdir(market, symbol), model_type)
         if not os.path.exists(model_path):
@@ -287,20 +371,24 @@ def predict_single_stock(
             print(f"[{symbol}] モデルが存在しません: {model_path}")
             continue
         try:
-            df = get_market_data_port().get_stock_data(
-                market,
-                symbol,
-                pd.Timestamp.today() - pd.Timedelta(days=lookback_days),
-                pd.Timestamp.today(),
-            )
-            if df.empty or "Close" not in df.columns:
-                print(f"[{symbol}] 株価データ取得失敗")
-                continue
-            current_price = _fetch_current_price(market, symbol, df)
             if current_price is None:
-                print(f"[{symbol}] 価格取得失敗")
-                continue
-            atr_value = _estimate_atr_from_ohlc(df)
+                # 足と基準の値段は銘柄ごとに1回だけ取り、どのモデルにも同じ値を使う（#867）
+                df = get_market_data_port().get_stock_data(
+                    market,
+                    symbol,
+                    pd.Timestamp.today() - pd.Timedelta(days=lookback_days),
+                    pd.Timestamp.today(),
+                )
+                if df.empty or "Close" not in df.columns:
+                    print(f"[{symbol}] 株価データ取得失敗")
+                    return None
+                if _is_stale_bars(market, symbol, df):
+                    return None
+                current_price = _fetch_current_price(market, symbol, df)
+                if current_price is None:
+                    print(f"[{symbol}] 価格取得失敗")
+                    return None
+                atr_value = _estimate_atr_from_ohlc(df)
             result = _run_single_model_prediction(model_path, market, symbol, df, current_price)
             if result is None:
                 print(f"[{symbol}] 特徴量生成失敗")
@@ -434,6 +522,8 @@ def explain_prediction_shap(
             pd.Timestamp.today(),
         )
         if df.empty or "Close" not in df.columns:
+            return None
+        if _is_stale_bars(market, symbol, df):
             return None
 
         df_feat = _mds.add_technical_indicators(df)

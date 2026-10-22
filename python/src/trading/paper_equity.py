@@ -3,6 +3,7 @@
 
 paper_orders（status='filled'）を時系列に適用して現金残高と保有数量を復元し、
 保有銘柄を日次終値でマークトゥマーケットして評価額を算出する。
+終値の分からない保有日は、最後に分かる終値、それも無ければ約定の値段で評価する。
 
 制約:
     - ロング（BUY/SELL）のみ対応。SHORT/SHORT_COVER は現金影響のみ反映し、
@@ -85,8 +86,23 @@ def build_equity_series(
     Returns:
         index に沿った評価額 Series
     """
+    equity, _ = _build_equity_with_fallbacks(orders, price_loader, initial_balance, index)
+    return equity
+
+
+def _build_equity_with_fallbacks(
+    orders: pd.DataFrame,
+    price_loader: Callable[[str, str], Optional[pd.Series]],
+    initial_balance: float,
+    index: pd.DatetimeIndex,
+) -> tuple[pd.Series, dict[tuple[str, str], pd.DatetimeIndex]]:
+    """評価額 Series と、約定の値段で評価した (market, symbol) ごとの日付を返す。
+
+    保有日の値段は、その日までの最後の終値（過去の方向にだけ埋めた値）で評価する。
+    終値が1つも分からない保有日は、0円にせず、その日までの最後の約定の値段で評価する（#850）。
+    """
     if index.empty:
-        return pd.Series(dtype=float)
+        return pd.Series(dtype=float), {}
 
     work = orders.copy()
     work["filled_at"] = pd.to_datetime(work["filled_at"]).dt.tz_localize(None).dt.normalize()
@@ -94,6 +110,7 @@ def build_equity_series(
     # 日次の現金増減と銘柄別数量増減を dict に集計してから Series 化する
     cash_events: dict[pd.Timestamp, float] = {}
     qty_events: dict[tuple[str, str], dict[pd.Timestamp, float]] = {}
+    fill_price_events: dict[tuple[str, str], dict[pd.Timestamp, float]] = {}
 
     for _, row in work.iterrows():
         side = int(row["side"])
@@ -116,10 +133,12 @@ def build_equity_series(
             key = (str(row["market"]), str(row["symbol"]))
             bucket = qty_events.setdefault(key, {})
             bucket[day] = bucket.get(day, 0.0) + _QTY_SIGN[side] * int(row["qty"])
+            fill_price_events.setdefault(key, {})[day] = float(row["fill_price"])
 
     cash_delta = pd.Series(cash_events, dtype=float).reindex(index, fill_value=0.0)
     cash = initial_balance + cash_delta.cumsum()
     equity = cash.copy()
+    fallbacks: dict[tuple[str, str], pd.DatetimeIndex] = {}
 
     for (market, symbol), bucket in qty_events.items():
         holdings = pd.Series(bucket, dtype=float).reindex(index, fill_value=0.0).cumsum()
@@ -127,12 +146,25 @@ def build_equity_series(
             continue
         prices = price_loader(market, symbol)
         if prices is None or prices.empty:
-            logger.warning("価格データなしのため評価から除外: %s/%s", market, symbol)
-            continue
-        aligned = prices.reindex(index).ffill().bfill()
-        equity += holdings * aligned
+            aligned = pd.Series(float("nan"), index=index)
+        else:
+            prices = prices.sort_index()
+            aligned = prices.reindex(prices.index.union(index)).ffill().reindex(index)
+        held = holdings != 0
+        missing = held & aligned.isna()
+        if missing.any():
+            fill_prices = pd.Series(fill_price_events[(market, symbol)], dtype=float)
+            aligned = aligned.fillna(fill_prices.reindex(index).ffill())
+            fallbacks[(market, symbol)] = index[missing]
+            logger.warning(
+                "終値が分からない保有日を約定の値段で評価: %s/%s (%d 日)",
+                market,
+                symbol,
+                int(missing.sum()),
+            )
+        equity += (holdings * aligned).where(held, 0.0)
 
-    return equity
+    return equity, fallbacks
 
 
 def get_paper_equity_curve(days: int = 180) -> pd.Series:
@@ -188,7 +220,8 @@ def compute_weekly_results(
 
     Returns:
         {"week", "start", "end", "markets": {market: {weekly_return, benchmark_ticker,
-        benchmark_return, excess_return, fills}}}。取れない値は None
+        benchmark_return, excess_return, fills, valued_at_fill_price}}}。取れない値は None。
+        valued_at_fill_price は、週の中に終値が分からず約定の値段で評価した日がある銘柄
     """
     last_bday = pd.Timestamp(as_of)
     while last_bday.weekday() >= 5:
@@ -207,12 +240,20 @@ def compute_weekly_results(
         market_orders = work[work["market"] == market] if not work.empty else work
         fills = 0
         weekly_return: Optional[float] = 0.0
+        valued_at_fill_price: list[str] = []
         if not market_orders.empty:
             in_week = market_orders["filled_at"].between(week_start, week_end)
             fills = int(in_week.sum())
             first_fill = market_orders["filled_at"].min()
             index = pd.bdate_range(start=min(first_fill, base_day), end=week_end)
-            equity = build_equity_series(market_orders, price_loader, initial_balance, index)
+            equity, fallbacks = _build_equity_with_fallbacks(
+                market_orders, price_loader, initial_balance, index
+            )
+            valued_at_fill_price = sorted(
+                symbol
+                for (_, symbol), days in fallbacks.items()
+                if ((days >= base_day) & (days <= week_end)).any()
+            )
             base_value = float(equity.loc[base_day])
             end_value = float(equity.loc[week_end])
             weekly_return = end_value / base_value - 1 if base_value else None
@@ -234,6 +275,7 @@ def compute_weekly_results(
             "benchmark_return": benchmark_return,
             "excess_return": None if excess_return is None else round(excess_return, 6),
             "fills": fills,
+            "valued_at_fill_price": valued_at_fill_price,
         }
 
     return {
