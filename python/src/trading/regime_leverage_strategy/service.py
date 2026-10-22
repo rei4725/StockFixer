@@ -315,7 +315,9 @@ def run_regime_leverage_daily_margin_check(
 ) -> Optional[RegimeLeverageDecision]:
     """日次ジョブ本体: 保有中の場合のみ、初期損切り・マージンコールを判定する。
 
-    当日安値(Low)がNaN(データ劣化時)の場合は判定を行わずNoneを返す。
+    未保有の場合はNoneを返す(何もしない)。保有中に当日安値(Low)がNaN(データ劣化時)の
+    場合は判定を行わずRuntimeErrorを送出する(損切り・マージンコールの判定が飛んだことを
+    スケジューラーのリトライ・Discord通知に乗せるため。#860)。
     """
     from config.settings import REGIME_LEVERAGE_SYMBOL
 
@@ -327,8 +329,10 @@ def run_regime_leverage_daily_margin_check(
     usdjpy_rate = _load_latest_usdjpy(market_data_port)
     day_low_usd = float(df.iloc[-1]["Low"])
     if pd.isna(day_low_usd):
-        logger.warning("レジームレバレッジ戦略(日次): 当日安値(Low)がNaNのため判定を中止します")
-        return None
+        raise RuntimeError(
+            "レジームレバレッジ戦略(日次): 保有中に当日安値(Low)がNaNのため判定を中止しました"
+            f"(shares={snapshot.shares})"
+        )
     now = datetime.now()
 
     decision = decide_daily_check(snapshot, day_low_usd, usdjpy_rate, now)
