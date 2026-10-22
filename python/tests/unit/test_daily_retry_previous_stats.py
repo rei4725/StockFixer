@@ -19,7 +19,8 @@ _LOADED = ["UnifiedStockXGBoost", "UnifiedStockLightGBM"]
 
 
 def _stamp(day: datetime) -> str:
-    return day.strftime("%Y%m%d") + "_073000"
+    # 今の時刻のまま書く（今日の判定は JST の日付なので、決まった時刻だと UTC の夕方に外れる）
+    return day.strftime("%Y%m%d_%H%M%S")
 
 
 def _rows(count: int):
