@@ -202,6 +202,8 @@ def _job_listener(event):
 # backfill: True のジョブだけ、前日分の取りこぼしを翌日に補完する。発注・約定・その日の
 # 相場の知らせなど、日をまたいでやり直すと当日分と二重になるジョブには付けない（#825）。
 # recovery_until: (hour, minute) のジョブは、当日分の補完をその時刻で打ち切る（#835）。
+# max_retries: 0 のジョブは、落ちても同じ回の中で頭から呼び直さない。発注のジョブは、やり直しの回が
+# 前の回の出した注文を知らずに同じ注文を出し直すため、これを付ける（#836）。
 SCHEDULE_CONFIG = {
     "daily_pipeline": {
         "func": job_daily_pipeline,
@@ -249,6 +251,7 @@ SCHEDULE_CONFIG = {
         # 先読みになり、引けの後の発注は翌朝の定時の回と重なる（#835）
         "recovery_until": (9, 30),
         "max_executions_per_period": 1,
+        "max_retries": 0,
         "description": "毎営業日 08:50 - 自動発注（ペーパートレード）",
     },
     "daily_settle_orders": {
@@ -340,6 +343,7 @@ SCHEDULE_CONFIG = {
         "minute": 30,
         "recovery_delay_minutes": 10,
         "max_executions_per_period": 1,
+        "max_retries": 0,
         "description": "毎営業日 16:30 - ルールシグナル生成 + ペーパートレード発注",
     },
     "pre_close_alert": {
