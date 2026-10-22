@@ -685,6 +685,113 @@ class TestRunAccuracyCheckAdditional(unittest.TestCase):
         self.assertNotIn(f"jp/S{n - 1}", msg)
         mock_save.assert_not_called()
 
+    @patch("src.prediction.db.load_drift_summary")
+    @patch("src.prediction.db.save_prediction_accuracy")
+    @patch("src.utils.db.load_raw_ohlcv")
+    @patch("src.prediction.db.load_prediction_results")
+    def test_scores_split_adjusted_raw_bars_on_same_level(
+        self, mock_load, mock_ohlcv, mock_save, mock_drift
+    ):
+        """raw の足が 1:2 の分割で調整し直してあり、保存した現在値が分割前のとき、同じ水準で比べること"""
+        import pandas as pd
+
+        from src.prediction.prediction_pipeline import run_accuracy_check
+
+        mock_load.return_value = pd.DataFrame(
+            {
+                "market": ["jp"],
+                "symbol": ["7203"],
+                "predicted_at": ["20261015_223736"],
+                "avg_pred_price": [1050.0],
+                "current_price": [1000.0],
+            }
+        )
+        # 分割前の 1000 円は、調整し直した足では 500 円。翌日の実績は調整後 505 円（+1%）
+        mock_ohlcv.return_value = pd.DataFrame(
+            {"Close": [500.0, 505.0]},
+            index=pd.DatetimeIndex(pd.to_datetime(["2026-10-15", "2026-10-16"]), name="Date"),
+        )
+        mock_drift.return_value = pd.DataFrame()
+
+        run_accuracy_check(horizon=1)
+
+        mock_save.assert_called_once()
+        row = mock_save.call_args[0][0][0]
+        self.assertAlmostEqual(row["actual_ratio"], 0.01)
+        self.assertAlmostEqual(row["predicted_ratio"], 0.05)
+        self.assertTrue(row["direction_match"])
+        self.assertEqual(row["actual_price"], 505.0)
+        self.assertAlmostEqual(row["predicted_price"], 525.0)
+
+    @patch("src.prediction.db.load_drift_summary")
+    @patch("src.prediction.db.save_prediction_accuracy")
+    @patch("src.utils.db.load_raw_ohlcv")
+    @patch("src.prediction.db.load_prediction_results")
+    def test_keeps_saved_current_price_without_split(
+        self, mock_load, mock_ohlcv, mock_save, mock_drift
+    ):
+        """分割の無い銘柄は、保存した現在値のまま採点すること"""
+        import pandas as pd
+
+        from src.prediction.prediction_pipeline import run_accuracy_check
+
+        mock_load.return_value = pd.DataFrame(
+            {
+                "market": ["jp"],
+                "symbol": ["7203"],
+                "predicted_at": ["20261015_223736"],
+                "avg_pred_price": [1050.0],
+                "current_price": [1000.0],
+            }
+        )
+        mock_ohlcv.return_value = pd.DataFrame(
+            {"Close": [990.0, 1040.0]},
+            index=pd.DatetimeIndex(pd.to_datetime(["2026-10-15", "2026-10-16"]), name="Date"),
+        )
+        mock_drift.return_value = pd.DataFrame()
+
+        run_accuracy_check(horizon=1)
+
+        row = mock_save.call_args[0][0][0]
+        self.assertAlmostEqual(row["actual_ratio"], 0.04)
+        self.assertAlmostEqual(row["predicted_ratio"], 0.05)
+        self.assertEqual(row["predicted_price"], 1050.0)
+
+    @patch("src.prediction.db.load_drift_summary")
+    @patch("src.prediction.db.save_prediction_accuracy")
+    @patch("src.utils.db.load_raw_ohlcv")
+    @patch("src.prediction.db.load_prediction_results")
+    def test_skips_when_price_level_gap_is_not_split_ratio(
+        self, mock_load, mock_ohlcv, mock_save, mock_drift
+    ):
+        """保存した現在値と raw の基準の終値の比が分割の比に合わないときは、採点から外して数えること"""
+        import pandas as pd
+
+        from src.prediction.prediction_pipeline import run_accuracy_check
+
+        mock_load.return_value = pd.DataFrame(
+            {
+                "market": ["jp"],
+                "symbol": ["7203"],
+                "predicted_at": ["20261015_223736"],
+                "avg_pred_price": [1050.0],
+                "current_price": [1000.0],
+            }
+        )
+        mock_ohlcv.return_value = pd.DataFrame(
+            {"Close": [570.0, 580.0]},
+            index=pd.DatetimeIndex(pd.to_datetime(["2026-10-15", "2026-10-16"]), name="Date"),
+        )
+        mock_drift.return_value = pd.DataFrame()
+
+        with self.assertLogs("src.prediction.prediction_pipeline", level="INFO") as cm:
+            run_accuracy_check(horizon=1)
+
+        mock_save.assert_not_called()
+        done = [m for m in cm.output if "精度チェック完了" in m]
+        self.assertIn("0件 採点", done[0])
+        self.assertIn("分割の比が合わない=1", done[0])
+
 
 if __name__ == "__main__":
     unittest.main()
