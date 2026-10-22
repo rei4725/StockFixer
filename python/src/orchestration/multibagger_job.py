@@ -45,63 +45,91 @@ def run_monthly_multibagger_screen(market: str = "us", top_n: int = 10) -> dict:
     """
     logger.info("=== 月次 multibagger スクリーン開始 (market=%s) ===", market)
 
-    new_candidates = _screen_new_candidates(market, top_n)
-    position_actions = _evaluate_positions(market)
+    new_candidates, screen_failed = _screen_new_candidates(market, top_n)
+    position_actions, skipped_positions = _evaluate_positions(market)
 
-    message = _format_message(market, new_candidates, position_actions)
+    message = _format_message(
+        market,
+        new_candidates,
+        position_actions,
+        skipped=skipped_positions,
+        screen_failed=screen_failed,
+    )
     _notify(message)
 
     logger.info(
-        "=== 月次 multibagger スクリーン完了: 新規候補=%d 件, 保有判定=%d 件 ===",
+        "=== 月次 multibagger スクリーン完了: 新規候補=%d 件, 保有判定=%d 件, 判定できず=%d 件 ===",
         len(new_candidates),
         len(position_actions),
+        len(skipped_positions),
     )
     return {
         "market": market,
         "new_candidates": new_candidates,
+        "screen_failed": screen_failed,
         "position_actions": position_actions,
+        "skipped_positions": skipped_positions,
         "message": message,
     }
 
 
-def _screen_new_candidates(market: str, top_n: int) -> list[MultibaggerCandidate]:
-    """#433 の最終スクリーン（トレンド + 質ゲート）で新規候補を取得する。"""
+class _PositionSkipped(Exception):
+    """保有の判定ができなかったこと（価格データなし・イベントなし）を表す。"""
+
+
+def _screen_new_candidates(market: str, top_n: int) -> tuple[list[MultibaggerCandidate], bool]:
+    """#433 の最終スクリーン（トレンド + 質ゲート）で新規候補を取得する。
+
+    Returns:
+        (新規候補, スクリーンが例外で失敗したか)
+    """
     try:
         trend = screen_trend_candidates(market=market)
         final = apply_quality_gate(trend)
-        return final[:top_n]
+        return final[:top_n], False
     except Exception as e:
         logger.error("新規候補スクリーン失敗: %s", e, exc_info=True)
-        return []
+        return [], True
 
 
-def _evaluate_positions(market: str) -> list[dict]:
-    """open ポジションを #430 保有エンジンに通し、アクションを判定・永続化する。"""
+def _evaluate_positions(market: str) -> tuple[list[dict], list[dict]]:
+    """open ポジションを #430 保有エンジンに通し、アクションを判定・永続化する。
+
+    Returns:
+        (判定できたアクション, 判定できなかった保有の symbol と理由)
+    """
     actions: list[dict] = []
+    skipped: list[dict] = []
     for pos in list_positions(status="open"):
         if pos.market != market:
             continue
         try:
-            action = _evaluate_one_position(pos)
+            actions.append(_evaluate_one_position(pos))
+        except _PositionSkipped as e:
+            skipped.append({"market": pos.market, "symbol": pos.symbol, "reason": str(e)})
         except Exception as e:
             logger.error("保有判定失敗 (%s/%s): %s", pos.market, pos.symbol, e, exc_info=True)
-            continue
-        if action is not None:
-            actions.append(action)
-    return actions
+            skipped.append(
+                {"market": pos.market, "symbol": pos.symbol, "reason": f"error:{type(e).__name__}"}
+            )
+    return actions, skipped
 
 
-def _evaluate_one_position(pos: Position) -> Optional[dict]:
-    """1 ポジションを最新価格まで保有シミュレートし、アクションを確定・永続化する。"""
+def _evaluate_one_position(pos: Position) -> dict:
+    """1 ポジションを最新価格まで保有シミュレートし、アクションを確定・永続化する。
+
+    Raises:
+        _PositionSkipped: 価格データまたは保有イベントが無く判定できないとき。
+    """
     prices = load_stock_features(pos.market, pos.symbol)
     if prices is None or "date" not in prices.columns or "Close" not in prices.columns:
         logger.warning("価格データなし（判定スキップ）: %s/%s", pos.market, pos.symbol)
-        return None
+        raise _PositionSkipped("no_prices")
 
     events = simulate_position(prices, pos.entry_date)
     if not events:
         logger.warning("保有イベントなし（判定スキップ）: %s/%s", pos.market, pos.symbol)
-        return None
+        raise _PositionSkipped("no_events")
 
     action, reason, held_fraction, multiple, price = _interpret_events(events)
 
@@ -152,12 +180,21 @@ def _format_message(
     market: str,
     candidates: list[MultibaggerCandidate],
     actions: list[dict],
+    skipped: Optional[list[dict]] = None,
+    screen_failed: bool = False,
 ) -> str:
-    """新規候補 + 保有アクションを Discord 向けテキスト（コードフェンス）に整形する。"""
+    """新規候補 + 保有アクションを Discord 向けテキスト（コードフェンス）に整形する。
+
+    判定できなかった保有は「判定できず」として載せ、開いた保有があるときは
+    「保有なし」と書かない。スクリーンの失敗は「該当なし」と分けて書く。
+    """
+    skipped = skipped or []
     lines: list[str] = [f"📈 月次 multibagger スクリーン ({market.upper()})", ""]
 
     lines.append("【新規候補】")
-    if candidates:
+    if screen_failed:
+        lines.append("⚠️ スクリーン失敗（候補を判定できず）")
+    elif candidates:
         lines.append("```")
         lines.append(f"{'symbol':<8}{'score':>8}{'close':>10}{'CAGR':>8}{'ROE':>8}")
         for c in candidates:
@@ -179,7 +216,13 @@ def _format_message(
                 f"{a['symbol']:<8}{a['action']:<10}{a['multiple']:>6.2f}x{a['reason']:>14}"
             )
         lines.append("```")
-    else:
+    if skipped:
+        lines.append(f"⚠️ 判定できず: {len(skipped)} 件")
+        lines.append("```")
+        for s in skipped:
+            lines.append(f"{s['symbol']:<8}{s['reason']}")
+        lines.append("```")
+    if not actions and not skipped:
         lines.append("保有なし")
 
     return "\n".join(lines)

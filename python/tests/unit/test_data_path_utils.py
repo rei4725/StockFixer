@@ -3,6 +3,7 @@
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from src.utils.data_path_utils import (
     ensure_dir,
@@ -55,7 +56,14 @@ class TestDataPathUtils(unittest.TestCase):
 
     def test_get_results_dir_under_python_root(self):
         """get_results_dir が python_root/results を返すことを確認"""
-        self.assertEqual(get_results_dir(), os.path.join(get_python_root(), "results"))
+        with patch.dict(os.environ):
+            os.environ.pop("STOCKFIXER_RESULTS_DIR", None)
+            self.assertEqual(get_results_dir(), os.path.join(get_python_root(), "results"))
+
+    def test_get_results_dir_env_override(self):
+        """STOCKFIXER_RESULTS_DIR があればその値を返すことを確認（#902）"""
+        with patch.dict(os.environ, {"STOCKFIXER_RESULTS_DIR": "/tmp/sf_results"}):
+            self.assertEqual(get_results_dir(), "/tmp/sf_results")
 
     def test_get_results_subdir_with_timestamp(self):
         """get_results_subdir にタイムスタンプを渡すとそのサブディレクトリを返すことを確認"""
