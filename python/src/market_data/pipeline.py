@@ -16,6 +16,7 @@ import pandas as pd
 from config.data import MAX_DATA_WORKERS
 from config.settings import SENTIMENT_LOOKBACK_DAYS, STALE_BARS_MAX_WEEKDAYS
 from src.domain.ports import AlertLevel, NotificationPort
+from src.market_data.bar_close import drop_unclosed_bars
 from src.market_data.base import DataSourceBase
 from src.market_data.loader import (
     fetch_cross_asset_features,
@@ -103,6 +104,8 @@ def fetch_stock_data_with_features(
                 fresh_data = data_source.get_stock_data(symbol, market, fetch_start, end_date)
             else:
                 fresh_data = get_stock_data(market, ticker, fetch_start, end_date)
+            # 引けていない当日の足は保存せず、次の回の差分で取り直す（#890）
+            fresh_data = drop_unclosed_bars(fresh_data, market)
             split_ratios = _stock_split_ratios(fresh_data)
             if split_ratios:
                 # 分割の前の足と段差にならないよう、全期間を取り直す（#817）
@@ -116,6 +119,7 @@ def fetch_stock_data_with_features(
                     data_source,
                     get_stock_data,
                 )
+                fresh_data = drop_unclosed_bars(fresh_data, market)
                 if fresh_data is None:
                     return None
                 df = fresh_data
@@ -154,6 +158,7 @@ def fetch_stock_data_with_features(
                 df = data_source.get_stock_data(symbol, market, start_date, end_date)
             else:
                 df = get_stock_data(market, ticker, start_date, end_date)
+            df = drop_unclosed_bars(df, market)
             if df is None or df.empty:
                 logger.warning("データが取得できませんでした。")
                 return None
