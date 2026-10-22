@@ -32,8 +32,17 @@ def _today() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
+class PositionLedgerError(Exception):
+    """ポジション台帳が在るのに読めない・形式が不正であることを表す（#885）。"""
+
+
 def _load_raw() -> list[dict]:
-    """JSON から生レコード（dict）のリストを読み込む。ファイルが無ければ空。"""
+    """JSON から生レコード（dict）のリストを読み込む。ファイルが無ければ空。
+
+    Raises:
+        PositionLedgerError: ファイルが在るのに読めない・list でないとき。
+            空の保有として進むと「保有なし」に化け、書き込み側は台帳を上書きで消すため。
+    """
     path = get_multibagger_positions_path()
     if not os.path.exists(path):
         return []
@@ -42,10 +51,10 @@ def _load_raw() -> list[dict]:
             data = json.load(f)
     except (OSError, json.JSONDecodeError) as e:
         logger.error("ポジション台帳の読み込み失敗: %s", e, exc_info=True)
-        return []
+        raise PositionLedgerError(f"ポジション台帳の読み込み失敗: {path}") from e
     if not isinstance(data, list):
-        logger.error("ポジション台帳の形式が不正です（list を期待）")
-        return []
+        logger.error("ポジション台帳の形式が不正です（list を期待）: %s", path)
+        raise PositionLedgerError(f"ポジション台帳の形式が不正です（list を期待）: {path}")
     return data
 
 
