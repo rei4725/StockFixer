@@ -500,17 +500,64 @@ class TestCountConsecutiveFailuresEdgeCases(unittest.TestCase):
                 result = _count_consecutive_pipeline_failures(None)
         self.assertEqual(result, 0)
 
-    def test_invalid_json_returns_zero(self):
-        from src.utils.alert_service import _count_consecutive_pipeline_failures
+    def test_invalid_json_raises_unreadable(self):
+        from src.utils.alert_service import (
+            SchedulerStateUnreadableError,
+            _count_consecutive_pipeline_failures,
+        )
 
         with tempfile.NamedTemporaryFile(suffix=".json", mode="w", delete=False) as f:
             f.write("not valid json {{{{")
             fname = f.name
         try:
-            result = _count_consecutive_pipeline_failures(fname)
+            with self.assertRaises(SchedulerStateUnreadableError):
+                _count_consecutive_pipeline_failures(fname)
         finally:
             os.unlink(fname)
-        self.assertEqual(result, 0)
+
+
+class TestPipelineFailRuleUnreadableState(unittest.TestCase):
+    """状態ファイルが在るのに読めないとき、0回と数えて黙らない（#924）"""
+
+    def _check(self, tmpdir: str):
+        from src.utils.alert_service import check_pipeline_fail_rule
+
+        return check_pipeline_fail_rule(os.path.join(tmpdir, "scheduler_queue_state.json"))
+
+    def test_broken_json_triggers(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with open(os.path.join(tmpdir, "scheduler_queue_state.json"), "w") as f:
+                f.write("not valid json {{{{")
+            result = self._check(tmpdir)
+        self.assertTrue(result.triggered)
+        self.assertIn("state_error", result.details)
+        self.assertTrue(any("状態ファイルが読めない" in line for line in result.as_discord_lines()))
+
+    def test_non_dict_top_level_triggers(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with open(os.path.join(tmpdir, "scheduler_queue_state.json"), "w") as f:
+                f.write("[1, 2, 3]")
+            result = self._check(tmpdir)
+        self.assertTrue(result.triggered)
+        self.assertIn("state_error", result.details)
+
+    def test_quarantined_without_body_triggers(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            corrupt = os.path.join(
+                tmpdir, "scheduler_queue_state.json.corrupt-20261023T000000000000Z"
+            )
+            with open(corrupt, "w") as f:
+                f.write("broken")
+            result = self._check(tmpdir)
+        self.assertTrue(result.triggered)
+        self.assertIn("state_error", result.details)
+
+    def test_missing_file_is_not_triggered(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = self._check(tmpdir)
+        self.assertFalse(result.triggered)
+        self.assertEqual(result.consecutive_count, 0)
+        self.assertNotIn("state_error", result.details)
 
 
 if __name__ == "__main__":

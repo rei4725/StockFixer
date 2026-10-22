@@ -231,6 +231,44 @@ class TestDbConnectionLockTimeout:
         assert issubclass(DbLockTimeoutError, RuntimeError)
 
 
+class TestHealthUnreadableSchedulerState:
+    """状態ファイルが在るのに読めないとき degraded と理由を返す（#924）"""
+
+    def _get(self, client, tmp_path):
+        with (
+            patch("src.api.health._check_db", return_value=("ok", None, None)),
+            patch("src.api.health.get_results_dir", return_value=str(tmp_path)),
+        ):
+            return client.get("/health")
+
+    def test_broken_json_is_degraded_with_reason(self, client, tmp_path):
+        (tmp_path / "scheduler_queue_state.json").write_text("not json {{{", encoding="utf-8")
+        resp = self._get(client, tmp_path)
+        data = resp.get_json()
+        assert data["status"] == "degraded"
+        assert data["scheduler_state_error"]
+        assert resp.status_code == 200
+
+    def test_non_dict_top_level_is_degraded(self, client, tmp_path):
+        (tmp_path / "scheduler_queue_state.json").write_text("[1, 2]", encoding="utf-8")
+        data = self._get(client, tmp_path).get_json()
+        assert data["status"] == "degraded"
+        assert data["scheduler_state_error"]
+
+    def test_quarantined_without_body_is_degraded(self, client, tmp_path):
+        (tmp_path / "scheduler_queue_state.json.corrupt-20261023T000000000000Z").write_text(
+            "broken", encoding="utf-8"
+        )
+        data = self._get(client, tmp_path).get_json()
+        assert data["status"] == "degraded"
+        assert "corrupt" in data["scheduler_state_error"]
+
+    def test_no_file_stays_ok(self, client, tmp_path):
+        data = self._get(client, tmp_path).get_json()
+        assert data["status"] == "ok"
+        assert "scheduler_state_error" not in data
+
+
 class TestLoadSchedulerLastRuns:
     def test_returns_empty_when_no_file(self, tmp_path):
         """状態ファイルが存在しない場合は空 dict を返す"""
