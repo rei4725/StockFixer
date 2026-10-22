@@ -191,3 +191,84 @@ def test_discord_failure_does_not_crash(tmp_positions, monkeypatch):
     # 例外を送出せず正常終了すること
     payload = multibagger_job.run_monthly_multibagger_screen(market="us")
     assert payload["new_candidates"]
+
+
+# ── 判定できなかった保有・スクリーン失敗（#872）────────────────
+
+
+def test_missing_prices_reports_skipped_not_no_holdings(tmp_positions, monkeypatch):
+    add_position("us", "AAPL", "2024-01-01", 100.0)
+    _patch_screen(monkeypatch, [])
+    monkeypatch.setattr(multibagger_job, "load_stock_features", lambda *_: None)
+    _patch_notify(monkeypatch)
+
+    payload = multibagger_job.run_monthly_multibagger_screen(market="us")
+
+    assert payload["position_actions"] == []
+    assert [s["symbol"] for s in payload["skipped_positions"]] == ["AAPL"]
+    message = payload["message"]
+    assert "保有なし" not in message
+    assert "判定できず" in message
+    assert "AAPL" in message
+
+
+def test_evaluation_exception_reports_skipped(tmp_positions, monkeypatch):
+    add_position("us", "AAPL", "2024-01-01", 100.0)
+    _patch_screen(monkeypatch, [])
+    _patch_prices(monkeypatch)
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("sim failed")
+
+    monkeypatch.setattr(multibagger_job, "simulate_position", _boom)
+    _patch_notify(monkeypatch)
+
+    payload = multibagger_job.run_monthly_multibagger_screen(market="us")
+
+    assert [s["symbol"] for s in payload["skipped_positions"]] == ["AAPL"]
+    message = payload["message"]
+    assert "保有なし" not in message
+    assert "判定できず" in message
+    assert "AAPL" in message
+
+
+def test_no_events_reports_skipped(tmp_positions, monkeypatch):
+    add_position("us", "AAPL", "2024-01-01", 100.0)
+    _patch_screen(monkeypatch, [])
+    _patch_prices(monkeypatch)
+    _patch_sim(monkeypatch, [])
+    _patch_notify(monkeypatch)
+
+    payload = multibagger_job.run_monthly_multibagger_screen(market="us")
+
+    message = payload["message"]
+    assert "保有なし" not in message
+    assert "判定できず" in message
+    assert "AAPL" in message
+
+
+def test_no_open_positions_still_says_no_holdings(tmp_positions, monkeypatch):
+    _patch_screen(monkeypatch, [])
+    _patch_notify(monkeypatch)
+
+    payload = multibagger_job.run_monthly_multibagger_screen(market="us")
+
+    assert payload["skipped_positions"] == []
+    assert "保有なし" in payload["message"]
+    assert "判定できず" not in payload["message"]
+
+
+def test_screen_exception_is_not_reported_as_no_candidates(tmp_positions, monkeypatch):
+    def _boom(**_k):
+        raise RuntimeError("screen down")
+
+    monkeypatch.setattr(multibagger_job, "screen_trend_candidates", _boom)
+    _patch_notify(monkeypatch)
+
+    payload = multibagger_job.run_monthly_multibagger_screen(market="us")
+
+    assert payload["new_candidates"] == []
+    assert payload["screen_failed"] is True
+    message = payload["message"]
+    assert "該当なし" not in message
+    assert "スクリーン失敗" in message
