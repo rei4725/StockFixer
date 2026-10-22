@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from src.orchestration.jobs.accuracy_json import (
     append_accuracy_json_sectors,
+    production_already_predicted_today,
     write_accuracy_json_without_sectors,
 )
 from src.orchestration.jobs.alerting import (
@@ -111,28 +112,35 @@ def run_daily_pipeline():
 
     # 2. 前日予測の精度チェック（NON_CRITICAL: 失敗しても後続処理を継続）
     # 3 で当日分の prediction_results を保存する前に読む（Delete-Insert 対策）。
+    # やり直しで既に今日の予想に入れ替わっていれば、前の回の JSON を残して飛ばす（#904）。
     logger.info("[2/6] 予測精度チェック開始")
-    try:
+    accuracy_report = None
+    if not production_already_predicted_today():
         from src.prediction.prediction_pipeline import run_accuracy_check
 
-        summary = run_accuracy_check(
-            horizon=1, model_name="production", model_version_filter="production"
-        )
-        send_accuracy_summary(summary, horizon=1)
-        logger.info("[2/6] 予測精度チェック完了 (production)")
-    except Exception as e:
-        _handle_stage_error(PipelineStage.NON_CRITICAL, "[2/6] 予測精度チェック (production)", e)
+        try:
+            summary = run_accuracy_check(
+                horizon=1, model_name="production", model_version_filter="production"
+            )
+            send_accuracy_summary(summary, horizon=1)
+            logger.info("[2/6] 予測精度チェック完了 (production)")
+        except Exception as e:
+            _handle_stage_error(
+                PipelineStage.NON_CRITICAL, "[2/6] 予測精度チェック (production)", e
+            )
 
-    try:
-        from src.prediction.prediction_pipeline import run_accuracy_check
+        try:
+            run_accuracy_check(
+                horizon=1, model_name="challenger", model_version_filter="challenger"
+            )
+            logger.info("[2/6] 予測精度チェック完了 (challenger)")
+        except Exception as e:
+            _handle_stage_error(
+                PipelineStage.NON_CRITICAL, "[2/6] 予測精度チェック (challenger)", e
+            )
 
-        run_accuracy_check(horizon=1, model_name="challenger", model_version_filter="challenger")
-        logger.info("[2/6] 予測精度チェック完了 (challenger)")
-    except Exception as e:
-        _handle_stage_error(PipelineStage.NON_CRITICAL, "[2/6] 予測精度チェック (challenger)", e)
-
-    # 採点の JSON も 3 の保存の前に業種なしで書き、業種は道の最後で書き足す（#843）
-    accuracy_report = write_accuracy_json_without_sectors()
+        # 採点の JSON も 3 の保存の前に業種なしで書き、業種は道の最後で書き足す（#843）
+        accuracy_report = write_accuracy_json_without_sectors()
 
     # 3. 予測（CRITICAL: 失敗時はパイプライン停止 + Discord通知）
     logger.info("[3/6] 予測開始 (production)")
