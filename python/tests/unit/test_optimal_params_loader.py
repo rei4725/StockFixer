@@ -65,19 +65,45 @@ class TestGetOptimalParams(unittest.TestCase):
 
         self.assertIsNone(result)
 
-    def test_returns_none_when_json_is_invalid(self):
-        """ファイルが不正な JSON の場合は None を返す（例外を外に出さない）"""
+    def _assert_unreadable(self, content: str) -> None:
         import tempfile
+
+        from src.utils.optimal_params_loader import OptimalParamsUnreadableError
 
         with tempfile.TemporaryDirectory() as d:
             path = Path(d) / "optimal_params.json"
-            path.write_text("{ invalid json !!!}", encoding="utf-8")
+            path.write_text(content, encoding="utf-8")
 
             get_optimal_params = self._get_fn()
             with patch("src.utils.optimal_params_loader.OPTIMAL_PARAMS_PATH", path):
-                result = get_optimal_params("jp", "7203")
+                with self.assertLogs("src.utils.optimal_params_loader", level="ERROR"):
+                    with self.assertRaises(OptimalParamsUnreadableError):
+                        get_optimal_params("jp", "7203")
 
-        self.assertIsNone(result)
+    def test_raises_when_json_is_invalid(self):
+        """ファイルが在るのに不正な JSON の場合は、未登録の None にせず例外を投げ ERROR を出す"""
+        self._assert_unreadable("{ invalid json !!!}")
+
+    def test_raises_when_top_level_is_not_dict(self):
+        """最上位が dict でない場合は、例外を投げ ERROR を出す"""
+        self._assert_unreadable(json.dumps([{"jp_7203": {"threshold": 0.01}}]))
+
+    def test_raises_when_file_cannot_be_read(self):
+        """ファイルが在るのに開けない場合は、例外を投げ ERROR を出す"""
+        import tempfile
+
+        from src.utils.optimal_params_loader import OptimalParamsUnreadableError
+
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "optimal_params.json"
+            path.write_text("{}", encoding="utf-8")
+
+            get_optimal_params = self._get_fn()
+            with patch("src.utils.optimal_params_loader.OPTIMAL_PARAMS_PATH", path):
+                with patch.object(Path, "open", side_effect=PermissionError("denied")):
+                    with self.assertLogs("src.utils.optimal_params_loader", level="ERROR"):
+                        with self.assertRaises(OptimalParamsUnreadableError):
+                            get_optimal_params("jp", "7203")
 
 
 if __name__ == "__main__":
