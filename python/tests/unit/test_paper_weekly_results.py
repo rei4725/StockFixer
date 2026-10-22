@@ -131,13 +131,36 @@ class TestComputeWeeklyResults(unittest.TestCase):
         self.assertEqual(jp["valued_at_fill_price"], ["9999"])
         self.assertEqual(result["markets"]["us"]["valued_at_fill_price"], [])
 
+    def test_split_in_week_follows_actual_move(self):
+        """週の中に 1:2 の分割があり、終値が全期間で調整し直してあっても、週の騰落率が実際の値動きどおりになること（#899）"""
+        orders = _orders([("jp", "7203", 1, 1000, 100.0, pd.Timestamp("2026-10-07"))])
+
+        def adjusted_loader(market, symbol):
+            # 実際は前週金曜 100 円 → 今週金曜 110 円。調整し直した足は全期間を 2 で割る
+            return _price_loader(market, symbol) / 2.0
+
+        def splits(market, symbol):
+            return pd.Series([2.0], index=[pd.Timestamp("2026-10-14")])
+
+        result = compute_weekly_results(
+            orders,
+            adjusted_loader,
+            _INITIAL,
+            date(2026, 10, 17),
+            _benchmark_fetcher,
+            split_loader=splits,
+        )
+        # 1,000 株 × 10 円 = +10,000
+        self.assertAlmostEqual(result["markets"]["jp"]["weekly_return"], 0.01)
+
 
 class TestWritePaperWeeklyResults(unittest.TestCase):
     """週の道からファイルに書くこと"""
 
+    @patch("src.trading.paper_equity._default_split_loader", return_value=None)
     @patch("src.trading.paper_equity._default_price_loader", side_effect=_price_loader)
     @patch("src.trading.paper_equity._load_filled_orders")
-    def test_writes_iso_week_json(self, mock_load, _mock_prices):
+    def test_writes_iso_week_json(self, mock_load, _mock_prices, _mock_splits):
         mock_load.return_value = _orders(
             [("jp", "7203", 1, 1000, 100.0, pd.Timestamp("2026-10-07"))]
         )
