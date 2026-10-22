@@ -4,11 +4,12 @@ import json
 import os
 import tempfile
 import unittest
-from datetime import date
+from datetime import date, datetime
 from unittest.mock import patch
 
 import pandas as pd
 
+from src.backtest.metrics import fetch_benchmark_returns
 from src.trading.paper_equity import compute_weekly_results, write_paper_weekly_results
 
 _INITIAL = 1_000_000.0
@@ -152,6 +153,116 @@ class TestComputeWeeklyResults(unittest.TestCase):
         )
         # 1,000 株 × 10 円 = +10,000
         self.assertAlmostEqual(result["markets"]["jp"]["weekly_return"], 0.01)
+
+
+class TestClosedWeek(unittest.TestCase):
+    """週の途中に動いても、直前に終わった週（前の ISO 週の月〜金）を書くこと（#919）"""
+
+    def setUp(self):
+        self.orders = _orders([("jp", "7203", 1, 1000, 100.0, pd.Timestamp("2026-10-07"))])
+
+    def test_wednesday_utc_of_thursday_jst_run_gives_previous_week(self):
+        # 木曜 02:00 JST は UTC では水曜 2026-10-21
+        result = compute_weekly_results(
+            self.orders, _price_loader, _INITIAL, date(2026, 10, 21), _benchmark_fetcher
+        )
+        self.assertEqual(result["week"], "2026-W42")
+        self.assertEqual(result["start"], "2026-10-12")
+        self.assertEqual(result["end"], "2026-10-16")
+        self.assertAlmostEqual(result["markets"]["jp"]["weekly_return"], 0.01)
+
+    def test_thursday_jst_gives_previous_week(self):
+        result = compute_weekly_results(
+            self.orders, _price_loader, _INITIAL, date(2026, 10, 22), _benchmark_fetcher
+        )
+        self.assertEqual(result["week"], "2026-W42")
+        self.assertEqual(result["end"], "2026-10-16")
+
+    def test_friday_does_not_write_the_unfinished_week(self):
+        """金曜の当日は、その週の終値がまだ無いため前の週を書くこと"""
+        result = compute_weekly_results(
+            self.orders, _price_loader, _INITIAL, date(2026, 10, 16), _benchmark_fetcher
+        )
+        self.assertEqual(result["week"], "2026-W41")
+        self.assertEqual(result["end"], "2026-10-09")
+
+    def test_missing_week_end_close_is_marked_partial(self):
+        """週の終わりの日の終値がまだ無い保有があれば、部分の週と分かる印を残すこと"""
+        result = compute_weekly_results(
+            self.orders, _price_loader, _INITIAL, date(2026, 10, 24), _benchmark_fetcher
+        )
+        # 終値は 2026-10-16 までしか無い
+        self.assertEqual(result["week"], "2026-W43")
+        self.assertTrue(result["markets"]["jp"]["partial_week"])
+        self.assertEqual(result["markets"]["jp"]["missing_week_end_close"], ["7203"])
+        self.assertFalse(result["markets"]["us"]["partial_week"])
+
+    def test_week_with_week_end_close_is_not_partial(self):
+        result = compute_weekly_results(
+            self.orders, _price_loader, _INITIAL, date(2026, 10, 17), _benchmark_fetcher
+        )
+        self.assertFalse(result["markets"]["jp"]["partial_week"])
+        self.assertEqual(result["markets"]["jp"]["missing_week_end_close"], [])
+
+    def test_job_passes_japan_date(self):
+        """週の道は、UTC でなく日本時間の日付を as_of に渡すこと"""
+        from src.orchestration.jobs.weekly import run_weekly_paper_results
+        from src.utils.japan_time import JAPAN_TIMEZONE
+
+        thursday_2am_jst = datetime(2026, 10, 22, 2, 0, tzinfo=JAPAN_TIMEZONE)
+        with patch("src.utils.japan_time.now_jst", return_value=thursday_2am_jst), patch(
+            "src.trading.paper_equity.write_paper_weekly_results"
+        ) as mock_write:
+            run_weekly_paper_results()
+        self.assertEqual(mock_write.call_args[0][0], date(2026, 10, 22))
+
+
+class TestBenchmarkNullReason(unittest.TestCase):
+    """ベンチマークが取れないときは WARNING を出して null、取れれば超過の騰落率を出すこと（#919）"""
+
+    def setUp(self):
+        self.orders = _orders([("jp", "7203", 1, 1000, 100.0, pd.Timestamp("2026-10-07"))])
+
+    def test_empty_benchmark_warns_and_gives_null(self):
+        def empty(ticker, start, end):
+            return {"ticker": ticker, "total_return": None, "start": start, "end": end}
+
+        with self.assertLogs("src.trading.paper_equity", level="WARNING") as logs:
+            result = compute_weekly_results(
+                self.orders, _price_loader, _INITIAL, date(2026, 10, 17), empty
+            )
+        self.assertIsNone(result["markets"]["jp"]["benchmark_return"])
+        self.assertIsNone(result["markets"]["jp"]["excess_return"])
+        self.assertTrue(any("1306.T" in line for line in logs.output))
+
+    @patch("yfinance.download")
+    def test_multiindex_columns_give_return_and_excess(self, mock_download):
+        """yfinance が列を多重の見出しで返しても、ベンチマークの騰落率が取れること"""
+        idx = pd.to_datetime(["2026-10-09", "2026-10-12", "2026-10-16"])
+
+        def download(ticker, **kwargs):
+            columns = pd.MultiIndex.from_tuples([("Close", ticker), ("Open", ticker)])
+            return pd.DataFrame(
+                [[100.0, 100.0], [101.0, 101.0], [104.0, 104.0]], index=idx, columns=columns
+            )
+
+        mock_download.side_effect = download
+        result = compute_weekly_results(
+            self.orders, _price_loader, _INITIAL, date(2026, 10, 17), fetch_benchmark_returns
+        )
+        jp = result["markets"]["jp"]
+        self.assertAlmostEqual(jp["benchmark_return"], 0.04)
+        self.assertAlmostEqual(jp["excess_return"], jp["weekly_return"] - jp["benchmark_return"])
+        self.assertAlmostEqual(jp["excess_return"], -0.03)
+
+    @patch("yfinance.download", return_value=pd.DataFrame())
+    def test_empty_download_warns_and_gives_null(self, _mock_download):
+        with self.assertLogs("src.trading.paper_equity", level="WARNING"):
+            result = compute_weekly_results(
+                self.orders, _price_loader, _INITIAL, date(2026, 10, 17), fetch_benchmark_returns
+            )
+        self.assertIsNone(result["markets"]["us"]["benchmark_return"])
+        self.assertIsNone(result["markets"]["us"]["excess_return"])
 
 
 class TestWritePaperWeeklyResults(unittest.TestCase):

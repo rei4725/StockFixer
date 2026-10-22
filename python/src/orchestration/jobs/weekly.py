@@ -243,14 +243,15 @@ def run_weekly_paper_results() -> None:
     logger.info("紙の売買の週の成績の書き出し開始")
     try:
         import os
-        from datetime import date
 
         from src.backtest.metrics import fetch_benchmark_returns
         from src.trading.paper_equity import write_paper_weekly_results
+        from src.utils import japan_time
         from src.utils.data_path_utils import get_results_dir
 
+        # コンテナは UTC のため、日本時間の日付で直前に終わった週を決める（#919）
         write_paper_weekly_results(
-            date.today(),
+            japan_time.now_jst().date(),
             fetch_benchmark_returns,
             os.path.join(get_results_dir(), "paper"),
         )
