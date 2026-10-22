@@ -18,6 +18,9 @@ python/data/
 python/models/
 Logs/
 python/results/
+# 最適パラメータ JSON の保存のロックと、壊れたときの退避（optimal_params.json そのものは追跡する）
+python/config/*.lock
+python/config/*.corrupt-*
 
 # DuckDB
 *.duckdb
