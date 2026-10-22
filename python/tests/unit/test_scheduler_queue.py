@@ -926,6 +926,67 @@ def test_retry_zero_means_no_retry(mock_sleep, tmp_path):
     mock_sleep.assert_not_called()
 
 
+def _schedule_config_with_failing_func(job_id: str):
+    """本番の SCHEDULE_CONFIG の job_id の設定のまま、関数だけ毎回落ちるものに替える。"""
+    from run_scheduler import SCHEDULE_CONFIG
+
+    call_count = {"n": 0}
+
+    def _func():
+        call_count["n"] += 1
+        raise RuntimeError(f"failed after placing orders #{call_count['n']}")
+
+    job_config = dict(SCHEDULE_CONFIG[job_id])
+    job_config["func"] = _func
+    return {job_id: job_config}, call_count
+
+
+@pytest.mark.parametrize("job_id", ["daily_auto_order", "daily_rule_signals"])
+@patch("src.orchestration.scheduler_queue.time.sleep")
+def test_order_jobs_in_schedule_config_are_not_retried(mock_sleep, job_id, tmp_path):
+    """発注のジョブは同じ回の中で呼び直さず、error を記録して知らせる（二重発注を防ぐ。#836）"""
+    state_path = tmp_path / "state.json"
+    config, call_count = _schedule_config_with_failing_func(job_id)
+    notifier = MagicMock()
+    manager = SchedulerQueueManager(
+        config, state_file_path=str(state_path), error_notifier=notifier
+    )
+
+    with pytest.raises(RuntimeError):
+        manager.run_job(job_id, reason="scheduled", force=True)
+
+    assert call_count["n"] == 1
+    mock_sleep.assert_not_called()
+    notifier.assert_called_once()
+    assert notifier.call_args[0][0] == job_id
+
+    saved = json.loads(state_path.read_text(encoding="utf-8"))
+    statuses = [e["status"] for e in saved["events"]]
+    assert "retry" not in statuses
+    assert statuses[-1] == "error"
+
+
+@patch("src.orchestration.scheduler_queue.time.sleep")
+def test_daily_pipeline_in_schedule_config_is_still_retried(mock_sleep, tmp_path):
+    """発注でないジョブ（daily_pipeline）は既定の回数までやり直す"""
+    from config import settings
+
+    state_path = tmp_path / "state.json"
+    config, call_count = _schedule_config_with_failing_func("daily_pipeline")
+    notifier = MagicMock()
+    manager = SchedulerQueueManager(
+        config, state_file_path=str(state_path), error_notifier=notifier
+    )
+
+    with pytest.raises(RuntimeError):
+        manager.run_job("daily_pipeline", reason="scheduled", force=True)
+
+    assert settings.SCHEDULER_MAX_RETRIES > 0
+    assert call_count["n"] == settings.SCHEDULER_MAX_RETRIES + 1
+    assert mock_sleep.call_count == settings.SCHEDULER_MAX_RETRIES
+    notifier.assert_called_once()
+
+
 @patch("src.orchestration.scheduler_queue.time.sleep")
 def test_retry_notifier_failure_does_not_propagate(mock_sleep, tmp_path):
     """error_notifier 自体が例外を出しても run_job は元の例外を再送出すること"""
