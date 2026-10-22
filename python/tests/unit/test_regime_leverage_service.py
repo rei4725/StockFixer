@@ -3,6 +3,7 @@
 import unittest
 from datetime import datetime
 from unittest.mock import MagicMock, patch  # noqa: F401  # Task 5/6のテストで使用予定
+from zoneinfo import ZoneInfo
 
 import numpy as np  # noqa: F401  # Task 5/6のテストで使用予定
 import pandas as pd  # noqa: F401  # Task 5/6のテストで使用予定
@@ -667,6 +668,140 @@ class TestRegimeLeverageUsdJpyGuard(unittest.TestCase):
             run_regime_leverage_weekly_check(mock_port)
 
         mock_insert.assert_not_called()
+
+
+_JST = ZoneInfo("Asia/Tokyo")
+
+
+def _fixed_datetime(now_jst: datetime):
+    """service.datetime を差し替え、now() だけを固定の JST の時刻にする。"""
+
+    class _FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            if tz is None:
+                return now_jst.replace(tzinfo=None)
+            return now_jst.astimezone(tz)
+
+    return _FixedDatetime
+
+
+def _daily_port(last_bar: str, lows: dict) -> MagicMock:
+    """last_bar の日までの日足(安値は既定で 498 ドル、lows で日ごとに上書き)を返すポート。"""
+    idx = pd.bdate_range(end=last_bar, periods=260)
+    prices = pd.Series(500.0, index=idx)
+    low = prices - 2
+    for day, value in lows.items():
+        low.loc[pd.Timestamp(day)] = value
+    df = pd.DataFrame(
+        {"Open": prices, "High": prices + 2, "Low": low, "Close": prices, "Volume": 1_000_000},
+        index=idx,
+    )
+    mock_port = MagicMock()
+    mock_port.get_stock_data.return_value = df
+    mock_port.get_forex_data.return_value = pd.DataFrame({"Close": [146.0]}, index=[idx[-1]])
+    return mock_port
+
+
+class TestDailyCheckUsesClosedBarsSinceLastRun(unittest.TestCase):
+    """日次判定は、前の回の後に引けた日足を全部見て、引けていない当日の足は使わない(#891)。
+    stop_price_jpy=65,000円・ドル円146円なので、安値445ドル以下で損切りの値段を割る。"""
+
+    def _run(
+        self,
+        now_jst: datetime,
+        executed_at: datetime,
+        port: MagicMock,
+        reason: str = "daily_noop",
+    ):
+        from src.trading.regime_leverage_strategy.service import (
+            run_regime_leverage_daily_margin_check,
+        )
+
+        snap = _holding_snapshot(
+            executed_at=executed_at,
+            action="noop",
+            reason=reason,
+            entry_date=datetime(2026, 1, 2),
+        )
+        with patch(
+            "src.trading.regime_leverage_strategy.service.get_latest_snapshot",
+            return_value=snap,
+        ), patch(
+            "src.trading.regime_leverage_strategy.service.insert_snapshot"
+        ) as mock_insert, patch(
+            "src.trading.regime_leverage_strategy.service.datetime", _fixed_datetime(now_jst)
+        ):
+            decision = run_regime_leverage_daily_margin_check(port)
+        mock_insert.assert_called_once_with(decision)
+        return decision
+
+    def test_weekly_row_is_not_used_as_last_daily_check(self):
+        # 最新の行が週次の回(JST 7/18 土 07:00、金曜 7/17 の引けの後)でも、
+        # 月曜 7/20 07:30 の日次の回は金曜の足を判定する
+        port = _daily_port("2026-07-17", {"2026-07-17": 440.0})
+        decision = self._run(
+            datetime(2026, 7, 20, 7, 30, tzinfo=_JST),
+            datetime(2026, 7, 18, 7, 0),
+            port,
+            reason="weekly_noop",
+        )
+        self.assertEqual(decision.reason, "initial_stop")
+
+    def test_summer_us_session_ignores_unclosed_today_bar(self):
+        # 夏時間: JST 7/15 23:00 = 米東部 7/15 10:00(場中)。7/15 の足は引けていない
+        port = _daily_port("2026-07-15", {"2026-07-15": 300.0})
+        decision = self._run(
+            datetime(2026, 7, 15, 23, 0, tzinfo=_JST), datetime(2026, 7, 15, 7, 30), port
+        )
+        self.assertEqual(decision.action, "noop")
+        self.assertEqual(decision.spy_price_usd, 498.0)
+
+    def test_winter_us_session_ignores_unclosed_today_bar(self):
+        # 冬時間: JST 1/14 23:45 = 米東部 1/14 09:45(場中)。1/14 の足は引けていない
+        port = _daily_port("2026-01-14", {"2026-01-14": 300.0})
+        decision = self._run(
+            datetime(2026, 1, 14, 23, 45, tzinfo=_JST), datetime(2026, 1, 14, 7, 30), port
+        )
+        self.assertEqual(decision.action, "noop")
+        self.assertEqual(decision.spy_price_usd, 498.0)
+
+    def test_winter_bar_not_closed_until_0600_jst(self):
+        # 冬時間: JST 1/15 05:30 = 米東部 1/14 15:30。1/14 の足はまだ引けていない
+        port = _daily_port("2026-01-14", {"2026-01-14": 300.0})
+        decision = self._run(
+            datetime(2026, 1, 15, 5, 30, tzinfo=_JST), datetime(2026, 1, 14, 7, 30), port
+        )
+        self.assertEqual(decision.action, "noop")
+
+    def test_summer_bar_closed_after_0500_jst(self):
+        # 夏時間: JST 7/16 05:30 = 米東部 7/15 16:30。7/15 の足は引けている
+        port = _daily_port("2026-07-15", {"2026-07-15": 440.0})
+        decision = self._run(
+            datetime(2026, 7, 16, 5, 30, tzinfo=_JST), datetime(2026, 7, 15, 7, 30), port
+        )
+        self.assertEqual(decision.reason, "initial_stop")
+
+    def test_missed_run_checks_older_closed_bar_for_initial_stop(self):
+        # 前の回は JST 7/14 07:30(7/13 の足まで判定)。7/15 の回が落ち、7/16 07:30 に動く。
+        # 7/14 と 7/15 の2本が引けており、古い方の 7/14 の安値が損切りの値段を割っている
+        port = _daily_port("2026-07-15", {"2026-07-14": 440.0})
+        decision = self._run(
+            datetime(2026, 7, 16, 7, 30, tzinfo=_JST), datetime(2026, 7, 14, 7, 30), port
+        )
+        self.assertEqual(decision.action, "exit")
+        self.assertEqual(decision.reason, "initial_stop")
+        self.assertEqual(decision.spy_price_usd, 440.0)
+
+    def test_missed_run_checks_older_closed_bar_for_margin_call(self):
+        # 7/14 の安値 300 ドルは維持率 0.20 を割る(マージンコールが損切りより先)
+        port = _daily_port("2026-07-15", {"2026-07-14": 300.0})
+        decision = self._run(
+            datetime(2026, 7, 16, 7, 30, tzinfo=_JST), datetime(2026, 7, 14, 7, 30), port
+        )
+        self.assertEqual(decision.action, "exit")
+        self.assertEqual(decision.reason, "margin_call")
+        self.assertEqual(decision.spy_price_usd, 300.0)
 
 
 if __name__ == "__main__":
