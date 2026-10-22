@@ -6,6 +6,10 @@
 
 from typing import TYPE_CHECKING
 
+from src.orchestration.jobs.accuracy_json import (
+    append_accuracy_json_sectors,
+    write_accuracy_json_without_sectors,
+)
 from src.orchestration.jobs.alerting import (
     evaluate_and_notify_alerts,
     evaluate_output_invariants_stage,
@@ -72,6 +76,7 @@ def run_daily_pipeline():
             3 で当日分を保存する前＝前日分がまだ残っている段階で読む必要がある
             （後段で読むと 3 の保存で前日分が上書き消滅済みで永久に0件採点になる）。
             採点の後、results/accuracy/YYYY-MM-DD.json に的中率を書く（非致命的）。
+            業種の内訳は yfinance を引くため、6 の後に書き足す（#843）。
         3. Top10/Worst10の予測を実行（production）
         3.1. 出力 invariant 評価（非致命的。結果は 6 で通知する）
         3.5. Challenger shadow 予測（モデルが存在する場合のみ、非致命的）
@@ -126,15 +131,8 @@ def run_daily_pipeline():
     except Exception as e:
         _handle_stage_error(PipelineStage.NON_CRITICAL, "[2/6] 予測精度チェック (challenger)", e)
 
-    # 採点の JSON（results/accuracy/YYYY-MM-DD.json）も、3 の保存の前に書く
-    # （今日の採点の行を prediction_results のスナップショットで見分けるため）
-    try:
-        from src.prediction.accuracy_report import write_daily_accuracy_report
-
-        write_daily_accuracy_report()
-        logger.info("[2/6] 採点の JSON 書き出し完了")
-    except Exception as e:
-        _handle_stage_error(PipelineStage.NON_CRITICAL, "[2/6] 採点の JSON 書き出し", e)
+    # 採点の JSON も 3 の保存の前に業種なしで書き、業種は道の最後で書き足す（#843）
+    accuracy_report = write_accuracy_json_without_sectors()
 
     # 3. 予測（CRITICAL: 失敗時はパイプライン停止 + Discord通知）
     logger.info("[3/6] 予測開始 (production)")
@@ -232,6 +230,9 @@ def run_daily_pipeline():
         logger.info("[6/6] 運用アラート評価完了")
     except Exception as e:
         _handle_stage_error(PipelineStage.NON_CRITICAL, "[6/6] 運用アラート評価", e)
+
+    # 採点の JSON に業種の内訳を書き足す（NON_CRITICAL。[2/6] で作った材料を使う）
+    append_accuracy_json_sectors(accuracy_report)
 
     logger.info("=== 日次パイプライン完了 ===")
 

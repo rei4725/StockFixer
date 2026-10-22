@@ -5,10 +5,11 @@
 """
 
 import logging
+import os
 import warnings
 from datetime import datetime, timedelta
 from threading import Lock
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import pandas as pd
 import yfinance as yf
@@ -18,7 +19,7 @@ from src.prediction.db import load_model_weights
 from src.prediction.range_clipping import clip_diff_ratio_to_atr_range
 from src.prediction.remote_client import get_service_url, predict_via_service
 from src.prediction.types import PredictionResult
-from src.utils.data_path_utils import get_ticker
+from src.utils.data_path_utils import get_models_dir, get_ticker
 from src.utils.db import get_active_symbols, load_stock_features
 from src.utils.logger import get_logger
 
@@ -28,8 +29,8 @@ logger = get_logger(__name__)
 warnings.filterwarnings("ignore", category=FutureWarning)
 logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 
-# モデルキャッシュ（スレッドセーフ）
-_model_cache: Dict[str, Any] = {}
+# モデルキャッシュ（スレッドセーフ）。モデル名 → (ファイルの更新時刻, モデル)
+_model_cache: Dict[str, Tuple[Optional[float], Any]] = {}
 _model_cache_lock = Lock()
 
 
@@ -54,20 +55,39 @@ def load_feature_data(market: str, symbol: str) -> Optional[pd.DataFrame]:
         return None
 
 
+def _unified_model_mtime(model_name: str) -> Optional[float]:
+    """統合モデルのファイルの更新時刻。ファイルが無ければ None。"""
+    path = os.path.join(get_models_dir(), "unified", f"{model_name}.joblib")
+    try:
+        return os.path.getmtime(path)
+    except OSError:
+        return None
+
+
 def get_cached_model(model_name: str):
     """
     キャッシュからモデルを取得（なければロード）
     スレッドセーフな実装
+
+    常駐のスケジューラーは同じプロセスで週の学習（昇格・challenger の学習し直し）と
+    日次の予想を回すため、キャッシュはファイルの更新時刻を一緒に持ち、変わっていたら
+    読み直す。見つからなかった None はキャッシュせず、次の呼び出しで再びファイルを見る。
     """
     from src.prediction.unified_model_pipeline import load_unified_model
 
     with _model_cache_lock:
-        if model_name not in _model_cache:
-            try:
-                _model_cache[model_name] = load_unified_model(model_name)
-            except FileNotFoundError:
-                _model_cache[model_name] = None
-        return _model_cache[model_name]
+        # 読み込みの前に時刻を取る。読み込み中に置き替わっても次の呼び出しで読み直される
+        mtime = _unified_model_mtime(model_name)
+        cached = _model_cache.get(model_name)
+        if cached is not None and cached[0] == mtime:
+            return cached[1]
+        try:
+            model = load_unified_model(model_name)
+        except FileNotFoundError:
+            _model_cache.pop(model_name, None)
+            return None
+        _model_cache[model_name] = (mtime, model)
+        return model
 
 
 def preload_models(model_types: List[str] = None) -> List[str]:
@@ -136,7 +156,7 @@ def resolve_expected_features(model: Any) -> Optional[List[str]]:
     return None
 
 
-def _count_weekdays_behind(last_date: pd.Timestamp, today: Optional[datetime] = None) -> int:
+def count_weekdays_behind(last_date: pd.Timestamp, today: Optional[datetime] = None) -> int:
     """
     特徴量の最後の行の翌日から、あるべき最新の営業日までの平日の数を返す。
 
@@ -284,7 +304,7 @@ def predict_with_unified_model(
     # する前の特徴量が残る。その行で予想を出し続けないよう、最後の行の日付を見る（#829）
     last_date = _last_feature_date(df)
     if last_date is not None:
-        stale_weekdays = _count_weekdays_behind(last_date)
+        stale_weekdays = count_weekdays_behind(last_date)
         if stale_weekdays > STALE_BARS_MAX_WEEKDAYS:
             logger.warning(
                 "特徴量が古いため予想をスキップ: market=%s symbol=%s "

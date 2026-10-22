@@ -554,7 +554,7 @@ class TestRunDailyPaperTradeReport(unittest.TestCase):
 class TestRunDailyPipeline:
     """run_daily_pipeline のテスト"""
 
-    @patch("src.prediction.accuracy_report.write_daily_accuracy_report")
+    @patch("src.prediction.accuracy_report.prepare_daily_accuracy_report")
     @patch("src.reporting.discord.discord_utils.send_miss_analysis_summary")
     @patch("src.prediction.db.load_top_prediction_misses")
     @patch("src.reporting.discord.discord_utils.send_daily_pipeline_error")
@@ -606,7 +606,7 @@ class TestRunDailyPipeline:
             mock_notify.call_args.kwargs["predictions"], PostgresPredictionResultRepository
         )
 
-    @patch("src.prediction.accuracy_report.write_daily_accuracy_report")
+    @patch("src.prediction.accuracy_report.prepare_daily_accuracy_report")
     @patch("src.reporting.discord.discord_utils.send_miss_analysis_summary")
     @patch("src.prediction.db.load_top_prediction_misses")
     @patch("src.reporting.discord.discord_utils.send_daily_pipeline_error")

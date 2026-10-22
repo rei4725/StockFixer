@@ -5,6 +5,8 @@ from __future__ import annotations
 import csv
 import json
 import os
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -59,13 +61,45 @@ def get_ranked_prediction_results(
     return _to_prediction_results(df)
 
 
+def _run_date(predicted_at: str) -> date | None:
+    """予想の回の時刻（20261021_073000 か ISO 形式）から日付を読む。読めなければ None。"""
+    try:
+        return datetime.strptime(predicted_at[:15], "%Y%m%d_%H%M%S").date()
+    except ValueError:
+        pass
+    try:
+        return pd.Timestamp(predicted_at).date()
+    except (ValueError, TypeError):
+        return None
+
+
+def _previous_weekday(today: date) -> date:
+    """today の前の営業日（土日だけを飛ばす。祝日は数え分けない）。"""
+    previous = today - timedelta(days=1)
+    while previous.weekday() >= 5:
+        previous -= timedelta(days=1)
+    return previous
+
+
 def get_latest_market_prediction_snapshots(
     *,
     predictions: PredictionResultRepository,
+    today: date | None = None,
 ) -> tuple[str | None, list[MarketPredictionSnapshot]]:
-    latest_ts = predictions.latest_timestamp()
+    # production の後に保存される challenger の回を掴まないよう、版を絞る
+    latest_ts = predictions.latest_timestamp(model_version="production")
     if not latest_ts:
         return None, []
+
+    run_date = _run_date(latest_ts)
+    if today is None:
+        today = datetime.now(ZoneInfo("Asia/Tokyo")).date()
+    if run_date is not None and run_date < _previous_weekday(today):
+        logger.warning(
+            "通知に使う production の予想の回 %s が前の営業日 %s より古い",
+            latest_ts,
+            _previous_weekday(today).isoformat(),
+        )
 
     snapshots: list[MarketPredictionSnapshot] = []
     for market in sorted(predictions.markets_at(latest_ts) or []):

@@ -116,7 +116,7 @@ class TestDailyPipelineInvariantWiring(unittest.TestCase):
             ),
             patch("src.prediction.prediction_pipeline.run_accuracy_check", return_value={}),
             patch("src.reporting.discord.discord_utils.send_accuracy_summary"),
-            patch("src.prediction.accuracy_report.write_daily_accuracy_report"),
+            patch("src.prediction.accuracy_report.prepare_daily_accuracy_report"),
             patch("src.orchestration.jobs.daily.run_daily_drift_check"),
             patch("src.reporting.discord.discord_utils.send_daily_pipeline_completion"),
             patch("src.reporting.discord.discord_utils.send_daily_pipeline_error"),

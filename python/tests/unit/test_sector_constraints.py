@@ -73,5 +73,46 @@ class TestGetSymbolSector(unittest.TestCase):
             result = get_symbol_sector("us", "EMPTY")
         self.assertIn("UNKNOWN", result)
 
+    def test_exception_is_not_cached_and_retried(self):
+        get_symbol_sector.cache_clear()
+        mock_ticker = unittest.mock.MagicMock()
+        mock_ticker.info = {"sector": "Technology"}
+        with patch(
+            "src.utils.sector_constraints.yf.Ticker",
+            side_effect=[RuntimeError("429"), mock_ticker],
+        ) as mock_cls:
+            first = get_symbol_sector("us", "RETRY")
+            second = get_symbol_sector("us", "RETRY")
+        self.assertIn("UNKNOWN", first)
+        self.assertEqual(second, "Technology")
+        self.assertEqual(mock_cls.call_count, 2)
+
+    def test_empty_sector_is_not_cached_and_retried(self):
+        get_symbol_sector.cache_clear()
+        empty_ticker = unittest.mock.MagicMock()
+        empty_ticker.info = {}
+        good_ticker = unittest.mock.MagicMock()
+        good_ticker.info = {"sector": "Financials"}
+        with patch(
+            "src.utils.sector_constraints.yf.Ticker",
+            side_effect=[empty_ticker, good_ticker],
+        ) as mock_cls:
+            first = get_symbol_sector("us", "RETRY_EMPTY")
+            second = get_symbol_sector("us", "RETRY_EMPTY")
+        self.assertIn("UNKNOWN", first)
+        self.assertEqual(second, "Financials")
+        self.assertEqual(mock_cls.call_count, 2)
+
+    def test_resolved_sector_is_cached(self):
+        get_symbol_sector.cache_clear()
+        mock_ticker = unittest.mock.MagicMock()
+        mock_ticker.info = {"sector": "Energy"}
+        with patch("src.utils.sector_constraints.yf.Ticker", return_value=mock_ticker) as mock_cls:
+            first = get_symbol_sector("us", "CACHED")
+            second = get_symbol_sector("us", "CACHED")
+        self.assertEqual(first, "Energy")
+        self.assertEqual(second, "Energy")
+        self.assertEqual(mock_cls.call_count, 1)
+
     def tearDown(self):
         get_symbol_sector.cache_clear()
