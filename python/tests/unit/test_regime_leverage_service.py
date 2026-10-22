@@ -593,5 +593,81 @@ class TestRegimeLeverageNaNGuard(unittest.TestCase):
         mock_insert.assert_not_called()
 
 
+class TestRegimeLeverageUsdJpyGuard(unittest.TestCase):
+    """ドル円の最終行の終値がNaNまたは0以下の場合、判定を行わず例外を送出し、
+    NaNの評価額をDBに書き込まないこと(#871)。"""
+
+    @staticmethod
+    def _port_with_fx(fx_close: float, prices: pd.Series) -> MagicMock:
+        idx = prices.index
+        df = pd.DataFrame(
+            {
+                "Open": prices,
+                "High": prices + 2,
+                "Low": prices - 2,
+                "Close": prices,
+                "Volume": 1_000_000,
+            },
+            index=idx,
+        )
+        mock_port = MagicMock()
+        mock_port.get_stock_data.return_value = df
+        mock_port.get_forex_data.return_value = pd.DataFrame(
+            {"Close": [145.0, fx_close]}, index=[idx[-2], idx[-1]]
+        )
+        return mock_port
+
+    @patch("src.trading.regime_leverage_strategy.service.insert_snapshot")
+    @patch("src.trading.regime_leverage_strategy.service.get_latest_snapshot")
+    def test_daily_check_holding_raises_when_usdjpy_is_nan(self, mock_latest, mock_insert):
+        from src.trading.regime_leverage_strategy.service import (
+            run_regime_leverage_daily_margin_check,
+        )
+
+        mock_latest.return_value = _holding_snapshot()
+        idx = pd.bdate_range("2025-01-01", periods=260)
+        prices = pd.Series(np.linspace(400.0, 500.0, 260), index=idx)
+        mock_port = self._port_with_fx(np.nan, prices)
+
+        with self.assertRaises(RuntimeError):
+            run_regime_leverage_daily_margin_check(mock_port)
+
+        mock_insert.assert_not_called()
+
+    @patch("src.trading.regime_leverage_strategy.service.insert_snapshot")
+    @patch("src.trading.regime_leverage_strategy.service.get_latest_snapshot")
+    def test_daily_check_holding_raises_when_usdjpy_is_zero(self, mock_latest, mock_insert):
+        from src.trading.regime_leverage_strategy.service import (
+            run_regime_leverage_daily_margin_check,
+        )
+
+        mock_latest.return_value = _holding_snapshot()
+        idx = pd.bdate_range("2025-01-01", periods=260)
+        prices = pd.Series(np.linspace(400.0, 500.0, 260), index=idx)
+        mock_port = self._port_with_fx(0.0, prices)
+
+        with self.assertRaises(RuntimeError):
+            run_regime_leverage_daily_margin_check(mock_port)
+
+        mock_insert.assert_not_called()
+
+    @patch("src.trading.regime_leverage_strategy.service.insert_snapshot")
+    @patch("src.trading.regime_leverage_strategy.service.get_latest_snapshot")
+    def test_weekly_check_holding_raises_when_usdjpy_is_nan(self, mock_latest, mock_insert):
+        """保有中にレジームが下降転換した週でも、ドル円がNaNならNaNの評価額で
+        regime_flipのexit行を書かずに例外を送出する。"""
+        from src.trading.regime_leverage_strategy.service import run_regime_leverage_weekly_check
+
+        mock_latest.return_value = _holding_snapshot()
+        idx = pd.bdate_range("2025-01-01", periods=260)
+        prices = pd.Series(np.linspace(600.0, 400.0, 260), index=idx)
+        mock_port = self._port_with_fx(np.nan, prices)
+
+        with self.assertRaises(RuntimeError):
+            run_regime_leverage_weekly_check(mock_port)
+
+        mock_insert.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
