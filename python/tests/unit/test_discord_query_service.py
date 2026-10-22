@@ -5,6 +5,7 @@ import json
 import os
 import tempfile
 import unittest
+from datetime import date
 from unittest.mock import patch
 
 from src.domain.types import PredictionResult
@@ -46,6 +47,50 @@ class TestDiscordQueryService(unittest.TestCase):
         self.assertEqual(snapshots[0].market, "JP")
         self.assertEqual([r.symbol for r in snapshots[0].top_results], ["7203", "6758"])
         self.assertEqual([r.symbol for r in snapshots[0].worst_results], ["6758", "7203"])
+
+    def test_get_latest_market_prediction_snapshots_uses_production_run(self):
+        repo = InMemoryPredictionRepository()
+        repo.add(
+            "20261021_073000",
+            [{**_pred_row("JP", "7203", -0.02), "model_version": "production"}],
+        )
+        # production の後に保存される challenger の回は時刻が新しいが、通知には使わない
+        repo.add(
+            "20261021_074500",
+            [{**_pred_row("JP", "7203", 0.05), "model_version": "challenger"}],
+        )
+
+        latest_ts, snapshots = get_latest_market_prediction_snapshots(predictions=repo)
+
+        self.assertEqual(latest_ts, "20261021_073000")
+        self.assertEqual(len(snapshots), 1)
+        self.assertEqual([r.diff_ratio for r in snapshots[0].top_results], [-0.02])
+
+    def test_get_latest_market_prediction_snapshots_warns_when_run_is_stale(self):
+        repo = InMemoryPredictionRepository()
+        # 金曜の回を翌週の水曜に読む（前の営業日の火曜より古い）
+        repo.add("20261016_073000", [_pred_row("JP", "7203", 0.01)])
+
+        with self.assertLogs("src.reporting.query_service", level="WARNING") as logs:
+            latest_ts, snapshots = get_latest_market_prediction_snapshots(
+                predictions=repo, today=date(2026, 10, 21)
+            )
+
+        self.assertEqual(latest_ts, "20261016_073000")
+        self.assertEqual(len(snapshots), 1)
+        self.assertTrue(any("古い" in message for message in logs.output))
+
+    def test_get_latest_market_prediction_snapshots_accepts_previous_weekday_run(self):
+        repo = InMemoryPredictionRepository()
+        # 金曜の回を月曜に読むのは前の営業日の回なので WARNING を出さない
+        repo.add("20261016_073000", [_pred_row("JP", "7203", 0.01)])
+
+        with self.assertNoLogs("src.reporting.query_service", level="WARNING"):
+            latest_ts, _ = get_latest_market_prediction_snapshots(
+                predictions=repo, today=date(2026, 10, 19)
+            )
+
+        self.assertEqual(latest_ts, "20261016_073000")
 
     @patch("src.reporting.query_service._explain_shap_fn")
     @patch("src.reporting.query_service._predict_single_fn")
