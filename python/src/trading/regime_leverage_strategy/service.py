@@ -256,12 +256,24 @@ def _load_spy_daily(market_data_port: MarketDataPort, symbol: str) -> pd.DataFra
 
 
 def _load_latest_usdjpy(market_data_port: MarketDataPort) -> float:
+    """最新のドル円(終値)を返す。
+
+    最終行の終値がNaNまたは0以下(データ劣化時)の場合はRuntimeErrorを送出する
+    (NaN比較は常にFalseになり、マージンコール・損切りの判定が黙って飛んでNaNの
+    評価額が記録されるため。スケジューラーのリトライ・Discord通知に乗せる。#871)。
+    """
     end = datetime.now()
     start = end - timedelta(days=10)
     fx_df = market_data_port.get_forex_data(
         "JPY=X", start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
     )
-    return float(fx_df["Close"].iloc[-1])
+    usdjpy_rate = float(fx_df["Close"].iloc[-1])
+    if pd.isna(usdjpy_rate) or usdjpy_rate <= 0:
+        raise RuntimeError(
+            "レジームレバレッジ戦略: ドル円の最終行の終値が不正のため判定を中止しました"
+            f"(usdjpy_rate={usdjpy_rate})"
+        )
+    return usdjpy_rate
 
 
 def run_regime_leverage_weekly_check(
