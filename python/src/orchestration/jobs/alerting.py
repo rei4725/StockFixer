@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-# 同じ日の1回目が読んだ前の日の回の統計（#920）。キーは今日の YYYYMMDD。
+# 同じ日の1回目が読んだ前の日の回の統計（#920）。キーは JST の今日の YYYYMMDD（#935）。
 # 日次の道を頭からやり直すと、最新の回は1回目が保存した今日の回になっているため、
 # 2回目はここに退避した前の日の回と比べる。
 _previous_day_stats: dict[str, "PredictionRunStats"] = {}
@@ -57,9 +57,9 @@ def fetch_previous_run_stats(model_version: str = "production") -> Optional["Pre
     取得に失敗しても致命的ではないため、例外を送出せず None を返す
     （急変チェックがスキップされるだけ）。
     """
-    from datetime import datetime
+    from src.orchestration.jobs.common import is_today_jst, today_jst_key
 
-    today = datetime.now().strftime("%Y%m%d")
+    today = today_jst_key()
     _compare_skipped_days.discard(today)
     try:
         from src.prediction.db import load_latest_prediction_timestamp
@@ -69,8 +69,8 @@ def fetch_previous_run_stats(model_version: str = "production") -> Optional["Pre
         previous_at = load_latest_prediction_timestamp(model_version=model_version)
         if not previous_at:
             return None
-        # predicted_at は保存の側と同じく datetime.now() の YYYYMMDD_HHMMSS
-        if str(previous_at).startswith(today):
+        # predicted_at は JST に直して JST の今日と比べる（#935。コンテナの時計は UTC）
+        if is_today_jst(previous_at):
             cached = _previous_day_stats.get(today)
             if cached is not None:
                 logger.warning(
@@ -113,8 +113,7 @@ def evaluate_output_invariants_stage(
     NON_CRITICAL 分類・ログ出力は呼び出し元の責務。
     やり直しで急変の見張りを飛ばした日は、B-0 を足して運用アラートに出す（#920）。
     """
-    from datetime import datetime
-
+    from src.orchestration.jobs.common import today_jst_key
     from src.prediction.output_invariants import evaluate_output_invariants
 
     report = evaluate_output_invariants(
@@ -124,7 +123,7 @@ def evaluate_output_invariants_stage(
         previous_stats=previous_stats,
     )
     violation_ids, details = report.violation_ids, report.as_details()
-    if previous_stats is None and datetime.now().strftime("%Y%m%d") in _compare_skipped_days:
+    if previous_stats is None and today_jst_key() in _compare_skipped_days:
         violation_ids.append(str(_COMPARE_SKIPPED_VIOLATION["id"]))
         details["violations"].append(dict(_COMPARE_SKIPPED_VIOLATION))
     return violation_ids, details
