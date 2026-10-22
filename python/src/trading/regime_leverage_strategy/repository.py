@@ -1,5 +1,6 @@
 """regime_leverage_log テーブルの読み書き。"""
 
+from datetime import datetime
 from typing import Optional
 
 from src.trading.regime_leverage_strategy.types import (
@@ -41,6 +42,26 @@ def get_latest_snapshot() -> Optional[RegimeLeverageSnapshot]:
         equity_now_jpy=row[12],
         maintenance_ratio=row[13],
     )
+
+
+def get_last_daily_check_at() -> Optional[datetime]:
+    """今の建玉で損切り・マージンコールを最後に判定した時刻を返す(#933)。
+
+    日次の回の行(daily_noop)か建てた行(regime_entry)のうち一番新しい行の時刻。建てた行は
+    引けで約定するので、その時刻までに引けた足は判定しなくてよい。まだ1行も無ければ None。
+    """
+    with _db_connection() as con:
+        row = con.execute("""
+            SELECT executed_at
+            FROM regime_leverage_log
+            WHERE reason IN ('daily_noop', 'regime_entry')
+            ORDER BY id DESC
+            LIMIT 1
+            """).fetchone()
+    if row is None:
+        return None
+    executed_at: datetime = row[0]
+    return executed_at
 
 
 def insert_snapshot(decision: RegimeLeverageDecision) -> None:

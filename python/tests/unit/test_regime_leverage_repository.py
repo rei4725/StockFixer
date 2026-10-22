@@ -65,6 +65,30 @@ class TestGetLatestSnapshot(unittest.TestCase):
         self.assertIsNone(result.maintenance_ratio)
 
 
+class TestGetLastDailyCheckAt(unittest.TestCase):
+    def _run(self, row):
+        from src.trading.regime_leverage_strategy.repository import get_last_daily_check_at
+
+        mock_con = MagicMock()
+        mock_con.execute.return_value.fetchone.return_value = row
+        with patch("src.trading.regime_leverage_strategy.repository._db_connection") as mock_ctx:
+            mock_ctx.return_value.__enter__ = MagicMock(return_value=mock_con)
+            mock_ctx.return_value.__exit__ = MagicMock(return_value=False)
+            result = get_last_daily_check_at()
+        return result, mock_con.execute.call_args[0][0]
+
+    def test_returns_none_when_no_rows(self):
+        result, _ = self._run(None)
+        self.assertIsNone(result)
+
+    def test_returns_executed_at_of_latest_daily_or_entry_row(self):
+        executed_at = datetime(2026, 7, 17, 7, 30)
+        result, sql = self._run((executed_at,))
+        self.assertEqual(result, executed_at)
+        self.assertIn("'daily_noop', 'regime_entry'", sql)
+        self.assertIn("ORDER BY id DESC", sql)
+
+
 class TestInsertSnapshot(unittest.TestCase):
     def test_executes_insert_with_expected_params(self):
         from src.trading.regime_leverage_strategy.repository import insert_snapshot
