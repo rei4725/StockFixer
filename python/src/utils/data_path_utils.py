@@ -114,11 +114,13 @@ def get_database_url() -> str:
     サービス（5433、本番とは別ポート・別ボリューム）を指す。DATABASE_URL 未設定
     のままローカルで pytest やスクリプトを実行しても、誤って本番Postgresに
     到達しないようにするための意図的な選択（#548と同型の「テストが本番リソース
-    に到達する」事故の再発防止）。
+    に到達する」事故の再発防止）。ホストは localhost でなく 127.0.0.1 にする。
+    compose はポートを 127.0.0.1 にだけ開くので、localhost だと Windows で先に
+    ::1 を試して接続ごとに約5秒待つ。
     """
     return os.environ.get(
         "DATABASE_URL",
-        "postgresql://stockfixer:stockfixer_dev@localhost:5433/stockfixer",
+        "postgresql://stockfixer:stockfixer_dev@127.0.0.1:5433/stockfixer",
     )
 
 
