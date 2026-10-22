@@ -11,6 +11,34 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+def _challengers_trained_this_week(challenger_names: list[str]) -> list[str]:
+    """今週（UTC の ISO 週）に学習し直された challenger の名前を返す（#905）。
+
+    今週の学習で作られた challenger は、影の予想を経ていない。
+    同じ週のやり直しで、影の比べは先週の記録を読むため、それを昇格させないために使う。
+    ファイルが無い challenger は含めない。
+    """
+    import os
+    from datetime import datetime, timedelta, timezone
+
+    from src.utils.data_path_utils import get_models_dir
+
+    now = datetime.now(timezone.utc)
+    week_start = (now - timedelta(days=now.weekday())).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    unified_dir = os.path.join(get_models_dir(), "unified")
+    fresh = []
+    for name in challenger_names:
+        path = os.path.join(unified_dir, f"{name}.joblib")
+        if not os.path.exists(path):
+            continue
+        mtime = datetime.fromtimestamp(os.path.getmtime(path), tz=timezone.utc)
+        if mtime >= week_start:
+            fresh.append(name)
+    return fresh
+
+
 def run_weekly_training():
     """
     週次実行: Shadow 評価 → 昇格ゲート → Challenger 再学習 → 精度チェック → Discord通知
@@ -60,7 +88,14 @@ def run_weekly_training():
     # 2 & 3. 昇格ゲート + 昇格（RECOVERABLE: 昇格不可でも後続の再学習は継続）
     promoted = False
     gate_result = None
-    if shadow_results and shadow_results[0][2]["challenger_wins"]:
+    fresh_challengers = _challengers_trained_this_week(list(_UNIFIED_CHALLENGER_NAMES))
+    if shadow_results and shadow_results[0][2]["challenger_wins"] and fresh_challengers:
+        logger.warning(
+            "[2/4] 昇格を飛ばす: challenger が今週学習し直されており影の比べを経ていない"
+            "（同じ週のやり直しの見込み） fresh=%s",
+            fresh_challengers,
+        )
+    elif shadow_results and shadow_results[0][2]["challenger_wins"]:
         logger.info("[2/4] 昇格ゲート評価開始")
         try:
             gate_result = evaluate_promotion(
