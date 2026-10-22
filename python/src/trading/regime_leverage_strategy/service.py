@@ -7,8 +7,9 @@ STRATEGY.md 7章の週次(レジーム転換・新規エントリー)・日次(�
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -33,6 +34,10 @@ logger = get_logger(__name__)
 # 米国株信用の手数料(trading-strategy/backtest.pyのCOMMISSION_PCT["USD"]と同じ値)
 _COMMISSION_PCT_USD = 0.0033
 _COMMISSION_CAP_USD = 16.5
+
+_JST = ZoneInfo("Asia/Tokyo")
+_US_MARKET_TZ = ZoneInfo("America/New_York")
+_US_MARKET_CLOSE = time(16, 0)
 
 
 def _calc_commission_usd(notional_usd: float) -> float:
@@ -255,6 +260,37 @@ def _load_spy_daily(market_data_port: MarketDataPort, symbol: str) -> pd.DataFra
     return build_weekly_frame(df)
 
 
+def _bar_close_at(bar_date: object) -> datetime:
+    """日足の引けの時刻(米国の取引所の16:00、夏時間・冬時間は ZoneInfo が扱う)を返す。"""
+    day = pd.Timestamp(bar_date).date()
+    return datetime.combine(day, _US_MARKET_CLOSE, tzinfo=_US_MARKET_TZ)
+
+
+def _as_aware(dt: datetime) -> datetime:
+    """タイムゾーンの無い時刻は JST とみなす(スケジューラーは JST で動く)。"""
+    return dt.replace(tzinfo=_JST) if dt.tzinfo is None else dt
+
+
+def select_unchecked_closed_bars(
+    df: pd.DataFrame, last_checked_at: Optional[datetime], now: datetime
+) -> pd.DataFrame:
+    """日次判定で見る日足を返す: now までに引けた足のうち、前の回(last_checked_at)の後に
+    引けた足を全部。引けていない当日の足は含めない。前の回の後に引けた足が無ければ、
+    最後に引けた足だけを返す(#891)。
+    """
+    now_aware = _as_aware(now)
+    closes = [_bar_close_at(ts) for ts in df.index]
+    closed = df[[close_at <= now_aware for close_at in closes]]
+    if closed.empty:
+        return closed
+    if last_checked_at is not None:
+        since = _as_aware(last_checked_at)
+        unchecked = closed[[_bar_close_at(ts) > since for ts in closed.index]]
+        if not unchecked.empty:
+            return unchecked
+    return closed.iloc[[-1]]
+
+
 def _load_latest_usdjpy(market_data_port: MarketDataPort) -> float:
     """最新のドル円(終値)を返す。
 
@@ -345,14 +381,27 @@ def run_regime_leverage_daily_margin_check(
 
     df = _load_spy_daily(market_data_port, REGIME_LEVERAGE_SYMBOL)
     usdjpy_rate = _load_latest_usdjpy(market_data_port)
-    day_low_usd = float(df.iloc[-1]["Low"])
-    if pd.isna(day_low_usd):
+    now = datetime.now(_JST)
+    # 前の回で判定した時刻は、日次の回の行(daily_noop)だけで覚える。週次の回は損切りを
+    # 判定しないため、週次の行の時刻を使うとその前に引けた足(金曜の足など)を飛ばす
+    last_checked_at = snapshot.executed_at if snapshot.reason == "daily_noop" else None
+    bars = select_unchecked_closed_bars(df, last_checked_at, now)
+    if bars.empty:
+        raise RuntimeError(
+            "レジームレバレッジ戦略(日次): 保有中に引けた日足が無いため判定を中止しました"
+            f"(shares={snapshot.shares})"
+        )
+
+    # 前の回の後に引けた足を古い順に判定し、最初に決済となった足で決済する(#891)
+    day_lows_usd = [float(low) for low in bars["Low"]]
+    if any(pd.isna(low) for low in day_lows_usd):
         raise RuntimeError(
             "レジームレバレッジ戦略(日次): 保有中に当日安値(Low)がNaNのため判定を中止しました"
             f"(shares={snapshot.shares})"
         )
-    now = datetime.now()
-
-    decision = decide_daily_check(snapshot, day_low_usd, usdjpy_rate, now)
+    decisions = (decide_daily_check(snapshot, low, usdjpy_rate, now) for low in day_lows_usd)
+    decision = next((d for d in decisions if d.action == "exit"), None)
+    if decision is None:
+        decision = decide_daily_check(snapshot, day_lows_usd[-1], usdjpy_rate, now)
     insert_snapshot(decision)
     return decision
