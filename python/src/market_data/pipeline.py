@@ -33,6 +33,8 @@ from src.market_data.macro_features import (
 from src.market_data.quality_check import QualityCheckResult, run_quality_checks
 from src.market_data.saver import save_raw_ohlcv
 from src.market_data.sentiment_features import add_sentiment_features, fetch_news_sentiment_with_llm
+from src.market_data.split_refetch import refetch_full_history
+from src.market_data.split_refetch import stock_split_ratios as _stock_split_ratios
 from src.market_data.technical import add_technical_indicators, create_basic_lag_features
 from src.market_data.wikipedia_features import add_pageview_features, fetch_pageview_features
 from src.utils.data_path_utils import get_ticker, normalize_col
@@ -101,14 +103,31 @@ def fetch_stock_data_with_features(
                 fresh_data = data_source.get_stock_data(symbol, market, fetch_start, end_date)
             else:
                 fresh_data = get_stock_data(market, ticker, fetch_start, end_date)
+            split_ratios = _stock_split_ratios(fresh_data)
+            if split_ratios:
+                # 分割の前の足と段差にならないよう、全期間を取り直す（#817）
+                fresh_data = refetch_full_history(
+                    market,
+                    symbol,
+                    ticker,
+                    start_date,
+                    end_date,
+                    split_ratios,
+                    data_source,
+                    get_stock_data,
+                )
+                if fresh_data is None:
+                    return None
+                df = fresh_data
             if fresh_data is not None and not fresh_data.empty:
-                df = merge_market_data(df, fresh_data)
-                logger.info(f"差分マージ完了: {len(fresh_data)}行追加")
+                if not split_ratios:
+                    df = merge_market_data(df, fresh_data)
+                    logger.info(f"差分マージ完了: {len(fresh_data)}行追加")
                 if defer_raw_save:
                     raw_data_to_save = fresh_data
                 else:
                     try:
-                        # 差分のみ保存（全件再保存より効率的）
+                        # 差分のみ保存（全件再保存より効率的）。分割のときは全期間を上書きする
                         save_raw_ohlcv(market, symbol, fresh_data)
                     except Exception as e:
                         logger.error(f"Raw OHLCV保存エラー（処理継続）: {e}", exc_info=True)
