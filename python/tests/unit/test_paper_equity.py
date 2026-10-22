@@ -9,7 +9,11 @@ import numpy as np
 import pandas as pd
 
 from src.reporting.equity_chart import _is_benchmark, build_equity_chart
-from src.trading.paper_equity import build_equity_series, get_paper_equity_curve
+from src.trading.paper_equity import (
+    _default_split_loader,
+    build_equity_series,
+    get_paper_equity_curve,
+)
 
 _INITIAL = 1_000_000.0
 
@@ -145,6 +149,102 @@ class TestBuildEquitySeries(unittest.TestCase):
         equity = build_equity_series(orders, _flat_price_loader(100.0), _INITIAL, idx)
 
         self.assertAlmostEqual(equity.iloc[-1], _INITIAL + 10_000.0)
+
+
+class TestBuildEquitySeriesSplit(unittest.TestCase):
+    """保有の途中に分割があり、raw の終値が全期間で調整し直してあるときの評価（#899）"""
+
+    def setUp(self):
+        self.idx = _index()
+        self.split_day = self.idx[5]
+
+    def _splits(self, market, symbol):
+        return pd.Series([2.0], index=[self.split_day])
+
+    def test_split_adjusted_close_does_not_halve_holding(self):
+        """分割前に 100 円で買った 100 株は、調整後の 50 円で 200 株として評価すること"""
+        orders = _orders([("jp", "7203", 1, 100, 100.0, self.idx[0])])
+
+        equity = build_equity_series(
+            orders, _flat_price_loader(50.0), _INITIAL, self.idx, split_loader=self._splits
+        )
+
+        # 実際の値動きは無いので、分割の前後とも元手のまま（段差が無い）
+        self.assertAlmostEqual(equity.iloc[0], _INITIAL)
+        self.assertAlmostEqual(equity.iloc[4], _INITIAL)
+        self.assertAlmostEqual(equity.iloc[5], _INITIAL)
+        self.assertAlmostEqual(equity.iloc[-1], _INITIAL)
+
+    def test_sell_after_split_closes_position(self):
+        """分割後に 200 株を売ると、分割前の 100 株の保有が消えること"""
+        orders = _orders(
+            [
+                ("jp", "7203", 1, 100, 100.0, self.idx[0]),
+                ("jp", "7203", 2, 200, 55.0, self.idx[7]),
+            ]
+        )
+
+        equity = build_equity_series(
+            orders, _flat_price_loader(50.0), _INITIAL, self.idx, split_loader=self._splits
+        )
+
+        # 売った後: 現金 -10,000 + 11,000 = +1,000、保有は残らない
+        self.assertAlmostEqual(equity.iloc[7], _INITIAL + 1_000.0)
+        self.assertAlmostEqual(equity.iloc[-1], _INITIAL + 1_000.0)
+
+    def test_fill_on_split_day_is_not_adjusted(self):
+        """分割の日の約定は、もう分割後の水準なので直さないこと"""
+        orders = _orders([("jp", "7203", 1, 100, 50.0, self.split_day)])
+
+        equity = build_equity_series(
+            orders, _flat_price_loader(60.0), _INITIAL, self.idx, split_loader=self._splits
+        )
+
+        self.assertAlmostEqual(equity.iloc[-1], _INITIAL + 1_000.0)
+
+    def test_missing_price_falls_back_to_adjusted_fill_price(self):
+        """終値の無い日は、分割の比で割った約定の値段で評価すること"""
+        orders = _orders([("jp", "7203", 1, 100, 100.0, self.idx[0])])
+
+        equity = build_equity_series(
+            orders, lambda m, s: None, _INITIAL, self.idx, split_loader=self._splits
+        )
+
+        self.assertAlmostEqual(equity.iloc[-1], _INITIAL)
+
+    def test_no_split_events_keeps_valuation(self):
+        """分割の記録が無い銘柄の評価は変わらないこと"""
+        orders = _orders([("jp", "7203", 1, 100, 100.0, self.idx[0])])
+
+        equity = build_equity_series(
+            orders, _flat_price_loader(120.0), _INITIAL, self.idx, split_loader=lambda m, s: None
+        )
+
+        self.assertAlmostEqual(equity.iloc[-1], _INITIAL + 2_000.0)
+
+
+class TestDefaultSplitLoader(unittest.TestCase):
+    """_default_split_loader（yfinance の分割の記録）のテスト"""
+
+    @patch("src.trading.paper_equity.yf.Ticker")
+    def test_returns_naive_normalized_index(self, mock_ticker):
+        idx = pd.DatetimeIndex(["2026-01-12 00:00"]).tz_localize("Asia/Tokyo")
+        mock_ticker.return_value.splits = pd.Series([2.0], index=idx)
+
+        result = _default_split_loader("jp", "7203")
+
+        self.assertEqual(list(result.index), [pd.Timestamp("2026-01-12")])
+        self.assertEqual(list(result), [2.0])
+
+    @patch("src.trading.paper_equity.yf.Ticker")
+    def test_empty_splits_returns_none(self, mock_ticker):
+        mock_ticker.return_value.splits = pd.Series(dtype=float)
+
+        self.assertIsNone(_default_split_loader("us", "AAPL"))
+
+    @patch("src.trading.paper_equity.yf.Ticker", side_effect=RuntimeError("network"))
+    def test_error_returns_none(self, _mock_ticker):
+        self.assertIsNone(_default_split_loader("us", "AAPL"))
 
 
 class TestGetPaperEquityCurve(unittest.TestCase):
