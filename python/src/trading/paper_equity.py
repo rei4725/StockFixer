@@ -133,7 +133,7 @@ def build_equity_series(
     Returns:
         index に沿った評価額 Series
     """
-    equity, _ = _build_equity_with_fallbacks(
+    equity, _, _ = _build_equity_with_fallbacks(
         orders, price_loader, initial_balance, index, split_loader
     )
     return equity
@@ -145,8 +145,9 @@ def _build_equity_with_fallbacks(
     initial_balance: float,
     index: pd.DatetimeIndex,
     split_loader: Optional[SplitLoader] = None,
-) -> tuple[pd.Series, dict[tuple[str, str], pd.DatetimeIndex]]:
-    """評価額 Series と、約定の値段で評価した (market, symbol) ごとの日付を返す。
+) -> tuple[pd.Series, dict[tuple[str, str], pd.DatetimeIndex], list[tuple[str, str]]]:
+    """評価額 Series と、約定の値段で評価した (market, symbol) ごとの日付と、
+    最後の日に保有しているのにその日以降の終値が無い (market, symbol) を返す。
 
     保有日の値段は、その日までの最後の終値（過去の方向にだけ埋めた値）で評価する。
     終値が1つも分からない保有日は、0円にせず、その日までの最後の約定の値段で評価する（#850）。
@@ -154,7 +155,7 @@ def _build_equity_with_fallbacks(
     現金は株数×値段で変わらないため直さない。
     """
     if index.empty:
-        return pd.Series(dtype=float), {}
+        return pd.Series(dtype=float), {}, []
 
     work = orders.copy()
     work["filled_at"] = pd.to_datetime(work["filled_at"]).dt.tz_localize(None).dt.normalize()
@@ -197,6 +198,7 @@ def _build_equity_with_fallbacks(
     cash = initial_balance + cash_delta.cumsum()
     equity = cash.copy()
     fallbacks: dict[tuple[str, str], pd.DatetimeIndex] = {}
+    missing_last_close: list[tuple[str, str]] = []
 
     for (market, symbol), bucket in qty_events.items():
         # 分割の比で直した株数の小数の誤差で、売り切った保有が残らないよう丸める
@@ -209,6 +211,11 @@ def _build_equity_with_fallbacks(
         else:
             prices = prices.sort_index()
             aligned = prices.reindex(prices.index.union(index)).ffill().reindex(index)
+        # 最後の日（祝日なら次の営業日）の終値がまだ無い保有は、評価が古い終値のままになる
+        if holdings.iloc[-1] != 0 and (
+            prices is None or prices.empty or prices.index.max() < index[-1]
+        ):
+            missing_last_close.append((market, symbol))
         held = holdings != 0
         missing = held & aligned.isna()
         if missing.any():
@@ -223,7 +230,7 @@ def _build_equity_with_fallbacks(
             )
         equity += (holdings * aligned).where(held, 0.0)
 
-    return equity, fallbacks
+    return equity, fallbacks, missing_last_close
 
 
 def get_paper_equity_curve(days: int = 180) -> pd.Series:
@@ -263,7 +270,16 @@ def _fetch_benchmark_return(
     except Exception:
         logger.warning("ベンチマーク取得失敗のため null にする: %s", ticker, exc_info=True)
         return None
-    return None if value is None else float(value)
+    if value is None:
+        # 取得が空・行が2つ未満・取得の形の誤りは、fetcher が None を返すだけなので理由を残す（#919）
+        logger.warning(
+            "ベンチマークの騰落率が取れないため null にする: %s (%s〜%s の前日まで)",
+            ticker,
+            start,
+            end,
+        )
+        return None
+    return float(value)
 
 
 def compute_weekly_results(
@@ -274,21 +290,24 @@ def compute_weekly_results(
     benchmark_fetcher: BenchmarkFetcher,
     split_loader: Optional[SplitLoader] = None,
 ) -> dict[str, Any]:
-    """as_of 以前の直近の営業日を含む ISO 週の、市場ごとの紙の売買の成績を返す（純粋ロジック）。
+    """as_of より前に終わった直近の ISO 週（月〜金）の、市場ごとの紙の売買の成績を返す（純粋ロジック）。
 
-    週の騰落率は前週の最終営業日の評価額から今週の金曜の評価額まで。
-    ベンチマークも同じ期間（前週の最終営業日の終値 → 今週の終値）で比べる。
+    as_of は日本時間の日付。金曜の当日はその週の引けがまだのため、前の週を対象にする（#919）。
+    週の騰落率は前週の最終営業日の評価額から対象の週の金曜の評価額まで。
+    ベンチマークも同じ期間（前週の最終営業日の終値 → 対象の週の終値）で比べる。
 
     Returns:
         {"week", "start", "end", "markets": {market: {weekly_return, benchmark_ticker,
-        benchmark_return, excess_return, fills, valued_at_fill_price}}}。取れない値は None。
-        valued_at_fill_price は、週の中に終値が分からず約定の値段で評価した日がある銘柄
+        benchmark_return, excess_return, fills, valued_at_fill_price, partial_week,
+        missing_week_end_close}}}。取れない値は None。
+        valued_at_fill_price は、週の中に終値が分からず約定の値段で評価した日がある銘柄。
+        missing_week_end_close は、週の終わりに保有しているのに金曜以降の終値がまだ無い銘柄で、
+        1つでもあれば partial_week を true にする（週の終わりの評価が古い終値のままの部分の週）
     """
-    last_bday = pd.Timestamp(as_of)
-    while last_bday.weekday() >= 5:
-        last_bday -= pd.Timedelta(days=1)
-    week_start = last_bday - pd.Timedelta(days=last_bday.weekday())
-    week_end = week_start + pd.Timedelta(days=4)
+    day = pd.Timestamp(as_of)
+    # 直前の金曜（as_of が金曜なら1週前）
+    week_end = day - pd.Timedelta(days=(day.weekday() - 4) % 7 or 7)
+    week_start = week_end - pd.Timedelta(days=4)
     base_day = week_start - pd.offsets.BDay(1)
     iso = week_end.isocalendar()
 
@@ -302,12 +321,13 @@ def compute_weekly_results(
         fills = 0
         weekly_return: Optional[float] = 0.0
         valued_at_fill_price: list[str] = []
+        missing_week_end_close: list[str] = []
         if not market_orders.empty:
             in_week = market_orders["filled_at"].between(week_start, week_end)
             fills = int(in_week.sum())
             first_fill = market_orders["filled_at"].min()
             index = pd.bdate_range(start=min(first_fill, base_day), end=week_end)
-            equity, fallbacks = _build_equity_with_fallbacks(
+            equity, fallbacks, missing = _build_equity_with_fallbacks(
                 market_orders, price_loader, initial_balance, index, split_loader
             )
             valued_at_fill_price = sorted(
@@ -315,6 +335,14 @@ def compute_weekly_results(
                 for (_, symbol), days in fallbacks.items()
                 if ((days >= base_day) & (days <= week_end)).any()
             )
+            missing_week_end_close = sorted(symbol for _, symbol in missing)
+            if missing_week_end_close:
+                logger.warning(
+                    "週の終わり %s の終値がまだ無い保有があるため部分の週として書く: %s %s",
+                    week_end.date().isoformat(),
+                    market,
+                    missing_week_end_close,
+                )
             base_value = float(equity.loc[base_day])
             end_value = float(equity.loc[week_end])
             weekly_return = end_value / base_value - 1 if base_value else None
@@ -337,6 +365,8 @@ def compute_weekly_results(
             "excess_return": None if excess_return is None else round(excess_return, 6),
             "fills": fills,
             "valued_at_fill_price": valued_at_fill_price,
+            "partial_week": bool(missing_week_end_close),
+            "missing_week_end_close": missing_week_end_close,
         }
 
     return {
