@@ -11,6 +11,13 @@ import src.utils.db as db_module
 from src.orchestration.scheduler import run_daily_pipeline, run_weekly_training
 
 
+def _snapshot_dir(path: str) -> dict[str, float]:
+    """ディレクトリ直下のファイル名と更新時刻の対応を返す（無ければ空）。"""
+    if not os.path.isdir(path):
+        return {}
+    return {name: os.path.getmtime(os.path.join(path, name)) for name in os.listdir(path)}
+
+
 class TestRunDailyPipeline(unittest.TestCase):
     """run_daily_pipeline 関数のテスト"""
 
@@ -23,8 +30,13 @@ class TestRunDailyPipeline(unittest.TestCase):
         path_utils.get_db_path = lambda: self.tmp_db
         db_module.get_db_path = lambda: self.tmp_db
         db_module._tables_initialized = False
+        # 採点の JSON を本番の results/ に書かないよう tmp に向ける（#916）
+        self.tmp_results = os.path.join(self.tmp_dir, "results")
+        self._env_patcher = patch.dict(os.environ, {"STOCKFIXER_RESULTS_DIR": self.tmp_results})
+        self._env_patcher.start()
 
     def tearDown(self):
+        self._env_patcher.stop()
         db_module.close_connection()
         path_utils.get_db_path = self._orig_get_db_path
         db_module.get_db_path = self._orig_get_db_path
@@ -57,6 +69,31 @@ class TestRunDailyPipeline(unittest.TestCase):
         mock_predict.assert_called_once()
         mock_output.assert_called_once()
         mock_send_completion.assert_called_once()
+
+    @patch("src.reporting.discord.discord_utils.send_daily_pipeline_completion")
+    @patch("src.prediction.prediction_pipeline.output_top_worst_results")
+    @patch("src.prediction.prediction_pipeline.predict_all_unified")
+    @patch("src.market_data.pipeline.run_batch_pipeline")
+    @patch("src.watchlist.batch_runner.load_target_symbols")
+    def test_daily_pipeline_writes_accuracy_json_under_tmp(
+        self,
+        mock_load_symbols,
+        mock_run_pipeline,
+        mock_predict,
+        mock_output,
+        mock_send_completion,
+    ):
+        """採点の JSON が tmp の下に書かれ、本番の results/accuracy は変わらないことを確認（#916）"""
+        prod_dir = os.path.join(path_utils.get_python_root(), "results", "accuracy")
+        before = _snapshot_dir(prod_dir)
+        mock_load_symbols.return_value = []
+
+        run_daily_pipeline()
+
+        tmp_accuracy_dir = os.path.join(self.tmp_results, "accuracy")
+        self.assertTrue(os.path.isdir(tmp_accuracy_dir))
+        self.assertTrue(any(name.endswith(".json") for name in os.listdir(tmp_accuracy_dir)))
+        self.assertEqual(_snapshot_dir(prod_dir), before)
 
     @patch("src.reporting.discord.discord_utils.send_daily_pipeline_error")
     @patch("src.prediction.prediction_pipeline.output_top_worst_results")

@@ -258,6 +258,50 @@ def test_no_open_positions_still_says_no_holdings(tmp_positions, monkeypatch):
     assert "判定できず" not in payload["message"]
 
 
+# ── 読めない台帳（#885）──────────────────────────────────────
+
+_BROKEN_LEDGER = '[{"market": "us", "symbol": "AAPL" "entry_date": "2024-01-01"}]'
+
+
+def test_list_positions_raises_on_broken_json(tmp_positions):
+    tmp_positions.write_text(_BROKEN_LEDGER, encoding="utf-8")
+
+    with pytest.raises(positions_mod.PositionLedgerError):
+        list_positions(status="open")
+
+
+def test_list_positions_raises_on_non_list_json(tmp_positions):
+    tmp_positions.write_text('{"market": "us"}', encoding="utf-8")
+
+    with pytest.raises(positions_mod.PositionLedgerError):
+        list_positions()
+
+
+def test_job_fails_on_broken_ledger_without_no_holdings_notice(tmp_positions, monkeypatch):
+    tmp_positions.write_text(_BROKEN_LEDGER, encoding="utf-8")
+    _patch_screen(monkeypatch, [])
+    calls = _patch_notify(monkeypatch)
+
+    with pytest.raises(positions_mod.PositionLedgerError):
+        multibagger_job.run_monthly_multibagger_screen(market="us")
+
+    assert not any("保有なし" in c for c in calls)
+
+
+def test_add_position_does_not_overwrite_broken_ledger(tmp_positions):
+    tmp_positions.write_text(_BROKEN_LEDGER, encoding="utf-8")
+
+    with pytest.raises(positions_mod.PositionLedgerError):
+        add_position("us", "MSFT", "2024-01-02", 200.0)
+
+    assert tmp_positions.read_text(encoding="utf-8") == _BROKEN_LEDGER
+
+
+def test_missing_ledger_is_empty(tmp_positions):
+    assert not tmp_positions.exists()
+    assert list_positions() == []
+
+
 def test_screen_exception_is_not_reported_as_no_candidates(tmp_positions, monkeypatch):
     def _boom(**_k):
         raise RuntimeError("screen down")
