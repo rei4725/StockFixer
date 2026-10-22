@@ -144,6 +144,32 @@ class TestGetOptimalParams(unittest.TestCase):
         finally:
             os.unlink(tmp_file)
 
+    def test_raises_when_json_is_broken(self):
+        """ファイルが在るのに JSON が壊れている場合は None ではなく例外を投げること（#931）"""
+        from src.backtest.optimizer import get_optimal_params
+        from src.backtest.optimizer.persistence import OptimalParamsCorruptedError
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_file = os.path.join(tmp_dir, "optimal_params.json")
+            with open(tmp_file, "w", encoding="utf-8") as f:
+                f.write('{"jp_7203": {"threshold": 0.0')
+            with self.assertRaises(OptimalParamsCorruptedError):
+                get_optimal_params("jp", "7203", json_path=tmp_file)
+            # 読み手はファイルを動かさない
+            self.assertTrue(os.path.exists(tmp_file))
+
+    def test_raises_when_top_level_is_list(self):
+        """最上位が list の場合は None ではなく例外を投げること（#931）"""
+        from src.backtest.optimizer import get_optimal_params
+        from src.backtest.optimizer.persistence import OptimalParamsCorruptedError
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_file = os.path.join(tmp_dir, "optimal_params.json")
+            with open(tmp_file, "w", encoding="utf-8") as f:
+                json.dump(["jp_7203"], f)
+            with self.assertRaises(OptimalParamsCorruptedError):
+                get_optimal_params("jp", "7203", json_path=tmp_file)
+
 
 # ──────────────────────────────────────────────────────────────────
 # save_optimization_results
@@ -445,6 +471,33 @@ class TestRunOptimizeBatch(unittest.TestCase):
         self.assertEqual(len(results), 2)
         statuses = [r.get("status") for r in results]
         self.assertIn("error", statuses)
+
+    @patch("src.backtest.optimizer.batch.save_optimal_params_json")
+    @patch("src.backtest.optimizer.batch.save_optimization_results")
+    @patch("src.backtest.optimizer.batch.run_optimization")
+    @patch("src.backtest.optimizer.batch.get_optimal_params")
+    def test_unreadable_existing_params_skip_overwrite(
+        self, mock_get, mock_run, mock_save, mock_json
+    ):
+        """既存の結果が読めないときは無いとみなさず、最適化も上書きもしないこと（#931）"""
+        from src.backtest.optimizer import run_optimize_batch
+        from src.backtest.optimizer.persistence import OptimalParamsCorruptedError
+        from src.domain.types import SymbolTask
+
+        mock_get.side_effect = OptimalParamsCorruptedError("壊れた最適パラメータJSON")
+
+        results = run_optimize_batch(
+            [SymbolTask(market="jp", symbol="7203")],
+            model_type="XGBoostModel",
+            max_workers=1,
+            skip_days=7,
+        )
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["status"], "error")
+        mock_run.assert_not_called()
+        mock_save.assert_not_called()
+        mock_json.assert_not_called()
 
     def test_returns_empty_on_no_tasks(self):
         """タスクが空の場合、空リストが返ること"""
