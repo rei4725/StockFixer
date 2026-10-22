@@ -149,7 +149,11 @@ def fetch_benchmark_returns(
         df = yf.download(ticker, start=start, end=end, progress=False, auto_adjust=True)
         if df is None or df.empty:
             return {"ticker": ticker, "total_return": None, "start": start, "end": end}
-        close = df["Close"].dropna()
+        close = df["Close"]
+        # yfinance は1銘柄でも列を (価格, ティッカー) の多重の見出しで返すことがある（#919）
+        if isinstance(close, pd.DataFrame):
+            close = close.iloc[:, 0]
+        close = close.dropna()
         if len(close) < 2:
             return {"ticker": ticker, "total_return": None, "start": start, "end": end}
         total_return = float((close.iloc[-1] - close.iloc[0]) / close.iloc[0])
