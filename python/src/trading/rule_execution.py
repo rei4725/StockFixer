@@ -50,12 +50,14 @@ def execute_rule_paper_trades(
     sell_orders = 0
     skipped = 0
 
+    # 保有を読めないまま空の保有で進めると、保有の数え直し・同じ銘柄の重ね買い・
+    # 保有中の売りの取りこぼしが起きるため、注文を出さずにジョブを失敗させる。
     try:
         positions = broker.get_positions()
-        held_symbols = {p["symbol"] for p in positions}
     except Exception:
-        positions = []
-        held_symbols = set()
+        logger.error("[rule] 保有の読み込みに失敗したため発注を中止する", exc_info=True)
+        raise
+    held_symbols = {p["symbol"] for p in positions}
 
     # ML 経路（execution.run_daily_orders）と同等のリスク制御を適用する。
     # R-307: DD 基準値を発注前に更新し、当日発注可否ゲート（日次損失・連続損失・
