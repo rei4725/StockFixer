@@ -18,9 +18,11 @@ from datetime import date, datetime, timedelta
 from typing import Any, Callable, Optional
 
 import pandas as pd
+import yfinance as yf
 
 from config.settings import PAPER_INITIAL_BALANCE
 from src.trading.brokers.base import OrderSide
+from src.utils.data_path_utils import get_ticker
 from src.utils.db import load_raw_ohlcv
 from src.utils.db._connection import _db_connection
 from src.utils.logger import get_logger
@@ -41,6 +43,7 @@ _QTY_SIGN = {int(OrderSide.BUY): +1, int(OrderSide.SELL): -1}
 WEEKLY_BENCHMARKS = {"jp": "1306.T", "us": "^GSPC"}
 
 BenchmarkFetcher = Callable[[str, str, str], dict[str, Any]]
+SplitLoader = Callable[[str, str], Optional[pd.Series]]
 
 
 def _load_filled_orders() -> pd.DataFrame:
@@ -69,11 +72,54 @@ def _default_price_loader(market: str, symbol: str) -> Optional[pd.Series]:
     return series
 
 
+def _default_split_loader(market: str, symbol: str) -> Optional[pd.Series]:
+    """銘柄の分割の記録 Series を yfinance から返す（index=分割の日、値=分割の比）。
+
+    取れなければ None（分割で直さずに評価する）。
+    """
+    ticker = get_ticker(market, symbol)
+    try:
+        splits = yf.Ticker(ticker).splits
+    except Exception:
+        logger.warning(
+            "分割の記録の取得失敗のため直さずに評価: %s/%s", market, symbol, exc_info=True
+        )
+        return None
+    if splits is None or splits.empty:
+        return None
+    splits = splits.copy()
+    idx = pd.to_datetime(splits.index)
+    if idx.tz is not None:
+        idx = idx.tz_localize(None)
+    splits.index = idx.normalize()
+    return splits
+
+
+def _split_factors(
+    splits: Optional[pd.Series], end: pd.Timestamp
+) -> Callable[[pd.Timestamp], float]:
+    """約定の日 -> その日より後で end までの分割の比の積、を返す関数を作る。
+
+    raw の終値は分割があると全期間を調整し直してあるため（#817）、分割より前の約定の
+    株数をこの積の倍に、値段を積で割ると、終値と同じ水準になる（#899）。
+    """
+    if splits is None or splits.empty:
+        return lambda day: 1.0
+    ratios = pd.to_numeric(splits, errors="coerce")
+    ratios = ratios[(ratios > 0) & (ratios.index <= end)]
+
+    def factor(day: pd.Timestamp) -> float:
+        return float(ratios[ratios.index > day].prod())
+
+    return factor
+
+
 def build_equity_series(
     orders: pd.DataFrame,
     price_loader: Callable[[str, str], Optional[pd.Series]],
     initial_balance: float,
     index: pd.DatetimeIndex,
+    split_loader: Optional[SplitLoader] = None,
 ) -> pd.Series:
     """約定履歴と価格ローダーから日次エクイティ系列を構成する（純粋ロジック）。
 
@@ -82,11 +128,14 @@ def build_equity_series(
         price_loader: (market, symbol) -> 日次終値 Series（取得不能時 None）
         initial_balance: 初期資金
         index: 評価日付の DatetimeIndex（昇順・正規化済み）
+        split_loader: (market, symbol) -> 分割の比の Series（無ければ None）。None なら直さない
 
     Returns:
         index に沿った評価額 Series
     """
-    equity, _ = _build_equity_with_fallbacks(orders, price_loader, initial_balance, index)
+    equity, _ = _build_equity_with_fallbacks(
+        orders, price_loader, initial_balance, index, split_loader
+    )
     return equity
 
 
@@ -95,11 +144,14 @@ def _build_equity_with_fallbacks(
     price_loader: Callable[[str, str], Optional[pd.Series]],
     initial_balance: float,
     index: pd.DatetimeIndex,
+    split_loader: Optional[SplitLoader] = None,
 ) -> tuple[pd.Series, dict[tuple[str, str], pd.DatetimeIndex]]:
     """評価額 Series と、約定の値段で評価した (market, symbol) ごとの日付を返す。
 
     保有日の値段は、その日までの最後の終値（過去の方向にだけ埋めた値）で評価する。
     終値が1つも分からない保有日は、0円にせず、その日までの最後の約定の値段で評価する（#850）。
+    分割より前の約定の株数と値段は、分割の比で終値と同じ水準に直して評価する（#899）。
+    現金は株数×値段で変わらないため直さない。
     """
     if index.empty:
         return pd.Series(dtype=float), {}
@@ -111,10 +163,12 @@ def _build_equity_with_fallbacks(
     cash_events: dict[pd.Timestamp, float] = {}
     qty_events: dict[tuple[str, str], dict[pd.Timestamp, float]] = {}
     fill_price_events: dict[tuple[str, str], dict[pd.Timestamp, float]] = {}
+    split_factors: dict[tuple[str, str], Callable[[pd.Timestamp], float]] = {}
 
     for _, row in work.iterrows():
         side = int(row["side"])
         day = pd.Timestamp(row["filled_at"])
+        fill_day = day
         if day > index[-1]:
             continue
         # index 開始前の約定は初日に寄せて累積に反映する
@@ -131,9 +185,13 @@ def _build_equity_with_fallbacks(
 
         if side in _QTY_SIGN:
             key = (str(row["market"]), str(row["symbol"]))
+            if key not in split_factors:
+                splits = split_loader(*key) if split_loader is not None else None
+                split_factors[key] = _split_factors(splits, index[-1])
+            factor = split_factors[key](fill_day)
             bucket = qty_events.setdefault(key, {})
-            bucket[day] = bucket.get(day, 0.0) + _QTY_SIGN[side] * int(row["qty"])
-            fill_price_events.setdefault(key, {})[day] = float(row["fill_price"])
+            bucket[day] = bucket.get(day, 0.0) + _QTY_SIGN[side] * int(row["qty"]) * factor
+            fill_price_events.setdefault(key, {})[day] = float(row["fill_price"]) / factor
 
     cash_delta = pd.Series(cash_events, dtype=float).reindex(index, fill_value=0.0)
     cash = initial_balance + cash_delta.cumsum()
@@ -141,7 +199,8 @@ def _build_equity_with_fallbacks(
     fallbacks: dict[tuple[str, str], pd.DatetimeIndex] = {}
 
     for (market, symbol), bucket in qty_events.items():
-        holdings = pd.Series(bucket, dtype=float).reindex(index, fill_value=0.0).cumsum()
+        # 分割の比で直した株数の小数の誤差で、売り切った保有が残らないよう丸める
+        holdings = pd.Series(bucket, dtype=float).reindex(index, fill_value=0.0).cumsum().round(6)
         if (holdings == 0).all():
             continue
         prices = price_loader(market, symbol)
@@ -191,6 +250,7 @@ def get_paper_equity_curve(days: int = 180) -> pd.Series:
         _default_price_loader,
         float(PAPER_INITIAL_BALANCE),
         index,
+        split_loader=_default_split_loader,
     )
 
 
@@ -212,6 +272,7 @@ def compute_weekly_results(
     initial_balance: float,
     as_of: date,
     benchmark_fetcher: BenchmarkFetcher,
+    split_loader: Optional[SplitLoader] = None,
 ) -> dict[str, Any]:
     """as_of 以前の直近の営業日を含む ISO 週の、市場ごとの紙の売買の成績を返す（純粋ロジック）。
 
@@ -247,7 +308,7 @@ def compute_weekly_results(
             first_fill = market_orders["filled_at"].min()
             index = pd.bdate_range(start=min(first_fill, base_day), end=week_end)
             equity, fallbacks = _build_equity_with_fallbacks(
-                market_orders, price_loader, initial_balance, index
+                market_orders, price_loader, initial_balance, index, split_loader
             )
             valued_at_fill_price = sorted(
                 symbol
@@ -306,6 +367,7 @@ def write_paper_weekly_results(
         float(PAPER_INITIAL_BALANCE),
         as_of,
         benchmark_fetcher,
+        split_loader=_default_split_loader,
     )
     os.makedirs(output_dir, exist_ok=True)
     path = os.path.join(output_dir, f"{result['week']}.json")

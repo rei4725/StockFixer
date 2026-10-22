@@ -496,7 +496,8 @@ class TestRunRegimeLeverageDailyMarginCheck(unittest.TestCase):
 
 
 class TestRegimeLeverageNaNGuard(unittest.TestCase):
-    """Finding 2: MA200/ATR14がNaNの場合、判定を行わずDBにも書き込まないこと。"""
+    """Finding 2: MA200/ATR14がNaNの場合、判定を行わずDBにも書き込まないこと。
+    未保有ならNoneを返し、保有中なら例外を送出する(#870)。"""
 
     @patch("src.trading.regime_leverage_strategy.service.insert_snapshot")
     @patch("src.trading.regime_leverage_strategy.service.get_latest_snapshot")
@@ -530,10 +531,12 @@ class TestRegimeLeverageNaNGuard(unittest.TestCase):
 
     @patch("src.trading.regime_leverage_strategy.service.insert_snapshot")
     @patch("src.trading.regime_leverage_strategy.service.get_latest_snapshot")
-    def test_weekly_check_holding_returns_none_when_ma200_is_nan_and_does_not_liquidate(
+    def test_weekly_check_holding_raises_when_ma200_is_nan_and_does_not_liquidate(
         self, mock_latest, mock_insert
     ):
-        """保有中にMA200がNaNになった場合でも、誤って regime_flip 決済してはならない。"""
+        """保有中にMA200がNaNになった場合、誤って regime_flip 決済せず、判定が黙って
+        飛ばないよう例外を送出する(スケジューラーのリトライ・Discord通知に乗せる。#870)。
+        """
         from src.trading.regime_leverage_strategy.service import run_regime_leverage_weekly_check
 
         mock_latest.return_value = _holding_snapshot()
@@ -554,9 +557,39 @@ class TestRegimeLeverageNaNGuard(unittest.TestCase):
         fx_df = pd.DataFrame({"Close": [145.0]}, index=[idx[-1]])
         mock_port.get_forex_data.return_value = fx_df
 
-        decision = run_regime_leverage_weekly_check(mock_port)
+        with self.assertRaises(RuntimeError):
+            run_regime_leverage_weekly_check(mock_port)
 
-        self.assertIsNone(decision)
+        mock_insert.assert_not_called()
+
+    @patch("src.trading.regime_leverage_strategy.service.insert_snapshot")
+    @patch("src.trading.regime_leverage_strategy.service.get_latest_snapshot")
+    def test_weekly_check_holding_raises_when_atr14_is_nan(self, mock_latest, mock_insert):
+        """保有中にATR14がNaN(最終行の高値・安値が欠損)の場合も例外を送出する(#870)。"""
+        from src.trading.regime_leverage_strategy.service import run_regime_leverage_weekly_check
+
+        mock_latest.return_value = _holding_snapshot()
+        mock_port = MagicMock()
+        idx = pd.bdate_range("2025-01-01", periods=260)
+        prices = pd.Series(np.linspace(400.0, 500.0, 260), index=idx)
+        df = pd.DataFrame(
+            {
+                "Open": prices,
+                "High": prices + 2,
+                "Low": prices - 2,
+                "Close": prices,
+                "Volume": 1_000_000,
+            },
+            index=idx,
+        )
+        df.loc[df.index[-1], ["High", "Low"]] = np.nan
+        mock_port.get_stock_data.return_value = df
+        fx_df = pd.DataFrame({"Close": [145.0]}, index=[idx[-1]])
+        mock_port.get_forex_data.return_value = fx_df
+
+        with self.assertRaises(RuntimeError):
+            run_regime_leverage_weekly_check(mock_port)
+
         mock_insert.assert_not_called()
 
 

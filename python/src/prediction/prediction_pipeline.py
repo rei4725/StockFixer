@@ -34,6 +34,30 @@ logger = get_logger(__name__)
 MAX_WORKERS = MAX_PREDICTION_WORKERS
 # 精度チェックで「まだデータなし」の行をログに出す件数の上限
 _NO_FUTURE_SAMPLE_LIMIT = 5
+# 保存した現在値と raw の基準の終値の比がこの幅に収まれば、分割による調整の違いは無いとみなす
+_SPLIT_GAP_TOLERANCE = 1.3
+# 比を分割の比（0.5 刻み）に丸めたときに許す、丸めとの相対の差
+_SPLIT_RATIO_TOLERANCE = 0.1
+
+
+def _split_adjust_scale(current_price: float, base_close: float) -> float | None:
+    """
+    保存した現在値を raw の足の調整の水準に合わせる倍率を返す。
+
+    比が _SPLIT_GAP_TOLERANCE の内なら分割は無いとみなして 1.0 を返す。
+    外なら 0.5 刻みの分割の比に丸め、丸めとの差が小さいときだけその倍率を返し、
+    分割の比に合わないときは None を返す。
+    """
+    if base_close <= 0 or current_price <= 0:
+        return None
+    gap = base_close / current_price
+    ratio = max(gap, 1 / gap)
+    if ratio <= _SPLIT_GAP_TOLERANCE:
+        return 1.0
+    split_ratio = round(ratio * 2) / 2
+    if abs(ratio / split_ratio - 1) > _SPLIT_RATIO_TOLERANCE:
+        return None
+    return split_ratio if gap > 1 else 1 / split_ratio
 
 
 def get_optimal_params(market: str, symbol: str) -> dict:
@@ -431,6 +455,7 @@ def run_accuracy_check(
         "予想値段なし": 0,
         "足なし": 0,
         "まだデータなし": 0,
+        "分割の比が合わない": 0,
     }
     # まだデータなしで飛ばした行の値を数件だけ残し、日付の比べが合わない原因の切り分けに使う
     no_future_samples: list[str] = []
@@ -476,6 +501,20 @@ def run_accuracy_check(
                     f"足の日付の型={ohlcv.index.dtype}"
                 )
             continue
+
+        # raw の足は分割で調整し直されることがあるため、予想の日以前の最後の足の終値と
+        # 保存した現在値の比から分割を見つけ、現在値と予想の値段を足と同じ水準に直す。
+        # 予想の日以前の足が無いときは確かめられないので、保存した値のまま比べる
+        base_dates = ohlcv.index[ohlcv.index <= pred_date]
+        if len(base_dates) > 0:
+            base_close = float(ohlcv.loc[base_dates[-1], "Close"])
+            scale = _split_adjust_scale(float(current_price), base_close)
+            if scale is None:
+                skipped["分割の比が合わない"] += 1
+                continue
+            if scale != 1.0:
+                current_price = current_price * scale
+                predicted_price = predicted_price * scale
 
         actual_price = float(ohlcv.loc[future_dates[horizon - 1], "Close"])
         predicted_ratio = (

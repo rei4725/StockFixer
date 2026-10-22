@@ -16,6 +16,34 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+def production_already_predicted_today() -> bool:
+    """prediction_results の production の回が既に今日のものなら True を返す（#904）。
+
+    日次の道を頭からやり直すと（同じ回の中のやり直し・当日分の補完）、[3/6] が
+    前日分を今日の予想で上書きした後に [2/6] が走り、まだ採点の無い今日の予想を
+    読んで採点の JSON を0件で上書きする。そのときは採点と JSON を飛ばす。
+    predicted_at は保存の側と同じく datetime.now() の YYYYMMDD_HHMMSS で比べる。
+    読めなければ False を返し、今までどおり採点する。
+    """
+    from datetime import datetime
+
+    try:
+        from src.prediction.db import load_latest_prediction_timestamp
+
+        latest = load_latest_prediction_timestamp(model_version="production")
+    except Exception as e:
+        _handle_stage_error(PipelineStage.NON_CRITICAL, "[2/6] 前の回の日付の確認", e)
+        return False
+    if not latest or not str(latest).startswith(datetime.now().strftime("%Y%m%d")):
+        return False
+    logger.warning(
+        "[2/6] production の予想が既に今日の回 (%s) のため、採点と採点の JSON を飛ばし"
+        "前の回の JSON を残す（日次の道のやり直し）",
+        latest,
+    )
+    return True
+
+
 def write_accuracy_json_without_sectors() -> "DailyAccuracyReport | None":
     """採点の JSON を業種なしで書き、業種の書き足しに使う材料を返す（NON_CRITICAL）。
 
