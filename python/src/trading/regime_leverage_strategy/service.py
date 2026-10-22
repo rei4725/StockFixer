@@ -271,8 +271,10 @@ def run_regime_leverage_weekly_check(
     結果をDBに記録して返す。
 
     MA200/ATR14がNaN(取得データが200/14日分に満たない等、データ劣化時)の場合は
-    判定を行わずNoneを返す(NaN比較は常にFalseになるため、誤って「レジーム下降」と
-    解釈して保有ポジションを強制決済してしまうことを防ぐ)。
+    判定を行わない(NaN比較は常にFalseになるため、誤って「レジーム下降」と
+    解釈して保有ポジションを強制決済してしまうことを防ぐ)。未保有ならNoneを返し、
+    保有中ならRuntimeErrorを送出する(レジーム転換の判定が飛んだことを
+    スケジューラーのリトライ・Discord通知に乗せるため。#870)。
     """
     from config.settings import REGIME_LEVERAGE_SYMBOL
 
@@ -282,7 +284,13 @@ def run_regime_leverage_weekly_check(
     week_close_usd = float(latest_row["Close"])
     ma200_usd = float(latest_row["MA200"])
     atr14_usd = float(latest_row["ATR14"])
+    snapshot = get_latest_snapshot()
     if pd.isna(ma200_usd) or pd.isna(atr14_usd):
+        if snapshot is not None and snapshot.shares > 0:
+            raise RuntimeError(
+                "レジームレバレッジ戦略(週次): 保有中にMA200またはATR14がNaNのため判定を中止しました"
+                f"(ma200_usd={ma200_usd}, atr14_usd={atr14_usd}, shares={snapshot.shares})"
+            )
         logger.warning(
             "レジームレバレッジ戦略(週次): MA200またはATR14がNaNのため判定を中止します"
             "(ma200_usd=%s, atr14_usd=%s)",
@@ -291,8 +299,6 @@ def run_regime_leverage_weekly_check(
         )
         return None
     now = datetime.now()
-
-    snapshot = get_latest_snapshot()
 
     if snapshot is None or snapshot.shares <= 0:
         from config.settings import REGIME_LEVERAGE_INITIAL_CAPITAL_JPY
