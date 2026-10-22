@@ -47,7 +47,14 @@ def get_model_path(market: str, symbol: str, model_name: str) -> str:
 
 # ===== 結果関連パス =====
 def get_results_dir() -> str:
-    """結果保存用ディレクトリの絶対パスを返す"""
+    """結果保存用ディレクトリの絶対パスを返す（環境変数 STOCKFIXER_RESULTS_DIR 優先）。
+
+    tests/unit の conftest がこの環境変数を tmp_path に向け、テストが本番の
+    results/ （採点の JSON 等）を上書きしないようにする（#902）。
+    """
+    override = os.environ.get("STOCKFIXER_RESULTS_DIR")
+    if override:
+        return override
     return os.path.join(_PYTHON_ROOT, "results")
 
 
