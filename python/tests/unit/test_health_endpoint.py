@@ -192,12 +192,12 @@ class TestCheckDb:
 
     def test_query_last_prediction_swallows_errors(self):
         """last_prediction_at のクエリ失敗は None を返し、例外を伝播させないこと"""
-        from src.api.health import _query_last_prediction_at
+        from src.utils.health_check import query_last_prediction_at
 
         bad_con = MagicMock()
         bad_con.execute.side_effect = RuntimeError("query failed")
 
-        assert _query_last_prediction_at(bad_con) is None
+        assert query_last_prediction_at(bad_con) is None
 
 
 class TestDbConnectionLockTimeout:

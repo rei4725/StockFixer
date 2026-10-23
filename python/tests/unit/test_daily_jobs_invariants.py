@@ -92,6 +92,12 @@ class TestDailyPipelineInvariantWiring(unittest.TestCase):
             # 通常ケースは実関数のまま評価させたいので何も patch しない。
             evaluate_patch = nullcontext()
 
+        # NF-303-4 の判定は DB と状態ファイルを触るため遮断する（#940）。
+        # with の入れ子は上限（20）に達しているので start/stop で当てる。
+        health_streak_patch = patch("src.orchestration.jobs.daily.record_health_degraded_streak")
+        captured["health_streak"] = health_streak_patch.start()
+        self.addCleanup(health_streak_patch.stop)
+
         with (
             patch("src.watchlist.batch_runner.load_target_symbols", return_value=[]),
             patch("src.market_data.pipeline.run_batch_pipeline"),
@@ -174,6 +180,15 @@ class TestDailyPipelineInvariantWiring(unittest.TestCase):
         rule = next(r for r in results if r.rule_id == "NF-303-5")
         self.assertFalse(rule.triggered)
         self.assertIs(self._captured["notifier"], send_webhook_notification)
+
+    def test_health_degraded_streak_recorded_once_per_run(self):
+        """日次の道で NF-303-4 の連続回数を1回だけ更新する（#940）。"""
+        self._run_pipeline(
+            output_rows=_rows(705, model_count=2),
+            loaded_models=["UnifiedStockXGBoost", "UnifiedStockLightGBM"],
+            previous_raw=None,
+        )
+        self._captured["health_streak"].assert_called_once_with()
 
     def test_evaluation_exception_fires_a0_without_stopping_pipeline(self):
         """[2.1/5] が例外で中断しても NF-303-5 は A-0（評価未実行）として発火し、
