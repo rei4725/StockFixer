@@ -1,13 +1,14 @@
 """ユニットテスト: src.trading.regime_leverage_strategy.service"""
 
 import unittest
-from datetime import datetime
+from datetime import date, datetime
 from unittest.mock import MagicMock, patch  # noqa: F401  # Task 5/6のテストで使用予定
 from zoneinfo import ZoneInfo
 
 import numpy as np  # noqa: F401  # Task 5/6のテストで使用予定
 import pandas as pd  # noqa: F401  # Task 5/6のテストで使用予定
 
+from config.settings import REGIME_LEVERAGE_INTEREST_ANNUAL
 from src.trading.regime_leverage_strategy.service import (
     compute_equity_now,
     decide_weekly_entry,
@@ -750,11 +751,12 @@ class TestDailyCheckUsesClosedBarsSinceLastRun(unittest.TestCase):
 
     def test_weekly_row_is_not_used_as_last_daily_check(self):
         # 最新の行が週次の回(JST 7/18 土 07:00、金曜 7/17 の引けの後)でも、
-        # 月曜 7/20 07:30 の日次の回は金曜の足を判定する
+        # 月曜 7/20 07:30 の日次の回は金曜の足を判定する。executed_at は DB と同じく
+        # タイムゾーンの無い UTC で渡す(#942)
         port = _daily_port("2026-07-17", {"2026-07-17": 440.0})
         decision = self._run(
             datetime(2026, 7, 20, 7, 30, tzinfo=_JST),
-            datetime(2026, 7, 18, 7, 0),
+            datetime(2026, 7, 17, 22, 0),
             port,
             reason="weekly_noop",
         )
@@ -767,10 +769,10 @@ class TestDailyCheckUsesClosedBarsSinceLastRun(unittest.TestCase):
         port = _daily_port("2026-07-20", {"2026-07-17": 440.0})
         decision = self._run(
             datetime(2026, 7, 21, 7, 30, tzinfo=_JST),
-            datetime(2026, 7, 18, 7, 0),
+            datetime(2026, 7, 17, 22, 0),
             port,
             reason="weekly_noop",
-            last_daily_check_at=datetime(2026, 7, 17, 7, 30),
+            last_daily_check_at=datetime(2026, 7, 16, 22, 30),
         )
         self.assertEqual(decision.action, "exit")
         self.assertEqual(decision.reason, "initial_stop")
@@ -782,10 +784,10 @@ class TestDailyCheckUsesClosedBarsSinceLastRun(unittest.TestCase):
         port = _daily_port("2026-07-21", {"2026-07-20": 440.0})
         decision = self._run(
             datetime(2026, 7, 22, 7, 30, tzinfo=_JST),
-            datetime(2026, 7, 18, 7, 0),
+            datetime(2026, 7, 17, 22, 0),
             port,
             reason="regime_entry",
-            last_daily_check_at=datetime(2026, 7, 18, 7, 0),
+            last_daily_check_at=datetime(2026, 7, 17, 22, 0),
         )
         self.assertEqual(decision.action, "exit")
         self.assertEqual(decision.reason, "initial_stop")
@@ -795,7 +797,7 @@ class TestDailyCheckUsesClosedBarsSinceLastRun(unittest.TestCase):
         # 夏時間: JST 7/15 23:00 = 米東部 7/15 10:00(場中)。7/15 の足は引けていない
         port = _daily_port("2026-07-15", {"2026-07-15": 300.0})
         decision = self._run(
-            datetime(2026, 7, 15, 23, 0, tzinfo=_JST), datetime(2026, 7, 15, 7, 30), port
+            datetime(2026, 7, 15, 23, 0, tzinfo=_JST), datetime(2026, 7, 14, 22, 30), port
         )
         self.assertEqual(decision.action, "noop")
         self.assertEqual(decision.spy_price_usd, 498.0)
@@ -804,7 +806,7 @@ class TestDailyCheckUsesClosedBarsSinceLastRun(unittest.TestCase):
         # 冬時間: JST 1/14 23:45 = 米東部 1/14 09:45(場中)。1/14 の足は引けていない
         port = _daily_port("2026-01-14", {"2026-01-14": 300.0})
         decision = self._run(
-            datetime(2026, 1, 14, 23, 45, tzinfo=_JST), datetime(2026, 1, 14, 7, 30), port
+            datetime(2026, 1, 14, 23, 45, tzinfo=_JST), datetime(2026, 1, 13, 22, 30), port
         )
         self.assertEqual(decision.action, "noop")
         self.assertEqual(decision.spy_price_usd, 498.0)
@@ -813,7 +815,7 @@ class TestDailyCheckUsesClosedBarsSinceLastRun(unittest.TestCase):
         # 冬時間: JST 1/15 05:30 = 米東部 1/14 15:30。1/14 の足はまだ引けていない
         port = _daily_port("2026-01-14", {"2026-01-14": 300.0})
         decision = self._run(
-            datetime(2026, 1, 15, 5, 30, tzinfo=_JST), datetime(2026, 1, 14, 7, 30), port
+            datetime(2026, 1, 15, 5, 30, tzinfo=_JST), datetime(2026, 1, 13, 22, 30), port
         )
         self.assertEqual(decision.action, "noop")
 
@@ -821,7 +823,7 @@ class TestDailyCheckUsesClosedBarsSinceLastRun(unittest.TestCase):
         # 夏時間: JST 7/16 05:30 = 米東部 7/15 16:30。7/15 の足は引けている
         port = _daily_port("2026-07-15", {"2026-07-15": 440.0})
         decision = self._run(
-            datetime(2026, 7, 16, 5, 30, tzinfo=_JST), datetime(2026, 7, 15, 7, 30), port
+            datetime(2026, 7, 16, 5, 30, tzinfo=_JST), datetime(2026, 7, 14, 22, 30), port
         )
         self.assertEqual(decision.reason, "initial_stop")
 
@@ -830,7 +832,7 @@ class TestDailyCheckUsesClosedBarsSinceLastRun(unittest.TestCase):
         # 7/14 と 7/15 の2本が引けており、古い方の 7/14 の安値が損切りの値段を割っている
         port = _daily_port("2026-07-15", {"2026-07-14": 440.0})
         decision = self._run(
-            datetime(2026, 7, 16, 7, 30, tzinfo=_JST), datetime(2026, 7, 14, 7, 30), port
+            datetime(2026, 7, 16, 7, 30, tzinfo=_JST), datetime(2026, 7, 13, 22, 30), port
         )
         self.assertEqual(decision.action, "exit")
         self.assertEqual(decision.reason, "initial_stop")
@@ -840,11 +842,80 @@ class TestDailyCheckUsesClosedBarsSinceLastRun(unittest.TestCase):
         # 7/14 の安値 300 ドルは維持率 0.20 を割る(マージンコールが損切りより先)
         port = _daily_port("2026-07-15", {"2026-07-14": 300.0})
         decision = self._run(
-            datetime(2026, 7, 16, 7, 30, tzinfo=_JST), datetime(2026, 7, 14, 7, 30), port
+            datetime(2026, 7, 16, 7, 30, tzinfo=_JST), datetime(2026, 7, 13, 22, 30), port
         )
         self.assertEqual(decision.action, "exit")
         self.assertEqual(decision.reason, "margin_call")
         self.assertEqual(decision.spy_price_usd, 300.0)
+
+
+class TestDbExecutedAtIsUtc(unittest.TestCase):
+    """DB の executed_at・entry_date はタイムゾーンの無い UTC で入る(#942)。"""
+
+    def test_naive_utc_executed_at_excludes_bar_checked_by_previous_run(self):
+        # 前の回は JST 7/15 水 07:30(= UTC 7/14 22:30)。そこで 7/14 の足(JST 7/15 05:00 引け)
+        # は判定済み。JST 7/16 07:30 の回は 7/15 の足だけを見る
+        from src.trading.regime_leverage_strategy.service import select_unchecked_closed_bars
+
+        df = _daily_port("2026-07-15", {"2026-07-14": 440.0}).get_stock_data.return_value
+        bars = select_unchecked_closed_bars(
+            df, datetime(2026, 7, 14, 22, 30), datetime(2026, 7, 16, 7, 30, tzinfo=_JST)
+        )
+        self.assertEqual(list(bars.index), [pd.Timestamp("2026-07-15")])
+
+    def test_daily_run_does_not_exit_on_bar_checked_by_previous_run(self):
+        from src.trading.regime_leverage_strategy.service import (
+            run_regime_leverage_daily_margin_check,
+        )
+
+        port = _daily_port("2026-07-15", {"2026-07-14": 440.0})
+        snap = _holding_snapshot(
+            executed_at=datetime(2026, 7, 14, 22, 30), action="noop", reason="daily_noop"
+        )
+        with patch(
+            "src.trading.regime_leverage_strategy.service.get_latest_snapshot",
+            return_value=snap,
+        ), patch("src.trading.regime_leverage_strategy.service.insert_snapshot"), patch(
+            "src.trading.regime_leverage_strategy.service.datetime",
+            _fixed_datetime(datetime(2026, 7, 16, 7, 30, tzinfo=_JST)),
+        ):
+            decision = run_regime_leverage_daily_margin_check(port)
+        self.assertEqual(decision.action, "noop")
+        self.assertEqual(decision.spy_price_usd, 498.0)
+
+    def test_weekly_entry_date_is_jst_and_days_held_counts_jst_days(self):
+        from src.trading.regime_leverage_strategy.service import run_regime_leverage_weekly_check
+
+        idx = pd.bdate_range(end="2026-07-17", periods=260)
+        prices = pd.Series(np.linspace(400.0, 500.0, 260), index=idx)
+        df = pd.DataFrame(
+            {"Open": prices, "High": prices + 2, "Low": prices - 2, "Close": prices},
+            index=idx,
+        )
+        mock_port = MagicMock()
+        mock_port.get_stock_data.return_value = df
+        mock_port.get_forex_data.return_value = pd.DataFrame({"Close": [145.0]}, index=[idx[-1]])
+        # 週次の回は土曜 7/18 06:30 JST(= UTC 金曜 7/17 21:30)
+        with patch(
+            "src.trading.regime_leverage_strategy.service.get_latest_snapshot",
+            return_value=None,
+        ), patch("src.trading.regime_leverage_strategy.service.insert_snapshot"), patch(
+            "src.trading.regime_leverage_strategy.service.datetime",
+            _fixed_datetime(datetime(2026, 7, 18, 6, 30, tzinfo=_JST)),
+        ):
+            decision = run_regime_leverage_weekly_check(mock_port)
+        self.assertEqual(decision.action, "entry")
+        self.assertIsNotNone(decision.entry_date.tzinfo)
+        self.assertEqual(decision.entry_date.astimezone(_JST).date(), date(2026, 7, 18))
+
+        # 月曜 7/20 07:30 JST の日次の回では、保有日数は2日。DB から読んだタイムゾーンの無い
+        # UTC(金曜 21:30)でも、週次の回のタイムゾーン付きの時刻でも同じ
+        now = datetime(2026, 7, 20, 7, 30, tzinfo=_JST)
+        for entry_date in (datetime(2026, 7, 17, 21, 30), decision.entry_date):
+            snap = _holding_snapshot(entry_date=entry_date)
+            equity = compute_equity_now(snap, snap.entry_price_jpy, now)
+            interest = snap.entry_price_jpy * snap.shares * REGIME_LEVERAGE_INTEREST_ANNUAL / 365
+            self.assertAlmostEqual(equity, snap.equity_at_entry_jpy - interest * 2)
 
 
 if __name__ == "__main__":
