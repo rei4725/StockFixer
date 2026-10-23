@@ -5,7 +5,6 @@
 """
 
 import re
-import sys
 
 import pandas as pd
 
@@ -16,6 +15,19 @@ logger = get_logger(__name__)
 # 約定（翌バー始値 #493）と動的スリッページの平均出来高（#494）のためだけに載せる生の列。
 # 当バーの値なので、モデルの特徴量には使わない（呼び出し側で除外する）。
 SIMULATION_ONLY_COLUMNS = ("Open", "Volume")
+
+# 表には載せるが、モデルの学習と予測の特徴量には使わない列（#979・#994）。
+# 当日の生の終値 Close・close と、当日の高安引けを含む atr は本番の特徴量に無い。
+# atr は ATR サイジング（backtester）と rules/・screener.py が表から読むので、表には残す。
+NON_FEATURE_COLUMNS = ("Close", "close", "atr") + SIMULATION_ONLY_COLUMNS
+
+
+class FeaturesUnavailableError(Exception):
+    """バックテスト用の特徴量が用意できない（データが無い・行数不足・生成失敗）。
+
+    バッチでは1銘柄のエラーとして except Exception で受けられるよう、SystemExit にしない（#972）。
+    CLI は入口の except Exception で受けて終了コード1で終える。
+    """
 
 
 def _attach_simulation_columns(X: pd.DataFrame, price_df: pd.DataFrame) -> None:
@@ -119,7 +131,7 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
         df = _dp.get_stock_data(market, ticker, start, end)
         if df is None or df.empty:
             logger.error(f"[backtest] yfinanceからデータを取得できませんでした: {market}/{symbol}")
-            sys.exit(1)
+            raise FeaturesUnavailableError(f"yfinanceからデータを取得できません: {market}/{symbol}")
         df = df.dropna(axis=1, how="all")
         close_series = df["Close"].copy()
         price_df = df[[c for c in SIMULATION_ONLY_COLUMNS if c in df.columns]].copy()
@@ -136,7 +148,9 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
                 f"[backtest] データ行数不足: {market}/{symbol} "
                 f"（{len(df)}行 < 最低{_MIN_ROWS}行）"
             )
-            sys.exit(1)
+            raise FeaturesUnavailableError(
+                f"データ行数不足: {market}/{symbol}（{len(df)}行 < 最低{_MIN_ROWS}行）"
+            )
         X, y = _dp.create_basic_lag_features(df, n_lags=10)
         if X is None or X.empty:
             nan_cols = df.isnull().sum()
@@ -145,7 +159,7 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
             logger.error(
                 f"[backtest] 特徴量生成に失敗しました: {market}/{symbol}（{len(df)}行, {detail}）"
             )
-            sys.exit(1)
+            raise FeaturesUnavailableError(f"特徴量生成に失敗しました: {market}/{symbol}")
         X.columns = [re.sub(r"[^0-9a-zA-Z_]", "_", str(c)) for c in X.columns]
         X["y"] = y
         # シミュレーション用に Close・Open・Volume 列を保持
@@ -165,7 +179,9 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
                 f"[backtest] market_data_rawにデータがありません: {market}/{symbol}"
                 " → run_data_creation.pyを先に実行してください"
             )
-            sys.exit(1)
+            raise FeaturesUnavailableError(
+                f"market_data_rawにデータがありません: {market}/{symbol}"
+            )
         df = df.dropna(axis=1, how="all")
         close_series = df["Close"].copy()
         price_df = df[[c for c in SIMULATION_ONLY_COLUMNS if c in df.columns]].copy()
@@ -182,7 +198,9 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
                 f"[backtest] データ行数不足: {market}/{symbol} "
                 f"（{len(df)}行 < 最低{_MIN_ROWS}行）"
             )
-            sys.exit(1)
+            raise FeaturesUnavailableError(
+                f"データ行数不足: {market}/{symbol}（{len(df)}行 < 最低{_MIN_ROWS}行）"
+            )
         X, y = _dp.create_basic_lag_features(df, n_lags=10)
         if X is None or X.empty:
             nan_cols = df.isnull().sum()
@@ -191,7 +209,7 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
             logger.error(
                 f"[backtest] 特徴量生成に失敗しました: {market}/{symbol}（{len(df)}行, {detail}）"
             )
-            sys.exit(1)
+            raise FeaturesUnavailableError(f"特徴量生成に失敗しました: {market}/{symbol}")
         X.columns = [re.sub(r"[^0-9a-zA-Z_]", "_", str(c)) for c in X.columns]
         X["y"] = y
         X["Close"] = close_series.reindex(X.index)
@@ -209,7 +227,7 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
                 f"[backtest] stock_featuresにデータがありません: {market}/{symbol}"
                 " → run_data_creation.pyを先に実行してください"
             )
-            sys.exit(1)
+            raise FeaturesUnavailableError(f"stock_featuresにデータがありません: {market}/{symbol}")
 
         # 最新日の行は y（翌日変化率）が未確定の NaN で保存される（予測用）
         if "y" in df.columns:

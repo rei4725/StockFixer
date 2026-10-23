@@ -49,20 +49,37 @@ class _TmpDbTestCase(unittest.TestCase):
 
 
 class TestExtractDates(unittest.TestCase):
+    def test_jp_regular_run_returns_base_bar_date(self):
+        # ふだんの JST 07:30 の回（UTC 前の日 22:30）は 2026-10-19
+        self.assertEqual(_extract_dates(["20261019_223000"], "jp"), {"2026-10-19"})
+
+    def test_jp_backfill_run_returns_previous_day(self):
+        # JST 10:30（場中）の補完の回は、UTC の日付 10-20 でなく基準の足の 10-19
+        self.assertEqual(_extract_dates(["20261020_013000"], "jp"), {"2026-10-19"})
+
+    def test_us_after_utc_midnight_returns_ny_date(self):
+        # UTC 10/20 01:30 は NY 10/19 21:30（引けの後）なので 2026-10-19
+        self.assertEqual(_extract_dates(["20261020_013000"], "us"), {"2026-10-19"})
+
     def test_standard_format(self):
-        result = _extract_dates(["20260403_120000", "20260404_090000"])
+        # JST 21:00・18:00（引けの後）なので、その日の足
+        result = _extract_dates(["20260403_120000", "20260404_090000"], "jp")
         self.assertEqual(result, {"2026-04-03", "2026-04-04"})
 
     def test_empty_list(self):
-        self.assertEqual(_extract_dates([]), set())
+        self.assertEqual(_extract_dates([], "jp"), set())
 
     def test_invalid_format_skipped(self):
-        result = _extract_dates(["invalid", "20260403_120000"])
+        result = _extract_dates(["invalid", "20260403_120000"], "jp")
         self.assertEqual(result, {"2026-04-03"})
 
     def test_duplicate_dates_deduplicated(self):
-        result = _extract_dates(["20260403_090000", "20260403_150000"])
+        # JST 4/3 18:00 と 4/4 00:00（引けの前）は、どちらも 4/3 の足
+        result = _extract_dates(["20260403_090000", "20260403_150000"], "jp")
         self.assertEqual(result, {"2026-04-03"})
+
+    def test_unknown_market_returns_utc_date(self):
+        self.assertEqual(_extract_dates(["20261020_013000"], "xx"), {"2026-10-20"})
 
 
 class TestLoadTopPredictionMisses(_TmpDbTestCase):
@@ -147,7 +164,8 @@ class TestAnalyzeMissCauses(unittest.TestCase):
                     "market": market,
                     "symbol": symbol,
                     "model_name": "test",
-                    "predicted_at": "20260401_120000",
+                    # NY 4/1 18:00（引けの後）なので基準の足は 2026-04-01
+                    "predicted_at": "20260401_220000",
                     "horizon": 1,
                     "predicted_ratio": 0.05,
                     "actual_ratio": -0.03,
@@ -242,6 +260,39 @@ class TestAnalyzeMissCauses(unittest.TestCase):
         if len(result) > 1:
             for i in range(len(result) - 1):
                 self.assertLessEqual(result[i].shap_rank, result[i + 1].shap_rank)
+
+    def _make_base_bar_features_df(self):
+        # 基準の足の日 2026-10-19 だけ異常、答えの日 2026-10-20 は平常
+        normal_dates = [f"2026-09-{d:02d}" for d in range(1, 21)]
+        normal_rsi = [50.0 + (i % 5 - 2) * 0.5 for i in range(20)]
+        normal_vol = [1000.0 + (i % 5 - 2) * 10 for i in range(20)]
+        return pd.DataFrame(
+            {
+                "date": normal_dates + ["2026-10-19", "2026-10-20"],
+                "rsi_14": normal_rsi + [1.0, 50.0],
+                "volume_ma20": normal_vol + [9000.0, 1000.0],
+            }
+        )
+
+    def _analyze_at(self, market, predicted_at):
+        miss_df = self._make_miss_df(market=market)
+        miss_df["predicted_at"] = predicted_at
+        with patch("src.prediction.miss_analysis.load_shap_latest") as mock_shap, patch(
+            "src.prediction.miss_analysis.load_stock_features"
+        ) as mock_feat:
+            mock_shap.return_value = self._make_shap_df()
+            mock_feat.return_value = self._make_base_bar_features_df()
+            return analyze_miss_causes(market, "AAPL", miss_df)
+
+    def test_jp_backfill_run_reads_base_bar_row(self):
+        # JST 10:30（場中）の補完の回は、前の日 2026-10-19 の行を引く
+        result = self._analyze_at("jp", "20261020_013000")
+        self.assertEqual([r.feature for r in result], ["rsi_14", "volume_ma20"])
+
+    def test_us_after_utc_midnight_reads_base_bar_row(self):
+        # NY 10/19 の夜の回は、2026-10-19 の行を引く
+        result = self._analyze_at("us", "20261020_013000")
+        self.assertEqual([r.feature for r in result], ["rsi_14", "volume_ma20"])
 
     def test_warn_repeated_features_logs_warning(self):
         causes = {
