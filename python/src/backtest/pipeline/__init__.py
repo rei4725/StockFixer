@@ -11,7 +11,7 @@ public API は本 __init__ で再公開し、`from src.backtest.pipeline import 
 
 from src.backtest.ports import get_model_manager  # noqa: F401  patch target 後方互換
 
-from .features import load_features  # noqa: F401
+from .features import FeaturesUnavailableError, load_features  # noqa: F401
 from .reporting import (  # noqa: F401
     fetch_benchmark_for_result,
     plot_backtest_chart,
@@ -26,6 +26,7 @@ from .runner import (  # noqa: F401
 )
 
 __all__ = [
+    "FeaturesUnavailableError",
     "load_features",
     "run_backtest_single",
     "run_backtest_walk_forward",

@@ -13,6 +13,7 @@ from typing import Any, Optional
 
 import pandas as pd
 
+from src.backtest.execution import default_slippage_for
 from src.backtest.pipeline import run_backtest_walk_forward
 from src.utils.data_path_utils import ensure_dir, get_results_dir
 from src.utils.db.experiment import generate_run_id, save_experiment_run
@@ -236,7 +237,7 @@ def run_walk_forward_comparison_report(
     threshold: float = 0.0,
     initial_cash: float = 1_000_000,
     fee_rate: float = 0.001,
-    slippage: float = 0.0,
+    slippage: Optional[float] = None,
     ensemble: bool = False,
     limit_symbols: Optional[int] = None,
 ) -> dict[str, Any]:
@@ -244,6 +245,7 @@ def run_walk_forward_comparison_report(
     標準条件で Walk-Forward 検証を全銘柄実行し、比較レポートを保存する。
 
     tasks は呼び出し元（orchestration 等）で load_target_symbols() して渡す。
+    slippage が None なら市場別の既定（US 5bps・JP 10bps）を当てる。0.0 は明示指定として尊重する。
 
     Returns:
         保存先情報を含む辞書
@@ -299,7 +301,9 @@ def run_walk_forward_comparison_report(
                     "threshold": threshold,
                     "initial_cash": initial_cash,
                     "fee_rate": fee_rate,
-                    "slippage": slippage,
+                    # 実際に当てたフラットの片道スリッページ率を残す（#993）
+                    "slippage": (default_slippage_for(market) if slippage is None else slippage),
+                    "slippage_is_market_default": slippage is None,
                     "ensemble": ensemble,
                     "total_return": summary.get("total_return"),
                     "sharpe_ratio": summary.get("sharpe_ratio"),

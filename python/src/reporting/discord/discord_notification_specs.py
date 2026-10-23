@@ -30,10 +30,15 @@ OPTIMIZATION_COMPLETION = NotificationSpec("✅ 週次バックテスト最適�
 OPTIMIZATION_COMPLETION_WITH_ERRORS = NotificationSpec(
     "✅ 週次バックテスト最適化完了", COLOR_CAUTION
 )
+OPTIMIZATION_ERROR = NotificationSpec("❌ 週次バックテスト最適化失敗", COLOR_ERROR)
 WALK_FORWARD_REPORT_COMPLETION = NotificationSpec("✅ Walk-Forward 比較レポート完了", COLOR_SUCCESS)
 WALK_FORWARD_REPORT_WITH_ERRORS = NotificationSpec(
     "⚠️ Walk-Forward 比較レポート完了", COLOR_CAUTION
 )
+WALK_FORWARD_REPORT_EMPTY = NotificationSpec(
+    "⚠️ Walk-Forward 比較レポート: 対象0銘柄", COLOR_WARNING
+)
+WALK_FORWARD_REPORT_ERROR = NotificationSpec("❌ Walk-Forward 比較レポート失敗", COLOR_ERROR)
 DB_MAINTENANCE_COMPLETION = NotificationSpec("✅ DB メンテナンス完了", COLOR_SUCCESS)
 DB_MAINTENANCE_ERROR = NotificationSpec("❌ DB メンテナンス失敗", COLOR_ERROR)
 DB_BACKUP_COMPLETION = NotificationSpec("✅ DB バックアップ完了", COLOR_SUCCESS)
@@ -55,5 +60,8 @@ def get_optimization_spec(*, failed: int) -> NotificationSpec:
     return OPTIMIZATION_COMPLETION_WITH_ERRORS if failed > 0 else OPTIMIZATION_COMPLETION
 
 
-def get_walk_forward_report_spec(*, failed_count: int) -> NotificationSpec:
+def get_walk_forward_report_spec(*, failed_count: int, total_count: int) -> NotificationSpec:
+    # 対象が0銘柄の回は何も検証していないため、成功の題にしない（#986）
+    if total_count <= 0:
+        return WALK_FORWARD_REPORT_EMPTY
     return WALK_FORWARD_REPORT_WITH_ERRORS if failed_count > 0 else WALK_FORWARD_REPORT_COMPLETION

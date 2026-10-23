@@ -256,7 +256,15 @@ def run_weekly_paper_results() -> None:
             os.path.join(get_results_dir(), "paper"),
         )
     except Exception as e:
+        # 週の成績が欠けた週を知らせる。投げ直すとやり直しで週のレポートを2回送るため、
+        # 知らせだけにする（#999）
         logger.error("紙の売買の週の成績の書き出し失敗: %s", e, exc_info=True)
+        try:
+            from src.reporting.discord.discord_utils import send_webhook_text
+
+            send_webhook_text(f"❌ 紙の売買の週の成績の書き出し失敗\n{str(e)[:1000] or '不明'}")
+        except Exception as notify_error:
+            logger.error("紙の売買の週の成績の失敗通知失敗: %s", notify_error, exc_info=True)
 
 
 def run_weekly_optimization():
@@ -276,7 +284,6 @@ def run_weekly_optimization():
     use_optuna = os.getenv("USE_OPTUNA", "").strip().lower() in ("1", "true", "yes")
     n_trials = int(os.getenv("OPTUNA_N_TRIALS", "50"))
 
-    success, failed = 0, 0
     try:
         from src.watchlist.batch_runner import load_target_symbols
 
@@ -308,17 +315,33 @@ def run_weekly_optimization():
                 max_workers=3,
                 sort_by="sharpe_ratio",
             )
-        success = sum(1 for r in results if not r.get("error"))
-        failed = len(results) - success
-        logger.info("=== 週次バックテスト最適化完了: 成功=%s, 失敗=%s ===", success, failed)
     except Exception as e:
+        # 全体が落ちた回は失敗と知らせたうえで投げ直し、run_job に error と記録させる（#973）
         logger.error("週次バックテスト最適化失敗: %s", e, exc_info=True)
+        try:
+            from src.reporting.discord.discord_utils import send_optimization_failure
+
+            send_optimization_failure(str(e))
+        except Exception as notify_error:
+            logger.error("週次最適化失敗通知失敗: %s", notify_error, exc_info=True)
+        raise
+
+    # skipped は成功に数えず、別に数える（#973）
+    success = sum(1 for r in results if r.get("status") == "success")
+    skipped = sum(1 for r in results if r.get("status") == "skipped")
+    failed = len(results) - success - skipped
+    logger.info(
+        "=== 週次バックテスト最適化完了: 成功=%s, 失敗=%s, スキップ=%s ===",
+        success,
+        failed,
+        skipped,
+    )
 
     # Discord 完了通知
     try:
         from src.reporting.discord.discord_utils import send_optimization_completion
 
-        send_optimization_completion(success=success, failed=failed)
+        send_optimization_completion(success=success, failed=failed, skipped=skipped)
     except Exception as e:
         logger.error("週次最適化完了通知失敗: %s", e, exc_info=True)
 
@@ -331,7 +354,6 @@ def run_weekly_walk_forward_report():
     前回スナップショットとの差分レポートを保存する。
     """
     logger.info("=== 週次 Walk-Forward 比較レポート開始 ===")
-    result: dict = {}
     try:
         from src.backtest.walk_forward_report import run_walk_forward_comparison_report
         from src.watchlist.batch_runner import load_target_symbols
@@ -344,18 +366,27 @@ def run_weekly_walk_forward_report():
             n_splits=5,
             threshold=0.0,
             fee_rate=0.001,
-            slippage=0.0,
-        )
-        logger.info(
-            "=== 週次 Walk-Forward 比較レポート完了: " "success=%s failed=%s total=%s ===",
-            result.get("success"),
-            result.get("failed"),
-            result.get("total"),
+            # slippage は渡さず市場別の既定（US 5bps・JP 10bps）を当てる（#993）
         )
     except Exception as e:
+        # 全体が落ちた回は失敗と知らせたうえで投げ直し、run_job に error と記録させる（#986）
         logger.error("Walk-Forward 比較レポート生成失敗: %s", e, exc_info=True)
+        try:
+            from src.reporting.discord.discord_utils import send_walk_forward_report_failure
 
-    # Discord 完了通知
+            send_walk_forward_report_failure(str(e))
+        except Exception as notify_error:
+            logger.error("Walk-Forward レポート失敗通知失敗: %s", notify_error, exc_info=True)
+        raise
+
+    logger.info(
+        "=== 週次 Walk-Forward 比較レポート完了: " "success=%s failed=%s total=%s ===",
+        result.get("success"),
+        result.get("failed"),
+        result.get("total"),
+    )
+
+    # Discord 完了通知（本体が終わった回だけ。対象0銘柄は ⚠️ の題になる）
     try:
         from src.reporting.discord.discord_utils import send_walk_forward_report_completion
 

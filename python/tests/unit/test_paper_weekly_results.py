@@ -302,6 +302,69 @@ class TestWeeklyReportCallsPaperResults(unittest.TestCase):
         run_weekly_paper_results()  # 例外が外に出ないこと
         mock_write.assert_called_once()
 
+    @patch("src.reporting.discord.discord_utils.send_webhook_text")
+    @patch("src.trading.paper_equity.write_paper_weekly_results", side_effect=RuntimeError("x"))
+    def test_failure_sends_notice(self, _mock_write, mock_send):
+        """書き出しが落ちた回は、失敗の知らせを送ること（#999）"""
+        from src.orchestration.jobs.weekly import run_weekly_paper_results
+
+        run_weekly_paper_results()
+        mock_send.assert_called_once()
+        text = mock_send.call_args[0][0]
+        self.assertIn("❌ 紙の売買の週の成績の書き出し失敗", text)
+        self.assertIn("x", text)
+
+    @patch("src.reporting.discord.discord_utils.send_webhook_text", side_effect=RuntimeError("y"))
+    @patch("src.trading.paper_equity.write_paper_weekly_results", side_effect=RuntimeError("x"))
+    def test_notice_failure_does_not_propagate(self, _mock_write, mock_send):
+        """知らせの送信が落ちても、例外が外に出ないこと（#999）"""
+        from src.orchestration.jobs.weekly import run_weekly_paper_results
+
+        run_weekly_paper_results()
+        mock_send.assert_called_once()
+
+    @patch("src.reporting.discord.discord_utils.send_webhook_text")
+    @patch("src.trading.paper_equity.write_paper_weekly_results", return_value="2026-W43.json")
+    def test_success_sends_no_notice(self, mock_write, mock_send):
+        """書き出しが終わった回は、失敗の知らせを送らないこと（#999）"""
+        from src.orchestration.jobs.weekly import run_weekly_paper_results
+
+        run_weekly_paper_results()
+        mock_write.assert_called_once()
+        mock_send.assert_not_called()
+
+    @patch("src.reporting.discord.discord_utils.send_webhook_text")
+    @patch("src.trading.paper_equity.write_paper_weekly_results", side_effect=RuntimeError("x"))
+    @patch("src.reporting.discord.discord_utils.send_miss_analysis_summary")
+    @patch("src.prediction.miss_analysis.run_miss_analysis_batch")
+    @patch("src.prediction.db.load_top_prediction_misses")
+    @patch("src.reporting.discord.discord_utils.send_weekly_report")
+    @patch("src.reporting.llm_review.generate_weekly_review", return_value=None)
+    @patch("src.infrastructure.llm.factory.get_text_review_port")
+    @patch("src.prediction.db.save_weekly_accuracy_snapshot")
+    @patch("src.infrastructure.persistence.analytics_query.PostgresAnalyticsQuery")
+    def test_weekly_report_runs_all_stages_and_notifies(
+        self,
+        _mock_analytics,
+        _mock_snapshot,
+        _mock_port,
+        _mock_review,
+        mock_report,
+        _mock_misses,
+        _mock_batch,
+        mock_miss_summary,
+        mock_write,
+        mock_send,
+    ):
+        """書き出しが落ちても、週のレポートと外れの分析が走り、ジョブは例外を上げないこと（#999）"""
+        from src.orchestration.jobs.weekly import run_weekly_report
+
+        run_weekly_report()
+        mock_report.assert_called_once()
+        mock_miss_summary.assert_called_once()
+        mock_write.assert_called_once()
+        mock_send.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()
