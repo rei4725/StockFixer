@@ -38,6 +38,7 @@ from src.reporting.discord.notifications_model import (  # noqa: F401  # re-expo
     send_factory_completion,
     send_feature_suggestion_notification,
     send_optimization_completion,
+    send_optimization_failure,
     send_promotion_result,
     send_shadow_evaluation_notification,
     send_shap_batch_summary,

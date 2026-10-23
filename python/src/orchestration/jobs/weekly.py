@@ -276,7 +276,6 @@ def run_weekly_optimization():
     use_optuna = os.getenv("USE_OPTUNA", "").strip().lower() in ("1", "true", "yes")
     n_trials = int(os.getenv("OPTUNA_N_TRIALS", "50"))
 
-    success, failed = 0, 0
     try:
         from src.watchlist.batch_runner import load_target_symbols
 
@@ -308,17 +307,33 @@ def run_weekly_optimization():
                 max_workers=3,
                 sort_by="sharpe_ratio",
             )
-        success = sum(1 for r in results if not r.get("error"))
-        failed = len(results) - success
-        logger.info("=== 週次バックテスト最適化完了: 成功=%s, 失敗=%s ===", success, failed)
     except Exception as e:
+        # 全体が落ちた回は失敗と知らせたうえで投げ直し、run_job に error と記録させる（#973）
         logger.error("週次バックテスト最適化失敗: %s", e, exc_info=True)
+        try:
+            from src.reporting.discord.discord_utils import send_optimization_failure
+
+            send_optimization_failure(str(e))
+        except Exception as notify_error:
+            logger.error("週次最適化失敗通知失敗: %s", notify_error, exc_info=True)
+        raise
+
+    # skipped は成功に数えず、別に数える（#973）
+    success = sum(1 for r in results if r.get("status") == "success")
+    skipped = sum(1 for r in results if r.get("status") == "skipped")
+    failed = len(results) - success - skipped
+    logger.info(
+        "=== 週次バックテスト最適化完了: 成功=%s, 失敗=%s, スキップ=%s ===",
+        success,
+        failed,
+        skipped,
+    )
 
     # Discord 完了通知
     try:
         from src.reporting.discord.discord_utils import send_optimization_completion
 
-        send_optimization_completion(success=success, failed=failed)
+        send_optimization_completion(success=success, failed=failed, skipped=skipped)
     except Exception as e:
         logger.error("週次最適化完了通知失敗: %s", e, exc_info=True)
 

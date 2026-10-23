@@ -9,6 +9,7 @@ Discord モデル/学習系通知
 import logging
 
 from src.reporting.discord.discord_notification_specs import (
+    OPTIMIZATION_ERROR,
     SHADOW_EVALUATION_CHALLENGER_WINS,
     SHADOW_EVALUATION_NO_WINNER,
     NotificationSpec,
@@ -59,13 +60,14 @@ def send_promotion_result(promoted: bool, reason: str, criteria: dict) -> bool:
     return send_webhook_text_chunked("\n".join(lines))
 
 
-def send_optimization_completion(success: int, failed: int) -> bool:
+def send_optimization_completion(success: int, failed: int, skipped: int = 0) -> bool:
     """
     週次バックテスト最適化完了通知を Discord Webhook に送信する。
 
     Args:
         success: 最適化成功銘柄数
         failed: 最適化失敗銘柄数
+        skipped: スキップした銘柄数（成功には数えない。#973）
 
     Returns:
         成功時 True、失敗時 False
@@ -76,13 +78,41 @@ def send_optimization_completion(success: int, failed: int) -> bool:
         {"name": "🕐 時刻", "value": format_jst(fmt=DISCORD_DATETIME_FORMAT), "inline": True},
         {"name": "✅ 成功", "value": f"{success:,} 銘柄", "inline": True},
         {"name": f"{status_icon} 失敗", "value": f"{failed:,} 銘柄", "inline": True},
+    ]
+    if skipped > 0:
+        fields.append({"name": "⏭️ スキップ", "value": f"{skipped:,} 銘柄", "inline": True})
+    fields.append(
         {
             "name": "💾 保存先",
             "value": "最適パラメータを `config/optimal_params.json` に保存しました",
             "inline": False,
+        }
+    )
+    return send_status_fields(spec, fields)
+
+
+def send_optimization_failure(error: str) -> bool:
+    """
+    週次バックテスト最適化が全体で失敗したことを Discord Webhook に送信する（#973）。
+
+    最適パラメータは更新されていないため、保存先の案内は出さない。
+
+    Args:
+        error: 失敗の内容
+
+    Returns:
+        成功時 True、失敗時 False
+    """
+    fields: list[dict] = [
+        {"name": "🕐 時刻", "value": format_jst(fmt=DISCORD_DATETIME_FORMAT), "inline": True},
+        {"name": "❌ エラー", "value": error[:1000] or "不明", "inline": False},
+        {
+            "name": "💾 最適パラメータ",
+            "value": "更新されていません（前回の値のまま）",
+            "inline": False,
         },
     ]
-    return send_status_fields(spec, fields)
+    return send_status_fields(OPTIMIZATION_ERROR, fields)
 
 
 def send_factory_completion(

@@ -17,6 +17,7 @@ from src.reporting.discord.discord_utils import (
     send_hit_rate_drift_alert,
     send_monthly_report_notification,
     send_optimization_completion,
+    send_optimization_failure,
     send_shadow_evaluation_notification,
     send_shap_notification,
     send_walk_forward_report_completion,
@@ -184,6 +185,41 @@ class TestSendOptimizationCompletion(unittest.TestCase):
         self.assertTrue(result)
         fields = _fields_map(_embed_from_post(mock_post))
         self.assertEqual(fields["✅ 失敗"], "0 銘柄")
+        self.assertNotIn("⏭️ スキップ", fields)
+
+    @patch(
+        "src.reporting.discord.webhook_sender._rate_limiter.check_and_record",
+        return_value=(True, None),
+    )
+    @patch("src.reporting.discord.webhook_sender._post_webhook")
+    def test_skipped_is_shown_separately(self, mock_post, _mock_rl):
+        mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
+
+        send_optimization_completion(success=3, failed=0, skipped=2)
+
+        fields = _fields_map(_embed_from_post(mock_post))
+        self.assertEqual(fields["✅ 成功"], "3 銘柄")
+        self.assertEqual(fields["⏭️ スキップ"], "2 銘柄")
+
+
+class TestSendOptimizationFailure(unittest.TestCase):
+    @patch(
+        "src.reporting.discord.webhook_sender._rate_limiter.check_and_record",
+        return_value=(True, None),
+    )
+    @patch("src.reporting.discord.webhook_sender._post_webhook")
+    def test_failure_has_no_success_title_or_saved_text(self, mock_post, _mock_rl):
+        """全体の失敗の知らせは、成功の題と保存しましたを出さない（#973）"""
+        mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
+
+        result = send_optimization_failure("DB に届かない")
+
+        self.assertTrue(result)
+        embed = _embed_from_post(mock_post)
+        self.assertEqual(embed["title"], "❌ 週次バックテスト最適化失敗")
+        fields = _fields_map(embed)
+        self.assertEqual(fields["❌ エラー"], "DB に届かない")
+        self.assertNotIn("保存しました", str(embed))
 
 
 class TestSendWalkForwardReportCompletion(unittest.TestCase):
