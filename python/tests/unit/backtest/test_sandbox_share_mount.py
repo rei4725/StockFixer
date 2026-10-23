@@ -155,6 +155,75 @@ class TestRunnerJob:
         assert result.repair_detail is None
 
 
+class _FakeResponse:
+    def __init__(self, body: bytes):
+        self._body = body
+
+    def read(self) -> bytes:
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+class TestRunnerReplyRobustness:
+    @pytest.fixture(autouse=True)
+    def _share(self, monkeypatch, tmp_path):
+        share_dir = tmp_path / "share"
+        share_dir.mkdir()
+        monkeypatch.setattr(sandbox_executor, "FACTORY_SANDBOX_SHARE_DIR", str(share_dir))
+        monkeypatch.setattr(sandbox_executor, "FACTORY_SANDBOX_SHARE_VOLUME", "vol_share")
+        monkeypatch.setattr(sandbox_executor, "FACTORY_SANDBOX_RUNNER_URL", "http://runner:8700")
+
+    def _run(self):
+        data_dir, windows = prepare_sandbox_data({}, [])
+        return run_sandboxed_evaluation(_HYPOTHESIS, data_dir, windows)
+
+    def test_http_error_is_infra_error(self, monkeypatch):
+        import io
+        import urllib.error
+
+        def _raise(req, timeout=None):
+            raise urllib.error.HTTPError(
+                "http://runner:8700/run", 400, "Bad", {}, io.BytesIO(b'{"error": "x"}')
+            )
+
+        monkeypatch.setattr(sandbox_executor.urllib.request, "urlopen", _raise)
+        result = self._run()
+        assert result.kind == "infra_error" and "400" in result.infra_detail
+
+    def test_url_error_is_infra_error(self, monkeypatch):
+        import urllib.error
+
+        def _raise(req, timeout=None):
+            raise urllib.error.URLError("refused")
+
+        monkeypatch.setattr(sandbox_executor.urllib.request, "urlopen", _raise)
+        assert self._run().kind == "infra_error"
+
+    def test_non_json_200_is_infra_error(self, monkeypatch):
+        monkeypatch.setattr(
+            sandbox_executor.urllib.request,
+            "urlopen",
+            lambda req, timeout=None: _FakeResponse(b"<html>oops</html>"),
+        )
+        result = self._run()
+        assert result.kind == "infra_error" and result.infra_detail
+
+    @pytest.mark.parametrize("body", [b"{}", b'{"returncode": 0}', b"[1]", b'"x"'])
+    def test_reply_missing_keys_is_infra_error(self, monkeypatch, body):
+        monkeypatch.setattr(
+            sandbox_executor.urllib.request,
+            "urlopen",
+            lambda req, timeout=None: _FakeResponse(body),
+        )
+        result = self._run()
+        assert result.kind == "infra_error" and result.infra_detail
+
+
 def test_post_job_requires_runner_url(monkeypatch):
     monkeypatch.setattr(sandbox_executor, "FACTORY_SANDBOX_RUNNER_URL", "")
     with pytest.raises(RuntimeError, match="FACTORY_SANDBOX_RUNNER_URL"):

@@ -372,7 +372,7 @@ def test_new_aggregate_fields_survive_sandbox_round_trip(monkeypatch, tmp_path, 
 def test_old_sandbox_payload_without_new_fields_falls_back_to_defaults(monkeypatch, tmp_path):
     """新フィールドを含まない旧サンドボックスイメージ由来のペイロードでも
     KeyError にならず、FactoryEvaluation の既定値にフォールバックすることを確認する。
-    FACTORY_SANDBOX_IMAGE は固定イメージのため、ホストより古いコンテナが
+    サンドボックスは固定イメージ（runner の SANDBOX_IMAGE）のため、ホストより古いコンテナが
     稼働し続ける状況が起こり得る（#625）。
     """
     fake_hypothesis = FactoryHypothesis(

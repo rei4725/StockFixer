@@ -69,6 +69,8 @@ services:
     image: stockfixer-sandbox-runner:${VERSION:-dev}
     container_name: stockfixer-sandbox-runner
     restart: always
+    security_opt:
+      - "no-new-privileges:true"
     environment:
       - SANDBOX_IMAGE=stockfixer:${VERSION:-dev}
       - SANDBOX_SHARE_VOLUME=stockfixer_factory_sandbox
@@ -95,7 +97,7 @@ services:
       postgres:
         condition: service_healthy
       sandbox-runner:
-        condition: service_healthy
+        condition: service_started
     environment:
       - LOG_FORMAT=json
       - LOG_DIR=/app/logs

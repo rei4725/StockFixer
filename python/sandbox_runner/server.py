@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import threading
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -13,6 +14,8 @@ from sandbox_runner.job import JobError, RunnerConfig, build_command
 _MAX_BODY = 64 * 1024
 _TAIL = 20000
 _DIGITS = re.compile(r"[0-9]+")
+# 同時に走らせるサンドボックスの数。埋まっていれば待たせず 503 を返す
+_SLOTS = threading.BoundedSemaphore(2)
 
 
 def parse_length(value: str | None) -> int | None:
@@ -25,6 +28,15 @@ def parse_length(value: str | None) -> int | None:
 
 
 def handle_run(body: bytes, cfg: RunnerConfig, run=subprocess.run) -> tuple[int, dict]:
+    if not _SLOTS.acquire(blocking=False):
+        return 503, {"error": "sandbox-runner が混んでいます"}
+    try:
+        return _handle_run(body, cfg, run)
+    finally:
+        _SLOTS.release()
+
+
+def _handle_run(body: bytes, cfg: RunnerConfig, run) -> tuple[int, dict]:
     try:
         job = json.loads(body)
         if not isinstance(job, dict):

@@ -1,8 +1,9 @@
 """Claude生成ルールコードを Docker サンドボックスで隔離実行するオーケストレーター。
 
-AST静的検査（高速フィルタ、主たる安全境界ではない）→ Dockerサンドボックス実行
-（--network none・読み取り専用マウント、主たる安全境界）の順で実行し、結果を
-既存の FactoryEvaluation 互換の形で返す。生成コード自体はこのモジュール内では
+AST静的検査（高速フィルタ、主たる安全境界ではない）→ sandbox-runner への依頼
+（runner が --network none・読み取り専用マウントのサンドボックスを起動する。
+そこが主たる安全境界）の順で実行し、結果を既存の FactoryEvaluation 互換の形で返す。
+本体は docker を直接実行せず、docker.sock も持たない。生成コード自体はこのモジュール内では
 一切execしない（execするのはサンドボックスコンテナ内の scripts/sandbox_evaluate_rule.py）。
 """
 
@@ -40,7 +41,7 @@ class SandboxRunResult:
         "gate_evaluated" — 正常にバックテスト完了。evaluation を保持。
         "repairable"     — AST違反・実行時例外。repair_detail に修復用の情報。
                             ゲート判定結果はここに含まれない（別経路）。
-        "infra_error"    — Dockerの起動失敗・タイムアウト等、コード起因でない。
+        "infra_error"    — runner に届かない・断られた・タイムアウト・応答不正等、コード起因でない。
 
     environment_broken=True は、サンドボックスが入力（候補ソース・株価データ）を
     読めなかったことを表す。候補を替えても直らないため、呼び出し元はその晩の生成を
@@ -90,7 +91,11 @@ def _rel_to_share(path: str) -> str:
 
 
 def _post_job(job: dict) -> dict:
-    """sandbox-runner にジョブを送り、答えを返す。届かなければ RuntimeError。"""
+    """sandbox-runner にジョブを送り、答えを返す。届かない・断られた・応答が不正なら RuntimeError。
+
+    HTTP のタイムアウトは FACTORY_SANDBOX_TIMEOUT_SECONDS + 30 秒。サンドボックス自体の
+    実際の制限時間は runner 側の SANDBOX_TIMEOUT_SECONDS が決める。
+    """
     if not FACTORY_SANDBOX_RUNNER_URL:
         raise RuntimeError("FACTORY_SANDBOX_RUNNER_URL が未設定です")
     req = urllib.request.Request(
@@ -101,7 +106,7 @@ def _post_job(job: dict) -> dict:
     )
     try:
         with urllib.request.urlopen(req, timeout=FACTORY_SANDBOX_TIMEOUT_SECONDS + 30) as res:
-            return json.loads(res.read().decode("utf-8"))
+            reply = json.loads(res.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         raise RuntimeError(
             f"sandbox-runner がジョブを断りました ({e.code}): "
@@ -109,6 +114,13 @@ def _post_job(job: dict) -> dict:
         ) from e
     except (urllib.error.URLError, OSError) as e:
         raise RuntimeError(f"sandbox-runner に届きません: {e}") from e
+    except ValueError as e:  # JSONDecodeError / UnicodeDecodeError
+        raise RuntimeError(f"sandbox-runner の応答が JSON ではありません: {e}") from e
+    if not isinstance(reply, dict) or not (
+        reply.get("timeout") is True or {"returncode", "stdout", "stderr"} <= reply.keys()
+    ):
+        raise RuntimeError(f"sandbox-runner の応答が不正です: {str(reply)[:500]}")
+    return reply
 
 
 def _nan_if_none(value: Optional[float]) -> float:
@@ -156,7 +168,7 @@ def run_sandboxed_evaluation(
     shared_data_dir: str,
     windows_file: str,
 ) -> SandboxRunResult:
-    """1候補をAST検査 → Dockerサンドボックスで評価する。"""
+    """1候補をAST検査 → sandbox-runner 経由でサンドボックスに評価させる。"""
     spec = hypothesis.rule_spec
     source_code = spec["source_code"]
 
@@ -195,7 +207,7 @@ def run_sandboxed_evaluation(
             return SandboxRunResult(
                 kind="infra_error",
                 infra_detail=(
-                    f"docker run 異常終了 (code={reply['returncode']}): "
+                    f"サンドボックス異常終了 (code={reply['returncode']}): "
                     f"{reply['stderr'][-2000:]}"
                 ),
             )
@@ -224,7 +236,7 @@ def run_sandboxed_evaluation(
 
         ev = payload["evaluation"]
         # n_symbols_with_signal / n_effective_symbols / avg_trades_per_symbol は
-        # サンドボックスコンテナ（固定イメージ FACTORY_SANDBOX_IMAGE）がホストより
+        # サンドボックスコンテナ（runner が使う固定イメージ SANDBOX_IMAGE）がホストより
         # 古いバージョンだと出力しない可能性がある。旧イメージ由来のペイロードで
         # KeyError にしてバッチ全体を落とさないよう、dataclass 既定値と同じ値で
         # .get() フォールバックする（#625）。ただしこのフォールバックは

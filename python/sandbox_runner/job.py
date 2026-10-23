@@ -12,8 +12,9 @@ import re
 from dataclasses import dataclass
 
 _MOUNT = "/sandbox_share"
-_IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,99}$")
-_REL = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_./-]{0,299}$")
+_IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,99}")
+_REL = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_./-]{0,299}")
+_FORBIDDEN_TEXT = re.compile(r"[\x00\r\n]")
 _KEYS = {
     "source_rel",
     "data_rel",
@@ -56,7 +57,7 @@ class RunnerConfig:
 
 def _rel(job: dict, key: str) -> str:
     value = job[key]
-    if not isinstance(value, str) or not _REL.match(value) or ".." in value.split("/"):
+    if not isinstance(value, str) or not _REL.fullmatch(value) or ".." in value.split("/"):
         raise JobError(f"{key} は共有ボリュームの中の相対パスで書いてください: {value!r}")
     return posixpath.join(_MOUNT, value)
 
@@ -68,19 +69,32 @@ def _int(job: dict, key: str, low: int, high: int) -> int:
     return value
 
 
+def _text(job: dict, key: str, low: int, high: int) -> str:
+    """自由文字列。NUL・CR・LF を含まず、長さが範囲内であること。
+
+    argv には `--key=value` の1要素で渡すので、先頭が "-" でもオプション扱いされない。
+    """
+    value = job[key]
+    if not isinstance(value, str) or _FORBIDDEN_TEXT.search(value) or not low <= len(value) <= high:
+        raise JobError(
+            f"{key} は NUL・改行を含まない {low}〜{high} 文字の文字列です: {value[:50]!r}"
+            if isinstance(value, str)
+            else f"{key} は文字列です"
+        )
+    return value
+
+
 def build_command(job: dict, cfg: RunnerConfig) -> list[str]:
     if set(job) != _KEYS:
         raise JobError(
             f"ジョブの鍵が違います: 足りない {sorted(_KEYS - set(job))} 余計 {sorted(set(job) - _KEYS)}"
         )
-    for key in ("class_name", "rule_name"):
-        if not isinstance(job[key], str) or not _IDENT.match(job[key]):
-            raise JobError(f"{key} は識別子で書いてください: {job[key]!r}")
+    if not isinstance(job["class_name"], str) or not _IDENT.fullmatch(job["class_name"]):
+        raise JobError(f"class_name は識別子で書いてください: {job['class_name']!r}")
+    rule_name = _text(job, "rule_name", 1, 200)
+    desc = _text(job, "description", 0, 4000)
     if job["market"] not in ("jp", "us"):
         raise JobError(f"market は jp か us です: {job['market']!r}")
-    desc = job["description"]
-    if not isinstance(desc, str) or len(desc) > 500:
-        raise JobError("description は500字までの文字列です")
     source, data, windows = _rel(job, "source_rel"), _rel(job, "data_rel"), _rel(job, "windows_rel")
     lookback = _int(job, "lookback_years", 1, 30)
     min_trades = _int(job, "min_trades_per_symbol", 0, 1000)
@@ -88,6 +102,14 @@ def build_command(job: dict, cfg: RunnerConfig) -> list[str]:
         "docker",
         "run",
         "--rm",
+        "--pull",
+        "never",
+        "--pids-limit",
+        "256",
+        "--cap-drop",
+        "ALL",
+        "--security-opt",
+        "no-new-privileges",
         "--network",
         "none",
         "--read-only",
@@ -114,10 +136,8 @@ def build_command(job: dict, cfg: RunnerConfig) -> list[str]:
         source,
         "--class-name",
         job["class_name"],
-        "--rule-name",
-        job["rule_name"],
-        "--description",
-        desc,
+        f"--rule-name={rule_name}",
+        f"--description={desc}",
         "--market",
         job["market"],
         "--lookback-years",
