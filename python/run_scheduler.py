@@ -204,6 +204,8 @@ def _job_listener(event):
 # recovery_until: (hour, minute) のジョブは、当日分の補完をその時刻で打ち切る（#835）。
 # max_retries: 0 のジョブは、落ちても同じ回の中で頭から呼び直さない。発注のジョブは、やり直しの回が
 # 前の回の出した注文を知らずに同じ注文を出し直すため、これを付ける（#836）。
+# rerun_if_interrupted: True のジョブは、前の起動のプロセスで消えた回（デプロイの起き直しなど）を
+# 1期間に1回まで回数に数えずに補完する。発注のジョブと週の学習（#807）には付けない（#946）。
 SCHEDULE_CONFIG = {
     "daily_pipeline": {
         "func": job_daily_pipeline,
@@ -238,6 +240,7 @@ SCHEDULE_CONFIG = {
         "recovery_delay_minutes": 15,
         "max_executions_per_period": 2,
         "description": "毎週木曜 02:00 - パフォーマンスレポート送信",
+        "rerun_if_interrupted": True,
     },
     "daily_auto_order": {
         "func": job_daily_auto_order,
@@ -286,6 +289,7 @@ SCHEDULE_CONFIG = {
         "recovery_delay_minutes": 30,
         "max_executions_per_period": 1,
         "description": "毎週水曜 01:00 - 全銘柄バックテスト最適化",
+        "rerun_if_interrupted": True,
     },
     "weekly_walk_forward_report": {
         "func": job_weekly_walk_forward_report,
@@ -297,6 +301,7 @@ SCHEDULE_CONFIG = {
         "recovery_delay_minutes": 30,
         "max_executions_per_period": 1,
         "description": "毎週木曜 01:00 - Walk-Forward 比較レポート生成",
+        "rerun_if_interrupted": True,
     },
     "daily_drift_check": {
         "func": job_daily_drift_check,
@@ -322,6 +327,7 @@ SCHEDULE_CONFIG = {
         "recovery_delay_minutes": 30,
         "max_executions_per_period": 1,
         "description": "毎週土曜 03:00 - DuckDB CHECKPOINT + VACUUM",
+        "rerun_if_interrupted": True,
     },
     "weekly_rule_evaluation": {
         "func": job_weekly_rule_evaluation,
@@ -333,6 +339,7 @@ SCHEDULE_CONFIG = {
         "recovery_delay_minutes": 60,
         "max_executions_per_period": 1,
         "description": "毎週日曜 02:00 - 全銘柄ルールバックテスト評価",
+        "rerun_if_interrupted": True,
     },
     "daily_rule_signals": {
         "func": job_daily_rule_signals,
@@ -368,6 +375,7 @@ SCHEDULE_CONFIG = {
         "max_executions_per_period": 1,
         "description": "毎日 03:30 - DuckDB バックアップ（最大5世代保持）",
         "backfill": True,
+        "rerun_if_interrupted": True,
     },
     "monthly_report": {
         "func": job_monthly_report,
@@ -380,6 +388,7 @@ SCHEDULE_CONFIG = {
         "recovery_delay_minutes": 60,
         "max_executions_per_period": 1,
         "description": "毎月1日 03:00 - 月次KPIレポート生成・保存・Discord通知",
+        "rerun_if_interrupted": True,
     },
     "monthly_multibagger": {
         "func": job_monthly_multibagger,
