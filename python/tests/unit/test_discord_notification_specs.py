@@ -29,11 +29,19 @@ class TestDiscordNotificationSpecs(unittest.TestCase):
 
     def test_walk_forward_report_spec_switches_title_and_color(self):
         self.assertEqual(
-            get_walk_forward_report_spec(failed_count=0), WALK_FORWARD_REPORT_COMPLETION
+            get_walk_forward_report_spec(failed_count=0, total_count=6),
+            WALK_FORWARD_REPORT_COMPLETION,
         )
         self.assertEqual(
-            get_walk_forward_report_spec(failed_count=2), WALK_FORWARD_REPORT_WITH_ERRORS
+            get_walk_forward_report_spec(failed_count=2, total_count=6),
+            WALK_FORWARD_REPORT_WITH_ERRORS,
         )
+
+    def test_walk_forward_report_spec_zero_total_is_not_success(self):
+        """対象が0銘柄の回は成功の題と色にしない（#986）"""
+        spec = get_walk_forward_report_spec(failed_count=0, total_count=0)
+        self.assertNotEqual(spec, WALK_FORWARD_REPORT_COMPLETION)
+        self.assertEqual(spec.color, COLOR_WARNING)
 
 
 if __name__ == "__main__":

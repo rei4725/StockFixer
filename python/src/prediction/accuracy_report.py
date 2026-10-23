@@ -22,6 +22,7 @@ from typing import Callable, Iterable
 
 import pandas as pd
 
+from src.prediction.prediction_pipeline import _base_bar_date
 from src.utils.data_path_utils import ensure_dir, get_results_dir
 from src.utils.japan_time import isoformat_utc, now_jst
 from src.utils.logger import get_logger
@@ -56,13 +57,34 @@ def _summary(rows: pd.DataFrame) -> dict:
     }
 
 
+def _row_base_day(predicted_at: str, market: str) -> str:
+    """行の予想の基準の日（YYYYMMDD）を返す。日付が読めないときは先頭8字を返す。"""
+    try:
+        return _base_bar_date(predicted_at, market).strftime("%Y%m%d")
+    except ValueError:
+        return predicted_at[:8]
+
+
+def _base_days(rows: pd.DataFrame) -> pd.Series:
+    """行ごとの予想の基準の日（YYYYMMDD）を返す。
+
+    predicted_at の UTC の日付で分けると、朝の回が落ちて JST の日中に動いた補完の回と
+    次の朝の回が同じ日にまとまる（#987）。採点と同じ基準の日（#960）で分ける。
+    """
+    return pd.Series(
+        [_row_base_day(str(p), str(m)) for p, m in zip(rows["predicted_at"], rows["market"])],
+        index=rows.index,
+        dtype=object,
+    )
+
+
 def _four_week_summary(rows: pd.DataFrame) -> dict:
-    """4週の窓の行を通した平均と、日ごとの的中率の平均を返す。"""
+    """4週の窓の行を通した平均と、日ごとの的中率の平均を返す（日は予想の基準の日）。"""
     summary = _summary(rows)
     if rows.empty:
         summary.update({"n_days": 0, "daily_direction_accuracy_mean": None})
         return summary
-    days = rows["predicted_at"].str[:8]
+    days = _base_days(rows)
     daily = rows.dropna(subset=["direction_match"]).groupby(days)["direction_match"]
     daily_rates = daily.apply(lambda s: s.astype(bool).mean())
     summary.update(
@@ -311,7 +333,7 @@ def prepare_daily_accuracy_report(
         accuracy = _load_accuracy(horizon)
         for model in models:
             model_rows = accuracy[accuracy["model_name"] == model]
-            window_rows = model_rows[model_rows["predicted_at"].str[:8] >= since]
+            window_rows = model_rows[_base_days(model_rows) >= since]
             today_rows = _today_rows(model_rows, snapshots[model], model)
             sections[model][str(horizon)] = build_horizon_report(today_rows, window_rows, None)
             today_by_key[(model, str(horizon))] = today_rows
