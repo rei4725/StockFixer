@@ -3,7 +3,7 @@ from typing import Any, Callable, Optional
 import pandas as pd
 
 from src.backtest.data_port import get_backtest_data_port
-from src.backtest.execution import ExecutionModel, TradingCosts
+from src.backtest.execution import ExecutionModel, TradingCosts, lot_size_for
 from src.backtest.metrics import compute_cost_comparison_metrics
 from src.backtest.position_sizing import calc_position_details
 from src.backtest.task import BacktestTask, ReturnRegressionTask
@@ -60,7 +60,7 @@ class Backtester:
         self.slippage_fn = slippage_fn  # R-210: 動的スリッページ関数 (qty, price, avg_vol) -> rate
         # 手数料・スリッページの演算はすべて ExecutionModel に委譲する（Phase 1 / PR-1）。
         self.execution = ExecutionModel(
-            TradingCosts(fee_rate=fee_rate, slippage_rate=slippage),
+            TradingCosts(fee_rate=fee_rate, slippage_rate=slippage, lot_size=lot_size_for(market)),
             slippage_fn=slippage_fn,
         )
         # #493: シグナル約定の実行ラグ（バー数）。1=翌バー約定（引け後シグナル→翌寄り）。

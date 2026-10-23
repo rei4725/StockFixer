@@ -94,8 +94,9 @@ class TestBuyCashCheckWithDynamicSlippage:
         qty = int(buys["qty"].iloc[0])
         assert qty > 0
         assert buys["cash"].iloc[0] >= 0
-        # 1 株増やすと現金を超える（必要以上に切り下げていない）
-        cost_plus_one = bt.execution.buy_cost(qty + 1, 100.0, 1000.0)
+        # 1 単元増やすと現金を超える（必要以上に切り下げていない・#965）
+        assert qty % bt.execution.lot_size == 0
+        cost_plus_one = bt.execution.buy_cost(qty + bt.execution.lot_size, 100.0, 1000.0)
         assert cost_plus_one > 1_000_000
 
 
