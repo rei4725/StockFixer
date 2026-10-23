@@ -22,7 +22,11 @@ from config.settings import (
 )
 from src.domain.ports import MarketDataPort
 from src.trading.regime_leverage_strategy.indicators import build_weekly_frame
-from src.trading.regime_leverage_strategy.repository import get_latest_snapshot, insert_snapshot
+from src.trading.regime_leverage_strategy.repository import (
+    get_last_daily_check_at,
+    get_latest_snapshot,
+    insert_snapshot,
+)
 from src.trading.regime_leverage_strategy.types import (
     RegimeLeverageDecision,
     RegimeLeverageSnapshot,
@@ -382,9 +386,13 @@ def run_regime_leverage_daily_margin_check(
     df = _load_spy_daily(market_data_port, REGIME_LEVERAGE_SYMBOL)
     usdjpy_rate = _load_latest_usdjpy(market_data_port)
     now = datetime.now(_JST)
-    # 前の回で判定した時刻は、日次の回の行(daily_noop)だけで覚える。週次の回は損切りを
-    # 判定しないため、週次の行の時刻を使うとその前に引けた足(金曜の足など)を飛ばす
-    last_checked_at = snapshot.executed_at if snapshot.reason == "daily_noop" else None
+    # 前の回で判定した時刻は、日次の回の行(daily_noop)か建てた行で覚える。週次の回は損切りを
+    # 判定しないため、週次の行の時刻を使うとその前に引けた足(金曜の足など)を飛ばす。最新の行が
+    # 週次の行なら、その前の日次の行を読み、その後に落ちた回の足も判定する(#933)
+    if snapshot.reason == "daily_noop":
+        last_checked_at: Optional[datetime] = snapshot.executed_at
+    else:
+        last_checked_at = get_last_daily_check_at()
     bars = select_unchecked_closed_bars(df, last_checked_at, now)
     if bars.empty:
         raise RuntimeError(

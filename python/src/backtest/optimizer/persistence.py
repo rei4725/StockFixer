@@ -21,7 +21,10 @@ logger = get_logger(__name__)
 
 
 class OptimalParamsCorruptedError(RuntimeError):
-    """既存の optimal_params.json が壊れていて、退避して保存を止めたことを表す。"""
+    """既存の optimal_params.json が壊れていることを表す。
+
+    保存では退避して止めたとき、読み出しでは在るのに読めない・最上位が dict でないときに投げる。
+    """
 
 
 def print_optimization_results(result_df: pd.DataFrame, sort_by: str) -> None:
@@ -315,7 +318,11 @@ def get_optimal_params(
         json_path: JSONファイルパス（Noneの場合は默认位置）
 
     Returns:
-        最適パラメータ辞書、または見つからない場合は None
+        最適パラメータ辞書、またはファイル未存在・キー未登録の場合は None
+
+    Raises:
+        OptimalParamsCorruptedError: ファイルが在るのに読めない・JSON が壊れている・
+            最上位が dict でない場合（未登録と区別し、良い結果を上書きしないため）
     """
     if json_path is None:
         # python/src/backtest/optimizer/persistence.py -> python/config
@@ -331,8 +338,14 @@ def get_optimal_params(
     try:
         with open(json_path, "r", encoding="utf-8") as f:
             all_params = json.load(f)
-        key = f"{market}_{symbol}"
-        return dict(all_params[key]) if key in all_params else None
-    except Exception as e:
-        logger.error(f"JSONの読み込みエラー: {e}", exc_info=True)
-        return None
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError) as e:
+        logger.error(f"最適パラメータJSONが在るのに読めません: {json_path}", exc_info=True)
+        raise OptimalParamsCorruptedError(
+            f"最適パラメータJSONを読めません: {json_path}: {e}"
+        ) from e
+    if not isinstance(all_params, dict):
+        detail = f"最上位が dict ではない: {type(all_params).__name__}"
+        logger.error(f"最適パラメータJSONが壊れています: {json_path} {detail}")
+        raise OptimalParamsCorruptedError(f"最適パラメータJSONが壊れています: {json_path} {detail}")
+    key = f"{market}_{symbol}"
+    return dict(all_params[key]) if key in all_params else None

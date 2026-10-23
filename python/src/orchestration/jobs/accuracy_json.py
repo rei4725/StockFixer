@@ -6,7 +6,7 @@ daily.py からの責務分離（ファイル行数ガード対策）。run_dail
 
 from typing import TYPE_CHECKING
 
-from src.orchestration.jobs.common import _handle_stage_error
+from src.orchestration.jobs.common import _handle_stage_error, is_today_jst
 from src.orchestration.types import PipelineStage
 from src.utils.logger import get_logger
 
@@ -22,11 +22,9 @@ def production_already_predicted_today() -> bool:
     日次の道を頭からやり直すと（同じ回の中のやり直し・当日分の補完）、[3/6] が
     前日分を今日の予想で上書きした後に [2/6] が走り、まだ採点の無い今日の予想を
     読んで採点の JSON を0件で上書きする。そのときは採点と JSON を飛ばす。
-    predicted_at は保存の側と同じく datetime.now() の YYYYMMDD_HHMMSS で比べる。
+    predicted_at は JST に直して JST の今日と比べる（#935。コンテナの時計は UTC）。
     読めなければ False を返し、今までどおり採点する。
     """
-    from datetime import datetime
-
     try:
         from src.prediction.db import load_latest_prediction_timestamp
 
@@ -34,7 +32,7 @@ def production_already_predicted_today() -> bool:
     except Exception as e:
         _handle_stage_error(PipelineStage.NON_CRITICAL, "[2/6] 前の回の日付の確認", e)
         return False
-    if not latest or not str(latest).startswith(datetime.now().strftime("%Y%m%d")):
+    if not latest or not is_today_jst(latest):
         return False
     logger.warning(
         "[2/6] production の予想が既に今日の回 (%s) のため、採点と採点の JSON を飛ばし"

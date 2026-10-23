@@ -10,6 +10,7 @@ from typing import Any, Optional
 from src.backtest.optimizer.grid import run_optimization
 from src.backtest.optimizer.optuna_search import run_optuna_optimization
 from src.backtest.optimizer.persistence import (
+    OptimalParamsCorruptedError,
     get_optimal_params,
     save_optimal_params_json,
     save_optimization_results,
@@ -92,7 +93,12 @@ def run_optimize_batch(
 
         # スキップ判定: 直近 skip_days 日以内に最適化済みならスキップ
         if skip_days is not None:
-            existing = get_optimal_params(market, symbol)
+            try:
+                existing = get_optimal_params(market, symbol)
+            except OptimalParamsCorruptedError as e:
+                # 既存の結果が無いとみなして最適化・上書きすると、良い結果を消すため止める
+                logger.error(f"[{market}/{symbol}] 既存の最適パラメータが読めないため中止: {e}")
+                return {"market": market, "symbol": symbol, "status": "error", "error": str(e)}
             if existing and existing.get("timestamp"):
                 try:
                     last_optimized = datetime.fromisoformat(existing["timestamp"])

@@ -19,6 +19,40 @@ logger = get_logger(__name__)
 # run_daily_drift_check() 専用の多重起動防止ロック（daily.py / skip_if_running から共有）。
 _drift_check_lock = threading.Lock()
 
+_JST_NAME = "Asia/Tokyo"
+
+
+def _local_now() -> "datetime":
+    """プロセスの時計の今を、タイムゾーン付きで返す（テストで差し替える）。"""
+    from datetime import datetime
+
+    return datetime.now().astimezone()
+
+
+def today_jst_key() -> str:
+    """JST の今日を YYYYMMDD で返す（日次の期間の鍵と同じ JST の日付）。"""
+    from zoneinfo import ZoneInfo
+
+    return _local_now().astimezone(ZoneInfo(_JST_NAME)).strftime("%Y%m%d")
+
+
+def is_today_jst(predicted_at: object) -> bool:
+    """predicted_at（YYYYMMDD_HHMMSS）が JST の今日の回なら True を返す（#935）。
+
+    predicted_at は保存の側の datetime.now()、つまりプロセスの時計（本番のコンテナは
+    UTC）の時刻なので、その時計の時差で JST に直して JST の今日と比べる。UTC の 00:00
+    （JST 09:00）をまたいだやり直しでも、同じ朝の回を今日と見なす。読めなければ False。
+    """
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    try:
+        naive = datetime.strptime(str(predicted_at)[:15], "%Y%m%d_%H%M%S")
+    except ValueError:
+        return False
+    local = naive.replace(tzinfo=_local_now().tzinfo)
+    return local.astimezone(ZoneInfo(_JST_NAME)).strftime("%Y%m%d") == today_jst_key()
+
 
 def skip_if_running(lock: threading.Lock, job_label: str) -> Callable:
     """同一プロセス内で多重起動された場合、後続の呼び出しは実処理をスキップするデコレータ。
