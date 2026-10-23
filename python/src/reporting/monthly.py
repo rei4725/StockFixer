@@ -11,7 +11,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -24,6 +24,9 @@ from src.utils.data_path_utils import get_results_dir
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+# 予測精度を1回に読む行数。窓の中の行がこれを超えるときは倍にして読み直す
+_ACCURACY_PAGE_ROWS = 5000
 
 
 # ---------------------------------------------------------------------------
@@ -55,6 +58,25 @@ def _mean_metric(df: pd.DataFrame, col: str) -> Optional[float]:
     return float(val) if not pd.isna(val) else None
 
 
+def _load_window_accuracy(analytics: AnalyticsQuery, days: int = _REPORT_DAYS) -> pd.DataFrame:
+    """checked_at が直近 days 日の採点を、行数の上限で落とさずに取得する。
+
+    prediction_accuracy は predicted_at 降順の先頭 limit 行だけを返す。取得した行が
+    上限ちょうどで、しかも最も古い checked_at がまだ窓の中なら、窓の古い側が
+    切れているので上限を倍にして読み直す。窓での絞り込みは kpi.py に任せる。
+    """
+    cutoff = datetime.now() - timedelta(days=days)
+    limit = _ACCURACY_PAGE_ROWS
+    while True:
+        df = analytics.prediction_accuracy(horizon=1, limit=limit)
+        if len(df) < limit or "checked_at" not in df.columns:
+            return df
+        oldest = pd.to_datetime(df["checked_at"], errors="coerce").min()
+        if pd.isna(oldest) or oldest < cutoff:
+            return df
+        limit *= 2
+
+
 def _load_monthly_kpis(analytics: AnalyticsQuery) -> MonthlyKPI:
     """AnalyticsQuery から補助 KPI の材料を取得し、kpi.get_monthly_kpis で集約する。
 
@@ -68,7 +90,7 @@ def _load_monthly_kpis(analytics: AnalyticsQuery) -> MonthlyKPI:
         diff_summary = None
     return get_monthly_kpis(
         diff_summary=diff_summary,
-        accuracy_df=analytics.prediction_accuracy(horizon=1, limit=5000),
+        accuracy_df=_load_window_accuracy(analytics),
         drift_df=analytics.drift_summary(horizon=1, recent_n=_REPORT_DAYS),
     )
 
