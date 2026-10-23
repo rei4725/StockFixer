@@ -234,3 +234,67 @@ class TestRunWalkForwardComparisonReport:
 
         assert mock_wf.call_count == 1
         assert result["total"] == 1
+
+
+class TestRunWalkForwardComparisonReportSlippage:
+    """run_walk_forward_comparison_report の slippage の扱い（#993）"""
+
+    _WF_DF = pd.DataFrame({"total_return": [0.01], "sharpe_ratio": [1.0], "max_drawdown": [-0.02]})
+
+    def _run(self, tmp_path, tasks, **kwargs):
+        from src.backtest.walk_forward_report import run_walk_forward_comparison_report
+
+        reports_dir = tmp_path / "backtest" / "walk_forward_reports"
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        with (
+            patch("src.backtest.walk_forward_report.run_backtest_walk_forward") as mock_wf,
+            patch("src.backtest.walk_forward_report.save_experiment_run") as mock_save,
+            patch("src.backtest.walk_forward_report.get_results_dir", return_value=str(tmp_path)),
+            patch("src.backtest.walk_forward_report.ensure_dir", return_value=str(reports_dir)),
+        ):
+            mock_wf.return_value = (None, None, self._WF_DF)
+            run_walk_forward_comparison_report(tasks, **kwargs)
+        return mock_wf, mock_save
+
+    def test_default_slippage_is_none(self):
+        """既定の slippage は None（市場別の既定）である"""
+        import inspect
+
+        from src.backtest.walk_forward_report import run_walk_forward_comparison_report
+
+        sig = inspect.signature(run_walk_forward_comparison_report)
+        assert sig.parameters["slippage"].default is None
+
+    def test_jp_and_us_pass_none_and_resolve_market_default(self, tmp_path):
+        """jp・us とも None を渡し、_resolve_slippage で市場別の既定が当たる"""
+        from config.settings import DEFAULT_SLIPPAGE_JP, DEFAULT_SLIPPAGE_US
+        from src.backtest.pipeline.runner import _resolve_slippage
+        from src.domain.types import SymbolTask
+
+        tasks = [SymbolTask(market="jp", symbol="7203"), SymbolTask(market="us", symbol="AAPL")]
+        mock_wf, mock_save = self._run(tmp_path, tasks)
+
+        expected = {"jp": DEFAULT_SLIPPAGE_JP, "us": DEFAULT_SLIPPAGE_US}
+        assert mock_wf.call_count == 2
+        for call in mock_wf.call_args_list:
+            market = call.kwargs["market"]
+            assert call.kwargs["slippage"] is None
+            eff, _ = _resolve_slippage(market, call.kwargs["slippage"], dynamic_slippage=False)
+            assert eff == pytest.approx(expected[market])
+
+        recorded = {c.kwargs["market"]: c.kwargs["params"] for c in mock_save.call_args_list}
+        for market, rate in expected.items():
+            assert recorded[market]["slippage"] == pytest.approx(rate)
+            assert recorded[market]["slippage_is_market_default"] is True
+
+    def test_explicit_zero_slippage_is_kept(self, tmp_path):
+        """slippage=0.0 を明示した呼び出しは 0.0 をそのまま使い、記録する"""
+        from src.domain.types import SymbolTask
+
+        tasks = [SymbolTask(market="jp", symbol="7203")]
+        mock_wf, mock_save = self._run(tmp_path, tasks, slippage=0.0)
+
+        assert mock_wf.call_args.kwargs["slippage"] == 0.0
+        params = mock_save.call_args.kwargs["params"]
+        assert params["slippage"] == 0.0
+        assert params["slippage_is_market_default"] is False
