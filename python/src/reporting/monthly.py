@@ -190,6 +190,13 @@ def save_monthly_report_to_file(
     _kpi = _load_monthly_kpis(analytics)
     diff = _kpi.diff_summary
     drift_count = _kpi.drift_count
+    # 件数が0のときの平均はアダプタが 0.0 で補った値なので、計測値として出さない
+    has_tracked = diff["tracked_count"] > 0
+    has_comparable = diff["comparable_count"] > 0
+    price_diff_text = f"¥{diff['avg_abs_price_diff']:.2f}" if has_comparable else "N/A"
+    diff_ratio_text = f"{diff['avg_abs_diff_ratio'] * 100:.4f}%" if has_comparable else "N/A"
+    paper_slippage_text = _pct(diff["avg_paper_slippage"]) if has_tracked else "N/A"
+    real_slippage_text = _pct(diff["avg_real_slippage"]) if has_comparable else "N/A"
 
     # 週次 Hit Rate ドリフト
     if drift_checker is not None:
@@ -247,10 +254,10 @@ def save_monthly_report_to_file(
         "|---|---|",
         f"| 追跡件数 | {diff['tracked_count']} |",
         f"| 比較可能件数 | {diff['comparable_count']} |",
-        f"| 平均price乖離 | ¥{diff['avg_abs_price_diff']:.2f} |",
-        f"| 平均乖離率 | {diff['avg_abs_diff_ratio'] * 100:.4f}% |",
-        f"| Paper Slippage | {_pct(diff['avg_paper_slippage'])} |",
-        f"| Real Slippage | {_pct(diff['avg_real_slippage'])} |",
+        f"| 平均price乖離 | {price_diff_text} |",
+        f"| 平均乖離率 | {diff_ratio_text} |",
+        f"| Paper Slippage | {paper_slippage_text} |",
+        f"| Real Slippage | {real_slippage_text} |",
         "",
         "## ドリフト状況（直近30日）",
         "",
