@@ -88,7 +88,7 @@ def calc_position_details(
             if min_qty > effective_max_qty:
                 min_qty = effective_max_qty
             qty = max(min_qty, qty)
-        qty = _cap_to_cash(qty, cash, price, volume, execution)
+        qty = _cap_to_cash(execution.round_to_lot(qty), cash, price, volume, execution)
         return build_position_details(
             qty=qty,
             cash=cash,
@@ -103,7 +103,9 @@ def calc_position_details(
         available = cash
         fallback_used = position_sizing == "atr"
 
-    qty = _cap_to_cash(int(available // unit_cost), cash, price, volume, execution)
+    qty = _cap_to_cash(
+        execution.round_to_lot(int(available // unit_cost)), cash, price, volume, execution
+    )
     return build_position_details(
         qty=qty,
         cash=cash,

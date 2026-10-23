@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from typing import Callable, Optional
 
 from config.settings import DEFAULT_SLIPPAGE_JP, DEFAULT_SLIPPAGE_US
+from src.domain.trading_rules import get_lot_size
 
 # 手数料の既定率。CLI / エンジン双方の既定をここに一本化する。
 DEFAULT_FEE_RATE: float = 0.001
@@ -39,6 +40,17 @@ def default_slippage_for(market: str) -> float:
     return DEFAULT_SLIPPAGE_JP if market == "jp" else DEFAULT_SLIPPAGE_US
 
 
+def lot_size_for(market: Optional[str]) -> int:
+    """バックテストで使う単元株数を返す（#965）。
+
+    本番の発注と同じ get_lot_size(market) を使う（jp=100・us=1）。
+    市場の分からない呼び出し（market が空）は従来どおり 1 株単位とする。
+    """
+    if not market:
+        return 1
+    return get_lot_size(market)
+
+
 @dataclass(frozen=True)
 class TradingCosts:
     """片道の取引コスト率。
@@ -47,10 +59,12 @@ class TradingCosts:
         fee_rate: 売買手数料率（片道）
         slippage_rate: フラットな片道スリッページ率。サイズ・流動性に依存する
             上乗せ分は ExecutionModel 側の slippage_fn が担う。
+        lot_size: 買付の単元株数。買える株数はこの倍数に切り下げる（#965）。
     """
 
     fee_rate: float = 0.0
     slippage_rate: float = 0.0
+    lot_size: int = 1
 
     @classmethod
     def for_market(
@@ -68,7 +82,7 @@ class TradingCosts:
                 0.0 は「コスト無し」の明示指定として尊重する。
         """
         resolved = default_slippage_for(market) if slippage is None else slippage
-        return cls(fee_rate=fee_rate, slippage_rate=resolved)
+        return cls(fee_rate=fee_rate, slippage_rate=resolved, lot_size=lot_size_for(market))
 
 
 class ExecutionModel:
@@ -123,17 +137,31 @@ class ExecutionModel:
 
         買った後に現金が負にならないことを保証する（過剰買付 #483 の再発防止）。
         動的スリッページは数量に依存するため、暫定数量で見積もったコストを
-        用いて算出し、超過していた場合のみ 1 株ずつ切り下げる。
+        用いて算出し、超過していた場合のみ 1 単元ずつ切り下げる。
+        株数は単元（costs.lot_size）の倍数に切り下げる（#965）。
         """
         if cash <= 0 or price <= 0:
             return 0
 
-        qty = int(math.floor(cash / self.unit_buy_cost(price, volume)))
+        qty = self.round_to_lot(int(math.floor(cash / self.unit_buy_cost(price, volume))))
         if qty <= 0:
             return 0
 
         # 動的スリッページは数量が増えるほど不利になるため、見積もりが
         # 楽観側へ振れうる。実コストで検算して超過分を切り下げる。
+        lot = self.lot_size
         while qty > 0 and self.buy_cost(qty, price, volume) > cash:
-            qty -= 1
-        return qty
+            qty -= lot
+        return max(0, qty)
+
+    @property
+    def lot_size(self) -> int:
+        """買付の単元株数（1 未満の指定は 1 とみなす）。"""
+        return max(1, int(self.costs.lot_size))
+
+    def round_to_lot(self, qty: int) -> int:
+        """株数を単元の倍数に切り下げる（#965）。"""
+        if qty <= 0:
+            return 0
+        lot = self.lot_size
+        return (qty // lot) * lot

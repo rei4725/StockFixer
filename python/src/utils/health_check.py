@@ -2,9 +2,8 @@
 
 api（/health）と orchestration（日次の道）の両方から使うため、utils に置く。
 
-- /health は DB の疎通・状態ファイルの読めなさ・スケジューラの鮮度（30分）で判定する
-- 日次の道は鮮度を見ない。日次の道が走っていること自体がスケジューラの生存の証であり、
-  評価の時点（07:30 JST の回から数十分後）では30分の物差しが毎営業日 degraded を返すため
+- /health は DB の疎通・状態ファイルの読めなさ・スケジューラの鮮度（3時間）で判定する
+- 日次の道は鮮度を見ない。日次の道が走っていること自体がスケジューラの生存の証のため
 """
 
 import json
@@ -15,7 +14,11 @@ from typing import Any
 from src.utils.data_path_utils import get_results_dir
 from src.utils.logger import get_logger
 
-SCHEDULER_STALE_SECS = 30 * 60  # 30分
+# 一番頻繁に success を残すジョブ strategy_promotion_check（毎日、2時間ごと）の間隔に、
+# 補完の待ち（recovery_delay_minutes の30分）と走る時間の余裕を足した3時間。
+# 30分では次の回を待つ間ずっと degraded になっていた（#962）。
+# このジョブを止める・間隔を延ばすときは、この値も見直す
+SCHEDULER_STALE_SECS = 3 * 60 * 60  # 3時間
 
 # health 用 DB チェックの接続待ち上限（秒）。
 # Docker HEALTHCHECK の HTTP タイムアウト（8秒）内に必ず応答を返せるよう、
