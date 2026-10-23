@@ -7,7 +7,7 @@ STRATEGY.md 7章の週次(レジーム転換・新規エントリー)・日次(�
 
 from __future__ import annotations
 
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
 
@@ -44,6 +44,17 @@ _US_MARKET_TZ = ZoneInfo("America/New_York")
 _US_MARKET_CLOSE = time(16, 0)
 
 
+def _as_aware(dt: datetime) -> datetime:
+    """タイムゾーンの無い時刻は UTC とみなす(DB の executed_at・entry_date はセッションの
+    タイムゾーン UTC で、タイムゾーンの無い時刻として入る。#942)。"""
+    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+
+
+def _jst_date(dt: datetime) -> date:
+    """JST の日付を返す(保有日数は JST の日付の差で数える)。"""
+    return _as_aware(dt).astimezone(_JST).date()
+
+
 def _calc_commission_usd(notional_usd: float) -> float:
     return min(notional_usd * _COMMISSION_PCT_USD, _COMMISSION_CAP_USD)
 
@@ -64,7 +75,7 @@ def compute_equity_now(
     ):
         raise ValueError("保有中でないsnapshotに対してcompute_equity_nowは呼べない")
     unrealized_pnl = (current_price_jpy - snapshot.entry_price_jpy) * snapshot.shares
-    days_held = (now.date() - snapshot.entry_date.date()).days
+    days_held = (_jst_date(now) - _jst_date(snapshot.entry_date)).days
     interest_accrued = (
         snapshot.entry_price_jpy
         * snapshot.shares
@@ -270,11 +281,6 @@ def _bar_close_at(bar_date: object) -> datetime:
     return datetime.combine(day, _US_MARKET_CLOSE, tzinfo=_US_MARKET_TZ)
 
 
-def _as_aware(dt: datetime) -> datetime:
-    """タイムゾーンの無い時刻は JST とみなす(スケジューラーは JST で動く)。"""
-    return dt.replace(tzinfo=_JST) if dt.tzinfo is None else dt
-
-
 def select_unchecked_closed_bars(
     df: pd.DataFrame, last_checked_at: Optional[datetime], now: datetime
 ) -> pd.DataFrame:
@@ -350,7 +356,7 @@ def run_regime_leverage_weekly_check(
             atr14_usd,
         )
         return None
-    now = datetime.now()
+    now = datetime.now(_JST)
 
     if snapshot is None or snapshot.shares <= 0:
         from config.settings import REGIME_LEVERAGE_INITIAL_CAPITAL_JPY
