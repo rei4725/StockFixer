@@ -11,6 +11,7 @@ from dataclasses import dataclass
 import pandas as pd
 
 from src.prediction.db import load_shap_latest
+from src.prediction.prediction_pipeline import _base_bar_date
 from src.utils.db.stock_features import load_stock_features
 from src.utils.logger import get_logger
 
@@ -59,7 +60,7 @@ def analyze_miss_causes(
         logger.warning("SHAP値なし: %s/%s モデル=%s", market, symbol, model_name)
         return []
 
-    miss_dates = _extract_dates(miss_df["predicted_at"].tolist())
+    miss_dates = _extract_dates(miss_df["predicted_at"].tolist(), market)
     if not miss_dates:
         return []
 
@@ -159,16 +160,19 @@ def run_miss_analysis_batch(
     return results
 
 
-def _extract_dates(predicted_at_list: list[str]) -> set[str]:
-    """予測日時文字列から YYYY-MM-DD 形式の日付セットを抽出する。"""
+def _extract_dates(predicted_at_list: list[str], market: str) -> set[str]:
+    """
+    予測日時文字列から、予想に使った基準の足の日（YYYY-MM-DD）のセットを抽出する。
+
+    UTC の日付ではなく、市場の引けで決まる基準の足の日を返すので、
+    00:00 UTC より後の補完の回でも、予想に使った日の特徴量の行を引ける。
+    """
     dates: set[str] = set()
     for pa in predicted_at_list:
         try:
-            date_part = str(pa).split("_")[0]
-            if len(date_part) == 8 and date_part.isdigit():
-                dates.add(f"{date_part[:4]}-{date_part[4:6]}-{date_part[6:8]}")
-        except Exception:
-            pass
+            dates.add(_base_bar_date(str(pa), market).strftime("%Y-%m-%d"))
+        except ValueError:
+            logger.warning("予測日時が読めないので外れ日から除く: %s", pa)
     return dates
 
 
