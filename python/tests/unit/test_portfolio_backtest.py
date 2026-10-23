@@ -397,11 +397,15 @@ class TestPortfolioMarketSlippage(unittest.TestCase):
         return equity_df.iloc[0]
 
     def _expected_value(self, slippage_by_symbol, prices):
-        """各銘柄に予算を等分し、その銘柄のスリッページで買った直後の評価額。"""
+        """各銘柄に予算を等分し、その銘柄のスリッページで買った直後の評価額。
+
+        株数は銘柄の鍵の市場の単元（jp=100・us=1）の倍数に切り下げる（#965）。
+        """
         budget = self._INITIAL_CASH / len(slippage_by_symbol)
         value = float(self._INITIAL_CASH)
         for sym, slip in slippage_by_symbol.items():
-            execution = ExecutionModel(TradingCosts(fee_rate=0.0, slippage_rate=slip))
+            market = sym.split("_", 1)[0]
+            execution = ExecutionModel(TradingCosts.for_market(market, 0.0, slip))
             qty = execution.max_affordable_qty(budget, prices[sym])
             value += qty * prices[sym] - execution.buy_cost(qty, prices[sym])
         return round(value, 2)

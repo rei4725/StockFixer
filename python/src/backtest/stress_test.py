@@ -10,10 +10,11 @@ run_stress_test.py はこのモジュールの関数を呼び出すラッパー�
 from __future__ import annotations
 
 import os
-from typing import Any, Optional
+from typing import Optional
 
 import pandas as pd
 
+from src.backtest.metrics import trade_pnl_sequence
 from src.backtest.pipeline import run_backtest_single
 from src.backtest.types import StressTestResult
 from src.domain.types import SymbolTask
@@ -50,6 +51,9 @@ MDD_THRESHOLD = 0.15
 def _compute_max_consecutive_losses(trade_log: pd.DataFrame) -> int:
     """取引ログから連続損失（連敗）の最大回数を計算する。
 
+    1取引の損益は、勝率（compute_metrics）と同じく手数料とスリッページを引いた後の値で
+    判定する（#963）。cash_gross 列が無いログでは値段の差のまま。
+
     Args:
         trade_log: Backtester.simulate_trading が返す DataFrame
 
@@ -59,23 +63,15 @@ def _compute_max_consecutive_losses(trade_log: pd.DataFrame) -> int:
     if trade_log is None or trade_log.empty:
         return 0
 
-    sell_actions = {"sell", "final_sell", "stop_loss", "take_profit"}
-    buys: list[dict[str, Any]] = []
     max_streak = 0
     current_streak = 0
 
-    for _, row in trade_log.iterrows():
-        action = row.get("action", "")
-        if action == "buy":
-            buys.append({"price": row["price"], "qty": row["qty"]})
-        elif action in sell_actions and buys:
-            buy = buys.pop(0)
-            pnl = (row["price"] - buy["price"]) * buy["qty"]
-            if pnl < 0:
-                current_streak += 1
-                max_streak = max(max_streak, current_streak)
-            else:
-                current_streak = 0
+    for pnl, _ in trade_pnl_sequence(trade_log, net_of_costs=True):
+        if pnl < 0:
+            current_streak += 1
+            max_streak = max(max_streak, current_streak)
+        else:
+            current_streak = 0
 
     return max_streak
 
