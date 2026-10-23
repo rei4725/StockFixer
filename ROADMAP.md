@@ -16,7 +16,6 @@
   - 約束のテスト: contracts/account-api.json から偽の口座アプリを作り、通した・断った（7つの理由の符号）・時間切れを確かめる
   - docker-compose.yml の stockfixer を外部ネットワーク stockfixer-account に入れる1行は★人間がマージする
   - 口座アプリは朝 9:05（JST）の精算の間、注文を待たせる。本体はこの時刻の前後に注文を出さない（10秒で時間切れなら出さずに記録する、の決まりで安全な側に倒れる）
-  - 成行の注文だけを使う（口座アプリの指値は、最初の場の寄り付きでしか判定されない。直すまで指値は出さない）
 - [ ] 段3: 影の運用（10営業日）
   - ACCOUNT_SHADOW=true のとき、run_daily_auto_order が今の PaperBroker に出すのと同じ注文を、口座アプリにも出す（口座アプリの答えで本体の動きを変えない）
   - 毎日 results/account_shadow/YYYY-MM-DD.json に、両方の注文・断り・約定・損益の差を書く
