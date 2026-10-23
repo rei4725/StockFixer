@@ -154,6 +154,68 @@ def test_top_misses_capped_at_ten(tmp_path):
     assert prod["top_misses"][0]["symbol"] == "1014"
 
 
+_LATEST_AT = "20261021_224556"
+_OLD_AT = "20261020_224701"
+
+
+def _mixed_runs_write(tmp_path):
+    """スナップショットに今の回と前の回の行が混ざる日の JSON を書く。"""
+    from src.prediction.accuracy_report import write_daily_accuracy_report
+
+    rows = [
+        _acc_row("production", "jp", "7203", _LATEST_AT, 0.02, 0.01, True),
+        _acc_row("production", "us", "AAPL", _LATEST_AT, 0.01, -0.01, False),
+        # 前の回で予想が止まった銘柄の古い行（今日の分に入れない）
+        _acc_row("production", "us", "PSKY", _OLD_AT, 0.03, -0.30, False),
+        _acc_row("production", "jp", "6758", _OLD_AT, 0.01, -0.20, False),
+    ]
+    snapshot = pd.DataFrame(
+        [
+            {"market": r["market"], "symbol": r["symbol"], "predicted_at": r["predicted_at"]}
+            for r in rows
+        ]
+    )
+
+    with (
+        patch("src.prediction.db.load_prediction_accuracy", return_value=pd.DataFrame(rows)),
+        patch("src.prediction.db.load_prediction_results", return_value=snapshot),
+        patch("src.prediction.accuracy_report.logger") as mock_logger,
+    ):
+        path = write_daily_accuracy_report(
+            report_date=date(2026, 10, 23),
+            models=("production",),
+            output_dir=str(tmp_path),
+            sector_getter=lambda market, symbol: "S",
+        )
+
+    with open(path, encoding="utf-8") as f:
+        prod = json.load(f)["models"]["production"]["1"]
+    return prod, mock_logger
+
+
+def test_today_rows_only_from_latest_run(tmp_path):
+    """今日の採点は、スナップショットの predicted_at の一番新しい回の行だけから出ること"""
+    prod, _ = _mixed_runs_write(tmp_path)
+
+    assert prod["n_scored"] == 2
+    assert prod["direction_accuracy"] == pytest.approx(0.5)
+    assert [m["symbol"] for m in prod["top_misses"]] == ["AAPL", "7203"]
+    assert {m["predicted_at"] for m in prod["top_misses"]} == {_LATEST_AT}
+    assert prod["by_market"]["jp"]["n_scored"] == 1
+    assert prod["by_market"]["us"]["n_scored"] == 1
+    assert prod["by_sector"]["S"]["n_scored"] == 2
+    # 4週の窓は前の回の行も含めたまま
+    assert prod["four_week"]["n_scored"] == 4
+
+
+def test_old_run_rows_count_logged(tmp_path):
+    """スナップショットの前の回の行の数が INFO のログに出ること"""
+    _, mock_logger = _mixed_runs_write(tmp_path)
+
+    messages = [c.args[0] % c.args[1:] for c in mock_logger.info.call_args_list]
+    assert any("前の回の行" in m and "2件" in m and _LATEST_AT in m for m in messages), messages
+
+
 def test_zero_scored_day_writes_zero_counts(tmp_path):
     """採点が0件の日も件数0の JSON を書き、例外にならないこと"""
     sector_getter = MagicMock()

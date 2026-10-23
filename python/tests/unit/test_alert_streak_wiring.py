@@ -1,5 +1,6 @@
-"""運用アラートの連続回数（NF-303-2・3）が日次の道の結果で更新されることのテスト（#934）。"""
+"""運用アラートの連続回数（NF-303-2・3・4）が日次の道の結果で更新されることのテスト（#934、#940）。"""
 
+import tempfile
 import unittest
 from contextlib import ExitStack
 from unittest.mock import patch
@@ -8,13 +9,16 @@ import pandas as pd
 
 from src.utils.alert_service import (
     DRIFT_WARN_THRESHOLD,
+    HEALTH_DEGRADED_THRESHOLD,
     LOSS_LIMIT_THRESHOLD,
     check_drift_warn_rule,
+    check_health_degraded_rule,
     check_loss_limit_rule,
 )
 
 _KEY_LOSS = "alert.loss_limit_streak"
 _KEY_DRIFT = "alert.drift_warn_streak"
+_KEY_HEALTH = "alert.health_degraded_streak"
 
 
 class _ConfigStoreTestCase(unittest.TestCase):
@@ -142,6 +146,49 @@ class TestDriftWarnStreakWiring(_ConfigStoreTestCase):
         self.store[_KEY_DRIFT] = "1"
         self._run_drift_check(pd.DataFrame())
         self.assertEqual(self.store[_KEY_DRIFT], "1")
+
+
+class TestHealthDegradedStreakWiring(_ConfigStoreTestCase):
+    """日次の道の degraded の判定で NF-303-4 の連続回数が動く（#940）。"""
+
+    def _record(self, db_status):
+        from src.orchestration.jobs.alert_streaks import record_health_degraded_streak
+
+        with patch("src.utils.health_check.check_db", return_value=(db_status, None, None)), patch(
+            "src.utils.health_check.get_results_dir", return_value=self.results_dir
+        ):
+            record_health_degraded_streak()
+
+    def setUp(self):
+        super().setUp()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.results_dir = tmp.name
+
+    def test_db_error_counts_up_and_triggers(self):
+        for _ in range(HEALTH_DEGRADED_THRESHOLD - 1):
+            self._record("error")
+        self.assertEqual(int(self.store.get(_KEY_HEALTH, "0")), HEALTH_DEGRADED_THRESHOLD - 1)
+        self.assertFalse(check_health_degraded_rule().triggered)
+
+        self._record("error")
+        result = check_health_degraded_rule()
+        self.assertTrue(result.triggered)
+        self.assertEqual(result.rule_id, "NF-303-4")
+        self.assertEqual(result.consecutive_count, HEALTH_DEGRADED_THRESHOLD)
+
+    def test_streak_resets_when_db_recovers(self):
+        self.store[_KEY_HEALTH] = "1"
+        self._record("ok")
+        self.assertEqual(self.store[_KEY_HEALTH], "0")
+
+    def test_streak_update_failure_does_not_raise(self):
+        with patch(
+            "src.orchestration.jobs.alert_streaks.update_health_degraded_streak",
+            side_effect=RuntimeError("db down"),
+        ):
+            with self.assertLogs("src.orchestration.jobs.alert_streaks", level="ERROR"):
+                self._record("error")
 
 
 if __name__ == "__main__":
