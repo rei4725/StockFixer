@@ -308,6 +308,8 @@ def run_horizon_exit_check() -> None:
 
     SL/TP によって既に決済済みのポジションは paper_positions に存在しないため
     自然に除外される（SL/TP 優先）。
+    銘柄ごとに最後の filled BUY の target_exit_date だけを見て、
+    約定前の SELL がある銘柄は飛ばす。
     live モードでは処理をスキップする。
     """
     import os
@@ -326,18 +328,30 @@ def run_horizon_exit_check() -> None:
 
     today_str = date.today().isoformat()
     with _db_connection() as con:
+        # paper_orders の行は売った後も残るため、銘柄ごとに今の保有を作った
+        # 最後の filled BUY の期限だけを見る (Issue #945)
         rows = con.execute(
             """
-            SELECT DISTINCT symbol
-            FROM paper_orders
-            WHERE side = %s
-              AND status = 'filled'
-              AND target_exit_date IS NOT NULL
+            SELECT symbol
+            FROM (
+                SELECT DISTINCT ON (symbol) symbol, target_exit_date
+                FROM paper_orders
+                WHERE side = %s
+                  AND status = 'filled'
+                ORDER BY symbol, filled_at DESC NULLS LAST, created_at DESC, order_id DESC
+            ) AS latest_buy
+            WHERE target_exit_date IS NOT NULL
               AND CAST(target_exit_date AS VARCHAR) <= %s
+            ORDER BY symbol
             """,
             [int(OrderSide.BUY), today_str],
         ).fetchall()
+        pending_sell_rows = con.execute(
+            "SELECT DISTINCT symbol FROM paper_orders WHERE side = %s AND status = 'pending'",
+            [int(OrderSide.SELL)],
+        ).fetchall()
 
+    pending_sell_symbols = {row[0] for row in pending_sell_rows}
     symbols_to_exit = [row[0] for row in rows]
     if not symbols_to_exit:
         logger.info("[horizon_exit] 期限切れポジションなし")
@@ -350,6 +364,10 @@ def run_horizon_exit_check() -> None:
     )
     exited: list[str] = []
     for symbol in symbols_to_exit:
+        if symbol in pending_sell_symbols:
+            # get_positions は約定前の SELL を引かないため、重ねると売りの二重発注になる
+            logger.info("[horizon_exit] 約定前の SELL があるためスキップ: %s", symbol)
+            continue
         positions = broker.get_positions()
         pos = next((p for p in positions if p["symbol"].replace(".T", "") == symbol), None)
         if pos is None or pos.get("qty", 0) <= 0:
