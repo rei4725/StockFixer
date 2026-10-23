@@ -128,6 +128,9 @@ class Settings(BaseSettings):
     # 一時ディレクトリを bind mount する（パスが一致するため）。
     FACTORY_SANDBOX_SHARE_DIR: str = Field(default="")  # 本体内のマウント先
     FACTORY_SANDBOX_SHARE_VOLUME: str = Field(default="")  # ホストの Docker が知るボリューム名
+    FACTORY_SANDBOX_RUNNER_URL: str = Field(
+        default=""
+    )  # sandbox-runner の URL（例 http://sandbox-runner:8700）
 
     # ---------- 戦略ファクトリー自動昇格ループ: 昇格記録（orchestration/jobs/periodic.py） ----------
     # 既定無効。マージ検知ジョブはこのフラグが true になるまで一切のGitHub API呼び出しを行わない。
@@ -295,6 +298,7 @@ FACTORY_SANDBOX_MEMORY_LIMIT: str = settings.FACTORY_SANDBOX_MEMORY_LIMIT
 FACTORY_SANDBOX_CPU_LIMIT: str = settings.FACTORY_SANDBOX_CPU_LIMIT
 FACTORY_SANDBOX_SHARE_DIR: str = settings.FACTORY_SANDBOX_SHARE_DIR
 FACTORY_SANDBOX_SHARE_VOLUME: str = settings.FACTORY_SANDBOX_SHARE_VOLUME
+FACTORY_SANDBOX_RUNNER_URL: str = settings.FACTORY_SANDBOX_RUNNER_URL
 
 GITHUB_TOKEN: str = settings.GITHUB_TOKEN
 GITHUB_REPO: str = settings.GITHUB_REPO

@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import json
 import os
-import posixpath
-import subprocess
 import tempfile
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from typing import Optional
 
@@ -20,9 +20,7 @@ import pandas as pd
 
 from config.settings import (
     FACTORY_GATE_MIN_TRADES_PER_SYMBOL,
-    FACTORY_SANDBOX_CPU_LIMIT,
-    FACTORY_SANDBOX_IMAGE,
-    FACTORY_SANDBOX_MEMORY_LIMIT,
+    FACTORY_SANDBOX_RUNNER_URL,
     FACTORY_SANDBOX_SHARE_DIR,
     FACTORY_SANDBOX_SHARE_VOLUME,
     FACTORY_SANDBOX_TIMEOUT_SECONDS,
@@ -56,10 +54,6 @@ class SandboxRunResult:
     environment_broken: bool = False
 
 
-# サンドボックス内で共有ボリュームをマウントする場所
-_SANDBOX_SHARE_MOUNT = "/sandbox_share"
-
-
 def _share_config() -> Optional[tuple[str, str]]:
     """共有ボリューム方式の設定 (本体内ディレクトリ, ボリューム名) を返す。未設定なら None。
 
@@ -76,37 +70,45 @@ def _share_config() -> Optional[tuple[str, str]]:
     return None
 
 
-def _workspace_dir() -> Optional[str]:
-    """サンドボックスに渡す一時ファイルを作る親ディレクトリ（None なら OS 既定の一時領域）。"""
-    config = _share_config()
-    return config[0] if config else None
-
-
-def _mount_args(paths: dict[str, str]) -> tuple[list[str], dict[str, str]]:
-    """docker run の -v 引数と、サンドボックス内で見えるパスへの対応を返す。
-
-    paths は {役割: 本体側のパス}。共有ボリューム方式ではボリューム全体を読み取り専用で
-    1 回だけマウントし、各パスをボリューム内の相対パスで読み替える。
-    bind mount 方式（ホスト実行）では従来どおり各パスを個別に /sandbox/<役割> へ渡す。
-    """
+def _workspace_dir() -> str:
+    """サンドボックスに渡す一時ファイルを作る親ディレクトリ（共有ボリューム内）。"""
     config = _share_config()
     if config is None:
-        args: list[str] = []
-        mapped: dict[str, str] = {}
-        for role, local in paths.items():
-            target = f"/sandbox/{role}"
-            args += ["-v", f"{local}:{target}:ro"]
-            mapped[role] = target
-        return args, mapped
+        raise RuntimeError(
+            "サンドボックスは共有ボリューム方式だけです"
+            "（FACTORY_SANDBOX_SHARE_DIR と FACTORY_SANDBOX_SHARE_VOLUME）"
+        )
+    return config[0]
 
-    share_dir, volume = config
-    mapped = {}
-    for role, local in paths.items():
-        rel = os.path.relpath(local, share_dir)
-        if rel.startswith(".."):
-            raise RuntimeError(f"サンドボックス入力が共有ディレクトリの外にあります: {local}")
-        mapped[role] = posixpath.join(_SANDBOX_SHARE_MOUNT, *rel.split(os.sep))
-    return ["-v", f"{volume}:{_SANDBOX_SHARE_MOUNT}:ro"], mapped
+
+def _rel_to_share(path: str) -> str:
+    share_dir = _workspace_dir()
+    rel = os.path.relpath(path, share_dir)
+    if rel.startswith(".."):
+        raise RuntimeError(f"サンドボックス入力が共有ディレクトリの外にあります: {path}")
+    return rel.replace(os.sep, "/")
+
+
+def _post_job(job: dict) -> dict:
+    """sandbox-runner にジョブを送り、答えを返す。届かなければ RuntimeError。"""
+    if not FACTORY_SANDBOX_RUNNER_URL:
+        raise RuntimeError("FACTORY_SANDBOX_RUNNER_URL が未設定です")
+    req = urllib.request.Request(
+        FACTORY_SANDBOX_RUNNER_URL.rstrip("/") + "/run",
+        data=json.dumps(job).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=FACTORY_SANDBOX_TIMEOUT_SECONDS + 30) as res:
+            return json.loads(res.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(
+            f"sandbox-runner がジョブを断りました ({e.code}): "
+            f"{e.read().decode('utf-8', 'replace')[:500]}"
+        ) from e
+    except (urllib.error.URLError, OSError) as e:
+        raise RuntimeError(f"sandbox-runner に届きません: {e}") from e
 
 
 def _nan_if_none(value: Optional[float]) -> float:
@@ -149,22 +151,6 @@ def prepare_sandbox_data(
     return data_dir, windows_path
 
 
-def _detect_self_image() -> str:
-    """FACTORY_SANDBOX_IMAGE が未設定の場合、自コンテナのイメージ名を推測する。"""
-    result = subprocess.run(
-        ["docker", "inspect", "--format", "{{.Config.Image}}", os.environ.get("HOSTNAME", "")],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    image = result.stdout.strip()
-    if not image:
-        raise RuntimeError(
-            "FACTORY_SANDBOX_IMAGE が未設定で、自コンテナのイメージ名も検出できませんでした"
-        )
-    return image
-
-
 def run_sandboxed_evaluation(
     hypothesis: FactoryHypothesis,
     shared_data_dir: str,
@@ -185,84 +171,41 @@ def run_sandboxed_evaluation(
         source_path = os.path.join(src_dir, "candidate.py")
         with open(source_path, "w", encoding="utf-8") as f:
             f.write(source_code)
-        mount_args, mapped = _mount_args(
-            {"src": src_dir, "data": shared_data_dir, "windows.json": windows_file}
-        )
-
-        image = FACTORY_SANDBOX_IMAGE or _detect_self_image()
-        cmd = [
-            "docker",
-            "run",
-            "--rm",
-            "--network",
-            "none",
-            "--read-only",
-            "--tmpfs",
-            "/tmp",
-            "--tmpfs",
-            "/Logs",
-            "--memory",
-            FACTORY_SANDBOX_MEMORY_LIMIT,
-            "--cpus",
-            FACTORY_SANDBOX_CPU_LIMIT,
-            "-e",
-            "STOCKFIXER_SANDBOX=1",
-            "-e",
-            "PYTHONPATH=/app",
-            # .env はサンドボックスコンテナにマウントされないため、ホスト側の実効値を
-            # 明示的に渡さないとコンテナ内は config/settings.py のデフォルト（3）に
-            # 固定されてしまう。ホスト側で FACTORY_GATE_MIN_TRADES_PER_SYMBOL を
-            # 変更しても Claude 生成候補だけ旧閾値で集計される不整合を防ぐ（#625）。
-            "-e",
-            f"FACTORY_GATE_MIN_TRADES_PER_SYMBOL={FACTORY_GATE_MIN_TRADES_PER_SYMBOL}",
-            *mount_args,
-            image,
-            "python",
-            "scripts/sandbox_evaluate_rule.py",
-            "--source-file",
-            posixpath.join(mapped["src"], "candidate.py"),
-            "--class-name",
-            spec["class_name"],
-            "--rule-name",
-            spec["rule_name"],
-            "--description",
-            spec["description"],
-            "--market",
-            hypothesis.market,
-            "--lookback-years",
-            str(hypothesis.lookback_years),
-            "--data-dir",
-            mapped["data"],
-            "--windows-file",
-            mapped["windows.json"],
-        ]
-
+        job = {
+            "source_rel": _rel_to_share(source_path),
+            "data_rel": _rel_to_share(shared_data_dir),
+            "windows_rel": _rel_to_share(windows_file),
+            "class_name": spec["class_name"],
+            "rule_name": spec["rule_name"],
+            "description": spec["description"],
+            "market": hypothesis.market,
+            "lookback_years": int(hypothesis.lookback_years),
+            "min_trades_per_symbol": int(FACTORY_GATE_MIN_TRADES_PER_SYMBOL),
+        }
         try:
-            proc = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                timeout=FACTORY_SANDBOX_TIMEOUT_SECONDS,
-                check=False,
-            )
-        except subprocess.TimeoutExpired:
+            reply = _post_job(job)
+        except RuntimeError as e:
+            return SandboxRunResult(kind="infra_error", infra_detail=str(e))
+        if reply.get("timeout"):
             return SandboxRunResult(
                 kind="infra_error", infra_detail="サンドボックス実行がタイムアウトしました"
             )
 
-        if proc.returncode not in (0, 1):
+        if reply["returncode"] not in (0, 1):
             return SandboxRunResult(
                 kind="infra_error",
-                infra_detail=f"docker run 異常終了 (code={proc.returncode}): {proc.stderr[-2000:]}",
+                infra_detail=(
+                    f"docker run 異常終了 (code={reply['returncode']}): "
+                    f"{reply['stderr'][-2000:]}"
+                ),
             )
 
         try:
-            payload = json.loads(proc.stdout.strip().splitlines()[-1])
+            payload = json.loads(reply["stdout"].strip().splitlines()[-1])
         except (json.JSONDecodeError, IndexError):
             return SandboxRunResult(
                 kind="infra_error",
-                infra_detail=f"サンドボックス出力の解析に失敗: {proc.stdout[-2000:]}",
+                infra_detail=f"サンドボックス出力の解析に失敗: {reply['stdout'][-2000:]}",
             )
 
         if payload.get("status") == "input_missing":
