@@ -4,6 +4,7 @@ daily.py からの責務分離（ファイル行数ガード対策）。run_dail
 step4、および手動実行（run_scheduler.py --run-now drift）の両方から呼ばれる。
 """
 
+from src.orchestration.jobs.alert_streaks import record_drift_warn_streak
 from src.orchestration.jobs.common import _drift_check_lock, skip_if_running
 from src.utils.logger import get_logger
 
@@ -56,6 +57,7 @@ def run_daily_drift_check():
         | (summary["direction_accuracy"] <= hit_rate_threshold)
     ]
     triggered = triggered[triggered["n_samples"] >= min_samples]
+    record_drift_warn_streak(not triggered.empty)  # NF-303-3 の連続回数（#934）
 
     if triggered.empty:
         logger.info("ドリフトチェック: 閾値超過銘柄なし")
