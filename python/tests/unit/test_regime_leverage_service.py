@@ -411,10 +411,14 @@ class TestRunRegimeLeverageDailyMarginCheck(unittest.TestCase):
         self.assertIsNone(result)
         mock_port.get_stock_data.assert_not_called()
 
+    @patch(
+        "src.trading.regime_leverage_strategy.service.get_last_daily_check_at",
+        return_value=None,
+    )
     @patch("src.trading.regime_leverage_strategy.service.insert_snapshot")
     @patch("src.trading.regime_leverage_strategy.service.get_latest_snapshot")
     def test_holding_and_above_stop_and_maintenance_calls_decide_daily_check_as_noop(
-        self, mock_latest, mock_insert
+        self, mock_latest, mock_insert, _mock_last_daily
     ):
         """保有中(shares>0)で当日安値がstop_price_jpyにも維持率にも抵触しない場合、
         decide_daily_checkがnoopを返し、その結果がinsert_snapshotへ渡されることを検証する
@@ -458,10 +462,14 @@ class TestRunRegimeLeverageDailyMarginCheck(unittest.TestCase):
         self.assertGreater(decision.maintenance_ratio, 0.20)
         mock_insert.assert_called_once_with(decision)
 
+    @patch(
+        "src.trading.regime_leverage_strategy.service.get_last_daily_check_at",
+        return_value=None,
+    )
     @patch("src.trading.regime_leverage_strategy.service.insert_snapshot")
     @patch("src.trading.regime_leverage_strategy.service.get_latest_snapshot")
     def test_raises_and_skips_insert_when_holding_and_day_low_is_nan(
-        self, mock_latest, mock_insert
+        self, mock_latest, mock_insert, _mock_last_daily
     ):
         """保有中に当日安値(Low)がNaN(データ劣化時)の場合、判定を行わず例外を送出し、DBにも
         書き込まないこと(NaN比較は常にFalseになり誤ってnoop/exitと判定してしまうため)。
@@ -713,6 +721,7 @@ class TestDailyCheckUsesClosedBarsSinceLastRun(unittest.TestCase):
         executed_at: datetime,
         port: MagicMock,
         reason: str = "daily_noop",
+        last_daily_check_at=None,
     ):
         from src.trading.regime_leverage_strategy.service import (
             run_regime_leverage_daily_margin_check,
@@ -727,6 +736,9 @@ class TestDailyCheckUsesClosedBarsSinceLastRun(unittest.TestCase):
         with patch(
             "src.trading.regime_leverage_strategy.service.get_latest_snapshot",
             return_value=snap,
+        ), patch(
+            "src.trading.regime_leverage_strategy.service.get_last_daily_check_at",
+            return_value=last_daily_check_at,
         ), patch(
             "src.trading.regime_leverage_strategy.service.insert_snapshot"
         ) as mock_insert, patch(
@@ -747,6 +759,37 @@ class TestDailyCheckUsesClosedBarsSinceLastRun(unittest.TestCase):
             reason="weekly_noop",
         )
         self.assertEqual(decision.reason, "initial_stop")
+
+    def test_weekly_row_latest_and_missed_daily_run_checks_missed_bar(self):
+        # 前の日次の回は JST 7/17 金 07:30(7/16 の足まで判定)。週次の回は 7/18 土 07:00。
+        # 月曜 7/20 07:30 の回が落ち、火曜 7/21 07:30 に動く。金曜 7/17 と月曜 7/20 の
+        # 2本が引けており、落ちた日に見るはずだった金曜の安値が損切りの値段を割っている(#933)
+        port = _daily_port("2026-07-20", {"2026-07-17": 440.0})
+        decision = self._run(
+            datetime(2026, 7, 21, 7, 30, tzinfo=_JST),
+            datetime(2026, 7, 18, 7, 0),
+            port,
+            reason="weekly_noop",
+            last_daily_check_at=datetime(2026, 7, 17, 7, 30),
+        )
+        self.assertEqual(decision.action, "exit")
+        self.assertEqual(decision.reason, "initial_stop")
+        self.assertEqual(decision.spy_price_usd, 440.0)
+
+    def test_entry_row_latest_and_missed_daily_run_checks_bars_after_entry(self):
+        # 週次の回で建てた(JST 7/18 土 07:00、金曜 7/17 の引けで約定)。火曜 7/21 の回が落ち、
+        # 水曜 7/22 に動く。建てた後に引けた 7/20 の足の安値が損切りの値段を割っている(#933)
+        port = _daily_port("2026-07-21", {"2026-07-20": 440.0})
+        decision = self._run(
+            datetime(2026, 7, 22, 7, 30, tzinfo=_JST),
+            datetime(2026, 7, 18, 7, 0),
+            port,
+            reason="regime_entry",
+            last_daily_check_at=datetime(2026, 7, 18, 7, 0),
+        )
+        self.assertEqual(decision.action, "exit")
+        self.assertEqual(decision.reason, "initial_stop")
+        self.assertEqual(decision.spy_price_usd, 440.0)
 
     def test_summer_us_session_ignores_unclosed_today_bar(self):
         # 夏時間: JST 7/15 23:00 = 米東部 7/15 10:00(場中)。7/15 の足は引けていない
