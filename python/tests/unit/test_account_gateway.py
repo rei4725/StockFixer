@@ -6,7 +6,8 @@ from datetime import date
 import httpx
 import pytest
 
-from src.trading.brokers.account.gateway import AccountGatewayBroker
+from src.infrastructure.in_memory import InMemoryNotificationAdapter
+from src.trading.brokers.account.gateway import AccountGatewayBroker, AccountGatewayUnavailable
 from src.trading.brokers.base import BrokerError, OrderSide, OrderType
 
 DAY = date(2026, 10, 26)
@@ -161,3 +162,69 @@ def test_get_token_calls_health(tmp_path):
 def test_cancel_is_not_supported(tmp_path):
     with pytest.raises(BrokerError):
         _broker(tmp_path, lambda r: httpx.Response(200, json={})).cancel_order("1")
+
+
+def test_timeout_stops_rest_of_day_and_notifies(tmp_path):
+    calls = []
+
+    def handler(request):
+        calls.append(request.url.path)
+        raise httpx.ReadTimeout("slow", request=request)
+
+    notifier = InMemoryNotificationAdapter()
+    b = _broker(tmp_path, handler, notifier=notifier)
+    with pytest.raises(AccountGatewayUnavailable):
+        b.send_order("7203", OrderSide.BUY, 100)
+    assert b.is_stopped_today()
+    assert (tmp_path / "stopped-2026-10-26.json").exists()
+    assert notifier.sent_alerts and notifier.sent_alerts[0]["title"] == "口座アプリに届かない"
+    # 2つ目の注文は呼ばずに断る（別のジョブの Broker でも同じ印を見る）
+    other = _broker(tmp_path, handler, job="rule")
+    with pytest.raises(AccountGatewayUnavailable):
+        other.send_order("6758", OrderSide.BUY, 100)
+    assert calls == ["/v1/orders"]
+
+
+def test_connection_error_stops(tmp_path):
+    def handler(request):
+        raise httpx.ConnectError("refused", request=request)
+
+    with pytest.raises(AccountGatewayUnavailable):
+        _broker(tmp_path, handler).get_positions()
+    assert (tmp_path / "stopped-2026-10-26.json").exists()
+
+
+@pytest.mark.parametrize("code", [401, 422, 500])
+def test_http_error_status_stops_the_day(tmp_path, code):
+    with pytest.raises(AccountGatewayUnavailable):
+        _broker(tmp_path, lambda r: httpx.Response(code, json={"detail": "x"})).send_order(
+            "7203", OrderSide.BUY, 100
+        )
+    assert (tmp_path / "stopped-2026-10-26.json").exists()
+
+
+def test_unexpected_reply_stops(tmp_path):
+    with pytest.raises(AccountGatewayUnavailable):
+        _broker(tmp_path, lambda r: httpx.Response(200, json={"status": "maybe"})).send_order(
+            "7203", OrderSide.BUY, 100
+        )
+
+
+def test_stop_is_per_jst_day(tmp_path):
+    (tmp_path / "stopped-2026-10-23.json").write_text("{}", encoding="utf-8")
+    b = _broker(tmp_path, lambda r: httpx.Response(200, json={"status": "accepted", "order_id": 1}))
+    assert not b.is_stopped_today()
+    assert b.send_order("7203", OrderSide.BUY, 100)["status"] == "pending"
+
+
+def test_notifier_failure_does_not_hide_the_stop(tmp_path):
+    class Broken(InMemoryNotificationAdapter):
+        def send_alert(self, title, message, level=None):
+            raise RuntimeError("discord down")
+
+    def handler(request):
+        raise httpx.ReadTimeout("slow", request=request)
+
+    with pytest.raises(AccountGatewayUnavailable):
+        _broker(tmp_path, handler, notifier=Broken()).send_order("7203", OrderSide.BUY, 100)
+    assert (tmp_path / "stopped-2026-10-26.json").exists()
