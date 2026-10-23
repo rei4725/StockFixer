@@ -8,7 +8,7 @@ from typing import Any, Callable, Optional, Tuple
 import pandas as pd
 
 from src.backtest.execution import default_slippage_for
-from src.backtest.pipeline.features import SIMULATION_ONLY_COLUMNS, load_features
+from src.backtest.pipeline.features import NON_FEATURE_COLUMNS, load_features
 from src.backtest.ports import get_model_manager
 from src.backtest.slippage import make_slippage_fn
 from src.utils.logger import get_logger
@@ -141,8 +141,7 @@ def run_backtest_single(
         c
         for c in train_df.columns
         if c not in exclude_cols
-        and c not in ("Close", "close")
-        and c not in SIMULATION_ONLY_COLUMNS
+        and c not in NON_FEATURE_COLUMNS
         and not (exclude_sentiment and (c.startswith(_SENTIMENT_PREFIXES)))
     ]
 

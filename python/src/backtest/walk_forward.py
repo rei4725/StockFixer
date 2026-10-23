@@ -167,14 +167,13 @@ class WalkForwardValidator:
     ) -> dict[str, Any]:
         """1折分の学習→予測→シミュレーションを実行する"""
         from src.backtest.backtester import Backtester
-        from src.backtest.pipeline.features import SIMULATION_ONLY_COLUMNS
+        from src.backtest.pipeline.features import NON_FEATURE_COLUMNS
 
         feature_cols = [
             c
             for c in train_df.columns
             if c not in (task.label_col, "market", "symbol", "market_encoded")
-            and c not in ("Close", "close")
-            and c not in SIMULATION_ONLY_COLUMNS
+            and c not in NON_FEATURE_COLUMNS
         ]
 
         X_train = train_df[feature_cols].dropna()
