@@ -243,6 +243,68 @@ class TestSendWalkForwardReportCompletion(unittest.TestCase):
         self.assertEqual(fields["📊 合計"], "6 銘柄")
         self.assertEqual(fields["📄 前回比較"], "なし（初回実行）")
 
+    @patch(
+        "src.reporting.discord.webhook_sender._rate_limiter.check_and_record",
+        return_value=(True, None),
+    )
+    @patch("src.reporting.discord.webhook_sender._post_webhook")
+    def test_all_success_uses_completion_title(self, mock_post, _mock_rl):
+        mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
+
+        send_walk_forward_report_completion({"success": 6, "failed": 0, "total": 6})
+
+        self.assertEqual(_embed_from_post(mock_post)["title"], "✅ Walk-Forward 比較レポート完了")
+
+    @patch(
+        "src.reporting.discord.webhook_sender._rate_limiter.check_and_record",
+        return_value=(True, None),
+    )
+    @patch("src.reporting.discord.webhook_sender._post_webhook")
+    def test_failures_use_caution_title(self, mock_post, _mock_rl):
+        mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
+
+        send_walk_forward_report_completion({"success": 5, "failed": 1, "total": 6})
+
+        self.assertEqual(_embed_from_post(mock_post)["title"], "⚠️ Walk-Forward 比較レポート完了")
+
+    @patch(
+        "src.reporting.discord.webhook_sender._rate_limiter.check_and_record",
+        return_value=(True, None),
+    )
+    @patch("src.reporting.discord.webhook_sender._post_webhook")
+    def test_zero_total_is_not_sent_as_success(self, mock_post, _mock_rl):
+        """対象が0銘柄の回は ✅ の題で送らない（#986）"""
+        mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
+
+        send_walk_forward_report_completion({"success": 0, "failed": 0, "total": 0})
+
+        embed = _embed_from_post(mock_post)
+        self.assertFalse(embed["title"].startswith("✅"), embed["title"])
+        self.assertNotEqual(embed["color"], 0x00FF00)
+
+
+class TestSendWalkForwardReportFailure(unittest.TestCase):
+    @patch(
+        "src.reporting.discord.webhook_sender._rate_limiter.check_and_record",
+        return_value=(True, None),
+    )
+    @patch("src.reporting.discord.webhook_sender._post_webhook")
+    def test_failure_has_error_title_and_message(self, mock_post, _mock_rl):
+        """全体の失敗の知らせは、成功の題と別の題で送る（#986）"""
+        from src.reporting.discord.discord_utils import send_walk_forward_report_failure
+
+        mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
+
+        result = send_walk_forward_report_failure("DB に届かない")
+
+        self.assertTrue(result)
+        embed = _embed_from_post(mock_post)
+        self.assertEqual(embed["title"], "❌ Walk-Forward 比較レポート失敗")
+        self.assertEqual(embed["color"], 0xFF0000)
+        fields = _fields_map(embed)
+        self.assertEqual(fields["❌ エラー"], "DB に届かない")
+        self.assertNotIn("✅", embed["title"])
+
 
 class TestSendDbMaintenanceCompletion(unittest.TestCase):
     @patch(

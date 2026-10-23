@@ -346,7 +346,6 @@ def run_weekly_walk_forward_report():
     前回スナップショットとの差分レポートを保存する。
     """
     logger.info("=== 週次 Walk-Forward 比較レポート開始 ===")
-    result: dict = {}
     try:
         from src.backtest.walk_forward_report import run_walk_forward_comparison_report
         from src.watchlist.batch_runner import load_target_symbols
@@ -361,16 +360,25 @@ def run_weekly_walk_forward_report():
             fee_rate=0.001,
             slippage=0.0,
         )
-        logger.info(
-            "=== 週次 Walk-Forward 比較レポート完了: " "success=%s failed=%s total=%s ===",
-            result.get("success"),
-            result.get("failed"),
-            result.get("total"),
-        )
     except Exception as e:
+        # 全体が落ちた回は失敗と知らせたうえで投げ直し、run_job に error と記録させる（#986）
         logger.error("Walk-Forward 比較レポート生成失敗: %s", e, exc_info=True)
+        try:
+            from src.reporting.discord.discord_utils import send_walk_forward_report_failure
 
-    # Discord 完了通知
+            send_walk_forward_report_failure(str(e))
+        except Exception as notify_error:
+            logger.error("Walk-Forward レポート失敗通知失敗: %s", notify_error, exc_info=True)
+        raise
+
+    logger.info(
+        "=== 週次 Walk-Forward 比較レポート完了: " "success=%s failed=%s total=%s ===",
+        result.get("success"),
+        result.get("failed"),
+        result.get("total"),
+    )
+
+    # Discord 完了通知（本体が終わった回だけ。対象0銘柄は ⚠️ の題になる）
     try:
         from src.reporting.discord.discord_utils import send_walk_forward_report_completion
 

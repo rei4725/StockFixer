@@ -48,6 +48,7 @@ from src.reporting.discord.notifications_model import (  # noqa: F401  # re-expo
 from src.reporting.discord.notifications_report import (  # noqa: F401  # re-export（#497 第2弾）
     send_monthly_report_notification,
     send_walk_forward_report_completion,
+    send_walk_forward_report_failure,
     send_weekly_report,
     send_weekly_training_completion,
 )
