@@ -172,15 +172,20 @@ def _window_bounds(start: str, end: str, n_windows: int) -> list[tuple[pd.Timest
 
 
 def _make_backtester(
-    initial_cash: float, fee_rate: float, slippage: float, stop_loss_pct: Optional[float]
+    market: str,
+    initial_cash: float,
+    fee_rate: float,
+    slippage: float,
+    stop_loss_pct: Optional[float],
 ) -> Backtester:
+    # market は単元株数（jp=100・us=1）を本番の発注と揃えるために渡す（#978）
     return Backtester(
         model_manager=None,
         signal_generator=None,
         data_loader=None,
         start_date=None,
         end_date=None,
-        market="",
+        market=market,
         symbol="",
         initial_cash=initial_cash,
         fee_rate=fee_rate,
@@ -239,7 +244,9 @@ def evaluate_hypothesis(
     if min_trades_per_symbol is None:
         min_trades_per_symbol = FACTORY_GATE_MIN_TRADES_PER_SYMBOL
     rule = build_rule(hypothesis.rule_spec)
-    backtester = _make_backtester(initial_cash, fee_rate, slippage, stop_loss_pct)
+    backtester = _make_backtester(
+        hypothesis.market, initial_cash, fee_rate, slippage, stop_loss_pct
+    )
 
     symbol_rows: list[SymbolMetrics] = []
     window_returns_by_symbol: list[list[float]] = []

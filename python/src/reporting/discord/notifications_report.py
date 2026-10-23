@@ -10,6 +10,7 @@ from typing import Optional
 
 from src.reporting.discord.discord_notification_specs import (
     MONTHLY_REPORT_COMPLETION,
+    WALK_FORWARD_REPORT_ERROR,
     WEEKLY_TRAINING_COMPLETION,
     get_walk_forward_report_spec,
 )
@@ -193,7 +194,7 @@ def send_walk_forward_report_completion(result: dict) -> bool:
     markdown_path = result.get("markdown_path")
     previous_path = result.get("previous_path")
 
-    spec = get_walk_forward_report_spec(failed_count=failed_count)
+    spec = get_walk_forward_report_spec(failed_count=failed_count, total_count=total_count)
     fields: list[dict] = [
         {"name": "🕐 時刻", "value": format_jst(fmt=DISCORD_DATETIME_FORMAT), "inline": True},
         {"name": "✅ 成功", "value": f"{success_count:,} 銘柄", "inline": True},
@@ -216,6 +217,30 @@ def send_walk_forward_report_completion(result: dict) -> bool:
             ok = False
 
     return ok
+
+
+def send_walk_forward_report_failure(error: str) -> bool:
+    """
+    Walk-Forward 比較レポートが全体で失敗したことを Discord Webhook に送信する（#986）。
+
+    今週の比較 CSV は書かれていないため、月次の KPI は前回の CSV のままになることを添える。
+
+    Args:
+        error: 失敗の内容
+
+    Returns:
+        成功時 True、失敗時 False
+    """
+    fields: list[dict] = [
+        {"name": "🕐 時刻", "value": format_jst(fmt=DISCORD_DATETIME_FORMAT), "inline": True},
+        {"name": "❌ エラー", "value": error[:1000] or "不明", "inline": False},
+        {
+            "name": "📄 比較レポート",
+            "value": "今週分は作られていません（月次の KPI は前回の CSV のまま）",
+            "inline": False,
+        },
+    ]
+    return send_status_fields(WALK_FORWARD_REPORT_ERROR, fields)
 
 
 def send_monthly_report_notification(

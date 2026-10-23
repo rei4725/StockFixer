@@ -482,15 +482,104 @@ class TestRunWeeklyWalkForwardReport(unittest.TestCase):
         run_weekly_walk_forward_report()
         mock_send.assert_called_once()
 
+    @patch("src.reporting.discord.discord_utils.send_walk_forward_report_failure")
     @patch("src.reporting.discord.discord_utils.send_walk_forward_report_completion")
     @patch("src.backtest.walk_forward_report.run_walk_forward_comparison_report")
     @patch("src.watchlist.batch_runner.load_target_symbols")
-    def test_exception_does_not_propagate(self, mock_symbols, mock_run, mock_send):
+    def test_exception_propagates_with_failure_notice(
+        self, mock_symbols, mock_run, mock_send, mock_failure
+    ):
+        """全体が落ちた回は失敗の知らせを送って例外を外に出し、完了の知らせを送らない（#986）"""
         from src.orchestration.scheduler import run_weekly_walk_forward_report
 
         mock_symbols.return_value = []
         mock_run.side_effect = Exception("レポートエラー")
-        run_weekly_walk_forward_report()  # 例外が外に出ないこと
+        with self.assertRaisesRegex(Exception, "レポートエラー"):
+            run_weekly_walk_forward_report()
+        mock_send.assert_not_called()
+        mock_failure.assert_called_once()
+        self.assertIn("レポートエラー", mock_failure.call_args.args[0])
+
+    @patch("src.reporting.discord.discord_utils.send_walk_forward_report_failure")
+    @patch("src.reporting.discord.discord_utils.send_walk_forward_report_completion")
+    @patch("src.backtest.walk_forward_report.run_walk_forward_comparison_report")
+    @patch("src.watchlist.batch_runner.load_target_symbols")
+    def test_load_symbols_exception_propagates(
+        self, mock_symbols, mock_run, mock_send, mock_failure
+    ):
+        """銘柄の一覧の読み込みで落ちた回も例外を外に出し、完了の知らせを送らない（#986）"""
+        from src.orchestration.scheduler import run_weekly_walk_forward_report
+
+        mock_symbols.side_effect = RuntimeError("DB に届かない")
+        with self.assertRaisesRegex(RuntimeError, "DB に届かない"):
+            run_weekly_walk_forward_report()
+        mock_run.assert_not_called()
+        mock_send.assert_not_called()
+        mock_failure.assert_called_once()
+
+    @patch("src.reporting.discord.discord_utils.send_walk_forward_report_failure")
+    @patch("src.reporting.discord.discord_utils.send_walk_forward_report_completion")
+    @patch("src.backtest.walk_forward_report.run_walk_forward_comparison_report")
+    @patch("src.watchlist.batch_runner.load_target_symbols")
+    def test_completed_run_sends_completion_with_result(
+        self, mock_symbols, mock_run, mock_send, mock_failure
+    ):
+        """本体が終わった回は結果を添えて完了の知らせを送り、失敗の知らせは送らない（#986）"""
+        from src.orchestration.scheduler import run_weekly_walk_forward_report
+
+        mock_symbols.return_value = []
+        result = {"success": 5, "failed": 1, "total": 6}
+        mock_run.return_value = result
+        run_weekly_walk_forward_report()
+        mock_send.assert_called_once_with(result)
+        mock_failure.assert_not_called()
+
+
+@patch("src.orchestration.scheduler_queue.ping_heartbeat")
+@patch("src.reporting.discord.discord_utils.send_walk_forward_report_failure")
+@patch("src.reporting.discord.discord_utils.send_walk_forward_report_completion")
+@patch("src.backtest.walk_forward_report.run_walk_forward_comparison_report")
+@patch("src.watchlist.batch_runner.load_target_symbols")
+def test_weekly_walk_forward_report_failure_recorded_as_error_by_run_job(
+    mock_symbols, mock_run, mock_send, mock_failure, mock_ping, tmp_path
+):
+    """週の Walk-Forward 比較レポートが丸ごと落ちた回を、run_job が error と記録する（#986）"""
+    import json
+    from datetime import datetime
+
+    from src.orchestration.scheduler import run_weekly_walk_forward_report
+    from src.orchestration.scheduler_queue import SchedulerQueueManager
+
+    mock_symbols.return_value = []
+    mock_run.side_effect = Exception("レポートエラー")
+    state_path = tmp_path / "state.json"
+    config = {
+        "weekly_walk_forward_report": {
+            "func": run_weekly_walk_forward_report,
+            "period": "weekly",
+            "day_of_week": "thu",
+            "hour": 1,
+            "minute": 0,
+            "max_retries": 0,
+            "retry_base_wait_seconds": 0.0,
+            "max_executions_per_period": 1,
+        }
+    }
+    manager = SchedulerQueueManager(config, state_file_path=str(state_path))
+    run_now = datetime(2026, 10, 22, 1, 0, tzinfo=manager.tz)
+    manager.now = lambda: run_now  # type: ignore[method-assign]
+
+    with pytest.raises(Exception, match="レポートエラー"):
+        manager.run_job("weekly_walk_forward_report", reason="test")
+
+    with open(state_path, encoding="utf-8") as f:
+        events = json.load(f)["events"]
+    finished = [e for e in events if e["status"] != "started"]
+    assert [e["status"] for e in finished] == ["error"]
+    assert finished[0]["error"] == "レポートエラー"
+    mock_send.assert_not_called()
+    mock_failure.assert_called_once()
+    mock_ping.assert_called_once_with("weekly_walk_forward_report", success=False)
 
 
 class TestRunWeeklyWatchlistRefresh(unittest.TestCase):

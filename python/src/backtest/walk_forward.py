@@ -173,6 +173,7 @@ class WalkForwardValidator:
             c
             for c in train_df.columns
             if c not in (task.label_col, "market", "symbol", "market_encoded")
+            and c not in ("Close", "close")
             and c not in SIMULATION_ONLY_COLUMNS
         ]
 
