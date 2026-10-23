@@ -208,6 +208,64 @@ def test_today_rows_only_from_latest_run(tmp_path):
     assert prod["four_week"]["n_scored"] == 4
 
 
+_BACKFILL_AT = "20261020_013000"  # 補完の回（JST 10/20 10:30）
+_NEXT_MORNING_AT = "20261020_223000"  # 次の朝の回（JST 10/21 07:30）
+
+
+def _write_production(tmp_path, rows, report_date):
+    from src.prediction.accuracy_report import write_daily_accuracy_report
+
+    snapshot = pd.DataFrame(
+        [
+            {"market": r["market"], "symbol": r["symbol"], "predicted_at": r["predicted_at"]}
+            for r in rows
+        ]
+    )
+    with (
+        patch("src.prediction.db.load_prediction_accuracy", return_value=pd.DataFrame(rows)),
+        patch("src.prediction.db.load_prediction_results", return_value=snapshot),
+    ):
+        path = write_daily_accuracy_report(
+            report_date=report_date,
+            models=("production",),
+            output_dir=str(tmp_path),
+            sector_getter=lambda market, symbol: "S",
+        )
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)["models"]["production"]["1"]
+
+
+def test_four_week_backfill_and_next_morning_are_separate_days(tmp_path):
+    """補完の回と次の朝の回は UTC の日付が同じでも別の日として数えること（#987）"""
+    rows = [
+        _acc_row("production", "jp", "7203", _BACKFILL_AT, 0.02, 0.01, True),
+        _acc_row("production", "us", "AAPL", _BACKFILL_AT, 0.01, -0.01, False),
+        _acc_row("production", "jp", "7203", _NEXT_MORNING_AT, 0.02, 0.01, True),
+    ]
+    prod = _write_production(tmp_path, rows, date(2026, 10, 21))
+
+    four_week = prod["four_week"]
+    assert four_week["n_scored"] == 3
+    assert four_week["n_days"] == 2
+    # 日ごとの的中率 0.5 と 1.0 の平均（行を通した 2/3 ではない）
+    assert four_week["daily_direction_accuracy_mean"] == pytest.approx(0.75)
+
+
+def test_four_week_window_uses_base_bar_date(tmp_path):
+    """4週の窓は予想の基準の日で切り、UTC の日付が窓の初日でも基準の日が前なら外すこと（#987）"""
+    rows = [
+        # 基準の日 9/21（JST 9/22 10:30 の補完の回）は窓（9/22 から）の外
+        _acc_row("production", "jp", "7203", "20260922_013000", 0.02, -0.01, False),
+        # 基準の日 9/22 のふだんの回は窓の中
+        _acc_row("production", "jp", "7203", "20260922_223000", 0.02, 0.01, True),
+        _acc_row("production", "jp", "7203", _NEXT_MORNING_AT, 0.02, 0.01, True),
+    ]
+    prod = _write_production(tmp_path, rows, date(2026, 10, 20))
+
+    assert prod["four_week"]["n_scored"] == 2
+    assert prod["four_week"]["n_days"] == 2
+
+
 def test_old_run_rows_count_logged(tmp_path):
     """スナップショットの前の回の行の数が INFO のログに出ること"""
     _, mock_logger = _mixed_runs_write(tmp_path)
