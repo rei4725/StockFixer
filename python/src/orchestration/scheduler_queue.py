@@ -26,6 +26,7 @@ from zoneinfo import ZoneInfo
 from filelock import FileLock
 
 from config.settings import settings
+from src.orchestration.scheduler_interrupted import count_executions
 from src.utils.data_path_utils import ensure_dir, get_results_dir
 from src.utils.heartbeat import ping_heartbeat
 from src.utils.japan_time import isoformat_utc
@@ -59,6 +60,11 @@ class SchedulerQueueManager:
             state_file_path = os.path.join(get_results_dir(), "scheduler_queue_state.json")
         self.state_file_path = state_file_path
         self._in_progress_jobs: set[str] = set()
+        # 起動ごとの印。始めの記録に入れ、前の起動で消えた回を見分ける（#946）
+        self._boot_id = uuid.uuid4().hex
+        # started_at は秒までで書くため、比べる起動の時刻も秒で切る
+        self._booted_at = datetime.now(timezone.utc).replace(microsecond=0)
+        self._warned_interrupted_run_ids: set[str] = set()
         self._error_notifier = error_notifier
         # 同じプロセスのスレッドの間（定時のジョブと補完のポーリング）を _lock で、
         # プロセスの間（手での即時実行）を _file_lock で守る。取る順は必ず _lock が先
@@ -163,6 +169,7 @@ class SchedulerQueueManager:
                     "status": "started",
                     "period_key": period_key,
                     "run_id": run_id,
+                    "boot_id": self._boot_id,
                     "started_at": isoformat_utc(started_at),
                 }
             )
@@ -410,21 +417,31 @@ class SchedulerQueueManager:
         return False
 
     def get_execution_count(self, job_id: str, period_key: str) -> int:
-        """success・error の記録に、終わりの記録が無い started（途中で落ちた実行）を足して数える。"""
-        count = 0
-        started_run_ids: set[str] = set()
-        finished_run_ids: set[str] = set()
-        for event in self._state.get("events", []):
-            if event.get("job_id") != job_id or event.get("period_key") != period_key:
+        """success・error の記録に、終わりの記録が無い started（途中で落ちた実行）を足して数える。
+
+        設定に ``rerun_if_interrupted: True`` を持つジョブは、前の起動のプロセスで消えた回を
+        1期間に1回まで数えない（#946）。
+        """
+        config = self.schedule_config.get(job_id, {})
+        rerun_if_interrupted = bool(config.get("rerun_if_interrupted", False))
+        result = count_executions(
+            self._state.get("events", []),
+            job_id,
+            period_key,
+            boot_id=self._boot_id,
+            booted_at=self._booted_at,
+            rerun_if_interrupted=rerun_if_interrupted,
+        )
+        for run_id in result.interrupted_run_ids:
+            if run_id in self._warned_interrupted_run_ids:
                 continue
-            status = event.get("status")
-            if status in {"success", "error"}:
-                count += 1
-                if event.get("run_id"):
-                    finished_run_ids.add(event["run_id"])
-            elif status == "started" and event.get("run_id"):
-                started_run_ids.add(event["run_id"])
-        return count + len(started_run_ids - finished_run_ids)
+            self._warned_interrupted_run_ids.add(run_id)
+            logger.warning(
+                f"前の起動のプロセスで消えた回を見つけました: job_id={job_id} "
+                f"period_key={period_key} run_id={run_id} "
+                f"補完の対象={'あり（1期間に1回まで）' if rerun_if_interrupted else 'なし'}"
+            )
+        return result.count
 
     def _build_period_key(self, config: dict[str, Any], now: datetime) -> str:
         period_type = config.get("period", "daily")
