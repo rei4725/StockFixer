@@ -272,7 +272,7 @@ def update_health_degraded_streak(is_degraded: bool) -> int:
     """
     ヘルスチェック degraded の有無に基づきストリークを更新して返す。
 
-    api/health.py のヘルスチェック実行後に呼び出す。
+    日次の道で1日1回呼び出す（orchestration/jobs/alert_streaks.py、#940）。
     """
     current = _get_streak(_KEY_HEALTH_DEGRADED_STREAK)
     new_value = current + 1 if is_degraded else 0

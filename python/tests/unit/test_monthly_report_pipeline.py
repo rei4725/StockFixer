@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -188,9 +188,18 @@ class TestComputeAvgSlippage(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
+class _LimitedAccuracy(InMemoryAnalyticsQuery):
+    """本物のアダプタと同じく predicted_at 降順の先頭 limit 行だけを返す。"""
+
+    def prediction_accuracy(self, market=None, symbol=None, horizon=1, limit=500):
+        df = super().prediction_accuracy(market=market, symbol=symbol, horizon=horizon, limit=limit)
+        df = df.sort_values("predicted_at", ascending=False)
+        return df.head(limit) if limit else df
+
+
 class TestLoadMonthlyKpis(unittest.TestCase):
     def test_queries_port_with_monthly_window(self):
-        """精度は horizon=1/limit=5000、ドリフトは recent_n=_REPORT_DAYS で問い合わせる。"""
+        """精度は horizon=1/limit=5000 から始め、ドリフトは recent_n=_REPORT_DAYS で問い合わせる。"""
         analytics = InMemoryAnalyticsQuery()
         _load_monthly_kpis(analytics)
         self.assertEqual(
@@ -221,6 +230,33 @@ class TestLoadMonthlyKpis(unittest.TestCase):
 
         kpi = _load_monthly_kpis(_FailingDiff())
         self.assertIsNone(kpi.avg_slippage)
+
+    def test_hit_rate_counts_all_rows_in_window_beyond_5000(self):
+        """窓の中に 5000 行を超える採点があっても、窓の中の全行で方向一致率を出す。"""
+        now = datetime.now()
+        rows = []
+        # 新しい側 5000 行はすべて的中、続く 3000 行（窓の中）はすべて外れ
+        for i in range(8000):
+            ts = now - timedelta(minutes=5 * i)
+            rows.append(
+                {
+                    "predicted_at": ts.strftime("%Y%m%d_%H%M%S"),
+                    "checked_at": ts,
+                    "direction_match": i < 5000,
+                }
+            )
+        # 窓より古い採点は数えない
+        old = now - timedelta(days=_REPORT_DAYS + 10)
+        rows.append(
+            {
+                "predicted_at": old.strftime("%Y%m%d_%H%M%S"),
+                "checked_at": old,
+                "direction_match": True,
+            }
+        )
+        analytics = _LimitedAccuracy(accuracy=pd.DataFrame(rows))
+        kpi = _load_monthly_kpis(analytics)
+        self.assertAlmostEqual(kpi.hit_rate, 5000 / 8000)
 
     def test_accuracy_failure_propagates(self):
         """精度の取得失敗は握りつぶさず呼び出し元へ伝播させる（従来挙動）。"""
