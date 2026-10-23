@@ -125,6 +125,13 @@ def job_daily_rule_signals():
     run_daily_rule_signals()
 
 
+def job_daily_account_shadow_report():
+    """毎営業日 17:00 - 口座アプリの影の運用の比べの日報（段3）"""
+    from src.orchestration.scheduler import run_daily_account_shadow_report
+
+    run_daily_account_shadow_report()
+
+
 def job_pre_close_alert():
     """毎営業日 15:00 - 引け前ポジション再評価アラート送信"""
     from src.orchestration.scheduler import run_pre_close_alert
@@ -352,6 +359,17 @@ SCHEDULE_CONFIG = {
         "max_executions_per_period": 1,
         "max_retries": 0,
         "description": "毎営業日 16:30 - ルールシグナル生成 + ペーパートレード発注",
+    },
+    "daily_account_shadow_report": {
+        "func": job_daily_account_shadow_report,
+        "trigger": "cron",
+        "period": "daily",
+        "day_of_week": "mon-fri",
+        "hour": 17,
+        "minute": 0,
+        "recovery_delay_minutes": 10,
+        "max_executions_per_period": 1,
+        "description": "毎営業日 17:00 - 口座アプリの影の運用の比べの日報（段3）",
     },
     "pre_close_alert": {
         "func": job_pre_close_alert,

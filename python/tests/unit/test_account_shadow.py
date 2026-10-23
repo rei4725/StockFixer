@@ -133,3 +133,42 @@ def test_factory_returns_shadow_when_configured(_cfg):
     )
     assert isinstance(b, ShadowBroker) and isinstance(b, BrokerBase)
     assert b.broker_name == "paper"
+
+
+def test_report_job_skips_when_shadow_off(_cfg):
+    from src.orchestration.jobs.account_shadow import run_daily_account_shadow_report
+    from src.trading.brokers.account import shadow_report
+
+    _cfg.setattr(cfg, "ACCOUNT_SHADOW", False)  # URL とトークンはあっても、フラグで止まる
+    called = MagicMock()
+    _cfg.setattr(shadow_report, "build_shadow_report", called)
+    run_daily_account_shadow_report()
+    called.assert_not_called()
+
+
+def test_report_job_writes_report(_cfg):
+    from src.infrastructure import yfinance_market_data_adapter
+    from src.infrastructure.persistence import trade_diff_repository
+    from src.orchestration.jobs.account_shadow import run_daily_account_shadow_report
+    from src.trading.brokers.account import gateway, shadow_report
+    from src.trading.brokers.paper import paper_broker
+
+    _cfg.setattr(paper_broker, "PaperBroker", MagicMock())
+    _cfg.setattr(gateway, "AccountGatewayBroker", MagicMock())
+    _cfg.setattr(yfinance_market_data_adapter, "YFinanceMarketDataAdapter", MagicMock())
+    _cfg.setattr(trade_diff_repository, "PostgresTradeDiffSink", MagicMock())
+    _cfg.setattr(shadow_report, "read_shadow_log", lambda day: [{"symbol": "7203"}])
+    _cfg.setattr(
+        shadow_report,
+        "build_shadow_report",
+        lambda day, records, paper, account: {"orders": records},
+    )
+    written = {}
+
+    def _write(day, report):
+        written["r"] = report
+        return "p"
+
+    _cfg.setattr(shadow_report, "write_shadow_report", _write)
+    run_daily_account_shadow_report()
+    assert written["r"] == {"orders": [{"symbol": "7203"}]}
