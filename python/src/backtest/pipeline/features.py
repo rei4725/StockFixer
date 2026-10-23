@@ -16,6 +16,11 @@ logger = get_logger(__name__)
 # 当バーの値なので、モデルの特徴量には使わない（呼び出し側で除外する）。
 SIMULATION_ONLY_COLUMNS = ("Open", "Volume")
 
+# 表には載せるが、モデルの学習と予測の特徴量には使わない列（#979・#994）。
+# 当日の生の終値 Close・close と、当日の高安引けを含む atr は本番の特徴量に無い。
+# atr は ATR サイジング（backtester）と rules/・screener.py が表から読むので、表には残す。
+NON_FEATURE_COLUMNS = ("Close", "close", "atr") + SIMULATION_ONLY_COLUMNS
+
 
 class FeaturesUnavailableError(Exception):
     """バックテスト用の特徴量が用意できない（データが無い・行数不足・生成失敗）。
