@@ -3,13 +3,25 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from sandbox_runner.job import JobError, RunnerConfig, build_command
 
 _MAX_BODY = 64 * 1024
 _TAIL = 20000
+_DIGITS = re.compile(r"[0-9]+")
+
+
+def parse_length(value: str | None) -> int | None:
+    """Content-Length を読む。無いか空なら 0、数字でなければ None（不正）。"""
+    if value is None or value == "":
+        return 0
+    if not _DIGITS.fullmatch(value):
+        return None
+    return int(value)
 
 
 def handle_run(body: bytes, cfg: RunnerConfig, run=subprocess.run) -> tuple[int, dict]:
@@ -18,8 +30,10 @@ def handle_run(body: bytes, cfg: RunnerConfig, run=subprocess.run) -> tuple[int,
         if not isinstance(job, dict):
             raise JobError("ジョブは JSON のオブジェクトです")
         cmd = build_command(job, cfg)
-    except (json.JSONDecodeError, JobError) as e:
+    except (ValueError, JobError) as e:
         return 400, {"error": str(e)}
+    name = "factory-sandbox-" + uuid.uuid4().hex[:12]
+    cmd = cmd[:2] + ["--name", name] + cmd[2:]
     try:
         proc = run(
             cmd,
@@ -30,7 +44,13 @@ def handle_run(body: bytes, cfg: RunnerConfig, run=subprocess.run) -> tuple[int,
             check=False,
         )
     except subprocess.TimeoutExpired:
+        try:
+            run(["docker", "kill", name], capture_output=True, text=True, timeout=30, check=False)
+        except (subprocess.TimeoutExpired, OSError):
+            pass
         return 200, {"timeout": True}
+    except OSError as e:
+        return 500, {"error": f"docker を実行できません: {e}"}
     return 200, {
         "returncode": proc.returncode,
         "stdout": proc.stdout[-_TAIL:],
@@ -51,16 +71,21 @@ def main() -> None:
             self.wfile.write(data)
 
         def do_GET(self) -> None:  # noqa: N802
-            (
+            if self.path == "/health":
                 self._send(200, {"status": "ok"})
-                if self.path == "/health"
-                else self._send(404, {"error": "not found"})
-            )
+            else:
+                self._send(404, {"error": "not found"})
 
         def do_POST(self) -> None:  # noqa: N802
-            length = int(self.headers.get("Content-Length") or 0)
-            if self.path != "/run" or length > _MAX_BODY:
-                self._send(404 if self.path != "/run" else 413, {"error": "not accepted"})
+            if self.path != "/run":
+                self._send(404, {"error": "not found"})
+                return
+            length = parse_length(self.headers.get("Content-Length"))
+            if length is None:
+                self._send(400, {"error": "Content-Length が不正です"})
+                return
+            if length > _MAX_BODY:
+                self._send(413, {"error": "body too large"})
                 return
             self._send(*handle_run(self.rfile.read(length), cfg))
 
