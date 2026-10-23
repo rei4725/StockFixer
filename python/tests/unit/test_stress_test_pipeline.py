@@ -110,6 +110,40 @@ class TestComputeMaxConsecutiveLosses:
         )
         assert _compute_max_consecutive_losses(trade_log) == 3
 
+    def test_compute_max_consecutive_losses_counts_cost_losses(self):
+        """値段の差では勝ちでも、手数料とスリッページを引くと負けの取引を連敗に数えること（#963）"""
+        # 1取引ごとに買いで 1.0、売りで 1.0 のコスト。値段の差 +1 の取引は控除後 -1 で負け
+        rows = []
+        cash_gross = 1000.0
+        paid = 0.0
+        dates = pd.date_range("2020-01-01", periods=8, freq="B")
+        for i, (buy_p, sell_p) in enumerate([(100, 101), (100, 101), (100, 101), (100, 110)]):
+            cash_gross -= buy_p
+            paid += 1.0
+            rows.append(
+                {
+                    "date": dates[i * 2],
+                    "action": "buy",
+                    "price": buy_p,
+                    "qty": 1,
+                    "cash": cash_gross - paid,
+                    "cash_gross": cash_gross,
+                }
+            )
+            cash_gross += sell_p
+            paid += 1.0
+            rows.append(
+                {
+                    "date": dates[i * 2 + 1],
+                    "action": "sell",
+                    "price": sell_p,
+                    "qty": 1,
+                    "cash": cash_gross - paid,
+                    "cash_gross": cash_gross,
+                }
+            )
+        assert _compute_max_consecutive_losses(pd.DataFrame(rows)) == 3
+
 
 class TestStressTestResultMddPass:
     """StressTestResult.mdd_pass の判定テスト"""

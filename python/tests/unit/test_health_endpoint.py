@@ -98,10 +98,10 @@ class TestHealthEndpoint:
         assert data["checked_at"]  # 空でない
 
     def test_health_degraded_when_scheduler_stale(self, client):
-        """スケジューラ最終実行から30分以上経過で status=degraded・HTTP 200 を返す"""
+        """2時間ごとの回を2回分過ぎても success が無ければ status=degraded・HTTP 200（#962）"""
         from datetime import datetime, timedelta, timezone
 
-        stale_time = (datetime.now(timezone.utc) - timedelta(minutes=31)).isoformat()
+        stale_time = (datetime.now(timezone.utc) - timedelta(hours=4)).isoformat()
         runs = {"daily_pipeline": stale_time}
         with (
             patch("src.api.health._check_db", return_value=("ok", None, None)),
@@ -114,7 +114,7 @@ class TestHealthEndpoint:
         assert resp.status_code == 200  # DB は ok なので HTTP 200
 
     def test_health_ok_when_scheduler_recent(self, client):
-        """スケジューラ最終実行が30分以内なら status=ok を返す"""
+        """スケジューラ最終実行が10分前なら status=ok を返す"""
         from datetime import datetime, timedelta, timezone
 
         recent_time = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
@@ -127,6 +127,22 @@ class TestHealthEndpoint:
 
         data = resp.get_json()
         assert data["status"] == "ok"
+
+    def test_health_ok_one_hour_after_success(self, client):
+        """最後の success から1時間（次の2時間ごとの回の前）は status=ok（#962）"""
+        from datetime import datetime, timedelta, timezone
+
+        last_success = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        runs = {"strategy_promotion_check": last_success}
+        with (
+            patch("src.api.health._check_db", return_value=("ok", None, None)),
+            patch("src.api.health._load_scheduler_last_runs", return_value=runs),
+        ):
+            resp = client.get("/health")
+
+        data = resp.get_json()
+        assert data["status"] == "ok"
+        assert resp.status_code == 200
         assert resp.status_code == 200
 
 

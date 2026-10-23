@@ -311,9 +311,11 @@ class TestATRPositionSizing(unittest.TestCase):
             atr_max_fraction=0.3,
             fee_rate=0.0,
         )
-        qty = bt._calc_qty(100_000, 1000.0, atr_value=100.0)
-        self.assertGreaterEqual(qty, 10)
-        self.assertLessEqual(qty, 30)
+        # market=jp は100株単元（#965）。建玉比率の上下限 1,000〜3,000株に単元が入る株価にする
+        qty = bt._calc_qty(100_000, 10.0, atr_value=100.0)
+        self.assertGreaterEqual(qty, 1000)
+        self.assertLessEqual(qty, 3000)
+        self.assertEqual(qty % 100, 0)
 
     def test_atr_fallback_to_full_when_no_atr(self):
         """atr_valueがNoneの場合は full モードと同じ動作になる"""
