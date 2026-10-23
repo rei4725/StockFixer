@@ -219,7 +219,15 @@ def run_weekly_report():
         )
         logger.info("=== 週次レポート送信完了 ===")
     except Exception as e:
+        # スナップショットと前週比較が欠けた週を知らせる。投げ直すとやり直しで
+        # 外れ原因分析と週の成績を2回走らせるため、知らせだけにする（#1007）
         logger.error("週次レポート生成失敗: %s", e, exc_info=True)
+        try:
+            from src.reporting.discord.discord_utils import send_webhook_text
+
+            send_webhook_text(f"❌ 週次レポート生成失敗\n{str(e)[:1000] or '不明'}")
+        except Exception as notify_error:
+            logger.error("週次レポートの失敗通知失敗: %s", notify_error, exc_info=True)
 
     # 外れ原因分析（非致命的）
     logger.info("外れ原因分析開始")

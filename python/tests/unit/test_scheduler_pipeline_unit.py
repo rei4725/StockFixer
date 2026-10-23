@@ -430,15 +430,98 @@ class TestRunWeeklyReport(unittest.TestCase):
             run_weekly_report()
         mock_send.assert_called_once()
 
+    @patch("src.reporting.discord.discord_utils.send_webhook_text")
     @patch("src.reporting.discord.discord_utils.send_weekly_report")
     @patch("src.infrastructure.persistence.analytics_query.PostgresAnalyticsQuery")
-    def test_exception_does_not_propagate(self, mock_analytics_cls, mock_send):
+    def test_exception_does_not_propagate(self, mock_analytics_cls, mock_send, _mock_notice):
         from src.orchestration.scheduler import run_weekly_report
 
         mock_analytics_cls.return_value.drift_summary.side_effect = Exception("DB エラー")
         run_weekly_report()  # 例外が外に出ないこと
         mock_analytics_cls.return_value.drift_summary.assert_called_once()
         mock_send.assert_not_called()
+
+
+@patch("src.orchestration.jobs.weekly.run_weekly_paper_results")
+@patch("src.reporting.discord.discord_utils.send_miss_analysis_summary")
+@patch("src.prediction.miss_analysis.run_miss_analysis_batch")
+@patch("src.prediction.db.load_top_prediction_misses")
+@patch("src.reporting.llm_review.generate_weekly_review", return_value=None)
+@patch("src.infrastructure.llm.factory.get_text_review_port")
+@patch("src.infrastructure.persistence.analytics_query.PostgresAnalyticsQuery")
+class TestRunWeeklyReportFailureNotice(unittest.TestCase):
+    """週のレポートの段が落ちた回に失敗の知らせを送ること（#1007）"""
+
+    @patch("src.reporting.discord.discord_utils.send_webhook_text")
+    @patch("src.reporting.discord.discord_utils.send_weekly_report")
+    @patch(
+        "src.prediction.db.save_weekly_accuracy_snapshot",
+        side_effect=RuntimeError("snapshot エラー"),
+    )
+    def test_snapshot_failure_sends_notice_and_runs_later_stages(
+        self, _mock_save, mock_report, mock_notice, *mocks
+    ):
+        from src.orchestration.jobs.weekly import run_weekly_report
+
+        mock_miss_summary, mock_paper = mocks[5], mocks[6]
+        run_weekly_report()
+        mock_report.assert_not_called()
+        mock_notice.assert_called_once()
+        text = mock_notice.call_args[0][0]
+        self.assertIn("❌ 週次レポート生成失敗", text)
+        self.assertIn("snapshot エラー", text)
+        mock_miss_summary.assert_called_once()
+        mock_paper.assert_called_once()
+
+    @patch("src.reporting.discord.discord_utils.send_webhook_text")
+    @patch(
+        "src.reporting.discord.discord_utils.send_weekly_report",
+        side_effect=RuntimeError("送信エラー"),
+    )
+    @patch("src.prediction.db.save_weekly_accuracy_snapshot")
+    def test_send_failure_sends_notice_and_runs_later_stages(
+        self, _mock_save, _mock_report, mock_notice, *mocks
+    ):
+        from src.orchestration.jobs.weekly import run_weekly_report
+
+        mock_miss_summary, mock_paper = mocks[5], mocks[6]
+        run_weekly_report()
+        mock_notice.assert_called_once()
+        text = mock_notice.call_args[0][0]
+        self.assertIn("❌ 週次レポート生成失敗", text)
+        self.assertIn("送信エラー", text)
+        mock_miss_summary.assert_called_once()
+        mock_paper.assert_called_once()
+
+    @patch(
+        "src.reporting.discord.discord_utils.send_webhook_text",
+        side_effect=RuntimeError("通知エラー"),
+    )
+    @patch(
+        "src.reporting.discord.discord_utils.send_weekly_report",
+        side_effect=RuntimeError("送信エラー"),
+    )
+    @patch("src.prediction.db.save_weekly_accuracy_snapshot")
+    def test_notice_failure_does_not_propagate(self, _mock_save, _mock_report, mock_notice, *mocks):
+        from src.orchestration.jobs.weekly import run_weekly_report
+
+        mock_paper = mocks[6]
+        run_weekly_report()  # 例外が外に出ないこと
+        mock_notice.assert_called_once()
+        mock_paper.assert_called_once()
+
+    @patch("src.reporting.discord.discord_utils.send_webhook_text")
+    @patch("src.reporting.discord.discord_utils.send_weekly_report")
+    @patch("src.prediction.db.save_weekly_accuracy_snapshot")
+    def test_success_sends_no_notice(self, _mock_save, mock_report, mock_notice, *mocks):
+        from src.orchestration.jobs.weekly import run_weekly_report
+
+        mock_miss_summary, mock_paper = mocks[5], mocks[6]
+        run_weekly_report()
+        mock_report.assert_called_once()
+        mock_notice.assert_not_called()
+        mock_miss_summary.assert_called_once()
+        mock_paper.assert_called_once()
 
 
 class TestRunDailySettle(unittest.TestCase):
