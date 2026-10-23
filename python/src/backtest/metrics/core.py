@@ -81,8 +81,11 @@ def compute_metrics(
     final_cash = equity.iloc[-1]
     total_return = (final_cash - initial_cash) / initial_cash
 
-    # 取引ペア（buy/sell）を抽出して勝率・Profit Factor を計算
-    wins, losses, win_returns, loss_returns = _extract_trade_pnl(trade_log)
+    # 取引ペア（buy/sell・short/short_cover）を抽出して勝率・Profit Factor を計算。
+    # cash 列（控除後）で測るときは、1取引の損益も手数料とスリッページを引いた後の値にする（#953）
+    wins, losses, win_returns, loss_returns = _extract_trade_pnl(
+        trade_log, net_of_costs=cash_column == "cash"
+    )
     trade_pnls = wins + losses
     num_trades = len(wins) + len(losses)
     win_rate = len(wins) / num_trades if num_trades > 0 else 0.0
@@ -194,11 +197,44 @@ def _empty_metrics(initial_cash: float) -> dict[str, Any]:
     }
 
 
+_LONG_EXIT_ACTIONS = ("sell", "final_sell", "stop_loss", "take_profit")
+_SHORT_EXIT_ACTIONS = ("short_cover", "final_short_cover")
+_COST_BEFORE_COLUMN = "_cost_before"
+
+
+def _with_cost_before(trade_log: pd.DataFrame) -> pd.DataFrame:
+    """各行の直前までに払った累計コスト（cash_gross - cash）を列に足したコピーを返す。
+
+    取引ログの price は約定の生の値段で、手数料とスリッページは cash 列にだけ入る（#953）。
+    cash_gross との差は累計コストなので、エントリー直前とエグジット後の差が1取引のコストになる。
+    レジーム別に行を分ける前に全体のログで付けておくと、分けた後も直前の値が保たれる。
+    """
+    if (
+        trade_log.empty
+        or _COST_BEFORE_COLUMN in trade_log.columns
+        or "cash" not in trade_log.columns
+        or "cash_gross" not in trade_log.columns
+    ):
+        return trade_log
+    paid = pd.to_numeric(trade_log["cash_gross"], errors="coerce") - pd.to_numeric(
+        trade_log["cash"], errors="coerce"
+    )
+    result = trade_log.copy()
+    result[_COST_BEFORE_COLUMN] = paid.shift(1).fillna(0.0)
+    return result
+
+
 def _extract_trade_pnl(
     trade_log: pd.DataFrame,
+    net_of_costs: bool = False,
 ) -> tuple[list[float], list[float], list[float], list[float]]:
     """
-    Buy → sell のペアから各トレードの損益とリターン率を抽出する。
+    Buy → sell 系、short → short_cover 系のペア（ログの順）から各トレードの損益とリターン率を抽出する。
+
+    Args:
+        trade_log: 取引ログ
+        net_of_costs: True なら手数料とスリッページを引いた後の損益にする（cash と
+            cash_gross の差から1取引のコストを出す）。cash_gross 列が無いときは値段の差のまま。
 
     Returns:
         (wins, losses, win_returns, loss_returns):
@@ -207,7 +243,12 @@ def _extract_trade_pnl(
             win_returns: 勝ちトレードのリターン率リスト
             loss_returns: 負けトレードのリターン率リスト（絶対値）
     """
+    if net_of_costs:
+        trade_log = _with_cost_before(trade_log)
+    use_net = net_of_costs and _COST_BEFORE_COLUMN in trade_log.columns
+
     buys: list[dict[str, Any]] = []
+    shorts: list[dict[str, Any]] = []
     wins: list[float] = []
     losses: list[float] = []
     win_returns: list[float] = []
@@ -215,18 +256,41 @@ def _extract_trade_pnl(
 
     for _, row in trade_log.iterrows():
         action = row.get("action", "")
-        if action == "buy":
-            buys.append({"price": row["price"], "qty": row["qty"]})
-        elif action in ("sell", "final_sell", "stop_loss", "take_profit") and buys:
-            buy = buys.pop(0)
-            pnl = (row["price"] - buy["price"]) * buy["qty"]
-            ret = (row["price"] - buy["price"]) / buy["price"] if buy["price"] > 0 else 0.0
-            if pnl >= 0:
-                wins.append(pnl)
-                win_returns.append(ret)
-            else:
-                losses.append(pnl)
-                loss_returns.append(abs(ret))
+        if action in ("buy", "short"):
+            entry = {
+                "price": row["price"],
+                "qty": row["qty"],
+                "cost_before": float(row[_COST_BEFORE_COLUMN]) if use_net else 0.0,
+            }
+            (buys if action == "buy" else shorts).append(entry)
+            continue
+        if action in _LONG_EXIT_ACTIONS and buys:
+            entry = buys.pop(0)
+            direction = 1.0
+        elif action in _SHORT_EXIT_ACTIONS and shorts:
+            entry = shorts.pop(0)
+            direction = -1.0
+        else:
+            continue
+        pnl = direction * (row["price"] - entry["price"]) * entry["qty"]
+        ret = (
+            direction * (row["price"] - entry["price"]) / entry["price"]
+            if entry["price"] > 0
+            else 0.0
+        )
+        if use_net:
+            cost = float(row["cash_gross"]) - float(row["cash"]) - entry["cost_before"]
+            if math.isfinite(cost):
+                pnl -= cost
+                notional = entry["price"] * entry["qty"]
+                if notional > 0:
+                    ret -= cost / notional
+        if pnl >= 0:
+            wins.append(pnl)
+            win_returns.append(ret)
+        else:
+            losses.append(pnl)
+            loss_returns.append(abs(ret))
 
     return wins, losses, win_returns, loss_returns
 
@@ -352,7 +416,8 @@ def compute_metrics_by_regime(
     if not isinstance(regime_series.index, pd.DatetimeIndex):
         regime_series.index = pd.to_datetime(regime_series.index)
 
-    trade_log = trade_log.copy()
+    # 行を分ける前に、各行の直前までの累計コストを付けておく（net の取引損益用・#953）
+    trade_log = _with_cost_before(trade_log).copy()
     trade_log["_date_dt"] = pd.to_datetime(trade_log["date"])
     trade_log["_regime"] = trade_log["_date_dt"].map(
         lambda d: regime_series.asof(d) if d >= regime_series.index.min() else None
