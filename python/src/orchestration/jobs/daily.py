@@ -18,7 +18,7 @@ from src.orchestration.jobs.alerting import (
     evaluate_output_invariants_stage,
     fetch_previous_run_stats,
 )
-from src.orchestration.jobs.common import _handle_stage_error
+from src.orchestration.jobs.common import _handle_stage_error, _notify_stage_failure
 from src.orchestration.jobs.drift_check import run_daily_drift_check
 from src.orchestration.jobs.unavailable_gates import (
     _raise_if_fetch_mostly_unavailable,
@@ -90,9 +90,12 @@ def run_daily_pipeline():
             send_accuracy_summary(summary, horizon=1)
             logger.info("[2/6] 予測精度チェック完了 (production)")
         except Exception as e:
+            # 採点は 3 の保存の後にやり直せないため知らせる。投げ直すと 3 の前に
+            # やり直しが入り #904 の飛ばしと絡むため、知らせだけにする（#1006）
             _handle_stage_error(
                 PipelineStage.NON_CRITICAL, "[2/6] 予測精度チェック (production)", e
             )
+            _notify_stage_failure("[2/6] 予測精度チェック (production)", e)
 
         try:
             run_accuracy_check(
