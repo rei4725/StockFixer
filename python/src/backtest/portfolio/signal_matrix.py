@@ -29,7 +29,7 @@ def _build_signal_matrix(
     学習データは train_ratio で分割し、テスト期間の予測のみ収録する。
     """
     from src.backtest.pipeline import _ensemble_predict, load_features
-    from src.backtest.pipeline.features import SIMULATION_ONLY_COLUMNS
+    from src.backtest.pipeline.features import NON_FEATURE_COLUMNS
 
     score_dict: dict[str, pd.Series] = {}
     close_dict: dict[str, pd.Series] = {}
@@ -51,8 +51,8 @@ def _build_signal_matrix(
             train_df = df.iloc[:split]
             test_df = df.iloc[split:]
 
-            exclude = {"y", "market", "symbol", "market_encoded", "Close", "close"}
-            exclude.update(SIMULATION_ONLY_COLUMNS)
+            exclude = {"y", "market", "symbol", "market_encoded"}
+            exclude.update(NON_FEATURE_COLUMNS)
             feature_cols = [c for c in df.columns if c not in exclude]
 
             X_train = train_df[feature_cols].dropna()
