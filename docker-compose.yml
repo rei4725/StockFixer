@@ -118,6 +118,10 @@ services:
       - ./python/results:/app/results
       - ./Logs:/app/logs
       - factory_sandbox:/app/sandbox_share
+    networks:
+      - default
+      # 口座アプリ（rei4725/StockFixer-account）の compose が作る共有ネットワーク。口座アプリを先に起こすこと
+      - stockfixer-account
     deploy:
       resources:
         limits:
@@ -143,3 +147,7 @@ volumes:
   ollama_data:
   postgres_data:
   postgres_test_data:
+
+networks:
+  stockfixer-account:
+    external: true
