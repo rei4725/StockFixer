@@ -524,19 +524,115 @@ class TestRunWeeklyOptimization(unittest.TestCase):
         from src.orchestration.scheduler import run_weekly_optimization
 
         mock_symbols.return_value = []
-        mock_run.return_value = [{"symbol": "7203", "status": "ok"}]
+        mock_run.return_value = [{"symbol": "7203", "status": "success"}]
         run_weekly_optimization()
-        mock_send.assert_called_once()
+        mock_send.assert_called_once_with(success=1, failed=0, skipped=0)
 
     @patch("src.reporting.discord.discord_utils.send_optimization_completion")
     @patch("src.backtest.optimizer.run_optimize_batch")
     @patch("src.watchlist.batch_runner.load_target_symbols")
-    def test_exception_does_not_propagate(self, mock_symbols, mock_run, mock_send):
+    def test_exception_propagates_without_completion_notice(
+        self, mock_symbols, mock_run, mock_send
+    ):
+        """全体が落ちた回は例外を外に出し、成功の題と保存しましたの知らせを送らない（#973）"""
         from src.orchestration.scheduler import run_weekly_optimization
 
         mock_symbols.return_value = []
         mock_run.side_effect = Exception("最適化エラー")
-        run_weekly_optimization()  # 例外が外に出ないこと
+        with self.assertRaisesRegex(Exception, "最適化エラー"):
+            run_weekly_optimization()
+        mock_send.assert_not_called()
+
+    @patch("src.reporting.discord.discord_utils.send_optimization_completion")
+    @patch("src.backtest.optimizer.run_optimize_batch")
+    @patch("src.watchlist.batch_runner.load_target_symbols")
+    def test_load_symbols_exception_propagates(self, mock_symbols, mock_run, mock_send):
+        """銘柄の一覧の読み込みで落ちた回も例外を外に出し、完了の知らせを送らない（#973）"""
+        from src.orchestration.scheduler import run_weekly_optimization
+
+        mock_symbols.side_effect = RuntimeError("DB に届かない")
+        with self.assertRaisesRegex(RuntimeError, "DB に届かない"):
+            run_weekly_optimization()
+        mock_run.assert_not_called()
+        mock_send.assert_not_called()
+
+    @patch("src.reporting.discord.discord_utils.send_optimization_failure")
+    @patch("src.reporting.discord.discord_utils.send_optimization_completion")
+    @patch("src.backtest.optimizer.run_optimize_batch")
+    @patch("src.watchlist.batch_runner.load_target_symbols")
+    def test_exception_sends_failure_notice(self, mock_symbols, mock_run, mock_send, mock_failure):
+        """全体が落ちた回は失敗の知らせを送る（#973）"""
+        from src.orchestration.scheduler import run_weekly_optimization
+
+        mock_symbols.return_value = []
+        mock_run.side_effect = Exception("最適化エラー")
+        with self.assertRaises(Exception):
+            run_weekly_optimization()
+        mock_failure.assert_called_once()
+        self.assertIn("最適化エラー", mock_failure.call_args.args[0])
+        mock_send.assert_not_called()
+
+    @patch("src.reporting.discord.discord_utils.send_optimization_completion")
+    @patch("src.backtest.optimizer.run_optimize_batch")
+    @patch("src.watchlist.batch_runner.load_target_symbols")
+    def test_skipped_is_not_counted_as_success(self, mock_symbols, mock_run, mock_send):
+        """status が skipped の銘柄は成功に数えず、別に数える（#973）"""
+        from src.orchestration.scheduler import run_weekly_optimization
+
+        mock_symbols.return_value = []
+        mock_run.return_value = [
+            {"symbol": "7203", "status": "success"},
+            {"symbol": "6758", "status": "skipped"},
+            {"symbol": "9984", "status": "error", "error": "x"},
+        ]
+        run_weekly_optimization()
+        mock_send.assert_called_once_with(success=1, failed=1, skipped=1)
+
+
+@patch("src.orchestration.scheduler_queue.ping_heartbeat")
+@patch("src.reporting.discord.discord_utils.send_optimization_failure")
+@patch("src.reporting.discord.discord_utils.send_optimization_completion")
+@patch("src.backtest.optimizer.run_optimize_batch")
+@patch("src.watchlist.batch_runner.load_target_symbols")
+def test_weekly_optimization_failure_recorded_as_error_by_run_job(
+    mock_symbols, mock_run, mock_send, mock_failure, mock_ping, tmp_path
+):
+    """週の最適化が丸ごと落ちた回を、run_job が error と記録する（#973）"""
+    import json
+    from datetime import datetime
+
+    from src.orchestration.scheduler import run_weekly_optimization
+    from src.orchestration.scheduler_queue import SchedulerQueueManager
+
+    mock_symbols.return_value = []
+    mock_run.side_effect = Exception("最適化エラー")
+    state_path = tmp_path / "state.json"
+    config = {
+        "weekly_optimization": {
+            "func": run_weekly_optimization,
+            "period": "weekly",
+            "day_of_week": "wed",
+            "hour": 1,
+            "minute": 0,
+            "max_retries": 0,
+            "retry_base_wait_seconds": 0.0,
+            "max_executions_per_period": 1,
+        }
+    }
+    manager = SchedulerQueueManager(config, state_file_path=str(state_path))
+    run_now = datetime(2026, 10, 21, 1, 0, tzinfo=manager.tz)
+    manager.now = lambda: run_now  # type: ignore[method-assign]
+
+    with pytest.raises(Exception, match="最適化エラー"):
+        manager.run_job("weekly_optimization", reason="test")
+
+    with open(state_path, encoding="utf-8") as f:
+        events = json.load(f)["events"]
+    finished = [e for e in events if e["status"] != "started"]
+    assert [e["status"] for e in finished] == ["error"]
+    assert finished[0]["error"] == "最適化エラー"
+    mock_send.assert_not_called()
+    mock_ping.assert_called_once_with("weekly_optimization", success=False)
 
 
 class TestRunDailyPaperTradeReport(unittest.TestCase):
