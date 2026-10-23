@@ -71,14 +71,15 @@ def _build_execution(
 def _build_market_executions(
     market: Optional[str], fee_rate: float, slippage: Optional[float]
 ) -> Optional[dict[str, ExecutionModel]]:
-    """全マーケット混在で slippage 未指定のとき、市場別の ExecutionModel を返す（#847）。
+    """全マーケット混在のとき、市場別の ExecutionModel を返す（#847・#965）。
 
-    銘柄の鍵の市場（jp_・us_）ごとに既定スリッページを当てるために使う。
-    market を明示したとき、または slippage を明示したときは None（全銘柄に同じコスト）。
+    銘柄の鍵の市場（jp_・us_）ごとに既定スリッページと単元株数を当てるために使う。
+    slippage を明示したときは全市場にその率を当て、単元だけを市場別にする。
+    market を明示したときは None（全銘柄に同じコスト）。
     """
-    if market or slippage is not None:
+    if market:
         return None
-    return {m: ExecutionModel(TradingCosts.for_market(m, fee_rate, None)) for m in ("jp", "us")}
+    return {m: ExecutionModel(TradingCosts.for_market(m, fee_rate, slippage)) for m in ("jp", "us")}
 
 
 def run_portfolio_backtest(

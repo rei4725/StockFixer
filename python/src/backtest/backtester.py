@@ -3,7 +3,7 @@ from typing import Any, Callable, Optional
 import pandas as pd
 
 from src.backtest.data_port import get_backtest_data_port
-from src.backtest.execution import ExecutionModel, TradingCosts
+from src.backtest.execution import ExecutionModel, TradingCosts, lot_size_for
 from src.backtest.metrics import compute_cost_comparison_metrics
 from src.backtest.position_sizing import calc_position_details
 from src.backtest.task import BacktestTask, ReturnRegressionTask
@@ -60,7 +60,7 @@ class Backtester:
         self.slippage_fn = slippage_fn  # R-210: 動的スリッページ関数 (qty, price, avg_vol) -> rate
         # 手数料・スリッページの演算はすべて ExecutionModel に委譲する（Phase 1 / PR-1）。
         self.execution = ExecutionModel(
-            TradingCosts(fee_rate=fee_rate, slippage_rate=slippage),
+            TradingCosts(fee_rate=fee_rate, slippage_rate=slippage, lot_size=lot_size_for(market)),
             slippage_fn=slippage_fn,
         )
         # #493: シグナル約定の実行ラグ（バー数）。1=翌バー約定（引け後シグナル→翌寄り）。
@@ -171,7 +171,7 @@ class Backtester:
             avg_vol = pd.Series(0.0, index=df.index)
         # #493: 実行ラグ。シグナル/確信度を execution_lag バー遅延させ、翌バーで約定する。
         # 約定価格は翌バー始値(Open)。Open 列が無ければ Close にフォールバック。
-        # SL/TP・mark-to-market は従来どおり当バー Close 基準（判定・約定とも Close で整合）。
+        # SL/TP の判定と mark-to-market は当バー Close 基準。SL/TP の約定は翌バー始値（#964）。
         # 最終バーまでに約定先バーが無いシグナルは shift により自然に破棄される。
         exec_col = "Open" if (self.execution_lag > 0 and "Open" in df.columns) else close_col
         if self.execution_lag > 0:
@@ -184,7 +184,7 @@ class Backtester:
             exec_pred = pred
         # シグナル約定（execution_lag > 0 なら翌バー始値）のコスト・サイジングには、
         # 約定時点で既知の前バーまでの平均出来高を使う（当バー出来高の先読みを防ぐ）。
-        # 先頭バーは前バーが無いため 0（フラットのみ適用）。SL/TP は当バー Close 約定なので avg_vol のまま。
+        # 先頭バーは前バーが無いため 0（フラットのみ適用）。SL/TP の翌バー決済も同じ exec_avg_vol を使う。
         if self.execution_lag > 0:
             exec_avg_vol = avg_vol.shift(1).fillna(0.0)
         else:
@@ -201,6 +201,11 @@ class Backtester:
         elif "atr" in df.columns:
             exec_atr = df["atr"]
 
+        # #964: execution_lag > 0 では SL/TP を当バー Close で判定し、決済は翌バーの
+        # exec_price（始値、無ければ終値）と exec_vol で行う。判定済みの決済の種類を持ち越す。
+        # 最終バーで判定したものは約定先バーが無いため、最終日の強制決済に任せる。
+        pending_exit: Optional[str] = None
+
         for date in df.index:
             price = df.loc[date, close_col]
             exec_price = df.loc[date, exec_col]
@@ -209,8 +214,49 @@ class Backtester:
             raw_sig = exec_signal.get(date, 0) if date in exec_signal.index else 0
             sig = 0 if pd.isna(raw_sig) else int(raw_sig)
 
+            # 前バーで判定した SL/TP の決済（この足のシグナルは評価しない＝二重に建てない・売らない）
+            if pending_exit is not None and position > 0:
+                proceeds = self.execution.sell_proceeds(position, exec_price, exec_vol)
+                proceeds_gross = position * exec_price
+                cash += proceeds
+                cash_gross += proceeds_gross
+                trade_log.append(
+                    {
+                        "date": date,
+                        "action": pending_exit,
+                        "price": exec_price,
+                        "qty": position,
+                        "cash": cash,
+                        "cash_gross": cash_gross,
+                    }
+                )
+                position = 0
+                position_price = 0.0
+                pending_exit = None
+                equity_records.append(
+                    self._mark_to_market(
+                        date, cash, cash_gross, position, price, short_position, short_price
+                    )
+                )
+                continue
+            pending_exit = None
+
             # ストップロス / テイクプロフィット判定（シグナルより先に評価）
-            if position > 0 and position_price > 0:
+            if self.execution_lag > 0 and position > 0 and position_price > 0:
+                change_from_entry = (price - position_price) / position_price
+                if self.stop_loss_pct is not None and change_from_entry <= -self.stop_loss_pct:
+                    pending_exit = "stop_loss"
+                elif self.take_profit_pct is not None and change_from_entry >= self.take_profit_pct:
+                    pending_exit = "take_profit"
+                if pending_exit is not None:
+                    # 判定の足ではまだ保有している（終値で時価評価し、決済は翌バー）
+                    equity_records.append(
+                        self._mark_to_market(
+                            date, cash, cash_gross, position, price, short_position, short_price
+                        )
+                    )
+                    continue
+            elif position > 0 and position_price > 0:
                 change_from_entry = (price - position_price) / position_price
 
                 if self.stop_loss_pct is not None and change_from_entry <= -self.stop_loss_pct:

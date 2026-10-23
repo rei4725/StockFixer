@@ -156,6 +156,78 @@ class TestRunHorizonExitCheck(unittest.TestCase):
                 [order_id, symbol, int(OrderSide.BUY), 100, 10, "filled", target_exit_date],
             )
 
+    def _insert_order(
+        self,
+        order_id: str,
+        symbol: str,
+        side: OrderSide,
+        status: str,
+        target_exit_date: str | None = None,
+        filled_at: str | None = None,
+    ) -> None:
+        with _db_connection() as con:
+            con.execute(
+                "INSERT INTO paper_orders "
+                "(order_id, symbol, side, qty, order_type, status, target_exit_date, filled_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                [order_id, symbol, int(side), 100, 10, status, target_exit_date, filled_at],
+            )
+
+    @patch(_BROKER_PATCH)
+    def test_skip_if_latest_buy_not_yet_due(self, mock_broker_cls):
+        """期限切れで売り終えた古い BUY があっても、今の保有を作った最新の
+        filled BUY が期限前なら売らない (Issue #945)。"""
+        from src.orchestration.scheduler import run_horizon_exit_check
+
+        today = date.today()
+        self._insert_order(
+            "ORD-200",
+            "8766",
+            OrderSide.BUY,
+            "filled",
+            target_exit_date=(today - timedelta(days=10)).isoformat(),
+            filled_at=f"{(today - timedelta(days=12)).isoformat()} 00:05:00",
+        )
+        self._insert_order(
+            "ORD-201",
+            "8766",
+            OrderSide.SELL,
+            "filled",
+            filled_at=f"{(today - timedelta(days=9)).isoformat()} 00:05:00",
+        )
+        self._insert_order(
+            "ORD-202",
+            "8766",
+            OrderSide.BUY,
+            "filled",
+            target_exit_date=(today + timedelta(days=3)).isoformat(),
+            filled_at=f"{(today - timedelta(days=1)).isoformat()} 00:05:00",
+        )
+
+        broker = MagicMock()
+        broker.get_positions.return_value = [{"symbol": "8766", "qty": 100}]
+        mock_broker_cls.return_value = broker
+
+        run_horizon_exit_check()
+
+        broker.send_order.assert_not_called()
+
+    @patch(_BROKER_PATCH)
+    def test_skip_if_pending_sell_exists(self, mock_broker_cls):
+        """同じ銘柄に約定前の SELL があるときは売りを重ねない (Issue #945)。"""
+        from src.orchestration.scheduler import run_horizon_exit_check
+
+        self._insert_overdue_order("ORD-210", "8766")
+        self._insert_order("ORD-211", "8766", OrderSide.SELL, "pending")
+
+        broker = MagicMock()
+        broker.get_positions.return_value = [{"symbol": "8766", "qty": 100}]
+        mock_broker_cls.return_value = broker
+
+        run_horizon_exit_check()
+
+        broker.send_order.assert_not_called()
+
     @patch(_BROKER_PATCH)
     def test_exits_overdue_positions(self, mock_broker_cls):
         """実 Postgres 上で target_exit_date 超過の注文が SELECT DISTINCT symbol で
