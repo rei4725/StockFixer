@@ -285,5 +285,94 @@ class TestWalkForwardRun(unittest.TestCase):
         self.assertIsInstance(result, pd.DataFrame)
 
 
+class TestRunFoldFeatureColumns(unittest.TestCase):
+    """_run_fold が当日の生の終値を特徴量に入れないことのテスト (Issue #979)"""
+
+    def _make_fold_df(self, n=40):
+        dates = pd.date_range("2024-01-01", periods=n, freq="B")
+        rng = np.random.default_rng(0)
+        close = 100 + rng.standard_normal(n).cumsum()
+        return pd.DataFrame(
+            {
+                "f1": rng.standard_normal(n),
+                "Close_lag1": np.roll(close, 1),
+                "Close": close,
+                "close": close,
+                "Open": close + 0.5,
+                "Volume": np.full(n, 1000.0),
+                "target_return": rng.standard_normal(n) * 0.01,
+            },
+            index=dates,
+        )
+
+    def _run_fold(self, ensemble=False):
+        from src.backtest.task import ReturnRegressionTask
+
+        model_manager = MagicMock()
+        model = MagicMock()
+        model.predict.side_effect = lambda X: np.zeros(len(X))
+        model_manager.get_model.return_value = model
+        v = WalkForwardValidator(
+            market="us",
+            symbol="AAPL",
+            model_manager=model_manager,
+            signal_generator=MagicMock(),
+            ensemble=ensemble,
+        )
+        df = self._make_fold_df()
+        train_df, val_df = df.iloc[:30], df.iloc[30:]
+        task = ReturnRegressionTask()
+        task_label = task.label_col
+        train_df = train_df.rename(columns={"target_return": task_label})
+        val_df = val_df.rename(columns={"target_return": task_label})
+
+        with patch("src.backtest.backtester.Backtester") as mock_bt_cls:
+            mock_bt_cls.return_value.simulate_trading.return_value = (
+                pd.DataFrame(),
+                {"total_return": 0.0},
+            )
+            if ensemble:
+                with patch(
+                    "src.backtest.pipeline._ensemble_predict",
+                    side_effect=lambda mm, X_tr, y_tr, X_v, name: pd.Series(
+                        np.zeros(len(X_v)), index=X_v.index
+                    ),
+                ) as mock_ens:
+                    v._run_fold(train_df, val_df, "StockXGBoostModel", None, task)
+                return mock_ens, mock_bt_cls, val_df
+            v._run_fold(train_df, val_df, "StockXGBoostModel", None, task)
+        return model, mock_bt_cls, val_df
+
+    def test_train_and_predict_exclude_close(self):
+        """モデルの train・predict に渡る列に Close・close が入らないこと"""
+        model, _, _ = self._run_fold()
+        train_cols = list(model.train.call_args.args[0].columns)
+        predict_cols = list(model.predict.call_args.args[0].columns)
+        for cols in (train_cols, predict_cols):
+            self.assertNotIn("Close", cols)
+            self.assertNotIn("close", cols)
+            self.assertNotIn("Open", cols)
+            self.assertNotIn("Volume", cols)
+            self.assertIn("f1", cols)
+            self.assertIn("Close_lag1", cols)
+
+    def test_ensemble_excludes_close(self):
+        """ensemble の道でも学習と予測に Close・close が入らないこと"""
+        mock_ens, _, _ = self._run_fold(ensemble=True)
+        _, X_train, _, X_val, _ = mock_ens.call_args.args
+        for cols in (list(X_train.columns), list(X_val.columns)):
+            self.assertNotIn("Close", cols)
+            self.assertNotIn("close", cols)
+
+    def test_simulation_keeps_close(self):
+        """simulate_trading に渡す val_df には Close が元の値のまま残ること"""
+        _, mock_bt_cls, val_df = self._run_fold()
+        sim_df = mock_bt_cls.return_value.simulate_trading.call_args.args[0]
+        self.assertIn("Close", sim_df.columns)
+        self.assertIn("Open", sim_df.columns)
+        pd.testing.assert_series_equal(sim_df["Close"], val_df["Close"])
+        pd.testing.assert_series_equal(sim_df["Open"], val_df["Open"])
+
+
 if __name__ == "__main__":
     unittest.main()
