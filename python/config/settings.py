@@ -117,17 +117,19 @@ class Settings(BaseSettings):
     FACTORY_CLAUDE_RULEGEN_COUNT: int = Field(default=3)
     # ゲート判定への修復リトライは行わない。静的検査違反・実行時例外・応答JSON不正のみ対象。
     FACTORY_CLAUDE_RULEGEN_MAX_REPAIR_ATTEMPTS: int = Field(default=2)
-    # サンドボックス実行設定（docker run --network none で使用）
-    FACTORY_SANDBOX_IMAGE: str = Field(default="")
+    # サンドボックス実行設定。イメージ・メモリ・CPU は sandbox-runner 側の環境変数で決まる。
+    # TIMEOUT は本体の HTTP クライアントの待ち時間にだけ使う（実際の制限は runner の
+    # SANDBOX_TIMEOUT_SECONDS）。
     FACTORY_SANDBOX_TIMEOUT_SECONDS: int = Field(default=120)
-    FACTORY_SANDBOX_MEMORY_LIMIT: str = Field(default="1g")
-    FACTORY_SANDBOX_CPU_LIMIT: str = Field(default="1")
     # 本体がコンテナの中からホストの Docker でサンドボックスを起動する構成では、本体の
     # /tmp のパスをホストの Docker は解決できない（#757）。本体とサンドボックスの双方が
     # 同じ実体を見られる名前付きボリュームを経由させる。両方未設定ならホスト実行とみなし
     # 一時ディレクトリを bind mount する（パスが一致するため）。
     FACTORY_SANDBOX_SHARE_DIR: str = Field(default="")  # 本体内のマウント先
     FACTORY_SANDBOX_SHARE_VOLUME: str = Field(default="")  # ホストの Docker が知るボリューム名
+    FACTORY_SANDBOX_RUNNER_URL: str = Field(
+        default=""
+    )  # sandbox-runner の URL（例 http://sandbox-runner:8700）
 
     # ---------- 戦略ファクトリー自動昇格ループ: 昇格記録（orchestration/jobs/periodic.py） ----------
     # 既定無効。マージ検知ジョブはこのフラグが true になるまで一切のGitHub API呼び出しを行わない。
@@ -289,12 +291,10 @@ FACTORY_CLAUDE_RULEGEN_COUNT: int = settings.FACTORY_CLAUDE_RULEGEN_COUNT
 FACTORY_CLAUDE_RULEGEN_MAX_REPAIR_ATTEMPTS: int = (
     settings.FACTORY_CLAUDE_RULEGEN_MAX_REPAIR_ATTEMPTS
 )
-FACTORY_SANDBOX_IMAGE: str = settings.FACTORY_SANDBOX_IMAGE
 FACTORY_SANDBOX_TIMEOUT_SECONDS: int = settings.FACTORY_SANDBOX_TIMEOUT_SECONDS
-FACTORY_SANDBOX_MEMORY_LIMIT: str = settings.FACTORY_SANDBOX_MEMORY_LIMIT
-FACTORY_SANDBOX_CPU_LIMIT: str = settings.FACTORY_SANDBOX_CPU_LIMIT
 FACTORY_SANDBOX_SHARE_DIR: str = settings.FACTORY_SANDBOX_SHARE_DIR
 FACTORY_SANDBOX_SHARE_VOLUME: str = settings.FACTORY_SANDBOX_SHARE_VOLUME
+FACTORY_SANDBOX_RUNNER_URL: str = settings.FACTORY_SANDBOX_RUNNER_URL
 
 GITHUB_TOKEN: str = settings.GITHUB_TOKEN
 GITHUB_REPO: str = settings.GITHUB_REPO

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -43,22 +42,16 @@ _HYPOTHESIS = FactoryHypothesis(
 )
 
 
-def _run_capturing_command(monkeypatch, stdout: str, data_dir: str, windows: str):
-    """docker run を起動せず、組み立てたコマンドと実行時点のソースファイルの有無を捕まえる。"""
+def _run_capturing_job(monkeypatch, reply: dict):
+    """runner に送ったジョブを捕まえ、決めた答えを返す。"""
     captured: dict = {}
 
-    def _fake_run(cmd, **kwargs):
-        captured["cmd"] = cmd
-        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout=stdout, stderr="")
+    def _fake_post(job):
+        captured["job"] = job
+        return reply
 
-    monkeypatch.setattr(sandbox_executor.subprocess, "run", _fake_run)
-    monkeypatch.setattr(sandbox_executor, "FACTORY_SANDBOX_IMAGE", "stockfixer:test")
-    result = run_sandboxed_evaluation(_HYPOTHESIS, data_dir, windows)
-    return result, captured["cmd"]
-
-
-def _arg_after(cmd: list[str], flag: str) -> str:
-    return cmd[cmd.index(flag) + 1]
+    monkeypatch.setattr(sandbox_executor, "_post_job", _fake_post)
+    return captured
 
 
 def _ok_payload() -> str:
@@ -99,44 +92,149 @@ class TestSharedVolumeMode:
         assert os.path.commonpath([windows, str(self.share_dir)]) == str(self.share_dir)
         assert os.path.exists(os.path.join(data_dir, "TEST.parquet"))
 
-    def test_mounts_the_volume_once_and_passes_paths_inside_it(self, monkeypatch):
-        data_dir, windows = _prepare()
-        result, cmd = _run_capturing_command(monkeypatch, _ok_payload(), data_dir, windows)
-
-        assert result.kind == "gate_evaluated"
-        mounts = [cmd[i + 1] for i, a in enumerate(cmd) if a == "-v"]
-        # ホストの Docker が解決できるのはボリューム名だけ。本体内のパスを渡してはならない
-        assert mounts == ["vol_share:/sandbox_share:ro"]
-        data_rel = os.path.relpath(data_dir, self.share_dir).replace(os.sep, "/")
-        windows_rel = os.path.relpath(windows, self.share_dir).replace(os.sep, "/")
-        assert _arg_after(cmd, "--data-dir") == f"/sandbox_share/{data_rel}"
-        assert _arg_after(cmd, "--windows-file") == f"/sandbox_share/{windows_rel}"
-        source = _arg_after(cmd, "--source-file")
-        assert source.startswith("/sandbox_share/factory_sandbox_src_")
-        assert source.endswith("/candidate.py")
-
     def test_rejects_inputs_outside_the_shared_directory(self, monkeypatch, tmp_path):
         outside = tmp_path / "outside"
         outside.mkdir()
+        captured = _run_capturing_job(monkeypatch, {"returncode": 0, "stdout": "", "stderr": ""})
         with pytest.raises(RuntimeError, match="共有ディレクトリの外"):
-            _run_capturing_command(
-                monkeypatch, _ok_payload(), str(outside), str(outside / "w.json")
+            run_sandboxed_evaluation(_HYPOTHESIS, str(outside), str(outside / "w.json"))
+        assert "job" not in captured
+
+
+class TestRunnerJob:
+    @pytest.fixture(autouse=True)
+    def _share(self, monkeypatch, tmp_path):
+        self.share_dir = tmp_path / "share"
+        self.share_dir.mkdir()
+        monkeypatch.setattr(sandbox_executor, "FACTORY_SANDBOX_SHARE_DIR", str(self.share_dir))
+        monkeypatch.setattr(sandbox_executor, "FACTORY_SANDBOX_SHARE_VOLUME", "vol_share")
+
+    def test_sends_paths_relative_to_the_share(self, monkeypatch):
+        data_dir, windows = prepare_sandbox_data({}, [])
+        stdout = json.dumps({"status": "error", "traceback": "boom"}) + "\n"
+        captured = _run_capturing_job(
+            monkeypatch, {"returncode": 1, "stdout": stdout, "stderr": ""}
+        )
+        result = run_sandboxed_evaluation(_HYPOTHESIS, data_dir, windows)
+        job = captured["job"]
+        assert job["source_rel"].endswith("/candidate.py") and not job["source_rel"].startswith("/")
+        assert job["data_rel"] == os.path.basename(data_dir)
+        assert job["windows_rel"] == os.path.basename(windows)
+        assert job["market"] == "us" and job["class_name"] == _HYPOTHESIS.rule_spec["class_name"]
+        assert result.kind == "repairable"
+
+    def test_ok_reply_is_evaluated(self, monkeypatch):
+        data_dir, windows = prepare_sandbox_data({}, [])
+        _run_capturing_job(monkeypatch, {"returncode": 0, "stdout": _ok_payload(), "stderr": ""})
+        result = run_sandboxed_evaluation(_HYPOTHESIS, data_dir, windows)
+        assert result.kind == "gate_evaluated"
+
+    def test_runner_timeout_is_infra_error(self, monkeypatch):
+        data_dir, windows = prepare_sandbox_data({}, [])
+        _run_capturing_job(monkeypatch, {"timeout": True})
+        result = run_sandboxed_evaluation(_HYPOTHESIS, data_dir, windows)
+        assert result.kind == "infra_error" and "タイムアウト" in result.infra_detail
+
+    def test_unreachable_runner_is_infra_error_not_repairable(self, monkeypatch):
+        data_dir, windows = prepare_sandbox_data({}, [])
+
+        def _down(job):
+            raise RuntimeError("sandbox-runner に届きません: connection refused")
+
+        monkeypatch.setattr(sandbox_executor, "_post_job", _down)
+        result = run_sandboxed_evaluation(_HYPOTHESIS, data_dir, windows)
+        assert result.kind == "infra_error" and "届きません" in result.infra_detail
+
+    def test_input_missing_is_an_environment_failure_not_repairable(self, monkeypatch):
+        data_dir, windows = prepare_sandbox_data({}, [])
+        stdout = json.dumps({"status": "input_missing", "detail": "見つからない入力: ['/x']"})
+        _run_capturing_job(monkeypatch, {"returncode": 0, "stdout": stdout, "stderr": ""})
+        result = run_sandboxed_evaluation(_HYPOTHESIS, data_dir, windows)
+        assert result.kind == "infra_error"
+        assert result.environment_broken is True
+        assert result.repair_detail is None
+
+
+class _FakeResponse:
+    def __init__(self, body: bytes):
+        self._body = body
+
+    def read(self) -> bytes:
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+class TestRunnerReplyRobustness:
+    @pytest.fixture(autouse=True)
+    def _share(self, monkeypatch, tmp_path):
+        share_dir = tmp_path / "share"
+        share_dir.mkdir()
+        monkeypatch.setattr(sandbox_executor, "FACTORY_SANDBOX_SHARE_DIR", str(share_dir))
+        monkeypatch.setattr(sandbox_executor, "FACTORY_SANDBOX_SHARE_VOLUME", "vol_share")
+        monkeypatch.setattr(sandbox_executor, "FACTORY_SANDBOX_RUNNER_URL", "http://runner:8700")
+
+    def _run(self):
+        data_dir, windows = prepare_sandbox_data({}, [])
+        return run_sandboxed_evaluation(_HYPOTHESIS, data_dir, windows)
+
+    def test_http_error_is_infra_error(self, monkeypatch):
+        import io
+        import urllib.error
+
+        def _raise(req, timeout=None):
+            raise urllib.error.HTTPError(
+                "http://runner:8700/run", 400, "Bad", {}, io.BytesIO(b'{"error": "x"}')
             )
 
+        monkeypatch.setattr(sandbox_executor.urllib.request, "urlopen", _raise)
+        result = self._run()
+        assert result.kind == "infra_error" and "400" in result.infra_detail
 
-class TestBindMountMode:
-    def test_host_run_binds_each_input(self, monkeypatch, tmp_path):
-        """共有設定が無い（ホストで直接実行）なら、パスが一致するため個別に bind mount する。"""
-        monkeypatch.setattr(sandbox_executor, "FACTORY_SANDBOX_SHARE_DIR", "")
-        monkeypatch.setattr(sandbox_executor, "FACTORY_SANDBOX_SHARE_VOLUME", "")
-        data_dir, windows = str(tmp_path / "data"), str(tmp_path / "w.json")
+    def test_url_error_is_infra_error(self, monkeypatch):
+        import urllib.error
 
-        _, cmd = _run_capturing_command(monkeypatch, _ok_payload(), data_dir, windows)
+        def _raise(req, timeout=None):
+            raise urllib.error.URLError("refused")
 
-        mounts = [cmd[i + 1] for i, a in enumerate(cmd) if a == "-v"]
-        assert f"{data_dir}:/sandbox/data:ro" in mounts
-        assert f"{windows}:/sandbox/windows.json:ro" in mounts
-        assert _arg_after(cmd, "--source-file") == "/sandbox/src/candidate.py"
+        monkeypatch.setattr(sandbox_executor.urllib.request, "urlopen", _raise)
+        assert self._run().kind == "infra_error"
+
+    def test_non_json_200_is_infra_error(self, monkeypatch):
+        monkeypatch.setattr(
+            sandbox_executor.urllib.request,
+            "urlopen",
+            lambda req, timeout=None: _FakeResponse(b"<html>oops</html>"),
+        )
+        result = self._run()
+        assert result.kind == "infra_error" and result.infra_detail
+
+    @pytest.mark.parametrize("body", [b"{}", b'{"returncode": 0}', b"[1]", b'"x"'])
+    def test_reply_missing_keys_is_infra_error(self, monkeypatch, body):
+        monkeypatch.setattr(
+            sandbox_executor.urllib.request,
+            "urlopen",
+            lambda req, timeout=None: _FakeResponse(body),
+        )
+        result = self._run()
+        assert result.kind == "infra_error" and result.infra_detail
+
+
+def test_post_job_requires_runner_url(monkeypatch):
+    monkeypatch.setattr(sandbox_executor, "FACTORY_SANDBOX_RUNNER_URL", "")
+    with pytest.raises(RuntimeError, match="FACTORY_SANDBOX_RUNNER_URL"):
+        sandbox_executor._post_job({})
+
+
+def test_share_is_required(monkeypatch):
+    monkeypatch.setattr(sandbox_executor, "FACTORY_SANDBOX_SHARE_DIR", "")
+    monkeypatch.setattr(sandbox_executor, "FACTORY_SANDBOX_SHARE_VOLUME", "")
+    with pytest.raises(RuntimeError, match="共有ボリューム方式だけ"):
+        _prepare()
 
 
 @pytest.mark.parametrize(
@@ -148,18 +246,6 @@ def test_half_configured_share_is_rejected(monkeypatch, share_dir, volume):
     monkeypatch.setattr(sandbox_executor, "FACTORY_SANDBOX_SHARE_VOLUME", volume)
     with pytest.raises(RuntimeError, match="両方"):
         _prepare()
-
-
-def test_input_missing_is_an_environment_failure_not_repairable(monkeypatch, tmp_path):
-    monkeypatch.setattr(sandbox_executor, "FACTORY_SANDBOX_SHARE_DIR", "")
-    monkeypatch.setattr(sandbox_executor, "FACTORY_SANDBOX_SHARE_VOLUME", "")
-    stdout = json.dumps({"status": "input_missing", "detail": "見つからない入力: ['/x']"})
-
-    result, _ = _run_capturing_command(monkeypatch, stdout, str(tmp_path), str(tmp_path / "w"))
-
-    assert result.kind == "infra_error"
-    assert result.environment_broken is True
-    assert result.repair_detail is None
 
 
 class TestGeneratorStopsOnBrokenEnvironment:

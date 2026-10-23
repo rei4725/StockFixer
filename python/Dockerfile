@@ -42,17 +42,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certifi
     && rm -rf /var/lib/apt/lists/*
 ENV PATH="/root/.local/bin:${PATH}"
 
-# Docker CLI（静的バイナリ、サンドボックス実行の docker run に使用）
-# docker.sock をマウントして兄弟コンテナを起動する Docker-outside-of-Docker 構成。
-# daemon 自体は不要なため CLI のみをダウンロードする。
-# バージョンは trivy の gobinary スキャン対象になるため、Go 標準ライブラリの
-# 修正版（go1.26.9 / go1.27.2 以上）でビルドされたものを選ぶこと。
-# 29.9.0 は go1.26.9 ビルド（バイナリ埋め込み文字列で確認済み）。
-RUN curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-29.9.0.tgz -o /tmp/docker.tgz \
-    && tar xzf /tmp/docker.tgz -C /tmp \
-    && mv /tmp/docker/docker /usr/local/bin/docker \
-    && rm -rf /tmp/docker.tgz /tmp/docker
-
 # アプリケーションコードのコピー
 COPY . .
 

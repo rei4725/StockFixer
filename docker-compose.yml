@@ -61,6 +61,25 @@ services:
       retries: 5
       start_period: 10s
 
+  # docker.sock を持つのはこのサービスだけ（本体のコードから Docker を操れないようにする）
+  sandbox-runner:
+    build:
+      context: ./python
+      dockerfile: sandbox_runner/Dockerfile
+    image: stockfixer-sandbox-runner:${VERSION:-dev}
+    container_name: stockfixer-sandbox-runner
+    restart: always
+    security_opt:
+      - "no-new-privileges:true"
+    environment:
+      - SANDBOX_IMAGE=stockfixer:${VERSION:-dev}
+      - SANDBOX_SHARE_VOLUME=stockfixer_factory_sandbox
+      - SANDBOX_MEMORY=1g
+      - SANDBOX_CPUS=1
+      - SANDBOX_TIMEOUT_SECONDS=120
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
   stockfixer:
     build:
       context: ./python
@@ -77,12 +96,14 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+      sandbox-runner:
+        condition: service_started
     environment:
       - LOG_FORMAT=json
       - LOG_DIR=/app/logs
       - OLLAMA_URL=http://ollama:11434
       - DATABASE_URL=postgresql://stockfixer:${POSTGRES_PASSWORD:-stockfixer_dev}@postgres:5432/stockfixer
-      - FACTORY_SANDBOX_IMAGE=stockfixer:${VERSION:-dev}
+      - FACTORY_SANDBOX_RUNNER_URL=http://sandbox-runner:8700
       # Claude 生成ルールのサンドボックスへ入力を渡す共有ボリューム（#757）。
       # サンドボックスはホストの Docker が起動するため、本体の /tmp は見えない
       - FACTORY_SANDBOX_SHARE_DIR=/app/sandbox_share
@@ -96,7 +117,6 @@ services:
       - ./python/models:/app/models
       - ./python/results:/app/results
       - ./Logs:/app/logs
-      - /var/run/docker.sock:/var/run/docker.sock
       - factory_sandbox:/app/sandbox_share
     deploy:
       resources:
