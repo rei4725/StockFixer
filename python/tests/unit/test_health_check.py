@@ -15,19 +15,32 @@ def _write_state(tmp_path, finished_at: str) -> None:
 
 
 class TestIsSchedulerStale:
-    def test_older_than_30_minutes_is_stale(self):
-        now = datetime(2026, 10, 23, 0, 0, tzinfo=timezone.utc)
-        runs = {"daily_pipeline": (now - timedelta(minutes=31)).isoformat()}
+    def test_one_hour_after_success_is_not_stale(self):
+        """次の2時間ごとの回の前（最後の success から1時間）は stale でない（#962）"""
+        now = datetime(2026, 10, 23, 0, 30, tzinfo=timezone.utc)
+        runs = {"strategy_promotion_check": (now - timedelta(hours=1)).isoformat()}
+        assert is_scheduler_stale(runs, now=now) is False
+
+    def test_just_after_next_scheduled_run_is_not_stale(self):
+        """次の回の時刻（2時間）を少し過ぎただけでは stale にしない（補完の待ちの余裕）"""
+        now = datetime(2026, 10, 23, 0, 30, tzinfo=timezone.utc)
+        runs = {"strategy_promotion_check": (now - timedelta(hours=2, minutes=40)).isoformat()}
+        assert is_scheduler_stale(runs, now=now) is False
+
+    def test_missed_scheduled_runs_is_stale(self):
+        """2時間ごとの回を2回分過ぎても success が無ければ stale（#962）"""
+        now = datetime(2026, 10, 23, 0, 30, tzinfo=timezone.utc)
+        runs = {"strategy_promotion_check": (now - timedelta(hours=4)).isoformat()}
         assert is_scheduler_stale(runs, now=now) is True
 
-    def test_within_30_minutes_is_not_stale(self):
+    def test_within_10_minutes_is_not_stale(self):
         now = datetime(2026, 10, 23, 0, 0, tzinfo=timezone.utc)
         runs = {"daily_pipeline": (now - timedelta(minutes=10)).isoformat()}
         assert is_scheduler_stale(runs, now=now) is False
 
     def test_naive_timestamp_is_treated_as_utc(self):
         now = datetime(2026, 10, 23, 0, 0, tzinfo=timezone.utc)
-        runs = {"daily_pipeline": "2026-10-22T23:00:00"}
+        runs = {"daily_pipeline": "2026-10-22T20:00:00"}
         assert is_scheduler_stale(runs, now=now) is True
 
     def test_empty_or_unparsable_is_not_stale(self):

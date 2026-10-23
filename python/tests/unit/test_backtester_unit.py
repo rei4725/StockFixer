@@ -909,5 +909,106 @@ class TestBacktesterExecutionLag:
         assert sell["price"] == 110.0
 
 
+class TestBacktesterSlTpNextBarFill:
+    """#964: execution_lag > 0 の SL/TP は当バー Close で判定し、翌バー始値で決済する"""
+
+    _IDX = pd.date_range("2024-01-01", periods=5, freq="B")
+
+    def _bt(self, **kwargs):
+        params = dict(
+            model_manager=MagicMock(),
+            signal_generator=MagicMock(),
+            data_loader=MagicMock(),
+            start_date=None,
+            end_date=None,
+            market="jp",
+            symbol="7203",
+            initial_cash=1_000_000,
+            fee_rate=0.0,
+            execution_lag=1,
+        )
+        params.update(kwargs)
+        return Backtester(**params)
+
+    def _sl_df(self):
+        # bar1 Open=100 で買い → bar2 Close=94 で -6%（SL 5% 割れ）→ bar3 Open=90 は窓開けの下げ
+        return pd.DataFrame(
+            {
+                "Open": [100.0, 100.0, 99.0, 90.0, 91.0],
+                "Close": [100.0, 100.0, 94.0, 91.0, 92.0],
+            },
+            index=self._IDX,
+        )
+
+    def test_stop_loss_filled_at_next_open(self):
+        signal = pd.Series([1, 0, 0, 0, 0], index=self._IDX)
+        result_df, metrics = self._bt(stop_loss_pct=0.05).simulate_trading(self._sl_df(), signal)
+
+        buy = result_df[result_df["action"] == "buy"].iloc[0]
+        sl = result_df[result_df["action"] == "stop_loss"].iloc[0]
+        assert sl["date"] == self._IDX[3]
+        assert sl["price"] == 90.0
+        # 判定した足の終値 94 で売った場合より損が大きい
+        loss = (sl["price"] - buy["price"]) * sl["qty"]
+        loss_at_close = (94.0 - buy["price"]) * sl["qty"]
+        assert loss < loss_at_close
+        assert "final_sell" not in result_df["action"].values
+
+    def test_take_profit_filled_at_next_open(self):
+        # bar2 Close=112 で +12%（TP 10%）→ bar3 Open=110 で決済
+        df = pd.DataFrame(
+            {
+                "Open": [100.0, 100.0, 109.0, 110.0, 111.0],
+                "Close": [100.0, 100.0, 112.0, 111.0, 112.0],
+            },
+            index=self._IDX,
+        )
+        signal = pd.Series([1, 0, 0, 0, 0], index=self._IDX)
+        result_df, _ = self._bt(take_profit_pct=0.10).simulate_trading(df, signal)
+
+        buy = result_df[result_df["action"] == "buy"].iloc[0]
+        tp = result_df[result_df["action"] == "take_profit"].iloc[0]
+        assert tp["date"] == self._IDX[3]
+        assert tp["price"] == 110.0
+        profit = (tp["price"] - buy["price"]) * tp["qty"]
+        profit_at_close = (112.0 - buy["price"]) * tp["qty"]
+        assert profit < profit_at_close
+
+    def test_buy_signal_on_exit_bar_does_not_reenter(self):
+        # 判定の足 bar2 の買いシグナルは bar3 に約定する足で、SL の決済と重なる
+        signal = pd.Series([1, 0, 1, 0, 0], index=self._IDX)
+        result_df, _ = self._bt(stop_loss_pct=0.05).simulate_trading(self._sl_df(), signal)
+
+        actions = list(result_df["action"])
+        assert actions.count("buy") == 1
+        assert actions.count("stop_loss") == 1
+        assert "final_sell" not in actions
+
+    def test_sell_signal_on_exit_bar_does_not_double_sell(self):
+        signal = pd.Series([1, 0, -1, 0, 0], index=self._IDX)
+        result_df, _ = self._bt(stop_loss_pct=0.05).simulate_trading(self._sl_df(), signal)
+
+        actions = list(result_df["action"])
+        assert actions.count("stop_loss") == 1
+        assert "sell" not in actions
+        assert "final_sell" not in actions
+
+    def test_trigger_on_last_bar_left_to_final_sell(self):
+        df = pd.DataFrame(
+            {
+                "Open": [100.0, 100.0, 99.0, 98.0, 97.0],
+                "Close": [100.0, 100.0, 99.0, 98.0, 94.0],
+            },
+            index=self._IDX,
+        )
+        signal = pd.Series([1, 0, 0, 0, 0], index=self._IDX)
+        result_df, _ = self._bt(stop_loss_pct=0.05).simulate_trading(df, signal)
+
+        actions = list(result_df["action"])
+        assert "stop_loss" not in actions
+        final = result_df[result_df["action"] == "final_sell"].iloc[0]
+        assert final["price"] == 94.0
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
