@@ -20,6 +20,7 @@ from src.backtest.metrics.core import (  # noqa: F401
     compute_cost_comparison_metrics,
     compute_metrics,
     compute_metrics_by_regime,
+    trade_pnl_sequence,
 )
 from src.backtest.metrics.overfitting import (  # noqa: F401
     _sharpe_by_column,
@@ -44,6 +45,7 @@ __all__ = [
     "compute_metrics",
     "compute_cost_comparison_metrics",
     "compute_metrics_by_regime",
+    "trade_pnl_sequence",
     "_empty_metrics",
     "_extract_trade_pnl",
     "_sharpe_per_trade",
