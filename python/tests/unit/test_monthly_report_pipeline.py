@@ -23,6 +23,7 @@ from src.reporting.monthly import (
     _load_monthly_kpis,
     _mean_metric,
     run_monthly_report,
+    save_monthly_report_to_file,
 )
 
 # ---------------------------------------------------------------------------
@@ -182,6 +183,11 @@ class TestComputeAvgSlippage(unittest.TestCase):
         self.assertIsNone(kpi.avg_slippage)
         self.assertEqual(kpi.diff_summary, _EMPTY_DIFF)
 
+    def test_zero_tracked_count_means_avg_slippage_is_none(self):
+        """追跡件数が0なら、アダプタが補った 0.0 を計測値として扱わず None にする。"""
+        kpi = _kpis(dict(_EMPTY_DIFF))
+        self.assertIsNone(kpi.avg_slippage)
+
 
 # ---------------------------------------------------------------------------
 # _load_monthly_kpis（入口がポートから材料を取得する）
@@ -340,6 +346,63 @@ class TestRunMonthlyReport(unittest.TestCase):
         expected_month = datetime.now().strftime("%Y-%m")
         summary = run_monthly_report(analytics=InMemoryAnalyticsQuery())
         self.assertEqual(summary.target_month, expected_month)
+
+
+# ---------------------------------------------------------------------------
+# save_monthly_report_to_file（paper/real 乖離の表示）
+# ---------------------------------------------------------------------------
+
+
+def _render_report(diff_summary: dict) -> str:
+    import tempfile
+
+    analytics = InMemoryAnalyticsQuery(paper_real_diff=diff_summary)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with (
+            patch("src.reporting.monthly.get_results_dir", return_value=tmpdir),
+            patch("src.reporting.monthly._load_latest_wf_summary", return_value=(None, None)),
+        ):
+            summary = run_monthly_report(target_month="2026-10", analytics=analytics)
+            path = save_monthly_report_to_file(summary, analytics=analytics)
+        return Path(path).read_text(encoding="utf-8")
+
+
+class TestSaveMonthlyReportPaperRealDiff(unittest.TestCase):
+    def test_zero_comparable_count_shows_real_side_as_na(self):
+        """比較可能件数が0なら、Real Slippage・乖離率・price 乖離を 0 と出さず N/A にする。"""
+        diff = dict(_EMPTY_DIFF, tracked_count=7, avg_paper_slippage=0.0012)
+        report = _render_report(diff)
+        self.assertIn("| 比較可能件数 | 0 |", report)
+        self.assertIn("| Real Slippage | N/A |", report)
+        self.assertIn("| 平均乖離率 | N/A |", report)
+        self.assertIn("| 平均price乖離 | N/A |", report)
+        # 追跡件数はあるので Paper 側は計測値のまま
+        self.assertIn("| Paper Slippage | 0.12% |", report)
+        self.assertIn("| Avg Slippage | 0.12% |", report)
+
+    def test_zero_tracked_count_shows_paper_slippage_as_na(self):
+        """追跡件数が0なら、Paper Slippage と KPI の Avg Slippage も N/A にする。"""
+        report = _render_report(dict(_EMPTY_DIFF))
+        self.assertIn("| Paper Slippage | N/A |", report)
+        self.assertIn("| Avg Slippage | N/A |", report)
+        self.assertIn("| Real Slippage | N/A |", report)
+
+    def test_counts_present_keep_measured_values(self):
+        diff = {
+            "tracked_count": 5,
+            "comparable_count": 3,
+            "avg_paper_slippage": 0.001,
+            "avg_real_slippage": 0.002,
+            "avg_abs_price_diff": 1.5,
+            "avg_abs_diff_ratio": 0.0003,
+            "max_abs_price_diff": 3.0,
+        }
+        report = _render_report(diff)
+        self.assertIn("| 平均price乖離 | ¥1.50 |", report)
+        self.assertIn("| 平均乖離率 | 0.0300% |", report)
+        self.assertIn("| Paper Slippage | 0.10% |", report)
+        self.assertIn("| Real Slippage | 0.20% |", report)
+        self.assertIn("| Avg Slippage | 0.10% |", report)
 
 
 if __name__ == "__main__":

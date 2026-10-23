@@ -578,8 +578,8 @@ class TestRunAccuracyCheckAdditional(unittest.TestCase):
                     "badvalue",
                     "20260416_120000",
                     "20260416_120000",
-                    "20260417_000500",
-                    "20260417_000500",
+                    "20260417_223000",
+                    "20260417_223000",
                     "20260416_120000",
                 ],
                 "avg_pred_price": [1050.0, 1050.0, None, 1050.0, 1050.0, 1050.0, 1050.0],
@@ -664,9 +664,10 @@ class TestRunAccuracyCheckAdditional(unittest.TestCase):
                 "current_price": [1000.0] * n,
             }
         )
+        # 10:30 JST の予想の基準の日は前の日の 10/15。10/16 の足はまだ無い
         mock_ohlcv.return_value = pd.DataFrame(
             {"Close": [1000.0, 1010.0]},
-            index=pd.DatetimeIndex(pd.to_datetime(["2026-10-15", "2026-10-16"]), name="Date"),
+            index=pd.DatetimeIndex(pd.to_datetime(["2026-10-14", "2026-10-15"]), name="Date"),
         )
         mock_drift.return_value = pd.DataFrame()
 
@@ -678,8 +679,8 @@ class TestRunAccuracyCheckAdditional(unittest.TestCase):
         msg = samples[0]
         self.assertIn("jp/S0", msg)
         self.assertIn("predicted_at=20261016_013000", msg)
-        self.assertIn("pred_date=2026-10-16", msg)
-        self.assertIn("足の最後=2026-10-16 00:00:00", msg)
+        self.assertIn("pred_date=2026-10-15", msg)
+        self.assertIn("足の最後=2026-10-15 00:00:00", msg)
         self.assertIn("datetime64", msg)
         # 数件に絞る（全件は出さない）
         self.assertNotIn(f"jp/S{n - 1}", msg)
@@ -791,6 +792,74 @@ class TestRunAccuracyCheckAdditional(unittest.TestCase):
         done = [m for m in cm.output if "精度チェック完了" in m]
         self.assertIn("0件 採点", done[0])
         self.assertIn("分割の比が合わない=1", done[0])
+
+    def _score_one(self, market, predicted_at, mock_load, mock_ohlcv, mock_save, mock_drift):
+        """10/20〜10/23 の足で1行を採点し、保存した行を返す"""
+        import pandas as pd
+
+        from src.prediction.prediction_pipeline import run_accuracy_check
+
+        mock_load.return_value = pd.DataFrame(
+            {
+                "market": [market],
+                "symbol": ["S"],
+                "predicted_at": [predicted_at],
+                "avg_pred_price": [1050.0],
+                "current_price": [1000.0],
+            }
+        )
+        mock_ohlcv.return_value = pd.DataFrame(
+            {"Close": [990.0, 1000.0, 1020.0, 1040.0]},
+            index=pd.DatetimeIndex(
+                pd.to_datetime(["2026-10-20", "2026-10-21", "2026-10-22", "2026-10-23"]),
+                name="Date",
+            ),
+        )
+        mock_drift.return_value = pd.DataFrame()
+
+        run_accuracy_check(horizon=1)
+
+        mock_save.assert_called_once()
+        return mock_save.call_args[0][0][0]
+
+    @patch("src.prediction.db.load_drift_summary")
+    @patch("src.prediction.db.save_prediction_accuracy")
+    @patch("src.utils.db.load_raw_ohlcv")
+    @patch("src.prediction.db.load_prediction_results")
+    def test_jp_prediction_during_session_uses_previous_close_as_base(
+        self, mock_load, mock_ohlcv, mock_save, mock_drift
+    ):
+        """日本株で 10:30 JST の補完の予想は、10/21 の終値を基準に 10/22 の終値で採点されること"""
+        row = self._score_one("jp", "20261022_013000", mock_load, mock_ohlcv, mock_save, mock_drift)
+        self.assertEqual(row["actual_price"], 1020.0)
+        self.assertAlmostEqual(row["actual_ratio"], 0.02)
+
+    @patch("src.prediction.db.load_drift_summary")
+    @patch("src.prediction.db.save_prediction_accuracy")
+    @patch("src.utils.db.load_raw_ohlcv")
+    @patch("src.prediction.db.load_prediction_results")
+    def test_us_prediction_after_utc_midnight_uses_previous_close_as_base(
+        self, mock_load, mock_ohlcv, mock_save, mock_drift
+    ):
+        """米国株で 01:30 UTC の補完の予想は、10/21 の終値を基準に 10/22 の終値で採点されること"""
+        row = self._score_one("us", "20261022_013000", mock_load, mock_ohlcv, mock_save, mock_drift)
+        self.assertEqual(row["actual_price"], 1020.0)
+        self.assertAlmostEqual(row["actual_ratio"], 0.02)
+
+    @patch("src.prediction.db.load_drift_summary")
+    @patch("src.prediction.db.save_prediction_accuracy")
+    @patch("src.utils.db.load_raw_ohlcv")
+    @patch("src.prediction.db.load_prediction_results")
+    def test_regular_run_scored_with_next_close(self, mock_load, mock_ohlcv, mock_save, mock_drift):
+        """定時の回（22:45 UTC）の予想は、日本株も米国株も 10/22 の終値で採点されること"""
+        for market in ("jp", "us"):
+            with self.subTest(market=market):
+                mock_save.reset_mock()
+                row = self._score_one(
+                    market, "20261021_224556", mock_load, mock_ohlcv, mock_save, mock_drift
+                )
+                self.assertEqual(row["actual_price"], 1020.0)
+                self.assertAlmostEqual(row["actual_ratio"], 0.02)
 
 
 if __name__ == "__main__":

@@ -506,6 +506,78 @@ class TestRunOptimizeBatch(unittest.TestCase):
         results = run_optimize_batch([], model_type="XGBoostModel")
         self.assertEqual(results, [])
 
+    @patch("src.utils.db.load_stock_features")
+    @patch("src.backtest.optimizer.batch.save_optimal_params_json")
+    @patch("src.backtest.optimizer.batch.save_optimization_results")
+    @patch("src.backtest.optimizer.batch.run_optimization")
+    def test_feature_load_failure_keeps_other_symbols(
+        self, mock_run, mock_save, mock_json, mock_load
+    ):
+        """1銘柄の特徴量が読めなくても、ほかの銘柄は保存され、その銘柄は error になること（#972）"""
+        from src.backtest.optimizer import run_optimize_batch
+        from src.backtest.pipeline import load_features
+        from src.domain.types import SymbolTask
+
+        mock_load.return_value = pd.DataFrame()
+        good_df = pd.DataFrame({"threshold": [0.02], "sharpe_ratio": [1.5]})
+
+        def _run(market, symbol, **kwargs):
+            if symbol == "7203":
+                load_features(market, symbol, "file")
+            return good_df
+
+        mock_run.side_effect = _run
+        mock_save.return_value = "/tmp/results.csv"
+        mock_json.return_value = "/tmp/params.json"
+
+        results = run_optimize_batch(
+            [SymbolTask(market="jp", symbol="7203"), SymbolTask(market="jp", symbol="9984")],
+            model_type="XGBoostModel",
+            max_workers=1,
+        )
+
+        by_symbol = {r["symbol"]: r for r in results}
+        self.assertEqual(by_symbol["7203"]["status"], "error")
+        self.assertEqual(by_symbol["9984"]["status"], "success")
+        mock_json.assert_called_once()
+        self.assertEqual(mock_json.call_args.args[2], "9984")
+
+
+class TestRunOptunaBatch(unittest.TestCase):
+    """run_optuna_batch のテスト"""
+
+    @patch("src.utils.db.load_stock_features")
+    @patch("src.backtest.optimizer.batch.save_optimal_params_json")
+    @patch("src.backtest.optimizer.batch.run_optuna_optimization")
+    def test_feature_load_failure_keeps_other_symbols(self, mock_run, mock_json, mock_load):
+        """1銘柄の特徴量が読めなくても、ほかの銘柄は保存され、その銘柄は error になること（#972）"""
+        from src.backtest.optimizer import run_optuna_batch
+        from src.backtest.pipeline import load_features
+        from src.domain.types import SymbolTask
+
+        mock_load.return_value = pd.DataFrame()
+        good_df = pd.DataFrame({"threshold": [0.02], "sharpe_ratio": [1.5]})
+
+        def _run(market, symbol, **kwargs):
+            if symbol == "7203":
+                load_features(market, symbol, "file")
+            return good_df
+
+        mock_run.side_effect = _run
+        mock_json.return_value = "/tmp/params.json"
+
+        results = run_optuna_batch(
+            [SymbolTask(market="jp", symbol="7203"), SymbolTask(market="jp", symbol="9984")],
+            n_trials=1,
+            max_workers=2,
+        )
+
+        by_symbol = {r["symbol"]: r for r in results}
+        self.assertEqual(by_symbol["7203"]["status"], "error")
+        self.assertEqual(by_symbol["9984"]["status"], "success")
+        mock_json.assert_called_once()
+        self.assertEqual(mock_json.call_args.args[2], "9984")
+
 
 # ──────────────────────────────────────────────────────────────────
 # Deflated Sharpe Ratio による選択バイアスガード（#467 / #372）
