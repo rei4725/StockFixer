@@ -50,7 +50,7 @@ def get_monthly_kpis(
     """hit_rate / avg_slippage / drift_count を集約して返す。
 
     入力はすべて入口が AnalyticsQuery から取得して渡す（自分では読みに行かない）。
-    accuracy_df は prediction_accuracy(horizon=1, limit=5000)、
+    accuracy_df は窓の中の採点をすべて含む prediction_accuracy(horizon=1) の戻り値、
     drift_df は drift_summary(horizon=1, recent_n=days) の戻り値を想定する。
 
     diff_summary の取得に失敗した場合は None を渡すこと。None のときは avg_slippage を

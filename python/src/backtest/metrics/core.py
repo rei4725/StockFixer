@@ -224,12 +224,14 @@ def _with_cost_before(trade_log: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
-def _extract_trade_pnl(
+def trade_pnl_sequence(
     trade_log: pd.DataFrame,
     net_of_costs: bool = False,
-) -> tuple[list[float], list[float], list[float], list[float]]:
+) -> list[tuple[float, float]]:
     """
-    Buy → sell 系、short → short_cover 系のペア（ログの順）から各トレードの損益とリターン率を抽出する。
+    Buy → sell 系、short → short_cover 系のペア（ログの順）から各トレードの損益とリターン率を、決済の順に返す。
+
+    連敗数のように取引の順が要る集計と、勝率などの集計で同じ損益の定義を使うための関数（#963）。
 
     Args:
         trade_log: 取引ログ
@@ -237,22 +239,17 @@ def _extract_trade_pnl(
             cash_gross の差から1取引のコストを出す）。cash_gross 列が無いときは値段の差のまま。
 
     Returns:
-        (wins, losses, win_returns, loss_returns):
-            wins: 正の損益リスト
-            losses: 負の損益リスト
-            win_returns: 勝ちトレードのリターン率リスト
-            loss_returns: 負けトレードのリターン率リスト（絶対値）
+        決済の順に並べた (損益, リターン率) のリスト
     """
+    if trade_log is None or trade_log.empty:
+        return []
     if net_of_costs:
         trade_log = _with_cost_before(trade_log)
     use_net = net_of_costs and _COST_BEFORE_COLUMN in trade_log.columns
 
     buys: list[dict[str, Any]] = []
     shorts: list[dict[str, Any]] = []
-    wins: list[float] = []
-    losses: list[float] = []
-    win_returns: list[float] = []
-    loss_returns: list[float] = []
+    trades: list[tuple[float, float]] = []
 
     for _, row in trade_log.iterrows():
         action = row.get("action", "")
@@ -285,6 +282,36 @@ def _extract_trade_pnl(
                 notional = entry["price"] * entry["qty"]
                 if notional > 0:
                     ret -= cost / notional
+        trades.append((pnl, ret))
+
+    return trades
+
+
+def _extract_trade_pnl(
+    trade_log: pd.DataFrame,
+    net_of_costs: bool = False,
+) -> tuple[list[float], list[float], list[float], list[float]]:
+    """
+    Buy → sell 系、short → short_cover 系のペア（ログの順）から各トレードの損益とリターン率を抽出する。
+
+    Args:
+        trade_log: 取引ログ
+        net_of_costs: True なら手数料とスリッページを引いた後の損益にする（cash と
+            cash_gross の差から1取引のコストを出す）。cash_gross 列が無いときは値段の差のまま。
+
+    Returns:
+        (wins, losses, win_returns, loss_returns):
+            wins: 正の損益リスト
+            losses: 負の損益リスト
+            win_returns: 勝ちトレードのリターン率リスト
+            loss_returns: 負けトレードのリターン率リスト（絶対値）
+    """
+    wins: list[float] = []
+    losses: list[float] = []
+    win_returns: list[float] = []
+    loss_returns: list[float] = []
+
+    for pnl, ret in trade_pnl_sequence(trade_log, net_of_costs=net_of_costs):
         if pnl >= 0:
             wins.append(pnl)
             win_returns.append(ret)

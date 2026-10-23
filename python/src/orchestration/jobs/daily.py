@@ -9,7 +9,10 @@ from src.orchestration.jobs.accuracy_json import (
     production_already_predicted_today,
     write_accuracy_json_without_sectors,
 )
-from src.orchestration.jobs.alert_streaks import record_loss_limit_streak
+from src.orchestration.jobs.alert_streaks import (
+    record_health_degraded_streak,
+    record_loss_limit_streak,
+)
 from src.orchestration.jobs.alerting import (
     evaluate_and_notify_alerts,
     evaluate_output_invariants_stage,
@@ -195,6 +198,7 @@ def run_daily_pipeline():
 
     # 6. 運用アラート評価（NON_CRITICAL: 条件成立時のみ Discord へ発報する）
     logger.info("[6/6] 運用アラート評価開始")
+    record_health_degraded_streak()  # NF-303-4 の連続回数（#940）
     try:
         evaluate_and_notify_alerts(prediction_violation_ids, prediction_details)
         logger.info("[6/6] 運用アラート評価完了")
