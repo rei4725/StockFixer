@@ -46,7 +46,8 @@ def _gateway():
             "current_price": 2600.0,
         },
     ]
-    g.get_equity.return_value = 900000.0
+    g.get_balance.return_value = 640000.0
+    g.get_equity.return_value = 895000.0  # 口座アプリの値（朝の値で評価）
     g.get_orders_on.return_value = [{"id": 1, "status": "filled"}]
     return g
 
@@ -66,6 +67,7 @@ def test_report_counts_rejections_by_code():
         "account_rejected": {"max_positions": 2},
         "account_error": 1,
         "not_forwarded": 1,
+        "account_deduplicated": 0,
     }
     assert [m["symbol"] for m in r["mismatched_orders"]] == ["6758", "9984", "8306"]
 
@@ -89,7 +91,13 @@ def test_positions_and_equity_diff():
         },
     ]
     # 紙の評価額 = 現金 500000 + 100*2600 + 50*3000 = 910000
-    assert r["equity"] == {"paper": 910000.0, "account": 900000.0, "diff": -10000.0}
+    # 口座アプリも紙と同じ値で評価し直す = 現金 640000 + 100*2600 = 900000
+    assert r["equity"] == {
+        "paper": 910000.0,
+        "account": 900000.0,
+        "diff": -10000.0,
+        "account_reported": 895000.0,
+    }
     assert r["account_orders"] == [{"id": 1, "status": "filled"}]
     assert r["account_error"] is None
 
@@ -114,3 +122,15 @@ def test_read_and_write(tmp_path):
     assert path.endswith("2026-10-26.json")
     with open(path, encoding="utf-8") as f:
         assert json.load(f) == {"day": "2026-10-26"}
+
+
+def test_same_day_duplicate_is_counted_as_deduplicated():
+    # 同じジョブ・銘柄・売買の2度目は、口座アプリが最初の答え（同じ order_id）を返す。注文は1回だけ
+    first = _rec("7203", {"order_id": "5", "status": "pending"})
+    again = _rec("7203", {"order_id": "5", "status": "pending"})
+    other_job = {**_rec("7203", {"order_id": "6", "status": "pending"}), "job": "rule"}
+    r = build_shadow_report(DAY, [first, again, other_job], _paper(), _gateway())
+    assert r["summary"]["account_accepted"] == 2
+    assert r["summary"]["account_deduplicated"] == 1
+    assert len(r["mismatched_orders"]) == 1
+    assert r["mismatched_orders"][0]["why"] == "deduplicated"

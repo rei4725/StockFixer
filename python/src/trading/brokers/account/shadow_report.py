@@ -38,11 +38,19 @@ def read_shadow_log(day: date, log_dir: str | None = None) -> list[dict[str, Any
 
 def _summarize(records: list[dict[str, Any]]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     rejected: Counter[str] = Counter()
-    accepted = errors = not_forwarded = 0
+    accepted = errors = not_forwarded = deduplicated = 0
     mismatched = []
+    seen: set[tuple[Any, Any, Any]] = set()
     for r in records:
         account = r.get("account") or {}
         status = account.get("status")
+        # client_order_id は「日付-ジョブ-銘柄-売買」。2度目は口座アプリが最初の答えを返し、注文は1回だけ
+        key = (r.get("job"), r.get("symbol"), r.get("side"))
+        if status != "not_forwarded" and key in seen:
+            deduplicated += 1
+            mismatched.append({**r, "why": "deduplicated"})
+            continue
+        seen.add(key)
         if status == "pending":
             accepted += 1
         elif status == "not_forwarded":
@@ -52,13 +60,14 @@ def _summarize(records: list[dict[str, Any]]) -> tuple[dict[str, Any], list[dict
                 rejected[str(account.get("reason_code"))] += 1
             else:
                 errors += 1
-            mismatched.append(r)
+            mismatched.append({**r, "why": status or "error"})
     summary = {
         "orders": len(records),
         "account_accepted": accepted,
         "account_rejected": dict(rejected),
         "account_error": errors,
         "not_forwarded": not_forwarded,
+        "account_deduplicated": deduplicated,
     }
     return summary, mismatched
 
@@ -111,17 +120,27 @@ def build_shadow_report(
     )
     try:
         account_positions = gateway.get_positions()
-        account_equity = gateway.get_equity()
+        account_cash = gateway.get_balance()
+        account_reported = gateway.get_equity()
         report["account_orders"] = gateway.get_orders_on(day)
     except Exception as e:
         logger.warning("[shadow] 口座アプリを読めない。注文の数えだけ書く: %r", e, exc_info=True)
         report["account_error"] = repr(e)[:300]
         return report
     report["positions_diff"] = _positions_diff(paper_positions, account_positions)
+    # 口座アプリは朝の値で評価している。値の取り方の違いを差に混ぜないよう、紙と同じ値で評価し直す
+    prices = {
+        str(x["symbol"]).replace(".T", ""): float(x["current_price"]) for x in paper_positions
+    }
+    account_equity = float(account_cash) + sum(
+        float(x["qty"]) * prices.get(str(x["symbol"]), float(x["current_price"]))
+        for x in account_positions
+    )
     report["equity"] = {
         "paper": round(paper_equity, 2),
         "account": round(account_equity, 2),
         "diff": round(account_equity - paper_equity, 2),
+        "account_reported": round(float(account_reported), 2),
     }
     return report
 
