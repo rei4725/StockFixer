@@ -241,12 +241,12 @@ class TestLoadFeaturesRawSource:
 
     @patch("src.market_data.loader.get_raw_ohlcv_from_db")
     def test_load_features_raw_exits_on_empty(self, mock_raw):
-        """空データの場合は SystemExit が発生すること"""
+        """空データの場合は FeaturesUnavailableError が発生すること（#972）"""
         mock_raw.return_value = pd.DataFrame()
 
-        from src.backtest.pipeline import load_features
+        from src.backtest.pipeline import FeaturesUnavailableError, load_features
 
-        with pytest.raises(SystemExit):
+        with pytest.raises(FeaturesUnavailableError):
             load_features("jp", "7203", "raw")
 
 
@@ -300,12 +300,12 @@ class TestLoadFeaturesFileSource:
 
     @patch("src.utils.db.load_stock_features")
     def test_load_features_file_exits_on_empty(self, mock_load):
-        """空データの場合は SystemExit が発生すること"""
+        """空データの場合は FeaturesUnavailableError が発生すること（#972）"""
         mock_load.return_value = pd.DataFrame()
 
-        from src.backtest.pipeline import load_features
+        from src.backtest.pipeline import FeaturesUnavailableError, load_features
 
-        with pytest.raises(SystemExit):
+        with pytest.raises(FeaturesUnavailableError):
             load_features("jp", "7203", "file")
 
 
@@ -753,13 +753,13 @@ class TestLoadFeaturesApiSource(unittest.TestCase):
     @patch("src.utils.data_path_utils.get_ticker")
     @patch("src.market_data.loader.get_stock_data")
     def test_api_source_exits_on_empty_data(self, mock_yf, mock_ticker):
-        """空データの場合 SystemExit が発生すること"""
+        """空データの場合 FeaturesUnavailableError が発生すること（#972）"""
         mock_ticker.return_value = "7203.T"
         mock_yf.return_value = pd.DataFrame()
 
-        from src.backtest.pipeline import load_features
+        from src.backtest.pipeline import FeaturesUnavailableError, load_features
 
-        with pytest.raises(SystemExit):
+        with pytest.raises(FeaturesUnavailableError):
             load_features("jp", "7203", "api")
 
     @patch("src.utils.data_path_utils.get_ticker")
