@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "python/Dockerfile"
+      - "python/sandbox_runner/**"
       - "python/requirements.txt"
       - "python/.trivyignore"
       - ".github/workflows/docker-scan.yml"
@@ -12,6 +13,7 @@ on:
       - develop
     paths:
       - "python/Dockerfile"
+      - "python/sandbox_runner/**"
       - "python/requirements.txt"
       - "python/.trivyignore"
       - ".github/workflows/docker-scan.yml"
@@ -53,6 +55,30 @@ jobs:
           vuln-type: library
           ignore-unfixed: true
           trivyignores: python/.trivyignore
+      - name: Build sandbox-runner Docker image
+        run: docker build -t stockfixer-sandbox-runner:scan -f python/sandbox_runner/Dockerfile ./python
+
+      - name: Trivy scan (sandbox-runner) — MEDIUM (warn only)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: stockfixer-sandbox-runner:scan
+          format: table
+          exit-code: "0"
+          severity: MEDIUM
+          vuln-type: library
+          ignore-unfixed: true
+
+      - name: Trivy scan (sandbox-runner) — HIGH/CRITICAL (CI fail gate)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: stockfixer-sandbox-runner:scan
+          format: table
+          exit-code: "1"
+          severity: HIGH,CRITICAL
+          vuln-type: library
+          ignore-unfixed: true
+          trivyignores: python/.trivyignore
+
       - name: Trivy full image scan — OS+library (weekly report)
         if: always() && github.event_name == 'schedule'
         uses: aquasecurity/trivy-action@v0.36.0

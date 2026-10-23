@@ -7,8 +7,21 @@ import subprocess
 import pandas as pd
 import scripts.sandbox_evaluate_rule as sandbox_script
 
+from src.backtest import sandbox_executor
 from src.backtest.sandbox_executor import run_sandboxed_evaluation
 from src.backtest.types import FactoryEvaluation, FactoryHypothesis
+
+
+def _stub_runner(monkeypatch, share_dir, fake_proc):
+    """共有ボリュームを tmp に向け、runner への送信を fake_proc の中身を返す形に差し替える。"""
+    monkeypatch.setattr(sandbox_executor, "FACTORY_SANDBOX_SHARE_DIR", str(share_dir))
+    monkeypatch.setattr(sandbox_executor, "FACTORY_SANDBOX_SHARE_VOLUME", "vol_share")
+    reply = {
+        "returncode": fake_proc.returncode,
+        "stdout": fake_proc.stdout,
+        "stderr": fake_proc.stderr,
+    }
+    monkeypatch.setattr(sandbox_executor, "_post_job", lambda job: reply)
 
 
 def test_main_rejects_without_sandbox_flag(monkeypatch, capsys):
@@ -333,11 +346,11 @@ def test_new_aggregate_fields_survive_sandbox_round_trip(monkeypatch, tmp_path, 
     # --- consumer側: docker run の標準出力として同じ JSON を返させ、
     #     run_sandboxed_evaluation が正しく FactoryEvaluation に復元することを確認する ---
     fake_proc = subprocess.CompletedProcess(args=[], returncode=0, stdout=stdout, stderr="")
-    monkeypatch.setattr(
-        "src.backtest.sandbox_executor.subprocess.run", lambda *args, **kwargs: fake_proc
-    )
+    _stub_runner(monkeypatch, tmp_path, fake_proc)
 
-    result = run_sandboxed_evaluation(fake_hypothesis, "/dummy_data", "/dummy_windows.json")
+    result = run_sandboxed_evaluation(
+        fake_hypothesis, str(tmp_path / "dummy_data"), str(tmp_path / "dummy_windows.json")
+    )
 
     assert result.kind == "gate_evaluated"
     assert result.evaluation is not None
@@ -356,10 +369,10 @@ def test_new_aggregate_fields_survive_sandbox_round_trip(monkeypatch, tmp_path, 
     )
 
 
-def test_old_sandbox_payload_without_new_fields_falls_back_to_defaults(monkeypatch):
+def test_old_sandbox_payload_without_new_fields_falls_back_to_defaults(monkeypatch, tmp_path):
     """新フィールドを含まない旧サンドボックスイメージ由来のペイロードでも
     KeyError にならず、FactoryEvaluation の既定値にフォールバックすることを確認する。
-    FACTORY_SANDBOX_IMAGE は固定イメージのため、ホストより古いコンテナが
+    サンドボックスは固定イメージ（runner の SANDBOX_IMAGE）のため、ホストより古いコンテナが
     稼働し続ける状況が起こり得る（#625）。
     """
     fake_hypothesis = FactoryHypothesis(
@@ -390,11 +403,11 @@ def test_old_sandbox_payload_without_new_fields_falls_back_to_defaults(monkeypat
     fake_proc = subprocess.CompletedProcess(
         args=[], returncode=0, stdout=json.dumps(old_payload), stderr=""
     )
-    monkeypatch.setattr(
-        "src.backtest.sandbox_executor.subprocess.run", lambda *args, **kwargs: fake_proc
-    )
+    _stub_runner(monkeypatch, tmp_path, fake_proc)
 
-    result = run_sandboxed_evaluation(fake_hypothesis, "/dummy_data", "/dummy_windows.json")
+    result = run_sandboxed_evaluation(
+        fake_hypothesis, str(tmp_path / "dummy_data"), str(tmp_path / "dummy_windows.json")
+    )
 
     assert result.kind == "gate_evaluated"
     assert result.evaluation is not None
