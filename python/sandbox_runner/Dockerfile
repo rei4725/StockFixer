@@ -3,10 +3,10 @@
 FROM python:3.12-slim
 # Docker CLI（静的バイナリ）。docker.sock 越しにサンドボックスを起動するために使う。
 # バージョンは trivy の gobinary スキャン対象になるため、Go 標準ライブラリの
-# 修正版（go1.26.9 / go1.27.2 以上）でビルドされたものを選ぶこと。
-# 29.9.0 は go1.26.9 ビルド（バイナリ埋め込み文字列で確認済み）。
+# 修正版（go1.26.10 / go1.27.3 以上）でビルドされたものを選ぶこと。
+# 29.9.2 は go1.26.10 ビルド（docker/cli v29.9.2 リリースノートより。CVE-2026-111943 対応）。
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
-    && curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-29.9.0.tgz -o /tmp/docker.tgz \
+    && curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-29.9.2.tgz -o /tmp/docker.tgz \
     && tar xzf /tmp/docker.tgz -C /tmp && mv /tmp/docker/docker /usr/local/bin/docker \
     && rm -rf /tmp/docker.tgz /tmp/docker /var/lib/apt/lists/*
 WORKDIR /runner
