@@ -11,9 +11,12 @@ import numpy as np
 import pandas as pd
 
 
-def _make_ohlcv(periods: int = 252) -> pd.DataFrame:
+def _make_ohlcv(periods: int = 252, end: "pd.Timestamp | None" = None) -> pd.DataFrame:
+    # 古い足の止め（#854）の線の内に入るよう、既定では今日で終わる足を作る
+    if end is None:
+        end = pd.Timestamp.now(tz="UTC").tz_localize(None).normalize()
     rng = np.random.default_rng(seed=1)
-    dates = pd.date_range("2023-01-01", periods=periods, freq="B")
+    dates = pd.date_range(end=end, periods=periods, freq="B")
     close = 100.0 + np.cumsum(rng.uniform(-1.0, 1.0, periods))
     return pd.DataFrame(
         {
@@ -58,7 +61,7 @@ def test_perf_predict_single(
 
     hist_df = pd.DataFrame(
         {"Close": [ohlcv["Close"].iloc[-1]]},
-        index=pd.date_range("2024-01-01", periods=1),
+        index=ohlcv.index[-1:],
     )
     ticker_obj = MagicMock()
     ticker_obj.history.return_value = hist_df
