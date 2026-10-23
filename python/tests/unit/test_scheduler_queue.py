@@ -820,6 +820,61 @@ def test_run_job_error_propagates(tmp_path):
         manager.run_job("fail_job", reason="test")
 
 
+@pytest.mark.parametrize(
+    "exc",
+    [SystemExit(1), KeyboardInterrupt()],
+    ids=["SystemExit", "KeyboardInterrupt"],
+)
+@patch("src.orchestration.scheduler_queue.ping_heartbeat")
+def test_run_job_base_exception_is_recorded_as_error(mock_ping, tmp_path, exc):
+    """Exception でない BaseException で止まった回を success と記録しない（#955）"""
+    state_path = tmp_path / "state.json"
+    calls = {"n": 0}
+
+    def interrupted_func():
+        calls["n"] += 1
+        raise exc
+
+    config = {
+        "daily_pipeline": {
+            "func": interrupted_func,
+            "period": "daily",
+            "day_of_week": "*",
+            "hour": 8,
+            "minute": 0,
+            "max_retries": 2,
+            "retry_base_wait_seconds": 0.0,
+            "backfill": True,
+        }
+    }
+    manager = SchedulerQueueManager(config, state_file_path=str(state_path))
+    run_now = datetime(2026, 10, 22, 9, 0, tzinfo=manager.tz)
+    manager.now = lambda: run_now  # type: ignore[method-assign]
+
+    with pytest.raises(type(exc)):
+        manager.run_job("daily_pipeline", reason="test")
+
+    # BaseException はやり直さない
+    assert calls["n"] == 1
+    with open(state_path, encoding="utf-8") as f:
+        events = json.load(f)["events"]
+    finished = [e for e in events if e["status"] not in {"started"}]
+    assert [e["status"] for e in finished] == ["error"]
+    assert finished[0]["error"] == f"{type(exc).__name__}: {exc}"
+    assert manager.has_success("daily_pipeline", "2026-10-22") is False
+    mock_ping.assert_called_once_with("daily_pipeline", success=False)
+
+    # 前日分の補完の対象に残り、連続失敗にも数える
+    next_day = run_now + timedelta(days=1)
+    manager.schedule_config["daily_pipeline"]["max_executions_per_period"] = 2
+    assert manager.get_missed_past_periods("daily_pipeline", lookback_days=1, now=next_day) == [
+        "2026-10-22"
+    ]
+    from src.utils.alert_service import _count_consecutive_pipeline_failures
+
+    assert _count_consecutive_pipeline_failures(str(state_path)) == 1
+
+
 # ── Exponential backoff リトライ テスト ──────────────────────────────────────
 
 

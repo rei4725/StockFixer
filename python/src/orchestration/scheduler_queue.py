@@ -157,7 +157,9 @@ class SchedulerQueueManager:
                 return False
 
             started_at = self.now()
-            status = "success"
+            # 終わりまで走ったときだけ success にする。Exception でない BaseException
+            # （SystemExit・KeyboardInterrupt）で止まった回を success と記録しない（#955）
+            status = "error"
             error_message = None
             run_id = uuid.uuid4().hex
 
@@ -186,10 +188,14 @@ class SchedulerQueueManager:
 
         try:
             self._run_with_retry(job_id, config, reason, period_key)
+            status = "success"
             return True
         except Exception as exc:
-            status = "error"
             error_message = str(exc)
+            raise
+        except BaseException as exc:
+            # KeyboardInterrupt は str が空になるため、型の名前を添える
+            error_message = f"{type(exc).__name__}: {exc}"
             raise
         finally:
             finished_at = self.now()

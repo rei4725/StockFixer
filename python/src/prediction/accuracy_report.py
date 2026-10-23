@@ -6,8 +6,8 @@
 引くため、日次の道の最後（[6/6] の後）に書き足す（#843）。
 
 「今日の採点」は、[3/6] で上書きされる前の prediction_results のスナップショット
-（run_accuracy_check が採点した予測そのもの）と prediction_accuracy の行を
-(market, symbol, predicted_at) で突き合わせたものとする。採点が 0 件の日も件数 0 で書く。
+（run_accuracy_check が採点した予測そのもの）のうち predicted_at の一番新しい回の行と、
+prediction_accuracy の行を (market, symbol, predicted_at) で突き合わせたものとする。採点が 0 件の日も件数 0 で書く。
 
 設計: ai-company docs/superpowers/specs/2026-10-15-prediction-ops-design.md（土台の2）
 """
@@ -178,12 +178,27 @@ def _with_abs_error(rows: pd.DataFrame) -> pd.DataFrame:
     return rows
 
 
-def _today_rows(model_rows: pd.DataFrame, snapshot: pd.DataFrame) -> pd.DataFrame:
-    """prediction_results のスナップショットに載っている予測の採点の行を返す。"""
+def _today_rows(model_rows: pd.DataFrame, snapshot: pd.DataFrame, model: str) -> pd.DataFrame:
+    """prediction_results のスナップショットの一番新しい回の予測の採点の行を返す。
+
+    保存は銘柄ごとの Delete-Insert のため、その回で予想が出なかった銘柄は前の回の
+    行がスナップショットに残る（#959）。一番新しい回は predicted_at の最大で決め、
+    前の回の行は今日の採点に入れない（1回の予測は全銘柄で同じ predicted_at を持つ）。
+    """
     if model_rows.empty or snapshot is None or snapshot.empty:
         return model_rows.iloc[0:0]
     keys = snapshot[_KEY].drop_duplicates().astype(str)
-    return model_rows.merge(keys, on=_KEY, how="inner")
+    latest_at = keys["predicted_at"].max()
+    is_latest = keys["predicted_at"] == latest_at
+    n_old = int((~is_latest).sum())
+    if n_old:
+        logger.info(
+            "採点の JSON: %s のスナップショットの前の回の行を %d件 除く（今の回=%s）",
+            model,
+            n_old,
+            latest_at,
+        )
+    return model_rows.merge(keys[is_latest], on=_KEY, how="inner")
 
 
 def _load_accuracy(horizon: int) -> pd.DataFrame:
@@ -297,7 +312,7 @@ def prepare_daily_accuracy_report(
         for model in models:
             model_rows = accuracy[accuracy["model_name"] == model]
             window_rows = model_rows[model_rows["predicted_at"].str[:8] >= since]
-            today_rows = _today_rows(model_rows, snapshots[model])
+            today_rows = _today_rows(model_rows, snapshots[model], model)
             sections[model][str(horizon)] = build_horizon_report(today_rows, window_rows, None)
             today_by_key[(model, str(horizon))] = today_rows
 
