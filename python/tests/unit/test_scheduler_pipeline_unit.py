@@ -534,6 +534,18 @@ class TestRunWeeklyWalkForwardReport(unittest.TestCase):
         mock_send.assert_called_once_with(result)
         mock_failure.assert_not_called()
 
+    @patch("src.reporting.discord.discord_utils.send_walk_forward_report_completion")
+    @patch("src.backtest.walk_forward_report.run_walk_forward_comparison_report")
+    @patch("src.watchlist.batch_runner.load_target_symbols")
+    def test_does_not_pass_flat_zero_slippage(self, mock_symbols, mock_run, mock_send):
+        """週のジョブは slippage を None（市場別の既定）で呼ぶ（#993）"""
+        from src.orchestration.scheduler import run_weekly_walk_forward_report
+
+        mock_symbols.return_value = []
+        mock_run.return_value = {"success": 0, "failed": 0, "total": 0}
+        run_weekly_walk_forward_report()
+        self.assertIsNone(mock_run.call_args.kwargs.get("slippage"))
+
 
 @patch("src.orchestration.scheduler_queue.ping_heartbeat")
 @patch("src.reporting.discord.discord_utils.send_walk_forward_report_failure")

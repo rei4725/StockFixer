@@ -358,7 +358,7 @@ def run_weekly_walk_forward_report():
             n_splits=5,
             threshold=0.0,
             fee_rate=0.001,
-            slippage=0.0,
+            # slippage は渡さず市場別の既定（US 5bps・JP 10bps）を当てる（#993）
         )
     except Exception as e:
         # 全体が落ちた回は失敗と知らせたうえで投げ直し、run_job に error と記録させる（#986）
