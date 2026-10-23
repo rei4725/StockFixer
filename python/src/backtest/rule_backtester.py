@@ -22,19 +22,21 @@ logger = get_logger(__name__)
 
 
 def _make_backtester(
+    market: str,
     initial_cash: float,
     fee_rate: float,
     slippage: float,
     stop_loss_pct: float | None,
     take_profit_pct: float | None,
 ) -> Backtester:
+    # market は単元株数（jp=100・us=1）を本番の発注と揃えるために渡す（#978）
     return Backtester(
         model_manager=None,
         signal_generator=None,
         data_loader=None,
         start_date=None,
         end_date=None,
-        market="",
+        market=market,
         symbol="",
         initial_cash=initial_cash,
         fee_rate=fee_rate,
@@ -89,7 +91,9 @@ def run_rule_backtest(
 
     logger.info(f"データ取得完了: {len(df)} 行")
 
-    backtester = _make_backtester(initial_cash, fee_rate, slippage, stop_loss_pct, take_profit_pct)
+    backtester = _make_backtester(
+        market, initial_cash, fee_rate, slippage, stop_loss_pct, take_profit_pct
+    )
     results = []
 
     for rule in rules:
