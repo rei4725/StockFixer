@@ -256,7 +256,15 @@ def run_weekly_paper_results() -> None:
             os.path.join(get_results_dir(), "paper"),
         )
     except Exception as e:
+        # 週の成績が欠けた週を知らせる。投げ直すとやり直しで週のレポートを2回送るため、
+        # 知らせだけにする（#999）
         logger.error("紙の売買の週の成績の書き出し失敗: %s", e, exc_info=True)
+        try:
+            from src.reporting.discord.discord_utils import send_webhook_text
+
+            send_webhook_text(f"❌ 紙の売買の週の成績の書き出し失敗\n{str(e)[:1000] or '不明'}")
+        except Exception as notify_error:
+            logger.error("紙の売買の週の成績の失敗通知失敗: %s", notify_error, exc_info=True)
 
 
 def run_weekly_optimization():
