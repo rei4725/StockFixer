@@ -218,6 +218,56 @@ def load_drift_summary(
             return pd.DataFrame()
 
 
+# predicted_at（'YYYYMMDD_HHMMSS' の文字列）の日付部分を 'YYYYMMDD' で取り出す SQL 式
+PREDICTED_DATE_SQL = "LEFT(REGEXP_REPLACE(predicted_at, '[^0-9]', '', 'g'), 8)"
+
+
+def load_weekly_accuracy_summary(
+    week_start: str, horizon: int = 1, model_name: str = "production"
+) -> pd.DataFrame:
+    """
+    week_start からの7日に予想した採点の行だけで、銘柄ごとの方向正解率・平均誤差を集計する。
+
+    load_drift_summary の銘柄ごと直近 N 件の窓は週をまたいで重なり、当週の的中率の
+    下がりを薄めるため、週の記録はこちらで作る（#1023）。
+
+    Args:
+        week_start: ISO 形式の週開始日（月曜日, 例: "2026-05-11"）
+        horizon: 対象ホライズン
+        model_name: 対象のモデル名ラベル（challenger の採点を混ぜない。#877）
+
+    Returns:
+        pd.DataFrame: [market, symbol, direction_accuracy, mean_abs_error, n_samples]
+    """
+    start = datetime.fromisoformat(week_start)
+    since = start.strftime("%Y%m%d")
+    until = (start + timedelta(days=7)).strftime("%Y%m%d")
+    with _db_connection() as con:
+        try:
+            return pd.read_sql(
+                f"""
+                SELECT
+                    market,
+                    symbol,
+                    AVG(CAST(direction_match AS INTEGER)) AS direction_accuracy,
+                    AVG(ABS(predicted_ratio - actual_ratio))  AS mean_abs_error,
+                    COUNT(*) AS n_samples
+                FROM prediction_accuracy
+                WHERE horizon = %s AND model_name = %s
+                  AND direction_match IS NOT NULL
+                  AND {PREDICTED_DATE_SQL} >= %s
+                  AND {PREDICTED_DATE_SQL} < %s
+                GROUP BY market, symbol
+                ORDER BY direction_accuracy ASC
+                """,
+                con,
+                params=[horizon, model_name, since, until],
+            )
+        except Exception as e:
+            logger.error(f"load_weekly_accuracy_summary 失敗: {e}", exc_info=True)
+            return pd.DataFrame()
+
+
 def save_weekly_accuracy_snapshot(week_start: str, df: pd.DataFrame) -> None:
     """
     週次精度スナップショットを accuracy_weekly_snapshots テーブルに保存する（UPSERT）。

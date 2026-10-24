@@ -188,17 +188,19 @@ def run_weekly_report():
 
         from src.infrastructure.llm.factory import get_text_review_port
         from src.infrastructure.persistence.analytics_query import PostgresAnalyticsQuery
-        from src.prediction.db import save_weekly_accuracy_snapshot
+        from src.prediction.db import load_weekly_accuracy_summary, save_weekly_accuracy_snapshot
         from src.reporting.discord.discord_utils import send_weekly_report
         from src.reporting.llm_review import generate_weekly_review
 
         analytics = PostgresAnalyticsQuery()
         summary = analytics.drift_summary(horizon=1, model_name="production")
 
-        # 今週月曜日を week_start として週次スナップショットを保存
+        # 今週月曜日を week_start として週次スナップショットを保存。直近 N 件の窓は
+        # 週をまたいで重なるため、今週に予想した採点の行だけで集計する（#1023）
         today = date.today()
         week_start = (today - timedelta(days=today.weekday())).isoformat()
-        save_weekly_accuracy_snapshot(week_start, summary)
+        week_summary = load_weekly_accuracy_summary(week_start, horizon=1, model_name="production")
+        save_weekly_accuracy_snapshot(week_start, week_summary)
         # 前週比較は今週分を含むスナップショットで行うため、保存の後に読む
         snapshots = analytics.weekly_accuracy_snapshots(n_weeks=4)
 
