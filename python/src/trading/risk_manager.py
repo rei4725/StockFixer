@@ -15,6 +15,7 @@ import os
 from typing import Any, Optional
 
 from config.settings import (
+    DEFAULT_STOP_LOSS_PCT,
     HALF_KELLY,
     MAX_CONSECUTIVE_LOSSES,
     MAX_DAILY_LOSS_RATE,
@@ -147,7 +148,14 @@ class RiskManager:
             else:
                 logger.warning(
                     f"[{market}_{symbol}] optimal_params.json が見つからないか未登録のため "
-                    f"stop_loss_pct/take_profit_pct はデフォルト値 (None) を使用します"
+                    f"take_profit_pct は None を使用します"
+                )
+            if self.stop_loss_pct is None and DEFAULT_STOP_LOSS_PCT > 0:
+                # 最適化は損切り無しで回しており、null のままだと損切りが一度も発動しない（#880）
+                self.stop_loss_pct = float(DEFAULT_STOP_LOSS_PCT)
+                logger.warning(
+                    f"[{market}_{symbol}] stop_loss_pct が null のため、"
+                    f"既定の損切りの線 DEFAULT_STOP_LOSS_PCT={self.stop_loss_pct} を使う"
                 )
 
     # ------------------------------------------------------------------
