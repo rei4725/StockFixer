@@ -277,7 +277,9 @@ def run_daily_orders(
             (~predictions["symbol"].isin(held_symbols))
             & (predictions["multi_horizon_score"] >= predictions["effective_buy_threshold"])
         ]
-        buy_signals = _apply_buy_sector_limit(buy_candidates).head(MAX_ORDERS_PER_RUN)
+        buy_signals = _apply_buy_sector_limit(
+            buy_candidates, held_symbols=held_symbols, market=market
+        ).head(MAX_ORDERS_PER_RUN)
     else:
         logger.warning(
             "[exec] 相関ゲートにより新規買いをスキップ: %s",
