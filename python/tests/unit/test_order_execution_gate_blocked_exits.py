@@ -90,10 +90,6 @@ class TestGateBlockedStillExits(unittest.TestCase):
                 "src.trading.execution.runner._choose_order_params",
                 return_value=(OrderType.MARKET, 0.0, "market", "open"),
             ),
-            patch(
-                "src.trading.execution.sl_tp._choose_order_params",
-                return_value=(OrderType.MARKET, 0.0, "market", "open"),
-            ),
             patch("src.trading.execution.sl_tp.RiskManager", sl_risk),
             patch(
                 "src.trading.execution.RiskManager.evaluate_trading_gate",

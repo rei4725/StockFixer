@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unittest
+from datetime import date, datetime, timedelta
 from unittest.mock import patch
 
 import pandas as pd
@@ -198,6 +199,99 @@ class TestLoadWeeklyHitRatesDirect(unittest.TestCase):
         mock_con.execute.side_effect = Exception("DB error")
         result = _load_weekly_hit_rates_direct(n_weeks=4, horizon=1)
         self.assertTrue(result.empty)
+
+
+class TestWeeklyHitRateWeekWindow(unittest.TestCase):
+    """週の記録と直接集計が、その週に予想した採点の行だけで的中率を出すこと（#1023）。
+
+    5週 × 2銘柄 × 5日の採点の行を置く。前の4週は A=3/5・B=2/5（平均 0.50）、
+    当週だけ A=2/5・B=2/5（平均 0.40）。銘柄ごとの直近30件の窓では当週が
+    (0.56 + 0.40) / 2 = 0.48 に薄まり、下がりが4%で線の5%に届かない。
+    """
+
+    @staticmethod
+    def _this_monday() -> date:
+        today = date.today()
+        return today - timedelta(days=today.weekday())
+
+    def _insert_rows(self, rescored_now: bool) -> None:
+        current = self._this_monday()
+        with _db_connection() as con:
+            for w in range(5):
+                monday = current - timedelta(weeks=w)
+                hits = {"A": 2, "B": 2} if w == 0 else {"A": 3, "B": 2}
+                for symbol, n_hit in hits.items():
+                    for d in range(5):
+                        day = monday + timedelta(days=d)
+                        # 毎日の採点し直しで、古い予想の checked_at も今に書き換わる
+                        checked_at = datetime.now() if rescored_now else day + timedelta(days=1)
+                        con.execute(
+                            """
+                            INSERT INTO prediction_accuracy
+                                (market, symbol, model_name, predicted_at, horizon,
+                                 predicted_ratio, actual_ratio, direction_match, checked_at)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            """,
+                            [
+                                "jp",
+                                symbol,
+                                "production",
+                                day.strftime("%Y%m%d") + "_230000",
+                                1,
+                                0.01,
+                                0.01 if d < n_hit else -0.01,
+                                d < n_hit,
+                                checked_at,
+                            ],
+                        )
+
+    @patch("src.orchestration.jobs.weekly.run_weekly_paper_results")
+    @patch("src.reporting.discord.discord_utils.send_webhook_text")
+    @patch("src.reporting.discord.discord_utils.send_miss_analysis_summary")
+    @patch("src.prediction.miss_analysis.run_miss_analysis_batch", return_value=[])
+    @patch("src.reporting.discord.discord_utils.send_weekly_report")
+    @patch("src.reporting.llm_review.generate_weekly_review", return_value=None)
+    @patch("src.infrastructure.llm.factory.get_text_review_port")
+    def test_weekly_snapshot_uses_this_week_predictions(self, *_mocks):
+        from src.orchestration.jobs.weekly import run_weekly_report
+        from src.prediction.db import load_weekly_accuracy_snapshots
+
+        self._insert_rows(rescored_now=False)
+        run_weekly_report()
+
+        snap = load_weekly_accuracy_snapshots(n_weeks=1)
+        self.assertEqual(str(snap["week_start"].iloc[0]), self._this_monday().isoformat())
+        self.assertAlmostEqual(float(snap["direction_accuracy"].mean()), 0.40)
+        self.assertEqual(set(snap["n_samples"]), {5})
+
+    def test_drift_detected_from_weekly_snapshots(self):
+        from src.prediction.db import load_weekly_accuracy_summary, save_weekly_accuracy_snapshot
+
+        self._insert_rows(rescored_now=False)
+        current = self._this_monday()
+        for w in range(5):
+            week_start = (current - timedelta(weeks=w)).isoformat()
+            save_weekly_accuracy_snapshot(
+                week_start, load_weekly_accuracy_summary(week_start, horizon=1)
+            )
+
+        result = check_weekly_hit_rate_drift(weeks=4, threshold=0.05)
+        self.assertEqual(result.current_week, current.isoformat())
+        self.assertAlmostEqual(result.current_hit_rate, 0.40)
+        self.assertAlmostEqual(result.avg_hit_rate, 0.50)
+        self.assertTrue(result.is_drifted)
+
+    def test_direct_fallback_groups_by_predicted_week(self):
+        self._insert_rows(rescored_now=True)
+
+        weekly = _load_weekly_hit_rates_direct(n_weeks=5, horizon=1)
+        self.assertEqual(len(weekly), 5)
+        self.assertEqual(weekly.iloc[0]["week_start"], self._this_monday().isoformat())
+        self.assertAlmostEqual(float(weekly.iloc[0]["hit_rate"]), 0.40)
+        self.assertAlmostEqual(float(weekly.iloc[1]["hit_rate"]), 0.50)
+
+        result = check_weekly_hit_rate_drift(weeks=4, threshold=0.05)
+        self.assertTrue(result.is_drifted)
 
 
 class TestCheckWeeklyHitRateDriftEdgeCases(unittest.TestCase):

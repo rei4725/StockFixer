@@ -41,6 +41,7 @@ from src.domain.exceptions import RiskError  # noqa: F401  # 後方互換のた�
 from src.domain.trading_rules import get_lot_size
 from src.trading.brokers.base import BrokerBase, OrderSide
 from src.trading.daily_loss_window import daily_loss_window_start
+from src.trading.position_valuation import positions_market_value
 from src.trading.types import TradingGateStatus
 from src.utils.db._connection import _db_connection
 from src.utils.logger import get_logger
@@ -436,10 +437,7 @@ class RiskManager:
             return self._total_equity_cache
 
         balance = self._broker.get_balance()
-        market_value = sum(
-            float(p.get("qty", 0)) * float(p.get("current_price", 0.0))
-            for p in self._broker.get_positions()
-        )
+        market_value = positions_market_value(self._broker.get_positions(), logger)
         self._total_equity_cache = balance + market_value
         return self._total_equity_cache
 
