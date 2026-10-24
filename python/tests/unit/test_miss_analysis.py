@@ -97,7 +97,7 @@ class TestLoadTopPredictionMisses(_TmpDbTestCase):
             {
                 "market": "us",
                 "symbol": "AAPL",
-                "model_name": "test",
+                "model_name": "production",
                 "predicted_at": recent,
                 "horizon": 1,
                 "predicted_ratio": 0.05,
@@ -106,7 +106,7 @@ class TestLoadTopPredictionMisses(_TmpDbTestCase):
             {
                 "market": "us",
                 "symbol": "GOOG",
-                "model_name": "test",
+                "model_name": "production",
                 "predicted_at": recent,
                 "horizon": 1,
                 "predicted_ratio": 0.01,
@@ -126,7 +126,7 @@ class TestLoadTopPredictionMisses(_TmpDbTestCase):
             {
                 "market": "us",
                 "symbol": "TSLA",
-                "model_name": "test",
+                "model_name": "production",
                 "predicted_at": "20260501_120000",
                 "horizon": 1,
                 "predicted_ratio": 0.05,
@@ -143,7 +143,7 @@ class TestLoadTopPredictionMisses(_TmpDbTestCase):
             {
                 "market": "us",
                 "symbol": f"SYM{i}",
-                "model_name": "test",
+                "model_name": "production",
                 "predicted_at": recent,
                 "horizon": 1,
                 "predicted_ratio": 0.01 * i,
@@ -155,6 +155,31 @@ class TestLoadTopPredictionMisses(_TmpDbTestCase):
         df = load_top_prediction_misses(horizon=1, top_n=3, since_days=30)
         self.assertEqual(len(df), 3)
 
+    def test_filters_by_model_name(self):
+        """production と challenger が混ざった表で、指定した model_name の外れだけ返す（#877）"""
+        recent = _recent_predicted_at()
+        rows = [
+            {
+                "market": "jp",
+                "symbol": "7203",
+                "model_name": model_name,
+                "predicted_at": recent,
+                "horizon": 1,
+                "predicted_ratio": ratio,
+                "actual_ratio": 0.0,
+            }
+            for model_name, ratio in (("production", 0.01), ("challenger", 0.2))
+        ]
+        self._insert_accuracy(rows)
+        df = load_top_prediction_misses(horizon=1, top_n=5, since_days=30, model_name="production")
+        self.assertEqual(list(df["model_name"]), ["production"])
+        df_default = load_top_prediction_misses(horizon=1, top_n=5, since_days=30)
+        self.assertEqual(list(df_default["model_name"]), ["production"])
+        df_ch = load_top_prediction_misses(
+            horizon=1, top_n=5, since_days=30, model_name="challenger"
+        )
+        self.assertEqual(list(df_ch["model_name"]), ["challenger"])
+
 
 class TestAnalyzeMissCauses(unittest.TestCase):
     def _make_miss_df(self, market="us", symbol="AAPL"):
@@ -163,7 +188,7 @@ class TestAnalyzeMissCauses(unittest.TestCase):
                 {
                     "market": market,
                     "symbol": symbol,
-                    "model_name": "test",
+                    "model_name": "production",
                     # NY 4/1 18:00（引けの後）なので基準の足は 2026-04-01
                     "predicted_at": "20260401_220000",
                     "horizon": 1,
@@ -316,7 +341,7 @@ class TestRunMissAnalysisBatch(unittest.TestCase):
                 {
                     "market": "us",
                     "symbol": "AAPL",
-                    "model_name": "test",
+                    "model_name": "production",
                     "predicted_at": "20260401_120000",
                     "horizon": 1,
                     "predicted_ratio": 0.05,
@@ -326,7 +351,7 @@ class TestRunMissAnalysisBatch(unittest.TestCase):
                 {
                     "market": "us",
                     "symbol": "GOOG",
-                    "model_name": "test",
+                    "model_name": "production",
                     "predicted_at": "20260401_120000",
                     "horizon": 1,
                     "predicted_ratio": 0.04,
