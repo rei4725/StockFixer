@@ -46,6 +46,16 @@ class YFinanceMarketDataAdapter(MarketDataPort):
             return 0.0
         return float(df["Close"].iloc[-1])
 
+    def get_splits(self, symbol: str) -> pd.Series | None:
+        import yfinance as yf
+
+        try:
+            splits = yf.Ticker(symbol).splits
+        except Exception:
+            logger.warning("%s: 株式分割の記録を取れない", symbol, exc_info=True)
+            return None
+        return splits if isinstance(splits, pd.Series) else None
+
     def get_ohlcv_with_indicators(self, ticker: str, lookback_days: int) -> pd.DataFrame | None:
         """OHLCV を取得しテクニカル指標を付与して返す。データなし時は None。"""
         from src.market_data.technical import add_technical_indicators

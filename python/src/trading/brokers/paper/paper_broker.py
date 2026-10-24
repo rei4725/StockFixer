@@ -20,6 +20,7 @@ from config.settings import PAPER_INITIAL_BALANCE
 from src.domain.ports import MarketDataPort, TradeDiffSink
 from src.domain.types import TradeDiffRecord
 from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
+from src.trading.brokers.paper.split_adjust import adjust_position_for_splits, looks_like_split_gap
 from src.utils.db._connection import _db_connection
 from src.utils.japan_time import now_jst
 from src.utils.logger import get_logger
@@ -489,14 +490,22 @@ class PaperBroker(BrokerBase):
         """保有ポジション一覧を返す（現在価格・含み損益つき。評価できない銘柄は NaN）"""
         with _db_connection() as con:
             rows = con.execute(
-                "SELECT symbol, qty, avg_price FROM paper_positions WHERE qty > 0"
+                "SELECT symbol, qty, avg_price, updated_at FROM paper_positions WHERE qty > 0"
             ).fetchall()
         if not rows:
             return []
 
         results = []
-        for sym, qty, avg in rows:
+        for sym, qty, avg, updated_at in rows:
+            qty, avg, split_known = adjust_position_for_splits(
+                self._market_data, sym, qty, avg, updated_at
+            )
             current_price = self._latest_close(sym)
+            if not split_known and looks_like_split_gap(avg, current_price):
+                logger.warning(
+                    f"[paper] {sym}: 分割の記録が取れず、買値と現在値の比が分割の比ほど違う"
+                )
+                current_price = math.nan
             unrealized_pnl = (current_price - avg) * qty
             results.append(
                 {
