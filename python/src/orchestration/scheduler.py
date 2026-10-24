@@ -10,6 +10,7 @@
 """
 
 from src.backtest.ports import set_model_manager_factory
+from src.orchestration.jobs.account_shadow import run_daily_account_shadow_report
 from src.orchestration.jobs.common import _handle_stage_error, _is_first_week_of_month
 from src.orchestration.jobs.daily import (
     run_daily_auto_order,
@@ -68,6 +69,7 @@ __all__ = [
     "run_pre_close_alert",
     "run_daily_backup",
     "run_daily_rule_signals",
+    "run_daily_account_shadow_report",
     # weekly
     "run_weekly_training",
     "run_weekly_report",

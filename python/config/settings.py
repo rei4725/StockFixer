@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     MAX_CONSECUTIVE_LOSSES: int = Field(default=3)
     MAX_POSITIONS: int = Field(default=10)
     HALF_KELLY: Optional[float] = Field(default=None)
+    # optimal_params.json の stop_loss_pct が無い・null の銘柄の損切りの線（#880）。0 で使わない
+    DEFAULT_STOP_LOSS_PCT: float = Field(default=0.08, ge=0.0, lt=1.0)
 
     # ---------- 自動発注（order_execution_pipeline.py） ----------
     MIN_CHANGE_RATIO: float = Field(default=0.003)
@@ -56,6 +58,11 @@ class Settings(BaseSettings):
 
     # ---------- ペーパートレード（paper_broker.py） ----------
     PAPER_INITIAL_BALANCE: float = Field(default=1_000_000.0)
+    # ---------- 口座アプリ（段2。設計: ai-company の specs/2026-10-23-account-app-design.md） ----------
+    # URL とトークンの両方があるときだけ口座アプリを呼ぶ。トークンは python/.env に人間が置く
+    ACCOUNT_GATEWAY_URL: str = Field(default="")
+    ACCOUNT_GATEWAY_TOKEN: str = Field(default="")
+    ACCOUNT_GATEWAY_TIMEOUT_SECONDS: float = Field(default=10.0)
 
     # ---------- 配分戦略ペーパートレード（trading/allocation_strategy） ----------
     ALLOCATION_STRATEGY_TQQQ_SYMBOL: str = Field(default="TQQQ")
@@ -227,6 +234,7 @@ MAX_DAILY_LOSS_RATE: float = settings.MAX_DAILY_LOSS_RATE
 MAX_POSITION_RATE: float = settings.MAX_POSITION_RATE
 MAX_CONSECUTIVE_LOSSES: int = settings.MAX_CONSECUTIVE_LOSSES
 MAX_POSITIONS: int = settings.MAX_POSITIONS
+DEFAULT_STOP_LOSS_PCT: float = settings.DEFAULT_STOP_LOSS_PCT
 HALF_KELLY: float = settings.HALF_KELLY if settings.HALF_KELLY is not None else _KELLY_CAP / 2
 
 MIN_CHANGE_RATIO: float = settings.MIN_CHANGE_RATIO
@@ -245,6 +253,9 @@ PERMUTATION_IMPORTANCE_REPEATS: int = settings.PERMUTATION_IMPORTANCE_REPEATS
 FEATURE_SELECTION_PROTECT_TOP_SHAP: int = settings.FEATURE_SELECTION_PROTECT_TOP_SHAP
 
 PAPER_INITIAL_BALANCE: float = settings.PAPER_INITIAL_BALANCE
+ACCOUNT_GATEWAY_URL: str = settings.ACCOUNT_GATEWAY_URL
+ACCOUNT_GATEWAY_TOKEN: str = settings.ACCOUNT_GATEWAY_TOKEN
+ACCOUNT_GATEWAY_TIMEOUT_SECONDS: float = settings.ACCOUNT_GATEWAY_TIMEOUT_SECONDS
 
 ALLOCATION_STRATEGY_TQQQ_SYMBOL: str = settings.ALLOCATION_STRATEGY_TQQQ_SYMBOL
 ALLOCATION_STRATEGY_BOND_SYMBOL: str = settings.ALLOCATION_STRATEGY_BOND_SYMBOL
@@ -261,6 +272,7 @@ REGIME_LEVERAGE_INTEREST_ANNUAL: float = settings.REGIME_LEVERAGE_INTEREST_ANNUA
 REGIME_LEVERAGE_SLIPPAGE_PCT: float = settings.REGIME_LEVERAGE_SLIPPAGE_PCT
 
 ENABLE_SHORT_SIDE: bool = flags.ENABLE_SHORT_SIDE
+ACCOUNT_SHADOW: bool = flags.ACCOUNT_SHADOW
 
 CORRELATION_ENC_THRESHOLD: float = settings.CORRELATION_ENC_THRESHOLD
 CORRELATION_WINDOW_DAYS: int = settings.CORRELATION_WINDOW_DAYS

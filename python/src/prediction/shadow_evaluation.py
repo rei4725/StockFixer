@@ -382,6 +382,9 @@ def promote_unified_challenger(dry_run: bool = False) -> dict:
     evaluate_shadow_models() で challenger_wins=True かつ
     evaluate_promotion() で eligible=True を確認してから呼び出すこと。
 
+    上書きの前に、今の本番のファイルを `<本番の名前>_YYYYMMDD_HHMMSS.joblib`（JST）に写す。
+    写しに1つでも失敗したら、どの本番のファイルも上書きせずに例外を投げる（#824）。
+
     Args:
         dry_run: True の場合はファイル操作を行わずログのみ出力する
 
@@ -389,15 +392,18 @@ def promote_unified_challenger(dry_run: bool = False) -> dict:
         dict:
             promoted: list[str] — 昇格に成功した production モデル名のリスト
             skipped: list[str] — challenger ファイルが存在しなかった challenger 名
+            backups: list[str] — 写した前の本番のファイルのパス
             dry_run: bool
     """
     import os
     import shutil
 
     from src.utils.data_path_utils import get_models_dir
+    from src.utils.japan_time import now_jst
 
     unified_dir = os.path.join(get_models_dir(), "unified")
-    promoted = []
+    stamp = now_jst().strftime("%Y%m%d_%H%M%S")
+    pairs = []
     skipped = []
 
     for challenger_name, production_name in zip(
@@ -405,21 +411,38 @@ def promote_unified_challenger(dry_run: bool = False) -> dict:
     ):
         src = os.path.join(unified_dir, f"{challenger_name}.joblib")
         dst = os.path.join(unified_dir, f"{production_name}.joblib")
-
         if not os.path.exists(src):
             logger.warning(f"Challenger モデルが見つかりません: {src}")
             skipped.append(challenger_name)
             continue
+        pairs.append((challenger_name, production_name, src, dst))
 
-        if dry_run:
+    if dry_run:
+        for challenger_name, production_name, _, _ in pairs:
             logger.info(f"[dry_run] 昇格スキップ: {challenger_name} -> {production_name}")
-        else:
-            shutil.copy2(src, dst)
-            logger.info(f"統合モデル昇格完了: {challenger_name} -> {production_name}")
+        return {
+            "promoted": [p[1] for p in pairs],
+            "skipped": skipped,
+            "backups": [],
+            "dry_run": True,
+        }
 
+    # 先に全部の本番のファイルを写す。失敗したら上書きの前に止まる（例外は呼ぶ側が知らせる）
+    backups = []
+    for _, production_name, _, dst in pairs:
+        if os.path.exists(dst):
+            backup = os.path.join(unified_dir, f"{production_name}_{stamp}.joblib")
+            shutil.copy2(dst, backup)
+            backups.append(backup)
+            logger.info(f"昇格の前に本番のモデルを写した: {backup}")
+
+    promoted = []
+    for challenger_name, production_name, src, dst in pairs:
+        shutil.copy2(src, dst)
+        logger.info(f"統合モデル昇格完了: {challenger_name} -> {production_name}")
         promoted.append(production_name)
 
-    return {"promoted": promoted, "skipped": skipped, "dry_run": dry_run}
+    return {"promoted": promoted, "skipped": skipped, "backups": backups, "dry_run": False}
 
 
 # ---------------------------------------------------------------------------
