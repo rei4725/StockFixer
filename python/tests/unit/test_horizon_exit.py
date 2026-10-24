@@ -11,8 +11,11 @@ SELECT/UPDATE）は tests/unit/conftest.py の autouse `_isolate_db` フィク�
 """
 
 import unittest
-from datetime import date, timedelta
+from collections.abc import Iterator
+from contextlib import contextmanager
+from datetime import date, datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -284,6 +287,103 @@ class TestRunHorizonExitCheck(unittest.TestCase):
         run_horizon_exit_check()
 
         mock_broker_cls.assert_not_called()
+
+
+_JST = ZoneInfo("Asia/Tokyo")
+# 2026-10-24 JST の定時の回（08:50 JST＝前の日の 23:50 UTC）と補完の回（09:05 JST＝00:05 UTC）
+_SCHEDULED_UTC = datetime(2026, 10, 23, 23, 50, tzinfo=timezone.utc)
+_RECOVERY_UTC = datetime(2026, 10, 24, 0, 5, tzinfo=timezone.utc)
+
+
+@contextmanager
+def _clock(utc_now: datetime) -> Iterator[None]:
+    """UTC のコンテナの時計を utc_now に置く（date.today() は UTC の日付を返す）。"""
+    fake_date = type("_FakeDate", (date,), {"today": classmethod(lambda cls: utc_now.date())})
+    with (
+        patch("datetime.date", fake_date),
+        patch("src.trading.execution.recording.date", fake_date, create=True),
+        patch(
+            "src.trading.execution.recording.now_jst",
+            lambda: utc_now.astimezone(_JST),
+            create=True,
+        ),
+        patch("src.orchestration.jobs.common._local_now", lambda: utc_now),
+    ):
+        yield
+
+
+class TestHorizonExitJstDate(unittest.TestCase):
+    """期限と決済の「今日」を JST の日付で決め、回す時刻で売る日が変わらない (Issue #949)。"""
+
+    def setUp(self):
+        with _db_connection() as con:
+            con.execute("DELETE FROM paper_orders")
+
+    def _buy_at(self, utc_now: datetime, order_id: str, symbol: str, horizon: int) -> None:
+        from src.infrastructure.in_memory import InMemoryTradeDiffSink
+        from src.trading.brokers.base import OrderType
+        from src.trading.execution.recording import _record_order
+
+        with _db_connection() as con:
+            con.execute(
+                "INSERT INTO paper_orders "
+                "(order_id, symbol, side, qty, order_type, status, filled_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                [order_id, symbol, int(OrderSide.BUY), 100, 10, "filled", utc_now],
+            )
+        with _clock(utc_now):
+            _record_order(
+                market="jp",
+                predicted_at="20261023_060000",
+                symbol=symbol,
+                side=OrderSide.BUY,
+                qty=100,
+                signal_price=1000.0,
+                order_price=1000.0,
+                order_type=OrderType.MARKET,
+                order_result={"order_id": order_id, "fill_price": 1000.0},
+                broker=None,
+                mode="paper",
+                horizon=horizon,
+                trade_diff_sink=InMemoryTradeDiffSink(),
+            )
+
+    def _sold_at(self, utc_now: datetime, symbol: str) -> bool:
+        from src.orchestration.scheduler import run_horizon_exit_check
+
+        with patch(_BROKER_PATCH) as mock_broker_cls:
+            broker = MagicMock()
+            broker.get_positions.return_value = [{"symbol": symbol, "qty": 100}]
+            mock_broker_cls.return_value = broker
+            with _clock(utc_now):
+                run_horizon_exit_check()
+        return broker.send_order.called
+
+    def _first_sell_day(self, symbol: str) -> date:
+        """発注の後の各 JST の日の定時の回（08:50 JST）で、初めて売る日を返す。"""
+        for days in range(1, 8):
+            run_utc = _SCHEDULED_UTC + timedelta(days=days)
+            if self._sold_at(run_utc, symbol):
+                return run_utc.astimezone(_JST).date()
+        self.fail(f"{symbol} を売らなかった")
+
+    def test_sell_day_same_for_scheduled_and_recovery_runs(self):
+        self._buy_at(_SCHEDULED_UTC, "ORD-949-S", "7203", horizon=3)
+        scheduled_day = self._first_sell_day("7203")
+        self.setUp()
+        self._buy_at(_RECOVERY_UTC, "ORD-949-R", "7203", horizon=3)
+        recovery_day = self._first_sell_day("7203")
+
+        self.assertEqual(scheduled_day, recovery_day)
+        self.assertEqual(scheduled_day, date(2026, 10, 27))
+
+    def test_recovery_run_does_not_exit_position_before_due(self):
+        # 2026-10-23 JST の定時の回で出した horizon=2 の BUY は 2026-10-25 の朝に売る。
+        # 2026-10-24 JST の補完の回（売る日の前の日）では売らない。
+        self._buy_at(_SCHEDULED_UTC - timedelta(days=1), "ORD-949-E", "9984", horizon=2)
+
+        self.assertFalse(self._sold_at(_RECOVERY_UTC, "9984"))
+        self.assertTrue(self._sold_at(_SCHEDULED_UTC + timedelta(days=1), "9984"))
 
 
 if __name__ == "__main__":

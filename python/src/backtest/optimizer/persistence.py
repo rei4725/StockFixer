@@ -19,6 +19,15 @@ from src.utils.results_io import save_result_csvs
 
 logger = get_logger(__name__)
 
+# 小さいほど良い指標。cost_impact_* は gross - net（コストで失った分）。
+# max_drawdown は負の小数（metrics.stats.max_drawdown）で 0 に近いほど良いので、ここに入れない
+_LOWER_IS_BETTER = {"cost_impact_return", "cost_impact_cash"}
+
+
+def _sort_best_first(valid: pd.DataFrame, sort_by: str) -> pd.DataFrame:
+    """最良の行が先頭に来るように並べる。"""
+    return valid.sort_values(sort_by, ascending=sort_by in _LOWER_IS_BETTER)
+
 
 class OptimalParamsCorruptedError(RuntimeError):
     """既存の optimal_params.json が壊れていることを表す。
@@ -55,9 +64,8 @@ def print_optimization_results(result_df: pd.DataFrame, sort_by: str) -> None:
         return
 
     # ソート
-    ascending = sort_by in {"max_drawdown", "cost_impact_return", "cost_impact_cash"}
     if sort_by in valid.columns:
-        valid = valid.sort_values(sort_by, ascending=ascending)
+        valid = _sort_best_first(valid, sort_by)
 
     display_cols = [
         "threshold",
@@ -86,7 +94,7 @@ def print_optimization_results(result_df: pd.DataFrame, sort_by: str) -> None:
     print(valid[display_cols].to_string(index=False))
 
     # ベスト結果
-    best = valid.iloc[-1] if not ascending else valid.iloc[0]
+    best = valid.iloc[0]
     print(f"\n{'='*70}")
     print(f"ベスト（{sort_by}基準）:")
     print(f"  閾値: {best.get('threshold', 'N/A')}")
@@ -164,8 +172,7 @@ def save_optimal_params_json(
         return ""
 
     # 最適パラメータを取得
-    ascending = sort_by in {"max_drawdown", "cost_impact_return", "cost_impact_cash"}
-    best_row = valid.sort_values(sort_by, ascending=ascending).iloc[-1 if not ascending else 0]
+    best_row = _sort_best_first(valid, sort_by).iloc[0]
 
     # JSON形式に変換
     optimal_param = {
