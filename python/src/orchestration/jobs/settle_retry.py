@@ -42,7 +42,8 @@ def run_daily_settle_retry(now: datetime | None = None) -> None:
         return
 
     logger.info("=== 約定のやり直し: 約定待ち %d 件 ===", pending_count)
-    run_daily_settle_orders()
+    # 約定が0件の回は完了の知らせを出さない（9:05 の分と重ねない。#1047）
+    run_daily_settle_orders(notify_when_none=False)
 
     if not is_final:
         return

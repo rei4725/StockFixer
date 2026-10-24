@@ -392,7 +392,7 @@ def run_horizon_exit_check() -> None:
     logger.info("[horizon_exit] ホライズン決済完了: %d 件", len(exited))
 
 
-def run_daily_settle_orders():
+def run_daily_settle_orders(notify_when_none: bool = True):
     """
     毎営業日 9:05 実行: pending 状態のペーパートレード注文を当日始値で約定処理する。
     本番（live）モードでは kabu STATION® が自動処理するため不要。
@@ -420,11 +420,11 @@ def run_daily_settle_orders():
         logger.error("約定処理失敗: %s", e, exc_info=True)
         raise
 
-    # Discord 完了通知
     try:
         from src.reporting.discord.discord_utils import send_daily_settle_completion
 
-        send_daily_settle_completion(settled_count=len(settled))
+        if settled or notify_when_none:  # Discord 完了通知。やり直しの0件の回は出さない #1047
+            send_daily_settle_completion(settled_count=len(settled))
     except Exception as e:
         logger.error("約定処理完了通知失敗: %s", e, exc_info=True)
 

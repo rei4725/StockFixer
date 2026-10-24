@@ -29,7 +29,7 @@ class TestRunDailySettleRetry(unittest.TestCase):
         """9:05 に据え置いた注文を、同じ日のやり直しの回で約定の処理に回す"""
         now = datetime(2026, 10, 22, 9, 15, tzinfo=_JST)
         settle, _, notify, warning = self._run([1], now)
-        settle.assert_called_once_with()
+        settle.assert_called_once_with(notify_when_none=False)
         notify.assert_not_called()
         warning.assert_not_called()
 
@@ -46,7 +46,7 @@ class TestRunDailySettleRetry(unittest.TestCase):
         """締めの前の回で残っても、知らせを出さない"""
         now = datetime(2026, 10, 22, 9, 45, tzinfo=_JST)
         settle, _, notify, warning = self._run([1, 1], now)
-        settle.assert_called_once_with()
+        settle.assert_called_once_with(notify_when_none=False)
         notify.assert_not_called()
         warning.assert_not_called()
 
@@ -54,7 +54,7 @@ class TestRunDailySettleRetry(unittest.TestCase):
         """締めの回で残った注文は据え置いたまま、WARNING と知らせを1回だけ出す"""
         now = datetime(2026, 10, 22, 9, 55, tzinfo=_JST)
         settle, count, notify, warning = self._run([2, 1], now)
-        settle.assert_called_once_with()
+        settle.assert_called_once_with(notify_when_none=False)
         self.assertEqual(count.call_count, 2)
         notify.assert_called_once()
         warning.assert_called_once()
@@ -64,7 +64,7 @@ class TestRunDailySettleRetry(unittest.TestCase):
         """締めの回で全部約定したら、知らせを出さない"""
         now = datetime(2026, 10, 22, 9, 55, tzinfo=_JST)
         settle, _, notify, warning = self._run([1, 0], now)
-        settle.assert_called_once_with()
+        settle.assert_called_once_with(notify_when_none=False)
         notify.assert_not_called()
         warning.assert_not_called()
 
@@ -84,6 +84,44 @@ class TestRunDailySettleRetry(unittest.TestCase):
         ):
             settle_retry.run_daily_settle_retry(now=now)
         mock_error.assert_called_once()
+
+
+class TestSettleCompletionNotifyOnce(unittest.TestCase):
+    """約定待ちがある日の完了の知らせの回数（#1047）"""
+
+    def _run_morning(self, settled_per_run, pending_per_retry):
+        """9:05 の約定と、やり直しの5回を順に流し、完了の知らせの件数の列を返す"""
+        from src.orchestration.jobs import daily, settle_retry
+
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch("src.trading.brokers.paper.paper_broker.PaperBroker") as mock_broker_cls,
+            patch("src.infrastructure.yfinance_market_data_adapter.YFinanceMarketDataAdapter"),
+            patch("src.infrastructure.persistence.trade_diff_repository.PostgresTradeDiffSink"),
+            patch("src.reporting.discord.discord_utils.send_daily_settle_completion") as mock_send,
+            patch.object(settle_retry, "count_pending_paper_orders", side_effect=pending_per_retry),
+        ):
+            mock_broker_cls.return_value.settle_pending_orders.side_effect = settled_per_run
+            daily.run_daily_settle_orders()
+            for minute in (15, 25, 35, 45, 55):
+                now = datetime(2026, 10, 22, 9, minute, tzinfo=_JST)
+                settle_retry.run_daily_settle_retry(now=now)
+        return [c.kwargs["settled_count"] for c in mock_send.call_args_list]
+
+    def test_notifies_only_main_and_the_retry_that_settled(self):
+        """やり直しの5回のうち1回だけで約定した日は、9:05 の分とその1回の分だけ知らせる"""
+        order = {"symbol": "7203", "qty": 100}
+        # 9:05 は当日の行が無く0件、9:15・9:25 も0件、9:35 で1件約定、その後は約定待ちが無い
+        settled_per_run = [[], [], [], [order]]
+        pending_per_retry = [1, 1, 1, 0, 0]
+        counts = self._run_morning(settled_per_run, pending_per_retry)
+        self.assertEqual(counts, [0, 1])
+
+    def test_no_pending_day_notifies_main_only(self):
+        """約定待ちが無い日は、今までどおり 9:05 の分だけ知らせる"""
+        order = {"symbol": "7203", "qty": 100}
+        counts = self._run_morning([[order]], [0, 0, 0, 0, 0])
+        self.assertEqual(counts, [1])
 
 
 class TestCountPendingPaperOrders(unittest.TestCase):
