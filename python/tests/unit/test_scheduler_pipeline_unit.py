@@ -13,6 +13,18 @@ from src.infrastructure.persistence.order_run_repository import PostgresOrderRun
 from src.orchestration.jobs import drift_check as drift_check_module
 from src.orchestration.scheduler import run_daily_auto_order, run_daily_drift_check
 
+# ドリフトの線は全銘柄の分布に比べて決まるので、傷んだ銘柄の横に健全な銘柄を並べる（#1045）
+_HEALTHY_PEERS = [
+    {
+        "market": "jp",
+        "symbol": f"P{i}",
+        "mean_abs_error": 0.01,
+        "direction_accuracy": 0.70,
+        "n_samples": 20,
+    }
+    for i in range(5)
+]
+
 
 @pytest.fixture(autouse=True)
 def _isolate_results_dir(monkeypatch, tmp_path):
@@ -186,6 +198,7 @@ class TestRunDailyDriftCheck(unittest.TestCase):
                     "n_samples": 20,
                 }
             ]
+            + _HEALTHY_PEERS
         )
         mock_load_symbols.return_value = [SymbolTask(market="jp", symbol="7203")]
         mock_train.return_value = {"status": "success", "shap_results": []}
@@ -223,6 +236,7 @@ class TestRunDailyDriftCheck(unittest.TestCase):
                     "n_samples": 20,
                 }
             ]
+            + _HEALTHY_PEERS
         )
         mock_load_symbols.return_value = [SymbolTask(market="jp", symbol="7203")]
         mock_train.return_value = {"status": "error", "error": "学習失敗"}
@@ -298,6 +312,7 @@ class TestRunDailyDriftCheck(unittest.TestCase):
                     "n_samples": 20,
                 },
             ]
+            + _HEALTHY_PEERS
         )
         mock_load_symbols.return_value = [
             SymbolTask(market="jp", symbol="7203"),
@@ -347,6 +362,7 @@ class TestRunDailyDriftCheck(unittest.TestCase):
                     "n_samples": 20,
                 },
             ]
+            + _HEALTHY_PEERS
         )
         mock_load_symbols.return_value = [
             SymbolTask(market="jp", symbol="AAA"),
