@@ -265,7 +265,12 @@ def main():
         benchmark_info = None
         if args.benchmark != "none" and metrics and result_df is not None and not result_df.empty:
             benchmark_info = fetch_benchmark_for_result(
-                result_df, args.benchmark, args.start_date, args.end_date
+                result_df,
+                args.benchmark,
+                args.start_date,
+                args.end_date,
+                test_start=metrics.get("test_start"),
+                test_end=metrics.get("test_end"),
             )
 
         print_backtest_metrics(
