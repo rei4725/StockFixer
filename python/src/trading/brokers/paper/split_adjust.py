@@ -11,6 +11,7 @@ from typing import Any
 import pandas as pd
 
 from src.domain.ports import MarketDataPort
+from src.trading.brokers.base import OrderSide
 from src.utils.db._connection import _db_connection
 from src.utils.logger import get_logger
 
@@ -59,12 +60,7 @@ def adjust_position_for_splits(
     market_data: MarketDataPort, sym: str, qty: int, avg: float, updated_at: Any
 ) -> tuple[int, float, bool]:
     """保有の後の分割で株数と買値を直して書き戻す。戻り値の3つ目は分割の記録が取れたか"""
-    try:
-        splits = market_data.get_splits(f"{sym}.T")
-    except Exception:
-        logger.warning("[paper] %s: 分割の記録の取得失敗", sym, exc_info=True)
-        splits = None
-    factor = split_factor_since(splits, updated_at)
+    factor = split_factor_since(_fetch_splits(market_data, sym), updated_at)
     if factor is None:
         return qty, avg, False
     if factor == 1.0:
@@ -82,3 +78,49 @@ def adjust_position_for_splits(
         f"{qty}株 @ {avg:.1f} → {new_qty}株 @ {new_avg:.1f}"
     )
     return new_qty, new_avg, True
+
+
+def _fetch_splits(market_data: MarketDataPort, sym: str) -> Any:
+    try:
+        return market_data.get_splits(f"{sym}.T")
+    except Exception:
+        logger.warning("[paper] %s: 分割の記録の取得失敗", sym, exc_info=True)
+        return None
+
+
+def adjust_order_for_splits(
+    market_data: MarketDataPort, sym: str, order: tuple[Any, ...], open_price: float
+) -> tuple[int, float, float | None] | None:
+    """約定の前に、保有と注文を株式分割で直す（#1073）。約定させないときは None
+
+    order は (side, qty, 指値, signal_price, created_at)。戻り値は直した (qty, 指値, signal_price)。
+    保有は get_positions と同じ直しにかけ、注文は出した後に権利落ちした分割の比で
+    株数・指値・signal_price を直す。分割の記録が取れず、値段が分割の比ほど違うときは約定させない。
+    空売りは保有の分割の直しが無いため、直さない。
+    """
+    side, qty, limit_price, signal_price, created_at = order
+    if side not in (int(OrderSide.BUY), int(OrderSide.SELL)):
+        return qty, limit_price, signal_price
+    with _db_connection() as con:
+        pos = con.execute(
+            "SELECT qty, avg_price, updated_at FROM paper_positions WHERE symbol=%s", [sym]
+        ).fetchone()
+    pos_avg = None
+    if pos:
+        _, pos_avg, _ = adjust_position_for_splits(market_data, sym, *pos)
+    factor = split_factor_since(_fetch_splits(market_data, sym), created_at)
+    if factor is None:
+        refs = [signal_price, limit_price, pos_avg]
+        if any(ref and looks_like_split_gap(float(ref), open_price) for ref in refs):
+            logger.warning(
+                f"[paper] {sym}: 分割の記録が取れず、注文か保有の値段と始値の比が"
+                "分割の比ほど違うため約定スキップ（pending 据え置き）"
+            )
+            return None
+        return qty, limit_price, signal_price
+    if factor == 1.0:
+        return qty, limit_price, signal_price
+    new_qty = int(round(qty * factor))
+    new_signal = None if signal_price is None else float(signal_price) / factor
+    logger.warning(f"[paper] {sym}: 株式分割（比 {factor:g}）で注文を直した {qty}株 → {new_qty}株")
+    return new_qty, float(limit_price or 0.0) / factor, new_signal
