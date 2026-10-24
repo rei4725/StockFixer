@@ -108,6 +108,7 @@ def load_top_prediction_misses(
     horizon: int = 1,
     top_n: int = 10,
     since_days: int = 30,
+    model_name: str = "production",
 ) -> pd.DataFrame:
     """
     直近 since_days 日の予測について外れ幅が大きい上位 top_n 件を返す。
@@ -118,6 +119,7 @@ def load_top_prediction_misses(
         horizon: 対象ホライズン
         top_n: 返却件数上限
         since_days: 対象期間（日数）
+        model_name: 対象のモデル名ラベル（challenger の採点を混ぜない。#877）
 
     Returns:
         pd.DataFrame: [market, symbol, model_name, predicted_at, horizon,
@@ -135,6 +137,7 @@ def load_top_prediction_misses(
                     ABS(predicted_ratio - actual_ratio) AS abs_error
                 FROM prediction_accuracy
                 WHERE horizon = %s
+                  AND model_name = %s
                   AND actual_ratio IS NOT NULL
                   AND predicted_ratio IS NOT NULL
                   AND predicted_at >= %s
@@ -142,20 +145,23 @@ def load_top_prediction_misses(
                 LIMIT {int(top_n)}
                 """,
                 con,
-                params=[horizon, since],
+                params=[horizon, model_name, since],
             )
         except Exception as e:
             logger.error(f"load_top_prediction_misses 失敗: {e}", exc_info=True)
             return pd.DataFrame()
 
 
-def load_drift_summary(horizon: int = 1, recent_n: int = 30) -> pd.DataFrame:
+def load_drift_summary(
+    horizon: int = 1, recent_n: int = 30, model_name: str = "production"
+) -> pd.DataFrame:
     """
     直近 recent_n 件の予測について銘柄ごとの方向正解率・平均誤差を集計する。
 
     Args:
         horizon: 対象ホライズン
         recent_n: 直近何件を対象にするか（銘柄ごとに最新 N 件）
+        model_name: 対象のモデル名ラベル（challenger の採点を混ぜない。#877）
 
     Returns:
         pd.DataFrame: [market, symbol, direction_accuracy, mean_abs_error, n_samples]
@@ -170,7 +176,7 @@ def load_drift_summary(horizon: int = 1, recent_n: int = 30) -> pd.DataFrame:
                             PARTITION BY market, symbol ORDER BY predicted_at DESC
                         ) AS rn
                     FROM prediction_accuracy
-                    WHERE horizon = %s
+                    WHERE horizon = %s AND model_name = %s
                 )
                 SELECT
                     market,
@@ -184,7 +190,7 @@ def load_drift_summary(horizon: int = 1, recent_n: int = 30) -> pd.DataFrame:
                 ORDER BY direction_accuracy ASC
                 """,
                 con,
-                params=[horizon],
+                params=[horizon, model_name],
             )
         except Exception as e:
             logger.error(f"load_drift_summary 失敗: {e}", exc_info=True)

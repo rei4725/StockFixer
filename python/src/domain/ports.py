@@ -128,8 +128,10 @@ class AnalyticsQuery(ABC):
         """直近期間の paper / real 乖離サマリーを返す"""
 
     @abstractmethod
-    def drift_summary(self, horizon: int = 1, recent_n: int = 30) -> pd.DataFrame:
-        """銘柄ごとに直近 recent_n 件の方向正解率・平均誤差を返す。
+    def drift_summary(
+        self, horizon: int = 1, recent_n: int = 30, model_name: str = "production"
+    ) -> pd.DataFrame:
+        """銘柄ごとに直近 recent_n 件の方向正解率・平均誤差を返す（model_name の採点だけ）。
 
         列: market, symbol, direction_accuracy, mean_abs_error, n_samples
         """
