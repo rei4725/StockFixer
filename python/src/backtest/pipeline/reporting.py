@@ -192,5 +192,7 @@ def fetch_benchmark_for_result(
         bm_start = fallback_start
         bm_end = fallback_end
     if bm_start and bm_end:
-        return fetch_benchmark_returns(bm_ticker, bm_start, bm_end)
+        # fetch_benchmark_returns の end は含まない（yfinance）ので、終わりの日を含むよう翌日を渡す（#1072）
+        bm_end_exclusive = (pd.Timestamp(bm_end) + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+        return fetch_benchmark_returns(bm_ticker, bm_start, bm_end_exclusive)
     return None
