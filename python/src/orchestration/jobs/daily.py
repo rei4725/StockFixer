@@ -286,11 +286,14 @@ def run_daily_auto_order():
     except Exception as e:
         logger.error("自動発注完了通知失敗: %s", e, exc_info=True)
 
-    # ホライズン期限切れポジションの自動決済
+    # ホライズン期限切れポジションの自動決済。失敗は相関の警告を送った後に投げ直し、
+    # 期限を過ぎた保有が決済されずに残ったことをジョブの失敗として見せる（#886）
+    horizon_exit_error: Exception | None = None
     try:
         run_horizon_exit_check()
     except Exception as e:
         logger.error("ホライズン決済チェック失敗: %s", e, exc_info=True)
+        horizon_exit_error = e
 
     # 相関リスク警告通知
     if stats.get("correlation_blocked"):
@@ -307,6 +310,9 @@ def run_daily_auto_order():
             )
         except Exception as e:
             logger.error("相関リスク警告通知失敗: %s", e, exc_info=True)
+
+    if horizon_exit_error is not None:
+        raise horizon_exit_error
 
 
 def run_horizon_exit_check() -> None:
