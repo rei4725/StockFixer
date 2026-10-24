@@ -43,6 +43,7 @@ from src.trading.brokers.base import BrokerBase, OrderSide
 from src.trading.daily_loss_window import daily_loss_window_start
 from src.trading.position_valuation import positions_market_value
 from src.trading.types import TradingGateStatus
+from src.trading.vix_run_cache import VixRunCache
 from src.utils.db._connection import _db_connection
 from src.utils.logger import get_logger
 from src.utils.optimal_params_loader import get_optimal_params
@@ -156,8 +157,9 @@ class RiskManager:
         self._market = market
         self.stop_loss_pct: Optional[float] = None
         self.take_profit_pct: Optional[float] = None
-        # 総資産は発注ループ中に銘柄ごとに参照されるため、インスタンス単位でキャッシュする
+        # 総資産と VIX は発注ループ中に銘柄ごとに参照されるため、インスタンス単位でキャッシュする
         self._total_equity_cache: Optional[float] = None
+        self._vix_cache = VixRunCache(lambda: fetch_latest_vix())  # 日付が変われば読み直す
 
         # Kelly 入力パラメータ（BT実績値をロード、なければデフォルト値）
         self.kelly_win_rate: float = DEFAULT_WIN_RATE
@@ -400,8 +402,7 @@ class RiskManager:
             )
         qty = int(qty * dd_scale)
 
-        # R-406: VIX 急騰時のポジション縮小
-        vix = fetch_latest_vix()
+        vix = self._vix_cache.get()  # R-406: VIX 急騰時のポジション縮小（1回の発注で1度だけ読む）
         vix_scale = compute_vix_position_scale(vix)
         if vix_scale < 1.0:
             logger.info(
