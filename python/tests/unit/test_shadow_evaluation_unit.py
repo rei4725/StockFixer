@@ -216,6 +216,63 @@ class TestPromoteUnifiedChallenger(unittest.TestCase):
         for name in ["UnifiedStockXGBoost", "UnifiedStockLightGBM"]:
             self.assertTrue(os.path.exists(os.path.join(self.unified_dir, f"{name}.joblib")))
 
+    def _create_production_files(self):
+        for name in ["UnifiedStockXGBoost", "UnifiedStockLightGBM"]:
+            with open(os.path.join(self.unified_dir, f"{name}.joblib"), "wb") as f:
+                f.write(f"old {name}".encode())
+
+    def test_backs_up_production_before_overwrite(self):
+        """上書きの前に、今の本番のファイルを日付つきの名前で写す（#824）"""
+        from src.prediction.shadow_evaluation import promote_unified_challenger
+
+        self._create_challenger_files()
+        self._create_production_files()
+        with patch("src.utils.data_path_utils.get_models_dir", return_value=self.tmpdir):
+            result = promote_unified_challenger(dry_run=False)
+
+        self.assertEqual(len(result["backups"]), 2)
+        for name in ["UnifiedStockXGBoost", "UnifiedStockLightGBM"]:
+            (backup,) = [b for b in result["backups"] if os.path.basename(b).startswith(name + "_")]
+            self.assertRegex(os.path.basename(backup), rf"^{name}_\d{{8}}_\d{{6}}\.joblib$")
+            with open(backup, "rb") as f:
+                self.assertEqual(f.read(), f"old {name}".encode())
+            with open(os.path.join(self.unified_dir, f"{name}.joblib"), "rb") as f:
+                self.assertEqual(f.read(), b"dummy model")
+
+    def test_backup_failure_leaves_production_unchanged(self):
+        """写しに失敗したら、どの本番のファイルも上書きしない"""
+        from src.prediction.shadow_evaluation import promote_unified_challenger
+
+        self._create_challenger_files()
+        self._create_production_files()
+        real_copy2 = shutil.copy2
+
+        def _copy2(src, dst, *a, **k):
+            if "_challenger" not in os.path.basename(src) and "LightGBM" in os.path.basename(src):
+                raise OSError("disk full")
+            return real_copy2(src, dst, *a, **k)
+
+        with patch("src.utils.data_path_utils.get_models_dir", return_value=self.tmpdir), patch(
+            "shutil.copy2", side_effect=_copy2
+        ):
+            with self.assertRaises(OSError):
+                promote_unified_challenger(dry_run=False)
+
+        for name in ["UnifiedStockXGBoost", "UnifiedStockLightGBM"]:
+            with open(os.path.join(self.unified_dir, f"{name}.joblib"), "rb") as f:
+                self.assertEqual(f.read(), f"old {name}".encode())
+
+    def test_dry_run_makes_no_backup(self):
+        from src.prediction.shadow_evaluation import promote_unified_challenger
+
+        self._create_challenger_files()
+        self._create_production_files()
+        with patch("src.utils.data_path_utils.get_models_dir", return_value=self.tmpdir):
+            result = promote_unified_challenger(dry_run=True)
+
+        self.assertEqual(result["backups"], [])
+        self.assertEqual(len(os.listdir(self.unified_dir)), 4)
+
 
 class TestPromoteChallengerToProduction(unittest.TestCase):
     def setUp(self):
