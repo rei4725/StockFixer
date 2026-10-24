@@ -1,6 +1,8 @@
 """買い候補の選別と保有銘柄・エグジットシグナルの判定。"""
 
 import os
+from collections import Counter
+from typing import Iterable
 
 import pandas as pd
 
@@ -17,10 +19,17 @@ logger = get_logger(__name__)
 def _apply_buy_sector_limit(
     predictions: pd.DataFrame,
     max_sector_positions: int = MAX_SECTOR_POSITIONS,
+    held_symbols: Iterable[str] = (),
+    market: str = "jp",
 ) -> pd.DataFrame:
-    """買い候補に同一セクター上限を適用する。"""
+    """買い候補に同一セクター上限を適用する。
+
+    held_symbols を渡すと、保有中の銘柄の業種の数と候補の数の和で上限を判定する（#908）。
+    """
     if predictions.empty or max_sector_positions <= 0:
         return predictions.copy()
+
+    held_sector_counts = Counter(get_symbol_sector(market, s) for s in sorted(held_symbols))
 
     score_col = (
         "multi_horizon_score" if "multi_horizon_score" in predictions.columns else "diff_ratio"
@@ -38,6 +47,7 @@ def _apply_buy_sector_limit(
         ordered_rows,
         max_sector_positions=max_sector_positions,
         sector_getter=_sector_getter,
+        initial_counts=held_sector_counts,
     )
     if not selected_rows:
         return predictions.iloc[0:0].copy()

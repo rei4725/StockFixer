@@ -274,7 +274,9 @@ def run_daily_orders(
             (~predictions["symbol"].isin(held_symbols))
             & (predictions["multi_horizon_score"] >= predictions["effective_buy_threshold"])
         ]
-        buy_signals = _apply_buy_sector_limit(buy_candidates).head(MAX_ORDERS_PER_RUN)
+        buy_signals = _apply_buy_sector_limit(
+            buy_candidates, held_symbols=held_symbols, market=market
+        ).head(MAX_ORDERS_PER_RUN)
     else:
         logger.warning(
             "[exec] リスク・相関ゲートにより新規買いをスキップ: %s",
@@ -325,33 +327,33 @@ def run_daily_orders(
             stats["skipped"] += 1
             continue
 
-        kelly_win_rate, kelly_avg_win, kelly_avg_loss = _resolve_kelly_params(
-            str(row["market"]), symbol
-        )
-        qty = risk.calc_position_size(
-            symbol,
-            current_price,
-            win_rate=kelly_win_rate,
-            avg_win=kelly_avg_win,
-            avg_loss=kelly_avg_loss,
-            confidence_ratio=confidence,
-        )
-        if qty <= 0:
-            logger.info(f"[exec] {symbol}: 発注株数 0 → スキップ（残高不足or上限）")
-            stats["skipped"] += 1
-            continue
-
-        if split_ratio < 1.0:
-            qty = _apply_split_qty(qty, split_ratio, lot=lot)
-            logger.info(
-                "[exec] %s: confidence_ratio=%.3f → %.0f%%発注 %d株 (R-308)",
-                symbol,
-                confidence,
-                split_ratio * 100,
-                qty,
-            )
-
         try:
+            kelly_win_rate, kelly_avg_win, kelly_avg_loss = _resolve_kelly_params(
+                str(row["market"]), symbol
+            )
+            qty = risk.calc_position_size(
+                symbol,
+                current_price,
+                win_rate=kelly_win_rate,
+                avg_win=kelly_avg_win,
+                avg_loss=kelly_avg_loss,
+                confidence_ratio=confidence,
+            )
+            if qty <= 0:
+                logger.info(f"[exec] {symbol}: 発注株数 0 → スキップ（残高不足or上限）")
+                stats["skipped"] += 1
+                continue
+
+            if split_ratio < 1.0:
+                qty = _apply_split_qty(qty, split_ratio, lot=lot)
+                logger.info(
+                    "[exec] %s: confidence_ratio=%.3f → %.0f%%発注 %d株 (R-308)",
+                    symbol,
+                    confidence,
+                    split_ratio * 100,
+                    qty,
+                )
+
             order_type, order_price, order_reason, order_session = _choose_order_params(
                 market=str(row["market"]),
                 symbol=symbol,
@@ -496,33 +498,33 @@ def run_daily_orders(
                 stats["skipped"] += 1
                 continue
 
-            kelly_win_rate, kelly_avg_win, kelly_avg_loss = _resolve_kelly_params(
-                str(row["market"]), symbol
-            )
-            qty = risk.calc_position_size(
-                symbol,
-                current_price,
-                win_rate=kelly_win_rate,
-                avg_win=kelly_avg_win,
-                avg_loss=kelly_avg_loss,
-                confidence_ratio=confidence,
-            )
-            if qty <= 0:
-                logger.info(f"[exec] {symbol}: 発注株数 0 → ショートスキップ（残高不足or上限）")
-                stats["skipped"] += 1
-                continue
-
-            if short_split_ratio < 1.0:
-                qty = _apply_split_qty(qty, short_split_ratio, lot=lot)
-                logger.info(
-                    "[exec] %s: confidence_ratio=%.3f → %.0f%%ショート発注 %d株 (R-308)",
-                    symbol,
-                    confidence,
-                    short_split_ratio * 100,
-                    qty,
-                )
-
             try:
+                kelly_win_rate, kelly_avg_win, kelly_avg_loss = _resolve_kelly_params(
+                    str(row["market"]), symbol
+                )
+                qty = risk.calc_position_size(
+                    symbol,
+                    current_price,
+                    win_rate=kelly_win_rate,
+                    avg_win=kelly_avg_win,
+                    avg_loss=kelly_avg_loss,
+                    confidence_ratio=confidence,
+                )
+                if qty <= 0:
+                    logger.info(f"[exec] {symbol}: 発注株数 0 → ショートスキップ（残高不足or上限）")
+                    stats["skipped"] += 1
+                    continue
+
+                if short_split_ratio < 1.0:
+                    qty = _apply_split_qty(qty, short_split_ratio, lot=lot)
+                    logger.info(
+                        "[exec] %s: confidence_ratio=%.3f → %.0f%%ショート発注 %d株 (R-308)",
+                        symbol,
+                        confidence,
+                        short_split_ratio * 100,
+                        qty,
+                    )
+
                 order_type, order_price, order_reason, order_session = _choose_order_params(
                     market=str(row["market"]),
                     symbol=symbol,
