@@ -143,6 +143,56 @@ class TestEvaluateAllSymbols(unittest.TestCase):
         # 例外が伝播せず結果が返る
         self.assertIsInstance(result, dict)
 
+    def test_exception_per_symbol_counts_as_error_not_skipped(self):
+        """評価の失敗は errors に数え、有効ルールなしの skipped と混ぜない（#1087）。"""
+        from src.backtest.rule_selector import evaluate_all_symbols
+
+        with (
+            patch("src.backtest.rule_selector._WATCHLIST_PATH", self.watchlist_path),
+            patch(
+                "src.backtest.rule_selector.run_rule_backtest",
+                side_effect=RuntimeError("backtest error"),
+            ),
+            patch("src.backtest.rule_selector.upsert_rule_best"),
+        ):
+            result = evaluate_all_symbols("jp", "2024-01-01", "2024-12-31")
+        self.assertEqual(result["errors"], 2)
+        self.assertEqual(result["skipped"], 0)
+
+    def test_upsert_failure_counts_as_error(self):
+        from src.backtest.rule_selector import evaluate_all_symbols
+
+        with (
+            patch("src.backtest.rule_selector._WATCHLIST_PATH", self.watchlist_path),
+            patch(
+                "src.backtest.rule_selector.run_rule_backtest",
+                return_value=[_mock_result("rsi_contrarian", 0.65, 50000)],
+            ),
+            patch(
+                "src.backtest.rule_selector.upsert_rule_best",
+                side_effect=RuntimeError("db error"),
+            ),
+        ):
+            result = evaluate_all_symbols("jp", "2024-01-01", "2024-12-31")
+        self.assertEqual(result["errors"], 2)
+        self.assertEqual(result["skipped"], 0)
+        self.assertEqual(result["effective"], 0)
+
+    def test_no_valid_rule_counts_as_skipped_not_error(self):
+        from src.backtest.rule_selector import evaluate_all_symbols
+
+        with (
+            patch("src.backtest.rule_selector._WATCHLIST_PATH", self.watchlist_path),
+            patch(
+                "src.backtest.rule_selector.run_rule_backtest",
+                return_value=[_mock_result("r1", 0.3, -100)],
+            ),
+            patch("src.backtest.rule_selector.upsert_rule_best"),
+        ):
+            result = evaluate_all_symbols("jp", "2024-01-01", "2024-12-31")
+        self.assertEqual(result["skipped"], 2)
+        self.assertEqual(result["errors"], 0)
+
     def test_returns_summary_keys(self):
         from src.backtest.rule_selector import evaluate_all_symbols
 
