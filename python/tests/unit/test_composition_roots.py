@@ -475,7 +475,7 @@ class TestRunWeeklyReportCompositionRoot(unittest.TestCase):
             weekly.run_weekly_report()
 
         self.assertEqual(order, ["save_snapshot", "load_snapshots"])
-        fake_query.drift_summary.assert_called_once_with(horizon=1)
+        fake_query.drift_summary.assert_called_once_with(horizon=1, model_name="production")
         fake_query.weekly_accuracy_snapshots.assert_called_once_with(n_weeks=4)
         self.assertIs(mock_save.call_args.args[1], drift_df)
         self.assertIs(captured.get("accuracy_df"), drift_df)

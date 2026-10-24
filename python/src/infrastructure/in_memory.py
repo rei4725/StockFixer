@@ -292,7 +292,9 @@ class InMemoryAnalyticsQuery(AnalyticsQuery):
         self.calls.append(("paper_real_diff_summary", {"recent_days": recent_days}))
         return self._paper_real_diff
 
-    def drift_summary(self, horizon: int = 1, recent_n: int = 30) -> pd.DataFrame:
+    def drift_summary(
+        self, horizon: int = 1, recent_n: int = 30, model_name: str = "production"
+    ) -> pd.DataFrame:
         self.calls.append(("drift_summary", {"horizon": horizon, "recent_n": recent_n}))
         return self._drift.copy()
 

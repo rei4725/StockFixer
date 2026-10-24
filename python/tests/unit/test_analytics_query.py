@@ -117,8 +117,10 @@ class TestPostgresAnalyticsQueryAccuracyDelegation(unittest.TestCase):
     def test_drift_summary_delegates(self):
         sentinel = pd.DataFrame({"x": [1]})
         with patch(f"{self._MOD}.load_drift_summary", return_value=sentinel) as mock_load:
-            result = PostgresAnalyticsQuery().drift_summary(horizon=3, recent_n=20)
-        mock_load.assert_called_once_with(horizon=3, recent_n=20)
+            result = PostgresAnalyticsQuery().drift_summary(
+                horizon=3, recent_n=20, model_name="challenger"
+            )
+        mock_load.assert_called_once_with(horizon=3, recent_n=20, model_name="challenger")
         self.assertIs(result, sentinel)
 
     def test_prediction_accuracy_delegates(self):
