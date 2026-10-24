@@ -36,6 +36,29 @@ class TestWirePorts(unittest.TestCase):
         self.assertIsNot(sp.get_backtest_screening_port(), first)
 
 
+class TestModelManagerFactoryWiring(unittest.TestCase):
+    """手で流すバックテストの入口が wire_ports() だけで ModelManager を使えること（#1063）。"""
+
+    def setUp(self):
+        from src.backtest import ports as backtest_ports
+
+        self._ports = backtest_ports
+        self._saved_factory = backtest_ports._model_manager_factory
+        self._saved_wired = port_wiring._wired
+
+    def tearDown(self):
+        self._ports._model_manager_factory = self._saved_factory
+        port_wiring._wired = self._saved_wired
+
+    def test_wire_ports_sets_model_manager_factory(self):
+        from src.prediction.manager import ModelManager
+
+        self._ports._model_manager_factory = None
+        port_wiring._wired = False
+        port_wiring.wire_ports()
+        self.assertIsInstance(self._ports.get_model_manager(), ModelManager)
+
+
 class TestAnalyticsQueryInjectionPoint(unittest.TestCase):
     def setUp(self):
         from src.reporting import ports as reporting_ports
