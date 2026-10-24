@@ -13,7 +13,7 @@ from datetime import datetime
 
 import pandas as pd
 
-from src.prediction.db import load_weekly_accuracy_snapshots
+from src.prediction.db import PREDICTED_DATE_SQL, load_weekly_accuracy_snapshots
 from src.prediction.types import DriftMonitorResult  # noqa: F401
 from src.utils.db._connection import _db_connection
 from src.utils.logger import get_logger
@@ -45,21 +45,24 @@ def _load_weekly_hit_rates_from_snapshots(n_weeks: int) -> pd.DataFrame:
 def _load_weekly_hit_rates_direct(n_weeks: int, horizon: int) -> pd.DataFrame:
     """prediction_accuracy テーブルを直接集計し週次 Hit Rate を返す（フォールバック）。
 
+    週は予想した日（predicted_at）で分ける。checked_at は採点し直しのたびに
+    今に書き換わり、古い予想も最新の週に寄るため使わない（#1023）。
+
     Returns:
         DataFrame [week_start, hit_rate] (week_start 降順)。空の場合は空 DataFrame。
     """
+    week_sql = f"CAST(date_trunc('week', TO_DATE({PREDICTED_DATE_SQL}, 'YYYYMMDD')) AS DATE)"
     with _db_connection() as con:
         try:
             df = pd.read_sql(
                 f"""
                 SELECT
-                    date_trunc('week', checked_at) AS week_start,
+                    {week_sql} AS week_start,
                     AVG(CAST(direction_match AS INTEGER)) AS hit_rate
                 FROM prediction_accuracy
                 WHERE horizon = %s
                   AND direction_match IS NOT NULL
-                  AND checked_at IS NOT NULL
-                GROUP BY date_trunc('week', checked_at)
+                GROUP BY {week_sql}
                 ORDER BY week_start DESC
                 LIMIT {int(n_weeks)}
                 """,
