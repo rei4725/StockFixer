@@ -148,7 +148,8 @@ class TestComputeDriftCount(unittest.TestCase):
         df = pd.DataFrame(
             {
                 "mean_abs_error": [0.05, 0.01, 0.01],
-                "direction_accuracy": [0.60, 0.40, 0.60],
+                "direction_accuracy": [0.60, 0.35, 0.60],
+                "n_samples": [30, 30, 30],
             }
         )
         # 1 行目は誤差超過、2 行目は正解率割れ、3 行目は健全
@@ -223,7 +224,13 @@ class TestLoadMonthlyKpis(unittest.TestCase):
     def test_aggregates_port_data(self):
         analytics = InMemoryAnalyticsQuery(
             accuracy=pd.DataFrame({"direction_match": [True, False, True, True]}),
-            drift=pd.DataFrame({"mean_abs_error": [0.05, 0.01], "direction_accuracy": [0.6, 0.6]}),
+            drift=pd.DataFrame(
+                {
+                    "mean_abs_error": [0.05, 0.01],
+                    "direction_accuracy": [0.6, 0.6],
+                    "n_samples": [30, 30],
+                }
+            ),
         )
         kpi = _load_monthly_kpis(analytics)
         self.assertAlmostEqual(kpi.hit_rate, 0.75)
