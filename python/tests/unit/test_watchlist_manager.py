@@ -40,18 +40,52 @@ class TestFetchSp500Symbols(unittest.TestCase):
 
 
 class TestFetchNikkei225Symbols(unittest.TestCase):
-    """fetch_nikkei225_symbols のテスト"""
+    """fetch_nikkei225_symbols のテスト
+
+    英語版 Wikipedia の Nikkei_225 から構成銘柄の表が消えた（2026-10 に確認）ため、
+    日本語版の「日経平均株価」の業種ごとの表（「証券コード」列）から取る。
+    """
 
     @patch("pandas.read_html")
-    def test_returns_list_of_symbols(self, mock_html):
-        """Wikipedia から日経225 銘柄リストが返ること"""
+    def test_reads_ja_wikipedia(self, mock_html):
+        """日本語版 Wikipedia の「日経平均株価」を読むこと"""
         from src.watchlist.manager import fetch_nikkei225_symbols
 
-        # 実際のカラム名は "Code"（英字）
-        mock_html.return_value = [pd.DataFrame({"Code": ["7203", "9984", "6758"]})]
-        result = fetch_nikkei225_symbols()
-        self.assertIsInstance(result, list)
-        self.assertEqual(len(result), 3)
+        mock_html.return_value = [pd.DataFrame({"証券コード": ["7203"]})]
+        fetch_nikkei225_symbols()
+        url = mock_html.call_args.args[0]
+        self.assertIn("ja.wikipedia.org", url)
+
+    @patch("pandas.read_html")
+    def test_collects_codes_across_sector_tables(self, mock_html):
+        """業種ごとに分かれた表の「証券コード」をまとめ、ほかの表は飛ばすこと"""
+        from src.watchlist.manager import fetch_nikkei225_symbols
+
+        mock_html.return_value = [
+            pd.DataFrame({"年": [2024], "終値": [40000]}),
+            pd.DataFrame({"証券コード": ["7203", "7267"], "銘柄": ["トヨタ", "ホンダ"]}),
+            pd.DataFrame({"証券コード": ["9984"], "銘柄": ["SBG"]}),
+        ]
+        self.assertEqual(fetch_nikkei225_symbols(), ["7203", "7267", "9984"])
+
+    @patch("pandas.read_html")
+    def test_keeps_alphanumeric_tse_codes(self, mock_html):
+        """東証の英字入りの新しいコード（例: 285A）を落とさないこと"""
+        from src.watchlist.manager import fetch_nikkei225_symbols
+
+        mock_html.return_value = [pd.DataFrame({"証券コード": ["7203", "285A", "130A"]})]
+        self.assertEqual(fetch_nikkei225_symbols(), ["7203", "285A", "130A"])
+
+    @patch("pandas.read_html")
+    def test_drops_duplicates_and_invalid_codes(self, mock_html):
+        """重複と、コードの形でない値（見出し・5桁・空）を除くこと"""
+        from src.watchlist.manager import fetch_nikkei225_symbols
+
+        mock_html.return_value = [
+            pd.DataFrame({"証券コード": ["7203", "証券コード", "12345", None, " 9984 "]}),
+            pd.DataFrame({"証券コード": ["7203", "ABC"]}),
+        ]
+        self.assertEqual(fetch_nikkei225_symbols(), ["7203", "9984"])
 
     @patch("pandas.read_html")
     def test_returns_empty_on_error(self, mock_html):
@@ -63,20 +97,8 @@ class TestFetchNikkei225Symbols(unittest.TestCase):
         self.assertEqual(result, [])
 
     @patch("pandas.read_html")
-    def test_filters_non_4digit_codes(self, mock_html):
-        """数字4桁以外のコードは除外されること"""
-        from src.watchlist.manager import fetch_nikkei225_symbols
-
-        mock_html.return_value = [pd.DataFrame({"Code": ["7203", "9984", "ABC", "12345", "0001"]})]
-        result = fetch_nikkei225_symbols()
-        # "7203", "9984", "0001" の3件のみ残る
-        self.assertEqual(len(result), 3)
-        self.assertNotIn("ABC", result)
-        self.assertNotIn("12345", result)
-
-    @patch("pandas.read_html")
     def test_returns_empty_when_no_code_column(self, mock_html):
-        """Code カラムがないテーブルのみの場合は空リストが返ること"""
+        """「証券コード」列がないテーブルのみの場合は空リストが返ること"""
         from src.watchlist.manager import fetch_nikkei225_symbols
 
         mock_html.return_value = [pd.DataFrame({"Symbol": ["AAPL"]})]

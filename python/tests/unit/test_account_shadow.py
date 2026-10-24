@@ -1,4 +1,4 @@
-"""ユニットテスト: ShadowBroker と make_order_broker"""
+"""ユニットテスト: ShadowBroker と注文の Broker の選び"""
 
 import json
 from datetime import date
@@ -113,7 +113,7 @@ def _cfg(monkeypatch):
 
 def test_factory_returns_paper_when_shadow_off(_cfg):
     _cfg.setattr(cfg, "ACCOUNT_SHADOW", False)
-    b = factory.make_order_broker(
+    b = factory.make_configured_order_broker(
         job="auto", market_data_port=MagicMock(), trade_diff_sink=MagicMock()
     )
     assert isinstance(b, PaperBroker)
@@ -121,18 +121,40 @@ def test_factory_returns_paper_when_shadow_off(_cfg):
 
 def test_factory_falls_back_to_paper_without_url(_cfg):
     _cfg.setattr(cfg, "ACCOUNT_GATEWAY_URL", "")
-    b = factory.make_order_broker(
+    b = factory.make_configured_order_broker(
         job="auto", market_data_port=MagicMock(), trade_diff_sink=MagicMock()
     )
     assert isinstance(b, PaperBroker)
 
 
 def test_factory_returns_shadow_when_configured(_cfg):
-    b = factory.make_order_broker(
+    b = factory.make_configured_order_broker(
         job="rule", market_data_port=MagicMock(), trade_diff_sink=MagicMock()
     )
     assert isinstance(b, ShadowBroker) and isinstance(b, BrokerBase)
     assert b.broker_name == "paper"
+
+
+def test_order_broker_is_paper_without_wiring_even_when_configured(_cfg):
+    # 設定の値がそろっていても、差し込みが無ければ gateway を作らない（#1029）
+    gw = MagicMock()
+    _cfg.setattr(factory, "AccountGatewayBroker", gw)
+    b = factory.make_order_broker(
+        job="auto", market_data_port=MagicMock(), trade_diff_sink=MagicMock()
+    )
+    assert isinstance(b, PaperBroker)
+    gw.assert_not_called()
+
+
+def test_wire_ports_injects_configured_selector(_cfg):
+    from src.orchestration import port_wiring
+
+    _cfg.setattr(port_wiring, "_wired", False)
+    port_wiring.wire_ports(force=True)
+    b = factory.make_order_broker(
+        job="hz", market_data_port=MagicMock(), trade_diff_sink=MagicMock()
+    )
+    assert isinstance(b, ShadowBroker)
 
 
 def test_report_job_skips_when_shadow_off(_cfg):

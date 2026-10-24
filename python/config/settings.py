@@ -17,6 +17,7 @@ from typing import Optional
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from config.env_source import dotenv_path
 from config.feature_flags import flags
 from config.trading_policy import KELLY_CAP as _KELLY_CAP
 
@@ -25,7 +26,7 @@ class Settings(BaseSettings):
     """環境変数から読み込まれるアプリケーション設定。"""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=dotenv_path(),
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=True,

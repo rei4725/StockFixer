@@ -73,3 +73,32 @@ def test_load_all_stock_features_coerces_all_null_column_to_numeric():
     all_df = load_all_stock_features()
 
     assert pd.api.types.is_float_dtype(all_df["capital_gains"])
+
+
+def test_load_all_stock_features_downcasts_features_to_float32_but_keeps_target():
+    """#807: 全件の float64 の読み込みが 8GB のコンテナの上限を超えるため、
+    特徴量の列は float32 で持つ。目的変数 y は精度を落とさない。
+    """
+    upsert_stock_features("us", "F32", pd.DataFrame({"close": [1.5], "y": [0.123456789012]}))
+
+    all_df = load_all_stock_features()
+
+    assert all_df["close"].dtype == "float32"
+    assert all_df["y"].dtype == "float64"
+    assert all_df.loc[all_df["symbol"] == "F32", "y"].iloc[0] == 0.123456789012
+
+
+def test_load_all_stock_features_reads_in_chunks_and_keeps_order(monkeypatch):
+    """#807: サーバー側のカーソルで少しずつ読んでも、行の順と中身は1回で読んだときと同じ。"""
+    import src.utils.db.stock_features as sf
+
+    monkeypatch.setattr(sf, "_LOAD_ALL_FETCH_ROWS", 1)
+    upsert_stock_features("us", "C1", pd.DataFrame({"close": [1.0, 2.0, 3.0]}))
+    upsert_stock_features("us", "C2", pd.DataFrame({"close": [4.0, 5.0]}))
+
+    all_df = load_all_stock_features()
+    picked = all_df[all_df["symbol"].isin(["C1", "C2"])]
+
+    assert list(picked["symbol"]) == ["C1", "C1", "C1", "C2", "C2"]
+    assert list(picked["close"]) == [1.0, 2.0, 3.0, 4.0, 5.0]
+    assert all_df.index.is_unique

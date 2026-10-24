@@ -13,12 +13,14 @@ env変数での上書きは settings.py の Settings クラスと同じ挙動
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from config.env_source import dotenv_path
+
 
 class FeatureFlags(BaseSettings):
     """機能の有効/無効フラグ（真偽値のみ）。"""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=dotenv_path(),
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=True,
