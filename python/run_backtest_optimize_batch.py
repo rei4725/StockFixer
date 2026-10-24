@@ -24,6 +24,7 @@ import sys
 
 from src.backtest.optimizer import run_optimize_batch
 from src.utils.logger import get_logger
+from src.watchlist.batch_runner import load_target_symbols
 
 logger = get_logger(__name__)
 
@@ -52,7 +53,12 @@ def parse_args():
     parser.add_argument(
         "--fee-rate", type=float, default=0.001, help="取引手数料率 (default: 0.001)"
     )
-    parser.add_argument("--slippage", type=float, default=0.0, help="スリッページ (default: 0.0)")
+    parser.add_argument(
+        "--slippage",
+        type=float,
+        default=None,
+        help="片道スリッページ率 (未指定時は市場別デフォルト US 5bps / JP 10bps)",
+    )
 
     # 閾値グリッド
     parser.add_argument(
@@ -112,7 +118,9 @@ def main():
     wire_ports()
     args = parse_args()
 
+    tasks = load_target_symbols(args.as_of_date)
     results = run_optimize_batch(
+        tasks,
         model_type=args.model_type,
         ensemble=args.ensemble,
         source=args.source,
@@ -127,7 +135,6 @@ def main():
         max_workers=args.max_workers,
         sort_by=args.sort_by,
         skip_days=args.skip_days,
-        as_of_date=args.as_of_date,
     )
 
     success = [r for r in results if r["status"] == "success"]
