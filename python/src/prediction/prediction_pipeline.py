@@ -579,7 +579,7 @@ def run_accuracy_check(
         save_prediction_accuracy(new_rows)
 
     # サマリーを返す
-    summary = load_drift_summary(horizon=horizon)
+    summary = load_drift_summary(horizon=horizon, model_name=model_name)
     skipped_str = ", ".join(f"{reason}={count}" for reason, count in skipped.items())
     logger.info(
         f"精度チェック完了: {len(new_rows)}件 採点 "

@@ -42,6 +42,16 @@ class TestFilterBySectorCap(unittest.TestCase):
         self.assertEqual(result.index("AAPL"), 0)
         self.assertEqual(result.index("JPM"), 1)
 
+    def test_initial_counts_are_included_in_cap(self):
+        items = ["AAPL", "MSFT", "JPM"]
+        result = filter_by_sector_cap(
+            items,
+            max_sector_positions=2,
+            sector_getter=self._sector,
+            initial_counts={"Technology": 1},
+        )
+        self.assertEqual(result, ["AAPL", "JPM"])
+
 
 class TestGetSymbolSector(unittest.TestCase):
     def test_returns_sector_from_yfinance(self):
