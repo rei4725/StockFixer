@@ -6,7 +6,11 @@ daily.py からの責務分離（ファイル行数ガード対策）。run_dail
 
 from typing import TYPE_CHECKING
 
-from src.orchestration.jobs.common import _handle_stage_error, is_today_jst
+from src.orchestration.jobs.common import (
+    _handle_stage_error,
+    _notify_stage_failure,
+    is_today_jst,
+)
 from src.orchestration.types import PipelineStage
 from src.utils.logger import get_logger
 
@@ -57,7 +61,9 @@ def write_accuracy_json_without_sectors() -> "DailyAccuracyReport | None":
         logger.info("[2/6] 採点の JSON 書き出し完了（業種は道の最後に書き足す）")
         return accuracy_report
     except Exception as e:
+        # その日の JSON は後から作り直せないため知らせる。[3/6] を止めないよう投げ直さない（#1006）
         _handle_stage_error(PipelineStage.NON_CRITICAL, "[2/6] 採点の JSON 書き出し", e)
+        _notify_stage_failure("[2/6] 採点の JSON 書き出し", e)
         return None
 
 
