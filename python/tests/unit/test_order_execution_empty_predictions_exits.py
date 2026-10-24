@@ -15,7 +15,7 @@ from src.infrastructure.in_memory import (
     InMemoryPredictionRepository,
     InMemoryTradeDiffSink,
 )
-from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
+from src.trading.brokers.base import BrokerBase, OrderSide
 from src.trading.execution import run_daily_orders
 from src.trading.types import TradingGateStatus
 
@@ -57,10 +57,6 @@ class TestEmptyPredictionsStillExits(unittest.TestCase):
             patch.object(_PREDICTIONS, "get_latest_by_market", return_value=pd.DataFrame()),
             patch("src.trading.execution.runner._record_order"),
             patch("src.trading.execution.sl_tp._record_order"),
-            patch(
-                "src.trading.execution.sl_tp._choose_order_params",
-                return_value=(OrderType.MARKET, 0.0, "market", "open"),
-            ),
             patch("src.trading.execution.sl_tp.RiskManager", sl_risk),
             patch(
                 "src.trading.execution.RiskManager.evaluate_trading_gate",
