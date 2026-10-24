@@ -222,6 +222,25 @@ class TestCheckSlTpExits(unittest.TestCase):
         self.assertEqual(stats["errors"], 1)
         self.assertEqual(len(triggered), 0)
 
+    def test_unpriced_position_is_not_treated_as_zero_pnl(self):
+        """現在値が NaN の保有は損益0として素通りさせず、評価できないと WARNING を出す（#844）"""
+        positions = [
+            {"symbol": "7203", "qty": 100, "avg_price": 1000.0, "current_price": float("nan")}
+        ]
+        broker = _make_broker(positions)
+        stats = _make_stats()
+
+        with patch("src.trading.execution.RiskManager.check_sl_tp") as check:
+            with self.assertLogs("src.trading.execution.sl_tp", level="WARNING") as logs:
+                triggered = _check_sl_tp_exits(
+                    broker, "jp", "paper", MagicMock(), stats, InMemoryTradeDiffSink()
+                )
+
+        check.assert_not_called()
+        broker.send_order.assert_not_called()
+        self.assertEqual(triggered, set())
+        self.assertTrue(any("7203" in m for m in logs.output))
+
     def test_symbol_dot_t_stripped(self):
         positions = [{"symbol": "7203.T", "qty": 100, "avg_price": 1000.0, "current_price": 900.0}]
         broker = _make_broker(positions)
