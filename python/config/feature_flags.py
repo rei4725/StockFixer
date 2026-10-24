@@ -27,6 +27,11 @@ class FeatureFlags(BaseSettings):
     # ---------- ショートサイド（R-215） ----------
     ENABLE_SHORT_SIDE: bool = Field(default=False)
 
+    # ---------- 口座アプリの影の運用（段3） ----------
+    # true のとき、紙に出す注文と同じ買い・売りを口座アプリにも出し、毎日比べる。
+    # 口座アプリの答えで本体の動きは変えない。ACCOUNT_GATEWAY_URL と ACCOUNT_GATEWAY_TOKEN も要る
+    ACCOUNT_SHADOW: bool = Field(default=False)
+
     # ---------- DB メンテナンス / retention（scheduler.run_weekly_db_maintenance） ----------
     # 月初週の週次メンテで VACUUM (ANALYZE) を実行し、肥大化・統計情報の陳腐化を防ぐか。
     DB_COMPACT_ENABLED: bool = Field(default=True)

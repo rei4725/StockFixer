@@ -260,20 +260,46 @@ class TestRiskManagerOptimalParamsAutoLoad(unittest.TestCase):
         self.assertAlmostEqual(risk.stop_loss_pct, 0.03)
         self.assertAlmostEqual(risk.take_profit_pct, 0.07)
 
-    def test_stop_loss_take_profit_none_when_json_not_found(self):
-        """JSON が存在しない（None が返る）場合は stop_loss_pct/take_profit_pct は None"""
-        with patch(self._MOCK_TARGET, return_value=None):
+    def test_stop_loss_falls_back_to_default_when_json_not_found(self):
+        """JSON に無い銘柄は既定の損切りの線（DEFAULT_STOP_LOSS_PCT）を使い、warning を出す（#880）"""
+        with patch(self._MOCK_TARGET, return_value=None), patch(
+            "src.trading.risk_manager.DEFAULT_STOP_LOSS_PCT", 0.08
+        ), self.assertLogs("src.trading.risk_manager", level="WARNING") as logs:
             risk = RiskManager(_make_broker(), market="jp", symbol="9999")
-        self.assertIsNone(risk.stop_loss_pct)
+        self.assertAlmostEqual(risk.stop_loss_pct, 0.08)
         self.assertIsNone(risk.take_profit_pct)
+        self.assertTrue(any("0.08" in m for m in logs.output))
 
-    def test_stop_loss_take_profit_null_in_json(self):
-        """JSON にキーが存在しても値が null の場合は None になる"""
+    def test_stop_loss_falls_back_to_default_when_null_in_json(self):
+        """JSON の値が null なら既定の損切りの線を使い、warning を出す。利確は null のまま（#880）"""
         params = {"threshold": 0.005, "stop_loss_pct": None, "take_profit_pct": None}
-        with patch(self._MOCK_TARGET, return_value=params):
+        with patch(self._MOCK_TARGET, return_value=params), patch(
+            "src.trading.risk_manager.DEFAULT_STOP_LOSS_PCT", 0.08
+        ), self.assertLogs("src.trading.risk_manager", level="WARNING") as logs:
             risk = RiskManager(_make_broker(), market="us", symbol="AAPL")
-        self.assertIsNone(risk.stop_loss_pct)
+        self.assertAlmostEqual(risk.stop_loss_pct, 0.08)
         self.assertIsNone(risk.take_profit_pct)
+        self.assertTrue(any("AAPL" in m for m in logs.output))
+        self.assertEqual(risk.check_sl_tp(100.0, 92.0)[0], True)
+        self.assertEqual(risk.check_sl_tp(100.0, 92.5)[0], False)
+
+    def test_default_stop_loss_zero_disables_fallback(self):
+        """DEFAULT_STOP_LOSS_PCT=0 なら既定の線を使わない（今までどおり損切り無し）"""
+        params = {"stop_loss_pct": None, "take_profit_pct": None}
+        with patch(self._MOCK_TARGET, return_value=params), patch(
+            "src.trading.risk_manager.DEFAULT_STOP_LOSS_PCT", 0.0
+        ):
+            risk = RiskManager(_make_broker(), market="jp", symbol="7203")
+        self.assertIsNone(risk.stop_loss_pct)
+
+    def test_json_stop_loss_wins_over_default(self):
+        """JSON に数の値があれば、既定の線より JSON を使う"""
+        params = {"stop_loss_pct": 0.03, "take_profit_pct": None}
+        with patch(self._MOCK_TARGET, return_value=params), patch(
+            "src.trading.risk_manager.DEFAULT_STOP_LOSS_PCT", 0.08
+        ):
+            risk = RiskManager(_make_broker(), market="jp", symbol="7203")
+        self.assertAlmostEqual(risk.stop_loss_pct, 0.03)
 
     def test_no_json_load_when_market_symbol_not_given(self):
         """market/symbol を指定しない場合は get_optimal_params が呼ばれない"""

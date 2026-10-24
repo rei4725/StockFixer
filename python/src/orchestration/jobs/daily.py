@@ -219,13 +219,14 @@ def run_daily_auto_order():
     """
     import os
 
+    from src.infrastructure.discord_notification_adapter import DiscordNotificationAdapter
     from src.infrastructure.persistence.order_run_repository import PostgresOrderRunSink
     from src.infrastructure.persistence.prediction_result_repository import (
         PostgresPredictionResultRepository,
     )
     from src.infrastructure.persistence.trade_diff_repository import PostgresTradeDiffSink
     from src.infrastructure.yfinance_market_data_adapter import YFinanceMarketDataAdapter
-    from src.trading.brokers.paper.paper_broker import PaperBroker
+    from src.trading.brokers.account.factory import make_order_broker
     from src.trading.execution import run_daily_orders
 
     mode = os.environ.get("AUTO_TRADE_MODE", "paper")
@@ -240,9 +241,11 @@ def run_daily_auto_order():
         market_data = None
     else:
         market_data = YFinanceMarketDataAdapter()
-        broker = PaperBroker(
+        broker = make_order_broker(
+            job="auto",
             market_data_port=market_data,
             trade_diff_sink=trade_diff_sink,
+            notifier=DiscordNotificationAdapter(),
         )
 
     try:
@@ -315,10 +318,11 @@ def run_horizon_exit_check() -> None:
     import os
     from datetime import date
 
+    from src.infrastructure.discord_notification_adapter import DiscordNotificationAdapter
     from src.infrastructure.persistence.trade_diff_repository import PostgresTradeDiffSink
     from src.infrastructure.yfinance_market_data_adapter import YFinanceMarketDataAdapter
+    from src.trading.brokers.account.factory import make_order_broker
     from src.trading.brokers.base import OrderSide
-    from src.trading.brokers.paper.paper_broker import PaperBroker
     from src.utils.db._connection import _db_connection
 
     mode = os.environ.get("AUTO_TRADE_MODE", "paper")
@@ -358,9 +362,11 @@ def run_horizon_exit_check() -> None:
         return
 
     logger.info("[horizon_exit] 期限切れポジション対象: %s", symbols_to_exit)
-    broker = PaperBroker(
+    broker = make_order_broker(
+        job="horizon",
         market_data_port=YFinanceMarketDataAdapter(),
         trade_diff_sink=PostgresTradeDiffSink(),
+        notifier=DiscordNotificationAdapter(),
     )
     exited: list[str] = []
     for symbol in symbols_to_exit:
@@ -546,20 +552,29 @@ def run_daily_rule_signals() -> None:
     market = os.environ.get("RULE_EVAL_MARKET", "jp")
 
     try:
+        from src.infrastructure.discord_notification_adapter import DiscordNotificationAdapter
         from src.infrastructure.persistence.trade_diff_repository import PostgresTradeDiffSink
         from src.infrastructure.yfinance_market_data_adapter import YFinanceMarketDataAdapter
         from src.rule_engine.pipeline import generate_rule_signals
+        from src.trading.brokers.account.factory import make_order_broker
         from src.trading.rule_execution import execute_rule_paper_trades
 
         market_data_adapter = YFinanceMarketDataAdapter()
         batch = generate_rule_signals(market=market, market_data_port=market_data_adapter)
         _raise_if_rule_signals_mostly_unavailable(batch)
         signals = batch.signals
+        rule_trade_diff_sink = PostgresTradeDiffSink()
         trade_stats = execute_rule_paper_trades(
             signals=signals,
             market=market,
             market_data_port=market_data_adapter,
-            trade_diff_sink=PostgresTradeDiffSink(),
+            trade_diff_sink=rule_trade_diff_sink,
+            broker=make_order_broker(
+                job="rule",
+                market_data_port=market_data_adapter,
+                trade_diff_sink=rule_trade_diff_sink,
+                notifier=DiscordNotificationAdapter(),
+            ),
         )
         logger.info(
             "=== 日次ルールシグナル完了: BUY=%s SELL=%s 取れなかった=%s 対象=%s ===",
