@@ -265,6 +265,62 @@ class TestBenchmarkNullReason(unittest.TestCase):
         self.assertIsNone(result["markets"]["us"]["excess_return"])
 
 
+def _download_from(closes):
+    """yfinance と同じく start 以上・end 未満の行だけを返す download の偽物。"""
+    series = pd.Series(closes)
+    series.index = pd.to_datetime(series.index)
+
+    def download(ticker, start, end, **kwargs):
+        rows = series[(series.index >= pd.Timestamp(start)) & (series.index < pd.Timestamp(end))]
+        return pd.DataFrame({"Close": rows})
+
+    return download
+
+
+class TestBenchmarkBaseOnHoliday(unittest.TestCase):
+    """ベンチマークの起点は、紙の売買の評価額と同じ base_day 以前の最後の終値にすること（#1076）"""
+
+    def setUp(self):
+        self.orders = _orders([("jp", "7203", 1, 1000, 100.0, pd.Timestamp("2026-10-07"))])
+
+    @patch("yfinance.download")
+    def test_holiday_base_day_uses_previous_close(self, mock_download):
+        # base_day の 2026-10-09（金）が休場。行は木曜と月曜〜金曜にある
+        mock_download.side_effect = _download_from(
+            {
+                "2026-10-08": 100.0,
+                "2026-10-12": 102.0,
+                "2026-10-13": 103.0,
+                "2026-10-14": 104.0,
+                "2026-10-15": 104.0,
+                "2026-10-16": 105.0,
+            }
+        )
+        result = compute_weekly_results(
+            self.orders, _price_loader, _INITIAL, date(2026, 10, 17), fetch_benchmark_returns
+        )
+        # 木曜 100 → 金曜 105（月曜起点なら 105 / 102 - 1）
+        self.assertAlmostEqual(result["markets"]["jp"]["benchmark_return"], 0.05)
+        self.assertAlmostEqual(result["markets"]["us"]["benchmark_return"], 0.05)
+
+    @patch("yfinance.download")
+    def test_trading_base_day_keeps_previous_value(self, mock_download):
+        mock_download.side_effect = _download_from(
+            {
+                "2026-10-08": 90.0,
+                "2026-10-09": 100.0,
+                "2026-10-12": 102.0,
+                "2026-10-16": 103.0,
+            }
+        )
+        expected = fetch_benchmark_returns("1306.T", "2026-10-09", "2026-10-17")["total_return"]
+        result = compute_weekly_results(
+            self.orders, _price_loader, _INITIAL, date(2026, 10, 17), fetch_benchmark_returns
+        )
+        self.assertEqual(result["markets"]["jp"]["benchmark_return"], expected)
+        self.assertAlmostEqual(result["markets"]["jp"]["benchmark_return"], 0.03)
+
+
 class TestWritePaperWeeklyResults(unittest.TestCase):
     """週の道からファイルに書くこと"""
 

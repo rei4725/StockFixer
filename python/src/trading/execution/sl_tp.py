@@ -5,6 +5,7 @@ import math
 from src.domain.ports import MarketDataPort, TradeDiffSink
 from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
 from src.trading.risk_manager import RiskManager
+from src.trading.types import TradingGateStatus
 from src.utils.logger import get_logger
 
 from .recording import _record_order
@@ -86,3 +87,22 @@ def _check_sl_tp_exits(
             stats["errors"] += 1
 
     return triggered
+
+
+def _sl_tp_exits_only(
+    broker: BrokerBase,
+    market: str,
+    mode: str,
+    market_data: MarketDataPort | None,
+    stats: OrderExecutionStats,
+    trade_diff_sink: TradeDiffSink,
+    gate_status: TradingGateStatus,
+) -> None:
+    """予測を使えない日に、当日の損失を stats に載せて SL/TP の決済だけ行う（#1049・#932）。"""
+    stats.update(
+        {
+            "daily_loss": gate_status.daily_loss,
+            "daily_loss_limit": gate_status.daily_loss_limit,
+        }
+    )
+    _check_sl_tp_exits(broker, market, mode, market_data, stats, trade_diff_sink)
