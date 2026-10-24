@@ -10,6 +10,9 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+# MAE の実効の線 = max(DRIFT_MAE_THRESHOLD, 全銘柄の MAE の中央値 × この倍率)
+DRIFT_MAE_RELATIVE_RATIO_DEFAULT = "1.5"
+
 
 @skip_if_running(_drift_check_lock, "日次ドリフトチェック")
 def run_daily_drift_check():
@@ -17,7 +20,9 @@ def run_daily_drift_check():
     日次ドリフト監視: 直近 20 営業日の MAE / Hit Rate を監視し、閾値超過銘柄を自動再学習する。
 
     環境変数:
-        DRIFT_MAE_THRESHOLD:       MAE 閾値（デフォルト 0.02 = 2%）
+        DRIFT_MAE_THRESHOLD:       MAE 閾値の下限（デフォルト 0.02 = 2%）
+        DRIFT_MAE_RELATIVE_RATIO:  全銘柄の MAE の中央値に掛ける倍率（デフォルト 1.5）。
+                                   実効の線は下限と「中央値×倍率」の大きい方。
         DRIFT_HIT_RATE_THRESHOLD:  Hit Rate 閾値（デフォルト 0.45 = 45%）
         DRIFT_MIN_SAMPLES:         判定に必要な最小サンプル数（デフォルト 10）。
                                    これ未満の銘柄はサンプル不足のノイズとみなし対象外にする。
@@ -37,10 +42,14 @@ def run_daily_drift_check():
     _hr_default = os.environ.get("DRIFT_HIT_RATE_THRESHOLD", "0.45")
     _min_samples_default = os.environ.get("DRIFT_MIN_SAMPLES", "10")
     _max_retrain_default = os.environ.get("DRIFT_MAX_RETRAIN_PER_RUN", "50")
+    _mae_ratio_default = os.environ.get(
+        "DRIFT_MAE_RELATIVE_RATIO", DRIFT_MAE_RELATIVE_RATIO_DEFAULT
+    )
     mae_threshold = float(get_config_value("drift.mae_threshold", _mae_default))
     hit_rate_threshold = float(get_config_value("drift.hit_rate_threshold", _hr_default))
     min_samples = int(get_config_value("drift.min_samples", _min_samples_default))
     max_retrain_per_run = int(get_config_value("drift.max_retrain_per_run", _max_retrain_default))
+    mae_relative_ratio = float(get_config_value("drift.mae_relative_ratio", _mae_ratio_default))
 
     logger.info(
         f"=== 日次ドリフトチェック開始 (MAE閾値={mae_threshold:.2%}, HitRate閾値={hit_rate_threshold:.0%}, "
@@ -52,11 +61,21 @@ def run_daily_drift_check():
         logger.info("ドリフトチェック: 精度データなし（スキップ）")
         return
 
-    triggered = summary[
-        (summary["mean_abs_error"] >= mae_threshold)
-        | (summary["direction_accuracy"] <= hit_rate_threshold)
+    eligible = summary[summary["n_samples"] >= min_samples]
+    # 全銘柄の MAE が同じ水準で高いときに全件が超えないよう、線を全銘柄の中央値の倍率まで上げる（#1020）
+    if not eligible.empty:
+        mae_threshold = max(
+            mae_threshold, float(eligible["mean_abs_error"].median()) * mae_relative_ratio
+        )
+        logger.info(
+            "ドリフトチェック: 実効MAE閾値=%.2f%% (中央値×%s と下限の大きい方)",
+            mae_threshold * 100,
+            mae_relative_ratio,
+        )
+    triggered = eligible[
+        (eligible["mean_abs_error"] >= mae_threshold)
+        | (eligible["direction_accuracy"] <= hit_rate_threshold)
     ]
-    triggered = triggered[triggered["n_samples"] >= min_samples]
     record_drift_warn_streak(not triggered.empty)  # NF-303-3 の連続回数（#934）
 
     if triggered.empty:
