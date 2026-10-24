@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     MAX_CONSECUTIVE_LOSSES: int = Field(default=3)
     MAX_POSITIONS: int = Field(default=10)
     HALF_KELLY: Optional[float] = Field(default=None)
+    # optimal_params.json の stop_loss_pct が無い・null の銘柄の損切りの線（#880）。0 で使わない
+    DEFAULT_STOP_LOSS_PCT: float = Field(default=0.08, ge=0.0, lt=1.0)
 
     # ---------- 自動発注（order_execution_pipeline.py） ----------
     MIN_CHANGE_RATIO: float = Field(default=0.003)
@@ -232,6 +234,7 @@ MAX_DAILY_LOSS_RATE: float = settings.MAX_DAILY_LOSS_RATE
 MAX_POSITION_RATE: float = settings.MAX_POSITION_RATE
 MAX_CONSECUTIVE_LOSSES: int = settings.MAX_CONSECUTIVE_LOSSES
 MAX_POSITIONS: int = settings.MAX_POSITIONS
+DEFAULT_STOP_LOSS_PCT: float = settings.DEFAULT_STOP_LOSS_PCT
 HALF_KELLY: float = settings.HALF_KELLY if settings.HALF_KELLY is not None else _KELLY_CAP / 2
 
 MIN_CHANGE_RATIO: float = settings.MIN_CHANGE_RATIO
