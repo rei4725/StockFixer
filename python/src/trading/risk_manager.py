@@ -11,7 +11,6 @@ OrderExecutionPipeline が注文を送信する前にゲートチェックを行
     4. 最大保有銘柄数 = 10 銘柄
 """
 
-import math
 import os
 from datetime import date, datetime, timezone
 from typing import Any, Optional
@@ -41,6 +40,7 @@ from config.trading_policy import (  # noqa: F401  # R-307/R-219 でポジショ
 from src.domain.exceptions import RiskError  # noqa: F401  # 後方互換のため re-export
 from src.domain.trading_rules import get_lot_size
 from src.trading.brokers.base import BrokerBase, OrderSide
+from src.trading.position_valuation import positions_market_value
 from src.trading.types import TradingGateStatus
 from src.utils.db._connection import _db_connection
 from src.utils.logger import get_logger
@@ -437,15 +437,7 @@ class RiskManager:
             return self._total_equity_cache
 
         balance = self._broker.get_balance()
-        market_value = 0.0
-        for p in self._broker.get_positions():
-            price = float(p.get("current_price", 0.0))
-            if math.isnan(price):
-                # 評価できない保有は時価0として数える（#844）。NaN で総資産ごと NaN になると
-                # DD が 0.0 になりゲートが外れるため、止める側（DD を大きく見る側）に倒す
-                logger.warning(f"[risk] {p.get('symbol')}: 現在値が取れず時価0として総資産に数える")
-                continue
-            market_value += float(p.get("qty", 0)) * price
+        market_value = positions_market_value(self._broker.get_positions(), logger)
         self._total_equity_cache = balance + market_value
         return self._total_equity_cache
 
