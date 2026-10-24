@@ -638,7 +638,10 @@ def run_now(pipeline: str):
     elif pipeline == "wf_report":
         queue_manager.run_job("weekly_walk_forward_report", reason="manual", force=True)
     elif pipeline == "watchlist":
-        queue_manager.run_job("weekly_watchlist_refresh", reason="manual", force=True)
+        # 週の更新は GitHub Actions（weekly-watchlist-refresh）へ移したため SCHEDULE_CONFIG に無い
+        from src.orchestration.scheduler import run_weekly_watchlist_refresh
+
+        run_weekly_watchlist_refresh()
     elif pipeline == "drift":
         queue_manager.run_job("daily_drift_check", reason="manual", force=True)
     elif pipeline == "db_maintenance":

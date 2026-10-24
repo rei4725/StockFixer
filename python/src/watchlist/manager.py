@@ -365,3 +365,45 @@ def run_watchlist_refresh(markets: Optional[list[str]] = None) -> list[Watchlist
         logger.info("=== ウォッチリスト更新完了 (変更なし) ===")
 
     return diffs
+
+
+# ── 実行結果の要約 ────────────────────────────────────────
+
+_SUMMARY_LIST_LIMIT = 20
+
+
+def failed_markets(diffs: list[WatchlistDiff]) -> list[str]:
+    """指数銘柄の取得に失敗した市場の一覧"""
+    return [d.market for d in diffs if d.fetch_failed]
+
+
+def _format_symbols(label: str, symbols: list[str]) -> str:
+    line = f"- **{label}** ({len(symbols)}): {', '.join(symbols[:_SUMMARY_LIST_LIMIT])}"
+    if len(symbols) > _SUMMARY_LIST_LIMIT:
+        line += " …他"
+    return line
+
+
+def format_refresh_summary(diffs: list[WatchlistDiff]) -> str:
+    """GitHub Actions の Step Summary に書く Markdown（取得失敗を「変更なし」と書かない）"""
+    lines = ["## Watchlist Refresh Results", ""]
+    failed = failed_markets(diffs)
+    for market in failed:
+        lines.append(
+            f"- **{market.upper()}**: 指数銘柄の取得失敗（watchlist.json は更新していない）"
+        )
+    if failed:
+        lines.append("")
+
+    changed = [d for d in diffs if d.has_changes or d.removed_unverified]
+    if not changed and not failed:
+        lines.append("変更なし — watchlist.json はすでに最新です。")
+    for d in changed:
+        lines.append(f"### {d.market.upper()}")
+        if d.added:
+            lines.append(_format_symbols("追加", d.added))
+        if d.removed:
+            lines.append(_format_symbols("削除", d.removed))
+        if d.removed_unverified:
+            lines.append(_format_symbols("保留", d.removed_unverified))
+    return "\n".join(lines) + "\n"
