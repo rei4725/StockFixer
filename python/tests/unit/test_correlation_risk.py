@@ -20,6 +20,34 @@ from src.trading.correlation_risk import (
 from src.trading.types import CorrelationGateResult
 
 
+def _run_load(frame: pd.DataFrame, symbols: list, window: int) -> pd.DataFrame:
+    conn_cm = MagicMock()
+    conn_cm.__enter__.return_value = MagicMock()
+    with (
+        patch("src.trading.correlation_risk._db_connection", return_value=conn_cm),
+        patch("src.trading.correlation_risk.pd.read_sql", return_value=frame),
+    ):
+        return _load_recent_returns(symbols, "jp", window)
+
+
+def _short_history_frame(short_bars: int) -> pd.DataFrame:
+    """A と B は 21 本の日足（高い相関）、C は直近 short_bars 本だけの表。"""
+    np.random.seed(7)
+    dates = pd.bdate_range("2026-09-21", periods=21)
+    base = 100.0 + np.cumsum(np.random.randn(21))
+    closes = {
+        "A": base,
+        "B": base + np.random.randn(21) * 0.05,
+        "C": 50.0 + np.cumsum(np.random.randn(21)),
+    }
+    rows = []
+    for sym, values in closes.items():
+        start = 21 - short_bars if sym == "C" else 0
+        for ts, close in zip(dates[start:], values[start:]):
+            rows.append({"symbol": sym, "ts": ts, "close": float(close)})
+    return pd.DataFrame(rows)
+
+
 class TestLoadRecentReturns(unittest.TestCase):
     """終値は stock_features ではなく market_data_raw の close から読む。
 
@@ -66,6 +94,29 @@ class TestLoadRecentReturns(unittest.TestCase):
         self.assertAlmostEqual(returns["A"].iloc[0], 0.10)
         self.assertAlmostEqual(returns["A"].iloc[1], -0.10)
         self.assertAlmostEqual(returns["B"].iloc[1], 0.10)
+
+    def test_short_history_symbol_is_dropped_not_all_rows(self):
+        """日足が1本の銘柄の列を外し、ほかの銘柄の行を残す（#1001）"""
+        frame = _short_history_frame(short_bars=1)
+        with self.assertLogs("src.trading.correlation_risk", level="WARNING") as logs:
+            returns = _run_load(frame, ["A", "B", "C"], 20)
+
+        self.assertEqual(list(returns.columns), ["A", "B"])
+        self.assertEqual(len(returns), 20)
+        self.assertTrue(any("C" in line for line in logs.output))
+
+    def test_few_bars_symbol_is_dropped_and_rest_keep_window(self):
+        """日足が数本の銘柄を外し、残りの銘柄の20日分を使う（#1001）"""
+        frame = _short_history_frame(short_bars=4)
+        returns = _run_load(frame, ["A", "B", "C"], 20)
+
+        self.assertEqual(list(returns.columns), ["A", "B"])
+        self.assertEqual(len(returns), 20)
+
+    def test_all_symbols_short_returns_empty(self):
+        frame = _short_history_frame(short_bars=1)
+        returns = _run_load(frame[frame["symbol"] == "C"], ["C"], 20)
+        self.assertTrue(returns.empty)
 
     def test_query_failure_raises(self):
         """取得の例外は空の表にせず投げる。空はデータ不足と区別がつかず素通しになる（#809）"""
@@ -191,6 +242,41 @@ class TestEvaluateCorrelationGate(unittest.TestCase):
         result = evaluate_correlation_gate(["A", "B"], "jp", window=20, enc_threshold=2.0)
         self.assertFalse(result.is_allowed)
         self.assertIn("boom", result.reason)
+
+    def _gate_with_frame(self, frame: pd.DataFrame) -> CorrelationGateResult:
+        conn_cm = MagicMock()
+        conn_cm.__enter__.return_value = MagicMock()
+        with (
+            patch("src.trading.correlation_risk._db_connection", return_value=conn_cm),
+            patch("src.trading.correlation_risk.pd.read_sql", return_value=frame),
+        ):
+            return evaluate_correlation_gate(["A", "B", "C"], "jp", window=20, enc_threshold=2.0)
+
+    def test_one_bar_symbol_does_not_skip_gate(self):
+        """3銘柄のうち C の日足が1本でも素通しにせず、A と B で ENC を出す（#1001）"""
+        result = self._gate_with_frame(_short_history_frame(short_bars=1))
+
+        self.assertNotEqual(result.reason, "リターンデータ不足のためスキップ")
+        self.assertFalse(result.is_allowed)
+        self.assertGreater(result.avg_correlation, 0.9)
+        self.assertLess(result.enc, 1.1)
+
+    def test_few_bars_symbol_excluded_and_rest_judged(self):
+        """C の日足が数本なら C を外し、A と B の20日分の相関で判定する（#1001）"""
+        frame = _short_history_frame(short_bars=4)
+        expected = (
+            frame[frame["symbol"] != "C"]
+            .pivot(index="ts", columns="symbol", values="close")
+            .pct_change()
+            .dropna()
+        )
+        expected_corr = abs(expected["A"].corr(expected["B"]))
+
+        result = self._gate_with_frame(frame)
+
+        self.assertAlmostEqual(result.avg_correlation, expected_corr, places=10)
+        self.assertAlmostEqual(result.enc, 2.0 / (1.0 + expected_corr), places=10)
+        self.assertFalse(result.is_allowed)
 
     @patch("src.trading.correlation_risk._load_recent_returns")
     def test_returns_correct_type(self, mock_load):
