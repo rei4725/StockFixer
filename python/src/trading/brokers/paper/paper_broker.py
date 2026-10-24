@@ -28,6 +28,8 @@ logger = get_logger(__name__)
 
 _INITIAL_BALANCE = PAPER_INITIAL_BALANCE
 _JST = "Asia/Tokyo"
+# 保有の評価に使う最後の足の古さの上限（暦日）。連休の前の営業日の足は使い、売買停止の足は使わない
+_PRICE_MAX_AGE_DAYS = 7
 
 
 def _parse_predicted_date(predicted_at: Any) -> date | None:
@@ -432,12 +434,33 @@ class PaperBroker(BrokerBase):
     # 照会
     # ------------------------------------------------------------------
 
+    def _latest_close(self, sym: str) -> float:
+        """保有の評価に使う最新の終値。取れない・NaN・最後の足が古いときは NaN（#844）
+
+        取得元の値（買値・売値）で埋めると損益0に見え、SL/TP や DD の判定が黙って外れる。
+        """
+        try:
+            hist = self._market_data.get_ohlcv(f"{sym}.T", "2d")
+        except Exception:
+            logger.warning("[paper] %s: 株価取得失敗（評価できない）", sym, exc_info=True)
+            return math.nan
+        if hist.empty:
+            logger.warning(f"[paper] {sym}: 株価が空（評価できない）")
+            return math.nan
+        close = float(hist["Close"].iloc[-1])
+        bar_date = _bar_date_jst(hist.index[-1])
+        if math.isnan(close) or (_today_jst() - bar_date).days > _PRICE_MAX_AGE_DAYS:
+            logger.warning(f"[paper] {sym}: 終値が NaN か古い（最後の足={bar_date}、評価できない）")
+            return math.nan
+        return close
+
     def get_short_positions(self) -> list[dict[str, Any]]:
         """保有中の空売りポジション一覧を返す。
 
         Returns:
             list[dict]: [{"symbol": str, "qty": int, "avg_short_price": float,
                           "current_price": float, "unrealized_pnl": float | None}]
+            現在値が評価できない銘柄は current_price と unrealized_pnl が NaN になる。
         """
         with _db_connection() as con:
             rows = con.execute(
@@ -448,16 +471,7 @@ class PaperBroker(BrokerBase):
 
         results = []
         for sym, qty, avg_short in rows:
-            ticker = f"{sym}.T"
-            current_price = avg_short  # フォールバック
-            try:
-                hist = self._market_data.get_ohlcv(ticker, "2d")
-                if not hist.empty:
-                    current_price = float(hist["Close"].iloc[-1])
-            except Exception:
-                logger.warning(
-                    "[paper] %s: 株価取得失敗（フォールバック値を使用）", sym, exc_info=True
-                )
+            current_price = self._latest_close(sym)
             # 空売りの未実現損益: 売り単価 - 現在価格が正なら利益
             unrealized_pnl = (avg_short - current_price) * qty
             results.append(
@@ -472,7 +486,7 @@ class PaperBroker(BrokerBase):
         return results
 
     def get_positions(self) -> list[dict[str, Any]]:
-        """保有ポジション一覧を返す（現在価格・含み損益つき）"""
+        """保有ポジション一覧を返す（現在価格・含み損益つき。評価できない銘柄は NaN）"""
         with _db_connection() as con:
             rows = con.execute(
                 "SELECT symbol, qty, avg_price FROM paper_positions WHERE qty > 0"
@@ -482,16 +496,7 @@ class PaperBroker(BrokerBase):
 
         results = []
         for sym, qty, avg in rows:
-            ticker = f"{sym}.T"
-            current_price = avg  # フォールバック
-            try:
-                hist = self._market_data.get_ohlcv(ticker, "2d")
-                if not hist.empty:
-                    current_price = float(hist["Close"].iloc[-1])
-            except Exception:
-                logger.warning(
-                    "[paper] %s: 株価取得失敗（フォールバック値を使用）", sym, exc_info=True
-                )
+            current_price = self._latest_close(sym)
             unrealized_pnl = (current_price - avg) * qty
             results.append(
                 {

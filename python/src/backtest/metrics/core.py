@@ -42,6 +42,8 @@ def compute_metrics(
         equity_series: 各バーの mark-to-market 日次 equity（保有中の含み損益込み）。
                        渡された場合は max_drawdown をこの系列から算出する。None の場合は
                        決済時点キャッシュベースの equity にフォールバックする（後方互換）。
+                       Sharpe の年率化に使う取引頻度も、この系列の最初と最後の日付の差で
+                       出す（#1022）。None の場合は取引の日付の差で出す。
         include_monte_carlo: True の場合、取引損益系列をブートストラップした
                        Monte Carlo リスク統計（mc_ プレフィックス）を結果に追加する。
                        1000回シミュレーションのためグリッドサーチ等の繰り返し呼び出しでは
@@ -110,7 +112,9 @@ def compute_metrics(
     sharpe_per_trade = _sharpe_per_trade(
         trade_pnls, risk_free_rate / max(num_trades, 1) if num_trades > 0 else 0.0
     )
-    trades_per_year = _estimate_trades_per_year(trade_log, num_trades, trading_days_per_year)
+    trades_per_year = _estimate_trades_per_year(
+        trade_log, num_trades, trading_days_per_year, equity_series
+    )
     sharpe = _annualize_sharpe(sharpe_per_trade, trades_per_year)
 
     # --- Maximum Drawdown ---
@@ -375,7 +379,10 @@ def compute_cost_comparison_metrics(
 
 
 def _estimate_trades_per_year(
-    trade_log: pd.DataFrame, num_trades: int, trading_days_per_year: int
+    trade_log: pd.DataFrame,
+    num_trades: int,
+    trading_days_per_year: int,
+    equity_series: Optional[pd.Series] = None,
 ) -> float:
     """バックテスト期間の暦スパンから実取引頻度（年あたり取引数）を推定する。
 
@@ -383,11 +390,24 @@ def _estimate_trades_per_year(
     Sharpe を頻度非整合に膨張させていた。期間が不明な場合のみ従来挙動（252）に
     フォールバックする。
 
+    日次の資産曲線 equity_series が渡された場合は、その最初と最後の日付の差（取引の
+    無い日を含む検証期間）を分母にする。取引の日付の差だけだと、取引が短い期間に
+    寄ったときに頻度を高く出し Sharpe を膨らませるため（#1022）。渡されない・日付に
+    できない場合のみ、取引の日付の差に戻す。
+
     長期コホートバックテスト（`longterm/metrics.py`）は意図的に異なる分母
     （実取引日付スパンではなく config の設定期間全体）を使う。理由は
     `longterm/metrics.py` の trades_per_year 算出箇所のコメントを参照。
     """
-    if num_trades < 1 or "date" not in trade_log.columns:
+    if num_trades < 1:
+        return float(trading_days_per_year)
+    if equity_series is not None and not equity_series.empty:
+        period = pd.to_datetime(pd.Series(equity_series.index), errors="coerce").dropna()
+        if not period.empty:
+            period_days = (period.max() - period.min()).days
+            if period_days > 0:
+                return num_trades / (period_days / 365.25)
+    if "date" not in trade_log.columns:
         return float(trading_days_per_year)
     dates = pd.to_datetime(trade_log["date"], errors="coerce").dropna()
     if dates.empty:
