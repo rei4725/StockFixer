@@ -47,7 +47,7 @@ def run_daily_drift_check():
         f"最小サンプル数={min_samples}, 再学習上限={max_retrain_per_run}) ==="
     )
 
-    summary = load_drift_summary(horizon=1, recent_n=20)
+    summary = load_drift_summary(horizon=1, recent_n=20, model_name="production")
     if summary is None or summary.empty:
         logger.info("ドリフトチェック: 精度データなし（スキップ）")
         return
