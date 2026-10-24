@@ -502,7 +502,7 @@ class TestLoadDriftSummary(_TmpDbTestCase):
                 {
                     "market": "us",
                     "symbol": "AAPL",
-                    "model_name": "XGB",
+                    "model_name": "production",
                     "predicted_at": f"2026040{i+1}_120000",
                     "horizon": 1,
                     "predicted_price": 102.0,
@@ -516,7 +516,7 @@ class TestLoadDriftSummary(_TmpDbTestCase):
             {
                 "market": "jp",
                 "symbol": "7203",
-                "model_name": "XGB",
+                "model_name": "production",
                 "predicted_at": "20260401_120000",
                 "horizon": 1,
                 "predicted_price": 3100.0,
@@ -559,6 +559,72 @@ class TestLoadDriftSummary(_TmpDbTestCase):
         """存在しないhorizonは空DataFrameを返すこと"""
         df = load_drift_summary(horizon=99)
         self.assertTrue(df.empty)
+
+
+def _mixed_model_rows() -> list[dict]:
+    """jp/7203 に production（当たり・誤差0）と challenger（外れ・誤差0.1）を10件ずつ作る。"""
+    rows = []
+    for model_name, ratio, match in (("production", 0.01, True), ("challenger", 0.11, False)):
+        for i in range(10):
+            rows.append(
+                {
+                    "market": "jp",
+                    "symbol": "7203",
+                    "model_name": model_name,
+                    "predicted_at": f"202604{i + 10}_120000",
+                    "horizon": 1,
+                    "predicted_price": 3100.0,
+                    "actual_price": 3100.0,
+                    "predicted_ratio": ratio,
+                    "actual_ratio": 0.01,
+                    "direction_match": match,
+                }
+            )
+    return rows
+
+
+class TestLoadDriftSummaryModelName(_TmpDbTestCase):
+    """load_drift_summary が model_name で絞ること（#877）"""
+
+    def setUp(self):
+        super().setUp()
+        save_prediction_accuracy(_mixed_model_rows())
+
+    def test_production_only(self):
+        df = load_drift_summary(horizon=1, recent_n=30, model_name="production")
+        self.assertEqual(int(df.iloc[0]["n_samples"]), 10)
+        self.assertAlmostEqual(float(df.iloc[0]["mean_abs_error"]), 0.0)
+        self.assertAlmostEqual(float(df.iloc[0]["direction_accuracy"]), 1.0)
+
+    def test_default_is_production(self):
+        df = load_drift_summary(horizon=1, recent_n=30)
+        self.assertEqual(int(df.iloc[0]["n_samples"]), 10)
+        self.assertAlmostEqual(float(df.iloc[0]["direction_accuracy"]), 1.0)
+
+    def test_challenger_only(self):
+        df = load_drift_summary(horizon=1, recent_n=30, model_name="challenger")
+        self.assertEqual(int(df.iloc[0]["n_samples"]), 10)
+        self.assertAlmostEqual(float(df.iloc[0]["direction_accuracy"]), 0.0)
+
+
+class TestDriftCheckIgnoresChallenger(_TmpDbTestCase):
+    """run_daily_drift_check が challenger の採点だけが悪い銘柄を再学習に選ばないこと（#877）"""
+
+    def test_challenger_only_bad_symbol_not_triggered(self):
+        save_prediction_accuracy(_mixed_model_rows())
+        from src.orchestration.jobs.drift_check import run_daily_drift_check
+
+        with patch(
+            "src.utils.db.system_config.get_config_value", side_effect=lambda _k, d: d
+        ), patch("src.orchestration.jobs.drift_check.record_drift_warn_streak") as streak, patch(
+            "src.reporting.discord.discord_utils.send_drift_retrain_notification"
+        ) as notify, patch(
+            "src.watchlist.batch_runner.load_target_symbols", return_value=[]
+        ):
+            run_daily_drift_check()
+
+        notify.assert_not_called()
+        streak.assert_called_once_with(False)
 
 
 class TestSaveShapValues(_TmpDbTestCase):

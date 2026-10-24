@@ -108,6 +108,19 @@ def _handle_stage_error(
         return False
 
 
+def _notify_stage_failure(label: str, exc: Exception) -> None:
+    """続けてよい段の失敗を Discord へ知らせる（知らせ自体の失敗は logger に残すだけ）。
+
+    後からやり直せない段（日次の [2/6] の採点など）が黙って欠けないようにする（#1006）。
+    """
+    try:
+        from src.reporting.discord.discord_utils import send_webhook_text
+
+        send_webhook_text(f"❌ {label} 失敗\n{str(exc)[:1000] or '不明'}")
+    except Exception as notify_error:
+        logger.error("%s の失敗通知失敗: %s", label, notify_error, exc_info=True)
+
+
 def _is_first_week_of_month(now: "datetime") -> bool:
     """月初週（1〜7日）かどうか。月次オートコンパクションの発火判定に使う。
 

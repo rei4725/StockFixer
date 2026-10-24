@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 from functools import lru_cache
-from typing import Callable, Iterable, TypeVar
+from typing import Callable, Iterable, Mapping, TypeVar
 
 import yfinance as yf
 
@@ -60,13 +60,17 @@ def filter_by_sector_cap(
     items: Iterable[T],
     max_sector_positions: int,
     sector_getter: Callable[[T], str],
+    initial_counts: Mapping[str, int] | None = None,
 ) -> list[T]:
-    """セクターごとの上限件数を超えないように順序を保ってフィルタする。"""
+    """セクターごとの上限件数を超えないように順序を保ってフィルタする。
+
+    initial_counts を渡すと、その件数（保有中の銘柄の業種の数など）から数え始める。
+    """
     if max_sector_positions <= 0:
         return list(items)
 
     selected: list[T] = []
-    sector_counts: Counter[str] = Counter()
+    sector_counts: Counter[str] = Counter(initial_counts or {})
     for item in items:
         sector = sector_getter(item)
         if sector_counts[sector] >= max_sector_positions:
