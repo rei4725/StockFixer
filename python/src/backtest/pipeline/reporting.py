@@ -159,15 +159,22 @@ def fetch_benchmark_for_result(
     benchmark_name: str,
     fallback_start: Optional[str] = None,
     fallback_end: Optional[str] = None,
+    test_start: Optional[str] = None,
+    test_end: Optional[str] = None,
 ) -> Optional[dict[str, Any]]:
     """
     バックテスト結果 DataFrame からベンチマーク比較データを取得する。
+
+    戦略の total_return は検証期間全体（取引の無い期間は現金）の成績なので、
+    検証期間が分かるときは取引の日付ではなく検証期間で BM を取る。
 
     Args:
         result_df: バックテスト結果 DataFrame（date 列推奨）
         benchmark_name: ベンチマーク識別子 ("n225", "sp500" など)
         fallback_start: result_df に date 列がない場合の開始日
         fallback_end: result_df に date 列がない場合の終了日
+        test_start: 検証期間の開始日（指定時は最優先）
+        test_end: 検証期間の終了日（指定時は最優先）
 
     Returns:
         fetch_benchmark_returns が返す辞書、または None
@@ -175,8 +182,15 @@ def fetch_benchmark_for_result(
     from src.backtest.metrics import BENCHMARK_TICKERS, fetch_benchmark_returns
 
     bm_ticker = BENCHMARK_TICKERS.get(benchmark_name, benchmark_name)
-    bm_start = str(result_df["date"].min())[:10] if "date" in result_df.columns else fallback_start
-    bm_end = str(result_df["date"].max())[:10] if "date" in result_df.columns else fallback_end
+    if test_start and test_end:
+        bm_start: Optional[str] = test_start
+        bm_end: Optional[str] = test_end
+    elif "date" in result_df.columns:
+        bm_start = str(result_df["date"].min())[:10]
+        bm_end = str(result_df["date"].max())[:10]
+    else:
+        bm_start = fallback_start
+        bm_end = fallback_end
     if bm_start and bm_end:
         return fetch_benchmark_returns(bm_ticker, bm_start, bm_end)
     return None

@@ -452,12 +452,15 @@ class TestRunWeeklyReportCompositionRoot(unittest.TestCase):
             return snapshots_df
 
         fake_query.weekly_accuracy_snapshots.side_effect = _snapshots
+        week_df = MagicMock(name="week_df")
         captured: dict = {}
 
         with patch(
             "src.infrastructure.persistence.analytics_query.PostgresAnalyticsQuery",
             return_value=fake_query,
         ), patch(
+            "src.prediction.db.load_weekly_accuracy_summary", return_value=week_df
+        ) as mock_week, patch(
             "src.prediction.db.save_weekly_accuracy_snapshot",
             side_effect=lambda *a, **k: order.append("save_snapshot"),
         ) as mock_save, patch(
@@ -477,7 +480,10 @@ class TestRunWeeklyReportCompositionRoot(unittest.TestCase):
         self.assertEqual(order, ["save_snapshot", "load_snapshots"])
         fake_query.drift_summary.assert_called_once_with(horizon=1, model_name="production")
         fake_query.weekly_accuracy_snapshots.assert_called_once_with(n_weeks=4)
-        self.assertIs(mock_save.call_args.args[1], drift_df)
+        # 週の記録は今週に予想した採点の行だけで作る（#1023）
+        week_start = mock_save.call_args.args[0]
+        mock_week.assert_called_once_with(week_start, horizon=1, model_name="production")
+        self.assertIs(mock_save.call_args.args[1], week_df)
         self.assertIs(captured.get("accuracy_df"), drift_df)
         self.assertIs(captured.get("snapshots_df"), snapshots_df)
 
