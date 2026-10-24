@@ -12,7 +12,9 @@ OrderExecutionPipeline が注文を送信する前にゲートチェックを行
 """
 
 import os
+from datetime import datetime, time, timedelta, timezone
 from typing import Any, Optional
+from zoneinfo import ZoneInfo
 
 from config.settings import (
     DEFAULT_STOP_LOSS_PCT,
@@ -44,6 +46,25 @@ logger = get_logger(__name__)
 
 DAILY_LOSS_RATE_ENV = "MAX_DAILY_LOSS_RATE"
 DISABLE_DAILY_LOSS_GUARD_ENV = "DISABLE_DAILY_LOSS_GUARD"
+
+_JST = ZoneInfo("Asia/Tokyo")
+
+
+def _utc_now() -> datetime:
+    """今の時刻（UTC）を返す。テストで差し替える。"""
+    return datetime.now(timezone.utc)
+
+
+def _daily_loss_window_start(now_utc: datetime) -> datetime:
+    """日次損失を数え始める時刻（前の営業日の 0:00 JST）を naive の UTC で返す（#941）。
+
+    DB の時刻は UTC で入っているので naive の UTC で比べる。営業日は土日だけを除く。
+    """
+    prev_day = now_utc.astimezone(_JST).date() - timedelta(days=1)
+    while prev_day.weekday() >= 5:
+        prev_day -= timedelta(days=1)
+    start_jst = datetime.combine(prev_day, time.min, tzinfo=_JST)
+    return start_jst.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 def fetch_latest_vix() -> Optional[float]:
@@ -481,7 +502,13 @@ class RiskManager:
         return balance * rate
 
     def _get_daily_realized_loss(self) -> float:
-        """当日の確定損失合計（プラスが損失）を返す"""
+        """前の営業日（JST）の 0:00 から今までの確定損失合計（プラスが損失）を返す
+
+        8:50 JST の朝の判定では JST の当日の約定がまだ無いので、前の営業日（月曜は金曜）
+        の確定損失を数える。DB の CURRENT_DATE は UTC の日付で、月曜の朝は日曜を見て
+        金曜の損失を数えなかった（#941）。
+        """
+        since = _daily_loss_window_start(_utc_now())
         with _db_connection() as con:
             if self._broker.broker_name == "paper":
                 row = con.execute(
@@ -491,10 +518,10 @@ class RiskManager:
                     WHERE status = 'filled'
                       AND side IN (%s, %s)
                       AND filled_at IS NOT NULL
-                      AND DATE(filled_at) = CURRENT_DATE
+                      AND filled_at >= %s
                       AND realized_pnl < 0
                     """,
-                    [int(OrderSide.SELL), int(OrderSide.SHORT_COVER)],
+                    [int(OrderSide.SELL), int(OrderSide.SHORT_COVER), since],
                 ).fetchone()
                 return abs(float(row[0])) if row else 0.0
 
@@ -508,11 +535,11 @@ class RiskManager:
                 """
                 SELECT COALESCE(SUM(realized_pnl), 0.0)
                 FROM trade_pnl
-                WHERE DATE(closed_at) = CURRENT_DATE
+                WHERE closed_at >= %s
                   AND broker = %s
                   AND realized_pnl < 0
                 """,
-                [self._broker.broker_name],
+                [since, self._broker.broker_name],
             ).fetchone()
             return abs(float(row[0])) if row else 0.0
 

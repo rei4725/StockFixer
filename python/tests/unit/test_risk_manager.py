@@ -6,6 +6,7 @@
 
 import unittest
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 from src.trading.brokers.base import BrokerBase, OrderSide
@@ -197,7 +198,47 @@ class TestRiskManagerPersistence(unittest.TestCase):
         self.assertEqual(daily_loss, 1234.0)
         query, params = mock_con.execute.call_args[0]
         self.assertIn("FROM paper_orders", query)
-        self.assertEqual(params, [int(OrderSide.SELL), int(OrderSide.SHORT_COVER)])
+        self.assertEqual(params[:2], [int(OrderSide.SELL), int(OrderSide.SHORT_COVER)])
+
+    def _window_start_param(self, now_utc: datetime, broker_name: str = "paper") -> object:
+        broker = _make_broker()
+        broker.broker_name = broker_name
+        risk = RiskManager(broker)
+
+        mock_con = MagicMock()
+        mock_con.execute.return_value.fetchone.return_value = (1,)
+
+        @contextmanager
+        def mock_db():
+            yield mock_con
+
+        with (
+            patch("src.trading.risk_manager._db_connection", new=mock_db),
+            patch("src.trading.risk_manager._utc_now", return_value=now_utc),
+        ):
+            risk._get_daily_realized_loss()
+
+        query, params = mock_con.execute.call_args[0]
+        self.assertNotIn("CURRENT_DATE", query)
+        return params[-1] if broker_name == "paper" else params[0]
+
+    def test_daily_loss_on_monday_morning_counts_friday(self):
+        # 月曜 2026-10-26 08:50 JST = 日曜 2026-10-25 23:50 UTC（#941）
+        start = self._window_start_param(datetime(2026, 10, 25, 23, 50, tzinfo=timezone.utc))
+        # 金曜 2026-10-23 00:00 JST = 2026-10-22 15:00 UTC から数える
+        self.assertEqual(start, datetime(2026, 10, 22, 15, 0))
+
+    def test_daily_loss_on_weekday_morning_counts_previous_day(self):
+        # 水曜 2026-10-28 08:50 JST = 火曜 2026-10-27 23:50 UTC
+        start = self._window_start_param(datetime(2026, 10, 27, 23, 50, tzinfo=timezone.utc))
+        # 火曜 2026-10-27 00:00 JST = 2026-10-26 15:00 UTC から数える
+        self.assertEqual(start, datetime(2026, 10, 26, 15, 0))
+
+    def test_daily_loss_trade_pnl_on_monday_morning_counts_friday(self):
+        start = self._window_start_param(
+            datetime(2026, 10, 25, 23, 50, tzinfo=timezone.utc), broker_name="other"
+        )
+        self.assertEqual(start, datetime(2026, 10, 22, 15, 0))
 
     def test_consecutive_losses_uses_paper_orders(self):
         broker = _make_broker()
