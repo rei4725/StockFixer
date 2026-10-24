@@ -253,6 +253,41 @@ class TestPaperBrokerSettle(unittest.TestCase):
         settled = self.broker.settle_pending_orders()
         self.assertEqual(len(settled), 1)
 
+    def test_second_buy_while_pending_is_rejected(self):
+        """同じ銘柄の買いが約定待ちのうちは、次の買いを受けない（重ね買いを防ぐ、#802）"""
+        first = self.broker.send_order("7203", OrderSide.BUY, 100)
+        second = self.broker.send_order("7203.T", OrderSide.BUY, 100)
+        self.assertEqual(first["status"], "pending")
+        self.assertEqual(second["status"], "rejected")
+        self.assertEqual(second["order_id"], "")
+        with _db_connection() as con:
+            n = con.execute(
+                "SELECT count(*) FROM paper_orders WHERE symbol='7203' AND status='pending'"
+            ).fetchone()[0]
+        self.assertEqual(n, 1)
+
+    def test_buy_after_fill_is_accepted(self):
+        self.broker.send_order("7203", OrderSide.BUY, 100)
+        self.broker.settle_pending_orders()
+        self.assertEqual(self.broker.send_order("7203", OrderSide.BUY, 100)["status"], "pending")
+
+    def test_settle_rejects_buy_when_cash_is_short(self):
+        """約定のときに現金が足りない買いは約定させず rejected にする（現金を負にしない、#802）"""
+        with _db_connection() as con:
+            con.execute("UPDATE paper_balance SET balance = 50000.0")
+        result = self.broker.send_order("7203", OrderSide.BUY, 100)  # 100 * 1000 = 100000
+        settled = self.broker.settle_pending_orders()
+        self.assertEqual(settled, [])
+        with _db_connection() as con:
+            status = con.execute(
+                "SELECT status FROM paper_orders WHERE order_id=%s", [result["order_id"]]
+            ).fetchone()[0]
+            balance = con.execute("SELECT balance FROM paper_balance").fetchone()[0]
+            pos = con.execute("SELECT qty FROM paper_positions WHERE symbol='7203'").fetchone()
+        self.assertEqual(status, "rejected")
+        self.assertAlmostEqual(balance, 50000.0)
+        self.assertIsNone(pos)
+
     def test_settle_fills_when_today_bar_present(self):
         """最後の行が predicted_at より後の営業日なら今までどおり約定する。"""
         result = self.broker.send_order("7203", OrderSide.BUY, 100)
