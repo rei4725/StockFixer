@@ -10,6 +10,7 @@ import sys
 
 from src.backtest.walk_forward_report import run_walk_forward_comparison_report
 from src.utils.logger import get_logger
+from src.watchlist.batch_runner import load_target_symbols
 
 logger = get_logger(__name__)
 
@@ -22,7 +23,12 @@ def parse_args():
     parser.add_argument("--threshold", type=float, default=0.0)
     parser.add_argument("--initial-cash", type=float, default=1_000_000)
     parser.add_argument("--fee-rate", type=float, default=0.001)
-    parser.add_argument("--slippage", type=float, default=0.0)
+    parser.add_argument(
+        "--slippage",
+        type=float,
+        default=None,
+        help="片道スリッページ率 (未指定時は市場別デフォルト US 5bps / JP 10bps)",
+    )
     parser.add_argument("--ensemble", action="store_true")
     parser.add_argument(
         "--limit-symbols", type=int, default=None, help="テスト用に対象銘柄数を制限"
@@ -41,7 +47,9 @@ def main():
 
     wire_ports()
     args = parse_args()
+    tasks = load_target_symbols(args.as_of_date)
     result = run_walk_forward_comparison_report(
+        tasks,
         model_type=args.model_type,
         source=args.source,
         n_splits=args.n_splits,
@@ -51,7 +59,6 @@ def main():
         slippage=args.slippage,
         ensemble=args.ensemble,
         limit_symbols=args.limit_symbols,
-        as_of_date=args.as_of_date,
     )
 
     logger.info("Walk-Forward比較レポート生成完了")
