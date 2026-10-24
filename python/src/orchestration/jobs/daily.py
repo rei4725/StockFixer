@@ -559,9 +559,10 @@ def run_daily_rule_signals() -> None:
             ),
         )
         logger.info(
-            "=== 日次ルールシグナル完了: BUY=%s SELL=%s 取れなかった=%s 対象=%s ===",
+            "=== 日次ルールシグナル完了: BUY=%s SELL=%s 注文失敗=%s 取れなかった=%s 対象=%s ===",
             trade_stats["buy_orders"],
             trade_stats["sell_orders"],
+            trade_stats.get("errors", 0),
             len(batch.unavailable),
             batch.total,
         )
@@ -580,3 +581,10 @@ def run_daily_rule_signals() -> None:
         )
     except Exception as e:
         logger.error("ルールシグナル通知失敗: %s", e, exc_info=True)
+
+    # 注文の失敗は知らせを送った後にジョブの失敗にする（#1075）。run_scheduler の
+    # daily_rule_signals は max_retries: 0 のため、失敗にしても発注は呼び直されない。
+    errors = trade_stats.get("errors", 0)
+    if errors > 0:
+        logger.error("日次ルールシグナルで注文の失敗が %d 件あった", errors)
+        raise RuntimeError(f"日次ルールシグナルで注文の失敗が {errors} 件あった")

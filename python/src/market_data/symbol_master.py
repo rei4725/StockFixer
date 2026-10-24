@@ -3,13 +3,14 @@
 
 出どころ: JPX「東証上場銘柄一覧」(data_j.xls、月1回更新)
     https://www.jpx.co.jp/markets/statistics-equities/misc/01.html
-取得は run_symbol_master.py から手動で流す（毎日のジョブには入れない）。
+取得は週の DB メンテナンスのジョブと run_symbol_master.py から流す（毎日のジョブには入れない）。
 .xls の読み込みには pandas の xlrd エンジンを使う。
 """
 
 from __future__ import annotations
 
 import io
+import json
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional, Sequence
 
@@ -17,6 +18,7 @@ import pandas as pd
 import requests
 
 from src.market_data.types import SymbolName
+from src.utils.db.symbol_master import upsert_symbol_names
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -113,3 +115,19 @@ def build_jp_symbol_master(
             "JPX 一覧に無い銘柄 %d 件: %s", len(result.missing), ", ".join(result.missing)
         )
     return result
+
+
+def refresh_jp_symbol_master() -> int:
+    """watchlist.json の jp 銘柄の社名を JPX 一覧から引き、symbol_master に保存する（#1080）。
+
+    Returns:
+        保存した件数
+    """
+    from src.utils.data_path_utils import get_watchlist_path
+
+    with open(get_watchlist_path(), encoding="utf-8") as f:
+        symbols = json.load(f).get("jp", [])
+    result = build_jp_symbol_master(symbols)
+    saved = upsert_symbol_names(result.records)
+    logger.info("銘柄マスタ更新完了: %d/%d 銘柄 (missing=%s)", saved, len(symbols), result.missing)
+    return saved

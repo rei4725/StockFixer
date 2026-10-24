@@ -436,6 +436,50 @@ class TestExecuteRulePaperTrades(unittest.TestCase):
                 execute_rule_paper_trades(signals, "jp", trade_diff_sink=InMemoryTradeDiffSink())
         mock_broker.send_order.assert_not_called()
 
+    def test_send_order_failure_counts_as_error_not_skipped(self):
+        """1銘柄の注文が落ちても、ほかの銘柄の注文は出し、失敗は errors に数える（#1075）。"""
+        from src.trading.rule_execution import execute_rule_paper_trades
+
+        mock_broker = MagicMock()
+        mock_broker.get_positions.return_value = [{"symbol": "6758", "qty": 100}]
+        mock_broker.send_order.side_effect = [RuntimeError("order error"), None]
+
+        signals = [
+            {"symbol": "7203", "signal": 1, "price": 1000.0},
+            {"symbol": "6758", "signal": -1, "price": 2000.0},
+        ]
+        with (
+            patch("src.trading.rule_execution.PaperBroker", return_value=mock_broker),
+            patch("src.trading.rule_execution.RiskManager", return_value=self._mock_risk()),
+            patch("src.trading.rule_execution.get_ticker", return_value="7203.T"),
+            self.assertLogs("src.trading.rule_execution", level="ERROR"),
+        ):
+            result = execute_rule_paper_trades(
+                signals, "jp", trade_diff_sink=InMemoryTradeDiffSink()
+            )
+        self.assertEqual(mock_broker.send_order.call_count, 2)
+        self.assertEqual(result["buy_orders"], 0)
+        self.assertEqual(result["sell_orders"], 1)
+        self.assertEqual(result["errors"], 1)
+        self.assertEqual(result["skipped"], 0)
+
+    def test_no_failure_returns_zero_errors(self):
+        from src.trading.rule_execution import execute_rule_paper_trades
+
+        mock_broker = MagicMock()
+        mock_broker.get_positions.return_value = []
+
+        signals = [{"symbol": "7203", "signal": 0, "price": 1000.0}]
+        with (
+            patch("src.trading.rule_execution.PaperBroker", return_value=mock_broker),
+            patch("src.trading.rule_execution.RiskManager", return_value=self._mock_risk()),
+        ):
+            result = execute_rule_paper_trades(
+                signals, "jp", trade_diff_sink=InMemoryTradeDiffSink()
+            )
+        self.assertEqual(result["errors"], 0)
+        self.assertEqual(result["skipped"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()
