@@ -259,12 +259,17 @@ def load_prediction_markets(predicted_at: str = None) -> list:
             return []
 
 
-def load_latest_predictions_by_market(market: str) -> pd.DataFrame:
+def load_latest_predictions_by_market(
+    market: str, model_version: str = "production"
+) -> pd.DataFrame:
     """
     指定マーケットについて銘柄ごとの最新予測を返す（発注パイプライン用）。
 
     旧 src/trading/execution/predictions.py の _load_latest_predictions を所有者である
-    本モジュールへ移設したもの。SQL は変更していない。
+    本モジュールへ移設したもの。
+
+    model_version の行だけを見る。challenger の影の予測は production の後の時刻で
+    保存されるので、絞らないと影のモデルの予測で本番の発注をする（#804）。
 
     Returns:
         columns: market, symbol, predicted_at, current_price, diff_ratio,
@@ -277,7 +282,7 @@ def load_latest_predictions_by_market(market: str) -> pd.DataFrame:
             WITH latest AS (
                 SELECT market, symbol, MAX(predicted_at) AS latest_at
                 FROM prediction_results
-                WHERE market = %s
+                WHERE market = %s AND model_version = %s
                 GROUP BY market, symbol
             )
             SELECT
@@ -294,11 +299,11 @@ def load_latest_predictions_by_market(market: str) -> pd.DataFrame:
             FROM prediction_results pr
             JOIN latest l
               ON pr.market = l.market AND pr.symbol = l.symbol AND pr.predicted_at = l.latest_at
-            WHERE pr.diff_ratio IS NOT NULL
+            WHERE pr.diff_ratio IS NOT NULL AND pr.model_version = %s
             ORDER BY pr.diff_ratio DESC
             """,
             con,
-            params=[market],
+            params=[market, model_version, model_version],
         )
 
 

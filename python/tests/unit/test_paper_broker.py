@@ -6,15 +6,26 @@
 """
 
 import unittest
-from unittest.mock import MagicMock
+from datetime import date
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
+import pytest
 
 from src.domain.ports import MarketDataPort
 from src.infrastructure.in_memory import InMemoryTradeDiffSink
 from src.trading.brokers.base import OrderSide, OrderType
+from src.trading.brokers.paper import paper_broker
 from src.trading.brokers.paper.paper_broker import PaperBroker
 from src.utils.db._connection import _db_connection
+
+_TODAY = date(2026, 3, 15)
+
+
+@pytest.fixture(autouse=True)
+def _fixed_today(monkeypatch):
+    """約定のジョブの「今日」（JST）を、模擬の OHLCV の最後の行の日に合わせる（#805）"""
+    monkeypatch.setattr(paper_broker, "_today_jst", lambda: _TODAY)
 
 
 def _make_mock_ohlcv() -> pd.DataFrame:
@@ -213,6 +224,34 @@ class TestPaperBrokerSettle(unittest.TestCase):
         settled = self.broker.settle_pending_orders()
         self.assertEqual(len(settled), 1)
         self.assertAlmostEqual(settled[0]["fill_price"], 1000.0)
+
+    def test_settle_defers_order_without_predicted_at_when_bar_is_not_today(self):
+        """predicted_at を持たない注文（SL/TP・ルール・期限の手じまい）も、今日の行が無ければ据え置く（#805）"""
+        # 最後の行は 03-15（前の営業日・休みの日の朝）
+        with patch.object(paper_broker, "_today_jst", lambda: date(2026, 3, 16)):
+            result = self.broker.send_order("7203", OrderSide.SELL, 100)
+            settled = self.broker.settle_pending_orders()
+        self.assertEqual(settled, [])
+        with _db_connection() as con:
+            status = con.execute(
+                "SELECT status FROM paper_orders WHERE order_id=%s", [result["order_id"]]
+            ).fetchone()[0]
+        self.assertEqual(status, "pending")
+
+    def test_settle_defers_when_bar_is_after_signal_but_before_today(self):
+        """predicted_at より後でも、今日より前の行では約定しない（何日か据え置かれた注文）"""
+        with patch.object(paper_broker, "_today_jst", lambda: date(2026, 3, 17)):
+            result = self.broker.send_order("7203", OrderSide.BUY, 100)
+            self._set_predicted_at(result["order_id"], "20260313_200000")
+            settled = self.broker.settle_pending_orders()
+        self.assertEqual(settled, [])
+        self._assert_still_pending(result["order_id"])
+
+    def test_settle_fills_order_without_predicted_at_on_today_bar(self):
+        """predicted_at を持たない注文も、今日の行があれば今までどおり約定する"""
+        self.broker.send_order("7203", OrderSide.BUY, 100)
+        settled = self.broker.settle_pending_orders()
+        self.assertEqual(len(settled), 1)
 
     def test_settle_fills_when_today_bar_present(self):
         """最後の行が predicted_at より後の営業日なら今までどおり約定する。"""
