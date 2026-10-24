@@ -1072,6 +1072,12 @@ class TestRunDailyPipeline:
 class TestRunWeeklyDbMaintenance(unittest.TestCase):
     """run_weekly_db_maintenance のテスト"""
 
+    def setUp(self):
+        # 銘柄マスタの更新（JPX 取得）は test_symbol_master_weekly.py で確かめる（#1080）
+        patcher = patch("src.orchestration.jobs.weekly.run_symbol_master_refresh")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     @staticmethod
     def _fake_conn(mock_con):
         from contextlib import contextmanager
