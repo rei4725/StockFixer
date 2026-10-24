@@ -15,6 +15,7 @@ from src.prediction.db import (
     load_drift_summary,
     load_excluded_features,
     load_latest_prediction_timestamp,
+    load_latest_predictions_by_market,
     load_prediction_accuracy,
     load_prediction_markets,
     load_prediction_results,
@@ -171,6 +172,31 @@ class TestLoadLatestPredictionTimestamp(_TmpDbTestCase):
 
         ts_unfiltered = load_latest_prediction_timestamp()
         self.assertEqual(ts_unfiltered, "20260403_080000")
+
+
+class TestLoadLatestPredictionsByMarket(_TmpDbTestCase):
+    """発注が読む load_latest_predictions_by_market は production の行だけを見る（#804）"""
+
+    def test_ignores_newer_challenger_rows(self):
+        production_row = PredictionResult(
+            "jp", "7203", 100.0, 101.0, 0.01, 2, model_version="production"
+        )
+        challenger_row = PredictionResult(
+            "jp", "7203", 100.0, 90.0, -0.10, 2, model_version="challenger"
+        )
+        save_prediction_results("20260403_070000", [production_row])
+        save_prediction_results("20260403_080000", [challenger_row])
+
+        df = load_latest_predictions_by_market("jp")
+        self.assertEqual(df["predicted_at"].tolist(), ["20260403_070000"])
+        self.assertAlmostEqual(float(df["diff_ratio"].iloc[0]), 0.01)
+
+    def test_challenger_only_symbol_is_not_returned(self):
+        challenger_row = PredictionResult(
+            "jp", "6758", 100.0, 120.0, 0.20, 2, model_version="challenger"
+        )
+        save_prediction_results("20260403_080000", [challenger_row])
+        self.assertTrue(load_latest_predictions_by_market("jp").empty)
 
 
 class TestLoadPredictionResults(_TmpDbTestCase):
