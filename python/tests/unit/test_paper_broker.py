@@ -5,6 +5,7 @@
 トランザクションロールバック分離）を経由してテストする。yfinance 呼び出しはモック化。
 """
 
+import math
 import unittest
 from datetime import date
 from unittest.mock import MagicMock, patch
@@ -450,6 +451,33 @@ class TestPaperBrokerShort(unittest.TestCase):
         positions = self.broker.get_short_positions()
         self.assertEqual(positions, [])
 
+    def _assert_short_unpriced(self):
+        """現在値が取れない空売りは売値で埋めず NaN を返し、WARNING を出す（#844）"""
+        with _db_connection() as con:
+            con.execute(
+                "INSERT INTO paper_short_positions"
+                " (symbol, qty, avg_short_price) VALUES ('7203', 100, 1200.0)"
+            )
+        with self.assertLogs("src.trading.brokers.paper.paper_broker", level="WARNING"):
+            positions = self.broker.get_short_positions()
+        self.assertEqual(len(positions), 1)
+        self.assertTrue(math.isnan(positions[0]["current_price"]))
+        self.assertTrue(math.isnan(positions[0]["unrealized_pnl"]))
+
+    def test_get_short_positions_unpriced_on_empty(self):
+        self._mock_market_data.get_ohlcv.return_value = pd.DataFrame()
+        self._assert_short_unpriced()
+
+    def test_get_short_positions_unpriced_on_error(self):
+        self._mock_market_data.get_ohlcv.side_effect = Exception("market data error")
+        self._assert_short_unpriced()
+
+    def test_get_short_positions_unpriced_on_nan_close(self):
+        hist = _make_mock_ohlcv()
+        hist["Close"] = float("nan")
+        self._mock_market_data.get_ohlcv.return_value = hist
+        self._assert_short_unpriced()
+
 
 class TestPaperBrokerGetToken(unittest.TestCase):
     def setUp(self):
@@ -546,15 +574,54 @@ class TestPaperBrokerGetPositionsAdditional(unittest.TestCase):
         self.assertIn("unrealized_pnl", positions[0])
         self.assertAlmostEqual(positions[0]["unrealized_pnl"], 2000.0)
 
-    def test_get_positions_fallback_on_yf_error(self):
+    def _assert_unpriced(self):
+        """現在値が取れない保有は買値で埋めず NaN を返し、WARNING を出す（#844）"""
+        with _db_connection() as con:
+            con.execute(
+                "INSERT INTO paper_positions (symbol, qty, avg_price) VALUES ('7203', 100, 1000.0)"
+            )
+        with self.assertLogs("src.trading.brokers.paper.paper_broker", level="WARNING"):
+            positions = self.broker.get_positions()
+        self.assertEqual(len(positions), 1)
+        self.assertAlmostEqual(positions[0]["avg_price"], 1000.0)
+        self.assertTrue(math.isnan(positions[0]["current_price"]))
+        self.assertTrue(math.isnan(positions[0]["unrealized_pnl"]))
+
+    def test_get_positions_unpriced_on_yf_error(self):
         self._mock_market_data.get_ohlcv.side_effect = Exception("market data error")
+        self._assert_unpriced()
+
+    def test_get_positions_unpriced_on_empty(self):
+        self._mock_market_data.get_ohlcv.return_value = pd.DataFrame()
+        self._assert_unpriced()
+
+    def test_get_positions_unpriced_on_nan_close(self):
+        hist = _make_mock_ohlcv()
+        hist["Close"] = float("nan")
+        self._mock_market_data.get_ohlcv.return_value = hist
+        self._assert_unpriced()
+
+    def test_get_positions_unpriced_on_stale_bar(self):
+        """最後の足が何日も前（売買停止など）なら、その終値を今の値として使わない"""
+        self._mock_market_data.get_ohlcv.return_value = pd.DataFrame(
+            {"Open": [1000.0], "High": [1050.0], "Low": [990.0], "Close": [1020.0]},
+            index=pd.to_datetime(["2026-03-01"]),
+        )
+        self._assert_unpriced()
+
+    def test_get_positions_uses_previous_close_over_weekend(self):
+        """休みの日の前の営業日の足は、今の値として使う（取れたときの今の動き）"""
+        self._mock_market_data.get_ohlcv.return_value = pd.DataFrame(
+            {"Open": [1000.0], "High": [1050.0], "Low": [990.0], "Close": [1020.0]},
+            index=pd.to_datetime(["2026-03-13"]),
+        )
         with _db_connection() as con:
             con.execute(
                 "INSERT INTO paper_positions (symbol, qty, avg_price) VALUES ('7203', 100, 1000.0)"
             )
         positions = self.broker.get_positions()
-        self.assertEqual(len(positions), 1)
-        self.assertAlmostEqual(positions[0]["unrealized_pnl"], 0.0)
+        self.assertAlmostEqual(positions[0]["current_price"], 1020.0)
+        self.assertAlmostEqual(positions[0]["unrealized_pnl"], 2000.0)
 
 
 class TestPaperBrokerGetPnlSummary(unittest.TestCase):

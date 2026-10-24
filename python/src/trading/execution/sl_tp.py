@@ -1,5 +1,7 @@
 """SL/TP トリガーによる保有ポジションの強制クローズ。"""
 
+import math
+
 from src.domain.ports import MarketDataPort, TradeDiffSink
 from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
 from src.trading.risk_manager import RiskManager
@@ -32,6 +34,10 @@ def _check_sl_tp_exits(
         qty = int(pos.get("qty") or 0)
         avg_price = float(pos.get("avg_price") or 0.0)
         current_price = float(pos.get("current_price") or 0.0)
+        if qty > 0 and avg_price > 0 and math.isnan(current_price):
+            # 現在値が取れない保有を損益0として素通りさせない（#844）
+            logger.warning("[exec] %s: 現在値が取れず SL/TP を評価できない（%d株）", symbol, qty)
+            continue
         if qty <= 0 or avg_price <= 0 or current_price <= 0:
             continue
 
