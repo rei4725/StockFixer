@@ -781,6 +781,38 @@ class TestTotalEquityBasedDrawdown(unittest.TestCase):
         # 現金 500,000 + (100×2,500) + (50×900) = 795,000
         self.assertAlmostEqual(risk.get_total_equity(), 795_000.0)
 
+    def test_total_equity_not_nan_when_position_unpriced(self):
+        """現在値が NaN の保有が混ざっても総資産は NaN にならない（#844）。
+        評価できない保有は時価0として数え（止める側）、WARNING を出す"""
+        positions = self._positions() + [
+            {"symbol": "9984", "qty": 10, "avg_price": 5_000.0, "current_price": float("nan")}
+        ]
+        broker = _make_broker(balance=500_000.0, positions=positions)
+        risk = RiskManager(broker)
+        with self.assertLogs("src.trading.risk_manager", level="WARNING"):
+            equity = risk.get_total_equity()
+        self.assertAlmostEqual(equity, 795_000.0)
+
+    def test_dd_ratio_counts_unpriced_position_as_loss(self):
+        """評価できない保有のある日も DD のゲートが外れない（NaN で 0.0 にならない）"""
+        positions = [
+            {"symbol": "9984", "qty": 100, "avg_price": 1_000.0, "current_price": float("nan")}
+        ]
+        broker = _make_broker(balance=900_000.0, positions=positions)
+        risk = RiskManager(broker)
+
+        mock_con = MagicMock()
+        mock_con.execute.return_value.fetchone.return_value = (1_000_000.0,)
+
+        @contextmanager
+        def mock_db():
+            yield mock_con
+
+        with patch("src.trading.risk_manager._db_connection", new=mock_db):
+            dd = risk.get_current_dd_ratio()
+
+        self.assertAlmostEqual(dd, 0.1)
+
     def test_total_equity_is_cached_across_calls(self):
         """発注ループ中に銘柄ごとへ再取得しないこと（ポジション時価取得は高コスト）"""
         broker = _make_broker(balance=500_000.0, positions=self._positions())

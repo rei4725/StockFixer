@@ -10,6 +10,7 @@ Streamlit によるインタラクティブなバックテストUIです。
     streamlit run run_backtest_ui.py
 """
 
+from dataclasses import dataclass
 from typing import Optional
 
 import pandas as pd
@@ -1294,29 +1295,61 @@ with tab_wf:
 # ──────────────────────────────────────────────
 # タブ4: パラメータ最適化
 # ──────────────────────────────────────────────
+@dataclass(frozen=True)
+class _OptimizationRun:
+    """最適化の結果と、結果を出したときの設定（流し直しの間 st.session_state に残す）。"""
+
+    df: Optional[pd.DataFrame]
+    market: str
+    symbol: str
+    slippage: Optional[float]
+    sort_by: str
+    optimize_risk: bool
+
+
+_OPT_RUN_KEY = "opt_run_result"
+
 with tab_optimize:
     if opt_run_button:
+        # 前の回の結果は捨てる。保存・適用のボタンで流し直した回は残した結果を使う（#1019）
+        st.session_state.pop(_OPT_RUN_KEY, None)
+    opt_run: Optional[_OptimizationRun] = st.session_state.get(_OPT_RUN_KEY)
+    if opt_run_button or opt_run is not None:
         try:
-            opt_df = _run_optimization(
-                market=market,
-                symbol=symbol,
-                model_type=model_type,
-                ensemble=ensemble,
-                source=source,
-                n_splits=opt_n_splits,
-                initial_cash=initial_cash,
-                fee_rate=fee_rate,
-                slippage=slippage,
-                threshold_min=opt_threshold_min,
-                threshold_max=opt_threshold_max,
-                threshold_step=opt_threshold_step,
-                optimize_risk=opt_optimize_risk,
-            )
+            if opt_run is None:
+                opt_run = _OptimizationRun(
+                    df=_run_optimization(
+                        market=market,
+                        symbol=symbol,
+                        model_type=model_type,
+                        ensemble=ensemble,
+                        source=source,
+                        n_splits=opt_n_splits,
+                        initial_cash=initial_cash,
+                        fee_rate=fee_rate,
+                        slippage=slippage,
+                        threshold_min=opt_threshold_min,
+                        threshold_max=opt_threshold_max,
+                        threshold_step=opt_threshold_step,
+                        optimize_risk=opt_optimize_risk,
+                    ),
+                    market=market,
+                    symbol=symbol,
+                    slippage=slippage,
+                    sort_by=opt_sort_by,
+                    optimize_risk=opt_optimize_risk,
+                )
+                if opt_run.df is not None and not opt_run.df.empty:
+                    st.session_state[_OPT_RUN_KEY] = opt_run
+            # 表示と保存は、サイドバーの今の値ではなく結果を出したときの設定を使う
+            opt_df = opt_run.df
 
             if opt_df is None or opt_df.empty:
                 st.warning("最適化結果が空です。パラメータ範囲を確認してください。")
             else:
-                sorted_df = opt_df.sort_values(opt_sort_by, ascending=False).reset_index(drop=True)
+                sorted_df = opt_df.sort_values(opt_run.sort_by, ascending=False).reset_index(
+                    drop=True
+                )
                 best = sorted_df.iloc[0]
 
                 # ── 1. ベストパラメータ表示 ──
@@ -1327,7 +1360,7 @@ with tab_optimize:
                     f"**閾値**: `{best['threshold']:.3f}` | "
                     f"**SL**: `{f'{best_sl:.0%}' if best_sl else 'なし'}` | "
                     f"**TP**: `{f'{best_tp:.0%}' if best_tp else 'なし'}` | "
-                    f"**{opt_sort_by}**: `{best[opt_sort_by]:.4f}`"
+                    f"**{opt_run.sort_by}**: `{best[opt_run.sort_by]:.4f}`"
                 )
                 st.success(best_msg)
 
@@ -1348,12 +1381,16 @@ with tab_optimize:
                 if st.button("💾 最適パラメータを JSON に保存", key="opt_save"):
                     # 画面の最良の1行だけを渡し、保存する行を画面の表示とそろえる
                     params_path = save_optimal_params_with_slippage(
-                        sorted_df.head(1), market, symbol, opt_sort_by, slippage
+                        sorted_df.head(1),
+                        opt_run.market,
+                        opt_run.symbol,
+                        opt_run.sort_by,
+                        opt_run.slippage,
                     )
                     if params_path:
                         st.success(
                             f"✅ 保存しました: `{params_path}`"
-                            f"（スリッページ {format_slippage(slippage, market)}）"
+                            f"（スリッページ {format_slippage(opt_run.slippage, opt_run.market)}）"
                         )
                     else:
                         st.warning("有効な最適化結果が無いため保存しませんでした。")
@@ -1361,13 +1398,13 @@ with tab_optimize:
                 st.divider()
 
                 # ── 4. ヒートマップ（optimize_risk=True 時のみ） ──
-                if opt_optimize_risk:
-                    st.subheader(f"🗺️ ヒートマップ: {opt_sort_by}")
-                    hmap_fig = build_optimize_heatmap(sorted_df, opt_sort_by)
+                if opt_run.optimize_risk:
+                    st.subheader(f"🗺️ ヒートマップ: {opt_run.sort_by}")
+                    hmap_fig = build_optimize_heatmap(sorted_df, opt_run.sort_by)
                     st.plotly_chart(hmap_fig, use_container_width=True)
 
                 # ── 5. 全結果テーブル ──
-                st.subheader(f"📋 全組み合わせ結果（{opt_sort_by} 降順）")
+                st.subheader(f"📋 全組み合わせ結果（{opt_run.sort_by} 降順）")
                 display_opt = sorted_df.copy()
                 for col in ["total_return", "win_rate", "max_drawdown"]:
                     if col in display_opt.columns:
@@ -1387,7 +1424,7 @@ with tab_optimize:
                 st.download_button(
                     "📥 最適化結果を CSV でダウンロード",
                     opt_csv,
-                    file_name=f"optimize_{market}_{symbol}.csv",
+                    file_name=f"optimize_{opt_run.market}_{opt_run.symbol}.csv",
                     mime="text/csv",
                 )
 

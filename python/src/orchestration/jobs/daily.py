@@ -320,11 +320,11 @@ def run_horizon_exit_check() -> None:
     live モードでは処理をスキップする。
     """
     import os
-    from datetime import date
 
     from src.infrastructure.discord_notification_adapter import DiscordNotificationAdapter
     from src.infrastructure.persistence.trade_diff_repository import PostgresTradeDiffSink
     from src.infrastructure.yfinance_market_data_adapter import YFinanceMarketDataAdapter
+    from src.orchestration.jobs.common import today_jst_iso
     from src.trading.brokers.account.factory import make_order_broker
     from src.trading.brokers.base import OrderSide
     from src.utils.db._connection import _db_connection
@@ -334,7 +334,7 @@ def run_horizon_exit_check() -> None:
         logger.info("live モードのためホライズン決済チェックをスキップ")
         return
 
-    today_str = date.today().isoformat()
+    today_str = today_jst_iso()  # target_exit_date は保有の最後の JST の日 (#949)
     with _db_connection() as con:
         # paper_orders の行は売った後も残るため、銘柄ごとに今の保有を作った
         # 最後の filled BUY の期限だけを見る (Issue #945)
@@ -349,7 +349,7 @@ def run_horizon_exit_check() -> None:
                 ORDER BY symbol, filled_at DESC NULLS LAST, created_at DESC, order_id DESC
             ) AS latest_buy
             WHERE target_exit_date IS NOT NULL
-              AND CAST(target_exit_date AS VARCHAR) <= %s
+              AND CAST(target_exit_date AS VARCHAR) < %s
             ORDER BY symbol
             """,
             [int(OrderSide.BUY), today_str],
@@ -392,7 +392,7 @@ def run_horizon_exit_check() -> None:
     logger.info("[horizon_exit] ホライズン決済完了: %d 件", len(exited))
 
 
-def run_daily_settle_orders():
+def run_daily_settle_orders(notify_when_none: bool = True):
     """
     毎営業日 9:05 実行: pending 状態のペーパートレード注文を当日始値で約定処理する。
     本番（live）モードでは kabu STATION® が自動処理するため不要。
@@ -420,11 +420,11 @@ def run_daily_settle_orders():
         logger.error("約定処理失敗: %s", e, exc_info=True)
         raise
 
-    # Discord 完了通知
     try:
         from src.reporting.discord.discord_utils import send_daily_settle_completion
 
-        send_daily_settle_completion(settled_count=len(settled))
+        if settled or notify_when_none:  # Discord 完了通知。やり直しの0件の回は出さない #1047
+            send_daily_settle_completion(settled_count=len(settled))
     except Exception as e:
         logger.error("約定処理完了通知失敗: %s", e, exc_info=True)
 

@@ -9,10 +9,12 @@ src/infrastructure/persistence/ のアダプタ越しに読む。
 from src.utils.db._connection import _db_connection  # noqa: F401  patch target 後方互換
 
 from .accuracy import (  # noqa: F401
+    PREDICTED_DATE_SQL,
     load_drift_summary,
     load_prediction_accuracy,
     load_top_prediction_misses,
     load_weekly_accuracy_snapshots,
+    load_weekly_accuracy_summary,
     save_prediction_accuracy,
     save_weekly_accuracy_snapshot,
 )
@@ -51,6 +53,7 @@ __all__ = [
     "load_prediction_accuracy",
     "load_top_prediction_misses",
     "load_drift_summary",
+    "load_weekly_accuracy_summary",
     "save_weekly_accuracy_snapshot",
     "load_weekly_accuracy_snapshots",
     # features

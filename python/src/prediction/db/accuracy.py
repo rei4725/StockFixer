@@ -1,6 +1,7 @@
 """prediction_accuracy / accuracy_weekly_snapshots テーブル: 予測精度追跡とドリフト集計。"""
 
 from datetime import datetime, timedelta
+from typing import Optional
 
 import pandas as pd
 
@@ -71,6 +72,8 @@ def load_prediction_accuracy(
     symbol: str = None,
     horizon: int = 1,
     limit: int = 500,
+    model_name: Optional[str] = None,
+    days: Optional[int] = None,
 ) -> pd.DataFrame:
     """
     prediction_accuracy テーブルからデータを取得する。
@@ -79,19 +82,37 @@ def load_prediction_accuracy(
         market: フィルタ対象の市場名（None なら全市場）
         symbol: フィルタ対象の銘柄コード（None なら全銘柄）
         horizon: フィルタ対象のホライズン（デフォルト 1）
-        limit: 返却行数の上限
+        limit: 返却行数の上限（0 なら上限なし）
+        model_name: フィルタ対象のモデル名ラベル（None なら全モデル）
+        days: 指定時は、上のフィルタに合う行の predicted_at の日付（YYYYMMDD）の
+            新しい方から days 日分だけを返す（predicted_at の下限をその日にする。#958）
 
     Returns:
         pd.DataFrame（結果なし時は空 DataFrame）
     """
-    query = "SELECT * FROM prediction_accuracy WHERE horizon = %s"
-    params: list = [horizon]
+    where = "horizon = %s"
+    filter_params: list = [horizon]
     if market is not None:
-        query += " AND market = %s"
-        params.append(market)
+        where += " AND market = %s"
+        filter_params.append(market)
     if symbol is not None:
-        query += " AND symbol = %s"
-        params.append(symbol)
+        where += " AND symbol = %s"
+        filter_params.append(symbol)
+    if model_name is not None:
+        where += " AND model_name = %s"
+        filter_params.append(model_name)
+
+    query = f"SELECT * FROM prediction_accuracy WHERE {where}"
+    params: list = list(filter_params)
+    if days is not None:
+        query += (
+            " AND predicted_at >= ("
+            "SELECT MIN(d) FROM ("
+            "SELECT DISTINCT SUBSTRING(predicted_at, 1, 8) AS d "
+            f"FROM prediction_accuracy WHERE {where} "
+            f"ORDER BY d DESC LIMIT {int(days)}) AS window_days)"
+        )
+        params += filter_params
     query += " ORDER BY predicted_at DESC"
     if limit:
         query += f" LIMIT {int(limit)}"
@@ -194,6 +215,56 @@ def load_drift_summary(
             )
         except Exception as e:
             logger.error(f"load_drift_summary 失敗: {e}", exc_info=True)
+            return pd.DataFrame()
+
+
+# predicted_at（'YYYYMMDD_HHMMSS' の文字列）の日付部分を 'YYYYMMDD' で取り出す SQL 式
+PREDICTED_DATE_SQL = "LEFT(REGEXP_REPLACE(predicted_at, '[^0-9]', '', 'g'), 8)"
+
+
+def load_weekly_accuracy_summary(
+    week_start: str, horizon: int = 1, model_name: str = "production"
+) -> pd.DataFrame:
+    """
+    week_start からの7日に予想した採点の行だけで、銘柄ごとの方向正解率・平均誤差を集計する。
+
+    load_drift_summary の銘柄ごと直近 N 件の窓は週をまたいで重なり、当週の的中率の
+    下がりを薄めるため、週の記録はこちらで作る（#1023）。
+
+    Args:
+        week_start: ISO 形式の週開始日（月曜日, 例: "2026-05-11"）
+        horizon: 対象ホライズン
+        model_name: 対象のモデル名ラベル（challenger の採点を混ぜない。#877）
+
+    Returns:
+        pd.DataFrame: [market, symbol, direction_accuracy, mean_abs_error, n_samples]
+    """
+    start = datetime.fromisoformat(week_start)
+    since = start.strftime("%Y%m%d")
+    until = (start + timedelta(days=7)).strftime("%Y%m%d")
+    with _db_connection() as con:
+        try:
+            return pd.read_sql(
+                f"""
+                SELECT
+                    market,
+                    symbol,
+                    AVG(CAST(direction_match AS INTEGER)) AS direction_accuracy,
+                    AVG(ABS(predicted_ratio - actual_ratio))  AS mean_abs_error,
+                    COUNT(*) AS n_samples
+                FROM prediction_accuracy
+                WHERE horizon = %s AND model_name = %s
+                  AND direction_match IS NOT NULL
+                  AND {PREDICTED_DATE_SQL} >= %s
+                  AND {PREDICTED_DATE_SQL} < %s
+                GROUP BY market, symbol
+                ORDER BY direction_accuracy ASC
+                """,
+                con,
+                params=[horizon, model_name, since, until],
+            )
+        except Exception as e:
+            logger.error(f"load_weekly_accuracy_summary 失敗: {e}", exc_info=True)
             return pd.DataFrame()
 
 
