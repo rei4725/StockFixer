@@ -631,6 +631,50 @@ class TestOptunaDSRGuard(unittest.TestCase):
         # 同じ Sharpe でも試行数が多いほど期待最大値が上がり DSR は下がる
         self.assertGreaterEqual(dsr_few, dsr_many)
 
+    @staticmethod
+    def _wf_by_threshold(**kwargs):
+        """閾値が大きいほど DD が深く・Sharpe が高く・コストが大きい fold 結果を返す。"""
+        th = float(kwargs["threshold"])
+        return (
+            None,
+            None,
+            pd.DataFrame(
+                {
+                    "max_drawdown": [-0.01 - th * 10],
+                    "sharpe_ratio": [th * 100],
+                    "cost_impact_return": [th],
+                    "num_trades": [10],
+                }
+            ),
+        )
+
+    def _best_row(self, sort_by: str):
+        from src.backtest.optimizer import run_optuna_optimization
+
+        result = run_optuna_optimization(market="jp", symbol="7203", n_trials=10, sort_by=sort_by)
+        return result.loc[result["dsr"].notna()].iloc[0], result
+
+    @patch("src.backtest.optimizer.optuna_search.run_backtest_walk_forward")
+    def test_max_drawdown_is_maximized(self, mock_wf):
+        """max_drawdown は負の小数なので 0 に近い（大きい）組が最良になる。"""
+        mock_wf.side_effect = self._wf_by_threshold
+        best, result = self._best_row("max_drawdown")
+        self.assertEqual(float(best["max_drawdown"]), float(result["max_drawdown"].max()))
+
+    @patch("src.backtest.optimizer.optuna_search.run_backtest_walk_forward")
+    def test_sharpe_ratio_is_maximized(self, mock_wf):
+        mock_wf.side_effect = self._wf_by_threshold
+        best, result = self._best_row("sharpe_ratio")
+        self.assertEqual(float(best["sharpe_ratio"]), float(result["sharpe_ratio"].max()))
+
+    @patch("src.backtest.optimizer.optuna_search.run_backtest_walk_forward")
+    def test_cost_impact_return_is_minimized(self, mock_wf):
+        mock_wf.side_effect = self._wf_by_threshold
+        best, result = self._best_row("cost_impact_return")
+        self.assertEqual(
+            float(best["cost_impact_return"]), float(result["cost_impact_return"].min())
+        )
+
 
 class TestSaveOptimalParamsDSR(unittest.TestCase):
     """save_optimal_params_json が DSR を JSON metrics に記録することの検証。"""

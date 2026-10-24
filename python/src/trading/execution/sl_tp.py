@@ -1,11 +1,12 @@
 """SL/TP トリガーによる保有ポジションの強制クローズ。"""
 
+import math
+
 from src.domain.ports import MarketDataPort, TradeDiffSink
-from src.trading.brokers.base import BrokerBase, OrderSide
+from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
 from src.trading.risk_manager import RiskManager
 from src.utils.logger import get_logger
 
-from .params import _choose_order_params
 from .recording import _record_order
 from .stats import OrderExecutionStats
 
@@ -33,6 +34,10 @@ def _check_sl_tp_exits(
         qty = int(pos.get("qty") or 0)
         avg_price = float(pos.get("avg_price") or 0.0)
         current_price = float(pos.get("current_price") or 0.0)
+        if qty > 0 and avg_price > 0 and math.isnan(current_price):
+            # 現在値が取れない保有を損益0として素通りさせない（#844）
+            logger.warning("[exec] %s: 現在値が取れず SL/TP を評価できない（%d株）", symbol, qty)
+            continue
         if qty <= 0 or avg_price <= 0 or current_price <= 0:
             continue
 
@@ -42,13 +47,8 @@ def _check_sl_tp_exits(
             continue
 
         try:
-            order_type, order_price, order_reason, order_session = _choose_order_params(
-                market=market,
-                symbol=symbol,
-                side=OrderSide.SELL,
-                current_price=current_price,
-                market_data=market_data,
-            )
+            # 損失の止めは約定を優先する。流動性の判定による指値は窓を開けた日に失効するため使わない（#881）
+            order_type, order_price, order_session = OrderType.MARKET, 0.0, "open"
             result = broker.send_order(
                 symbol,
                 OrderSide.SELL,

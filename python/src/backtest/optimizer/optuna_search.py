@@ -56,7 +56,8 @@ def run_optuna_optimization(
         logger.error("optuna が未インストールです。pip install optuna を実行してください。")
         return pd.DataFrame()
 
-    _minimize = sort_by in {"max_drawdown", "cost_impact_return", "cost_impact_cash"}
+    # max_drawdown は負の小数（0 に近いほど良い）なので maximize 側に置く
+    _minimize = sort_by in {"cost_impact_return", "cost_impact_cash"}
 
     def _objective(trial: "optuna.Trial") -> float:
         threshold = trial.suggest_float("threshold", 0.0, 0.02, step=0.001)

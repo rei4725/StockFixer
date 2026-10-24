@@ -1,6 +1,7 @@
 """prediction_accuracy / accuracy_weekly_snapshots テーブル: 予測精度追跡とドリフト集計。"""
 
 from datetime import datetime, timedelta
+from typing import Optional
 
 import pandas as pd
 
@@ -71,6 +72,8 @@ def load_prediction_accuracy(
     symbol: str = None,
     horizon: int = 1,
     limit: int = 500,
+    model_name: Optional[str] = None,
+    days: Optional[int] = None,
 ) -> pd.DataFrame:
     """
     prediction_accuracy テーブルからデータを取得する。
@@ -79,19 +82,37 @@ def load_prediction_accuracy(
         market: フィルタ対象の市場名（None なら全市場）
         symbol: フィルタ対象の銘柄コード（None なら全銘柄）
         horizon: フィルタ対象のホライズン（デフォルト 1）
-        limit: 返却行数の上限
+        limit: 返却行数の上限（0 なら上限なし）
+        model_name: フィルタ対象のモデル名ラベル（None なら全モデル）
+        days: 指定時は、上のフィルタに合う行の predicted_at の日付（YYYYMMDD）の
+            新しい方から days 日分だけを返す（predicted_at の下限をその日にする。#958）
 
     Returns:
         pd.DataFrame（結果なし時は空 DataFrame）
     """
-    query = "SELECT * FROM prediction_accuracy WHERE horizon = %s"
-    params: list = [horizon]
+    where = "horizon = %s"
+    filter_params: list = [horizon]
     if market is not None:
-        query += " AND market = %s"
-        params.append(market)
+        where += " AND market = %s"
+        filter_params.append(market)
     if symbol is not None:
-        query += " AND symbol = %s"
-        params.append(symbol)
+        where += " AND symbol = %s"
+        filter_params.append(symbol)
+    if model_name is not None:
+        where += " AND model_name = %s"
+        filter_params.append(model_name)
+
+    query = f"SELECT * FROM prediction_accuracy WHERE {where}"
+    params: list = list(filter_params)
+    if days is not None:
+        query += (
+            " AND predicted_at >= ("
+            "SELECT MIN(d) FROM ("
+            "SELECT DISTINCT SUBSTRING(predicted_at, 1, 8) AS d "
+            f"FROM prediction_accuracy WHERE {where} "
+            f"ORDER BY d DESC LIMIT {int(days)}) AS window_days)"
+        )
+        params += filter_params
     query += " ORDER BY predicted_at DESC"
     if limit:
         query += f" LIMIT {int(limit)}"
