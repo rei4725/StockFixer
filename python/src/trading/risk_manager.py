@@ -11,6 +11,7 @@ OrderExecutionPipeline が注文を送信する前にゲートチェックを行
     4. 最大保有銘柄数 = 10 銘柄
 """
 
+import math
 import os
 from typing import Any, Optional
 
@@ -397,10 +398,15 @@ class RiskManager:
             return self._total_equity_cache
 
         balance = self._broker.get_balance()
-        market_value = sum(
-            float(p.get("qty", 0)) * float(p.get("current_price", 0.0))
-            for p in self._broker.get_positions()
-        )
+        market_value = 0.0
+        for p in self._broker.get_positions():
+            price = float(p.get("current_price", 0.0))
+            if math.isnan(price):
+                # 評価できない保有は時価0として数える（#844）。NaN で総資産ごと NaN になると
+                # DD が 0.0 になりゲートが外れるため、止める側（DD を大きく見る側）に倒す
+                logger.warning(f"[risk] {p.get('symbol')}: 現在値が取れず時価0として総資産に数える")
+                continue
+            market_value += float(p.get("qty", 0)) * price
         self._total_equity_cache = balance + market_value
         return self._total_equity_cache
 
