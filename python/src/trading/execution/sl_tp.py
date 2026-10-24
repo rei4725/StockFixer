@@ -1,11 +1,10 @@
 """SL/TP トリガーによる保有ポジションの強制クローズ。"""
 
 from src.domain.ports import MarketDataPort, TradeDiffSink
-from src.trading.brokers.base import BrokerBase, OrderSide
+from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
 from src.trading.risk_manager import RiskManager
 from src.utils.logger import get_logger
 
-from .params import _choose_order_params
 from .recording import _record_order
 from .stats import OrderExecutionStats
 
@@ -42,13 +41,8 @@ def _check_sl_tp_exits(
             continue
 
         try:
-            order_type, order_price, order_reason, order_session = _choose_order_params(
-                market=market,
-                symbol=symbol,
-                side=OrderSide.SELL,
-                current_price=current_price,
-                market_data=market_data,
-            )
+            # 損失の止めは約定を優先する。流動性の判定による指値は窓を開けた日に失効するため使わない（#881）
+            order_type, order_price, order_session = OrderType.MARKET, 0.0, "open"
             result = broker.send_order(
                 symbol,
                 OrderSide.SELL,
