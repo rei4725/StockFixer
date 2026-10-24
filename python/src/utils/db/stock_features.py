@@ -21,6 +21,13 @@ logger = get_logger(__name__)
 # 数値化しない列（date は timestamp、market/symbol は呼び出し元で既に drop 済みだが念のため含める）
 _NON_NUMERIC_COLUMNS = {"date", "market", "symbol"}
 
+# 全件の読み込み（統合モデルの学習）は、1回で読むと psycopg が結果を丸ごと手元に溜め、
+# float64 の DataFrame と合わせて 8GB のコンテナの上限を超えてプロセスが消える（#807）。
+# サーバー側のカーソルで少しずつ読み、特徴量の列は float32 で持つ（XGBoost・LightGBM は
+# 学習の中で float32 か区間に直すため、学習への影響は丸めの差だけ）。目的変数は精度を保つ
+_LOAD_ALL_FETCH_ROWS = 10_000
+_FLOAT64_COLUMNS = {"y"}
+
 
 def _ensure_columns(con: psycopg.Connection, df: pd.DataFrame) -> None:
     """DataFrame の列が stock_features テーブルに存在しない場合 ALTER TABLE で追加する。
@@ -124,22 +131,40 @@ def load_all_stock_features() -> pd.DataFrame:
     Returns:
         全データを結合した DataFrame（market, symbol 列付き）
     """
+    frames: list[pd.DataFrame] = []
     with _db_connection() as con:
         try:
-            df = pd.read_sql("SELECT * FROM stock_features ORDER BY market, symbol, row_num", con)
+            with con.transaction(), con.cursor(name="load_all_stock_features") as cur:
+                cur.execute("SELECT * FROM stock_features ORDER BY market, symbol, row_num")
+                columns = [d.name for d in cur.description or []]
+                while rows := cur.fetchmany(_LOAD_ALL_FETCH_ROWS):
+                    frames.append(_shrink_feature_chunk(pd.DataFrame(rows, columns=columns)))
         except Exception as e:
             logger.error(f"stock_features 全件読み込み失敗: {e}", exc_info=True)
             return pd.DataFrame()
 
-    if df.empty:
+    if not frames:
         return pd.DataFrame()
 
-    if "row_num" in df.columns:
-        df = df.drop(columns=["row_num"])
-
-    df = coerce_object_numeric_columns(df, exclude=_NON_NUMERIC_COLUMNS)
+    df = pd.concat(frames, ignore_index=True)
+    frames.clear()
     logger.info(f"DB読み込み完了: stock_features ({len(df)}行)")
     return df
+
+
+def _shrink_feature_chunk(chunk: pd.DataFrame) -> pd.DataFrame:
+    """1回分の読み込みを、塊ごとに同じ型にそろえて小さくする。
+
+    塊の中で全行 NULL の列は object で来るため、型は塊の中身でなく列の名前で決める。
+    """
+    chunk = chunk.drop(columns=[c for c in ["row_num"] if c in chunk.columns])
+    for col in chunk.columns:
+        if col == "date":
+            chunk[col] = pd.to_datetime(chunk[col])
+        elif col not in _NON_NUMERIC_COLUMNS:
+            dtype = "float64" if col in _FLOAT64_COLUMNS else "float32"
+            chunk[col] = pd.to_numeric(chunk[col], errors="coerce").astype(dtype)
+    return chunk
 
 
 def delete_stock_features(market: str, symbol: str) -> None:
