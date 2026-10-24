@@ -1,12 +1,13 @@
 """注文結果の記録と live 約定差分の同期。"""
 
-from datetime import date, timedelta
+from datetime import timedelta
 from typing import Any
 
 from src.domain.ports import TradeDiffSink
 from src.domain.types import TradeDiffRecord
 from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
 from src.utils.db import db_connection
+from src.utils.japan_time import now_jst
 
 
 def _link_paper_order_metadata(
@@ -99,7 +100,9 @@ def _record_order(
     if mode == "paper" and order_id:
         target_exit_date: str | None = None
         if horizon is not None and side in (OrderSide.BUY, OrderSide.SHORT):
-            target_exit_date = (date.today() + timedelta(days=horizon)).isoformat()
+            # 保有の最後の JST の日（発注日＋horizon−1）。決済はその次の日の朝 (#949)
+            last_day = now_jst().date() + timedelta(days=horizon - 1)
+            target_exit_date = last_day.isoformat()
         _link_paper_order_metadata(
             order_id, market, predicted_at, signal_price, horizon, target_exit_date
         )

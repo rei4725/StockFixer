@@ -69,6 +69,19 @@ def _load_recent_returns(symbols: list[str], market: str, window: int) -> pd.Dat
         return pd.DataFrame()
 
     pivot = df.pivot(index="ts", columns="symbol", values="close")
+    # 日足の短い銘柄を残すと dropna() が全銘柄の行を落とし、ゲートが素通しになる（#1001）
+    min_returns = max(2, window / 2)
+    return_counts = pivot.count() - 1
+    short_symbols = list(return_counts[return_counts < min_returns].index)
+    if short_symbols:
+        logger.warning(
+            "[corr] 日足の本数が足りない銘柄を相関の計算から外す: %s (必要なリターン数>=%s)",
+            short_symbols,
+            min_returns,
+        )
+        pivot = pivot.drop(columns=short_symbols)
+    if pivot.empty:
+        return pd.DataFrame()
     returns = pivot.pct_change().dropna()
     return returns
 
