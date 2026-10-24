@@ -4,27 +4,29 @@ root_packages =
 
 # ============================================================
 # Contract 1: レイヤー階層契約
-#   domain < utils < BC群 < orchestration/api
+#   domain < utils < BC群 < infrastructure < orchestration/api
 #   上位レイヤーが下位レイヤーを参照するのは合法。逆は禁止。
 #
 # src.domain は型とポートのみを持つ共有カーネルであり、src.domain.types 以外を
 # 一切 import しない真の最下層。2026-09-22 の設計判断でこれを恒久的な位置づけとした
 # （docs/superpowers/specs/2026-09-22-db-ownership-decoupling-design.md §3）。
 #
-# src.infrastructure は意図的に layers へ載せていない。
-#   src/infrastructure/* -> src.market_data（アダプタが BC を参照）
-#   src/backtest/*, src/reporting/*, src/quality/* -> src.infrastructure
-# とパッケージ単位で循環しているため、層に追加した時点で契約が落ちる。
-# 循環の解消は別 Issue とする。
+# src.infrastructure はポートの実装（アダプタ）を持つ外側の層として BC の上に置く。
+# アダプタが BC を参照する（infrastructure -> market_data・reporting・prediction.db）のは
+# 上から下で合法。BC が infrastructure を参照するのは禁止で、アダプタは合成ルート
+# （orchestration / api）が注入する。かつては BC -> infrastructure の参照があり
+# パッケージ単位で循環していたため層に載せられなかったが、その向きが 0 件になったので
+# 載せた（#741）。
 #
 # ignore_imports は両契約とも未使用（例外 0 件が現状）。
 # 例外を追加する際は必ずレビューを経ること。
 # ============================================================
 [importlinter:contract:layers]
-name = Layered architecture (domain < utils < BC < orchestration/api)
+name = Layered architecture (domain < utils < BC < infrastructure < orchestration/api)
 type = layers
 layers =
     src.api | src.orchestration
+    src.infrastructure
     src.backtest | src.prediction | src.trading | src.reporting | src.watchlist | src.market_data | src.rule_engine | src.quality | src.screening
     src.utils
     src.domain
@@ -66,11 +68,9 @@ modules =
 # Contract 3: domain purity 契約
 #   src.domain は src.domain 自身以外の src.* を一切 import しない。
 #
-# Contract 1（layers）は src.domain が src.utils・BC群・src.api/src.orchestration より
-# 下位にあることは証明するが、src.infrastructure については何も証明しない。
-# src.infrastructure は BC 群との間でパッケージ単位の循環があり（Contract 1 のコメント参照）、
-# 意図的に layers 契約へ載せていないため、"layers" という型ではこの性質を表現できない。
-# そのため forbidden 型の独立した契約として domain の純粋性のみを直接検証する。
+# src.infrastructure を Contract 1（layers）に載せた（#741）ので、この性質は
+# Contract 1 でも証明される。layers の並びを将来変えても domain の純粋性が
+# 崩れないよう、forbidden 型の独立した契約として直接の検証を残す。
 #
 # ignore_imports は未使用（例外 0 件が現状）。
 # 例外を追加する際は必ずレビューを経ること。
