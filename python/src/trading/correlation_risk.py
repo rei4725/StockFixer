@@ -24,6 +24,13 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+class CorrelationDataUnavailable(Exception):
+    """相関の計算に使う終値を DB から読めなかった（SQL の誤り・DB の不調など）。
+
+    データが足りないだけ（新しい銘柄・行数不足）は空の表で返し、この例外にはしない。
+    """
+
+
 def _load_recent_returns(symbols: list[str], market: str, window: int) -> pd.DataFrame:
     """market_data_raw から直近 window 日分の日足終値リターンを取得する。
 
@@ -54,8 +61,9 @@ def _load_recent_returns(symbols: list[str], market: str, window: int) -> pd.Dat
         with _db_connection() as con:
             df = pd.read_sql(query, con, params=[market, "1d"] + symbols + [window + 1])
     except Exception as e:
+        # 空の表で返すとデータ不足と区別がつかず、ゲートが黙って素通しになる（#809）
         logger.error("相関計算用データ取得失敗: %s", e, exc_info=True)
-        return pd.DataFrame()
+        raise CorrelationDataUnavailable(repr(e)[:300]) from e
 
     if df.empty:
         return pd.DataFrame()
@@ -109,7 +117,15 @@ def filter_correlated_candidates(
         return list(candidate_symbols), []
 
     all_symbols = list(set(candidate_symbols) | set(existing_symbols))
-    returns = _load_recent_returns(all_symbols, market, window)
+    try:
+        returns = _load_recent_returns(all_symbols, market, window)
+    except CorrelationDataUnavailable as e:
+        logger.error(
+            "[corr] 相関のデータを読めないため候補を全部止める (candidates=%s): %s",
+            candidate_symbols,
+            e,
+        )
+        return [], list(candidate_symbols)
 
     if returns.empty:
         logger.warning(
@@ -188,7 +204,20 @@ def evaluate_correlation_gate(
             symbols=list(symbols),
         )
 
-    returns = _load_recent_returns(symbols, market, window)
+    try:
+        returns = _load_recent_returns(symbols, market, window)
+    except CorrelationDataUnavailable as e:
+        failure = f"相関のデータを読めないため新規エントリーを止める: {e}"
+        logger.error("[corr] %s", failure)
+        return CorrelationGateResult(
+            is_allowed=False,
+            enc=float(n),
+            enc_threshold=enc_threshold,
+            avg_correlation=0.0,
+            n_symbols=n,
+            symbols=list(symbols),
+            reason=failure,
+        )
 
     if returns.empty or len(returns.columns) < 2:
         logger.warning("[corr] リターンデータ不足のため相関ゲートをスキップ (symbols=%s)", symbols)
