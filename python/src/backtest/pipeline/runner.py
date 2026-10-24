@@ -197,6 +197,10 @@ def run_backtest_single(
         signal,
         pred=pred,
     )
+    # ベンチマークを戦略と同じ検証期間で取れるよう、検証期間を metrics に入れる
+    if metrics and isinstance(test_df.index, pd.DatetimeIndex) and len(test_df) > 0:
+        metrics["test_start"] = str(test_df.index[0])[:10]
+        metrics["test_end"] = str(test_df.index[-1])[:10]
     close_col = "Close" if "Close" in test_df.columns else "close"
     price_series = test_df[close_col].rename("price")
     return result_df, metrics, price_series
