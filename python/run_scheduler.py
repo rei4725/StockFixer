@@ -76,6 +76,13 @@ def job_daily_settle_orders():
     run_daily_settle_orders()
 
 
+def job_daily_settle_orders_retry():
+    """据え置いた pending 注文の約定のやり直し（毎営業日 09:15〜09:55）"""
+    from src.orchestration.jobs.settle_retry import run_daily_settle_retry
+
+    run_daily_settle_retry()
+
+
 def job_daily_paper_trade_report():
     """毎営業日 15:30 - ペーパートレードポジション・損益レポートを Discord に送信"""
     from src.orchestration.scheduler import run_daily_paper_trade_report
@@ -274,6 +281,19 @@ SCHEDULE_CONFIG = {
         "recovery_delay_minutes": 10,
         "max_executions_per_period": 1,
         "description": "毎営業日 09:05 - pending 注文の約定処理（ペーパートレード）",
+    },
+    # 9:05 に当日の行が無く据え置いた注文を、同じ朝のうちに当日始値で約定し直す。約定待ちが無ければ
+    # 約定の処理は動かさない。minute が int でないので当日分の補完はしない（#1008）
+    "daily_settle_orders_retry": {
+        "func": job_daily_settle_orders_retry,
+        "trigger": "cron",
+        "period": "daily",
+        "day_of_week": "mon-fri",
+        "hour": 9,
+        "minute": "15,25,35,45,55",
+        "max_executions_per_period": 5,
+        "max_retries": 0,
+        "description": "毎営業日 09:15〜09:55 - 据え置いた pending 注文の約定のやり直し（ペーパートレード）",
     },
     "daily_paper_trade_report": {
         "func": job_daily_paper_trade_report,

@@ -332,6 +332,47 @@ class TestRunDailyOrders(unittest.TestCase):
         finally:
             self._stop_patches(patch_list)
 
+    def test_position_size_error_does_not_stop_remaining_orders(self):
+        """1銘柄の株数計算が例外でも残りの銘柄は発注され、失敗銘柄はエラーに記録される（#903）"""
+        broker = _make_broker()
+        predictions = _make_predictions(n_buy=3)
+        failing_symbol = "7201"
+
+        def _calc_qty(symbol, *args, **kwargs):
+            if symbol == failing_symbol:
+                raise ValueError("price data missing")
+            return 100
+
+        patches = [
+            (
+                patch(
+                    "src.trading.execution.RiskManager.calc_position_size",
+                    side_effect=_calc_qty,
+                )
+                if getattr(p, "attribute", None) == "calc_position_size"
+                else p
+            )
+            for p in self._patch_pipeline(predictions)
+        ]
+        _, patch_list = self._start_patches(patches)
+        try:
+            with self.assertLogs("src.trading.execution.runner", level="ERROR") as logs:
+                stats = run_daily_orders(
+                    broker,
+                    order_run_sink=InMemoryOrderRunSink(),
+                    trade_diff_sink=InMemoryTradeDiffSink(),
+                    prediction_repo=_PREDICTIONS,
+                    market="jp",
+                    mode="paper",
+                )
+            self.assertEqual(stats["buy_orders"], 2)
+            self.assertEqual(stats["errors"], 1)
+            ordered = {c.args[0] for c in broker.send_order.call_args_list}
+            self.assertEqual(ordered, {"7200", "7202"})
+            self.assertTrue(any(failing_symbol in line for line in logs.output))
+        finally:
+            self._stop_patches(patch_list)
+
     def test_confidence_ratio_passed_to_position_size(self):
         broker = _make_broker()
         # R-308: 0.65 は半量発注レンジ（calc_position_size は呼ばれる）
