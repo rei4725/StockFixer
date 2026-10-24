@@ -5,6 +5,7 @@ from discord.ext import commands
 from discord.utils import escape_markdown
 from dotenv import load_dotenv
 
+from config.env_source import dotenv_path
 from src.domain.types import PredictionResult
 from src.reporting.discord.discord_formatters import (
     build_prediction_list,
@@ -32,7 +33,8 @@ from src.utils.scheduler_types import SchedulerJobStatus
 
 logger = get_logger(__name__)
 
-load_dotenv()
+if dotenv_path():  # pytest では本番の .env を環境変数に流し込まない
+    load_dotenv()
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 INTENTS = discord.Intents.default()
 INTENTS.message_content = True

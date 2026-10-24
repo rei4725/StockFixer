@@ -7,10 +7,12 @@
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from config.env_source import dotenv_path
+
 
 class DataSettings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=dotenv_path(),
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=True,
