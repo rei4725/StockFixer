@@ -40,6 +40,27 @@ def _block_heartbeat_ping(monkeypatch):
 
 
 # ============================================
+# 口座アプリ（影の運用）実送信ガード（unit テスト全体に適用）
+# ============================================
+
+
+@pytest.fixture(autouse=True)
+def _block_account_gateway(monkeypatch):
+    """本番 .env の ACCOUNT_SHADOW・ACCOUNT_GATEWAY_URL・ACCOUNT_GATEWAY_TOKEN が
+    ローカルの pytest 実行に漏れ込み、make_order_broker が ShadowBroker を返して
+    テストから口座アプリへ注文を出すことを防ぐ（2026-10-24 の自動デプロイ失敗 #1017。
+    CI には .env が無いため緑で、デプロイ前テストだけが赤になった）。
+    factory は呼ぶ時に config.settings から引くので、そこを上書きすれば足りる。
+    影の運用の挙動を検証したいテストは、当該テスト内で改めて monkeypatch する。
+    """
+    import config.settings as cfg
+
+    monkeypatch.setattr(cfg, "ACCOUNT_SHADOW", False)
+    monkeypatch.setattr(cfg, "ACCOUNT_GATEWAY_URL", "")
+    monkeypatch.setattr(cfg, "ACCOUNT_GATEWAY_TOKEN", "")
+
+
+# ============================================
 # Claude/外部API実呼び出しガード（unit テスト全体に適用）
 # ============================================
 
