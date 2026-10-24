@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pandas as pd
 
+from config.settings import MAX_SECTOR_POSITIONS
 from src.infrastructure.in_memory import (
     InMemoryOrderRunSink,
     InMemoryPredictionRepository,
@@ -152,6 +153,31 @@ class TestRunDailyOrders(unittest.TestCase):
             )
             self.assertGreater(stats["buy_orders"], 0)
             self.assertEqual(stats["errors"], 0)
+        finally:
+            self._stop_patches(patch_list)
+
+    def test_held_sector_at_cap_blocks_new_buys(self):
+        """#908: 保有の業種が上限件数に達していれば、同じ業種の新規買いを発注しない。"""
+        held = [{"symbol": f"730{i}.T", "qty": 100, "avg_price": 1000.0} for i in range(3)]
+        broker = _make_broker(positions=held)
+        predictions = _make_predictions(n_buy=3)
+        patches = self._patch_pipeline(predictions)
+        patches[-1] = patch(
+            "src.trading.execution.selection.get_symbol_sector",
+            return_value="Auto",
+        )
+        _, patch_list = self._start_patches(patches)
+        try:
+            stats = run_daily_orders(
+                broker,
+                order_run_sink=InMemoryOrderRunSink(),
+                trade_diff_sink=InMemoryTradeDiffSink(),
+                prediction_repo=_PREDICTIONS,
+                market="jp",
+                mode="paper",
+            )
+            self.assertEqual(stats["buy_orders"], 0)
+            broker.send_order.assert_not_called()
         finally:
             self._stop_patches(patch_list)
 
@@ -860,6 +886,95 @@ class TestSectorLimitHelpers(unittest.TestCase):
 
         self.assertEqual(limited["symbol"].tolist(), ["7200", "6758", "8306"])
         self.assertEqual(limited["sector"].tolist(), ["Auto", "Tech", "Bank"])
+
+    _SECTORS = {
+        "7200": "Auto",
+        "7201": "Auto",
+        "7202": "Auto",
+        "7203": "Auto",
+        "7267": "Auto",
+        "7269": "Auto",
+        "7270": "Auto",
+        "6758": "Tech",
+    }
+
+    def _sector_of(self, market: str, symbol: str) -> str:
+        return self._SECTORS.get(symbol, f"UNKNOWN:{market}:{symbol}")
+
+    def _candidates(self, symbols: list[str]) -> pd.DataFrame:
+        return pd.DataFrame(
+            [
+                {
+                    "market": "jp",
+                    "symbol": s,
+                    "diff_ratio": 0.05 - 0.001 * i,
+                    "current_price": 1000.0,
+                }
+                for i, s in enumerate(symbols)
+            ]
+        )
+
+    def test_held_sector_at_cap_blocks_new_buys_in_that_sector(self):
+        """#908: 保有がその業種で上限件数あるとき、その業種の新規候補は選ばれない。"""
+        predictions = self._candidates(["7200", "7201", "6758"])
+        with patch(
+            "src.trading.execution.selection.get_symbol_sector", side_effect=self._sector_of
+        ):
+            limited = _apply_buy_sector_limit(
+                predictions,
+                max_sector_positions=MAX_SECTOR_POSITIONS,
+                held_symbols={"7203", "7267", "7269"},
+                market="jp",
+            )
+
+        self.assertEqual(limited["symbol"].tolist(), ["6758"])
+
+    def test_one_held_in_sector_allows_cap_minus_one_new_buys(self):
+        """#908: 保有がその業種で1件のとき、新規は MAX_SECTOR_POSITIONS - 1 件まで。"""
+        predictions = self._candidates(["7200", "7201", "7202", "7267", "6758"])
+        with patch(
+            "src.trading.execution.selection.get_symbol_sector", side_effect=self._sector_of
+        ):
+            limited = _apply_buy_sector_limit(
+                predictions,
+                max_sector_positions=MAX_SECTOR_POSITIONS,
+                held_symbols={"7270"},
+                market="jp",
+            )
+
+        auto = [s for s in limited["symbol"].tolist() if self._SECTORS.get(s) == "Auto"]
+        self.assertEqual(len(auto), MAX_SECTOR_POSITIONS - 1)
+        self.assertEqual(auto, ["7200", "7201", "7202", "7267"][: MAX_SECTOR_POSITIONS - 1])
+        self.assertIn("6758", limited["symbol"].tolist())
+
+    def test_no_holdings_keeps_candidate_only_cap(self):
+        """#908: 保有が無いときは今までどおり候補の中だけで上限をかける。"""
+        predictions = self._candidates(["7200", "7201", "7202", "7267", "6758"])
+        with patch(
+            "src.trading.execution.selection.get_symbol_sector", side_effect=self._sector_of
+        ):
+            with_empty = _apply_buy_sector_limit(
+                predictions, max_sector_positions=MAX_SECTOR_POSITIONS, held_symbols=set()
+            )
+            default = _apply_buy_sector_limit(
+                predictions, max_sector_positions=MAX_SECTOR_POSITIONS
+            )
+
+        auto = ["7200", "7201", "7202", "7267"][:MAX_SECTOR_POSITIONS]
+        expected = auto + ["6758"]
+        self.assertEqual(with_empty["symbol"].tolist(), expected)
+        self.assertEqual(default["symbol"].tolist(), expected)
+
+    def test_cap_and_thresholds_are_unchanged(self):
+        """#908: 上限の値と売買のしきい値は変えない。"""
+        from config.settings import Settings
+
+        defaults = {name: field.default for name, field in Settings.model_fields.items()}
+        self.assertEqual(defaults["MAX_SECTOR_POSITIONS"], 3)
+        self.assertEqual(defaults["MAX_ORDERS_PER_RUN"], 5)
+        self.assertEqual(defaults["MAX_POSITIONS"], 10)
+        self.assertAlmostEqual(defaults["BUY_THRESHOLD"], 0.005)
+        self.assertAlmostEqual(defaults["SELL_THRESHOLD"], -0.005)
 
 
 class TestShortSide(unittest.TestCase):
