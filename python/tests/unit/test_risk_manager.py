@@ -8,6 +8,8 @@ import unittest
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from src.trading.brokers.base import BrokerBase, OrderSide
 from src.trading.risk_manager import (
     MAX_CONSECUTIVE_LOSSES,
@@ -16,6 +18,16 @@ from src.trading.risk_manager import (
     MAX_POSITIONS,
     RiskManager,
 )
+
+
+@pytest.fixture(autouse=True)
+def _no_real_vix_fetch():
+    """calc_position_size が実 yfinance で ^VIX を読みに行かないようにする（#823）。
+
+    既定では取れない扱いにし（lag1 に戻る道）、最新の終値を見るテストは個別に patch する。
+    """
+    with patch("yfinance.Ticker", side_effect=RuntimeError("unit テストでは ^VIX を読まない")):
+        yield
 
 
 def _make_broker(balance: float = 1_000_000.0, positions: list | None = None) -> MagicMock:
@@ -262,9 +274,11 @@ class TestRiskManagerOptimalParamsAutoLoad(unittest.TestCase):
 
     def test_stop_loss_falls_back_to_default_when_json_not_found(self):
         """JSON に無い銘柄は既定の損切りの線（DEFAULT_STOP_LOSS_PCT）を使い、warning を出す（#880）"""
-        with patch(self._MOCK_TARGET, return_value=None), patch(
-            "src.trading.risk_manager.DEFAULT_STOP_LOSS_PCT", 0.08
-        ), self.assertLogs("src.trading.risk_manager", level="WARNING") as logs:
+        with (
+            patch(self._MOCK_TARGET, return_value=None),
+            patch("src.trading.risk_manager.DEFAULT_STOP_LOSS_PCT", 0.08),
+            self.assertLogs("src.trading.risk_manager", level="WARNING") as logs,
+        ):
             risk = RiskManager(_make_broker(), market="jp", symbol="9999")
         self.assertAlmostEqual(risk.stop_loss_pct, 0.08)
         self.assertIsNone(risk.take_profit_pct)
@@ -273,9 +287,11 @@ class TestRiskManagerOptimalParamsAutoLoad(unittest.TestCase):
     def test_stop_loss_falls_back_to_default_when_null_in_json(self):
         """JSON の値が null なら既定の損切りの線を使い、warning を出す。利確は null のまま（#880）"""
         params = {"threshold": 0.005, "stop_loss_pct": None, "take_profit_pct": None}
-        with patch(self._MOCK_TARGET, return_value=params), patch(
-            "src.trading.risk_manager.DEFAULT_STOP_LOSS_PCT", 0.08
-        ), self.assertLogs("src.trading.risk_manager", level="WARNING") as logs:
+        with (
+            patch(self._MOCK_TARGET, return_value=params),
+            patch("src.trading.risk_manager.DEFAULT_STOP_LOSS_PCT", 0.08),
+            self.assertLogs("src.trading.risk_manager", level="WARNING") as logs,
+        ):
             risk = RiskManager(_make_broker(), market="us", symbol="AAPL")
         self.assertAlmostEqual(risk.stop_loss_pct, 0.08)
         self.assertIsNone(risk.take_profit_pct)
@@ -286,8 +302,9 @@ class TestRiskManagerOptimalParamsAutoLoad(unittest.TestCase):
     def test_default_stop_loss_zero_disables_fallback(self):
         """DEFAULT_STOP_LOSS_PCT=0 なら既定の線を使わない（今までどおり損切り無し）"""
         params = {"stop_loss_pct": None, "take_profit_pct": None}
-        with patch(self._MOCK_TARGET, return_value=params), patch(
-            "src.trading.risk_manager.DEFAULT_STOP_LOSS_PCT", 0.0
+        with (
+            patch(self._MOCK_TARGET, return_value=params),
+            patch("src.trading.risk_manager.DEFAULT_STOP_LOSS_PCT", 0.0),
         ):
             risk = RiskManager(_make_broker(), market="jp", symbol="7203")
         self.assertIsNone(risk.stop_loss_pct)
@@ -295,8 +312,9 @@ class TestRiskManagerOptimalParamsAutoLoad(unittest.TestCase):
     def test_json_stop_loss_wins_over_default(self):
         """JSON に数の値があれば、既定の線より JSON を使う"""
         params = {"stop_loss_pct": 0.03, "take_profit_pct": None}
-        with patch(self._MOCK_TARGET, return_value=params), patch(
-            "src.trading.risk_manager.DEFAULT_STOP_LOSS_PCT", 0.08
+        with (
+            patch(self._MOCK_TARGET, return_value=params),
+            patch("src.trading.risk_manager.DEFAULT_STOP_LOSS_PCT", 0.08),
         ):
             risk = RiskManager(_make_broker(), market="jp", symbol="7203")
         self.assertAlmostEqual(risk.stop_loss_pct, 0.03)
@@ -482,7 +500,7 @@ class TestFetchLatestVix(unittest.TestCase):
         from src.trading.risk_manager import fetch_latest_vix
 
         mock_con = MagicMock()
-        mock_con.execute.return_value.fetchone.return_value = (28.5,)
+        mock_con.execute.return_value.fetchone.return_value = (28.5, "2026-10-22")
 
         @contextmanager
         def mock_db():
@@ -527,16 +545,16 @@ class TestFetchLatestVix(unittest.TestCase):
 
     def test_queries_vix_close_lag1_not_raw_vix_close(self):
         """回帰テスト（#697）: stock_features には生の vix_close 列は保存されず
-        vix_close_lag1 のみが存在する。誤って存在しない vix_close 列を参照すると
-        本番で UndefinedColumn エラーになるため、実行される SQL が
-        vix_close_lag1 を参照していることを固定する。
+        vix_close_lag1 のみが存在する。最新の終値が取れず lag1 に戻る道（#823）で
+        誤って存在しない vix_close 列を参照すると本番で UndefinedColumn エラーになるため、
+        実行される SQL が vix_close_lag1 を参照していることを固定する。
         """
         from contextlib import contextmanager
 
         from src.trading.risk_manager import fetch_latest_vix
 
         mock_con = MagicMock()
-        mock_con.execute.return_value.fetchone.return_value = (28.5,)
+        mock_con.execute.return_value.fetchone.return_value = (28.5, "2026-10-22")
 
         @contextmanager
         def mock_db():
@@ -550,6 +568,109 @@ class TestFetchLatestVix(unittest.TestCase):
         self.assertNotIn("SELECT vix_close\n", executed_sql)
         # row_num は symbol ごとに採番され銘柄横断で比較不能なため date でソートする
         self.assertIn("ORDER BY date DESC", executed_sql)
+
+
+def _vix_history(values, end):
+    """yf.Ticker("^VIX").history() の戻り値の形（日付の index と Close 列）を作る。"""
+    import pandas as pd
+
+    idx = pd.bdate_range(end=end, periods=len(values))
+    return pd.DataFrame({"Close": values}, index=idx)
+
+
+class TestFetchLatestVixUsesLatestClose(unittest.TestCase):
+    """Issue #823: 発注の時点で分かっている最新の VIX の終値（T）で判定する。"""
+
+    _KELLY = dict(win_rate=0.6, avg_win=0.02, avg_loss=0.01)
+
+    def _lag1_db(self, value, day):
+        mock_con = MagicMock()
+        mock_con.execute.return_value.fetchone.return_value = (value, day)
+
+        @contextmanager
+        def mock_db():
+            yield mock_con
+
+        return mock_db
+
+    def _make_risk(self):
+        risk = RiskManager(_make_broker(balance=10_000_000.0))
+        risk.get_current_dd_ratio = MagicMock(return_value=0.0)
+        risk._market = "us"
+        return risk
+
+    def test_spike_on_latest_day_scales_position(self):
+        """T-1 は閾値未満・T は閾値以上のとき、calc_position_size が縮小を掛ける。"""
+        from datetime import date, timedelta
+
+        from src.trading.risk_manager import VIX_POSITION_SCALE
+
+        today = date.today()
+        hist = _vix_history([20.0, 35.0], end=today)
+        ticker = MagicMock()
+        ticker.history.return_value = hist
+
+        base_risk = self._make_risk()
+        with patch("src.trading.risk_manager.fetch_latest_vix", return_value=None):
+            qty_base = base_risk.calc_position_size("AAPL", price=100.0, **self._KELLY)
+
+        risk = self._make_risk()
+        with (
+            patch("yfinance.Ticker", return_value=ticker),
+            patch(
+                "src.trading.risk_manager._db_connection",
+                new=self._lag1_db(20.0, today - timedelta(days=1)),
+            ),
+        ):
+            qty = risk.calc_position_size("AAPL", price=100.0, **self._KELLY)
+
+        self.assertGreater(qty_base, 0)
+        self.assertEqual(qty, int(qty_base * VIX_POSITION_SCALE))
+
+    def test_falls_back_to_lag1_with_warning_when_raw_unavailable(self):
+        """生の値が取れないときは lag1 に戻し、WARNING を出し、発注は止まらない。"""
+        from datetime import date
+
+        risk = self._make_risk()
+        with (
+            patch("yfinance.Ticker", side_effect=RuntimeError("network down")),
+            patch(
+                "src.trading.risk_manager._db_connection",
+                new=self._lag1_db(35.0, date.today()),
+            ),
+            self.assertLogs("src.trading.risk_manager", level="WARNING") as logs,
+        ):
+            from src.trading.risk_manager import fetch_latest_vix
+
+            vix = fetch_latest_vix()
+            qty = risk.calc_position_size("AAPL", price=100.0)
+
+        self.assertAlmostEqual(vix, 35.0)
+        self.assertGreaterEqual(qty, 0)
+        self.assertTrue(any("lag1" in m for m in logs.output))
+
+    def test_stale_latest_close_warns(self):
+        """返す値の日付が5営業日より前なら WARNING を出す。"""
+        from datetime import date, timedelta
+
+        from src.trading.risk_manager import fetch_latest_vix
+
+        ticker = MagicMock()
+        ticker.history.return_value = _vix_history([25.0], end=date.today() - timedelta(days=14))
+        with (
+            patch("yfinance.Ticker", return_value=ticker),
+            self.assertLogs("src.trading.risk_manager", level="WARNING") as logs,
+        ):
+            vix = fetch_latest_vix()
+
+        self.assertAlmostEqual(vix, 25.0)
+        self.assertTrue(any("古" in m for m in logs.output))
+
+    def test_threshold_and_scale_values_unchanged(self):
+        from src.trading.risk_manager import VIX_POSITION_SCALE, VIX_SPIKE_THRESHOLD
+
+        self.assertEqual(VIX_SPIKE_THRESHOLD, 30.0)
+        self.assertEqual(VIX_POSITION_SCALE, 0.5)
 
 
 class TestCalcPositionSizeVixScale(unittest.TestCase):
@@ -569,7 +690,7 @@ class TestCalcPositionSizeVixScale(unittest.TestCase):
         mock_con_normal.execute.return_value.fetchone.return_value = None
 
         mock_con_spike = MagicMock()
-        mock_con_spike.execute.return_value.fetchone.return_value = (50.0,)
+        mock_con_spike.execute.return_value.fetchone.return_value = (50.0, "2026-10-22")
 
         @contextmanager
         def db_no_vix():
