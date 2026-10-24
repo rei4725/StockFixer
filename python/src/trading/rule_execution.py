@@ -40,7 +40,8 @@ def execute_rule_paper_trades(
         broker: 注文を出す先（省略時は PaperBroker。影の運用では ShadowBroker）
 
     Returns:
-        {"buy_orders": int, "sell_orders": int, "skipped": int}
+        {"buy_orders": int, "sell_orders": int, "skipped": int, "errors": int}
+        errors は注文（株数の計算を含む）が例外で落ちた銘柄の数で、skipped に含めない。
     """
     if broker is None:
         broker = PaperBroker(
@@ -52,6 +53,7 @@ def execute_rule_paper_trades(
     buy_orders = 0
     sell_orders = 0
     skipped = 0
+    errors = 0
 
     # 保有を読めないまま空の保有で進めると、保有の数え直し・同じ銘柄の重ね買い・
     # 保有中の売りの取りこぼしが起きるため、注文を出さずにジョブを失敗させる。
@@ -141,8 +143,18 @@ def execute_rule_paper_trades(
                 skipped += 1
 
         except Exception as exc:
+            # 失敗はスキップと分けて数え、呼び出し元がジョブを失敗にできるようにする（#1075）。
+            # ほかの銘柄の注文は止めない。
             logger.error(f"  {symbol} 注文失敗: {exc}", exc_info=True)
-            skipped += 1
+            errors += 1
 
-    logger.info(f"ペーパートレード実行: BUY={buy_orders}  SELL={sell_orders}  スキップ={skipped}")
-    return {"buy_orders": buy_orders, "sell_orders": sell_orders, "skipped": skipped}
+    logger.info(
+        f"ペーパートレード実行: BUY={buy_orders}  SELL={sell_orders}  "
+        f"スキップ={skipped}  失敗={errors}"
+    )
+    return {
+        "buy_orders": buy_orders,
+        "sell_orders": sell_orders,
+        "skipped": skipped,
+        "errors": errors,
+    }
