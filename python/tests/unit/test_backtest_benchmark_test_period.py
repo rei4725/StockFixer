@@ -37,7 +37,7 @@ class TestFetchBenchmarkPeriod:
             test_end="2024-06-28",
         )
 
-        mock_fetch.assert_called_once_with("^GSPC", "2024-01-01", "2024-06-28")
+        mock_fetch.assert_called_once_with("^GSPC", "2024-01-01", "2024-06-29")
 
     @patch("src.backtest.metrics.fetch_benchmark_returns")
     def test_falls_back_to_trade_dates_without_test_period(self, mock_fetch):
@@ -46,7 +46,7 @@ class TestFetchBenchmarkPeriod:
 
         fetch_benchmark_for_result(_trades_in_middle(), "sp500", "2020-01-01", "2024-12-31")
 
-        mock_fetch.assert_called_once_with("^GSPC", "2024-03-01", "2024-03-15")
+        mock_fetch.assert_called_once_with("^GSPC", "2024-03-01", "2024-03-16")
 
     @patch("src.backtest.metrics.fetch_benchmark_returns")
     def test_falls_back_to_fallback_without_date_column(self, mock_fetch):
@@ -57,7 +57,45 @@ class TestFetchBenchmarkPeriod:
             pd.DataFrame({"action": ["BUY"]}), "sp500", "2020-01-01", "2024-12-31"
         )
 
-        mock_fetch.assert_called_once_with("^GSPC", "2020-01-01", "2024-12-31")
+        mock_fetch.assert_called_once_with("^GSPC", "2020-01-01", "2025-01-01")
+
+
+class TestFetchBenchmarkIncludesEndDay:
+    """yfinance の end は終わりの日を含まないので、翌日を渡す（#1072）。"""
+
+    @patch("src.backtest.metrics.fetch_benchmark_returns")
+    def test_test_period_end_is_next_day(self, mock_fetch):
+        """検証期間の終わりの日 2024-06-28 を含むよう、end に 2024-06-29 を渡す"""
+        mock_fetch.return_value = {"total_return": 0.1}
+
+        fetch_benchmark_for_result(
+            _trades_in_middle(),
+            "sp500",
+            test_start="2024-01-01",
+            test_end="2024-06-28",
+        )
+
+        mock_fetch.assert_called_once_with("^GSPC", "2024-01-01", "2024-06-29")
+
+    @patch("src.backtest.metrics.fetch_benchmark_returns")
+    def test_trade_dates_end_is_next_day(self, mock_fetch):
+        """取引の日付の道でも、最後の取引の日を含むよう翌日を渡す"""
+        mock_fetch.return_value = {"total_return": 0.1}
+
+        fetch_benchmark_for_result(_trades_in_middle(), "sp500")
+
+        mock_fetch.assert_called_once_with("^GSPC", "2024-03-01", "2024-03-16")
+
+    @patch("src.backtest.metrics.fetch_benchmark_returns")
+    def test_fallback_end_is_next_day(self, mock_fetch):
+        """fallback の道でも、終わりの日を含むよう翌日を渡す"""
+        mock_fetch.return_value = {"total_return": 0.1}
+
+        fetch_benchmark_for_result(
+            pd.DataFrame({"action": ["BUY"]}), "sp500", "2020-01-01", "2024-12-31"
+        )
+
+        mock_fetch.assert_called_once_with("^GSPC", "2020-01-01", "2025-01-01")
 
 
 class TestRunBacktestSingleTestPeriod:

@@ -20,7 +20,7 @@ from config.settings import PAPER_INITIAL_BALANCE
 from src.domain.ports import MarketDataPort, TradeDiffSink
 from src.domain.types import TradeDiffRecord
 from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
-from src.trading.brokers.paper.split_adjust import adjust_position_for_splits, looks_like_split_gap
+from src.trading.brokers.paper import split_adjust as sa
 from src.utils.db._connection import _db_connection
 from src.utils.japan_time import now_jst
 from src.utils.logger import get_logger
@@ -193,7 +193,7 @@ class PaperBroker(BrokerBase):
         with _db_connection() as con:
             rows = con.execute(
                 "SELECT order_id, market, predicted_at, symbol, side, qty, price, "
-                "signal_price, order_type "
+                "signal_price, order_type, created_at "
                 "FROM paper_orders WHERE status='pending'"
             ).fetchall()
 
@@ -208,6 +208,7 @@ class PaperBroker(BrokerBase):
             limit_price,
             signal_price,
             order_type_val,
+            created_at,
         ) in rows:
             ticker = f"{symbol}.T"
             try:
@@ -251,6 +252,12 @@ class PaperBroker(BrokerBase):
                     )
                     continue
 
+                order = (side, qty, limit_price, signal_price, created_at)
+                adjusted = sa.adjust_order_for_splits(self._market_data, symbol, order, open_price)
+                if adjusted is None:
+                    continue
+                qty, limit_price, signal_price = adjusted
+
                 if order_type_val == int(OrderType.MARKET):
                     fill_price = open_price
                 else:  # 指値
@@ -290,9 +297,9 @@ class PaperBroker(BrokerBase):
                             continue
                     self._apply_fill(con, order_id, symbol, side, qty, fill_price)
                     con.execute(
-                        "UPDATE paper_orders SET status='filled', "
+                        "UPDATE paper_orders SET status='filled', qty=%s, "
                         "fill_price=%s, filled_at=CURRENT_TIMESTAMP WHERE order_id=%s",
-                        [fill_price, order_id],
+                        [qty, fill_price, order_id],
                     )
                 if market and predicted_at and signal_price is not None:
                     self._trade_diff_sink.record(
@@ -497,11 +504,11 @@ class PaperBroker(BrokerBase):
 
         results = []
         for sym, qty, avg, updated_at in rows:
-            qty, avg, split_known = adjust_position_for_splits(
+            qty, avg, split_known = sa.adjust_position_for_splits(
                 self._market_data, sym, qty, avg, updated_at
             )
             current_price = self._latest_close(sym)
-            if not split_known and looks_like_split_gap(avg, current_price):
+            if not split_known and sa.looks_like_split_gap(avg, current_price):
                 logger.warning(
                     f"[paper] {sym}: 分割の記録が取れず、買値と現在値の比が分割の比ほど違う"
                 )

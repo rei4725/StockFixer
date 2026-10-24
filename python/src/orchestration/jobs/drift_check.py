@@ -12,6 +12,9 @@ logger = get_logger(__name__)
 
 # MAE の実効の線 = max(DRIFT_MAE_THRESHOLD, 全銘柄の MAE の中央値 × この倍率)
 DRIFT_MAE_RELATIVE_RATIO_DEFAULT = "1.5"
+# Hit Rate の実効の線 = min(DRIFT_HIT_RATE_THRESHOLD, 全銘柄の Hit Rate の中央値 - この幅)
+# 20件の Hit Rate の標本のぶれ（p=0.45 で標準偏差 約0.11）の約2倍を幅にとる（#1045）
+DRIFT_HIT_RATE_RELATIVE_MARGIN_DEFAULT = "0.20"
 
 
 @skip_if_running(_drift_check_lock, "日次ドリフトチェック")
@@ -23,7 +26,9 @@ def run_daily_drift_check():
         DRIFT_MAE_THRESHOLD:       MAE 閾値の下限（デフォルト 0.02 = 2%）
         DRIFT_MAE_RELATIVE_RATIO:  全銘柄の MAE の中央値に掛ける倍率（デフォルト 1.5）。
                                    実効の線は下限と「中央値×倍率」の大きい方。
-        DRIFT_HIT_RATE_THRESHOLD:  Hit Rate 閾値（デフォルト 0.45 = 45%）
+        DRIFT_HIT_RATE_THRESHOLD:  Hit Rate 閾値の上限（デフォルト 0.45 = 45%）
+        DRIFT_HIT_RATE_RELATIVE_MARGIN: 全銘柄の Hit Rate の中央値から引く幅（デフォルト 0.20）。
+                                   実効の線は上限と「中央値-幅」の小さい方。
         DRIFT_MIN_SAMPLES:         判定に必要な最小サンプル数（デフォルト 10）。
                                    これ未満の銘柄はサンプル不足のノイズとみなし対象外にする。
         DRIFT_MAX_RETRAIN_PER_RUN: 1回の実行で再学習する最大銘柄数（デフォルト 50）。
@@ -50,6 +55,12 @@ def run_daily_drift_check():
     min_samples = int(get_config_value("drift.min_samples", _min_samples_default))
     max_retrain_per_run = int(get_config_value("drift.max_retrain_per_run", _max_retrain_default))
     mae_relative_ratio = float(get_config_value("drift.mae_relative_ratio", _mae_ratio_default))
+    _hr_margin_default = os.environ.get(
+        "DRIFT_HIT_RATE_RELATIVE_MARGIN", DRIFT_HIT_RATE_RELATIVE_MARGIN_DEFAULT
+    )
+    hit_rate_relative_margin = float(
+        get_config_value("drift.hit_rate_relative_margin", _hr_margin_default)
+    )
 
     logger.info(
         f"=== 日次ドリフトチェック開始 (MAE閾値={mae_threshold:.2%}, HitRate閾値={hit_rate_threshold:.0%}, "
@@ -71,6 +82,16 @@ def run_daily_drift_check():
             "ドリフトチェック: 実効MAE閾値=%.2f%% (中央値×%s と下限の大きい方)",
             mae_threshold * 100,
             mae_relative_ratio,
+        )
+        # 全銘柄の Hit Rate が同じ水準で低いときに半数が超えないよう、線を中央値から幅を引いた値まで下げる（#1045）
+        hit_rate_threshold = min(
+            hit_rate_threshold,
+            float(eligible["direction_accuracy"].median()) - hit_rate_relative_margin,
+        )
+        logger.info(
+            "ドリフトチェック: 実効HitRate閾値=%.1f%% (中央値-%s と上限の小さい方)",
+            hit_rate_threshold * 100,
+            hit_rate_relative_margin,
         )
     triggered = eligible[
         (eligible["mean_abs_error"] >= mae_threshold)
