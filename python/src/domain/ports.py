@@ -213,6 +213,10 @@ class MarketDataPort(ABC):
     def get_latest_price(self, symbol: str) -> float:
         """最新終値を返す。取得失敗時は 0.0 を返す。"""
 
+    def get_splits(self, symbol: str) -> pd.Series | None:
+        """株式分割の記録（index=権利落ちの日、値=分割の比）。分からなければ None"""
+        return None
+
 
 class TextReviewPort(ABC):
     """Claude へのテキスト/構造化レビュー要求を抽象化するポート。
