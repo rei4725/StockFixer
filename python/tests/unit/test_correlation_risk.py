@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 
 from src.trading.correlation_risk import (
+    CorrelationDataUnavailable,
     _load_recent_returns,
     compute_enc,
     evaluate_correlation_gate,
@@ -66,12 +67,13 @@ class TestLoadRecentReturns(unittest.TestCase):
         self.assertAlmostEqual(returns["A"].iloc[1], -0.10)
         self.assertAlmostEqual(returns["B"].iloc[1], 0.10)
 
-    def test_query_failure_returns_empty(self):
+    def test_query_failure_raises(self):
+        """取得の例外は空の表にせず投げる。空はデータ不足と区別がつかず素通しになる（#809）"""
         conn_cm = MagicMock()
         conn_cm.__enter__.side_effect = RuntimeError("boom")
         with patch("src.trading.correlation_risk._db_connection", return_value=conn_cm):
-            result = _load_recent_returns(["A", "B"], "us", 2)
-        self.assertTrue(result.empty)
+            with self.assertRaises(CorrelationDataUnavailable):
+                _load_recent_returns(["A", "B"], "us", 2)
 
 
 class TestComputeEnc(unittest.TestCase):
@@ -183,6 +185,14 @@ class TestEvaluateCorrelationGate(unittest.TestCase):
         self.assertIsNotNone(result.reason)
 
     @patch("src.trading.correlation_risk._load_recent_returns")
+    def test_load_failure_blocks_new_entries(self, mock_load):
+        """取得に失敗したら、新規の買いを止める側に倒す（#809）"""
+        mock_load.side_effect = CorrelationDataUnavailable("boom")
+        result = evaluate_correlation_gate(["A", "B"], "jp", window=20, enc_threshold=2.0)
+        self.assertFalse(result.is_allowed)
+        self.assertIn("boom", result.reason)
+
+    @patch("src.trading.correlation_risk._load_recent_returns")
     def test_returns_correct_type(self, mock_load):
         np.random.seed(1)
         df = pd.DataFrame({"X": np.random.randn(20), "Y": np.random.randn(20)})
@@ -251,6 +261,14 @@ class TestFilterCorrelatedCandidates(unittest.TestCase):
         )
         self.assertEqual(allowed, ["MISSING"])
         self.assertEqual(blocked, [])
+
+    @patch("src.trading.correlation_risk._load_recent_returns")
+    def test_load_failure_blocks_all_candidates(self, mock_load):
+        """取得に失敗したら、候補を全部止める（#809）"""
+        mock_load.side_effect = CorrelationDataUnavailable("boom")
+        allowed, blocked = filter_correlated_candidates(["A", "B"], ["EXIST"], "us")
+        self.assertEqual(allowed, [])
+        self.assertEqual(blocked, ["A", "B"])
 
     @patch("src.trading.correlation_risk._load_recent_returns")
     def test_mixed_candidates(self, mock_load):
