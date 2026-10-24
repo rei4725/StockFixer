@@ -316,11 +316,11 @@ def run_horizon_exit_check() -> None:
     live モードでは処理をスキップする。
     """
     import os
-    from datetime import date
 
     from src.infrastructure.discord_notification_adapter import DiscordNotificationAdapter
     from src.infrastructure.persistence.trade_diff_repository import PostgresTradeDiffSink
     from src.infrastructure.yfinance_market_data_adapter import YFinanceMarketDataAdapter
+    from src.orchestration.jobs.common import today_jst_iso
     from src.trading.brokers.account.factory import make_order_broker
     from src.trading.brokers.base import OrderSide
     from src.utils.db._connection import _db_connection
@@ -330,7 +330,7 @@ def run_horizon_exit_check() -> None:
         logger.info("live モードのためホライズン決済チェックをスキップ")
         return
 
-    today_str = date.today().isoformat()
+    today_str = today_jst_iso()  # target_exit_date は保有の最後の JST の日 (#949)
     with _db_connection() as con:
         # paper_orders の行は売った後も残るため、銘柄ごとに今の保有を作った
         # 最後の filled BUY の期限だけを見る (Issue #945)
@@ -345,7 +345,7 @@ def run_horizon_exit_check() -> None:
                 ORDER BY symbol, filled_at DESC NULLS LAST, created_at DESC, order_id DESC
             ) AS latest_buy
             WHERE target_exit_date IS NOT NULL
-              AND CAST(target_exit_date AS VARCHAR) <= %s
+              AND CAST(target_exit_date AS VARCHAR) < %s
             ORDER BY symbol
             """,
             [int(OrderSide.BUY), today_str],

@@ -36,6 +36,12 @@ def today_jst_key() -> str:
     return _local_now().astimezone(ZoneInfo(_JST_NAME)).strftime("%Y%m%d")
 
 
+def today_jst_iso() -> str:
+    """JST の今日を YYYY-MM-DD で返す（paper_orders の target_exit_date と比べる形）。"""
+    key = today_jst_key()
+    return f"{key[:4]}-{key[4:6]}-{key[6:]}"
+
+
 def is_today_jst(predicted_at: object) -> bool:
     """predicted_at（YYYYMMDD_HHMMSS）が JST の今日の回なら True を返す（#935）。
 
