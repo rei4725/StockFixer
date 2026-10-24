@@ -141,7 +141,7 @@ def _warn_dropped_rows(valid: pd.Series, market: pd.Series, symbol: pd.Series) -
         return
     keys = pd.DataFrame({"market": market, "symbol": symbol, "valid": valid})
     kept_per_symbol = keys.groupby(["market", "symbol"])["valid"].sum()
-    all_dropped = [f"{m}/{s}" for (m, s), n in kept_per_symbol.items() if n == 0]
+    all_dropped = [f"{m}/{s}" for m, s in kept_per_symbol[kept_per_symbol == 0].index]
     dropped_per_market = {
         str(m): int(n) for m, n in keys.loc[dropped, "market"].value_counts().sort_index().items()
     }
@@ -230,6 +230,8 @@ def train_unified_model(
             return
         logger.info("2. 特徴量準備中...")
         X, y = prepare_unified_features(df)
+        # 全銘柄の表は X の写しを作った後は要らない。学習の間まで持つと 8GB の上限に近づく（#807）
+        del df
     else:
         # 多ホライズンパス: market_data_raw から全銘柄 OHLCV を取得して再計算
         logger.info("1. OHLCV データ読み込み中（全銘柄）...")

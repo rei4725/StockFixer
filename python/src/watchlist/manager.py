@@ -12,6 +12,7 @@ watchlist.json の追加・削除・監査ログ保存を行う。
 
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
@@ -34,6 +35,9 @@ MARKET_KEY_MAP = {
 # Wikipedia は既定の User-Agent を 403 で拒否するため、連絡先を含む UA を明示する。
 # （Wikimedia の User-Agent ポリシーに従い、プロジェクト名と URL を含める）
 WIKIPEDIA_STORAGE_OPTIONS = {"User-Agent": "StockFixer/1.0 (https://github.com/rei4725/StockFixer)"}
+
+# 東証の銘柄コード（4文字。2文字目と4文字目は英字になりうる。例: 7203, 285A, 130A）
+_TSE_CODE_RE = re.compile(r"^[0-9][0-9A-Z][0-9][0-9A-Z]$")
 
 
 # ── データクラス ──────────────────────────────────────────
@@ -86,24 +90,28 @@ def fetch_nikkei225_symbols() -> list[str]:
     """
     日経225構成銘柄をWikipediaから取得する。
 
+    英語版の Nikkei_225 から構成銘柄の表が消えた（2026-10 に確認）ため、日本語版の
+    「日経平均株価」の業種ごとの表（「証券コード」列）から取る。
+
     Returns:
-        4桁銘柄コードのリスト（例: ["7203", "9984", ...]）
+        銘柄コードのリスト（例: ["7203", "9984", "285A", ...]）
     """
     import pandas as pd
 
-    url = "https://en.wikipedia.org/wiki/Nikkei_225"
+    url = "https://ja.wikipedia.org/wiki/%E6%97%A5%E7%B5%8C%E5%B9%B3%E5%9D%87%E6%A0%AA%E4%BE%A1"
     try:
         tables = pd.read_html(url, storage_options=WIKIPEDIA_STORAGE_OPTIONS)
-        # "Code" 列を含むテーブルを探す
+        codes: list[str] = []
         for df in tables:
-            if "Code" in df.columns:
-                codes = df["Code"].dropna().astype(str).str.zfill(4).tolist()
-                # 数字4桁のみ抽出
-                codes = [c for c in codes if c.isdigit() and len(c) == 4]
-                if codes:
-                    logger.info(f"日経225構成銘柄取得完了: {len(codes)}件")
-                    return codes
-        logger.warning("日経225テーブルにCodeカラムが見つかりませんでした")
+            if "証券コード" not in df.columns:
+                continue
+            for code in df["証券コード"].dropna().astype(str).str.strip():
+                if _TSE_CODE_RE.match(code) and code not in codes:
+                    codes.append(code)
+        if codes:
+            logger.info(f"日経225構成銘柄取得完了: {len(codes)}件")
+            return codes
+        logger.warning("日経225テーブルに証券コードのカラムが見つかりませんでした")
         return []
     except Exception as e:
         logger.error(f"日経225銘柄取得失敗: {e}", exc_info=True)
@@ -365,3 +373,45 @@ def run_watchlist_refresh(markets: Optional[list[str]] = None) -> list[Watchlist
         logger.info("=== ウォッチリスト更新完了 (変更なし) ===")
 
     return diffs
+
+
+# ── 実行結果の要約 ────────────────────────────────────────
+
+_SUMMARY_LIST_LIMIT = 20
+
+
+def failed_markets(diffs: list[WatchlistDiff]) -> list[str]:
+    """指数銘柄の取得に失敗した市場の一覧"""
+    return [d.market for d in diffs if d.fetch_failed]
+
+
+def _format_symbols(label: str, symbols: list[str]) -> str:
+    line = f"- **{label}** ({len(symbols)}): {', '.join(symbols[:_SUMMARY_LIST_LIMIT])}"
+    if len(symbols) > _SUMMARY_LIST_LIMIT:
+        line += " …他"
+    return line
+
+
+def format_refresh_summary(diffs: list[WatchlistDiff]) -> str:
+    """GitHub Actions の Step Summary に書く Markdown（取得失敗を「変更なし」と書かない）"""
+    lines = ["## Watchlist Refresh Results", ""]
+    failed = failed_markets(diffs)
+    for market in failed:
+        lines.append(
+            f"- **{market.upper()}**: 指数銘柄の取得失敗（watchlist.json は更新していない）"
+        )
+    if failed:
+        lines.append("")
+
+    changed = [d for d in diffs if d.has_changes or d.removed_unverified]
+    if not changed and not failed:
+        lines.append("変更なし — watchlist.json はすでに最新です。")
+    for d in changed:
+        lines.append(f"### {d.market.upper()}")
+        if d.added:
+            lines.append(_format_symbols("追加", d.added))
+        if d.removed:
+            lines.append(_format_symbols("削除", d.removed))
+        if d.removed_unverified:
+            lines.append(_format_symbols("保留", d.removed_unverified))
+    return "\n".join(lines) + "\n"

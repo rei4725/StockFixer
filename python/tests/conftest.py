@@ -13,6 +13,15 @@ import pandas as pd
 import pytest
 
 # ============================================
+# 本番の .env を読まない（config の import より前に立てる）
+# ============================================
+
+# デプロイの機械には本番の python/.env があり、CI には無い。読むと同じテストが
+# 場所で結果を変え、テストから口座アプリ等の本番の資源に届く（#1017）。
+# config.env_source.dotenv_path() がこれを見て None を返す。
+os.environ["STOCKFIXER_IGNORE_DOTENV"] = "1"
+
+# ============================================
 # basetemp の実行毎ユニーク化（wipe 衝突防止）
 # ============================================
 
@@ -90,6 +99,10 @@ def _wire_default_ports():
     from src.prediction.ports import set_market_data_port
     from src.reporting.ports import set_analytics_query, set_prediction_result_repository
     from src.screening.backtest_adapter import BacktestScreeningAdapter
+    from src.trading.brokers.account.factory import (
+        make_paper_order_broker,
+        set_order_broker_selector,
+    )
 
     set_backtest_data_port(BacktestMarketDataAdapter())
     set_market_data_port(PredictionMarketDataAdapter())
@@ -98,6 +111,9 @@ def _wire_default_ports():
     # テストが意図せず DB を読みに行かないようにするため
     set_analytics_query(InMemoryAnalyticsQuery())
     set_prediction_result_repository(InMemoryPredictionRepository())
+    # 注文の Broker は設定の値を読まない PaperBroker だけにする。OS の環境変数に
+    # ACCOUNT_SHADOW などがあっても、テストから口座アプリの gateway へ届かない（#1029）
+    set_order_broker_selector(make_paper_order_broker)
     yield
 
 

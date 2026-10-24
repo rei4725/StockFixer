@@ -23,7 +23,7 @@ _wired = False
 
 
 def wire_ports(force: bool = False) -> None:
-    """BC ポートにデフォルトのアダプタ（market_data / screening / analytics）を注入する（冪等）。
+    """BC ポートにデフォルトのアダプタ（market_data / screening / analytics / 注文の broker の選び）を注入する（冪等）。
 
     Args:
         force: True のとき、既に注入済みでも再注入する（テスト用途）。
@@ -43,6 +43,10 @@ def wire_ports(force: bool = False) -> None:
     from src.prediction.ports import set_market_data_port
     from src.reporting.ports import set_analytics_query, set_prediction_result_repository
     from src.screening.backtest_adapter import BacktestScreeningAdapter
+    from src.trading.brokers.account.factory import (
+        make_configured_order_broker,
+        set_order_broker_selector,
+    )
 
     set_backtest_data_port(BacktestMarketDataAdapter())
     set_market_data_port(PredictionMarketDataAdapter())
@@ -50,8 +54,10 @@ def wire_ports(force: bool = False) -> None:
     # PostgresAnalyticsQuery はコンストラクタで DB に触れない（接続は各メソッド呼び出し時）
     set_analytics_query(PostgresAnalyticsQuery())
     set_prediction_result_repository(PostgresPredictionResultRepository())
+    # 注文の Broker は設定の値で ShadowBroker を選ぶ（#1029。テストは差し込まず PaperBroker のまま）
+    set_order_broker_selector(make_configured_order_broker)
     _wired = True
     logger.debug(
         "ポート注入完了: BacktestDataPort / MarketDataPort / BacktestScreeningPort"
-        " / AnalyticsQuery / PredictionResultRepository"
+        " / AnalyticsQuery / PredictionResultRepository / OrderBrokerSelector"
     )
