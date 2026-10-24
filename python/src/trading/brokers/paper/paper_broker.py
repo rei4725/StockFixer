@@ -21,6 +21,7 @@ from src.domain.ports import MarketDataPort, TradeDiffSink
 from src.domain.types import TradeDiffRecord
 from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
 from src.utils.db._connection import _db_connection
+from src.utils.japan_time import now_jst
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -51,6 +52,11 @@ def _bar_date_jst(index_value: Any) -> date:
     if ts.tzinfo is not None:
         ts = ts.tz_convert(_JST)
     return ts.date()
+
+
+def _today_jst() -> date:
+    """約定のジョブを回した日（JST）。テストで差し替える"""
+    return now_jst().date()
 
 
 class PaperBroker(BrokerBase):
@@ -199,6 +205,15 @@ class PaperBroker(BrokerBase):
                     logger.warning(
                         f"[paper] {symbol}: 当日の行が未取得（最後の行={bar_date} "
                         f"シグナル日={signal_date}）のため約定スキップ（pending 据え置き）"
+                    )
+                    continue
+                # predicted_at を持たない注文（SL/TP・ルール・期限の手じまい）と、何日か据え置かれた
+                # 注文も、今日（JST）の行でだけ約定させる。東証の休みの日は最後の行が前の営業日になる（#805）
+                today = _today_jst()
+                if bar_date < today:
+                    logger.warning(
+                        f"[paper] {symbol}: 今日の行が未取得（最後の行={bar_date} "
+                        f"今日={today}）のため約定スキップ（pending 据え置き）"
                     )
                     continue
 
