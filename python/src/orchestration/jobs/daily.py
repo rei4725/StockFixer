@@ -267,6 +267,11 @@ def run_daily_auto_order():
         )
     except Exception as e:
         logger.error("自動発注失敗: %s", e, exc_info=True)
+        # 発注の道が落ちても、期限を過ぎた保有の決済は走らせてからジョブを失敗にする（#932）
+        try:
+            run_horizon_exit_check()
+        except Exception:
+            logger.error("ホライズン決済チェック失敗", exc_info=True)
         raise
     record_loss_limit_streak(stats)  # NF-303-2 の連続回数（#934）
 
