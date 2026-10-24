@@ -112,6 +112,17 @@ class TestDriftWarnStreakWiring(_ConfigStoreTestCase):
 
     @staticmethod
     def _summary(mae: float, hit_rate: float) -> pd.DataFrame:
+        # 線は全銘柄の分布に比べて決まるので、健全な銘柄を並べて 7203 だけを動かす（#1020, #1045）
+        peers = [
+            {
+                "market": "jp",
+                "symbol": f"P{i}",
+                "mean_abs_error": 0.01,
+                "direction_accuracy": 0.55,
+                "n_samples": 20,
+            }
+            for i in range(4)
+        ]
         return pd.DataFrame(
             [
                 {
@@ -122,6 +133,7 @@ class TestDriftWarnStreakWiring(_ConfigStoreTestCase):
                     "n_samples": 20,
                 }
             ]
+            + peers
         )
 
     def test_drift_warn_streak_counts_up_and_triggers(self):

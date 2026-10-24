@@ -56,3 +56,24 @@ class FundamentalRecord:
     revenue_cagr_3y: Optional[float] = None
     trailing_pe: Optional[float] = None
     payout_ratio: Optional[float] = None
+
+
+@dataclass
+class SymbolName:
+    """銘柄コードと社名の対応1件（symbol_master の1行）。
+
+    Attributes:
+        market: マーケット識別子（例: "jp"）
+        symbol: 銘柄コード（例: "7203"）
+        name_ja: 日本語社名（例: "トヨタ自動車"）
+        name_en: 英語名（取れないときは None）
+        sector: 業種（JPX の33業種区分）
+        source: 出どころ（例: "jpx_listed_issues"）
+    """
+
+    market: str
+    symbol: str
+    name_ja: Optional[str]
+    name_en: Optional[str] = None
+    sector: Optional[str] = None
+    source: str = "jpx_listed_issues"

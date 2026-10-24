@@ -140,13 +140,17 @@ def run_daily_orders(
 
     predictions = prediction_repo.get_latest_by_market(market)
     if predictions.empty:
-        logger.warning("[exec] 予測結果が存在しません。先に run_predict.py を実行してください。")
+        # SL/TP は予測を使わないので決済だけは走らせ、新規と売りシグナルの決済は飛ばす（#1049）
+        logger.warning(
+            "[exec] 予測結果が存在しません（SL/TP の決済だけ行う）。run_predict.py を確認"
+        )
         stats.update(
             {
                 "daily_loss": gate_status.daily_loss,
                 "daily_loss_limit": gate_status.daily_loss_limit,
             }
         )
+        _check_sl_tp_exits(broker, market, mode, market_data, stats, trade_diff_sink)
         return stats
     if "predicted_at" not in predictions.columns:
         predictions = predictions.copy()

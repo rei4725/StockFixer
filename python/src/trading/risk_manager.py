@@ -40,6 +40,7 @@ from config.trading_policy import (  # noqa: F401  # R-307/R-219 でポジショ
 from src.domain.exceptions import RiskError  # noqa: F401  # 後方互換のため re-export
 from src.domain.trading_rules import get_lot_size
 from src.trading.brokers.base import BrokerBase, OrderSide
+from src.trading.daily_loss_window import daily_loss_window_start
 from src.trading.position_valuation import positions_market_value
 from src.trading.types import TradingGateStatus
 from src.utils.db._connection import _db_connection
@@ -50,7 +51,6 @@ logger = get_logger(__name__)
 
 DAILY_LOSS_RATE_ENV = "MAX_DAILY_LOSS_RATE"
 DISABLE_DAILY_LOSS_GUARD_ENV = "DISABLE_DAILY_LOSS_GUARD"
-
 
 VIX_TICKER = "^VIX"
 VIX_STALE_BUSINESS_DAYS = 5  # 返す VIX の日付がこれより古い営業日数なら WARNING（#823）
@@ -518,7 +518,7 @@ class RiskManager:
         return balance * rate
 
     def _get_daily_realized_loss(self) -> float:
-        """当日の確定損失合計（プラスが損失）を返す"""
+        """前の営業日（JST）の 0:00 から今までの確定損失合計（プラスが損失）を返す（#941）"""
         with _db_connection() as con:
             if self._broker.broker_name == "paper":
                 row = con.execute(
@@ -528,10 +528,10 @@ class RiskManager:
                     WHERE status = 'filled'
                       AND side IN (%s, %s)
                       AND filled_at IS NOT NULL
-                      AND DATE(filled_at) = CURRENT_DATE
+                      AND filled_at >= %s
                       AND realized_pnl < 0
                     """,
-                    [int(OrderSide.SELL), int(OrderSide.SHORT_COVER)],
+                    [int(OrderSide.SELL), int(OrderSide.SHORT_COVER), daily_loss_window_start()],
                 ).fetchone()
                 return abs(float(row[0])) if row else 0.0
 
@@ -545,11 +545,11 @@ class RiskManager:
                 """
                 SELECT COALESCE(SUM(realized_pnl), 0.0)
                 FROM trade_pnl
-                WHERE DATE(closed_at) = CURRENT_DATE
+                WHERE closed_at >= %s
                   AND broker = %s
                   AND realized_pnl < 0
                 """,
-                [self._broker.broker_name],
+                [daily_loss_window_start(), self._broker.broker_name],
             ).fetchone()
             return abs(float(row[0])) if row else 0.0
 
