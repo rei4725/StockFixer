@@ -104,6 +104,23 @@ class PaperBroker(BrokerBase):
         # ここで確定させることで、メタデータ補完（_link_paper_order_metadata）を経由しない
         # 発注経路でも market が NULL にならず、エクイティ再構成の時価評価が機能する。
         with _db_connection() as con:
+            if side == OrderSide.BUY:
+                # 約定待ちの買いは保有にも残高にも出ないため、次の回が同じ銘柄を重ねて買う（#802）
+                waiting = con.execute(
+                    "SELECT order_id FROM paper_orders "
+                    "WHERE symbol=%s AND side=%s AND status='pending' LIMIT 1",
+                    [sym, int(OrderSide.BUY)],
+                ).fetchone()
+                if waiting:
+                    logger.warning(
+                        f"[paper] {sym}: 買いが約定待ち（order_id={waiting[0]}）のため、"
+                        "次の買いを受けない"
+                    )
+                    return {
+                        "order_id": "",
+                        "status": "rejected",
+                        "message": "pending buy exists",
+                    }
             con.execute(
                 """
                 INSERT INTO paper_orders
@@ -253,6 +270,21 @@ class PaperBroker(BrokerBase):
 
                 # Phase 2: 約定処理（接続を再取得）
                 with _db_connection() as con:
+                    if side == int(OrderSide.BUY):
+                        cash = float(
+                            con.execute("SELECT balance FROM paper_balance LIMIT 1").fetchone()[0]
+                        )
+                        if qty * fill_price > cash:
+                            # 発注は約定待ちを引かない残高で株数を決めるので、ここで検算する（#802）
+                            logger.warning(
+                                f"[paper] {symbol}: 現金不足（要 {qty * fill_price:.0f} / "
+                                f"残 {cash:.0f}）のため買いを約定させない（rejected）"
+                            )
+                            con.execute(
+                                "UPDATE paper_orders SET status='rejected' WHERE order_id=%s",
+                                [order_id],
+                            )
+                            continue
                     self._apply_fill(con, order_id, symbol, side, qty, fill_price)
                     con.execute(
                         "UPDATE paper_orders SET status='filled', "
