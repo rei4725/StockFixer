@@ -193,7 +193,7 @@ def run_weekly_report():
         from src.reporting.llm_review import generate_weekly_review
 
         analytics = PostgresAnalyticsQuery()
-        summary = analytics.drift_summary(horizon=1)
+        summary = analytics.drift_summary(horizon=1, model_name="production")
 
         # 今週月曜日を week_start として週次スナップショットを保存
         today = date.today()
@@ -236,7 +236,9 @@ def run_weekly_report():
         from src.prediction.miss_analysis import run_miss_analysis_batch
         from src.reporting.discord.discord_utils import send_miss_analysis_summary
 
-        miss_df = load_top_prediction_misses(horizon=1, top_n=10, since_days=30)
+        miss_df = load_top_prediction_misses(
+            horizon=1, top_n=10, since_days=30, model_name="production"
+        )
         analysis_results = run_miss_analysis_batch(miss_df)
         send_miss_analysis_summary(miss_df, analysis_results, since_days=30)
         logger.info("外れ原因分析完了")

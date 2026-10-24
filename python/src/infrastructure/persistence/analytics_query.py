@@ -55,8 +55,12 @@ class PostgresAnalyticsQuery(AnalyticsQuery):
             "max_abs_price_diff": float(row[6] or 0.0),
         }
 
-    def drift_summary(self, horizon: int = 1, recent_n: int = 30) -> pd.DataFrame:
-        return _accuracy.load_drift_summary(horizon=horizon, recent_n=recent_n)
+    def drift_summary(
+        self, horizon: int = 1, recent_n: int = 30, model_name: str = "production"
+    ) -> pd.DataFrame:
+        return _accuracy.load_drift_summary(
+            horizon=horizon, recent_n=recent_n, model_name=model_name
+        )
 
     def prediction_accuracy(
         self,

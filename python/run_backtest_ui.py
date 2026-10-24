@@ -10,6 +10,8 @@ Streamlit によるインタラクティブなバックテストUIです。
     streamlit run run_backtest_ui.py
 """
 
+from typing import Optional
+
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -20,6 +22,67 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 wire_ports()
+
+
+# ──────────────────────────────────────────────
+# スリッページの既定と最適パラメータの保存（#1005）
+# ──────────────────────────────────────────────
+def resolve_ui_slippage(
+    use_market_default: bool, manual_slippage: Optional[float]
+) -> Optional[float]:
+    """UI で当てるスリッページを返す。
+
+    市場別の既定を使うときは None（下流が default_slippage_for(market) を当てる）。
+    0.0 は人間が既定を外して明示したときだけ返す。
+    """
+    if use_market_default or manual_slippage is None:
+        return None
+    return float(manual_slippage)
+
+
+def applied_slippage(slippage: Optional[float], market: str) -> float:
+    """実際に当たるフラットの片道スリッページ率を返す。"""
+    from src.backtest.execution import default_slippage_for
+
+    return default_slippage_for(market) if slippage is None else slippage
+
+
+def format_slippage(slippage: Optional[float], market: str) -> str:
+    """画面に出すスリッページ（既定か明示かが分かる形）。"""
+    rate = applied_slippage(slippage, market)
+    return f"{rate:.4f}（市場別の既定）" if slippage is None else f"{rate:.4f}（明示）"
+
+
+def save_optimal_params_with_slippage(
+    result_df: pd.DataFrame,
+    market: str,
+    symbol: str,
+    sort_by: str,
+    slippage: Optional[float],
+) -> str:
+    """save_optimal_params_json で保存し、当てたスリッページの率を書き足す。
+
+    読めない JSON は save_optimal_params_json が退避して OptimalParamsCorruptedError を投げ、
+    ほかの銘柄の値を消さない。書き足しも同じロックの下で読み直し、一時ファイルから置き換える。
+    """
+    from filelock import FileLock
+
+    from src.backtest.optimizer import persistence
+
+    json_path = persistence.save_optimal_params_json(result_df, market, symbol, sort_by=sort_by)
+    if not json_path:
+        return json_path
+
+    with FileLock(f"{json_path}.lock"):
+        all_params = persistence._load_params_for_update(json_path)
+        entry = all_params.get(f"{market}_{symbol}")
+        if isinstance(entry, dict):
+            # 実際に当てたフラットの片道スリッページ率を残す（#1005、#993 と同じ形）
+            entry["slippage"] = applied_slippage(slippage, market)
+            entry["slippage_is_market_default"] = slippage is None
+            persistence._write_params_atomically(json_path, all_params)
+    return json_path
+
 
 # ──────────────────────────────────────────────
 # ページ設定
@@ -100,14 +163,22 @@ with st.sidebar:
             step=0.0001,
             format="%.4f",
         )
-        slippage = st.number_input(
-            "スリッページ",
-            min_value=0.0,
-            max_value=0.01,
-            value=0.0,
-            step=0.0001,
-            format="%.4f",
+        use_market_default_slippage = st.checkbox(
+            "市場別の既定スリッページを使う",
+            value=True,
+            help="US 5bps・JP 10bps。外したときだけ下の率（0 を含む）を当てる",
         )
+        manual_slippage = None
+        if not use_market_default_slippage:
+            manual_slippage = st.number_input(
+                "スリッページ",
+                min_value=0.0,
+                max_value=0.01,
+                value=0.0,
+                step=0.0001,
+                format="%.4f",
+            )
+        slippage = resolve_ui_slippage(use_market_default_slippage, manual_slippage)
 
     # --- リスク管理 ---
     with st.expander("🛡️ リスク管理"):
@@ -776,7 +847,7 @@ with tab_single:
                 "シグナル閾値": f"{threshold:.3f}",
                 "初期資金": f"¥{initial_cash:,}",
                 "手数料率": f"{fee_rate:.4f}",
-                "スリッページ": f"{slippage:.4f}",
+                "スリッページ": format_slippage(slippage, market),
                 "ストップロス": f"{stop_loss_pct:.0%}" if stop_loss_pct else "無効",
                 "テイクプロフィット": f"{take_profit_pct:.0%}" if take_profit_pct else "無効",
                 "ポジションサイジング": position_sizing,
@@ -1212,6 +1283,7 @@ with tab_wf:
                 "フォールド数": wf_n_splits,
                 "初期資金": f"¥{initial_cash:,}",
                 "手数料率": f"{fee_rate:.4f}",
+                "スリッページ": format_slippage(slippage, market),
                 "ストップロス": f"{stop_loss_pct:.0%}" if stop_loss_pct else "無効",
                 "テイクプロフィット": f"{take_profit_pct:.0%}" if take_profit_pct else "無効",
                 "ポジションサイジング": position_sizing,
@@ -1274,31 +1346,17 @@ with tab_optimize:
 
                 # ── 3. 保存ボタン ──
                 if st.button("💾 最適パラメータを JSON に保存", key="opt_save"):
-                    import json
-                    from pathlib import Path
-
-                    params_path = Path(__file__).parent / "config" / "optimal_params.json"
-                    params_path.parent.mkdir(exist_ok=True)
-                    existing = {}
-                    if params_path.exists():
-                        try:
-                            existing = json.loads(params_path.read_text(encoding="utf-8"))
-                        except Exception:
-                            existing = {}
-
-                    key = f"{market}_{symbol}"
-                    existing[key] = {
-                        "threshold": float(best["threshold"]),
-                        "stop_loss_pct": float(best_sl) if best_sl is not None else None,
-                        "take_profit_pct": float(best_tp) if best_tp is not None else None,
-                        "sort_by": opt_sort_by,
-                        "score": float(best[opt_sort_by]),
-                        "updated_at": pd.Timestamp.now().isoformat(),
-                    }
-                    params_path.write_text(
-                        json.dumps(existing, ensure_ascii=False, indent=2), encoding="utf-8"
+                    # 画面の最良の1行だけを渡し、保存する行を画面の表示とそろえる
+                    params_path = save_optimal_params_with_slippage(
+                        sorted_df.head(1), market, symbol, opt_sort_by, slippage
                     )
-                    st.success(f"✅ 保存しました: `{params_path}`")
+                    if params_path:
+                        st.success(
+                            f"✅ 保存しました: `{params_path}`"
+                            f"（スリッページ {format_slippage(slippage, market)}）"
+                        )
+                    else:
+                        st.warning("有効な最適化結果が無いため保存しませんでした。")
 
                 st.divider()
 
@@ -1350,6 +1408,7 @@ with tab_optimize:
                 "データソース": source,
                 "モデルタイプ": "アンサンブル" if ensemble else model_type,
                 "フォールド数": opt_n_splits,
+                "スリッページ": format_slippage(slippage, market),
                 "閾値 最小": f"{opt_threshold_min:.3f}",
                 "閾値 最大": f"{opt_threshold_max:.3f}",
                 "閾値 ステップ": f"{opt_threshold_step:.3f}",

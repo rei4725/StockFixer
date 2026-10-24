@@ -12,9 +12,12 @@ OrderExecutionPipeline が注文を送信する前にゲートチェックを行
 """
 
 import os
-from datetime import datetime, time, timedelta, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Optional
-from zoneinfo import ZoneInfo
+
+import numpy as np
+import pandas as pd
+import yfinance as yf
 
 from config.settings import (
     DEFAULT_STOP_LOSS_PCT,
@@ -37,6 +40,7 @@ from config.trading_policy import (  # noqa: F401  # R-307/R-219 でポジショ
 from src.domain.exceptions import RiskError  # noqa: F401  # 後方互換のため re-export
 from src.domain.trading_rules import get_lot_size
 from src.trading.brokers.base import BrokerBase, OrderSide
+from src.trading.daily_loss_window import daily_loss_window_start
 from src.trading.types import TradingGateStatus
 from src.utils.db._connection import _db_connection
 from src.utils.logger import get_logger
@@ -47,51 +51,65 @@ logger = get_logger(__name__)
 DAILY_LOSS_RATE_ENV = "MAX_DAILY_LOSS_RATE"
 DISABLE_DAILY_LOSS_GUARD_ENV = "DISABLE_DAILY_LOSS_GUARD"
 
-_JST = ZoneInfo("Asia/Tokyo")
+VIX_TICKER = "^VIX"
+VIX_STALE_BUSINESS_DAYS = 5  # 返す VIX の日付がこれより古い営業日数なら WARNING（#823）
 
 
-def _utc_now() -> datetime:
-    """今の時刻（UTC）を返す。テストで差し替える。"""
-    return datetime.now(timezone.utc)
+def _fetch_raw_vix_close() -> Optional[tuple[float, date]]:
+    """yfinance から ^VIX の最新の終値とその日付を返す（#823。DB は VIX の生の値を持たない）。"""
+    hist = yf.Ticker(VIX_TICKER).history(period="10d", auto_adjust=False, timeout=10)
+    close = hist["Close"].dropna() if hist is not None and "Close" in hist.columns else None
+    if close is None or close.empty:
+        return None
+    return float(close.iloc[-1]), pd.Timestamp(close.index[-1]).date()
 
 
-def _daily_loss_window_start(now_utc: datetime) -> datetime:
-    """日次損失を数え始める時刻（前の営業日の 0:00 JST）を naive の UTC で返す（#941）。
+def _fetch_lag1_vix() -> Optional[tuple[float, date]]:
+    """stock_features の最新の行の vix_close_lag1（T-1 の値。#697 で生の列は無い）と行の日付。
 
-    DB の時刻は UTC で入っているので naive の UTC で比べる。営業日は土日だけを除く。
+    row_num は symbol ごとに採番され直すため date で降順ソートして銘柄横断の最新を取る。
     """
-    prev_day = now_utc.astimezone(_JST).date() - timedelta(days=1)
-    while prev_day.weekday() >= 5:
-        prev_day -= timedelta(days=1)
-    start_jst = datetime.combine(prev_day, time.min, tzinfo=_JST)
-    return start_jst.astimezone(timezone.utc).replace(tzinfo=None)
+    with _db_connection() as con:
+        row = con.execute("""
+            SELECT vix_close_lag1, date
+            FROM stock_features
+            WHERE vix_close_lag1 IS NOT NULL
+            ORDER BY date DESC
+            LIMIT 1
+            """).fetchone()
+    if row is None:
+        return None
+    return float(row[0]), pd.Timestamp(row[1]).date()
 
 
 def fetch_latest_vix() -> Optional[float]:
-    """stock_features から最新の VIX 値を取得する（R-406）。
+    """発注の時点で分かっている最新の VIX の終値（T）を返す（R-406・#823）。
 
-    stock_features は生の VIX 値（vix_close）を保持しない
-    （market_data.pipeline がラグ特徴量のみを保存するため）。
-    そのため直近営業日の値として vix_close_lag1 を代替値に用いる。
-    row_num は symbol ごとに採番され直すため銘柄横断の時系列順序を保証しない。
-    date で降順ソートして全銘柄横断で最新の値を取得する。
-    データが存在しない場合は None を返す。
+    取れなければ vix_close_lag1（T-1）に WARNING つきで戻す。値の日付をログに出し、
+    VIX_STALE_BUSINESS_DAYS 営業日より古ければ WARNING。どちらも取れなければ None。
     """
+    result: Optional[tuple[float, date]] = None
+    source = VIX_TICKER
     try:
-        with _db_connection() as con:
-            row = con.execute("""
-                SELECT vix_close_lag1
-                FROM stock_features
-                WHERE vix_close_lag1 IS NOT NULL
-                ORDER BY date DESC
-                LIMIT 1
-                """).fetchone()
-        if row is None:
-            return None
-        return float(row[0])
+        result = _fetch_raw_vix_close()
     except Exception:
-        logger.warning("[risk] VIX の取得に失敗しました", exc_info=True)
+        logger.warning("[risk] VIX の最新の終値の取得に失敗しました", exc_info=True)
+    if result is None:
+        source = "stock_features.vix_close_lag1"
+        logger.warning("[risk] VIX の最新の終値が取れないため 1営業日前の lag1 で代わりにします")
+        try:
+            result = _fetch_lag1_vix()
+        except Exception:
+            logger.warning("[risk] VIX の取得に失敗しました", exc_info=True)
+            return None
+    if result is None:
         return None
+    vix, as_of = result
+    logger.info(f"[risk] VIX={vix:.2f} as_of={as_of} source={source}")
+    age = int(np.busday_count(as_of, datetime.now(timezone.utc).date()))
+    if age > VIX_STALE_BUSINESS_DAYS:
+        logger.warning(f"[risk] VIX の値が古すぎます as_of={as_of} ({age}営業日前) source={source}")
+    return vix
 
 
 def compute_vix_position_scale(vix: Optional[float]) -> float:
@@ -502,13 +520,7 @@ class RiskManager:
         return balance * rate
 
     def _get_daily_realized_loss(self) -> float:
-        """前の営業日（JST）の 0:00 から今までの確定損失合計（プラスが損失）を返す
-
-        8:50 JST の朝の判定では JST の当日の約定がまだ無いので、前の営業日（月曜は金曜）
-        の確定損失を数える。DB の CURRENT_DATE は UTC の日付で、月曜の朝は日曜を見て
-        金曜の損失を数えなかった（#941）。
-        """
-        since = _daily_loss_window_start(_utc_now())
+        """前の営業日（JST）の 0:00 から今までの確定損失合計（プラスが損失）を返す（#941）"""
         with _db_connection() as con:
             if self._broker.broker_name == "paper":
                 row = con.execute(
@@ -521,7 +533,7 @@ class RiskManager:
                       AND filled_at >= %s
                       AND realized_pnl < 0
                     """,
-                    [int(OrderSide.SELL), int(OrderSide.SHORT_COVER), since],
+                    [int(OrderSide.SELL), int(OrderSide.SHORT_COVER), daily_loss_window_start()],
                 ).fetchone()
                 return abs(float(row[0])) if row else 0.0
 
@@ -539,7 +551,7 @@ class RiskManager:
                   AND broker = %s
                   AND realized_pnl < 0
                 """,
-                [since, self._broker.broker_name],
+                [daily_loss_window_start(), self._broker.broker_name],
             ).fetchone()
             return abs(float(row[0])) if row else 0.0
 
