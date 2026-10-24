@@ -31,6 +31,7 @@ from typing import Optional
 import pandas as pd
 
 from src.prediction.db import load_prediction_accuracy
+from src.prediction.shadow_evaluation import DEFAULT_EVALUATION_DAYS
 from src.utils.data_path_utils import get_results_dir
 from src.utils.db.experiment import load_experiment_runs
 from src.utils.logger import get_logger
@@ -137,9 +138,16 @@ def _wf_mean(df: pd.DataFrame, model_name: str, col: str) -> Optional[float]:
     return float(val) if not pd.isna(val) else None
 
 
+def _load_model_window(model_name: str, horizon: int) -> pd.DataFrame:
+    """指定モデルの直近 DEFAULT_EVALUATION_DAYS 日分の採点の行を全部読む（#958）。"""
+    return load_prediction_accuracy(
+        horizon=horizon, limit=0, model_name=model_name, days=DEFAULT_EVALUATION_DAYS
+    )
+
+
 def _compute_hit_rate(model_name: str, horizon: int) -> Optional[float]:
     """prediction_accuracy テーブルから指定モデルの方向正解率を返す。"""
-    df = load_prediction_accuracy(horizon=horizon, limit=5000)
+    df = _load_model_window(model_name, horizon)
     if df.empty or "direction_match" not in df.columns:
         return None
     if "model_name" in df.columns:
@@ -155,7 +163,7 @@ def _compute_slippage(model_name: str, horizon: int) -> Optional[float]:
     prediction_accuracy には price 差分の絶対値を集計した列はないため、
     predicted_ratio と actual_ratio の絶対乖離の平均を代用する。
     """
-    df = load_prediction_accuracy(horizon=horizon, limit=5000)
+    df = _load_model_window(model_name, horizon)
     if df.empty:
         return None
     if "model_name" in df.columns:
@@ -198,7 +206,8 @@ def evaluate_promotion(
     wf_summary_*.csv から取得する。model_name 列が CSV に存在する場合は
     それでフィルタし、ない場合は全銘柄の平均を両モデルで共有する。
 
-    Hit Rate と Slippage は prediction_accuracy テーブルから取得する。
+    Hit Rate と Slippage は prediction_accuracy テーブルの shadow モデルの
+    直近 DEFAULT_EVALUATION_DAYS 日分の全部の行から取得する。
 
     Args:
         shadow_model_name: 評価対象の shadow モデル名

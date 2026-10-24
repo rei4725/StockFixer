@@ -125,14 +125,10 @@ class TestCheckSlTpExits(unittest.TestCase):
 
         with self._patch_risk(sl=True, reason="SL発動: pnl=-6.00% <= -5.00%"):
             with patch("src.trading.execution.params.get_optimal_params", return_value={}):
-                with patch(
-                    "src.trading.execution.sl_tp._choose_order_params",
-                    return_value=(OrderType.MARKET, 0.0, "market", "open"),
-                ):
-                    with patch("src.trading.execution.sl_tp._record_order"):
-                        triggered = _check_sl_tp_exits(
-                            broker, "jp", "paper", market_data, stats, InMemoryTradeDiffSink()
-                        )
+                with patch("src.trading.execution.sl_tp._record_order"):
+                    triggered = _check_sl_tp_exits(
+                        broker, "jp", "paper", market_data, stats, InMemoryTradeDiffSink()
+                    )
 
         broker.send_order.assert_called_once_with(
             "7203", OrderSide.SELL, 100, price=0.0, order_type=OrderType.MARKET
@@ -149,14 +145,10 @@ class TestCheckSlTpExits(unittest.TestCase):
 
         with self._patch_risk(tp=True, reason="TP発動: pnl=15.00% >= 10.00%"):
             with patch("src.trading.execution.params.get_optimal_params", return_value={}):
-                with patch(
-                    "src.trading.execution.sl_tp._choose_order_params",
-                    return_value=(OrderType.MARKET, 0.0, "market", "open"),
-                ):
-                    with patch("src.trading.execution.sl_tp._record_order"):
-                        triggered = _check_sl_tp_exits(
-                            broker, "jp", "paper", market_data, stats, InMemoryTradeDiffSink()
-                        )
+                with patch("src.trading.execution.sl_tp._record_order"):
+                    triggered = _check_sl_tp_exits(
+                        broker, "jp", "paper", market_data, stats, InMemoryTradeDiffSink()
+                    )
 
         self.assertIn("9984", triggered)
         self.assertEqual(stats["sell_orders"], 1)
@@ -211,13 +203,9 @@ class TestCheckSlTpExits(unittest.TestCase):
 
         with self._patch_risk(sl=True, reason="SL発動"):
             with patch("src.trading.execution.params.get_optimal_params", return_value={}):
-                with patch(
-                    "src.trading.execution.sl_tp._choose_order_params",
-                    return_value=(OrderType.MARKET, 0.0, "market", "open"),
-                ):
-                    triggered = _check_sl_tp_exits(
-                        broker, "jp", "paper", market_data, stats, InMemoryTradeDiffSink()
-                    )
+                triggered = _check_sl_tp_exits(
+                    broker, "jp", "paper", market_data, stats, InMemoryTradeDiffSink()
+                )
 
         self.assertEqual(stats["errors"], 1)
         self.assertEqual(len(triggered), 0)
@@ -249,19 +237,56 @@ class TestCheckSlTpExits(unittest.TestCase):
 
         with self._patch_risk(sl=True, reason="SL発動"):
             with patch("src.trading.execution.params.get_optimal_params", return_value={}):
-                with patch(
-                    "src.trading.execution.sl_tp._choose_order_params",
-                    return_value=(OrderType.MARKET, 0.0, "market", "open"),
-                ):
-                    with patch("src.trading.execution.sl_tp._record_order"):
-                        triggered = _check_sl_tp_exits(
-                            broker, "jp", "paper", market_data, stats, InMemoryTradeDiffSink()
-                        )
+                with patch("src.trading.execution.sl_tp._record_order"):
+                    triggered = _check_sl_tp_exits(
+                        broker, "jp", "paper", market_data, stats, InMemoryTradeDiffSink()
+                    )
 
         # send_order には .T 除去後の symbol が渡されること
         call_args = broker.send_order.call_args
         self.assertEqual(call_args[0][0], "7203")
         self.assertIn("7203", triggered)
+
+    def test_sl_on_illiquid_wide_range_symbol_sends_market_order(self):
+        # #881: 新規の発注なら指値になる銘柄（低出来高・広い値幅）でも、SL/TP の決済は成行で出す
+        positions = [{"symbol": "7203", "qty": 100, "avg_price": 1000.0, "current_price": 940.0}]
+        broker = _make_broker(positions)
+        stats = _make_stats()
+
+        with self._patch_risk(sl=True, reason="SL発動: pnl=-6.00% <= -5.00%"):
+            with patch(
+                "src.trading.execution.params._load_execution_metrics",
+                return_value=(10_000.0, 0.03),
+            ):
+                with patch("src.trading.execution.sl_tp._record_order") as record:
+                    with self.assertLogs("src.trading.execution.sl_tp", level="INFO") as logs:
+                        triggered = _check_sl_tp_exits(
+                            broker, "jp", "paper", MagicMock(), stats, InMemoryTradeDiffSink()
+                        )
+
+        broker.send_order.assert_called_once_with(
+            "7203", OrderSide.SELL, 100, price=0.0, order_type=OrderType.MARKET
+        )
+        self.assertEqual(record.call_args.kwargs["order_type"], OrderType.MARKET)
+        self.assertEqual(record.call_args.kwargs["order_price"], 0.0)
+        self.assertTrue(any("成行売り" in line for line in logs.output))
+        self.assertIn("7203", triggered)
+
+    def test_new_order_on_illiquid_wide_range_symbol_stays_limit(self):
+        # ふつうの新規の発注の指値の判定は変わらない
+        from src.trading.execution.params import _choose_order_params
+
+        with patch(
+            "src.trading.execution.params._load_execution_metrics",
+            return_value=(10_000.0, 0.03),
+        ):
+            order_type, price, _, session = _choose_order_params(
+                "jp", "7203", OrderSide.SELL, 1000.0, MagicMock()
+            )
+
+        self.assertEqual(order_type, OrderType.LIMIT)
+        self.assertGreater(price, 0.0)
+        self.assertEqual(session, "close")
 
 
 if __name__ == "__main__":

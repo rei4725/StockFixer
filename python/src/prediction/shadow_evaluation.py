@@ -91,14 +91,14 @@ def evaluate_shadow_models(
     """
     production / challenger 両バージョンの予測精度を比較評価する。
 
-    prediction_accuracy テーブルの直近 evaluation_days 件を使って
+    prediction_accuracy テーブルのモデルごとの直近 evaluation_days 日分を使って
     Sharpe Ratio と Hit Rate を算出し、challenger が優れているかどうかを判定する。
     結果は experiment_runs テーブルに記録される。
 
     Args:
         production_version: 本番バージョンのラベル（prediction_accuracy の model_name に対応）
         challenger_version: チャレンジャーバージョンのラベル
-        evaluation_days: 評価期間（直近 N 件の accuracy レコードを使用）
+        evaluation_days: 評価期間（モデルごとに predicted_at の日付の直近 N 日分を全部使う）
         horizon: 対象予測ホライズン（デフォルト 1）
         market: マーケットフィルタ（None なら全マーケット）
         symbol: 銘柄フィルタ（None なら全銘柄）
@@ -120,11 +120,14 @@ def evaluate_shadow_models(
         f"horizon={horizon}, evaluation_days={evaluation_days}) ==="
     )
 
+    # モデルごとに直近 evaluation_days 日分の行を全部読む（全モデルを行数で切らない。#958）
     df_prod = load_prediction_accuracy(
         market=market,
         symbol=symbol,
         horizon=horizon,
-        limit=evaluation_days * 100,  # 銘柄数 × evaluation_days を上限目安に取得
+        limit=0,
+        model_name=production_version,
+        days=evaluation_days,
     )
     df_prod = df_prod[df_prod["model_name"] == production_version] if not df_prod.empty else df_prod
 
@@ -132,7 +135,9 @@ def evaluate_shadow_models(
         market=market,
         symbol=symbol,
         horizon=horizon,
-        limit=evaluation_days * 100,
+        limit=0,
+        model_name=challenger_version,
+        days=evaluation_days,
     )
     df_chal = df_chal[df_chal["model_name"] == challenger_version] if not df_chal.empty else df_chal
 
