@@ -41,6 +41,8 @@ _CASH_SIGN = {
 _QTY_SIGN = {int(OrderSide.BUY): +1, int(OrderSide.SELL): -1}
 # 週の成績で市場ごとに比べるベンチマーク（#812）
 WEEKLY_BENCHMARKS = {"jp": "1306.T", "us": "^GSPC"}
+# ベンチマークの起点の終値を base_day からさかのぼって探す営業日の数（年末年始や大型連休の休場をまたぐ幅）
+_BENCHMARK_LOOKBACK_BDAYS = 10
 
 BenchmarkFetcher = Callable[[str, str, str], dict[str, Any]]
 SplitLoader = Callable[[str, str], Optional[pd.Series]]
@@ -262,24 +264,41 @@ def get_paper_equity_curve(days: int = 180) -> pd.Series:
 
 
 def _fetch_benchmark_return(
-    fetcher: BenchmarkFetcher, ticker: str, start: str, end: str
+    fetcher: BenchmarkFetcher, ticker: str, base_day: pd.Timestamp, end: str
 ) -> Optional[float]:
-    """ベンチマークの期間リターンを返す。取得できなければ None（週の道は止めない）。"""
-    try:
-        value = fetcher(ticker, start, end).get("total_return")
-    except Exception:
-        logger.warning("ベンチマーク取得失敗のため null にする: %s", ticker, exc_info=True)
-        return None
-    if value is None:
-        # 取得が空・行が2つ未満・取得の形の誤りは、fetcher が None を返すだけなので理由を残す（#919）
-        logger.warning(
-            "ベンチマークの騰落率が取れないため null にする: %s (%s〜%s の前日まで)",
-            ticker,
-            start,
-            end,
-        )
-        return None
-    return float(value)
+    """base_day 以前の最後の終値から end の前日までのベンチマークの騰落率を返す。
+
+    紙の売買の評価額は base_day が休場なら前の営業日の終値で評価するため、ベンチマークも
+    同じ日の終値を起点にする（#1076）。fetcher は start より後の最初の行を起点にするので、
+    返った起点の日が start と一致するまで営業日を1日ずつさかのぼる。
+    取得できなければ None（週の道は止めない）。
+    """
+    for back in range(_BENCHMARK_LOOKBACK_BDAYS + 1):
+        start = (base_day - pd.offsets.BDay(back)).date().isoformat()
+        try:
+            result = fetcher(ticker, start, end)
+        except Exception:
+            logger.warning("ベンチマーク取得失敗のため null にする: %s", ticker, exc_info=True)
+            return None
+        value = result.get("total_return")
+        if value is None:
+            # 取得が空・行が2つ未満・取得の形の誤りは、fetcher が None を返すだけなので理由を残す（#919）
+            logger.warning(
+                "ベンチマークの騰落率が取れないため null にする: %s (%s〜%s の前日まで)",
+                ticker,
+                start,
+                end,
+            )
+            return None
+        first_day = result.get("start")
+        if first_day is None or pd.Timestamp(first_day) <= pd.Timestamp(start):
+            return float(value)
+    logger.warning(
+        "ベンチマークの起点の終値が %s 以前に見つからないため null にする: %s",
+        base_day.date().isoformat(),
+        ticker,
+    )
+    return None
 
 
 def compute_weekly_results(
@@ -350,7 +369,7 @@ def compute_weekly_results(
         benchmark_return = _fetch_benchmark_return(
             benchmark_fetcher,
             ticker,
-            base_day.date().isoformat(),
+            base_day,
             (week_end + pd.Timedelta(days=1)).date().isoformat(),
         )
         excess_return = (
