@@ -22,19 +22,26 @@ def _check_sl_tp_exits(
     stats: OrderExecutionStats,
     trade_diff_sink: TradeDiffSink,
 ) -> set[str]:
-    """保有ポジションを走査し SL/TP トリガーで成行売りを発行する。
+    """保有ポジションを走査し SL/TP トリガーで成行の決済を発行する。
+
+    買い持ちは成行売り、空売りは SHORT_COVER の成行で返済する（#1120）。
 
     Returns:
-        SL/TP が発動して売り注文を出した銘柄コードのセット。
+        SL/TP が発動して決済の注文を出した銘柄コードのセット。
         呼び出し元は prediction ベースの売りシグナルから除外する。
     """
     triggered: set[str] = set()
     record = _recorder(_record_order, stats)  # 記録の失敗でも売りは出たものとして除外する (#1104)
-    positions = broker.get_positions()
-    for pos in positions:
+    try:
+        short_positions = broker.get_short_positions()
+    except AttributeError:
+        short_positions = []
+    exits = [(pos, False) for pos in broker.get_positions()]
+    exits += [(pos, True) for pos in short_positions]
+    for pos, is_short in exits:
         symbol = str(pos.get("symbol", "")).replace(".T", "")
         qty = int(pos.get("qty") or 0)
-        avg_price = float(pos.get("avg_price") or 0.0)
+        avg_price = float(pos.get("avg_short_price" if is_short else "avg_price") or 0.0)
         current_price = float(pos.get("current_price") or 0.0)
         if qty > 0 and avg_price > 0 and math.isnan(current_price):
             # 現在値が取れない保有を損益0として素通りさせない（#844）
@@ -44,16 +51,22 @@ def _check_sl_tp_exits(
             continue
 
         risk = RiskManager(broker, market, symbol)
-        sl_triggered, tp_triggered, reason = risk.check_sl_tp(avg_price, current_price)
+        if is_short:
+            sl_triggered, tp_triggered, reason = risk.check_sl_tp(
+                avg_price, current_price, is_short=True
+            )
+        else:
+            sl_triggered, tp_triggered, reason = risk.check_sl_tp(avg_price, current_price)
         if not sl_triggered and not tp_triggered:
             continue
 
+        side = OrderSide.SHORT_COVER if is_short else OrderSide.SELL
         try:
             # 損失の止めは約定を優先する。流動性の判定による指値は窓を開けた日に失効するため使わない（#881）
             order_type, order_price, order_session = OrderType.MARKET, 0.0, "open"
             result = broker.send_order(
                 symbol,
-                OrderSide.SELL,
+                side,
                 qty,
                 price=order_price,
                 order_type=order_type,
@@ -62,7 +75,7 @@ def _check_sl_tp_exits(
                 market=market,
                 predicted_at="",
                 symbol=symbol,
-                side=OrderSide.SELL,
+                side=side,
                 qty=qty,
                 signal_price=current_price,
                 order_price=order_price,
@@ -74,13 +87,17 @@ def _check_sl_tp_exits(
                 trade_diff_sink=trade_diff_sink,
             )
             logger.info(
-                "[exec] SL/TP発動 → 成行売り: %s %d株 @ %.1f (%s)",
+                "[exec] SL/TP発動 → %s: %s %d株 @ %.1f (%s)",
+                "成行の空売り返済" if is_short else "成行売り",
                 symbol,
                 qty,
                 current_price,
                 reason,
             )
-            stats["sell_orders"] += 1
+            if is_short:
+                stats["short_orders"] += 1
+            else:
+                stats["sell_orders"] += 1
             stats["total_turnover"] += current_price * qty
             triggered.add(symbol)
         except Exception:

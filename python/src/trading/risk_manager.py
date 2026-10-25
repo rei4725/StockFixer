@@ -205,11 +205,11 @@ class RiskManager:
     # ------------------------------------------------------------------
 
     def check_sl_tp(
-        self,
-        avg_price: float,
-        current_price: float,
+        self, avg_price: float, current_price: float, is_short: bool = False
     ) -> tuple[bool, bool, str]:
         """ポジションの含み損益率が SL/TP 閾値を超えているか判定する。
+
+        is_short=True は空売りで、avg_price を売り建ての単価とし値上がりを損とする（#1120）。
 
         Returns:
             (sl_triggered, tp_triggered, reason)
@@ -217,7 +217,7 @@ class RiskManager:
         """
         if avg_price <= 0:
             return False, False, ""
-        pnl_pct = (current_price - avg_price) / avg_price
+        pnl_pct = (current_price - avg_price) / avg_price * (-1.0 if is_short else 1.0)
         sl_triggered = self.stop_loss_pct is not None and pnl_pct <= -self.stop_loss_pct
         tp_triggered = (
             not sl_triggered
