@@ -61,7 +61,25 @@ def _fail_production(*, model_name, **_kwargs):
     return None
 
 
+def _fail_challenger(*, model_name, **_kwargs):
+    if model_name == "challenger":
+        raise RuntimeError("challenger timeout")
+    return None
+
+
 class TestDailyAccuracyCheckFailureNotice:
+    def test_challenger_failure_sends_notice_and_runs_later_stages(self):
+        """challenger の採点が落ちた回も知らせを1回送り、[3/6] 以降を走らせること（#1152）"""
+        mocks = _run_daily_pipeline(_fail_challenger)
+
+        mocks["webhook"].assert_called_once()
+        text = mocks["webhook"].call_args.args[0]
+        assert "[2/6] 予測精度チェック (challenger)" in text
+        assert "challenger timeout" in text
+        mocks["predict"].assert_called_once()
+        mocks["output"].assert_called_once()
+        mocks["completion"].assert_called_once()
+
     def test_production_failure_sends_notice_and_runs_later_stages(self):
         """production の採点が落ちた回は知らせを送り、[3/6] 以降を走らせること"""
         mocks = _run_daily_pipeline(_fail_production)

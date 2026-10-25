@@ -301,6 +301,65 @@ class TestRunHorizonExitCheck(unittest.TestCase):
         broker.send_order.assert_any_call("9984", OrderSide.SELL, 200)
 
     @patch(_BROKER_PATCH)
+    def test_covers_overdue_short_positions_only(self, mock_broker_cls):
+        """最後の filled の SHORT の期限が過ぎた空売りだけを SHORT_COVER の成行で返済し、
+        期限内の空売り・買い持ちには出さない。side ごとに最後の約定を見る (#1145)。"""
+        from src.orchestration.scheduler import run_horizon_exit_check
+
+        today = date.today()
+        overdue = (today - timedelta(days=1)).isoformat()
+        not_due = (today + timedelta(days=3)).isoformat()
+        filled = f"{(today - timedelta(days=2)).isoformat()} 00:05:00"
+        later = f"{(today - timedelta(days=1)).isoformat()} 00:05:00"
+        self._insert_order("ORD-300", "7203", OrderSide.SHORT, "filled", overdue, filled)
+        self._insert_order("ORD-301", "9984", OrderSide.SHORT, "filled", not_due, filled)
+        self._insert_order("ORD-302", "6758", OrderSide.BUY, "filled", not_due, filled)
+        # 同じ銘柄の後の SHORT の期限が過ぎていても、買い持ちの期限は BUY の行で決める
+        self._insert_order("ORD-303", "8766", OrderSide.BUY, "filled", not_due, filled)
+        self._insert_order("ORD-304", "8766", OrderSide.SHORT, "filled", overdue, later)
+
+        broker = MagicMock()
+        broker.get_positions.return_value = [
+            {"symbol": "6758", "qty": 100},
+            {"symbol": "8766", "qty": 100},
+        ]
+        broker.get_short_positions.return_value = [
+            {"symbol": "7203.T", "qty": 300},
+            {"symbol": "9984", "qty": 200},
+            {"symbol": "8766", "qty": 400},
+        ]
+        mock_broker_cls.return_value = broker
+
+        run_horizon_exit_check()
+
+        self.assertEqual(broker.send_order.call_count, 2)
+        broker.send_order.assert_any_call("7203", OrderSide.SHORT_COVER, 300)
+        broker.send_order.assert_any_call("8766", OrderSide.SHORT_COVER, 400)
+
+    @patch(_BROKER_PATCH)
+    def test_short_positions_unsupported_treated_as_empty(self, mock_broker_cls):
+        """get_short_positions が無い broker でも買い持ちの決済は続ける (#1145)。"""
+        from src.orchestration.scheduler import run_horizon_exit_check
+
+        self._insert_overdue_order("ORD-310", "7203")
+        self._insert_order(
+            "ORD-311",
+            "9984",
+            OrderSide.SHORT,
+            "filled",
+            (date.today() - timedelta(days=1)).isoformat(),
+        )
+
+        broker = MagicMock()
+        broker.get_positions.return_value = [{"symbol": "7203", "qty": 100}]
+        broker.get_short_positions.side_effect = AttributeError
+        mock_broker_cls.return_value = broker
+
+        run_horizon_exit_check()
+
+        broker.send_order.assert_called_once_with("7203", OrderSide.SELL, 100)
+
+    @patch(_BROKER_PATCH)
     def test_skip_if_position_already_closed(self, mock_broker_cls):
         from src.orchestration.scheduler import run_horizon_exit_check
 
@@ -421,8 +480,9 @@ class TestHorizonExitJstDate(unittest.TestCase):
         recovery_day = self._first_sell_day("7203")
 
         self.assertEqual(scheduled_day, recovery_day)
-        # 2026-10-24（土）を1日目に 10-26（月）・10-27（火）と営業日で数え、10-28 の朝に売る (#1119)
-        self.assertEqual(scheduled_day, date(2026, 10, 28))
+        # 2026-10-24（土）の発注は約定する 10-26（月）を1日目に 10-27（火）・10-28（水）と
+        # 営業日で数え、10-29 の朝に売る (#1119, #1131)
+        self.assertEqual(scheduled_day, date(2026, 10, 29))
 
     def test_recovery_run_does_not_exit_position_before_due(self):
         # 2026-10-23（金）JST の定時の回で出した horizon=2 の BUY は、期限が 10-26（月）で

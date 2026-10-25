@@ -41,7 +41,7 @@ from src.domain.exceptions import RiskError  # noqa: F401  # 後方互換のた�
 from src.domain.trading_rules import get_lot_size
 from src.trading.brokers.base import BrokerBase, OrderSide
 from src.trading.daily_loss_window import daily_loss_window_start
-from src.trading.position_valuation import positions_market_value
+from src.trading.position_valuation import broker_positions_value
 from src.trading.types import TradingGateStatus
 from src.trading.vix_run_cache import VixRunCache
 from src.utils.db._connection import _db_connection
@@ -438,8 +438,8 @@ class RiskManager:
             return self._total_equity_cache
 
         balance = self._broker.get_balance()
-        market_value = positions_market_value(self._broker.get_positions(), logger)
-        self._total_equity_cache = balance + market_value
+        # 買い持ちの時価に、空売りの含み損益を足す（#1148）
+        self._total_equity_cache = balance + broker_positions_value(self._broker, logger)
         return self._total_equity_cache
 
     def update_peak_balance(self) -> None:
