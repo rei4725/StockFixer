@@ -1,7 +1,8 @@
 import unittest
 from unittest.mock import patch
 
-from src.utils.sector_constraints import filter_by_sector_cap, get_symbol_sector
+from src.domain.sector_cap import filter_by_sector_cap
+from src.utils.sector_constraints import get_symbol_sector
 
 
 class TestFilterBySectorCap(unittest.TestCase):

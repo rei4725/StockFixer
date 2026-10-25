@@ -13,7 +13,7 @@ from typing import Optional
 
 import pandas as pd
 
-from src.utils.drift_thresholds import DriftThresholds, select_drifted_symbols
+from src.reporting.drift_thresholds import DriftThresholds, select_drifted_symbols
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)

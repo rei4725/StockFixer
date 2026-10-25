@@ -17,12 +17,12 @@ from config.settings import (
     MAX_POSITIONS,
     MAX_SECTOR_POSITIONS,
 )
+from src.domain.sector_cap import filter_by_sector_cap
 from src.domain.trading_rules import DEFAULT_REGIME_SCALE as _DEFAULT_REGIME_SCALE
 from src.domain.trading_rules import REGIME_SCALE as _REGIME_SCALE
 from src.trading.correlation_risk import filter_correlated_candidates
 from src.trading.types import AllocationCandidate, AllocationResult
 from src.utils.logger import get_logger
-from src.utils.sector_constraints import filter_by_sector_cap
 
 logger = get_logger(__name__)
 

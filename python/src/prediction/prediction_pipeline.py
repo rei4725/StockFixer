@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import warnings
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
@@ -20,6 +21,7 @@ from config.data import MAX_PREDICTION_WORKERS
 from src.prediction.db import save_prediction_results
 from src.prediction.predict_single import predict_single_stock
 from src.prediction.types import PredictionResult
+from src.prediction.unified_run_summary import log_unified_prediction_summary
 from src.utils.data_path_utils import get_models_dir
 from src.utils.db import get_active_symbols
 from src.utils.df_to_string import df_to_pretty_string
@@ -178,9 +180,14 @@ def predict_all_individual(max_workers=MAX_WORKERS):
     return output_rows
 
 
-def predict_all_unified(max_workers=MAX_WORKERS):
+def predict_all_unified(
+    max_workers=MAX_WORKERS, on_error: Callable[[str, str], None] | None = None
+):
     """
     統合モデルで全銘柄の予測を実行する
+
+    Args:
+        on_error: 例外で予想を出せなかった銘柄ごとに (market, symbol) で呼ぶ（#1118）
 
     Returns:
         list[PredictionResult]: 各銘柄の予測結果
@@ -209,8 +216,10 @@ def predict_all_unified(max_workers=MAX_WORKERS):
             )
         except Exception as e:
             logger.error(f"[{market}_{symbol}] 予測エラー: {e}", exc_info=True)
+            error_keys.append((market, symbol))
             return None
 
+    error_keys: list[tuple[str, str]] = []
     output_rows: list[PredictionResult] = []
     logger.info(f"並列予測開始（統合モデル）: {len(all_keys)}銘柄, ワーカー数: {max_workers}")
 
@@ -221,10 +230,10 @@ def predict_all_unified(max_workers=MAX_WORKERS):
             if result is not None:
                 output_rows.append(result)
 
-    logger.info(
-        f"並列予測完了（統合モデル）: {len(output_rows)}/{len(all_keys)}銘柄, "
-        f"特徴量が古いため予想なし: {len(stale_keys)}銘柄"
-    )
+    log_unified_prediction_summary(len(output_rows), len(all_keys), stale_keys, error_keys)
+    if on_error is not None:
+        for market, symbol in error_keys:
+            on_error(market, symbol)
     return output_rows
 
 

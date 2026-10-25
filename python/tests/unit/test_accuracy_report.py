@@ -393,7 +393,7 @@ def test_sector_lookup_runs_after_prediction_not_before(*_mocks):
             raise RuntimeError("429 Too Many Requests")
         return _SECTORS[symbol]
 
-    def _predict():
+    def _predict(**_kwargs):
         events.append("predict")
         return []
 
