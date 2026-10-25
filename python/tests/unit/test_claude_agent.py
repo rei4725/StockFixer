@@ -364,14 +364,21 @@ class TestRunClaudeTrader(unittest.TestCase):
         # 2回呼ばれているはず（tool_use → end_turn）
         self.assertEqual(client.messages.create.call_count, 2)
 
-    def _run_with_buys(self, symbols, positions=None):
-        """1回の中で symbols の順に place_order の買いを呼ばせ、(stats, broker, 結果) を返す"""
+    def _run_with_buys(self, symbols, positions=None, orders=None, returns=None, sectors=None):
+        """1回の中で symbols の順に place_order の買いを呼ばせ、(stats, broker, 結果) を返す
+
+        orders を渡すと (銘柄, side) の順に呼ばせる。returns は相関に使う終値のリターン、
+        sectors は銘柄から業種への対応（無い銘柄は銘柄ごとに別の業種）。
+        """
         from src.trading.claude_agent import run_claude_trader
 
+        if orders is None:
+            orders = [(s, "buy") for s in symbols]
         broker = _make_broker(positions=positions)
-        n = max(len(symbols), 1)
-        df = _make_predictions_df(n=n)
-        df["symbol"] = [f"S{i}" for i in range(n)]
+        held = [p["symbol"] for p in positions or []]
+        n = max(len(orders), 1)
+        df = _make_predictions_df(n=n + len(held))
+        df["symbol"] = [f"S{i}" for i in range(n)] + held
         df["multi_horizon_score"] = df["diff_ratio"]
         df["effective_buy_threshold"] = 0.005
         df["effective_sell_threshold"] = -0.005
@@ -379,10 +386,11 @@ class TestRunClaudeTrader(unittest.TestCase):
             {
                 "id": f"tool-{i}",
                 "name": "place_order",
-                "input": {"symbol": s, "side": "buy", "reasoning": "テスト"},
+                "input": {"symbol": s, "side": side, "reasoning": "テスト"},
             }
-            for i, s in enumerate(symbols)
+            for i, (s, side) in enumerate(orders)
         ]
+        sector_map = sectors or {}
         client = MagicMock()
         client.messages.create.side_effect = [
             _make_anthropic_response(stop_reason="tool_use", tool_calls=tool_calls),
@@ -401,6 +409,12 @@ class TestRunClaudeTrader(unittest.TestCase):
         ), patch(
             "src.trading.claude_agent._choose_order_params",
             return_value=(OrderType.MARKET, 0.0, "market", "open"),
+        ), patch(
+            "src.trading.correlation_risk._load_recent_returns",
+            return_value=pd.DataFrame() if returns is None else returns,
+        ), patch(
+            "src.utils.sector_constraints._lookup_symbol_sector",
+            side_effect=lambda market, symbol: sector_map.get(symbol, f"sector-{symbol}"),
         ):
             mock_risk_cls.return_value = self._make_risk_mock()
             stats = run_claude_trader(
@@ -446,6 +460,40 @@ class TestRunClaudeTrader(unittest.TestCase):
         self.assertEqual([r["status"] for r in results], ["placed", "skipped"])
         broker.send_order.assert_called_once()
         self.assertEqual(stats["buy_orders"], 1)
+
+    def test_correlation_gate_blocks_buy_but_allows_sell(self):
+        positions = [
+            {"symbol": h, "qty": 100, "avg_price": 1000.0, "current_price": 1000.0}
+            for h in ("H0", "H1")
+        ]
+        # 保有の2銘柄がまったく同じ値動き → ENC=1 < 閾値で相関ゲート不合格
+        base = [0.01, -0.02, 0.015, -0.005, 0.02, -0.01, 0.005, -0.015, 0.01, 0.0, 0.012]
+        returns = pd.DataFrame({"H0": base, "H1": base})
+        stats, broker, results = self._run_with_buys(
+            [], positions=positions, orders=[("S0", "buy"), ("H0", "sell")], returns=returns
+        )
+
+        self.assertEqual([r["status"] for r in results], ["skipped", "placed"])
+        self.assertIn("相関", results[0]["reason"])
+        broker.send_order.assert_called_once()
+        self.assertEqual(broker.send_order.call_args[0][1], OrderSide.SELL)
+        self.assertEqual(stats["buy_orders"], 0)
+        self.assertEqual(stats["sell_orders"], 1)
+
+    def test_same_sector_buy_skipped_when_held_and_run_buys_reach_cap(self):
+        from config.settings import MAX_SECTOR_POSITIONS
+
+        positions = [{"symbol": "H0", "qty": 100, "avg_price": 1000.0, "current_price": 1000.0}]
+        n_buys = MAX_SECTOR_POSITIONS  # 保有の1件と合わせると上限を1件超える
+        symbols = [f"S{i}" for i in range(n_buys + 1)]
+        sectors = {s: "Tech" for s in ["H0"] + symbols[:n_buys]}
+        sectors[symbols[-1]] = "Energy"
+        stats, broker, results = self._run_with_buys(symbols, positions=positions, sectors=sectors)
+
+        statuses = [r["status"] for r in results]
+        self.assertEqual(statuses, ["placed"] * (n_buys - 1) + ["skipped", "placed"])
+        self.assertIn("MAX_SECTOR_POSITIONS", results[n_buys - 1]["reason"])
+        self.assertEqual(stats["buy_orders"], n_buys)
 
     def test_import_error_raised_without_anthropic(self):
         broker = _make_broker()
