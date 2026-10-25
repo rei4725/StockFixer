@@ -7,11 +7,12 @@ from typing import Iterable
 import pandas as pd
 
 from config.settings import MAX_SECTOR_POSITIONS
+from src.domain.sector_cap import filter_by_sector_cap
 from src.domain.trading_rules import ML_EXIT_PROB_THRESHOLD as _ML_EXIT_PROB_THRESHOLD
 from src.trading.brokers.base import BrokerBase
 from src.trading.models.exit_model import ExitModel
 from src.utils.logger import get_logger
-from src.utils.sector_constraints import filter_by_sector_cap, get_symbol_sector
+from src.utils.sector_constraints import get_symbol_sector
 
 logger = get_logger(__name__)
 

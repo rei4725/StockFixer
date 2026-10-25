@@ -18,3 +18,10 @@ def test_jp_market_holidays_shim_reexports_domain_functions():
 
     assert old.is_jp_market_holiday is new.is_jp_market_holiday
     assert old.is_jp_business_day is new.is_jp_business_day
+
+
+def test_sector_constraints_shim_reexports_domain_filter():
+    import src.domain.sector_cap as new
+    import src.utils.sector_constraints as old
+
+    assert old.filter_by_sector_cap is new.filter_by_sector_cap
