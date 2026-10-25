@@ -7,7 +7,7 @@ root_packages =
 #   domain < utils < BC群 < infrastructure < orchestration/api
 #   上位レイヤーが下位レイヤーを参照するのは合法。逆は禁止。
 #
-# src.domain は型とポートのみを持つ共有カーネルであり、src.domain.types 以外を
+# src.domain は型・ポート・ルール定数・例外・純粋なルール関数を持つ共有カーネルであり、src.domain.types 以外を
 # 一切 import しない真の最下層。2026-09-22 の設計判断でこれを恒久的な位置づけとした
 # （docs/superpowers/specs/2026-09-22-db-ownership-decoupling-design.md §3）。
 #

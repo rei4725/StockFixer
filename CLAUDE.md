@@ -101,9 +101,9 @@ backtest/  prediction/  trading/  reporting/  watchlist/  market_data/
 screening/ rule_engine/
           Bounded contexts — each owns its own types.py and pipelines
     ↓
-domain/           Shared kernel — 共有型 (SymbolTask 等) + ports (NotificationPort 等)
+domain/           Shared kernel — 共有型 (SymbolTask 等) + ports (NotificationPort 等) + ルールの表・暦・純粋なルール関数
 infrastructure/   Adapters — domain ports の実装 (yfinance / Discord / in-memory / persistence)
-utils/            DB, logging, retry, path helpers
+utils/            道具だけ（DB, logging, retry, path, 外部 API の薄いクライアント）
 ```
 
 ### Bounded Contexts (`src/<context>/`)
@@ -130,6 +130,10 @@ utils/            DB, logging, retry, path helpers
 - `domain/types.py` — BC 横断の共有型 (`SymbolTask`, `PredictionResult`, `BatchResult` 等)
 - `domain/ports.py` — ポート定義 (`NotificationPort`, `MarketDataPort` 等)
 - `domain/trading_rules.py` — 取引ルール定数
+- `domain/regime_weights.py` — レジーム別のセクターの重みの表
+- `domain/jp_market_holidays.py` — 東証の休場日の表と営業日の判定
+- `domain/sector_cap.py` — セクターごとの保有の上限で候補を絞るルール関数
+- `domain/signal_rules.py` — 売買シグナルの判断の純粋関数（`utils/signal_generator.py` の `SignalGenerator` が値を渡して呼ぶ）
 - `infrastructure/` — ポートの実装アダプタ (yfinance / Discord / log / in-memory / `infrastructure/persistence/`: domain のリポジトリ／sink ポートを実装する Postgres アダプタ、1 テーブル 1 モジュール)
 
 ### Key Data Types (defined in each BC's `types.py`)
@@ -221,6 +225,7 @@ pip-audit -r requirements-dev.txt
 
 - **`run_*.py` files** are CLI wrappers only: parse args, call service layer, print results. No business logic, data transforms, or direct DB access.
 - **Strict layering**: upper layers import lower ones, never the reverse. BC modules (`backtest/`, `prediction/` 等) do not import from `orchestration/` or `api/`.
+- **utils/ に業務の処理を置かない**: 売買の判断・表・暦は domain/、1つの BC しか使わない処理はその BC へ。utils/ に新しいモジュールを足すときは tests/unit/test_utils_allowlist.py に理由を書く。
 - **Types over dicts**: use dataclass types from each BC's `types.py`, not raw dicts.
 - **Logging**: all modules use `get_logger(__name__)` from the unified factory in `utils/`. Never use bare `except: pass` — always `logger.error("...", exc_info=True)`.
 - **Time**: UTC internally, display as `Asia/Tokyo`.
