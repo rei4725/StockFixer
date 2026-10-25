@@ -48,7 +48,7 @@ from .params import (
     _choose_order_params,
     _resolve_kelly_params,
 )
-from .recording import _record_order, _sync_live_execution_diffs
+from .recording import _record_order, _recorder, _sync_live_execution_diffs
 from .selection import (
     _apply_buy_sector_limit,
     _compute_ml_exit_signals,
@@ -107,6 +107,7 @@ def run_daily_orders(
         "n_held_symbols": 0,
         "held_symbols_list": [],
     }
+    record = _recorder(_record_order, stats)  # 記録の失敗でも注文は出たものとして数える (#1104)
     try:
         broker.get_token()
     except BrokerError as e:
@@ -245,7 +246,7 @@ def run_daily_orders(
                 price=order_price,
                 order_type=order_type,
             )
-            _record_order(
+            record(
                 market=str(row["market"]),
                 predicted_at=str(row["predicted_at"]),
                 symbol=symbol,
@@ -371,7 +372,7 @@ def run_daily_orders(
                 price=order_price,
                 order_type=order_type,
             )
-            _record_order(
+            record(
                 market=str(row["market"]),
                 predicted_at=str(row["predicted_at"]),
                 symbol=symbol,
@@ -437,7 +438,7 @@ def run_daily_orders(
                     price=order_price,
                     order_type=order_type,
                 )
-                _record_order(
+                record(
                     market=str(row["market"]),
                     predicted_at=str(row["predicted_at"]),
                     symbol=symbol,
@@ -542,7 +543,7 @@ def run_daily_orders(
                     price=order_price,
                     order_type=order_type,
                 )
-                _record_order(
+                record(
                     market=str(row["market"]),
                     predicted_at=str(row["predicted_at"]),
                     symbol=symbol,

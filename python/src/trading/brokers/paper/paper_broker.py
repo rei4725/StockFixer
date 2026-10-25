@@ -63,6 +63,26 @@ def _today_jst() -> date:
     return now_jst().date()
 
 
+def _undo_short_registration(con: Any, symbol: str, qty: int, price: Any) -> None:
+    """取り消した空売りの分を paper_short_positions から戻す（加重平均単価も戻す, #1104）"""
+    row = con.execute(
+        "SELECT qty, avg_short_price FROM paper_short_positions WHERE symbol=%s", [symbol]
+    ).fetchone()
+    if not row:
+        return
+    cur_qty, cur_avg = int(row[0]), float(row[1] or 0.0)
+    rest = cur_qty - qty
+    if rest <= 0:
+        con.execute("DELETE FROM paper_short_positions WHERE symbol=%s", [symbol])
+        return
+    rest_avg = (cur_avg * cur_qty - float(price or 0.0) * qty) / rest
+    con.execute(
+        "UPDATE paper_short_positions SET qty=%s, avg_short_price=%s, "
+        "updated_at=CURRENT_TIMESTAMP WHERE symbol=%s",
+        [rest, rest_avg, symbol],
+    )
+
+
 class PaperBroker(BrokerBase):
     """
     ペーパートレード用 Broker。APIキー不要で完全動作する。
@@ -109,6 +129,9 @@ class PaperBroker(BrokerBase):
         # PaperBroker は東証銘柄専用（settle で f"{symbol}.T" を組み立てる）ため market は "jp"。
         # ここで確定させることで、メタデータ補完（_link_paper_order_metadata）を経由しない
         # 発注経路でも market が NULL にならず、エクイティ再構成の時価評価が機能する。
+        if side == OrderSide.SHORT:
+            # 分割前の空売りの保有に分割後の値段を混ぜて平均しないよう、先に直す（#1086）
+            sa.adjust_stored_short_for_splits(self._market_data, sym)
         with _db_connection() as con:
             if side == OrderSide.BUY:
                 # 約定待ちの買いは保有にも残高にも出ないため、次の回が同じ銘柄を重ねて買う（#802）
@@ -171,12 +194,19 @@ class PaperBroker(BrokerBase):
         }
 
     def cancel_order(self, order_id: str) -> dict[str, Any]:
-        """pending 状態の注文をキャンセルする"""
+        """pending 状態の注文をキャンセルする（空売りは send_order の即時の仮登録も戻す）"""
         with _db_connection() as con:
+            pending = con.execute(
+                "SELECT symbol, side, qty, price FROM paper_orders "
+                "WHERE order_id=%s AND status='pending'",
+                [order_id],
+            ).fetchone()
             con.execute(
                 "UPDATE paper_orders SET status='cancelled' WHERE order_id=%s AND status='pending'",
                 [order_id],
             )
+            if pending and int(pending[1]) == int(OrderSide.SHORT):
+                _undo_short_registration(con, str(pending[0]), int(pending[2]), pending[3])
         logger.info(f"[paper] 注文キャンセル: order_id={order_id}")
         return {
             "order_id": order_id,
@@ -377,14 +407,23 @@ class PaperBroker(BrokerBase):
         """
         with _db_connection() as con:
             rows = con.execute(
-                "SELECT symbol, qty, avg_short_price FROM paper_short_positions WHERE qty > 0"
+                "SELECT symbol, qty, avg_short_price, updated_at "
+                "FROM paper_short_positions WHERE qty > 0"
             ).fetchall()
         if not rows:
             return []
 
         results = []
-        for sym, qty, avg_short in rows:
+        for sym, qty, avg_short, updated_at in rows:
+            qty, avg_short, split_known = sa.adjust_short_position_for_splits(
+                self._market_data, sym, qty, avg_short, updated_at
+            )
             current_price = self._latest_close(sym)
+            if not split_known and sa.looks_like_split_gap(avg_short, current_price):
+                logger.warning(
+                    f"[paper] {sym}: 分割の記録が取れず、売り建ての単価と現在値の比が分割の比ほど違う"
+                )
+                current_price = math.nan
             # 空売りの未実現損益: 売り単価 - 現在価格が正なら利益
             unrealized_pnl = (avg_short - current_price) * qty
             results.append(
