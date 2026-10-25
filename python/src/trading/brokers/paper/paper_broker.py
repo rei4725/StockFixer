@@ -129,6 +129,9 @@ class PaperBroker(BrokerBase):
         # PaperBroker は東証銘柄専用（settle で f"{symbol}.T" を組み立てる）ため market は "jp"。
         # ここで確定させることで、メタデータ補完（_link_paper_order_metadata）を経由しない
         # 発注経路でも market が NULL にならず、エクイティ再構成の時価評価が機能する。
+        if side == OrderSide.SHORT:
+            # 分割前の空売りの保有に分割後の値段を混ぜて平均しないよう、先に直す（#1086）
+            sa.adjust_stored_short_for_splits(self._market_data, sym)
         with _db_connection() as con:
             if side == OrderSide.BUY:
                 # 約定待ちの買いは保有にも残高にも出ないため、次の回が同じ銘柄を重ねて買う（#802）
@@ -404,14 +407,23 @@ class PaperBroker(BrokerBase):
         """
         with _db_connection() as con:
             rows = con.execute(
-                "SELECT symbol, qty, avg_short_price FROM paper_short_positions WHERE qty > 0"
+                "SELECT symbol, qty, avg_short_price, updated_at "
+                "FROM paper_short_positions WHERE qty > 0"
             ).fetchall()
         if not rows:
             return []
 
         results = []
-        for sym, qty, avg_short in rows:
+        for sym, qty, avg_short, updated_at in rows:
+            qty, avg_short, split_known = sa.adjust_short_position_for_splits(
+                self._market_data, sym, qty, avg_short, updated_at
+            )
             current_price = self._latest_close(sym)
+            if not split_known and sa.looks_like_split_gap(avg_short, current_price):
+                logger.warning(
+                    f"[paper] {sym}: 分割の記録が取れず、売り建ての単価と現在値の比が分割の比ほど違う"
+                )
+                current_price = math.nan
             # 空売りの未実現損益: 売り単価 - 現在価格が正なら利益
             unrealized_pnl = (avg_short - current_price) * qty
             results.append(
