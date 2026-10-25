@@ -63,6 +63,26 @@ def _today_jst() -> date:
     return now_jst().date()
 
 
+def _undo_short_registration(con: Any, symbol: str, qty: int, price: Any) -> None:
+    """取り消した空売りの分を paper_short_positions から戻す（加重平均単価も戻す, #1104）"""
+    row = con.execute(
+        "SELECT qty, avg_short_price FROM paper_short_positions WHERE symbol=%s", [symbol]
+    ).fetchone()
+    if not row:
+        return
+    cur_qty, cur_avg = int(row[0]), float(row[1] or 0.0)
+    rest = cur_qty - qty
+    if rest <= 0:
+        con.execute("DELETE FROM paper_short_positions WHERE symbol=%s", [symbol])
+        return
+    rest_avg = (cur_avg * cur_qty - float(price or 0.0) * qty) / rest
+    con.execute(
+        "UPDATE paper_short_positions SET qty=%s, avg_short_price=%s, "
+        "updated_at=CURRENT_TIMESTAMP WHERE symbol=%s",
+        [rest, rest_avg, symbol],
+    )
+
+
 class PaperBroker(BrokerBase):
     """
     ペーパートレード用 Broker。APIキー不要で完全動作する。
@@ -171,12 +191,19 @@ class PaperBroker(BrokerBase):
         }
 
     def cancel_order(self, order_id: str) -> dict[str, Any]:
-        """pending 状態の注文をキャンセルする"""
+        """pending 状態の注文をキャンセルする（空売りは send_order の即時の仮登録も戻す）"""
         with _db_connection() as con:
+            pending = con.execute(
+                "SELECT symbol, side, qty, price FROM paper_orders "
+                "WHERE order_id=%s AND status='pending'",
+                [order_id],
+            ).fetchone()
             con.execute(
                 "UPDATE paper_orders SET status='cancelled' WHERE order_id=%s AND status='pending'",
                 [order_id],
             )
+            if pending and int(pending[1]) == int(OrderSide.SHORT):
+                _undo_short_registration(con, str(pending[0]), int(pending[2]), pending[3])
         logger.info(f"[paper] 注文キャンセル: order_id={order_id}")
         return {
             "order_id": order_id,
