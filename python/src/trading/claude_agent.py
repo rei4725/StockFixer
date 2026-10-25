@@ -29,6 +29,7 @@ from config.settings import (
 )
 from src.domain.ports import PredictionResultRepository, TradeDiffSink
 from src.trading.brokers.base import BrokerBase, BrokerError, OrderSide
+from src.trading.claude_order_caps import RunBuyCaps
 from src.trading.claude_reasoning_log import save_reasoning_log
 from src.trading.execution import (
     _attach_dynamic_thresholds,
@@ -242,9 +243,10 @@ def _handle_place_order(
     stats: dict[str, Any],
     *,
     trade_diff_sink: TradeDiffSink,
+    caps: RunBuyCaps | None = None,
 ) -> dict[str, Any]:
     """
-    RiskManager ゲートとポジションサイジングを強制適用して注文を発注する。
+    RiskManager ゲート・1回の買いの上限（caps）・ポジションサイジングを強制適用して注文を発注する。
     Claude がこれらをバイパスする手段はない。
     """
     # 発注方向の変換
@@ -284,6 +286,11 @@ def _handle_place_order(
         }
 
     if side == OrderSide.BUY:
+        cap_reason = caps.check_buy(symbol) if caps is not None else None
+        if cap_reason is not None:
+            logger.info("[claude_agent] %s → スキップ: %s", symbol, cap_reason)
+            stats["skipped"] += 1
+            return {"status": "skipped", "reason": cap_reason}
         held = _get_held_symbols(broker)
         if symbol in held:
             stats["skipped"] += 1
@@ -340,6 +347,8 @@ def _handle_place_order(
         )
         if side == OrderSide.BUY:
             stats["buy_orders"] += 1
+            if caps is not None:
+                caps.record_buy(symbol)
         else:
             stats["sell_orders"] += 1
         stats["total_turnover"] = stats.get("total_turnover", 0.0) + current_price * qty
@@ -438,6 +447,9 @@ def run_claude_trader(
         logger.warning("[claude_agent] リスクゲート不合格 → スキップ: %s", gate.reason)
         stats.update({"trading_stopped": gate.stop_active, "stop_reason": gate.reason})
         return stats
+
+    # 回の中で増える買いと建玉を数える（8:50 の道の position_count と同じく回の始めの保有から）
+    caps = RunBuyCaps(position_count=len(_get_held_symbols(broker)))
 
     # 予測キャッシュ（place_order ハンドラーで参照）
     predictions_cache = prediction_repo.get_latest_by_market(market)
@@ -544,6 +556,7 @@ market: {market}, mode: {mode}
                     mode=mode,
                     stats=stats,
                     trade_diff_sink=trade_diff_sink,
+                    caps=caps,
                 )
             else:
                 result = {"error": f"未知の tool: {tool_name}"}

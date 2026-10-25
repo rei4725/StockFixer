@@ -1,17 +1,14 @@
 from __future__ import annotations
 
-from collections import Counter
 from functools import lru_cache
-from typing import Callable, Iterable, Mapping, TypeVar
 
 import yfinance as yf
 
+from src.domain.sector_cap import filter_by_sector_cap as filter_by_sector_cap  # noqa: F401
 from src.utils.data_path_utils import get_ticker
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
-
-T = TypeVar("T")
 
 
 def _normalize_sector(sector: str | None, fallback_key: str) -> str:
@@ -54,27 +51,3 @@ def get_symbol_sector(market: str, symbol: str) -> str:
 
 
 get_symbol_sector.cache_clear = _lookup_symbol_sector.cache_clear  # type: ignore[attr-defined]
-
-
-def filter_by_sector_cap(
-    items: Iterable[T],
-    max_sector_positions: int,
-    sector_getter: Callable[[T], str],
-    initial_counts: Mapping[str, int] | None = None,
-) -> list[T]:
-    """セクターごとの上限件数を超えないように順序を保ってフィルタする。
-
-    initial_counts を渡すと、その件数（保有中の銘柄の業種の数など）から数え始める。
-    """
-    if max_sector_positions <= 0:
-        return list(items)
-
-    selected: list[T] = []
-    sector_counts: Counter[str] = Counter(initial_counts or {})
-    for item in items:
-        sector = sector_getter(item)
-        if sector_counts[sector] >= max_sector_positions:
-            continue
-        selected.append(item)
-        sector_counts[sector] += 1
-    return selected

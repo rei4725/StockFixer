@@ -6,7 +6,7 @@ step4、および手動実行（run_scheduler.py --run-now drift）の両方か�
 
 from src.orchestration.jobs.alert_streaks import record_drift_warn_streak
 from src.orchestration.jobs.common import _drift_check_lock, skip_if_running
-from src.utils.drift_thresholds import load_drift_thresholds, select_drifted_symbols
+from src.reporting.drift_thresholds import load_drift_thresholds, select_drifted_symbols
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)

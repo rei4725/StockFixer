@@ -18,10 +18,10 @@ from typing import Any, Callable, Optional
 import pandas as pd
 
 from src.domain.ports import AnalyticsQuery
+from src.reporting.drift_thresholds import load_drift_thresholds
 from src.reporting.kpi import _REPORT_DAYS, MonthlyKPI, get_monthly_kpis
 from src.reporting.types import MonthlyReportSummary
 from src.utils.data_path_utils import get_results_dir
-from src.utils.drift_thresholds import load_drift_thresholds
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)

@@ -15,6 +15,7 @@ import pandas as pd
 
 from config.data import MAX_DATA_WORKERS
 from config.settings import SENTIMENT_LOOKBACK_DAYS, STALE_BARS_MAX_WEEKDAYS
+from src.domain.jp_market_holidays import is_jp_business_day
 from src.domain.ports import AlertLevel, NotificationPort
 from src.market_data.bar_close import drop_unclosed_bars
 from src.market_data.base import DataSourceBase
@@ -39,7 +40,6 @@ from src.market_data.technical import add_technical_indicators, create_basic_lag
 from src.market_data.wikipedia_features import add_pageview_features, fetch_pageview_features
 from src.utils.data_path_utils import get_ticker, normalize_col
 from src.utils.db import upsert_stock_features
-from src.utils.jp_market_holidays import is_jp_business_day
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
