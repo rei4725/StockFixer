@@ -470,6 +470,15 @@ class PaperBroker(BrokerBase):
             )
         return results
 
+    def get_pending_buy_symbols(self) -> set[str]:
+        """約定待ちの BUY がある銘柄コードを返す（get_positions は約定前の買いを含まない、#1137）"""
+        with _db_connection() as con:
+            rows = con.execute(
+                "SELECT DISTINCT symbol FROM paper_orders WHERE status='pending' AND side=%s",
+                [int(OrderSide.BUY)],
+            ).fetchall()
+        return {str(sym).replace(".T", "") for (sym,) in rows}
+
     def get_pnl_summary(self) -> dict[str, Any]:
         """
         損益サマリーを返す。
