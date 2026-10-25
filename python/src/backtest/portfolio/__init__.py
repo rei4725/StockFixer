@@ -135,8 +135,8 @@ def run_portfolio_backtest(
 
     logger.info(f"[ポートフォリオ] 対象銘柄数: {len(all_symbols)}")
 
-    # 各銘柄の予測スコアと Close 価格を収集
-    score_matrix, close_matrix = _build_signal_matrix(
+    # 各銘柄の予測スコアと Close・Open 価格を収集
+    score_matrix, close_matrix, open_matrix = _build_signal_matrix(
         all_symbols, model_type, train_ratio, source, threshold, ensemble
     )
 
@@ -158,6 +158,7 @@ def run_portfolio_backtest(
         max_sector_positions=max_sector_positions,
         use_sector_rotation=use_sector_rotation,
         execution_by_market=_build_market_executions(market, fee_rate, slippage),
+        open_matrix=open_matrix,
     )
 
     metrics = _compute_portfolio_metrics(equity_df, initial_cash)
@@ -202,7 +203,7 @@ def compare_sector_rotation_kpi(
         logger.error(f"[セクターローテーション比較] 対象銘柄が見つかりません: market={market}")
         return {}
 
-    score_matrix, close_matrix = _build_signal_matrix(
+    score_matrix, close_matrix, open_matrix = _build_signal_matrix(
         all_symbols, model_type, train_ratio, source, 0.0, ensemble
     )
     if score_matrix.empty:
@@ -223,6 +224,7 @@ def compare_sector_rotation_kpi(
         max_sector_positions,
         use_sector_rotation=False,
         execution_by_market=execution_by_market,
+        open_matrix=open_matrix,
     )
     eq_on, _ = _simulate_portfolio(
         score_matrix,
@@ -234,6 +236,7 @@ def compare_sector_rotation_kpi(
         max_sector_positions,
         use_sector_rotation=True,
         execution_by_market=execution_by_market,
+        open_matrix=open_matrix,
     )
 
     metrics_off = _compute_portfolio_metrics(eq_off, initial_cash)

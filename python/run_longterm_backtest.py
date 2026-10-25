@@ -56,7 +56,12 @@ def parse_args():
         default=None,
         help="片道スリッページ率（未指定なら市場別の既定値を使う）",
     )
-    parser.add_argument("--benchmark", type=str, default="^GSPC", help="ベンチマークティッカー")
+    parser.add_argument(
+        "--benchmark",
+        type=str,
+        default=None,
+        help="ベンチマークティッカー（未指定なら市場別の既定: jp=1306.T, us=^GSPC）",
+    )
     parser.add_argument(
         "--execution-lag",
         type=_non_negative_int,

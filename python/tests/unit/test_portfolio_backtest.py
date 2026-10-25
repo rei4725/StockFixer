@@ -78,7 +78,7 @@ class TestBuildSignalMatrix:
         """銘柄リストが空の場合は空の DataFrame が返ること"""
         from src.backtest.portfolio import _build_signal_matrix
 
-        scores, prices = _build_signal_matrix(
+        scores, prices, opens = _build_signal_matrix(
             symbols=[],
             model_type="XGBoostModel",
             train_ratio=0.8,
@@ -88,6 +88,7 @@ class TestBuildSignalMatrix:
         )
         assert scores.empty
         assert prices.empty
+        assert opens.empty
 
 
 class TestGetRebalanceDates:
@@ -298,7 +299,7 @@ class TestSimulatePortfolio(unittest.TestCase):
 class TestSimulatePortfolioMissingPrice(unittest.TestCase):
     """Issue #846: 値段の欠けた日は、その日までの最後の値段で評価・売却する。"""
 
-    def _run(self, score_matrix, close_matrix, rebalance_dates, top_n):
+    def _run(self, score_matrix, close_matrix, rebalance_dates, top_n, open_matrix=None):
         from src.backtest.portfolio import _simulate_portfolio
 
         with patch(
@@ -313,6 +314,7 @@ class TestSimulatePortfolioMissingPrice(unittest.TestCase):
                 initial_cash=10_000,
                 execution=ExecutionModel(TradingCosts(fee_rate=0.0)),
                 max_sector_positions=5,
+                open_matrix=open_matrix,
             )
         return equity_df.set_index("date")
 
@@ -321,8 +323,10 @@ class TestSimulatePortfolioMissingPrice(unittest.TestCase):
         dates = pd.date_range("2026-01-05", periods=4, freq="B")
         score_matrix = pd.DataFrame({"A": [0.5, 0.5, 0.5, 0.5]}, index=dates)
         close_matrix = pd.DataFrame({"A": [100.0, 120.0, float("nan"), 130.0]}, index=dates)
+        # #1099: dates[0] のスコアで dates[1] の始値 100 で買う
+        open_matrix = pd.DataFrame({"A": [100.0, 100.0, float("nan"), 130.0]}, index=dates)
 
-        equity = self._run(score_matrix, close_matrix, [dates[0]], top_n=1)
+        equity = self._run(score_matrix, close_matrix, [dates[0]], top_n=1, open_matrix=open_matrix)
 
         missing_day = str(dates[2])[:10]
         assert equity.loc[missing_day, "portfolio_value"] == pytest.approx(12_000)
@@ -330,13 +334,22 @@ class TestSimulatePortfolioMissingPrice(unittest.TestCase):
 
     def test_rebalance_sells_missing_holding_at_last_price(self):
         """リバランスの日に欠けた保有が最後の値段で現金に戻ること（戦略と基準）"""
-        dates = pd.date_range("2026-01-05", periods=3, freq="B")
-        score_matrix = pd.DataFrame({"A": [0.9, 0.9, 0.1], "B": [0.1, 0.1, 0.9]}, index=dates)
+        # #1099: dates[0]・dates[1] のスコアで、翌営業日の始値で約定させる
+        nan = float("nan")
+        dates = pd.date_range("2026-01-05", periods=4, freq="B")
+        score_matrix = pd.DataFrame(
+            {"A": [0.9, 0.1, 0.1, 0.1], "B": [0.1, 0.9, 0.9, 0.9]}, index=dates
+        )
         close_matrix = pd.DataFrame(
-            {"A": [100.0, 120.0, float("nan")], "B": [50.0, 50.0, 50.0]}, index=dates
+            {"A": [100.0, 120.0, nan, nan], "B": [50.0, 50.0, 50.0, 50.0]}, index=dates
+        )
+        open_matrix = pd.DataFrame(
+            {"A": [100.0, 100.0, nan, nan], "B": [50.0, 50.0, 50.0, 50.0]}, index=dates
         )
 
-        equity = self._run(score_matrix, close_matrix, [dates[0], dates[2]], top_n=1)
+        equity = self._run(
+            score_matrix, close_matrix, [dates[0], dates[1]], top_n=1, open_matrix=open_matrix
+        )
 
         rebalance_day = str(dates[2])[:10]
         # 戦略: A を 100 株 @120 で売り 12,000 を B に回す
@@ -375,7 +388,7 @@ class TestPortfolioMarketSlippage(unittest.TestCase):
             patch("src.utils.db.stock_features.get_all_symbols", return_value=all_symbols),
             patch(
                 "src.backtest.portfolio._build_signal_matrix",
-                return_value=(score_matrix, close_matrix),
+                return_value=(score_matrix, close_matrix, close_matrix),
             ),
             patch(
                 "src.backtest.portfolio._attach_regime_metrics",
@@ -394,7 +407,8 @@ class TestPortfolioMarketSlippage(unittest.TestCase):
                 fee_rate=0.0,
                 slippage=slippage,
             )
-        return equity_df.iloc[0]
+        # #1099: 最初の日のスコアは翌営業日の始値で約定するため、その日の行を見る
+        return equity_df.iloc[1]
 
     def _expected_value(self, slippage_by_symbol, prices):
         """各銘柄に予算を等分し、その銘柄のスリッページで買った直後の評価額。
@@ -491,6 +505,7 @@ class TestBuildSignalMatrixAdditional(unittest.TestCase):
         df_feat = pd.DataFrame(
             {
                 "close_lag1": np.random.randn(n),
+                "Open": np.random.rand(n) * 100 + 100,
                 "Close": np.random.rand(n) * 100 + 100,
                 "y": np.random.randn(n) * 0.01,
             },
@@ -502,7 +517,7 @@ class TestBuildSignalMatrixAdditional(unittest.TestCase):
         mock_mm = mock_get_mm.return_value
         mock_mm.predict_with_model.return_value = np.array([0.01] * n_test)
 
-        score_matrix, close_matrix = _build_signal_matrix(
+        score_matrix, close_matrix, open_matrix = _build_signal_matrix(
             symbols=[("jp", "7203")],
             model_type="XGBoostModel",
             train_ratio=0.8,
@@ -513,6 +528,11 @@ class TestBuildSignalMatrixAdditional(unittest.TestCase):
 
         self.assertIsInstance(score_matrix, pd.DataFrame)
         self.assertIsInstance(close_matrix, pd.DataFrame)
+        # #1099: Open の表も同じ行で返すこと
+        self.assertEqual(open_matrix.index.tolist(), close_matrix.index.tolist())
+        pd.testing.assert_series_equal(
+            open_matrix["jp_7203"], df_feat["Open"].reindex(open_matrix.index), check_names=False
+        )
         # 1銘柄のデータが含まれること
         self.assertFalse(score_matrix.empty)
         self.assertIn("jp_7203", score_matrix.columns)
@@ -538,7 +558,7 @@ class TestBuildSignalMatrixAdditional(unittest.TestCase):
         )
         mock_load.return_value = df_small
 
-        score_matrix, close_matrix = _build_signal_matrix(
+        score_matrix, close_matrix, _ = _build_signal_matrix(
             symbols=[("jp", "7203")],
             model_type="XGBoostModel",
             train_ratio=0.8,
@@ -558,7 +578,7 @@ class TestBuildSignalMatrixAdditional(unittest.TestCase):
 
         mock_load.return_value = pd.DataFrame()
 
-        score_matrix, close_matrix = _build_signal_matrix(
+        score_matrix, close_matrix, _ = _build_signal_matrix(
             symbols=[("jp", "7203")],
             model_type="XGBoostModel",
             train_ratio=0.8,
@@ -638,7 +658,7 @@ class TestRunPortfolioBacktest(unittest.TestCase):
             },
             index=dates,
         )
-        mock_build.return_value = (score_matrix, close_matrix)
+        mock_build.return_value = (score_matrix, close_matrix, close_matrix)
         mock_rebalance.return_value = list(dates[:3])
 
         equity_df_mock = pd.DataFrame(
@@ -668,7 +688,7 @@ class TestRunPortfolioBacktest(unittest.TestCase):
         from src.backtest.portfolio import run_portfolio_backtest
 
         mock_symbols.return_value = [("jp", "7203")]
-        mock_build.return_value = (pd.DataFrame(), pd.DataFrame())
+        mock_build.return_value = (pd.DataFrame(), pd.DataFrame(), pd.DataFrame())
 
         equity_df, metrics, holdings_df = run_portfolio_backtest(market="jp")
         self.assertTrue(equity_df.empty)

@@ -40,7 +40,7 @@ def run_longterm_backtest(
     max_positions: int = 10,
     fee_rate: float = DEFAULT_FEE_RATE,
     slippage: Optional[float] = None,
-    benchmark_ticker: str = "^GSPC",
+    benchmark_ticker: Optional[str] = None,
     execution_lag: int = 1,
     rules: Optional[HoldRules] = None,
 ) -> tuple[pd.DataFrame, dict, pd.DataFrame]:

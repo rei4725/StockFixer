@@ -139,6 +139,22 @@ class TestComputeHitRate(unittest.TestCase):
         _compute_hit_rate(df)
         self.assertEqual(df["checked_at"].iloc[0], "2020-01-01")
 
+    def test_counts_only_production_rows(self):
+        """challenger の影の予想の採点を production の的中率に混ぜない（#1090）。"""
+        df = pd.DataFrame(
+            {
+                "direction_match": [True, False] * 5 + [True] * 8 + [False] * 2,
+                "model_name": ["production"] * 10 + ["challenger"] * 10,
+            }
+        )
+        kpi = get_monthly_kpis(diff_summary={}, accuracy_df=df, drift_df=pd.DataFrame())
+        self.assertAlmostEqual(kpi.hit_rate, 0.50)
+
+    def test_without_model_name_column_uses_all_rows(self):
+        df = pd.DataFrame({"direction_match": [True, False] * 5 + [True] * 8 + [False] * 2})
+        kpi = get_monthly_kpis(diff_summary={}, accuracy_df=df, drift_df=pd.DataFrame())
+        self.assertAlmostEqual(kpi.hit_rate, 0.65)
+
 
 class TestComputeDriftCount(unittest.TestCase):
     def test_returns_zero_when_empty(self):
