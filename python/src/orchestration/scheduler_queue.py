@@ -224,23 +224,31 @@ class SchedulerQueueManager:
                     error=error_message,
                 )
 
-            self._append_event(
-                {
-                    "job_id": job_id,
-                    "reason": reason,
-                    "status": status,
-                    "period_key": period_key,
-                    "run_id": run_id,
-                    "started_at": isoformat_utc(started_at),
-                    "finished_at": isoformat_utc(finished_at),
-                    "duration_seconds": duration_seconds,
-                    "error": error_message,
-                }
-            )
-            with self._lock:
-                self._in_progress_jobs.discard(job_id)
-            # 外部死活監視（#496）: 実行したジョブのみ ping（skip 経路は送らない）
-            ping_heartbeat(job_id, success=(status == "success"))
+            # 書き込みが失敗しても印を外し heartbeat を送り、ジョブの元の例外を隠さない（#1165）
+            try:
+                self._append_event(
+                    {
+                        "job_id": job_id,
+                        "reason": reason,
+                        "status": status,
+                        "period_key": period_key,
+                        "run_id": run_id,
+                        "started_at": isoformat_utc(started_at),
+                        "finished_at": isoformat_utc(finished_at),
+                        "duration_seconds": duration_seconds,
+                        "error": error_message,
+                    }
+                )
+            except Exception:
+                logger.error(
+                    f"終わりの記録の書き込みに失敗: job_id={job_id} status={status}",
+                    exc_info=True,
+                )
+            finally:
+                with self._lock:
+                    self._in_progress_jobs.discard(job_id)
+                # 外部死活監視（#496）: 実行したジョブのみ ping（skip 経路は送らない）
+                ping_heartbeat(job_id, success=(status == "success"))
 
     def _run_with_retry(
         self, job_id: str, config: dict[str, Any], reason: str, period_key: str
