@@ -19,6 +19,7 @@ from src.orchestration.jobs.alerting import (
     fetch_previous_run_stats,
 )
 from src.orchestration.jobs.backup_job import run_daily_backup  # noqa: F401 (re-export)
+from src.orchestration.jobs.challenger_shadow import run_challenger_shadow_stage
 from src.orchestration.jobs.common import _handle_stage_error, _notify_stage_failure
 from src.orchestration.jobs.drift_check import run_daily_drift_check
 from src.orchestration.jobs.prediction_errors import notify_prediction_errors
@@ -167,20 +168,7 @@ def run_daily_pipeline():
         _handle_stage_error(PipelineStage.NON_CRITICAL, "[3.1/6] 出力 invariant 評価", e)
 
     # 3.5. Challenger shadow 予測（NON_CRITICAL: モデルが存在しない場合はスキップ、失敗しても継続）
-    logger.info("[3.5/6] Challenger shadow 予測開始")
-    try:
-        from src.prediction.shadow_evaluation import predict_with_challenger_unified
-
-        challenger_rows = predict_with_challenger_unified()
-        if challenger_rows:
-            output_top_worst_results(
-                challenger_rows, mode="unified", shadow_mode=True, model_version="challenger"
-            )
-            logger.info("[3.5/6] Challenger shadow 予測完了: %d 銘柄", len(challenger_rows))
-        else:
-            logger.info("[3.5/6] Challenger モデルなし（スキップ）")
-    except Exception as e:
-        _handle_stage_error(PipelineStage.NON_CRITICAL, "[3.5/6] Challenger shadow 予測", e)
+    run_challenger_shadow_stage()
 
     # 4. 日次ドリフトチェック（NON_CRITICAL: 失敗しても後続処理を継続）
     logger.info("[4/6] 日次ドリフトチェック開始")
@@ -391,6 +379,8 @@ def run_horizon_exit_check() -> None:
         trade_diff_sink=PostgresTradeDiffSink(),
         notifier=DiscordNotificationAdapter(),
     )
+    # 送った売りは約定まで保有を変えないので、保有の一覧はループの前に1回だけ読む（#1095）
+    positions = broker.get_positions()
     exited: list[str] = []
     failed: list[str] = []
     for symbol in symbols_to_exit:
@@ -398,7 +388,6 @@ def run_horizon_exit_check() -> None:
             # get_positions は約定前の SELL を引かないため、重ねると売りの二重発注になる
             logger.info("[horizon_exit] 約定前の SELL があるためスキップ: %s", symbol)
             continue
-        positions = broker.get_positions()
         pos = next((p for p in positions if p["symbol"].replace(".T", "") == symbol), None)
         if pos is None or pos.get("qty", 0) <= 0:
             continue

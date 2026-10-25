@@ -255,6 +255,29 @@ class TestRunHorizonExitCheck(unittest.TestCase):
         broker.send_order.assert_any_call("9984", OrderSide.SELL, 200)
 
     @patch(_BROKER_PATCH)
+    def test_reads_positions_once_for_all_overdue(self, mock_broker_cls):
+        """期限切れが複数でも保有の一覧はループの前に1回だけ読み、写しに無い・株数0は飛ばす (#1095)。"""
+        from src.orchestration.scheduler import run_horizon_exit_check
+
+        for i, symbol in enumerate(("7203", "8766", "9984", "6758")):
+            self._insert_overdue_order(f"ORD-12{i}", symbol)
+
+        broker = MagicMock()
+        broker.get_positions.return_value = [
+            {"symbol": "7203", "qty": 100},
+            {"symbol": "8766.T", "qty": 300},
+            {"symbol": "9984", "qty": 0},
+        ]
+        mock_broker_cls.return_value = broker
+
+        run_horizon_exit_check()
+
+        self.assertEqual(broker.get_positions.call_count, 1)
+        self.assertEqual(broker.send_order.call_count, 2)
+        broker.send_order.assert_any_call("7203", OrderSide.SELL, 100)
+        broker.send_order.assert_any_call("8766", OrderSide.SELL, 300)
+
+    @patch(_BROKER_PATCH)
     def test_one_symbol_failure_exits_others_then_fails_job(self, mock_broker_cls):
         """1銘柄の決済が落ちても他の銘柄は決済し、最後にジョブを失敗にする (#1074)。"""
         from src.orchestration.scheduler import run_horizon_exit_check
@@ -398,15 +421,17 @@ class TestHorizonExitJstDate(unittest.TestCase):
         recovery_day = self._first_sell_day("7203")
 
         self.assertEqual(scheduled_day, recovery_day)
-        self.assertEqual(scheduled_day, date(2026, 10, 27))
+        # 2026-10-24（土）を1日目に 10-26（月）・10-27（火）と営業日で数え、10-28 の朝に売る (#1119)
+        self.assertEqual(scheduled_day, date(2026, 10, 28))
 
     def test_recovery_run_does_not_exit_position_before_due(self):
-        # 2026-10-23 JST の定時の回で出した horizon=2 の BUY は 2026-10-25 の朝に売る。
-        # 2026-10-24 JST の補完の回（売る日の前の日）では売らない。
+        # 2026-10-23（金）JST の定時の回で出した horizon=2 の BUY は、期限が 10-26（月）で
+        # 2026-10-27 の朝に売る (#1119)。2026-10-24 JST の補完の回と 10-25 の回では売らない。
         self._buy_at(_SCHEDULED_UTC - timedelta(days=1), "ORD-949-E", "9984", horizon=2)
 
         self.assertFalse(self._sold_at(_RECOVERY_UTC, "9984"))
-        self.assertTrue(self._sold_at(_SCHEDULED_UTC + timedelta(days=1), "9984"))
+        self.assertFalse(self._sold_at(_SCHEDULED_UTC + timedelta(days=1), "9984"))
+        self.assertTrue(self._sold_at(_SCHEDULED_UTC + timedelta(days=3), "9984"))
 
 
 if __name__ == "__main__":
