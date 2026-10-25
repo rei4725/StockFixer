@@ -60,6 +60,37 @@ def adjust_position_for_splits(
     market_data: MarketDataPort, sym: str, qty: int, avg: float, updated_at: Any
 ) -> tuple[int, float, bool]:
     """保有の後の分割で株数と買値を直して書き戻す。戻り値の3つ目は分割の記録が取れたか"""
+    return _adjust_holding(market_data, sym, qty, avg, updated_at, short=False)
+
+
+def adjust_short_position_for_splits(
+    market_data: MarketDataPort, sym: str, qty: int, avg: float, updated_at: Any
+) -> tuple[int, float, bool]:
+    """空売りの保有を、建てた後の分割で直して書き戻す（#1086）。戻り値は買い持ちと同じ"""
+    return _adjust_holding(market_data, sym, qty, avg, updated_at, short=True)
+
+
+def adjust_stored_short_for_splits(market_data: MarketDataPort, sym: str) -> None:
+    """新しい空売りを仮登録で平均する前に、今の空売りの保有を分割で直す（#1086）"""
+    with _db_connection() as con:
+        pos = con.execute(
+            "SELECT qty, avg_short_price, updated_at FROM paper_short_positions WHERE symbol=%s",
+            [sym],
+        ).fetchone()
+    if pos:
+        pos_qty, pos_avg, pos_updated_at = pos
+        _adjust_holding(market_data, sym, pos_qty, pos_avg, pos_updated_at, short=True)
+
+
+def _adjust_holding(
+    market_data: MarketDataPort,
+    sym: str,
+    qty: int,
+    avg: float,
+    updated_at: Any,
+    *,
+    short: bool,
+) -> tuple[int, float, bool]:
     factor = split_factor_since(_fetch_splits(market_data, sym), updated_at)
     if factor is None:
         return qty, avg, False
@@ -67,14 +98,21 @@ def adjust_position_for_splits(
         return qty, avg, True
     new_qty = int(round(qty * factor))
     new_avg = avg / factor
-    with _db_connection() as con:
-        con.execute(
-            "UPDATE paper_positions SET qty=%s, avg_price=%s, "
-            "updated_at=CURRENT_TIMESTAMP WHERE symbol=%s",
-            [new_qty, new_avg, sym],
+    if short:
+        sql = (
+            "UPDATE paper_short_positions SET qty=%s, avg_short_price=%s, "
+            "updated_at=CURRENT_TIMESTAMP WHERE symbol=%s"
         )
+    else:
+        sql = (
+            "UPDATE paper_positions SET qty=%s, avg_price=%s, "
+            "updated_at=CURRENT_TIMESTAMP WHERE symbol=%s"
+        )
+    with _db_connection() as con:
+        con.execute(sql, [new_qty, new_avg, sym])
+    label = "空売りの保有" if short else "保有"
     logger.warning(
-        f"[paper] {sym}: 株式分割（比 {factor:g}）で保有を直した "
+        f"[paper] {sym}: 株式分割（比 {factor:g}）で{label}を直した "
         f"{qty}株 @ {avg:.1f} → {new_qty}株 @ {new_avg:.1f}"
     )
     return new_qty, new_avg, True
@@ -96,18 +134,24 @@ def adjust_order_for_splits(
     order は (side, qty, 指値, signal_price, created_at)。戻り値は直した (qty, 指値, signal_price)。
     保有は get_positions と同じ直しにかけ、注文は出した後に権利落ちした分割の比で
     株数・指値・signal_price を直す。分割の記録が取れず、値段が分割の比ほど違うときは約定させない。
-    空売りは保有の分割の直しが無いため、直さない。
+    SHORT・SHORT_COVER は空売りの保有を同じ直しにかける（#1086）。
     """
     side, qty, limit_price, signal_price, created_at = order
-    if side not in (int(OrderSide.BUY), int(OrderSide.SELL)):
+    short = side in (int(OrderSide.SHORT), int(OrderSide.SHORT_COVER))
+    if short:
+        sql = "SELECT qty, avg_short_price, updated_at FROM paper_short_positions WHERE symbol=%s"
+    elif side in (int(OrderSide.BUY), int(OrderSide.SELL)):
+        sql = "SELECT qty, avg_price, updated_at FROM paper_positions WHERE symbol=%s"
+    else:
         return qty, limit_price, signal_price
     with _db_connection() as con:
-        pos = con.execute(
-            "SELECT qty, avg_price, updated_at FROM paper_positions WHERE symbol=%s", [sym]
-        ).fetchone()
+        pos = con.execute(sql, [sym]).fetchone()
     pos_avg = None
     if pos:
-        _, pos_avg, _ = adjust_position_for_splits(market_data, sym, *pos)
+        pos_qty, raw_avg, pos_updated_at = pos
+        _, pos_avg, _ = _adjust_holding(
+            market_data, sym, pos_qty, raw_avg, pos_updated_at, short=short
+        )
     factor = split_factor_since(_fetch_splits(market_data, sym), created_at)
     if factor is None:
         refs = [signal_price, limit_price, pos_avg]
