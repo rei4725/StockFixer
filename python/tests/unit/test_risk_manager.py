@@ -252,6 +252,12 @@ class TestRiskManagerPersistence(unittest.TestCase):
         )
         self.assertEqual(start, datetime(2026, 10, 22, 15, 0))
 
+    def test_daily_loss_after_holiday_monday_counts_friday(self):
+        # 祝日（勤労感謝の日）の月曜の次の火曜 2026-11-24 08:50 JST = 2026-11-23 23:50 UTC（#1050）
+        start = self._window_start_param(datetime(2026, 11, 23, 23, 50, tzinfo=timezone.utc))
+        # 金曜 2026-11-20 00:00 JST = 2026-11-19 15:00 UTC から数える
+        self.assertEqual(start, datetime(2026, 11, 19, 15, 0))
+
     def test_consecutive_losses_uses_paper_orders(self):
         broker = _make_broker()
         risk = RiskManager(broker)
