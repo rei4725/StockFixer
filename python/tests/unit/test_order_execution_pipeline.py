@@ -680,6 +680,70 @@ class TestRunDailyOrders(unittest.TestCase):
         with self.assertRaisesRegex(TypeError, "order_run_sink"):
             run_daily_orders(broker, market="jp", mode="paper")  # type: ignore[call-arg]
 
+    def test_sell_loop_reads_positions_once(self):
+        """#1095: 売りのループは保有の一覧を1回だけ読み、写しに無い銘柄と株数0の銘柄は飛ばす。"""
+        held = [
+            {"symbol": "9000", "qty": 100, "avg_price": 1000.0},
+            {"symbol": "9001", "qty": 200, "avg_price": 1000.0},
+            {"symbol": "9002", "qty": 300, "avg_price": 1000.0},
+            {"symbol": "9003", "qty": 400, "avg_price": 1000.0},
+        ]
+        # 売りのループで読む写しでは 9002 が消え、9003 の株数が0になっている
+        in_loop = [held[0], held[1], {"symbol": "9003", "qty": 0, "avg_price": 1000.0}]
+        calls_before_loop: list[int] = []
+        broker = _make_broker()
+        broker.get_positions.side_effect = lambda: held if not calls_before_loop else in_loop
+
+        def _snapshot(market):
+            calls_before_loop.append(broker.get_positions.call_count)
+            return None
+
+        def _mock_attach(df):
+            result = df.copy()
+            result["base_threshold"] = 0.001
+            result["threshold_scale"] = 1.0
+            result["effective_buy_threshold"] = 0.001
+            result["effective_sell_threshold"] = -0.001
+            return result
+
+        def _mock_score(df):
+            result = df.copy()
+            result["multi_horizon_score"] = result["diff_ratio"]
+            return result
+
+        predictions = _make_predictions(n_buy=0, n_sell=4)
+        patches = self._patch_pipeline(predictions)
+        patches += [
+            patch(
+                "src.trading.execution.runner._attach_dynamic_thresholds",
+                side_effect=_mock_attach,
+            ),
+            patch(
+                "src.trading.execution.runner.apply_multi_horizon_score_column",
+                side_effect=_mock_score,
+            ),
+            patch("src.trading.execution.runner._check_sl_tp_exits", return_value=set()),
+            patch("src.trading.execution.runner._load_exit_model", side_effect=_snapshot),
+        ]
+        _, patch_list = self._start_patches(patches)
+        try:
+            stats = run_daily_orders(
+                broker,
+                order_run_sink=InMemoryOrderRunSink(),
+                trade_diff_sink=InMemoryTradeDiffSink(),
+                prediction_repo=_PREDICTIONS,
+                market="jp",
+                mode="paper",
+            )
+        finally:
+            self._stop_patches(patch_list)
+
+        self.assertLessEqual(broker.get_positions.call_count - calls_before_loop[0], 1)
+        self.assertEqual(stats["sell_orders"], 2)
+        self.assertEqual(stats["errors"], 0)
+        sold = {c.args[0]: c.args[2] for c in broker.send_order.call_args_list}
+        self.assertEqual(sold, {"9000": 100, "9001": 200})
+
 
 class TestDynamicThresholdHelpers(unittest.TestCase):
     def test_market_threshold_scale_expands_on_high_dispersion(self):

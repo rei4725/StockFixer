@@ -383,6 +383,33 @@ class TestPaperBrokerShort(unittest.TestCase):
         self.assertEqual(pos[0], 100)
         self.assertAlmostEqual(pos[1], 1000.0)
 
+    def _settle_short_on_existing(self, provisional_price: float) -> None:
+        """100 株 @ 2000 の空売りに、50 株の空売りを 2200 で約定させる（#1115）"""
+        with _db_connection() as con:
+            con.execute(
+                "INSERT INTO paper_short_positions"
+                " (symbol, qty, avg_short_price) VALUES ('7203', 100, 2000.0)"
+            )
+        self._mock_market_data.get_ohlcv.return_value = pd.DataFrame(
+            {"Open": [2200.0], "High": [2250.0], "Low": [2150.0], "Close": [2210.0]},
+            index=pd.to_datetime(["2026-03-15"]),
+        )
+        self.broker.send_order("7203", OrderSide.SHORT, 50, price=provisional_price)
+        self.broker.settle_pending_orders()
+        with _db_connection() as con:
+            pos = con.execute(
+                "SELECT qty, avg_short_price FROM paper_short_positions WHERE symbol='7203'"
+            ).fetchone()
+        self.assertEqual(pos[0], 150)
+        # (2000*100 + 2200*50) / 150
+        self.assertAlmostEqual(pos[1], 2066.6667, places=3)
+
+    def test_settle_short_on_existing_averages_with_fill_price(self):
+        self._settle_short_on_existing(2200.0)
+
+    def test_settle_market_short_on_existing_ignores_zero_provisional_price(self):
+        self._settle_short_on_existing(0.0)
+
     def test_settle_short_cover_computes_realized_pnl(self):
         """SHORT_COVER の約定で realized_pnl が正しく計算されること"""
         # 空売りポジション (avg=1200) を用意
