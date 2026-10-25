@@ -81,11 +81,16 @@ def apply_fill(
             old_qty, old_avg = existing_short
             # 仮登録の平均は、前の保有と今回の注文の price（成行は 0.0）を混ぜている。
             # その price の分を約定の値段に置き換え、前の保有と約定の加重平均にする（#1115）
+            # 権利落ちの日は保有と qty が分割で直っているが、注文の行はまだ分割前なので、
+            # 仮登録の分は注文の行の price と株数の積（分割で変わらない金額）で引く
             order = con.execute(
-                "SELECT price FROM paper_orders WHERE order_id=%s", [order_id]
+                "SELECT price, qty FROM paper_orders WHERE order_id=%s", [order_id]
             ).fetchone()
-            provisional = float(order[0]) if order and order[0] is not None else fill_price
-            new_avg = old_avg + (fill_price - provisional) * qty / old_qty
+            if order and order[0] is not None and order[1] is not None:
+                provisional_amount = float(order[0]) * int(order[1])
+            else:
+                provisional_amount = fill_price * qty
+            new_avg = old_avg + (fill_price * qty - provisional_amount) / old_qty
             con.execute(
                 "UPDATE paper_short_positions SET avg_short_price=%s, "
                 "updated_at=CURRENT_TIMESTAMP WHERE symbol=%s",
