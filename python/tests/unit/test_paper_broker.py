@@ -741,6 +741,19 @@ class TestPaperBrokerGetPnlSummary(unittest.TestCase):
         self.assertEqual(result["trade_count"], 1)
         self.assertIsNotNone(result["started_at"])
 
+    def test_get_pnl_summary_includes_short_unrealized_loss(self):
+        """空売りの含み損が unrealized_pnl に入る（#1148）"""
+        with _db_connection() as con:
+            con.execute("DELETE FROM paper_short_positions")
+            con.execute(
+                "INSERT INTO paper_short_positions"
+                " (symbol, qty, avg_short_price) VALUES ('7203', 100, 1000.0)"
+            )
+        result = self.broker.get_pnl_summary()
+        # 売り 1,000 に対して現在値 1,020 → (1,000 - 1,020) × 100 = -2,000
+        self.assertAlmostEqual(result["unrealized_pnl"], -2000.0)
+        self.assertAlmostEqual(result["total_pnl"], -2000.0)
+
     def test_get_pnl_summary_total_pnl_equals_realized_plus_unrealized(self):
         result = self.broker.get_pnl_summary()
         self.assertAlmostEqual(

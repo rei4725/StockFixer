@@ -861,6 +861,47 @@ class TestTotalEquityBasedDrawdown(unittest.TestCase):
 
         self.assertAlmostEqual(dd, 0.1)
 
+    def test_total_equity_includes_short_unrealized_loss(self):
+        """空売りの含み損が総資産から引かれる（#1148）"""
+        broker = _make_broker(balance=500_000.0, positions=self._positions())
+        broker.get_short_positions.return_value = [
+            {
+                "symbol": "9984",
+                "qty": 100,
+                "avg_short_price": 1_000.0,
+                "current_price": 1_200.0,
+                "unrealized_pnl": -20_000.0,
+            }
+        ]
+        risk = RiskManager(broker)
+        # 795,000（現金＋買い持ちの時価）- 20,000（空売りの含み損）
+        self.assertAlmostEqual(risk.get_total_equity(), 775_000.0)
+
+    def test_total_equity_skips_unpriced_short(self):
+        """評価できない空売りは NaN にせず数えず、WARNING を出す（#844 と同じ扱い）"""
+        broker = _make_broker(balance=500_000.0, positions=self._positions())
+        broker.get_short_positions.return_value = [
+            {
+                "symbol": "9984",
+                "qty": 100,
+                "avg_short_price": 1_000.0,
+                "current_price": float("nan"),
+                "unrealized_pnl": float("nan"),
+            }
+        ]
+        risk = RiskManager(broker)
+        with self.assertLogs("src.trading.risk_manager", level="WARNING"):
+            equity = risk.get_total_equity()
+        self.assertAlmostEqual(equity, 795_000.0)
+
+    def test_total_equity_without_short_positions_method(self):
+        """get_short_positions を持たない broker では空売りを空として扱う"""
+        broker = MagicMock(spec=["get_balance", "get_positions", "broker_name"])
+        broker.get_balance.return_value = 500_000.0
+        broker.get_positions.return_value = self._positions()
+        risk = RiskManager(broker)
+        self.assertAlmostEqual(risk.get_total_equity(), 795_000.0)
+
     def test_total_equity_is_cached_across_calls(self):
         """発注ループ中に銘柄ごとへ再取得しないこと（ポジション時価取得は高コスト）"""
         broker = _make_broker(balance=500_000.0, positions=self._positions())
