@@ -206,6 +206,14 @@ class TestRecordOrderTargetExitDate(unittest.TestCase):
         """horizon 1 の期限は発注日のまま。"""
         self.assertEqual(self._target_exit_date(date(2026, 10, 23), OrderSide.BUY, 1), "2026-10-23")
 
+    def test_horizon3_from_market_holiday_starts_next_business_day(self):
+        """休場日（2026-11-23）の horizon 3 は翌営業日 11-24 を1日目にして木曜（#1131）。"""
+        self.assertEqual(self._target_exit_date(date(2026, 11, 23), OrderSide.BUY, 3), "2026-11-26")
+
+    def test_horizon1_from_market_holiday_is_next_business_day(self):
+        """休場日（2026-11-23）の horizon 1 は翌営業日 11-24（#1131）。"""
+        self.assertEqual(self._target_exit_date(date(2026, 11, 23), OrderSide.BUY, 1), "2026-11-24")
+
     def test_short_gets_same_target_exit_date(self):
         """SHORT にも BUY と同じ期限が付く。"""
         self.assertEqual(
