@@ -308,6 +308,10 @@ def run_longterm_backtest(
     equity_df = pd.DataFrame(equity_rows)
     trades_df = _trades_frame(portfolio)
 
-    benchmark = fetch_benchmark_returns(config.benchmark_ticker, config.start, config.end)
+    # yf.download の end は排他のため、資産曲線の最後の日の翌日を渡して終わりの日をそろえる。
+    benchmark_end = (pd.Timestamp(equity_df["date"].iloc[-1]) + pd.Timedelta(days=1)).strftime(
+        "%Y-%m-%d"
+    )
+    benchmark = fetch_benchmark_returns(config.benchmark_ticker, config.start, benchmark_end)
     metrics = compute_longterm_metrics(equity_df, trades_df, config, benchmark, portfolio.closed)
     return equity_df, metrics, trades_df

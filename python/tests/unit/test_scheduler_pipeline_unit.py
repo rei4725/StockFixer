@@ -552,6 +552,7 @@ class TestRunDailySettle(unittest.TestCase):
 
         mock_broker = mock_broker_cls.return_value
         mock_broker.settle_pending_orders.return_value = [{"symbol": "7203", "qty": 10}]
+        mock_broker.last_settle_errors = 0
         with _patch.dict("os.environ", {"AUTO_TRADE_MODE": "paper"}):
             run_daily_settle_orders()
         mock_broker.settle_pending_orders.assert_called()

@@ -542,6 +542,98 @@ class TestRunOptimizeBatch(unittest.TestCase):
         mock_json.assert_called_once()
         self.assertEqual(mock_json.call_args.args[2], "9984")
 
+    @patch("src.backtest.optimizer.batch.save_optimal_params_json")
+    @patch("src.backtest.optimizer.batch.save_optimization_results")
+    @patch("src.backtest.optimizer.batch.run_optimization")
+    def test_interrupt_keeps_already_computed_results(self, mock_run, mock_save, mock_json):
+        """途中の銘柄で中断されても、それより前に計算が終わった銘柄は保存済みであること（#1094）"""
+        import threading
+
+        from src.backtest.optimizer import run_optimize_batch
+        from src.domain.types import SymbolTask
+
+        class _Interrupted(BaseException):
+            pass
+
+        good_df = pd.DataFrame({"threshold": [0.02], "sharpe_ratio": [1.5]})
+        saved_two = threading.Event()
+
+        def _json(df, market, symbol, sort_by="sharpe_ratio"):
+            if mock_json.call_count >= 2:
+                saved_two.set()
+            return "/tmp/params.json"
+
+        def _run(market, symbol, **kwargs):
+            if symbol == "6758":
+                # 前の2銘柄の保存を待ってから中断する（待ち切れなければそのまま中断）
+                saved_two.wait(timeout=2)
+                raise _Interrupted()
+            return good_df
+
+        mock_run.side_effect = _run
+        mock_save.return_value = "/tmp/results.csv"
+        mock_json.side_effect = _json
+
+        tasks = [
+            SymbolTask(market="jp", symbol="7203"),
+            SymbolTask(market="jp", symbol="9984"),
+            SymbolTask(market="jp", symbol="6758"),
+        ]
+        with self.assertRaises(_Interrupted):
+            run_optimize_batch(tasks, model_type="XGBoostModel", max_workers=1)
+
+        saved_symbols = sorted(c.args[2] for c in mock_json.call_args_list)
+        self.assertEqual(saved_symbols, ["7203", "9984"])
+        self.assertEqual(sorted(c.args[2] for c in mock_save.call_args_list), ["7203", "9984"])
+
+    @patch("src.backtest.optimizer.batch.save_optimal_params_json")
+    @patch("src.backtest.optimizer.batch.save_optimization_results")
+    @patch("src.backtest.optimizer.batch.run_optimization")
+    @patch("src.backtest.optimizer.batch.get_optimal_params")
+    def test_full_run_saves_same_contents(self, mock_get, mock_run, mock_save, mock_json):
+        """全部終わったときの保存の呼び出しと結果サマリーが今までと同じであること（#1094）"""
+        from datetime import datetime
+
+        from src.backtest.optimizer import run_optimize_batch
+        from src.domain.types import SymbolTask
+
+        df_a = pd.DataFrame({"threshold": [0.02], "sharpe_ratio": [1.5]})
+        mock_get.side_effect = lambda m, s: (
+            {"timestamp": datetime.now().isoformat()} if s == "6758" else None
+        )
+
+        def _run(market, symbol, **kwargs):
+            if symbol == "9984":
+                raise ValueError("最適化エラー")
+            return df_a
+
+        mock_run.side_effect = _run
+        mock_save.return_value = "/tmp/results.csv"
+        mock_json.return_value = "/tmp/params.json"
+
+        results = run_optimize_batch(
+            [
+                SymbolTask(market="jp", symbol="7203"),
+                SymbolTask(market="jp", symbol="9984"),
+                SymbolTask(market="jp", symbol="6758"),
+            ],
+            model_type="XGBoostModel",
+            max_workers=2,
+            sort_by="total_return",
+            skip_days=7,
+        )
+
+        by_symbol = {r["symbol"]: r for r in results}
+        self.assertEqual(len(results), 3)
+        self.assertEqual(by_symbol["7203"], {"market": "jp", "symbol": "7203", "status": "success"})
+        self.assertEqual(
+            by_symbol["9984"],
+            {"market": "jp", "symbol": "9984", "status": "error", "error": "最適化エラー"},
+        )
+        self.assertEqual(by_symbol["6758"], {"market": "jp", "symbol": "6758", "status": "skipped"})
+        mock_save.assert_called_once_with(df_a, "jp", "7203")
+        mock_json.assert_called_once_with(df_a, "jp", "7203", sort_by="total_return")
+
 
 class TestRunOptunaBatch(unittest.TestCase):
     """run_optuna_batch のテスト"""

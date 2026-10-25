@@ -243,6 +243,29 @@ class TestLongtermBacktest(unittest.TestCase):
         self.assertEqual(metrics["benchmark_return"], 0.5)
         self.assertAlmostEqual(metrics["alpha"], round(metrics["total_return"] - 0.5, 6), places=6)
 
+    def test_benchmark_end_includes_last_equity_day(self):
+        """ベンチマークの end は資産曲線の最後の日の翌日（#1077）。
+
+        yf.download の end は排他のため、最後の日を含めるには翌日を渡す。
+        """
+        set_backtest_screening_port(_StubScreeningPort(_make_screen(["MID"])))
+
+        def _load_closes(market, start_date=None, end_date=None, timeframe="1d"):
+            return _closes_frame(["MID"]).reset_index(drop=True)
+
+        with patch.object(lb_prices, "load_raw_closes", side_effect=_load_closes), patch.object(
+            lb_engine,
+            "fetch_benchmark_returns",
+            return_value={"ticker": "1306.T", "total_return": 0.5, "start": "", "end": ""},
+        ) as fetch:
+            equity, _, _ = lb.run_longterm_backtest(
+                market="jp", start=_ENTRY_DATE, end=_END, max_positions=10
+            )
+        last_day = equity["date"].iloc[-1]
+        self.assertEqual(last_day, _END)
+        expected_end = (pd.Timestamp(last_day) + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+        fetch.assert_called_once_with("1306.T", _ENTRY_DATE, expected_end)
+
     def test_empty_universe(self):
         """対象データなしでも例外なく空の結果を返す。"""
         with patch.object(
