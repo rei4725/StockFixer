@@ -52,7 +52,8 @@ def get_monthly_kpis(
     """hit_rate / avg_slippage / drift_count を集約して返す。
 
     入力はすべて入口が AnalyticsQuery から取得して渡す（自分では読みに行かない）。
-    accuracy_df は窓の中の採点をすべて含む prediction_accuracy(horizon=1) の戻り値、
+    accuracy_df は窓の中の採点をすべて含む prediction_accuracy(horizon=1) の戻り値
+    （model_name 列があれば production の行だけで hit_rate を出す）、
     drift_df は drift_summary(horizon=1, recent_n=days) の戻り値を想定する。
     drift_thresholds は入口が読んだドリフト判定の設定値（省略時は既定値）。
 
@@ -84,6 +85,9 @@ def _compute_hit_rate(accuracy_df: pd.DataFrame, days: int = _REPORT_DAYS) -> Op
     df = accuracy_df.copy()
     if df.empty or "direction_match" not in df.columns:
         return None
+    # challenger の影の予想の採点を本番の的中率に混ぜない（#1090）
+    if "model_name" in df.columns:
+        df = df[df["model_name"] == "production"]
     if "checked_at" in df.columns:
         df["checked_at"] = pd.to_datetime(df["checked_at"], errors="coerce")
         cutoff = datetime.now() - timedelta(days=days)
