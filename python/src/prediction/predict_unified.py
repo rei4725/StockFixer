@@ -391,6 +391,7 @@ def predict_with_unified_model(
     # 各モデルで予測（キャッシュされたモデルを使用）
     pred_prices = []
     succeeded_model_names = []
+    last_model_error: Optional[Exception] = None
     for model_name in model_types:
         try:
             model = get_cached_model(model_name)
@@ -424,7 +425,8 @@ def predict_with_unified_model(
             pred_price = current_price * (1 + pred_return)
             pred_prices.append(pred_price)
             succeeded_model_names.append(model_name)
-        except Exception:
+        except Exception as e:
+            last_model_error = e
             # WARNING では埋もれる。1モデル落ちるとアンサンブルが単一モデルに
             # 縮退したまま予測値は出続けるため、失敗が見えないと気づけない（#615）。
             logger.error(
@@ -437,6 +439,11 @@ def predict_with_unified_model(
             continue
 
     if not pred_prices:
+        # 例外で全滅したときは None にせず投げ、呼び出し元の例外の数と知らせに乗せる（#1140）
+        if last_model_error is not None:
+            raise RuntimeError(
+                f"全モデルの予測が例外で失敗: market={market} symbol={symbol}"
+            ) from last_model_error
         return None
 
     # model_metrics の directional_accuracy をソフトマックス重みでアンサンブル（R-202）
