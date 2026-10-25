@@ -7,7 +7,7 @@ Issue #511: 肥大化した portfolio.py を責務分割。
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import numpy as np
 import pandas as pd
@@ -66,12 +66,14 @@ def _simulate_portfolio(
     max_sector_positions: int,
     use_sector_rotation: bool = False,
     execution_by_market: Optional[dict[str, ExecutionModel]] = None,
+    open_matrix: Optional[pd.DataFrame] = None,
 ) -> tuple[pd.DataFrame, list[dict[str, Any]]]:
     """
     ポートフォリオシミュレーションを実行する。
 
-    毎リバランス日に Top-N 銘柄をスコア比例配分で保有し、
-    日次の portfolio_value と equal_weight_value を記録する。
+    毎リバランス日 t のスコアで Top-N 銘柄とスコア比例のウェイトを決め、
+    翌営業日 t+1 の始値（open_matrix）で売買する（#1099）。最後の日のスコアは約定させない。
+    日次の portfolio_value と equal_weight_value を終値で記録する。
 
     execution_by_market を与えると、銘柄の鍵の市場（jp_・us_）ごとにその
     ExecutionModel で売買のコストを計算する（#847）。無い市場は execution を使う。
@@ -106,14 +108,42 @@ def _simulate_portfolio(
     # Issue #846: 評価と売却は、その日までの最後の値段（過去の方向にだけ埋めた値）で行う。
     # 購入はその日に値段のある銘柄だけにする。
     last_close_matrix = close_matrix.sort_index().ffill()
+    # Issue #1099: 日 t のスコアは t の引けの後にしか出せないため、売買は翌営業日 t+1 の
+    # 始値で約定させる（backtester の execution_lag=1 と同じ）。Open の表が無いときは終値の表で代える。
+    fill_matrix = open_matrix if open_matrix is not None else close_matrix
 
-    for date in score_matrix.index:
+    # 前のリバランスの日に決めて、次の日の寄りで約定させる注文
+    pending: Optional[dict[str, Any]] = None
+    prev_last_prices = pd.Series(dtype=float)
+    dates = list(score_matrix.index)
+
+    for i, date in enumerate(dates):
         date_str = str(date)[:10]
-        prices_today = close_matrix.loc[date].dropna()
         last_prices = last_close_matrix.loc[date].dropna()
 
-        # ─ リバランス ─
-        if date_str in rebalance_set:
+        # ─ 前の日に決めた売買を、この日の始値で約定 ─
+        if pending is not None:
+            fill_prices = (
+                fill_matrix.loc[date].dropna()
+                if date in fill_matrix.index
+                else pd.Series(dtype=float)
+            )
+            # 始値の無い保有は、前の日までの最後の値段で売る（#846）
+            sell_prices = prev_last_prices.copy()
+            sell_prices.update(fill_prices)
+            cash, holdings, records = _fill_rebalance(
+                cash, holdings, pending, fill_prices, sell_prices, date_str, _exec
+            )
+            holdings_records.extend(records)
+            eq_syms = [s for s in pending["eq_symbols"] if s in fill_prices.index]
+            if eq_syms:
+                eq_cash, eq_holdings = _fill_equal_weight(
+                    eq_cash, eq_holdings, eq_syms, fill_prices, sell_prices, _exec
+                )
+            pending = None
+
+        # ─ リバランス（最後の日のスコアは約定させない） ─
+        if date_str in rebalance_set and i + 1 < len(dates):
             scores_today = score_matrix.loc[date].dropna()
 
             # セクターローテーション: レジームに応じてスコアを調整
@@ -143,60 +173,16 @@ def _simulate_portfolio(
                 else:
                     turnover = 1.0
 
-                # 既存保有を全売却
-                for sym, pos in holdings.items():
-                    if sym in last_prices.index:
-                        cash += _exec(sym).sell_proceeds(pos["qty"], last_prices[sym])
-
-                holdings = {}
-
-                # 新規銘柄を購入
-                total_budget = cash
-                for sym_key, w in weights.items():
-                    sym = str(sym_key)
-                    if sym not in prices_today.index:
-                        continue
-                    budget = total_budget * float(w)
-                    price = prices_today[sym]
-                    if price <= 0:
-                        continue
-                    qty = _exec(sym).max_affordable_qty(budget, price)
-                    if qty > 0:
-                        cost = _exec(sym).buy_cost(qty, price)
-                        cash -= cost
-                        holdings[sym] = {"qty": qty, "price": price}
-
-                        holdings_records.append(
-                            {
-                                "rebalance_date": date_str,
-                                "symbol": sym,
-                                "sector": _get_portfolio_symbol_sector(sym),
-                                "weight": float(w),
-                                "score": float(top_candidates.get(sym, 0)),
-                                "price": price,
-                                "qty": qty,
-                                "turnover": turnover,
-                            }
-                        )
-
-                # 等分戦略のリバランス（全有効銘柄に均等配分）
-                valid_syms = [s for s in scores_today.index if s in prices_today.index]
-                if valid_syms:
-                    for sym, pos in eq_holdings.items():
-                        if sym in last_prices.index:
-                            eq_cash += _exec(sym).sell_proceeds(pos["qty"], last_prices[sym])
-                    eq_holdings = {}
-                    eq_per = eq_cash / len(valid_syms)
-                    for sym in valid_syms:
-                        price = prices_today[sym]
-                        if price <= 0:
-                            continue
-                        qty = _exec(sym).max_affordable_qty(eq_per, price)
-                        if qty > 0:
-                            eq_cash -= _exec(sym).buy_cost(qty, price)
-                            eq_holdings[sym] = {"qty": qty}
-
+                pending = {
+                    "rebalance_date": date_str,
+                    "weights": weights,
+                    "scores": top_candidates,
+                    "turnover": turnover,
+                    "eq_symbols": [str(s) for s in scores_today.index],
+                }
                 prev_symbols = new_symbols
+
+        prev_last_prices = last_prices
 
         # ─ 日次ポートフォリオ価値 ─
         pf_value = cash + sum(
@@ -216,6 +202,76 @@ def _simulate_portfolio(
 
     equity_df = pd.DataFrame(equity_rows)
     return equity_df, holdings_records
+
+
+def _fill_rebalance(
+    cash: float,
+    holdings: dict[str, dict[str, Any]],
+    pending: dict[str, Any],
+    fill_prices: pd.Series,
+    sell_prices: pd.Series,
+    fill_date: str,
+    exec_for: Callable[[str], ExecutionModel],
+) -> tuple[float, dict[str, dict[str, Any]], list[dict[str, Any]]]:
+    """既存保有を全売却し、決めたウェイトで約定の日の始値で買う（#1099）。"""
+    for sym, pos in holdings.items():
+        if sym in sell_prices.index:
+            cash += exec_for(sym).sell_proceeds(pos["qty"], sell_prices[sym])
+
+    new_holdings: dict[str, dict[str, Any]] = {}
+    records: list[dict[str, Any]] = []
+    total_budget = cash
+    for sym_key, w in pending["weights"].items():
+        sym = str(sym_key)
+        if sym not in fill_prices.index:
+            continue
+        budget = total_budget * float(w)
+        price = fill_prices[sym]
+        if price <= 0:
+            continue
+        qty = exec_for(sym).max_affordable_qty(budget, price)
+        if qty > 0:
+            cash -= exec_for(sym).buy_cost(qty, price)
+            new_holdings[sym] = {"qty": qty, "price": price}
+            records.append(
+                {
+                    "rebalance_date": pending["rebalance_date"],
+                    "fill_date": fill_date,
+                    "symbol": sym,
+                    "sector": _get_portfolio_symbol_sector(sym),
+                    "weight": float(w),
+                    "score": float(pending["scores"].get(sym, 0)),
+                    "price": price,
+                    "qty": qty,
+                    "turnover": pending["turnover"],
+                }
+            )
+    return cash, new_holdings, records
+
+
+def _fill_equal_weight(
+    eq_cash: float,
+    eq_holdings: dict[str, dict[str, Any]],
+    valid_syms: list[str],
+    fill_prices: pd.Series,
+    sell_prices: pd.Series,
+    exec_for: Callable[[str], ExecutionModel],
+) -> tuple[float, dict[str, dict[str, Any]]]:
+    """等分戦略のリバランス（約定の日に始値のある銘柄に均等配分、#1099）。"""
+    for sym, pos in eq_holdings.items():
+        if sym in sell_prices.index:
+            eq_cash += exec_for(sym).sell_proceeds(pos["qty"], sell_prices[sym])
+    new_holdings: dict[str, dict[str, Any]] = {}
+    eq_per = eq_cash / len(valid_syms)
+    for sym in valid_syms:
+        price = fill_prices[sym]
+        if price <= 0:
+            continue
+        qty = exec_for(sym).max_affordable_qty(eq_per, price)
+        if qty > 0:
+            eq_cash -= exec_for(sym).buy_cost(qty, price)
+            new_holdings[sym] = {"qty": qty}
+    return eq_cash, new_holdings
 
 
 def _get_portfolio_symbol_sector(sym_key: str) -> str:
