@@ -23,3 +23,35 @@ def positions_market_value(positions: Iterable[Mapping[str, Any]], logger: loggi
             continue
         market_value += float(p.get("qty", 0)) * price
     return market_value
+
+
+def short_positions_unrealized_pnl(
+    positions: Iterable[Mapping[str, Any]], logger: logging.Logger
+) -> float:
+    """空売りの保有の含み損益の合計を返す（#1148）。
+
+    空売りは建てても現金が動かないため、総資産には時価ではなく含み損益を足す。
+    評価できない保有は買い持ちの positions_market_value と同じく数えずに飛ばし、
+    NaN で合計ごと NaN にしない。WARNING は呼び出し側の logger に出す。
+    """
+    total = 0.0
+    for p in positions:
+        pnl = float(p.get("unrealized_pnl", 0.0))
+        if math.isnan(pnl):
+            logger.warning(f"[risk] {p.get('symbol')}: 空売りの現在値が取れず含み損益を数えない")
+            continue
+        total += pnl
+    return total
+
+
+def broker_positions_value(broker: Any, logger: logging.Logger) -> float:
+    """broker の保有を総資産に足す額（買い持ちの時価 + 空売りの含み損益）を返す（#1148）。
+
+    get_short_positions を持たない broker（AttributeError）は空売りを空として扱う。
+    """
+    market_value = positions_market_value(broker.get_positions(), logger)
+    try:
+        short_positions = broker.get_short_positions()
+    except AttributeError:
+        short_positions = []
+    return market_value + short_positions_unrealized_pnl(short_positions, logger)

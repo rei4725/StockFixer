@@ -18,8 +18,13 @@ logger = get_logger(__name__)
 
 
 def _nth_business_day(order_day: date, horizon: int) -> date:
-    """発注日を1日目として horizon 番目の東証の営業日を返す（horizon 1 は発注日）。"""
+    """発注日を1日目として horizon 番目の東証の営業日を返す（horizon 1 は発注日）。
+
+    発注日が休場日なら、約定する次の営業日を1日目にする (#1131)。
+    """
     day = order_day
+    while not is_jp_business_day(day):
+        day += timedelta(days=1)
     for _ in range(horizon - 1):
         day += timedelta(days=1)
         while not is_jp_business_day(day):
@@ -117,8 +122,8 @@ def _record_order(
     if mode == "paper" and order_id:
         target_exit_date: str | None = None
         if horizon is not None and side in (OrderSide.BUY, OrderSide.SHORT):
-            # 保有の最後の JST の日（発注日を1日目とする horizon 番目の東証の営業日）。
-            # 決済はその次の日の朝 (#949, #1119)
+            # 保有の最後の JST の日（発注日を1日目とする horizon 番目の東証の営業日。
+            # 休場日の発注は次の営業日を1日目にする）。決済はその次の日の朝 (#949, #1119, #1131)
             target_exit_date = _nth_business_day(now_jst().date(), horizon).isoformat()
         try:
             _link_paper_order_metadata(

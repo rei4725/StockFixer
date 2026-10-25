@@ -22,6 +22,7 @@ from src.domain.types import TradeDiffRecord
 from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
 from src.trading.brokers.paper import split_adjust as sa
 from src.trading.brokers.paper.fill import apply_fill
+from src.trading.position_valuation import short_positions_unrealized_pnl
 from src.utils.db._connection import _db_connection
 from src.utils.japan_time import now_jst
 from src.utils.logger import get_logger
@@ -504,6 +505,8 @@ class PaperBroker(BrokerBase):
         # 含み損益（現在ポジションから計算）
         positions = self.get_positions()
         unrealized_pnl = sum(p["unrealized_pnl"] for p in positions)
+        # 空売りの含み損益も足す（#1148）
+        unrealized_pnl += short_positions_unrealized_pnl(self.get_short_positions(), logger)
 
         balance = self.get_balance()
         return {

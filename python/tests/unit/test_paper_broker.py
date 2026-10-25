@@ -429,6 +429,42 @@ class TestPaperBrokerShort(unittest.TestCase):
         # realized_pnl = (avg_short_price - fill_price) * qty = (1200 - 1000) * 100
         self.assertAlmostEqual(row[0], 20000.0)
 
+    def _short_then_cover(self, cover_open: float) -> float:
+        """100 株を 1000 で空売りし、cover_open で返済した後の残高を返す（#1147）"""
+        self.broker.send_order("7203", OrderSide.SHORT, 100, price=1000.0)
+        self.broker.settle_pending_orders()
+        self._mock_market_data.get_ohlcv.return_value = pd.DataFrame(
+            {
+                "Open": [cover_open],
+                "High": [cover_open + 50.0],
+                "Low": [cover_open - 50.0],
+                "Close": [cover_open],
+            },
+            index=pd.to_datetime(["2026-03-15"]),
+        )
+        self.broker.send_order("7203", OrderSide.SHORT_COVER, 100)
+        self.broker.settle_pending_orders()
+        with _db_connection() as con:
+            return con.execute("SELECT balance FROM paper_balance").fetchone()[0]
+
+    def test_settle_short_cover_at_loss_reduces_balance(self):
+        """高い値で返済すると、損の分だけ残高が減ること"""
+        balance = self._short_then_cover(1100.0)
+        self.assertAlmostEqual(balance, 1_000_000.0 - (1100.0 - 1000.0) * 100)
+
+    def test_settle_short_cover_at_profit_increases_balance(self):
+        """安い値で返済すると、益の分だけ残高が増えること"""
+        balance = self._short_then_cover(900.0)
+        self.assertAlmostEqual(balance, 1_000_000.0 + (1000.0 - 900.0) * 100)
+
+    def test_settle_short_cover_without_position_keeps_balance(self):
+        """保有が見つからない返済は残高を動かさないこと"""
+        self.broker.send_order("7203", OrderSide.SHORT_COVER, 100)
+        self.broker.settle_pending_orders()
+        with _db_connection() as con:
+            balance = con.execute("SELECT balance FROM paper_balance").fetchone()[0]
+        self.assertAlmostEqual(balance, 1_000_000.0)
+
     def test_settle_short_cover_reduces_position(self):
         """SHORT_COVER 約定後に paper_short_positions の qty が減少すること"""
         with _db_connection() as con:
@@ -704,6 +740,19 @@ class TestPaperBrokerGetPnlSummary(unittest.TestCase):
         self.assertAlmostEqual(result["realized_pnl"], 5000.0)
         self.assertEqual(result["trade_count"], 1)
         self.assertIsNotNone(result["started_at"])
+
+    def test_get_pnl_summary_includes_short_unrealized_loss(self):
+        """空売りの含み損が unrealized_pnl に入る（#1148）"""
+        with _db_connection() as con:
+            con.execute("DELETE FROM paper_short_positions")
+            con.execute(
+                "INSERT INTO paper_short_positions"
+                " (symbol, qty, avg_short_price) VALUES ('7203', 100, 1000.0)"
+            )
+        result = self.broker.get_pnl_summary()
+        # 売り 1,000 に対して現在値 1,020 → (1,000 - 1,020) × 100 = -2,000
+        self.assertAlmostEqual(result["unrealized_pnl"], -2000.0)
+        self.assertAlmostEqual(result["total_pnl"], -2000.0)
 
     def test_get_pnl_summary_total_pnl_equals_realized_plus_unrealized(self):
         result = self.broker.get_pnl_summary()
