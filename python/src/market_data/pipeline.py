@@ -20,7 +20,6 @@ from src.market_data.bar_close import drop_unclosed_bars
 from src.market_data.base import DataSourceBase
 from src.market_data.loader import (
     fetch_cross_asset_features,
-    get_latest_business_day,
     get_raw_ohlcv_from_db,
     get_stock_data,
     merge_market_data,
@@ -40,6 +39,7 @@ from src.market_data.technical import add_technical_indicators, create_basic_lag
 from src.market_data.wikipedia_features import add_pageview_features, fetch_pageview_features
 from src.utils.data_path_utils import get_ticker, normalize_col
 from src.utils.db import upsert_stock_features
+from src.utils.jp_market_holidays import is_jp_business_day
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -136,13 +136,13 @@ def fetch_stock_data_with_features(
                     except Exception as e:
                         logger.error(f"Raw OHLCV保存エラー（処理継続）: {e}", exc_info=True)
             else:
-                stale_weekdays = _count_weekdays_behind(db_latest_date, end_date)
+                stale_weekdays = _count_weekdays_behind(db_latest_date, end_date, market)
                 if stale_weekdays > STALE_BARS_MAX_WEEKDAYS:
                     # 取得の失敗も yf_client が空で返すため、ここでは止まった足と区別できない
                     logger.warning(
                         f"足が止まったため特徴量生成をスキップ: {market}/{symbol} "
                         f"（DB の最新の足 {db_latest_date.strftime('%Y-%m-%d')}、"
-                        f"平日で {stale_weekdays}日 > {STALE_BARS_MAX_WEEKDAYS}日 古く、"
+                        f"営業日で {stale_weekdays}日 > {STALE_BARS_MAX_WEEKDAYS}日 古く、"
                         "差分データなし。取得の失敗か上場廃止の可能性）"
                     )
                     return None
@@ -307,22 +307,20 @@ def _raw_only_result(market: str, symbol: str, raw_data_to_save) -> Optional[tup
     return (market, symbol, None, raw_data_to_save, None)
 
 
-def _count_weekdays_behind(db_latest_date: pd.Timestamp, end_date: str) -> int:
+def _count_weekdays_behind(db_latest_date: pd.Timestamp, end_date: str, market: str = "us") -> int:
     """
-    DB の最新の足の翌日から、あるべき最新の営業日までの平日の数を返す。
+    DB の最新の足の翌日から end_date（YYYY-MM-DD）までの、足りない営業日の数を返す。
 
-    Args:
-        db_latest_date: DB 内の最新の足の日付
-        end_date: 目標終了日（YYYY-MM-DD）
-
-    Returns:
-        足りない平日の数（祝日は数え分けない）。
+    end_date までに数えるのは、あるべき最新の営業日までに数えるのと同じ数になる。
+    jp は東証の休場日も除き（#1105）、ほかの市場は土日だけを除く（祝日は数え分けない）。
     """
-    expected_latest = pd.Timestamp(get_latest_business_day(end_date)).normalize()
     if db_latest_date.tzinfo is not None:
         db_latest_date = db_latest_date.tz_localize(None)
     next_day = db_latest_date.normalize() + timedelta(days=1)
-    return len(pd.bdate_range(next_day, expected_latest))
+    days = pd.bdate_range(next_day, pd.Timestamp(end_date).normalize())
+    if market == "jp":
+        return sum(1 for day in days if is_jp_business_day(day.date()))
+    return len(days)
 
 
 def _build_latest_feature_row(df: pd.DataFrame, lag_columns: list) -> Optional[pd.DataFrame]:
