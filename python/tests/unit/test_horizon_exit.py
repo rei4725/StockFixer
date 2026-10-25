@@ -421,8 +421,9 @@ class TestHorizonExitJstDate(unittest.TestCase):
         recovery_day = self._first_sell_day("7203")
 
         self.assertEqual(scheduled_day, recovery_day)
-        # 2026-10-24（土）を1日目に 10-26（月）・10-27（火）と営業日で数え、10-28 の朝に売る (#1119)
-        self.assertEqual(scheduled_day, date(2026, 10, 28))
+        # 2026-10-24（土）の発注は約定する 10-26（月）を1日目に 10-27（火）・10-28（水）と
+        # 営業日で数え、10-29 の朝に売る (#1119, #1131)
+        self.assertEqual(scheduled_day, date(2026, 10, 29))
 
     def test_recovery_run_does_not_exit_position_before_due(self):
         # 2026-10-23（金）JST の定時の回で出した horizon=2 の BUY は、期限が 10-26（月）で
