@@ -391,6 +391,8 @@ def run_horizon_exit_check() -> None:
         trade_diff_sink=PostgresTradeDiffSink(),
         notifier=DiscordNotificationAdapter(),
     )
+    # 送った売りは約定まで保有を変えないので、保有の一覧はループの前に1回だけ読む（#1095）
+    positions = broker.get_positions()
     exited: list[str] = []
     failed: list[str] = []
     for symbol in symbols_to_exit:
@@ -398,7 +400,6 @@ def run_horizon_exit_check() -> None:
             # get_positions は約定前の SELL を引かないため、重ねると売りの二重発注になる
             logger.info("[horizon_exit] 約定前の SELL があるためスキップ: %s", symbol)
             continue
-        positions = broker.get_positions()
         pos = next((p for p in positions if p["symbol"].replace(".T", "") == symbol), None)
         if pos is None or pos.get("qty", 0) <= 0:
             continue
