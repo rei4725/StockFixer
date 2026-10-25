@@ -1,6 +1,6 @@
 """注文結果の記録と live 約定差分の同期。"""
 
-from datetime import timedelta
+from datetime import date, timedelta
 from typing import Any
 
 from src.domain.ports import TradeDiffSink
@@ -8,6 +8,17 @@ from src.domain.types import TradeDiffRecord
 from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
 from src.utils.db import db_connection
 from src.utils.japan_time import now_jst
+from src.utils.jp_market_holidays import is_jp_business_day
+
+
+def _nth_business_day(order_day: date, horizon: int) -> date:
+    """発注日を1日目として horizon 番目の東証の営業日を返す（horizon 1 は発注日）。"""
+    day = order_day
+    for _ in range(horizon - 1):
+        day += timedelta(days=1)
+        while not is_jp_business_day(day):
+            day += timedelta(days=1)
+    return day
 
 
 def _link_paper_order_metadata(
@@ -100,9 +111,9 @@ def _record_order(
     if mode == "paper" and order_id:
         target_exit_date: str | None = None
         if horizon is not None and side in (OrderSide.BUY, OrderSide.SHORT):
-            # 保有の最後の JST の日（発注日＋horizon−1）。決済はその次の日の朝 (#949)
-            last_day = now_jst().date() + timedelta(days=horizon - 1)
-            target_exit_date = last_day.isoformat()
+            # 保有の最後の JST の日（発注日を1日目とする horizon 番目の東証の営業日）。
+            # 決済はその次の日の朝 (#949, #1119)
+            target_exit_date = _nth_business_day(now_jst().date(), horizon).isoformat()
         _link_paper_order_metadata(
             order_id, market, predicted_at, signal_price, horizon, target_exit_date
         )
