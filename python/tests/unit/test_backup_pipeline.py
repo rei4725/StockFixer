@@ -10,6 +10,7 @@
 """
 
 import os
+import subprocess
 from unittest.mock import MagicMock, patch
 
 from src.orchestration.backup_pipeline import _prune_old_backups, _run_pg_dump, run_db_backup
@@ -125,6 +126,88 @@ class TestRunDbBackup:
         assert result["size_mb"] == 0.0
         assert result["pruned_count"] == 0
 
+    def _run_failing_backup(self, backup_root, side_effect):
+        def _fail(url, dest):
+            open(dest, "wb").write(b"partial")
+            raise side_effect
+
+        with (
+            patch(
+                "src.orchestration.backup_pipeline.get_backup_dir",
+                return_value=str(backup_root),
+            ),
+            patch("src.orchestration.backup_pipeline._run_pg_dump", side_effect=_fail),
+            patch(
+                "src.orchestration.backup_pipeline.get_database_url",
+                return_value="postgresql://u:p@h:5432/db",
+            ),
+        ):
+            return run_db_backup()
+
+    def test_failure_removes_folder_of_this_run(self, tmp_path):
+        backup_root = tmp_path / "backups"
+        _write_good_backup(backup_root / "20260101_000000")
+
+        result = self._run_failing_backup(backup_root, RuntimeError("pg_dump 失敗 (code=1)"))
+
+        assert result["error"] is not None
+        assert not os.path.exists(os.path.dirname(result["backup_path"]))
+        assert os.listdir(backup_root) == ["20260101_000000"]
+
+    def test_timeout_removes_folder_of_this_run(self, tmp_path):
+        backup_root = tmp_path / "backups"
+
+        result = self._run_failing_backup(
+            backup_root, subprocess.TimeoutExpired(cmd="pg_dump", timeout=300)
+        )
+
+        assert result["error"] is not None
+        assert not os.path.exists(os.path.dirname(result["backup_path"]))
+        assert os.listdir(backup_root) == []
+
+    def test_success_keeps_newest_five_good_generations_among_failure_leftovers(self, tmp_path):
+        backup_root = tmp_path / "backups"
+        good = [
+            "20260101_000000",
+            "20260103_000000",
+            "20260105_000000",
+            "20260107_000000",
+            "20260109_000000",
+        ]
+        for name in good:
+            _write_good_backup(backup_root / name)
+        (backup_root / "20260110_000000").mkdir()
+        (backup_root / "20260111_000000").mkdir()
+        (backup_root / "20260111_000000" / "other.txt").write_bytes(b"x")
+        (backup_root / "20260112_000000").mkdir()
+        (backup_root / "20260112_000000" / "stockfixer.dump").write_bytes(b"")
+
+        with (
+            patch(
+                "src.orchestration.backup_pipeline.get_backup_dir", return_value=str(backup_root)
+            ),
+            patch(
+                "src.orchestration.backup_pipeline._run_pg_dump",
+                side_effect=lambda url, dest: open(dest, "wb").write(b"x" * 2048),
+            ),
+            patch(
+                "src.orchestration.backup_pipeline.get_database_url",
+                return_value="postgresql://u:p@h:5432/db",
+            ),
+        ):
+            result = run_db_backup()
+
+        assert result["error"] is None
+        this_run = os.path.basename(os.path.dirname(result["backup_path"]))
+        assert sorted(os.listdir(backup_root)) == good[1:] + [this_run]
+        for name in good[1:]:
+            assert (backup_root / name / "stockfixer.dump").read_bytes() == b"x" * 2048
+
+
+def _write_good_backup(folder):
+    folder.mkdir(parents=True)
+    (folder / "stockfixer.dump").write_bytes(b"x" * 2048)
+
 
 class TestPruneOldBackups:
     def test_returns_zero_when_backup_root_missing(self, tmp_path):
@@ -141,7 +224,7 @@ class TestPruneOldBackups:
             "20260106_000000",
             "20260107_000000",
         ]:
-            (tmp_path / name).mkdir()
+            _write_good_backup(tmp_path / name)
 
         deleted = _prune_old_backups(str(tmp_path), 5)
 
@@ -157,7 +240,7 @@ class TestPruneOldBackups:
 
     def test_no_deletion_when_within_max_generations(self, tmp_path):
         for name in ["20260101_000000", "20260102_000000"]:
-            (tmp_path / name).mkdir()
+            _write_good_backup(tmp_path / name)
 
         deleted = _prune_old_backups(str(tmp_path), 5)
 
