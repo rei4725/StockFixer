@@ -21,10 +21,10 @@ def _build_signal_matrix(
     source: str,
     threshold: float,
     ensemble: bool,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     全銘柄について学習 → 予測し、date × symbol の
-    スコアマトリクスと Close 価格マトリクスを返す。
+    スコアマトリクスと Close・Open 価格マトリクスを返す。
 
     学習データは train_ratio で分割し、テスト期間の予測のみ収録する。
     """
@@ -33,6 +33,7 @@ def _build_signal_matrix(
 
     score_dict: dict[str, pd.Series] = {}
     close_dict: dict[str, pd.Series] = {}
+    open_dict: dict[str, pd.Series] = {}
 
     for market, symbol in symbols:
         key = f"{market}_{symbol}"
@@ -82,6 +83,10 @@ def _build_signal_matrix(
             close_col = "Close" if "Close" in test_df.columns else "close"
             if close_col in test_df.columns:
                 close_dict[key] = test_df[close_col].reindex(X_test.index)
+            # Issue #1099: 行 t のスコアの売買は t+1 の始値で約定させるため、Open も持つ
+            open_col = "Open" if "Open" in test_df.columns else "open"
+            if open_col in test_df.columns:
+                open_dict[key] = test_df[open_col].reindex(X_test.index)
 
             logger.info(f"[PF] 予測完了: {key} ({len(pred)}行)")
 
@@ -89,7 +94,7 @@ def _build_signal_matrix(
             logger.error(f"[PF] 銘柄スキップ ({key}): {e}", exc_info=True)
 
     if not score_dict:
-        return pd.DataFrame(), pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
     score_matrix = pd.DataFrame(score_dict).sort_index()
     close_matrix = pd.DataFrame(close_dict).sort_index()
@@ -98,5 +103,7 @@ def _build_signal_matrix(
     common_idx = score_matrix.index.intersection(close_matrix.index)
     score_matrix = score_matrix.loc[common_idx]
     close_matrix = close_matrix.loc[common_idx]
+    # Open の無い銘柄・日は NaN にし、その日の始値では買わない
+    open_matrix = pd.DataFrame(open_dict).reindex(index=common_idx, columns=close_matrix.columns)
 
-    return score_matrix, close_matrix
+    return score_matrix, close_matrix, open_matrix
