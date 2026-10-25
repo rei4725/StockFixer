@@ -8,17 +8,27 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
-from pandas.tseries.offsets import BDay
 
 from config.settings import STALE_BARS_MAX_WEEKDAYS
 from src.prediction.types import PredictionResult
+from src.utils.jp_market_holidays import is_jp_business_day
 
 
 def _latest_weekday() -> pd.Timestamp:
     today = pd.Timestamp.today().normalize()
-    while today.weekday() >= 5:
+    while not is_jp_business_day(today.date()):
         today -= pd.Timedelta(days=1)
     return today
+
+
+def _business_days_before(n: int) -> pd.Timestamp:
+    """直近の東証の営業日から東証の営業日で n 日戻った日（#1106）。"""
+    day = _latest_weekday()
+    for _ in range(n):
+        day -= pd.Timedelta(days=1)
+        while not is_jp_business_day(day.date()):
+            day -= pd.Timedelta(days=1)
+    return day
 
 
 def _make_df(last_date: pd.Timestamp, n: int = 60) -> pd.DataFrame:
@@ -73,7 +83,7 @@ class TestPredictSingleStockStaleBars(unittest.TestCase):
         return result, mock_mm
 
     def test_returns_none_and_warns_when_last_bar_is_stale(self):
-        last_date = _latest_weekday() - BDay(STALE_BARS_MAX_WEEKDAYS + 1)
+        last_date = _business_days_before(STALE_BARS_MAX_WEEKDAYS + 1)
         with self.assertLogs("src.prediction.predict_single", level=logging.WARNING) as logs:
             result, mock_mm = self._predict(_make_df(last_date))
 
@@ -83,7 +93,7 @@ class TestPredictSingleStockStaleBars(unittest.TestCase):
         self.assertTrue(any(last_date.strftime("%Y-%m-%d") in line for line in logs.output))
 
     def test_returns_prediction_when_last_bar_is_within_limit(self):
-        last_date = _latest_weekday() - BDay(STALE_BARS_MAX_WEEKDAYS)
+        last_date = _business_days_before(STALE_BARS_MAX_WEEKDAYS)
         result, _ = self._predict(_make_df(last_date))
 
         self.assertIsInstance(result, PredictionResult)
@@ -95,7 +105,7 @@ class TestPredictSingleStockStaleBars(unittest.TestCase):
         self.assertIsInstance(result, PredictionResult)
 
     def test_handles_tz_aware_index(self):
-        df = _make_df(_latest_weekday() - BDay(STALE_BARS_MAX_WEEKDAYS + 1))
+        df = _make_df(_business_days_before(STALE_BARS_MAX_WEEKDAYS + 1))
         df.index = df.index.tz_localize("Asia/Tokyo")
         result, _ = self._predict(df)
 
@@ -127,7 +137,7 @@ class TestExplainPredictionShapStaleBars(unittest.TestCase):
                 return explain_prediction_shap("jp", "5202")
 
     def test_returns_none_and_warns_when_last_bar_is_stale(self):
-        last_date = _latest_weekday() - BDay(STALE_BARS_MAX_WEEKDAYS + 1)
+        last_date = _business_days_before(STALE_BARS_MAX_WEEKDAYS + 1)
         with self.assertLogs("src.prediction.predict_single", level=logging.WARNING) as logs:
             result = self._explain(_make_df(last_date))
 
@@ -135,7 +145,7 @@ class TestExplainPredictionShapStaleBars(unittest.TestCase):
         self.assertTrue(any("5202" in line for line in logs.output))
 
     def test_returns_result_when_last_bar_is_within_limit(self):
-        last_date = _latest_weekday() - BDay(STALE_BARS_MAX_WEEKDAYS)
+        last_date = _business_days_before(STALE_BARS_MAX_WEEKDAYS)
         result = self._explain(_make_df(last_date))
 
         self.assertIsNotNone(result)

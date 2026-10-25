@@ -147,7 +147,7 @@ def _is_stale_bars(market: str, symbol: str, df: pd.DataFrame) -> bool:
     if not isinstance(df.index, pd.DatetimeIndex) or df.empty:
         return False
     last_date = pd.Timestamp(df.index[-1])
-    stale_weekdays = count_weekdays_behind(last_date)
+    stale_weekdays = count_weekdays_behind(last_date, market=market)
     if stale_weekdays <= STALE_BARS_MAX_WEEKDAYS:
         return False
     logger.warning(

@@ -7,7 +7,7 @@
 import logging
 import os
 import warnings
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from threading import Lock
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -21,6 +21,7 @@ from src.prediction.remote_client import get_service_url, predict_via_service
 from src.prediction.types import PredictionResult
 from src.utils.data_path_utils import get_models_dir, get_ticker
 from src.utils.db import get_active_symbols, load_stock_features
+from src.utils.jp_market_holidays import is_jp_business_day
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -156,9 +157,18 @@ def resolve_expected_features(model: Any) -> Optional[List[str]]:
     return None
 
 
-def count_weekdays_behind(last_date: pd.Timestamp, today: Optional[datetime] = None) -> int:
+def _is_open_day(day: date, market: Optional[str]) -> bool:
+    """jp は東証の営業日（#1106）、それ以外は土日以外なら True。"""
+    if market == "jp":
+        return is_jp_business_day(day)
+    return day.weekday() < 5
+
+
+def count_weekdays_behind(
+    last_date: pd.Timestamp, today: Optional[datetime] = None, market: Optional[str] = None
+) -> int:
     """
-    特徴量の最後の行の翌日から、あるべき最新の営業日までの平日の数を返す。
+    特徴量の最後の行の翌日から、あるべき最新の営業日までの営業日の数を返す。
 
     数え方は market_data.pipeline の同名の関数（#815）に揃える。BC 同士は
     import できないため写している。
@@ -166,17 +176,19 @@ def count_weekdays_behind(last_date: pd.Timestamp, today: Optional[datetime] = N
     Args:
         last_date: 特徴量の最後の行の日付
         today: 基準日（省略時は今日）
+        market: 市場名。jp は東証の休場日も除く（#1106）。省略時は土日だけを除く
 
     Returns:
-        足りない平日の数（祝日は数え分けない）。
+        足りない営業日の数。
     """
     expected_latest = pd.Timestamp(today if today is not None else datetime.now()).normalize()
-    while expected_latest.weekday() >= 5:
+    while not _is_open_day(expected_latest.date(), market):
         expected_latest -= timedelta(days=1)
     if last_date.tzinfo is not None:
         last_date = last_date.tz_localize(None)
     next_day = last_date.normalize() + timedelta(days=1)
-    return len(pd.bdate_range(next_day, expected_latest))
+    days = pd.date_range(next_day, expected_latest)
+    return sum(1 for day in days if _is_open_day(day.date(), market))
 
 
 def _last_feature_date(df: pd.DataFrame) -> Optional[pd.Timestamp]:
@@ -304,7 +316,7 @@ def predict_with_unified_model(
     # する前の特徴量が残る。その行で予想を出し続けないよう、最後の行の日付を見る（#829）
     last_date = _last_feature_date(df)
     if last_date is not None:
-        stale_weekdays = count_weekdays_behind(last_date)
+        stale_weekdays = count_weekdays_behind(last_date, market=market)
         if stale_weekdays > STALE_BARS_MAX_WEEKDAYS:
             logger.warning(
                 "特徴量が古いため予想をスキップ: market=%s symbol=%s "
