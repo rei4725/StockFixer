@@ -1,6 +1,7 @@
 """売買シグナル生成ユーティリティ
 
-trading BC と backtest BC の両方から参照できる SignalGenerator 本体。
+trading BC と backtest BC の両方から参照する SignalGenerator。
+判断の本体は src.domain.signal_rules。このクラスは optimal_params と設定の値を渡す入れ物。
 """
 
 from __future__ import annotations
@@ -10,6 +11,7 @@ from typing import Optional
 import pandas as pd
 
 from config.settings import VOLUME_FILTER_MULTIPLIER, VOLUME_FILTER_WINDOW_DAYS
+from src.domain.signal_rules import generate_trade_signals
 from src.utils.logger import get_logger
 from src.utils.optimal_params_loader import get_optimal_params
 
@@ -68,38 +70,11 @@ class SignalGenerator:
         Returns:
             pd.Series: 各時点での売買シグナル ('Buy', 'Sell', 'Hold') 。
         """
-        signals = pd.Series("Hold", index=data.index)
-
-        # 動的閾値の計算
-        if rolling_std is not None and len(rolling_std.dropna()) > 0:
-            avg_std = rolling_std.mean()
-            if avg_std > 0:
-                vol_ratio = rolling_std / avg_std
-                threshold = self.base_threshold * vol_ratio
-            else:
-                threshold = pd.Series(self.base_threshold, index=data.index)
-        else:
-            threshold = pd.Series(self.base_threshold, index=data.index)
-
-        # 予測値が閾値を超えた場合に Buy/Sell シグナルを生成
-        buy_condition = prediction > threshold
-        sell_condition = prediction < -threshold
-
-        signals.loc[buy_condition] = "Buy"
-        signals.loc[sell_condition] = "Sell"
-
-        # RSI判定（テスト用にカラム名を'RSI'に統一）
-        if "RSI" in data.columns:
-            # RSI極値でHoldゾーンを拡張:
-            # 売られすぎ(RSI<30) かつ Hold なら Buy（底値拾い買いシグナル）
-            # 買われすぎ(RSI>70) かつ Hold なら Sell（高値売りシグナル）
-            signals.loc[(data["RSI"] < 30) & (signals == "Hold")] = "Buy"
-            signals.loc[(data["RSI"] > 70) & (signals == "Hold")] = "Sell"
-
-        # 出来高フィルター: 直近20日平均の1.5倍未満の場合はBuy→Hold
-        if "Volume" in data.columns:
-            avg_volume = data["Volume"].rolling(VOLUME_FILTER_WINDOW_DAYS, min_periods=1).mean()
-            low_volume = data["Volume"] < avg_volume * VOLUME_FILTER_MULTIPLIER
-            signals.loc[low_volume & (signals == "Buy")] = "Hold"
-
-        return signals
+        return generate_trade_signals(
+            data,
+            prediction,
+            self.base_threshold,
+            VOLUME_FILTER_WINDOW_DAYS,
+            VOLUME_FILTER_MULTIPLIER,
+            rolling_std,
+        )
