@@ -28,6 +28,25 @@ class TestBuild(unittest.TestCase):
         self.assertEqual(cfg.n_trials, 0)
         self.assertEqual(cfg.benchmark_ticker, "^GSPC")
 
+    def test_jp_benchmark_default_is_jp_index(self):
+        """jp で benchmark_ticker を渡さないと jp の指数を使う（#1077）。"""
+        cfg = LongtermBacktestConfig.build(market="jp")
+        self.assertEqual(cfg.benchmark_ticker, "1306.T")
+
+    def test_jp_benchmark_default_without_build(self):
+        cfg = LongtermBacktestConfig(market="jp")
+        self.assertEqual(cfg.benchmark_ticker, "1306.T")
+
+    def test_explicit_benchmark_wins(self):
+        cfg = LongtermBacktestConfig.build(market="jp", benchmark_ticker="^N225")
+        self.assertEqual(cfg.benchmark_ticker, "^N225")
+        cfg = LongtermBacktestConfig.build(market="us", benchmark_ticker="^IXIC")
+        self.assertEqual(cfg.benchmark_ticker, "^IXIC")
+
+    def test_none_benchmark_falls_back_to_market_default(self):
+        cfg = LongtermBacktestConfig.build(market="jp", benchmark_ticker=None)
+        self.assertEqual(cfg.benchmark_ticker, "1306.T")
+
     def test_is_frozen(self):
         cfg = LongtermBacktestConfig.build(market="us")
         with self.assertRaises(FrozenInstanceError):

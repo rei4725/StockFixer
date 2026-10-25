@@ -255,6 +255,29 @@ class TestRunHorizonExitCheck(unittest.TestCase):
         broker.send_order.assert_any_call("9984", OrderSide.SELL, 200)
 
     @patch(_BROKER_PATCH)
+    def test_one_symbol_failure_exits_others_then_fails_job(self, mock_broker_cls):
+        """1銘柄の決済が落ちても他の銘柄は決済し、最後にジョブを失敗にする (#1074)。"""
+        from src.orchestration.scheduler import run_horizon_exit_check
+
+        self._insert_overdue_order("ORD-110", "7203")
+        self._insert_overdue_order("ORD-111", "9984")
+
+        broker = MagicMock()
+        broker.get_positions.return_value = [
+            {"symbol": "7203", "qty": 100},
+            {"symbol": "9984", "qty": 200},
+        ]
+        broker.send_order.side_effect = [RuntimeError("broker down"), MagicMock()]
+        mock_broker_cls.return_value = broker
+
+        with self.assertLogs("src.orchestration.jobs.daily", level="ERROR"):
+            with self.assertRaises(RuntimeError):
+                run_horizon_exit_check()
+
+        self.assertEqual(broker.send_order.call_count, 2)
+        broker.send_order.assert_any_call("9984", OrderSide.SELL, 200)
+
+    @patch(_BROKER_PATCH)
     def test_skip_if_position_already_closed(self, mock_broker_cls):
         from src.orchestration.scheduler import run_horizon_exit_check
 
