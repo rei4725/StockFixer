@@ -1,7 +1,7 @@
 """ウォッチリスト全銘柄へのバッチ最適化（グリッド / Optuna）。
 
 最適化計算は並列（DuckDB 読み込みのみ）、結果保存は呼び出し側のスレッドで逐次
-（optimal_params.json の同時書き込み破損を防止）。run_optimize_batch は終わった銘柄から保存する。
+（optimal_params.json の同時書き込み破損を防止）。どちらも終わった銘柄から保存する。
 """
 
 from datetime import datetime, timedelta
@@ -242,21 +242,17 @@ def run_optuna_batch(
             logger.error(f"[{m}/{s}] Optuna最適化エラー: {e}", exc_info=True)
             return {"market": m, "symbol": s, "status": "error", "error": str(e)}
 
-    # フェーズ1: 並列最適化
-    results = []
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {executor.submit(_task, t): t for t in symbols}
-        for future in as_completed(futures):
-            results.append(future.result())
+    summary: list[dict[str, Any]] = []
+    success = 0
+    error = 0
 
-    # フェーズ2: 逐次保存
-    summary, success, error = [], 0, 0
-    for res in results:
+    def _save_result(res: dict[str, Any]) -> None:
+        nonlocal success, error
         m, s = res["market"], res["symbol"]
         if res["status"] != "success":
             summary.append({"market": m, "symbol": s, "status": "error", "error": res.get("error")})
             error += 1
-            continue
+            return
         try:
             save_optimal_params_json(res["result_df"], m, s, sort_by=sort_by)
             summary.append({"market": m, "symbol": s, "status": "success"})
@@ -265,6 +261,13 @@ def run_optuna_batch(
             logger.error(f"[{m}/{s}] 保存エラー: {e}", exc_info=True)
             summary.append({"market": m, "symbol": s, "status": "error", "error": str(e)})
             error += 1
+
+    # 計算は並列、保存は呼び出し側のスレッドで終わった順に逐次（JSON書き込みの競合を防止）。
+    # 全銘柄を待たずに保存し、途中で中断されてもそれまでの結果を残す（#1107）
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(_task, t): t for t in symbols}
+        for future in as_completed(futures):
+            _save_result(future.result())
 
     logger.info(f"Optunaバッチ最適化完了: 成功={success} / エラー={error}")
     return summary
