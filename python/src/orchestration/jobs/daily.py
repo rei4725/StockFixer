@@ -403,7 +403,7 @@ def run_horizon_exit_check() -> None:
     logger.info("[horizon_exit] ホライズン決済完了: %d 件", len(exited))
 
 
-def run_daily_settle_orders(notify_when_none: bool = True):
+def run_daily_settle_orders(notify_when_none: bool = True) -> int:
     """
     毎営業日 9:05 実行: pending 状態のペーパートレード注文を当日始値で約定処理する。
     本番（live）モードでは kabu STATION® が自動処理するため不要。
@@ -413,7 +413,7 @@ def run_daily_settle_orders(notify_when_none: bool = True):
     mode = os.environ.get("AUTO_TRADE_MODE", "paper")
     if mode == "live":
         logger.info("live モードのため settle スキップ")
-        return
+        return 0
 
     from src.infrastructure.persistence.trade_diff_repository import PostgresTradeDiffSink
     from src.infrastructure.yfinance_market_data_adapter import YFinanceMarketDataAdapter
@@ -430,14 +430,10 @@ def run_daily_settle_orders(notify_when_none: bool = True):
     except Exception as e:
         logger.error("約定処理失敗: %s", e, exc_info=True)
         raise
+    from src.orchestration.jobs.settle_notify import notify_settle_result
 
-    try:
-        from src.reporting.discord.discord_utils import send_daily_settle_completion
-
-        if settled or notify_when_none:  # Discord 完了通知。やり直しの0件の回は出さない #1047
-            send_daily_settle_completion(settled_count=len(settled))
-    except Exception as e:
-        logger.error("約定処理完了通知失敗: %s", e, exc_info=True)
+    # 例外で約定できなかった件数を返す（締めの知らせで当日の行の無さと分ける #1088）
+    return notify_settle_result(len(settled), broker.last_settle_errors, notify_when_none)
 
 
 def run_daily_paper_trade_report():

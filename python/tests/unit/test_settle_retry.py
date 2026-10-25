@@ -18,7 +18,7 @@ class TestRunDailySettleRetry(unittest.TestCase):
             patch.object(
                 settle_retry, "count_pending_paper_orders", side_effect=pending_counts
             ) as mock_count,
-            patch.object(settle_retry, "run_daily_settle_orders") as mock_settle,
+            patch.object(settle_retry, "run_daily_settle_orders", return_value=0) as mock_settle,
             patch("src.reporting.discord.discord_utils.send_webhook_notification") as mock_notify,
             patch.object(settle_retry.logger, "warning") as mock_warning,
         ):
@@ -75,7 +75,7 @@ class TestRunDailySettleRetry(unittest.TestCase):
         now = datetime(2026, 10, 22, 9, 55, tzinfo=_JST)
         with (
             patch.object(settle_retry, "count_pending_paper_orders", side_effect=[1, 1]),
-            patch.object(settle_retry, "run_daily_settle_orders"),
+            patch.object(settle_retry, "run_daily_settle_orders", return_value=0),
             patch(
                 "src.reporting.discord.discord_utils.send_webhook_notification",
                 side_effect=RuntimeError("down"),
@@ -102,6 +102,7 @@ class TestSettleCompletionNotifyOnce(unittest.TestCase):
             patch.object(settle_retry, "count_pending_paper_orders", side_effect=pending_per_retry),
         ):
             mock_broker_cls.return_value.settle_pending_orders.side_effect = settled_per_run
+            mock_broker_cls.return_value.last_settle_errors = 0
             daily.run_daily_settle_orders()
             for minute in (15, 25, 35, 45, 55):
                 now = datetime(2026, 10, 22, 9, minute, tzinfo=_JST)

@@ -116,6 +116,7 @@ class TestDailyJobCompositionRoot(unittest.TestCase):
             captured.update(kwargs)
             broker = MagicMock()
             broker.settle_pending_orders.return_value = []
+            broker.last_settle_errors = 0
             return broker
 
         with patch(

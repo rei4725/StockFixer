@@ -43,7 +43,7 @@ def run_daily_settle_retry(now: datetime | None = None) -> None:
 
     logger.info("=== 約定のやり直し: 約定待ち %d 件 ===", pending_count)
     # 約定が0件の回は完了の知らせを出さない（9:05 の分と重ねない。#1047）
-    run_daily_settle_orders(notify_when_none=False)
+    errors = run_daily_settle_orders(notify_when_none=False)
 
     if not is_final:
         return
@@ -52,9 +52,12 @@ def run_daily_settle_retry(now: datetime | None = None) -> None:
     if remaining <= 0:
         return
 
+    # 例外で残した分を、当日の行が無い据え置きと分けて出す（#1088）
+    errors = min(errors, remaining)
     message = (
         f"締め {SETTLE_RETRY_CUTOFF_JST[0]}:{SETTLE_RETRY_CUTOFF_JST[1]:02d} を過ぎても"
-        f"当日の行が無く約定待ちの注文が {remaining} 件残った。翌営業日まで据え置く"
+        f"約定待ちの注文が {remaining} 件残った（当日の行が無い {remaining - errors} 件、"
+        f"約定処理の例外 {errors} 件）。翌営業日まで据え置く"
     )
     logger.warning("[paper] %s", message)
     try:
