@@ -83,6 +83,20 @@ def _load_recent_returns(symbols: list[str], market: str, window: int) -> pd.Dat
     if pivot.empty:
         return pd.DataFrame()
     returns = pivot.pct_change().dropna()
+    # 日足の止まった銘柄は古い日付で本数がそろい、dropna() が共通の行を減らす（#1141）
+    while len(returns) < min_returns and len(pivot.columns) > 1:
+        last_dates = pd.Series({sym: pivot[sym].last_valid_index() for sym in pivot.columns})
+        stale_symbols = list(last_dates[last_dates < last_dates.max()].index)
+        if not stale_symbols:
+            break
+        logger.warning(
+            "[corr] 日足の最後の日が古い銘柄を相関の計算から外す: %s (共通のリターン数=%d < %s)",
+            stale_symbols,
+            len(returns),
+            min_returns,
+        )
+        pivot = pivot.drop(columns=stale_symbols).dropna(how="all")
+        returns = pivot.pct_change().dropna()
     return returns
 
 

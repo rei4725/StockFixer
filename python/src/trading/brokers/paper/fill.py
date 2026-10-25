@@ -123,6 +123,8 @@ def apply_fill(
         else:
             old_avg = fill_price  # ポジション不明時はPnL=0扱い
         realized_pnl = (old_avg - fill_price) * qty
+        # 建てるときは残高を動かさないので、返済のときに損益だけを残高へ移す（#1147）
+        con.execute("UPDATE paper_balance SET balance = balance + %s", [realized_pnl])
         con.execute(
             "UPDATE paper_orders SET realized_pnl=%s WHERE order_id=%s",
             [realized_pnl, order_id],

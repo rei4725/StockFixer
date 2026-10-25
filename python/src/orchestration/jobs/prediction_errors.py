@@ -13,8 +13,13 @@ logger = get_logger(__name__)
 _NOTICE_SYMBOL_LIMIT = 5
 
 
-def notify_prediction_errors(error_keys: list[tuple[str, str]]) -> None:
-    """例外で予想を出せなかった銘柄が1件以上なら、件数と先頭の銘柄を知らせる。"""
+def notify_prediction_errors(
+    error_keys: list[tuple[str, str]], stage: str = "[3/6] 予測 (production)"
+) -> None:
+    """例外で予想を出せなかった銘柄が1件以上なら、件数と先頭の銘柄を知らせる。
+
+    stage は知らせとログに出す段の名前（[3.5/6] の challenger でも使う #1139）。
+    """
     if not error_keys:
         return
     names = [f"{market}_{symbol}" for market, symbol in sorted(error_keys)]
@@ -22,5 +27,5 @@ def notify_prediction_errors(error_keys: list[tuple[str, str]]) -> None:
     if len(names) > _NOTICE_SYMBOL_LIMIT:
         head += " ほか"
     message = f"例外で予想を出せなかった銘柄が {len(names)} 件あった: {head}"
-    logger.warning("[3/6] 予測 (production): %s", message)
-    _notify_stage_failure("[3/6] 予測 (production) の一部の銘柄", RuntimeError(message))
+    logger.warning("%s: %s", stage, message)
+    _notify_stage_failure(f"{stage} の一部の銘柄", RuntimeError(message))

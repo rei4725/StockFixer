@@ -8,6 +8,7 @@ from src.trading.risk_manager import RiskManager
 from src.trading.types import TradingGateStatus
 from src.utils.logger import get_logger
 
+from .pending import _load_pending_exits, _log_pending_skips
 from .recording import _record_order, _recorder
 from .stats import OrderExecutionStats
 
@@ -38,6 +39,8 @@ def _check_sl_tp_exits(
         short_positions = []
     exits = [(pos, False) for pos in broker.get_positions()]
     exits += [(pos, True) for pos in short_positions]
+    pending = _load_pending_exits(broker)
+    pending_skipped: list[str] = []
     for pos, is_short in exits:
         symbol = str(pos.get("symbol", "")).replace(".T", "")
         qty = int(pos.get("qty") or 0)
@@ -61,6 +64,9 @@ def _check_sl_tp_exits(
             continue
 
         side = OrderSide.SHORT_COVER if is_short else OrderSide.SELL
+        if pending.has(symbol, side):
+            pending_skipped.append(symbol)
+            continue
         try:
             # 損失の止めは約定を優先する。流動性の判定による指値は窓を開けた日に失効するため使わない（#881）
             order_type, order_price, order_session = OrderType.MARKET, 0.0, "open"
@@ -104,6 +110,7 @@ def _check_sl_tp_exits(
             logger.error("[exec] SL/TP売り注文エラー (%s)", symbol, exc_info=True)
             stats["errors"] += 1
 
+    _log_pending_skips("SL/TP", pending_skipped)
     return triggered
 
 
