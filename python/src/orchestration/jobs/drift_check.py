@@ -6,15 +6,10 @@ step4、および手動実行（run_scheduler.py --run-now drift）の両方か�
 
 from src.orchestration.jobs.alert_streaks import record_drift_warn_streak
 from src.orchestration.jobs.common import _drift_check_lock, skip_if_running
+from src.utils.drift_thresholds import load_drift_thresholds, select_drifted_symbols
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
-
-# MAE の実効の線 = max(DRIFT_MAE_THRESHOLD, 全銘柄の MAE の中央値 × この倍率)
-DRIFT_MAE_RELATIVE_RATIO_DEFAULT = "1.5"
-# Hit Rate の実効の線 = min(DRIFT_HIT_RATE_THRESHOLD, 全銘柄の Hit Rate の中央値 - この幅)
-# 20件の Hit Rate の標本のぶれ（p=0.45 で標準偏差 約0.11）の約2倍を幅にとる（#1045）
-DRIFT_HIT_RATE_RELATIVE_MARGIN_DEFAULT = "0.20"
 
 
 @skip_if_running(_drift_check_lock, "日次ドリフトチェック")
@@ -43,28 +38,14 @@ def run_daily_drift_check():
     from src.prediction.db import load_drift_summary
     from src.utils.db.system_config import get_config_value
 
-    _mae_default = os.environ.get("DRIFT_MAE_THRESHOLD", "0.02")
-    _hr_default = os.environ.get("DRIFT_HIT_RATE_THRESHOLD", "0.45")
-    _min_samples_default = os.environ.get("DRIFT_MIN_SAMPLES", "10")
+    thresholds = load_drift_thresholds()
     _max_retrain_default = os.environ.get("DRIFT_MAX_RETRAIN_PER_RUN", "50")
-    _mae_ratio_default = os.environ.get(
-        "DRIFT_MAE_RELATIVE_RATIO", DRIFT_MAE_RELATIVE_RATIO_DEFAULT
-    )
-    mae_threshold = float(get_config_value("drift.mae_threshold", _mae_default))
-    hit_rate_threshold = float(get_config_value("drift.hit_rate_threshold", _hr_default))
-    min_samples = int(get_config_value("drift.min_samples", _min_samples_default))
     max_retrain_per_run = int(get_config_value("drift.max_retrain_per_run", _max_retrain_default))
-    mae_relative_ratio = float(get_config_value("drift.mae_relative_ratio", _mae_ratio_default))
-    _hr_margin_default = os.environ.get(
-        "DRIFT_HIT_RATE_RELATIVE_MARGIN", DRIFT_HIT_RATE_RELATIVE_MARGIN_DEFAULT
-    )
-    hit_rate_relative_margin = float(
-        get_config_value("drift.hit_rate_relative_margin", _hr_margin_default)
-    )
 
     logger.info(
-        f"=== 日次ドリフトチェック開始 (MAE閾値={mae_threshold:.2%}, HitRate閾値={hit_rate_threshold:.0%}, "
-        f"最小サンプル数={min_samples}, 再学習上限={max_retrain_per_run}) ==="
+        f"=== 日次ドリフトチェック開始 (MAE閾値={thresholds.mae_threshold:.2%}, "
+        f"HitRate閾値={thresholds.hit_rate_threshold:.0%}, "
+        f"最小サンプル数={thresholds.min_samples}, 再学習上限={max_retrain_per_run}) ==="
     )
 
     summary = load_drift_summary(horizon=1, recent_n=20, model_name="production")
@@ -72,31 +53,21 @@ def run_daily_drift_check():
         logger.info("ドリフトチェック: 精度データなし（スキップ）")
         return
 
-    eligible = summary[summary["n_samples"] >= min_samples]
-    # 全銘柄の MAE が同じ水準で高いときに全件が超えないよう、線を全銘柄の中央値の倍率まで上げる（#1020）
-    if not eligible.empty:
-        mae_threshold = max(
-            mae_threshold, float(eligible["mean_abs_error"].median()) * mae_relative_ratio
-        )
-        logger.info(
-            "ドリフトチェック: 実効MAE閾値=%.2f%% (中央値×%s と下限の大きい方)",
-            mae_threshold * 100,
-            mae_relative_ratio,
-        )
-        # 全銘柄の Hit Rate が同じ水準で低いときに半数が超えないよう、線を中央値から幅を引いた値まで下げる（#1045）
-        hit_rate_threshold = min(
-            hit_rate_threshold,
-            float(eligible["direction_accuracy"].median()) - hit_rate_relative_margin,
-        )
-        logger.info(
-            "ドリフトチェック: 実効HitRate閾値=%.1f%% (中央値-%s と上限の小さい方)",
-            hit_rate_threshold * 100,
-            hit_rate_relative_margin,
-        )
-    triggered = eligible[
-        (eligible["mean_abs_error"] >= mae_threshold)
-        | (eligible["direction_accuracy"] <= hit_rate_threshold)
-    ]
+    # 線を全銘柄の中央値に合わせる判定は月次レポートと共通（#1020・#1045・#1089）
+    selection = select_drifted_symbols(summary, thresholds)
+    mae_threshold = selection.mae_threshold
+    hit_rate_threshold = selection.hit_rate_threshold
+    logger.info(
+        "ドリフトチェック: 実効MAE閾値=%.2f%% (中央値×%s と下限の大きい方)",
+        mae_threshold * 100,
+        thresholds.mae_relative_ratio,
+    )
+    logger.info(
+        "ドリフトチェック: 実効HitRate閾値=%.1f%% (中央値-%s と上限の小さい方)",
+        hit_rate_threshold * 100,
+        thresholds.hit_rate_relative_margin,
+    )
+    triggered = selection.triggered
     record_drift_warn_streak(not triggered.empty)  # NF-303-3 の連続回数（#934）
 
     if triggered.empty:
