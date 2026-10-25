@@ -446,6 +446,7 @@ def send_rule_evaluation_completion(
     effective: int,
     skipped: int,
     market: str,
+    errors: int = 0,
 ) -> bool:
     """週次ルール評価完了通知を Discord に送信する。"""
     now = format_jst(fmt="%Y/%m/%d %H:%M JST")
@@ -456,6 +457,8 @@ def send_rule_evaluation_completion(
         f"有効ルール発見: {effective} 銘柄",
         f"スキップ (有効ルールなし): {skipped} 銘柄",
     ]
+    if errors > 0:
+        lines.append(f"❌ 評価失敗: {errors} 銘柄（最優秀ルールの表が古いか欠けている）")
     return send_webhook_text("\n".join(lines))
 
 

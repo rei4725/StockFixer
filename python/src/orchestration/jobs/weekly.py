@@ -5,6 +5,7 @@
 """
 
 from src.orchestration.jobs.common import _handle_stage_error, _is_first_week_of_month
+from src.orchestration.jobs.symbol_master_job import run_symbol_master_refresh
 from src.orchestration.types import PipelineStage
 from src.utils.logger import get_logger
 
@@ -435,6 +436,7 @@ def run_weekly_db_maintenance() -> None:
         1. retention  — 診断ログの古い行を削除（各グループ最新は保持）
         2. （月初週のみ）VACUUM (ANALYZE) — 肥大化・統計情報の陳腐化を防ぐ
            （日常的な肥大化対策は Postgres の autovacuum に委ねる）
+        3. 銘柄マスタ（symbol_master）の社名を JPX 一覧から埋め直す（#1080）
     実行後にサイズ・所要時間を Discord 通知し、サイズが閾値超なら警告する。
     """
     import time
@@ -494,6 +496,8 @@ def run_weekly_db_maintenance() -> None:
         size_before,
         size_after,
     )
+    # 銘柄マスタ（社名）を JPX 一覧から埋め直す。落ちても WARNING で戻り、通知は続ける（#1080）
+    run_symbol_master_refresh()
 
     try:
         send_db_maintenance_completion(
@@ -555,7 +559,7 @@ def run_weekly_rule_evaluation() -> None:
     「最優秀ルール」を DuckDB に保存する。
 
     判定基準: 勝率 50% 以上 AND 純利益プラス
-    完了後 Discord に評価サマリーを通知する。
+    完了後 Discord に評価サマリーを通知し、評価の失敗があればジョブを失敗にする（#1087）。
     """
     from config.execution import RULE_EVAL_END, RULE_EVAL_MARKET, RULE_EVAL_START
 
@@ -581,14 +585,6 @@ def run_weekly_rule_evaluation() -> None:
         logger.error("週次ルール評価失敗: %s", e, exc_info=True)
         raise
 
-    try:
-        from src.reporting.discord.discord_utils import send_rule_evaluation_completion
+    from src.orchestration.jobs.rule_evaluation import finish_rule_evaluation
 
-        send_rule_evaluation_completion(
-            evaluated=summary["evaluated"],
-            effective=summary["effective"],
-            skipped=summary["skipped"],
-            market=market,
-        )
-    except Exception as e:
-        logger.error("ルール評価通知失敗: %s", e, exc_info=True)
+    finish_rule_evaluation(summary, market)
