@@ -21,6 +21,7 @@ from src.orchestration.jobs.alerting import (
 from src.orchestration.jobs.backup_job import run_daily_backup  # noqa: F401 (re-export)
 from src.orchestration.jobs.common import _handle_stage_error, _notify_stage_failure
 from src.orchestration.jobs.drift_check import run_daily_drift_check
+from src.orchestration.jobs.prediction_errors import notify_prediction_errors
 from src.orchestration.jobs.unavailable_gates import (
     _raise_if_fetch_mostly_unavailable,
     _raise_if_rule_signals_mostly_unavailable,
@@ -139,11 +140,13 @@ def run_daily_pipeline():
 
         previous_stats = fetch_previous_run_stats(model_version="production")
 
-        output_rows = predict_all_unified()
+        predict_errors: list[tuple[str, str]] = []  # 例外で予想を出せなかった銘柄（#1118）
+        output_rows = predict_all_unified(on_error=lambda m, s: predict_errors.append((m, s)))
         output_top_worst_results(
             output_rows, mode="unified", shadow_mode=True, model_version="production"
         )
         logger.info("[3/6] 予測完了 (production): %d 銘柄", len(output_rows))
+        notify_prediction_errors(predict_errors)
     except Exception as e:
         if _handle_stage_error(
             PipelineStage.CRITICAL,
