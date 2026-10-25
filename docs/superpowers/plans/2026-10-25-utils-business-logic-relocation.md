@@ -36,7 +36,7 @@
 
 - [ ] **Step 1:** `git fetch && git switch develop && git pull --ff-only` を実行し、`git switch -c refactor/<対象>` で新しいブランチを作る。
 - [ ] **Step 2:** 開いた PR の中に、その PR で移すファイルを触っているものがないか確かめる。
-  Run: `gh pr list --state open --json number,files --jq '.[] | select(any(.files[]; .path | test("src/utils/(regime_weights|jp_market_holidays|sector_constraints|signal_generator|drift_thresholds)\\.py"))) | .number'`
+  Run: `gh pr list --state open --json number,files --jq '.[] | select(any(.files[]; .path | test("src/utils/(regime_weights|jp_market_holidays|sector_constraints|signal_generator|drift_thresholds)[.]py"))) | .number'`
   Expected: 何も出ない。出たら、その PR の中身を見る。移すファイルの **中身** を書き換えていれば、その PR のマージを待つ。import だけなら進めてよい。
 
 ---

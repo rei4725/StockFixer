@@ -15,8 +15,8 @@ import pandas as pd
 from config.settings import MAX_SECTOR_POSITIONS
 from src.backtest.data_port import get_backtest_data_port
 from src.backtest.execution import ExecutionModel
+from src.domain.regime_weights import get_regime_sector_weight
 from src.utils.logger import get_logger
-from src.utils.regime_weights import get_regime_sector_weight
 from src.utils.sector_constraints import filter_by_sector_cap, get_symbol_sector
 
 logger = get_logger(__name__)
