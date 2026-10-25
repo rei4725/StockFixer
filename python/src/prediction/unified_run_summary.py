@@ -15,12 +15,17 @@ def log_unified_prediction_summary(
     n_total: int,
     stale_keys: list[tuple[str, str]],
     error_keys: list[tuple[str, str]],
+    label: str = "統合モデル",
 ) -> None:
-    """予想を出した数と、出せなかった数を理由ごとに分けてログへ出す。"""
+    """予想を出した数と、出せなかった数を理由ごとに分けてログへ出す。
+
+    label は完了の行の括弧に入れるモデルの呼び名（challenger の影の予想で分ける #1139）。
+    """
     n_other = n_total - n_rows - len(stale_keys) - len(error_keys)
     logger.info(
-        "並列予測完了（統合モデル）: %d/%d銘柄, 特徴量が古いため予想なし: %d銘柄, "
+        "並列予測完了（%s）: %d/%d銘柄, 特徴量が古いため予想なし: %d銘柄, "
         "例外で予想なし: %d銘柄, そのほかの理由で予想なし: %d銘柄",
+        label,
         n_rows,
         n_total,
         len(stale_keys),
