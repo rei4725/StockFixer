@@ -1,7 +1,7 @@
 """ウォッチリスト全銘柄へのバッチ最適化（グリッド / Optuna）。
 
-フェーズ1で並列に最適化計算（DuckDB 読み込みのみ）、
-フェーズ2で逐次に結果保存（optimal_params.json の同時書き込み破損を防止）。
+最適化計算は並列（DuckDB 読み込みのみ）、結果保存は呼び出し側のスレッドで逐次
+（optimal_params.json の同時書き込み破損を防止）。run_optimize_batch は終わった銘柄から保存する。
 """
 
 from datetime import datetime, timedelta
@@ -49,8 +49,9 @@ def run_optimize_batch(
 
     tasks は呼び出し元（orchestration 等）で load_target_symbols() して渡す。
 
-    フェーズ1: 最適化計算（並列） — DuckDB読み込みのみ・書き込みなし
-    フェーズ2: 結果保存（逐次） — optimal_params.json の同時書き込み破損を防止
+    最適化計算（並列） — DuckDB読み込みのみ・書き込みなし
+    結果保存（逐次） — 計算が終わった銘柄から呼び出し側のスレッドで1件ずつ保存し、
+    optimal_params.json の同時書き込み破損を防ぎつつ、中断時もそれまでの結果を残す
 
     Args:
         tasks: 対象銘柄タスクリスト（SymbolTask または dict）
@@ -140,32 +141,26 @@ def run_optimize_batch(
             logger.error(f"[{market}/{symbol}] 最適化エラー: {e}", exc_info=True)
             return {"market": market, "symbol": symbol, "status": "error", "error": str(e)}
 
-    # フェーズ1: 最適化計算（並列）
-    optimize_results = []
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {executor.submit(_optimize_task, task): task for task in symbols}
-        for future in as_completed(futures):
-            optimize_results.append(future.result())
-
-    # フェーズ2: 結果保存（逐次 — JSON書き込みの競合を防止）
     summary = []
     success_count = 0
     error_count = 0
     skip_count = 0
-    for res in optimize_results:
+
+    def _save_result(res: dict[str, Any]) -> None:
+        nonlocal success_count, error_count, skip_count
         market = res["market"]
         symbol = res["symbol"]
         if res["status"] == "skipped":
             summary.append({"market": market, "symbol": symbol, "status": "skipped"})
             skip_count += 1
-            continue
+            return
         if res["status"] != "success":
             logger.error(f"[{market}/{symbol}] スキップ（最適化失敗）: {res.get('error')}")
             summary.append(
                 {"market": market, "symbol": symbol, "status": "error", "error": res.get("error")}
             )
             error_count += 1
-            continue
+            return
 
         result_df = res["result_df"]
         try:
@@ -178,6 +173,13 @@ def run_optimize_batch(
             logger.error(f"[{market}/{symbol}] 保存エラー: {e}", exc_info=True)
             summary.append({"market": market, "symbol": symbol, "status": "error", "error": str(e)})
             error_count += 1
+
+    # 計算は並列、保存は呼び出し側のスレッドで終わった順に逐次（JSON書き込みの競合を防止）。
+    # 全銘柄を待たずに保存し、途中で中断されてもそれまでの結果を残す（#1094）
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(_optimize_task, task): task for task in symbols}
+        for future in as_completed(futures):
+            _save_result(future.result())
 
     logger.info(
         f"全銘柄最適化バッチ完了: 成功={success_count} / スキップ={skip_count} / エラー={error_count}"
