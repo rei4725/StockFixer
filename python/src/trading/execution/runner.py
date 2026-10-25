@@ -48,6 +48,7 @@ from .params import (
     _choose_order_params,
     _resolve_kelly_params,
 )
+from .pending import _load_pending_exits, _log_pending_skips
 from .recording import _record_order, _recorder, _sync_live_execution_diffs
 from .selection import (
     _apply_buy_sector_limit,
@@ -57,7 +58,7 @@ from .selection import (
     _load_exit_model,
 )
 from .sl_tp import _check_sl_tp_exits, _sl_tp_exits_only
-from .stats import OrderExecutionStats
+from .stats import OrderExecutionStats, _new_stats
 
 logger = get_logger(__name__)
 
@@ -88,25 +89,7 @@ def run_daily_orders(
     """
     logger.info(f"=== 自動発注開始: market={market} mode={mode} broker={broker.broker_name} ===")
 
-    stats: OrderExecutionStats = {
-        "buy_orders": 0,
-        "sell_orders": 0,
-        "short_orders": 0,
-        "skipped": 0,
-        "skipped_min_change": 0,
-        "errors": 0,
-        "trading_stopped": False,
-        "stop_reason": None,
-        "reason_code": None,
-        "daily_loss": 0.0,
-        "daily_loss_limit": None,
-        "total_turnover": 0.0,
-        "correlation_blocked": False,
-        "enc": 0.0,
-        "avg_correlation": 0.0,
-        "n_held_symbols": 0,
-        "held_symbols_list": [],
-    }
+    stats = _new_stats()
     record = _recorder(_record_order, stats)  # 記録の失敗でも注文は出たものとして数える (#1104)
     try:
         broker.get_token()
@@ -212,8 +195,14 @@ def run_daily_orders(
         )
     ]
     sell_positions: list[dict] | None = None
+    # 前の回の約定待ちの決済がある銘柄には2本目を出さない（#1117）
+    pending = _load_pending_exits(broker)
+    pending_skipped: list[str] = []
     for _, row in sell_signals.iterrows():
         symbol = row["symbol"]
+        if pending.has(symbol, OrderSide.SELL):
+            pending_skipped.append(symbol)
+            continue
         # 予測変動量が閾値未満 → 発注スキップ（R-214）
         if abs(float(row.get("diff_ratio") or 0.0)) < MIN_CHANGE_RATIO:
             logger.info(
@@ -272,6 +261,7 @@ def run_daily_orders(
         except Exception as e:
             logger.error(f"[exec] 売り注文エラー ({symbol}): {e}", exc_info=True)
             stats["errors"] += 1
+    _log_pending_skips("売りシグナル", pending_skipped)
 
     # --- 新規買いシグナル ---
     if gate_status.is_allowed and corr_gate.is_allowed:
@@ -417,8 +407,12 @@ def run_daily_orders(
             (predictions["symbol"].isin(short_held_symbols))
             & (predictions["multi_horizon_score"] >= predictions["effective_buy_threshold"])
         ]
+        cover_skipped: list[str] = []
         for _, row in cover_signals.iterrows():
             symbol = row["symbol"]
+            if pending.has(symbol, OrderSide.SHORT_COVER):
+                cover_skipped.append(symbol)
+                continue
             try:
                 pos = next((p for p in short_positions if p["symbol"] == symbol), None)
                 if pos is None or pos["qty"] <= 0:
@@ -463,6 +457,7 @@ def run_daily_orders(
             except Exception as e:
                 logger.error(f"[exec] SHORT_COVER注文エラー ({symbol}): {e}", exc_info=True)
                 stats["errors"] += 1
+        _log_pending_skips("SHORT_COVER", cover_skipped)
 
         # 非保有かつ売りシグナルの銘柄に新規ショートエントリー（リスクゲート不合格の日は 0 件）
         short_entry_candidates = predictions[

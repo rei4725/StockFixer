@@ -18,7 +18,7 @@ import math
 import os
 import shutil
 from datetime import datetime
-from typing import Optional
+from typing import Callable, Optional
 
 import numpy as np
 import pandas as pd
@@ -319,29 +319,39 @@ _UNIFIED_CHALLENGER_NAMES = [
 ]
 
 
-def predict_with_challenger_unified() -> list:
+def available_unified_challengers() -> list[str]:
+    """ファイルが在る challenger unified モデルの名前を返す（一部欠損は許容）。"""
+    from src.utils.data_path_utils import get_models_dir
+
+    unified_dir = os.path.join(get_models_dir(), "unified")
+    return [
+        name
+        for name in _UNIFIED_CHALLENGER_NAMES
+        if os.path.exists(os.path.join(unified_dir, f"{name}.joblib"))
+    ]
+
+
+def predict_with_challenger_unified(
+    on_error: Callable[[str, str], None] | None = None,
+) -> list:
     """Challenger unified モデルで全銘柄予測を実行し PredictionResult リストを返す。
 
     UnifiedStockXGBoost_challenger / UnifiedStockLightGBM_challenger を使用する。
     モデルファイルが存在しない場合は空リストを返す。
 
+    Args:
+        on_error: 例外で予想を出せなかった銘柄ごとに (market, symbol) で呼ぶ（#1139）
+
     Returns:
         list[PredictionResult]: 各銘柄の予測結果
     """
-    import os
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     from src.prediction.predict_unified import get_cached_model, predict_with_unified_model
-    from src.utils.data_path_utils import get_models_dir
+    from src.prediction.unified_run_summary import log_unified_prediction_summary
     from src.utils.db import get_active_symbols
 
-    # challenger ファイルが存在するものだけ使用する（一部欠損は許容）
-    unified_dir = os.path.join(get_models_dir(), "unified")
-    available_challengers = [
-        name
-        for name in _UNIFIED_CHALLENGER_NAMES
-        if os.path.exists(os.path.join(unified_dir, f"{name}.joblib"))
-    ]
+    available_challengers = available_unified_challengers()
     missing = [n for n in _UNIFIED_CHALLENGER_NAMES if n not in available_challengers]
     if missing:
         logger.info(f"一部の Challenger モデルが見つかりません（スキップ）: {missing}")
@@ -356,14 +366,24 @@ def predict_with_challenger_unified() -> list:
     all_keys = get_active_symbols()
     logger.info(f"Challenger shadow 予測開始: {len(all_keys)} 銘柄")
 
+    # 予想を出せなかった銘柄（list.append はスレッドをまたいでも安全）
+    stale_keys: list[tuple[str, str]] = []
+    error_keys: list[tuple[str, str]] = []
+
+    def on_stale(market: str, symbol: str) -> None:
+        stale_keys.append((market, symbol))
+
     def _predict(args):
         market, symbol = args
         try:
-            return predict_with_unified_model(market, symbol, model_types=available_challengers)
+            return predict_with_unified_model(
+                market, symbol, model_types=available_challengers, on_stale=on_stale
+            )
         except Exception:
             logger.warning(
                 "Challenger 予測スキップ: market=%s symbol=%s", market, symbol, exc_info=True
             )
+            error_keys.append((market, symbol))
             return None
 
     results = []
@@ -374,7 +394,12 @@ def predict_with_challenger_unified() -> list:
             if result is not None:
                 results.append(result)
 
-    logger.info(f"Challenger shadow 予測完了: {len(results)} 銘柄")
+    log_unified_prediction_summary(
+        len(results), len(all_keys), stale_keys, error_keys, label="challenger 統合モデル"
+    )
+    if on_error is not None:
+        for market, symbol in error_keys:
+            on_error(market, symbol)
     return results
 
 

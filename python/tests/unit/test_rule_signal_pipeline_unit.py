@@ -255,6 +255,27 @@ class TestRunRuleSignalPipeline(unittest.TestCase):
 
 
 class TestExecuteRulePaperTrades(unittest.TestCase):
+    def setUp(self):
+        # 業種の照会（yfinance）と相関の計算（DB）を外し、既定では業種を銘柄ごとに分けて通す
+        from src.trading.types import CorrelationGateResult
+
+        self.corr_result = CorrelationGateResult(
+            is_allowed=True, enc=1.0, enc_threshold=2.0, avg_correlation=0.0, n_symbols=0
+        )
+        self.sector_by_symbol: dict[str, str] = {}
+        corr_patcher = patch(
+            "src.trading.rule_execution.evaluate_correlation_gate",
+            side_effect=lambda *a, **k: self.corr_result,
+        )
+        sector_patcher = patch(
+            "src.trading.rule_execution.get_symbol_sector",
+            side_effect=lambda market, symbol: self.sector_by_symbol.get(symbol, f"sec-{symbol}"),
+        )
+        self.mock_corr = corr_patcher.start()
+        sector_patcher.start()
+        self.addCleanup(corr_patcher.stop)
+        self.addCleanup(sector_patcher.stop)
+
     @staticmethod
     def _mock_risk(is_allowed=True, qty=100):
         """RiskManager のモックを生成する（ゲート判定と発注株数を制御）。"""
@@ -479,6 +500,72 @@ class TestExecuteRulePaperTrades(unittest.TestCase):
             )
         self.assertEqual(result["errors"], 0)
         self.assertEqual(result["skipped"], 1)
+
+    def test_buy_skipped_when_sector_cap_reached_including_held(self):
+        """保有と候補で同じ業種が MAX_SECTOR_POSITIONS に達したら、その業種の新規買いを出さない。"""
+        from config.settings import MAX_SECTOR_POSITIONS
+        from src.trading.rule_execution import execute_rule_paper_trades
+
+        mock_broker = MagicMock()
+        held = [f"H{i:03d}" for i in range(MAX_SECTOR_POSITIONS - 1)]
+        mock_broker.get_positions.return_value = [{"symbol": s, "qty": 100} for s in held]
+        for s in held + ["A001", "A002"]:
+            self.sector_by_symbol[s] = "Technology"
+
+        signals = [
+            {"symbol": "A001", "signal": 1, "price": 1000.0},
+            {"symbol": "A002", "signal": 1, "price": 1000.0},
+            {"symbol": "B001", "signal": 1, "price": 1000.0},
+        ]
+        with (
+            patch("src.trading.rule_execution.PaperBroker", return_value=mock_broker),
+            patch("src.trading.rule_execution.RiskManager", return_value=self._mock_risk()),
+            patch("src.trading.rule_execution.get_ticker", side_effect=lambda m, s: f"{s}.T"),
+        ):
+            result = execute_rule_paper_trades(
+                signals, "jp", trade_diff_sink=InMemoryTradeDiffSink()
+            )
+        ordered = [c.kwargs["symbol"] for c in mock_broker.send_order.call_args_list]
+        self.assertEqual(ordered, ["A001.T", "B001.T"])
+        self.assertEqual(result["buy_orders"], 2)
+        self.assertEqual(result["skipped"], 1)
+
+    def test_correlation_gate_blocks_buys_but_allows_sells(self):
+        """相関ゲート不合格のときは新規買いを出さず、保有の SELL は出す。"""
+        from src.trading.rule_execution import execute_rule_paper_trades
+        from src.trading.types import CorrelationGateResult
+
+        self.corr_result = CorrelationGateResult(
+            is_allowed=False,
+            enc=1.2,
+            enc_threshold=2.0,
+            avg_correlation=0.9,
+            n_symbols=2,
+            reason="ENC 低下",
+        )
+        mock_broker = MagicMock()
+        mock_broker.get_positions.return_value = [
+            {"symbol": "6758", "qty": 100},
+            {"symbol": "9984", "qty": 100},
+        ]
+
+        signals = [
+            {"symbol": "7203", "signal": 1, "price": 1000.0},
+            {"symbol": "6758", "signal": -1, "price": 2000.0},
+        ]
+        with (
+            patch("src.trading.rule_execution.PaperBroker", return_value=mock_broker),
+            patch("src.trading.rule_execution.RiskManager", return_value=self._mock_risk()),
+            patch("src.trading.rule_execution.get_ticker", side_effect=lambda m, s: f"{s}.T"),
+        ):
+            result = execute_rule_paper_trades(
+                signals, "jp", trade_diff_sink=InMemoryTradeDiffSink()
+            )
+        self.assertEqual(result["buy_orders"], 0)
+        self.assertEqual(result["sell_orders"], 1)
+        mock_broker.send_order.assert_called_once()
+        self.assertEqual(mock_broker.send_order.call_args.kwargs["side"].name, "SELL")
+        self.assertEqual(self.mock_corr.call_args.args[0], ["6758", "9984"])
 
 
 if __name__ == "__main__":

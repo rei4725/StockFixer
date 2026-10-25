@@ -2,16 +2,26 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from typing import Any
 
-from config.settings import MAX_ORDERS_PER_RUN, MAX_POSITIONS
+from config.settings import (
+    CORRELATION_ENC_THRESHOLD,
+    CORRELATION_WINDOW_DAYS,
+    MAX_ORDERS_PER_RUN,
+    MAX_POSITIONS,
+    MAX_SECTOR_POSITIONS,
+)
 from src.domain.ports import TradeDiffSink
+from src.domain.sector_cap import filter_by_sector_cap
 from src.domain.trading_rules import get_lot_size
 from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
 from src.trading.brokers.paper.paper_broker import PaperBroker
+from src.trading.correlation_risk import evaluate_correlation_gate
 from src.trading.risk_manager import RiskManager
 from src.utils.data_path_utils import get_ticker
 from src.utils.logger import get_logger
+from src.utils.sector_constraints import get_symbol_sector
 
 logger = get_logger(__name__)
 
@@ -75,6 +85,34 @@ def execute_rule_paper_trades(
             gate.reason or "理由未設定",
         )
 
+    # 8:50 の道（execution.runner）と同じく、相関ゲート不合格なら新規買いだけ止め、
+    # 同一業種の上限は保有中の銘柄の業種も含めて数える（#1138）。
+    buy_candidates = [
+        item for item in signals if item["signal"] == 1 and item["symbol"] not in held_symbols
+    ]
+    sector_allowed: set[str] = set()
+    if gate.is_allowed and buy_candidates:
+        held_codes = sorted({s.replace(".T", "") for s in held_symbols})
+        corr_gate = evaluate_correlation_gate(
+            held_codes,
+            market,
+            window=CORRELATION_WINDOW_DAYS,
+            enc_threshold=CORRELATION_ENC_THRESHOLD,
+        )
+        if corr_gate.is_allowed:
+            selected = filter_by_sector_cap(
+                buy_candidates,
+                max_sector_positions=MAX_SECTOR_POSITIONS,
+                sector_getter=lambda it: get_symbol_sector(market, str(it["symbol"])),
+                initial_counts=Counter(get_symbol_sector(market, s) for s in held_codes),
+            )
+            sector_allowed = {str(it["symbol"]) for it in selected}
+        else:
+            logger.warning(
+                "[rule] 相関ゲート不合格のため新規買いを停止: %s",
+                corr_gate.reason or "ENC閾値未満",
+            )
+
     position_count = len(held_symbols)  # 1ラン内で増える建玉数を追跡し MAX_POSITIONS を厳守
     buy_orders_this_run = 0
 
@@ -86,6 +124,10 @@ def execute_rule_paper_trades(
         try:
             if signal == 1 and symbol not in held_symbols:
                 if not gate.is_allowed:
+                    skipped += 1
+                    continue
+                if symbol not in sector_allowed:
+                    logger.info("[rule] %s: 相関ゲートか同一業種の上限で新規買いスキップ", symbol)
                     skipped += 1
                     continue
                 if position_count >= MAX_POSITIONS:
