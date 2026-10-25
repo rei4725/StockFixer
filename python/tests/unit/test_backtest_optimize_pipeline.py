@@ -670,6 +670,130 @@ class TestRunOptunaBatch(unittest.TestCase):
         mock_json.assert_called_once()
         self.assertEqual(mock_json.call_args.args[2], "9984")
 
+    @patch("src.backtest.optimizer.batch.save_optimal_params_json")
+    @patch("src.backtest.optimizer.batch.run_optuna_optimization")
+    def test_saves_finished_symbol_while_others_running(self, mock_run, mock_json):
+        """ほかの銘柄が計算中でも、終わった銘柄の保存が呼ばれること（#1107）"""
+        import threading
+
+        from src.backtest.optimizer import run_optuna_batch
+        from src.domain.types import SymbolTask
+
+        good_df = pd.DataFrame({"threshold": [0.02], "sharpe_ratio": [1.5]})
+        saved_first = threading.Event()
+        saved_while_running = []
+
+        def _json(df, market, symbol, sort_by="sharpe_ratio"):
+            if symbol == "7203":
+                saved_first.set()
+            return "/tmp/params.json"
+
+        def _run(market, symbol, **kwargs):
+            if symbol == "9984":
+                # 計算中のまま、先に終わった 7203 の保存を待つ
+                saved_while_running.append(saved_first.wait(timeout=2))
+            return good_df
+
+        mock_run.side_effect = _run
+        mock_json.side_effect = _json
+
+        results = run_optuna_batch(
+            [SymbolTask(market="jp", symbol="7203"), SymbolTask(market="jp", symbol="9984")],
+            n_trials=1,
+            max_workers=2,
+        )
+
+        self.assertEqual(saved_while_running, [True])
+        self.assertEqual(sorted(r["status"] for r in results), ["success", "success"])
+
+    @patch("src.backtest.optimizer.batch.save_optimal_params_json")
+    @patch("src.backtest.optimizer.batch.run_optuna_optimization")
+    def test_interrupt_keeps_already_computed_results(self, mock_run, mock_json):
+        """途中の銘柄で中断されても、それより前に計算が終わった銘柄は保存済みであること（#1107）"""
+        import threading
+
+        from src.backtest.optimizer import run_optuna_batch
+        from src.domain.types import SymbolTask
+
+        class _Interrupted(BaseException):
+            pass
+
+        good_df = pd.DataFrame({"threshold": [0.02], "sharpe_ratio": [1.5]})
+        saved_two = threading.Event()
+
+        def _json(df, market, symbol, sort_by="sharpe_ratio"):
+            if mock_json.call_count >= 2:
+                saved_two.set()
+            return "/tmp/params.json"
+
+        def _run(market, symbol, **kwargs):
+            if symbol == "6758":
+                # 前の2銘柄の保存を待ってから中断する（待ち切れなければそのまま中断）
+                saved_two.wait(timeout=2)
+                raise _Interrupted()
+            return good_df
+
+        mock_run.side_effect = _run
+        mock_json.side_effect = _json
+
+        tasks = [
+            SymbolTask(market="jp", symbol="7203"),
+            SymbolTask(market="jp", symbol="9984"),
+            SymbolTask(market="jp", symbol="6758"),
+        ]
+        with self.assertRaises(_Interrupted):
+            run_optuna_batch(tasks, n_trials=1, max_workers=1)
+
+        saved_symbols = sorted(c.args[2] for c in mock_json.call_args_list)
+        self.assertEqual(saved_symbols, ["7203", "9984"])
+
+    @patch("src.backtest.optimizer.batch.save_optimal_params_json")
+    @patch("src.backtest.optimizer.batch.run_optuna_optimization")
+    def test_full_run_summary_unchanged(self, mock_run, mock_json):
+        """全部終わったときの保存の呼び出しと結果サマリーが今までと同じであること（#1107）"""
+        from src.backtest.optimizer import run_optuna_batch
+        from src.domain.types import SymbolTask
+
+        df_a = pd.DataFrame({"threshold": [0.02], "sharpe_ratio": [1.5]})
+
+        def _run(market, symbol, **kwargs):
+            if symbol == "9984":
+                raise ValueError("最適化エラー")
+            return df_a
+
+        def _json(df, market, symbol, sort_by="sharpe_ratio"):
+            if symbol == "6758":
+                raise OSError("書き込みエラー")
+            return "/tmp/params.json"
+
+        mock_run.side_effect = _run
+        mock_json.side_effect = _json
+
+        results = run_optuna_batch(
+            [
+                SymbolTask(market="jp", symbol="7203"),
+                SymbolTask(market="jp", symbol="9984"),
+                SymbolTask(market="jp", symbol="6758"),
+            ],
+            n_trials=1,
+            max_workers=2,
+            sort_by="total_return",
+        )
+
+        by_symbol = {r["symbol"]: r for r in results}
+        self.assertEqual(len(results), 3)
+        self.assertEqual(by_symbol["7203"], {"market": "jp", "symbol": "7203", "status": "success"})
+        self.assertEqual(
+            by_symbol["9984"],
+            {"market": "jp", "symbol": "9984", "status": "error", "error": "最適化エラー"},
+        )
+        self.assertEqual(
+            by_symbol["6758"],
+            {"market": "jp", "symbol": "6758", "status": "error", "error": "書き込みエラー"},
+        )
+        self.assertEqual(mock_json.call_count, 2)
+        mock_json.assert_any_call(df_a, "jp", "7203", sort_by="total_return")
+
 
 # ──────────────────────────────────────────────────────────────────
 # Deflated Sharpe Ratio による選択バイアスガード（#467 / #372）
