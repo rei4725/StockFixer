@@ -19,6 +19,7 @@ from src.orchestration.jobs.alerting import (
     fetch_previous_run_stats,
 )
 from src.orchestration.jobs.backup_job import run_daily_backup  # noqa: F401 (re-export)
+from src.orchestration.jobs.challenger_shadow import run_challenger_shadow_stage
 from src.orchestration.jobs.common import _handle_stage_error, _notify_stage_failure
 from src.orchestration.jobs.drift_check import run_daily_drift_check
 from src.orchestration.jobs.prediction_errors import notify_prediction_errors
@@ -167,20 +168,7 @@ def run_daily_pipeline():
         _handle_stage_error(PipelineStage.NON_CRITICAL, "[3.1/6] 出力 invariant 評価", e)
 
     # 3.5. Challenger shadow 予測（NON_CRITICAL: モデルが存在しない場合はスキップ、失敗しても継続）
-    logger.info("[3.5/6] Challenger shadow 予測開始")
-    try:
-        from src.prediction.shadow_evaluation import predict_with_challenger_unified
-
-        challenger_rows = predict_with_challenger_unified()
-        if challenger_rows:
-            output_top_worst_results(
-                challenger_rows, mode="unified", shadow_mode=True, model_version="challenger"
-            )
-            logger.info("[3.5/6] Challenger shadow 予測完了: %d 銘柄", len(challenger_rows))
-        else:
-            logger.info("[3.5/6] Challenger モデルなし（スキップ）")
-    except Exception as e:
-        _handle_stage_error(PipelineStage.NON_CRITICAL, "[3.5/6] Challenger shadow 予測", e)
+    run_challenger_shadow_stage()
 
     # 4. 日次ドリフトチェック（NON_CRITICAL: 失敗しても後続処理を継続）
     logger.info("[4/6] 日次ドリフトチェック開始")
@@ -330,89 +318,23 @@ def run_daily_auto_order():
 
 def run_horizon_exit_check() -> None:
     """
-    毎営業日実行: target_exit_date を過ぎたペーパーポジションを成行売りで強制決済する。
+    毎営業日実行: target_exit_date を過ぎたペーパーポジションを成行で強制決済する。
 
-    SL/TP によって既に決済済みのポジションは paper_positions に存在しないため
-    自然に除外される（SL/TP 優先）。
-    銘柄ごとに最後の filled BUY の target_exit_date だけを見て、
-    約定前の SELL がある銘柄は飛ばす。
+    買い持ちは成行売り、空売りは SHORT_COVER で返済する（horizon_exit.py, #1145）。
     live モードでは処理をスキップする。
     """
     import os
 
-    from src.infrastructure.discord_notification_adapter import DiscordNotificationAdapter
-    from src.infrastructure.persistence.trade_diff_repository import PostgresTradeDiffSink
-    from src.infrastructure.yfinance_market_data_adapter import YFinanceMarketDataAdapter
-    from src.orchestration.jobs.common import today_jst_iso
-    from src.trading.brokers.account.factory import make_order_broker
-    from src.trading.brokers.base import OrderSide
-    from src.utils.db._connection import _db_connection
+    from src.orchestration.jobs.horizon_exit import exit_expired_positions
 
     mode = os.environ.get("AUTO_TRADE_MODE", "paper")
     if mode == "live":
         logger.info("live モードのためホライズン決済チェックをスキップ")
         return
 
-    today_str = today_jst_iso()  # target_exit_date は保有の最後の JST の日 (#949)
-    with _db_connection() as con:
-        # paper_orders の行は売った後も残るため、銘柄ごとに今の保有を作った
-        # 最後の filled BUY の期限だけを見る (Issue #945)
-        rows = con.execute(
-            """
-            SELECT symbol
-            FROM (
-                SELECT DISTINCT ON (symbol) symbol, target_exit_date
-                FROM paper_orders
-                WHERE side = %s
-                  AND status = 'filled'
-                ORDER BY symbol, filled_at DESC NULLS LAST, created_at DESC, order_id DESC
-            ) AS latest_buy
-            WHERE target_exit_date IS NOT NULL
-              AND CAST(target_exit_date AS VARCHAR) < %s
-            ORDER BY symbol
-            """,
-            [int(OrderSide.BUY), today_str],
-        ).fetchall()
-        pending_sell_rows = con.execute(
-            "SELECT DISTINCT symbol FROM paper_orders WHERE side = %s AND status = 'pending'",
-            [int(OrderSide.SELL)],
-        ).fetchall()
-
-    pending_sell_symbols = {row[0] for row in pending_sell_rows}
-    symbols_to_exit = [row[0] for row in rows]
-    if not symbols_to_exit:
-        logger.info("[horizon_exit] 期限切れポジションなし")
-        return
-
-    logger.info("[horizon_exit] 期限切れポジション対象: %s", symbols_to_exit)
-    broker = make_order_broker(
-        job="horizon",
-        market_data_port=YFinanceMarketDataAdapter(),
-        trade_diff_sink=PostgresTradeDiffSink(),
-        notifier=DiscordNotificationAdapter(),
-    )
-    # 送った売りは約定まで保有を変えないので、保有の一覧はループの前に1回だけ読む（#1095）
-    positions = broker.get_positions()
-    exited: list[str] = []
-    failed: list[str] = []
-    for symbol in symbols_to_exit:
-        if symbol in pending_sell_symbols:
-            # get_positions は約定前の SELL を引かないため、重ねると売りの二重発注になる
-            logger.info("[horizon_exit] 約定前の SELL があるためスキップ: %s", symbol)
-            continue
-        pos = next((p for p in positions if p["symbol"].replace(".T", "") == symbol), None)
-        if pos is None or pos.get("qty", 0) <= 0:
-            continue
-        try:
-            broker.send_order(symbol, OrderSide.SELL, pos["qty"])
-            logger.info("[horizon_exit] ホライズン決済: %s %d株", symbol, pos["qty"])
-            exited.append(symbol)
-        except Exception as e:
-            logger.error("[horizon_exit] 決済失敗: %s: %s", symbol, e, exc_info=True)
-            failed.append(symbol)
-
-    logger.info("[horizon_exit] ホライズン決済完了: %d 件", len(exited))
+    failed = exit_expired_positions()
     if failed:  # 他の銘柄を決済し終えてから失敗にする（#1074）
+        logger.error("[horizon_exit] 決済に失敗した銘柄: %s", failed)
         raise RuntimeError(f"ホライズン決済に失敗した銘柄: {failed}")
 
 
