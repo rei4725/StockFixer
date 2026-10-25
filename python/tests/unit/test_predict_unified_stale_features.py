@@ -11,16 +11,26 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
-from pandas.tseries.offsets import BDay
 
 from config.settings import STALE_BARS_MAX_WEEKDAYS
+from src.utils.jp_market_holidays import is_jp_business_day
 
 
 def _latest_weekday() -> pd.Timestamp:
-    """今日から遡った直近の平日（あるべき最新の営業日）。"""
+    """今日から遡った直近の東証の営業日（あるべき最新の営業日）。"""
     day = pd.Timestamp.now().normalize()
-    while day.weekday() >= 5:
+    while not is_jp_business_day(day.date()):
         day -= pd.Timedelta(days=1)
+    return day
+
+
+def _business_days_before(n: int) -> pd.Timestamp:
+    """あるべき最新の営業日から東証の営業日で n 日戻った日（#1106）。"""
+    day = _latest_weekday()
+    for _ in range(n):
+        day -= pd.Timedelta(days=1)
+        while not is_jp_business_day(day.date()):
+            day -= pd.Timedelta(days=1)
     return day
 
 
@@ -74,7 +84,7 @@ class TestStaleFeatures(unittest.TestCase):
         predict_unified._model_cache.clear()
 
     def test_stale_last_row_returns_none_and_warns(self):
-        last_date = _latest_weekday() - BDay(STALE_BARS_MAX_WEEKDAYS + 1)
+        last_date = _business_days_before(STALE_BARS_MAX_WEEKDAYS + 1)
         model = _mock_model()
 
         with self.assertLogs("src.prediction.predict_unified", level="WARNING") as logs:
@@ -88,7 +98,7 @@ class TestStaleFeatures(unittest.TestCase):
         self.assertIn(last_date.strftime("%Y-%m-%d"), joined)
 
     def test_holiday_gap_of_two_weekdays_still_predicts(self):
-        last_date = _latest_weekday() - BDay(2)
+        last_date = _business_days_before(2)
         model = _mock_model()
 
         result = _run(lambda m, s: _feature_frame(last_date), model)
@@ -97,7 +107,7 @@ class TestStaleFeatures(unittest.TestCase):
         self.assertEqual(result.symbol, "5202")
 
     def test_gap_at_threshold_still_predicts(self):
-        last_date = _latest_weekday() - BDay(STALE_BARS_MAX_WEEKDAYS)
+        last_date = _business_days_before(STALE_BARS_MAX_WEEKDAYS)
         model = _mock_model()
 
         result = _run(lambda m, s: _feature_frame(last_date), model)
@@ -117,7 +127,7 @@ class TestPredictAllUnifiedStaleCount(unittest.TestCase):
         from src.prediction.prediction_pipeline import predict_all_unified
 
         fresh = _latest_weekday()
-        stale = fresh - BDay(STALE_BARS_MAX_WEEKDAYS + 5)
+        stale = _business_days_before(STALE_BARS_MAX_WEEKDAYS + 5)
         frames = {"5202": _feature_frame(stale), "7203": _feature_frame(fresh)}
 
         with ExitStack() as stack:
