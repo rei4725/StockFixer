@@ -48,6 +48,23 @@ def _short_history_frame(short_bars: int) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _stale_symbol_frame(stale_days: int) -> pd.DataFrame:
+    """A と B は直近 21 本の日足（高い相関）、C は stale_days 営業日前で止まった 21 本の表。"""
+    np.random.seed(11)
+    dates = pd.bdate_range(end="2026-10-23", periods=21 + stale_days)
+    base = 100.0 + np.cumsum(np.random.randn(21))
+    closes = {
+        "A": (dates[stale_days:], base),
+        "B": (dates[stale_days:], base + np.random.randn(21) * 0.05),
+        "C": (dates[:21], 50.0 + np.cumsum(np.random.randn(21))),
+    }
+    rows = []
+    for sym, (sym_dates, values) in closes.items():
+        for ts, close in zip(sym_dates, values):
+            rows.append({"symbol": sym, "ts": ts, "close": float(close)})
+    return pd.DataFrame(rows)
+
+
 class TestLoadRecentReturns(unittest.TestCase):
     """終値は stock_features ではなく market_data_raw の close から読む。
 
@@ -112,6 +129,26 @@ class TestLoadRecentReturns(unittest.TestCase):
 
         self.assertEqual(list(returns.columns), ["A", "B"])
         self.assertEqual(len(returns), 20)
+
+    def test_stale_symbol_before_window_is_dropped_not_all_rows(self):
+        """日足が25営業日前で止まった銘柄の列を外し、表を空にしない（#1141）"""
+        frame = _stale_symbol_frame(stale_days=25)
+        with self.assertLogs("src.trading.correlation_risk", level="WARNING") as logs:
+            returns = _run_load(frame, ["A", "B", "C"], 20)
+
+        self.assertEqual(list(returns.columns), ["A", "B"])
+        self.assertEqual(len(returns), 20)
+        self.assertTrue(any("'C'" in line for line in logs.output))
+
+    def test_stale_symbol_inside_window_is_dropped_and_rest_keep_window(self):
+        """日足が18営業日前で止まった銘柄を外し、残りの20日分を使う（#1141）"""
+        frame = _stale_symbol_frame(stale_days=18)
+        with self.assertLogs("src.trading.correlation_risk", level="WARNING") as logs:
+            returns = _run_load(frame, ["A", "B", "C"], 20)
+
+        self.assertEqual(list(returns.columns), ["A", "B"])
+        self.assertEqual(len(returns), 20)
+        self.assertTrue(any("'C'" in line for line in logs.output))
 
     def test_all_symbols_short_returns_empty(self):
         frame = _short_history_frame(short_bars=1)
@@ -271,6 +308,39 @@ class TestEvaluateCorrelationGate(unittest.TestCase):
             .dropna()
         )
         expected_corr = abs(expected["A"].corr(expected["B"]))
+
+        result = self._gate_with_frame(frame)
+
+        self.assertAlmostEqual(result.avg_correlation, expected_corr, places=10)
+        self.assertAlmostEqual(result.enc, 2.0 / (1.0 + expected_corr), places=10)
+        self.assertFalse(result.is_allowed)
+
+    def _expected_ab_corr(self, frame: pd.DataFrame) -> float:
+        expected = (
+            frame[frame["symbol"] != "C"]
+            .pivot(index="ts", columns="symbol", values="close")
+            .pct_change()
+            .dropna()
+        )
+        self.assertEqual(len(expected), 20)
+        return float(abs(expected["A"].corr(expected["B"])))
+
+    def test_stale_symbol_before_window_does_not_skip_gate(self):
+        """C の日足が25営業日前で止まっても素通しにせず、A と B の20日分で ENC を出す（#1141）"""
+        frame = _stale_symbol_frame(stale_days=25)
+        expected_corr = self._expected_ab_corr(frame)
+
+        result = self._gate_with_frame(frame)
+
+        self.assertNotEqual(result.reason, "リターンデータ不足のためスキップ")
+        self.assertAlmostEqual(result.avg_correlation, expected_corr, places=10)
+        self.assertAlmostEqual(result.enc, 2.0 / (1.0 + expected_corr), places=10)
+        self.assertFalse(result.is_allowed)
+
+    def test_stale_symbol_inside_window_excluded_and_rest_judged(self):
+        """C の日足が18営業日前で止まったら C を外し、A と B の20日分で判定する（#1141）"""
+        frame = _stale_symbol_frame(stale_days=18)
+        expected_corr = self._expected_ab_corr(frame)
 
         result = self._gate_with_frame(frame)
 
