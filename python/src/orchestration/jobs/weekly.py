@@ -5,6 +5,7 @@
 """
 
 from src.orchestration.jobs.common import _handle_stage_error, _is_first_week_of_month
+from src.orchestration.jobs.symbol_master_job import run_symbol_master_refresh
 from src.orchestration.types import PipelineStage
 from src.utils.logger import get_logger
 
@@ -435,6 +436,7 @@ def run_weekly_db_maintenance() -> None:
         1. retention  — 診断ログの古い行を削除（各グループ最新は保持）
         2. （月初週のみ）VACUUM (ANALYZE) — 肥大化・統計情報の陳腐化を防ぐ
            （日常的な肥大化対策は Postgres の autovacuum に委ねる）
+        3. 銘柄マスタ（symbol_master）の社名を JPX 一覧から埋め直す（#1080）
     実行後にサイズ・所要時間を Discord 通知し、サイズが閾値超なら警告する。
     """
     import time
@@ -494,6 +496,8 @@ def run_weekly_db_maintenance() -> None:
         size_before,
         size_after,
     )
+    # 銘柄マスタ（社名）を JPX 一覧から埋め直す。落ちても WARNING で戻り、通知は続ける（#1080）
+    run_symbol_master_refresh()
 
     try:
         send_db_maintenance_completion(

@@ -744,8 +744,9 @@ class TestCalcPositionSizeVixScale(unittest.TestCase):
         with patch("src.trading.risk_manager._db_connection", new=db_no_vix):
             qty_normal = risk.calc_position_size("AAPL", price=100.0)
 
+        # VIX は1回の発注（インスタンス）の中で使い回すため、別の回として作り直す（#1046）
         with patch("src.trading.risk_manager._db_connection", new=db_high_vix):
-            qty_spike = risk.calc_position_size("AAPL", price=100.0)
+            qty_spike = self._make_risk().calc_position_size("AAPL", price=100.0)
 
         self.assertGreaterEqual(qty_normal, qty_spike)
 
