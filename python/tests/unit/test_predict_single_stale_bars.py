@@ -10,8 +10,8 @@ import numpy as np
 import pandas as pd
 
 from config.settings import STALE_BARS_MAX_WEEKDAYS
+from src.domain.jp_market_holidays import is_jp_business_day
 from src.prediction.types import PredictionResult
-from src.utils.jp_market_holidays import is_jp_business_day
 
 
 def _latest_weekday() -> pd.Timestamp:

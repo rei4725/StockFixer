@@ -15,13 +15,13 @@ import pandas as pd
 import yfinance as yf
 
 from config.settings import PREDICTION_ATR_CLIP_MULTIPLIER, STALE_BARS_MAX_WEEKDAYS
+from src.domain.jp_market_holidays import is_jp_business_day
 from src.prediction.db import load_model_weights
 from src.prediction.range_clipping import clip_diff_ratio_to_atr_range
 from src.prediction.remote_client import get_service_url, predict_via_service
 from src.prediction.types import PredictionResult
 from src.utils.data_path_utils import get_models_dir, get_ticker
 from src.utils.db import get_active_symbols, load_stock_features
-from src.utils.jp_market_holidays import is_jp_business_day
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)

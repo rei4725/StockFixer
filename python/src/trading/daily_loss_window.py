@@ -4,7 +4,7 @@ from datetime import datetime, time, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-from src.utils.jp_market_holidays import is_jp_business_day
+from src.domain.jp_market_holidays import is_jp_business_day
 
 _JST = ZoneInfo("Asia/Tokyo")
 

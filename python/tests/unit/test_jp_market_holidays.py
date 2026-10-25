@@ -2,7 +2,7 @@
 
 from datetime import date
 
-from src.utils.jp_market_holidays import (
+from src.domain.jp_market_holidays import (
     _HOLIDAYS_BY_YEAR,
     is_jp_business_day,
     is_jp_market_holiday,
