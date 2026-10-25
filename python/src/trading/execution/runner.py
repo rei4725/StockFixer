@@ -211,6 +211,7 @@ def run_daily_orders(
             | (predictions["symbol"].isin(ml_exit_symbols))
         )
     ]
+    sell_positions: list[dict] | None = None
     for _, row in sell_signals.iterrows():
         symbol = row["symbol"]
         # 予測変動量が閾値未満 → 発注スキップ（R-214）
@@ -225,10 +226,10 @@ def run_daily_orders(
             stats["skipped"] += 1
             continue
         try:
-            # 保有全数を成行売り
-            pos = next(
-                (p for p in broker.get_positions() if p["symbol"].replace(".T", "") == symbol), None
-            )
+            # 保有全数を成行売り。保有の一覧は銘柄によらず同じなので1回だけ読む（#1095）
+            if sell_positions is None:
+                sell_positions = broker.get_positions()
+            pos = next((p for p in sell_positions if p["symbol"].replace(".T", "") == symbol), None)
             if pos is None or pos["qty"] <= 0:
                 continue
             qty = pos["qty"]
