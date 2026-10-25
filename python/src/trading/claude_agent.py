@@ -29,7 +29,7 @@ from config.settings import (
 )
 from src.domain.ports import PredictionResultRepository, TradeDiffSink
 from src.trading.brokers.base import BrokerBase, BrokerError, OrderSide
-from src.trading.claude_order_caps import RunBuyCaps
+from src.trading.claude_order_caps import RunBuyCaps, start_run_buy_caps
 from src.trading.claude_reasoning_log import save_reasoning_log
 from src.trading.execution import (
     _attach_dynamic_thresholds,
@@ -448,8 +448,8 @@ def run_claude_trader(
         stats.update({"trading_stopped": gate.stop_active, "stop_reason": gate.reason})
         return stats
 
-    # 回の中で増える買いと建玉を数える（8:50 の道の position_count と同じく回の始めの保有から）
-    caps = RunBuyCaps(position_count=len(_get_held_symbols(broker)))
+    # 回の中で増える買い・建玉・業種を数え、相関ゲートを1回だけ評価する（8:50 の道と同じく回の始めの保有から）
+    caps = start_run_buy_caps(_get_held_symbols(broker), market)
 
     # 予測キャッシュ（place_order ハンドラーで参照）
     predictions_cache = prediction_repo.get_latest_by_market(market)
