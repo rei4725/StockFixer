@@ -287,6 +287,7 @@ def run_daily_auto_order():
             stop_reason=stats.get("stop_reason"),
             daily_loss=stats.get("daily_loss"),
             daily_loss_limit=stats.get("daily_loss_limit"),
+            errors=stats.get("errors", 0),
         )
     except Exception as e:
         logger.error("自動発注完了通知失敗: %s", e, exc_info=True)
@@ -318,6 +319,10 @@ def run_daily_auto_order():
 
     if horizon_exit_error is not None:
         raise horizon_exit_error
+    # 注文ごとの失敗（SL/TP の売りを含む）も知らせの後にジョブの失敗にする（#1074）。
+    # daily_auto_order は max_retries: 0 のため、失敗にしても発注は呼び直されない。
+    if stats.get("errors", 0) > 0:
+        raise RuntimeError(f"自動発注で注文の失敗が {stats['errors']} 件あった")
 
 
 def run_horizon_exit_check() -> None:
@@ -384,6 +389,7 @@ def run_horizon_exit_check() -> None:
         notifier=DiscordNotificationAdapter(),
     )
     exited: list[str] = []
+    failed: list[str] = []
     for symbol in symbols_to_exit:
         if symbol in pending_sell_symbols:
             # get_positions は約定前の SELL を引かないため、重ねると売りの二重発注になる
@@ -399,8 +405,11 @@ def run_horizon_exit_check() -> None:
             exited.append(symbol)
         except Exception as e:
             logger.error("[horizon_exit] 決済失敗: %s: %s", symbol, e, exc_info=True)
+            failed.append(symbol)
 
     logger.info("[horizon_exit] ホライズン決済完了: %d 件", len(exited))
+    if failed:  # 他の銘柄を決済し終えてから失敗にする（#1074）
+        raise RuntimeError(f"ホライズン決済に失敗した銘柄: {failed}")
 
 
 def run_daily_settle_orders(notify_when_none: bool = True) -> int:
