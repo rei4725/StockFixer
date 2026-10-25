@@ -14,11 +14,12 @@ from src.trading.execution import _check_sl_tp_exits
 from src.trading.risk_manager import RiskManager
 
 
-def _make_broker(positions=None):
+def _make_broker(positions=None, short_positions=None):
     broker = MagicMock(spec=BrokerBase)
     broker.broker_name = "paper"
     broker.get_balance.return_value = 1_000_000.0
     broker.get_positions.return_value = positions or []
+    broker.get_short_positions.return_value = short_positions or []
     broker.send_order.return_value = {"order_id": "test-sl-001", "status": "pending"}
     return broker
 
@@ -105,6 +106,104 @@ class TestCheckSlTp(unittest.TestCase):
         # pnl_pct = 0.10 == take_profit_pct → 発動
         sl, tp, _ = risk.check_sl_tp(avg_price=1000.0, current_price=1100.0)
         self.assertTrue(tp)
+
+    def test_short_rise_triggers_sl(self):
+        # 空売りは値上がりが損。売り建て 1000 → 1060 で損益率 -6%（#1120）
+        risk = self._make_risk(stop_loss_pct=0.05, take_profit_pct=0.10)
+        sl, tp, reason = risk.check_sl_tp(avg_price=1000.0, current_price=1060.0, is_short=True)
+        self.assertTrue(sl)
+        self.assertFalse(tp)
+        self.assertIn("SL発動", reason)
+
+    def test_short_fall_triggers_tp_not_sl(self):
+        # 空売りは値下がりが益。売り建て 1000 → 880 で損益率 +12%
+        risk = self._make_risk(stop_loss_pct=0.05, take_profit_pct=0.10)
+        sl, tp, reason = risk.check_sl_tp(avg_price=1000.0, current_price=880.0, is_short=True)
+        self.assertFalse(sl)
+        self.assertTrue(tp)
+        self.assertIn("TP発動", reason)
+
+
+class TestCheckSlTpShortExits(unittest.TestCase):
+    """空売りの保有も SL/TP で SHORT_COVER の成行で返済する（#1120）"""
+
+    _PARAMS = {"stop_loss_pct": 0.05, "take_profit_pct": 0.10}
+
+    def _run(self, broker, stats):
+        with patch("src.trading.risk_manager.get_optimal_params", return_value=self._PARAMS):
+            with patch("src.trading.execution.sl_tp._record_order") as record:
+                triggered = _check_sl_tp_exits(
+                    broker, "jp", "paper", MagicMock(), stats, InMemoryTradeDiffSink()
+                )
+        return triggered, record
+
+    def test_short_rise_past_sl_sends_short_cover(self):
+        shorts = [
+            {"symbol": "6758", "qty": 100, "avg_short_price": 1000.0, "current_price": 1060.0}
+        ]
+        broker = _make_broker(short_positions=shorts)
+        stats = _make_stats()
+
+        triggered, record = self._run(broker, stats)
+
+        broker.send_order.assert_called_once_with(
+            "6758", OrderSide.SHORT_COVER, 100, price=0.0, order_type=OrderType.MARKET
+        )
+        self.assertEqual(record.call_args.kwargs["side"], OrderSide.SHORT_COVER)
+        self.assertIn("6758", triggered)
+        self.assertEqual(stats["short_orders"], 1)
+        self.assertEqual(stats["sell_orders"], 0)
+
+    def test_short_fall_past_tp_sends_short_cover(self):
+        shorts = [{"symbol": "6758", "qty": 100, "avg_short_price": 1000.0, "current_price": 880.0}]
+        broker = _make_broker(short_positions=shorts)
+        stats = _make_stats()
+
+        triggered, _ = self._run(broker, stats)
+
+        broker.send_order.assert_called_once_with(
+            "6758", OrderSide.SHORT_COVER, 100, price=0.0, order_type=OrderType.MARKET
+        )
+        self.assertIn("6758", triggered)
+
+    def test_short_small_fall_does_not_hit_sl(self):
+        # 値下がり 6% は空売りの益。SL にも TP（10%）にも当たらない
+        shorts = [{"symbol": "6758", "qty": 100, "avg_short_price": 1000.0, "current_price": 940.0}]
+        broker = _make_broker(short_positions=shorts)
+        stats = _make_stats()
+
+        triggered, _ = self._run(broker, stats)
+
+        broker.send_order.assert_not_called()
+        self.assertEqual(triggered, set())
+
+    def test_unpriced_short_is_skipped_with_warning(self):
+        shorts = [
+            {"symbol": "6758", "qty": 100, "avg_short_price": 1000.0, "current_price": float("nan")}
+        ]
+        broker = _make_broker(short_positions=shorts)
+        stats = _make_stats()
+
+        with self.assertLogs("src.trading.execution.sl_tp", level="WARNING") as logs:
+            triggered, _ = self._run(broker, stats)
+
+        broker.send_order.assert_not_called()
+        self.assertEqual(triggered, set())
+        self.assertTrue(any("6758" in m for m in logs.output))
+
+    def test_broker_without_short_positions_keeps_long_only(self):
+        # get_short_positions が既定の空リストのブローカーでは、買い持ちだけを見る今の動き
+        positions = [{"symbol": "7203", "qty": 100, "avg_price": 1000.0, "current_price": 940.0}]
+        broker = _make_broker(positions)
+        stats = _make_stats()
+
+        triggered, _ = self._run(broker, stats)
+
+        broker.send_order.assert_called_once_with(
+            "7203", OrderSide.SELL, 100, price=0.0, order_type=OrderType.MARKET
+        )
+        self.assertEqual(triggered, {"7203"})
+        self.assertEqual(stats["short_orders"], 0)
 
 
 class TestCheckSlTpExits(unittest.TestCase):

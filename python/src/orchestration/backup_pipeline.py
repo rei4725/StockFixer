@@ -45,6 +45,8 @@ def run_db_backup() -> dict:
     error_msg = None
     size_mb = 0.0
     pruned_count = 0
+    # 失敗時に消すのはこの回に作ったフォルダだけ（同じ秒の既存フォルダは消さない）
+    created_dest_dir = not os.path.isdir(backup_dest_dir)
 
     try:
         os.makedirs(backup_dest_dir, exist_ok=True)
@@ -58,6 +60,8 @@ def run_db_backup() -> dict:
     except Exception as e:
         logger.error("バックアップ失敗: %s", e, exc_info=True)
         error_msg = str(e)
+        if created_dest_dir:
+            _remove_failed_backup_dir(backup_dest_dir)
 
     elapsed = time.monotonic() - start
     logger.info(
@@ -108,8 +112,32 @@ def _run_pg_dump(database_url: str, dest_path: str) -> None:
         raise RuntimeError(f"pg_dump 失敗 (code={result.returncode}): {result.stderr}")
 
 
+def _remove_failed_backup_dir(backup_dest_dir: str) -> None:
+    """失敗した回のフォルダ（書きかけの dump を含む）を消す。"""
+    if not os.path.isdir(backup_dest_dir):
+        return
+    try:
+        shutil.rmtree(backup_dest_dir)
+        logger.info("失敗したバックアップのフォルダを削除: %s", backup_dest_dir)
+    except Exception as e:
+        logger.error(
+            "失敗したバックアップのフォルダ削除失敗 (%s): %s", backup_dest_dir, e, exc_info=True
+        )
+
+
+def _has_valid_dump(backup_dir: str) -> bool:
+    """stockfixer.dump があり大きさが0より大きいかを返す。"""
+    dump_path = os.path.join(backup_dir, "stockfixer.dump")
+    return os.path.isfile(dump_path) and os.path.getsize(dump_path) > 0
+
+
 def _prune_old_backups(backup_root: str, max_generations: int) -> int:
-    """max_generations を超えた古いバックアップを削除し、削除件数を返す。"""
+    """
+    max_generations を超えた古いバックアップと失敗の跡を削除し、削除件数を返す。
+
+    世代に数えるのは stockfixer.dump があり大きさが0より大きいフォルダだけ。
+    dump が無いか大きさ0のフォルダは失敗の跡として削除する。
+    """
     if not os.path.isdir(backup_root):
         return 0
 
@@ -117,7 +145,9 @@ def _prune_old_backups(backup_root: str, max_generations: int) -> int:
     entries = sorted(
         e for e in os.listdir(backup_root) if os.path.isdir(os.path.join(backup_root, e))
     )
-    to_delete = entries[: max(0, len(entries) - max_generations)]
+    valid = [e for e in entries if _has_valid_dump(os.path.join(backup_root, e))]
+    leftovers = [e for e in entries if e not in valid]
+    to_delete = leftovers + valid[: max(0, len(valid) - max_generations)]
 
     for name in to_delete:
         target = os.path.join(backup_root, name)
