@@ -21,6 +21,7 @@ from src.domain.ports import MarketDataPort, TradeDiffSink
 from src.domain.types import TradeDiffRecord
 from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
 from src.trading.brokers.paper import split_adjust as sa
+from src.trading.brokers.paper.fill import apply_fill
 from src.utils.db._connection import _db_connection
 from src.utils.japan_time import now_jst
 from src.utils.logger import get_logger
@@ -80,6 +81,8 @@ class PaperBroker(BrokerBase):
     ) -> None:
         self._market_data = market_data_port
         self._trade_diff_sink = trade_diff_sink
+        # 直前の settle_pending_orders で、例外のため pending に残した注文の件数（#1088）
+        self.last_settle_errors = 0
 
     def get_token(self) -> str:
         """ペーパートレードはトークン不要。ダミー文字列を返す"""
@@ -198,6 +201,7 @@ class PaperBroker(BrokerBase):
             ).fetchall()
 
         settled = []
+        errors = 0  # 例外で約定できず pending に残した件数
         for (
             order_id,
             market,
@@ -271,15 +275,16 @@ class PaperBroker(BrokerBase):
                         fill_price = min(limit_price, open_price)
                     else:
                         logger.info(f"[paper] {symbol}: 指値未達、失効")
-                        with _db_connection() as con:
+                        with _db_connection() as con, con.transaction():
                             con.execute(
                                 "UPDATE paper_orders SET status='expired' WHERE order_id=%s",
                                 [order_id],
                             )
                         continue
 
-                # Phase 2: 約定処理（接続を再取得）
-                with _db_connection() as con:
+                # Phase 2: 約定処理（接続を再取得）。接続は自動確定のため、1件分を囲み、
+                # 途中で落ちたら残高・保有・注文を全部戻して pending に残す（#1088）
+                with _db_connection() as con, con.transaction():
                     if side == int(OrderSide.BUY):
                         cash = float(
                             con.execute("SELECT balance FROM paper_balance LIMIT 1").fetchone()[0]
@@ -295,7 +300,7 @@ class PaperBroker(BrokerBase):
                                 [order_id],
                             )
                             continue
-                    self._apply_fill(con, order_id, symbol, side, qty, fill_price)
+                    apply_fill(con, order_id, symbol, side, qty, fill_price)
                     con.execute(
                         "UPDATE paper_orders SET status='filled', qty=%s, "
                         "fill_price=%s, filled_at=CURRENT_TIMESTAMP WHERE order_id=%s",
@@ -327,116 +332,16 @@ class PaperBroker(BrokerBase):
                 )
 
             except Exception as e:
+                errors += 1
                 logger.error(f"[paper] 約定処理エラー ({symbol}): {e}", exc_info=True)
 
+        self.last_settle_errors = errors
+        if errors:
+            logger.error(
+                f"[paper] 約定処理の例外で pending に据え置いた注文: {errors} 件"
+                "（当日の行が無い据え置きとは別）"
+            )
         return settled
-
-    def _apply_fill(
-        self, con: Any, order_id: str, symbol: str, side: int, qty: int, fill_price: float
-    ) -> None:
-        """約定に合わせてポジションと残高を更新する"""
-        existing = con.execute(
-            "SELECT qty, avg_price FROM paper_positions WHERE symbol=%s", [symbol]
-        ).fetchone()
-
-        if side == int(OrderSide.BUY):
-            cost = qty * fill_price
-            # 残高を減少
-            con.execute("UPDATE paper_balance SET balance = balance - %s", [cost])
-            if existing:
-                old_qty, old_avg = existing
-                new_qty = old_qty + qty
-                new_avg = (old_avg * old_qty + fill_price * qty) / new_qty
-                con.execute(
-                    "UPDATE paper_positions SET qty=%s, avg_price=%s, "
-                    "updated_at=CURRENT_TIMESTAMP WHERE symbol=%s",
-                    [new_qty, new_avg, symbol],
-                )
-            else:
-                con.execute(
-                    "INSERT INTO paper_positions "
-                    "(symbol, qty, avg_price, updated_at) VALUES (%s, %s, %s, CURRENT_TIMESTAMP)",
-                    [symbol, qty, fill_price],
-                )
-        elif side == int(OrderSide.SELL):
-            # 未保有銘柄の SELL は現金を計上しない（幻の現金水増しを防止）。
-            # 保有数量を超える SELL は保有分にクランプする（過大な現金計上を防止）。
-            if not existing:
-                logger.warning(
-                    "[paper] %s: 未保有のため SELL をスキップ（現金・実現損益を計上しない）", symbol
-                )
-                return
-            old_qty, old_avg = existing
-            sell_qty = min(qty, old_qty)
-            if sell_qty < qty:
-                logger.warning(
-                    "[paper] %s: 売却数量 %d が保有 %d を超過 → 保有分にクランプ",
-                    symbol,
-                    qty,
-                    old_qty,
-                )
-            proceeds = sell_qty * fill_price
-            con.execute("UPDATE paper_balance SET balance = balance + %s", [proceeds])
-            new_qty = old_qty - sell_qty
-            if new_qty <= 0:
-                con.execute("DELETE FROM paper_positions WHERE symbol=%s", [symbol])
-            else:
-                con.execute(
-                    "UPDATE paper_positions SET qty=%s, "
-                    "updated_at=CURRENT_TIMESTAMP WHERE symbol=%s",
-                    [new_qty, symbol],
-                )
-            realized_pnl = (fill_price - old_avg) * sell_qty
-            con.execute(
-                "UPDATE paper_orders SET realized_pnl=%s WHERE order_id=%s",
-                [realized_pnl, order_id],
-            )
-        elif side == int(OrderSide.SHORT):
-            # 空売り新規: send_order で仮登録済みの avg_short_price を実際の約定値段で上書きする
-            existing_short = con.execute(
-                "SELECT qty, avg_short_price FROM paper_short_positions WHERE symbol=%s",
-                [symbol],
-            ).fetchone()
-            if existing_short:
-                old_qty, old_avg = existing_short
-                # 今回約定分のみで avg を再計算（send_order の仮登録を fill_price で補正）
-                new_avg = ((old_avg * old_qty) - (old_avg - fill_price) * qty) / old_qty
-                con.execute(
-                    "UPDATE paper_short_positions SET avg_short_price=%s, "
-                    "updated_at=CURRENT_TIMESTAMP WHERE symbol=%s",
-                    [new_avg, symbol],
-                )
-            else:
-                con.execute(
-                    "INSERT INTO paper_short_positions "
-                    "(symbol, qty, avg_short_price, opened_at, updated_at) "
-                    "VALUES (%s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
-                    [symbol, qty, fill_price],
-                )
-        elif side == int(OrderSide.SHORT_COVER):
-            # 空売り返済: paper_short_positions から qty を減算し実現損益を記録
-            existing_short = con.execute(
-                "SELECT qty, avg_short_price FROM paper_short_positions WHERE symbol=%s",
-                [symbol],
-            ).fetchone()
-            if existing_short:
-                old_qty, old_avg = existing_short
-                new_qty = old_qty - qty
-                if new_qty <= 0:
-                    con.execute("DELETE FROM paper_short_positions WHERE symbol=%s", [symbol])
-                else:
-                    con.execute(
-                        "UPDATE paper_short_positions SET qty=%s, "
-                        "updated_at=CURRENT_TIMESTAMP WHERE symbol=%s",
-                        [new_qty, symbol],
-                    )
-            else:
-                old_avg = fill_price  # ポジション不明時はPnL=0扱い
-            realized_pnl = (old_avg - fill_price) * qty
-            con.execute(
-                "UPDATE paper_orders SET realized_pnl=%s WHERE order_id=%s",
-                [realized_pnl, order_id],
-            )
 
     # ------------------------------------------------------------------
     # 照会
