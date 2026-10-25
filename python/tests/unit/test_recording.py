@@ -12,6 +12,7 @@ DB を直接叩く経路は tests/unit/conftest.py の autouse `_isolate_db` フ
 """
 
 import unittest
+from datetime import date, datetime
 from unittest.mock import MagicMock, patch
 
 from src.infrastructure.in_memory import InMemoryTradeDiffSink
@@ -163,6 +164,57 @@ class TestRecordOrderUsesInjectedSink(unittest.TestCase):
         import src.trading.execution.recording as mod
 
         self.assertFalse(hasattr(mod, "upsert_paper_real_diff"))
+
+
+class TestRecordOrderTargetExitDate(unittest.TestCase):
+    """target_exit_date は発注日を1日目とする horizon 番目の東証の営業日（#1119）。"""
+
+    def _target_exit_date(self, order_day: date, side: OrderSide, horizon: int) -> str | None:
+        with (
+            patch(
+                "src.trading.execution.recording.now_jst",
+                return_value=datetime(order_day.year, order_day.month, order_day.day, 9, 0),
+            ),
+            patch("src.trading.execution.recording._link_paper_order_metadata") as mock_link,
+        ):
+            _record_order(
+                market="jp",
+                predicted_at="2026-10-22T00:00:00",
+                symbol="7203",
+                side=side,
+                qty=100,
+                signal_price=1000.0,
+                order_price=1000.0,
+                order_type=OrderType.MARKET,
+                order_result={"order_id": "ord-exit", "fill_price": 1000.0},
+                broker=MagicMock(),
+                mode="paper",
+                horizon=horizon,
+                trade_diff_sink=InMemoryTradeDiffSink(),
+            )
+        return mock_link.call_args.args[5]
+
+    def test_horizon5_from_thursday_ends_next_wednesday(self):
+        """木曜（2026-10-22）の horizon 5 は木・金・月・火・水で、次の週の水曜。"""
+        self.assertEqual(self._target_exit_date(date(2026, 10, 22), OrderSide.BUY, 5), "2026-10-28")
+
+    def test_horizon3_skips_market_holiday(self):
+        """月曜（2026-11-02）の horizon 3 は文化の日（11-03）を飛ばして木曜。"""
+        self.assertEqual(self._target_exit_date(date(2026, 11, 2), OrderSide.BUY, 3), "2026-11-05")
+
+    def test_horizon1_is_order_day(self):
+        """horizon 1 の期限は発注日のまま。"""
+        self.assertEqual(self._target_exit_date(date(2026, 10, 23), OrderSide.BUY, 1), "2026-10-23")
+
+    def test_short_gets_same_target_exit_date(self):
+        """SHORT にも BUY と同じ期限が付く。"""
+        self.assertEqual(
+            self._target_exit_date(date(2026, 10, 22), OrderSide.SHORT, 5), "2026-10-28"
+        )
+
+    def test_sell_has_no_target_exit_date(self):
+        """SELL には期限を付けない。"""
+        self.assertIsNone(self._target_exit_date(date(2026, 10, 22), OrderSide.SELL, 5))
 
 
 if __name__ == "__main__":
