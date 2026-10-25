@@ -72,15 +72,20 @@ def apply_fill(
             [realized_pnl, order_id],
         )
     elif side == int(OrderSide.SHORT):
-        # 空売り新規: send_order で仮登録済みの avg_short_price を実際の約定値段で上書きする
+        # 空売り新規: send_order で仮登録済みの avg_short_price を実際の約定値段で直す
         existing_short = con.execute(
             "SELECT qty, avg_short_price FROM paper_short_positions WHERE symbol=%s",
             [symbol],
         ).fetchone()
         if existing_short:
             old_qty, old_avg = existing_short
-            # 今回約定分のみで avg を再計算（send_order の仮登録を fill_price で補正）
-            new_avg = ((old_avg * old_qty) - (old_avg - fill_price) * qty) / old_qty
+            # 仮登録の平均は、前の保有と今回の注文の price（成行は 0.0）を混ぜている。
+            # その price の分を約定の値段に置き換え、前の保有と約定の加重平均にする（#1115）
+            order = con.execute(
+                "SELECT price FROM paper_orders WHERE order_id=%s", [order_id]
+            ).fetchone()
+            provisional = float(order[0]) if order and order[0] is not None else fill_price
+            new_avg = old_avg + (fill_price - provisional) * qty / old_qty
             con.execute(
                 "UPDATE paper_short_positions SET avg_short_price=%s, "
                 "updated_at=CURRENT_TIMESTAMP WHERE symbol=%s",
