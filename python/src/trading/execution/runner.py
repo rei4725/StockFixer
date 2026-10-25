@@ -56,7 +56,7 @@ from .selection import (
     _get_held_symbols,
     _load_exit_model,
 )
-from .sl_tp import _check_sl_tp_exits
+from .sl_tp import _check_sl_tp_exits, _sl_tp_exits_only
 from .stats import OrderExecutionStats
 
 logger = get_logger(__name__)
@@ -144,20 +144,19 @@ def run_daily_orders(
         logger.warning(
             "[exec] 予測結果が存在しません（SL/TP の決済だけ行う）。run_predict.py を確認"
         )
-        stats.update(
-            {
-                "daily_loss": gate_status.daily_loss,
-                "daily_loss_limit": gate_status.daily_loss_limit,
-            }
-        )
-        _check_sl_tp_exits(broker, market, mode, market_data, stats, trade_diff_sink)
+        _sl_tp_exits_only(broker, market, mode, market_data, stats, trade_diff_sink, gate_status)
         return stats
     if "predicted_at" not in predictions.columns:
         predictions = predictions.copy()
         predictions["predicted_at"] = ""
 
-    predictions = _attach_dynamic_thresholds(predictions)
-    predictions = apply_multi_horizon_score_column(predictions)
+    try:
+        predictions = _attach_dynamic_thresholds(predictions)
+        predictions = apply_multi_horizon_score_column(predictions)
+    except Exception:  # 新規は止め SL/TP の決済だけ行い、ジョブは失敗にする（#932）
+        logger.error("[exec] 閾値・スコアの計算に失敗。SL/TP の決済だけ行う", exc_info=True)
+        _sl_tp_exits_only(broker, market, mode, market_data, stats, trade_diff_sink, gate_status)
+        raise
     threshold_scale = float(predictions["threshold_scale"].iloc[0])
     logger.info(
         "[exec] 動的閾値適用: scale=%.3f buy_range=%.3f%%-%.3f%%",
