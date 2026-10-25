@@ -21,6 +21,7 @@ from src.domain.ports import AnalyticsQuery
 from src.reporting.kpi import _REPORT_DAYS, MonthlyKPI, get_monthly_kpis
 from src.reporting.types import MonthlyReportSummary
 from src.utils.data_path_utils import get_results_dir
+from src.utils.drift_thresholds import load_drift_thresholds
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -92,6 +93,7 @@ def _load_monthly_kpis(analytics: AnalyticsQuery) -> MonthlyKPI:
         diff_summary=diff_summary,
         accuracy_df=_load_window_accuracy(analytics),
         drift_df=analytics.drift_summary(horizon=1, recent_n=_REPORT_DAYS),
+        drift_thresholds=load_drift_thresholds(),
     )
 
 
