@@ -76,6 +76,7 @@ class TestRunDailyAutoOrder(unittest.TestCase):
             stop_reason="日次損失上限に到達",
             daily_loss=25_000.0,
             daily_loss_limit=20_000.0,
+            errors=0,
         )
 
     @patch("src.reporting.discord.discord_utils.send_daily_order_completion")

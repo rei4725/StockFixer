@@ -13,6 +13,7 @@ import pandas as pd
 import src.utils.data_path_utils as path_utils
 import src.utils.db as db_module
 from src.market_data.pipeline import (
+    _count_weekdays_behind,
     fetch_stock_data_with_features,
     save_features_to_db,
     save_stock_data_with_features,
@@ -379,6 +380,52 @@ class TestFetchStockDataWithFeatures(_TmpDbTestCase):
         )
 
         self.assertIsNotNone(result)
+
+    def test_count_weekdays_behind_skips_jp_market_holidays(self):
+        """jp は東証の休場日を数えず、us は土日だけを除く（#1105）"""
+        last = pd.Timestamp("2027-04-30")
+        # 05-03〜05-05 は東証の休場日。jp は 05-06 の1日だけ足りない
+        self.assertEqual(_count_weekdays_behind(last, "2027-05-06", "jp"), 1)
+        self.assertEqual(_count_weekdays_behind(last, "2027-05-06", "us"), 4)
+        # 04-27・04-28・04-30・05-06 の4営業日（04-29 は休場日）
+        self.assertEqual(_count_weekdays_behind(pd.Timestamp("2027-04-26"), "2027-05-06", "jp"), 4)
+
+    def _fetch_with_empty_diff(self, mock_from_db, mock_get_data, market, last_date):
+        mock_from_db.return_value = self._make_ohlcv_until(last_date)
+        mock_get_data.return_value = pd.DataFrame()
+        return fetch_stock_data_with_features(
+            market=market, symbol="7203", start_date="2022-05-06", end_date="2027-05-06"
+        )
+
+    @patch("src.market_data.pipeline.fetch_pageview_features", return_value=None)
+    @patch("src.market_data.pipeline.fetch_news_sentiment_with_llm", return_value=None)
+    @patch("src.market_data.pipeline.fetch_additional_macro_features", return_value=None)
+    @patch("src.market_data.pipeline.fetch_cross_asset_features", return_value=None)
+    @patch("src.market_data.pipeline.get_stock_data")
+    @patch("src.market_data.pipeline.get_raw_ohlcv_from_db")
+    def test_jp_golden_week_gap_with_empty_diff_still_builds_features(
+        self, mock_from_db, mock_get_data, *_mocks
+    ):
+        """大型連休の明けの朝でも、jp は東証の営業日で数えて特徴量を作る（#1105）"""
+        result = self._fetch_with_empty_diff(mock_from_db, mock_get_data, "jp", "2027-04-30")
+
+        self.assertIsNotNone(result)
+
+    @patch("src.market_data.pipeline.fetch_pageview_features", return_value=None)
+    @patch("src.market_data.pipeline.fetch_news_sentiment_with_llm", return_value=None)
+    @patch("src.market_data.pipeline.fetch_additional_macro_features", return_value=None)
+    @patch("src.market_data.pipeline.fetch_cross_asset_features", return_value=None)
+    @patch("src.market_data.pipeline.get_stock_data")
+    @patch("src.market_data.pipeline.get_raw_ohlcv_from_db")
+    def test_jp_four_business_days_gap_and_us_weekday_gap_are_skipped(
+        self, mock_from_db, mock_get_data, *_mocks
+    ):
+        """東証の営業日で4日空いた jp と、土日だけを除いて4日空いた us はスキップする（#1105）"""
+        jp = self._fetch_with_empty_diff(mock_from_db, mock_get_data, "jp", "2027-04-26")
+        us = self._fetch_with_empty_diff(mock_from_db, mock_get_data, "us", "2027-04-30")
+
+        self.assertIsNone(jp)
+        self.assertIsNone(us)
 
     def _make_split_case(self):
         """2分割の前の DB の足、分割の行を含む差分の足、取り直した全期間の足を作る"""

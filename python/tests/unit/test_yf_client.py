@@ -1,11 +1,40 @@
 """yf_client モジュールのユニットテスト"""
 
+import shutil
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
 
-from src.market_data.yf_client import _normalize, download, ticker_history
+from src.market_data.yf_client import (
+    _normalize,
+    clear_cache,
+    download,
+    set_no_cache,
+    ticker_history,
+)
+
+
+class _IsolatedCacheTestBase(unittest.TestCase):
+    """キャッシュの置き場を一時ディレクトリに差し替え、テストごとに空にする（#1103）"""
+
+    def setUp(self):
+        self.tmp_dir = tempfile.mkdtemp()
+        self._patch_data_dir = patch(
+            "src.market_data.yf_client.get_data_dir", return_value=self.tmp_dir
+        )
+        self._patch_data_dir.start()
+        clear_cache()
+        set_no_cache(False)
+
+    def tearDown(self):
+        # 差し替えを外す前に空にし、実際の data_dir のキャッシュには触れない
+        clear_cache()
+        set_no_cache(False)
+        self._patch_data_dir.stop()
+        shutil.rmtree(self.tmp_dir, ignore_errors=True)
 
 
 class TestNormalize(unittest.TestCase):
@@ -90,7 +119,7 @@ class TestNormalize(unittest.TestCase):
         self.assertEqual(len(result), 2)
 
 
-class TestDownload(unittest.TestCase):
+class TestDownload(_IsolatedCacheTestBase):
     """download 関数のテスト"""
 
     @patch("src.market_data.yf_client.with_retry")
@@ -166,8 +195,22 @@ class TestDownload(unittest.TestCase):
         self.assertTrue(result.empty)
 
 
-class TestTickerHistory(unittest.TestCase):
+class TestTickerHistory(_IsolatedCacheTestBase):
     """ticker_history 関数のテスト"""
+
+    @patch("src.market_data.yf_client.with_retry")
+    @patch("src.market_data.yf_client.yf")
+    def test_disk_cache_written_to_temp_dir(self, mock_yf, mock_retry):
+        """ディスクのキャッシュが一時ディレクトリに書かれること"""
+        mock_yf.Ticker.return_value = MagicMock()
+        mock_retry.return_value = pd.DataFrame(
+            {"Close": [100.0]}, index=pd.date_range("2024-01-01", periods=1)
+        )
+
+        ticker_history("7203.T", start="2024-01-01", end="2024-06-01")
+
+        cached = list((Path(self.tmp_dir) / "yf_cache").glob("*.pkl"))
+        self.assertEqual(len(cached), 1)
 
     @patch("src.market_data.yf_client.with_retry")
     @patch("src.market_data.yf_client.yf")
@@ -232,6 +275,26 @@ class TestTickerHistory(unittest.TestCase):
         result = ticker_history("UNKNOWN", start="2024-01-01", end="2024-01-02")
 
         self.assertTrue(result.empty)
+
+
+class TestTickerHistoryOrderIndependence(unittest.TestCase):
+    """TestTickerHistory が実行順に依存しないことのテスト（#1103）"""
+
+    def test_exception_case_passes_after_normalized_case(self):
+        """正常系の後に同じ引数の例外系を同じプロセスで流しても通ること"""
+        suite = unittest.TestSuite(
+            [
+                TestTickerHistory("test_returns_normalized_df"),
+                TestTickerHistory("test_exception_returns_empty"),
+            ]
+        )
+        result = unittest.TestResult()
+
+        suite.run(result)
+
+        self.assertEqual(result.testsRun, 2)
+        self.assertEqual(result.failures, [])
+        self.assertEqual(result.errors, [])
 
 
 if __name__ == "__main__":

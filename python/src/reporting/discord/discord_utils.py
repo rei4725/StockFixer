@@ -180,6 +180,7 @@ def send_daily_order_completion(
     stop_reason: Optional[str] = None,
     daily_loss: Optional[float] = None,
     daily_loss_limit: Optional[float] = None,
+    errors: int = 0,
 ) -> bool:
     """
     自動発注完了通知を Discord Webhook に送信する。
@@ -192,6 +193,7 @@ def send_daily_order_completion(
         stop_reason: 停止理由
         daily_loss: 当日損失額
         daily_loss_limit: 当日損失上限額
+        errors: 例外で出せなかった注文の数（SL/TP の売りを含む）
 
     Returns:
         成功時 True、失敗時 False
@@ -202,6 +204,7 @@ def send_daily_order_completion(
         {"name": "⚙️ モード", "value": mode, "inline": True},
         {"name": "🟢 買い注文", "value": f"{buy_orders:,} 件", "inline": True},
         {"name": "🔴 売り注文", "value": f"{sell_orders:,} 件", "inline": True},
+        {"name": "⚠️ 注文エラー", "value": f"{errors:,} 件", "inline": True},
     ]
     if trading_stopped:
         fields.append(
