@@ -1,5 +1,6 @@
 """注文結果の記録と live 約定差分の同期。"""
 
+from collections.abc import Callable
 from datetime import timedelta
 from typing import Any
 
@@ -8,6 +9,11 @@ from src.domain.types import TradeDiffRecord
 from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
 from src.utils.db import db_connection
 from src.utils.japan_time import now_jst
+from src.utils.logger import get_logger
+
+from .stats import OrderExecutionStats
+
+logger = get_logger(__name__)
 
 
 def _link_paper_order_metadata(
@@ -103,9 +109,16 @@ def _record_order(
             # 保有の最後の JST の日（発注日＋horizon−1）。決済はその次の日の朝 (#949)
             last_day = now_jst().date() + timedelta(days=horizon - 1)
             target_exit_date = last_day.isoformat()
-        _link_paper_order_metadata(
-            order_id, market, predicted_at, signal_price, horizon, target_exit_date
-        )
+        try:
+            _link_paper_order_metadata(
+                order_id, market, predicted_at, signal_price, horizon, target_exit_date
+            )
+        except Exception:
+            if side in (OrderSide.BUY, OrderSide.SHORT):
+                # 期限の無い保有を残さないよう、期限を書けない新規の注文は取り消す (#1104)
+                logger.error("[exec] 注文の期限を書けず取り消す: order_id=%s", order_id)
+                broker.cancel_order(order_id)
+            raise
 
     fill_price_raw = order_result.get("fill_price")
     fill_price = float(fill_price_raw) if isinstance(fill_price_raw, (int, float)) else None
@@ -124,3 +137,26 @@ def _record_order(
             split_ratio=split_ratio,
         )
     )
+
+
+def _recorder(record: Callable[..., None], stats: OrderExecutionStats) -> Callable[..., None]:
+    """send_order が通った後の付帯の記録を、失敗しても数えを止めない形で包む（#1104）。
+
+    注文はもう出ているため、記録の失敗で呼び出し元の数え（保有の上限・SL/TP の除外）を
+    止めない。失敗は order_id を添えて ERROR に出し、errors に数える。
+    record は呼び出し元のモジュールの _record_order（テストが差し替える名前）を渡す。
+    """
+
+    def _record_after_send(**kwargs: Any) -> None:
+        try:
+            record(**kwargs)
+        except Exception:
+            logger.error(
+                "[exec] 注文は出たが付帯の記録に失敗 (%s order_id=%s)",
+                kwargs["symbol"],
+                kwargs["order_result"].get("order_id", ""),
+                exc_info=True,
+            )
+            stats["errors"] += 1
+
+    return _record_after_send

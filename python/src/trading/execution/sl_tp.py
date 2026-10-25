@@ -8,7 +8,7 @@ from src.trading.risk_manager import RiskManager
 from src.trading.types import TradingGateStatus
 from src.utils.logger import get_logger
 
-from .recording import _record_order
+from .recording import _record_order, _recorder
 from .stats import OrderExecutionStats
 
 logger = get_logger(__name__)
@@ -29,6 +29,7 @@ def _check_sl_tp_exits(
         呼び出し元は prediction ベースの売りシグナルから除外する。
     """
     triggered: set[str] = set()
+    record = _recorder(_record_order, stats)  # 記録の失敗でも売りは出たものとして除外する (#1104)
     positions = broker.get_positions()
     for pos in positions:
         symbol = str(pos.get("symbol", "")).replace(".T", "")
@@ -57,7 +58,7 @@ def _check_sl_tp_exits(
                 price=order_price,
                 order_type=order_type,
             )
-            _record_order(
+            record(
                 market=market,
                 predicted_at="",
                 symbol=symbol,
