@@ -68,7 +68,8 @@ def evaluate_all_symbols(
         symbols: 評価対象銘柄リスト（Noneでウォッチリスト全銘柄）
 
     Returns:
-        {"evaluated": int, "effective": int, "skipped": int}
+        {"evaluated": int, "effective": int, "skipped": int, "errors": int}
+        skipped は有効ルールなしの銘柄の数、errors は評価（保存を含む）が例外で落ちた銘柄の数。
     """
     target_symbols = symbols or _load_symbols(market)
     logger.info(f"ルール評価開始: {len(target_symbols)} 銘柄 ({market})")
@@ -76,6 +77,7 @@ def evaluate_all_symbols(
     evaluated = 0
     effective = 0
     skipped = 0
+    errors = 0
 
     for i, symbol in enumerate(target_symbols, 1):
         logger.info(f"[{i}/{len(target_symbols)}] {market}/{symbol} 評価中...")
@@ -118,11 +120,20 @@ def evaluate_all_symbols(
             )
 
         except Exception as exc:
+            # 失敗は有効ルールなしと分けて数え、呼び出し元がジョブを失敗にできるようにする（#1087）。
+            # ほかの銘柄の評価は止めない。
             logger.error(f"  [{symbol}] 評価失敗: {exc}", exc_info=True)
-            skipped += 1
+            errors += 1
 
-    summary = {"evaluated": evaluated, "effective": effective, "skipped": skipped}
-    logger.info(f"ルール評価完了: 評価={evaluated}  有効={effective}  スキップ={skipped}")
+    summary = {
+        "evaluated": evaluated,
+        "effective": effective,
+        "skipped": skipped,
+        "errors": errors,
+    }
+    logger.info(
+        f"ルール評価完了: 評価={evaluated}  有効={effective}  スキップ={skipped}  失敗={errors}"
+    )
     return summary
 
 

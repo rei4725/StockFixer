@@ -559,7 +559,7 @@ def run_weekly_rule_evaluation() -> None:
     「最優秀ルール」を DuckDB に保存する。
 
     判定基準: 勝率 50% 以上 AND 純利益プラス
-    完了後 Discord に評価サマリーを通知する。
+    完了後 Discord に評価サマリーを通知し、評価の失敗があればジョブを失敗にする（#1087）。
     """
     from config.execution import RULE_EVAL_END, RULE_EVAL_MARKET, RULE_EVAL_START
 
@@ -585,14 +585,6 @@ def run_weekly_rule_evaluation() -> None:
         logger.error("週次ルール評価失敗: %s", e, exc_info=True)
         raise
 
-    try:
-        from src.reporting.discord.discord_utils import send_rule_evaluation_completion
+    from src.orchestration.jobs.rule_evaluation import finish_rule_evaluation
 
-        send_rule_evaluation_completion(
-            evaluated=summary["evaluated"],
-            effective=summary["effective"],
-            skipped=summary["skipped"],
-            market=market,
-        )
-    except Exception as e:
-        logger.error("ルール評価通知失敗: %s", e, exc_info=True)
+    finish_rule_evaluation(summary, market)

@@ -13,6 +13,7 @@ from typing import Optional
 
 import pandas as pd
 
+from src.utils.drift_thresholds import DriftThresholds, select_drifted_symbols
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -46,12 +47,14 @@ def get_monthly_kpis(
     diff_summary: Optional[dict],
     accuracy_df: pd.DataFrame,
     drift_df: pd.DataFrame,
+    drift_thresholds: Optional[DriftThresholds] = None,
 ) -> MonthlyKPI:
     """hit_rate / avg_slippage / drift_count を集約して返す。
 
     入力はすべて入口が AnalyticsQuery から取得して渡す（自分では読みに行かない）。
     accuracy_df は窓の中の採点をすべて含む prediction_accuracy(horizon=1) の戻り値、
     drift_df は drift_summary(horizon=1, recent_n=days) の戻り値を想定する。
+    drift_thresholds は入口が読んだドリフト判定の設定値（省略時は既定値）。
 
     diff_summary の取得に失敗した場合は None を渡すこと。None のときは avg_slippage を
     「計測されたゼロ」(0.0) ではなく「データなし」(None) として扱い、
@@ -71,7 +74,7 @@ def get_monthly_kpis(
     return MonthlyKPI(
         hit_rate=_compute_hit_rate(accuracy_df, days),
         avg_slippage=avg_slippage,
-        drift_count=_compute_drift_count(drift_df),
+        drift_count=_compute_drift_count(drift_df, drift_thresholds),
         diff_summary=resolved_diff_summary,
     )
 
@@ -90,12 +93,11 @@ def _compute_hit_rate(accuracy_df: pd.DataFrame, days: int = _REPORT_DAYS) -> Op
     return float(df["direction_match"].astype(float).mean())
 
 
-def _compute_drift_count(drift_df: pd.DataFrame) -> int:
+def _compute_drift_count(
+    drift_df: pd.DataFrame, thresholds: Optional[DriftThresholds] = None
+) -> int:
+    """日次のドリフト検査と同じ判定（サンプル数の下限・中央値に合わせた線）で数える（#1089）。"""
     if drift_df is None or drift_df.empty:
         return 0
-    return int(
-        (
-            (drift_df.get("mean_abs_error", pd.Series(dtype=float)) >= 0.02)
-            | (drift_df.get("direction_accuracy", pd.Series(dtype=float)) <= 0.45)
-        ).sum()
-    )
+    selection = select_drifted_symbols(drift_df, thresholds or DriftThresholds())
+    return len(selection.triggered)
