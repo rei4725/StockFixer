@@ -5,6 +5,7 @@ anthropic SDK・DuckDB・Broker はすべて MagicMock で差し替える。
 anthropic が未インストールの環境でも実行できるよう sys.modules にスタブを注入する。
 """
 
+import json
 import sys
 import unittest
 from unittest.mock import MagicMock, patch
@@ -362,6 +363,89 @@ class TestRunClaudeTrader(unittest.TestCase):
 
         # 2回呼ばれているはず（tool_use → end_turn）
         self.assertEqual(client.messages.create.call_count, 2)
+
+    def _run_with_buys(self, symbols, positions=None):
+        """1回の中で symbols の順に place_order の買いを呼ばせ、(stats, broker, 結果) を返す"""
+        from src.trading.claude_agent import run_claude_trader
+
+        broker = _make_broker(positions=positions)
+        n = max(len(symbols), 1)
+        df = _make_predictions_df(n=n)
+        df["symbol"] = [f"S{i}" for i in range(n)]
+        df["multi_horizon_score"] = df["diff_ratio"]
+        df["effective_buy_threshold"] = 0.005
+        df["effective_sell_threshold"] = -0.005
+        tool_calls = [
+            {
+                "id": f"tool-{i}",
+                "name": "place_order",
+                "input": {"symbol": s, "side": "buy", "reasoning": "テスト"},
+            }
+            for i, s in enumerate(symbols)
+        ]
+        client = MagicMock()
+        client.messages.create.side_effect = [
+            _make_anthropic_response(stop_reason="tool_use", tool_calls=tool_calls),
+            _make_anthropic_response(stop_reason="end_turn"),
+        ]
+        with patch("src.trading.claude_agent.RiskManager") as mock_risk_cls, patch.object(
+            _PREDICTIONS, "get_latest_by_market", return_value=df
+        ), patch("anthropic.Anthropic", return_value=client), patch(
+            "src.trading.claude_agent._attach_dynamic_thresholds", return_value=df
+        ), patch(
+            "src.trading.claude_agent.apply_multi_horizon_score_column", return_value=df
+        ), patch(
+            "src.trading.claude_agent._record_order"
+        ), patch(
+            "src.trading.claude_agent._resolve_kelly_params", return_value=(0.55, 0.015, 0.008)
+        ), patch(
+            "src.trading.claude_agent._choose_order_params",
+            return_value=(OrderType.MARKET, 0.0, "market", "open"),
+        ):
+            mock_risk_cls.return_value = self._make_risk_mock()
+            stats = run_claude_trader(
+                broker=broker,
+                market="jp",
+                mode="paper",
+                trade_diff_sink=InMemoryTradeDiffSink(),
+                prediction_repo=_PREDICTIONS,
+            )
+        tool_results = client.messages.create.call_args_list[1].kwargs["messages"][-1]["content"]
+        results = [json.loads(r["content"]) for r in tool_results]
+        return stats, broker, results
+
+    def test_buys_beyond_max_orders_per_run_are_skipped(self):
+        from config.settings import MAX_ORDERS_PER_RUN
+
+        symbols = [f"S{i}" for i in range(MAX_ORDERS_PER_RUN + 2)]
+        stats, broker, results = self._run_with_buys(symbols)
+
+        self.assertEqual(broker.send_order.call_count, MAX_ORDERS_PER_RUN)
+        self.assertEqual(stats["buy_orders"], MAX_ORDERS_PER_RUN)
+        statuses = [r["status"] for r in results]
+        self.assertEqual(statuses[:MAX_ORDERS_PER_RUN], ["placed"] * MAX_ORDERS_PER_RUN)
+        self.assertEqual(statuses[MAX_ORDERS_PER_RUN:], ["skipped", "skipped"])
+        self.assertIn("MAX_ORDERS_PER_RUN", results[-1]["reason"])
+
+    def test_second_buy_skipped_when_positions_reach_max(self):
+        from config.settings import MAX_POSITIONS
+
+        positions = [
+            {"symbol": f"H{i}", "qty": 100, "avg_price": 1000.0, "current_price": 1000.0}
+            for i in range(MAX_POSITIONS - 1)
+        ]
+        stats, broker, results = self._run_with_buys(["S0", "S1"], positions=positions)
+
+        self.assertEqual([r["status"] for r in results], ["placed", "skipped"])
+        self.assertIn("MAX_POSITIONS", results[1]["reason"])
+        broker.send_order.assert_called_once()
+
+    def test_second_buy_of_same_symbol_in_run_is_skipped(self):
+        stats, broker, results = self._run_with_buys(["S0", "S0"])
+
+        self.assertEqual([r["status"] for r in results], ["placed", "skipped"])
+        broker.send_order.assert_called_once()
+        self.assertEqual(stats["buy_orders"], 1)
 
     def test_import_error_raised_without_anthropic(self):
         broker = _make_broker()

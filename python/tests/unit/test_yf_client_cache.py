@@ -3,6 +3,7 @@
 import shutil
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import pandas as pd
@@ -54,12 +55,13 @@ class _CacheTestBase(unittest.TestCase):
         mod.set_no_cache(False)
 
     def tearDown(self):
-        self._patch_data_dir.stop()
-        shutil.rmtree(self.tmp_dir, ignore_errors=True)
         import src.market_data.yf_client as mod
 
+        # 差し替えを外す前に空にし、実際の data_dir のキャッシュには触れない（#1116）
         mod.clear_cache()
         mod.set_no_cache(False)
+        self._patch_data_dir.stop()
+        shutil.rmtree(self.tmp_dir, ignore_errors=True)
 
 
 class TestDownloadCache(_CacheTestBase):
@@ -198,6 +200,36 @@ class TestTickerHistoryCache(_CacheTestBase):
         yf_client.ticker_history("INVALID", start="2024-01-01", end="2024-06-01")
 
         self.assertEqual(mock_retry.call_count, 2)
+
+
+class TestCacheTestBaseTeardown(unittest.TestCase):
+    """_CacheTestBase の後始末が差し替えの外のキャッシュを消さないこと（#1116）"""
+
+    def setUp(self):
+        # 差し替えの外の一時ディレクトリを実際の data_dir に見立てる
+        self.outer_dir = tempfile.mkdtemp()
+        self._patch_outer = patch(
+            "src.market_data.yf_client.get_data_dir", return_value=self.outer_dir
+        )
+        self._patch_outer.start()
+
+    def tearDown(self):
+        self._patch_outer.stop()
+        shutil.rmtree(self.outer_dir, ignore_errors=True)
+
+    def test_teardown_keeps_outer_disk_cache(self):
+        """setUp・tearDown の後も、外の yf_cache の pkl が残ること"""
+        outer_cache = Path(self.outer_dir) / "yf_cache"
+        outer_cache.mkdir(parents=True)
+        outer_pkl = outer_cache / "outer.pkl"
+        outer_pkl.write_bytes(b"x")
+
+        case = TestDownloadCache("test_empty_df_not_cached")
+        # setUp の clear_cache も差し替えの内側で呼ばれるので、外の pkl は消えない
+        case.setUp()
+        case.tearDown()
+
+        self.assertTrue(outer_pkl.exists())
 
 
 if __name__ == "__main__":
