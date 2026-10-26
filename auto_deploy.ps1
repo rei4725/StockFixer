@@ -209,6 +209,15 @@ try {
         Write-Log "[health] healthy 確認 ✅"
         Set-Content -Path $stateFile -Value $remoteSha -Encoding UTF8
         Resolve-FailureIssues $env:VERSION
+
+        # ---- 古いイメージ・ビルドキャッシュの掃除 ----
+        # デプロイ毎に旧イメージが溜まり Docker の仮想ディスクが満杯になって
+        # postgres が PANIC した (2026-10-27)。稼働中コンテナのイメージと
+        # 直近 1 日分は残す（手動ロールバック用）。失敗してもデプロイは成功扱い。
+        Write-Log "[cleanup] 1 日より古い未使用イメージとビルドキャッシュを削除"
+        docker image prune -a -f --filter "until=24h" 2>&1 | ForEach-Object { Write-Log "  [cleanup] $_" }
+        docker builder prune -f --filter "until=24h" 2>&1 | Select-Object -Last 1 | ForEach-Object { Write-Log "  [cleanup] $_" }
+
         Write-Log "=== 自動デプロイ完了 (v$($env:VERSION)) ==="
         exit 0
     }
