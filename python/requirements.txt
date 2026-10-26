@@ -12,7 +12,7 @@ xgboost==3.4.1
 requests==2.34.2
 httpx==0.28.1
 matplotlib==3.11.2
-shap==0.53.0
+shap==0.54.1
 numba==0.68.0
 llvmlite==0.50.0
 pandas>=3.0.6,<4
