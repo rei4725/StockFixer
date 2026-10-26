@@ -55,6 +55,7 @@ from .selection import (
     _compute_ml_exit_signals,
     _determine_entry_horizon,
     _get_held_symbols,
+    _get_pending_buy_symbols,
     _load_exit_model,
 )
 from .sl_tp import _check_sl_tp_exits, _sl_tp_exits_only
@@ -263,14 +264,15 @@ def run_daily_orders(
             stats["errors"] += 1
     _log_pending_skips("売りシグナル", pending_skipped)
 
-    # --- 新規買いシグナル ---
+    # --- 新規買いシグナル（前の回の約定待ちの BUY も保有と業種の上限に数える、#1137） ---
+    held_or_pending = held_symbols | _get_pending_buy_symbols(broker)
     if gate_status.is_allowed and corr_gate.is_allowed:
         buy_candidates = predictions[
-            (~predictions["symbol"].isin(held_symbols))
+            (~predictions["symbol"].isin(held_or_pending))
             & (predictions["multi_horizon_score"] >= predictions["effective_buy_threshold"])
         ]
         buy_signals = _apply_buy_sector_limit(
-            buy_candidates, held_symbols=held_symbols, market=market
+            buy_candidates, held_symbols=held_or_pending, market=market
         ).head(MAX_ORDERS_PER_RUN)
     else:
         logger.warning(
@@ -282,7 +284,7 @@ def run_daily_orders(
     # 1ラン内で増える建玉数を追跡し、ラン途中でも MAX_POSITIONS を超えないようにする。
     # （ゲートはラン開始時の一度きりで、head(MAX_ORDERS_PER_RUN) だけでは保有上限を
     #   最大 MAX_ORDERS_PER_RUN-1 件超過しうるため）
-    position_count = len(held_symbols)
+    position_count = len(held_or_pending)
 
     for _, row in buy_signals.iterrows():
         symbol = row["symbol"]
