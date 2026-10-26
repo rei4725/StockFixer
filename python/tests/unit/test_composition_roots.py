@@ -362,6 +362,10 @@ class TestRunDashboardCompositionRoot(unittest.TestCase):
             run_dashboard.main()
 
         self.assertIsInstance(captured.get("analytics"), PostgresAnalyticsQuery)
+        # ペーパーの含み損益は PaperBroker の評価から出す（#1178）
+        from src.trading.brokers.paper.paper_broker import PaperBroker
+
+        self.assertIsInstance(captured.get("paper_broker"), PaperBroker)
 
 
 class TestRunMonthlyReportCliCompositionRoot(unittest.TestCase):

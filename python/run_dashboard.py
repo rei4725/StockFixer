@@ -41,11 +41,23 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    from src.infrastructure.persistence.trade_diff_repository import PostgresTradeDiffSink
+    from src.infrastructure.yfinance_market_data_adapter import YFinanceMarketDataAdapter
     from src.orchestration.port_wiring import wire_ports
+    from src.trading.brokers.paper.paper_broker import PaperBroker
 
     wire_ports()
     args = parse_args()
-    run_dashboard(recent_days=args.days, drift_n=args.drift_n, analytics=PostgresAnalyticsQuery())
+    paper_broker = PaperBroker(
+        market_data_port=YFinanceMarketDataAdapter(),
+        trade_diff_sink=PostgresTradeDiffSink(),
+    )
+    run_dashboard(
+        recent_days=args.days,
+        drift_n=args.drift_n,
+        analytics=PostgresAnalyticsQuery(),
+        paper_broker=paper_broker,
+    )
 
 
 if __name__ == "__main__":
