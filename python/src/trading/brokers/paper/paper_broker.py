@@ -335,6 +335,13 @@ class PaperBroker(BrokerBase):
                             )
                             continue
                     qty = apply_fill(con, order_id, symbol, side, qty, fill_price)
+                    if qty <= 0:
+                        # 保有の無い決済は約定させない（評価額に幻の現金と建玉を入れない、#1190）
+                        con.execute(
+                            "UPDATE paper_orders SET status='rejected' WHERE order_id=%s",
+                            [order_id],
+                        )
+                        continue
                     con.execute(
                         "UPDATE paper_orders SET status='filled', qty=%s, "
                         "fill_price=%s, filled_at=CURRENT_TIMESTAMP WHERE order_id=%s",

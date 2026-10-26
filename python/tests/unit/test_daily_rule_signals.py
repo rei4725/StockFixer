@@ -41,28 +41,61 @@ class TestRunDailyRuleSignalsUnavailable(unittest.TestCase):
                 self._run(_batch(n_ok=1, n_unavailable=2))
         self.assertIn("日次ルールシグナル失敗", "\n".join(logs.output))
 
-    def test_does_not_place_orders_when_more_than_half_unavailable(self):
-        execute = MagicMock()
+    def test_places_held_sells_but_no_new_buys_when_more_than_half_unavailable(self):
+        """半分を超えた日も保有の SELL だけは出し、新規の BUY は出さずに失敗にする（#1191）。"""
         from src.orchestration.jobs import daily
+        from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
 
+        batch = RuleSignalBatch(
+            signals=[
+                {"symbol": "1000", "rule": "rsi_contrarian", "signal": -1, "price": 100.0},
+                {"symbol": "2000", "rule": "rsi_contrarian", "signal": 1, "price": 100.0},
+            ],
+            unavailable=[
+                UnavailableRuleSymbol(symbol=f"NG{i}", rule="rsi_contrarian", reason="データ不足")
+                for i in range(3)
+            ],
+            total=5,
+        )
+        broker = MagicMock(spec=BrokerBase)
+        broker.broker_name = "mock"
+        broker.get_positions.return_value = [
+            {"symbol": "1000", "qty": 100, "avg_price": 100.0, "current_price": 100.0}
+        ]
+        risk = MagicMock()
+        risk.evaluate_trading_gate.return_value = MagicMock(is_allowed=True, reason=None)
+        risk.calc_position_size.return_value = 100
         with (
+            patch("src.rule_engine.pipeline.generate_rule_signals", return_value=batch),
+            patch("src.trading.brokers.account.factory.make_order_broker", return_value=broker),
+            patch("src.trading.rule_execution.RiskManager", return_value=risk),
             patch(
-                "src.rule_engine.pipeline.generate_rule_signals",
-                return_value=_batch(n_ok=0, n_unavailable=3),
+                "src.trading.rule_execution.evaluate_correlation_gate",
+                return_value=MagicMock(is_allowed=True, reason=None),
             ),
-            patch("src.trading.rule_execution.execute_rule_paper_trades", execute),
+            patch("src.trading.rule_execution.get_symbol_sector", return_value="sec"),
+            patch(
+                "src.trading.rule_execution.get_ticker",
+                side_effect=lambda market, symbol: f"{symbol}.T",
+            ),
+            patch("src.infrastructure.discord_notification_adapter.DiscordNotificationAdapter"),
             patch("src.infrastructure.yfinance_market_data_adapter.YFinanceMarketDataAdapter"),
             patch("src.infrastructure.persistence.trade_diff_repository.PostgresTradeDiffSink"),
+            patch("src.reporting.discord.discord_utils.send_rule_daily_signals"),
+            self.assertLogs("src.orchestration.jobs.daily", level="ERROR"),
             self.assertRaises(RuntimeError),
         ):
             daily.run_daily_rule_signals()
-        execute.assert_not_called()
+        broker.send_order.assert_called_once_with(
+            symbol="1000.T", side=OrderSide.SELL, qty=100, order_type=OrderType.MARKET
+        )
 
     def test_half_or_less_places_orders_and_logs_unavailable_count(self):
         with self.assertLogs("src.orchestration.jobs.daily", level="INFO") as logs:
             execute = self._run(_batch(n_ok=2, n_unavailable=2))
         execute.assert_called_once()
         self.assertEqual(len(execute.call_args.kwargs["signals"]), 2)
+        self.assertTrue(execute.call_args.kwargs["allow_new_buys"])
         done = [line for line in logs.output if "日次ルールシグナル完了" in line]
         self.assertEqual(len(done), 1)
         self.assertIn("取れなかった=2", done[0])

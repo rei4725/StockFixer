@@ -36,6 +36,7 @@ def execute_rule_paper_trades(
     *,
     trade_diff_sink: TradeDiffSink,
     broker: BrokerBase | None = None,
+    allow_new_buys: bool = True,
 ) -> dict[str, int]:
     """
     シグナルに基づきペーパートレードを実行する。
@@ -50,6 +51,8 @@ def execute_rule_paper_trades(
         market_data_port: MarketDataPort 実装（呼び出し元から注入）
         trade_diff_sink: 約定乖離の記録先（TradeDiffSink 実装。合成ルートが必ず渡す）
         broker: 注文を出す先（省略時は PaperBroker。影の運用では ShadowBroker）
+        allow_new_buys: False なら新規の BUY だけ止めて skipped に数え、保有の SELL は出す
+            （シグナルを出せなかった銘柄が多すぎる日。#1191）
 
     Returns:
         {"buy_orders": int, "sell_orders": int, "skipped": int, "errors": int}
@@ -89,6 +92,9 @@ def execute_rule_paper_trades(
             "[rule] リスクゲート不合格のため新規買いを停止: %s",
             gate.reason or "理由未設定",
         )
+    buys_allowed = gate.is_allowed and allow_new_buys
+    if not allow_new_buys:
+        logger.warning("[rule] 呼び出し元の指定で新規買いを停止し、保有の決済だけ出す")
 
     # 8:50 の道（execution.runner）と同じく、相関ゲート不合格なら新規買いだけ止め、
     # 同一業種の上限は保有中の銘柄の業種も含めて数える（#1138）。
@@ -96,7 +102,7 @@ def execute_rule_paper_trades(
         item for item in signals if item["signal"] == 1 and item["symbol"] not in held_or_pending
     ]
     sector_allowed: set[str] = set()
-    if gate.is_allowed and buy_candidates:
+    if buys_allowed and buy_candidates:
         held_codes = sorted({s.replace(".T", "") for s in held_or_pending})
         corr_gate = evaluate_correlation_gate(
             held_codes,
@@ -131,7 +137,7 @@ def execute_rule_paper_trades(
 
         try:
             if signal == 1 and symbol not in held_or_pending:
-                if not gate.is_allowed:
+                if not buys_allowed:
                     skipped += 1
                     continue
                 if symbol not in sector_allowed:

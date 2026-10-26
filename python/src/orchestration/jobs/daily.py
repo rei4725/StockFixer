@@ -26,6 +26,7 @@ from src.orchestration.jobs.prediction_errors import notify_prediction_errors
 from src.orchestration.jobs.unavailable_gates import (
     _raise_if_fetch_mostly_unavailable,
     _raise_if_rule_signals_mostly_unavailable,
+    _rule_signals_mostly_unavailable,
 )
 from src.orchestration.types import PipelineStage
 from src.utils.logger import get_logger
@@ -476,7 +477,9 @@ def run_daily_rule_signals() -> None:
 
         market_data_adapter = YFinanceMarketDataAdapter()
         batch = generate_rule_signals(market=market, market_data_port=market_data_adapter)
-        _raise_if_rule_signals_mostly_unavailable(batch)
+        # 取れなかった銘柄が多すぎる日も、取れた銘柄の保有の SELL は出し、新規の BUY だけ
+        # 止めてからジョブを失敗にする（#1191。8:50 の道・Claude の道と同じ形）。
+        mostly_unavailable = _rule_signals_mostly_unavailable(batch)
         signals = batch.signals
         rule_trade_diff_sink = PostgresTradeDiffSink()
         trade_stats = execute_rule_paper_trades(
@@ -490,7 +493,14 @@ def run_daily_rule_signals() -> None:
                 trade_diff_sink=rule_trade_diff_sink,
                 notifier=DiscordNotificationAdapter(),
             ),
+            allow_new_buys=not mostly_unavailable,
         )
+        if mostly_unavailable:
+            logger.warning(
+                "日次ルールシグナル: 取れなかった銘柄が多すぎるため新規買いを止めた SELL=%s",
+                trade_stats["sell_orders"],
+            )
+            _raise_if_rule_signals_mostly_unavailable(batch)
         logger.info(
             "=== 日次ルールシグナル完了: BUY=%s SELL=%s 注文失敗=%s 取れなかった=%s 対象=%s ===",
             trade_stats["buy_orders"],
