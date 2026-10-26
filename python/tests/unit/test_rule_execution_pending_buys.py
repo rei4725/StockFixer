@@ -132,5 +132,44 @@ class TestRuleExecutionCountsPendingBuys(unittest.TestCase):
         self.assertEqual(result["skipped"], 1)
 
 
+class TestRuleExecutionAllowNewBuys(unittest.TestCase):
+    """allow_new_buys=False では新規の BUY だけ止め、保有の SELL は出す（#1191）。"""
+
+    def test_blocks_buys_but_places_sells(self):
+        broker = _broker([_long("1000")])
+        risk = MagicMock()
+        risk.evaluate_trading_gate.return_value = MagicMock(is_allowed=True, reason=None)
+        risk.calc_position_size.return_value = 100
+        corr = MagicMock(return_value=MagicMock(is_allowed=True, reason=None))
+        signals = [
+            {"symbol": "1000", "signal": -1, "price": 1000.0},
+            {"symbol": "3000", "signal": 1, "price": 1000.0},
+        ]
+        with (
+            patch("src.trading.rule_execution.RiskManager", return_value=risk),
+            patch("src.trading.rule_execution.evaluate_correlation_gate", corr),
+            patch("src.trading.rule_execution.get_symbol_sector", return_value="sec"),
+            patch(
+                "src.trading.rule_execution.get_ticker",
+                side_effect=lambda market, symbol: f"{symbol}.T",
+            ),
+        ):
+            result = execute_rule_paper_trades(
+                signals,
+                "jp",
+                trade_diff_sink=InMemoryTradeDiffSink(),
+                broker=broker,
+                allow_new_buys=False,
+            )
+
+        broker.send_order.assert_called_once_with(
+            symbol="1000.T", side=OrderSide.SELL, qty=100, order_type=OrderType.MARKET
+        )
+        corr.assert_not_called()
+        self.assertEqual(result["buy_orders"], 0)
+        self.assertEqual(result["sell_orders"], 1)
+        self.assertEqual(result["skipped"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()

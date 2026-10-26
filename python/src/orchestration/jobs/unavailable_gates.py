@@ -29,18 +29,28 @@ def _raise_if_fetch_mostly_unavailable(total: int, batch_result: "BatchResult") 
         )
 
 
-def _raise_if_rule_signals_mostly_unavailable(batch: "RuleSignalBatch") -> None:
-    """シグナルを出せなかった銘柄が対象の線を超えたら RuntimeError を投げる（#822）。
+def _rule_signals_mostly_unavailable(batch: "RuleSignalBatch") -> bool:
+    """シグナルを出せなかった銘柄が対象の線を超えたかを返す（#822・#1191）。
 
-    データが取れない日に保有銘柄の SELL が出ないまま「完了」と記録されるのを止める。
     線は日次の取得（#811）と同じ DAILY_FETCH_MAX_UNAVAILABLE_RATIO を使う。
     """
     from config.settings import DAILY_FETCH_MAX_UNAVAILABLE_RATIO
 
     if batch.total <= 0:
-        return
+        return False
+    return len(batch.unavailable) / batch.total > DAILY_FETCH_MAX_UNAVAILABLE_RATIO
+
+
+def _raise_if_rule_signals_mostly_unavailable(batch: "RuleSignalBatch") -> None:
+    """シグナルを出せなかった銘柄が対象の線を超えたら RuntimeError を投げる（#822）。
+
+    データが取れない日に保有銘柄の SELL が出ないまま「完了」と記録されるのを止める。
+    呼び出し元は、取れた銘柄の保有の SELL を出した後に呼ぶ（#1191）。
+    """
+    from config.settings import DAILY_FETCH_MAX_UNAVAILABLE_RATIO
+
     unavailable = len(batch.unavailable)
-    if unavailable / batch.total > DAILY_FETCH_MAX_UNAVAILABLE_RATIO:
+    if _rule_signals_mostly_unavailable(batch):
         raise RuntimeError(
             f"ルールシグナルを出せなかった銘柄が多すぎる: {unavailable} / 対象 {batch.total}"
             f"（線 {DAILY_FETCH_MAX_UNAVAILABLE_RATIO:.0%}）"
