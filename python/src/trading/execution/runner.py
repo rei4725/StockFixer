@@ -108,6 +108,7 @@ def run_daily_orders(
     risk = RiskManager(broker, market=market)
     lot = get_lot_size(market)
     gate_status: TradingGateStatus | None = None
+    prepared = None  # 予測が空の日は None のまま（#1049）
     # SL/TP より前の手順が落ちたら、新規は止め SL/TP の決済だけ行い、ジョブは失敗にする（#932・#1179）
     try:
         risk.update_peak_balance()  # R-307: DD基準値を発注前に更新
@@ -132,10 +133,9 @@ def run_daily_orders(
             predictions = _attach_dynamic_thresholds(predictions)
             predictions = apply_multi_horizon_score_column(predictions)
             held_symbols = _get_held_symbols(broker)
-            held_symbols_list = sorted(held_symbols)
             # --- 相関ゲート: 保有銘柄間の相関上昇時に新規買いをブロック ---
-            corr_gate = evaluate_correlation_gate(
-                held_symbols_list,
+            prepared = held_symbols, evaluate_correlation_gate(
+                sorted(held_symbols),
                 market,
                 window=CORRELATION_WINDOW_DAYS,
                 enc_threshold=CORRELATION_ENC_THRESHOLD,
@@ -149,13 +149,14 @@ def run_daily_orders(
                 broker, market, mode, market_data, stats, trade_diff_sink, gate_status
             )
         raise
-    if predictions.empty:
+    if prepared is None:
         # SL/TP は予測を使わないので決済だけは走らせ、新規と売りシグナルの決済は飛ばす（#1049）
         logger.warning(
             "[exec] 予測結果が存在しません（SL/TP の決済だけ行う）。run_predict.py を確認"
         )
         _sl_tp_exits_only(broker, market, mode, market_data, stats, trade_diff_sink, gate_status)
         return stats
+    held_symbols, corr_gate = prepared
 
     threshold_scale = float(predictions["threshold_scale"].iloc[0])
     logger.info(
@@ -170,7 +171,7 @@ def run_daily_orders(
             "daily_loss": gate_status.daily_loss,
             "daily_loss_limit": gate_status.daily_loss_limit,
             "n_held_symbols": len(held_symbols),
-            "held_symbols_list": held_symbols_list,
+            "held_symbols_list": sorted(held_symbols),
             "correlation_blocked": not corr_gate.is_allowed,
             "enc": corr_gate.enc,
             "avg_correlation": corr_gate.avg_correlation,
