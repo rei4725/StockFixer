@@ -304,3 +304,25 @@ def backtester_with_mocks(mock_model_manager, mock_signal_generator, mock_data_l
         fee_rate=0.001,
         slippage=0.0,
     )
+
+
+# ============================================
+# 発注のジョブの「今日」を営業日に固定（unit テスト全体に適用）
+# ============================================
+
+
+@pytest.fixture(autouse=True)
+def _jp_business_day_for_daily_jobs(monkeypatch):
+    """daily の発注のジョブは東証の休場日に何もせず戻る（#1185）。
+
+    既存の 8:50・16:30 の道のテストは今日を差し替えないため、土日・休場日に
+    流すと発注の道に入らず赤になる。daily の now_jst を営業日に固定する。
+    休場日を確かめたいテストは daily.now_jst を個別に patch する。
+    """
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    monkeypatch.setattr(
+        "src.orchestration.jobs.daily.now_jst",
+        lambda: datetime(2026, 10, 27, 8, 50, tzinfo=ZoneInfo("Asia/Tokyo")),
+    )
