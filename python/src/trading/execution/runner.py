@@ -35,6 +35,7 @@ from src.domain.trading_rules import get_lot_size
 from src.domain.types import OrderRunSummary
 from src.trading.brokers.base import BrokerBase, BrokerError, OrderSide
 from src.trading.correlation_risk import evaluate_correlation_gate
+from src.trading.position_valuation import read_short_positions
 from src.trading.risk_manager import RiskManager
 from src.trading.signal_generator import apply_multi_horizon_score_column
 from src.trading.types import TradingGateStatus
@@ -283,8 +284,10 @@ def run_daily_orders(
 
     # 1ラン内で増える建玉数を追跡し、ラン途中でも MAX_POSITIONS を超えないようにする。
     # （ゲートはラン開始時の一度きりで、head(MAX_ORDERS_PER_RUN) だけでは保有上限を
-    #   最大 MAX_ORDERS_PER_RUN-1 件超過しうるため）
-    position_count = len(held_or_pending)
+    #   最大 MAX_ORDERS_PER_RUN-1 件超過しうるため）。空売りの保有も数える（#1146）
+    short_positions = read_short_positions(broker)
+    short_held_symbols = {p["symbol"] for p in short_positions if p.get("qty", 0) > 0}
+    position_count = len(held_or_pending) + len(short_held_symbols)
 
     for _, row in buy_signals.iterrows():
         symbol = row["symbol"]
@@ -398,13 +401,6 @@ def run_daily_orders(
     # --- ショートサイド処理（R-215）: ENABLE_SHORT_SIDE=True かつ PaperBroker のみ ---
     if ENABLE_SHORT_SIDE and broker.broker_name == "paper":
         # ショートポジション保有銘柄で買いシグナルが出ていれば SHORT_COVER
-        try:
-            short_positions = broker.get_short_positions()
-        except AttributeError:
-            short_positions = []
-            logger.warning("[exec] get_short_positions() が未実装のため SHORT_COVER をスキップ")
-
-        short_held_symbols = {p["symbol"] for p in short_positions if p.get("qty", 0) > 0}
         cover_signals = predictions[
             (predictions["symbol"].isin(short_held_symbols))
             & (predictions["multi_horizon_score"] >= predictions["effective_buy_threshold"])
@@ -471,6 +467,11 @@ def run_daily_orders(
         for _, row in short_entry_candidates.iterrows():
             symbol = row["symbol"]
             current_price = float(row.get("current_price") or 0)
+
+            if position_count >= MAX_POSITIONS:
+                logger.info("[exec] 保有上限 %d 到達で新規ショートをスキップ", MAX_POSITIONS)
+                stats["skipped"] += 1
+                continue
 
             if abs(float(row.get("diff_ratio") or 0.0)) < MIN_CHANGE_RATIO:
                 logger.info(
@@ -565,6 +566,7 @@ def run_daily_orders(
                 )
                 stats["short_orders"] += 1
                 stats["total_turnover"] += current_price * qty
+                position_count += 1
             except Exception as e:
                 logger.error(f"[exec] ショート注文エラー ({symbol}): {e}", exc_info=True)
                 stats["errors"] += 1
