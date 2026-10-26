@@ -40,6 +40,7 @@ from src.trading.execution import (
     _resolve_kelly_params,
 )
 from src.trading.execution.pending import _load_pending_exits
+from src.trading.execution.selection import _get_pending_buy_symbols
 from src.trading.risk_manager import RiskManager
 from src.trading.signal_generator import apply_multi_horizon_score_column
 from src.trading.types import TradingGateStatus
@@ -210,7 +211,8 @@ def _handle_place_order(
             logger.info("[claude_agent] %s → スキップ: %s", symbol, cap_reason)
             stats["skipped"] += 1
             return {"status": "skipped", "reason": cap_reason}
-        held = _get_held_symbols(broker)
+        # 紙の BUY は約定まで保有に出ないため、約定待ちの BUY も保有中とみなす（#1177）
+        held = _get_held_symbols(broker) | _get_pending_buy_symbols(broker)
         if symbol in held:
             stats["skipped"] += 1
             return {"status": "skipped", "reason": f"{symbol} は既に保有中"}
@@ -377,8 +379,9 @@ def run_claude_trader(
             "保有の sell だけを判断すること。\n"
         )
 
-    # 回の中で増える買い・建玉・業種を数え、相関ゲートを1回だけ評価する（8:50 の道と同じく回の始めの保有から）
-    caps = start_run_buy_caps(_get_held_symbols(broker), market)
+    # 回の中で増える買い・建玉・業種を数え、相関ゲートを1回だけ評価する（8:50 の道と同じく回の始めの保有から）。
+    # 前の回の約定待ちの BUY も約定の後に保有になるため、保有に入れて数える（#1177）
+    caps = start_run_buy_caps(_get_held_symbols(broker) | _get_pending_buy_symbols(broker), market)
 
     # 予測キャッシュ（place_order ハンドラーで参照）
     predictions_cache = prediction_repo.get_latest_by_market(market)

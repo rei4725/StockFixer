@@ -455,19 +455,32 @@ class TestRunClaudeTrader(unittest.TestCase):
         self.assertEqual(client.messages.create.call_count, 2)
 
     def _run_with_buys(
-        self, symbols, positions=None, orders=None, returns=None, sectors=None, gate=None
+        self,
+        symbols,
+        positions=None,
+        orders=None,
+        returns=None,
+        sectors=None,
+        gate=None,
+        pending=None,
     ):
         """1回の中で symbols の順に place_order の買いを呼ばせ、(stats, broker, 結果) を返す
 
         orders を渡すと (銘柄, side) の順に呼ばせる。returns は相関に使う終値のリターン、
         sectors は銘柄から業種への対応（無い銘柄は銘柄ごとに別の業種）。
         gate を渡すと、リスクのゲートの評価をその値にする。
+        pending を渡すと、broker の get_pending_buy_symbols がそれを返す（例外なら投げる）。
+        渡さないときは broker に get_pending_buy_symbols が無い。
         """
         from src.trading.claude_agent import run_claude_trader
 
         if orders is None:
             orders = [(s, "buy") for s in symbols]
         broker = _make_broker(positions=positions)
+        if isinstance(pending, Exception):
+            broker.get_pending_buy_symbols = MagicMock(side_effect=pending)
+        elif pending is not None:
+            broker.get_pending_buy_symbols = MagicMock(return_value=set(pending))
         held = [p["symbol"] for p in positions or []]
         n = max(len(orders), 1)
         df = _make_predictions_df(n=n + len(held))
@@ -607,6 +620,67 @@ class TestRunClaudeTrader(unittest.TestCase):
         self.assertEqual(statuses, ["placed"] * (n_buys - 1) + ["skipped", "placed"])
         self.assertIn("MAX_SECTOR_POSITIONS", results[n_buys - 1]["reason"])
         self.assertEqual(stats["buy_orders"], n_buys)
+
+    def _nine_held(self):
+        return [
+            {"symbol": f"H{i}", "qty": 100, "avg_price": 1000.0, "current_price": 1000.0}
+            for i in range(9)
+        ]
+
+    def test_pending_buy_counts_toward_max_positions(self):
+        # 約定済み9件＋前の回の約定待ちの BUY 1件で MAX_POSITIONS=10 に達する（#1177）
+        with patch("src.trading.claude_order_caps.MAX_POSITIONS", 10):
+            stats, broker, results = self._run_with_buys(
+                ["S0"], positions=self._nine_held(), pending={"P0"}
+            )
+
+        self.assertEqual(results[0]["status"], "skipped")
+        self.assertIn("MAX_POSITIONS", results[0]["reason"])
+        broker.send_order.assert_not_called()
+        self.assertEqual(stats["buy_orders"], 0)
+
+    def test_pending_buy_counts_toward_sector_cap(self):
+        with patch("src.trading.claude_order_caps.MAX_SECTOR_POSITIONS", 1):
+            stats, broker, results = self._run_with_buys(
+                ["S0", "S1"], pending={"P0"}, sectors={"P0": "Tech", "S0": "Tech"}
+            )
+
+        self.assertEqual([r["status"] for r in results], ["skipped", "placed"])
+        self.assertIn("MAX_SECTOR_POSITIONS", results[0]["reason"])
+        self.assertEqual(broker.send_order.call_args[0][0], "S1")
+
+    def test_pending_buys_enter_correlation_gate(self):
+        base = [0.01, -0.02, 0.015, -0.005, 0.02, -0.01, 0.005, -0.015, 0.01, 0.0, 0.012]
+        returns = pd.DataFrame({"P0": base, "P1": base})
+        stats, broker, results = self._run_with_buys(["S0"], pending={"P0", "P1"}, returns=returns)
+
+        self.assertEqual(results[0]["status"], "skipped")
+        self.assertIn("相関", results[0]["reason"])
+        broker.send_order.assert_not_called()
+
+    def test_pending_buy_symbol_is_treated_as_held(self):
+        stats, broker, results = self._run_with_buys(["S0"], pending={"S0"})
+
+        self.assertEqual(results[0]["status"], "skipped")
+        self.assertIn("既に保有中", results[0]["reason"])
+        broker.send_order.assert_not_called()
+
+    def test_broker_without_pending_reader_keeps_current_behavior(self):
+        with patch("src.trading.claude_order_caps.MAX_POSITIONS", 10):
+            stats, broker, results = self._run_with_buys(["S0"], positions=self._nine_held())
+
+        self.assertEqual(results[0]["status"], "placed")
+        broker.send_order.assert_called_once()
+
+    def test_unreadable_pending_buys_keep_current_behavior(self):
+        with patch("src.trading.claude_order_caps.MAX_POSITIONS", 10):
+            stats, broker, results = self._run_with_buys(
+                ["S0"], positions=self._nine_held(), pending=RuntimeError("DB 読めない")
+            )
+
+        self.assertEqual(results[0]["status"], "placed")
+        broker.send_order.assert_called_once()
+        self.assertEqual(stats["errors"], 0)
 
     def test_import_error_raised_without_anthropic(self):
         broker = _make_broker()
