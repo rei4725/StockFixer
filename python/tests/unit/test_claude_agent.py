@@ -172,6 +172,34 @@ class TestHandlePlaceOrder(unittest.TestCase):
         self.broker.send_order.assert_not_called()
         self.assertEqual(stats["skipped"], 1)
 
+    @patch("src.trading.claude_agent._record_order")
+    @patch("src.trading.claude_agent._get_held_symbols", return_value=set())
+    @patch(
+        "src.trading.claude_agent._choose_order_params",
+        return_value=(OrderType.MARKET, 0.0, "market", "open"),
+    )
+    def test_risk_gate_blocked_allows_sell_but_skips_buy(self, _choose, _held, _record):
+        # 8:50 の道・ルールの道と同じく、ゲート不合格の日も保有の売りは通す
+        self.risk.evaluate_trading_gate.return_value = _make_gate(
+            is_allowed=False, stop_active=True, reason="日次損失上限"
+        )
+        self.broker.get_positions.return_value = [
+            {"symbol": "7200", "qty": 200, "avg_price": 990.0, "current_price": 1000.0}
+        ]
+        stats = {"buy_orders": 0, "sell_orders": 0, "skipped": 0, "errors": 0}
+
+        sell = self._call("7200", "sell", stats)
+        buy = self._call("7201", "buy", stats)
+
+        self.assertEqual(sell["status"], "placed")
+        self.assertEqual(buy["status"], "skipped")
+        self.assertIn("日次損失上限", buy["reason"])
+        self.broker.send_order.assert_called_once()
+        self.assertEqual(self.broker.send_order.call_args[0][1], OrderSide.SELL)
+        self.assertEqual(stats["sell_orders"], 1)
+        self.assertEqual(stats["buy_orders"], 0)
+        self.assertEqual(stats["skipped"], 1)
+
     def test_unknown_symbol_skips_order(self):
         result = self._call("UNKNOWN", "buy")
         self.assertEqual(result["status"], "skipped")
@@ -295,7 +323,8 @@ class TestRunClaudeTrader(unittest.TestCase):
 
     @patch("src.trading.claude_agent.RiskManager")
     @patch.object(_PREDICTIONS, "get_latest_by_market")
-    def test_risk_gate_blocked_returns_early(self, mock_load, mock_risk_cls):
+    @patch("anthropic.Anthropic")
+    def test_risk_gate_blocked_keeps_stop_stats(self, mock_anthropic_cls, mock_load, mock_risk_cls):
         broker = _make_broker()
         mock_load.return_value = pd.DataFrame()
         risk_mock = self._make_risk_mock(is_allowed=False)
@@ -304,6 +333,9 @@ class TestRunClaudeTrader(unittest.TestCase):
             is_allowed=False, stop_active=True, reason="日次損失上限テスト"
         )
         mock_risk_cls.return_value = risk_mock
+        client = MagicMock()
+        client.messages.create.return_value = _make_anthropic_response(stop_reason="end_turn")
+        mock_anthropic_cls.return_value = client
 
         from src.trading.claude_agent import run_claude_trader
 
@@ -316,10 +348,13 @@ class TestRunClaudeTrader(unittest.TestCase):
         )
 
         self.assertTrue(stats["trading_stopped"])
-        self.assertIsNotNone(stats["stop_reason"])
-        # anthropic クライアントが生成されていないこと（buy/sell は 0）
+        self.assertEqual(stats["stop_reason"], "日次損失上限テスト")
         self.assertEqual(stats["buy_orders"], 0)
         self.assertEqual(stats["sell_orders"], 0)
+        # 早く戻らず Claude を呼び、新規の買いを止めることをプロンプトで伝える
+        client.messages.create.assert_called_once()
+        system_prompt = client.messages.create.call_args.kwargs["system"]
+        self.assertIn("日次損失上限テスト", system_prompt)
 
     @patch("src.trading.claude_agent.RiskManager")
     @patch.object(_PREDICTIONS, "get_latest_by_market")
@@ -364,11 +399,14 @@ class TestRunClaudeTrader(unittest.TestCase):
         # 2回呼ばれているはず（tool_use → end_turn）
         self.assertEqual(client.messages.create.call_count, 2)
 
-    def _run_with_buys(self, symbols, positions=None, orders=None, returns=None, sectors=None):
+    def _run_with_buys(
+        self, symbols, positions=None, orders=None, returns=None, sectors=None, gate=None
+    ):
         """1回の中で symbols の順に place_order の買いを呼ばせ、(stats, broker, 結果) を返す
 
         orders を渡すと (銘柄, side) の順に呼ばせる。returns は相関に使う終値のリターン、
         sectors は銘柄から業種への対応（無い銘柄は銘柄ごとに別の業種）。
+        gate を渡すと、リスクのゲートの評価をその値にする。
         """
         from src.trading.claude_agent import run_claude_trader
 
@@ -416,7 +454,10 @@ class TestRunClaudeTrader(unittest.TestCase):
             "src.utils.sector_constraints._lookup_symbol_sector",
             side_effect=lambda market, symbol: sector_map.get(symbol, f"sector-{symbol}"),
         ):
-            mock_risk_cls.return_value = self._make_risk_mock()
+            risk_mock = self._make_risk_mock()
+            if gate is not None:
+                risk_mock.evaluate_trading_gate.return_value = gate
+            mock_risk_cls.return_value = risk_mock
             stats = run_claude_trader(
                 broker=broker,
                 market="jp",
@@ -479,6 +520,23 @@ class TestRunClaudeTrader(unittest.TestCase):
         self.assertEqual(broker.send_order.call_args[0][1], OrderSide.SELL)
         self.assertEqual(stats["buy_orders"], 0)
         self.assertEqual(stats["sell_orders"], 1)
+
+    def test_risk_gate_blocked_at_start_still_sells_held_position(self):
+        positions = [{"symbol": "H0", "qty": 100, "avg_price": 1000.0, "current_price": 1000.0}]
+        gate = _make_gate(is_allowed=False, stop_active=True, reason="日次損失上限テスト")
+        stats, broker, results = self._run_with_buys(
+            [], positions=positions, orders=[("S0", "buy"), ("H0", "sell")], gate=gate
+        )
+
+        self.assertEqual([r["status"] for r in results], ["skipped", "placed"])
+        broker.send_order.assert_called_once()
+        self.assertEqual(broker.send_order.call_args[0][0], "H0")
+        self.assertEqual(broker.send_order.call_args[0][1], OrderSide.SELL)
+        self.assertEqual(broker.send_order.call_args[0][2], 100)
+        self.assertEqual(stats["buy_orders"], 0)
+        self.assertEqual(stats["sell_orders"], 1)
+        self.assertTrue(stats["trading_stopped"])
+        self.assertEqual(stats["stop_reason"], "日次損失上限テスト")
 
     def test_same_sector_buy_skipped_when_held_and_run_buys_reach_cap(self):
         from config.settings import MAX_SECTOR_POSITIONS
