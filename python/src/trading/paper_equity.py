@@ -5,9 +5,8 @@ paper_orders（status='filled'）を時系列に適用して現金残高と保�
 保有銘柄を日次終値でマークトゥマーケットして評価額を算出する。
 終値の分からない保有日は、最後に分かる終値、それも無ければ約定の値段で評価する。
 
-制約:
-    - ロング（BUY/SELL）のみ対応。SHORT/SHORT_COVER は現金影響のみ反映し、
-      空売り建玉の評価損益は含めない（ENABLE_SHORT_SIDE 既定 false のため）。
+空売り（SHORT/SHORT_COVER）の建玉は負の株数として同じく時価で評価し、
+売り代金を足した現金から返済の義務（株数 × 終値）を引く（#1163）。
 """
 
 from __future__ import annotations
@@ -30,15 +29,20 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 # 現金増減の符号: BUY/SHORT_COVER は支出、SELL は収入。
-# SHORT は売建の受け取り（簡易モデル: 受領現金のみ反映）。
+# SHORT は売建の受け取り。
 _CASH_SIGN = {
     int(OrderSide.BUY): -1,
     int(OrderSide.SELL): +1,
     int(OrderSide.SHORT): +1,
     int(OrderSide.SHORT_COVER): -1,
 }
-# 保有数量の増減（ロングのみ）
-_QTY_SIGN = {int(OrderSide.BUY): +1, int(OrderSide.SELL): -1}
+# 保有数量の増減。空売りの建玉は負の株数として時価で評価する（#1163）
+_QTY_SIGN = {
+    int(OrderSide.BUY): +1,
+    int(OrderSide.SELL): -1,
+    int(OrderSide.SHORT): -1,
+    int(OrderSide.SHORT_COVER): +1,
+}
 # 週の成績で市場ごとに比べるベンチマーク（#812）
 WEEKLY_BENCHMARKS = {"jp": "1306.T", "us": "^GSPC"}
 # ベンチマークの起点の終値を base_day からさかのぼって探す営業日の数（年末年始や大型連休の休場をまたぐ幅）
