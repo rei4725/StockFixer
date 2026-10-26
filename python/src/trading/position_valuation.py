@@ -25,6 +25,24 @@ def positions_market_value(positions: Iterable[Mapping[str, Any]], logger: loggi
     return market_value
 
 
+def long_positions_unrealized_pnl(
+    positions: Iterable[Mapping[str, Any]], logger: logging.Logger
+) -> float:
+    """買い持ちの保有の含み損益の合計を返す（#1162）。
+
+    評価できない保有は空売りの short_positions_unrealized_pnl と同じく数えずに飛ばし、
+    NaN で合計ごと NaN にしない。WARNING は呼び出し側の logger に出す。
+    """
+    total = 0.0
+    for p in positions:
+        pnl = float(p.get("unrealized_pnl", 0.0))
+        if math.isnan(pnl):
+            logger.warning(f"[risk] {p.get('symbol')}: 買い持ちの現在値が取れず含み損益を数えない")
+            continue
+        total += pnl
+    return total
+
+
 def short_positions_unrealized_pnl(
     positions: Iterable[Mapping[str, Any]], logger: logging.Logger
 ) -> float:

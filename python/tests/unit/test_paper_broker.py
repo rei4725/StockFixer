@@ -754,6 +754,23 @@ class TestPaperBrokerGetPnlSummary(unittest.TestCase):
         self.assertAlmostEqual(result["unrealized_pnl"], -2000.0)
         self.assertAlmostEqual(result["total_pnl"], -2000.0)
 
+    def test_get_pnl_summary_skips_unpriced_long(self):
+        """評価できない（NaN の）買い持ちは WARNING を出して含み損益に数えない（#1162）"""
+        nan = math.nan
+        positions = [
+            {"symbol": "7203", "qty": 100, "current_price": 1020.0, "unrealized_pnl": 2000.0},
+            {"symbol": "9984", "qty": 100, "current_price": nan, "unrealized_pnl": nan},
+        ]
+        with (
+            patch.object(self.broker, "get_positions", return_value=positions),
+            patch.object(self.broker, "get_short_positions", return_value=[]),
+            self.assertLogs("src.trading.brokers.paper.paper_broker", level="WARNING") as logs,
+        ):
+            result = self.broker.get_pnl_summary()
+        self.assertAlmostEqual(result["unrealized_pnl"], 2000.0)
+        self.assertAlmostEqual(result["total_pnl"], 2000.0)
+        self.assertTrue(any("9984" in line for line in logs.output))
+
     def test_get_pnl_summary_total_pnl_equals_realized_plus_unrealized(self):
         result = self.broker.get_pnl_summary()
         self.assertAlmostEqual(
