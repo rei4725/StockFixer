@@ -19,6 +19,7 @@ from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
 from src.trading.brokers.paper.paper_broker import PaperBroker
 from src.trading.correlation_risk import evaluate_correlation_gate
 from src.trading.execution.pending import _load_pending_exits, _log_pending_skips
+from src.trading.execution.selection import _get_pending_buy_symbols
 from src.trading.risk_manager import RiskManager
 from src.utils.data_path_utils import get_ticker
 from src.utils.logger import get_logger
@@ -74,6 +75,9 @@ def execute_rule_paper_trades(
         logger.error("[rule] 保有の読み込みに失敗したため発注を中止する", exc_info=True)
         raise
     held_symbols = {p["symbol"] for p in positions}
+    # 約定待ちの BUY は朝の約定まで get_positions に出ないため、新規買いの数えに足す（#1176）。
+    # SELL の分かれ道は約定済みの保有（held_symbols）だけを見る。
+    held_or_pending = held_symbols | _get_pending_buy_symbols(broker)
 
     # ML 経路（execution.run_daily_orders）と同等のリスク制御を適用する。
     # R-307: DD 基準値を発注前に更新し、当日発注可否ゲート（日次損失・連続損失・
@@ -89,11 +93,11 @@ def execute_rule_paper_trades(
     # 8:50 の道（execution.runner）と同じく、相関ゲート不合格なら新規買いだけ止め、
     # 同一業種の上限は保有中の銘柄の業種も含めて数える（#1138）。
     buy_candidates = [
-        item for item in signals if item["signal"] == 1 and item["symbol"] not in held_symbols
+        item for item in signals if item["signal"] == 1 and item["symbol"] not in held_or_pending
     ]
     sector_allowed: set[str] = set()
     if gate.is_allowed and buy_candidates:
-        held_codes = sorted({s.replace(".T", "") for s in held_symbols})
+        held_codes = sorted({s.replace(".T", "") for s in held_or_pending})
         corr_gate = evaluate_correlation_gate(
             held_codes,
             market,
@@ -114,7 +118,7 @@ def execute_rule_paper_trades(
                 corr_gate.reason or "ENC閾値未満",
             )
 
-    position_count = len(held_symbols)  # 1ラン内で増える建玉数を追跡し MAX_POSITIONS を厳守
+    position_count = len(held_or_pending)  # 1ラン内で増える建玉数を追跡し MAX_POSITIONS を厳守
     buy_orders_this_run = 0
     # 朝の約定で据え置かれた SELL がある銘柄には2本目を出さない（#1169。8:50 の道と同じ確かめ）
     pending = _load_pending_exits(broker)
@@ -126,7 +130,7 @@ def execute_rule_paper_trades(
         price = item.get("price") or 0.0
 
         try:
-            if signal == 1 and symbol not in held_symbols:
+            if signal == 1 and symbol not in held_or_pending:
                 if not gate.is_allowed:
                     skipped += 1
                     continue
