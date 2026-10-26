@@ -2,17 +2,42 @@
 
 import math
 
+from config.settings import DEFAULT_STOP_LOSS_PCT
 from src.domain.ports import MarketDataPort, TradeDiffSink
 from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
 from src.trading.risk_manager import RiskManager
 from src.trading.types import TradingGateStatus
 from src.utils.logger import get_logger
+from src.utils.optimal_params_loader import OptimalParamsUnreadableError
 
 from .pending import _load_pending_exits, _log_pending_skips
 from .recording import _record_order, _recorder
 from .stats import OrderExecutionStats
 
 logger = get_logger(__name__)
+
+
+def _sl_tp_risk(
+    broker: BrokerBase, market: str, symbol: str, stats: OrderExecutionStats
+) -> RiskManager:
+    """銘柄ごとの SL/TP の線を持つ RiskManager を返す。
+
+    optimal_params.json が読めない日は、既定の損切りの線（#880 と同じ線）で SL だけ判定する（#1192）。
+    """
+    try:
+        return RiskManager(broker, market, symbol)
+    except OptimalParamsUnreadableError:
+        logger.error(
+            "[exec] %s: optimal_params.json が読めない。既定の損切りの線 %.2f%% で SL を判定する",
+            symbol,
+            DEFAULT_STOP_LOSS_PCT * 100,
+            exc_info=True,
+        )
+        stats["errors"] += 1
+        risk = RiskManager(broker, market)
+        if DEFAULT_STOP_LOSS_PCT > 0:
+            risk.stop_loss_pct = float(DEFAULT_STOP_LOSS_PCT)
+        return risk
 
 
 def _check_sl_tp_exits(
@@ -53,7 +78,7 @@ def _check_sl_tp_exits(
         if qty <= 0 or avg_price <= 0 or current_price <= 0:
             continue
 
-        risk = RiskManager(broker, market, symbol)
+        risk = _sl_tp_risk(broker, market, symbol, stats)
         if is_short:
             sl_triggered, tp_triggered, reason = risk.check_sl_tp(
                 avg_price, current_price, is_short=True
