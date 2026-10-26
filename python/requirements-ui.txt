@@ -13,4 +13,4 @@
 #   .venv-ui/Scripts/python -m streamlit run run_backtest_ui.py
 #
 # streamlit が pillow 13 以上を受けるようになったら、この行を requirements.txt に戻してよい。
-streamlit>=1.66.0
+streamlit>=1.66.1
