@@ -65,6 +65,18 @@ def _get_held_symbols(broker: BrokerBase) -> set[str]:
     return {p["symbol"].replace(".T", "") for p in positions if p.get("qty", 0) > 0}
 
 
+def _get_pending_buy_symbols(broker: BrokerBase) -> set[str]:
+    """約定待ちの BUY の銘柄コードを返す。読む関数が無い Broker と読めないときは空（#1137）。"""
+    reader = getattr(broker, "get_pending_buy_symbols", None)
+    if reader is None:
+        return set()
+    try:
+        return {str(s).replace(".T", "") for s in reader()}
+    except Exception:
+        logger.error("[exec] 約定待ちの BUY を読めない（保有だけで数えて続ける）", exc_info=True)
+        return set()
+
+
 def _load_exit_model(market: str) -> ExitModel | None:
     """
     保存済みの ExitModel を models/ から読み込む。
