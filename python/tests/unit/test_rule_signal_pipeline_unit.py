@@ -94,6 +94,36 @@ class TestGetTodaySignal(unittest.TestCase):
         self.assertIn(signal, [-1, 0, 1])
         self.assertIsInstance(price, float)
 
+    def test_jp_long_holiday_gap_still_returns_signal(self):
+        """jp は東証の休場日を遅れに数えない（#1164）。09-21〜09-23 の連休明けの 09-24 の回。"""
+        from src.rule_engine.pipeline import _count_weekdays_behind, _get_today_signal
+
+        df = _make_ohlcv()
+        df.index = pd.bdate_range(end="2026-09-18", periods=len(df))
+        mock_port = _MockMarketDataPort(df)
+        result = _get_today_signal(
+            "jp", "7203", "rsi_contrarian", mock_port, signal_date=date(2026, 9, 24)
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual(_count_weekdays_behind(date(2026, 9, 18), date(2026, 9, 24), "jp"), 1)
+
+    def test_jp_holiday_signal_date_is_not_counted(self):
+        """jp で signal_date が休場日なら、その日を遅れに数えない（#1164）。"""
+        from src.rule_engine.pipeline import _count_weekdays_behind
+
+        # 2026-11-03（火）は文化の日
+        self.assertEqual(_count_weekdays_behind(date(2026, 11, 2), date(2026, 11, 3), "jp"), 0)
+        self.assertEqual(_count_weekdays_behind(date(2026, 10, 30), date(2026, 11, 3), "jp"), 1)
+
+    def test_us_counts_only_weekends_out(self):
+        """us は今までどおり土日だけを除く（#1164）。"""
+        from src.rule_engine.pipeline import _count_weekdays_behind
+
+        self.assertEqual(_count_weekdays_behind(date(2026, 9, 18), date(2026, 9, 24), "us"), 4)
+        self.assertEqual(_count_weekdays_behind(date(2026, 11, 2), date(2026, 11, 3), "us"), 1)
+        # signal_date が土曜でも、その日は数えない
+        self.assertEqual(_count_weekdays_behind(date(2026, 10, 22), date(2026, 10, 24), "us"), 1)
+
 
 class TestRunRuleSignalPipeline(unittest.TestCase):
     def test_empty_effective_rules_returns_empty(self):
