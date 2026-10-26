@@ -334,7 +334,7 @@ class PaperBroker(BrokerBase):
                                 [order_id],
                             )
                             continue
-                    apply_fill(con, order_id, symbol, side, qty, fill_price)
+                    qty = apply_fill(con, order_id, symbol, side, qty, fill_price)
                     con.execute(
                         "UPDATE paper_orders SET status='filled', qty=%s, "
                         "fill_price=%s, filled_at=CURRENT_TIMESTAMP WHERE order_id=%s",
