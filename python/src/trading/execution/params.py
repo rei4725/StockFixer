@@ -1,5 +1,7 @@
 """発注パラメータ算出: 動的閾値・Kelly 入力・分割比率・注文種別判定。"""
 
+from dataclasses import replace
+
 import pandas as pd
 
 from config.settings import (
@@ -14,8 +16,17 @@ from src.domain.trading_rules import THRESHOLD_SCALE_MAX as _THRESHOLD_SCALE_MAX
 from src.domain.trading_rules import THRESHOLD_SCALE_MIN as _THRESHOLD_SCALE_MIN
 from src.domain.trading_rules import THRESHOLD_SCALE_MIN_ROWS as _THRESHOLD_SCALE_MIN_ROWS
 from src.trading.brokers.base import OrderSide, OrderType
+from src.trading.types import TradingGateStatus
 from src.utils.data_path_utils import get_ticker
-from src.utils.optimal_params_loader import get_optimal_params
+from src.utils.logger import get_logger
+from src.utils.optimal_params_loader import OptimalParamsUnreadableError, get_optimal_params
+
+from .stats import OrderExecutionStats
+
+logger = get_logger(__name__)
+
+# 閾値の既定値を使った印。runner はこの印で新規を止め、エラーに数える（#932・#1214）
+_PARAMS_UNREADABLE_COL = "optimal_params_unreadable"
 
 
 def _compute_market_threshold_scale(predictions: pd.DataFrame) -> float:
@@ -36,9 +47,26 @@ def _compute_market_threshold_scale(predictions: pd.DataFrame) -> float:
     return float(min(_THRESHOLD_SCALE_MAX, max(_THRESHOLD_SCALE_MIN, raw_scale)))
 
 
-def _resolve_base_threshold(market: str, symbol: str) -> float:
-    """銘柄別の最適閾値を取得し、未設定時は既定値にフォールバックする。"""
-    params = get_optimal_params(market, symbol)
+def _read_optimal_params(market: str, symbol: str, what: str) -> tuple[dict | None, bool]:
+    """optimal_params.json が読めない日は ERROR を出し、未登録と同じく None で続ける（#1214）。
+
+    Returns:
+        (params, readable) — 読めなかったときは (None, False)
+    """
+    try:
+        return get_optimal_params(market, symbol), True
+    except OptimalParamsUnreadableError:
+        logger.error(
+            "[exec] %s: optimal_params.json が読めない。既定の%sで続ける",
+            symbol,
+            what,
+            exc_info=True,
+        )
+        return None, False
+
+
+def _base_threshold_with_readable(market: str, symbol: str) -> tuple[float, bool]:
+    params, readable = _read_optimal_params(market, symbol, "閾値")
     raw_threshold = params.get("threshold") if params else None
     try:
         threshold = abs(float(raw_threshold)) if raw_threshold is not None else 0.0
@@ -47,7 +75,29 @@ def _resolve_base_threshold(market: str, symbol: str) -> float:
 
     if threshold <= 0:
         threshold = abs(BUY_THRESHOLD)
-    return threshold
+    return threshold, readable
+
+
+def _resolve_base_threshold(market: str, symbol: str) -> float:
+    """銘柄別の最適閾値を取得し、未設定時・読めない日は既定値にフォールバックする。"""
+    return _base_threshold_with_readable(market, symbol)[0]
+
+
+def _block_new_if_params_unreadable(
+    predictions: pd.DataFrame, gate_status: TradingGateStatus, stats: OrderExecutionStats
+) -> TradingGateStatus:
+    """閾値を既定値で決めた日は、新規（買い・ショート）を止めてエラーに数える（#932・#1214）。
+
+    決済（予想の売り・SHORT_COVER）はゲートによらず出るので、保有は手放せる。
+    """
+    if _PARAMS_UNREADABLE_COL not in predictions.columns:
+        return gate_status
+    if not predictions[_PARAMS_UNREADABLE_COL].astype(bool).any():
+        return gate_status
+    reason = "optimal_params.json が読めないため既定の閾値で決済だけ行う"
+    logger.error("[exec] %s（新規は止める）", reason)
+    stats["errors"] += 1
+    return replace(gate_status, is_allowed=False, reason=gate_status.reason or reason)
 
 
 def _attach_dynamic_thresholds(predictions: pd.DataFrame) -> pd.DataFrame:
@@ -56,16 +106,18 @@ def _attach_dynamic_thresholds(predictions: pd.DataFrame) -> pd.DataFrame:
         return predictions.copy()
 
     scale = _compute_market_threshold_scale(predictions)
-    threshold_cache: dict[tuple[str, str], float] = {}
+    threshold_cache: dict[tuple[str, str], tuple[float, bool]] = {}
 
-    def _get_threshold(row: pd.Series) -> float:
+    def _cached(row: pd.Series) -> tuple[float, bool]:
         key = (str(row["market"]), str(row["symbol"]))
         if key not in threshold_cache:
-            threshold_cache[key] = _resolve_base_threshold(*key)
+            threshold_cache[key] = _base_threshold_with_readable(*key)
         return threshold_cache[key]
 
     enriched = predictions.copy()
-    enriched["base_threshold"] = enriched.apply(_get_threshold, axis=1)
+    enriched["base_threshold"] = enriched.apply(lambda row: _cached(row)[0], axis=1)
+    if not all(readable for _, readable in threshold_cache.values()):
+        enriched[_PARAMS_UNREADABLE_COL] = enriched.apply(lambda row: not _cached(row)[1], axis=1)
     enriched["threshold_scale"] = scale
     enriched["effective_buy_threshold"] = enriched["base_threshold"] * scale
     enriched["effective_sell_threshold"] = -enriched["effective_buy_threshold"]
@@ -113,7 +165,7 @@ def _resolve_kelly_params(
     Returns:
         (win_rate, avg_win, avg_loss) — 各値が使用不能な場合は None
     """
-    params = get_optimal_params(market, symbol)
+    params, _ = _read_optimal_params(market, symbol, "Kelly の入力")
     metrics = params.get("metrics", {}) if params else {}
 
     def _extract(key: str) -> float | None:

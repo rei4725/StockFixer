@@ -45,6 +45,7 @@ from .params import (
     _SPLIT_LOW_CONFIDENCE,
     _apply_split_qty,
     _attach_dynamic_thresholds,
+    _block_new_if_params_unreadable,
     _calc_split_ratio,
     _choose_order_params,
     _resolve_kelly_params,
@@ -157,11 +158,10 @@ def run_daily_orders(
         _sl_tp_exits_only(broker, market, mode, market_data, stats, trade_diff_sink, gate_status)
         return stats
     held_symbols, corr_gate = prepared
-
-    threshold_scale = float(predictions["threshold_scale"].iloc[0])
+    gate_status = _block_new_if_params_unreadable(predictions, gate_status, stats)
     logger.info(
         "[exec] 動的閾値適用: scale=%.3f buy_range=%.3f%%-%.3f%%",
-        threshold_scale,
+        float(predictions["threshold_scale"].iloc[0]),
         predictions["effective_buy_threshold"].min() * 100,
         predictions["effective_buy_threshold"].max() * 100,
     )
