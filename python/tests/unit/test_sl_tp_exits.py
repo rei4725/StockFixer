@@ -8,10 +8,14 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
+import pandas as pd
+
+from config.settings import DEFAULT_STOP_LOSS_PCT
 from src.infrastructure.in_memory import InMemoryTradeDiffSink
 from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
 from src.trading.execution import _check_sl_tp_exits
 from src.trading.risk_manager import RiskManager
+from src.utils.optimal_params_loader import OptimalParamsUnreadableError
 
 
 def _make_broker(positions=None, short_positions=None):
@@ -386,6 +390,176 @@ class TestCheckSlTpExits(unittest.TestCase):
         self.assertEqual(order_type, OrderType.LIMIT)
         self.assertGreater(price, 0.0)
         self.assertEqual(session, "close")
+
+
+class TestSlTpUnreadableParams(unittest.TestCase):
+    """optimal_params.json が読めない日も、既定の損切りの線で SL を判定する（#1192）"""
+
+    _LOSS = DEFAULT_STOP_LOSS_PCT + 0.02  # 既定の線を超えた損益率
+    _POSITIONS = [
+        {"symbol": "7203", "qty": 100, "avg_price": 1000.0, "current_price": 1000.0 * (1 - _LOSS)},
+        {"symbol": "9000", "qty": 100, "avg_price": 1000.0, "current_price": 1000.0},
+        {"symbol": "9002", "qty": 100, "avg_price": 1000.0, "current_price": 1000.0},
+    ]
+    _SHORTS = [
+        {
+            "symbol": "6758",
+            "qty": 100,
+            "avg_short_price": 1000.0,
+            "current_price": 1000.0 * (1 + _LOSS),
+        }
+    ]
+
+    @staticmethod
+    def _unreadable():
+        return patch(
+            "src.trading.risk_manager.get_optimal_params",
+            side_effect=OptimalParamsUnreadableError("broken"),
+        )
+
+    @staticmethod
+    def _sent(broker):
+        return [(c.args[0], c.args[1]) for c in broker.send_order.call_args_list]
+
+    def test_default_stop_exits_long_and_short(self):
+        broker = _make_broker(self._POSITIONS, self._SHORTS)
+        stats = _make_stats()
+
+        with self._unreadable():
+            with patch("src.trading.execution.sl_tp._record_order"):
+                with self.assertLogs("src.trading.execution.sl_tp", level="ERROR"):
+                    triggered = _check_sl_tp_exits(
+                        broker, "jp", "paper", MagicMock(), stats, InMemoryTradeDiffSink()
+                    )
+
+        self.assertEqual(
+            sorted(self._sent(broker)),
+            sorted([("7203", OrderSide.SELL), ("6758", OrderSide.SHORT_COVER)]),
+        )
+        self.assertEqual(triggered, {"7203", "6758"})
+        self.assertGreaterEqual(stats["errors"], 1)
+
+    def test_exits_only_path_uses_default_stop(self):
+        # 予測を使えない日の SL/TP だけの道も同じ扱い（#932・#1049）
+        from src.trading.execution.sl_tp import _sl_tp_exits_only
+        from src.trading.types import TradingGateStatus
+
+        gate = TradingGateStatus(
+            is_allowed=True,
+            stop_active=False,
+            reason_code=None,
+            reason=None,
+            daily_loss=0.0,
+            daily_loss_limit=20_000.0,
+        )
+        broker = _make_broker(self._POSITIONS, self._SHORTS)
+        stats = _make_stats()
+
+        with self._unreadable():
+            with patch("src.trading.execution.sl_tp._record_order"):
+                _sl_tp_exits_only(
+                    broker, "jp", "paper", MagicMock(), stats, InMemoryTradeDiffSink(), gate
+                )
+
+        self.assertEqual(
+            sorted(self._sent(broker)),
+            sorted([("7203", OrderSide.SELL), ("6758", OrderSide.SHORT_COVER)]),
+        )
+        self.assertGreaterEqual(stats["errors"], 1)
+
+    def test_run_daily_orders_reaches_prediction_sell(self):
+        from src.infrastructure.in_memory import (
+            InMemoryOrderRunSink,
+            InMemoryPredictionRepository,
+        )
+        from src.trading.execution import run_daily_orders
+        from src.trading.types import CorrelationGateResult, TradingGateStatus
+
+        repo = InMemoryPredictionRepository()
+        predictions = pd.DataFrame(
+            [
+                {
+                    "market": "jp",
+                    "symbol": "9002",
+                    "predicted_at": "20261026_083000",
+                    "current_price": 1000.0,
+                    "diff_ratio": -0.03,
+                    "confidence_ratio": 1.0,
+                }
+            ]
+        )
+        gate = TradingGateStatus(
+            is_allowed=True,
+            stop_active=False,
+            reason_code=None,
+            reason=None,
+            daily_loss=0.0,
+            daily_loss_limit=20_000.0,
+        )
+        patches = [
+            self._unreadable(),
+            patch.object(repo, "get_latest_by_market", return_value=predictions),
+            patch("src.trading.execution.runner._record_order"),
+            patch("src.trading.execution.sl_tp._record_order"),
+            patch(
+                "src.trading.execution.runner._choose_order_params",
+                return_value=(OrderType.MARKET, 0.0, "market", "open"),
+            ),
+            patch(
+                "src.trading.execution.RiskManager.evaluate_trading_gate",
+                return_value=gate,
+            ),
+            patch("src.trading.execution.RiskManager.calc_position_size", return_value=100),
+            patch("src.trading.execution.RiskManager.update_peak_balance"),
+            patch(
+                "src.trading.execution.runner.evaluate_correlation_gate",
+                return_value=CorrelationGateResult(
+                    is_allowed=True, enc=2.0, enc_threshold=2.0, avg_correlation=0.0, n_symbols=3
+                ),
+            ),
+            patch("src.trading.execution.runner._load_exit_model", return_value=None),
+            patch("src.trading.execution.params.get_optimal_params", return_value={}),
+        ]
+        for p in patches:
+            p.start()
+        broker = _make_broker(self._POSITIONS, self._SHORTS)
+        try:
+            stats = run_daily_orders(
+                broker,
+                order_run_sink=InMemoryOrderRunSink(),
+                trade_diff_sink=InMemoryTradeDiffSink(),
+                prediction_repo=repo,
+                market="jp",
+                mode="paper",
+            )
+        finally:
+            for p in patches:
+                p.stop()
+
+        sent = self._sent(broker)
+        self.assertIn(("7203", OrderSide.SELL), sent)
+        self.assertIn(("6758", OrderSide.SHORT_COVER), sent)
+        self.assertIn(("9002", OrderSide.SELL), sent)
+        self.assertNotIn(("9000", OrderSide.SELL), sent)
+        self.assertGreaterEqual(stats["errors"], 1)
+
+    def test_readable_params_keep_symbol_thresholds(self):
+        # 読める日は銘柄ごとの線（5%）で判定し、既定の線に置き換えない
+        positions = [{"symbol": "7203", "qty": 100, "avg_price": 1000.0, "current_price": 940.0}]
+        broker = _make_broker(positions)
+        stats = _make_stats()
+
+        with patch(
+            "src.trading.risk_manager.get_optimal_params",
+            return_value={"stop_loss_pct": 0.05, "take_profit_pct": 0.10},
+        ):
+            with patch("src.trading.execution.sl_tp._record_order"):
+                triggered = _check_sl_tp_exits(
+                    broker, "jp", "paper", MagicMock(), stats, InMemoryTradeDiffSink()
+                )
+
+        self.assertEqual(triggered, {"7203"})
+        self.assertEqual(stats["errors"], 0)
 
 
 if __name__ == "__main__":
