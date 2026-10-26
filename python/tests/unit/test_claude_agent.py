@@ -230,6 +230,61 @@ class TestHandlePlaceOrder(unittest.TestCase):
         result = self._call("7200", "buy")
         self.assertEqual(result["status"], "skipped")
 
+    def _pending_from_sent_sells(self, *_args):
+        # 紙の SELL は約定まで保有を減らさず paper_orders の約定待ちに入る。送った SELL を約定待ちとして返す
+        from src.trading.execution.pending import PendingExits
+
+        sells = frozenset(
+            c[0][0] for c in self.broker.send_order.call_args_list if c[0][1] == OrderSide.SELL
+        )
+        return PendingExits(sells=sells)
+
+    @patch("src.trading.claude_agent._record_order")
+    @patch(
+        "src.trading.claude_agent._choose_order_params",
+        return_value=(OrderType.MARKET, 0.0, "market", "open"),
+    )
+    def test_second_sell_of_same_symbol_in_run_is_skipped(self, _choose, _record):
+        # #1170: 同じ回に同じ銘柄の sell を2回呼んでも SELL は1本だけ
+        self.broker.get_positions.return_value = [
+            {"symbol": "7200", "qty": 200, "avg_price": 990.0, "current_price": 1000.0}
+        ]
+        stats = {"buy_orders": 0, "sell_orders": 0, "skipped": 0, "errors": 0}
+        with patch(
+            "src.trading.claude_agent._load_pending_exits",
+            side_effect=self._pending_from_sent_sells,
+            create=True,
+        ):
+            first = self._call("7200", "sell", stats)
+            second = self._call("7200", "sell", stats)
+
+        self.assertEqual(first["status"], "placed")
+        self.assertEqual(second["status"], "skipped")
+        self.assertIn("約定待ち", second["reason"])
+        self.broker.send_order.assert_called_once()
+        self.assertEqual(stats["sell_orders"], 1)
+        self.assertEqual(stats["skipped"], 1)
+
+    def test_sell_skipped_when_previous_run_sell_is_pending(self):
+        # #1170: 前の回（16:30 のルールの道など）の SELL が約定待ちなら2本目を出さない
+        from src.trading.execution.pending import PendingExits
+
+        self.broker.get_positions.return_value = [
+            {"symbol": "7200.T", "qty": 200, "avg_price": 990.0, "current_price": 1000.0}
+        ]
+        stats = {"buy_orders": 0, "sell_orders": 0, "skipped": 0, "errors": 0}
+        with patch(
+            "src.trading.claude_agent._load_pending_exits",
+            return_value=PendingExits(sells=frozenset({"7200"})),
+            create=True,
+        ):
+            result = self._call("7200", "sell", stats)
+
+        self.assertEqual(result["status"], "skipped")
+        self.assertIn("約定待ち", result["reason"])
+        self.broker.send_order.assert_not_called()
+        self.assertEqual(stats["skipped"], 1)
+
 
 # ---------------------------------------------------------------------------
 # get_predictions ハンドラーテスト
