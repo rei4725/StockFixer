@@ -12,7 +12,7 @@ xgboost==3.4.1
 requests==2.34.2
 httpx==0.28.1
 matplotlib==3.11.2
-shap==0.53.0
+shap==0.54.1
 numba==0.68.0
 llvmlite==0.50.0
 pandas>=3.0.6,<4
@@ -24,12 +24,12 @@ duckdb==1.5.6
 psycopg[binary,pool]>=3.3.6
 apscheduler==3.11.3
 plotly>=7.1.0
-filelock>=4.2.0
+filelock>=4.2.4
 optuna>=5.0.0
-pydantic-settings>=2.16.0
+pydantic-settings>=2.16.1
 prometheus-client>=0.26.0
 anthropic>=1.15.0
-xlrd>=2.0.1             # JPX の東証上場銘柄一覧（.xls）を pandas で読む（run_symbol_master.py）
+xlrd>=2.0.2             # JPX の東証上場銘柄一覧（.xls）を pandas で読む（run_symbol_master.py）
 
 
 # セキュリティ修正: 脆弱性のある推移的依存関係を安全なバージョンに固定

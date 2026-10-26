@@ -31,6 +31,7 @@ from src.domain.ports import PredictionResultRepository, TradeDiffSink
 from src.trading.brokers.base import BrokerBase, BrokerError, OrderSide
 from src.trading.claude_order_caps import RunBuyCaps, start_run_buy_caps
 from src.trading.claude_reasoning_log import save_reasoning_log
+from src.trading.claude_tools import TOOLS as _TOOLS
 from src.trading.execution import (
     _attach_dynamic_thresholds,
     _choose_order_params,
@@ -50,90 +51,6 @@ _MAX_AGENT_TURNS = 20
 
 # Claude に渡す予測候補の上限行数（トークン節約）
 _MAX_PREDICTION_ROWS = 50
-
-
-# ---------------------------------------------------------------------------
-# Tool スキーマ定義
-# ---------------------------------------------------------------------------
-
-_TOOLS: list[dict[str, Any]] = [
-    {
-        "name": "get_predictions",
-        "description": (
-            "当日の ML 予測結果から閾値通過候補を取得する。"
-            "buy 候補（multi_horizon_score が effective_buy_threshold 以上）と"
-            "sell 候補（保有中かつ effective_sell_threshold 以下）を返す。"
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "market": {
-                    "type": "string",
-                    "description": "対象マーケット。例: 'jp', 'us'",
-                }
-            },
-            "required": ["market"],
-        },
-    },
-    {
-        "name": "get_positions",
-        "description": "現在の保有ポジション一覧を返す。symbol, qty, avg_price, current_price を含む。",
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-            "required": [],
-        },
-    },
-    {
-        "name": "get_balance",
-        "description": "現在の現金余力（円）を返す。",
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-            "required": [],
-        },
-    },
-    {
-        "name": "get_risk_status",
-        "description": (
-            "リスクゲートの評価結果を返す。"
-            "is_allowed=false の場合は当日の発注が禁止されている。"
-            "daily_loss, consecutive_losses, position_count なども含む。"
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-            "required": [],
-        },
-    },
-    {
-        "name": "place_order",
-        "description": (
-            "指定銘柄の注文を発注する。"
-            "RiskManager のゲートチェックとポジションサイジングは Python 側で自動適用される。"
-            "side は 'buy' または 'sell' を指定する。"
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "symbol": {
-                    "type": "string",
-                    "description": "銘柄コード。例: '7203', 'AAPL'",
-                },
-                "side": {
-                    "type": "string",
-                    "enum": ["buy", "sell"],
-                    "description": "発注方向",
-                },
-                "reasoning": {
-                    "type": "string",
-                    "description": "この発注判断の理由（ログ保存用）",
-                },
-            },
-            "required": ["symbol", "side", "reasoning"],
-        },
-    },
-]
 
 
 # ---------------------------------------------------------------------------
@@ -252,9 +169,10 @@ def _handle_place_order(
     # 発注方向の変換
     side = OrderSide.BUY if side_str == "buy" else OrderSide.SELL
 
-    # RiskManager 再チェック（Claude の判断時点と現在の間にレースコンディションが起きても安全）
+    # RiskManager 再チェック（Claude の判断時点と現在の間にレースコンディションが起きても安全）。
+    # 8:50 の道・ルールの道と同じく、不合格なら新規の買いだけ止め、保有の売りは通す
     gate = risk.evaluate_trading_gate()
-    if not gate.is_allowed:
+    if side == OrderSide.BUY and not gate.is_allowed:
         msg = f"RiskManager ゲート不合格のためスキップ: {gate.reason}"
         logger.warning("[claude_agent] %s → %s", symbol, msg)
         stats["skipped"] += 1
@@ -441,12 +359,16 @@ def run_claude_trader(
     risk = RiskManager(broker, market=market)
     risk.update_peak_balance()
 
-    # 発注可否チェック（早期リターン）
+    # 発注可否チェック。不合格でも早く戻らず、新規の買いだけ止めて保有の売りは受け付ける
     gate = risk.evaluate_trading_gate()
+    gate_notice = ""
     if not gate.is_allowed:
-        logger.warning("[claude_agent] リスクゲート不合格 → スキップ: %s", gate.reason)
+        logger.warning("[claude_agent] リスクゲート不合格 → 新規の買いを停止: %s", gate.reason)
         stats.update({"trading_stopped": gate.stop_active, "stop_reason": gate.reason})
-        return stats
+        gate_notice = (
+            f"\n## 本日の状態\nリスクゲート不合格（{gate.reason}）のため新規の buy は受け付けない。"
+            "保有の sell だけを判断すること。\n"
+        )
 
     # 回の中で増える買い・建玉・業種を数え、相関ゲートを1回だけ評価する（8:50 の道と同じく回の始めの保有から）
     caps = start_run_buy_caps(_get_held_symbols(broker), market)
@@ -465,7 +387,7 @@ tool を使って当日の予測・ポジション・残高・リスク状態を
 buy/sell/hold の判断を行い、発注を実行してください。
 
 ## 制約（厳守）
-- is_allowed=false のときは発注しない
+- is_allowed=false のときは新規の buy をしない（保有の sell は可）
 - 1セッションの最大発注数: {MAX_ORDERS_PER_RUN} 件
 - 既に保有中の銘柄に追加買いしない
 - 確信のない銘柄は hold（見送り）を選択する
@@ -477,7 +399,7 @@ buy/sell/hold の判断を行い、発注を実行してください。
 3. get_balance / get_positions で資金状況を把握
 4. 各候補を評価して place_order を呼ぶ（または見送る）
 5. 全判断が終わったらセッションを終了する
-
+{gate_notice}
 market: {market}, mode: {mode}
 """
 
