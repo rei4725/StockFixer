@@ -151,6 +151,21 @@ class TestPaperBrokerSettle(unittest.TestCase):
         self.assertIsNone(pos)  # 全量決済で削除
         self.assertAlmostEqual(pnl, (1000.0 - 900.0) * 100)
 
+    def test_settle_sell_clamped_records_filled_qty(self):
+        """保有を超える SELL は、注文の行の qty に実際に売った株数を書く（#1184）"""
+        with _db_connection() as con:
+            con.execute(
+                "INSERT INTO paper_positions (symbol, qty, avg_price) VALUES ('7203', 100, 900.0)"
+            )
+        result = self.broker.send_order("7203", OrderSide.SELL, 150)
+        settled = self.broker.settle_pending_orders()
+        with _db_connection() as con:
+            qty = con.execute(
+                "SELECT qty FROM paper_orders WHERE order_id=%s", [result["order_id"]]
+            ).fetchone()[0]
+        self.assertEqual(qty, 100)
+        self.assertEqual(settled[0]["qty"], 100)
+
     def test_settle_skips_on_nan_ohlc(self):
         """NaN の OHLC では約定させず pending を据え置く（残高・avg_price 汚染防止）。"""
         nan_df = pd.DataFrame(
@@ -520,6 +535,22 @@ class TestPaperBrokerShort(unittest.TestCase):
         self.assertAlmostEqual(balance, 1_000_000.0 + (1200.0 - 1000.0) * 100)
         self.assertIsNone(pos)
         self.assertTrue(any("超過" in line for line in logs.output))
+
+    def test_settle_short_cover_clamped_records_filled_qty(self):
+        """保有を超える返済は、注文の行の qty に実際に返済した株数を書く（#1184）"""
+        with _db_connection() as con:
+            con.execute(
+                "INSERT INTO paper_short_positions"
+                " (symbol, qty, avg_short_price) VALUES ('7203', 100, 1200.0)"
+            )
+        result = self.broker.send_order("7203", OrderSide.SHORT_COVER, 150)
+        settled = self.broker.settle_pending_orders()
+        with _db_connection() as con:
+            qty = con.execute(
+                "SELECT qty FROM paper_orders WHERE order_id=%s", [result["order_id"]]
+            ).fetchone()[0]
+        self.assertEqual(qty, 100)
+        self.assertEqual(settled[0]["qty"], 100)
 
     def test_get_short_positions(self):
         """get_short_positions が paper_short_positions を正しく返すこと"""

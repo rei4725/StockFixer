@@ -11,10 +11,11 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
-def apply_fill(
-    con: Any, order_id: str, symbol: str, side: int, qty: int, fill_price: float
-) -> None:
-    """約定に合わせてポジションと残高を更新する"""
+def apply_fill(con: Any, order_id: str, symbol: str, side: int, qty: int, fill_price: float) -> int:
+    """約定に合わせてポジションと残高を更新し、実際に約定した株数を返す
+
+    SELL・SHORT_COVER で保有を超える分は保有分にクランプし、その株数を返す（#1184）。
+    """
     existing = con.execute(
         "SELECT qty, avg_price FROM paper_positions WHERE symbol=%s", [symbol]
     ).fetchone()
@@ -45,7 +46,7 @@ def apply_fill(
             logger.warning(
                 "[paper] %s: 未保有のため SELL をスキップ（現金・実現損益を計上しない）", symbol
             )
-            return
+            return qty
         old_qty, old_avg = existing
         sell_qty = min(qty, old_qty)
         if sell_qty < qty:
@@ -71,6 +72,7 @@ def apply_fill(
             "UPDATE paper_orders SET realized_pnl=%s WHERE order_id=%s",
             [realized_pnl, order_id],
         )
+        return sell_qty
     elif side == int(OrderSide.SHORT):
         # 空売り新規: send_order で仮登録済みの avg_short_price を実際の約定値段で直す
         existing_short = con.execute(
@@ -139,3 +141,5 @@ def apply_fill(
             "UPDATE paper_orders SET realized_pnl=%s WHERE order_id=%s",
             [realized_pnl, order_id],
         )
+        return cover_qty
+    return qty
