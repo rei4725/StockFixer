@@ -24,7 +24,7 @@ duckdb==1.5.6
 psycopg[binary,pool]>=3.3.6
 apscheduler==3.11.3
 plotly>=7.1.0
-filelock>=4.2.0
+filelock>=4.2.4
 optuna>=5.0.0
 pydantic-settings>=2.16.0
 prometheus-client>=0.26.0
