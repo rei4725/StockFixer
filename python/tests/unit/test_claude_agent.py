@@ -114,6 +114,15 @@ class TestHandlePlaceOrder(unittest.TestCase):
         self.predictions["effective_sell_threshold"] = -0.005
         self.predictions["base_threshold"] = 0.005
         self.predictions["threshold_scale"] = 1.0
+        # broker は broker_name="paper" の MagicMock なので、差し替えないとテスト用の DB の
+        # paper_orders を読み、ほかのテストの残りで揺れる。約定待ちの決済は既定で空にする
+        from src.trading.execution.pending import PendingExits
+
+        pending_patcher = patch(
+            "src.trading.claude_agent._load_pending_exits", return_value=PendingExits()
+        )
+        self.load_pending_exits = pending_patcher.start()
+        self.addCleanup(pending_patcher.stop)
 
     def _call(self, symbol, side_str, stats=None):
         from src.trading.claude_agent import _handle_place_order
@@ -161,6 +170,22 @@ class TestHandlePlaceOrder(unittest.TestCase):
         call_args = self.broker.send_order.call_args
         self.assertEqual(call_args[0][1], OrderSide.SELL)
         self.assertEqual(call_args[0][2], 200)
+
+    @patch("src.trading.claude_agent._record_order")
+    @patch(
+        "src.trading.claude_agent._choose_order_params",
+        return_value=(OrderType.MARKET, 0.0, "market", "open"),
+    )
+    @patch("src.trading.execution.pending.db_connection")
+    def test_sell_does_not_read_paper_orders(self, mock_db, _choose, _record):
+        # #1205: sell の約定待ちの確認は setUp の差し替えを通り、DB に繋がない
+        self.broker.get_positions.return_value = [
+            {"symbol": "7200", "qty": 200, "avg_price": 990.0, "current_price": 1000.0}
+        ]
+        result = self._call("7200", "sell")
+        self.assertEqual(result["status"], "placed")
+        self.load_pending_exits.assert_called_once_with(self.broker)
+        mock_db.assert_not_called()
 
     def test_risk_gate_blocked_skips_order(self):
         self.risk.evaluate_trading_gate.return_value = _make_gate(
