@@ -1,7 +1,7 @@
 """約定待ちの決済の確かめ — 同じ銘柄に2本目の決済を出さない（#1117）。
 
 get_positions は約定前の SELL を引かないため、前の回（16:30 のルールの道など）の
-約定待ちを見ずに売ると二重の決済になる。ホライズン決済の pending_sell_symbols と同じ確かめ。
+約定待ちを見ずに売ると二重の決済になる。ホライズン決済も同じ読み取りを使う（#1168）。
 """
 
 from dataclasses import dataclass, field
@@ -29,6 +29,11 @@ def _load_pending_exits(broker: BrokerBase) -> PendingExits:
     """paper_orders から約定待ちの決済の銘柄を読む。paper 以外のブローカーは空を返す。"""
     if broker.broker_name != "paper":
         return PendingExits()
+    return _read_pending_exits()
+
+
+def _read_pending_exits() -> PendingExits:
+    """paper_orders から約定待ちの決済の銘柄を読む（紙の保有だけを扱う道が直接呼ぶ。#1168）。"""
     try:
         with db_connection() as con:
             rows = con.execute(
