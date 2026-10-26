@@ -560,17 +560,27 @@ def _poll_recovery_jobs(queue_manager):
         if not config.get("auto_schedule", True):
             continue
 
-        # 当日分の補完
-        if queue_manager.should_recover(job_id, now=now):
-            logger.warning(f"補完実行を開始: {job_id}")
-            queue_manager.run_job(job_id, reason="recovery")
-            continue
+        # 1つのジョブが落ちても後のジョブ（発注・約定）の補完を同じ回で進める（#1186）。
+        # 失敗の記録と知らせは run_job の中で済んでいる。
+        try:
+            _recover_job(queue_manager, job_id, now)
+        except Exception:
+            logger.error(f"補完実行に失敗: {job_id}（次のジョブへ進む）", exc_info=True)
 
-        # 前日分の補完（コンテナ再起動などで当日スケジュール前に前日分が欠落した場合）
-        missed_periods = queue_manager.get_missed_past_periods(job_id, lookback_days=2, now=now)
-        for missed_period_key in missed_periods:
-            logger.warning(f"前日分補完実行を開始: {job_id} (period={missed_period_key})")
-            queue_manager.run_job(job_id, reason="recovery_backfill", period_key=missed_period_key)
+
+def _recover_job(queue_manager, job_id: str, now) -> None:
+    """1つのジョブの当日分、なければ前日分を補完実行する"""
+    # 当日分の補完
+    if queue_manager.should_recover(job_id, now=now):
+        logger.warning(f"補完実行を開始: {job_id}")
+        queue_manager.run_job(job_id, reason="recovery")
+        return
+
+    # 前日分の補完（コンテナ再起動などで当日スケジュール前に前日分が欠落した場合）
+    missed_periods = queue_manager.get_missed_past_periods(job_id, lookback_days=2, now=now)
+    for missed_period_key in missed_periods:
+        logger.warning(f"前日分補完実行を開始: {job_id} (period={missed_period_key})")
+        queue_manager.run_job(job_id, reason="recovery_backfill", period_key=missed_period_key)
 
 
 def _print_schedule():

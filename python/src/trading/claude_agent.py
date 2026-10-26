@@ -39,6 +39,7 @@ from src.trading.execution import (
     _record_order,
     _resolve_kelly_params,
 )
+from src.trading.execution.pending import _load_pending_exits
 from src.trading.risk_manager import RiskManager
 from src.trading.signal_generator import apply_multi_horizon_score_column
 from src.trading.types import TradingGateStatus
@@ -238,6 +239,12 @@ def _handle_place_order(
         if pos is None or pos.get("qty", 0) <= 0:
             stats["skipped"] += 1
             return {"status": "skipped", "reason": f"{symbol} の保有ポジションなし"}
+        # 紙の SELL は約定まで保有を減らさないため、同じ回・前の回の約定待ちを見て2本目を出さない（#1170）
+        if _load_pending_exits(broker).has(symbol, OrderSide.SELL):
+            msg = f"{symbol} は約定待ちの SELL があるためスキップ"
+            logger.info("[claude_agent] %s", msg)
+            stats["skipped"] += 1
+            return {"status": "skipped", "reason": msg}
         qty = pos["qty"]
 
     try:

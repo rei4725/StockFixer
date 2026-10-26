@@ -25,6 +25,24 @@ def positions_market_value(positions: Iterable[Mapping[str, Any]], logger: loggi
     return market_value
 
 
+def long_positions_unrealized_pnl(
+    positions: Iterable[Mapping[str, Any]], logger: logging.Logger
+) -> float:
+    """買い持ちの保有の含み損益の合計を返す（#1162）。
+
+    評価できない保有は空売りの short_positions_unrealized_pnl と同じく数えずに飛ばし、
+    NaN で合計ごと NaN にしない。WARNING は呼び出し側の logger に出す。
+    """
+    total = 0.0
+    for p in positions:
+        pnl = float(p.get("unrealized_pnl", 0.0))
+        if math.isnan(pnl):
+            logger.warning(f"[risk] {p.get('symbol')}: 買い持ちの現在値が取れず含み損益を数えない")
+            continue
+        total += pnl
+    return total
+
+
 def short_positions_unrealized_pnl(
     positions: Iterable[Mapping[str, Any]], logger: logging.Logger
 ) -> float:
@@ -44,14 +62,24 @@ def short_positions_unrealized_pnl(
     return total
 
 
+def read_short_positions(broker: Any) -> list[dict[str, Any]]:
+    """broker の空売りの保有を返す。get_short_positions を持たない broker は空とする。"""
+    try:
+        return list(broker.get_short_positions())
+    except AttributeError:
+        return []
+
+
+def count_short_positions(broker: Any) -> int:
+    """保有の上限に数える空売りの建玉の数（qty > 0）を返す（#1146）。"""
+    return sum(1 for p in read_short_positions(broker) if p.get("qty", 0) > 0)
+
+
 def broker_positions_value(broker: Any, logger: logging.Logger) -> float:
     """broker の保有を総資産に足す額（買い持ちの時価 + 空売りの含み損益）を返す（#1148）。
 
     get_short_positions を持たない broker（AttributeError）は空売りを空として扱う。
     """
     market_value = positions_market_value(broker.get_positions(), logger)
-    try:
-        short_positions = broker.get_short_positions()
-    except AttributeError:
-        short_positions = []
+    short_positions = read_short_positions(broker)
     return market_value + short_positions_unrealized_pnl(short_positions, logger)
