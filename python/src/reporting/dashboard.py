@@ -14,14 +14,14 @@ from __future__ import annotations
 
 import math
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional, Protocol
 
 import pandas as pd
 from tabulate import tabulate  # type: ignore[import-untyped]
 
 from src.domain.ports import AnalyticsQuery
 from src.reporting.monthly import run_monthly_report
-from src.utils.db import db_connection, load_experiment_runs
+from src.utils.db import load_experiment_runs
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -118,43 +118,59 @@ def _section_paper_real_diff(d: dict) -> list[list]:
     ]
 
 
-def _section_paper_balance() -> list[list]:
+class PaperPnlSource(Protocol):
+    """ペーパーの損益と保有の評価を返すもの（PaperBroker）。
+
+    reporting は trading を import できない（BC 独立性契約）ため、合成ルートが注入する。
+    """
+
+    def get_pnl_summary(self) -> dict[str, Any]: ...
+
+    def get_positions(self) -> list[dict[str, Any]]: ...
+
+    def get_short_positions(self) -> list[dict[str, Any]]: ...
+
+
+def _sum_unrealized(positions: list[dict[str, Any]]) -> tuple[float, int]:
+    """含み損益の合計と、評価できない（NaN の）建玉の数を返す。"""
+    total = 0.0
+    unvalued = 0
+    for p in positions:
+        pnl = float(p.get("unrealized_pnl", math.nan))
+        if math.isnan(pnl):
+            unvalued += 1
+            continue
+        total += pnl
+    return total, unvalued
+
+
+def _section_paper_balance(broker: PaperPnlSource) -> list[list]:
     """
     paper トレードの残高・損益サマリーを行リストで返す。
 
-    実現損益: paper_orders.realized_pnl の合計（filled 注文のみ）
-    含み損益（空売り）: paper_short_positions.unrealized_pnl の合計
-    ロングポジションの含み損益はリアルタイム価格なしでは算出不可のため表示しない。
+    実現損益と残高は get_pnl_summary()、含み損益は get_positions()・get_short_positions()
+    の評価から出す（#1178）。評価できない建玉は合計に足さず、件数を行に出す。
     """
-    with db_connection() as con:
-        bal_row = con.execute("SELECT balance FROM paper_balance LIMIT 1").fetchone()
-        balance = float(bal_row[0]) if bal_row else 0.0
+    summary = broker.get_pnl_summary()
+    realized_pnl = float(summary["realized_pnl"])
+    balance = float(summary["balance"])
 
-        realized_row = con.execute(
-            "SELECT SUM(realized_pnl) FROM paper_orders "
-            "WHERE status = 'filled' AND realized_pnl IS NOT NULL"
-        ).fetchone()
-        realized_pnl = (
-            float(realized_row[0]) if realized_row and realized_row[0] is not None else 0.0
-        )
+    positions = broker.get_positions()
+    short_positions = broker.get_short_positions()
+    long_unrealized, long_unvalued = _sum_unrealized(positions)
+    short_unrealized, short_unvalued = _sum_unrealized(short_positions)
 
-        short_row = con.execute(
-            "SELECT SUM(unrealized_pnl) FROM paper_short_positions "
-            "WHERE unrealized_pnl IS NOT NULL"
-        ).fetchone()
-        short_unrealized = float(short_row[0]) if short_row and short_row[0] is not None else 0.0
-
-        open_positions_row = con.execute("SELECT COUNT(*) FROM paper_positions").fetchone()
-        open_count = int(open_positions_row[0]) if open_positions_row else 0
-
-    total_pnl = realized_pnl + short_unrealized
+    total_pnl = realized_pnl + long_unrealized + short_unrealized
 
     return [
         ["残高 (現金)", f"¥{balance:,.0f}"],
         ["実現損益", f"¥{realized_pnl:,.0f}"],
+        ["含み損益（買い持ち）", f"¥{long_unrealized:,.0f}"],
         ["含み損益（空売り）", f"¥{short_unrealized:,.0f}"],
         ["合計損益", f"¥{total_pnl:,.0f}"],
-        ["ロングポジション数", str(open_count)],
+        ["評価できない建玉数", str(long_unvalued + short_unvalued)],
+        ["ロングポジション数", str(len(positions))],
+        ["空売りポジション数", str(len(short_positions))],
     ]
 
 
@@ -203,6 +219,7 @@ def run_dashboard(
     drift_n: int = 20,
     *,
     analytics: AnalyticsQuery,
+    paper_broker: PaperPnlSource,
 ) -> None:
     """
     運用監視ダッシュボードを標準出力に表示する（read-only）。
@@ -214,6 +231,7 @@ def run_dashboard(
         recent_days: paper/real 乖離・月次 KPI の集計期間（日）
         drift_n: ドリフト判定に使う直近サンプル数（銘柄ごと）
         analytics: paper/real 乖離・予測精度・ドリフトの読み取りポート
+        paper_broker: ペーパーの損益と保有の評価を返すもの（PaperBroker）
     """
     print("=" * 60)
     print("  StockFixer 運用監視ダッシュボード")
@@ -272,7 +290,7 @@ def run_dashboard(
     # --- [4] ペーパートレード残高・損益 ---
     print("--- [4] ペーパートレード残高・損益 ---")
     try:
-        rows = _section_paper_balance()
+        rows = _section_paper_balance(paper_broker)
         print(tabulate(rows, headers=["項目", "値"], tablefmt="simple"))
     except Exception as e:
         logger.error("ペーパー残高取得失敗: %s", e, exc_info=True)
