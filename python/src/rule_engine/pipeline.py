@@ -14,6 +14,7 @@ from typing import Any
 import pandas as pd
 
 from src.domain.generated_rules import GENERATED_RULES
+from src.domain.jp_market_holidays import is_jp_business_day
 from src.rule_engine.ports import OHLCVWithIndicatorsPort
 from src.rule_engine.rules import (
     BollingerBandRule,
@@ -48,11 +49,26 @@ _LOOKBACK_DAYS = 90
 _STALE_BARS_MAX_WEEKDAYS = 3
 
 
-def _count_weekdays_behind(last_bar: date, signal_date: date) -> int:
-    """最後の足の翌日から signal_date までの平日の数を返す（祝日は数え分けない）。"""
-    if last_bar >= signal_date:
+def _is_open_day(day: date, market: str) -> bool:
+    """jp は東証の営業日（#1164）、それ以外は土日以外なら True。"""
+    if market == "jp":
+        return is_jp_business_day(day)
+    return day.weekday() < 5
+
+
+def _count_weekdays_behind(last_bar: date, signal_date: date, market: str = "us") -> int:
+    """最後の足の翌日から、signal_date 以前のあるべき最新の営業日までの営業日の数を返す。
+
+    数え方は prediction.predict_unified.count_weekdays_behind（#1106）に揃える。
+    jp は東証の休場日も除き、それ以外は土日だけを除く。
+    """
+    expected_latest = signal_date
+    while not _is_open_day(expected_latest, market):
+        expected_latest -= timedelta(days=1)
+    if last_bar >= expected_latest:
         return 0
-    return len(pd.bdate_range(last_bar + timedelta(days=1), signal_date))
+    days = pd.date_range(last_bar + timedelta(days=1), expected_latest)
+    return sum(1 for day in days if _is_open_day(day.date(), market))
 
 
 def _get_today_signal(
@@ -80,7 +96,7 @@ def _get_today_signal(
 
     if signal_date is not None and isinstance(df.index, pd.DatetimeIndex):
         last_bar = pd.Timestamp(df.index[-1]).date()
-        behind = _count_weekdays_behind(last_bar, signal_date)
+        behind = _count_weekdays_behind(last_bar, signal_date, market)
         if behind > _STALE_BARS_MAX_WEEKDAYS:
             logger.warning(
                 f"足が止まったためシグナルを出さない: {market}/{symbol} "

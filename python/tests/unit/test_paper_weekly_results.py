@@ -110,6 +110,24 @@ class TestComputeWeeklyResults(unittest.TestCase):
         self.assertAlmostEqual(result["markets"]["jp"]["weekly_return"], 0.01)
         self.assertEqual(result["markets"]["jp"]["valued_at_fill_price"], [])
 
+    def test_short_week_moves_by_short_pnl(self):
+        """空売りを含む週は、週の騰落率が空売りの損益の分だけ動くこと（#1163）"""
+        # 前週に 1,000 株を 100 円で空売りし、今週の金曜に終値が 110 円へ上がる
+        orders = _orders([("jp", "7203", 3, 1000, 100.0, pd.Timestamp("2026-10-07"))])
+        result = compute_weekly_results(
+            orders, _price_loader, _INITIAL, date(2026, 10, 17), _benchmark_fetcher
+        )
+        # 前週末 1,000,000 → 今週末 1,000,000 − 1,000 株 × 10 円 = 990,000
+        self.assertAlmostEqual(result["markets"]["jp"]["weekly_return"], -0.01)
+
+    def test_short_opened_in_week_does_not_add_proceeds(self):
+        """週の中に空売りを建てても、売り代金が週の騰落率に入らないこと"""
+        orders = _orders([("jp", "7203", 3, 1000, 100.0, pd.Timestamp("2026-10-13"))])
+        result = compute_weekly_results(
+            orders, _price_loader, _INITIAL, date(2026, 10, 17), _benchmark_fetcher
+        )
+        self.assertAlmostEqual(result["markets"]["jp"]["weekly_return"], -0.01)
+
     def test_missing_price_is_not_counted_as_zero(self):
         """値段の取れない保有は0円でなく約定の値段で評価し、その銘柄を結果に残すこと（#850）"""
         orders = _orders(

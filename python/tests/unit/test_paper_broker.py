@@ -496,6 +496,31 @@ class TestPaperBrokerShort(unittest.TestCase):
             ).fetchone()
         self.assertIsNone(pos)
 
+    def test_settle_short_cover_clamps_to_held_qty(self):
+        """保有を超える返済は保有分に減らし、実現損益と残高を保有分で数える（#1161）"""
+        with _db_connection() as con:
+            con.execute(
+                "INSERT INTO paper_short_positions"
+                " (symbol, qty, avg_short_price) VALUES ('7203', 100, 1200.0)"
+            )
+        result = self.broker.send_order("7203", OrderSide.SHORT_COVER, 150)
+        with self.assertLogs("src.trading.brokers.paper.fill", level="WARNING") as logs:
+            self.broker.settle_pending_orders()
+        with _db_connection() as con:
+            balance = con.execute("SELECT balance FROM paper_balance").fetchone()[0]
+            pos = con.execute(
+                "SELECT qty FROM paper_short_positions WHERE symbol='7203'"
+            ).fetchone()
+            pnl = con.execute(
+                "SELECT realized_pnl FROM paper_orders WHERE order_id=%s",
+                [result["order_id"]],
+            ).fetchone()[0]
+        # fill=1000 のとき、損益は 100株分の (1200 - 1000) * 100 だけ
+        self.assertAlmostEqual(pnl, (1200.0 - 1000.0) * 100)
+        self.assertAlmostEqual(balance, 1_000_000.0 + (1200.0 - 1000.0) * 100)
+        self.assertIsNone(pos)
+        self.assertTrue(any("超過" in line for line in logs.output))
+
     def test_get_short_positions(self):
         """get_short_positions が paper_short_positions を正しく返すこと"""
         with _db_connection() as con:
@@ -753,6 +778,23 @@ class TestPaperBrokerGetPnlSummary(unittest.TestCase):
         # 売り 1,000 に対して現在値 1,020 → (1,000 - 1,020) × 100 = -2,000
         self.assertAlmostEqual(result["unrealized_pnl"], -2000.0)
         self.assertAlmostEqual(result["total_pnl"], -2000.0)
+
+    def test_get_pnl_summary_skips_unpriced_long(self):
+        """評価できない（NaN の）買い持ちは WARNING を出して含み損益に数えない（#1162）"""
+        nan = math.nan
+        positions = [
+            {"symbol": "7203", "qty": 100, "current_price": 1020.0, "unrealized_pnl": 2000.0},
+            {"symbol": "9984", "qty": 100, "current_price": nan, "unrealized_pnl": nan},
+        ]
+        with (
+            patch.object(self.broker, "get_positions", return_value=positions),
+            patch.object(self.broker, "get_short_positions", return_value=[]),
+            self.assertLogs("src.trading.brokers.paper.paper_broker", level="WARNING") as logs,
+        ):
+            result = self.broker.get_pnl_summary()
+        self.assertAlmostEqual(result["unrealized_pnl"], 2000.0)
+        self.assertAlmostEqual(result["total_pnl"], 2000.0)
+        self.assertTrue(any("9984" in line for line in logs.output))
 
     def test_get_pnl_summary_total_pnl_equals_realized_plus_unrealized(self):
         result = self.broker.get_pnl_summary()

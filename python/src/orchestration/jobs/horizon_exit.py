@@ -36,7 +36,8 @@ def exit_expired_positions() -> list[str]:
     SL/TP によって既に決済済みのポジションは保有に存在しないため
     自然に除外される（SL/TP 優先）。
     買い持ちは銘柄ごとに最後の filled BUY、空売りは最後の filled SHORT の
-    target_exit_date だけを見る。約定前の SELL がある銘柄の買い持ちは飛ばす。
+    target_exit_date だけを見る。約定前の SELL がある銘柄の買い持ちと、
+    約定前の SHORT_COVER がある銘柄の空売りは飛ばす。
 
     Returns:
         決済の注文に失敗した銘柄コードのリスト。
@@ -47,18 +48,14 @@ def exit_expired_positions() -> list[str]:
     from src.orchestration.jobs.common import today_jst_iso
     from src.trading.brokers.account.factory import make_order_broker
     from src.trading.brokers.base import OrderSide
+    from src.trading.execution.pending import _log_pending_skips, _read_pending_exits
     from src.utils.db._connection import _db_connection
 
     today_str = today_jst_iso()  # target_exit_date は保有の最後の JST の日 (#949)
     with _db_connection() as con:
         long_rows = con.execute(_EXPIRED_SQL, [int(OrderSide.BUY), today_str]).fetchall()
         short_rows = con.execute(_EXPIRED_SQL, [int(OrderSide.SHORT), today_str]).fetchall()
-        pending_sell_rows = con.execute(
-            "SELECT DISTINCT symbol FROM paper_orders WHERE side = %s AND status = 'pending'",
-            [int(OrderSide.SELL)],
-        ).fetchall()
 
-    pending_sell_symbols = {row[0] for row in pending_sell_rows}
     long_symbols = [row[0] for row in long_rows]
     short_symbols = [row[0] for row in short_rows]
     if not long_symbols and not short_symbols:
@@ -83,15 +80,21 @@ def exit_expired_positions() -> list[str]:
         except AttributeError:
             short_positions = []
 
+    # 保有の一覧は約定前の SELL・SHORT_COVER を引かないため、重ねると返済の二重発注になる (#1168)
+    pending = _read_pending_exits()
     exits: list[tuple[str, OrderSide, dict[str, Any] | None]] = []
+    skipped: list[str] = []
     for symbol in long_symbols:
-        if symbol in pending_sell_symbols:
-            # get_positions は約定前の SELL を引かないため、重ねると売りの二重発注になる
-            logger.info("[horizon_exit] 約定前の SELL があるためスキップ: %s", symbol)
+        if pending.has(symbol, OrderSide.SELL):
+            skipped.append(symbol)
             continue
         exits.append((symbol, OrderSide.SELL, _find_position(positions, symbol)))
     for symbol in short_symbols:
+        if pending.has(symbol, OrderSide.SHORT_COVER):
+            skipped.append(symbol)
+            continue
         exits.append((symbol, OrderSide.SHORT_COVER, _find_position(short_positions, symbol)))
+    _log_pending_skips("horizon_exit", skipped)
 
     exited: list[str] = []
     failed: list[str] = []
