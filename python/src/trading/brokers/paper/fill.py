@@ -15,6 +15,7 @@ def apply_fill(con: Any, order_id: str, symbol: str, side: int, qty: int, fill_p
     """約定に合わせてポジションと残高を更新し、実際に約定した株数を返す
 
     SELL・SHORT_COVER で保有を超える分は保有分にクランプし、その株数を返す（#1184）。
+    保有の無い SELL・SHORT_COVER は何も動かさず 0 を返す（#1190）。
     """
     existing = con.execute(
         "SELECT qty, avg_price FROM paper_positions WHERE symbol=%s", [symbol]
@@ -40,13 +41,13 @@ def apply_fill(con: Any, order_id: str, symbol: str, side: int, qty: int, fill_p
                 [symbol, qty, fill_price],
             )
     elif side == int(OrderSide.SELL):
-        # 未保有銘柄の SELL は現金を計上しない（幻の現金水増しを防止）。
+        # 未保有銘柄の SELL は現金を計上せず、約定した株数を 0 で返す（幻の現金水増しを防止）。
         # 保有数量を超える SELL は保有分にクランプする（過大な現金計上を防止）。
         if not existing:
             logger.warning(
                 "[paper] %s: 未保有のため SELL をスキップ（現金・実現損益を計上しない）", symbol
             )
-            return qty
+            return 0
         old_qty, old_avg = existing
         sell_qty = min(qty, old_qty)
         if sell_qty < qty:
@@ -112,28 +113,30 @@ def apply_fill(con: Any, order_id: str, symbol: str, side: int, qty: int, fill_p
             "SELECT qty, avg_short_price FROM paper_short_positions WHERE symbol=%s",
             [symbol],
         ).fetchone()
-        cover_qty = qty
-        if existing_short:
-            old_qty, old_avg = existing_short
-            cover_qty = min(qty, old_qty)
-            if cover_qty < qty:
-                logger.warning(
-                    "[paper] %s: 返済数量 %d が空売りの保有 %d を超過 → 保有分にクランプ",
-                    symbol,
-                    qty,
-                    old_qty,
-                )
-            new_qty = old_qty - cover_qty
-            if new_qty <= 0:
-                con.execute("DELETE FROM paper_short_positions WHERE symbol=%s", [symbol])
-            else:
-                con.execute(
-                    "UPDATE paper_short_positions SET qty=%s, "
-                    "updated_at=CURRENT_TIMESTAMP WHERE symbol=%s",
-                    [new_qty, symbol],
-                )
+        if not existing_short:
+            logger.warning(
+                "[paper] %s: 空売りの保有が無いため SHORT_COVER をスキップ（実現損益を計上しない）",
+                symbol,
+            )
+            return 0
+        old_qty, old_avg = existing_short
+        cover_qty = min(qty, old_qty)
+        if cover_qty < qty:
+            logger.warning(
+                "[paper] %s: 返済数量 %d が空売りの保有 %d を超過 → 保有分にクランプ",
+                symbol,
+                qty,
+                old_qty,
+            )
+        new_qty = old_qty - cover_qty
+        if new_qty <= 0:
+            con.execute("DELETE FROM paper_short_positions WHERE symbol=%s", [symbol])
         else:
-            old_avg = fill_price  # ポジション不明時はPnL=0扱い
+            con.execute(
+                "UPDATE paper_short_positions SET qty=%s, "
+                "updated_at=CURRENT_TIMESTAMP WHERE symbol=%s",
+                [new_qty, symbol],
+            )
         realized_pnl = (old_avg - fill_price) * cover_qty
         # 建てるときは残高を動かさないので、返済のときに損益だけを残高へ移す（#1147）
         con.execute("UPDATE paper_balance SET balance = balance + %s", [realized_pnl])
