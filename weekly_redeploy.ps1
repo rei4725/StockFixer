@@ -143,9 +143,9 @@ try {
     Write-Log "コンテナ状態: $status"
 
     # --- 古いイメージ・ビルドキャッシュの掃除（auto_deploy.ps1 と同じ） ---
-    Write-Log "[cleanup] 7 日より古い未使用イメージとビルドキャッシュを削除"
-    docker image prune -a -f --filter "until=168h" 2>&1 | ForEach-Object { Write-Log "  [cleanup] $_" }
-    docker builder prune -f --filter "until=168h" 2>&1 | Select-Object -Last 1 | ForEach-Object { Write-Log "  [cleanup] $_" }
+    Write-Log "[cleanup] 1 日より古い未使用イメージとビルドキャッシュを削除"
+    docker image prune -a -f --filter "until=24h" 2>&1 | ForEach-Object { Write-Log "  [cleanup] $_" }
+    docker builder prune -f --filter "until=24h" 2>&1 | Select-Object -Last 1 | ForEach-Object { Write-Log "  [cleanup] $_" }
 
     Write-Log "=== 再デプロイ完了 ==="
     exit 0
