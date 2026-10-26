@@ -18,6 +18,7 @@ from src.domain.trading_rules import get_lot_size
 from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
 from src.trading.brokers.paper.paper_broker import PaperBroker
 from src.trading.correlation_risk import evaluate_correlation_gate
+from src.trading.execution.pending import _load_pending_exits, _log_pending_skips
 from src.trading.risk_manager import RiskManager
 from src.utils.data_path_utils import get_ticker
 from src.utils.logger import get_logger
@@ -115,6 +116,9 @@ def execute_rule_paper_trades(
 
     position_count = len(held_symbols)  # 1ラン内で増える建玉数を追跡し MAX_POSITIONS を厳守
     buy_orders_this_run = 0
+    # 朝の約定で据え置かれた SELL がある銘柄には2本目を出さない（#1169。8:50 の道と同じ確かめ）
+    pending = _load_pending_exits(broker)
+    pending_skipped: list[str] = []
 
     for item in signals:
         symbol = item["symbol"]
@@ -169,6 +173,10 @@ def execute_rule_paper_trades(
                 logger.info(f"  BUY 注文: {symbol}  {qty}株  現在値={price:.0f}円")
 
             elif signal == -1 and symbol in held_symbols:
+                if pending.has(symbol, OrderSide.SELL):
+                    pending_skipped.append(symbol)
+                    skipped += 1
+                    continue
                 pos = next((p for p in positions if p["symbol"] == symbol), None)
                 qty = pos.get("qty", 1) if pos else 1
                 ticker = get_ticker(market, symbol)
@@ -190,6 +198,7 @@ def execute_rule_paper_trades(
             logger.error(f"  {symbol} 注文失敗: {exc}", exc_info=True)
             errors += 1
 
+    _log_pending_skips("ルールの売りシグナル", pending_skipped)
     logger.info(
         f"ペーパートレード実行: BUY={buy_orders}  SELL={sell_orders}  "
         f"スキップ={skipped}  失敗={errors}"
