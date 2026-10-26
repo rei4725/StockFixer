@@ -41,7 +41,7 @@ from src.domain.exceptions import RiskError  # noqa: F401  # 後方互換のた�
 from src.domain.trading_rules import get_lot_size
 from src.trading.brokers.base import BrokerBase, OrderSide
 from src.trading.daily_loss_window import daily_loss_window_start
-from src.trading.position_valuation import broker_positions_value
+from src.trading.position_valuation import broker_positions_value, count_short_positions
 from src.trading.types import TradingGateStatus
 from src.trading.vix_run_cache import VixRunCache
 from src.utils.db._connection import _db_connection
@@ -247,6 +247,7 @@ class RiskManager:
         """発注可否と停止理由の詳細を返す。"""
         balance = self._broker.get_balance()
         positions = self._broker.get_positions()
+        n_positions = len(positions) + count_short_positions(self._broker)
         daily_loss_limit = self._resolve_daily_loss_limit(balance)
         daily_loss = 0.0
 
@@ -268,7 +269,7 @@ class RiskManager:
                 daily_loss_limit=daily_loss_limit,
                 consecutive_losses=0,
                 consecutive_loss_limit=MAX_CONSECUTIVE_LOSSES,
-                position_count=len(positions),
+                position_count=n_positions,
                 max_positions=MAX_POSITIONS,
             )
 
@@ -286,13 +287,13 @@ class RiskManager:
                 daily_loss_limit=daily_loss_limit,
                 consecutive_losses=consecutive,
                 consecutive_loss_limit=MAX_CONSECUTIVE_LOSSES,
-                position_count=len(positions),
+                position_count=n_positions,
                 max_positions=MAX_POSITIONS,
             )
 
         # ルール 4: 最大保有銘柄数
-        if len(positions) >= MAX_POSITIONS:
-            reason = f"保有銘柄数上限: {len(positions)} >= {MAX_POSITIONS}"
+        if n_positions >= MAX_POSITIONS:
+            reason = f"保有銘柄数上限: {n_positions} >= {MAX_POSITIONS}"
             logger.warning(f"[risk] {reason} → 新規買い停止")
             return TradingGateStatus(
                 is_allowed=False,
@@ -303,7 +304,7 @@ class RiskManager:
                 daily_loss_limit=daily_loss_limit,
                 consecutive_losses=consecutive,
                 consecutive_loss_limit=MAX_CONSECUTIVE_LOSSES,
-                position_count=len(positions),
+                position_count=n_positions,
                 max_positions=MAX_POSITIONS,
             )
 
@@ -314,7 +315,7 @@ class RiskManager:
             daily_loss_limit=daily_loss_limit,
             consecutive_losses=consecutive,
             consecutive_loss_limit=MAX_CONSECUTIVE_LOSSES,
-            position_count=len(positions),
+            position_count=n_positions,
             max_positions=MAX_POSITIONS,
         )
 
