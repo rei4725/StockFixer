@@ -105,13 +105,23 @@ def apply_fill(
             )
     elif side == int(OrderSide.SHORT_COVER):
         # 空売り返済: paper_short_positions から qty を減算し実現損益を記録
+        # 保有を超える返済は SELL と同じく保有分にクランプする（#1161）
         existing_short = con.execute(
             "SELECT qty, avg_short_price FROM paper_short_positions WHERE symbol=%s",
             [symbol],
         ).fetchone()
+        cover_qty = qty
         if existing_short:
             old_qty, old_avg = existing_short
-            new_qty = old_qty - qty
+            cover_qty = min(qty, old_qty)
+            if cover_qty < qty:
+                logger.warning(
+                    "[paper] %s: 返済数量 %d が空売りの保有 %d を超過 → 保有分にクランプ",
+                    symbol,
+                    qty,
+                    old_qty,
+                )
+            new_qty = old_qty - cover_qty
             if new_qty <= 0:
                 con.execute("DELETE FROM paper_short_positions WHERE symbol=%s", [symbol])
             else:
@@ -122,7 +132,7 @@ def apply_fill(
                 )
         else:
             old_avg = fill_price  # ポジション不明時はPnL=0扱い
-        realized_pnl = (old_avg - fill_price) * qty
+        realized_pnl = (old_avg - fill_price) * cover_qty
         # 建てるときは残高を動かさないので、返済のときに損益だけを残高へ移す（#1147）
         con.execute("UPDATE paper_balance SET balance = balance + %s", [realized_pnl])
         con.execute(
