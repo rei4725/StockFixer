@@ -141,14 +141,49 @@ class TestBuildEquitySeries(unittest.TestCase):
 
         self.assertAlmostEqual(equity.iloc[-1], _INITIAL + 2_000.0)
 
-    def test_short_affects_cash_only(self):
-        """SHORT（side=3）は現金にのみ反映され保有評価を持たないこと"""
+    def test_short_does_not_jump_by_proceeds(self):
+        """SHORT（side=3）を建てた日に、評価額が売り代金の分だけ跳ねないこと（#1163）"""
         idx = _index()
         orders = _orders([("jp", "7203", 3, 100, 100.0, idx[0])])
 
         equity = build_equity_series(orders, _flat_price_loader(100.0), _INITIAL, idx)
 
+        # 現金 +10,000 − 100株 × 100円 = 差し引きゼロ
+        self.assertAlmostEqual(equity.iloc[0], _INITIAL)
+        self.assertAlmostEqual(equity.iloc[-1], _INITIAL)
+
+    def test_short_marks_to_market_until_cover(self):
+        """空売りの間は 初期の現金 − 株数 × 終値 + 売り代金、返済の後は実現損益で残ること"""
+        idx = _index()
+        orders = _orders(
+            [
+                ("jp", "7203", 3, 100, 1_000.0, idx[1]),
+                ("jp", "7203", 4, 100, 900.0, idx[6]),
+            ]
+        )
+        closes = pd.Series(
+            [1_000.0, 1_000.0, 980.0, 950.0, 1_020.0, 930.0, 900.0, 880.0, 870.0, 860.0],
+            index=idx,
+        )
+
+        equity = build_equity_series(orders, lambda m, s: closes, _INITIAL, idx)
+
+        self.assertAlmostEqual(equity.iloc[0], _INITIAL)
+        for i in range(1, 6):
+            self.assertAlmostEqual(equity.iloc[i], _INITIAL - 100 * closes.iloc[i] + 100_000.0)
+        # 返済の日以降: (1,000 − 900) × 100株 = +10,000 で、終値が動いても変わらない
+        self.assertAlmostEqual(equity.iloc[6], _INITIAL + 10_000.0)
         self.assertAlmostEqual(equity.iloc[-1], _INITIAL + 10_000.0)
+
+    def test_short_missing_price_values_at_fill_price(self):
+        """終値の分からない空売りは約定の値段で評価すること"""
+        idx = _index()
+        orders = _orders([("jp", "9999", 3, 10, 500.0, idx[0])])
+
+        equity = build_equity_series(orders, lambda m, s: None, _INITIAL, idx)
+
+        self.assertAlmostEqual(equity.iloc[0], _INITIAL)
+        self.assertAlmostEqual(equity.iloc[-1], _INITIAL)
 
 
 class TestBuildEquitySeriesSplit(unittest.TestCase):
@@ -189,6 +224,25 @@ class TestBuildEquitySeriesSplit(unittest.TestCase):
         )
 
         # 売った後: 現金 -10,000 + 11,000 = +1,000、保有は残らない
+        self.assertAlmostEqual(equity.iloc[7], _INITIAL + 1_000.0)
+        self.assertAlmostEqual(equity.iloc[-1], _INITIAL + 1_000.0)
+
+    def test_short_cover_after_split_closes_position(self):
+        """分割前に 100 株を空売りし、分割後に 200 株を返済すると、建玉が消えること"""
+        orders = _orders(
+            [
+                ("jp", "7203", 3, 100, 100.0, self.idx[0]),
+                ("jp", "7203", 4, 200, 45.0, self.idx[7]),
+            ]
+        )
+
+        equity = build_equity_series(
+            orders, _flat_price_loader(50.0), _INITIAL, self.idx, split_loader=self._splits
+        )
+
+        # 建てた間は 現金 +10,000 − 200株 × 50円 で元手のまま、返済後は +10,000 − 9,000
+        self.assertAlmostEqual(equity.iloc[0], _INITIAL)
+        self.assertAlmostEqual(equity.iloc[5], _INITIAL)
         self.assertAlmostEqual(equity.iloc[7], _INITIAL + 1_000.0)
         self.assertAlmostEqual(equity.iloc[-1], _INITIAL + 1_000.0)
 
