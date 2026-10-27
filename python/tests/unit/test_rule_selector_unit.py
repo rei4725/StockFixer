@@ -215,6 +215,103 @@ class TestEvaluateAllSymbols(unittest.TestCase):
         self.assertEqual(result["evaluated"], 1)
         mock_upsert.assert_not_called()
 
+    def _seed_previous_week(self) -> None:
+        from src.utils.db.rule_results import upsert_rule_best
+
+        for symbol in ("7203", "6758"):
+            upsert_rule_best(
+                market="jp",
+                symbol=symbol,
+                best_rule="golden_cross",
+                win_rate=0.7,
+                net_profit=10000.0,
+                num_trades=10,
+                profit_factor=1.5,
+                max_drawdown=-0.05,
+                backtest_start="2023-01-01",
+                backtest_end="2023-12-31",
+            )
+
+    def test_no_valid_rule_drops_previous_effective_row(self):
+        """今週の評価で有効ルールが無い銘柄は、前の週の有効の行を残さない（#1275）。"""
+        from src.backtest.rule_selector import evaluate_all_symbols
+        from src.utils.db.rule_results import load_effective_rules
+
+        self._seed_previous_week()
+        with (
+            patch("src.backtest.rule_selector._WATCHLIST_PATH", self.watchlist_path),
+            patch(
+                "src.backtest.rule_selector.run_rule_backtest",
+                return_value=[_mock_result("golden_cross", 0.0, -5000)],  # 全敗
+            ),
+        ):
+            result = evaluate_all_symbols("jp", "2024-01-01", "2024-12-31")
+        symbols = set(load_effective_rules("jp")["symbol"])
+        self.assertNotIn("7203", symbols)
+        self.assertNotIn("6758", symbols)
+        self.assertEqual(result["skipped"], 2)
+        self.assertEqual(result["errors"], 0)
+
+    def test_valid_rule_replaces_previous_row(self):
+        from src.backtest.rule_selector import evaluate_all_symbols
+        from src.utils.db.rule_results import load_effective_rules
+
+        self._seed_previous_week()
+        with (
+            patch("src.backtest.rule_selector._WATCHLIST_PATH", self.watchlist_path),
+            patch(
+                "src.backtest.rule_selector.run_rule_backtest",
+                return_value=[_mock_result("rsi_contrarian", 0.65, 50000)],
+            ),
+        ):
+            evaluate_all_symbols("jp", "2024-01-01", "2024-12-31")
+        df = load_effective_rules("jp")
+        rows = df[df["symbol"].isin(["7203", "6758"])]
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(set(rows["best_rule"]), {"rsi_contrarian"})
+
+    def test_evaluation_error_keeps_previous_row(self):
+        from src.backtest.rule_selector import evaluate_all_symbols
+        from src.utils.db.rule_results import load_effective_rules
+
+        self._seed_previous_week()
+        with (
+            patch("src.backtest.rule_selector._WATCHLIST_PATH", self.watchlist_path),
+            patch(
+                "src.backtest.rule_selector.run_rule_backtest",
+                side_effect=RuntimeError("backtest error"),
+            ),
+        ):
+            result = evaluate_all_symbols("jp", "2024-01-01", "2024-12-31")
+        symbols = set(load_effective_rules("jp")["symbol"])
+        self.assertIn("7203", symbols)
+        self.assertIn("6758", symbols)
+        self.assertEqual(result["errors"], 2)
+
+    def test_fetch_failure_keeps_previous_row(self):
+        """取得に失敗した銘柄の行は残し、取得できて有効ルールが無い銘柄の行は消す。"""
+        import pandas as pd
+
+        from src.backtest.rule_selector import evaluate_all_symbols
+        from src.utils.db.rule_results import load_effective_rules
+
+        self._seed_previous_week()
+        port = MagicMock()
+        # 7203 は取得が空、6758 は取れるがルールが無いので有効ルールなし
+        port.download.side_effect = [pd.DataFrame(), pd.DataFrame({"Close": [100.0, 101.0]})]
+        port.add_technical_indicators.side_effect = lambda df: df
+        with (
+            patch("src.backtest.rule_selector._WATCHLIST_PATH", self.watchlist_path),
+            patch("src.backtest.rule_selector.ALL_RULES", []),
+            patch("src.backtest.rule_backtester.get_backtest_data_port", return_value=port),
+        ):
+            result = evaluate_all_symbols("jp", "2024-01-01", "2024-12-31")
+        symbols = set(load_effective_rules("jp")["symbol"])
+        self.assertIn("7203", symbols)
+        self.assertNotIn("6758", symbols)
+        self.assertEqual(result["errors"], 1)
+        self.assertEqual(result["skipped"], 1)
+
     def test_returns_summary_keys(self):
         from src.backtest.rule_selector import evaluate_all_symbols
 

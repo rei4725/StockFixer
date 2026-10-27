@@ -13,7 +13,7 @@ from typing import Any
 
 from src.backtest.rule_backtester import run_rule_backtest
 from src.backtest.rules import ALL_RULES
-from src.utils.db.rule_results import load_rule_best_all, upsert_rule_best
+from src.utils.db.rule_results import delete_rule_best, load_rule_best_all, upsert_rule_best
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -100,7 +100,9 @@ def evaluate_all_symbols(
 
             best = _select_best_rule(results)
             if best is None:
-                logger.info(f"  [{symbol}] 有効ルールなし → スキップ")
+                # 前の週の有効の行を残すと、基準を外れたルールで新規買いが出る（#1275）
+                delete_rule_best(market=market, symbol=symbol)
+                logger.info(f"  [{symbol}] 有効ルールなし → 前の行を消してスキップ")
                 skipped += 1
                 continue
 

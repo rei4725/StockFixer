@@ -1406,20 +1406,65 @@ class TestRunNightlyStrategyFactory(unittest.TestCase):
         mock_batch.assert_not_called()
         mock_send.assert_not_called()
 
+    @patch("src.reporting.discord.discord_utils.send_factory_failure")
     @patch("src.reporting.discord.discord_utils.send_factory_completion")
     @patch("src.watchlist.batch_runner.load_target_symbols")
     @patch("src.backtest.factory.run_factory_batch")
-    def test_batch_error_does_not_raise_and_skips_notification(
-        self, mock_batch, mock_load, mock_send
+    def test_batch_error_notifies_failure_and_raises(
+        self, mock_batch, mock_load, mock_send, mock_failure
     ):
+        # 落ちた回は失敗と知らせて投げ直し、run_job に error と記録させる（#1284）
         from src.orchestration.scheduler import run_nightly_strategy_factory
 
         mock_load.return_value = [SymbolTask(market="jp", symbol="7203")]
         mock_batch.side_effect = RuntimeError("evaluation failed")
 
-        run_nightly_strategy_factory(force=True, market="jp")  # 例外が外に漏れないこと
+        with self.assertRaises(RuntimeError):
+            run_nightly_strategy_factory(force=True, market="jp")
 
+        mock_failure.assert_called_once()
+        self.assertEqual(mock_failure.call_args.kwargs["market"], "jp")
+        self.assertIn("evaluation failed", mock_failure.call_args.kwargs["error"])
         mock_send.assert_not_called()
+
+    @patch("src.reporting.discord.discord_utils.send_factory_failure")
+    @patch("src.reporting.discord.discord_utils.send_factory_completion")
+    @patch("src.backtest.factory.load_factory_specs", return_value=[])
+    @patch("src.backtest.factory.load_factory_hashes", return_value=set())
+    @patch("src.backtest.factory._load_symbol_data", return_value={})
+    @patch("src.infrastructure.llm.factory.get_text_review_port")
+    @patch("src.watchlist.batch_runner.load_target_symbols")
+    def test_no_symbol_data_fails_job(
+        self, mock_load, _mock_port, _mock_data, _mock_hashes, _mock_specs, mock_send, mock_failure
+    ):
+        # 値段が全銘柄で取れない回を「評価0」の完了にせず、失敗にする（#1284）
+        from src.orchestration.scheduler import run_nightly_strategy_factory
+
+        mock_load.return_value = [SymbolTask(market="jp", symbol="7203")]
+
+        with self.assertRaises(RuntimeError):
+            run_nightly_strategy_factory(force=True, market="jp", budget=1, seed=1)
+
+        mock_failure.assert_called_once()
+        mock_send.assert_not_called()
+
+    @patch("src.reporting.discord.discord_utils.send_factory_completion")
+    @patch(
+        "src.reporting.discord.discord_utils.send_factory_failure",
+        side_effect=RuntimeError("webhook down"),
+    )
+    @patch("src.watchlist.batch_runner.load_target_symbols")
+    @patch("src.backtest.factory.run_factory_batch")
+    def test_failure_notice_error_keeps_original_exception(
+        self, mock_batch, mock_load, _mock_failure, _mock_send
+    ):
+        from src.orchestration.scheduler import run_nightly_strategy_factory
+
+        mock_load.return_value = [SymbolTask(market="jp", symbol="7203")]
+        mock_batch.side_effect = ValueError("evaluation failed")
+
+        with self.assertRaises(ValueError):
+            run_nightly_strategy_factory(force=True, market="jp")
 
 
 class TestStrategyPromotionCheckSchedule(unittest.TestCase):
