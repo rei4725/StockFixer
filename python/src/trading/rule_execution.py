@@ -20,6 +20,7 @@ from src.trading.brokers.paper.paper_broker import PaperBroker
 from src.trading.correlation_risk import evaluate_correlation_gate
 from src.trading.execution.pending import _load_pending_exits, _log_pending_skips
 from src.trading.execution.selection import _get_pending_buy_symbols
+from src.trading.position_valuation import count_short_positions
 from src.trading.risk_manager import RiskManager
 from src.utils.data_path_utils import get_ticker
 from src.utils.logger import get_logger
@@ -124,7 +125,8 @@ def execute_rule_paper_trades(
                 corr_gate.reason or "ENC閾値未満",
             )
 
-    position_count = len(held_or_pending)  # 1ラン内で増える建玉数を追跡し MAX_POSITIONS を厳守
+    # 1ラン内で増える建玉数を追跡し MAX_POSITIONS を厳守。空売りの建玉も数える（#1210）
+    position_count = len(held_or_pending) + count_short_positions(broker)
     buy_orders_this_run = 0
     # 朝の約定で据え置かれた SELL がある銘柄には2本目を出さない（#1169。8:50 の道と同じ確かめ）
     pending = _load_pending_exits(broker)
