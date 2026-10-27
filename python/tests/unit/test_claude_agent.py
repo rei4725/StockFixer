@@ -346,6 +346,28 @@ class TestHandleGetPredictions(unittest.TestCase):
         self.assertNotIn("7200", buy_symbols)
 
     @patch.object(_PREDICTIONS, "get_latest_by_market")
+    @patch("src.trading.claude_agent._get_held_symbols", return_value={"7200"})
+    def test_unreadable_params_empty_buy_candidates(self, _held, _load):
+        df = _make_predictions_df(n=4)
+        df["multi_horizon_score"] = [-0.02, 0.02, 0.03, 0.04]
+        df["effective_buy_threshold"] = 0.005
+        df["effective_sell_threshold"] = -0.005
+        df["threshold_scale"] = 1.0
+        df["optimal_params_unreadable"] = True
+        _load.return_value = df
+
+        with patch("src.trading.claude_agent._attach_dynamic_thresholds", return_value=df), patch(
+            "src.trading.claude_agent.apply_multi_horizon_score_column", return_value=df
+        ):
+            from src.trading.claude_agent import _handle_get_predictions
+
+            result = _handle_get_predictions("jp", _make_broker(), _PREDICTIONS)
+
+        self.assertEqual(result["buy_candidates"], [])
+        self.assertIn("optimal_params.json が読めない", result["buy_blocked_reason"])
+        self.assertEqual([r["symbol"] for r in result["sell_candidates"]], ["7200"])
+
+    @patch.object(_PREDICTIONS, "get_latest_by_market")
     def test_empty_predictions_returns_message(self, _load):
         _load.return_value = pd.DataFrame()
         broker = _make_broker()
@@ -489,6 +511,7 @@ class TestRunClaudeTrader(unittest.TestCase):
         gate=None,
         pending=None,
         shorts=None,
+        params_path=None,
     ):
         """1回の中で symbols の順に place_order の買いを呼ばせ、(stats, broker, 結果) を返す
 
@@ -499,8 +522,13 @@ class TestRunClaudeTrader(unittest.TestCase):
         渡さないときは broker に get_pending_buy_symbols が無い。
         shorts を渡すと、broker の get_short_positions がそれを返す。
         渡さないときは broker に get_short_positions が無い。
+        params_path を渡すと、optimal_params.json をそのファイルにし、閾値と Kelly の入力を
+        本物の読み込みで決める。
         """
+        from contextlib import ExitStack
+
         from src.trading.claude_agent import run_claude_trader
+        from src.trading.execution import _attach_dynamic_thresholds, _resolve_kelly_params
 
         if orders is None:
             orders = [(s, "buy") for s in symbols]
@@ -532,16 +560,28 @@ class TestRunClaudeTrader(unittest.TestCase):
             _make_anthropic_response(stop_reason="tool_use", tool_calls=tool_calls),
             _make_anthropic_response(stop_reason="end_turn"),
         ]
-        with patch("src.trading.claude_agent.RiskManager") as mock_risk_cls, patch.object(
+        if params_path is None:
+            attach = {"return_value": df}
+            score = {"return_value": df}
+            kelly = {"return_value": (0.55, 0.015, 0.008)}
+        else:
+            attach = {"side_effect": _attach_dynamic_thresholds}
+            score = {"side_effect": lambda d: d}
+            kelly = {"side_effect": _resolve_kelly_params}
+        with ExitStack() as stack, patch(
+            "src.trading.claude_agent.RiskManager"
+        ) as mock_risk_cls, patch.object(
             _PREDICTIONS, "get_latest_by_market", return_value=df
-        ), patch("anthropic.Anthropic", return_value=client), patch(
-            "src.trading.claude_agent._attach_dynamic_thresholds", return_value=df
         ), patch(
-            "src.trading.claude_agent.apply_multi_horizon_score_column", return_value=df
+            "anthropic.Anthropic", return_value=client
+        ), patch(
+            "src.trading.claude_agent._attach_dynamic_thresholds", **attach
+        ), patch(
+            "src.trading.claude_agent.apply_multi_horizon_score_column", **score
         ), patch(
             "src.trading.claude_agent._record_order"
         ), patch(
-            "src.trading.claude_agent._resolve_kelly_params", return_value=(0.55, 0.015, 0.008)
+            "src.trading.claude_agent._resolve_kelly_params", **kelly
         ), patch(
             "src.trading.claude_agent._choose_order_params",
             return_value=(OrderType.MARKET, 0.0, "market", "open"),
@@ -552,6 +592,10 @@ class TestRunClaudeTrader(unittest.TestCase):
             "src.utils.sector_constraints._lookup_symbol_sector",
             side_effect=lambda market, symbol: sector_map.get(symbol, f"sector-{symbol}"),
         ):
+            if params_path is not None:
+                stack.enter_context(
+                    patch("src.utils.optimal_params_loader.OPTIMAL_PARAMS_PATH", params_path)
+                )
             risk_mock = self._make_risk_mock()
             if gate is not None:
                 risk_mock.evaluate_trading_gate.return_value = gate
@@ -734,6 +778,42 @@ class TestRunClaudeTrader(unittest.TestCase):
 
         self.assertEqual(results[0]["status"], "placed")
         broker.send_order.assert_called_once()
+
+    def _write_params(self, content):
+        import tempfile
+        from pathlib import Path
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = Path(tmp.name) / "optimal_params.json"
+        path.write_text(content, encoding="utf-8")
+        return path
+
+    def test_unreadable_params_block_buy_but_allow_sell(self):
+        # optimal_params.json が壊れた日は、8:50 の道と同じく新規の buy だけ止める（#1227）
+        positions = [{"symbol": "H0", "qty": 100, "avg_price": 1000.0, "current_price": 1000.0}]
+        path = self._write_params("{ invalid json !!!}")
+        with self.assertLogs("src.trading.claude_agent", level="ERROR"):
+            stats, broker, results = self._run_with_buys(
+                [], positions=positions, orders=[("S0", "buy"), ("H0", "sell")], params_path=path
+            )
+
+        self.assertEqual([r["status"] for r in results], ["skipped", "placed"])
+        self.assertIn("optimal_params.json が読めない", results[0]["reason"])
+        broker.send_order.assert_called_once()
+        self.assertEqual(broker.send_order.call_args[0][0], "H0")
+        self.assertEqual(broker.send_order.call_args[0][1], OrderSide.SELL)
+        self.assertEqual(stats["buy_orders"], 0)
+        self.assertEqual(stats["sell_orders"], 1)
+        self.assertEqual(stats["errors"], 1)
+
+    def test_readable_params_keep_buy_path(self):
+        path = self._write_params(json.dumps({"jp_S0": {"threshold": 0.005}}))
+        stats, broker, results = self._run_with_buys(["S0"], params_path=path)
+
+        self.assertEqual(results[0]["status"], "placed")
+        broker.send_order.assert_called_once()
+        self.assertEqual(stats["errors"], 0)
 
     def test_import_error_raised_without_anthropic(self):
         broker = _make_broker()

@@ -482,7 +482,9 @@ class TestRunFactoryBatch(unittest.TestCase):
                     "High": close * (1 + abs(rng.normal(0, vol / 2, len(dates)))),
                     "Low": close * (1 - abs(rng.normal(0, vol / 2, len(dates)))),
                     "Close": close,
-                    "Volume": rng.integers(1000, 50000, len(dates)).astype(float),
+                    # 全額投入（約1万株）が出来高の大半を占めて動的スリッページ（#1244）で
+                    # 合格候補が消えないよう、出来高は流動性のある銘柄の桁にする
+                    "Volume": rng.integers(1_000_000, 50_000_000, len(dates)).astype(float),
                 },
                 index=dates,
             )

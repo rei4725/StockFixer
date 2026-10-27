@@ -82,6 +82,7 @@ def _run_pipeline(table: _FakePredictionTable, output_rows, notify_side_effect=N
         p("src.market_data.pipeline.run_batch_pipeline", return_value=MagicMock())
         p("src.infrastructure.discord_notification_adapter.DiscordNotificationAdapter")
         p("src.orchestration.jobs.daily.production_already_predicted_today", return_value=True)
+        p("src.prediction.prediction_pipeline.run_accuracy_check")
         p("src.prediction.db.load_latest_prediction_timestamp", new=table.latest_timestamp)
         p("src.prediction.db.prediction_results.load_run_stats_at", new=table.run_stats_at)
         p("src.reporting.discord.discord_utils.send_daily_pipeline_error")
