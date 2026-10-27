@@ -109,6 +109,60 @@ class TestPostgresAnalyticsQuery(unittest.TestCase):
         self.assertEqual(len(params), 1)
 
 
+class _DuckDBConnection:
+    """集計の SQL を実際に流すため、Postgres の %s を DuckDB の ? に置き換えて渡す。"""
+
+    def __init__(self, con):
+        self._con = con
+
+    def execute(self, sql, params=None):
+        return self._con.execute(sql.replace("%s", "?"), params)
+
+
+class TestPostgresAnalyticsQuerySlippageSign(unittest.TestCase):
+    """スリッページは損の向きを正にして平均する（#1261）。
+
+    side は BUY=1・SELL=2・SHORT=3・SHORT_COVER=4。
+    """
+
+    def _summary(self, rows):
+        import duckdb
+
+        con = duckdb.connect(":memory:")
+        con.execute(
+            "CREATE TABLE paper_real_diff ("
+            "side INTEGER, signal_price DOUBLE, paper_price DOUBLE, real_price DOUBLE, "
+            "paper_slippage DOUBLE, real_slippage DOUBLE, price_diff DOUBLE, "
+            "paper_filled_at TIMESTAMP, real_checked_at TIMESTAMP, created_at TIMESTAMP)"
+        )
+        for side, slip in rows:
+            con.execute(
+                "INSERT INTO paper_real_diff VALUES "
+                "(?, 100.0, ?, ?, ?, ?, 0.0, NULL, NULL, CURRENT_TIMESTAMP)",
+                [side, 100.0 * (1 + slip), 100.0 * (1 + slip), slip, slip],
+            )
+        with patch(
+            "src.infrastructure.persistence.analytics_query.db_connection",
+            _patched_connection(_DuckDBConnection(con)),
+        ):
+            return PostgresAnalyticsQuery().paper_real_diff_summary(recent_days=7)
+
+    def test_buy_high_and_sell_low_both_count_as_cost(self):
+        result = self._summary([(1, 0.01), (2, -0.01)])
+        self.assertAlmostEqual(result["avg_paper_slippage"], 0.01)
+        self.assertAlmostEqual(result["avg_real_slippage"], 0.01)
+
+    def test_buy_high_and_sell_high_cancel_out(self):
+        result = self._summary([(1, 0.01), (2, 0.01)])
+        self.assertAlmostEqual(result["avg_paper_slippage"], 0.0)
+        self.assertAlmostEqual(result["avg_real_slippage"], 0.0)
+
+    def test_short_low_and_short_cover_high_count_as_cost(self):
+        result = self._summary([(3, -0.01), (4, 0.01)])
+        self.assertAlmostEqual(result["avg_paper_slippage"], 0.01)
+        self.assertAlmostEqual(result["avg_real_slippage"], 0.01)
+
+
 class TestPostgresAnalyticsQueryAccuracyDelegation(unittest.TestCase):
     """予測精度系 3 メソッドは prediction BC 所有の SQL へ引数をそのまま委譲する。"""
 

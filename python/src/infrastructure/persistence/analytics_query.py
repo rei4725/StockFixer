@@ -20,6 +20,12 @@ class PostgresAnalyticsQuery(AnalyticsQuery):
     """Postgres から reporting 向けの集計を読む AnalyticsQuery 実装。"""
 
     def paper_real_diff_summary(self, recent_days: int = 7) -> dict:
+        """スリッページの平均は損の向きを正にした値で返す（#1261）。
+
+        書く所は side に関わらず (約定値-シグナル値)/シグナル値 を入れる。
+        side は OrderSide の BUY=1・SELL=2・SHORT=3・SHORT_COVER=4 で、
+        売りの向き（SELL・SHORT）は約定値が低いほど損なので符号を反転して平均する。
+        """
         since = datetime.now() - timedelta(days=recent_days)
         with db_connection() as con:
             row = con.execute(
@@ -29,8 +35,12 @@ class PostgresAnalyticsQuery(AnalyticsQuery):
                 COUNT(*) FILTER (
                     WHERE paper_price IS NOT NULL AND real_price IS NOT NULL
                 ) AS comparable_count,
-                AVG(paper_slippage) AS avg_paper_slippage,
-                AVG(real_slippage) AS avg_real_slippage,
+                AVG(
+                    CASE WHEN side IN (2, 3) THEN -paper_slippage ELSE paper_slippage END
+                ) AS avg_paper_slippage,
+                AVG(
+                    CASE WHEN side IN (2, 3) THEN -real_slippage ELSE real_slippage END
+                ) AS avg_real_slippage,
                 AVG(ABS(price_diff)) AS avg_abs_price_diff,
                 AVG(ABS(price_diff / NULLIF(signal_price, 0))) AS avg_abs_diff_ratio,
                 MAX(ABS(price_diff)) AS max_abs_price_diff
