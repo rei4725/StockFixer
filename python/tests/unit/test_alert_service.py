@@ -30,6 +30,8 @@ from src.utils.alert_service import (
 # ヘルパー
 # ---------------------------------------------------------------------------
 
+_DAY = "20261027"
+
 
 def _make_state(events: list[dict]) -> dict:
     return {"events": events}
@@ -155,20 +157,24 @@ class TestLossLimitStreak(unittest.TestCase):
     def test_update_increments_when_triggered(self):
         with (
             patch("src.utils.alert_service._get_streak", return_value=1),
+            patch("src.utils.alert_service._get_streak_day", return_value=""),
+            patch("src.utils.alert_service._set_streak_day"),
             patch("src.utils.alert_service._set_streak") as mock_set,
         ):
-            result = update_loss_limit_streak(True)
+            result = update_loss_limit_streak(True, _DAY)
         self.assertEqual(result, 2)
-        mock_set.assert_called_once()
+        mock_set.assert_called_with("alert.loss_limit_streak", 2)
 
     def test_update_resets_when_not_triggered(self):
         with (
             patch("src.utils.alert_service._get_streak", return_value=2),
+            patch("src.utils.alert_service._get_streak_day", return_value=""),
+            patch("src.utils.alert_service._set_streak_day"),
             patch("src.utils.alert_service._set_streak") as mock_set,
         ):
-            result = update_loss_limit_streak(False)
+            result = update_loss_limit_streak(False, _DAY)
         self.assertEqual(result, 0)
-        mock_set.assert_called_once()
+        mock_set.assert_called_with("alert.loss_limit_streak", 0)
 
     def test_check_below_threshold_not_triggered(self):
         with patch("src.utils.alert_service._get_streak", return_value=LOSS_LIMIT_THRESHOLD - 1):
@@ -191,20 +197,24 @@ class TestDriftWarnStreak(unittest.TestCase):
     def test_update_increments_when_warn(self):
         with (
             patch("src.utils.alert_service._get_streak", return_value=0),
+            patch("src.utils.alert_service._get_streak_day", return_value=""),
+            patch("src.utils.alert_service._set_streak_day"),
             patch("src.utils.alert_service._set_streak") as mock_set,
         ):
-            result = update_drift_warn_streak(True)
+            result = update_drift_warn_streak(True, _DAY)
         self.assertEqual(result, 1)
-        mock_set.assert_called_once()
+        mock_set.assert_called_with("alert.drift_warn_streak", 1)
 
     def test_update_resets_when_no_warn(self):
         with (
             patch("src.utils.alert_service._get_streak", return_value=3),
+            patch("src.utils.alert_service._get_streak_day", return_value=""),
+            patch("src.utils.alert_service._set_streak_day"),
             patch("src.utils.alert_service._set_streak") as mock_set,
         ):
-            result = update_drift_warn_streak(False)
+            result = update_drift_warn_streak(False, _DAY)
         self.assertEqual(result, 0)
-        mock_set.assert_called_once()
+        mock_set.assert_called_with("alert.drift_warn_streak", 0)
 
     def test_check_below_threshold_not_triggered(self):
         with patch("src.utils.alert_service._get_streak", return_value=DRIFT_WARN_THRESHOLD - 1):
@@ -227,20 +237,24 @@ class TestHealthDegradedStreak(unittest.TestCase):
     def test_update_increments_when_degraded(self):
         with (
             patch("src.utils.alert_service._get_streak", return_value=1),
+            patch("src.utils.alert_service._get_streak_day", return_value=""),
+            patch("src.utils.alert_service._set_streak_day"),
             patch("src.utils.alert_service._set_streak") as mock_set,
         ):
-            result = update_health_degraded_streak(True)
+            result = update_health_degraded_streak(True, _DAY)
         self.assertEqual(result, 2)
-        mock_set.assert_called_once()
+        mock_set.assert_called_with("alert.health_degraded_streak", 2)
 
     def test_update_resets_when_ok(self):
         with (
             patch("src.utils.alert_service._get_streak", return_value=5),
+            patch("src.utils.alert_service._get_streak_day", return_value=""),
+            patch("src.utils.alert_service._set_streak_day"),
             patch("src.utils.alert_service._set_streak") as mock_set,
         ):
-            result = update_health_degraded_streak(False)
+            result = update_health_degraded_streak(False, _DAY)
         self.assertEqual(result, 0)
-        mock_set.assert_called_once()
+        mock_set.assert_called_with("alert.health_degraded_streak", 0)
 
     def test_check_below_threshold_not_triggered(self):
         with patch(
