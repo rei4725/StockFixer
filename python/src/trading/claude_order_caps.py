@@ -75,8 +75,14 @@ class RunBuyCaps:
             self.sector_counts[self._sector(symbol)] += 1
 
 
-def start_run_buy_caps(held_symbols: Iterable[str], market: str) -> RunBuyCaps:
-    """回の始めの保有から、相関ゲートを1回だけ評価し、業種の数を数えた RunBuyCaps を作る"""
+def start_run_buy_caps(
+    held_symbols: Iterable[str], market: str, short_count: int = 0
+) -> RunBuyCaps:
+    """回の始めの保有から、相関ゲートを1回だけ評価し、業種の数を数えた RunBuyCaps を作る
+
+    short_count は空売りの建玉の数で、建玉の数（MAX_POSITIONS）にだけ足す（#1211）。
+    業種の上限と相関ゲートには入れない。
+    """
     held_codes = sorted({s.replace(".T", "") for s in held_symbols})
     corr_gate = evaluate_correlation_gate(
         held_codes,
@@ -89,7 +95,7 @@ def start_run_buy_caps(held_symbols: Iterable[str], market: str) -> RunBuyCaps:
         corr_block_reason = corr_gate.reason or "ENC閾値未満"
         logger.warning("[claude_agent] 相関ゲート不合格のため新規買いを停止: %s", corr_block_reason)
     return RunBuyCaps(
-        position_count=len(held_codes),
+        position_count=len(held_codes) + short_count,
         market=market,
         corr_block_reason=corr_block_reason,
         sector_counts=Counter(get_symbol_sector(market, s) for s in held_codes),
