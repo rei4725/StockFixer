@@ -488,6 +488,7 @@ class TestRunClaudeTrader(unittest.TestCase):
         sectors=None,
         gate=None,
         pending=None,
+        shorts=None,
     ):
         """1回の中で symbols の順に place_order の買いを呼ばせ、(stats, broker, 結果) を返す
 
@@ -496,6 +497,8 @@ class TestRunClaudeTrader(unittest.TestCase):
         gate を渡すと、リスクのゲートの評価をその値にする。
         pending を渡すと、broker の get_pending_buy_symbols がそれを返す（例外なら投げる）。
         渡さないときは broker に get_pending_buy_symbols が無い。
+        shorts を渡すと、broker の get_short_positions がそれを返す。
+        渡さないときは broker に get_short_positions が無い。
         """
         from src.trading.claude_agent import run_claude_trader
 
@@ -506,6 +509,8 @@ class TestRunClaudeTrader(unittest.TestCase):
             broker.get_pending_buy_symbols = MagicMock(side_effect=pending)
         elif pending is not None:
             broker.get_pending_buy_symbols = MagicMock(return_value=set(pending))
+        if shorts is not None:
+            broker.get_short_positions = MagicMock(return_value=shorts)
         held = [p["symbol"] for p in positions or []]
         n = max(len(orders), 1)
         df = _make_predictions_df(n=n + len(held))
@@ -706,6 +711,29 @@ class TestRunClaudeTrader(unittest.TestCase):
         self.assertEqual(results[0]["status"], "placed")
         broker.send_order.assert_called_once()
         self.assertEqual(stats["errors"], 0)
+
+    def test_short_positions_count_toward_max_positions(self):
+        # 買い持ち7件＋空売り2件＋この回の買い1件で MAX_POSITIONS=10 に達する（#1211）
+        shorts = [{"symbol": f"T{i}", "qty": 100, "unrealized_pnl": 0.0} for i in range(2)]
+        with patch("src.trading.claude_order_caps.MAX_POSITIONS", 10):
+            stats, broker, results = self._run_with_buys(
+                ["S0", "S1"], positions=self._nine_held()[:7], shorts=shorts
+            )
+
+        self.assertEqual([r["status"] for r in results], ["placed", "skipped"])
+        self.assertIn("MAX_POSITIONS", results[1]["reason"])
+        broker.send_order.assert_called_once()
+        self.assertEqual(stats["buy_orders"], 1)
+
+    def test_closed_short_with_zero_qty_is_not_counted(self):
+        shorts = [{"symbol": "T0", "qty": 0, "unrealized_pnl": 0.0}]
+        with patch("src.trading.claude_order_caps.MAX_POSITIONS", 10):
+            stats, broker, results = self._run_with_buys(
+                ["S0"], positions=self._nine_held(), shorts=shorts
+            )
+
+        self.assertEqual(results[0]["status"], "placed")
+        broker.send_order.assert_called_once()
 
     def test_import_error_raised_without_anthropic(self):
         broker = _make_broker()

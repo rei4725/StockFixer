@@ -101,6 +101,42 @@ def _set_streak(key: str, value: int) -> None:
         logger.error("ストリーク更新失敗 key=%s: %s", key, exc, exc_info=True)
 
 
+def _get_streak_day(key: str) -> str:
+    try:
+        from src.utils.db.system_config import get_config_value
+
+        return get_config_value(f"{key}.day", "") or ""
+    except Exception as exc:
+        logger.error("ストリークの日付取得失敗 key=%s: %s", key, exc, exc_info=True)
+        return ""
+
+
+def _set_streak_day(key: str, day_key: str) -> None:
+    try:
+        from src.utils.db.system_config import set_config_value
+
+        set_config_value(f"{key}.day", day_key)
+    except Exception as exc:
+        logger.error("ストリークの日付更新失敗 key=%s: %s", key, exc, exc_info=True)
+
+
+def _update_daily_streak(key: str, hit: bool, day_key: str) -> tuple[int, int]:
+    """JST の日（day_key）ごとに1回だけ数えてストリークを更新し、(前の日までの値, 新しい値) を返す。
+
+    同じ日の2回目（やり直しの回）は加算せず、前の日までの値にその日の判定を当て直す（#1242）。
+    前の日までの値は `<key>.prev`、最後に数えた日は `<key>.day` に置く。
+    """
+    if _get_streak_day(key) == day_key:
+        base = _get_streak(f"{key}.prev")
+    else:
+        base = _get_streak(key)
+        _set_streak(f"{key}.prev", base)
+        _set_streak_day(key, day_key)
+    new_value = base + 1 if hit else 0
+    _set_streak(key, new_value)
+    return base, new_value
+
+
 # ---------------------------------------------------------------------------
 # ルール 1: 日次パイプライン連続失敗
 # ---------------------------------------------------------------------------
@@ -202,15 +238,14 @@ def check_pipeline_fail_rule(state_file_path: str | None = None) -> AlertResult:
 # ---------------------------------------------------------------------------
 
 
-def update_loss_limit_streak(triggered: bool) -> int:
+def update_loss_limit_streak(triggered: bool, day_key: str) -> int:
     """
     損失上限発動の有無に基づきストリークを更新して返す。
 
-    orchestration 層の run_daily_auto_order() から呼び出す。
+    orchestration 層の run_daily_auto_order() から呼び出す。day_key は JST の今日
+    （YYYYMMDD）で、同じ日の2回目は加算しない（#1242）。
     """
-    current = _get_streak(_KEY_LOSS_LIMIT_STREAK)
-    new_value = current + 1 if triggered else 0
-    _set_streak(_KEY_LOSS_LIMIT_STREAK, new_value)
+    current, new_value = _update_daily_streak(_KEY_LOSS_LIMIT_STREAK, triggered, day_key)
     logger.info("損失上限ストリーク更新: %d → %d", current, new_value)
     return new_value
 
@@ -235,15 +270,14 @@ def check_loss_limit_rule() -> AlertResult:
 # ---------------------------------------------------------------------------
 
 
-def update_drift_warn_streak(warn_detected: bool) -> int:
+def update_drift_warn_streak(warn_detected: bool, day_key: str) -> int:
     """
     ドリフト Warn 以上検出の有無に基づきストリークを更新して返す。
 
-    orchestration 層の run_daily_drift_check() から呼び出す。
+    orchestration 層の run_daily_drift_check() から呼び出す。day_key は JST の今日
+    （YYYYMMDD）で、同じ日の2回目は加算しない（#1242）。
     """
-    current = _get_streak(_KEY_DRIFT_WARN_STREAK)
-    new_value = current + 1 if warn_detected else 0
-    _set_streak(_KEY_DRIFT_WARN_STREAK, new_value)
+    current, new_value = _update_daily_streak(_KEY_DRIFT_WARN_STREAK, warn_detected, day_key)
     logger.info("ドリフト警告ストリーク更新: %d → %d", current, new_value)
     return new_value
 
@@ -268,15 +302,14 @@ def check_drift_warn_rule() -> AlertResult:
 # ---------------------------------------------------------------------------
 
 
-def update_health_degraded_streak(is_degraded: bool) -> int:
+def update_health_degraded_streak(is_degraded: bool, day_key: str) -> int:
     """
     ヘルスチェック degraded の有無に基づきストリークを更新して返す。
 
-    日次の道で1日1回呼び出す（orchestration/jobs/alert_streaks.py、#940）。
+    日次の道で1日1回呼び出す（orchestration/jobs/alert_streaks.py、#940）。day_key は
+    JST の今日（YYYYMMDD）で、同じ日の2回目は加算しない（#1242）。
     """
-    current = _get_streak(_KEY_HEALTH_DEGRADED_STREAK)
-    new_value = current + 1 if is_degraded else 0
-    _set_streak(_KEY_HEALTH_DEGRADED_STREAK, new_value)
+    current, new_value = _update_daily_streak(_KEY_HEALTH_DEGRADED_STREAK, is_degraded, day_key)
     logger.info("ヘルス degraded ストリーク更新: %d → %d", current, new_value)
     return new_value
 

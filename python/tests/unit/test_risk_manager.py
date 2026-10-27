@@ -366,6 +366,35 @@ class TestRiskManagerOptimalParamsAutoLoad(unittest.TestCase):
             risk = RiskManager(_make_broker(), market="jp", symbol="7203")
         self.assertAlmostEqual(risk.stop_loss_pct, 0.03)
 
+    def test_nan_stop_loss_falls_back_to_default(self):
+        """JSON の stop_loss_pct が NaN なら null と同じく既定の線を使い、SL が発動する（#1241）"""
+        params = {"stop_loss_pct": float("nan"), "take_profit_pct": float("nan")}
+        with (
+            patch(self._MOCK_TARGET, return_value=params),
+            patch("src.trading.risk_manager.DEFAULT_STOP_LOSS_PCT", 0.08),
+            self.assertLogs("src.trading", level="WARNING") as logs,
+        ):
+            risk = RiskManager(_make_broker(), market="jp", symbol="7203")
+        self.assertAlmostEqual(risk.stop_loss_pct, 0.08)
+        self.assertIsNone(risk.take_profit_pct)
+        self.assertTrue(any("stop_loss_pct=nan" in m for m in logs.output))
+        self.assertTrue(any("DEFAULT_STOP_LOSS_PCT=0.08" in m for m in logs.output))
+        self.assertEqual(risk.check_sl_tp(100.0, 92.0)[0], True)
+        self.assertEqual(risk.check_sl_tp(100.0, 92.5)[0], False)
+
+    def test_non_positive_or_infinite_sl_tp_are_treated_as_none(self):
+        """無限・0・負の stop_loss_pct と take_profit_pct は None とみなす（#1241）"""
+        for bad in (float("inf"), float("-inf"), 0.0, -0.03):
+            with self.subTest(bad=bad):
+                params = {"stop_loss_pct": bad, "take_profit_pct": bad}
+                with (
+                    patch(self._MOCK_TARGET, return_value=params),
+                    patch("src.trading.risk_manager.DEFAULT_STOP_LOSS_PCT", 0.08),
+                ):
+                    risk = RiskManager(_make_broker(), market="jp", symbol="7203")
+                self.assertAlmostEqual(risk.stop_loss_pct, 0.08)
+                self.assertIsNone(risk.take_profit_pct)
+
     def test_no_json_load_when_market_symbol_not_given(self):
         """market/symbol を指定しない場合は get_optimal_params が呼ばれない"""
         with patch(self._MOCK_TARGET) as mock_fn:

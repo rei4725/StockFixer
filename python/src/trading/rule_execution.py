@@ -83,50 +83,62 @@ def execute_rule_paper_trades(
     # SELL の分かれ道は約定済みの保有（held_symbols）だけを見る。
     held_or_pending = held_symbols | _get_pending_buy_symbols(broker)
 
-    # ML 経路（execution.run_daily_orders）と同等のリスク制御を適用する。
-    # R-307: DD 基準値を発注前に更新し、当日発注可否ゲート（日次損失・連続損失・
-    # 保有上限）を評価する。不合格時は新規買いを停止するが、決済（SELL）は許可する。
-    risk.update_peak_balance()
-    gate = risk.evaluate_trading_gate()
-    if not gate.is_allowed:
-        logger.warning(
-            "[rule] リスクゲート不合格のため新規買いを停止: %s",
-            gate.reason or "理由未設定",
-        )
-    buys_allowed = gate.is_allowed and allow_new_buys
     if not allow_new_buys:
         logger.warning("[rule] 呼び出し元の指定で新規買いを停止し、保有の決済だけ出す")
-
-    # 8:50 の道（execution.runner）と同じく、相関ゲート不合格なら新規買いだけ止め、
-    # 同一業種の上限は保有中の銘柄の業種も含めて数える（#1138）。
-    buy_candidates = [
-        item for item in signals if item["signal"] == 1 and item["symbol"] not in held_or_pending
-    ]
+    buys_allowed = False
     sector_allowed: set[str] = set()
-    if buys_allowed and buy_candidates:
-        held_codes = sorted({s.replace(".T", "") for s in held_or_pending})
-        corr_gate = evaluate_correlation_gate(
-            held_codes,
-            market,
-            window=CORRELATION_WINDOW_DAYS,
-            enc_threshold=CORRELATION_ENC_THRESHOLD,
-        )
-        if corr_gate.is_allowed:
-            selected = filter_by_sector_cap(
-                buy_candidates,
-                max_sector_positions=MAX_SECTOR_POSITIONS,
-                sector_getter=lambda it: get_symbol_sector(market, str(it["symbol"])),
-                initial_counts=Counter(get_symbol_sector(market, s) for s in held_codes),
-            )
-            sector_allowed = {str(it["symbol"]) for it in selected}
-        else:
+    position_count = len(held_or_pending)
+    # 新規買いにだけ使う手順が落ちたら、新規は止め保有の SELL だけ出してから、
+    # 同じ例外を投げ直してジョブを失敗にする（#1221。8:50 の道の #1179 と同じ形）
+    buy_step_error: Exception | None = None
+    try:
+        # ML 経路（execution.run_daily_orders）と同等のリスク制御を適用する。
+        # R-307: DD 基準値を発注前に更新し、当日発注可否ゲート（日次損失・連続損失・
+        # 保有上限）を評価する。不合格時は新規買いを停止するが、決済（SELL）は許可する。
+        risk.update_peak_balance()
+        gate = risk.evaluate_trading_gate()
+        if not gate.is_allowed:
             logger.warning(
-                "[rule] 相関ゲート不合格のため新規買いを停止: %s",
-                corr_gate.reason or "ENC閾値未満",
+                "[rule] リスクゲート不合格のため新規買いを停止: %s",
+                gate.reason or "理由未設定",
             )
 
-    # 1ラン内で増える建玉数を追跡し MAX_POSITIONS を厳守。空売りの建玉も数える（#1210）
-    position_count = len(held_or_pending) + count_short_positions(broker)
+        # 8:50 の道（execution.runner）と同じく、相関ゲート不合格なら新規買いだけ止め、
+        # 同一業種の上限は保有中の銘柄の業種も含めて数える（#1138）。
+        buy_candidates = [
+            item
+            for item in signals
+            if item["signal"] == 1 and item["symbol"] not in held_or_pending
+        ]
+        if gate.is_allowed and allow_new_buys and buy_candidates:
+            held_codes = sorted({s.replace(".T", "") for s in held_or_pending})
+            corr_gate = evaluate_correlation_gate(
+                held_codes,
+                market,
+                window=CORRELATION_WINDOW_DAYS,
+                enc_threshold=CORRELATION_ENC_THRESHOLD,
+            )
+            if corr_gate.is_allowed:
+                selected = filter_by_sector_cap(
+                    buy_candidates,
+                    max_sector_positions=MAX_SECTOR_POSITIONS,
+                    sector_getter=lambda it: get_symbol_sector(market, str(it["symbol"])),
+                    initial_counts=Counter(get_symbol_sector(market, s) for s in held_codes),
+                )
+                sector_allowed = {str(it["symbol"]) for it in selected}
+            else:
+                logger.warning(
+                    "[rule] 相関ゲート不合格のため新規買いを停止: %s",
+                    corr_gate.reason or "ENC閾値未満",
+                )
+
+        # 1ラン内で増える建玉数を追跡し MAX_POSITIONS を厳守。空売りの建玉も数える（#1210）
+        position_count += count_short_positions(broker)
+        buys_allowed = gate.is_allowed and allow_new_buys
+    except Exception as exc:
+        logger.error("[rule] 新規買いの判定の手順に失敗。保有の SELL だけ出す", exc_info=True)
+        buy_step_error = exc
+        sector_allowed = set()
     buy_orders_this_run = 0
     # 朝の約定で据え置かれた SELL がある銘柄には2本目を出さない（#1169。8:50 の道と同じ確かめ）
     pending = _load_pending_exits(broker)
@@ -215,6 +227,8 @@ def execute_rule_paper_trades(
         f"ペーパートレード実行: BUY={buy_orders}  SELL={sell_orders}  "
         f"スキップ={skipped}  失敗={errors}"
     )
+    if buy_step_error is not None:
+        raise buy_step_error
     return {
         "buy_orders": buy_orders,
         "sell_orders": sell_orders,

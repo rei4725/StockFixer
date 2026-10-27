@@ -583,6 +583,55 @@ class TestPaperBrokerShort(unittest.TestCase):
         self.assertTrue(math.isnan(positions[0]["current_price"]))
         self.assertTrue(math.isnan(positions[0]["unrealized_pnl"]))
 
+    def test_pending_market_short_does_not_lower_equity(self):
+        """約定前の成行の空売り（単価 0.0 の仮登録）を建玉の全額の損として評価しない（#1225）"""
+        from src.trading.risk_manager import RiskManager
+
+        self.broker.send_order("7203", OrderSide.SHORT, 100, price=0.0)
+        summary = self.broker.get_pnl_summary()
+        self.assertAlmostEqual(summary["unrealized_pnl"], 0.0)
+        self.assertAlmostEqual(RiskManager(self.broker).get_total_equity(), 1_000_000.0)
+        positions = self.broker.get_short_positions()
+        # 保有の上限には数える（#1146）が、約定待ちの株数として分けて返す
+        self.assertEqual(positions[0]["qty"], 100)
+        self.assertEqual(positions[0]["pending_qty"], 100)
+
+    def test_pending_short_on_filled_values_only_filled(self):
+        """約定した空売りに約定待ちを重ねても、評価は約定した分の単価と株数で出す（#1225）"""
+        with _db_connection() as con:
+            con.execute(
+                "INSERT INTO paper_short_positions"
+                " (symbol, qty, avg_short_price) VALUES ('7203', 100, 1200.0)"
+            )
+        self.broker.send_order("7203", OrderSide.SHORT, 50, price=0.0)
+        pos = self.broker.get_short_positions()[0]
+        self.assertEqual(pos["qty"], 150)
+        self.assertEqual(pos["pending_qty"], 50)
+        self.assertAlmostEqual(pos["avg_short_price"], 1200.0)
+        self.assertAlmostEqual(pos["unrealized_pnl"], (1200.0 - 1020.0) * 100)
+
+    def test_settle_fills_short_before_cover_of_same_symbol(self):
+        """同じ銘柄の SHORT と SHORT_COVER が約定待ちなら、先に出た SHORT から約定させる（#1225）"""
+        self.broker.send_order("7203", OrderSide.SHORT, 100, price=0.0)
+        cover = self.broker.send_order("7203", OrderSide.SHORT_COVER, 100)
+        with _db_connection() as con:
+            # SHORT の行を書き直して表の後ろへ回し、読み出しの順に頼らないことを確かめる
+            con.execute(
+                "UPDATE paper_orders SET created_at = created_at - INTERVAL '1 minute' "
+                "WHERE side=%s",
+                [int(OrderSide.SHORT)],
+            )
+        self.broker.settle_pending_orders()
+        with _db_connection() as con:
+            pnl = con.execute(
+                "SELECT realized_pnl FROM paper_orders WHERE order_id=%s", [cover["order_id"]]
+            ).fetchone()[0]
+            rest = con.execute("SELECT COUNT(*) FROM paper_short_positions").fetchone()[0]
+            balance = con.execute("SELECT balance FROM paper_balance").fetchone()[0]
+        self.assertAlmostEqual(pnl, 0.0)  # 1000 で建てて 1000 で返す
+        self.assertEqual(rest, 0)
+        self.assertAlmostEqual(balance, 1_000_000.0)
+
     def test_get_short_positions_unpriced_on_empty(self):
         self._mock_market_data.get_ohlcv.return_value = pd.DataFrame()
         self._assert_short_unpriced()

@@ -181,12 +181,13 @@ def save_optimal_params_json(
         "timestamp": datetime.now().isoformat(),
         "sort_by": sort_by,
         "threshold": float(best_row.get("threshold", 0.0)),
+        # None と数の混ざった列は float になり None が NaN になるため、NaN も null で書く（#1241）
         "stop_loss_pct": (
-            float(best_row["stop_loss_pct"]) if best_row.get("stop_loss_pct") is not None else None
+            float(best_row["stop_loss_pct"]) if pd.notna(best_row.get("stop_loss_pct")) else None
         ),
         "take_profit_pct": (
             float(best_row["take_profit_pct"])
-            if best_row.get("take_profit_pct") is not None
+            if pd.notna(best_row.get("take_profit_pct"))
             else None
         ),
         "position_sizing": str(best_row.get("position_sizing", "full")),

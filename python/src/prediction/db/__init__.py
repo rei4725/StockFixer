@@ -10,6 +10,7 @@ from src.utils.db._connection import _db_connection  # noqa: F401  patch target 
 
 from .accuracy import (  # noqa: F401
     PREDICTED_DATE_SQL,
+    jst_day,
     load_drift_summary,
     load_prediction_accuracy,
     load_top_prediction_misses,

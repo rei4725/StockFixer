@@ -68,6 +68,39 @@ class TestSaveOptimalParamsBestRow(unittest.TestCase):
         with open(path, "r", encoding="utf-8") as f:
             self.assertEqual(json.load(f)["jp_1301"]["threshold"], 0.03)
 
+    def _saved_sl_tp(self, df: pd.DataFrame) -> dict:
+        with redirect_stdout(io.StringIO()):
+            path = persistence.save_optimal_params_json(df, "jp", "1301", sort_by="sharpe_ratio")
+        with open(path, "r", encoding="utf-8") as f:
+            text = f.read()
+        self.assertNotIn("NaN", text)
+        return json.loads(text)["jp_1301"]
+
+    def test_none_sl_tp_best_row_saved_as_null(self):
+        """SL の候補に None と数が混ざり None の行が最良なら null で書く（#1241）"""
+        df = _result_df()
+        df["stop_loss_pct"] = [0.02, None, 0.05]
+        df["take_profit_pct"] = [0.05, None, 0.10]
+        saved = self._saved_sl_tp(df)
+        self.assertIsNone(saved["stop_loss_pct"])
+        self.assertIsNone(saved["take_profit_pct"])
+
+    def test_numeric_sl_tp_best_row_saved_as_number(self):
+        df = _result_df()
+        df["stop_loss_pct"] = [None, 0.03, 0.05]
+        df["take_profit_pct"] = [None, 0.07, 0.10]
+        saved = self._saved_sl_tp(df)
+        self.assertEqual(saved["stop_loss_pct"], 0.03)
+        self.assertEqual(saved["take_profit_pct"], 0.07)
+
+    def test_all_none_sl_tp_saved_as_null(self):
+        df = _result_df()
+        df["stop_loss_pct"] = [None, None, None]
+        df["take_profit_pct"] = [None, None, None]
+        saved = self._saved_sl_tp(df)
+        self.assertIsNone(saved["stop_loss_pct"])
+        self.assertIsNone(saved["take_profit_pct"])
+
 
 class TestPrintBestMatchesSaved(unittest.TestCase):
     def _printed_best_threshold(self, sort_by: str) -> str:
