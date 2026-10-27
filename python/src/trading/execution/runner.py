@@ -133,6 +133,8 @@ def run_daily_orders(
         if entry_error is not None:
             raise entry_error
         return stats
+    # 相関ゲートを評価しない・評価が落ちた日も corr_gate に不合格の値が入るよう先に置く
+    blocked_status, corr_gate = _block_entries(gate_status)
     if entry_error is None:
         try:
             # --- 相関ゲート: 保有銘柄間の相関上昇時に新規買いをブロック ---
@@ -146,7 +148,7 @@ def run_daily_orders(
             logger.error("[exec] 相関ゲートの評価に失敗。新規は止め、決済は続ける", exc_info=True)
             entry_error = exc
     if entry_error is not None:
-        gate_status, corr_gate = _block_entries(gate_status)
+        gate_status = blocked_status
     gate_status = _block_new_if_params_unreadable(predictions, gate_status, stats)
     logger.info(
         "[exec] 動的閾値適用: scale=%.3f buy_range=%.3f%%-%.3f%%",
