@@ -210,10 +210,26 @@ def add_technical_indicators(
         close=df["Close"], window=ema_slow_window, fillna=True
     ).ema_indicator()
 
-    # ATR
-    df["atr"] = ta.volatility.AverageTrueRange(
-        high=df["High"], low=df["Low"], close=df["Close"], window=atr_window, fillna=True
-    ).average_true_range()
+    # ATR: 高値・安値・終値のそろった足だけで計算して元の行へ戻す。ta の ATR は再帰なので、
+    # 欠けた足1本で後が全部 NaN になり、fillna で欠けの手前の値に固まる。欠けた足の行は
+    # 1本手前の値を引き継ぎ、未来の足は使わない（#1240）。
+    complete = df.dropna(subset=["High", "Low", "Close"])
+    if complete.empty:
+        df["atr"] = 0.0
+    else:
+        df["atr"] = (
+            ta.volatility.AverageTrueRange(
+                high=complete["High"],
+                low=complete["Low"],
+                close=complete["Close"],
+                window=min(atr_window, len(complete)),
+                fillna=True,
+            )
+            .average_true_range()
+            .reindex(df.index)
+            .ffill()
+            .fillna(0.0)
+        )
 
     # RSI
     df["rsi"] = ta.momentum.RSIIndicator(close=df["Close"], window=rsi_window, fillna=True).rsi()

@@ -126,6 +126,22 @@ class TestSlTpSkipsPendingExit(_PendingOrdersCase):
 
         self.assertEqual(_sides(broker, OrderSide.SHORT_COVER), ["9984"])
 
+    def test_pending_only_short_gets_no_sl_tp_cover(self):
+        """約定待ちの SHORT だけの銘柄は返済しない。約定した分だけ返済する（#1225）"""
+        broker = _broker(
+            short_positions=[{**_short("6758"), "pending_qty": 100}, _short_partly("9984")]
+        )
+
+        self._run(broker)
+
+        self.assertEqual(_sides(broker, OrderSide.SHORT_COVER), ["9984"])
+        self.assertEqual(broker.send_order.call_args.args[2], 60)
+
+
+def _short_partly(symbol: str) -> dict:
+    """100 株のうち 40 株が約定待ちの空売り"""
+    return {**_short(symbol), "pending_qty": 40}
+
 
 class TestRunnerSkipsPendingExit(_PendingOrdersCase):
     def _run(self, broker, predictions, extra_patches=()):
@@ -192,6 +208,23 @@ class TestRunnerSkipsPendingExit(_PendingOrdersCase):
         )
 
         self.assertEqual(_sides(broker, OrderSide.SHORT_COVER), ["9984"])
+
+    def test_pending_only_short_gets_no_prediction_cover(self):
+        """8:50 の返済も、約定待ちの SHORT だけの銘柄は出さず、約定した分だけ返す（#1225）"""
+        broker = _broker(
+            short_positions=[{**_short("6758"), "pending_qty": 100}, _short_partly("9984")]
+        )
+        predictions = pd.DataFrame([_row("6758", 0.05), _row("9984", 0.05)])
+
+        self._run(
+            broker,
+            predictions,
+            (patch("src.trading.execution.runner.ENABLE_SHORT_SIDE", True),),
+        )
+
+        self.assertEqual(_sides(broker, OrderSide.SHORT_COVER), ["9984"])
+        covers = [c for c in broker.send_order.call_args_list if c.args[1] == OrderSide.SHORT_COVER]
+        self.assertEqual(covers[0].args[2], 60)
 
 
 if __name__ == "__main__":
