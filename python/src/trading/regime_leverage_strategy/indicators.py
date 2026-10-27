@@ -37,8 +37,13 @@ def build_weekly_frame(daily_df: pd.DataFrame) -> pd.DataFrame:
     """日足dfにATR14・200日線を追加する(週足化はしない。呼び出し側が最終行=直近営業日
     を使う。7章の判定は「その週の金曜終値」だが、日次ジョブ実行時点では当該週がまだ
     確定していないため、呼び出し側で週の最終営業日かどうかを判定する)。
+
+    ATR14・200日線は、高値・安値・終値のどれかが欠けた行を除いた日足から計算し、元の行に
+    戻す。窓の途中の1本の欠けで、その後の値が全部 NaN になるのを防ぐ。欠けた行の ATR14・
+    200日線は NaN のまま残すので、最後の行が欠けていれば呼び出し側で NaN として扱う(#1228)。
     """
     df = daily_df.copy()
-    df["ATR14"] = wilder_atr(df, _ATR_PERIOD)
-    df["MA200"] = df["Close"].rolling(_REGIME_MA).mean()
+    complete = df.dropna(subset=["High", "Low", "Close"])
+    df["ATR14"] = wilder_atr(complete, _ATR_PERIOD).reindex(df.index)
+    df["MA200"] = complete["Close"].rolling(_REGIME_MA).mean().reindex(df.index)
     return df
