@@ -334,7 +334,7 @@ def run_claude_trader(
         import anthropic
     except ImportError:
         raise ImportError(
-            "anthropic パッケージが必要です。`pip install anthropic>=0.50.0` を実行してください。"
+            "anthropic パッケージが必要です。`pip install anthropic>=2.1.0` を実行してください。"
         )
 
     run_id = str(uuid.uuid4())[:12]
