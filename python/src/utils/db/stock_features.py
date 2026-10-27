@@ -97,9 +97,14 @@ def upsert_stock_features(market: str, symbol: str, df: pd.DataFrame) -> None:
     logger.info(f"DB保存完了: stock_features [{market}_{symbol}] ({len(save_df)}行)")
 
 
-def load_stock_features(market: str, symbol: str) -> Optional[pd.DataFrame]:
+def load_stock_features(
+    market: str, symbol: str, raise_on_error: bool = False
+) -> Optional[pd.DataFrame]:
     """
     1銘柄分の特徴量を DB から取得する。
+
+    Args:
+        raise_on_error: True なら読み込みの例外を None にせず投げ、行が無いことと分ける（#1272）
 
     Returns:
         特徴量 DataFrame、データがなければ None
@@ -114,6 +119,8 @@ def load_stock_features(market: str, symbol: str) -> Optional[pd.DataFrame]:
             )
         except Exception as e:
             logger.error(f"stock_features 読み込み失敗 [{market}_{symbol}]: {e}", exc_info=True)
+            if raise_on_error:
+                raise
             return None
 
     if df.empty:

@@ -28,13 +28,13 @@ class TestLoadFeatureData(unittest.TestCase):
         self.assertIsInstance(result, pd.DataFrame)
 
     @patch("src.prediction.predict_unified.load_stock_features")
-    def test_returns_none_on_exception(self, mock_load):
-        """例外時は None が返ること"""
+    def test_raises_on_exception(self, mock_load):
+        """読み込みの例外は None にせず投げること（#1272）"""
         from src.prediction.predict_unified import load_feature_data
 
         mock_load.side_effect = Exception("特徴量取得エラー")
-        result = load_feature_data("jp", "7203")
-        self.assertIsNone(result)
+        with self.assertRaises(Exception):
+            load_feature_data("jp", "7203")
 
     @patch("src.prediction.predict_unified.load_stock_features")
     def test_returns_dataframe_or_none_on_empty(self, mock_load):
@@ -53,7 +53,7 @@ class TestLoadFeatureData(unittest.TestCase):
 
         mock_load.return_value = pd.DataFrame({"x": [1]})
         load_feature_data("us", "AAPL")
-        mock_load.assert_called_once_with("us", "AAPL")
+        mock_load.assert_called_once_with("us", "AAPL", raise_on_error=True)
 
 
 class TestGetCachedModel(unittest.TestCase):

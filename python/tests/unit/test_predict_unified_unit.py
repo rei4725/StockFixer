@@ -35,15 +35,15 @@ class TestLoadFeatureData(unittest.TestCase):
             result = load_feature_data("jp", "7203")
         self.assertIsInstance(result, pd.DataFrame)
 
-    def test_returns_none_on_exception(self):
+    def test_raises_on_exception(self):
         from src.prediction.predict_unified import load_feature_data
 
         with patch(
             "src.prediction.predict_unified.load_stock_features",
             side_effect=RuntimeError("db error"),
         ):
-            result = load_feature_data("jp", "7203")
-        self.assertIsNone(result)
+            with self.assertRaises(RuntimeError):
+                load_feature_data("jp", "7203")
 
 
 class TestGetCachedModel(unittest.TestCase):
