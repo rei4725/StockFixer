@@ -25,7 +25,9 @@ def production_already_predicted_today() -> bool:
 
     日次の道を頭からやり直すと（同じ回の中のやり直し・当日分の補完）、[3/6] が
     前日分を今日の予想で上書きした後に [2/6] が走り、まだ採点の無い今日の予想を
-    読んで採点の JSON を0件で上書きする。そのときは採点と JSON を飛ばす。
+    読んで採点の JSON を0件で上書きする。そのときは JSON を書かず、採点は今日の回の
+    行だけを外す。1回目に足が取れず予想を出さなかった銘柄の前の日の行は残っており、
+    次の [3/6] で消える前に採点する（#1255）。
     predicted_at は JST に直して JST の今日と比べる（#935。コンテナの時計は UTC）。
     読めなければ False を返し、今までどおり採点する。
     """
@@ -39,8 +41,8 @@ def production_already_predicted_today() -> bool:
     if not latest or not is_today_jst(latest):
         return False
     logger.warning(
-        "[2/6] production の予想が既に今日の回 (%s) のため、採点と採点の JSON を飛ばし"
-        "前の回の JSON を残す（日次の道のやり直し）",
+        "[2/6] production の予想が既に今日の回 (%s) のため、今日の回の行を採点から外し"
+        "採点の JSON は前の回のものを残す（日次の道のやり直し）",
         latest,
     )
     return True

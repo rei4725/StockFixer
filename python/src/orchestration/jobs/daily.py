@@ -20,7 +20,11 @@ from src.orchestration.jobs.alerting import (
 )
 from src.orchestration.jobs.backup_job import run_daily_backup  # noqa: F401 (re-export)
 from src.orchestration.jobs.challenger_shadow import run_challenger_shadow_stage
-from src.orchestration.jobs.common import _handle_stage_error, _notify_stage_failure
+from src.orchestration.jobs.common import (
+    _handle_stage_error,
+    _notify_stage_failure,
+    is_today_jst,
+)
 from src.orchestration.jobs.drift_check import run_daily_drift_check
 from src.orchestration.jobs.prediction_errors import notify_prediction_errors
 from src.orchestration.jobs.unavailable_gates import (
@@ -81,39 +85,45 @@ def run_daily_pipeline():
 
     # 2. 前日予測の精度チェック（NON_CRITICAL: 失敗しても後続処理を継続）
     # 3 で当日分の prediction_results を保存する前に読む（Delete-Insert 対策）。
-    # やり直しで既に今日の予想に入れ替わっていれば、前の回の JSON を残して飛ばす（#904）。
+    # やり直しで既に今日の予想に入れ替わっていれば、今日の回の行だけを採点から外し、
+    # 残っている前の日の回の行は採点する。JSON は前の回のものを残す（#904, #1255）。
     logger.info("[2/6] 予測精度チェック開始")
     accuracy_report = None
-    if not production_already_predicted_today():
-        from src.prediction.prediction_pipeline import run_accuracy_check
+    rerun = production_already_predicted_today()
+    skip_predicted_at = is_today_jst if rerun else None
+    from src.prediction.prediction_pipeline import run_accuracy_check
 
-        try:
-            summary = run_accuracy_check(
-                horizon=1, model_name="production", model_version_filter="production"
-            )
+    try:
+        summary = run_accuracy_check(
+            horizon=1,
+            model_name="production",
+            model_version_filter="production",
+            skip_predicted_at=skip_predicted_at,
+        )
+        if not rerun:  # 精度の知らせは1回目が送っている
             send_accuracy_summary(summary, horizon=1)
-            logger.info("[2/6] 予測精度チェック完了 (production)")
-        except Exception as e:
-            # 採点は 3 の保存の後にやり直せないため知らせる。投げ直すと 3 の前に
-            # やり直しが入り #904 の飛ばしと絡むため、知らせだけにする（#1006）
-            _handle_stage_error(
-                PipelineStage.NON_CRITICAL, "[2/6] 予測精度チェック (production)", e
-            )
-            _notify_stage_failure("[2/6] 予測精度チェック (production)", e)
+        logger.info("[2/6] 予測精度チェック完了 (production)")
+    except Exception as e:
+        # 採点は 3 の保存の後にやり直せないため知らせる。投げ直すと 3 の前に
+        # やり直しが入り #904 の飛ばしと絡むため、知らせだけにする（#1006）
+        _handle_stage_error(PipelineStage.NON_CRITICAL, "[2/6] 予測精度チェック (production)", e)
+        _notify_stage_failure("[2/6] 予測精度チェック (production)", e)
 
-        try:
-            run_accuracy_check(
-                horizon=1, model_name="challenger", model_version_filter="challenger"
-            )
-            logger.info("[2/6] 予測精度チェック完了 (challenger)")
-        except Exception as e:
-            # challenger の採点も 3 の保存の後にやり直せないため知らせる（#1152）
-            _handle_stage_error(
-                PipelineStage.NON_CRITICAL, "[2/6] 予測精度チェック (challenger)", e
-            )
-            _notify_stage_failure("[2/6] 予測精度チェック (challenger)", e)
+    try:
+        run_accuracy_check(
+            horizon=1,
+            model_name="challenger",
+            model_version_filter="challenger",
+            skip_predicted_at=skip_predicted_at,
+        )
+        logger.info("[2/6] 予測精度チェック完了 (challenger)")
+    except Exception as e:
+        # challenger の採点も 3 の保存の後にやり直せないため知らせる（#1152）
+        _handle_stage_error(PipelineStage.NON_CRITICAL, "[2/6] 予測精度チェック (challenger)", e)
+        _notify_stage_failure("[2/6] 予測精度チェック (challenger)", e)
 
-        # 採点の JSON も 3 の保存の前に業種なしで書き、業種は道の最後で書き足す（#843）
+    # 採点の JSON も 3 の保存の前に業種なしで書き、業種は道の最後で書き足す（#843）
+    if not rerun:
         accuracy_report = write_accuracy_json_without_sectors()
 
     # 3. 予測（CRITICAL: 失敗時はパイプライン停止 + Discord通知）

@@ -2,7 +2,8 @@
 
 prediction_results は Delete-Insert のスナップショットテーブルなので、[3/6] の保存の後に
 [5/6] で落ちて頭からやり直すと、[2/6] は今日の予想（まだ採点の無い行）を読む。
-そのときは採点と JSON の書き出しを飛ばし、1回目の JSON を残す。
+そのときは JSON の書き出しを飛ばして1回目の JSON を残し、採点は今日の回の行だけを
+外す（#1255）。
 """
 
 import json
@@ -12,6 +13,8 @@ from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
+
+from src.orchestration.jobs.common import is_today_jst
 
 _SYMBOLS = ["7203", "6758"]
 
@@ -64,7 +67,7 @@ def results_dir(tmp_path):
 
 
 def _run_pipeline(table: _FakePredictionTable, notify_side_effect=None):
-    """外への呼び出しを止めて日次の道を1回呼び、run_accuracy_check の mock を返す。"""
+    """外への呼び出しを止めて日次の道を1回呼び、run_accuracy_check へ渡した外す回の判定を返す。"""
     from src.orchestration.scheduler import run_daily_pipeline
 
     with ExitStack() as stack:
@@ -99,7 +102,8 @@ def _run_pipeline(table: _FakePredictionTable, notify_side_effect=None):
         try:
             run_daily_pipeline()
         finally:
-            calls = accuracy_check.call_count
+            # 呼ばれた回ごとの、採点から外す回の判定（None は外さない）
+            calls = [c.kwargs.get("skip_predicted_at") for c in accuracy_check.call_args_list]
     return calls
 
 
@@ -116,13 +120,13 @@ def test_normal_morning_scores_and_writes_json(results_dir):
 
     calls = _run_pipeline(table)
 
-    assert calls == 2  # production と challenger
+    assert calls == [None, None]  # production と challenger。どの回も外さない
     report = _read_json(results_dir)
     assert report["models"]["production"]["1"]["n_scored"] == 2
 
 
 def test_skips_scoring_when_production_already_today(results_dir):
-    """production の回が既に今日なら、run_accuracy_check を呼ばず JSON も書き換えない。"""
+    """production の回が既に今日なら、今日の回を外して採点し、JSON は書き換えない（#1255）。"""
     today = _stamp(datetime.now())
     yesterday = _stamp(datetime.now() - timedelta(days=1))
     table = _FakePredictionTable(production_at=today, scored_at=yesterday)
@@ -133,7 +137,7 @@ def test_skips_scoring_when_production_already_today(results_dir):
 
     calls = _run_pipeline(table)
 
-    assert calls == 0
+    assert calls == [is_today_jst, is_today_jst]
     assert json.loads(previous.read_text(encoding="utf-8")) == {
         "models": {"production": {"1": {"n_scored": 5}}}
     }
@@ -151,5 +155,5 @@ def test_retry_after_notify_failure_keeps_first_n_scored(results_dir):
     # scheduler_queue の同じ回の中のやり直しと同じく、頭から呼び直す
     calls = _run_pipeline(table)
 
-    assert calls == 0
+    assert calls == [is_today_jst, is_today_jst]
     assert _read_json(results_dir)["models"]["production"]["1"]["n_scored"] == 2
