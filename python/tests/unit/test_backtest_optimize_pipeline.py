@@ -634,6 +634,45 @@ class TestRunOptimizeBatch(unittest.TestCase):
         mock_save.assert_called_once_with(df_a, "jp", "7203")
         mock_json.assert_called_once_with(df_a, "jp", "7203", sort_by="total_return")
 
+    @patch("src.backtest.optimizer.batch.save_optimal_params_json")
+    @patch("src.backtest.optimizer.batch.save_optimization_results")
+    @patch("src.backtest.optimizer.batch.run_optimization")
+    def test_no_valid_rows_counts_as_error(self, mock_run, mock_save, mock_json):
+        """全候補が error の行だけの銘柄は保存されず error になり、成功に数えないこと（#1285）"""
+        from src.backtest.optimizer import run_optimize_batch
+        from src.backtest.optimizer.persistence import save_optimal_params_json as real_save_json
+        from src.domain.types import SymbolTask
+
+        error_df = pd.DataFrame(
+            {"threshold": [0.01, 0.02], "error": ["データが取得できませんでした"] * 2}
+        )
+        good_df = pd.DataFrame({"threshold": [0.02], "sharpe_ratio": [1.5]})
+
+        def _json(df, market, symbol, sort_by="sharpe_ratio"):
+            if symbol == "7203":
+                # 有効な行が無い表では、本物は何も書かずに "" を返す
+                return real_save_json(df, market, symbol, sort_by=sort_by)
+            return "/tmp/params.json"
+
+        mock_run.side_effect = lambda market, symbol, **kwargs: (
+            error_df if symbol == "7203" else good_df
+        )
+        mock_save.return_value = "/tmp/results.csv"
+        mock_json.side_effect = _json
+
+        results = run_optimize_batch(
+            [SymbolTask(market="jp", symbol="7203"), SymbolTask(market="jp", symbol="9984")],
+            model_type="XGBoostModel",
+            max_workers=1,
+        )
+
+        by_symbol = {r["symbol"]: r for r in results}
+        self.assertEqual(
+            by_symbol["7203"],
+            {"market": "jp", "symbol": "7203", "status": "error", "error": "有効な最適化結果なし"},
+        )
+        self.assertEqual(by_symbol["9984"], {"market": "jp", "symbol": "9984", "status": "success"})
+
 
 class TestRunOptunaBatch(unittest.TestCase):
     """run_optuna_batch のテスト"""
