@@ -44,16 +44,13 @@ def load_feature_data(market: str, symbol: str) -> Optional[pd.DataFrame]:
         symbol: 銘柄コード
 
     Returns:
-        特徴量DataFrame または None
+        特徴量DataFrame。行が無ければ None
+
+    Raises:
+        Exception: 読み込みの失敗（DB の例外）。行が無いことと分け、呼び出し元の
+            例外の数と知らせに乗せる（#1272）
     """
-    try:
-        df = load_stock_features(market, symbol)
-        return df
-    except Exception:
-        logger.warning(
-            "特徴量データ読み込み失敗: market=%s symbol=%s", market, symbol, exc_info=True
-        )
-        return None
+    return load_stock_features(market, symbol, raise_on_error=True)
 
 
 def _unified_model_mtime(model_name: str) -> Optional[float]:
