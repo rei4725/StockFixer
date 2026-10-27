@@ -78,7 +78,7 @@ class TestBuildSignalMatrix:
         """銘柄リストが空の場合は空の DataFrame が返ること"""
         from src.backtest.portfolio import _build_signal_matrix
 
-        scores, prices, opens = _build_signal_matrix(
+        scores, prices, opens, volumes = _build_signal_matrix(
             symbols=[],
             model_type="XGBoostModel",
             train_ratio=0.8,
@@ -89,6 +89,7 @@ class TestBuildSignalMatrix:
         assert scores.empty
         assert prices.empty
         assert opens.empty
+        assert volumes.empty
 
 
 class TestGetRebalanceDates:
@@ -388,7 +389,7 @@ class TestPortfolioMarketSlippage(unittest.TestCase):
             patch("src.utils.db.stock_features.get_all_symbols", return_value=all_symbols),
             patch(
                 "src.backtest.portfolio._build_signal_matrix",
-                return_value=(score_matrix, close_matrix, close_matrix),
+                return_value=(score_matrix, close_matrix, close_matrix, pd.DataFrame()),
             ),
             patch(
                 "src.backtest.portfolio._attach_regime_metrics",
@@ -507,6 +508,7 @@ class TestBuildSignalMatrixAdditional(unittest.TestCase):
                 "close_lag1": np.random.randn(n),
                 "Open": np.random.rand(n) * 100 + 100,
                 "Close": np.random.rand(n) * 100 + 100,
+                "Volume": np.random.rand(n) * 10_000 + 1_000,
                 "y": np.random.randn(n) * 0.01,
             },
             index=dates,
@@ -517,7 +519,7 @@ class TestBuildSignalMatrixAdditional(unittest.TestCase):
         mock_mm = mock_get_mm.return_value
         mock_mm.predict_with_model.return_value = np.array([0.01] * n_test)
 
-        score_matrix, close_matrix, open_matrix = _build_signal_matrix(
+        score_matrix, close_matrix, open_matrix, volume_matrix = _build_signal_matrix(
             symbols=[("jp", "7203")],
             model_type="XGBoostModel",
             train_ratio=0.8,
@@ -532,6 +534,14 @@ class TestBuildSignalMatrixAdditional(unittest.TestCase):
         self.assertEqual(open_matrix.index.tolist(), close_matrix.index.tolist())
         pd.testing.assert_series_equal(
             open_matrix["jp_7203"], df_feat["Open"].reindex(open_matrix.index), check_names=False
+        )
+        # #1299: Volume の表も Close・Open と同じ行と列で返すこと
+        self.assertEqual(volume_matrix.index.tolist(), close_matrix.index.tolist())
+        self.assertEqual(volume_matrix.columns.tolist(), close_matrix.columns.tolist())
+        pd.testing.assert_series_equal(
+            volume_matrix["jp_7203"],
+            df_feat["Volume"].reindex(volume_matrix.index),
+            check_names=False,
         )
         # 1銘柄のデータが含まれること
         self.assertFalse(score_matrix.empty)
@@ -558,7 +568,7 @@ class TestBuildSignalMatrixAdditional(unittest.TestCase):
         )
         mock_load.return_value = df_small
 
-        score_matrix, close_matrix, _ = _build_signal_matrix(
+        score_matrix, close_matrix, _, _ = _build_signal_matrix(
             symbols=[("jp", "7203")],
             model_type="XGBoostModel",
             train_ratio=0.8,
@@ -578,7 +588,7 @@ class TestBuildSignalMatrixAdditional(unittest.TestCase):
 
         mock_load.return_value = pd.DataFrame()
 
-        score_matrix, close_matrix, _ = _build_signal_matrix(
+        score_matrix, close_matrix, _, _ = _build_signal_matrix(
             symbols=[("jp", "7203")],
             model_type="XGBoostModel",
             train_ratio=0.8,
@@ -658,7 +668,7 @@ class TestRunPortfolioBacktest(unittest.TestCase):
             },
             index=dates,
         )
-        mock_build.return_value = (score_matrix, close_matrix, close_matrix)
+        mock_build.return_value = (score_matrix, close_matrix, close_matrix, pd.DataFrame())
         mock_rebalance.return_value = list(dates[:3])
 
         equity_df_mock = pd.DataFrame(
@@ -688,7 +698,7 @@ class TestRunPortfolioBacktest(unittest.TestCase):
         from src.backtest.portfolio import run_portfolio_backtest
 
         mock_symbols.return_value = [("jp", "7203")]
-        mock_build.return_value = (pd.DataFrame(), pd.DataFrame(), pd.DataFrame())
+        mock_build.return_value = (pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame())
 
         equity_df, metrics, holdings_df = run_portfolio_backtest(market="jp")
         self.assertTrue(equity_df.empty)
