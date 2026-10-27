@@ -13,6 +13,7 @@ import pytest
 
 from src.utils.db._connection import _db_connection
 from src.utils.db.rule_results import (
+    delete_rule_best,
     load_effective_rules,
     load_rule_best_all,
     load_rule_signals_by_date,
@@ -102,6 +103,24 @@ class TestUpsertRuleBest:
 
         by_symbol = {r[0]: r[1] for r in rows}
         assert by_symbol == {"A1": "rule_a", "A2": "rule_b"}
+
+
+class TestDeleteRuleBest:
+    def test_deletes_only_given_symbol(self):
+        _make_best(symbol="DEL1")
+        _make_best(symbol="KEEP1")
+        _make_best(market="jp", symbol="DEL1")
+
+        delete_rule_best("us", "DEL1")
+
+        assert "DEL1" not in set(load_rule_best_all("us")["symbol"])
+        assert "KEEP1" in set(load_rule_best_all("us")["symbol"])
+        assert "DEL1" in set(load_rule_best_all("jp")["symbol"])
+
+    def test_missing_row_is_noop(self):
+        delete_rule_best("us", "NOSUCH")
+
+        assert "NOSUCH" not in set(load_rule_best_all("us")["symbol"])
 
 
 class TestLoadRuleBestAll:

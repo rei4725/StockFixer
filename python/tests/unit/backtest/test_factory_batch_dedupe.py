@@ -45,7 +45,10 @@ class TestBatchDedupeIncludesCanonicalHashes(unittest.TestCase):
             factory, "sample_hypotheses", side_effect=_fake_sample
         ), unittest.mock.patch.object(
             factory, "_load_symbol_data", return_value={}
+        ), self.assertRaises(
+            RuntimeError
         ):
+            # 値段を空にしてサンプリングの後で止める。全銘柄が空の回は例外になる（#1284）
             factory.run_factory_batch(
                 market="jp",
                 symbols=["X"],
@@ -74,6 +77,8 @@ class TestBatchDedupeIncludesCanonicalHashes(unittest.TestCase):
             factory, "sample_hypotheses", side_effect=_fake_sample
         ), unittest.mock.patch.object(
             factory, "_load_symbol_data", return_value={}
+        ), self.assertRaises(
+            RuntimeError
         ):
             factory.run_factory_batch(
                 market="jp",
@@ -101,6 +106,8 @@ class TestBatchDedupeIncludesCanonicalHashes(unittest.TestCase):
             factory, "sample_hypotheses", side_effect=_fake_sample
         ), unittest.mock.patch.object(
             factory, "_load_symbol_data", return_value={}
+        ), self.assertRaises(
+            RuntimeError
         ):
             factory.run_factory_batch(
                 market="jp",
