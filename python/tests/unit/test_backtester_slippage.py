@@ -140,6 +140,84 @@ class TestExecutionVolumeNoLookahead:
         assert sell_low["cash"] == pytest.approx(sell_high["cash"])
 
 
+class TestShortMarkToMarketDynamicSlippage:
+    """空売りの日々の時価評価に、返す時と同じ動的スリッページを入れること（#1231）。"""
+
+    @staticmethod
+    def _df(mtm_bar_volume=50_000.0):
+        idx = pd.date_range("2024-01-01", periods=6, freq="D")
+        volume = [40_000.0, 60_000.0, 30_000.0, 80_000.0, 50_000.0, 70_000.0]
+        volume[4] = mtm_bar_volume
+        return pd.DataFrame(
+            {
+                "Open": [100.0, 101.0, 99.0, 98.0, 97.0, 96.0],
+                "Close": [100.5, 100.0, 98.5, 97.5, 96.5, 95.5],
+                "Volume": volume,
+            },
+            index=idx,
+        )
+
+    @staticmethod
+    def _short_bt(slippage_fn):
+        bt = _make_bt(slippage=0.001, slippage_fn=slippage_fn)
+        bt.enable_short = True
+        return bt
+
+    @staticmethod
+    def _run(bt, df):
+        # bar0 の売りシグナル→bar1 始値で空売り、bar4 の買いシグナル→bar5 始値で返す
+        signal = pd.Series([-1, 0, 0, 0, 1, 0], index=df.index)
+        return bt.simulate_trading(df, signal, collect_equity=True)
+
+    @staticmethod
+    def _exec_vol(df, i):
+        # 約定の時点で分かる前の足までの平均出来高
+        return float(df["Volume"].rolling(20, min_periods=1).mean().shift(1).iloc[i])
+
+    def test_equity_before_cover_matches_cover_formula(self):
+        df = self._df()
+        bt = self._short_bt(make_slippage_fn(alpha=0.10))
+        result_df, metrics = self._run(bt, df)
+        qty = int(result_df[result_df["action"] == "short"]["qty"].iloc[0])
+        assert qty > 0
+        expected = (
+            bt.initial_cash
+            + bt.execution.sell_proceeds(qty, df["Open"].iloc[1], self._exec_vol(df, 1))
+            - bt.execution.buy_cost(qty, df["Close"].iloc[4], self._exec_vol(df, 4))
+        )
+        assert metrics["equity_curve"].iloc[4] == pytest.approx(expected)
+
+    def test_without_slippage_fn_unchanged(self):
+        df = self._df()
+        bt = self._short_bt(None)
+        result_df, metrics = self._run(bt, df)
+        qty = int(result_df[result_df["action"] == "short"]["qty"].iloc[0])
+        for i in range(1, 5):
+            expected = (
+                bt.initial_cash
+                + bt.execution.sell_proceeds(qty, df["Open"].iloc[1])
+                - bt.execution.buy_cost(qty, df["Close"].iloc[i])
+            )
+            assert metrics["equity_curve"].iloc[i] == pytest.approx(expected)
+
+    def test_without_short_unchanged(self):
+        df = self._df()
+        bt = _make_bt(slippage=0.001, slippage_fn=make_slippage_fn(alpha=0.10))
+        signal = pd.Series([1, 0, 0, 0, -1, 0], index=df.index)
+        result_df, metrics = bt.simulate_trading(df, signal, collect_equity=True)
+        buy = result_df[result_df["action"] == "buy"].iloc[0]
+        for i in range(1, 5):
+            expected = buy["cash"] + int(buy["qty"]) * df["Close"].iloc[i]
+            assert metrics["equity_curve"].iloc[i] == pytest.approx(expected)
+
+    def test_mark_to_market_ignores_current_bar_volume(self):
+        bt_low = self._short_bt(make_slippage_fn(alpha=0.10))
+        _, low = self._run(bt_low, self._df(mtm_bar_volume=1_000.0))
+        bt_high = self._short_bt(make_slippage_fn(alpha=0.10))
+        _, high = self._run(bt_high, self._df(mtm_bar_volume=1_000_000_000.0))
+        assert low["equity_curve"].iloc[4] == pytest.approx(high["equity_curve"].iloc[4])
+
+
 class TestDefaultSlippageResolution:
     def test_default_by_market(self):
         assert default_slippage_for("us") == pytest.approx(0.0005)
