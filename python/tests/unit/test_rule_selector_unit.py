@@ -193,6 +193,28 @@ class TestEvaluateAllSymbols(unittest.TestCase):
         self.assertEqual(result["skipped"], 2)
         self.assertEqual(result["errors"], 0)
 
+    def test_fetch_failure_counts_as_error_not_skipped(self):
+        """値段の取得の失敗（空）は errors に数え、有効ルールなしの skipped と混ぜない（#1270）。"""
+        import pandas as pd
+
+        from src.backtest.rule_selector import evaluate_all_symbols
+
+        port = MagicMock()
+        # 7203 は取得が空、6758 は取れるがルールが無いので有効ルールなし
+        port.download.side_effect = [pd.DataFrame(), pd.DataFrame({"Close": [100.0, 101.0]})]
+        port.add_technical_indicators.side_effect = lambda df: df
+        with (
+            patch("src.backtest.rule_selector._WATCHLIST_PATH", self.watchlist_path),
+            patch("src.backtest.rule_selector.ALL_RULES", []),
+            patch("src.backtest.rule_backtester.get_backtest_data_port", return_value=port),
+            patch("src.backtest.rule_selector.upsert_rule_best") as mock_upsert,
+        ):
+            result = evaluate_all_symbols("jp", "2024-01-01", "2024-12-31")
+        self.assertEqual(result["errors"], 1)
+        self.assertEqual(result["skipped"], 1)
+        self.assertEqual(result["evaluated"], 1)
+        mock_upsert.assert_not_called()
+
     def test_returns_summary_keys(self):
         from src.backtest.rule_selector import evaluate_all_symbols
 
