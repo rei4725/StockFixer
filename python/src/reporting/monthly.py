@@ -261,6 +261,8 @@ def save_monthly_report_to_file(
         f"| Paper Slippage | {paper_slippage_text} |",
         f"| Real Slippage | {real_slippage_text} |",
         "",
+        "Slippage は損の向きを正にした値（買いは高く、売りは安く約定するほど正）。",
+        "",
         "## ドリフト状況（直近30日）",
         "",
         f"閾値超過銘柄数: {drift_count}",
