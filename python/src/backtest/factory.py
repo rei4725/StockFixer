@@ -366,8 +366,10 @@ def run_factory_batch(
     data = _load_symbol_data(market, symbols, start, end)
     result = FactoryBatchResult(market=market)
     if not data:
-        logger.error("[factory] 有効な銘柄データがないため中止: market=%s", market)
-        return result
+        # 全銘柄が取れない回を「評価0」の成功にせず、失敗としてジョブに返す（#1284）
+        raise RuntimeError(
+            f"[factory] 有効な銘柄データがないため中止: market={market} 銘柄数={len(symbols)}"
+        )
 
     windows = _window_bounds(start, end, n_windows)
     evaluations = [evaluate_hypothesis(h, data, windows) for h in batch]

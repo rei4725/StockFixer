@@ -552,21 +552,46 @@ class TestRunFactoryBatch(unittest.TestCase):
     @patch("src.backtest.factory.count_factory_runs", return_value=0)
     @patch("src.backtest.factory.load_factory_hashes", return_value=set())
     @patch("src.backtest.factory.get_backtest_data_port")
-    def test_batch_aborts_without_symbol_data(self, mock_port, mock_hashes, mock_count, mock_save):
+    def test_batch_raises_without_symbol_data(self, mock_port, mock_hashes, mock_count, mock_save):
+        # 全銘柄が取れない回は空の結果を返さず例外にする（#1284）
         port = MagicMock()
         port.download.return_value = None
         mock_port.return_value = port
 
-        result = run_factory_batch(
-            market="jp",
-            symbols=["AAA"],
-            budget=3,
-            seed=1,
-            review_port=InMemoryTextReviewPort(),
+        with self.assertRaises(RuntimeError):
+            run_factory_batch(
+                market="jp",
+                symbols=["AAA"],
+                budget=3,
+                seed=1,
+                review_port=InMemoryTextReviewPort(),
+            )
+
+        mock_save.assert_not_called()
+
+    @patch("src.backtest.factory.get_backtest_data_port")
+    def test_load_symbol_data_keeps_symbols_that_were_fetched(self, mock_port):
+        # 一部の銘柄だけ取れない回は、取れた銘柄で評価を続ける（#1284）
+        good = pd.DataFrame(
+            {"Close": np.linspace(100, 120, 400)},
+            index=pd.bdate_range(end="2026-08-28", periods=400),
         )
 
-        self.assertEqual(result.evaluated, [])
-        mock_save.assert_not_called()
+        def _download(ticker, start=None, end=None):
+            if ticker.startswith("BAD"):
+                raise ConnectionError("fetch failed")
+            if ticker.startswith("NONE"):
+                return None
+            return good
+
+        port = MagicMock()
+        port.download.side_effect = _download
+        port.add_technical_indicators.side_effect = lambda df: df
+        mock_port.return_value = port
+
+        data = _load_symbol_data("jp", ["GOOD", "BAD", "NONE"], "2025-06-01", "2026-08-28")
+
+        self.assertEqual(list(data), ["GOOD"])
 
     @patch("src.backtest.factory.datetime")
     @patch("src.backtest.factory.FACTORY_CLAUDE_RULEGEN_ENABLED", False)

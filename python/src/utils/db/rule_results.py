@@ -107,6 +107,16 @@ def upsert_rule_best(
         )
 
 
+def delete_rule_best(market: str, symbol: str) -> None:
+    """1銘柄分の最優秀ルールの行を消す（評価が済み有効ルールが無かった銘柄用、#1275）。"""
+    ensure_rule_tables()
+    with _db_connection() as con:
+        con.execute(
+            "DELETE FROM rule_best_by_symbol WHERE market = %s AND symbol = %s",
+            [market, symbol],
+        )
+
+
 def load_rule_best_all(market: str) -> pd.DataFrame:
     """有効な最優秀ルール一覧を返す（全銘柄）。"""
     ensure_rule_tables()
