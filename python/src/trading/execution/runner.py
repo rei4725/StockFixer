@@ -35,7 +35,7 @@ from src.domain.trading_rules import get_lot_size
 from src.domain.types import OrderRunSummary
 from src.trading.brokers.base import BrokerBase, BrokerError, OrderSide
 from src.trading.correlation_risk import evaluate_correlation_gate
-from src.trading.position_valuation import read_short_positions
+from src.trading.position_valuation import coverable_short_qty, read_short_positions
 from src.trading.risk_manager import RiskManager
 from src.trading.signal_generator import apply_multi_horizon_score_column
 from src.trading.types import TradingGateStatus
@@ -414,9 +414,9 @@ def run_daily_orders(
                 continue
             try:
                 pos = next((p for p in short_positions if p["symbol"] == symbol), None)
-                if pos is None or pos["qty"] <= 0:
+                qty = coverable_short_qty(pos) if pos is not None else 0  # 約定待ちを除く
+                if qty <= 0:
                     continue
-                qty = pos["qty"]
                 current_price = float(row.get("current_price") or 0.0)
                 order_type, order_price, order_reason, order_session = _choose_order_params(
                     market=str(row["market"]),

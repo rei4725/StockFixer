@@ -22,6 +22,7 @@ from src.domain.types import TradeDiffRecord
 from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
 from src.trading.brokers.paper import split_adjust as sa
 from src.trading.brokers.paper.fill import apply_fill
+from src.trading.brokers.paper.pending_short import read_pending_shorts, split_filled_short
 from src.trading.position_valuation import (
     long_positions_unrealized_pnl,
     short_positions_unrealized_pnl,
@@ -226,12 +227,13 @@ class PaperBroker(BrokerBase):
         Returns:
             約定した注文のリスト
         """
-        # Phase 1: ペンディング注文を読み込む（接続をすぐに解放）
+        # Phase 1: ペンディング注文を読み込む（接続をすぐに解放）。出た順に約定させ、
+        # 同じ銘柄の返済が先の空売りより先に約定しないようにする（#1225）
         with _db_connection() as con:
             rows = con.execute(
                 "SELECT order_id, market, predicted_at, symbol, side, qty, price, "
                 "signal_price, order_type, created_at "
-                "FROM paper_orders WHERE status='pending'"
+                "FROM paper_orders WHERE status='pending' ORDER BY created_at, order_id"
             ).fetchall()
 
         settled = []
@@ -416,8 +418,11 @@ class PaperBroker(BrokerBase):
         """保有中の空売りポジション一覧を返す。
 
         Returns:
-            list[dict]: [{"symbol": str, "qty": int, "avg_short_price": float,
-                          "current_price": float, "unrealized_pnl": float | None}]
+            list[dict]: [{"symbol": str, "qty": int, "pending_qty": int,
+                          "avg_short_price": float, "current_price": float,
+                          "unrealized_pnl": float | None}]
+            qty は約定待ちの SHORT（仮登録）を含む（保有の上限に数える, #1146）。pending_qty は
+            その約定待ちの株数で、avg_short_price と unrealized_pnl は約定した分だけで出す（#1225）。
             現在値が評価できない銘柄は current_price と unrealized_pnl が NaN になる。
         """
         with _db_connection() as con:
@@ -425,26 +430,35 @@ class PaperBroker(BrokerBase):
                 "SELECT symbol, qty, avg_short_price, updated_at "
                 "FROM paper_short_positions WHERE qty > 0"
             ).fetchall()
+            pending = read_pending_shorts(con) if rows else {}
         if not rows:
             return []
 
         results = []
-        for sym, qty, avg_short, updated_at in rows:
+        for sym, raw_qty, raw_avg, updated_at in rows:
             qty, avg_short, split_known = sa.adjust_short_position_for_splits(
-                self._market_data, sym, qty, avg_short, updated_at
+                self._market_data, sym, raw_qty, raw_avg, updated_at
+            )
+            pending_qty, filled_qty, avg_short = split_filled_short(
+                pending.get(str(sym)), int(raw_qty), qty, avg_short
             )
             current_price = self._latest_close(sym)
-            if not split_known and sa.looks_like_split_gap(avg_short, current_price):
+            if (
+                filled_qty > 0
+                and not split_known
+                and sa.looks_like_split_gap(avg_short, current_price)
+            ):
                 logger.warning(
                     f"[paper] {sym}: 分割の記録が取れず、売り建ての単価と現在値の比が分割の比ほど違う"
                 )
                 current_price = math.nan
-            # 空売りの未実現損益: 売り単価 - 現在価格が正なら利益
-            unrealized_pnl = (avg_short - current_price) * qty
+            # 空売りの未実現損益: 売り単価 - 現在価格が正なら利益。約定待ちの分は評価しない
+            unrealized_pnl = (avg_short - current_price) * filled_qty if filled_qty > 0 else 0.0
             results.append(
                 {
                     "symbol": sym,
                     "qty": qty,
+                    "pending_qty": pending_qty,
                     "avg_short_price": avg_short,
                     "current_price": current_price,
                     "unrealized_pnl": unrealized_pnl,
