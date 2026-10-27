@@ -53,6 +53,7 @@ from src.backtest.hypothesis_review import review_hypothesis
 from src.backtest.metrics import probability_of_backtest_overfitting
 from src.backtest.rules import AndRule, OrRule, TradingRule
 from src.backtest.sandbox_executor import prepare_sandbox_data
+from src.backtest.slippage import make_slippage_fn
 from src.backtest.types import FactoryBatchResult, FactoryEvaluation, FactoryHypothesis
 from src.domain.ports import TextReviewPort
 from src.utils.data_path_utils import get_ticker
@@ -177,8 +178,10 @@ def _make_backtester(
     fee_rate: float,
     slippage: float,
     stop_loss_pct: Optional[float],
+    dynamic_slippage: bool = True,
 ) -> Backtester:
     # market は単元株数（jp=100・us=1）を本番の発注と揃えるために渡す（#978）
+    # 市場インパクトはパイプラインと同じ make_slippage_fn() の既定で数える（#1244）
     return Backtester(
         model_manager=None,
         signal_generator=None,
@@ -193,6 +196,7 @@ def _make_backtester(
         stop_loss_pct=stop_loss_pct,
         take_profit_pct=None,
         position_sizing="full",
+        slippage_fn=make_slippage_fn() if dynamic_slippage else None,
     )
 
 
@@ -232,6 +236,7 @@ def evaluate_hypothesis(
     slippage: float = 0.001,
     stop_loss_pct: Optional[float] = 0.07,
     min_trades_per_symbol: Optional[int] = None,
+    dynamic_slippage: bool = True,
 ) -> FactoryEvaluation:
     """1仮説を全銘柄 × 全期間 + 窓別に評価する。
 
@@ -245,7 +250,7 @@ def evaluate_hypothesis(
         min_trades_per_symbol = FACTORY_GATE_MIN_TRADES_PER_SYMBOL
     rule = build_rule(hypothesis.rule_spec)
     backtester = _make_backtester(
-        hypothesis.market, initial_cash, fee_rate, slippage, stop_loss_pct
+        hypothesis.market, initial_cash, fee_rate, slippage, stop_loss_pct, dynamic_slippage
     )
 
     symbol_rows: list[SymbolMetrics] = []

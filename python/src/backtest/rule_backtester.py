@@ -15,6 +15,7 @@ import pandas as pd
 from src.backtest.backtester import Backtester
 from src.backtest.data_port import get_backtest_data_port
 from src.backtest.rules.base import TradingRule
+from src.backtest.slippage import make_slippage_fn
 from src.utils.data_path_utils import get_ticker
 from src.utils.logger import get_logger
 
@@ -28,8 +29,10 @@ def _make_backtester(
     slippage: float,
     stop_loss_pct: float | None,
     take_profit_pct: float | None,
+    dynamic_slippage: bool = True,
 ) -> Backtester:
     # market は単元株数（jp=100・us=1）を本番の発注と揃えるために渡す（#978）
+    # 市場インパクトはパイプラインと同じ make_slippage_fn() の既定で数える（#1244）
     return Backtester(
         model_manager=None,
         signal_generator=None,
@@ -44,6 +47,7 @@ def _make_backtester(
         stop_loss_pct=stop_loss_pct,
         take_profit_pct=take_profit_pct,
         position_sizing="full",
+        slippage_fn=make_slippage_fn() if dynamic_slippage else None,
     )
 
 
@@ -58,6 +62,7 @@ def run_rule_backtest(
     slippage: float = 0.001,
     stop_loss_pct: float | None = 0.07,
     take_profit_pct: float | None = None,
+    dynamic_slippage: bool = True,
 ) -> list[dict[str, Any]]:
     """
     指定銘柄に対して複数ルールのバックテストを実行する。
@@ -73,6 +78,7 @@ def run_rule_backtest(
         slippage: スリッページ率
         stop_loss_pct: ストップロス率（Noneで無効）
         take_profit_pct: テイクプロフィット率（Noneで無効）
+        dynamic_slippage: 出来高に応じた市場インパクトを数えるか（既定 True）
 
     Returns:
         各ルールのバックテスト結果リスト（win_rate 降順）
@@ -92,7 +98,13 @@ def run_rule_backtest(
     logger.info(f"データ取得完了: {len(df)} 行")
 
     backtester = _make_backtester(
-        market, initial_cash, fee_rate, slippage, stop_loss_pct, take_profit_pct
+        market,
+        initial_cash,
+        fee_rate,
+        slippage,
+        stop_loss_pct,
+        take_profit_pct,
+        dynamic_slippage,
     )
     results = []
 
