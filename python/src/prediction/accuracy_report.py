@@ -226,7 +226,8 @@ def _today_rows(model_rows: pd.DataFrame, snapshot: pd.DataFrame, model: str) ->
 def _load_accuracy(horizon: int) -> pd.DataFrame:
     from src.prediction.db import load_prediction_accuracy
 
-    rows = load_prediction_accuracy(horizon=horizon, limit=_HISTORY_LIMIT)
+    # 読み込みの失敗は0件の JSON にせず投げ、呼び出し元の知らせに乗せる（#1283）
+    rows = load_prediction_accuracy(horizon=horizon, limit=_HISTORY_LIMIT, raise_on_error=True)
     if rows is None or rows.empty:
         return pd.DataFrame(columns=_ACCURACY_COLUMNS)
     rows = rows.copy()
@@ -238,7 +239,9 @@ def _load_accuracy(horizon: int) -> pd.DataFrame:
 def _load_snapshot(model: str) -> pd.DataFrame:
     from src.prediction.db import load_prediction_results
 
-    snapshot = load_prediction_results(limit=_SNAPSHOT_LIMIT, model_version=model)
+    snapshot = load_prediction_results(
+        limit=_SNAPSHOT_LIMIT, model_version=model, raise_on_error=True
+    )
     if snapshot is None or snapshot.empty:
         return pd.DataFrame(columns=_KEY)
     return snapshot
