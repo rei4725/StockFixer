@@ -97,6 +97,30 @@ def _load_recent_returns(symbols: list[str], market: str, window: int) -> pd.Dat
         )
         pivot = pivot.drop(columns=stale_symbols).dropna(how="all")
         returns = pivot.pct_change().dropna()
+    # 窓の途中で日足の欠けた銘柄は本数も最後の日もそろい、上の2つで外れない（#1254）
+    while len(returns) < min_returns and len(pivot.columns) > 1:
+        missing = pivot.iloc[-(window + 1) :].isna().sum()
+        gap_symbols = list(missing[missing == missing.max()].index)
+        if missing.max() == 0 or len(gap_symbols) == len(pivot.columns):
+            break
+        logger.warning(
+            "[corr] 窓の中で日足の欠けが多い銘柄を相関の計算から外す: %s (欠けた日数=%d, 共通のリターン数=%d < %s)",
+            gap_symbols,
+            int(missing.max()),
+            len(returns),
+            min_returns,
+        )
+        pivot = pivot.drop(columns=gap_symbols).dropna(how="all")
+        returns = pivot.pct_change().dropna()
+    if len(returns) < min_returns and len(pivot.columns) > 1:
+        # 数本の相関は大きく振れ、1本なら NaN になる。判定に使わずデータ不足として返す
+        logger.warning(
+            "[corr] 共通のリターンが足りないため相関の表を返さない: %s (共通のリターン数=%d < %s)",
+            list(pivot.columns),
+            len(returns),
+            min_returns,
+        )
+        return pd.DataFrame()
     return returns
 
 
