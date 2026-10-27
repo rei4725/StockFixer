@@ -363,6 +363,28 @@ class TestWeeklySnapshotLastJstWeek(unittest.TestCase):
         self._assert_last_week_snapshot()
 
 
+class TestDirectFallbackJstWeek(unittest.TestCase):
+    """直接集計の道も、週の記録と同じ JST の日付で週に切ること（#1239）。
+
+    2026-05-11（月）〜15（金）JST の朝の5回（predicted_at は前の日の 22:30 UTC）を
+    A=3/5・B=2/5 で置く。JST 月曜の回は UTC では日曜で、UTC の日付で切ると前の週に入る。
+    """
+
+    MONDAY = date(2026, 5, 11)
+
+    def test_five_morning_runs_in_same_jst_week(self):
+        with _db_connection() as con:
+            for symbol, n_hit in {"A": 3, "B": 2}.items():
+                for d in range(5):
+                    TestWeeklySnapshotLastJstWeek._insert(
+                        con, symbol, self.MONDAY + timedelta(days=d), d < n_hit
+                    )
+
+        weekly = _load_weekly_hit_rates_direct(n_weeks=5, horizon=1)
+        self.assertEqual(list(weekly["week_start"]), [self.MONDAY.isoformat()])
+        self.assertAlmostEqual(float(weekly.iloc[0]["hit_rate"]), 0.50)
+
+
 class TestCheckWeeklyHitRateDriftEdgeCases(unittest.TestCase):
     @patch("src.prediction.drift_monitor._load_weekly_hit_rates")
     def test_zero_avg_hit_rate_returns_zero_drop_ratio(self, mock_load):

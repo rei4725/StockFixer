@@ -13,7 +13,7 @@ from datetime import datetime
 
 import pandas as pd
 
-from src.prediction.db import PREDICTED_DATE_SQL, load_weekly_accuracy_snapshots
+from src.prediction.db import jst_day, load_weekly_accuracy_snapshots
 from src.prediction.types import DriftMonitorResult  # noqa: F401
 from src.utils.db._connection import _db_connection
 from src.utils.logger import get_logger
@@ -47,32 +47,38 @@ def _load_weekly_hit_rates_direct(n_weeks: int, horizon: int) -> pd.DataFrame:
 
     週は予想した日（predicted_at）で分ける。checked_at は採点し直しのたびに
     今に書き換わり、古い予想も最新の週に寄るため使わない（#1023）。
+    predicted_at は UTC で、JST 月曜 07:30 の回は UTC では日曜になるため、
+    週の記録（load_weekly_accuracy_summary）と同じ JST の日付で週に切る（#1239）。
 
     Returns:
         DataFrame [week_start, hit_rate] (week_start 降順)。空の場合は空 DataFrame。
     """
-    week_sql = f"CAST(date_trunc('week', TO_DATE({PREDICTED_DATE_SQL}, 'YYYYMMDD')) AS DATE)"
     with _db_connection() as con:
         try:
-            df = pd.read_sql(
-                f"""
+            runs = pd.read_sql(
+                """
                 SELECT
-                    {week_sql} AS week_start,
-                    AVG(CAST(direction_match AS INTEGER)) AS hit_rate
+                    predicted_at,
+                    SUM(CAST(direction_match AS INTEGER)) AS hits,
+                    COUNT(*) AS n
                 FROM prediction_accuracy
                 WHERE horizon = %s
                   AND direction_match IS NOT NULL
-                GROUP BY {week_sql}
-                ORDER BY week_start DESC
-                LIMIT {int(n_weeks)}
+                GROUP BY predicted_at
                 """,
                 con,
                 params=[horizon],
             )
-            if df.empty:
+            if runs.empty:
                 return pd.DataFrame()
-            df["week_start"] = df["week_start"].astype(str)
-            return df[["week_start", "hit_rate"]].reset_index(drop=True)
+            days = pd.to_datetime(runs["predicted_at"].astype(str).map(jst_day), format="%Y%m%d")
+            runs["week_start"] = (days - pd.to_timedelta(days.dt.weekday, unit="D")).dt.strftime(
+                "%Y-%m-%d"
+            )
+            weekly = runs.groupby("week_start", as_index=False)[["hits", "n"]].sum()
+            weekly["hit_rate"] = weekly["hits"] / weekly["n"]
+            weekly = weekly.sort_values("week_start", ascending=False).head(int(n_weeks))
+            return weekly[["week_start", "hit_rate"]].reset_index(drop=True)
         except Exception as e:
             logger.error("週次 Hit Rate 直接集計失敗: %s", e, exc_info=True)
             return pd.DataFrame()
