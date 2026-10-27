@@ -22,12 +22,19 @@ _KEY_HEALTH = "alert.health_degraded_streak"
 
 
 class _ConfigStoreTestCase(unittest.TestCase):
-    """system_config を辞書に置き換える。"""
+    """system_config を辞書に置き換え、記録のたびに JST の日を1日進める（#1242）。"""
 
     def setUp(self):
         self.store: dict[str, str] = {}
         stack = ExitStack()
         self.addCleanup(stack.close)
+        days = (f"202610{d:02d}" for d in range(1, 32))
+        stack.enter_context(
+            patch(
+                "src.orchestration.jobs.alert_streaks.today_jst_key",
+                side_effect=lambda: next(days),
+            )
+        )
         stack.enter_context(
             patch(
                 "src.utils.db.system_config.get_config_value",
