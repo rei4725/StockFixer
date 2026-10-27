@@ -314,6 +314,10 @@ class PaperBroker(BrokerBase):
                                 "UPDATE paper_orders SET status='expired' WHERE order_id=%s",
                                 [order_id],
                             )
+                            if side == int(OrderSide.SHORT):
+                                # cancel_order と同じく仮登録を戻す。行も分割で直してあるので、
+                                # 分割の直しの後の株数と指値で引く（#1219）
+                                _undo_short_registration(con, symbol, qty, limit_price)
                         continue
 
                 # Phase 2: 約定処理（接続を再取得）。接続は自動確定のため、1件分を囲み、
