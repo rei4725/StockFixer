@@ -161,6 +161,8 @@ def _resolve_kelly_params(
 ) -> tuple[float | None, float | None, float | None]:
     """BT実績の Kelly 入力値を optimal_params.json から取得する。
     未登録・値が 0 以下・NaN の場合は None を返し、RiskManager のデフォルト値を使用させる。
+    ただし win_rate が 0 で avg_loss が正（取引があり全部負けた）の場合は win_rate を 0.0 で
+    返し、Kelly を 0 にして新規を見送らせる（#1259）。
 
     Returns:
         (win_rate, avg_win, avg_loss) — 各値が使用不能な場合は None
@@ -176,7 +178,16 @@ def _resolve_kelly_params(
             return None
         return fv if fv > 0.0 else None
 
-    return _extract("win_rate"), _extract("avg_win"), _extract("avg_loss")
+    win_rate, avg_win, avg_loss = _extract("win_rate"), _extract("avg_win"), _extract("avg_loss")
+    if win_rate is None and avg_loss is not None:
+        raw_win_rate: float | None
+        try:
+            raw_win_rate = float(metrics.get("win_rate"))  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            raw_win_rate = None
+        if raw_win_rate == 0.0:
+            win_rate = 0.0
+    return win_rate, avg_win, avg_loss
 
 
 # R-308: 分割エントリー/エグジット（確信度連動）

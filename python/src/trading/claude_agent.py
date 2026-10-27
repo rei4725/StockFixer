@@ -198,10 +198,15 @@ def _handle_place_order(
         return {"status": "skipped", "reason": buy_block_reason}
 
     # RiskManager 再チェック（Claude の判断時点と現在の間にレースコンディションが起きても安全）。
-    # 8:50 の道・ルールの道と同じく、不合格なら新規の買いだけ止め、保有の売りは通す
-    gate = risk.evaluate_trading_gate()
-    if side == OrderSide.BUY and not gate.is_allowed:
-        msg = f"RiskManager ゲート不合格のためスキップ: {gate.reason}"
+    # 不合格・評価の失敗なら新規の買いだけ止め、保有の売りでは評価を呼ばずに通す（#1260）
+    try:
+        gate = risk.evaluate_trading_gate() if side == OrderSide.BUY else None
+        gate_reason = None if gate is None or gate.is_allowed else str(gate.reason)
+    except Exception as e:
+        logger.error("[claude_agent] ゲートの評価に失敗: %s", e, exc_info=True)
+        gate_reason = f"評価に失敗 {e}"
+    if gate_reason is not None:
+        msg = f"RiskManager ゲート不合格のためスキップ: {gate_reason}"
         logger.warning("[claude_agent] %s → %s", symbol, msg)
         stats["skipped"] += 1
         return {"status": "skipped", "reason": msg}
@@ -330,6 +335,16 @@ def _handle_place_order(
         return {"status": "error", "reason": str(e)}
 
 
+def _place_order_or_error(**kwargs: Any) -> dict[str, Any]:
+    """1件の発注の例外で回ごと落とさず、error として返し errors に数える（#1260）。"""
+    try:
+        return _handle_place_order(**kwargs)
+    except Exception as e:
+        logger.error("[claude_agent] 発注の処理に失敗 %s: %s", kwargs["symbol"], e, exc_info=True)
+        kwargs["stats"]["errors"] += 1
+        return {"status": "error", "reason": str(e)}
+
+
 # ---------------------------------------------------------------------------
 # メインエントリーポイント
 # ---------------------------------------------------------------------------
@@ -392,27 +407,37 @@ def run_claude_trader(
         return stats
 
     risk = RiskManager(broker, market=market)
-    risk.update_peak_balance()
-
-    # 発注可否チェック。不合格でも早く戻らず、新規の買いだけ止めて保有の売りは受け付ける
-    gate = risk.evaluate_trading_gate()
     gate_notice = ""
-    if not gate.is_allowed:
-        logger.warning("[claude_agent] リスクゲート不合格 → 新規の買いを停止: %s", gate.reason)
-        stats.update({"trading_stopped": gate.stop_active, "stop_reason": gate.reason})
-        gate_notice = (
-            f"\n## 本日の状態\nリスクゲート不合格（{gate.reason}）のため新規の buy は受け付けない。"
-            "保有の sell だけを判断すること。\n"
-        )
+    buy_block_reason: str | None = None
+    caps: RunBuyCaps | None = None
+    # 新規買いにだけ使う手順が落ちたら、新規の buy は止め保有の sell だけ判断させてから、
+    # 同じ例外を投げ直して回を失敗にする（#1260。ルールの道の #1221 と同じ形）
+    buy_step_error: Exception | None = None
+    try:
+        risk.update_peak_balance()
+        # 発注可否チェック。不合格でも早く戻らず、新規の買いだけ止めて保有の売りは受け付ける
+        gate = risk.evaluate_trading_gate()
+        if not gate.is_allowed:
+            logger.warning("[claude_agent] リスクゲート不合格 → 新規の買いを停止: %s", gate.reason)
+            stats.update({"trading_stopped": gate.stop_active, "stop_reason": gate.reason})
+            gate_notice = (
+                f"\n## 本日の状態\nリスクゲート不合格（{gate.reason}）のため新規の buy は受け付けない。"
+                "保有の sell だけを判断すること。\n"
+            )
 
-    # 回の中で増える買い・建玉・業種を数え、相関ゲートを1回だけ評価する（8:50 の道と同じく回の始めの保有から）。
-    # 前の回の約定待ちの BUY も約定の後に保有になるため、保有に入れて数える（#1177）。
-    # 空売りの建玉も MAX_POSITIONS に数える（#1211、16:30 の道と同じ）
-    caps = start_run_buy_caps(
-        _get_held_symbols(broker) | _get_pending_buy_symbols(broker),
-        market,
-        short_count=count_short_positions(broker),
-    )
+        # 回の中で増える買い・建玉・業種を数え、相関ゲートを1回だけ評価する（8:50 の道と同じく回の始めの保有から）。
+        # 前の回の約定待ちの BUY も約定の後に保有になるため、保有に入れて数える（#1177）。
+        # 空売りの建玉も MAX_POSITIONS に数える（#1211、16:30 の道と同じ）
+        caps = start_run_buy_caps(
+            _get_held_symbols(broker) | _get_pending_buy_symbols(broker),
+            market,
+            short_count=count_short_positions(broker),
+        )
+    except Exception as exc:
+        logger.error("[claude_agent] 新規買いの判定の手順に失敗。sell だけ出す", exc_info=True)
+        buy_step_error = exc
+        buy_block_reason = f"新規買いの判定の手順に失敗したため新規の buy を止める（{exc}）"
+        gate_notice += f"\n## 本日の状態\n{buy_block_reason}。保有の sell だけを判断すること。\n"
 
     # 予測キャッシュ（place_order ハンドラーで参照）
     predictions_cache = prediction_repo.get_latest_by_market(market)
@@ -421,13 +446,12 @@ def run_claude_trader(
         predictions_cache = apply_multi_horizon_score_column(predictions_cache)
 
     # optimal_params.json が読めない日は、既定の閾値・Kelly で新規を出さず、保有の sell だけ通す（#1227）
-    buy_block_reason: str | None = None
     if _params_unreadable(predictions_cache):
-        buy_block_reason = _PARAMS_UNREADABLE_REASON
-        logger.error("[claude_agent] %s", buy_block_reason)
+        buy_block_reason = buy_block_reason or _PARAMS_UNREADABLE_REASON
+        logger.error("[claude_agent] %s", _PARAMS_UNREADABLE_REASON)
         stats["errors"] += 1
         gate_notice += (
-            f"\n## 最適パラメータ\n{buy_block_reason}。新規の buy は受け付けない。"
+            f"\n## 最適パラメータ\n{_PARAMS_UNREADABLE_REASON}。新規の buy は受け付けない。"
             "保有の sell だけを判断すること。\n"
         )
 
@@ -519,7 +543,7 @@ market: {market}, mode: {mode}
                 result = _handle_get_risk_status(risk)
 
             elif tool_name == "place_order":
-                result = _handle_place_order(
+                result = _place_order_or_error(
                     symbol=str(tool_input.get("symbol", "")),
                     side_str=str(tool_input.get("side", "buy")),
                     reasoning=str(tool_input.get("reasoning", "")),
@@ -569,4 +593,6 @@ market: {market}, mode: {mode}
         stats["skipped"],
         stats["errors"],
     )
+    if buy_step_error is not None:
+        raise buy_step_error
     return stats

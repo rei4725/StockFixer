@@ -161,6 +161,45 @@ class TestKellyUnreadable(unittest.TestCase):
             result = _resolve_kelly_params("jp", "6501")
         self.assertEqual(result, (0.55, 0.03, 0.02))
 
+    def test_all_losses_keeps_zero_win_rate_and_sizes_zero(self):
+        # 取引があり全部負けた銘柄は勝率 0 を既定の 55% に戻さず、新規を見送る（#1259）
+        from src.trading.risk_manager import RiskManager
+
+        with patch(
+            "src.trading.execution.params.get_optimal_params",
+            return_value={"metrics": {"win_rate": 0.0, "avg_win": 0.0, "avg_loss": 0.012}},
+        ):
+            win_rate, avg_win, avg_loss = _resolve_kelly_params("jp", "6501")
+        self.assertEqual(win_rate, 0.0)
+        self.assertEqual(avg_loss, 0.012)
+
+        risk = RiskManager(_make_broker(), market="jp")
+        risk.get_current_dd_ratio = MagicMock(return_value=0.0)
+        with patch("yfinance.Ticker", side_effect=RuntimeError("unit テストでは ^VIX を読まない")):
+            qty = risk.calc_position_size(
+                "6501", price=1000.0, win_rate=win_rate, avg_win=avg_win, avg_loss=avg_loss
+            )
+        self.assertEqual(qty, 0)
+
+    def test_unusable_metrics_return_none(self):
+        # 取引なし（全部 0）・NaN・欠けは今までどおり既定に戻す
+        cases = [
+            {"win_rate": 0.0, "avg_win": 0.0, "avg_loss": 0.0},
+            {"win_rate": float("nan"), "avg_win": float("nan"), "avg_loss": float("nan")},
+            {"win_rate": float("nan"), "avg_win": 0.0, "avg_loss": 0.012},
+            {"win_rate": 0.0, "avg_win": 0.0},
+            {},
+        ]
+        for metrics in cases:
+            with self.subTest(metrics=metrics):
+                with patch(
+                    "src.trading.execution.params.get_optimal_params",
+                    return_value={"metrics": metrics},
+                ):
+                    win_rate, avg_win, _ = _resolve_kelly_params("jp", "6501")
+                self.assertIsNone(win_rate)
+                self.assertIsNone(avg_win)
+
     def test_claude_buy_sizes_with_default_kelly(self):
         from src.trading.claude_agent import _handle_place_order
 

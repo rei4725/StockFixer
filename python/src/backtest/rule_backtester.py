@@ -22,6 +22,10 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+class RuleBacktestDataError(RuntimeError):
+    """値段の取得に失敗した（None・空）ことを、有効ルールなしと分けて伝える（#1270）。"""
+
+
 def _make_backtester(
     market: str,
     initial_cash: float,
@@ -63,6 +67,7 @@ def run_rule_backtest(
     stop_loss_pct: float | None = 0.07,
     take_profit_pct: float | None = None,
     dynamic_slippage: bool = True,
+    raise_on_fetch_failure: bool = False,
 ) -> list[dict[str, Any]]:
     """
     指定銘柄に対して複数ルールのバックテストを実行する。
@@ -79,6 +84,8 @@ def run_rule_backtest(
         stop_loss_pct: ストップロス率（Noneで無効）
         take_profit_pct: テイクプロフィット率（Noneで無効）
         dynamic_slippage: 出来高に応じた市場インパクトを数えるか（既定 True）
+        raise_on_fetch_failure: 値段の取得の失敗を空のリストでなく
+            RuleBacktestDataError で返すか（既定 False）
 
     Returns:
         各ルールのバックテスト結果リスト（win_rate 降順）
@@ -90,6 +97,8 @@ def run_rule_backtest(
     df = _dp.download(ticker, start=start, end=end)
     if df is None or df.empty:
         logger.error(f"データ取得失敗: {ticker}")
+        if raise_on_fetch_failure:
+            raise RuleBacktestDataError(f"データ取得失敗: {ticker}")
         return []
 
     df = _dp.add_technical_indicators(df)
