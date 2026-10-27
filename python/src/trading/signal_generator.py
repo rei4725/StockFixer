@@ -3,14 +3,15 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from src.domain.regime_weights import REGIME_SECTOR_WEIGHTS as REGIME_SECTOR_WEIGHTS  # noqa: F401
-from src.domain.regime_weights import (  # noqa: F401
-    get_regime_sector_weight as get_regime_sector_weight,
-)
 from src.domain.trading_rules import CONFLUENCE_BOOST_PER_HORIZON as _CONFLUENCE_BOOST_PER_HORIZON
 from src.domain.trading_rules import DEFAULT_HORIZON_WEIGHTS as _DEFAULT_HORIZON_WEIGHTS
 from src.utils.logger import get_logger
 from src.utils.signal_generator import SignalGenerator as SignalGenerator  # noqa: F401
+
+from src.domain.regime_weights import (  # noqa: F401  # isort: skip
+    REGIME_SECTOR_WEIGHTS as REGIME_SECTOR_WEIGHTS,
+    get_regime_sector_weight as get_regime_sector_weight,
+)
 
 logger = get_logger(__name__)
 

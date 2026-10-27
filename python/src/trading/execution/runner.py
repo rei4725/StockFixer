@@ -38,9 +38,9 @@ from src.trading.correlation_risk import evaluate_correlation_gate
 from src.trading.position_valuation import coverable_short_qty, read_short_positions
 from src.trading.risk_manager import RiskManager
 from src.trading.signal_generator import apply_multi_horizon_score_column
-from src.trading.types import TradingGateStatus
 from src.utils.logger import get_logger
 
+from .entry_gates import _block_entries, _evaluate_entry_gate
 from .params import (
     _SPLIT_LOW_CONFIDENCE,
     _apply_split_qty,
@@ -108,25 +108,11 @@ def run_daily_orders(
 
     risk = RiskManager(broker, market=market)
     lot = get_lot_size(market)
-    gate_status: TradingGateStatus | None = None
-    prepared = None  # 予測が空の日は None のまま（#1049）
-    # SL/TP より前の手順が落ちたら、新規は止め SL/TP の決済だけ行い、ジョブは失敗にする（#932・#1179）
+    # 新規にだけ使う手順が落ちたら、新規は止め決済は出してから投げ直す（#1281。#1221 と同じ形）
+    gate_status, entry_error = _evaluate_entry_gate(risk, stats)
+    held_symbols: set[str] | None = None  # 予測が空の日は None のまま（#1049）
+    # 予測・保有が読めなければ、新規は止め SL/TP の決済だけ行い、ジョブは失敗にする（#932・#1179）
     try:
-        risk.update_peak_balance()  # R-307: DD基準値を発注前に更新
-        # --- 当日取引可否: 不合格なら新規（買い・ショート）だけ止め、決済は続ける（#874） ---
-        gate_status = risk.evaluate_trading_gate()
-        if not gate_status.is_allowed:
-            logger.warning(
-                "[exec] リスクチェック不合格 → 本日の新規発注をスキップ（決済は続ける）: %s",
-                gate_status.reason or "理由未設定",
-            )
-            stats.update(
-                {
-                    "trading_stopped": gate_status.stop_active,
-                    "stop_reason": gate_status.reason,
-                    "reason_code": gate_status.reason_code,
-                }
-            )
         predictions = prediction_repo.get_latest_by_market(market)
         if not predictions.empty:
             if "predicted_at" not in predictions.columns:
@@ -134,30 +120,35 @@ def run_daily_orders(
             predictions = _attach_dynamic_thresholds(predictions)
             predictions = apply_multi_horizon_score_column(predictions)
             held_symbols = _get_held_symbols(broker)
-            # --- 相関ゲート: 保有銘柄間の相関上昇時に新規買いをブロック ---
-            prepared = held_symbols, evaluate_correlation_gate(
-                sorted(held_symbols),
-                market,
-                window=CORRELATION_WINDOW_DAYS,
-                enc_threshold=CORRELATION_ENC_THRESHOLD,
-            )
     except Exception:
         logger.error("[exec] SL/TP より前の手順に失敗。SL/TP の決済だけ行う", exc_info=True)
-        if gate_status is None:
-            _check_sl_tp_exits(broker, market, mode, market_data, stats, trade_diff_sink)
-        else:
-            _sl_tp_exits_only(
-                broker, market, mode, market_data, stats, trade_diff_sink, gate_status
-            )
+        _sl_tp_exits_only(broker, market, mode, market_data, stats, trade_diff_sink, gate_status)
         raise
-    if prepared is None:
+    if held_symbols is None:
         # SL/TP は予測を使わないので決済だけは走らせ、新規と売りシグナルの決済は飛ばす（#1049）
         logger.warning(
             "[exec] 予測結果が存在しません（SL/TP の決済だけ行う）。run_predict.py を確認"
         )
         _sl_tp_exits_only(broker, market, mode, market_data, stats, trade_diff_sink, gate_status)
+        if entry_error is not None:
+            raise entry_error
         return stats
-    held_symbols, corr_gate = prepared
+    # 相関ゲートを評価しない・評価が落ちた日も corr_gate に不合格の値が入るよう先に置く
+    blocked_status, corr_gate = _block_entries(gate_status)
+    if entry_error is None:
+        try:
+            # --- 相関ゲート: 保有銘柄間の相関上昇時に新規買いをブロック ---
+            corr_gate = evaluate_correlation_gate(
+                sorted(held_symbols),
+                market,
+                window=CORRELATION_WINDOW_DAYS,
+                enc_threshold=CORRELATION_ENC_THRESHOLD,
+            )
+        except Exception as exc:
+            logger.error("[exec] 相関ゲートの評価に失敗。新規は止め、決済は続ける", exc_info=True)
+            entry_error = exc
+    if entry_error is not None:
+        gate_status = blocked_status
     gate_status = _block_new_if_params_unreadable(predictions, gate_status, stats)
     logger.info(
         "[exec] 動的閾値適用: scale=%.3f buy_range=%.3f%%-%.3f%%",
@@ -597,4 +588,6 @@ def run_daily_orders(
         )
     except Exception:
         logger.error("[exec] order_run_summary 保存失敗", exc_info=True)
+    if entry_error is not None:
+        raise entry_error
     return stats

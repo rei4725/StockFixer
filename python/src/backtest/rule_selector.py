@@ -13,7 +13,12 @@ from typing import Any
 
 from src.backtest.rule_backtester import run_rule_backtest
 from src.backtest.rules import ALL_RULES
-from src.utils.db.rule_results import delete_rule_best, load_rule_best_all, upsert_rule_best
+from src.utils.db.rule_results import (
+    delete_rule_best,
+    delete_rule_best_except,
+    load_rule_best_all,
+    upsert_rule_best,
+)
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -70,7 +75,8 @@ def evaluate_all_symbols(
     Returns:
         {"evaluated": int, "effective": int, "skipped": int, "errors": int}
         skipped は有効ルールなしの銘柄の数、errors は値段の取得の失敗か、
-        評価（保存を含む）が例外で落ちた銘柄の数。
+        評価（保存を含む）が例外で落ちた銘柄の数に、ウォッチリストから外れた銘柄の
+        行の削除の失敗（1回）を足したもの。
     """
     target_symbols = symbols or _load_symbols(market)
     logger.info(f"ルール評価開始: {len(target_symbols)} 銘柄 ({market})")
@@ -128,6 +134,14 @@ def evaluate_all_symbols(
             # 失敗は有効ルールなしと分けて数え、呼び出し元がジョブを失敗にできるようにする（#1087）。
             # ほかの銘柄の評価は止めない。
             logger.error(f"  [{symbol}] 評価失敗: {exc}", exc_info=True)
+            errors += 1
+
+    if symbols is None and target_symbols:
+        # 外れた銘柄の行を残すと、16:30 のルールの発注で新規買いが出続ける（#1294）
+        try:
+            delete_rule_best_except(market=market, keep_symbols=target_symbols)
+        except Exception as exc:
+            logger.error(f"ウォッチリスト外の行の削除に失敗: {exc}", exc_info=True)
             errors += 1
 
     summary = {
