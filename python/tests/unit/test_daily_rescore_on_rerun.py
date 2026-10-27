@@ -40,7 +40,7 @@ def _run_pipeline(snapshot: dict[str, list[dict]]):
 
     saved: list[dict] = []
 
-    def load_results(limit=5000, model_version=None):
+    def load_results(limit=5000, model_version=None, raise_on_error=False):
         return pd.DataFrame(snapshot.get(model_version, []))
 
     def latest_timestamp(model_version=None):

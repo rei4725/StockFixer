@@ -398,8 +398,11 @@ def run_accuracy_check(
         f"model_version_filter={model_version_filter}) ==="
     )
 
-    # 直近の予測結果を取得（model_version フィルタ付き）
-    df_pred = load_prediction_results(limit=5000, model_version=model_version_filter)
+    # 直近の予測結果を取得（model_version フィルタ付き）。読み込みの失敗は行が無いことと分け、
+    # 例外として日次の道の [2/6] の知らせに乗せる（#1282）
+    df_pred = load_prediction_results(
+        limit=5000, model_version=model_version_filter, raise_on_error=True
+    )
     if df_pred is None or df_pred.empty:
         logger.info("予測結果が存在しません（model_version=%s）。", model_version_filter)
         return pd.DataFrame()
