@@ -49,6 +49,7 @@ def exit_expired_positions() -> list[str]:
     from src.trading.brokers.account.factory import make_order_broker
     from src.trading.brokers.base import OrderSide
     from src.trading.execution.pending import _log_pending_skips, _read_pending_exits
+    from src.trading.position_valuation import coverable_short_qty
     from src.utils.db._connection import _db_connection
 
     today_str = today_jst_iso()  # target_exit_date は保有の最後の JST の日 (#949)
@@ -99,11 +100,15 @@ def exit_expired_positions() -> list[str]:
     exited: list[str] = []
     failed: list[str] = []
     for symbol, side, pos in exits:
-        if pos is None or pos.get("qty", 0) <= 0:
+        if pos is None:
+            continue
+        # 空売りは約定待ちの SHORT の分を返さない (#1252)
+        qty = coverable_short_qty(pos) if side == OrderSide.SHORT_COVER else pos.get("qty", 0)
+        if qty <= 0:
             continue
         try:
-            broker.send_order(symbol, side, pos["qty"])
-            logger.info("[horizon_exit] ホライズン決済: %s %s %d株", symbol, side.name, pos["qty"])
+            broker.send_order(symbol, side, qty)
+            logger.info("[horizon_exit] ホライズン決済: %s %s %d株", symbol, side.name, qty)
             exited.append(symbol)
         except Exception as e:
             logger.error("[horizon_exit] 決済失敗: %s: %s", symbol, e, exc_info=True)
