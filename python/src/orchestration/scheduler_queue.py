@@ -26,6 +26,10 @@ from zoneinfo import ZoneInfo
 from filelock import FileLock
 
 from config.settings import settings
+from src.orchestration.scheduler_cutoff import (
+    is_past_recovery_until,
+    warn_scheduled_start_past_cutoff,
+)
 from src.orchestration.scheduler_interrupted import count_executions
 from src.utils.data_path_utils import ensure_dir, get_results_dir
 from src.utils.heartbeat import ping_heartbeat
@@ -113,6 +117,12 @@ class SchedulerQueueManager:
         now = self.now()
         if period_key is None:
             period_key = self._build_period_key(config, now)
+
+        # 定時の回も、misfire の猶予で遅れて締め（recovery_until）を過ぎて走り出したら動かさない。
+        # 寄り付き前の予想で寄り付きの後に発注しないため。手での即時実行（force）は対象の外（#1298）
+        if reason == "scheduled" and not force and is_past_recovery_until(config, now):
+            warn_scheduled_start_past_cutoff(job_id, config, period_key, now)
+            return False
 
         # 実行中の確かめ・回数の確かめ・始めの記録を、ロックの内でひと続きに行う。
         # 回数は別のプロセスの記録も数えるため、ファイルを読み直してから数える
@@ -400,11 +410,8 @@ class SchedulerQueueManager:
 
         # recovery_until (hour, minute) を持つジョブは、その日のその時刻から補完しない。
         # 発注のようにその日の相場の前にしか意味の無いジョブを、引けの後や夜に動かさない（#835）
-        recovery_until = config.get("recovery_until")
-        if recovery_until is not None:
-            until_hour, until_minute = recovery_until
-            if now >= now.replace(hour=until_hour, minute=until_minute, second=0, microsecond=0):
-                return False
+        if is_past_recovery_until(config, now):
+            return False
 
         if not self._reload_state_for_recovery():
             return False
