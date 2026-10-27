@@ -39,6 +39,7 @@ from src.trading.execution import (
     _record_order,
     _resolve_kelly_params,
 )
+from src.trading.execution.params import _PARAMS_UNREADABLE_COL
 from src.trading.execution.pending import _load_pending_exits
 from src.trading.execution.selection import _get_pending_buy_symbols
 from src.trading.position_valuation import count_short_positions
@@ -54,6 +55,18 @@ _MAX_AGENT_TURNS = 20
 
 # Claude に渡す予測候補の上限行数（トークン節約）
 _MAX_PREDICTION_ROWS = 50
+
+# optimal_params.json が読めない日に新規の buy を止める理由（#1227、8:50 の道の #1214 と同じ止め方）
+_PARAMS_UNREADABLE_REASON = (
+    "optimal_params.json が読めないため新規の buy を止める（保有の sell は可）"
+)
+
+
+def _params_unreadable(predictions: pd.DataFrame) -> bool:
+    """閾値を既定値で決めた行があるか。あれば新規の buy を止める（#1227）。"""
+    if _PARAMS_UNREADABLE_COL not in predictions.columns:
+        return False
+    return bool(predictions[_PARAMS_UNREADABLE_COL].astype(bool).any())
 
 
 # ---------------------------------------------------------------------------
@@ -74,11 +87,14 @@ def _handle_get_predictions(
         predictions = apply_multi_horizon_score_column(predictions)
 
         held_symbols = _get_held_symbols(broker)
+        buy_blocked = _params_unreadable(predictions)
 
         buy_candidates = predictions[
             (~predictions["symbol"].isin(held_symbols))
             & (predictions["multi_horizon_score"] >= predictions["effective_buy_threshold"])
         ].head(_MAX_PREDICTION_ROWS)
+        if buy_blocked:
+            buy_candidates = buy_candidates.iloc[0:0]
 
         sell_candidates = predictions[
             (predictions["symbol"].isin(held_symbols))
@@ -103,7 +119,7 @@ def _handle_get_predictions(
             available = [c for c in cols if c in df.columns]
             return df[available].to_dict(orient="records")
 
-        return {
+        result: dict[str, Any] = {
             "buy_candidates": _to_records(buy_candidates),
             "sell_candidates": _to_records(sell_candidates),
             "held_symbols": sorted(held_symbols),
@@ -111,6 +127,9 @@ def _handle_get_predictions(
                 float(predictions["threshold_scale"].iloc[0]) if not predictions.empty else 1.0
             ),
         }
+        if buy_blocked:
+            result["buy_blocked_reason"] = _PARAMS_UNREADABLE_REASON
+        return result
     except Exception as e:
         logger.error("[claude_agent] get_predictions エラー: %s", e, exc_info=True)
         return {"error": str(e)}
@@ -164,13 +183,19 @@ def _handle_place_order(
     *,
     trade_diff_sink: TradeDiffSink,
     caps: RunBuyCaps | None = None,
+    buy_block_reason: str | None = None,
 ) -> dict[str, Any]:
     """
     RiskManager ゲート・1回の買いの上限（caps）・ポジションサイジングを強制適用して注文を発注する。
-    Claude がこれらをバイパスする手段はない。
+    Claude がこれらをバイパスする手段はない。buy_block_reason があれば新規の買いだけ止める。
     """
     # 発注方向の変換
     side = OrderSide.BUY if side_str == "buy" else OrderSide.SELL
+
+    if side == OrderSide.BUY and buy_block_reason is not None:
+        logger.warning("[claude_agent] %s → スキップ: %s", symbol, buy_block_reason)
+        stats["skipped"] += 1
+        return {"status": "skipped", "reason": buy_block_reason}
 
     # RiskManager 再チェック（Claude の判断時点と現在の間にレースコンディションが起きても安全）。
     # 8:50 の道・ルールの道と同じく、不合格なら新規の買いだけ止め、保有の売りは通す
@@ -395,6 +420,17 @@ def run_claude_trader(
         predictions_cache = _attach_dynamic_thresholds(predictions_cache)
         predictions_cache = apply_multi_horizon_score_column(predictions_cache)
 
+    # optimal_params.json が読めない日は、既定の閾値・Kelly で新規を出さず、保有の sell だけ通す（#1227）
+    buy_block_reason: str | None = None
+    if _params_unreadable(predictions_cache):
+        buy_block_reason = _PARAMS_UNREADABLE_REASON
+        logger.error("[claude_agent] %s", buy_block_reason)
+        stats["errors"] += 1
+        gate_notice += (
+            f"\n## 最適パラメータ\n{buy_block_reason}。新規の buy は受け付けない。"
+            "保有の sell だけを判断すること。\n"
+        )
+
     # システムプロンプト
     system_prompt = f"""あなたは株式トレードの判断を行う AI エージェントです。
 
@@ -495,6 +531,7 @@ market: {market}, mode: {mode}
                     stats=stats,
                     trade_diff_sink=trade_diff_sink,
                     caps=caps,
+                    buy_block_reason=buy_block_reason,
                 )
             else:
                 result = {"error": f"未知の tool: {tool_name}"}
