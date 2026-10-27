@@ -65,6 +65,24 @@ def _stale_symbol_frame(stale_days: int) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _gap_symbol_frame(gap_days: int) -> pd.DataFrame:
+    """A と B は直近 21 本の日足（高い相関）、C は直近から2日目以降の gap_days 日が欠けた 21 本の表。"""
+    np.random.seed(13)
+    dates = pd.bdate_range(end="2026-10-23", periods=21 + gap_days)
+    base = 100.0 + np.cumsum(np.random.randn(21))
+    c_dates = dates[:20].append(dates[-1:])
+    closes = {
+        "A": (dates[gap_days:], base),
+        "B": (dates[gap_days:], base + np.random.randn(21) * 0.05),
+        "C": (c_dates, 50.0 + np.cumsum(np.random.randn(21))),
+    }
+    rows = []
+    for sym, (sym_dates, values) in closes.items():
+        for ts, close in zip(sym_dates, values):
+            rows.append({"symbol": sym, "ts": ts, "close": float(close)})
+    return pd.DataFrame(rows)
+
+
 class TestLoadRecentReturns(unittest.TestCase):
     """終値は stock_features ではなく market_data_raw の close から読む。
 
@@ -149,6 +167,23 @@ class TestLoadRecentReturns(unittest.TestCase):
         self.assertEqual(list(returns.columns), ["A", "B"])
         self.assertEqual(len(returns), 20)
         self.assertTrue(any("'C'" in line for line in logs.output))
+
+    def test_gap_symbol_inside_window_is_dropped_and_rest_keep_window(self):
+        """日足が窓の途中で15営業日欠けた銘柄を外し、残りの20日分を使う（#1254）"""
+        frame = _gap_symbol_frame(gap_days=15)
+        with self.assertLogs("src.trading.correlation_risk", level="WARNING") as logs:
+            returns = _run_load(frame, ["A", "B", "C"], 20)
+
+        self.assertEqual(list(returns.columns), ["A", "B"])
+        self.assertEqual(len(returns), 20)
+        self.assertTrue(any("'C'" in line for line in logs.output))
+
+    def test_two_symbols_with_one_common_row_returns_no_correlation_rows(self):
+        """2銘柄で共通のリターンが1本なら、数本の相関の表を返さない（#1254）"""
+        frame = _gap_symbol_frame(gap_days=18)
+        returns = _run_load(frame[frame["symbol"] != "B"], ["A", "C"], 20)
+
+        self.assertLess(len(returns.columns), 2)
 
     def test_all_symbols_short_returns_empty(self):
         frame = _short_history_frame(short_bars=1)
@@ -347,6 +382,44 @@ class TestEvaluateCorrelationGate(unittest.TestCase):
         self.assertAlmostEqual(result.avg_correlation, expected_corr, places=10)
         self.assertAlmostEqual(result.enc, 2.0 / (1.0 + expected_corr), places=10)
         self.assertFalse(result.is_allowed)
+
+    def test_gap_symbol_inside_window_excluded_and_rest_judged(self):
+        """C の日足が窓の途中で15営業日欠けたら C を外し、A と B の20日分で判定する（#1254）"""
+        frame = _gap_symbol_frame(gap_days=15)
+        expected_corr = self._expected_ab_corr(frame)
+
+        result = self._gate_with_frame(frame)
+
+        self.assertAlmostEqual(result.avg_correlation, expected_corr, places=10)
+        self.assertAlmostEqual(result.enc, 2.0 / (1.0 + expected_corr), places=10)
+        self.assertFalse(result.is_allowed)
+
+    def test_one_common_row_does_not_judge_with_nan_enc(self):
+        """共通のリターンが1本になる欠けでも、ENC を NaN のまま判定しない（#1254）"""
+        frame = _gap_symbol_frame(gap_days=18)
+        expected_corr = self._expected_ab_corr(frame)
+
+        result = self._gate_with_frame(frame)
+
+        self.assertFalse(np.isnan(result.enc))
+        self.assertAlmostEqual(result.enc, 2.0 / (1.0 + expected_corr), places=10)
+
+    def test_two_symbols_one_common_row_does_not_judge_with_nan_enc(self):
+        """2銘柄で共通のリターンが1本なら、ENC=nan で止めずにデータ不足として扱う（#1254）"""
+        frame = _gap_symbol_frame(gap_days=18)
+        conn_cm = MagicMock()
+        conn_cm.__enter__.return_value = MagicMock()
+        with (
+            patch("src.trading.correlation_risk._db_connection", return_value=conn_cm),
+            patch(
+                "src.trading.correlation_risk.pd.read_sql",
+                return_value=frame[frame["symbol"] != "B"],
+            ),
+        ):
+            result = evaluate_correlation_gate(["A", "C"], "jp", window=20, enc_threshold=2.0)
+
+        self.assertFalse(np.isnan(result.enc))
+        self.assertNotIn("nan", result.reason or "")
 
     @patch("src.trading.correlation_risk._load_recent_returns")
     def test_returns_correct_type(self, mock_load):

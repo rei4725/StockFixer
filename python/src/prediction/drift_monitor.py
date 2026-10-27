@@ -42,13 +42,16 @@ def _load_weekly_hit_rates_from_snapshots(n_weeks: int) -> pd.DataFrame:
     return weekly
 
 
-def _load_weekly_hit_rates_direct(n_weeks: int, horizon: int) -> pd.DataFrame:
+def _load_weekly_hit_rates_direct(
+    n_weeks: int, horizon: int, model_name: str = "production"
+) -> pd.DataFrame:
     """prediction_accuracy テーブルを直接集計し週次 Hit Rate を返す（フォールバック）。
 
     週は予想した日（predicted_at）で分ける。checked_at は採点し直しのたびに
     今に書き換わり、古い予想も最新の週に寄るため使わない（#1023）。
     predicted_at は UTC で、JST 月曜 07:30 の回は UTC では日曜になるため、
     週の記録（load_weekly_accuracy_summary）と同じ JST の日付で週に切る（#1239）。
+    週の記録と同じく、model_name の採点だけで集計する（challenger を混ぜない。#1253）。
 
     Returns:
         DataFrame [week_start, hit_rate] (week_start 降順)。空の場合は空 DataFrame。
@@ -62,12 +65,12 @@ def _load_weekly_hit_rates_direct(n_weeks: int, horizon: int) -> pd.DataFrame:
                     SUM(CAST(direction_match AS INTEGER)) AS hits,
                     COUNT(*) AS n
                 FROM prediction_accuracy
-                WHERE horizon = %s
+                WHERE horizon = %s AND model_name = %s
                   AND direction_match IS NOT NULL
                 GROUP BY predicted_at
                 """,
                 con,
-                params=[horizon],
+                params=[horizon, model_name],
             )
             if runs.empty:
                 return pd.DataFrame()
