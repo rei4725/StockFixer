@@ -70,6 +70,14 @@ def read_short_positions(broker: Any) -> list[dict[str, Any]]:
         return []
 
 
+def coverable_short_qty(pos: Mapping[str, Any]) -> int:
+    """返済に出してよい株数（約定待ちの SHORT の pending_qty を引いた株数、#1225）。
+
+    約定前の空売りを返すと、仮登録の単価で幻の実現損益が出て、後の約定で空売りが残る。
+    """
+    return int(pos.get("qty") or 0) - int(pos.get("pending_qty") or 0)
+
+
 def count_short_positions(broker: Any) -> int:
     """保有の上限に数える空売りの建玉の数（qty > 0）を返す（#1146）。"""
     return sum(1 for p in read_short_positions(broker) if p.get("qty", 0) > 0)

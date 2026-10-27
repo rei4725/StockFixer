@@ -41,6 +41,7 @@ from src.trading.execution import (
 )
 from src.trading.execution.pending import _load_pending_exits
 from src.trading.execution.selection import _get_pending_buy_symbols
+from src.trading.position_valuation import count_short_positions
 from src.trading.risk_manager import RiskManager
 from src.trading.signal_generator import apply_multi_horizon_score_column
 from src.trading.types import TradingGateStatus
@@ -380,8 +381,13 @@ def run_claude_trader(
         )
 
     # 回の中で増える買い・建玉・業種を数え、相関ゲートを1回だけ評価する（8:50 の道と同じく回の始めの保有から）。
-    # 前の回の約定待ちの BUY も約定の後に保有になるため、保有に入れて数える（#1177）
-    caps = start_run_buy_caps(_get_held_symbols(broker) | _get_pending_buy_symbols(broker), market)
+    # 前の回の約定待ちの BUY も約定の後に保有になるため、保有に入れて数える（#1177）。
+    # 空売りの建玉も MAX_POSITIONS に数える（#1211、16:30 の道と同じ）
+    caps = start_run_buy_caps(
+        _get_held_symbols(broker) | _get_pending_buy_symbols(broker),
+        market,
+        short_count=count_short_positions(broker),
+    )
 
     # 予測キャッシュ（place_order ハンドラーで参照）
     predictions_cache = prediction_repo.get_latest_by_market(market)

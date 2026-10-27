@@ -42,6 +42,7 @@ from src.domain.trading_rules import get_lot_size
 from src.trading.brokers.base import BrokerBase, OrderSide
 from src.trading.daily_loss_window import daily_loss_window_start
 from src.trading.position_valuation import broker_positions_value, count_short_positions
+from src.trading.sl_tp_params import positive_pct_param
 from src.trading.types import TradingGateStatus
 from src.trading.vix_run_cache import VixRunCache
 from src.utils.db._connection import _db_connection
@@ -169,10 +170,9 @@ class RiskManager:
         if market is not None and symbol is not None:
             params = get_optimal_params(market, symbol)
             if params is not None:
-                v = params.get("stop_loss_pct")
-                self.stop_loss_pct = float(v) if v is not None else None
-                v = params.get("take_profit_pct")
-                self.take_profit_pct = float(v) if v is not None else None
+                label = f"{market}_{symbol}"
+                self.stop_loss_pct = positive_pct_param(params, "stop_loss_pct", label)
+                self.take_profit_pct = positive_pct_param(params, "take_profit_pct", label)
                 logger.debug(
                     f"[{market}_{symbol}] optimal_params.json から SL/TP を自動ロード: "
                     f"stop_loss_pct={self.stop_loss_pct}, take_profit_pct={self.take_profit_pct}"
