@@ -31,6 +31,7 @@ OPTIMIZATION_COMPLETION_WITH_ERRORS = NotificationSpec(
     "✅ 週次バックテスト最適化完了", COLOR_CAUTION
 )
 OPTIMIZATION_ERROR = NotificationSpec("❌ 週次バックテスト最適化失敗", COLOR_ERROR)
+FACTORY_ERROR = NotificationSpec("❌ 戦略ファクトリー夜間バッチ失敗", COLOR_ERROR)
 WALK_FORWARD_REPORT_COMPLETION = NotificationSpec("✅ Walk-Forward 比較レポート完了", COLOR_SUCCESS)
 WALK_FORWARD_REPORT_WITH_ERRORS = NotificationSpec(
     "⚠️ Walk-Forward 比較レポート完了", COLOR_CAUTION
