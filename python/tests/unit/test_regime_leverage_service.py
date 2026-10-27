@@ -918,5 +918,135 @@ class TestDbExecutedAtIsUtc(unittest.TestCase):
             self.assertAlmostEqual(equity, snap.equity_at_entry_jpy - interest * 2)
 
 
+class TestDailyCheckStopsAtFirstMissingBar(unittest.TestCase):
+    """日次判定は、引けた足を古い順に最初の欠けた足の手前まで判定し、そこで決済に当たれば
+    決済する。決済に当たらず欠けた足があるときは今までどおり投げる(#1228)。
+    前の回は JST 7/14 07:30。JST 7/17 07:30 の回で 7/14・7/15・7/16 の3本を見る。"""
+
+    def _run(self, lows: dict):
+        from src.trading.regime_leverage_strategy.service import (
+            run_regime_leverage_daily_margin_check,
+        )
+
+        port = _daily_port("2026-07-16", lows)
+        snap = _holding_snapshot(
+            executed_at=datetime(2026, 7, 13, 22, 30), action="noop", reason="daily_noop"
+        )
+        with patch(
+            "src.trading.regime_leverage_strategy.service.get_latest_snapshot",
+            return_value=snap,
+        ), patch(
+            "src.trading.regime_leverage_strategy.service.insert_snapshot"
+        ) as mock_insert, patch(
+            "src.trading.regime_leverage_strategy.service.datetime",
+            _fixed_datetime(datetime(2026, 7, 17, 7, 30, tzinfo=_JST)),
+        ):
+            try:
+                decision = run_regime_leverage_daily_margin_check(port)
+            except RuntimeError:
+                mock_insert.assert_not_called()
+                raise
+        mock_insert.assert_called_once_with(decision)
+        return decision
+
+    def test_initial_stop_on_first_bar_exits_even_if_third_bar_low_is_nan(self):
+        decision = self._run({"2026-07-14": 440.0, "2026-07-16": np.nan})
+        self.assertEqual(decision.action, "exit")
+        self.assertEqual(decision.reason, "initial_stop")
+        self.assertEqual(decision.spy_price_usd, 440.0)
+
+    def test_margin_call_on_first_bar_exits_even_if_third_bar_low_is_nan(self):
+        decision = self._run({"2026-07-14": 300.0, "2026-07-16": np.nan})
+        self.assertEqual(decision.action, "exit")
+        self.assertEqual(decision.reason, "margin_call")
+        self.assertEqual(decision.spy_price_usd, 300.0)
+
+    def test_raises_when_first_bar_low_is_nan(self):
+        # 欠けた足より後の足(7/15)が損切りの値段を割っていても、欠けた足を飛ばして判定しない
+        with self.assertRaises(RuntimeError):
+            self._run({"2026-07-14": np.nan, "2026-07-15": 440.0})
+
+    def test_raises_when_no_exit_before_missing_bar(self):
+        with self.assertRaises(RuntimeError):
+            self._run({"2026-07-16": np.nan})
+
+
+def _weekly_port(prices: pd.Series, missing_day: str, columns: list) -> MagicMock:
+    df = pd.DataFrame(
+        {"Open": prices, "High": prices + 2, "Low": prices - 2, "Close": prices},
+        index=prices.index,
+    )
+    df["Volume"] = 1_000_000
+    df.loc[pd.Timestamp(missing_day), columns] = np.nan
+    mock_port = MagicMock()
+    mock_port.get_stock_data.return_value = df
+    mock_port.get_forex_data.return_value = pd.DataFrame(
+        {"Close": [145.0]}, index=[prices.index[-1]]
+    )
+    return mock_port
+
+
+class TestWeeklyCheckSkipsMissingRowsForIndicators(unittest.TestCase):
+    """週次の MA200・ATR14 は、欠けた行を除いた日足から計算する。最後の行の値がそろわない
+    ときだけ今までどおり投げる(#1228)。"""
+
+    _MID_DAY = "2026-04-15"
+
+    def _run(self, port: MagicMock):
+        from src.trading.regime_leverage_strategy.service import run_regime_leverage_weekly_check
+
+        with patch(
+            "src.trading.regime_leverage_strategy.service.get_latest_snapshot",
+            return_value=_holding_snapshot(),
+        ), patch(
+            "src.trading.regime_leverage_strategy.service.insert_snapshot"
+        ) as mock_insert, patch(
+            "src.trading.regime_leverage_strategy.service.datetime",
+            _fixed_datetime(datetime(2026, 7, 18, 6, 30, tzinfo=_JST)),
+        ):
+            try:
+                decision = run_regime_leverage_weekly_check(port)
+            except RuntimeError:
+                mock_insert.assert_not_called()
+                raise
+        mock_insert.assert_called_once_with(decision)
+        return decision
+
+    @staticmethod
+    def _prices(start: float, end: float) -> pd.Series:
+        idx = pd.bdate_range(end="2026-07-17", periods=260)
+        return pd.Series(np.linspace(start, end, 260), index=idx)
+
+    def test_noop_when_close_missing_mid_window_and_regime_up(self):
+        port = _weekly_port(self._prices(400.0, 500.0), self._MID_DAY, ["Close"])
+        decision = self._run(port)
+        self.assertEqual(decision.action, "noop")
+        self.assertEqual(decision.reason, "weekly_noop")
+
+    def test_exit_when_ohlc_missing_mid_window_and_regime_down(self):
+        port = _weekly_port(
+            self._prices(600.0, 400.0), self._MID_DAY, ["Open", "High", "Low", "Close"]
+        )
+        decision = self._run(port)
+        self.assertEqual(decision.action, "exit")
+        self.assertEqual(decision.reason, "regime_flip")
+
+    def test_ohlc_missing_mid_window_keeps_indicators_finite_on_last_row(self):
+        from src.trading.regime_leverage_strategy.indicators import build_weekly_frame
+
+        port = _weekly_port(
+            self._prices(400.0, 500.0), self._MID_DAY, ["Open", "High", "Low", "Close"]
+        )
+        result = build_weekly_frame(port.get_stock_data.return_value)
+        self.assertFalse(pd.isna(result["MA200"].iloc[-1]))
+        self.assertFalse(pd.isna(result["ATR14"].iloc[-1]))
+        self.assertEqual(len(result), 260)
+
+    def test_raises_when_last_row_close_is_nan(self):
+        port = _weekly_port(self._prices(600.0, 400.0), "2026-07-17", ["Close"])
+        with self.assertRaises(RuntimeError):
+            self._run(port)
+
+
 if __name__ == "__main__":
     unittest.main()

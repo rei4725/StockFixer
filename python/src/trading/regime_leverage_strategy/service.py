@@ -332,7 +332,8 @@ def run_regime_leverage_weekly_check(
     判定を行わない(NaN比較は常にFalseになるため、誤って「レジーム下降」と
     解釈して保有ポジションを強制決済してしまうことを防ぐ)。未保有ならNoneを返し、
     保有中ならRuntimeErrorを送出する(レジーム転換の判定が飛んだことを
-    スケジューラーのリトライ・Discord通知に乗せるため。#870)。
+    スケジューラーのリトライ・Discord通知に乗せるため。#870)。MA200/ATR14は欠けた行を
+    除いた日足から計算するため、NaNになるのは最後の行が欠けたときかデータが足りないとき(#1228)。
     """
     from config.settings import REGIME_LEVERAGE_SYMBOL
 
@@ -380,8 +381,9 @@ def run_regime_leverage_daily_margin_check(
     """日次ジョブ本体: 保有中の場合のみ、初期損切り・マージンコールを判定する。
 
     未保有の場合はNoneを返す(何もしない)。保有中に当日安値(Low)がNaN(データ劣化時)の
-    場合は判定を行わずRuntimeErrorを送出する(損切り・マージンコールの判定が飛んだことを
-    スケジューラーのリトライ・Discord通知に乗せるため。#860)。
+    足があり、その手前の足で決済に当たらない場合はRuntimeErrorを送出する(損切り・
+    マージンコールの判定が飛んだことをスケジューラーのリトライ・Discord通知に乗せるため。
+    #860・#1228)。
     """
     from config.settings import REGIME_LEVERAGE_SYMBOL
 
@@ -406,16 +408,18 @@ def run_regime_leverage_daily_margin_check(
             f"(shares={snapshot.shares})"
         )
 
-    # 前の回の後に引けた足を古い順に判定し、最初に決済となった足で決済する(#891)
+    # 前の回の後に引けた足を古い順に判定し、最初に決済となった足で決済する(#891)。
+    # 安値の欠けた足に当たったら、その手前までで決済に当たらなければ投げる(#1228)
     day_lows_usd = [float(low) for low in bars["Low"]]
-    if any(pd.isna(low) for low in day_lows_usd):
-        raise RuntimeError(
-            "レジームレバレッジ戦略(日次): 保有中に当日安値(Low)がNaNのため判定を中止しました"
-            f"(shares={snapshot.shares})"
-        )
-    decisions = (decide_daily_check(snapshot, low, usdjpy_rate, now) for low in day_lows_usd)
-    decision = next((d for d in decisions if d.action == "exit"), None)
-    if decision is None:
-        decision = decide_daily_check(snapshot, day_lows_usd[-1], usdjpy_rate, now)
+    for low in day_lows_usd:
+        if pd.isna(low):
+            raise RuntimeError(
+                "レジームレバレッジ戦略(日次): 保有中に当日安値(Low)がNaNのため判定を中止しました"
+                f"(shares={snapshot.shares})"
+            )
+        decision = decide_daily_check(snapshot, low, usdjpy_rate, now)
+        if decision.action == "exit":
+            insert_snapshot(decision)
+            return decision
     insert_snapshot(decision)
     return decision
