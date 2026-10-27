@@ -368,6 +368,7 @@ def run_accuracy_check(
     horizon: int = 1,
     model_name: str = "unified",
     model_version_filter: str = None,
+    skip_predicted_at: Callable[[str], bool] | None = None,
 ) -> pd.DataFrame:
     """
     過去の予測結果と実際の株価を照合し、精度を prediction_accuracy テーブルに保存する。
@@ -379,6 +380,8 @@ def run_accuracy_check(
         horizon: チェック対象のホライズン（デフォルト 1 = 翌日予測を評価）
         model_name: prediction_accuracy テーブルに記録するモデル名ラベル
         model_version_filter: prediction_results の model_version でフィルタ（None なら全件）
+        skip_predicted_at: predicted_at を受けて True を返す行は採点しない（None なら外さない）。
+            日次の道のやり直しで今日の回の行だけを外すのに使う（#1255）
 
     Returns:
         pd.DataFrame: 今回採点した行のサマリー
@@ -405,6 +408,7 @@ def run_accuracy_check(
     # 採点を飛ばした件数を continue の分かれ道ごとに数え、完了ログに出す（0件の原因の切り分け用）
     skipped = {
         "必須の値なし": 0,
+        "外した回": 0,
         "predicted_at形式不正": 0,
         "予想値段なし": 0,
         "足なし": 0,
@@ -424,6 +428,10 @@ def run_accuracy_check(
         # 文字列の列でも NULL は NaN になり、NaN は真と判定されるため pd.isna でも確かめる
         if any(pd.isna(v) or not v for v in (market, symbol, predicted_at_str)):
             skipped["必須の値なし"] += 1
+            continue
+
+        if skip_predicted_at is not None and skip_predicted_at(str(predicted_at_str)):
+            skipped["外した回"] += 1
             continue
 
         # predicted_at は YYYYMMDD_HHMMSS 形式（UTC）。基準の日は予想の時刻に引けていた最後の足の日

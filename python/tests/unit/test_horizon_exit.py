@@ -358,6 +358,26 @@ class TestRunHorizonExitCheck(unittest.TestCase):
         broker.send_order.assert_called_once_with("9984", OrderSide.SHORT_COVER, 200)
 
     @patch(_BROKER_PATCH)
+    def test_short_cover_excludes_pending_short_qty(self, mock_broker_cls):
+        """約定待ちの SHORT の分は返さず、約定待ちだけの銘柄には返済を出さない (Issue #1252)。"""
+        from src.orchestration.scheduler import run_horizon_exit_check
+
+        overdue = (date.today() - timedelta(days=1)).isoformat()
+        self._insert_order("ORD-330", "7203", OrderSide.SHORT, "filled", overdue)
+        self._insert_order("ORD-331", "9984", OrderSide.SHORT, "filled", overdue)
+
+        broker = MagicMock()
+        broker.get_short_positions.return_value = [
+            {"symbol": "7203", "qty": 100, "pending_qty": 40},
+            {"symbol": "9984", "qty": 40, "pending_qty": 40},
+        ]
+        mock_broker_cls.return_value = broker
+
+        run_horizon_exit_check()
+
+        broker.send_order.assert_called_once_with("7203", OrderSide.SHORT_COVER, 60)
+
+    @patch(_BROKER_PATCH)
     def test_short_positions_unsupported_treated_as_empty(self, mock_broker_cls):
         """get_short_positions が無い broker でも買い持ちの決済は続ける (#1145)。"""
         from src.orchestration.scheduler import run_horizon_exit_check

@@ -216,6 +216,9 @@ def train_unified_model(
         data_dir: データディレクトリ（未使用、後方互換）
         save_dir: モデル保存ディレクトリ
         horizon: 予測ホライズン（営業日）。1=翌日（デフォルト）。
+
+    Raises:
+        RuntimeError: 学習に使うデータが空のとき（読み込みの失敗を含む）
     """
     from src.prediction.manager import ModelManager
 
@@ -226,8 +229,8 @@ def train_unified_model(
         logger.info("1. データ読み込み中...")
         df = load_all_stock_data(data_dir)
         if df.empty:
-            logger.warning("データが見つかりません。")
-            return
+            # 読み込みの失敗も空で返るため、学習の失敗として投げ、呼び出し元に成功と見せない（#1243）
+            raise RuntimeError("stock_features が空か読み込みに失敗したため学習できません")
         logger.info("2. 特徴量準備中...")
         X, y = prepare_unified_features(df)
         # 全銘柄の表は X の写しを作った後は要らない。学習の間まで持つと 8GB の上限に近づく（#807）
@@ -237,8 +240,7 @@ def train_unified_model(
         logger.info("1. OHLCV データ読み込み中（全銘柄）...")
         X, y = _load_all_ohlcv_for_unified(horizon)
         if X is None or X.empty:
-            logger.warning("OHLCVデータが見つかりません。")
-            return
+            raise RuntimeError("OHLCV から特徴量を作れなかったため学習できません")
 
     X = _apply_unified_feature_exclusions(X)
 
