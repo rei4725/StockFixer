@@ -185,21 +185,24 @@ def run_weekly_report():
     """
     logger.info("=== 週次レポート生成開始 ===")
     try:
-        from datetime import date, timedelta
+        from datetime import timedelta
 
         from src.infrastructure.llm.factory import get_text_review_port
         from src.infrastructure.persistence.analytics_query import PostgresAnalyticsQuery
         from src.prediction.db import load_weekly_accuracy_summary, save_weekly_accuracy_snapshot
         from src.reporting.discord.discord_utils import send_weekly_report
         from src.reporting.llm_review import generate_weekly_review
+        from src.utils import japan_time
 
         analytics = PostgresAnalyticsQuery()
         summary = analytics.drift_summary(horizon=1, model_name="production")
 
-        # 今週月曜日を week_start として週次スナップショットを保存。直近 N 件の窓は
-        # 週をまたいで重なるため、今週に予想した採点の行だけで集計する（#1023）
-        today = date.today()
-        week_start = (today - timedelta(days=today.weekday())).isoformat()
+        # 直前に終わった JST の週の月曜を week_start として週次スナップショットを保存。
+        # 直近 N 件の窓は週をまたいで重なるため、その週に予想した採点の行だけで
+        # 集計する（#1023）。木曜の時点で当週の予想は採点が済んでいないため、
+        # 全5回の採点が済んだ前の週で作る。コンテナは UTC のため JST の日付で決める（#1229）
+        today = japan_time.now_jst().date()
+        week_start = (today - timedelta(days=today.weekday() + 7)).isoformat()
         week_summary = load_weekly_accuracy_summary(week_start, horizon=1, model_name="production")
         save_weekly_accuracy_snapshot(week_start, week_summary)
         # 前週比較は今週分を含むスナップショットで行うため、保存の後に読む
