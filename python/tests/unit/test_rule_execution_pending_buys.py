@@ -171,5 +171,31 @@ class TestRuleExecutionAllowNewBuys(unittest.TestCase):
         self.assertEqual(result["skipped"], 1)
 
 
+class TestRuleExecutionCountsShortPositions(unittest.TestCase):
+    """1回の中の保有の数えに空売りの建玉を足す（#1210。8:50 の道と同じ数え）。"""
+
+    _run = TestRuleExecutionCountsPendingBuys._run
+
+    def test_shorts_count_toward_max_positions_within_run(self):
+        held = [_long(str(1000 + i)) for i in range(7)]
+        broker = _broker(held)
+        broker.get_short_positions.return_value = [
+            {"symbol": "5000", "qty": 100, "avg_price": 1000.0, "current_price": 1000.0},
+            {"symbol": "5001", "qty": 100, "avg_price": 1000.0, "current_price": 1000.0},
+        ]
+        signals = [
+            {"symbol": "3000", "signal": 1, "price": 1000.0},
+            {"symbol": "3001", "signal": 1, "price": 1000.0},
+        ]
+
+        result, _ = self._run(broker, signals)
+
+        broker.send_order.assert_called_once_with(
+            symbol="3000.T", side=OrderSide.BUY, qty=100, order_type=OrderType.MARKET
+        )
+        self.assertEqual(result["buy_orders"], 1)
+        self.assertEqual(result["skipped"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()

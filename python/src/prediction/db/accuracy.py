@@ -1,5 +1,6 @@
 """prediction_accuracy / accuracy_weekly_snapshots テーブル: 予測精度追跡とドリフト集計。"""
 
+import re
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -220,16 +221,31 @@ def load_drift_summary(
 
 # predicted_at（'YYYYMMDD_HHMMSS' の文字列）の日付部分を 'YYYYMMDD' で取り出す SQL 式
 PREDICTED_DATE_SQL = "LEFT(REGEXP_REPLACE(predicted_at, '[^0-9]', '', 'g'), 8)"
+_JST_OFFSET = timedelta(hours=9)
+
+
+def _jst_day(predicted_at: str) -> str:
+    """predicted_at（UTC の 'YYYYMMDD_HHMMSS'）の JST の日付（YYYYMMDD）を返す。
+
+    時刻が読めないときは数字の先頭8字を返す。
+    """
+    digits = re.sub(r"[^0-9]", "", predicted_at)
+    try:
+        utc = datetime.strptime(digits[:14], "%Y%m%d%H%M%S")
+    except ValueError:
+        return digits[:8]
+    return (utc + _JST_OFFSET).strftime("%Y%m%d")
 
 
 def load_weekly_accuracy_summary(
     week_start: str, horizon: int = 1, model_name: str = "production"
 ) -> pd.DataFrame:
     """
-    week_start からの7日に予想した採点の行だけで、銘柄ごとの方向正解率・平均誤差を集計する。
+    week_start からの7日（JST の日付）に予想した採点の行だけで、銘柄ごとの方向正解率・平均誤差を集計する。
 
     load_drift_summary の銘柄ごと直近 N 件の窓は週をまたいで重なり、当週の的中率の
-    下がりを薄めるため、週の記録はこちらで作る（#1023）。
+    下がりを薄めるため、週の記録はこちらで作る（#1023）。predicted_at は UTC で、
+    JST 月曜 07:30 の回は UTC では日曜になるため、JST の日付で週に切る（#1229）。
 
     Args:
         week_start: ISO 形式の週開始日（月曜日, 例: "2026-05-11"）
@@ -242,30 +258,46 @@ def load_weekly_accuracy_summary(
     start = datetime.fromisoformat(week_start)
     since = start.strftime("%Y%m%d")
     until = (start + timedelta(days=7)).strftime("%Y%m%d")
+    # JST の日付は UTC の日付と同じか1日後なので、UTC で1日前から読んで JST で切る
+    utc_since = (start - timedelta(days=1)).strftime("%Y%m%d")
+    columns = ["market", "symbol", "direction_accuracy", "mean_abs_error", "n_samples"]
     with _db_connection() as con:
         try:
-            return pd.read_sql(
+            rows = pd.read_sql(
                 f"""
                 SELECT
                     market,
                     symbol,
-                    AVG(CAST(direction_match AS INTEGER)) AS direction_accuracy,
-                    AVG(ABS(predicted_ratio - actual_ratio))  AS mean_abs_error,
-                    COUNT(*) AS n_samples
+                    predicted_at,
+                    CAST(direction_match AS INTEGER) AS hit,
+                    ABS(predicted_ratio - actual_ratio) AS abs_error
                 FROM prediction_accuracy
                 WHERE horizon = %s AND model_name = %s
                   AND direction_match IS NOT NULL
                   AND {PREDICTED_DATE_SQL} >= %s
                   AND {PREDICTED_DATE_SQL} < %s
-                GROUP BY market, symbol
-                ORDER BY direction_accuracy ASC
                 """,
                 con,
-                params=[horizon, model_name, since, until],
+                params=[horizon, model_name, utc_since, until],
             )
         except Exception as e:
             logger.error(f"load_weekly_accuracy_summary 失敗: {e}", exc_info=True)
             return pd.DataFrame()
+    if rows.empty:
+        return pd.DataFrame(columns=columns)
+    days = rows["predicted_at"].astype(str).map(_jst_day)
+    rows = rows[(days >= since) & (days < until)]
+    summary = (
+        rows.groupby(["market", "symbol"], as_index=False)
+        .agg(
+            direction_accuracy=("hit", "mean"),
+            mean_abs_error=("abs_error", "mean"),
+            n_samples=("hit", "size"),
+        )
+        .sort_values("direction_accuracy", kind="stable")
+        .reset_index(drop=True)
+    )
+    return summary[columns]
 
 
 def save_weekly_accuracy_snapshot(week_start: str, df: pd.DataFrame) -> None:
