@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import unittest
 from datetime import date, datetime, timedelta
+from typing import Optional
 from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -245,25 +247,6 @@ class TestWeeklyHitRateWeekWindow(unittest.TestCase):
                             ],
                         )
 
-    @patch("src.orchestration.jobs.weekly.run_weekly_paper_results")
-    @patch("src.reporting.discord.discord_utils.send_webhook_text")
-    @patch("src.reporting.discord.discord_utils.send_miss_analysis_summary")
-    @patch("src.prediction.miss_analysis.run_miss_analysis_batch", return_value=[])
-    @patch("src.reporting.discord.discord_utils.send_weekly_report")
-    @patch("src.reporting.llm_review.generate_weekly_review", return_value=None)
-    @patch("src.infrastructure.llm.factory.get_text_review_port")
-    def test_weekly_snapshot_uses_this_week_predictions(self, *_mocks):
-        from src.orchestration.jobs.weekly import run_weekly_report
-        from src.prediction.db import load_weekly_accuracy_snapshots
-
-        self._insert_rows(rescored_now=False)
-        run_weekly_report()
-
-        snap = load_weekly_accuracy_snapshots(n_weeks=1)
-        self.assertEqual(str(snap["week_start"].iloc[0]), self._this_monday().isoformat())
-        self.assertAlmostEqual(float(snap["direction_accuracy"].mean()), 0.40)
-        self.assertEqual(set(snap["n_samples"]), {5})
-
     def test_drift_detected_from_weekly_snapshots(self):
         from src.prediction.db import load_weekly_accuracy_summary, save_weekly_accuracy_snapshot
 
@@ -292,6 +275,92 @@ class TestWeeklyHitRateWeekWindow(unittest.TestCase):
 
         result = check_weekly_hit_rate_drift(weeks=4, threshold=0.05)
         self.assertTrue(result.is_drifted)
+
+
+class TestWeeklySnapshotLastJstWeek(unittest.TestCase):
+    """週次レポート（木曜 02:00 JST）が、直前に終わった JST の週の5回分で記録を作ること（#1229）。
+
+    日次の予想は平日 07:30 JST で、predicted_at は前の日の 22:30 UTC になる。
+    2026-05-11（月）〜15（金）JST の朝の5回を A=3/5・B=2/5 で置き、前の週の金曜の回と、
+    今週の月・火の回（採点済み）と水の回（未採点）も置く。
+    """
+
+    LAST_MONDAY = date(2026, 5, 11)
+    # 2026-05-21（木）02:00 JST = 2026-05-20（水）17:00 UTC
+    RUN_AT = datetime(2026, 5, 21, 2, 0, tzinfo=ZoneInfo("Asia/Tokyo"))
+
+    @staticmethod
+    def _insert(con, symbol: str, jst_day: date, hit: Optional[bool]) -> None:
+        predicted_at = (jst_day - timedelta(days=1)).strftime("%Y%m%d") + "_223000"
+        con.execute(
+            """
+            INSERT INTO prediction_accuracy
+                (market, symbol, model_name, predicted_at, horizon,
+                 predicted_ratio, actual_ratio, direction_match, checked_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            [
+                "jp",
+                symbol,
+                "production",
+                predicted_at,
+                1,
+                0.01,
+                None if hit is None else (0.01 if hit else -0.01),
+                hit,
+                datetime.now(),
+            ],
+        )
+
+    def _insert_rows(self) -> None:
+        with _db_connection() as con:
+            for symbol, n_hit in {"A": 3, "B": 2}.items():
+                for d in range(5):
+                    self._insert(con, symbol, self.LAST_MONDAY + timedelta(days=d), d < n_hit)
+                # 前の週の金曜の回・今週の月火の回は外れ、水の回は未採点
+                self._insert(con, symbol, self.LAST_MONDAY - timedelta(days=3), False)
+                self._insert(con, symbol, self.LAST_MONDAY + timedelta(days=7), False)
+                self._insert(con, symbol, self.LAST_MONDAY + timedelta(days=8), False)
+                self._insert(con, symbol, self.LAST_MONDAY + timedelta(days=9), None)
+
+    def _run_report(self) -> None:
+        from src.orchestration.jobs.weekly import run_weekly_report
+
+        with patch("src.utils.japan_time.now_jst", return_value=self.RUN_AT), patch(
+            "src.orchestration.jobs.weekly.run_weekly_paper_results"
+        ), patch("src.reporting.discord.discord_utils.send_webhook_text"), patch(
+            "src.reporting.discord.discord_utils.send_miss_analysis_summary"
+        ), patch(
+            "src.prediction.miss_analysis.run_miss_analysis_batch", return_value=[]
+        ), patch(
+            "src.reporting.discord.discord_utils.send_weekly_report"
+        ), patch(
+            "src.reporting.llm_review.generate_weekly_review", return_value=None
+        ), patch(
+            "src.infrastructure.llm.factory.get_text_review_port"
+        ):
+            run_weekly_report()
+
+    def _assert_last_week_snapshot(self) -> None:
+        from src.prediction.db import load_weekly_accuracy_snapshots
+
+        snap = load_weekly_accuracy_snapshots(n_weeks=1)
+        self.assertEqual(str(snap["week_start"].iloc[0]), self.LAST_MONDAY.isoformat())
+        self.assertEqual(set(snap["n_samples"]), {5})
+        by_symbol = dict(zip(snap["symbol"], snap["direction_accuracy"].astype(float)))
+        self.assertAlmostEqual(by_symbol["A"], 0.60)
+        self.assertAlmostEqual(by_symbol["B"], 0.40)
+
+    def test_snapshot_uses_last_jst_week_five_runs(self):
+        self._insert_rows()
+        self._run_report()
+        self._assert_last_week_snapshot()
+
+    def test_saving_same_week_twice_keeps_values(self):
+        self._insert_rows()
+        self._run_report()
+        self._run_report()
+        self._assert_last_week_snapshot()
 
 
 class TestCheckWeeklyHitRateDriftEdgeCases(unittest.TestCase):
