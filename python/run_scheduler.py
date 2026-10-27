@@ -554,8 +554,6 @@ def _poll_recovery_jobs(queue_manager):
     # 補完ジョブの失敗で生存信号が途切れないよう、ポーリング冒頭で送る。
     ping_heartbeat(SCHEDULER_ALIVE_SLUG)
 
-    now = queue_manager.now()
-
     for job_id, config in SCHEDULE_CONFIG.items():
         if not config.get("auto_schedule", True):
             continue
@@ -563,7 +561,9 @@ def _poll_recovery_jobs(queue_manager):
         # 1つのジョブが落ちても後のジョブ（発注・約定）の補完を同じ回で進める（#1186）。
         # 失敗の記録と知らせは run_job の中で済んでいる。
         try:
-            _recover_job(queue_manager, job_id, now)
+            # 前のジョブの長い補完で締め（recovery_until）を越えることがあるため、
+            # 判定の直前に時刻を測り直す（#1286）
+            _recover_job(queue_manager, job_id, queue_manager.now())
         except Exception:
             logger.error(f"補完実行に失敗: {job_id}（次のジョブへ進む）", exc_info=True)
 
