@@ -75,6 +75,7 @@ def load_prediction_accuracy(
     limit: int = 500,
     model_name: Optional[str] = None,
     days: Optional[int] = None,
+    raise_on_error: bool = False,
 ) -> pd.DataFrame:
     """
     prediction_accuracy テーブルからデータを取得する。
@@ -87,6 +88,8 @@ def load_prediction_accuracy(
         model_name: フィルタ対象のモデル名ラベル（None なら全モデル）
         days: 指定時は、上のフィルタに合う行の predicted_at の日付（YYYYMMDD）の
             新しい方から days 日分だけを返す（predicted_at の下限をその日にする。#958）
+        raise_on_error: True なら読み込みの例外を空の表にせず投げ、行が無いことと分ける
+            （日次の採点の JSON を0件で上書きしないため。#1283）
 
     Returns:
         pd.DataFrame（結果なし時は空 DataFrame）
@@ -123,6 +126,8 @@ def load_prediction_accuracy(
             return pd.read_sql(query, con, params=params)
         except Exception as e:
             logger.error(f"prediction_accuracy 読み込み失敗: {e}", exc_info=True)
+            if raise_on_error:
+                raise
             return pd.DataFrame()
 
 
