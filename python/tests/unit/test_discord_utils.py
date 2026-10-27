@@ -59,6 +59,27 @@ class TestSendDailyOrderCompletion(unittest.TestCase):
         self.assertEqual(fields["🟢 買い注文"], "2 件")
         self.assertEqual(fields["🔴 売り注文"], "1 件")
         self.assertNotIn("⛔ 停止理由", fields)
+        self.assertNotIn("⚠️ SL/TP 評価できず", fields)
+
+    @patch(
+        "src.reporting.discord.webhook_sender._rate_limiter.check_and_record",
+        return_value=(True, None),
+    )
+    @patch("src.reporting.discord.webhook_sender._post_webhook")
+    def test_completion_notification_shows_unevaluable_sl_tp(self, mock_post, _mock_rl):
+        """SL/TP を評価できなかった保有の件数と銘柄を知らせに出す（#1296）"""
+        mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
+
+        result = send_daily_order_completion(
+            buy_orders=0,
+            sell_orders=0,
+            mode="paper",
+            sl_tp_unevaluable_symbols=["7203", "6758"],
+        )
+
+        self.assertTrue(result)
+        fields = _fields_map(_embed_from_post(mock_post))
+        self.assertEqual(fields["⚠️ SL/TP 評価できず"], "2 件: 7203, 6758")
 
     @patch(
         "src.reporting.discord.webhook_sender._rate_limiter.check_and_record",

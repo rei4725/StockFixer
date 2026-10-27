@@ -292,6 +292,7 @@ def run_daily_auto_order():
             daily_loss=stats.get("daily_loss"),
             daily_loss_limit=stats.get("daily_loss_limit"),
             errors=stats.get("errors", 0),
+            sl_tp_unevaluable_symbols=stats.get("sl_tp_unevaluable_symbols"),
         )
     except Exception as e:
         logger.error("自動発注完了通知失敗: %s", e, exc_info=True)
