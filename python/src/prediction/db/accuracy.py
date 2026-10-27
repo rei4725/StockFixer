@@ -224,7 +224,7 @@ PREDICTED_DATE_SQL = "LEFT(REGEXP_REPLACE(predicted_at, '[^0-9]', '', 'g'), 8)"
 _JST_OFFSET = timedelta(hours=9)
 
 
-def _jst_day(predicted_at: str) -> str:
+def jst_day(predicted_at: str) -> str:
     """predicted_at（UTC の 'YYYYMMDD_HHMMSS'）の JST の日付（YYYYMMDD）を返す。
 
     時刻が読めないときは数字の先頭8字を返す。
@@ -285,7 +285,7 @@ def load_weekly_accuracy_summary(
             return pd.DataFrame()
     if rows.empty:
         return pd.DataFrame(columns=columns)
-    days = rows["predicted_at"].astype(str).map(_jst_day)
+    days = rows["predicted_at"].astype(str).map(jst_day)
     rows = rows[(days >= since) & (days < until)]
     summary = (
         rows.groupby(["market", "symbol"], as_index=False)
