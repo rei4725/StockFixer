@@ -178,7 +178,7 @@ class TestLoadWeeklyHitRatesDirect(unittest.TestCase):
                 (market, symbol, model_name, predicted_at, horizon, direction_match, checked_at)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
             """,
-            ["jp", "7203", "m1", checked_at[:10], 1, direction_match, checked_at],
+            ["jp", "7203", "production", checked_at[:10], 1, direction_match, checked_at],
         )
 
     def test_returns_dataframe_on_success(self):
@@ -378,6 +378,46 @@ class TestDirectFallbackJstWeek(unittest.TestCase):
                 for d in range(5):
                     TestWeeklySnapshotLastJstWeek._insert(
                         con, symbol, self.MONDAY + timedelta(days=d), d < n_hit
+                    )
+
+        weekly = _load_weekly_hit_rates_direct(n_weeks=5, horizon=1)
+        self.assertEqual(list(weekly["week_start"]), [self.MONDAY.isoformat()])
+        self.assertAlmostEqual(float(weekly.iloc[0]["hit_rate"]), 0.50)
+
+
+class TestDirectFallbackProductionOnly(unittest.TestCase):
+    """直接集計の道も、週の記録と同じく production の採点だけで集計すること（#1253）。
+
+    同じ週に production の5回（A=3/5・B=2/5、的中率 0.50）と、challenger の影の予想の
+    5回（全部当たり）を置く。challenger が混ざると的中率は 0.75 になる。
+    """
+
+    MONDAY = date(2026, 5, 11)
+
+    def test_hit_rate_from_production_rows_only(self):
+        with _db_connection() as con:
+            for symbol, n_hit in {"A": 3, "B": 2}.items():
+                for d in range(5):
+                    jst_day = self.MONDAY + timedelta(days=d)
+                    TestWeeklySnapshotLastJstWeek._insert(con, symbol, jst_day, d < n_hit)
+                    con.execute(
+                        """
+                        INSERT INTO prediction_accuracy
+                            (market, symbol, model_name, predicted_at, horizon,
+                             predicted_ratio, actual_ratio, direction_match, checked_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        [
+                            "jp",
+                            symbol,
+                            "challenger",
+                            (jst_day - timedelta(days=1)).strftime("%Y%m%d") + "_223000",
+                            1,
+                            0.01,
+                            0.01,
+                            True,
+                            datetime.now(),
+                        ],
                     )
 
         weekly = _load_weekly_hit_rates_direct(n_weeks=5, horizon=1)
