@@ -9,6 +9,7 @@ Discord モデル/学習系通知
 import logging
 
 from src.reporting.discord.discord_notification_specs import (
+    FACTORY_ERROR,
     OPTIMIZATION_ERROR,
     SHADOW_EVALUATION_CHALLENGER_WINS,
     SHADOW_EVALUATION_NO_WINNER,
@@ -161,6 +162,32 @@ def send_factory_completion(
         {"name": "📄 レポート (results/factory/reports/)", "value": passed_value, "inline": False},
     ]
     return send_status_fields(spec, fields)
+
+
+def send_factory_failure(market: str, error: str) -> bool:
+    """
+    戦略ファクトリー夜間バッチが全体で失敗したことを Discord Webhook に送信する（#1284）。
+
+    その夜の市場の評価は行われていないため、やり直しの案内を添える。
+
+    Args:
+        market: 対象マーケット
+        error: 失敗の内容
+
+    Returns:
+        成功時 True、失敗時 False
+    """
+    fields: list[dict] = [
+        {"name": "🕐 時刻", "value": format_jst(fmt=DISCORD_DATETIME_FORMAT), "inline": True},
+        {"name": "🌐 市場", "value": market, "inline": True},
+        {"name": "❌ エラー", "value": error[:1000] or "不明", "inline": False},
+        {
+            "name": "🧪 評価",
+            "value": "この回の評価は行われていません（run_strategy_factory.py でやり直せます）",
+            "inline": False,
+        },
+    ]
+    return send_status_fields(FACTORY_ERROR, fields)
 
 
 def send_shap_notification(

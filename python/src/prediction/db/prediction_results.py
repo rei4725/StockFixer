@@ -159,6 +159,7 @@ def load_prediction_results(
     worst_n: int = None,
     limit: int = None,
     model_version: str = None,
+    raise_on_error: bool = False,
 ) -> pd.DataFrame:
     """
     予測結果を DB から取得する。
@@ -170,6 +171,7 @@ def load_prediction_results(
         worst_n: 下位 N 件のみ取得（diff_ratio 昇順）
         limit: 取得件数上限。predicted_at=None のときは全タイムスタンプ対象で N 件取得
         model_version: モデルバージョンフィルタ（None なら全バージョン）
+        raise_on_error: True なら読み込みの例外を空の表にせず投げ、行が無いことと分ける（#1282）
 
     Returns:
         予測結果 DataFrame
@@ -194,6 +196,8 @@ def load_prediction_results(
                 return pd.read_sql(query, con, params=params)
             except Exception as e:
                 logger.error(f"prediction_results 読み込み失敗: {e}", exc_info=True)
+                if raise_on_error:
+                    raise
                 return pd.DataFrame()
 
     if predicted_at is None:
@@ -228,6 +232,8 @@ def load_prediction_results(
             return pd.read_sql(query, con, params=params)
         except Exception as e:
             logger.error(f"prediction_results 読み込み失敗: {e}", exc_info=True)
+            if raise_on_error:
+                raise
             return pd.DataFrame()
 
 

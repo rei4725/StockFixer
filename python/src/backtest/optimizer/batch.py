@@ -166,6 +166,19 @@ def run_optimize_batch(
         try:
             csv_path = save_optimization_results(result_df, market, symbol)
             json_path = save_optimal_params_json(result_df, market, symbol, sort_by=sort_by)
+            if not json_path:
+                # 全候補が error の行だけで保存されなかった銘柄を成功に数えない（#1285）
+                logger.error(f"[{market}/{symbol}] 有効な最適化結果なし（最適パラメータ未保存）")
+                summary.append(
+                    {
+                        "market": market,
+                        "symbol": symbol,
+                        "status": "error",
+                        "error": "有効な最適化結果なし",
+                    }
+                )
+                error_count += 1
+                return
             logger.info(f"[{market}/{symbol}] 保存完了 CSV={csv_path} JSON={json_path}")
             summary.append({"market": market, "symbol": symbol, "status": "success"})
             success_count += 1
