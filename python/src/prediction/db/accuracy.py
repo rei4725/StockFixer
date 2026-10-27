@@ -175,7 +175,10 @@ def load_top_prediction_misses(
 
 
 def load_drift_summary(
-    horizon: int = 1, recent_n: int = 30, model_name: str = "production"
+    horizon: int = 1,
+    recent_n: int = 30,
+    model_name: str = "production",
+    raise_on_error: bool = False,
 ) -> pd.DataFrame:
     """
     直近 recent_n 件の予測について銘柄ごとの方向正解率・平均誤差を集計する。
@@ -184,6 +187,8 @@ def load_drift_summary(
         horizon: 対象ホライズン
         recent_n: 直近何件を対象にするか（銘柄ごとに最新 N 件）
         model_name: 対象のモデル名ラベル（challenger の採点を混ぜない。#877）
+        raise_on_error: True なら読み込みの失敗を空の表にせず投げ直す
+            （日次ドリフト検査が「精度データなし」と分けるため。#1271）
 
     Returns:
         pd.DataFrame: [market, symbol, direction_accuracy, mean_abs_error, n_samples]
@@ -216,6 +221,8 @@ def load_drift_summary(
             )
         except Exception as e:
             logger.error(f"load_drift_summary 失敗: {e}", exc_info=True)
+            if raise_on_error:
+                raise
             return pd.DataFrame()
 
 
