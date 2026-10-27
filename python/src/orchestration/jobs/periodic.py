@@ -208,7 +208,15 @@ def run_nightly_strategy_factory(
             len(result.passed),
         )
     except Exception as e:
+        # 落ちた回は失敗と知らせたうえで投げ直し、run_job に error と記録させる（#1284）
         logger.error("戦略ファクトリー失敗: %s", e, exc_info=True)
+        try:
+            from src.reporting.discord.discord_utils import send_factory_failure
+
+            send_factory_failure(market=market, error=str(e))
+        except Exception as notify_error:
+            logger.error("戦略ファクトリー失敗通知失敗: %s", notify_error, exc_info=True)
+        raise
 
     # Discord 完了通知
     try:

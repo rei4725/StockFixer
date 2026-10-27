@@ -36,6 +36,7 @@ from src.reporting.discord.notifications_drift import (  # noqa: F401  # re-expo
 from src.reporting.discord.notifications_model import (  # noqa: F401  # re-export（#497 第4弾）
     send_allocation_rebalance_report,
     send_factory_completion,
+    send_factory_failure,
     send_feature_suggestion_notification,
     send_optimization_completion,
     send_optimization_failure,
