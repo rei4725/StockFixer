@@ -117,6 +117,23 @@ def delete_rule_best(market: str, symbol: str) -> None:
         )
 
 
+def delete_rule_best_except(market: str, keep_symbols: list[str]) -> None:
+    """keep_symbols に無い銘柄の最優秀ルールの行を消す（ウォッチリストから外れた銘柄用、#1294）。
+
+    keep_symbols が空なら何も消さない（ウォッチリストの読み違いで全行を消さないため）。
+    """
+    if not keep_symbols:
+        return
+    ensure_rule_tables()
+    placeholders = ", ".join(["%s"] * len(keep_symbols))
+    with _db_connection() as con:
+        con.execute(
+            "DELETE FROM rule_best_by_symbol"  # nosec B608 - placeholders are only "%s"
+            f" WHERE market = %s AND symbol NOT IN ({placeholders})",
+            [market, *keep_symbols],
+        )
+
+
 def load_rule_best_all(market: str) -> pd.DataFrame:
     """有効な最優秀ルール一覧を返す（全銘柄）。"""
     ensure_rule_tables()
