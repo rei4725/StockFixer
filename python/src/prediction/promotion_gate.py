@@ -11,6 +11,9 @@ shadow モデルの Walk-Forward 成績が current モデルを上回った場�
     4. Hit Rate:   shadow >= 0.50（最低ライン）
     5. slippage 乖離: shadow の avg_abs_diff_ratio < 0.02（2% 以内）
 
+WF の要約に model_name の列が無いときは 1〜3 を比べられないとして判定から外し、
+4 に「shadow の Hit Rate が current 以上」を足す（#1269）。
+
 手動承認フラグ: require_manual_approval=True（デフォルト）の場合、
 判定結果を JSON に保存するが実際のファイル操作は行わない。
 
@@ -204,7 +207,9 @@ def evaluate_promotion(
 
     Walk-Forward 成績（Net Return / MDD / Sharpe）は最新の
     wf_summary_*.csv から取得する。model_name 列が CSV に存在する場合は
-    それでフィルタし、ない場合は全銘柄の平均を両モデルで共有する。
+    それでフィルタする。ない場合は 3 つを比べられないとして passed を None にし
+    eligible から外し、代わりに shadow の Hit Rate が current 以上であることを
+    求める（#1269）。
 
     Hit Rate と Slippage は prediction_accuracy テーブルの shadow モデルの
     直近 DEFAULT_EVALUATION_DAYS 日分の全部の行から取得する。
@@ -228,8 +233,10 @@ def evaluate_promotion(
 
     # --- Walk-Forward 成績 ---
     wf_df, wf_filename = _load_latest_wf_summary()
+    # model_name の列が無い要約は両モデルに同じ平均を渡すことになり比べられない（#1269）
+    wf_not_comparable = wf_df is not None and "model_name" not in wf_df.columns
 
-    if wf_df is not None:
+    if wf_df is not None and not wf_not_comparable:
         shadow_net_return = _wf_mean(wf_df, shadow_model_name, "total_return")
         current_net_return = _wf_mean(wf_df, current_model_name, "total_return")
         shadow_mdd = _wf_mean(wf_df, shadow_model_name, "max_drawdown")
@@ -247,10 +254,17 @@ def evaluate_promotion(
     # --- prediction_accuracy 成績 ---
     shadow_hit_rate = _compute_hit_rate(shadow_model_name, horizon)
     shadow_slippage = _compute_slippage(shadow_model_name, horizon)
+    current_hit_rate = _compute_hit_rate(current_model_name, horizon) if wf_not_comparable else None
 
     # --- 各基準の判定 ---
+    # WF を比べられないときの 1〜3 の passed は None（判定に使わない）
+    net_return_passed: Optional[bool]
+    mdd_passed: Optional[bool]
+    sharpe_passed: Optional[bool]
     # 1. Net Return
-    if shadow_net_return is not None and current_net_return is not None:
+    if wf_not_comparable:
+        net_return_passed = None
+    elif shadow_net_return is not None and current_net_return is not None:
         net_return_passed = shadow_net_return > current_net_return
     else:
         net_return_passed = False
@@ -261,7 +275,9 @@ def evaluate_promotion(
     }
 
     # 2. MDD（絶対値が小さいほど良い）
-    if shadow_mdd is not None and current_mdd is not None:
+    if wf_not_comparable:
+        mdd_passed = None
+    elif shadow_mdd is not None and current_mdd is not None:
         mdd_passed = abs(shadow_mdd) < abs(current_mdd)
     else:
         mdd_passed = False
@@ -272,12 +288,14 @@ def evaluate_promotion(
     }
 
     # 3. Sharpe（5% 劣化まで許容）
-    if shadow_sharpe is not None and current_sharpe is not None:
+    sharpe_threshold: Optional[float] = None
+    if wf_not_comparable:
+        sharpe_passed = None
+    elif shadow_sharpe is not None and current_sharpe is not None:
         sharpe_threshold = current_sharpe * (1.0 - _SHARPE_TOLERANCE)
         sharpe_passed = shadow_sharpe >= sharpe_threshold
     else:
         sharpe_passed = False
-        sharpe_threshold = None
     criteria_sharpe: dict = {
         "shadow": shadow_sharpe,
         "current": current_sharpe,
@@ -285,9 +303,20 @@ def evaluate_promotion(
         "passed": sharpe_passed,
     }
 
-    # 4. Hit Rate（方向正解率 >= 0.50）
+    if wf_not_comparable:
+        note = f"WF の要約 {wf_filename} に model_name の列が無く比べられない"
+        for c in (criteria_net_return, criteria_mdd, criteria_sharpe):
+            c["note"] = note
+
+    # 4. Hit Rate（方向正解率 >= 0.50。WF を比べられないときは current 以上も求める）
     if shadow_hit_rate is not None:
         hit_rate_passed = shadow_hit_rate >= _HIT_RATE_FLOOR
+        if wf_not_comparable:
+            hit_rate_passed = (
+                hit_rate_passed
+                and current_hit_rate is not None
+                and shadow_hit_rate >= current_hit_rate
+            )
     else:
         hit_rate_passed = False
     criteria_hit_rate: dict = {
@@ -295,6 +324,8 @@ def evaluate_promotion(
         "floor": _HIT_RATE_FLOOR,
         "passed": hit_rate_passed,
     }
+    if wf_not_comparable:
+        criteria_hit_rate["current"] = current_hit_rate
 
     # 5. Slippage 乖離（avg_abs_diff_ratio < 0.02）
     if shadow_slippage is not None:
@@ -315,18 +346,10 @@ def evaluate_promotion(
         "slippage": criteria_slippage,
     }
 
-    eligible = all(
-        [
-            net_return_passed,
-            mdd_passed,
-            sharpe_passed,
-            hit_rate_passed,
-            slippage_passed,
-        ]
-    )
+    eligible = all(c["passed"] for c in criteria.values() if c["passed"] is not None)
 
     # --- 判定理由サマリー ---
-    failed_names = [name for name, c in criteria.items() if not c["passed"]]
+    failed_names = [name for name, c in criteria.items() if c["passed"] is False]
     if eligible:
         if require_manual_approval:
             reason = (
@@ -342,6 +365,11 @@ def evaluate_promotion(
         reason = (
             f"昇格基準未達: {', '.join(failed_names)} が条件を満たしていない。"
             f"shadow={shadow_model_name} current={current_model_name}"
+        )
+    if wf_not_comparable:
+        reason += (
+            " WF の要約に model_name の列が無く net_return, mdd, sharpe は比べられないため、"
+            "代わりに hit_rate が current 以上かで判定した。"
         )
 
     # --- A/B テスト run_id 収集 ---

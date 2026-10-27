@@ -225,6 +225,27 @@ class TestHandlePlaceOrder(unittest.TestCase):
         self.assertEqual(stats["buy_orders"], 0)
         self.assertEqual(stats["skipped"], 1)
 
+    @patch("src.trading.claude_agent._record_order")
+    @patch(
+        "src.trading.claude_agent._choose_order_params",
+        return_value=(OrderType.MARKET, 0.0, "market", "open"),
+    )
+    def test_gate_error_still_sends_sell(self, _choose, _record):
+        # #1260: ゲートの評価が落ちても保有の売りは出す
+        self.risk.evaluate_trading_gate.side_effect = RuntimeError("日次損失の読み出し失敗")
+        self.broker.get_positions.return_value = [
+            {"symbol": "7200", "qty": 200, "avg_price": 990.0, "current_price": 1000.0}
+        ]
+        stats = {"buy_orders": 0, "sell_orders": 0, "skipped": 0, "errors": 0}
+
+        sell = self._call("7200", "sell", stats)
+        buy = self._call("7201", "buy", stats)
+
+        self.assertEqual(sell["status"], "placed")
+        self.assertEqual(buy["status"], "skipped")
+        self.broker.send_order.assert_called_once()
+        self.assertEqual(self.broker.send_order.call_args[0][1], OrderSide.SELL)
+
     def test_unknown_symbol_skips_order(self):
         result = self._call("UNKNOWN", "buy")
         self.assertEqual(result["status"], "skipped")
@@ -512,6 +533,8 @@ class TestRunClaudeTrader(unittest.TestCase):
         pending=None,
         shorts=None,
         params_path=None,
+        risk_errors=None,
+        raises=None,
     ):
         """1回の中で symbols の順に place_order の買いを呼ばせ、(stats, broker, 結果) を返す
 
@@ -599,14 +622,23 @@ class TestRunClaudeTrader(unittest.TestCase):
             risk_mock = self._make_risk_mock()
             if gate is not None:
                 risk_mock.evaluate_trading_gate.return_value = gate
+            for name, err in (risk_errors or {}).items():
+                getattr(risk_mock, name).side_effect = err
             mock_risk_cls.return_value = risk_mock
-            stats = run_claude_trader(
+            kwargs = dict(
                 broker=broker,
                 market="jp",
                 mode="paper",
                 trade_diff_sink=InMemoryTradeDiffSink(),
                 prediction_repo=_PREDICTIONS,
             )
+            if raises is None:
+                stats = run_claude_trader(**kwargs)
+            else:
+                with self.assertRaises(type(raises)) as ctx:
+                    run_claude_trader(**kwargs)
+                self.assertIs(ctx.exception, raises)
+                stats = None
         tool_results = client.messages.create.call_args_list[1].kwargs["messages"][-1]["content"]
         results = [json.loads(r["content"]) for r in tool_results]
         return stats, broker, results
@@ -679,6 +711,50 @@ class TestRunClaudeTrader(unittest.TestCase):
         self.assertEqual(stats["sell_orders"], 1)
         self.assertTrue(stats["trading_stopped"])
         self.assertEqual(stats["stop_reason"], "日次損失上限テスト")
+
+    def _assert_buy_step_error_sells_then_raises(self, err, **kwargs):
+        # #1260: 新規買いの手順が落ちた日も、新規の buy だけ止めて保有の sell を出し、
+        # 回の終わりに同じ例外を投げ直す（#1221 のルールの道と同じ形）
+        positions = [{"symbol": "H0", "qty": 100, "avg_price": 1000.0, "current_price": 1000.0}]
+        _stats, broker, results = self._run_with_buys(
+            [], positions=positions, orders=[("S0", "buy"), ("H0", "sell")], raises=err, **kwargs
+        )
+
+        self.assertEqual([r["status"] for r in results], ["skipped", "placed"])
+        broker.send_order.assert_called_once()
+        self.assertEqual(broker.send_order.call_args[0][0], "H0")
+        self.assertEqual(broker.send_order.call_args[0][1], OrderSide.SELL)
+
+    def test_correlation_gate_error_sells_then_raises(self):
+        err = RuntimeError("相関の読み出し失敗")
+        with patch("src.trading.claude_order_caps.evaluate_correlation_gate", side_effect=err):
+            self._assert_buy_step_error_sells_then_raises(err)
+
+    def test_update_peak_balance_error_sells_then_raises(self):
+        err = RuntimeError("DD 基準値の更新失敗")
+        self._assert_buy_step_error_sells_then_raises(err, risk_errors={"update_peak_balance": err})
+
+    def test_trading_gate_error_sells_then_raises(self):
+        err = RuntimeError("日次損失の読み出し失敗")
+        self._assert_buy_step_error_sells_then_raises(
+            err, risk_errors={"evaluate_trading_gate": err}
+        )
+
+    def test_position_size_error_counts_error_and_keeps_later_sell(self):
+        # #1260: 1件の買いの例外で回ごと落ちず、その件を errors に数えて後の sell を出す
+        positions = [{"symbol": "H0", "qty": 100, "avg_price": 1000.0, "current_price": 1000.0}]
+        stats, broker, results = self._run_with_buys(
+            [],
+            positions=positions,
+            orders=[("S0", "buy"), ("H0", "sell")],
+            risk_errors={"calc_position_size": ValueError("サイズの計算に失敗")},
+        )
+
+        self.assertEqual([r["status"] for r in results], ["error", "placed"])
+        self.assertEqual(stats["errors"], 1)
+        self.assertEqual(stats["sell_orders"], 1)
+        broker.send_order.assert_called_once()
+        self.assertEqual(broker.send_order.call_args[0][1], OrderSide.SELL)
 
     def test_same_sector_buy_skipped_when_held_and_run_buys_reach_cap(self):
         from config.settings import MAX_SECTOR_POSITIONS

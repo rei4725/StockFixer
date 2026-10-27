@@ -272,6 +272,55 @@ class TestEvaluatePromotion(unittest.TestCase):
         self.assertIsInstance(result, PromotionResult)
 
 
+class TestEvaluatePromotionWithoutModelName(unittest.TestCase):
+    """WF の要約に model_name の列が無いときの判定（#1269）。"""
+
+    def _run(self, shadow_hit: float, current_hit: float, slippage: float = 0.01):
+        rates = {"shadow": shadow_hit, "current": current_hit}
+        with (
+            patch(
+                "src.prediction.promotion_gate._load_latest_wf_summary",
+                return_value=(_make_wf_df(), "wf_summary_20261021_160001.csv"),
+            ),
+            patch(
+                "src.prediction.promotion_gate._compute_hit_rate",
+                side_effect=lambda name, horizon: rates[name],
+            ),
+            patch("src.prediction.promotion_gate._compute_slippage", return_value=slippage),
+            patch("src.prediction.promotion_gate._collect_run_ids", return_value=[]),
+        ):
+            from src.prediction.promotion_gate import evaluate_promotion
+
+            return evaluate_promotion("shadow", "current")
+
+    def test_eligible_when_shadow_hit_rate_beats_current(self):
+        result = self._run(shadow_hit=0.58, current_hit=0.52)
+        self.assertTrue(result.eligible)
+        self.assertTrue(result.require_manual_approval)
+
+    def test_not_eligible_when_shadow_hit_rate_below_current(self):
+        result = self._run(shadow_hit=0.52, current_hit=0.58)
+        self.assertFalse(result.eligible)
+
+    def test_not_eligible_when_slippage_too_high(self):
+        result = self._run(shadow_hit=0.58, current_hit=0.52, slippage=0.05)
+        self.assertFalse(result.eligible)
+
+    def test_wf_criteria_marked_not_comparable(self):
+        result = self._run(shadow_hit=0.58, current_hit=0.52)
+        for key in ("net_return", "mdd", "sharpe"):
+            self.assertIsNone(result.criteria[key]["passed"])
+            self.assertIn("model_name", result.criteria[key]["note"])
+        self.assertEqual(result.criteria["hit_rate"]["current"], 0.52)
+        self.assertTrue(result.criteria["hit_rate"]["passed"])
+        self.assertIn("比べられない", result.reason)
+
+    def test_reason_lists_wf_not_comparable_when_not_eligible(self):
+        result = self._run(shadow_hit=0.52, current_hit=0.58)
+        self.assertIn("比べられない", result.reason)
+        self.assertIn("hit_rate", result.reason)
+
+
 class TestSavePromotionResult(unittest.TestCase):
     def test_saves_json_file(self):
         from src.prediction.promotion_gate import PromotionResult, save_promotion_result
