@@ -33,6 +33,7 @@ from typing import Optional
 
 import pandas as pd
 
+from src.prediction.baseline_metrics import baseline_metrics
 from src.prediction.db import load_prediction_accuracy
 from src.prediction.shadow_evaluation import DEFAULT_EVALUATION_DAYS
 from src.utils.data_path_utils import get_results_dir
@@ -102,6 +103,8 @@ class PromotionResult:
     reason: str
     run_ids: list[str] = field(default_factory=list)
     wf_source_file: Optional[str] = None
+    # 判定には使わない物差し（#1309）: {"shadow": {...}, "current": {...}}
+    baseline_metrics: dict = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -178,6 +181,14 @@ def _compute_slippage(model_name: str, horizon: int) -> Optional[float]:
     diff = (pred - actual).abs()
     val = diff.mean()
     return float(val) if not pd.isna(val) else None
+
+
+def _compute_baseline_metrics(model_name: str, horizon: int) -> dict:
+    """prediction_accuracy から基準の的中率・MAE・順位相関を返す（判定には使わない、#1309）。"""
+    df = _load_model_window(model_name, horizon)
+    if not df.empty and "model_name" in df.columns:
+        df = df[df["model_name"] == model_name]
+    return baseline_metrics(df)
 
 
 def _collect_run_ids(shadow_model: str, current_model: str) -> list[str]:
@@ -389,6 +400,10 @@ def evaluate_promotion(
         reason=reason,
         run_ids=run_ids,
         wf_source_file=wf_filename,
+        baseline_metrics={
+            "shadow": _compute_baseline_metrics(shadow_model_name, horizon),
+            "current": _compute_baseline_metrics(current_model_name, horizon),
+        },
     )
 
     logger.info(
