@@ -22,6 +22,21 @@ from src.utils.sector_constraints import get_symbol_sector
 
 logger = get_logger(__name__)
 
+# 動的スリッページの平均出来高の窓（backtester.py の _AVG_VOL_WINDOW と同じ）
+_AVG_VOL_WINDOW = 20
+
+
+def _build_exec_avg_volume(volume_matrix: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
+    """約定の日に使う平均出来高の表を返す（#1299）。
+
+    約定の日より前の足までの 20 本の平均にし、約定の日の出来高を含めない
+    （backtester.py と同じ rolling(20).mean().shift(1)、PR 783）。先頭の日は 0（フラットのみ）。
+    """
+    if volume_matrix is None or volume_matrix.empty:
+        return None
+    avg_vol = volume_matrix.sort_index().rolling(_AVG_VOL_WINDOW, min_periods=1).mean()
+    return avg_vol.shift(1).fillna(0.0)
+
 
 def _get_rebalance_dates(index: pd.DatetimeIndex, freq: str) -> list[Any]:
     """リバランス日のリストを返す。"""
@@ -68,6 +83,7 @@ def _simulate_portfolio(
     use_sector_rotation: bool = False,
     execution_by_market: Optional[dict[str, ExecutionModel]] = None,
     open_matrix: Optional[pd.DataFrame] = None,
+    volume_matrix: Optional[pd.DataFrame] = None,
 ) -> tuple[pd.DataFrame, list[dict[str, Any]]]:
     """
     ポートフォリオシミュレーションを実行する。
@@ -78,6 +94,9 @@ def _simulate_portfolio(
 
     execution_by_market を与えると、銘柄の鍵の市場（jp_・us_）ごとにその
     ExecutionModel で売買のコストを計算する（#847）。無い市場は execution を使う。
+
+    volume_matrix を与えると、売りと買い（戦略と等分の基準の両方）に約定の日より前の
+    足までの平均出来高を渡し、ExecutionModel の動的スリッページを効かせる（#1299）。
     """
 
     def _exec(sym: str) -> ExecutionModel:
@@ -112,6 +131,7 @@ def _simulate_portfolio(
     # Issue #1099: 日 t のスコアは t の引けの後にしか出せないため、売買は翌営業日 t+1 の
     # 始値で約定させる（backtester の execution_lag=1 と同じ）。Open の表が無いときは終値の表で代える。
     fill_matrix = open_matrix if open_matrix is not None else close_matrix
+    exec_avg_vol = _build_exec_avg_volume(volume_matrix)
 
     # 前のリバランスの日に決めて、次の日の寄りで約定させる注文
     pending: Optional[dict[str, Any]] = None
@@ -132,14 +152,19 @@ def _simulate_portfolio(
             # 始値の無い保有は、前の日までの最後の値段で売る（#846）
             sell_prices = prev_last_prices.copy()
             sell_prices.update(fill_prices)
+            volumes = (
+                exec_avg_vol.loc[date]
+                if exec_avg_vol is not None and date in exec_avg_vol.index
+                else pd.Series(dtype=float)
+            )
             cash, holdings, records = _fill_rebalance(
-                cash, holdings, pending, fill_prices, sell_prices, date_str, _exec
+                cash, holdings, pending, fill_prices, sell_prices, date_str, _exec, volumes
             )
             holdings_records.extend(records)
             eq_syms = [s for s in pending["eq_symbols"] if s in fill_prices.index]
             if eq_syms:
                 eq_cash, eq_holdings = _fill_equal_weight(
-                    eq_cash, eq_holdings, eq_syms, fill_prices, sell_prices, _exec
+                    eq_cash, eq_holdings, eq_syms, fill_prices, sell_prices, _exec, volumes
                 )
             pending = None
 
@@ -213,11 +238,17 @@ def _fill_rebalance(
     sell_prices: pd.Series,
     fill_date: str,
     exec_for: Callable[[str], ExecutionModel],
+    volumes: Optional[pd.Series] = None,
 ) -> tuple[float, dict[str, dict[str, Any]], list[dict[str, Any]]]:
-    """既存保有を全売却し、決めたウェイトで約定の日の始値で買う（#1099）。"""
+    """既存保有を全売却し、決めたウェイトで約定の日の始値で買う（#1099）。
+
+    volumes は約定の日より前の足までの平均出来高（#1299）。無い銘柄はフラットの率だけ。
+    """
     for sym, pos in holdings.items():
         if sym in sell_prices.index:
-            cash += exec_for(sym).sell_proceeds(pos["qty"], sell_prices[sym])
+            cash += exec_for(sym).sell_proceeds(
+                pos["qty"], sell_prices[sym], _volume_of(volumes, sym)
+            )
 
     new_holdings: dict[str, dict[str, Any]] = {}
     records: list[dict[str, Any]] = []
@@ -230,9 +261,10 @@ def _fill_rebalance(
         price = fill_prices[sym]
         if price <= 0:
             continue
-        qty = exec_for(sym).max_affordable_qty(budget, price)
+        volume = _volume_of(volumes, sym)
+        qty = exec_for(sym).max_affordable_qty(budget, price, volume)
         if qty > 0:
-            cash -= exec_for(sym).buy_cost(qty, price)
+            cash -= exec_for(sym).buy_cost(qty, price, volume)
             new_holdings[sym] = {"qty": qty, "price": price}
             records.append(
                 {
@@ -257,22 +289,37 @@ def _fill_equal_weight(
     fill_prices: pd.Series,
     sell_prices: pd.Series,
     exec_for: Callable[[str], ExecutionModel],
+    volumes: Optional[pd.Series] = None,
 ) -> tuple[float, dict[str, dict[str, Any]]]:
-    """等分戦略のリバランス（約定の日に始値のある銘柄に均等配分、#1099）。"""
+    """等分戦略のリバランス（約定の日に始値のある銘柄に均等配分、#1099）。
+
+    戦略と同じ平均出来高（volumes）で動的スリッページを当てる（#1299）。
+    """
     for sym, pos in eq_holdings.items():
         if sym in sell_prices.index:
-            eq_cash += exec_for(sym).sell_proceeds(pos["qty"], sell_prices[sym])
+            eq_cash += exec_for(sym).sell_proceeds(
+                pos["qty"], sell_prices[sym], _volume_of(volumes, sym)
+            )
     new_holdings: dict[str, dict[str, Any]] = {}
     eq_per = eq_cash / len(valid_syms)
     for sym in valid_syms:
         price = fill_prices[sym]
         if price <= 0:
             continue
-        qty = exec_for(sym).max_affordable_qty(eq_per, price)
+        volume = _volume_of(volumes, sym)
+        qty = exec_for(sym).max_affordable_qty(eq_per, price, volume)
         if qty > 0:
-            eq_cash -= exec_for(sym).buy_cost(qty, price)
+            eq_cash -= exec_for(sym).buy_cost(qty, price, volume)
             new_holdings[sym] = {"qty": qty}
     return eq_cash, new_holdings
+
+
+def _volume_of(volumes: Optional[pd.Series], sym: str) -> float:
+    """銘柄の平均出来高を返す。無い・NaN のときは 0（フラットの率だけ）。"""
+    if volumes is None or sym not in volumes.index:
+        return 0.0
+    value = float(volumes[sym])
+    return value if value > 0 else 0.0
 
 
 def _get_portfolio_symbol_sector(sym_key: str) -> str:
