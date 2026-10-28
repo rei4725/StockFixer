@@ -830,6 +830,57 @@ class TestBacktesterShortEntryVolume:
         assert short_qty == buy_qty
 
 
+class TestBacktesterFinalExitVolume:
+    """#1347: 期末の強制決済は、execution_lag > 0 なら前の足までの平均出来高で数える"""
+
+    _FINAL_PRICE = 123.0
+
+    @classmethod
+    def _df(cls, last_volume: float) -> pd.DataFrame:
+        n = 25
+        idx = pd.date_range("2024-01-01", periods=n, freq="B")
+        prices = [100.0] * (n - 1) + [cls._FINAL_PRICE]
+        volumes = [10_000.0 + 1_000.0 * i for i in range(n - 1)] + [last_volume]
+        return pd.DataFrame({"Open": prices, "Close": prices, "Volume": volumes}, index=idx)
+
+    @staticmethod
+    def _signal(df: pd.DataFrame, short: bool) -> pd.Series:
+        values = [0] * len(df)
+        values[0] = -1 if short else 1
+        return pd.Series(values, index=df.index)
+
+    @staticmethod
+    def _final_cash(df: pd.DataFrame, short: bool, calls: list) -> float:
+        bt = TestBacktesterShortEntryVolume._spy_bt(calls, execution_lag=1)
+        result_df, _ = bt.simulate_trading(df, TestBacktesterFinalExitVolume._signal(df, short))
+        action = "final_short_cover" if short else "final_sell"
+        rows = result_df[result_df["action"] == action]
+        assert len(rows) == 1
+        return float(rows["cash"].iloc[0])
+
+    @pytest.mark.parametrize("short", [False, True])
+    def test_final_cash_independent_of_last_bar_volume(self, short):
+        """最後の足の出来高だけを変えても、期末の強制決済の cash は変わらない"""
+        cashes = [
+            self._final_cash(self._df(last_volume), short, [])
+            for last_volume in (100.0, 34_000.0, 50_000_000.0)
+        ]
+        assert cashes[0] == pytest.approx(cashes[1], rel=1e-12)
+        assert cashes[0] == pytest.approx(cashes[2], rel=1e-12)
+
+    @pytest.mark.parametrize("short", [False, True])
+    def test_final_exit_avg_volume_excludes_last_bar(self, short):
+        """期末の slippage_fn に渡る avg_volume は、最後の足を除いた20本の平均"""
+        df = self._df(last_volume=50_000_000.0)
+        calls: list = []
+        self._final_cash(df, short, calls)
+
+        final_calls = [c for c in calls if c[1] == self._FINAL_PRICE]
+        assert final_calls
+        expected = float(df["Volume"].iloc[-21:-1].mean())
+        assert [c[2] for c in final_calls] == pytest.approx([expected] * len(final_calls))
+
+
 class TestBacktesterExecutionLag:
     """#493: 実行ラグ（翌バー約定）の検証"""
 

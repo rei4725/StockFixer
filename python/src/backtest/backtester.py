@@ -471,8 +471,9 @@ class Backtester:
                 )
             )
 
-        # 最終日に未決済ポジションを強制決済
-        final_vol = float(avg_vol.iloc[-1]) if len(avg_vol) else 0.0
+        # 最終日に未決済ポジションを強制決済。execution_lag > 0 では最後の足の出来高を
+        # 先読みしないよう、前の足までの平均出来高（mark-to-market と同じ値）を使う（#1347）
+        final_vol = float(exec_avg_vol.iloc[-1]) if len(exec_avg_vol) else 0.0
         if position > 0:
             price = df.iloc[-1][close_col]
             proceeds = self.execution.sell_proceeds(position, price, final_vol)
