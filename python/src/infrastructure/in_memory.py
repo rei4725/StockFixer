@@ -293,7 +293,11 @@ class InMemoryAnalyticsQuery(AnalyticsQuery):
         return self._paper_real_diff
 
     def drift_summary(
-        self, horizon: int = 1, recent_n: int = 30, model_name: str = "production"
+        self,
+        horizon: int = 1,
+        recent_n: int = 30,
+        model_name: str = "production",
+        raise_on_error: bool = False,
     ) -> pd.DataFrame:
         self.calls.append(("drift_summary", {"horizon": horizon, "recent_n": recent_n}))
         return self._drift.copy()
@@ -304,6 +308,7 @@ class InMemoryAnalyticsQuery(AnalyticsQuery):
         symbol: Optional[str] = None,
         horizon: int = 1,
         limit: int = 500,
+        raise_on_error: bool = False,
     ) -> pd.DataFrame:
         self.calls.append(
             (
