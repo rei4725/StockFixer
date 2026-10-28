@@ -145,7 +145,7 @@ class _StubScreeningPort:
 def _run(symbols, screen=None, call_log=None, **kwargs):
     screen = screen or _make_screen(symbols, call_log)
 
-    def _load_closes(market, start_date=None, end_date=None, timeframe="1d"):
+    def _load_closes(market, start_date=None, end_date=None, timeframe="1d", with_volume=False):
         df = _closes_frame(symbols)
         if end_date is not None and not df.empty:
             df = df[df["ts"] <= pd.Timestamp(end_date)]
@@ -250,7 +250,7 @@ class TestLongtermBacktest(unittest.TestCase):
         """
         set_backtest_screening_port(_StubScreeningPort(_make_screen(["MID"])))
 
-        def _load_closes(market, start_date=None, end_date=None, timeframe="1d"):
+        def _load_closes(market, start_date=None, end_date=None, timeframe="1d", with_volume=False):
             return _closes_frame(["MID"]).reset_index(drop=True)
 
         with patch.object(lb_prices, "load_raw_closes", side_effect=_load_closes), patch.object(

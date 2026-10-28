@@ -271,6 +271,12 @@ class TestLoadRawCloses(_TmpDbTestCase):
         df = load_raw_closes("us")
         self.assertEqual(list(df.columns), ["symbol", "ts", "close"])
 
+    def test_with_volume_adds_volume_column(self):
+        self._seed()
+        df = load_raw_closes("us", with_volume=True)
+        self.assertEqual(list(df.columns), ["symbol", "ts", "close", "volume"])
+        self.assertEqual(len(df), 6)
+
     def test_excludes_other_markets(self):
         self._seed()
         df = load_raw_closes("jp")

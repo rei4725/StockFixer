@@ -116,26 +116,32 @@ def load_all_raw_ohlcv_symbols(timeframe: str = "1d") -> list:
 
 
 def load_raw_closes(
-    market: str, start_date=None, end_date=None, timeframe: str = "1d"
+    market: str,
+    start_date=None,
+    end_date=None,
+    timeframe: str = "1d",
+    with_volume: bool = False,
 ) -> pd.DataFrame:
     """market の全銘柄の終値を 1 クエリで取得する。
 
     銘柄ごとに load_raw_ohlcv を呼ぶと N+1 クエリになるため、一括読み出しが
     必要な用途（バックテストの価格マップ構築など）はこちらを使う。転送量を
-    抑えるため close 列のみを引く。
+    抑えるため close 列のみを引く（with_volume=True なら volume 列も引く）。
 
     Args:
         market: マーケット識別子 (例: "us", "jp")
         start_date: 開始日 (str or datetime, None なら全期間)
         end_date: 終了日 (str or datetime, None なら全期間)
         timeframe: 時間軸 (default: "1d")
+        with_volume: True なら volume 列を足す（動的スリッページ用）
 
     Returns:
-        columns=[symbol, ts, close] の DataFrame（symbol, ts の昇順）。
-        データなしは空 DataFrame。
+        columns=[symbol, ts, close]（with_volume なら [symbol, ts, close, volume]）
+        の DataFrame（symbol, ts の昇順）。データなしは空 DataFrame。
     """
-    query = """
-        SELECT symbol, ts, close
+    columns = ["symbol", "ts", "close"] + (["volume"] if with_volume else [])
+    select = "SELECT symbol, ts, close, volume" if with_volume else "SELECT symbol, ts, close"
+    query = select + """
         FROM market_data_raw
         WHERE market = %s AND timeframe = %s
     """
@@ -155,7 +161,7 @@ def load_raw_closes(
             df = pd.read_sql(query, con, params=params)
         except Exception as e:
             logger.error(f"market_data_raw 一括読み込み失敗 [{market}]: {e}", exc_info=True)
-            return pd.DataFrame(columns=["symbol", "ts", "close"])
+            return pd.DataFrame(columns=columns)
 
     return df
 

@@ -38,11 +38,13 @@ from src.backtest.longterm.portfolio import OpenPosition, Portfolio
 from src.backtest.longterm.prices import (
     build_calendar,
     close_lookups,
+    exec_avg_volume,
     load_price_map,
     make_rescreen_dates,
 )
 from src.backtest.metrics import fetch_benchmark_returns
 from src.backtest.screening_port import get_backtest_screening_port
+from src.backtest.slippage import make_slippage_fn
 from src.domain.types import TrendCandidate
 from src.utils.logger import get_logger
 
@@ -154,11 +156,13 @@ def enter_candidates(
         if entry_price <= 0 or per_position <= 0:
             continue
 
+        # 約定の日より前の平均出来高（約定の日を含めない）で市場インパクトを数える。
+        volume = exec_avg_volume(price_map, symbol, entry_date)
         # 予算 per_position で買える整数株数。端株は買わず、余剰は現金として温存する。
-        shares = execution.max_affordable_qty(per_position, entry_price)
+        shares = execution.max_affordable_qty(per_position, entry_price, volume)
         if shares <= 0:
             continue
-        cost = execution.buy_cost(shares, entry_price)
+        cost = execution.buy_cost(shares, entry_price, volume)
 
         # イベント生成を enter の前に済ませることで、空イベント時の
         # 現金巻き戻しが不要になる（simulate_position は現金に依存しない）。
@@ -179,6 +183,12 @@ def enter_candidates(
                 events_by_date=group_events_by_date(events),
             )
         )
+
+
+def build_execution(config: LongtermBacktestConfig) -> ExecutionModel:
+    """約定モデルを組む。dynamic_slippage が True なら市場インパクトを上乗せする（#1310）。"""
+    slippage_fn = make_slippage_fn() if config.dynamic_slippage else None
+    return ExecutionModel(config.costs, slippage_fn)
 
 
 def _empty_result(
@@ -246,7 +256,7 @@ def run_longterm_backtest(
             [symbol, entry_date, exit_date, entry_price, exit_price,
              multiple, max_multiple, exit_reason, held_days]
     """
-    execution = ExecutionModel(config.costs)
+    execution = build_execution(config)
 
     price_map = load_price_map(config.market, config.end)
     calendar = build_calendar(price_map, config.start, config.end)
@@ -270,8 +280,9 @@ def run_longterm_backtest(
         for symbol in list(portfolio.positions.keys()):
             pos = portfolio.positions[symbol]
             for ev in pos.events_by_date.get(date, []):
+                volume = exec_avg_volume(price_map, symbol, ev.date)
                 if ev.action == "scale_out":
-                    portfolio.scale_out(symbol, ev, execution)
+                    portfolio.scale_out(symbol, ev, execution, volume)
                 elif ev.action == "exit":
                     max_multiple = _peak_multiple(
                         price_map,
@@ -281,7 +292,7 @@ def run_longterm_backtest(
                         ev.date,
                         ev.price,
                     )
-                    portfolio.close(symbol, ev, execution, max_multiple)
+                    portfolio.close(symbol, ev, execution, max_multiple, volume)
                     # 撤退後の同日イベントは保有が無いので処理しない。
                     break
 
