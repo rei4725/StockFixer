@@ -277,13 +277,22 @@ def load_latest_predictions_by_market(
     model_version の行だけを見る。challenger の影の予測は production の後の時刻で
     保存されるので、絞らないと影のモデルの予測で本番の発注をする（#804）。
 
+    その market と model_version の最新の回（MAX(predicted_at)。1回の予想は全銘柄に
+    同じ predicted_at を付けて保存する）の行だけを返す。ウォッチリストから外れた銘柄や
+    予想を飛ばした銘柄の前の回の行は表に残るので、返すと古い予想と値段で発注する（#1304）。
+
     Returns:
         columns: market, symbol, predicted_at, current_price, diff_ratio,
         confidence_ratio, diff_ratio_3d, diff_ratio_5d, diff_ratio_10d,
         confluence_score (desc order by diff_ratio)
     """
     with _db_connection() as con:
-        return pd.read_sql(
+        latest_run = con.execute(
+            "SELECT MAX(predicted_at) FROM prediction_results"
+            " WHERE market = %s AND model_version = %s",
+            [market, model_version],
+        ).fetchone()
+        df = pd.read_sql(
             """
             WITH latest AS (
                 SELECT market, symbol, MAX(predicted_at) AS latest_at
@@ -311,6 +320,18 @@ def load_latest_predictions_by_market(
             con,
             params=[market, model_version, model_version],
         )
+    run_at = latest_run[0] if latest_run else None
+    stale = df["predicted_at"] != run_at
+    if stale.any():
+        logger.warning(
+            "最新の回に無い銘柄の古い予測を外す: market=%s model_version=%s 最新の回=%s"
+            " 外した銘柄=%d",
+            market,
+            model_version,
+            run_at,
+            int(stale.sum()),
+        )
+    return df[~stale].reset_index(drop=True)
 
 
 def load_shadow_comparison(

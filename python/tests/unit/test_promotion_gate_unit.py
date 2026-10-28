@@ -198,6 +198,37 @@ class TestEvaluatePromotion(unittest.TestCase):
         self.assertEqual(result.shadow_model, "shadow")
         self.assertEqual(result.current_model, "current")
 
+    def test_baseline_metrics_recorded_without_changing_decision(self):
+        """基準の的中率などは結果に載るが、合否には使わない（#1309）"""
+        from src.prediction.promotion_gate import evaluate_promotion
+
+        # 全部「上がる」と言う予想: 的中率 = 実際に上がった割合 (3/4)
+        df = pd.DataFrame(
+            {
+                "direction_match": [1, 1, 0, 1],
+                "predicted_ratio": [0.05, 0.06, 0.07, 0.04],
+                "actual_ratio": [0.01, 0.02, -0.01, 0.0],
+                "model_name": ["shadow"] * 4,
+            }
+        )
+        patches = self._patch_all()
+        with (
+            patches[0],
+            patches[1],
+            patches[2],
+            patches[3],
+            patch("src.prediction.promotion_gate.load_prediction_accuracy", return_value=df),
+        ):
+            result = evaluate_promotion("shadow", "current")
+        self.assertTrue(result.eligible)
+        shadow = result.baseline_metrics["shadow"]
+        self.assertAlmostEqual(shadow["actual_up_rate"], 0.75)
+        self.assertAlmostEqual(shadow["hit_rate_minus_up_rate"], 0.0)
+        self.assertAlmostEqual(shadow["mae"], (0.04 + 0.04 + 0.08 + 0.04) / 4)
+        # current の行は無い
+        self.assertEqual(result.baseline_metrics["current"]["n_baseline"], 0)
+        self.assertNotIn("baseline", result.criteria)
+
     def test_not_eligible_when_hit_rate_below_floor(self):
         from src.prediction.promotion_gate import evaluate_promotion
 

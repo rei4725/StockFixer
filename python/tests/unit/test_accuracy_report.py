@@ -125,6 +125,29 @@ def test_report_fields_from_scored_rows(tmp_path):
     assert challenger["four_week"]["n_scored"] == 0
 
 
+def test_report_has_baseline_metrics(tmp_path):
+    """的中率と並べて基準の的中率・MAE・順位相関が出ること（#1309）"""
+    path, _ = _write(tmp_path, _accuracy_rows(), lambda market, symbol: _SECTORS[symbol])
+    with open(path, encoding="utf-8") as f:
+        report = json.load(f)
+    prod = report["models"]["production"]["1"]
+
+    # 今日の採点: 実際に上がったのは 7203 だけ、上がると予想したのは 3件（0.00 を含む）
+    assert prod["actual_up_rate"] == pytest.approx(0.25)
+    assert prod["predicted_up_rate"] == pytest.approx(0.75)
+    assert prod["majority_baseline_accuracy"] == pytest.approx(0.75)
+    assert prod["hit_rate_minus_up_rate"] == pytest.approx(0.5 - 0.25)
+    assert prod["hit_rate_minus_majority"] == pytest.approx(0.5 - 0.75)
+    assert prod["mae"] == pytest.approx(prod["mean_abs_error"])
+    assert "rank_corr" in prod and "abs_rank_corr" in prod
+    assert prod["four_week"]["n_baseline"] == 6
+    assert prod["by_market"]["jp"]["actual_up_rate"] == pytest.approx(0.5)
+
+    challenger = report["models"]["challenger"]["1"]
+    assert challenger["n_baseline"] == 0
+    assert challenger["actual_up_rate"] is None
+
+
 def test_top_misses_capped_at_ten(tmp_path):
     """外れの大きい銘柄は上位10件までであること"""
     rows = [

@@ -28,6 +28,7 @@ import pandas as pd
 
 from config.settings import MAX_SECTOR_POSITIONS
 from src.backtest.execution import ExecutionModel, TradingCosts
+from src.backtest.slippage import make_slippage_fn
 from src.utils.logger import get_logger
 
 from .metrics import (  # noqa: F401
@@ -58,18 +59,28 @@ logger = get_logger(__name__)
 
 
 def _build_execution(
-    market: Optional[str], fee_rate: float, slippage: Optional[float]
+    market: Optional[str],
+    fee_rate: float,
+    slippage: Optional[float],
+    dynamic_slippage: bool = True,
 ) -> ExecutionModel:
     """市場別の既定コストから ExecutionModel を組む。
 
     market=None（全マーケット混在）は US 既定にフォールバックする。
     銘柄ごとの市場別の既定は _build_market_executions が担う（#847）。
+    市場インパクトはほかのバックテストの道と同じ make_slippage_fn() の既定で数える（#1299）。
     """
-    return ExecutionModel(TradingCosts.for_market(market or "us", fee_rate, slippage))
+    return ExecutionModel(
+        TradingCosts.for_market(market or "us", fee_rate, slippage),
+        slippage_fn=make_slippage_fn() if dynamic_slippage else None,
+    )
 
 
 def _build_market_executions(
-    market: Optional[str], fee_rate: float, slippage: Optional[float]
+    market: Optional[str],
+    fee_rate: float,
+    slippage: Optional[float],
+    dynamic_slippage: bool = True,
 ) -> Optional[dict[str, ExecutionModel]]:
     """全マーケット混在のとき、市場別の ExecutionModel を返す（#847・#965）。
 
@@ -79,7 +90,13 @@ def _build_market_executions(
     """
     if market:
         return None
-    return {m: ExecutionModel(TradingCosts.for_market(m, fee_rate, slippage)) for m in ("jp", "us")}
+    return {
+        m: ExecutionModel(
+            TradingCosts.for_market(m, fee_rate, slippage),
+            slippage_fn=make_slippage_fn() if dynamic_slippage else None,
+        )
+        for m in ("jp", "us")
+    }
 
 
 def run_portfolio_backtest(
@@ -96,6 +113,7 @@ def run_portfolio_backtest(
     ensemble: bool = False,
     max_sector_positions: int = MAX_SECTOR_POSITIONS,
     use_sector_rotation: bool = False,
+    dynamic_slippage: bool = True,
 ) -> tuple[pd.DataFrame, dict[str, Any], pd.DataFrame]:
     """
     ポートフォリオバックテストを実行する。
@@ -115,6 +133,8 @@ def run_portfolio_backtest(
         ensemble: XGBoost+LightGBM アンサンブルを使用
         max_sector_positions: 同一セクターで許容する最大銘柄数（0 以下で無効）
         use_sector_rotation: True のとき市場レジームに応じてセクターウェイトを切り替える
+        dynamic_slippage: True のとき株数と約定の日より前の平均出来高に応じた
+            市場インパクトをフラットの率に上乗せする（#1299）
 
     Returns:
         (equity_df, metrics, holdings_df)
@@ -135,8 +155,8 @@ def run_portfolio_backtest(
 
     logger.info(f"[ポートフォリオ] 対象銘柄数: {len(all_symbols)}")
 
-    # 各銘柄の予測スコアと Close・Open 価格を収集
-    score_matrix, close_matrix, open_matrix = _build_signal_matrix(
+    # 各銘柄の予測スコアと Close・Open 価格・Volume を収集
+    score_matrix, close_matrix, open_matrix, volume_matrix = _build_signal_matrix(
         all_symbols, model_type, train_ratio, source, threshold, ensemble
     )
 
@@ -154,11 +174,12 @@ def run_portfolio_backtest(
         rebalance_dates=rebalance_dates,
         top_n=top_n,
         initial_cash=initial_cash,
-        execution=_build_execution(market, fee_rate, slippage),
+        execution=_build_execution(market, fee_rate, slippage, dynamic_slippage),
         max_sector_positions=max_sector_positions,
         use_sector_rotation=use_sector_rotation,
-        execution_by_market=_build_market_executions(market, fee_rate, slippage),
+        execution_by_market=_build_market_executions(market, fee_rate, slippage, dynamic_slippage),
         open_matrix=open_matrix,
+        volume_matrix=volume_matrix,
     )
 
     metrics = _compute_portfolio_metrics(equity_df, initial_cash)
@@ -184,6 +205,7 @@ def compare_sector_rotation_kpi(
     slippage: Optional[float] = None,
     ensemble: bool = False,
     max_sector_positions: int = MAX_SECTOR_POSITIONS,
+    dynamic_slippage: bool = True,
 ) -> dict[str, Any]:
     """
     セクターローテーション有効時/無効時の KPI を比較する。
@@ -203,7 +225,7 @@ def compare_sector_rotation_kpi(
         logger.error(f"[セクターローテーション比較] 対象銘柄が見つかりません: market={market}")
         return {}
 
-    score_matrix, close_matrix, open_matrix = _build_signal_matrix(
+    score_matrix, close_matrix, open_matrix, volume_matrix = _build_signal_matrix(
         all_symbols, model_type, train_ratio, source, 0.0, ensemble
     )
     if score_matrix.empty:
@@ -212,8 +234,8 @@ def compare_sector_rotation_kpi(
 
     rebalance_dates = _get_rebalance_dates(pd.DatetimeIndex(score_matrix.index), rebalance_freq)
 
-    execution = _build_execution(market, fee_rate, slippage)
-    execution_by_market = _build_market_executions(market, fee_rate, slippage)
+    execution = _build_execution(market, fee_rate, slippage, dynamic_slippage)
+    execution_by_market = _build_market_executions(market, fee_rate, slippage, dynamic_slippage)
     eq_off, _ = _simulate_portfolio(
         score_matrix,
         close_matrix,
@@ -225,6 +247,7 @@ def compare_sector_rotation_kpi(
         use_sector_rotation=False,
         execution_by_market=execution_by_market,
         open_matrix=open_matrix,
+        volume_matrix=volume_matrix,
     )
     eq_on, _ = _simulate_portfolio(
         score_matrix,
@@ -237,6 +260,7 @@ def compare_sector_rotation_kpi(
         use_sector_rotation=True,
         execution_by_market=execution_by_market,
         open_matrix=open_matrix,
+        volume_matrix=volume_matrix,
     )
 
     metrics_off = _compute_portfolio_metrics(eq_off, initial_cash)
