@@ -1061,5 +1061,85 @@ class TestBacktesterSlTpNextBarFill:
         assert final["price"] == 94.0
 
 
+class TestBacktesterSlTpAfterOpenSignal:
+    """#1361: execution_lag > 0 では、寄りで約定するシグナルを先に処理し、
+    その後に残った保有だけを当バー Close で SL/TP 判定する"""
+
+    _IDX = pd.date_range("2024-01-01", periods=5, freq="B")
+
+    def _bt(self, **kwargs):
+        params = dict(
+            model_manager=MagicMock(),
+            signal_generator=MagicMock(),
+            data_loader=MagicMock(),
+            start_date=None,
+            end_date=None,
+            market="jp",
+            symbol="7203",
+            initial_cash=1_000_000,
+            fee_rate=0.0,
+            execution_lag=1,
+        )
+        params.update(kwargs)
+        return Backtester(**params)
+
+    def test_sell_signal_at_open_wins_over_take_profit_at_close(self):
+        # bar1 Open=100 で買い → bar2 の寄り 101 で売りシグナルが約定。bar2 Close=112 は TP 10% 超え
+        df = pd.DataFrame(
+            {
+                "Open": [100.0, 100.0, 101.0, 110.0, 111.0],
+                "Close": [100.0, 100.0, 112.0, 111.0, 112.0],
+            },
+            index=self._IDX,
+        )
+        signal = pd.Series([1, -1, 0, 0, 0], index=self._IDX)
+        result_df, _ = self._bt(take_profit_pct=0.10).simulate_trading(df, signal)
+
+        actions = list(result_df["action"])
+        assert "take_profit" not in actions
+        sell = result_df[result_df["action"] == "sell"].iloc[0]
+        assert sell["date"] == self._IDX[2]
+        assert sell["price"] == 101.0
+        assert "final_sell" not in actions
+
+    def test_sell_signal_at_open_wins_over_stop_loss_at_close(self):
+        # bar2 の寄り 99 で売りシグナルが約定。bar2 Close=94 は SL 5% 割れ
+        df = pd.DataFrame(
+            {
+                "Open": [100.0, 100.0, 99.0, 90.0, 91.0],
+                "Close": [100.0, 100.0, 94.0, 91.0, 92.0],
+            },
+            index=self._IDX,
+        )
+        signal = pd.Series([1, -1, 0, 0, 0], index=self._IDX)
+        result_df, _ = self._bt(stop_loss_pct=0.05).simulate_trading(df, signal)
+
+        actions = list(result_df["action"])
+        assert "stop_loss" not in actions
+        sell = result_df[result_df["action"] == "sell"].iloc[0]
+        assert sell["date"] == self._IDX[2]
+        assert sell["price"] == 99.0
+        assert "final_sell" not in actions
+
+    def test_buy_at_open_then_stop_loss_at_close_exits_next_bar(self):
+        # bar1 Open=100 で買い、同じ足の Close=94 で SL 5% 割れ → bar2 Open=92 で決済
+        df = pd.DataFrame(
+            {
+                "Open": [100.0, 100.0, 92.0, 91.0, 90.0],
+                "Close": [100.0, 94.0, 93.0, 92.0, 91.0],
+            },
+            index=self._IDX,
+        )
+        signal = pd.Series([1, 0, 0, 0, 0], index=self._IDX)
+        result_df, _ = self._bt(stop_loss_pct=0.05).simulate_trading(df, signal)
+
+        buy = result_df[result_df["action"] == "buy"].iloc[0]
+        sl = result_df[result_df["action"] == "stop_loss"].iloc[0]
+        assert buy["date"] == self._IDX[1]
+        assert sl["date"] == self._IDX[2]
+        assert sl["price"] == 92.0
+        assert list(result_df["action"]).count("stop_loss") == 1
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
