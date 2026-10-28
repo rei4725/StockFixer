@@ -112,13 +112,22 @@ def _compute_drift_count(
     """
     if drift_df is None or drift_df.empty:
         return 0
-    df = drift_df
-    if "last_predicted_at" in df.columns:
-        digits = df["last_predicted_at"].astype(str).str.replace(r"[^0-9]", "", regex=True)
-        last_at = pd.to_datetime(digits.str[:14], format="%Y%m%d%H%M%S", errors="coerce")
-        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
-        df = df[last_at.isna() | (last_at >= cutoff)]
-        if df.empty:
-            return 0
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
+    df = drop_stale_symbols(drift_df, cutoff)
+    if df.empty:
+        return 0
     selection = select_drifted_symbols(df, thresholds or DriftThresholds())
     return len(selection.triggered)
+
+
+def drop_stale_symbols(drift_df: pd.DataFrame, cutoff_utc: datetime) -> pd.DataFrame:
+    """最後の予想（last_predicted_at、UTC の 'YYYYMMDD_HHMMSS'）が cutoff_utc より古い銘柄を外す。
+
+    cutoff_utc は tz を持たない UTC の時刻。月次の閾値超過銘柄数（#1335）と週次レポート
+    （#1350）で同じ物差しにする。列が無い表と時刻が読めない行は、今までどおり残す。
+    """
+    if drift_df is None or drift_df.empty or "last_predicted_at" not in drift_df.columns:
+        return drift_df
+    digits = drift_df["last_predicted_at"].astype(str).str.replace(r"[^0-9]", "", regex=True)
+    last_at = pd.to_datetime(digits.str[:14], format="%Y%m%d%H%M%S", errors="coerce")
+    return drift_df[last_at.isna() | (last_at >= cutoff_utc)]
