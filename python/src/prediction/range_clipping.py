@@ -41,11 +41,24 @@ def clip_diff_ratio_to_atr_range(
         [-max_ratio, max_ratio] にクリップした変化率。判定不能な入力の
         場合は diff_ratio をそのまま返す。
     """
-    if atr is None or atr <= 0 or current_price <= 0:
-        return diff_ratio
-
-    max_ratio = atr_multiplier * (atr / current_price) * math.sqrt(max(horizon, 1))
-    if max_ratio <= 0:
+    max_ratio = atr_clip_max_ratio(atr, current_price, horizon, atr_multiplier)
+    if max_ratio is None:
         return diff_ratio
 
     return max(-max_ratio, min(max_ratio, diff_ratio))
+
+
+def atr_clip_max_ratio(
+    atr: Optional[float],
+    current_price: float,
+    horizon: int = 1,
+    atr_multiplier: float = DEFAULT_ATR_CLIP_MULTIPLIER,
+) -> Optional[float]:
+    """クリップの上限の幅（変化率）。判定不能な入力なら None。"""
+    if atr is None or atr <= 0 or current_price <= 0:
+        return None
+
+    max_ratio = atr_multiplier * (atr / current_price) * math.sqrt(max(horizon, 1))
+    if max_ratio <= 0:
+        return None
+    return max_ratio

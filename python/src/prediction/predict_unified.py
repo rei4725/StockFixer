@@ -17,7 +17,12 @@ import yfinance as yf
 from config.settings import PREDICTION_ATR_CLIP_MULTIPLIER, STALE_BARS_MAX_WEEKDAYS
 from src.domain.jp_market_holidays import is_jp_business_day
 from src.prediction.db import load_model_weights
-from src.prediction.range_clipping import clip_diff_ratio_to_atr_range
+from src.prediction.prediction_run_stats import (
+    collect_prediction_run_stats,
+    record_clip,
+    record_zero_fill,
+)
+from src.prediction.range_clipping import atr_clip_max_ratio, clip_diff_ratio_to_atr_range
 from src.prediction.remote_client import get_service_url, predict_via_service
 from src.prediction.types import PredictionResult
 from src.utils.data_path_utils import get_models_dir, get_ticker
@@ -389,6 +394,8 @@ def predict_with_unified_model(
     pred_prices = []
     succeeded_model_names = []
     last_model_error: Optional[Exception] = None
+    # モデルをまたいで0で埋めた特徴量（回ごとのログに出す、#1318）
+    zero_filled: set = set()
     for model_name in model_types:
         try:
             model = get_cached_model(model_name)
@@ -403,6 +410,7 @@ def predict_with_unified_model(
                 for feat in expected_features:
                     if feat not in latest_X_aligned.columns:
                         latest_X_aligned[feat] = 0
+                        zero_filled.add(feat)
                 # 期待される特徴量のみ選択
                 latest_X_aligned = latest_X_aligned[expected_features]
             else:
@@ -435,6 +443,8 @@ def predict_with_unified_model(
             )
             continue
 
+    record_zero_fill(market, horizon, sorted(zero_filled))
+
     if not pred_prices:
         # 例外で全滅したときは None にせず投げ、呼び出し元の例外の数と知らせに乗せる（#1140）
         if last_model_error is not None:
@@ -457,6 +467,15 @@ def predict_with_unified_model(
         raw_atr = latest_X["atr_lag1"].iloc[0]
         if pd.notna(raw_atr):
             atr_value = float(raw_atr)
+    # 上限・下限に当たった数を回ごとのログに出す（#1318）
+    record_clip(
+        market,
+        horizon,
+        diff_ratio,
+        atr_clip_max_ratio(
+            atr_value, current_price, horizon, atr_multiplier=PREDICTION_ATR_CLIP_MULTIPLIER
+        ),
+    )
     diff_ratio = clip_diff_ratio_to_atr_range(
         diff_ratio,
         atr_value,
@@ -515,12 +534,13 @@ def predict_all_with_unified_model(
             return None
 
     results = []
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        futures = {executor.submit(predict_wrapper, key): key for key in all_keys}
-        for future in as_completed(futures):
-            result = future.result()
-            if result is not None:
-                results.append(result)
+    with collect_prediction_run_stats("unified_all"):
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            futures = {executor.submit(predict_wrapper, key): key for key in all_keys}
+            for future in as_completed(futures):
+                result = future.result()
+                if result is not None:
+                    results.append(result)
 
     if results:
         return pd.concat(results, ignore_index=True)
