@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unittest
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 import pandas as pd
@@ -60,6 +61,13 @@ class TestShadowEvaluationReadsWholeWindow(unittest.TestCase):
         days = _days(_N_DAYS)
         _insert(_rows("production", days, hit_days=10))
         _insert(_rows("challenger", days, hit_days=3))
+        # 今の challenger は20日より前に学習した（版の境で絞らない。#1327）
+        trained = patch(
+            "src.prediction.challenger_window.current_challenger_trained_at",
+            return_value=datetime(2026, 9, 1, tzinfo=timezone.utc),
+        )
+        trained.start()
+        self.addCleanup(trained.stop)
 
     def test_counts_are_twenty_days_each(self):
         from src.prediction.shadow_evaluation import evaluate_shadow_models
