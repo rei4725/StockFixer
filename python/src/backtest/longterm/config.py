@@ -37,6 +37,8 @@ class LongtermBacktestConfig:
                    CLI からこの値を指定するフラグは未提供（呼び出し元コードから
                    設定する必要がある）。
     benchmark_ticker: 比べる指数。空なら market の既定（`DEFAULT_BENCHMARKS`）を使う。
+    dynamic_slippage: True（既定）なら約定の日より前の 20 本の平均出来高で
+                   市場インパクト（`make_slippage_fn`）を上乗せする。False で切る。
     """
 
     market: str = "us"
@@ -49,6 +51,7 @@ class LongtermBacktestConfig:
     execution_lag: int = 1
     benchmark_ticker: str = ""
     n_trials: int = 0
+    dynamic_slippage: bool = True
     costs: TradingCosts = field(default_factory=TradingCosts)
     rules: HoldRules = field(default_factory=HoldRules)
 
