@@ -23,7 +23,11 @@ from src.trading.brokers.paper.bar_timing import bar_date_jst as _bar_date_jst
 from src.trading.brokers.paper.bar_timing import created_after_bar_close as _created_after_bar_close
 from src.trading.brokers.paper.bar_timing import parse_predicted_date as _parse_predicted_date
 from src.trading.brokers.paper.fill import apply_fill
-from src.trading.brokers.paper.pending_short import read_pending_shorts, split_filled_short
+from src.trading.brokers.paper.pending_short import (
+    pending_in_row_units,
+    read_pending_shorts,
+    split_filled_short,
+)
 from src.trading.position_valuation import (
     long_positions_unrealized_pnl,
     short_positions_unrealized_pnl,
@@ -44,22 +48,30 @@ def _today_jst() -> date:
     return now_jst().date()
 
 
-def _undo_short_registration(con: Any, symbol: str, qty: int, price: Any) -> None:
-    """取り消した空売りの分を paper_short_positions から戻す（加重平均単価も戻す, #1104）"""
+def _undo_short_registration(
+    con: Any, symbol: str, qty: int, price: Any, splits: Any = None, created_at: Any = None
+) -> None:
+    """取り消した空売りの分を paper_short_positions から戻す（加重平均単価も戻す, #1104）
+
+    splits と created_at を渡すと、仮登録で分割を当てて足した株数を引く（#1339）。
+    """
     row = con.execute(
-        "SELECT qty, avg_short_price FROM paper_short_positions WHERE symbol=%s", [symbol]
+        "SELECT qty, avg_short_price, updated_at FROM paper_short_positions WHERE symbol=%s",
+        [symbol],
     ).fetchone()
     if not row:
         return
     cur_qty, cur_avg = int(row[0]), float(row[1] or 0.0)
-    rest = cur_qty - qty
+    factor = 1.0 if created_at is None else sa.split_factor_between(splits, created_at, row[2])
+    rest = cur_qty - int(round(qty * factor))
     if rest <= 0:
         con.execute("DELETE FROM paper_short_positions WHERE symbol=%s", [symbol])
         return
     rest_avg = (cur_avg * cur_qty - float(price or 0.0) * qty) / rest
+    # 権利落ちの日の寄りの前に直した行の updated_at を、前の日と読まれる今の時刻に戻さない（#1339）
     con.execute(
         "UPDATE paper_short_positions SET qty=%s, avg_short_price=%s, "
-        "updated_at=CURRENT_TIMESTAMP WHERE symbol=%s",
+        "updated_at=GREATEST(updated_at, CURRENT_TIMESTAMP) WHERE symbol=%s",
         [rest, rest_avg, symbol],
     )
 
@@ -110,9 +122,10 @@ class PaperBroker(BrokerBase):
         # PaperBroker は東証銘柄専用（settle で f"{symbol}.T" を組み立てる）ため market は "jp"。
         # ここで確定させることで、メタデータ補完（_link_paper_order_metadata）を経由しない
         # 発注経路でも market が NULL にならず、エクイティ再構成の時価評価が機能する。
+        splits: Any = None
         if side == OrderSide.SHORT:
             # 分割前の空売りの保有に分割後の値段を混ぜて平均しないよう、先に直す（#1086）
-            sa.adjust_stored_short_for_splits(self._market_data, sym)
+            splits = sa.adjust_stored_short_for_splits(self._market_data, sym)
         with _db_connection() as con:
             if side == OrderSide.BUY:
                 # 約定待ちの買いは保有にも残高にも出ないため、次の回が同じ銘柄を重ねて買う（#802）
@@ -142,16 +155,23 @@ class PaperBroker(BrokerBase):
             if side == OrderSide.SHORT:
                 # paper_short_positions に即時仮登録（加重平均単価更新）
                 existing_short = con.execute(
-                    "SELECT qty, avg_short_price FROM paper_short_positions WHERE symbol=%s",
+                    "SELECT qty, avg_short_price, updated_at FROM paper_short_positions "
+                    "WHERE symbol=%s",
                     [sym],
                 ).fetchone()
                 if existing_short:
-                    old_qty, old_avg = existing_short
-                    new_qty = old_qty + qty
+                    old_qty, old_avg, old_updated_at = existing_short
+                    # 権利落ちの日の寄りの前に直した行は updated_at を戻さず、分割前の注文の株数は
+                    # 分割を当てて足す（金額は分割で変わらないのでそのまま、#1339）
+                    created_at = con.execute(
+                        "SELECT created_at FROM paper_orders WHERE order_id=%s", [order_id]
+                    ).fetchone()[0]
+                    factor = sa.split_factor_between(splits, created_at, old_updated_at)
+                    new_qty = old_qty + int(round(qty * factor))
                     new_avg = (old_avg * old_qty + price * qty) / new_qty
                     con.execute(
                         "UPDATE paper_short_positions SET qty=%s, avg_short_price=%s, "
-                        "updated_at=CURRENT_TIMESTAMP WHERE symbol=%s",
+                        "updated_at=GREATEST(updated_at, CURRENT_TIMESTAMP) WHERE symbol=%s",
                         [new_qty, new_avg, sym],
                     )
                 else:
@@ -178,7 +198,7 @@ class PaperBroker(BrokerBase):
         """pending 状態の注文をキャンセルする（空売りは send_order の即時の仮登録も戻す）"""
         with _db_connection() as con:
             pending = con.execute(
-                "SELECT symbol, side, qty, price FROM paper_orders "
+                "SELECT symbol, side, qty, price, created_at FROM paper_orders "
                 "WHERE order_id=%s AND status='pending'",
                 [order_id],
             ).fetchone()
@@ -187,7 +207,9 @@ class PaperBroker(BrokerBase):
                 [order_id],
             )
             if pending and int(pending[1]) == int(OrderSide.SHORT):
-                _undo_short_registration(con, str(pending[0]), int(pending[2]), pending[3])
+                sym = str(pending[0])
+                splits = sa.fetch_splits(self._market_data, sym)
+                _undo_short_registration(con, sym, int(pending[2]), pending[3], splits, pending[4])
         logger.info(f"[paper] 注文キャンセル: order_id={order_id}")
         return {
             "order_id": order_id,
@@ -423,8 +445,10 @@ class PaperBroker(BrokerBase):
             qty, avg_short, split_known = sa.adjust_short_position_for_splits(
                 self._market_data, sym, raw_qty, raw_avg, updated_at
             )
+            orders = pending.get(str(sym))
+            splits = sa.fetch_splits(self._market_data, sym) if orders else None
             pending_qty, filled_qty, avg_short = split_filled_short(
-                pending.get(str(sym)), int(raw_qty), qty, avg_short
+                pending_in_row_units(orders, splits, updated_at), int(raw_qty), qty, avg_short
             )
             current_price = self._latest_close(sym)
             if (
