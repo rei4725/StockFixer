@@ -24,7 +24,7 @@ def run_weekly_report():
     """
     logger.info("=== 週次レポート生成開始 ===")
     try:
-        from datetime import timedelta
+        from datetime import datetime, timedelta
 
         from src.infrastructure.llm.factory import get_text_review_port
         from src.infrastructure.persistence.analytics_query import PostgresAnalyticsQuery
@@ -34,6 +34,7 @@ def run_weekly_report():
             save_weekly_accuracy_snapshot,
         )
         from src.reporting.discord.discord_utils import send_weekly_report
+        from src.reporting.kpi import drop_stale_symbols
         from src.reporting.llm_review import generate_weekly_review
         from src.utils import japan_time
 
@@ -45,7 +46,12 @@ def run_weekly_report():
         # 集計する（#1023）。木曜の時点で当週の予想は採点が済んでいないため、
         # 全5回の採点が済んだ前の週で作る。コンテナは UTC のため JST の日付で決める（#1229）
         today = japan_time.now_jst().date()
-        week_start = (today - timedelta(days=today.weekday() + 7)).isoformat()
+        week_start_date = today - timedelta(days=today.weekday() + 7)
+        week_start = week_start_date.isoformat()
+        # 報告の週より後に予想していない銘柄（ウォッチリストから外れた銘柄）の古い採点を、
+        # 全体平均正解率と要注意銘柄から外す。週の始まりは JST の 0 時を UTC にして比べる（#1350）
+        week_start_utc = datetime.combine(week_start_date, datetime.min.time()) - timedelta(hours=9)
+        summary = drop_stale_symbols(summary, week_start_utc)
         week_summary = load_weekly_accuracy_summary(
             week_start, horizon=1, model_name="production", raise_on_error=True
         )
