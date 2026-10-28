@@ -12,6 +12,7 @@ from src.infrastructure.persistence.analytics_query import PostgresAnalyticsQuer
 
 _EMPTY = {
     "tracked_count": 0,
+    "paper_filled_count": 0,
     "comparable_count": 0,
     "avg_paper_slippage": 0.0,
     "avg_real_slippage": 0.0,
@@ -69,7 +70,7 @@ class TestInMemoryAnalyticsQuery(unittest.TestCase):
 
 class TestPostgresAnalyticsQuery(unittest.TestCase):
     def test_maps_row_to_summary_dict(self):
-        row = (10, 7, 0.001, 0.002, 3.5, 0.0035, 9.0)
+        row = (10, 7, 0.001, 0.002, 3.5, 0.0035, 9.0, 8)
         con = _FakeConnection(row)
         with patch(
             "src.infrastructure.persistence.analytics_query.db_connection",
@@ -79,6 +80,7 @@ class TestPostgresAnalyticsQuery(unittest.TestCase):
 
         self.assertEqual(result["tracked_count"], 10)
         self.assertEqual(result["comparable_count"], 7)
+        self.assertEqual(result["paper_filled_count"], 8)
         self.assertAlmostEqual(result["avg_paper_slippage"], 0.001)
         self.assertAlmostEqual(result["avg_real_slippage"], 0.002)
         self.assertAlmostEqual(result["avg_abs_price_diff"], 3.5)
@@ -86,7 +88,7 @@ class TestPostgresAnalyticsQuery(unittest.TestCase):
         self.assertAlmostEqual(result["max_abs_price_diff"], 9.0)
 
     def test_null_row_becomes_zeros(self):
-        con = _FakeConnection((None, None, None, None, None, None, None))
+        con = _FakeConnection((None, None, None, None, None, None, None, None))
         with patch(
             "src.infrastructure.persistence.analytics_query.db_connection",
             _patched_connection(con),
@@ -96,7 +98,7 @@ class TestPostgresAnalyticsQuery(unittest.TestCase):
         self.assertEqual(result, _EMPTY)
 
     def test_queries_paper_real_diff_table(self):
-        con = _FakeConnection((0, 0, None, None, None, None, None))
+        con = _FakeConnection((0, 0, None, None, None, None, None, 0))
         with patch(
             "src.infrastructure.persistence.analytics_query.db_connection",
             _patched_connection(con),
@@ -136,10 +138,12 @@ class TestPostgresAnalyticsQuerySlippageSign(unittest.TestCase):
             "paper_filled_at TIMESTAMP, real_checked_at TIMESTAMP, created_at TIMESTAMP)"
         )
         for side, slip in rows:
+            # slip が None の行は、約定待ち・失効で約定値もスリッページも無い行を表す
+            price = 100.0 * (1 + slip) if slip is not None else None
             con.execute(
                 "INSERT INTO paper_real_diff VALUES "
                 "(?, 100.0, ?, ?, ?, ?, 0.0, NULL, NULL, CURRENT_TIMESTAMP)",
-                [side, 100.0 * (1 + slip), 100.0 * (1 + slip), slip, slip],
+                [side, price, price, slip, slip],
             )
         with patch(
             "src.infrastructure.persistence.analytics_query.db_connection",
@@ -161,6 +165,18 @@ class TestPostgresAnalyticsQuerySlippageSign(unittest.TestCase):
         result = self._summary([(3, -0.01), (4, 0.01)])
         self.assertAlmostEqual(result["avg_paper_slippage"], 0.01)
         self.assertAlmostEqual(result["avg_real_slippage"], 0.01)
+
+    def test_counts_only_filled_paper_rows(self):
+        """約定待ち・失効（paper_slippage が NULL）の行は約定の数に入れない（#1334）。"""
+        result = self._summary([(1, 0.01), (1, None), (2, None)])
+        self.assertEqual(result["tracked_count"], 3)
+        self.assertEqual(result["paper_filled_count"], 1)
+        self.assertAlmostEqual(result["avg_paper_slippage"], 0.01)
+
+    def test_no_filled_paper_rows_counts_zero(self):
+        result = self._summary([(1, None), (2, None)])
+        self.assertEqual(result["tracked_count"], 2)
+        self.assertEqual(result["paper_filled_count"], 0)
 
 
 class TestPostgresAnalyticsQueryAccuracyDelegation(unittest.TestCase):

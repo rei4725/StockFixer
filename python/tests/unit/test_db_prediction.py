@@ -597,6 +597,12 @@ class TestLoadDriftSummary(_TmpDbTestCase):
         df = load_drift_summary(horizon=1)
         self.assertIn("mean_abs_error", df.columns)
 
+    def test_contains_last_predicted_at(self):
+        """銘柄ごとの最後の predicted_at が last_predicted_at 列に入ること（#1335）"""
+        df = load_drift_summary(horizon=1).set_index("symbol")
+        self.assertEqual(df.loc["AAPL", "last_predicted_at"], "20260405_120000")
+        self.assertEqual(df.loc["7203", "last_predicted_at"], "20260401_120000")
+
     def test_recent_n_limits_records(self):
         """recent_n が機能すること（全件よりも少ないデータで集計）"""
         df_full = load_drift_summary(horizon=1, recent_n=100)
