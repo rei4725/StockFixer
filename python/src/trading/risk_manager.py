@@ -40,6 +40,11 @@ from config.trading_policy import (  # noqa: F401  # R-307/R-219 でポジショ
 from src.domain.exceptions import RiskError  # noqa: F401  # 後方互換のため re-export
 from src.domain.trading_rules import get_lot_size
 from src.trading.brokers.base import BrokerBase, OrderSide
+from src.trading.consecutive_losses import (
+    count_leading_losses,
+    recent_paper_closed_pnls,
+    recent_trade_pnl_closed_pnls,
+)
 from src.trading.daily_loss_window import daily_loss_window_start
 from src.trading.position_valuation import broker_positions_value, count_short_positions
 from src.trading.sl_tp_params import positive_pct_param
@@ -556,21 +561,11 @@ class RiskManager:
             return abs(float(row[0])) if row else 0.0
 
     def _get_consecutive_losses(self) -> int:
-        """直近の連続損失回数を返す"""
+        """日次損失と同じ区切りからの決済の、直近の連続損失回数を返す（#1311）"""
+        window_start = daily_loss_window_start()
         with _db_connection() as con:
             if self._broker.broker_name == "paper":
-                rows = con.execute(
-                    """
-                    SELECT realized_pnl
-                    FROM paper_orders
-                    WHERE status = 'filled'
-                      AND side IN (%s, %s)
-                      AND realized_pnl IS NOT NULL
-                    ORDER BY filled_at DESC
-                    LIMIT %s
-                    """,
-                    [int(OrderSide.SELL), int(OrderSide.SHORT_COVER), MAX_CONSECUTIVE_LOSSES],
-                ).fetchall()
+                rows = recent_paper_closed_pnls(con, window_start, MAX_CONSECUTIVE_LOSSES)
             else:
                 if not self._table_exists(con, "trade_pnl"):
                     message = (
@@ -580,21 +575,7 @@ class RiskManager:
                     logger.warning(message)
                     return 0
 
-                rows = con.execute(
-                    """
-                    SELECT realized_pnl
-                    FROM trade_pnl
-                    WHERE broker = %s
-                    ORDER BY closed_at DESC
-                    LIMIT %s
-                    """,
-                    [self._broker.broker_name, MAX_CONSECUTIVE_LOSSES],
-                ).fetchall()
-
-            count = 0
-            for (pnl,) in rows:
-                if pnl < 0:
-                    count += 1
-                else:
-                    break
-            return count
+                rows = recent_trade_pnl_closed_pnls(
+                    con, self._broker.broker_name, window_start, MAX_CONSECUTIVE_LOSSES
+                )
+            return count_leading_losses(rows)
