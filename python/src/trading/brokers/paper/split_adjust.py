@@ -75,8 +75,11 @@ def adjust_short_position_for_splits(
     return _adjust_holding(market_data, sym, qty, avg, updated_at, short=True)
 
 
-def adjust_stored_short_for_splits(market_data: MarketDataPort, sym: str) -> None:
-    """新しい空売りを仮登録で平均する前に、今の空売りの保有を分割で直す（#1086）"""
+def adjust_stored_short_for_splits(market_data: MarketDataPort, sym: str) -> Any:
+    """新しい空売りを仮登録で平均する前に、今の空売りの保有を分割で直す（#1086）
+
+    仮登録で注文の株数を保有の行の単位に直せるよう、分割の記録（取れなければ None）を返す。
+    """
     with _db_connection() as con:
         pos = con.execute(
             "SELECT qty, avg_short_price, updated_at FROM paper_short_positions WHERE symbol=%s",
@@ -85,6 +88,20 @@ def adjust_stored_short_for_splits(market_data: MarketDataPort, sym: str) -> Non
     if pos:
         pos_qty, pos_avg, pos_updated_at = pos
         _adjust_holding(market_data, sym, pos_qty, pos_avg, pos_updated_at, short=True)
+    return fetch_splits(market_data, sym)
+
+
+def split_factor_between(splits: Any, since: Any, until: Any) -> float:
+    """since の日より後で until の日までに権利落ちした分割の比の積（#1339）
+
+    約定待ちの注文（created_at の日の単位）を、保有の行（updated_at の日の単位）の株数に直す比。
+    記録が分からないとき、until が since より前のときは 1.0。
+    """
+    after_since = split_factor_since(splits, since)
+    after_until = split_factor_since(splits, until)
+    if after_since is None or after_until is None or after_since <= after_until:
+        return 1.0
+    return after_since / after_until
 
 
 def _adjust_holding(
@@ -96,7 +113,7 @@ def _adjust_holding(
     *,
     short: bool,
 ) -> tuple[int, float, bool]:
-    splits = _fetch_splits(market_data, sym)
+    splits = fetch_splits(market_data, sym)
     factor = split_factor_since(splits, updated_at)
     if factor is None:
         return qty, avg, False
@@ -139,7 +156,7 @@ def _stamp_after_splits(splits: pd.Series, since: Any) -> datetime:
     return max(now, datetime.combine(max(applied), datetime.min.time()))
 
 
-def _fetch_splits(market_data: MarketDataPort, sym: str) -> Any:
+def fetch_splits(market_data: MarketDataPort, sym: str) -> Any:
     try:
         return market_data.get_splits(f"{sym}.T")
     except Exception:
@@ -173,7 +190,7 @@ def adjust_order_for_splits(
         _, pos_avg, _ = _adjust_holding(
             market_data, sym, pos_qty, raw_avg, pos_updated_at, short=short
         )
-    factor = split_factor_since(_fetch_splits(market_data, sym), created_at)
+    factor = split_factor_since(fetch_splits(market_data, sym), created_at)
     if factor is None:
         refs = [signal_price, limit_price, pos_avg]
         if any(ref and looks_like_split_gap(float(ref), open_price) for ref in refs):
