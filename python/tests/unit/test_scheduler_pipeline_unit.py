@@ -451,12 +451,12 @@ class TestRunWeeklyReport(unittest.TestCase):
     @patch("src.reporting.discord.discord_utils.send_webhook_text")
     @patch("src.reporting.discord.discord_utils.send_weekly_report")
     @patch("src.infrastructure.persistence.analytics_query.PostgresAnalyticsQuery")
-    def test_exception_does_not_propagate(self, mock_analytics_cls, mock_send, _mock_notice):
+    @patch("src.prediction.db.load_drift_summary", side_effect=Exception("DB エラー"))
+    def test_exception_does_not_propagate(self, mock_drift, _mock_cls, mock_send, _mock_notice):
         from src.orchestration.scheduler import run_weekly_report
 
-        mock_analytics_cls.return_value.drift_summary.side_effect = Exception("DB エラー")
         run_weekly_report()  # 例外が外に出ないこと
-        mock_analytics_cls.return_value.drift_summary.assert_called_once()
+        mock_drift.assert_called_once()
         mock_send.assert_not_called()
 
 

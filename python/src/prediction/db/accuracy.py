@@ -250,7 +250,10 @@ def jst_day(predicted_at: str) -> str:
 
 
 def load_weekly_accuracy_summary(
-    week_start: str, horizon: int = 1, model_name: str = "production"
+    week_start: str,
+    horizon: int = 1,
+    model_name: str = "production",
+    raise_on_error: bool = False,
 ) -> pd.DataFrame:
     """
     week_start からの7日（JST の日付）に予想した採点の行だけで、銘柄ごとの方向正解率・平均誤差を集計する。
@@ -263,6 +266,8 @@ def load_weekly_accuracy_summary(
         week_start: ISO 形式の週開始日（月曜日, 例: "2026-05-11"）
         horizon: 対象ホライズン
         model_name: 対象のモデル名ラベル（challenger の採点を混ぜない。#877）
+        raise_on_error: True なら読み込みの失敗を空の表にせず投げ直す
+            （週次レポートが失敗の週を黙って欠かないため。#1305）
 
     Returns:
         pd.DataFrame: [market, symbol, direction_accuracy, mean_abs_error, n_samples]
@@ -294,6 +299,8 @@ def load_weekly_accuracy_summary(
             )
         except Exception as e:
             logger.error(f"load_weekly_accuracy_summary 失敗: {e}", exc_info=True)
+            if raise_on_error:
+                raise
             return pd.DataFrame()
     if rows.empty:
         return pd.DataFrame(columns=columns)
