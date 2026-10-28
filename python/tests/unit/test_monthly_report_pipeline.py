@@ -214,7 +214,9 @@ class TestComputeAvgSlippage(unittest.TestCase):
 class _LimitedAccuracy(InMemoryAnalyticsQuery):
     """本物のアダプタと同じく predicted_at 降順の先頭 limit 行だけを返す。"""
 
-    def prediction_accuracy(self, market=None, symbol=None, horizon=1, limit=500):
+    def prediction_accuracy(
+        self, market=None, symbol=None, horizon=1, limit=500, raise_on_error=False
+    ):
         df = super().prediction_accuracy(market=market, symbol=symbol, horizon=horizon, limit=limit)
         df = df.sort_values("predicted_at", ascending=False)
         return df.head(limit) if limit else df
@@ -291,7 +293,9 @@ class TestLoadMonthlyKpis(unittest.TestCase):
         """精度の取得失敗は握りつぶさず呼び出し元へ伝播させる（従来挙動）。"""
 
         class _FailingAccuracy(InMemoryAnalyticsQuery):
-            def prediction_accuracy(self, market=None, symbol=None, horizon=1, limit=500):
+            def prediction_accuracy(
+                self, market=None, symbol=None, horizon=1, limit=500, raise_on_error=False
+            ):
                 raise RuntimeError("DB down")
 
         with self.assertRaises(RuntimeError):

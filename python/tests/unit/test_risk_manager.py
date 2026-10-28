@@ -275,9 +275,9 @@ class TestRiskManagerPersistence(unittest.TestCase):
         self.assertEqual(consecutive, 2)
         query, params = mock_con.execute.call_args[0]
         self.assertIn("FROM paper_orders", query)
-        self.assertEqual(
-            params, [int(OrderSide.SELL), int(OrderSide.SHORT_COVER), MAX_CONSECUTIVE_LOSSES]
-        )
+        self.assertEqual(params[:2], [int(OrderSide.SELL), int(OrderSide.SHORT_COVER)])
+        self.assertIsInstance(params[2], datetime)
+        self.assertEqual(params[3], MAX_CONSECUTIVE_LOSSES)
 
     def test_missing_trade_pnl_returns_zero_for_non_paper_broker(self):
         broker = _make_broker()
@@ -298,6 +298,89 @@ class TestRiskManagerPersistence(unittest.TestCase):
         query, params = mock_con.execute.call_args[0]
         self.assertIn("information_schema.tables", query)
         self.assertEqual(params, ["trade_pnl"])
+
+
+class _FakeClosedTradesCon:
+    """決済の (realized_pnl, 時刻 naive UTC) を持ち、渡された時刻の下限と件数で絞って返す"""
+
+    def __init__(self, trades: list[tuple[float, datetime]]) -> None:
+        self._trades = trades
+
+    def execute(self, query: str, params: list) -> MagicMock:
+        result = MagicMock()
+        if "information_schema.tables" in query:
+            result.fetchone.return_value = (1,)
+            return result
+        starts = [p for p in params if isinstance(p, datetime)]
+        limit = [p for p in params if isinstance(p, int) and not isinstance(p, bool)][-1]
+        rows = [t for t in self._trades if not starts or t[1] >= starts[0]]
+        rows.sort(key=lambda t: t[1], reverse=True)
+        result.fetchall.return_value = [(pnl,) for pnl, _ in rows[:limit]]
+        return result
+
+
+class TestConsecutiveLossesTodayOnly(unittest.TestCase):
+    """連続損失は日次損失と同じ区切り（daily_loss_window_start）からの決済だけを数える（#1311）"""
+
+    # 水曜 2026-10-28 08:50 JST = 2026-10-27 23:50 UTC。区切りは 2026-10-26 15:00 UTC
+    _NOW = datetime(2026, 10, 27, 23, 50, tzinfo=timezone.utc)
+
+    def _gate(self, trades: list[tuple[float, datetime]], broker_name: str = "paper"):
+        broker = _make_broker()
+        broker.broker_name = broker_name
+        risk = RiskManager(broker)
+        risk._get_daily_realized_loss = MagicMock(return_value=0.0)
+        con = _FakeClosedTradesCon(trades)
+
+        @contextmanager
+        def fake_db():
+            yield con
+
+        with (
+            patch("src.trading.risk_manager._db_connection", new=fake_db),
+            patch("src.trading.daily_loss_window._utc_now", return_value=self._NOW),
+        ):
+            return risk.evaluate_trading_gate()
+
+    def test_losses_before_window_do_not_block(self):
+        # 本番の 10-28 8:50 の形: 負けは 10-26 と 10-23 の決済で、区切りの後は0件
+        trades = [
+            (-21000.0, datetime(2026, 10, 26, 0, 25, 1)),
+            (-9500.0, datetime(2026, 10, 26, 0, 25, 0)),
+            (-3075.0, datetime(2026, 10, 23, 0, 5, 0)),
+        ]
+        for broker_name in ("paper", "other"):
+            with self.subTest(broker=broker_name):
+                status = self._gate(trades, broker_name)
+                self.assertTrue(status.is_allowed)
+                self.assertEqual(status.consecutive_losses, 0)
+
+    def test_three_losses_in_window_block(self):
+        trades = [
+            (-100.0, datetime(2026, 10, 27, 0, 5, 0)),
+            (-200.0, datetime(2026, 10, 27, 1, 0, 0)),
+            (-300.0, datetime(2026, 10, 27, 5, 0, 0)),
+        ]
+        for broker_name in ("paper", "other"):
+            with self.subTest(broker=broker_name):
+                status = self._gate(trades, broker_name)
+                self.assertFalse(status.is_allowed)
+                self.assertEqual(status.reason_code, "consecutive_losses")
+                self.assertEqual(status.consecutive_losses, MAX_CONSECUTIVE_LOSSES)
+
+    def test_win_breaks_streak_in_window(self):
+        # 古い順に 負け・負け・勝ち・負け → 直近から数えて連続1回
+        trades = [
+            (-100.0, datetime(2026, 10, 27, 0, 5, 0)),
+            (-200.0, datetime(2026, 10, 27, 1, 0, 0)),
+            (50.0, datetime(2026, 10, 27, 2, 0, 0)),
+            (-300.0, datetime(2026, 10, 27, 5, 0, 0)),
+        ]
+        for broker_name in ("paper", "other"):
+            with self.subTest(broker=broker_name):
+                status = self._gate(trades, broker_name)
+                self.assertTrue(status.is_allowed)
+                self.assertEqual(status.consecutive_losses, 1)
 
 
 # ---------------------------------------------------------------------------

@@ -66,10 +66,17 @@ class PostgresAnalyticsQuery(AnalyticsQuery):
         }
 
     def drift_summary(
-        self, horizon: int = 1, recent_n: int = 30, model_name: str = "production"
+        self,
+        horizon: int = 1,
+        recent_n: int = 30,
+        model_name: str = "production",
+        raise_on_error: bool = False,
     ) -> pd.DataFrame:
         return _accuracy.load_drift_summary(
-            horizon=horizon, recent_n=recent_n, model_name=model_name
+            horizon=horizon,
+            recent_n=recent_n,
+            model_name=model_name,
+            raise_on_error=raise_on_error,
         )
 
     def prediction_accuracy(
@@ -78,9 +85,14 @@ class PostgresAnalyticsQuery(AnalyticsQuery):
         symbol: Optional[str] = None,
         horizon: int = 1,
         limit: int = 500,
+        raise_on_error: bool = False,
     ) -> pd.DataFrame:
         return _accuracy.load_prediction_accuracy(
-            market=market, symbol=symbol, horizon=horizon, limit=limit
+            market=market,
+            symbol=symbol,
+            horizon=horizon,
+            limit=limit,
+            raise_on_error=raise_on_error,
         )
 
     def weekly_accuracy_snapshots(self, n_weeks: int = 4) -> pd.DataFrame:

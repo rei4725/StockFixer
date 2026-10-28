@@ -69,7 +69,7 @@ def _load_window_accuracy(analytics: AnalyticsQuery, days: int = _REPORT_DAYS) -
     cutoff = datetime.now() - timedelta(days=days)
     limit = _ACCURACY_PAGE_ROWS
     while True:
-        df = analytics.prediction_accuracy(horizon=1, limit=limit)
+        df = analytics.prediction_accuracy(horizon=1, limit=limit, raise_on_error=True)
         if len(df) < limit or "checked_at" not in df.columns:
             return df
         oldest = pd.to_datetime(df["checked_at"], errors="coerce").min()
@@ -82,7 +82,8 @@ def _load_monthly_kpis(analytics: AnalyticsQuery) -> MonthlyKPI:
     """AnalyticsQuery から補助 KPI の材料を取得し、kpi.get_monthly_kpis で集約する。
 
     diff_summary の取得失敗だけは握りつぶして None（＝データなし）として扱う。
-    精度・ドリフトの取得失敗は従来どおり呼び出し元へ伝播させる。
+    精度・ドリフトの取得失敗は空の表にせず呼び出し元へ伝播させ、
+    「データなし・ドリフト0件」のレポートを保存しない（#1306）。
     """
     try:
         diff_summary = analytics.paper_real_diff_summary(recent_days=_REPORT_DAYS)
@@ -92,7 +93,7 @@ def _load_monthly_kpis(analytics: AnalyticsQuery) -> MonthlyKPI:
     return get_monthly_kpis(
         diff_summary=diff_summary,
         accuracy_df=_load_window_accuracy(analytics),
-        drift_df=analytics.drift_summary(horizon=1, recent_n=_REPORT_DAYS),
+        drift_df=analytics.drift_summary(horizon=1, recent_n=_REPORT_DAYS, raise_on_error=True),
         drift_thresholds=load_drift_thresholds(),
     )
 
