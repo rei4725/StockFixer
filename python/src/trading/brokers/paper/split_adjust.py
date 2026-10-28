@@ -5,7 +5,7 @@ paper_positions の株数と買値は約定の時の値段のままだが、現�
 """
 
 import math
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Any
 
 import pandas as pd
@@ -22,6 +22,11 @@ _SPLIT_SUSPECT_RATIO = 1.8
 # 比を分割の比（0.5 刻み）に丸めたときに許す、丸めとの相対の差（採点の側と同じ）
 _SPLIT_RATIO_TOLERANCE = 0.1
 _JST = "Asia/Tokyo"
+
+
+def _now_utc() -> datetime:
+    """DB の updated_at と同じ、tz 無しの UTC の今の時刻"""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def _to_jst_date(value: Any) -> date:
@@ -91,7 +96,8 @@ def _adjust_holding(
     *,
     short: bool,
 ) -> tuple[int, float, bool]:
-    factor = split_factor_since(_fetch_splits(market_data, sym), updated_at)
+    splits = _fetch_splits(market_data, sym)
+    factor = split_factor_since(splits, updated_at)
     if factor is None:
         return qty, avg, False
     if factor == 1.0:
@@ -101,21 +107,36 @@ def _adjust_holding(
     if short:
         sql = (
             "UPDATE paper_short_positions SET qty=%s, avg_short_price=%s, "
-            "updated_at=CURRENT_TIMESTAMP WHERE symbol=%s"
+            "updated_at=%s WHERE symbol=%s"
         )
     else:
-        sql = (
-            "UPDATE paper_positions SET qty=%s, avg_price=%s, "
-            "updated_at=CURRENT_TIMESTAMP WHERE symbol=%s"
-        )
+        sql = "UPDATE paper_positions SET qty=%s, avg_price=%s, updated_at=%s WHERE symbol=%s"
     with _db_connection() as con:
-        con.execute(sql, [new_qty, new_avg, sym])
+        con.execute(sql, [new_qty, new_avg, _stamp_after_splits(splits, updated_at), sym])
     label = "空売りの保有" if short else "保有"
     logger.warning(
         f"[paper] {sym}: 株式分割（比 {factor:g}）で{label}を直した "
         f"{qty}株 @ {avg:.1f} → {new_qty}株 @ {new_avg:.1f}"
     )
     return new_qty, new_avg, True
+
+
+def _stamp_after_splits(splits: pd.Series, since: Any) -> datetime:
+    """直した保有に書き戻す updated_at（#1326）
+
+    split_factor_since は tz 無しの値を日付のまま読むので、権利落ちの日の 9:00 JST より前に
+    書いた今の時刻は前の日と読まれ、同じ分割をまた当てる。当てた権利落ちの日より前に読まれない値にする。
+    """
+    since_date = _to_jst_date(since)
+    applied = [
+        _to_jst_date(ex_date)
+        for ex_date, ratio in splits.items()
+        if float(ratio) > 0 and _to_jst_date(ex_date) > since_date
+    ]
+    now = _now_utc()
+    if not applied:
+        return now
+    return max(now, datetime.combine(max(applied), datetime.min.time()))
 
 
 def _fetch_splits(market_data: MarketDataPort, sym: str) -> Any:
