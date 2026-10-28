@@ -450,9 +450,9 @@ def run_daily_orders(
                 stats["errors"] += 1
         _log_pending_skips("SHORT_COVER", cover_skipped)
 
-        # 非保有かつ売りシグナルの銘柄に新規ショートエントリー（リスクゲート不合格の日は 0 件）
+        # 非保有（約定待ちの BUY を含む、#1333）かつ売りシグナルの銘柄に新規ショート（ゲート不合格は 0 件）
         short_entry_candidates = predictions[
-            (~predictions["symbol"].isin(held_symbols))
+            (~predictions["symbol"].isin(held_or_pending))
             & (~predictions["symbol"].isin(short_held_symbols))
             & (predictions["multi_horizon_score"] <= predictions["effective_sell_threshold"])
         ].head(MAX_ORDERS_PER_RUN if gate_status.is_allowed else 0)

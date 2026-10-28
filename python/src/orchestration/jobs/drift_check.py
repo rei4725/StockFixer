@@ -11,6 +11,29 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+# 銘柄別のモデルをこの日数以内に学び直した銘柄は、ドリフトの再学習から外す（#1331）
+_RECENT_RETRAIN_DAYS = 7
+_SYMBOL_MODEL_NAMES = ("StockXGBoostModel", "StockLightGBMModel")
+
+
+def _is_recently_retrained(market: str, symbol: str) -> bool:
+    """銘柄別のモデルのファイルがすべて直近 _RECENT_RETRAIN_DAYS 日以内に更新されていれば True。"""
+    import os
+    from datetime import datetime, timedelta, timezone
+
+    from src.utils.data_path_utils import get_models_dir
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=_RECENT_RETRAIN_DAYS)
+    subdir = os.path.join(get_models_dir(), f"{market}_{symbol}")
+    for name in _SYMBOL_MODEL_NAMES:
+        path = os.path.join(subdir, f"{name}.joblib")
+        if not os.path.exists(path):
+            return False
+        mtime = datetime.fromtimestamp(os.path.getmtime(path), tz=timezone.utc)
+        if mtime < cutoff:
+            return False
+    return True
+
 
 @skip_if_running(_drift_check_lock, "日次ドリフトチェック")
 def run_daily_drift_check():
@@ -77,26 +100,36 @@ def run_daily_drift_check():
         logger.info("ドリフトチェック: 閾値超過銘柄なし")
         return
 
+    columns = ["market", "symbol", "mean_abs_error", "direction_accuracy"]
+    ranked = triggered.sort_values("mean_abs_error", ascending=False)
+    # 知らせの中身は外す前の上位 max_retrain_per_run 件のまま（#1331）
+    notify = triggered
     if len(triggered) > max_retrain_per_run:
         logger.warning(
             "ドリフト検知: %s 銘柄が閾値超過 → MAEが悪い順に上位 %s 件のみ再学習",
             len(triggered),
             max_retrain_per_run,
         )
-        triggered = triggered.sort_values("mean_abs_error", ascending=False).head(
-            max_retrain_per_run
-        )
-
-    triggered_list = triggered[
-        ["market", "symbol", "mean_abs_error", "direction_accuracy"]
-    ].to_dict("records")
+        notify = ranked.head(max_retrain_per_run)
+    notify_list = notify[columns].to_dict("records")
+    ranked_list = ranked[columns].to_dict("records")
+    fresh_skipped = [s for s in ranked_list if _is_recently_retrained(s["market"], s["symbol"])]
+    logger.info(
+        "ドリフト再学習: 銘柄別モデルを直近%s日以内に更新した %s 銘柄を対象から除外",
+        _RECENT_RETRAIN_DAYS,
+        len(fresh_skipped),
+    )
+    skipped_keys = {(s["market"], s["symbol"]) for s in fresh_skipped}
+    triggered_list = [s for s in ranked_list if (s["market"], s["symbol"]) not in skipped_keys][
+        :max_retrain_per_run
+    ]
     logger.warning("ドリフト検知: %s 銀柄が閾値超過 → 自動再学習開始", len(triggered_list))
 
     # Discord 通知（再学習開始前）
     try:
         from src.reporting.discord.discord_utils import send_drift_retrain_notification
 
-        send_drift_retrain_notification(triggered_list, mae_threshold, hit_rate_threshold)
+        send_drift_retrain_notification(notify_list, mae_threshold, hit_rate_threshold)
     except Exception as e:
         logger.error("ドリフト通知失敗: %s", e, exc_info=True)
 
