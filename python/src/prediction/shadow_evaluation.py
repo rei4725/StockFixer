@@ -87,6 +87,7 @@ def evaluate_shadow_models(
     horizon: int = 1,
     market: Optional[str] = None,
     symbol: Optional[str] = None,
+    raise_on_error: bool = False,
 ) -> dict:
     """
     production / challenger 両バージョンの予測精度を比較評価する。
@@ -102,6 +103,8 @@ def evaluate_shadow_models(
         horizon: 対象予測ホライズン（デフォルト 1）
         market: マーケットフィルタ（None なら全マーケット）
         symbol: 銘柄フィルタ（None なら全銘柄）
+        raise_on_error: True なら prediction_accuracy の読み込みの例外を投げ、
+            DB が読めない週を「challenger は勝たなかった」にしない（週次学習の道。#1295）
 
     Returns:
         dict:
@@ -128,6 +131,7 @@ def evaluate_shadow_models(
         limit=0,
         model_name=production_version,
         days=evaluation_days,
+        raise_on_error=raise_on_error,
     )
     df_prod = df_prod[df_prod["model_name"] == production_version] if not df_prod.empty else df_prod
 
@@ -138,6 +142,7 @@ def evaluate_shadow_models(
         limit=0,
         model_name=challenger_version,
         days=evaluation_days,
+        raise_on_error=raise_on_error,
     )
     df_chal = df_chal[df_chal["model_name"] == challenger_version] if not df_chal.empty else df_chal
 

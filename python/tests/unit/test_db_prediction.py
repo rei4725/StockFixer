@@ -198,6 +198,60 @@ class TestLoadLatestPredictionsByMarket(_TmpDbTestCase):
         save_prediction_results("20260403_080000", [challenger_row])
         self.assertTrue(load_latest_predictions_by_market("jp").empty)
 
+    def test_symbol_missing_from_latest_run_is_not_returned(self):
+        """最新の回に無い銘柄（ウォッチリストから外れた形）の古い行を返さない（#1304）"""
+        save_prediction_results(
+            "20260401_070000", [PredictionResult("jp", "5202", 100.0, 120.0, 0.20, 2)]
+        )
+        save_prediction_results(
+            "20260403_070000", [PredictionResult("jp", "7203", 100.0, 101.0, 0.01, 2)]
+        )
+
+        df = load_latest_predictions_by_market("jp")
+        self.assertEqual(df["symbol"].tolist(), ["7203"])
+        self.assertEqual(df["predicted_at"].tolist(), ["20260403_070000"])
+
+    def test_dropped_symbol_count_is_warned(self):
+        save_prediction_results(
+            "20260401_070000", [PredictionResult("jp", "5202", 100.0, 120.0, 0.20, 2)]
+        )
+        save_prediction_results(
+            "20260401_070000", [PredictionResult("jp", "6758", 100.0, 120.0, 0.20, 2)]
+        )
+        save_prediction_results(
+            "20260403_070000", [PredictionResult("jp", "7203", 100.0, 101.0, 0.01, 2)]
+        )
+
+        with self.assertLogs("src.prediction.db.prediction_results", level="WARNING") as logs:
+            load_latest_predictions_by_market("jp")
+        self.assertTrue(any("外した銘柄=2" in m for m in logs.output))
+
+    def test_latest_run_of_other_market_does_not_drop_rows(self):
+        """最新の回は market ごとに決める"""
+        save_prediction_results(
+            "20260403_070000", [PredictionResult("jp", "7203", 100.0, 101.0, 0.01, 2)]
+        )
+        save_prediction_results(
+            "20260404_070000", [PredictionResult("us", "AAPL", 100.0, 101.0, 0.01, 2)]
+        )
+        self.assertEqual(load_latest_predictions_by_market("jp")["symbol"].tolist(), ["7203"])
+
+    def test_newer_challenger_run_does_not_drop_production_rows(self):
+        """challenger の新しい回で production の最新の回を決めない（#804）"""
+        save_prediction_results(
+            "20260403_070000",
+            [PredictionResult("jp", "7203", 100.0, 101.0, 0.01, 2, model_version="production")],
+        )
+        save_prediction_results(
+            "20260403_080000",
+            [PredictionResult("jp", "6758", 100.0, 101.0, 0.01, 2, model_version="challenger")],
+        )
+        df = load_latest_predictions_by_market("jp")
+        self.assertEqual(df["symbol"].tolist(), ["7203"])
+        self.assertEqual(
+            load_latest_predictions_by_market("jp", "challenger")["symbol"].tolist(), ["6758"]
+        )
+
 
 class TestLoadPredictionResults(_TmpDbTestCase):
     """load_prediction_results のテスト"""
