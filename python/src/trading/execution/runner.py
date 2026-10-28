@@ -259,10 +259,15 @@ def run_daily_orders(
             stats["errors"] += 1
     _log_pending_skips("売りシグナル", pending_skipped)
 
+    # 空売りの保有（約定待ちの SHORT の仮登録を含む）。新規買いの候補から外す（#1348）
+    short_positions = read_short_positions(broker)
+    short_held_symbols = {p["symbol"] for p in short_positions if p.get("qty", 0) > 0}
+
     # --- 新規買いシグナル（前の回の約定待ちの BUY も保有と業種の上限に数える、#1137） ---
     if gate_status.is_allowed and corr_gate.is_allowed:
         buy_candidates = predictions[
             (~predictions["symbol"].isin(held_or_pending))
+            & (~predictions["symbol"].isin(short_held_symbols))
             & (predictions["multi_horizon_score"] >= predictions["effective_buy_threshold"])
         ]
         buy_signals = _apply_buy_sector_limit(
@@ -278,8 +283,6 @@ def run_daily_orders(
     # 1ラン内で増える建玉数を追跡し、ラン途中でも MAX_POSITIONS を超えないようにする。
     # （ゲートはラン開始時の一度きりで、head(MAX_ORDERS_PER_RUN) だけでは保有上限を
     #   最大 MAX_ORDERS_PER_RUN-1 件超過しうるため）。空売りの保有も数える（#1146）
-    short_positions = read_short_positions(broker)
-    short_held_symbols = {p["symbol"] for p in short_positions if p.get("qty", 0) > 0}
     position_count = len(held_or_pending) + len(short_held_symbols)
 
     for _, row in buy_signals.iterrows():
