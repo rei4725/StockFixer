@@ -4,9 +4,12 @@ daily.py からの責務分離（ファイル行数ガード対策）。run_dail
 step4、および手動実行（run_scheduler.py --run-now drift）の両方から呼ばれる。
 """
 
+from datetime import datetime, timedelta, timezone
+
 from src.orchestration.jobs.alert_streaks import record_drift_warn_streak
 from src.orchestration.jobs.common import _drift_check_lock, skip_if_running
 from src.reporting.drift_thresholds import load_drift_thresholds, select_drifted_symbols
+from src.reporting.kpi import drop_stale_symbols
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -14,12 +17,16 @@ logger = get_logger(__name__)
 # 銘柄別のモデルをこの日数以内に学び直した銘柄は、ドリフトの再学習から外す（#1331）
 _RECENT_RETRAIN_DAYS = 7
 _SYMBOL_MODEL_NAMES = ("StockXGBoostModel", "StockLightGBMModel")
+# 最後の予想がこの日数より古い銘柄は、もう予想していない銘柄として判定から外す（#1359）。
+# 予想は毎営業日なので、月次（#1335）の30日では外れた銘柄が1か月近く枠を取り続ける。
+# 年末年始・大型連休の休場（暦で最長6日ほど）と採点の1日の遅れで今の銘柄を外さず、
+# 外れた銘柄は2週ほどで外れる長さとして10日にする
+_STALE_DAYS = 10
 
 
 def _is_recently_retrained(market: str, symbol: str) -> bool:
     """銘柄別のモデルのファイルがすべて直近 _RECENT_RETRAIN_DAYS 日以内に更新されていれば True。"""
     import os
-    from datetime import datetime, timedelta, timezone
 
     from src.utils.data_path_utils import get_models_dir
 
@@ -77,6 +84,21 @@ def run_daily_drift_check():
     )
     if summary is None or summary.empty:
         logger.info("ドリフトチェック: 精度データなし（スキップ）")
+        return
+
+    # ウォッチリストから外れて予想が止まった銘柄の凍った採点を、線の中央値・連続回数・
+    # 知らせ・再学習の候補から外す。物差しは週次・月次と共通（#1335・#1350・#1359）
+    before = len(summary)
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=_STALE_DAYS)
+    summary = drop_stale_symbols(summary, cutoff)
+    logger.info(
+        "ドリフトチェック: 最後の予想が%s日より古い %s 銘柄を対象から除外",
+        _STALE_DAYS,
+        before - len(summary),
+    )
+    if summary.empty:
+        record_drift_warn_streak(False)
+        logger.info("ドリフトチェック: 今の銘柄の精度データなし（スキップ）")
         return
 
     # 線を全銘柄の中央値に合わせる判定は月次レポートと共通（#1020・#1045・#1089）
