@@ -812,6 +812,29 @@ class TestWeeklyAccuracySnapshot(_TmpDbTestCase):
         result = load_weekly_accuracy_snapshots(n_weeks=4)
         self.assertTrue(result.empty)
 
+    def test_missing_columns_is_noop(self):
+        """列の足りない表を渡しても例外にならず何も書かないこと"""
+        save_weekly_accuracy_snapshot("2026-05-11", pd.DataFrame({"market": ["us"]}))
+        result = load_weekly_accuracy_snapshots(n_weeks=4)
+        self.assertTrue(result.empty)
+
+    def test_insert_failure_raises_and_keeps_existing_week(self):
+        """書き込みが落ちたら例外を投げ、前からあったその週の行が残ること（#1328）"""
+        save_weekly_accuracy_snapshot("2026-05-11", self._make_accuracy_df(direction_accuracy=0.5))
+
+        with patch(
+            "src.prediction.db.accuracy.bulk_insert", side_effect=RuntimeError("insert failed")
+        ):
+            with self.assertRaises(RuntimeError):
+                save_weekly_accuracy_snapshot(
+                    "2026-05-11", self._make_accuracy_df(direction_accuracy=0.7)
+                )
+
+        result = load_weekly_accuracy_snapshots(n_weeks=4)
+        rows = result[result["week_start"] == "2026-05-11"]
+        self.assertEqual(len(rows), 1)
+        self.assertAlmostEqual(rows.iloc[0]["direction_accuracy"], 0.5)
+
     def test_load_returns_empty_when_no_data(self):
         """データがないとき空 DataFrame を返すこと"""
         result = load_weekly_accuracy_snapshots(n_weeks=4)

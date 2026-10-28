@@ -205,6 +205,16 @@ class TestComputeAvgSlippage(unittest.TestCase):
         kpi = _kpis(dict(_EMPTY_DIFF))
         self.assertIsNone(kpi.avg_slippage)
 
+    def test_no_paper_fills_means_avg_slippage_is_none(self):
+        """追跡件数があっても約定したペーパーの行が0件なら、補った 0.0 を計測値としない（#1334）。"""
+        kpi = _kpis(dict(_EMPTY_DIFF, tracked_count=3, paper_filled_count=0))
+        self.assertIsNone(kpi.avg_slippage)
+
+    def test_paper_fills_keep_measured_avg_slippage(self):
+        diff = dict(_EMPTY_DIFF, tracked_count=3, paper_filled_count=1, avg_paper_slippage=0.002)
+        kpi = _kpis(diff)
+        self.assertAlmostEqual(kpi.avg_slippage, 0.002)
+
 
 # ---------------------------------------------------------------------------
 # _load_monthly_kpis（入口がポートから材料を取得する）
@@ -397,7 +407,7 @@ def _render_report(diff_summary: dict) -> str:
 class TestSaveMonthlyReportPaperRealDiff(unittest.TestCase):
     def test_zero_comparable_count_shows_real_side_as_na(self):
         """比較可能件数が0なら、Real Slippage・乖離率・price 乖離を 0 と出さず N/A にする。"""
-        diff = dict(_EMPTY_DIFF, tracked_count=7, avg_paper_slippage=0.0012)
+        diff = dict(_EMPTY_DIFF, tracked_count=7, paper_filled_count=7, avg_paper_slippage=0.0012)
         report = _render_report(diff)
         self.assertIn("| 比較可能件数 | 0 |", report)
         self.assertIn("| Real Slippage | N/A |", report)
@@ -414,9 +424,17 @@ class TestSaveMonthlyReportPaperRealDiff(unittest.TestCase):
         self.assertIn("| Avg Slippage | N/A |", report)
         self.assertIn("| Real Slippage | N/A |", report)
 
+    def test_no_paper_fills_shows_paper_slippage_as_na(self):
+        """約定待ち・失効の行だけの窓では、Paper Slippage と Avg Slippage を N/A にする（#1334）。"""
+        report = _render_report(dict(_EMPTY_DIFF, tracked_count=4, paper_filled_count=0))
+        self.assertIn("| 追跡件数 | 4 |", report)
+        self.assertIn("| Paper Slippage | N/A |", report)
+        self.assertIn("| Avg Slippage | N/A |", report)
+
     def test_counts_present_keep_measured_values(self):
         diff = {
             "tracked_count": 5,
+            "paper_filled_count": 5,
             "comparable_count": 3,
             "avg_paper_slippage": 0.001,
             "avg_real_slippage": 0.002,

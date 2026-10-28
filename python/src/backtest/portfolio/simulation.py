@@ -90,7 +90,8 @@ def _simulate_portfolio(
 
     毎リバランス日 t のスコアで Top-N 銘柄とスコア比例のウェイトを決め、
     翌営業日 t+1 の始値（open_matrix）で売買する（#1099）。最後の日のスコアは約定させない。
-    日次の portfolio_value と equal_weight_value を終値で記録する。
+    日次の portfolio_value と equal_weight_value を終値で記録する。最後の日に残った保有は
+    その日の終値で sell_proceeds を通して売り、売った後の現金で記録する（#1332）。
 
     execution_by_market を与えると、銘柄の鍵の市場（jp_・us_）ごとにその
     ExecutionModel で売買のコストを計算する（#847）。無い市場は execution を使う。
@@ -210,6 +211,16 @@ def _simulate_portfolio(
 
         prev_last_prices = last_prices
 
+        # ─ 最後の日に残った保有を終値で売る（backtester.py の final_sell と同じ、#1332） ─
+        if i + 1 == len(dates):
+            volumes = (
+                exec_avg_vol.loc[date]
+                if exec_avg_vol is not None and date in exec_avg_vol.index
+                else pd.Series(dtype=float)
+            )
+            cash, holdings = _liquidate(cash, holdings, last_prices, _exec, volumes)
+            eq_cash, eq_holdings = _liquidate(eq_cash, eq_holdings, last_prices, _exec, volumes)
+
         # ─ 日次ポートフォリオ価値 ─
         pf_value = cash + sum(
             pos["qty"] * last_prices.get(sym, pos.get("price", 0)) for sym, pos in holdings.items()
@@ -312,6 +323,28 @@ def _fill_equal_weight(
             eq_cash -= exec_for(sym).buy_cost(qty, price, volume)
             new_holdings[sym] = {"qty": qty}
     return eq_cash, new_holdings
+
+
+def _liquidate(
+    cash: float,
+    holdings: dict[str, dict[str, Any]],
+    last_prices: pd.Series,
+    exec_for: Callable[[str], ExecutionModel],
+    volumes: Optional[pd.Series] = None,
+) -> tuple[float, dict[str, dict[str, Any]]]:
+    """値段のある保有を sell_proceeds で売り、売った後の現金と残りの保有を返す（#1332）。
+
+    volumes はその日より前の足までの平均出来高。値段の無い保有は売らずに残す。
+    """
+    remaining: dict[str, dict[str, Any]] = {}
+    for sym, pos in holdings.items():
+        if sym in last_prices.index:
+            cash += exec_for(sym).sell_proceeds(
+                pos["qty"], last_prices[sym], _volume_of(volumes, sym)
+            )
+        else:
+            remaining[sym] = pos
+    return cash, remaining
 
 
 def _volume_of(volumes: Optional[pd.Series], sym: str) -> float:
