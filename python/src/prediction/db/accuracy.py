@@ -196,7 +196,9 @@ def load_drift_summary(
             （日次ドリフト検査が「精度データなし」と分けるため。#1271）
 
     Returns:
-        pd.DataFrame: [market, symbol, direction_accuracy, mean_abs_error, n_samples]
+        pd.DataFrame: [market, symbol, direction_accuracy, mean_abs_error, n_samples,
+            last_predicted_at]（last_predicted_at は銘柄ごとの最後の予想の時刻。
+            月次レポートが今は予想していない銘柄を外すために使う。#1335）
     """
     with _db_connection() as con:
         try:
@@ -215,7 +217,8 @@ def load_drift_summary(
                     symbol,
                     AVG(CAST(direction_match AS INTEGER)) AS direction_accuracy,
                     AVG(ABS(predicted_ratio - actual_ratio))  AS mean_abs_error,
-                    COUNT(*) AS n_samples
+                    COUNT(*) AS n_samples,
+                    MAX(predicted_at) AS last_predicted_at
                 FROM ranked
                 WHERE rn <= {int(recent_n)}
                 GROUP BY market, symbol
