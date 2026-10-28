@@ -8,7 +8,7 @@ DB を読まず、受け取ったデータを集約するだけの内側の関�
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import pandas as pd
@@ -22,6 +22,7 @@ _REPORT_DAYS = 30
 
 _EMPTY_DIFF: dict = {
     "tracked_count": 0,
+    "paper_filled_count": 0,
     "comparable_count": 0,
     "avg_paper_slippage": 0.0,
     "avg_real_slippage": 0.0,
@@ -60,12 +61,13 @@ def get_monthly_kpis(
     diff_summary の取得に失敗した場合は None を渡すこと。None のときは avg_slippage を
     「計測されたゼロ」(0.0) ではなく「データなし」(None) として扱い、
     diff_summary フィールドには表示用の _EMPTY_DIFF を補う。
-    tracked_count が 0 のときも、アダプタが補った 0.0 を計測値とせず None にする。
+    tracked_count が 0 のときと、約定したペーパーの行（paper_filled_count）が 0 のときも、
+    アダプタが補った 0.0 を計測値とせず None にする（#1334）。
     """
     if diff_summary is None:
         avg_slippage = None
         resolved_diff_summary = dict(_EMPTY_DIFF)
-    elif diff_summary.get("tracked_count") == 0:
+    elif diff_summary.get("tracked_count") == 0 or diff_summary.get("paper_filled_count") == 0:
         avg_slippage = None
         resolved_diff_summary = diff_summary
     else:
@@ -75,7 +77,7 @@ def get_monthly_kpis(
     return MonthlyKPI(
         hit_rate=_compute_hit_rate(accuracy_df, days),
         avg_slippage=avg_slippage,
-        drift_count=_compute_drift_count(drift_df, drift_thresholds),
+        drift_count=_compute_drift_count(drift_df, drift_thresholds, days),
         diff_summary=resolved_diff_summary,
     )
 
@@ -98,10 +100,25 @@ def _compute_hit_rate(accuracy_df: pd.DataFrame, days: int = _REPORT_DAYS) -> Op
 
 
 def _compute_drift_count(
-    drift_df: pd.DataFrame, thresholds: Optional[DriftThresholds] = None
+    drift_df: pd.DataFrame,
+    thresholds: Optional[DriftThresholds] = None,
+    days: int = _REPORT_DAYS,
 ) -> int:
-    """日次のドリフト検査と同じ判定（サンプル数の下限・中央値に合わせた線）で数える（#1089）。"""
+    """日次のドリフト検査と同じ判定（サンプル数の下限・中央値に合わせた線）で数える（#1089）。
+
+    最後の予想（last_predicted_at、UTC の 'YYYYMMDD_HHMMSS'）が窓より古い銘柄は、
+    もう予想していない銘柄として判定と中央値から外す（#1335）。列が無い表と
+    時刻が読めない行は、今までどおり数える。
+    """
     if drift_df is None or drift_df.empty:
         return 0
-    selection = select_drifted_symbols(drift_df, thresholds or DriftThresholds())
+    df = drift_df
+    if "last_predicted_at" in df.columns:
+        digits = df["last_predicted_at"].astype(str).str.replace(r"[^0-9]", "", regex=True)
+        last_at = pd.to_datetime(digits.str[:14], format="%Y%m%d%H%M%S", errors="coerce")
+        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
+        df = df[last_at.isna() | (last_at >= cutoff)]
+        if df.empty:
+            return 0
+    selection = select_drifted_symbols(df, thresholds or DriftThresholds())
     return len(selection.triggered)
