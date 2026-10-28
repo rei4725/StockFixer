@@ -21,10 +21,10 @@ def _build_signal_matrix(
     source: str,
     threshold: float,
     ensemble: bool,
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     全銘柄について学習 → 予測し、date × symbol の
-    スコアマトリクスと Close・Open 価格マトリクスを返す。
+    スコアマトリクスと Close・Open 価格マトリクス・Volume マトリクスを返す。
 
     学習データは train_ratio で分割し、テスト期間の予測のみ収録する。
     """
@@ -34,6 +34,7 @@ def _build_signal_matrix(
     score_dict: dict[str, pd.Series] = {}
     close_dict: dict[str, pd.Series] = {}
     open_dict: dict[str, pd.Series] = {}
+    volume_dict: dict[str, pd.Series] = {}
 
     for market, symbol in symbols:
         key = f"{market}_{symbol}"
@@ -87,6 +88,10 @@ def _build_signal_matrix(
             open_col = "Open" if "Open" in test_df.columns else "open"
             if open_col in test_df.columns:
                 open_dict[key] = test_df[open_col].reindex(X_test.index)
+            # Issue #1299: 動的スリッページの平均出来高のため、Volume も持つ
+            volume_col = "Volume" if "Volume" in test_df.columns else "volume"
+            if volume_col in test_df.columns:
+                volume_dict[key] = test_df[volume_col].reindex(X_test.index)
 
             logger.info(f"[PF] 予測完了: {key} ({len(pred)}行)")
 
@@ -94,7 +99,7 @@ def _build_signal_matrix(
             logger.error(f"[PF] 銘柄スキップ ({key}): {e}", exc_info=True)
 
     if not score_dict:
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
     score_matrix = pd.DataFrame(score_dict).sort_index()
     close_matrix = pd.DataFrame(close_dict).sort_index()
@@ -105,5 +110,8 @@ def _build_signal_matrix(
     close_matrix = close_matrix.loc[common_idx]
     # Open の無い銘柄・日は NaN にし、その日の始値では買わない
     open_matrix = pd.DataFrame(open_dict).reindex(index=common_idx, columns=close_matrix.columns)
+    volume_matrix = pd.DataFrame(volume_dict).reindex(
+        index=common_idx, columns=close_matrix.columns
+    )
 
-    return score_matrix, close_matrix, open_matrix
+    return score_matrix, close_matrix, open_matrix, volume_matrix

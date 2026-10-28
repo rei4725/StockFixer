@@ -197,7 +197,7 @@ class TestSignalMatrixExcludesAtr:
         ):
             mock_mm = mock_get_mm.return_value
             mock_mm.predict_with_model.side_effect = lambda name, X: np.zeros(len(X))
-            score_matrix, _, _ = _build_signal_matrix(
+            score_matrix, _, _, _ = _build_signal_matrix(
                 symbols=[("jp", "7203")],
                 model_type="XGBoostModel",
                 train_ratio=0.8,
