@@ -206,7 +206,7 @@ class TestCompareSectorRotationKpi(unittest.TestCase):
         from src.backtest.portfolio import compare_sector_rotation_kpi
 
         mock_symbols.return_value = [("jp", "7203")]
-        mock_build.return_value = (pd.DataFrame(), pd.DataFrame(), pd.DataFrame())
+        mock_build.return_value = (pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame())
         result = compare_sector_rotation_kpi(market="jp")
         self.assertEqual(result, {})
 
@@ -231,7 +231,7 @@ class TestCompareSectorRotationKpi(unittest.TestCase):
             {"jp_7203": rng.random(n) * 100 + 100, "jp_6758": rng.random(n) * 100 + 100},
             index=dates,
         )
-        mock_build.return_value = (score_matrix, close_matrix, close_matrix)
+        mock_build.return_value = (score_matrix, close_matrix, close_matrix, pd.DataFrame())
 
         result = compare_sector_rotation_kpi(market="jp", rebalance_freq="weekly")
 
@@ -257,7 +257,7 @@ class TestCompareSectorRotationKpi(unittest.TestCase):
         rng = np.random.default_rng(seed=2)
         score_matrix = pd.DataFrame({"jp_7203": rng.random(n) * 0.05 + 0.01}, index=dates)
         close_matrix = pd.DataFrame({"jp_7203": rng.random(n) * 100 + 100}, index=dates)
-        mock_build.return_value = (score_matrix, close_matrix, close_matrix)
+        mock_build.return_value = (score_matrix, close_matrix, close_matrix, pd.DataFrame())
 
         result = compare_sector_rotation_kpi(market="jp", rebalance_freq="weekly")
         if result:
