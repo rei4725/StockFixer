@@ -42,7 +42,7 @@ from src.trading.execution import (
 from src.trading.execution.params import _PARAMS_UNREADABLE_COL
 from src.trading.execution.pending import _load_pending_exits
 from src.trading.execution.selection import _get_pending_buy_symbols
-from src.trading.position_valuation import count_short_positions
+from src.trading.position_valuation import count_short_positions, short_held_codes
 from src.trading.risk_manager import RiskManager
 from src.trading.signal_generator import apply_multi_horizon_score_column
 from src.trading.types import TradingGateStatus
@@ -242,11 +242,13 @@ def _handle_place_order(
             logger.info("[claude_agent] %s → スキップ: %s", symbol, cap_reason)
             stats["skipped"] += 1
             return {"status": "skipped", "reason": cap_reason}
-        # 紙の BUY は約定まで保有に出ないため、約定待ちの BUY も保有中とみなす（#1177）
+        # 紙の BUY は約定まで保有に出ないため、約定待ちの BUY も保有中とみなす（#1177）。
+        # 空売り中（約定待ちの SHORT を含む）の銘柄へも逆向きの新規買いを重ねない（#1349）
         held = _get_held_symbols(broker) | _get_pending_buy_symbols(broker)
-        if symbol in held:
+        if symbol in held or symbol.replace(".T", "") in short_held_codes(broker):
             stats["skipped"] += 1
-            return {"status": "skipped", "reason": f"{symbol} は既に保有中"}
+            state = "既に保有中" if symbol in held else "空売り中"
+            return {"status": "skipped", "reason": f"{symbol} は{state}"}
 
         kelly_win_rate, kelly_avg_win, kelly_avg_loss = _resolve_kelly_params(
             str(row["market"]), symbol
