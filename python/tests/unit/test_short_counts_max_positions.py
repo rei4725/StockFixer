@@ -2,6 +2,7 @@
 
 ゲートの保有銘柄数と 8:50 の発注の中の数えが買い持ちだけを見ていたため、空売りを
 有効にすると、建玉の合計が MAX_POSITIONS を超えるまで空売りの新規を建てられた。
+約定待ちの BUY の銘柄も新規ショートの候補から外す（#1333）。
 """
 
 import unittest
@@ -148,6 +149,16 @@ class TestRunnerCountsShortPositions(unittest.TestCase):
 
         self.assertEqual(len(self._shorts_sent(broker)), 1)
         self.assertEqual(stats["short_orders"], 1)
+
+    def test_no_short_entry_on_pending_buy_symbol(self):
+        """約定待ちの BUY がある銘柄には新規ショートを出さない（#1333）。"""
+        broker = _broker()
+        broker.get_pending_buy_symbols = MagicMock(return_value={"8306"})
+        predictions = pd.DataFrame([_row("8306", -0.05), _row("4063", -0.05)])
+
+        self._run(broker, predictions, max_positions=10)
+
+        self.assertEqual(self._shorts_sent(broker), ["4063"])
 
 
 if __name__ == "__main__":
