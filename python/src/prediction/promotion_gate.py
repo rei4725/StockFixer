@@ -34,6 +34,12 @@ from typing import Optional
 import pandas as pd
 
 from src.prediction.baseline_metrics import baseline_metrics
+from src.prediction.challenger_window import (
+    CHALLENGER_LABEL,
+    ChallengerWindow,
+    filter_current_challenger,
+    filter_to_days,
+)
 from src.prediction.db import load_prediction_accuracy
 from src.prediction.shadow_evaluation import DEFAULT_EVALUATION_DAYS
 from src.utils.data_path_utils import get_results_dir
@@ -144,16 +150,40 @@ def _wf_mean(df: pd.DataFrame, model_name: str, col: str) -> Optional[float]:
     return float(val) if not pd.isna(val) else None
 
 
-def _load_model_window(model_name: str, horizon: int) -> pd.DataFrame:
-    """指定モデルの直近 DEFAULT_EVALUATION_DAYS 日分の採点の行を全部読む（#958）。"""
-    return load_prediction_accuracy(
+def _load_model_window(
+    model_name: str, horizon: int, window: Optional[ChallengerWindow] = None
+) -> pd.DataFrame:
+    """指定モデルの直近 DEFAULT_EVALUATION_DAYS 日分の採点の行を全部読む（#958）。
+
+    challenger のラベルは今の challenger の予想の行に絞り、window を渡したモデルは
+    その challenger の行がある日に絞る（#1327）。
+    """
+    df = load_prediction_accuracy(
         horizon=horizon, limit=0, model_name=model_name, days=DEFAULT_EVALUATION_DAYS
     )
+    if model_name == CHALLENGER_LABEL:
+        df, _ = filter_current_challenger(df)
+    elif window is not None:
+        df = filter_to_days(df, window)
+    return df
 
 
-def _compute_hit_rate(model_name: str, horizon: int) -> Optional[float]:
+def _challenger_window(shadow_model_name: str, horizon: int) -> Optional[ChallengerWindow]:
+    """shadow が challenger のラベルなら、今の challenger の窓（日数と件数）を返す。"""
+    if shadow_model_name != CHALLENGER_LABEL:
+        return None
+    df = load_prediction_accuracy(
+        horizon=horizon, limit=0, model_name=shadow_model_name, days=DEFAULT_EVALUATION_DAYS
+    )
+    _, window = filter_current_challenger(df)
+    return window
+
+
+def _compute_hit_rate(
+    model_name: str, horizon: int, window: Optional[ChallengerWindow] = None
+) -> Optional[float]:
     """prediction_accuracy テーブルから指定モデルの方向正解率を返す。"""
-    df = _load_model_window(model_name, horizon)
+    df = _load_model_window(model_name, horizon, window)
     if df.empty or "direction_match" not in df.columns:
         return None
     if "model_name" in df.columns:
@@ -183,9 +213,11 @@ def _compute_slippage(model_name: str, horizon: int) -> Optional[float]:
     return float(val) if not pd.isna(val) else None
 
 
-def _compute_baseline_metrics(model_name: str, horizon: int) -> dict:
+def _compute_baseline_metrics(
+    model_name: str, horizon: int, window: Optional[ChallengerWindow] = None
+) -> dict:
     """prediction_accuracy から基準の的中率・MAE・順位相関を返す（判定には使わない、#1309）。"""
-    df = _load_model_window(model_name, horizon)
+    df = _load_model_window(model_name, horizon, window)
     if not df.empty and "model_name" in df.columns:
         df = df[df["model_name"] == model_name]
     return baseline_metrics(df)
@@ -263,9 +295,15 @@ def evaluate_promotion(
         current_sharpe = None
 
     # --- prediction_accuracy 成績 ---
+    # challenger は今の版の予想の日だけ、current もその日だけで比べる（#1327）
+    window = _challenger_window(shadow_model_name, horizon)
+    paired: dict = {"window": window} if window is not None else {}
     shadow_hit_rate = _compute_hit_rate(shadow_model_name, horizon)
     shadow_slippage = _compute_slippage(shadow_model_name, horizon)
-    current_hit_rate = _compute_hit_rate(current_model_name, horizon) if wf_not_comparable else None
+    current_hit_rate = (
+        _compute_hit_rate(current_model_name, horizon, **paired) if wf_not_comparable else None
+    )
+    baseline_current = _compute_baseline_metrics(current_model_name, horizon, **paired)
 
     # --- 各基準の判定 ---
     # WF を比べられないときの 1〜3 の passed は None（判定に使わない）
@@ -337,6 +375,8 @@ def evaluate_promotion(
     }
     if wf_not_comparable:
         criteria_hit_rate["current"] = current_hit_rate
+    if window is not None:
+        criteria_hit_rate.update(window.as_dict())
 
     # 5. Slippage 乖離（avg_abs_diff_ratio < 0.02）
     if shadow_slippage is not None:
@@ -402,14 +442,15 @@ def evaluate_promotion(
         wf_source_file=wf_filename,
         baseline_metrics={
             "shadow": _compute_baseline_metrics(shadow_model_name, horizon),
-            "current": _compute_baseline_metrics(current_model_name, horizon),
+            "current": baseline_current,
         },
     )
 
     logger.info(
         f"昇格ゲート判定: eligible={eligible} reason={reason} "
         f"net_return={net_return_passed} mdd={mdd_passed} "
-        f"sharpe={sharpe_passed} hit_rate={hit_rate_passed} slippage={slippage_passed}"
+        f"sharpe={sharpe_passed} hit_rate={hit_rate_passed} slippage={slippage_passed} "
+        f"窓={window.as_dict() if window is not None else None}"
     )
     return result
 

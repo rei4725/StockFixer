@@ -6,6 +6,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -137,6 +138,9 @@ class TestEvaluateShadowModels(unittest.TestCase):
         chal_df = _make_accuracy_df(
             "challenger", [1, 1, 1, 1], [0.02, 0.03, 0.02, 0.03], [0.02, 0.025, 0.02, 0.028]
         )
+        # 今の challenger の学習より後の同じ日の予想（#1327）
+        prod_df["predicted_at"] = "20261021_224500"
+        chal_df["predicted_at"] = "20261021_224500"
 
         with (
             patch(
@@ -144,6 +148,10 @@ class TestEvaluateShadowModels(unittest.TestCase):
                 side_effect=[prod_df, chal_df],
             ),
             patch("src.prediction.shadow_evaluation._record_ab_result"),
+            patch(
+                "src.prediction.challenger_window.current_challenger_trained_at",
+                return_value=datetime(2026, 10, 20, tzinfo=timezone.utc),
+            ),
         ):
             result = evaluate_shadow_models()
 
