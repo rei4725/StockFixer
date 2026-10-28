@@ -251,31 +251,9 @@ class Backtester:
                 continue
             pending_exit = None
 
-            # ストップロス / テイクプロフィット判定（シグナルより先に評価）
-            if self.execution_lag > 0 and position > 0 and position_price > 0:
-                change_from_entry = (price - position_price) / position_price
-                if self.stop_loss_pct is not None and change_from_entry <= -self.stop_loss_pct:
-                    pending_exit = "stop_loss"
-                elif self.take_profit_pct is not None and change_from_entry >= self.take_profit_pct:
-                    pending_exit = "take_profit"
-                if pending_exit is not None:
-                    # 判定の足ではまだ保有している（終値で時価評価し、決済は翌バー）
-                    equity_records.append(
-                        mark_to_market(
-                            self.execution,
-                            date,
-                            cash,
-                            cash_gross,
-                            position,
-                            price,
-                            short_position,
-                            short_price,
-                            short_entry_vol,
-                            exec_vol,
-                        )
-                    )
-                    continue
-            elif position > 0 and position_price > 0:
+            # 同バー約定（execution_lag == 0）のストップロス / テイクプロフィット判定
+            # （シグナルより先に評価）。execution_lag > 0 の判定はシグナルの後で行う（#1361）
+            if self.execution_lag == 0 and position > 0 and position_price > 0:
                 change_from_entry = (price - position_price) / position_price
 
                 if self.stop_loss_pct is not None and change_from_entry <= -self.stop_loss_pct:
@@ -454,6 +432,16 @@ class Backtester:
                             "cash_gross": cash_gross,
                         }
                     )
+
+            # #1361: execution_lag > 0 では、この足の寄りで約定するシグナルを先に処理し、
+            # まだ保有が残っていれば当バー Close で SL/TP を判定して翌バーの決済を立てる。
+            # 寄りの約定を当バーの終値で取り消さない（終値は寄りの時点で分からない）。
+            if self.execution_lag > 0 and position > 0 and position_price > 0:
+                change_from_entry = (price - position_price) / position_price
+                if self.stop_loss_pct is not None and change_from_entry <= -self.stop_loss_pct:
+                    pending_exit = "stop_loss"
+                elif self.take_profit_pct is not None and change_from_entry >= self.take_profit_pct:
+                    pending_exit = "take_profit"
 
             # 各バー末の mark-to-market equity を記録（保有中の含み損益込み・#492）
             equity_records.append(
