@@ -128,7 +128,6 @@ class TestEntryGateErrorKeepsExits(unittest.TestCase):
             self._sent(),
             [
                 ("9001", OrderSide.SELL),
-                ("6758", OrderSide.BUY),
                 ("7000", OrderSide.BUY),
                 ("6758", OrderSide.SHORT_COVER),
                 ("6000", OrderSide.SHORT),

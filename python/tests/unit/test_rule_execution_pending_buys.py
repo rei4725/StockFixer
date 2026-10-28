@@ -196,6 +196,27 @@ class TestRuleExecutionCountsShortPositions(unittest.TestCase):
         self.assertEqual(result["buy_orders"], 1)
         self.assertEqual(result["skipped"], 1)
 
+    def test_short_held_symbol_is_not_bought(self):
+        # 空売り中（約定待ちの SHORT の仮登録を含む）の銘柄へ逆向きの新規買いを重ねない（#1349）
+        broker = _broker([_long("1000")])
+        broker.get_short_positions.return_value = [
+            {"symbol": "5000.T", "qty": 100, "avg_price": 1000.0, "current_price": 1000.0},
+            {"symbol": "5001", "qty": 0, "avg_price": 1000.0, "current_price": 1000.0},
+        ]
+        signals = [
+            {"symbol": "5000", "signal": 1, "price": 1000.0},
+            {"symbol": "5001", "signal": 1, "price": 1000.0},
+            {"symbol": "1000", "signal": -1, "price": 1000.0},
+        ]
+
+        result, _ = self._run(broker, signals)
+
+        sent = [(c.kwargs["symbol"], c.kwargs["side"]) for c in broker.send_order.call_args_list]
+        self.assertEqual(sent, [("5001.T", OrderSide.BUY), ("1000.T", OrderSide.SELL)])
+        self.assertEqual(result["buy_orders"], 1)
+        self.assertEqual(result["sell_orders"], 1)
+        self.assertEqual(result["skipped"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()
