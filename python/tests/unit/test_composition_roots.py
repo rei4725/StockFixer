@@ -449,7 +449,6 @@ class TestRunWeeklyReportCompositionRoot(unittest.TestCase):
         drift_df = MagicMock(name="drift_df")
         snapshots_df = MagicMock(name="snapshots_df")
         fake_query = MagicMock()
-        fake_query.drift_summary.return_value = drift_df
         fake_query.paper_real_diff_summary.return_value = {"tracked_count": 0}
 
         def _snapshots(**kwargs):
@@ -464,6 +463,8 @@ class TestRunWeeklyReportCompositionRoot(unittest.TestCase):
             "src.infrastructure.persistence.analytics_query.PostgresAnalyticsQuery",
             return_value=fake_query,
         ), patch(
+            "src.prediction.db.load_drift_summary", return_value=drift_df
+        ) as mock_drift, patch(
             "src.prediction.db.load_weekly_accuracy_summary", return_value=week_df
         ) as mock_week, patch(
             "src.prediction.db.save_weekly_accuracy_snapshot",
@@ -483,11 +484,14 @@ class TestRunWeeklyReportCompositionRoot(unittest.TestCase):
             weekly.run_weekly_report()
 
         self.assertEqual(order, ["save_snapshot", "load_snapshots"])
-        fake_query.drift_summary.assert_called_once_with(horizon=1, model_name="production")
+        # 読み込みの失敗を失敗の知らせに届けるため、週次レポートの道だけ投げる（#1305）
+        mock_drift.assert_called_once_with(horizon=1, model_name="production", raise_on_error=True)
         fake_query.weekly_accuracy_snapshots.assert_called_once_with(n_weeks=4)
         # 週の記録は今週に予想した採点の行だけで作る（#1023）
         week_start = mock_save.call_args.args[0]
-        mock_week.assert_called_once_with(week_start, horizon=1, model_name="production")
+        mock_week.assert_called_once_with(
+            week_start, horizon=1, model_name="production", raise_on_error=True
+        )
         self.assertIs(mock_save.call_args.args[1], week_df)
         self.assertIs(captured.get("accuracy_df"), drift_df)
         self.assertIs(captured.get("snapshots_df"), snapshots_df)
