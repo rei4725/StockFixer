@@ -21,6 +21,7 @@ class OrderExecutionStats(TypedDict):
     avg_correlation: float
     n_held_symbols: int
     held_symbols_list: list[str]
+    sl_tp_unevaluable_symbols: list[str]
 
 
 def _new_stats() -> OrderExecutionStats:
@@ -43,4 +44,5 @@ def _new_stats() -> OrderExecutionStats:
         "avg_correlation": 0.0,
         "n_held_symbols": 0,
         "held_symbols_list": [],
+        "sl_tp_unevaluable_symbols": [],
     }

@@ -182,6 +182,7 @@ def send_daily_order_completion(
     daily_loss: Optional[float] = None,
     daily_loss_limit: Optional[float] = None,
     errors: int = 0,
+    sl_tp_unevaluable_symbols: Optional[list[str]] = None,
 ) -> bool:
     """
     自動発注完了通知を Discord Webhook に送信する。
@@ -195,6 +196,7 @@ def send_daily_order_completion(
         daily_loss: 当日損失額
         daily_loss_limit: 当日損失上限額
         errors: 例外で出せなかった注文の数（SL/TP の売りを含む）
+        sl_tp_unevaluable_symbols: 現在値が取れず SL/TP を評価できなかった保有の銘柄
 
     Returns:
         成功時 True、失敗時 False
@@ -207,6 +209,16 @@ def send_daily_order_completion(
         {"name": "🔴 売り注文", "value": f"{sell_orders:,} 件", "inline": True},
         {"name": "⚠️ 注文エラー", "value": f"{errors:,} 件", "inline": True},
     ]
+    if sl_tp_unevaluable_symbols:
+        # 損失の止めが判定されなかった保有を平常に見せない（#1296）
+        fields.append(
+            {
+                "name": "⚠️ SL/TP 評価できず",
+                "value": f"{len(sl_tp_unevaluable_symbols):,} 件: "
+                + ", ".join(sl_tp_unevaluable_symbols),
+                "inline": False,
+            }
+        )
     if trading_stopped:
         fields.append(
             {
