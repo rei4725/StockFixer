@@ -194,11 +194,14 @@ def save_monthly_report_to_file(
     diff = _kpi.diff_summary
     drift_count = _kpi.drift_count
     # 件数が0のときの平均はアダプタが 0.0 で補った値なので、計測値として出さない
-    has_tracked = diff["tracked_count"] > 0
+    # 約定したペーパーの行が0件の窓（約定待ち・失効だけ）も同じく出さない（#1334）
+    has_paper_fills = (
+        diff["tracked_count"] > 0 and diff.get("paper_filled_count", diff["tracked_count"]) > 0
+    )
     has_comparable = diff["comparable_count"] > 0
     price_diff_text = f"¥{diff['avg_abs_price_diff']:.2f}" if has_comparable else "N/A"
     diff_ratio_text = f"{diff['avg_abs_diff_ratio'] * 100:.4f}%" if has_comparable else "N/A"
-    paper_slippage_text = _pct(diff["avg_paper_slippage"]) if has_tracked else "N/A"
+    paper_slippage_text = _pct(diff["avg_paper_slippage"]) if has_paper_fills else "N/A"
     real_slippage_text = _pct(diff["avg_real_slippage"]) if has_comparable else "N/A"
 
     # 週次 Hit Rate ドリフト

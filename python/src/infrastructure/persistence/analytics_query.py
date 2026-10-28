@@ -43,7 +43,8 @@ class PostgresAnalyticsQuery(AnalyticsQuery):
                 ) AS avg_real_slippage,
                 AVG(ABS(price_diff)) AS avg_abs_price_diff,
                 AVG(ABS(price_diff / NULLIF(signal_price, 0))) AS avg_abs_diff_ratio,
-                MAX(ABS(price_diff)) AS max_abs_price_diff
+                MAX(ABS(price_diff)) AS max_abs_price_diff,
+                COUNT(paper_slippage) AS paper_filled_count
             FROM paper_real_diff
             WHERE COALESCE(paper_filled_at, real_checked_at, created_at) >= %s
             """,
@@ -53,10 +54,12 @@ class PostgresAnalyticsQuery(AnalyticsQuery):
         if row is None:
             # COUNT / AVG の集約クエリは必ず 1 行返るが、型は Optional のため
             # 防御的に全ゼロ相当の行として扱う。
-            row = (0, 0, None, None, None, None, None)
+            row = (0, 0, None, None, None, None, None, 0)
 
         return {
             "tracked_count": int(row[0] or 0),
+            # 約定したペーパーの行の数。0 なら avg_paper_slippage は補った 0.0（#1334）
+            "paper_filled_count": int(row[7] or 0),
             "comparable_count": int(row[1] or 0),
             "avg_paper_slippage": float(row[2] or 0.0),
             "avg_real_slippage": float(row[3] or 0.0),

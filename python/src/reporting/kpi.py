@@ -22,6 +22,7 @@ _REPORT_DAYS = 30
 
 _EMPTY_DIFF: dict = {
     "tracked_count": 0,
+    "paper_filled_count": 0,
     "comparable_count": 0,
     "avg_paper_slippage": 0.0,
     "avg_real_slippage": 0.0,
@@ -60,12 +61,13 @@ def get_monthly_kpis(
     diff_summary の取得に失敗した場合は None を渡すこと。None のときは avg_slippage を
     「計測されたゼロ」(0.0) ではなく「データなし」(None) として扱い、
     diff_summary フィールドには表示用の _EMPTY_DIFF を補う。
-    tracked_count が 0 のときも、アダプタが補った 0.0 を計測値とせず None にする。
+    tracked_count が 0 のときと、約定したペーパーの行（paper_filled_count）が 0 のときも、
+    アダプタが補った 0.0 を計測値とせず None にする（#1334）。
     """
     if diff_summary is None:
         avg_slippage = None
         resolved_diff_summary = dict(_EMPTY_DIFF)
-    elif diff_summary.get("tracked_count") == 0:
+    elif diff_summary.get("tracked_count") == 0 or diff_summary.get("paper_filled_count") == 0:
         avg_slippage = None
         resolved_diff_summary = diff_summary
     else:

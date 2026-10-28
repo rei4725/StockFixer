@@ -262,6 +262,7 @@ class InMemoryAnalyticsQuery(AnalyticsQuery):
 
     _EMPTY_PAPER_REAL_DIFF: dict = {
         "tracked_count": 0,
+        "paper_filled_count": 0,
         "comparable_count": 0,
         "avg_paper_slippage": 0.0,
         "avg_real_slippage": 0.0,
