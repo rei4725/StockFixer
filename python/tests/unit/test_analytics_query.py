@@ -174,7 +174,9 @@ class TestPostgresAnalyticsQueryAccuracyDelegation(unittest.TestCase):
             result = PostgresAnalyticsQuery().drift_summary(
                 horizon=3, recent_n=20, model_name="challenger"
             )
-        mock_load.assert_called_once_with(horizon=3, recent_n=20, model_name="challenger")
+        mock_load.assert_called_once_with(
+            horizon=3, recent_n=20, model_name="challenger", raise_on_error=False
+        )
         self.assertIs(result, sentinel)
 
     def test_prediction_accuracy_delegates(self):
@@ -183,7 +185,9 @@ class TestPostgresAnalyticsQueryAccuracyDelegation(unittest.TestCase):
             result = PostgresAnalyticsQuery().prediction_accuracy(
                 market="jp", symbol="7203", horizon=5, limit=10
             )
-        mock_load.assert_called_once_with(market="jp", symbol="7203", horizon=5, limit=10)
+        mock_load.assert_called_once_with(
+            market="jp", symbol="7203", horizon=5, limit=10, raise_on_error=False
+        )
         self.assertIs(result, sentinel)
 
     def test_weekly_accuracy_snapshots_delegates(self):

@@ -129,11 +129,16 @@ class AnalyticsQuery(ABC):
 
     @abstractmethod
     def drift_summary(
-        self, horizon: int = 1, recent_n: int = 30, model_name: str = "production"
+        self,
+        horizon: int = 1,
+        recent_n: int = 30,
+        model_name: str = "production",
+        raise_on_error: bool = False,
     ) -> pd.DataFrame:
         """銘柄ごとに直近 recent_n 件の方向正解率・平均誤差を返す（model_name の採点だけ）。
 
         列: market, symbol, direction_accuracy, mean_abs_error, n_samples
+        raise_on_error が True なら読み込みの失敗を空の表にせず投げる（#1306）
         """
 
     @abstractmethod
@@ -143,8 +148,12 @@ class AnalyticsQuery(ABC):
         symbol: Optional[str] = None,
         horizon: int = 1,
         limit: int = 500,
+        raise_on_error: bool = False,
     ) -> pd.DataFrame:
-        """予測精度の明細を predicted_at 降順で返す"""
+        """予測精度の明細を predicted_at 降順で返す
+
+        raise_on_error が True なら読み込みの失敗を空の表にせず投げる（#1306）
+        """
 
     @abstractmethod
     def weekly_accuracy_snapshots(self, n_weeks: int = 4) -> pd.DataFrame:
