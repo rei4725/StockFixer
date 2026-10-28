@@ -133,13 +133,15 @@ def run_daily_orders(
         if entry_error is not None:
             raise entry_error
         return stats
+    # 前の回の約定待ちの BUY も、相関ゲート・保有・業種の上限に数える（#1137・#1320）
+    held_or_pending = held_symbols | _get_pending_buy_symbols(broker)
     # 相関ゲートを評価しない・評価が落ちた日も corr_gate に不合格の値が入るよう先に置く
     blocked_status, corr_gate = _block_entries(gate_status)
     if entry_error is None:
         try:
             # --- 相関ゲート: 保有銘柄間の相関上昇時に新規買いをブロック ---
             corr_gate = evaluate_correlation_gate(
-                sorted(held_symbols),
+                sorted(held_or_pending),
                 market,
                 window=CORRELATION_WINDOW_DAYS,
                 enc_threshold=CORRELATION_ENC_THRESHOLD,
@@ -258,7 +260,6 @@ def run_daily_orders(
     _log_pending_skips("売りシグナル", pending_skipped)
 
     # --- 新規買いシグナル（前の回の約定待ちの BUY も保有と業種の上限に数える、#1137） ---
-    held_or_pending = held_symbols | _get_pending_buy_symbols(broker)
     if gate_status.is_allowed and corr_gate.is_allowed:
         buy_candidates = predictions[
             (~predictions["symbol"].isin(held_or_pending))
