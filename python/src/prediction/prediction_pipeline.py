@@ -21,6 +21,7 @@ from config.data import MAX_PREDICTION_WORKERS
 from src.prediction.db import save_prediction_results
 from src.prediction.multi_horizon import predict_all_unified_multi_horizon  # noqa: F401
 from src.prediction.predict_single import predict_single_stock
+from src.prediction.prediction_run_stats import collect_prediction_run_stats
 from src.prediction.types import PredictionResult
 from src.prediction.unified_run_summary import log_unified_prediction_summary
 from src.utils.data_path_utils import get_models_dir
@@ -224,12 +225,14 @@ def predict_all_unified(
     output_rows: list[PredictionResult] = []
     logger.info(f"並列予測開始（統合モデル）: {len(all_keys)}銘柄, ワーカー数: {max_workers}")
 
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {executor.submit(wrapper, task): task for task in all_keys}
-        for future in as_completed(futures):
-            result = future.result()
-            if result is not None:
-                output_rows.append(result)
+    # クリップと0埋めの数を回の終わりにログに出す（#1318）
+    with collect_prediction_run_stats("unified"):
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(wrapper, task): task for task in all_keys}
+            for future in as_completed(futures):
+                result = future.result()
+                if result is not None:
+                    output_rows.append(result)
 
     log_unified_prediction_summary(len(output_rows), len(all_keys), stale_keys, error_keys)
     if on_error is not None:

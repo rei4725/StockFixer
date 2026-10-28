@@ -5,7 +5,11 @@ prediction_pipeline.py から分けた（ファイルの行数の上限のため
 re-export しているので、今までの import はそのまま使える。
 """
 
+from collections.abc import Callable
+from typing import Optional
+
 from config.data import MAX_PREDICTION_WORKERS
+from src.prediction.prediction_run_stats import collect_prediction_run_stats
 from src.prediction.types import PredictionResult
 from src.utils.db import get_active_symbols
 from src.utils.logger import get_logger
@@ -42,6 +46,19 @@ def predict_all_unified_multi_horizon(
     output_rows: list[PredictionResult] = []
     logger.info(f"多ホライズン予測開始（統合モデル）: {len(all_keys)}銘柄, horizons={horizons}")
 
+    # クリップと0埋めの数を回の終わりに市場・ホライズンごとにログに出す（#1318）
+    with collect_prediction_run_stats("multi_horizon"):
+        _predict_symbols(all_keys, horizons, output_rows, predict_with_unified_model)
+    return output_rows
+
+
+def _predict_symbols(
+    all_keys: list,
+    horizons: list,
+    output_rows: list[PredictionResult],
+    predict_with_unified_model: Callable[..., Optional[PredictionResult]],
+) -> None:
+    """銘柄ごとに全ホライズンを予想し、コンフルエンスを付けて output_rows に足す"""
     for market, symbol in all_keys:
         try:
             horizon_results: dict[int, PredictionResult] = {}
@@ -102,5 +119,3 @@ def predict_all_unified_multi_horizon(
             )
         except Exception as e:
             logger.error(f"[{market}_{symbol}] 多ホライズン予測エラー: {e}", exc_info=True)
-
-    return output_rows

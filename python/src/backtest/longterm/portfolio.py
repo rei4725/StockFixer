@@ -73,14 +73,23 @@ class Portfolio:
             pos.entry_date, pos.symbol, pos.entry_price, pos.shares, pos.cost_basis, self.cash
         )
 
-    def scale_out(self, symbol: str, ev: PositionEvent, execution: ExecutionModel) -> None:
-        """部分利確。保有比率の減少分だけ売却して現金を回収する。"""
+    def scale_out(
+        self,
+        symbol: str,
+        ev: PositionEvent,
+        execution: ExecutionModel,
+        volume: float = 0.0,
+    ) -> None:
+        """部分利確。保有比率の減少分だけ売却して現金を回収する。
+
+        volume は約定の日より前の平均出来高（動的スリッページ用。0 ならフラットのみ）。
+        """
         pos = self.positions[symbol]
         delta = pos.current_hf - ev.held_fraction
         if delta <= 0:
             return
         sold = pos.shares * delta
-        proceeds = execution.sell_proceeds(sold, ev.price)
+        proceeds = execution.sell_proceeds(sold, ev.price, volume)
         self.cash += proceeds
         pos.realized += proceeds
         pos.current_hf = ev.held_fraction
@@ -94,16 +103,18 @@ class Portfolio:
         ev: PositionEvent,
         execution: ExecutionModel,
         max_multiple: float,
+        volume: float = 0.0,
     ) -> ClosedTrade:
         """残りを全売却してポジションを閉じ、確定した ClosedTrade を返す。
 
         max_multiple はエンジン側で追跡している「保有中の最大倍率」であり、
         既定値は与えない: 省略を許すとエンジンが渡し忘れたまま
         max_multiple 列が静かに壊れうるため、必須引数のまま維持する。
+        volume は約定の日より前の平均出来高（動的スリッページ用。0 ならフラットのみ）。
         """
         pos = self.positions.pop(symbol)
         sold = pos.held_shares()
-        proceeds = execution.sell_proceeds(sold, ev.price)
+        proceeds = execution.sell_proceeds(sold, ev.price, volume)
         self.cash += proceeds
         pos.realized += proceeds
         pos.current_hf = 0.0

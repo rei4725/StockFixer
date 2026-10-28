@@ -11,16 +11,17 @@ kabu STATION® API が利用できない環境（APIキー未取得・テスト�
 
 import math
 import uuid
-from datetime import date, datetime
+from datetime import date
 from typing import Any
-
-import pandas as pd
 
 from config.settings import PAPER_INITIAL_BALANCE
 from src.domain.ports import MarketDataPort, TradeDiffSink
 from src.domain.types import TradeDiffRecord
 from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
 from src.trading.brokers.paper import split_adjust as sa
+from src.trading.brokers.paper.bar_timing import bar_date_jst as _bar_date_jst
+from src.trading.brokers.paper.bar_timing import created_after_bar_close as _created_after_bar_close
+from src.trading.brokers.paper.bar_timing import parse_predicted_date as _parse_predicted_date
 from src.trading.brokers.paper.fill import apply_fill
 from src.trading.brokers.paper.pending_short import read_pending_shorts, split_filled_short
 from src.trading.position_valuation import (
@@ -34,33 +35,8 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 _INITIAL_BALANCE = PAPER_INITIAL_BALANCE
-_JST = "Asia/Tokyo"
 # 保有の評価に使う最後の足の古さの上限（暦日）。連休の前の営業日の足は使い、売買停止の足は使わない
 _PRICE_MAX_AGE_DAYS = 7
-
-
-def _parse_predicted_date(predicted_at: Any) -> date | None:
-    """predicted_at（例: "20260213_142903"）からシグナルを作った日を返す。読めなければ None"""
-    if not predicted_at:
-        return None
-    text = str(predicted_at)
-    try:
-        return datetime.strptime(text[:8], "%Y%m%d").date()
-    except ValueError:
-        pass
-    try:
-        return date.fromisoformat(text[:10])
-    except ValueError:
-        logger.warning(f"[paper] predicted_at を日付として読めません: {text}")
-        return None
-
-
-def _bar_date_jst(index_value: Any) -> date:
-    """OHLCV の行の日付を JST の日付で返す（tz なしの index はそのまま日付とみなす）"""
-    ts = pd.Timestamp(index_value)
-    if ts.tzinfo is not None:
-        ts = ts.tz_convert(_JST)
-    return ts.date()
 
 
 def _today_jst() -> date:
@@ -275,6 +251,14 @@ class PaperBroker(BrokerBase):
                     logger.warning(
                         f"[paper] {symbol}: 今日の行が未取得（最後の行={bar_date} "
                         f"今日={today}）のため約定スキップ（pending 据え置き）"
+                    )
+                    continue
+                # 引けの後に出た注文（遅れた 9:05 の約定が 16:30 のルールの発注の後に走ったときなど）を、
+                # 注文より前の始値で約定させない。翌営業日の足で約定させる。us は東証の引けで区切らない
+                if market != "us" and _created_after_bar_close(created_at, bar_date):
+                    logger.warning(
+                        f"[paper] {symbol}: 注文が足の日の引けの後（created_at={created_at}、"
+                        f"足={bar_date}）のため約定スキップ（pending 据え置き）"
                     )
                     continue
 
