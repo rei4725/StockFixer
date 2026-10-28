@@ -22,6 +22,7 @@ from typing import Callable, Iterable
 
 import pandas as pd
 
+from src.prediction.baseline_metrics import baseline_metrics
 from src.prediction.prediction_pipeline import _base_bar_date
 from src.utils.data_path_utils import ensure_dir, get_results_dir
 from src.utils.japan_time import isoformat_utc, now_jst
@@ -45,16 +46,21 @@ SectorGetter = Callable[[str, str], str]
 
 
 def _summary(rows: pd.DataFrame) -> dict:
-    """件数・向きの的中率・平均の誤差（|予想の変化率 - 実際の変化率|）を返す。"""
+    """件数・向きの的中率・平均の誤差（|予想の変化率 - 実際の変化率|）と、基準の的中率などの
+    物差し（baseline_metrics、#1309）を返す。"""
     if rows.empty:
-        return {"n_scored": 0, "direction_accuracy": None, "mean_abs_error": None}
+        summary: dict = {"n_scored": 0, "direction_accuracy": None, "mean_abs_error": None}
+        summary.update(baseline_metrics(rows))
+        return summary
     matches = rows["direction_match"].dropna().astype(bool)
     errors = rows["abs_error"].dropna()
-    return {
+    summary = {
         "n_scored": int(len(rows)),
         "direction_accuracy": float(matches.mean()) if len(matches) else None,
         "mean_abs_error": float(errors.mean()) if len(errors) else None,
     }
+    summary.update(baseline_metrics(rows))
+    return summary
 
 
 def _row_base_day(predicted_at: str, market: str) -> str:
