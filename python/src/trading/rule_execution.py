@@ -20,7 +20,7 @@ from src.trading.brokers.paper.paper_broker import PaperBroker
 from src.trading.correlation_risk import evaluate_correlation_gate
 from src.trading.execution.pending import _load_pending_exits, _log_pending_skips
 from src.trading.execution.selection import _get_pending_buy_symbols
-from src.trading.position_valuation import count_short_positions
+from src.trading.position_valuation import count_short_positions, short_held_codes
 from src.trading.risk_manager import RiskManager
 from src.utils.data_path_utils import get_ticker
 from src.utils.logger import get_logger
@@ -82,6 +82,8 @@ def execute_rule_paper_trades(
     # 約定待ちの BUY は朝の約定まで get_positions に出ないため、新規買いの数えに足す（#1176）。
     # SELL の分かれ道は約定済みの保有（held_symbols）だけを見る。
     held_or_pending = held_symbols | _get_pending_buy_symbols(broker)
+    # 空売り中の銘柄へ逆向きの新規買いを重ねない（#1349）。読めなければ新規買いの手順で止まる
+    short_codes: set[str] = set()
 
     if not allow_new_buys:
         logger.warning("[rule] 呼び出し元の指定で新規買いを停止し、保有の決済だけ出す")
@@ -105,10 +107,13 @@ def execute_rule_paper_trades(
 
         # 8:50 の道（execution.runner）と同じく、相関ゲート不合格なら新規買いだけ止め、
         # 同一業種の上限は保有中の銘柄の業種も含めて数える（#1138）。
+        short_codes = short_held_codes(broker)
         buy_candidates = [
             item
             for item in signals
-            if item["signal"] == 1 and item["symbol"] not in held_or_pending
+            if item["signal"] == 1
+            and item["symbol"] not in held_or_pending
+            and str(item["symbol"]).replace(".T", "") not in short_codes
         ]
         if gate.is_allowed and allow_new_buys and buy_candidates:
             held_codes = sorted({s.replace(".T", "") for s in held_or_pending})
@@ -152,6 +157,10 @@ def execute_rule_paper_trades(
         try:
             if signal == 1 and symbol not in held_or_pending:
                 if not buys_allowed:
+                    skipped += 1
+                    continue
+                if str(symbol).replace(".T", "") in short_codes:
+                    logger.info("[rule] %s: 空売り中のため新規買いスキップ", symbol)
                     skipped += 1
                     continue
                 if symbol not in sector_allowed:

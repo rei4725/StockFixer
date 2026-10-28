@@ -815,6 +815,15 @@ class TestRunClaudeTrader(unittest.TestCase):
         self.assertIn("既に保有中", results[0]["reason"])
         broker.send_order.assert_not_called()
 
+    def test_short_held_symbol_is_treated_as_held(self):
+        # 空売り中（約定待ちの SHORT の仮登録を含む）の銘柄の buy は飛ばす（#1349）
+        shorts = [{"symbol": "S0.T", "qty": 100, "unrealized_pnl": 0.0}]
+        stats, broker, results = self._run_with_buys(["S0"], shorts=shorts)
+
+        self.assertEqual(results[0]["status"], "skipped")
+        self.assertIn("空売り中", results[0]["reason"])
+        broker.send_order.assert_not_called()
+
     def test_broker_without_pending_reader_keeps_current_behavior(self):
         with patch("src.trading.claude_order_caps.MAX_POSITIONS", 10):
             stats, broker, results = self._run_with_buys(["S0"], positions=self._nine_held())

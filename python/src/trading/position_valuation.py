@@ -83,6 +83,15 @@ def count_short_positions(broker: Any) -> int:
     return sum(1 for p in read_short_positions(broker) if p.get("qty", 0) > 0)
 
 
+def short_held_codes(broker: Any) -> set[str]:
+    """空売りの建玉（qty > 0。約定待ちの SHORT の仮登録を含む）の銘柄コードを返す（#1349）。"""
+    return {
+        str(p["symbol"]).replace(".T", "")
+        for p in read_short_positions(broker)
+        if p.get("qty", 0) > 0
+    }
+
+
 def broker_positions_value(broker: Any, logger: logging.Logger) -> float:
     """broker の保有を総資産に足す額（買い持ちの時価 + 空売りの含み損益）を返す（#1148）。
 
