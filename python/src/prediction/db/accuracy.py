@@ -327,6 +327,9 @@ def save_weekly_accuracy_snapshot(week_start: str, df: pd.DataFrame) -> None:
         week_start: ISO 形式の週開始日（月曜日, 例: "2026-05-11"）
         df: load_drift_summary() が返す DataFrame
             列: market, symbol, direction_accuracy, mean_abs_error, n_samples
+
+    Raises:
+        Exception: DELETE か書き込みが失敗したとき（その週の既存の行は残る）
     """
     required = {"market", "symbol", "direction_accuracy", "mean_abs_error", "n_samples"}
     if df is None or df.empty or not required.issubset(df.columns):
@@ -335,28 +338,33 @@ def save_weekly_accuracy_snapshot(week_start: str, df: pd.DataFrame) -> None:
     snap = df[list(required)].copy()
     snap["week_start"] = week_start
 
+    # DELETE と書き込みを1つのトランザクションにし、書き込みが落ちたときに
+    # その週の既存の行が消えたまま残らないようにする（#1328）。
+    # 失敗は投げ直し、週次レポートの失敗の知らせに届ける。
     with _db_connection() as con:
         try:
-            con.execute(
-                "DELETE FROM accuracy_weekly_snapshots WHERE week_start = %s",
-                [week_start],
-            )
-            bulk_insert(
-                con,
-                "accuracy_weekly_snapshots",
-                snap,
-                columns=[
-                    "week_start",
-                    "market",
-                    "symbol",
-                    "direction_accuracy",
-                    "mean_abs_error",
-                    "n_samples",
-                ],
-            )
+            with con.transaction():
+                con.execute(
+                    "DELETE FROM accuracy_weekly_snapshots WHERE week_start = %s",
+                    [week_start],
+                )
+                bulk_insert(
+                    con,
+                    "accuracy_weekly_snapshots",
+                    snap,
+                    columns=[
+                        "week_start",
+                        "market",
+                        "symbol",
+                        "direction_accuracy",
+                        "mean_abs_error",
+                        "n_samples",
+                    ],
+                )
             logger.debug(f"accuracy_weekly_snapshots 保存: week_start={week_start}, {len(snap)}件")
         except Exception as e:
             logger.error(f"save_weekly_accuracy_snapshot 失敗: {e}", exc_info=True)
+            raise
 
 
 def load_weekly_accuracy_snapshots(n_weeks: int = 4) -> pd.DataFrame:

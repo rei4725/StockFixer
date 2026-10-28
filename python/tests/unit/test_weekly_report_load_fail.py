@@ -7,7 +7,7 @@ import pandas as pd
 
 from src.infrastructure.persistence.analytics_query import PostgresAnalyticsQuery
 from src.orchestration.jobs.weekly import run_weekly_report
-from src.prediction.db import load_weekly_accuracy_summary
+from src.prediction.db import load_weekly_accuracy_summary, save_weekly_accuracy_snapshot
 
 _ACC = "src.prediction.db.accuracy"
 _DRIFT_DF = pd.DataFrame(
@@ -94,6 +94,23 @@ def test_no_rows_week_does_not_notify(mock_read_sql, mock_con):
     assert mock_save.call_args.args[1].empty
     mock_report.assert_called_once()
     assert mock_report.call_args.kwargs["accuracy_df"].empty
+
+
+@patch("src.prediction.db.load_drift_summary", return_value=_DRIFT_DF)
+@patch("src.prediction.db.load_weekly_accuracy_summary", return_value=_DRIFT_DF)
+@patch(f"{_ACC}._db_connection", side_effect=lambda: nullcontext(MagicMock()))
+@patch(f"{_ACC}.bulk_insert", side_effect=RuntimeError("insert failed"))
+def test_snapshot_save_failure_sends_notice(mock_insert, mock_con, mock_week, mock_drift):
+    """週の記録の保存が落ちた週は、黙らず失敗を1回知らせる（#1328）。"""
+    mock_notice, mock_report = MagicMock(), MagicMock()
+    _run(mock_notice, mock_report, save_weekly_accuracy_snapshot)
+
+    mock_insert.assert_called_once()
+    mock_report.assert_not_called()
+    mock_notice.assert_called_once()
+    text = mock_notice.call_args[0][0]
+    assert "❌ 週次レポート生成失敗" in text
+    assert "insert failed" in text
 
 
 @patch(f"{_ACC}._db_connection", return_value=nullcontext(MagicMock()))
