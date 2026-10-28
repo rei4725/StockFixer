@@ -88,7 +88,9 @@ def upsert_stock_features(market: str, symbol: str, df: pd.DataFrame) -> None:
     save_df["symbol"] = symbol
     save_df["row_num"] = range(len(save_df))
 
-    with _db_connection() as con:
+    # 本番の接続は自動確定のため、書き込みが落ちると DELETE だけが残り、銘柄の全期間が消える。
+    # 1つのトランザクションにして、落ちたら前の行を残す（#1340）
+    with _db_connection() as con, con.transaction():
         _ensure_columns(con, save_df)
         con.execute(
             "DELETE FROM stock_features WHERE market = %s AND symbol = %s", [market, symbol]

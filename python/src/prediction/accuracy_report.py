@@ -8,6 +8,8 @@
 「今日の採点」は、[3/6] で上書きされる前の prediction_results のスナップショット
 （run_accuracy_check が採点した予測そのもの）のうち predicted_at の一番新しい回の行と、
 prediction_accuracy の行を (market, symbol, predicted_at) で突き合わせたものとする。採点が 0 件の日も件数 0 で書く。
+challenger の欄は、今日と4週のどちらも今の challenger の版の境（challenger_window）より後の
+predicted_at の行だけで数え、境の時刻を version_since に書く（#1341）。
 
 設計: ai-company docs/superpowers/specs/2026-10-15-prediction-ops-design.md（土台の2）
 """
@@ -23,6 +25,7 @@ from typing import Callable, Iterable
 import pandas as pd
 
 from src.prediction.baseline_metrics import baseline_metrics
+from src.prediction.challenger_window import CHALLENGER_LABEL, filter_current_challenger
 from src.prediction.prediction_pipeline import _base_bar_date
 from src.utils.data_path_utils import ensure_dir, get_results_dir
 from src.utils.japan_time import isoformat_utc, now_jst
@@ -342,9 +345,17 @@ def prepare_daily_accuracy_report(
         accuracy = _load_accuracy(horizon)
         for model in models:
             model_rows = accuracy[accuracy["model_name"] == model]
+            version_since = None
+            if model == CHALLENGER_LABEL:
+                # 学び直す前の版の challenger の採点を混ぜない（#1341）
+                model_rows, chal_window = filter_current_challenger(model_rows)
+                version_since = chal_window.as_dict()["challenger_trained_at"]
             window_rows = model_rows[_base_days(model_rows) >= since]
             today_rows = _today_rows(model_rows, snapshots[model], model)
-            sections[model][str(horizon)] = build_horizon_report(today_rows, window_rows, None)
+            section = build_horizon_report(today_rows, window_rows, None)
+            if model == CHALLENGER_LABEL:
+                section["version_since"] = version_since
+            sections[model][str(horizon)] = section
             today_by_key[(model, str(horizon))] = today_rows
 
     return DailyAccuracyReport(
