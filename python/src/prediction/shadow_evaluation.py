@@ -23,6 +23,11 @@ from typing import Callable, Optional
 import numpy as np
 import pandas as pd
 
+from src.prediction.challenger_window import (
+    CHALLENGER_LABEL,
+    filter_current_challenger,
+    filter_to_days,
+)
 from src.prediction.db import load_prediction_accuracy
 from src.utils.data_path_utils import get_models_subdir
 from src.utils.db.experiment import generate_run_id, save_experiment_run
@@ -116,6 +121,12 @@ def evaluate_shadow_models(
             evaluated_at: str
             n_production: int
             n_challenger: int
+            以下は challenger_version が challenger のラベルのときだけ（#1327）:
+            challenger_trained_at: str | None  # 今の challenger のファイルの更新時刻
+            window_days: int  # 今の challenger の予想の日数
+
+    challenger のラベルの行は、今の challenger のファイルの更新時刻より後の predicted_at に絞り、
+    production もその日だけで比べる。ファイルが無いか0件なら challenger は「データなし」になる。
     """
     logger.info(
         f"=== シャドーモード評価開始 "
@@ -146,6 +157,16 @@ def evaluate_shadow_models(
     )
     df_chal = df_chal[df_chal["model_name"] == challenger_version] if not df_chal.empty else df_chal
 
+    # challenger のラベルは毎週の版が混ざるので、今の版の予想の日だけで両方を比べる（#1327）
+    window_info: dict = {}
+    if challenger_version == CHALLENGER_LABEL:
+        df_chal, window = filter_current_challenger(df_chal)
+        df_prod = filter_to_days(df_prod, window)
+        window_info = {
+            "challenger_trained_at": window.as_dict()["challenger_trained_at"],
+            "window_days": len(window.days),
+        }
+
     prod_hit = _compute_hit_rate(df_prod)
     prod_sharpe = _compute_sharpe(df_prod)
     chal_hit = _compute_hit_rate(df_chal)
@@ -172,12 +193,15 @@ def evaluate_shadow_models(
         "evaluated_at": evaluated_at,
         "n_production": len(df_prod),
         "n_challenger": len(df_chal),
+        **window_info,
     }
 
     logger.info(
         f"評価結果: production=hit_rate={prod_hit}, sharpe={prod_sharpe} / "
         f"challenger=hit_rate={chal_hit}, sharpe={chal_sharpe} / "
-        f"challenger_wins={challenger_wins}"
+        f"challenger_wins={challenger_wins} / "
+        f"日数={window_info.get('window_days')} 件数=production {len(df_prod)}, "
+        f"challenger {len(df_chal)}"
     )
 
     # experiment_runs に記録（production / challenger それぞれ）
