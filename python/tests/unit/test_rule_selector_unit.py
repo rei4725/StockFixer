@@ -312,6 +312,103 @@ class TestEvaluateAllSymbols(unittest.TestCase):
         self.assertEqual(result["errors"], 1)
         self.assertEqual(result["skipped"], 1)
 
+    def _seed_off_watchlist(self, symbol: str = "9999") -> None:
+        from src.utils.db.rule_results import upsert_rule_best
+
+        upsert_rule_best(
+            market="jp",
+            symbol=symbol,
+            best_rule="golden_cross",
+            win_rate=0.7,
+            net_profit=10000.0,
+            num_trades=10,
+            profit_factor=1.5,
+            max_drawdown=-0.05,
+            backtest_start="2023-01-01",
+            backtest_end="2023-12-31",
+        )
+
+    def test_off_watchlist_row_is_dropped(self):
+        """ウォッチリストから外れた銘柄の行は、全体の評価のあと残さない（#1294）。"""
+        from src.backtest.rule_selector import evaluate_all_symbols
+        from src.utils.db.rule_results import load_effective_rules
+
+        self._seed_off_watchlist()
+        with (
+            patch("src.backtest.rule_selector._WATCHLIST_PATH", self.watchlist_path),
+            patch(
+                "src.backtest.rule_selector.run_rule_backtest",
+                return_value=[_mock_result("rsi_contrarian", 0.65, 50000)],
+            ),
+        ):
+            result = evaluate_all_symbols("jp", "2024-01-01", "2024-12-31")
+        symbols = set(load_effective_rules("jp")["symbol"])
+        self.assertNotIn("9999", symbols)
+        self.assertIn("7203", symbols)
+        self.assertIn("6758", symbols)
+        self.assertEqual(result["errors"], 0)
+
+    def test_off_watchlist_row_kept_when_watchlist_empty(self):
+        from src.backtest.rule_selector import evaluate_all_symbols
+        from src.utils.db.rule_results import load_effective_rules
+
+        self._seed_off_watchlist()
+        empty_wl = _make_watchlist_file("jp", [])
+        try:
+            with patch("src.backtest.rule_selector._WATCHLIST_PATH", empty_wl):
+                evaluate_all_symbols("jp", "2024-01-01", "2024-12-31")
+        finally:
+            os.unlink(empty_wl)
+        self.assertIn("9999", set(load_effective_rules("jp")["symbol"]))
+
+    def test_off_watchlist_row_kept_when_watchlist_unreadable(self):
+        from src.backtest.rule_selector import evaluate_all_symbols
+        from src.utils.db.rule_results import load_effective_rules
+
+        self._seed_off_watchlist()
+        missing = self.watchlist_path + ".missing"
+        with patch("src.backtest.rule_selector._WATCHLIST_PATH", missing):
+            with self.assertRaises(OSError):
+                evaluate_all_symbols("jp", "2024-01-01", "2024-12-31")
+        self.assertIn("9999", set(load_effective_rules("jp")["symbol"]))
+
+    def test_off_watchlist_row_kept_when_symbols_given(self):
+        """手で銘柄を渡した評価では、ほかの銘柄の行を消さない。"""
+        from src.backtest.rule_selector import evaluate_all_symbols
+        from src.utils.db.rule_results import load_effective_rules
+
+        self._seed_off_watchlist()
+        with (
+            patch("src.backtest.rule_selector._WATCHLIST_PATH", self.watchlist_path),
+            patch(
+                "src.backtest.rule_selector.run_rule_backtest",
+                return_value=[_mock_result("rsi_contrarian", 0.65, 50000)],
+            ),
+        ):
+            evaluate_all_symbols("jp", "2024-01-01", "2024-12-31", symbols=["7203"])
+        symbols = set(load_effective_rules("jp")["symbol"])
+        self.assertIn("9999", symbols)
+        self.assertIn("7203", symbols)
+
+    def test_off_watchlist_prune_failure_counts_as_error(self):
+        from src.backtest.rule_selector import evaluate_all_symbols
+
+        with (
+            patch("src.backtest.rule_selector._WATCHLIST_PATH", self.watchlist_path),
+            patch(
+                "src.backtest.rule_selector.run_rule_backtest",
+                return_value=[_mock_result("rsi_contrarian", 0.65, 50000)],
+            ),
+            patch("src.backtest.rule_selector.upsert_rule_best"),
+            patch(
+                "src.backtest.rule_selector.delete_rule_best_except",
+                side_effect=RuntimeError("db error"),
+            ),
+        ):
+            result = evaluate_all_symbols("jp", "2024-01-01", "2024-12-31")
+        self.assertEqual(result["errors"], 1)
+        self.assertEqual(result["effective"], 2)
+
     def test_returns_summary_keys(self):
         from src.backtest.rule_selector import evaluate_all_symbols
 

@@ -332,6 +332,27 @@ class TestCheckSlTpExits(unittest.TestCase):
         self.assertEqual(triggered, set())
         self.assertTrue(any("7203" in m for m in logs.output))
 
+    def test_unpriced_long_and_short_are_counted_in_stats(self):
+        """評価できなかった保有の数と銘柄を stats に残し、errors は増やさない（#1296）"""
+        positions = [
+            {"symbol": "7203.T", "qty": 100, "avg_price": 1000.0, "current_price": float("nan")}
+        ]
+        shorts = [
+            {"symbol": "6758", "qty": 100, "avg_short_price": 1000.0, "current_price": float("nan")}
+        ]
+        broker = _make_broker(positions, short_positions=shorts)
+        stats = _make_stats()
+
+        triggered = _check_sl_tp_exits(
+            broker, "jp", "paper", MagicMock(), stats, InMemoryTradeDiffSink()
+        )
+
+        broker.send_order.assert_not_called()
+        self.assertEqual(triggered, set())
+        self.assertEqual(len(stats["sl_tp_unevaluable_symbols"]), 2)
+        self.assertEqual(stats["sl_tp_unevaluable_symbols"], ["7203", "6758"])
+        self.assertEqual(stats["errors"], 0)
+
     def test_symbol_dot_t_stripped(self):
         positions = [{"symbol": "7203.T", "qty": 100, "avg_price": 1000.0, "current_price": 900.0}]
         broker = _make_broker(positions)

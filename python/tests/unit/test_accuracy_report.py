@@ -3,6 +3,7 @@
 import json
 import os
 import tempfile
+from contextlib import ExitStack
 from datetime import date
 from unittest.mock import MagicMock, patch
 
@@ -426,3 +427,83 @@ def test_sector_lookup_runs_after_prediction_not_before(*_mocks):
     assert prod["by_sector"]["Technology"]["n_scored"] == 2
     assert prod["by_sector"]["Consumer Cyclical"]["n_scored"] == 1
     assert prod["by_sector"]["UNKNOWN"]["n_scored"] == 1
+
+
+def _read_error_patches(stack, module):
+    """module の DB の接続を偽にし、pd.read_sql を読み込みの失敗にする。"""
+    stack.enter_context(patch(f"{module}._db_connection", MagicMock()))
+    stack.enter_context(patch("pandas.read_sql", side_effect=RuntimeError("connection lost")))
+
+
+def test_accuracy_read_error_raises_and_keeps_previous_json(tmp_path):
+    """prediction_accuracy が読めないときは例外にし、当日の JSON を0件で上書きしないこと（#1283）"""
+    from src.prediction.accuracy_report import prepare_daily_accuracy_report
+
+    previous = tmp_path / "2026-10-20.json"
+    previous.write_text('{"models": {"production": {"1": {"n_scored": 4}}}}', encoding="utf-8")
+
+    with ExitStack() as stack:
+        _read_error_patches(stack, "src.prediction.db.accuracy")
+        stack.enter_context(
+            patch(
+                "src.prediction.db.load_prediction_results",
+                side_effect=lambda **kw: _snapshot(kw.get("model_version")),
+            )
+        )
+        with pytest.raises(RuntimeError, match="connection lost"):
+            prepare_daily_accuracy_report(
+                report_date=date(2026, 10, 20), output_dir=str(tmp_path)
+            ).write(None)
+
+    assert json.loads(previous.read_text(encoding="utf-8")) == {
+        "models": {"production": {"1": {"n_scored": 4}}}
+    }
+
+
+def test_snapshot_read_error_raises_and_writes_no_json(tmp_path):
+    """prediction_results が読めないときも例外にし、JSON を書かないこと（#1283）"""
+    from src.prediction.accuracy_report import prepare_daily_accuracy_report
+
+    with ExitStack() as stack:
+        _read_error_patches(stack, "src.prediction.db.prediction_results")
+        stack.enter_context(
+            patch("src.prediction.db.load_prediction_accuracy", return_value=_accuracy_rows())
+        )
+        with pytest.raises(RuntimeError, match="connection lost"):
+            prepare_daily_accuracy_report(report_date=date(2026, 10, 20), output_dir=str(tmp_path))
+
+    assert list(tmp_path.glob("*.json")) == []
+
+
+def test_no_scored_rows_still_writes_zero_json(tmp_path):
+    """採点の行が本当に0件の日は、今までどおり n_scored 0 の JSON を書くこと（#1283）"""
+    from src.prediction.accuracy_report import prepare_daily_accuracy_report
+
+    with (
+        patch("src.prediction.db.accuracy._db_connection", MagicMock()),
+        patch("pandas.read_sql", return_value=pd.DataFrame()),
+        patch(
+            "src.prediction.db.load_prediction_results",
+            side_effect=lambda **kw: _snapshot(kw.get("model_version")),
+        ),
+    ):
+        path = prepare_daily_accuracy_report(
+            report_date=date(2026, 10, 20), output_dir=str(tmp_path)
+        ).write(None)
+
+    with open(path, encoding="utf-8") as f:
+        report = json.load(f)
+    assert report["models"]["production"]["1"]["n_scored"] == 0
+
+
+def test_load_prediction_accuracy_default_returns_empty_on_error():
+    """raise_on_error を渡さない呼び出し元には、今までどおり空の表を返すこと（#1283）"""
+    from src.prediction.db import load_prediction_accuracy
+
+    with (
+        patch("src.prediction.db.accuracy._db_connection", MagicMock()),
+        patch("pandas.read_sql", side_effect=RuntimeError("connection lost")),
+    ):
+        assert load_prediction_accuracy(horizon=1).empty
+        with pytest.raises(RuntimeError):
+            load_prediction_accuracy(horizon=1, raise_on_error=True)

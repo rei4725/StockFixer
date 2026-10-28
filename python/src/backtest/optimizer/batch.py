@@ -267,7 +267,15 @@ def run_optuna_batch(
             error += 1
             return
         try:
-            save_optimal_params_json(res["result_df"], m, s, sort_by=sort_by)
+            json_path = save_optimal_params_json(res["result_df"], m, s, sort_by=sort_by)
+            if not json_path:
+                # 有効な行が無く保存されなかった銘柄を成功に数えない（#1293）
+                logger.error(f"[{m}/{s}] 有効な最適化結果なし（最適パラメータ未保存）")
+                summary.append(
+                    {"market": m, "symbol": s, "status": "error", "error": "有効な最適化結果なし"}
+                )
+                error += 1
+                return
             summary.append({"market": m, "symbol": s, "status": "success"})
             success += 1
         except Exception as e:
