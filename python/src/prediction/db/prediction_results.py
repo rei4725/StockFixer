@@ -17,6 +17,7 @@ def save_prediction_results(predicted_at: str, results: list[PredictionResult]) 
     """
     予測結果を DB に保存する（Delete-Insert 方式）。
     対象銘柄・モデルバージョンの既存データを削除してから挿入する。
+    削除と挿入は1つのトランザクションで行い、挿入が落ちたら削除も戻して例外を投げる。
 
     シャドーモード利用時は model_version フィールドを設定することで、
     production / challenger 両バージョンを同一テーブルに共存させられる。
@@ -65,7 +66,9 @@ def save_prediction_results(predicted_at: str, results: list[PredictionResult]) 
         if c not in save_df.columns:
             save_df[c] = None
 
-    with _db_connection() as con:
+    # 本番の接続は自動確定のため、消すと書くを1つのトランザクションにまとめ、
+    # 書き込みが落ちたら DELETE も戻して前の回の行を残す（#1354）
+    with _db_connection() as con, con.transaction():
         pairs = save_df[["market", "symbol", "model_version"]].drop_duplicates()
         for _, row in pairs.iterrows():
             con.execute(
