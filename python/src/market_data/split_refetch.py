@@ -8,6 +8,7 @@ yfinance は分割の前の足も調整し直して返すが、DB の古い足�
 取得が止まっていた間の分割・yfinance が行を返さない分割）。そのため、
 差分を DB の直近の足と重ねて取って終値を突き合わせ、取り直した後も
 前日比が極端な足が残る銘柄は予想から外す。
+取り直しは取得の窓より前の DB の足も含める（#1392）。
 """
 
 from typing import Callable, List, Optional, Tuple
@@ -106,28 +107,62 @@ def refetch_full_history(
     reason: str,
     data_source: Optional[DataSourceBase],
     fetch_stock_data: Callable[[str, str, str, str], Optional[pd.DataFrame]],
+    load_db_bars: Optional[Callable[..., Optional[pd.DataFrame]]] = None,
 ) -> Optional[pd.DataFrame]:
     """
-    株式分割のため start_date〜end_date の全期間の足を取り直す。
+    株式分割のため全期間の足を取り直す。
+
+    取得の窓は毎日後ろへ動くため、DB には start_date より前の足が残る。
+    それも分割前の値段のまま段差になるので、取り直しの始まりを DB の最古の足の日まで広げる（#1392）。
 
     Args:
         reason: 取り直す理由（ログに出す。例: 分割の比・突き合わせの比）
+        load_db_bars: (market, symbol, start, end) で DB の足を読む関数。None なら広げない
 
     Returns:
-        取り直した全期間の足。取れなければ None（段差のある足で特徴量を作らない）。
+        取り直した全期間の足（start_date より前を含みうる）。取れなければ None
+        （段差のある足で特徴量を作らない）。
     """
+    db_oldest = _db_oldest_day(market, symbol, start_date, load_db_bars)
+    fetch_start = min(start_date, db_oldest) if db_oldest else start_date
     logger.info(
         f"株式分割のため全期間を取り直す: {market}/{symbol} "
-        f"（{reason}、{start_date}～{end_date}）"
+        f"（{reason}、{fetch_start}～{end_date}）"
     )
     if data_source is not None:
-        full_data = data_source.get_stock_data(symbol, market, start_date, end_date)
+        full_data = data_source.get_stock_data(symbol, market, fetch_start, end_date)
     else:
-        full_data = fetch_stock_data(market, ticker, start_date, end_date)
+        full_data = fetch_stock_data(market, ticker, fetch_start, end_date)
     if full_data is None or full_data.empty:
         logger.warning(
             f"株式分割の取り直しに失敗したため特徴量生成をスキップ: {market}/{symbol}"
             "（段差のある足で特徴量を作らない）"
         )
         return None
+    first_day = _day_index(full_data.index).min().strftime("%Y-%m-%d")
+    if db_oldest and first_day > db_oldest:
+        logger.warning(
+            f"取り直した足が DB の最古の足より新しく、{db_oldest}～{first_day} の DB の足は"
+            f"分割前の値段のまま残る: {market}/{symbol}"
+        )
     return full_data
+
+
+def _db_oldest_day(
+    market: str,
+    symbol: str,
+    start_date: str,
+    load_db_bars: Optional[Callable[..., Optional[pd.DataFrame]]],
+) -> Optional[str]:
+    """DB にある start_date までの足のうち、最古の日を YYYY-MM-DD で返す。無ければ None。"""
+    if load_db_bars is None:
+        return None
+    older = load_db_bars(market, symbol, None, start_date)
+    if older is None or older.empty:
+        return None
+    return str(_day_index(older.index).min().strftime("%Y-%m-%d"))
+
+
+def bars_from(df: pd.DataFrame, start_date: str) -> pd.DataFrame:
+    """start_date の日以後の足だけを返す（広げて取り直した足を特徴量の窓に戻す）。"""
+    return df[_day_index(df.index) >= pd.Timestamp(start_date)]
