@@ -31,6 +31,9 @@ NotifierFn = Callable[[str, str, int], bool]
 PIPELINE_FAIL_THRESHOLD = 2  # 連続失敗回数
 LOSS_LIMIT_THRESHOLD = 3  # 連続損失上限発動日数
 DRIFT_WARN_THRESHOLD = 2  # 連続ドリフト警告検出回数（Warn 以上）
+# Warn が続く間に知らせ直す条件（#1369）: 前の知らせより割合がこの倍率以上、またはこの回数続いた
+DRIFT_RENOTIFY_RATIO = 1.5
+DRIFT_RENOTIFY_DAYS = 7
 HEALTH_DEGRADED_THRESHOLD = 2  # 連続 degraded 確認回数
 PREDICTION_OUTPUT_THRESHOLD = 1  # 予測出力 invariant はストリークを使わず即発報
 
@@ -40,6 +43,8 @@ PREDICTION_OUTPUT_THRESHOLD = 1  # 予測出力 invariant はストリークを�
 
 _KEY_LOSS_LIMIT_STREAK = "alert.loss_limit_streak"
 _KEY_DRIFT_WARN_STREAK = "alert.drift_warn_streak"
+_KEY_DRIFT_STATS = "alert.drift_warn_streak.stats"  # 割合|閾値超過の数|判定した数
+_KEY_DRIFT_NOTIFIED = "alert.drift_warn_streak.notified"  # 前の知らせの連続回数|割合
 _KEY_HEALTH_DEGRADED_STREAK = "alert.health_degraded_streak"
 
 # スケジューラ日次パイプラインのジョブID
@@ -73,6 +78,7 @@ class AlertResult:
                 f"  - [{violation.get('id')}] {violation.get('description')} "
                 f"(実測 {violation.get('observed')} / 閾値 {violation.get('threshold')})"
             )
+        lines.extend(self.details.get("notes", []))
         return lines
 
 
@@ -270,30 +276,123 @@ def check_loss_limit_rule() -> AlertResult:
 # ---------------------------------------------------------------------------
 
 
-def update_drift_warn_streak(warn_detected: bool, day_key: str) -> int:
-    """
-    ドリフト Warn 以上検出の有無に基づきストリークを更新して返す。
+def _get_config_str(key: str) -> str:
+    try:
+        from src.utils.db.system_config import get_config_value
 
-    orchestration 層の run_daily_drift_check() から呼び出す。day_key は JST の今日
-    （YYYYMMDD）で、同じ日の2回目は加算しない（#1242）。
+        return get_config_value(key, "") or ""
+    except Exception as exc:
+        logger.error("設定の取得失敗 key=%s: %s", key, exc, exc_info=True)
+        return ""
+
+
+def _set_config_str(key: str, value: str) -> None:
+    try:
+        from src.utils.db.system_config import set_config_value
+
+        set_config_value(key, value)
+    except Exception as exc:
+        logger.error("設定の更新失敗 key=%s: %s", key, exc, exc_info=True)
+
+
+def _parse_fields(raw: str, n: int) -> list[float]:
+    """'a|b|c' の形の値を n 個の数に読む。読めなければ 0 を並べる。"""
+    parts = raw.split("|")
+    try:
+        values = [float(p) for p in parts]
+    except ValueError:
+        return [0.0] * n
+    return values + [0.0] * (n - len(values)) if len(values) <= n else values[:n]
+
+
+def update_drift_warn_streak(
+    warn_detected: bool,
+    day_key: str,
+    share: float = 0.0,
+    n_triggered: int = 0,
+    n_evaluated: int = 0,
+) -> int:
     """
+    ドリフト Warn の有無に基づきストリークを更新して返す。
+
+    orchestration 層の run_daily_drift_check() から呼び出す。warn_detected は閾値超えの割合が
+    drift.warn_share 以上の日に真（#1369）。割合・件数・分母は知らせの本文に出すため
+    `<key>.stats` に置く。day_key は JST の今日（YYYYMMDD）で、同じ日の2回目は加算しない（#1242）。
+    """
+    _set_config_str(_KEY_DRIFT_STATS, f"{share:.6f}|{n_triggered}|{n_evaluated}")
     current, new_value = _update_daily_streak(_KEY_DRIFT_WARN_STREAK, warn_detected, day_key)
-    logger.info("ドリフト警告ストリーク更新: %d → %d", current, new_value)
+    logger.info(
+        "ドリフト警告ストリーク更新: %d → %d (閾値超過 %d / 判定 %d 銘柄, 割合=%.1f%%)",
+        current,
+        new_value,
+        n_triggered,
+        n_evaluated,
+        share * 100,
+    )
     return new_value
 
 
+def decide_drift_notice(
+    count: int, share: float, notified_count: int, notified_share: float
+) -> str:
+    """NF-303-3 を今日知らせるかを決め、知らせの種類を返す（知らせないなら ""）。
+
+    notified_count・notified_share は前の知らせの日の連続回数と割合（知らせていなければ 0）。
+    Warn が始まった日（start）、前の知らせより割合が DRIFT_RENOTIFY_RATIO 倍以上に悪くなった日
+    （worse）、前の知らせから DRIFT_RENOTIFY_DAYS 回続いた日（periodic）、解けた日（resolved）
+    だけ知らせる（#1369）。
+    """
+    if count >= DRIFT_WARN_THRESHOLD:
+        # 前の知らせより回数が小さいのは、間で一度 0 に戻って数え直したとき
+        if notified_count <= 0 or count < notified_count:
+            return "start"
+        # 浮動小数の丸めで、ちょうど倍率の日を落とさない
+        if share >= notified_share * DRIFT_RENOTIFY_RATIO - 1e-9:
+            return "worse"
+        if count - notified_count >= DRIFT_RENOTIFY_DAYS:
+            return "periodic"
+        return ""
+    return "resolved" if notified_count > 0 else ""
+
+
+_DRIFT_NOTICE_NAMES = {
+    "start": "ドリフト検知（R-104）連続 Warn",
+    "worse": "ドリフト検知（R-104）連続 Warn（前の知らせより悪化）",
+    "periodic": "ドリフト検知（R-104）連続 Warn（続いている）",
+    "resolved": "ドリフト検知（R-104）連続 Warn が解けた",
+}
+
+
 def check_drift_warn_rule() -> AlertResult:
-    """ドリフト連続警告ルールを評価する。"""
+    """ドリフト連続警告ルールを評価する。知らせると決めた日は、その日の回数と割合を覚える。"""
     count = _get_streak(_KEY_DRIFT_WARN_STREAK)
-    triggered = count >= DRIFT_WARN_THRESHOLD
-    logger.info("ドリフト警告連続チェック: count=%d triggered=%s", count, triggered)
+    share, n_triggered, n_evaluated = _parse_fields(_get_config_str(_KEY_DRIFT_STATS), 3)
+    notified_count, notified_share = _parse_fields(_get_config_str(_KEY_DRIFT_NOTIFIED), 2)
+    kind = decide_drift_notice(count, share, int(notified_count), notified_share)
+    if kind == "resolved":
+        _set_config_str(_KEY_DRIFT_NOTIFIED, "0|0")
+    elif kind:
+        _set_config_str(_KEY_DRIFT_NOTIFIED, f"{count}|{share:.6f}")
+    triggered = bool(kind)
+    logger.info(
+        "ドリフト警告連続チェック: count=%d share=%.1f%% (%d/%d) notice=%s triggered=%s",
+        count,
+        share * 100,
+        int(n_triggered),
+        int(n_evaluated),
+        kind or "-",
+        triggered,
+    )
+    note = f"  閾値超過 {int(n_triggered)} / 判定 {int(n_evaluated)} 銘柄（割合 {share:.1%}）"
+    if notified_count > 0:
+        note += f"、前の知らせは連続 {int(notified_count)} 回目・割合 {notified_share:.1%}"
     return AlertResult(
         rule_id="NF-303-3",
-        name="ドリフト検知（R-104）連続 Warn",
+        name=_DRIFT_NOTICE_NAMES.get(kind, "ドリフト検知（R-104）連続 Warn"),
         triggered=triggered,
         consecutive_count=count,
         threshold=DRIFT_WARN_THRESHOLD,
-        details={"config_key": _KEY_DRIFT_WARN_STREAK},
+        details={"config_key": _KEY_DRIFT_WARN_STREAK, "notice": kind, "notes": [note]},
     )
 
 

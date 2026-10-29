@@ -29,10 +29,12 @@ def record_loss_limit_streak(stats: dict) -> None:
         logger.error("損失上限ストリーク更新失敗: %s", e, exc_info=True)
 
 
-def record_drift_warn_streak(warn_detected: bool) -> None:
-    """日次ドリフトチェックの判定からドリフト警告の連続回数を更新する。"""
+def record_drift_warn_streak(
+    warn_detected: bool, share: float = 0.0, n_triggered: int = 0, n_evaluated: int = 0
+) -> None:
+    """日次ドリフトチェックの判定からドリフト警告の連続回数と、その日の割合・件数・分母を記録する。"""
     try:
-        update_drift_warn_streak(warn_detected, today_jst_key())
+        update_drift_warn_streak(warn_detected, today_jst_key(), share, n_triggered, n_evaluated)
     except Exception as e:
         logger.error("ドリフト警告ストリーク更新失敗: %s", e, exc_info=True)
 

@@ -194,6 +194,13 @@ class TestLossLimitStreak(unittest.TestCase):
 
 
 class TestDriftWarnStreak(unittest.TestCase):
+    def setUp(self):
+        # 割合と前の知らせの記録（#1369）は無いものとして読む
+        for name, kwargs in (("_get_config_str", {"return_value": ""}), ("_set_config_str", {})):
+            patcher = patch(f"src.utils.alert_service.{name}", **kwargs)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
     def test_update_increments_when_warn(self):
         with (
             patch("src.utils.alert_service._get_streak", return_value=0),
