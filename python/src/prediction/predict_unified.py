@@ -17,6 +17,7 @@ import yfinance as yf
 from config.settings import PREDICTION_ATR_CLIP_MULTIPLIER, STALE_BARS_MAX_WEEKDAYS
 from src.domain.jp_market_holidays import is_jp_business_day
 from src.prediction.db import load_model_weights
+from src.prediction.macro_change_features import add_macro_change_features
 from src.prediction.prediction_run_stats import (
     collect_prediction_run_stats,
     record_clip,
@@ -358,6 +359,10 @@ def predict_with_unified_model(
     if "market_encoded" not in latest_X.columns:
         market_codes = {"us": 0, "jp": 1}
         latest_X["market_encoded"] = market_codes.get(market, 0)
+
+    # 変化率で学んだ challenger のために変化率の列を足す。水準の列は残し、
+    # 水準で学んだモデルは今までどおりその列で予想する（#1374）
+    latest_X = add_macro_change_features(latest_X)
 
     # 推論サービスが有効なときだけ委譲する。
     # get_service_url() で先に判定するのは、未設定の既定パスで load_model_weights()
