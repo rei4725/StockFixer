@@ -244,7 +244,7 @@ def _choose_order_params(
     # 広スプレッドのみ → 寄付指値（寄付時の価格優位性を活用）
     order_session = "close" if any("low_volume" in r for r in reasons) else "open"
     buffer = current_price * LIMIT_ORDER_PRICE_BUFFER
-    limit_price = (
-        current_price + buffer if side == OrderSide.BUY else max(0.0, current_price - buffer)
-    )
+    # 買い（BUY・SHORT_COVER）は現在値より上、売り（SELL・SHORT）は下に指値を置く
+    is_buy_side = side in (OrderSide.BUY, OrderSide.SHORT_COVER)
+    limit_price = current_price + buffer if is_buy_side else max(0.0, current_price - buffer)
     return OrderType.LIMIT, limit_price, ", ".join(reasons), order_session
