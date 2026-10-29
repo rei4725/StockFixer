@@ -584,7 +584,8 @@ class TestFetchStockDataWithFeatures(_TmpDbTestCase):
         )
 
         mock_get_data.assert_called_once()
-        self.assertEqual(mock_get_data.call_args.args[2], "2023-03-02")
+        # DB の直近 5 本（02-25〜03-01）と重ねて取る（#1386）
+        self.assertEqual(mock_get_data.call_args.args[2], "2023-02-25")
         self.assertIsNotNone(result)
         self.assertEqual(len(result[3]), 6)
 

@@ -5,7 +5,7 @@ DB 書き込みを行わないため並列実行フェーズでも使用でき�
 """
 
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Tuple
 
 import pandas as pd
 
@@ -63,6 +63,19 @@ def run_quality_checks(
             logger.warning(msg)
 
     return result
+
+
+def price_step_issue(steps: List[Tuple[str, float]]) -> QualityIssue:
+    """前日比の終値が極端な足 (日付, 比) の warning を作る（#1386）。"""
+    shown = "、".join(f"{day} {ratio:.3f}倍" for day, ratio in steps[:5])
+    return QualityIssue(
+        check="price_step",
+        level="warning",
+        detail=(
+            f"前日比の終値が極端な足が {len(steps)}本（{shown}）。"
+            "全期間を取り直しても残るため予想から外す"
+        ),
+    )
 
 
 def _check_nan_rate(df: pd.DataFrame, threshold: float) -> List[QualityIssue]:
