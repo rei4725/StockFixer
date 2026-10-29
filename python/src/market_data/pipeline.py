@@ -19,6 +19,8 @@ from src.domain.jp_market_holidays import is_jp_business_day
 from src.domain.ports import AlertLevel, NotificationPort
 from src.market_data.bar_close import drop_unclosed_bars
 from src.market_data.base import DataSourceBase
+from src.market_data.batch_db_write import log_pipeline_summary as _log_pipeline_summary
+from src.market_data.batch_db_write import write_batch_to_db
 from src.market_data.loader import (
     fetch_cross_asset_features,
     get_raw_ohlcv_from_db,
@@ -440,18 +442,6 @@ def save_stock_data_with_features(
     save_features_to_db(market, symbol, data, quality_result)
 
 
-def _log_pipeline_summary(phase: str, batch_result: "BatchResult") -> None:
-    """バッチ処理結果をログに出力する。"""
-    n_success = len(batch_result.succeeded)
-    n_skip = len(batch_result.skipped)
-    n_error = len(batch_result.failed)
-    logger.info(f"{phase} 結果サマリー 成功: {n_success} / スキップ: {n_skip} / エラー: {n_error}")
-    if batch_result.failed:
-        logger.warning(f"\n{phase} エラー詳細:")
-        for f in batch_result.failed:
-            logger.warning(f"  - {f.market}/{f.symbol}: {f.error}")
-
-
 def run_batch_pipeline(
     tasks: list,
     fetch_only: bool = False,
@@ -545,54 +535,5 @@ def run_batch_pipeline(
         _log_pipeline_summary("データ取得（保存なし）", batch_result)
         return batch_result
 
-    # フェーズ2: DB書き込み（逐次） - DuckDB排他ロック制約のため直列実行
-    # 特徴量をスキップした銘柄も、取れた足だけは保存する。スキップの数え方は変えない（#840）
-    skipped_raw = [r for r in batch_result.skipped if r.get("raw_data") is not None]
-    if skipped_raw:
-        logger.info(f"Raw保存開始（特徴量スキップ分） 対象件数: {len(skipped_raw)}")
-    for r in skipped_raw:
-        try:
-            save_raw_ohlcv(r["market"], r["symbol"], r["raw_data"])
-        except Exception as e:
-            logger.error(f"[Raw保存エラー] {r['market']}/{r['symbol']}: {e}", exc_info=True)
-
-    success_data = [r for r in batch_result.succeeded if r.get("data")]
-    logger.info(f"DB書き込み開始（逐次） 対象件数: {len(success_data)}")
-
-    db_results = []
-    for i, r in enumerate(success_data, 1):
-        market, symbol, data, raw_data, quality_result = r["data"]
-        try:
-            if raw_data is not None and not raw_data.empty:
-                try:
-                    save_raw_ohlcv(market, symbol, raw_data)
-                except Exception as e:
-                    logger.error(f"[Raw保存エラー] {market}/{symbol}: {e}", exc_info=True)
-            save_features_to_db(market, symbol, data, quality_result, notification_port)
-            db_results.append({"market": market, "symbol": symbol, "status": "success"})
-        except Exception as e:
-            logger.error(f"[DB書き込みエラー] {market}/{symbol}: {e}", exc_info=True)
-            db_results.append(
-                {"market": market, "symbol": symbol, "status": "error", "error": str(e)}
-            )
-        if i % 50 == 0:
-            logger.info(f"  ... {i}/{len(success_data)} 件完了")
-
-    # 最終サマリー（取得フェーズのエラー/スキップ + DB書き込み結果を統合）
-    db_succeeded = [r for r in db_results if r.get("status") == "success"]
-    db_failed = [
-        BatchFailure(
-            market=r.get("market", "?"),
-            symbol=r.get("symbol", "?"),
-            error=r.get("error", "DB書き込みエラー"),
-        )
-        for r in db_results
-        if r.get("status") == "error"
-    ]
-    final_batch = BatchResult(
-        succeeded=db_succeeded,
-        failed=db_failed + batch_result.failed,
-        skipped=batch_result.skipped,
-    )
-    _log_pipeline_summary("データ更新", final_batch)
-    return final_batch
+    # フェーズ2: DB書き込み（逐次）。足の保存が落ちた銘柄は failed に数える（#1377）
+    return write_batch_to_db(batch_result, save_raw_ohlcv, save_features_to_db, notification_port)
