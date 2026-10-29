@@ -36,14 +36,23 @@ def write_batch_to_db(
     save_raw_ohlcv: Callable,
     save_features_to_db: Callable,
     notification_port: "NotificationPort | None" = None,
+    record_quality_issues: "Callable | None" = None,
 ) -> BatchResult:
     """フェーズ2: DB書き込み（逐次） - DuckDB排他ロック制約のため直列実行。
 
     market_data_raw の保存が落ちた銘柄は、特徴量の保存は続けたうえで failed に数え、
     succeeded・skipped には入れない（#1377）。採点と相関のゲートは足の表を読むため、
     [1/6] の線と知らせに乗せて、その日のうちに手で取り直せるようにする。
+
+    特徴量をスキップした銘柄に品質の結果（段差の足など）があれば、
+    record_quality_issues(market, symbol, quality_result, notification_port) で記録する（#1386）。
     """
     failed: list = []
+    if record_quality_issues is not None:
+        for r in batch_result.skipped:
+            quality = r.get("quality_result")
+            if quality is not None and quality.issues:
+                record_quality_issues(r["market"], r["symbol"], quality, notification_port)
 
     # 特徴量をスキップした銘柄も、取れた足だけは保存する（#840）
     skipped: list = []
