@@ -218,6 +218,15 @@ try {
         docker image prune -a -f --filter "until=24h" 2>&1 | ForEach-Object { Write-Log "  [cleanup] $_" }
         docker builder prune -f --filter "until=24h" 2>&1 | Select-Object -Last 1 | ForEach-Object { Write-Log "  [cleanup] $_" }
 
+        # ---- Docker の仮想ディスクの肥大化の見張り ----
+        # 掃除しても vhdx は縮まないため、しきい値超えで Issue を立てて人間に圧縮を頼む。
+        # 失敗してもデプロイは成功扱い。
+        try {
+            & (Join-Path $repoDir "docker_disk_check.ps1")
+        } catch {
+            Write-Log "[disk-check] 呼び出しに失敗: $_"
+        }
+
         Write-Log "=== 自動デプロイ完了 (v$($env:VERSION)) ==="
         exit 0
     }
