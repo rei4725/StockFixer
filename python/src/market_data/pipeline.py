@@ -21,9 +21,6 @@ from src.market_data.bar_close import drop_unclosed_bars
 from src.market_data.base import DataSourceBase
 from src.market_data.batch_db_write import log_pipeline_summary as _log_pipeline_summary
 from src.market_data.batch_db_write import write_batch_to_db
-from src.market_data.latest_feature_row import (  # noqa: F401 (re-export)
-    build_latest_feature_row as _build_latest_feature_row,
-)
 from src.market_data.loader import (
     fetch_cross_asset_features,
     get_raw_ohlcv_from_db,
@@ -49,13 +46,17 @@ from src.market_data.split_refetch import (
     overlap_close_mismatch,
     overlap_fetch_start,
     refetch_full_history,
+    stock_split_ratios,
 )
-from src.market_data.split_refetch import stock_split_ratios as _stock_split_ratios
 from src.market_data.technical import add_technical_indicators, create_basic_lag_features
 from src.market_data.wikipedia_features import add_pageview_features, fetch_pageview_features
 from src.utils.data_path_utils import get_ticker, normalize_col
 from src.utils.db import upsert_stock_features
 from src.utils.logger import get_logger
+
+from src.market_data.latest_feature_row import (  # noqa: F401  # isort: skip
+    build_latest_feature_row as _build_latest_feature_row,
+)
 
 logger = get_logger(__name__)
 
@@ -126,7 +127,7 @@ def fetch_stock_data_with_features(
             fresh_data = drop_unclosed_bars(fresh_data, market)
             mismatch = overlap_close_mismatch(df, fresh_data)
             fresh_data = bars_after(fresh_data, db_latest_date)
-            split_ratios = _stock_split_ratios(fresh_data)
+            split_ratios = stock_split_ratios(fresh_data)
             if split_ratios or mismatch is not None:
                 # 分割の前の足と段差にならないよう、全期間を取り直す（#817）
                 reason = (
