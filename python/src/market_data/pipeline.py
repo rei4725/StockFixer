@@ -33,16 +33,30 @@ from src.market_data.macro_features import (
     add_macro_derived_features,
     fetch_additional_macro_features,
 )
-from src.market_data.quality_check import QualityCheckResult, run_quality_checks
+from src.market_data.quality_check import (
+    QualityCheckResult,
+    price_step_issue,
+    run_quality_checks,
+)
 from src.market_data.saver import save_raw_ohlcv
 from src.market_data.sentiment_features import add_sentiment_features, fetch_news_sentiment_with_llm
-from src.market_data.split_refetch import refetch_full_history
-from src.market_data.split_refetch import stock_split_ratios as _stock_split_ratios
+from src.market_data.split_refetch import (
+    bars_after,
+    find_price_steps,
+    overlap_close_mismatch,
+    overlap_fetch_start,
+    refetch_full_history,
+    stock_split_ratios,
+)
 from src.market_data.technical import add_technical_indicators, create_basic_lag_features
 from src.market_data.wikipedia_features import add_pageview_features, fetch_pageview_features
 from src.utils.data_path_utils import get_ticker, normalize_col
 from src.utils.db import upsert_stock_features
 from src.utils.logger import get_logger
+
+from src.market_data.latest_feature_row import (  # noqa: F401  # isort: skip
+    build_latest_feature_row as _build_latest_feature_row,
+)
 
 logger = get_logger(__name__)
 
@@ -75,6 +89,8 @@ def fetch_stock_data_with_features(
         呼び出し元が保存できるよう data と quality_result を None にしたタプルを返す（#840）。
     """
     raw_data_to_save = None
+    # 全期間の足を yfinance から取った（取り直した）か
+    full_fetched = False
 
     # start_date, end_date自動決定（5年前〜現在をデフォルトとする）
     if end_date is None:
@@ -99,8 +115,9 @@ def fetch_stock_data_with_features(
     if need_fresh:
         # 新規データを取得すべき
         if db_latest_date is not None:
-            # DB内有データ：差分更新ロジック
-            fetch_start = (pd.to_datetime(db_latest_date) + timedelta(days=1)).strftime("%Y-%m-%d")
+            # DB内有データ：差分更新ロジック。差分の窓に分割の行が無い分割も見つけるため、
+            # DB の直近の足と重ねて取り、終値を突き合わせる（#1386）
+            fetch_start = overlap_fetch_start(df)
             logger.info(f"差分取得: {market}/{symbol} ({fetch_start}～{end_date})")
             if data_source is not None:
                 fresh_data = data_source.get_stock_data(symbol, market, fetch_start, end_date)
@@ -108,16 +125,23 @@ def fetch_stock_data_with_features(
                 fresh_data = get_stock_data(market, ticker, fetch_start, end_date)
             # 引けていない当日の足は保存せず、次の回の差分で取り直す（#890）
             fresh_data = drop_unclosed_bars(fresh_data, market)
-            split_ratios = _stock_split_ratios(fresh_data)
-            if split_ratios:
+            mismatch = overlap_close_mismatch(df, fresh_data)
+            fresh_data = bars_after(fresh_data, db_latest_date)
+            split_ratios = stock_split_ratios(fresh_data)
+            if split_ratios or mismatch is not None:
                 # 分割の前の足と段差にならないよう、全期間を取り直す（#817）
+                reason = (
+                    f"分割の比 {split_ratios}"
+                    if split_ratios
+                    else f"直近の足の終値の比 {mismatch:.3f}"
+                )
                 fresh_data = refetch_full_history(
                     market,
                     symbol,
                     ticker,
                     start_date,
                     end_date,
-                    split_ratios,
+                    reason,
                     data_source,
                     get_stock_data,
                 )
@@ -125,8 +149,9 @@ def fetch_stock_data_with_features(
                 if fresh_data is None:
                     return None
                 df = fresh_data
+                full_fetched = True
             if fresh_data is not None and not fresh_data.empty:
-                if not split_ratios:
+                if not full_fetched:
                     df = merge_market_data(df, fresh_data)
                     logger.info(f"差分マージ完了: {len(fresh_data)}行追加")
                 if defer_raw_save:
@@ -164,6 +189,7 @@ def fetch_stock_data_with_features(
             if df is None or df.empty:
                 logger.warning("データが取得できませんでした。")
                 return None
+            full_fetched = True
             if defer_raw_save:
                 raw_data_to_save = df
             else:
@@ -178,6 +204,28 @@ def fetch_stock_data_with_features(
         else:
             logger.warning(f"DBデータなし: market={market}, symbol={symbol}")
             return None
+
+    # 前日比が極端な足（DB に残った分割の段差）があれば全期間を取り直し、
+    # それでも残る銘柄は特徴量を作らず、予想の上位とシグナルから外す（#1386）
+    steps = find_price_steps(df)
+    if steps and not full_fetched:
+        full_data = refetch_full_history(
+            market,
+            symbol,
+            ticker,
+            start_date,
+            end_date,
+            f"前日比が極端な足 {steps[:3]}",
+            data_source,
+            get_stock_data,
+        )
+        full_data = drop_unclosed_bars(full_data, market)
+        if full_data is not None and not full_data.empty:
+            df = full_data
+            raw_data_to_save = _save_or_defer_raw(market, symbol, full_data, defer_raw_save)
+            steps = find_price_steps(df)
+    if steps:
+        return _price_step_result(market, symbol, steps, raw_data_to_save)
 
     # 全行NaNな列を除去（例: auto_adjust=True時の Adj Close 等）
     all_nan_cols = df.columns[df.isnull().all()].tolist()
@@ -309,6 +357,25 @@ def _raw_only_result(market: str, symbol: str, raw_data_to_save) -> Optional[tup
     return (market, symbol, None, raw_data_to_save, None)
 
 
+def _save_or_defer_raw(market: str, symbol: str, bars: pd.DataFrame, defer_raw_save: bool):
+    """defer_raw_save なら足を呼び出し元に返し、そうでなければ今保存して None を返す。"""
+    if defer_raw_save:
+        return bars
+    try:
+        save_raw_ohlcv(market, symbol, bars)
+    except Exception as e:
+        logger.error(f"Raw OHLCV保存エラー（処理継続）: {e}", exc_info=True)
+    return None
+
+
+def _price_step_result(market: str, symbol: str, steps: list, raw_data_to_save) -> tuple:
+    """段差の足が残る銘柄を、特徴量なし・品質の WARNING つきの結果にする（#1386）。"""
+    issue = price_step_issue(steps)
+    logger.warning(f"[品質チェック] {market}/{symbol}: {issue.detail}")
+    quality = QualityCheckResult(market=market, symbol=symbol, passed=True, issues=[issue])
+    return (market, symbol, None, raw_data_to_save, quality)
+
+
 def _count_weekdays_behind(db_latest_date: pd.Timestamp, end_date: str, market: str = "us") -> int:
     """
     DB の最新の足の翌日から end_date（YYYY-MM-DD）までの、足りない営業日の数を返す。
@@ -323,41 +390,6 @@ def _count_weekdays_behind(db_latest_date: pd.Timestamp, end_date: str, market: 
     if market == "jp":
         return sum(1 for day in days if is_jp_business_day(day.date()))
     return len(days)
-
-
-def _build_latest_feature_row(df: pd.DataFrame, lag_columns: list) -> Optional[pd.DataFrame]:
-    """
-    df の最終日の行のラグ特徴量を、create_basic_lag_features と同じ規則で作る。
-
-    create_basic_lag_features は target（翌日の変化率）が NaN の行を落とすため、
-    最終日の行を返さない。ここではその行だけを作る。target 以外の欠損と
-    earnings_flag の扱いは create_basic_lag_features に揃える。
-
-    Args:
-        df: create_basic_lag_features に渡したのと同じ DataFrame
-        lag_columns: create_basic_lag_features が返した X の列名（"<列>_lag<N>"）
-
-    Returns:
-        最終日1行の DataFrame。作れない（欠損・決算近傍）なら None。
-    """
-    if df.empty or not lag_columns:
-        return None
-    last = df.iloc[-1]
-    if last.isnull().any():
-        return None
-    if "earnings_flag" in df.columns and last["earnings_flag"] != 0:
-        return None
-
-    values = {}
-    for name in lag_columns:
-        col, _, lag = str(name).rpartition("_lag")
-        if col not in df.columns or not lag.isdigit() or int(lag) >= len(df):
-            return None
-        values[name] = df[col].iloc[-1 - int(lag)]
-    row = pd.DataFrame([values], index=df.index[-1:], columns=lag_columns)
-    if row.isnull().any().any():
-        return None
-    return row
 
 
 def save_features_to_db(
@@ -439,6 +471,11 @@ def save_stock_data_with_features(
     if result is None:
         return
     _, _, data, _, quality_result = result
+    if data is None:
+        # 段差の足が残り特徴量を作らなかった銘柄は、品質の記録だけを残す（#1386）
+        if quality_result is not None and quality_result.issues:
+            _notify_quality_issues(market, symbol, quality_result)
+        return
     save_features_to_db(market, symbol, data, quality_result)
 
 
@@ -482,7 +519,15 @@ def run_batch_pipeline(
                 logger.info(f"[データ取得スキップ] {market}/{symbol}")
                 # 特徴量を作れなくても、取れた足はフェーズ2で market_data_raw に保存する（#840）
                 raw_data = result[3] if result is not None else None
-                return {"market": market, "symbol": symbol, "status": "skip", "raw_data": raw_data}
+                # 段差の足で外した銘柄の品質の記録も、フェーズ2で data_quality_log に書く（#1386）
+                quality = result[4] if result is not None else None
+                return {
+                    "market": market,
+                    "symbol": symbol,
+                    "status": "skip",
+                    "raw_data": raw_data,
+                    "quality_result": quality,
+                }
             logger.info(f"[データ取得完了] {market}/{symbol}")
             return {"market": market, "symbol": symbol, "status": "success", "data": result}
         except Exception as e:
@@ -536,4 +581,10 @@ def run_batch_pipeline(
         return batch_result
 
     # フェーズ2: DB書き込み（逐次）。足の保存が落ちた銘柄は failed に数える（#1377）
-    return write_batch_to_db(batch_result, save_raw_ohlcv, save_features_to_db, notification_port)
+    return write_batch_to_db(
+        batch_result,
+        save_raw_ohlcv,
+        save_features_to_db,
+        notification_port,
+        record_quality_issues=_notify_quality_issues,
+    )
