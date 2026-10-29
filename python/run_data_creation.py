@@ -34,7 +34,12 @@ def run_single(market: str, symbol: str, start_date=None, end_date=None, fetch_o
             if result is None:
                 logger.warning(f"[取得失敗] {market}/{symbol}")
                 return
-            market, symbol, data, _ = result
+            market, symbol, data, _, quality_result = result
+            if data is None:
+                issues = [] if quality_result is None else quality_result.issues
+                detail = ", ".join(f"{i.check}({i.level}): {i.detail}" for i in issues)
+                logger.warning(f"[特徴量なし] {market}/{symbol} - 品質: {detail or '結果なし'}")
+                return
             logger.info(f"[取得完了] {market}/{symbol} - {len(data)}行")
         else:
             save_stock_data_with_features(
