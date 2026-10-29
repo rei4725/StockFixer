@@ -189,7 +189,9 @@ def run_daily_pipeline():
         run_daily_drift_check()
         logger.info("[4/6] 日次ドリフトチェック完了")
     except Exception as e:
+        # 落ちた日は再学習が黙って欠けるため、後の段は止めずに知らせる（#1368）
         _handle_stage_error(PipelineStage.NON_CRITICAL, "[4/6] 日次ドリフトチェック", e)
+        _notify_stage_failure("[4/6] 日次ドリフトチェック", e)
 
     # 5. Discord通知（CRITICAL: 失敗時はパイプライン停止）
     logger.info("[5/6] Discord通知送信")
@@ -211,7 +213,9 @@ def run_daily_pipeline():
         evaluate_and_notify_alerts(prediction_violation_ids, prediction_details)
         logger.info("[6/6] 運用アラート評価完了")
     except Exception as e:
+        # 落ちた日は NF-303 の警報がどれも評価されないため知らせる（#1368）
         _handle_stage_error(PipelineStage.NON_CRITICAL, "[6/6] 運用アラート評価", e)
+        _notify_stage_failure("[6/6] 運用アラート評価", e)
 
     # 採点の JSON に業種の内訳を書き足す（NON_CRITICAL。[2/6] で作った材料を使う）
     append_accuracy_json_sectors(accuracy_report)
