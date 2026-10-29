@@ -59,6 +59,20 @@ def _mean_metric(df: pd.DataFrame, col: str) -> Optional[float]:
     return float(val) if not pd.isna(val) else None
 
 
+def _count_success_symbols(df: pd.DataFrame) -> Optional[int]:
+    """total_return の入った行の銘柄数（market・symbol の重なりを除く）を返す。
+
+    WF サマリーは失敗した銘柄を error だけの行として書き、記録の保存だけが
+    落ちた銘柄は成功の行と失敗の行の2行を持つ。平均に入った銘柄だけを数える（#1375）。
+    """
+    if "total_return" not in df.columns:
+        return len(df)
+    ok = df[pd.to_numeric(df["total_return"], errors="coerce").notna()]
+    keys = [c for c in ("market", "symbol") if c in ok.columns]
+    count = len(ok.drop_duplicates(subset=keys)) if keys else len(ok)
+    return count or None
+
+
 def _load_window_accuracy(analytics: AnalyticsQuery, days: int = _REPORT_DAYS) -> pd.DataFrame:
     """checked_at が直近 days 日の採点を、行数の上限で落とさずに取得する。
 
@@ -134,7 +148,7 @@ def run_monthly_report(
         net_return = _mean_metric(wf_df, "total_return")
         max_drawdown = _mean_metric(wf_df, "max_drawdown")
         sharpe_ratio = _mean_metric(wf_df, "sharpe_ratio")
-        symbol_count = len(wf_df)
+        symbol_count = _count_success_symbols(wf_df)
 
     # ---- 補助KPI ----
     kpi = _load_monthly_kpis(analytics)
