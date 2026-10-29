@@ -18,6 +18,10 @@ from config.settings import (
     PERMUTATION_IMPORTANCE_REPEATS,
 )
 from src.prediction.db import load_excluded_features, save_feature_selection
+from src.prediction.macro_change_features import (
+    add_macro_change_features,
+    drop_macro_level_columns,
+)
 from src.prediction.ports import get_market_data_port
 from src.utils.data_path_utils import ensure_dir, get_models_dir
 from src.utils.db import load_all_stock_features
@@ -187,6 +191,10 @@ def prepare_unified_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]
     # 配当・分割のラグの列は特徴量にしない。取得の道で有り無しが変わっていたため、
     # 表には銘柄によって全行 NULL のまま残っている（#816）
     X = X.drop(columns=[c for c in X.columns if str(c).startswith(_CORPORATE_ACTION_LAG_PREFIXES)])
+
+    # 相場全体の指標は水準を外し前日比の変化率で学ぶ。水準は全銘柄の予想を同じ向きに
+    # そろえるため（#1374）。表の列は消さず、今のモデルは予想の道で水準の列のまま使う
+    X = drop_macro_level_columns(add_macro_change_features(X))
 
     # NaNを除去
     valid_idx = X.notna().all(axis=1) & y.notna()
