@@ -5,7 +5,7 @@
 予想が0件の日は、モデルが無い日と分けてログに出す。
 """
 
-from src.orchestration.jobs.common import _handle_stage_error
+from src.orchestration.jobs.common import _handle_stage_error, _notify_stage_failure
 from src.orchestration.jobs.prediction_errors import notify_prediction_errors
 from src.orchestration.types import PipelineStage
 from src.utils.logger import get_logger
@@ -40,4 +40,6 @@ def run_challenger_shadow_stage() -> None:
             logger.info("[3.5/6] Challenger モデルなし（スキップ）")
         notify_prediction_errors(errors, stage=_STAGE)
     except Exception as e:
+        # 段全体が落ちた日は影の予想が丸ごと欠けるため、後の段は止めずに知らせる（#1368）
         _handle_stage_error(PipelineStage.NON_CRITICAL, _STAGE, e)
+        _notify_stage_failure(_STAGE, e)

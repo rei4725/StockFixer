@@ -16,6 +16,10 @@ DRIFT_MAE_RELATIVE_RATIO_DEFAULT = "1.5"
 # Hit Rate の実効の線 = min(DRIFT_HIT_RATE_THRESHOLD, 全銘柄の Hit Rate の中央値 - この幅)
 # 20件の Hit Rate の標本のぶれ（p=0.45 で標準偏差 約0.11）の約2倍を幅にとる（#1045）
 DRIFT_HIT_RATE_RELATIVE_MARGIN_DEFAULT = "0.20"
+# 評価した銘柄のうち閾値超えの割合がこの線以上の日を NF-303-3 の Warn と数える（#1369）。
+# 10-26〜10-29 のふだんの日は 23〜47 / 約700 銘柄（3〜7%）、10-25 より前の傷んだ日は
+# 約694 / 700 銘柄（99%）。ふだんの日の上の端の約2倍にとる
+DRIFT_WARN_SHARE_DEFAULT = "0.15"
 
 
 @dataclass(frozen=True)
@@ -27,15 +31,25 @@ class DriftThresholds:
     min_samples: int = 10
     mae_relative_ratio: float = float(DRIFT_MAE_RELATIVE_RATIO_DEFAULT)
     hit_rate_relative_margin: float = float(DRIFT_HIT_RATE_RELATIVE_MARGIN_DEFAULT)
+    warn_share: float = float(DRIFT_WARN_SHARE_DEFAULT)
 
 
 @dataclass(frozen=True)
 class DriftSelection:
-    """判定の結果。triggered は閾値超過の銘柄の行、線は中央値に合わせた後の実効の値。"""
+    """判定の結果。triggered は閾値超過の銘柄の行、線は中央値に合わせた後の実効の値。
+
+    n_evaluated はサンプル数の下限を満たして判定した銘柄の数（Warn の割合の分母、#1369）。
+    """
 
     triggered: pd.DataFrame
     mae_threshold: float
     hit_rate_threshold: float
+    n_evaluated: int = 0
+
+    @property
+    def triggered_share(self) -> float:
+        """判定した銘柄のうち閾値超過の割合。判定した銘柄が無ければ 0。"""
+        return len(self.triggered) / self.n_evaluated if self.n_evaluated else 0.0
 
 
 def load_drift_thresholds() -> DriftThresholds:
@@ -59,6 +73,7 @@ def load_drift_thresholds() -> DriftThresholds:
                 DRIFT_HIT_RATE_RELATIVE_MARGIN_DEFAULT,
             )
         ),
+        warn_share=float(_get("warn_share", "DRIFT_WARN_SHARE", DRIFT_WARN_SHARE_DEFAULT)),
     )
 
 
@@ -83,5 +98,8 @@ def select_drifted_symbols(summary: pd.DataFrame, thresholds: DriftThresholds) -
         | (eligible["direction_accuracy"] <= hit_rate_threshold)
     ]
     return DriftSelection(
-        triggered=triggered, mae_threshold=mae_threshold, hit_rate_threshold=hit_rate_threshold
+        triggered=triggered,
+        mae_threshold=mae_threshold,
+        hit_rate_threshold=hit_rate_threshold,
+        n_evaluated=len(eligible),
     )

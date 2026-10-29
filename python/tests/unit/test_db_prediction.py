@@ -684,7 +684,8 @@ class TestDriftCheckIgnoresChallenger(_TmpDbTestCase):
             run_daily_drift_check()
 
         notify.assert_not_called()
-        streak.assert_called_once_with(False)
+        streak.assert_called_once()
+        self.assertIs(streak.call_args.args[0], False)
 
 
 class TestSaveShapValues(_TmpDbTestCase):

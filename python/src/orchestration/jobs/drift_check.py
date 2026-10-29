@@ -58,6 +58,8 @@ def run_daily_drift_check():
                                    これ未満の銘柄はサンプル不足のノイズとみなし対象外にする。
         DRIFT_MAX_RETRAIN_PER_RUN: 1回の実行で再学習する最大銘柄数（デフォルト 50）。
                                    超過分は MAE が悪い順に足切りし、翌営業日以降の判定に委ねる。
+        DRIFT_WARN_SHARE:          判定した銘柄のうち閾値超えの割合がこれ以上の日を NF-303-3 の
+                                   Warn と数える（デフォルト 0.15）。再学習には効かない。
 
     完了条件:
         - 閾値超過銘柄が存在する場合に銘柄別モデルを再学習
@@ -116,7 +118,19 @@ def run_daily_drift_check():
         thresholds.hit_rate_relative_margin,
     )
     triggered = selection.triggered
-    record_drift_warn_streak(not triggered.empty)  # NF-303-3 の連続回数（#934）
+    # NF-303-3 の連続回数は閾値超えの割合が線以上の日だけ数える（#934・#1369）。
+    # 再学習は割合に関わらず、閾値超えが1銘柄でもあれば下で回す
+    share = selection.triggered_share
+    warn = selection.n_evaluated > 0 and share >= thresholds.warn_share
+    logger.info(
+        "ドリフトチェック: 閾値超過 %s / 判定 %s 銘柄 (割合=%.1f%%, Warn の線=%.1f%%, Warn=%s)",
+        len(triggered),
+        selection.n_evaluated,
+        share * 100,
+        thresholds.warn_share * 100,
+        warn,
+    )
+    record_drift_warn_streak(warn, share, len(triggered), selection.n_evaluated)
 
     if triggered.empty:
         logger.info("ドリフトチェック: 閾値超過銘柄なし")
