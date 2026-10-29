@@ -73,13 +73,15 @@ def _check_sl_tp_exits(
         qty = coverable_short_qty(pos) if is_short else int(pos.get("qty") or 0)
         avg_price = float(pos.get("avg_short_price" if is_short else "avg_price") or 0.0)
         current_price = float(pos.get("current_price") or 0.0)
-        if qty > 0 and avg_price > 0 and math.isnan(current_price):
-            # 現在値が取れない保有を損益0として素通りさせない（#844）
-            logger.warning("[exec] %s: 現在値が取れず SL/TP を評価できない（%d株）", symbol, qty)
+        if qty <= 0:
+            continue
+        if not all(math.isfinite(p) and p > 0 for p in (avg_price, current_price)):
+            # 現在値か買値が取れない保有を損益0として素通りさせない（#844・#1380）
+            logger.warning(
+                "[exec] %s: 現在値か買値が取れず SL/TP を評価できない（%d株）", symbol, qty
+            )
             # 売らずに飛ばすが、完了の知らせで分かるように数と銘柄を残す（#1296）
             stats.setdefault("sl_tp_unevaluable_symbols", []).append(symbol)
-            continue
-        if qty <= 0 or avg_price <= 0 or current_price <= 0:
             continue
 
         risk = _sl_tp_risk(broker, market, symbol, stats)
