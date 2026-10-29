@@ -22,11 +22,17 @@ def save_prediction_accuracy(rows: list[dict]) -> int:
 
     Returns:
         挿入/更新件数
+
+    Raises:
+        RuntimeError: 1行でも書き込みに落ちたとき。ほかの行を書き終えた後に、落ちた件数と
+            最初の例外を載せて投げる（採点はやり直せないので日次の失敗の知らせに届ける。#1371）
     """
     if not rows:
         return 0
 
     inserted = 0
+    failed = 0
+    first_error: Optional[Exception] = None
     with _db_connection() as con:
         for row in rows:
             try:
@@ -60,10 +66,17 @@ def save_prediction_accuracy(rows: list[dict]) -> int:
                 )
                 inserted += 1
             except Exception as e:
+                failed += 1
+                if first_error is None:
+                    first_error = e
                 logger.error(
                     f"prediction_accuracy 保存失敗 [{row.get('market')}_{row.get('symbol')}]: {e}",
                     exc_info=True,
                 )
+    if first_error is not None:
+        raise RuntimeError(
+            f"prediction_accuracy 保存失敗: {failed}件 (保存={inserted}件, 最初の例外: {first_error})"
+        ) from first_error
     logger.info(f"prediction_accuracy 保存完了: {inserted}件")
     return inserted
 

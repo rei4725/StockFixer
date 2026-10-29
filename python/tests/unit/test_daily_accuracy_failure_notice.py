@@ -1,7 +1,9 @@
 """日次の道の [2/6] 採点と採点の JSON が落ちた回の失敗の知らせのテスト（#1006）"""
 
-from contextlib import ExitStack
+from contextlib import ExitStack, nullcontext
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from src.orchestration.jobs.accuracy_json import write_accuracy_json_without_sectors
 
@@ -67,7 +69,37 @@ def _fail_challenger(*, model_name, **_kwargs):
     return None
 
 
+def _fail_save_for(target):
+    """target の採点で、行の書き込みが落ちる save_prediction_accuracy を流す（#1371）。"""
+
+    def side_effect(*, model_name, **_kwargs):
+        from src.prediction.db.accuracy import save_prediction_accuracy
+
+        con = MagicMock()
+        if model_name == target:
+            con.execute.side_effect = RuntimeError("row write failed")
+        row = {"market": "jp", "symbol": "7203", "model_name": model_name, "predicted_at": "x"}
+        with patch("src.prediction.db.accuracy._db_connection", return_value=nullcontext(con)):
+            save_prediction_accuracy([row])
+        return None
+
+    return side_effect
+
+
 class TestDailyAccuracyCheckFailureNotice:
+    @pytest.mark.parametrize("target", ["production", "challenger"])
+    def test_save_row_failure_sends_notice_and_runs_later_stages(self, target):
+        """採点の行の書き込みが落ちた回は [2/6] の知らせを1回送り、[3/6] 以降を走らせること（#1371）"""
+        mocks = _run_daily_pipeline(_fail_save_for(target))
+
+        mocks["webhook"].assert_called_once()
+        text = mocks["webhook"].call_args.args[0]
+        assert f"[2/6] 予測精度チェック ({target})" in text
+        assert "row write failed" in text
+        mocks["predict"].assert_called_once()
+        mocks["output"].assert_called_once()
+        mocks["completion"].assert_called_once()
+
     def test_challenger_failure_sends_notice_and_runs_later_stages(self):
         """challenger の採点が落ちた回も知らせを1回送り、[3/6] 以降を走らせること（#1152）"""
         mocks = _run_daily_pipeline(_fail_challenger)
