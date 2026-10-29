@@ -825,6 +825,29 @@ class TestExecutionOrderTypeHelpers(unittest.TestCase):
         self.assertEqual(reason, "market")
         self.assertEqual(session, "open")
 
+    def test_choose_order_params_short_cover_limit_above_price(self):
+        # SHORT_COVER は買い戻しなので、指値は現在値より上になる（#1384）
+        adapter = self._make_adapter(volume=100_000, high=101.0, low=99.0)
+
+        order_type, price, _reason, session = _choose_order_params(
+            "jp", "7203", OrderSide.SHORT_COVER, 1000.0, market_data=adapter
+        )
+
+        self.assertEqual(order_type, OrderType.LIMIT)
+        self.assertGreater(price, 1000.0)
+        self.assertEqual(session, "close")
+
+    def test_choose_order_params_short_limit_below_price(self):
+        adapter = self._make_adapter(volume=100_000, high=101.0, low=99.0)
+
+        order_type, price, _reason, session = _choose_order_params(
+            "jp", "7203", OrderSide.SHORT, 1000.0, market_data=adapter
+        )
+
+        self.assertEqual(order_type, OrderType.LIMIT)
+        self.assertLess(price, 1000.0)
+        self.assertEqual(session, "close")
+
 
 class TestExecutionOrderTypeFlow(unittest.TestCase):
     @patch("src.trading.execution.runner._record_order")
