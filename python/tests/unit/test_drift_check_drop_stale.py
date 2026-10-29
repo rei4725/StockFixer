@@ -42,7 +42,8 @@ def test_stale_symbols_do_not_trigger(
     with caplog.at_level(logging.INFO):
         run_daily_drift_check()
 
-    mock_streak.assert_called_once_with(False)
+    mock_streak.assert_called_once()
+    assert mock_streak.call_args.args[0] is False
     mock_train.assert_not_called()
     mock_notify.assert_not_called()
     lines = [r for r in caplog.records if "古い 2 銘柄" in r.getMessage()]
@@ -73,7 +74,8 @@ def test_stale_symbols_leave_median_and_candidates(
     with patch("src.orchestration.jobs.drift_check._is_recently_retrained", return_value=False):
         run_daily_drift_check()
 
-    mock_streak.assert_called_once_with(True)
+    # 割合の分母も古い銘柄を外した9銘柄で数える（#1369）
+    mock_streak.assert_called_once_with(False, 1 / 9, 1, 9)
     assert [c.args[0].symbol for c in mock_train.call_args_list] == ["BAD"]
     mock_notify.assert_called_once()
     notified = [s["symbol"] for s in mock_notify.call_args.args[0]]
