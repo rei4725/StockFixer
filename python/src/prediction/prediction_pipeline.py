@@ -513,14 +513,14 @@ def run_accuracy_check(
     if no_future_samples:
         logger.info("まだデータなしの例: %s", " | ".join(no_future_samples))
 
-    if new_rows:
-        save_prediction_accuracy(new_rows)
+    # 書き込みに落ちた行があれば例外が上がり、日次の [2/6] の失敗の知らせに届く（#1371）
+    saved = save_prediction_accuracy(new_rows) if new_rows else 0
 
     # サマリーを返す
     summary = load_drift_summary(horizon=horizon, model_name=model_name)
     skipped_str = ", ".join(f"{reason}={count}" for reason, count in skipped.items())
     logger.info(
-        f"精度チェック完了: {len(new_rows)}件 採点 "
+        f"精度チェック完了: {len(new_rows)}件 採点, {saved}件 保存 "
         f"(読み込み={len(df_pred)}件, 飛ばした理由: {skipped_str})"
     )
     return summary

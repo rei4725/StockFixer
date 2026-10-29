@@ -846,8 +846,8 @@ class TestSavePredictionAccuracyPartialFailure(unittest.TestCase):
     """save_prediction_accuracy の部分失敗テスト（モック使用）"""
 
     @patch("src.prediction.db.accuracy._db_connection")
-    def test_partial_failure_returns_partial_count(self, mock_db_ctx):
-        """1行目成功・2行目例外 → 返却値 1 であること"""
+    def test_partial_failure_raises_with_failed_count(self, mock_db_ctx):
+        """1行目成功・2行目例外 → 1行目は書き、落ちた件数を載せて投げること（#1371）"""
         mock_con = MagicMock()
         # 1回目の execute 成功、2回目は例外
         mock_con.execute.side_effect = [MagicMock(), Exception("DB error")]
@@ -870,8 +870,9 @@ class TestSavePredictionAccuracyPartialFailure(unittest.TestCase):
                 "horizon": 1,
             },
         ]
-        count = save_prediction_accuracy(rows)
-        self.assertEqual(count, 1)
+        with self.assertRaisesRegex(RuntimeError, "1件"):
+            save_prediction_accuracy(rows)
+        self.assertEqual(mock_con.execute.call_count, 2)
 
 
 if __name__ == "__main__":
