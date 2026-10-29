@@ -35,7 +35,8 @@ def test_uniformly_high_mae_triggers_nothing(
 
     mock_notify.assert_not_called()
     mock_train.assert_not_called()
-    mock_streak.assert_called_once_with(False)
+    mock_streak.assert_called_once()
+    assert mock_streak.call_args.args[0] is False
 
 
 @patch("src.orchestration.jobs.drift_check.record_drift_warn_streak")
@@ -56,4 +57,5 @@ def test_only_degraded_symbol_triggers(
 
     mock_train.assert_called_once()
     assert mock_train.call_args.args[0].symbol == "BAD"
-    mock_streak.assert_called_once_with(True)
+    # 再学習は回すが、9銘柄中1銘柄（11%）は Warn の線（15%）に届かない（#1369）
+    mock_streak.assert_called_once_with(False, 1 / 9, 1, 9)
