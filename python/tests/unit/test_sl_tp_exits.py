@@ -353,6 +353,39 @@ class TestCheckSlTpExits(unittest.TestCase):
         self.assertEqual(stats["sl_tp_unevaluable_symbols"], ["7203", "6758"])
         self.assertEqual(stats["errors"], 0)
 
+    def test_non_positive_or_nan_prices_are_counted_as_unevaluable(self):
+        """株数があり現在値0・買値0・買値 NaN の保有を黙って飛ばさず、評価できない数に入れる（#1380）"""
+        cases = [
+            ("current_price=0", 1000.0, 0.0),
+            ("avg_price=0", 0.0, 900.0),
+            ("avg_price=nan", float("nan"), 900.0),
+        ]
+        for label, avg, current in cases:
+            for is_short in (False, True):
+                with self.subTest(case=label, is_short=is_short):
+                    price_key = "avg_short_price" if is_short else "avg_price"
+                    pos = {"symbol": "7203", "qty": 100, price_key: avg, "current_price": current}
+                    if is_short:
+                        broker = _make_broker(short_positions=[pos])
+                    else:
+                        broker = _make_broker([pos])
+                    stats = _make_stats()
+
+                    with patch("src.trading.execution.RiskManager.check_sl_tp") as check:
+                        with self.assertLogs(
+                            "src.trading.execution.sl_tp", level="WARNING"
+                        ) as logs:
+                            triggered = _check_sl_tp_exits(
+                                broker, "jp", "paper", MagicMock(), stats, InMemoryTradeDiffSink()
+                            )
+
+                    check.assert_not_called()
+                    broker.send_order.assert_not_called()
+                    self.assertEqual(triggered, set())
+                    self.assertTrue(any("7203" in m for m in logs.output))
+                    self.assertEqual(stats.get("sl_tp_unevaluable_symbols"), ["7203"])
+                    self.assertEqual(stats["errors"], 0)
+
     def test_symbol_dot_t_stripped(self):
         positions = [{"symbol": "7203.T", "qty": 100, "avg_price": 1000.0, "current_price": 900.0}]
         broker = _make_broker(positions)
