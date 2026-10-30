@@ -115,3 +115,69 @@ def test_each_job_is_judged_with_time_measured_just_before():
     assert seen["daily_pipeline"] == datetime(2026, 10, 27, 9, 5)
     assert seen["daily_auto_order"] == datetime(2026, 10, 27, 9, 35)
     assert [c.args[0] for c in qm.run_job.call_args_list] == ["daily_pipeline"]
+
+
+def test_job_with_cutoff_is_recovered_before_long_job_without_cutoff():
+    """日次の道の補完の間に 9:30 を越えても、締めを持つ自動発注を先に補完すること（#1395）"""
+    clock = {"now": datetime(2026, 10, 27, 9, 5)}
+    qm = MagicMock()
+    qm.now.side_effect = lambda: clock["now"]
+
+    def _should_recover(job_id, now):
+        if job_id == "daily_auto_order":
+            return (now.hour, now.minute) < (9, 30)
+        return True
+
+    def _run_job(job_id, reason, **kwargs):
+        # 日次の道の補完の間に 9:30 を越える
+        if job_id == "daily_pipeline":
+            clock["now"] = datetime(2026, 10, 27, 9, 35)
+
+    qm.should_recover.side_effect = _should_recover
+    qm.get_missed_past_periods.return_value = []
+    qm.run_job.side_effect = _run_job
+    config = {
+        "daily_pipeline": {"description": "日次の道"},
+        "daily_auto_order": {"description": "自動発注", "recovery_until": (9, 30)},
+    }
+
+    import run_scheduler
+
+    with (
+        patch.object(run_scheduler, "SCHEDULE_CONFIG", config),
+        patch.object(run_scheduler, "ping_heartbeat"),
+    ):
+        run_scheduler._poll_recovery_jobs(qm)
+
+    assert [c.args[0] for c in qm.run_job.call_args_list] == ["daily_auto_order", "daily_pipeline"]
+
+
+def test_jobs_without_cutoff_keep_config_order():
+    """締めの無いジョブ同士は SCHEDULE_CONFIG の順のまま、締めのあるジョブの後に回ること"""
+    qm = MagicMock()
+    qm.should_recover.return_value = True
+    qm.get_missed_past_periods.return_value = []
+    config = {
+        "daily_pipeline": {"description": "日次の道"},
+        "weekly_training": {"description": "週の学習"},
+        "daily_auto_order": {"description": "自動発注", "recovery_until": (9, 30)},
+        "daily_report": {"description": "日次の報告"},
+        "disabled_job": {"description": "止めたジョブ", "auto_schedule": False},
+        "daily_fill_check": {"description": "約定の確認", "recovery_until": (15, 30)},
+    }
+
+    import run_scheduler
+
+    with (
+        patch.object(run_scheduler, "SCHEDULE_CONFIG", config),
+        patch.object(run_scheduler, "ping_heartbeat"),
+    ):
+        run_scheduler._poll_recovery_jobs(qm)
+
+    assert [c.args[0] for c in qm.run_job.call_args_list] == [
+        "daily_auto_order",
+        "daily_fill_check",
+        "daily_pipeline",
+        "weekly_training",
+        "daily_report",
+    ]
