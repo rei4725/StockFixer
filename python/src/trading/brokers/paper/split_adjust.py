@@ -119,17 +119,36 @@ def _adjust_holding(
         return qty, avg, False
     if factor == 1.0:
         return qty, avg, True
-    new_qty = int(round(qty * factor))
-    new_avg = avg / factor
     if short:
-        sql = (
+        select_sql = (
+            "SELECT qty, avg_short_price, updated_at FROM paper_short_positions "
+            "WHERE symbol=%s FOR UPDATE"
+        )
+        update_sql = (
             "UPDATE paper_short_positions SET qty=%s, avg_short_price=%s, "
             "updated_at=%s WHERE symbol=%s"
         )
     else:
-        sql = "UPDATE paper_positions SET qty=%s, avg_price=%s, updated_at=%s WHERE symbol=%s"
-    with _db_connection() as con:
-        con.execute(sql, [new_qty, new_avg, _stamp_after_splits(splits, updated_at), sym])
+        select_sql = (
+            "SELECT qty, avg_price, updated_at FROM paper_positions WHERE symbol=%s FOR UPDATE"
+        )
+        update_sql = (
+            "UPDATE paper_positions SET qty=%s, avg_price=%s, updated_at=%s WHERE symbol=%s"
+        )
+    # 分割の記録を取る間に約定が行を変えうるので、書く前に行を押さえて読み直し、
+    # 読み直した株数と updated_at から比を当て直す（#1423）
+    with _db_connection() as con, con.transaction():
+        row = con.execute(select_sql, [sym]).fetchone()
+        if row is None:
+            logger.warning(f"[paper] {sym}: 分割の直しの前に保有の行が無くなったため書かない")
+            return int(round(qty * factor)), avg / factor, True
+        qty, avg, updated_at = row
+        factor = split_factor_since(splits, updated_at) or 1.0
+        if factor == 1.0:
+            return qty, avg, True
+        new_qty = int(round(qty * factor))
+        new_avg = avg / factor
+        con.execute(update_sql, [new_qty, new_avg, _stamp_after_splits(splits, updated_at), sym])
     label = "空売りの保有" if short else "保有"
     logger.warning(
         f"[paper] {sym}: 株式分割（比 {factor:g}）で{label}を直した "
