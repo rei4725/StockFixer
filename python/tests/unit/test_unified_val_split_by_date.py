@@ -97,12 +97,11 @@ def test_split_without_dates_keeps_row_order():
 @patch("src.prediction.unified_model_pipeline._compute_and_save_unified_feature_selection")
 @patch("src.prediction.unified_model_pipeline.load_excluded_features", return_value=[])
 @patch("src.prediction.manager.ModelManager")
-@patch("src.prediction.unified_model_pipeline._load_sentiment_lookup", return_value={})
 @patch("src.prediction.unified_model_pipeline.get_market_data_port")
 @patch("src.utils.db.load_raw_ohlcv")
 @patch("src.utils.db.load_all_raw_ohlcv_symbols")
 def test_multi_horizon_validation_rows_are_latest_dates(
-    mock_symbols, mock_raw, mock_port, _mock_lookup, mock_mm_cls, _mock_excluded, _mock_compute
+    mock_symbols, mock_raw, mock_port, mock_mm_cls, _mock_excluded, _mock_compute
 ):
     """多ホライズンの道でも、検証は直近の日付の行で、どの銘柄も学習に入る。"""
     from src.prediction.unified_model_pipeline import train_unified_model
