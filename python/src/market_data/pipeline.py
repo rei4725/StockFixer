@@ -19,6 +19,7 @@ from src.domain.jp_market_holidays import is_jp_business_day
 from src.domain.ports import AlertLevel, NotificationPort
 from src.market_data.bar_close import drop_unclosed_bars
 from src.market_data.base import DataSourceBase
+from src.market_data.batch_db_write import has_price_step
 from src.market_data.batch_db_write import log_pipeline_summary as _log_pipeline_summary
 from src.market_data.batch_db_write import write_batch_to_db
 from src.market_data.loader import (
@@ -52,7 +53,7 @@ from src.market_data.split_refetch import (
 from src.market_data.technical import add_technical_indicators, create_basic_lag_features
 from src.market_data.wikipedia_features import add_pageview_features, fetch_pageview_features
 from src.utils.data_path_utils import get_ticker, normalize_col
-from src.utils.db import upsert_stock_features
+from src.utils.db import delete_stock_features, upsert_stock_features
 from src.utils.logger import get_logger
 
 from src.market_data.latest_feature_row import (  # noqa: F401  # isort: skip
@@ -476,9 +477,11 @@ def save_stock_data_with_features(
         return
     _, _, data, _, quality_result = result
     if data is None:
-        # 段差の足が残り特徴量を作らなかった銘柄は、品質の記録だけを残す（#1386）
+        # 段差の足が残り特徴量を作らなかった銘柄は、品質を記録し、前の特徴量を消す（#1386・#1399）
         if quality_result is not None and quality_result.issues:
             _notify_quality_issues(market, symbol, quality_result)
+        if has_price_step(quality_result):
+            delete_stock_features(market, symbol)
         return
     save_features_to_db(market, symbol, data, quality_result)
 
@@ -591,4 +594,5 @@ def run_batch_pipeline(
         save_features_to_db,
         notification_port,
         record_quality_issues=_notify_quality_issues,
+        delete_features=delete_stock_features,
     )
