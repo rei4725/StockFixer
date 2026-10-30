@@ -4,6 +4,7 @@ import pandas as pd
 
 from src.backtest.data_port import get_backtest_data_port
 from src.backtest.execution import ExecutionModel, TradingCosts, lot_size_for
+from src.backtest.limit_fill import LimitFillModel
 from src.backtest.mark_to_market import build_equity_curves, mark_to_market
 from src.backtest.metrics import compute_cost_comparison_metrics
 from src.backtest.position_sizing import calc_position_details
@@ -206,6 +207,8 @@ class Backtester:
         # exec_price（始値、無ければ終値）と exec_vol で行う。判定済みの決済の種類を持ち越す。
         # 最終バーで判定したものは約定先バーが無いため、最終日の強制決済に任せる。
         pending_exit: Optional[str] = None
+        # #1418: 本番で指値になる日は、翌バーが指値に届いたときだけ指値で約定する
+        limit_fill = LimitFillModel(df, close_col, self.market, self.execution_lag > 0)
 
         for date in df.index:
             price = df.loc[date, close_col]
@@ -322,7 +325,11 @@ class Backtester:
                     )
                     continue
 
-            # シグナルに基づく売買
+            # シグナルに基づく売買。#1418: 本番で指値になる日は、指値に届かなければ約定させず、
+            # 届けば exec_price を指値の値段に置き換える（SL/TP は本番も成行なので置き換えない）
+            fill_price = limit_fill.fill_price(date, sig == 1, exec_price) if sig else exec_price
+            sig = 0 if fill_price is None else sig
+            exec_price = exec_price if fill_price is None else fill_price
             # ショートカバー: 買いシグナル + ショートポジション保有
             if sig == 1 and self.enable_short and short_position > 0:
                 # エントリー売り: short_price * qty * (1 - fee - slip)（エントリー時点の出来高）
