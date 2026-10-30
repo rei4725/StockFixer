@@ -1,6 +1,7 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
+import pytest
 import requests
 
 from src.market_data.adapters.edinet_client import EdinetClient, _to_edinet_sec_code
@@ -213,6 +214,104 @@ class TestEdinetClientFetchDocumentTitles(unittest.TestCase):
         self.assertIn("2024-01-01", called_dates)
         self.assertIn("2024-01-02", called_dates)
         self.assertIn("2024-01-03", called_dates)
+
+
+def _status_response(body: dict) -> MagicMock:
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.raise_for_status.return_value = None
+    mock_resp.json.return_value = body
+    return mock_resp
+
+
+_AUTH_FAILED_BODY = {
+    "StatusCode": 401,
+    "message": "Access denied due to invalid subscription key.",
+}
+
+
+@pytest.fixture
+def _fresh_stop():
+    from src.market_data.adapters import edinet_client
+
+    edinet_client.reset_edinet_stop()
+    yield
+    edinet_client.reset_edinet_stop()
+
+
+def test_auth_failure_warns_once_and_stops_remaining_symbols(monkeypatch, _fresh_stop):
+    """本文の StatusCode が認証の失敗なら WARNING を1回出し、残りの銘柄で取得を呼ばない（#1426）"""
+    from src.market_data.adapters import edinet_client
+
+    monkeypatch.setenv("EDINET_API_KEY", "dummy-invalid-key")
+    mock_logger = MagicMock()
+    monkeypatch.setattr(edinet_client, "logger", mock_logger)
+    mock_get = MagicMock(return_value=_status_response(_AUTH_FAILED_BODY))
+    monkeypatch.setattr(edinet_client.requests, "get", mock_get)
+
+    results = [
+        EdinetClient().fetch_document_titles(symbol, "2024-01-01", "2024-01-05")
+        for symbol in ("7203", "6758", "9984")
+    ]
+
+    assert results == [None, None, None]
+    assert mock_get.call_count == 1
+    assert mock_logger.warning.call_count == 1
+
+
+def test_reset_allows_next_run_to_try_again(monkeypatch, _fresh_stop):
+    """打ち切りはその回の中だけで、戻した後の回はまた1回目から取得を試す"""
+    from src.market_data.adapters import edinet_client
+
+    monkeypatch.setenv("EDINET_API_KEY", "dummy-invalid-key")
+    mock_get = MagicMock(return_value=_status_response(_AUTH_FAILED_BODY))
+    monkeypatch.setattr(edinet_client.requests, "get", mock_get)
+
+    EdinetClient().fetch_document_titles("7203", "2024-01-01", "2024-01-03")
+    EdinetClient().fetch_document_titles("6758", "2024-01-01", "2024-01-03")
+    assert mock_get.call_count == 1
+
+    edinet_client.reset_edinet_stop()
+    EdinetClient().fetch_document_titles("7203", "2024-01-01", "2024-01-03")
+    assert mock_get.call_count == 2
+
+
+def test_batch_pipeline_resets_stop_at_start(monkeypatch, _fresh_stop):
+    """バッチの回の始めで打ち切りが戻る"""
+    from src.market_data import pipeline
+    from src.market_data.adapters import edinet_client
+
+    monkeypatch.setattr(edinet_client, "_stopped", True)
+    pipeline.run_batch_pipeline([])
+    assert edinet_client._is_stopped() is False
+
+
+def test_success_body_with_status_code_200_keeps_titles(monkeypatch, _fresh_stop):
+    """成功の応答では今までどおり全日を取得し、値も同じ"""
+    from src.market_data.adapters import edinet_client
+
+    monkeypatch.setenv("EDINET_API_KEY", "dummy-valid-key")
+    body = {
+        "metadata": {"status": "200", "message": "OK"},
+        "results": [
+            {
+                "secCode": "72030",
+                "docTypeCode": "120",
+                "docDescription": "有価証券報告書",
+                "filerName": "トヨタ自動車株式会社",
+            }
+        ],
+    }
+    mock_get = MagicMock(return_value=_status_response(body))
+    monkeypatch.setattr(edinet_client.requests, "get", mock_get)
+
+    first = EdinetClient().fetch_document_titles("7203", "2024-01-01", "2024-01-02")
+    second = EdinetClient().fetch_document_titles("7203", "2024-01-01", "2024-01-02")
+
+    expected = {"2024-01-01": ["有価証券報告書"], "2024-01-02": ["有価証券報告書"]}
+    assert first == expected
+    assert second == expected
+    assert mock_get.call_count == 4
 
 
 if __name__ == "__main__":
