@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import pandas as pd
+from tests.unit.models_dir_isolation import isolate_models_dir  # noqa: F401
 
 from src.domain.types import SymbolTask
 from src.orchestration.jobs.drift_check import run_daily_drift_check

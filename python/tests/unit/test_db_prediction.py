@@ -8,6 +8,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
+from tests.unit.models_dir_isolation import isolate_models_dir  # noqa: F401
 
 import src.utils.data_path_utils as path_utils
 import src.utils.db as db_module

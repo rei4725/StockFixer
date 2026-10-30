@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
+from tests.unit.models_dir_isolation import isolate_models_dir  # noqa: F401
 
 from src.orchestration.jobs.drift_check import run_daily_drift_check
 from src.prediction.db import load_drift_summary

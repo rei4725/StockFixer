@@ -6,6 +6,7 @@ from contextlib import ExitStack
 from unittest.mock import patch
 
 import pandas as pd
+from tests.unit.models_dir_isolation import isolate_models_dir  # noqa: F401
 
 from src.utils.alert_service import (
     DRIFT_WARN_THRESHOLD,
