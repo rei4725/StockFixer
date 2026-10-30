@@ -377,6 +377,7 @@ def predict_with_challenger_unified(
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     from src.prediction.predict_unified import get_cached_model, predict_with_unified_model
+    from src.prediction.prediction_run_stats import collect_prediction_run_stats
     from src.prediction.unified_run_summary import log_unified_prediction_summary
     from src.utils.db import get_active_symbols
 
@@ -416,12 +417,14 @@ def predict_with_challenger_unified(
             return None
 
     results = []
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        futures = {executor.submit(_predict, key): key for key in all_keys}
-        for future in as_completed(futures):
-            result = future.result()
-            if result is not None:
-                results.append(result)
+    # クリップと0埋めの数を本番と同じ形で回の終わりにログに出す（#1431）
+    with collect_prediction_run_stats("challenger"):
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            futures = {executor.submit(_predict, key): key for key in all_keys}
+            for future in as_completed(futures):
+                result = future.result()
+                if result is not None:
+                    results.append(result)
 
     log_unified_prediction_summary(
         len(results), len(all_keys), stale_keys, error_keys, label="challenger 統合モデル"

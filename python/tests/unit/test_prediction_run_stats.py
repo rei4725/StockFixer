@@ -170,5 +170,43 @@ class TestPredictAllUnifiedLogs(unittest.TestCase):
         self.assertTrue(any("名前=feat_b" in line for line in lines), lines)
 
 
+class TestChallengerShadowLogs(unittest.TestCase):
+    @patch("src.prediction.unified_run_summary.log_unified_prediction_summary")
+    @patch("src.utils.db.get_active_symbols")
+    @patch("src.prediction.shadow_evaluation.available_unified_challengers")
+    def test_challenger_shadow_logs_stats(self, mock_available, mock_symbols, _summary):
+        """challenger の影の予想の回の終わりに run=challenger の行が出る（#1431）"""
+        from src.prediction.shadow_evaluation import predict_with_challenger_unified
+
+        challenger = "UnifiedStockXGBoost_challenger"
+        mock_available.return_value = [challenger]
+        mock_symbols.return_value = [("jp", "7203"), ("jp", "6758")]
+        model = _model(0.10, ["feat_a", "feat_b", "atr_lag1"])
+        with (
+            patch(f"{_MOD}.load_feature_data", return_value=_features(10.0, False)),
+            patch(f"{_MOD}._fetch_current_price", return_value=1000.0),
+            patch(f"{_MOD}.get_service_url", return_value=None),
+            patch(
+                f"{_MOD}.get_cached_model",
+                side_effect=lambda name: model if name == challenger else None,
+            ),
+            patch(f"{_MOD}.load_model_weights", return_value=[1.0]),
+            patch(f"{_STATS}.logger") as mock_logger,
+        ):
+            rows = predict_with_challenger_unified()
+
+        self.assertEqual(len(rows), 2)
+        lines = [c.args[0] % c.args[1:] for c in mock_logger.info.call_args_list]
+        clip_lines = [line for line in lines if line.startswith("予想のATRクリップ")]
+        fill_lines = [line for line in lines if line.startswith("予想の特徴量の0埋め")]
+        self.assertEqual(len(clip_lines), 1, lines)
+        self.assertEqual(len(fill_lines), 1, lines)
+        self.assertIn("run=challenger market=jp horizon=1", clip_lines[0])
+        self.assertIn("上限=2（100.0%）", clip_lines[0])
+        self.assertIn("run=challenger market=jp horizon=1", fill_lines[0])
+        self.assertIn("0埋めの銘柄数=2/2", fill_lines[0])
+        self.assertIn("名前=feat_b", fill_lines[0])
+
+
 if __name__ == "__main__":
     unittest.main()
