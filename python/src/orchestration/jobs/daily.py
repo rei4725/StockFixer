@@ -4,6 +4,8 @@
 ドリフト監視・バックアップ・ルールシグナルのオーケストレーション。
 """
 
+from collections import Counter
+
 from src.orchestration.jobs.accuracy_json import (
     append_accuracy_json_sectors,
     production_already_predicted_today,
@@ -80,7 +82,8 @@ def run_daily_pipeline():
     try:
         tasks = load_target_symbols()
         batch_result = run_batch_pipeline(tasks, notification_port=DiscordNotificationAdapter())
-        _raise_if_fetch_mostly_unavailable(len(tasks), batch_result)
+        market_totals = Counter(str(getattr(t, "market", "")) for t in tasks)
+        _raise_if_fetch_mostly_unavailable(len(tasks), batch_result, market_totals)
         logger.info("[1/6] データ取得完了")
     except Exception as e:
         if _handle_stage_error(

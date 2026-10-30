@@ -3,7 +3,7 @@
 daily.py からの責務分離（ファイル行数ガード対策）。
 """
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from src.orchestration.jobs.common import _notify_stage_failure
 from src.utils.logger import get_logger
@@ -17,12 +17,21 @@ logger = get_logger(__name__)
 # 取得のエラーの知らせに並べる銘柄の上限（#1256）
 _FETCH_ERROR_NOTICE_SYMBOL_LIMIT = 5
 
+# 8:50 の自動発注が注文を出す市場（#1432）
+_ORDER_MARKET = "jp"
 
-def _raise_if_fetch_mostly_unavailable(total: int, batch_result: "BatchResult") -> None:
+
+def _raise_if_fetch_mostly_unavailable(
+    total: int,
+    batch_result: "BatchResult",
+    market_totals: Optional[dict[str, int]] = None,
+) -> None:
     """取得のスキップ+エラーが対象の線を超えたら RuntimeError を投げる（#811）。
 
     run_batch_pipeline は銘柄ごとのスキップ・エラーを例外にしないため、全銘柄が
     スキップされても [1/6] が「完了」になり、古い特徴量で予測を保存し続けた。
+    全体の割合に加えて、8:50 が発注する市場（jp）の銘柄だけの割合も同じ線で見る。
+    jp は全体の約3割のため、jp が大きく欠けても全体の線に届かない（#1432）。
     線の下でも取得のエラーが1件以上あれば、件数と先頭の銘柄を1回知らせる（#1256）。
     毎日あるスキップ（足の止まった銘柄）は知らせに数えない。
     """
@@ -37,7 +46,38 @@ def _raise_if_fetch_mostly_unavailable(total: int, batch_result: "BatchResult") 
             f" + エラー {len(batch_result.failed)} / 対象 {total}"
             f"（線 {DAILY_FETCH_MAX_UNAVAILABLE_RATIO:.0%}）"
         )
+    _raise_if_order_market_mostly_unavailable(market_totals or {}, batch_result)
     _notify_fetch_errors(total, batch_result)
+
+
+def _raise_if_order_market_mostly_unavailable(
+    market_totals: dict[str, int], batch_result: "BatchResult"
+) -> None:
+    """発注する市場の銘柄だけのスキップ+エラーが線を超えたら RuntimeError を投げる（#1432）。
+
+    一部の jp 銘柄の予想だけで 8:50 の新規が出て、予想の無い保有の売りが欠けるのを止める。
+    """
+    from config.settings import DAILY_FETCH_MAX_UNAVAILABLE_RATIO
+
+    market = _ORDER_MARKET
+    market_total = market_totals.get(market, 0)
+    if market_total <= 0:
+        return
+    n_skipped = sum(1 for s in batch_result.skipped if _skipped_market(s) == market)
+    n_failed = sum(1 for f in batch_result.failed if f.market == market)
+    if (n_skipped + n_failed) / market_total > DAILY_FETCH_MAX_UNAVAILABLE_RATIO:
+        raise RuntimeError(
+            f"{market} の取得できなかった銘柄が多すぎる: スキップ {n_skipped}"
+            f" + エラー {n_failed} / {market} の対象 {market_total}"
+            f"（線 {DAILY_FETCH_MAX_UNAVAILABLE_RATIO:.0%}）"
+        )
+
+
+def _skipped_market(skipped: object) -> Optional[str]:
+    """スキップの結果（market の鍵を持つ dict）から市場を返す。"""
+    if isinstance(skipped, dict):
+        return skipped.get("market")
+    return getattr(skipped, "market", None)
 
 
 def _notify_fetch_errors(total: int, batch_result: "BatchResult") -> None:
