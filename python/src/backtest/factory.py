@@ -197,6 +197,9 @@ def _make_backtester(
         take_profit_pct=None,
         position_sizing="full",
         slippage_fn=make_slippage_fn() if dynamic_slippage else None,
+        # 生成したルールは本番ではルールの発注（rule_execution の成行）で動くため、
+        # 指値の判定を当てない（#1418）
+        limit_order_fill=False,
     )
 
 

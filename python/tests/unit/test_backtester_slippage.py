@@ -31,6 +31,16 @@ def _make_bt(slippage=0.0, slippage_fn=None):
     )
 
 
+@pytest.fixture
+def market_orders(monkeypatch):
+    """出来高の少ない仮のデータでも、本番の指値の判定（#1418）を外して成行で約定させる。
+
+    動的スリッページのテストは出来高を小さくして効きを見るので、指値の判定とは切り離す。
+    """
+    monkeypatch.setattr("src.backtest.limit_fill.LIMIT_ORDER_AVG_VOLUME_THRESHOLD", 0)
+    monkeypatch.setattr("src.backtest.limit_fill.LIMIT_ORDER_SPREAD_PROXY_THRESHOLD", float("inf"))
+
+
 class TestGetSlippage:
     def test_base_only_without_fn(self):
         bt = _make_bt(slippage=0.001)
@@ -76,6 +86,7 @@ class TestSimulateTradingCost:
         assert metrics["num_trades"] >= 1
 
 
+@pytest.mark.usefixtures("market_orders")
 class TestBuyCashCheckWithDynamicSlippage:
     """動的スリッページ込みの買付代金が現金を超えないこと（過剰買付 #483 の再発防止）。"""
 
@@ -140,6 +151,7 @@ class TestExecutionVolumeNoLookahead:
         assert sell_low["cash"] == pytest.approx(sell_high["cash"])
 
 
+@pytest.mark.usefixtures("market_orders")
 class TestShortMarkToMarketDynamicSlippage:
     """空売りの日々の時価評価に、返す時と同じ動的スリッページを入れること（#1231）。"""
 

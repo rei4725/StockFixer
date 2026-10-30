@@ -11,6 +11,7 @@ from config.settings import (
     LIMIT_ORDER_PRICE_BUFFER,
     LIMIT_ORDER_SPREAD_PROXY_THRESHOLD,
 )
+from src.domain.limit_order_rules import plan_limit_order
 from src.domain.ports import MarketDataPort
 from src.domain.trading_rules import THRESHOLD_SCALE_MAX as _THRESHOLD_SCALE_MAX
 from src.domain.trading_rules import THRESHOLD_SCALE_MIN as _THRESHOLD_SCALE_MIN
@@ -22,7 +23,6 @@ from src.utils.logger import get_logger
 from src.utils.optimal_params_loader import OptimalParamsUnreadableError, get_optimal_params
 
 from .stats import OrderExecutionStats
-from .tick_size import round_limit_price, tick_size
 
 logger = get_logger(__name__)
 
@@ -232,24 +232,17 @@ def _choose_order_params(
     """
     avg_volume, spread_proxy = _load_execution_metrics(market, symbol, market_data)
 
-    reasons: list[str] = []
-    if avg_volume is not None and avg_volume < LIMIT_ORDER_AVG_VOLUME_THRESHOLD:
-        reasons.append(f"low_volume={avg_volume:.0f}")
-    if spread_proxy is not None and spread_proxy > LIMIT_ORDER_SPREAD_PROXY_THRESHOLD:
-        reasons.append(f"wide_range={spread_proxy:.3%}")
-
-    if not reasons:
+    # 判定はバックテストと同じ domain の関数で行う（#1418）
+    plan = plan_limit_order(
+        market,
+        side in (OrderSide.BUY, OrderSide.SHORT_COVER),
+        current_price,
+        avg_volume,
+        spread_proxy,
+        LIMIT_ORDER_AVG_VOLUME_THRESHOLD,
+        LIMIT_ORDER_SPREAD_PROXY_THRESHOLD,
+        LIMIT_ORDER_PRICE_BUFFER,
+    )
+    if not plan.is_limit:
         return OrderType.MARKET, 0.0, "market", "open"
-
-    # 低流動性 → 引け指値（引け時点で流動性が集まりやすく価格優位性が高い）
-    # 広スプレッドのみ → 寄付指値（寄付時の価格優位性を活用）
-    order_session = "close" if any("low_volume" in r for r in reasons) else "open"
-    # 余裕の幅は少なくとも現在値の帯の単位1つ分にとり、丸めの後も買いは現在値以上・
-    # 売りは現在値以下に残す（#1403）
-    buffer = max(current_price * LIMIT_ORDER_PRICE_BUFFER, tick_size(market, current_price))
-    # 買い（BUY・SHORT_COVER）は現在値より上、売り（SELL・SHORT）は下に指値を置く
-    is_buy_side = side in (OrderSide.BUY, OrderSide.SHORT_COVER)
-    limit_price = current_price + buffer if is_buy_side else max(0.0, current_price - buffer)
-    # 呼値の単位に丸める。買いは切り下げ、売りは切り上げて、余裕の幅より現在値から離さない（#1396）
-    limit_price = round_limit_price(market, limit_price, is_buy_side)
-    return OrderType.LIMIT, limit_price, ", ".join(reasons), order_session
+    return OrderType.LIMIT, plan.limit_price, ", ".join(plan.reasons), plan.session

@@ -83,6 +83,8 @@ def _flat_final_cash(df: pd.DataFrame) -> float:
         stop_loss_pct=0.07,
         take_profit_pct=None,
         position_sizing="full",
+        # ルールの道は本番と同じ成行で約定する（#1418）
+        limit_order_fill=False,
     )
     _, metrics = backtester.simulate_trading(df, _StubRule().generate_signal(df))
     return float(metrics["final_cash"])

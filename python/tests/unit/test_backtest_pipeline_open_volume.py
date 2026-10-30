@@ -168,6 +168,11 @@ class TestBacktesterUsesOpenAndVolume:
         monkeypatch.setattr(
             "src.utils.db.load_stock_features", lambda m, s: _stock_features_frame(raw)
         )
+        # 仮のデータは出来高が少なく値幅が広い。始値での約定を見るので指値の判定（#1418）は外す
+        monkeypatch.setattr("src.backtest.limit_fill.LIMIT_ORDER_AVG_VOLUME_THRESHOLD", 0)
+        monkeypatch.setattr(
+            "src.backtest.limit_fill.LIMIT_ORDER_SPREAD_PROXY_THRESHOLD", float("inf")
+        )
 
         from src.backtest.backtester import Backtester
         from src.backtest.pipeline import load_features
