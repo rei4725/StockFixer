@@ -52,6 +52,8 @@ def _make_backtester(
         take_profit_pct=take_profit_pct,
         position_sizing="full",
         slippage_fn=make_slippage_fn() if dynamic_slippage else None,
+        # 本番のルールの発注は成行（rule_execution）なので、指値の判定を当てない（#1418）
+        limit_order_fill=False,
     )
 
 
