@@ -1,6 +1,9 @@
 """ユニットテスト: scheduler_pipeline の自動発注連携"""
 
+import os
+import shutil
 import sys
+import tempfile
 import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -116,6 +119,15 @@ class TestRunDailyAutoOrder(unittest.TestCase):
 
 
 class TestRunDailyDriftCheck(unittest.TestCase):
+    def setUp(self):
+        # _is_recently_retrained が本物の models/ の更新時刻を読んで銘柄を外さないよう、
+        # 空の一時フォルダに向ける（#1402）
+        models_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, models_dir, True)
+        patcher = patch("src.utils.data_path_utils.get_models_dir", return_value=models_dir)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     @patch("src.prediction.training_pipeline.train_models_for_symbol_task")
     @patch("src.watchlist.batch_runner.load_target_symbols")
     @patch("src.reporting.discord.discord_utils.send_drift_retrain_notification")
@@ -379,6 +391,46 @@ class TestRunDailyDriftCheck(unittest.TestCase):
         self.assertEqual(mock_train.call_count, 2)
         trained_symbols = {call.args[0].symbol for call in mock_train.call_args_list}
         self.assertEqual(trained_symbols, {"BBB", "CCC"})
+
+    @patch("src.prediction.training_pipeline.train_models_for_symbol_task")
+    @patch("src.watchlist.batch_runner.load_target_symbols")
+    @patch("src.reporting.discord.discord_utils.send_drift_retrain_notification")
+    @patch("src.prediction.db.load_drift_summary")
+    def test_fresh_models_in_python_root_do_not_skip_retrain(
+        self,
+        mock_load_summary,
+        mock_notify,
+        mock_load_symbols,
+        mock_train,
+    ):
+        """本番の作業場の models/jp_7201 が7日以内に更新されていても、再学習の期待は変わらない（#1402）。"""
+        root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, root, True)
+        subdir = os.path.join(root, "models", "jp_7201")
+        os.makedirs(subdir)
+        for name in ("StockXGBoostModel", "StockLightGBMModel"):
+            with open(os.path.join(subdir, f"{name}.joblib"), "wb"):
+                pass
+        mock_load_summary.return_value = pd.DataFrame(
+            [
+                {
+                    "market": "jp",
+                    "symbol": "7201",
+                    "mean_abs_error": 0.03,
+                    "direction_accuracy": 0.40,
+                    "n_samples": 20,
+                },
+            ]
+            + _HEALTHY_PEERS
+        )
+        mock_load_symbols.return_value = [SymbolTask(market="jp", symbol="7201")]
+        mock_train.return_value = {"status": "success"}
+
+        with patch("src.utils.data_path_utils._PYTHON_ROOT", root):
+            run_daily_drift_check()
+
+        mock_train.assert_called_once()
+        self.assertEqual(mock_train.call_args.args[0].symbol, "7201")
 
 
 class TestDailyDriftCheckScheduleConfig(unittest.TestCase):
