@@ -555,7 +555,12 @@ def _poll_recovery_jobs(queue_manager):
     # 補完ジョブの失敗で生存信号が途切れないよう、ポーリング冒頭で送る。
     ping_heartbeat(SCHEDULER_ALIVE_SLUG)
 
-    for job_id, config in SCHEDULE_CONFIG.items():
+    # 締め（recovery_until）を持つジョブを先に回す。締めの無い長い補完（日次の道など）の後ろで
+    # 自動発注の補完が締めを過ぎて飛ばされないため（#1395）。sorted は安定なので同じ組の中は今の順のまま。
+    ordered = sorted(
+        SCHEDULE_CONFIG.items(), key=lambda item: item[1].get("recovery_until") is None
+    )
+    for job_id, config in ordered:
         if not config.get("auto_schedule", True):
             continue
 
