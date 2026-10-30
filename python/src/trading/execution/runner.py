@@ -41,6 +41,7 @@ from src.trading.signal_generator import apply_multi_horizon_score_column
 from src.utils.logger import get_logger
 
 from .entry_gates import _block_entries, _evaluate_entry_gate
+from .freshness import _block_new_if_stale
 from .params import (
     _SPLIT_LOW_CONFIDENCE,
     _apply_split_qty,
@@ -76,6 +77,7 @@ def run_daily_orders(
     mode: str = "paper",
     market_data: MarketDataPort | None = None,
     notifier: NotificationPort | None = None,
+    prediction_saved_day: str | None = None,  # [3/6] の保存の終わりの JST の日付（#1394）
 ) -> OrderExecutionStats:
     """
     日次自動発注メインエントリーポイント。
@@ -86,9 +88,6 @@ def run_daily_orders(
         mode: "paper" or "live"
         trade_diff_sink: 約定乖離の記録先（TradeDiffSink 実装。合成ルートが必ず渡す）
         prediction_repo: 予測結果の読み取り元（PredictionResultRepository 実装。合成ルートが必ず渡す）
-
-    Returns:
-        {"buy_orders": int, "sell_orders": int, "skipped": int, "errors": int}
     """
     logger.info(f"=== 自動発注開始: market={market} mode={mode} broker={broker.broker_name} ===")
 
@@ -152,6 +151,7 @@ def run_daily_orders(
     if entry_error is not None:
         gate_status = blocked_status
     gate_status = _block_new_if_params_unreadable(predictions, gate_status, stats)
+    gate_status = _block_new_if_stale(predictions, gate_status, prediction_saved_day, stats)
     logger.info(
         "[exec] 動的閾値適用: scale=%.3f buy_range=%.3f%%-%.3f%%",
         float(predictions["threshold_scale"].iloc[0]),
