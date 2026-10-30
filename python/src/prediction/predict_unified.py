@@ -413,6 +413,13 @@ def predict_with_unified_model(
                         zero_filled.add(feat)
                 # 期待される特徴量のみ選択
                 latest_X_aligned = latest_X_aligned[expected_features]
+                # 列はあっても値が NaN のもの（DB に NULL のまま残った列）も0で埋める（#1425）
+                nan_features = [
+                    feat for feat in expected_features if pd.isna(latest_X_aligned[feat].iloc[0])
+                ]
+                if nan_features:
+                    latest_X_aligned = latest_X_aligned.fillna({f: 0 for f in nan_features})
+                    zero_filled.update(nan_features)
             else:
                 logger.warning(
                     "モデルの期待特徴量を解決できずアラインメントをスキップ: model=%s",
@@ -443,6 +450,14 @@ def predict_with_unified_model(
             )
             continue
 
+    if zero_filled:
+        logger.info(
+            "予想の特徴量を0で埋めた: market=%s symbol=%s horizon=%d 列=%s",
+            market,
+            symbol,
+            horizon,
+            ",".join(sorted(zero_filled)),
+        )
     record_zero_fill(market, horizon, sorted(zero_filled))
 
     if not pred_prices:

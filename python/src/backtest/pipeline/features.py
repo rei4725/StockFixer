@@ -12,9 +12,10 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-# 約定（翌バー始値 #493）と動的スリッページの平均出来高（#494）のためだけに載せる生の列。
+# 約定（翌バー始値 #493）と動的スリッページの平均出来高（#494）、指値の値幅と届きの判定
+# （High・Low #1418・#1424）のためだけに載せる生の列。
 # 当バーの値なので、モデルの特徴量には使わない（呼び出し側で除外する）。
-SIMULATION_ONLY_COLUMNS = ("Open", "Volume")
+SIMULATION_ONLY_COLUMNS = ("Open", "High", "Low", "Volume")
 
 # 表には載せるが、モデルの学習と予測の特徴量には使わない列（#979・#994）。
 # 当日の生の終値 Close・close と、当日の高安引けを含む atr は本番の特徴量に無い。
@@ -31,7 +32,7 @@ class FeaturesUnavailableError(Exception):
 
 
 def _attach_simulation_columns(X: pd.DataFrame, price_df: pd.DataFrame) -> None:
-    """生の Open・Volume を X の行（日付）に合わせて足す。"""
+    """生の Open・High・Low・Volume を X の行（日付）に合わせて足す。"""
     for col in SIMULATION_ONLY_COLUMNS:
         if col in price_df.columns:
             X[col] = price_df[col].reindex(X.index)
@@ -45,7 +46,7 @@ def _naive_dates(index: pd.Index) -> pd.DatetimeIndex:
 
 
 def _attach_raw_prices(df: pd.DataFrame, market: str, symbol: str) -> pd.DataFrame:
-    """stock_features に market_data_raw の生の Open・Volume・Close を日付で合わせて足す。
+    """stock_features に market_data_raw の生の Open・High・Low・Volume・Close を日付で足す。
 
     stock_features には生の価格が無い（ラグ列だけ）。取れなければ df をそのまま返し、
     呼び出し側は従来どおり Close_lag1 で代替する（約定は Close・スリッページはフラットのみ）。
@@ -65,10 +66,10 @@ def _attach_raw_prices(df: pd.DataFrame, market: str, symbol: str) -> pd.DataFra
             f"[backtest] market_data_raw の読み込みに失敗: {market}/{symbol}", exc_info=True
         )
         raw = None
-    needed = ["Open", "Close", "Volume"]
+    needed = ["Open", "High", "Low", "Close", "Volume"]
     if raw is None or raw.empty or not set(needed) <= set(raw.columns):
         logger.warning(
-            f"[backtest] market_data_raw に生の Open・Volume・Close がありません: {market}/{symbol}"
+            f"[backtest] market_data_raw に生の OHLCV がありません: {market}/{symbol}"
             " → Close は Close_lag1 で代替、約定は Close、スリッページはフラットのみになります"
         )
         return df
@@ -83,7 +84,7 @@ def _attach_raw_prices(df: pd.DataFrame, market: str, symbol: str) -> pd.DataFra
     if missing > 0:
         logger.warning(
             f"[backtest] market_data_raw に無い日が {missing}/{len(df)} 行: {market}/{symbol}"
-            " → その行の Close は Close_lag1、Open は Close で代替します"
+            " → その行の Close は Close_lag1、Open・High・Low は Close で代替します"
         )
 
     df = df.copy()
@@ -92,8 +93,10 @@ def _attach_raw_prices(df: pd.DataFrame, market: str, symbol: str) -> pd.DataFra
         if "Close_lag1" in df.columns:
             close = close.fillna(df["Close_lag1"])
         df["Close"] = close
-    if "Open" not in df.columns:
-        df["Open"] = aligned["Open"].fillna(df["Close"])
+    # 欠けた日は、その日の Close で埋める（先の日の値を使わない）
+    for col in ("Open", "High", "Low"):
+        if col not in df.columns:
+            df[col] = aligned[col].fillna(df["Close"])
     if "Volume" not in df.columns:
         # 欠けた日は直前の出来高で埋める（過去→現在方向のみ。先読みにしない）
         df["Volume"] = aligned["Volume"].ffill().fillna(0.0)
@@ -113,10 +116,11 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
 
     Returns:
         特徴量 DataFrame（インデックス=日付 or row_num）
-        - "api" / "raw" の場合は生の Close・Open・Volume 列を保持
-        - "file" の場合は market_data_raw から生の Close・Open・Volume を日付で補完
+        - "api" / "raw" の場合は生の Close・Open・High・Low・Volume 列を保持
+        - "file" の場合は market_data_raw から生の Close・Open・High・Low・Volume を日付で補完
           （取れなければ Close_lag1 を Close として補完）
-        - Open・Volume（SIMULATION_ONLY_COLUMNS）は約定とスリッページ用で、特徴量にしない
+        - Open・High・Low・Volume（SIMULATION_ONLY_COLUMNS）は約定・指値・スリッページ用で、
+          特徴量にしない
     """
     if source == "api":
         from datetime import datetime, timedelta
@@ -162,7 +166,7 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
             raise FeaturesUnavailableError(f"特徴量生成に失敗しました: {market}/{symbol}")
         X.columns = [re.sub(r"[^0-9a-zA-Z_]", "_", str(c)) for c in X.columns]
         X["y"] = y
-        # シミュレーション用に Close・Open・Volume 列を保持
+        # シミュレーション用に Close・Open・High・Low・Volume 列を保持
         X["Close"] = close_series.reindex(X.index)
         _attach_simulation_columns(X, price_df)
         if "atr" in df.columns:
@@ -271,7 +275,7 @@ def load_features(market: str, symbol: str, source: str) -> pd.DataFrame:
             except Exception as e:
                 logger.debug(f"[backtest] 日付補完スキップ: {e}", exc_info=True)
 
-        # stock_features には生の Close・Open・Volume が無いため market_data_raw から日付で足す
+        # stock_features には生の OHLCV が無いため market_data_raw から日付で足す
         df = _attach_raw_prices(df, market, symbol)
 
         # market_data_raw から取れなければ Close_lag1 で代替（従来の動き）
