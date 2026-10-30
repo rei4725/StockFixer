@@ -22,6 +22,7 @@ from src.utils.logger import get_logger
 from src.utils.optimal_params_loader import OptimalParamsUnreadableError, get_optimal_params
 
 from .stats import OrderExecutionStats
+from .tick_size import round_limit_price
 
 logger = get_logger(__name__)
 
@@ -247,4 +248,6 @@ def _choose_order_params(
     # 買い（BUY・SHORT_COVER）は現在値より上、売り（SELL・SHORT）は下に指値を置く
     is_buy_side = side in (OrderSide.BUY, OrderSide.SHORT_COVER)
     limit_price = current_price + buffer if is_buy_side else max(0.0, current_price - buffer)
+    # 呼値の単位に丸める。買いは切り下げ、売りは切り上げて、余裕の幅より現在値から離さない（#1396）
+    limit_price = round_limit_price(market, limit_price, is_buy_side)
     return OrderType.LIMIT, limit_price, ", ".join(reasons), order_session
