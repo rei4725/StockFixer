@@ -11,9 +11,12 @@ API ドキュメント: https://disclosure2.edinet-fsa.go.jp/weee0020.aspx
   - 日付ごとに 1 回の API コールが必要なため、長期間の取得は max_days でキャップする。
   - EDINET_API_KEY 環境変数が設定されている場合は Subscription-Key として送信する。
   - 未設定でも基本アクセスは可能（レートリミットが厳しい場合がある）。
+  - HTTP 200 でも本文の StatusCode が成功でない（キーが無い・認証の失敗）ときは、
+    WARNING を1回出し、reset_edinet_stop() が呼ばれるまで（その回の残りの銘柄で）取得しない。
 """
 
 import os
+import threading
 from datetime import date as _date
 from datetime import timedelta
 from typing import Optional
@@ -39,6 +42,45 @@ _TARGET_DOC_TYPES = frozenset(
 
 # デフォルトで取得する最大日数（API コール数を制限）
 _DEFAULT_MAX_DAYS = 30
+
+# 本文の StatusCode が成功でない応答を受けたら立てる。並列の銘柄の取得で共有する（#1426）
+_stop_lock = threading.Lock()
+_stopped = False
+
+
+def reset_edinet_stop() -> None:
+    """取得の打ち切りを戻す。バッチの回の始めに呼び、次の回はまた1回目から試す。"""
+    global _stopped
+    with _stop_lock:
+        _stopped = False
+
+
+def _is_stopped() -> bool:
+    with _stop_lock:
+        return _stopped
+
+
+def _stop_on_status(date_str: str, data: object, has_key: bool) -> bool:
+    """本文の StatusCode が成功でなければ打ち切りを立て、初回だけ WARNING を出す。"""
+    global _stopped
+    if not isinstance(data, dict) or "StatusCode" not in data:
+        return False
+    status = data.get("StatusCode")
+    if str(status) == "200":
+        return False
+    with _stop_lock:
+        first = not _stopped
+        _stopped = True
+    if first:
+        logger.warning(
+            "EDINET: 応答の本文の StatusCode=%s (%s) のため、この回の残りの取得を打ち切る"
+            " (date=%s, キーの有無=%s)",
+            status,
+            data.get("message", ""),
+            date_str,
+            has_key,
+        )
+    return True
 
 
 def _to_edinet_sec_code(symbol: str) -> str:
@@ -104,6 +146,8 @@ class EdinetClient:
         records: dict[str, list[str]] = {}
         current = effective_start
         while current <= end:
+            if _is_stopped():
+                return None
             titles = self._fetch_day(current.isoformat(), sec_code)
             if titles:
                 records[current.isoformat()] = titles
@@ -132,6 +176,9 @@ class EdinetClient:
             return []
         except Exception as e:
             logger.warning("EDINET API 予期しないエラー (%s): %s", date_str, e)
+            return []
+
+        if _stop_on_status(date_str, data, bool(self._api_key)):
             return []
 
         results = data.get("results", [])

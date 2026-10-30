@@ -508,8 +508,10 @@ def run_batch_pipeline(
     from concurrent.futures import as_completed
 
     from src.domain.types import BatchFailure, BatchResult
+    from src.market_data.adapters.edinet_client import reset_edinet_stop
 
     _TASK_TIMEOUT = 300
+    reset_edinet_stop()  # EDINET の打ち切りは回の中だけ。毎回1回目から試す（#1426）
 
     def _fetch_task(task) -> dict:
         """データ取得＋特徴量生成のみ（DB書き込みなし）"""
