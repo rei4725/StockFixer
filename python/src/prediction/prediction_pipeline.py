@@ -7,6 +7,7 @@
 import glob
 import json
 import logging
+import math
 import os
 import warnings
 from collections.abc import Callable
@@ -56,8 +57,10 @@ def _split_adjust_scale(current_price: float, base_close: float) -> float | None
 
     比が _SPLIT_GAP_TOLERANCE の内なら分割は無いとみなして 1.0 を返す。
     外なら 0.5 刻みの分割の比に丸め、丸めとの差が小さいときだけその倍率を返し、
-    分割の比に合わないときは None を返す。
+    分割の比に合わないときや、値が有限でないときは None を返す。
     """
+    if not (math.isfinite(base_close) and math.isfinite(current_price)):
+        return None
     if base_close <= 0 or current_price <= 0:
         return None
     gap = base_close / current_price
@@ -454,6 +457,10 @@ def run_accuracy_check(
 
         # 翌 horizon 営業日後の実績終値を取得
         ohlcv = load_raw_ohlcv(market, symbol)
+        if ohlcv is not None and not ohlcv.empty:
+            # 終値の欠けた足（NULL・無限）を落とし、次の終値のある足で採点する
+            close = pd.to_numeric(ohlcv["Close"], errors="coerce")
+            ohlcv = ohlcv[close.notna() & ~close.isin([float("inf"), float("-inf")])]
         if ohlcv is None or ohlcv.empty:
             skipped["足なし"] += 1
             continue

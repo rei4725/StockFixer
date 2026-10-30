@@ -19,6 +19,11 @@ def _raw_save_error(e: Exception) -> str:
     return f"market_data_raw の保存に失敗: {e}"
 
 
+def has_price_step(quality) -> bool:
+    """品質の結果に段差の足（price_step）があるか（#1399）。"""
+    return quality is not None and any(i.check == "price_step" for i in quality.issues)
+
+
 def log_pipeline_summary(phase: str, batch_result: BatchResult) -> None:
     """バッチ処理結果をログに出力する。"""
     n_success = len(batch_result.succeeded)
@@ -37,6 +42,7 @@ def write_batch_to_db(
     save_features_to_db: Callable,
     notification_port: "NotificationPort | None" = None,
     record_quality_issues: "Callable | None" = None,
+    delete_features: "Callable | None" = None,
 ) -> BatchResult:
     """フェーズ2: DB書き込み（逐次） - DuckDB排他ロック制約のため直列実行。
 
@@ -46,6 +52,9 @@ def write_batch_to_db(
 
     特徴量をスキップした銘柄に品質の結果（段差の足など）があれば、
     record_quality_issues(market, symbol, quality_result, notification_port) で記録する（#1386）。
+    段差の足（price_step）で外した銘柄は、段差の入った前の特徴量で予想と学習を続けないよう、
+    delete_features(market, symbol) で stock_features の行を消す。消すのが落ちた銘柄は
+    足の保存は続けたうえで failed に数える（#1399）。
     """
     failed: list = []
     if record_quality_issues is not None:
@@ -60,17 +69,27 @@ def write_batch_to_db(
     if skipped_raw:
         logger.info(f"Raw保存開始（特徴量スキップ分） 対象件数: {len(skipped_raw)}")
     for r in batch_result.skipped:
-        if r.get("raw_data") is None:
-            skipped.append(r)
-            continue
-        try:
-            save_raw_ohlcv(r["market"], r["symbol"], r["raw_data"])
-            skipped.append(r)
-        except Exception as e:
-            logger.error(f"[Raw保存エラー] {r['market']}/{r['symbol']}: {e}", exc_info=True)
+        errors: list = []
+        if delete_features is not None and has_price_step(r.get("quality_result")):
+            try:
+                delete_features(r["market"], r["symbol"])
+            except Exception as e:
+                logger.error(
+                    f"[stock_features 削除エラー] {r['market']}/{r['symbol']}: {e}", exc_info=True
+                )
+                errors.append(f"段差の銘柄の stock_features の削除に失敗: {e}")
+        if r.get("raw_data") is not None:
+            try:
+                save_raw_ohlcv(r["market"], r["symbol"], r["raw_data"])
+            except Exception as e:
+                logger.error(f"[Raw保存エラー] {r['market']}/{r['symbol']}: {e}", exc_info=True)
+                errors.append(_raw_save_error(e))
+        if errors:
             failed.append(
-                BatchFailure(market=r["market"], symbol=r["symbol"], error=_raw_save_error(e))
+                BatchFailure(market=r["market"], symbol=r["symbol"], error=" / ".join(errors))
             )
+        else:
+            skipped.append(r)
 
     success_data = [r for r in batch_result.succeeded if r.get("data")]
     logger.info(f"DB書き込み開始（逐次） 対象件数: {len(success_data)}")
