@@ -23,6 +23,7 @@ from src.trading.brokers.paper.bar_timing import bar_date_jst as _bar_date_jst
 from src.trading.brokers.paper.bar_timing import created_after_bar_close as _created_after_bar_close
 from src.trading.brokers.paper.bar_timing import parse_predicted_date as _parse_predicted_date
 from src.trading.brokers.paper.fill import apply_fill
+from src.trading.brokers.paper.fill import claim_pending as _claim_pending
 from src.trading.brokers.paper.pending_short import (
     pending_in_row_units,
     read_pending_shorts,
@@ -318,6 +319,8 @@ class PaperBroker(BrokerBase):
                     else:
                         logger.info(f"[paper] {symbol}: 指値未達、失効")
                         with _db_connection() as con, con.transaction():
+                            if not _claim_pending(con, order_id, symbol):
+                                continue
                             con.execute(
                                 "UPDATE paper_orders SET status='expired' WHERE order_id=%s",
                                 [order_id],
@@ -331,6 +334,9 @@ class PaperBroker(BrokerBase):
                 # Phase 2: 約定処理（接続を再取得）。接続は自動確定のため、1件分を囲み、
                 # 途中で落ちたら残高・保有・注文を全部戻して pending に残す（#1088）
                 with _db_connection() as con, con.transaction():
+                    # 読んだ後に別の約定の回が約定させた注文は飛ばす（#1419）
+                    if not _claim_pending(con, order_id, symbol):
+                        continue
                     if side == int(OrderSide.BUY):
                         cash = float(
                             con.execute("SELECT balance FROM paper_balance LIMIT 1").fetchone()[0]
