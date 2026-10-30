@@ -157,6 +157,57 @@ class TestPredictUsesLatestRow(unittest.TestCase):
         self.assertEqual(list(passed.columns), expected_features)
         self.assertTrue((passed[action_lags] == 0).all().all())
 
+    def test_predict_fills_nan_in_model_columns_and_records(self):
+        """モデルが持つ列が表にあって値が NaN のとき、0で埋めて記録する（#1425）"""
+        from src.prediction.predict_unified import predict_with_unified_model
+        from src.prediction.prediction_run_stats import collect_prediction_run_stats
+
+        ohlcv = _make_ohlcv(60)
+        data = _fetch_features(ohlcv)
+        stored = data.drop(columns=["market", "symbol"]).copy()
+        # 特徴量の生成が作らなくなった列は、DB に NULL のまま残る（#816 と同じ形）
+        stored["Dividends_lag1"] = np.nan
+        expected_features = [c for c in stored.columns if c != "y"]
+        filled_col = expected_features[0]
+        original_value = stored[filled_col].iloc[-1]
+        stored.iloc[-1, stored.columns.get_loc(filled_col)] = np.nan
+
+        mock_model = MagicMock()
+        mock_model.predict.return_value = pd.Series([0.01])
+        mock_ticker = MagicMock()
+        mock_ticker.history.return_value = pd.DataFrame({"Close": [100.0]})
+
+        with (
+            patch("src.prediction.predict_unified.load_feature_data", return_value=stored),
+            patch("src.prediction.predict_unified.get_cached_model", return_value=mock_model),
+            patch(
+                "src.prediction.predict_unified.resolve_expected_features",
+                return_value=expected_features,
+            ),
+            patch("src.prediction.predict_unified.get_service_url", return_value=None),
+            patch("src.prediction.predict_unified.get_ticker", return_value="AAPL"),
+            patch("src.prediction.predict_unified.load_model_weights", return_value=[1.0]),
+            patch("src.prediction.predict_unified.yf.Ticker", return_value=mock_ticker),
+            collect_prediction_run_stats("test") as stats,
+        ):
+            result = predict_with_unified_model("us", "AAPL", model_types=["UnifiedStockXGBoost"])
+
+        self.assertIsNotNone(result)
+        self.assertFalse(pd.isna(original_value))
+        passed = mock_model.predict.call_args[0][0]
+        self.assertEqual(list(passed.columns), expected_features)
+        self.assertFalse(passed.isna().any().any())
+        self.assertEqual(passed["Dividends_lag1"].iloc[0], 0)
+        self.assertEqual(passed[filled_col].iloc[0], 0)
+        # 埋めていない列の値は変わらない
+        others = [c for c in expected_features if c not in ("Dividends_lag1", filled_col)]
+        pd.testing.assert_series_equal(
+            passed.iloc[0][others], stored.iloc[-1][others], check_names=False
+        )
+        counts = stats.snapshot()[("us", 1)]
+        self.assertEqual(counts.filled_symbols, 1)
+        self.assertEqual(set(counts.filled_features), {"Dividends_lag1", filled_col})
+
 
 class TestReadersDropUndeterminedY(unittest.TestCase):
     def _stored_frame(self) -> pd.DataFrame:
