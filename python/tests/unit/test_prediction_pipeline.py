@@ -861,6 +861,89 @@ class TestRunAccuracyCheckAdditional(unittest.TestCase):
                 self.assertEqual(row["actual_price"], 1020.0)
                 self.assertAlmostEqual(row["actual_ratio"], 0.02)
 
+    @patch("src.prediction.db.load_drift_summary")
+    @patch("src.prediction.db.save_prediction_accuracy")
+    @patch("src.utils.db.load_raw_ohlcv")
+    @patch("src.prediction.db.load_prediction_results")
+    def test_skips_nan_close_bar_and_scores_with_next_close(
+        self, mock_load, mock_ohlcv, mock_save, mock_drift
+    ):
+        """翌日の足の終値が欠けているとき、その次の終値のある足で採点すること"""
+        import pandas as pd
+
+        from src.prediction.prediction_pipeline import run_accuracy_check
+
+        mock_load.return_value = pd.DataFrame(
+            {
+                "market": ["jp"],
+                "symbol": ["7203"],
+                "predicted_at": ["20261021_224556"],
+                "avg_pred_price": [1050.0],
+                "current_price": [1000.0],
+            }
+        )
+        mock_ohlcv.return_value = pd.DataFrame(
+            {"Close": [1000.0, float("nan"), 1030.0]},
+            index=pd.DatetimeIndex(
+                pd.to_datetime(["2026-10-21", "2026-10-22", "2026-10-23"]), name="Date"
+            ),
+        )
+        mock_drift.return_value = pd.DataFrame()
+
+        run_accuracy_check(horizon=1)
+
+        mock_save.assert_called_once()
+        row = mock_save.call_args[0][0][0]
+        self.assertEqual(row["actual_price"], 1030.0)
+        self.assertAlmostEqual(row["actual_ratio"], 0.03)
+        self.assertTrue(row["direction_match"])
+
+    @patch("src.prediction.db.load_drift_summary")
+    @patch("src.prediction.db.save_prediction_accuracy")
+    @patch("src.utils.db.load_raw_ohlcv")
+    @patch("src.prediction.db.load_prediction_results")
+    def test_nan_base_close_does_not_abort_other_symbols(
+        self, mock_load, mock_ohlcv, mock_save, mock_drift
+    ):
+        """基準の足の終値が欠けた銘柄があっても例外を投げず、ほかの銘柄を採点して保存すること"""
+        import pandas as pd
+
+        from src.prediction.prediction_pipeline import run_accuracy_check
+
+        mock_load.return_value = pd.DataFrame(
+            {
+                "market": ["jp", "jp"],
+                "symbol": ["BAD", "GOOD"],
+                "predicted_at": ["20261021_224556", "20261021_224556"],
+                "avg_pred_price": [1050.0, 1050.0],
+                "current_price": [1000.0, 1000.0],
+            }
+        )
+        index = pd.DatetimeIndex(pd.to_datetime(["2026-10-21", "2026-10-22"]), name="Date")
+        bars = {
+            "BAD": pd.DataFrame({"Close": [float("nan"), 1010.0]}, index=index),
+            "GOOD": pd.DataFrame({"Close": [1000.0, 1020.0]}, index=index),
+        }
+        mock_ohlcv.side_effect = lambda market, symbol: bars[symbol]
+        mock_drift.return_value = pd.DataFrame()
+
+        run_accuracy_check(horizon=1)
+
+        mock_save.assert_called_once()
+        rows = {r["symbol"]: r for r in mock_save.call_args[0][0]}
+        self.assertIn("GOOD", rows)
+        self.assertEqual(rows["GOOD"]["actual_price"], 1020.0)
+        for r in rows.values():
+            self.assertFalse(pd.isna(r["actual_price"]))
+
+    def test_split_adjust_scale_returns_none_for_non_finite(self):
+        """基準の終値・現在値が有限でないとき、_split_adjust_scale は None を返すこと"""
+        from src.prediction.prediction_pipeline import _split_adjust_scale
+
+        self.assertIsNone(_split_adjust_scale(100.0, float("nan")))
+        self.assertIsNone(_split_adjust_scale(float("nan"), 100.0))
+        self.assertIsNone(_split_adjust_scale(100.0, float("inf")))
+
 
 if __name__ == "__main__":
     unittest.main()
