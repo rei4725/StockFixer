@@ -42,6 +42,7 @@ from src.market_data.saver import save_raw_ohlcv
 from src.market_data.sentiment_features import add_sentiment_features, fetch_news_sentiment_with_llm
 from src.market_data.split_refetch import (
     bars_after,
+    bars_from,
     find_price_steps,
     overlap_close_mismatch,
     overlap_fetch_start,
@@ -144,11 +145,13 @@ def fetch_stock_data_with_features(
                     reason,
                     data_source,
                     get_stock_data,
+                    get_raw_ohlcv_from_db,
                 )
                 fresh_data = drop_unclosed_bars(fresh_data, market)
                 if fresh_data is None:
                     return None
-                df = fresh_data
+                # 窓より前まで広げた足は全部保存し、特徴量は今までどおり窓の中で作る（#1392）
+                df = bars_from(fresh_data, start_date)
                 full_fetched = True
             if fresh_data is not None and not fresh_data.empty:
                 if not full_fetched:
@@ -218,10 +221,11 @@ def fetch_stock_data_with_features(
             f"前日比が極端な足 {steps[:3]}",
             data_source,
             get_stock_data,
+            get_raw_ohlcv_from_db,
         )
         full_data = drop_unclosed_bars(full_data, market)
         if full_data is not None and not full_data.empty:
-            df = full_data
+            df = bars_from(full_data, start_date)
             raw_data_to_save = _save_or_defer_raw(market, symbol, full_data, defer_raw_save)
             steps = find_price_steps(df)
     if steps:

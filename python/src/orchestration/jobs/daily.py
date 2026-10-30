@@ -27,6 +27,11 @@ from src.orchestration.jobs.common import (
 )
 from src.orchestration.jobs.drift_check import run_daily_drift_check
 from src.orchestration.jobs.prediction_errors import notify_prediction_errors
+from src.orchestration.jobs.prediction_saved_marker import (
+    clear_prediction_saved_marker,
+    mark_prediction_saved,
+    read_prediction_saved_day,
+)
 from src.orchestration.jobs.unavailable_gates import (
     _raise_if_fetch_mostly_unavailable,
     _raise_if_rule_signals_mostly_unavailable,
@@ -146,6 +151,8 @@ def run_daily_pipeline():
     # （毎日 compared_with_previous=False になる、C-1 対策）。
     # 取得に失敗しても致命的ではない（急変チェックがスキップされるだけ）。
     previous_stats = None
+    # 保存の途中や落ちた回で 8:50 の新規が出ないよう、保存し終えるまで印を消しておく（#1394）
+    clear_prediction_saved_marker()
 
     try:
         from src.prediction.predict_unified import preload_models
@@ -159,6 +166,7 @@ def run_daily_pipeline():
         output_top_worst_results(
             output_rows, mode="unified", shadow_mode=True, model_version="production"
         )
+        mark_prediction_saved()
         logger.info("[3/6] 予測完了 (production): %d 銘柄", len(output_rows))
         notify_prediction_errors(predict_errors)
     except Exception as e:
@@ -269,6 +277,7 @@ def run_daily_auto_order():
             market="jp",
             mode=mode,
             market_data=market_data,
+            prediction_saved_day=read_prediction_saved_day(),
         )
         logger.info(
             "=== 自動発注完了: 買い=%s 売り=%s ===", stats["buy_orders"], stats["sell_orders"]
@@ -300,6 +309,7 @@ def run_daily_auto_order():
         )
     except Exception as e:
         logger.error("自動発注完了通知失敗: %s", e, exc_info=True)
+    _notify_stale_prediction(stats)
 
     # ホライズン期限切れポジションの自動決済。失敗は相関の警告を送った後に投げ直し、
     # 期限を過ぎた保有が決済されずに残ったことをジョブの失敗として見せる（#886）
@@ -332,6 +342,25 @@ def run_daily_auto_order():
     # daily_auto_order は max_retries: 0 のため、失敗にしても発注は呼び直されない。
     if stats.get("errors", 0) > 0:
         raise RuntimeError(f"自動発注で注文の失敗が {stats['errors']} 件あった")
+
+
+def _notify_stale_prediction(stats) -> None:
+    """今日の予想の保存が終わっておらず新規を止めた日に、件数と理由を1回知らせる（#1394）。"""
+    reason = stats.get("stale_prediction_reason")
+    if not reason:
+        return
+    try:
+        from src.domain.ports import AlertLevel
+        from src.infrastructure.discord_notification_adapter import DiscordNotificationAdapter
+
+        DiscordNotificationAdapter().send_alert(
+            "自動発注: 今日の予想が無いため新規を止めた",
+            f"{reason}\n新規の買い・ショートは出さず、決済だけ行った"
+            f"（売り={stats.get('sell_orders', 0)} 件、スキップ={stats.get('skipped', 0)} 件）。",
+            level=AlertLevel.WARNING,
+        )
+    except Exception as e:
+        logger.error("新規を止めた知らせの送信失敗: %s", e, exc_info=True)
 
 
 def run_horizon_exit_check() -> None:
