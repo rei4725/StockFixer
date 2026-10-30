@@ -11,6 +11,23 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+def claim_pending(con: Any, order_id: str, symbol: str) -> bool:
+    """注文がまだ pending なら行を押さえて True を返す（#1419）
+
+    約定の回が重なると、どちらも同じ注文を pending として読む。書き込みのトランザクションの
+    始めに行を押さえて読み直し、先の回が約定・失効させた注文は False で飛ばす。
+    Postgres は押さえを待った後に WHERE を読み直すので、先の回の確定後は行が返らない。
+    """
+    row = con.execute(
+        "SELECT order_id FROM paper_orders WHERE order_id=%s AND status='pending' FOR UPDATE",
+        [order_id],
+    ).fetchone()
+    if row is None:
+        logger.warning("[paper] %s: 注文 %s は別の約定の回が処理済みのため飛ばす", symbol, order_id)
+        return False
+    return True
+
+
 def apply_fill(con: Any, order_id: str, symbol: str, side: int, qty: int, fill_price: float) -> int:
     """約定に合わせてポジションと残高を更新し、実際に約定した株数を返す
 
