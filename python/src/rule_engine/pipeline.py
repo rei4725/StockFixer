@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import math
 from datetime import date, timedelta
 from typing import Any
 
@@ -80,7 +81,8 @@ def _get_today_signal(
 ) -> tuple[int, float] | None:
     """当日のシグナルと終値を返す。Returns: (signal, price) signal は 1=buy, -1=sell, 0=hold
 
-    未知のルール・データ不足、または signal_date を渡したときに最後の足が古すぎれば
+    未知のルール・データ不足・最後の足の終値が有限の正の数でない（#1409）、
+    または signal_date を渡したときに最後の足が古すぎれば
     None を返す（シグナルを出さない。HOLD とは分ける #822）。
     """
     rule = _RULE_INSTANCES.get(rule_name)
@@ -105,10 +107,18 @@ def _get_today_signal(
             )
             return None
 
+    # 終値だけ欠けた足は取得の後も残る。HOLD や NaN の値段で渡さず、出せない銘柄にする（#1409）
+    today_price = float(pd.to_numeric(df["Close"].iloc[-1:], errors="coerce").iloc[0])
+    if not math.isfinite(today_price) or today_price <= 0:
+        logger.warning(
+            f"最後の足の終値が使えないためシグナルを出さない: {market}/{symbol} "
+            f"（終値 {today_price}）"
+        )
+        return None
+
     signal_series = rule.generate_signal(df)
 
     today_signal = int(signal_series.iloc[-1])
-    today_price = float(df["Close"].iloc[-1])
     return today_signal, today_price
 
 

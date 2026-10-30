@@ -107,6 +107,40 @@ class TestGetTodaySignal(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(_count_weekdays_behind(date(2026, 9, 18), date(2026, 9, 24), "jp"), 1)
 
+    def test_bad_last_close_returns_none(self):
+        """最後の足の終値が NaN・inf・0 以下なら、HOLD にせずシグナルを出さない（#1409）。"""
+        from src.rule_engine.pipeline import _get_today_signal
+
+        for rule_name in ["rsi_contrarian", "ema_momentum", "volume_breakout"]:
+            for bad in [np.nan, np.inf, -np.inf, 0.0, -1.0]:
+                with self.subTest(rule=rule_name, close=bad):
+                    df = _make_ohlcv()
+                    df.iloc[-1, df.columns.get_loc("Close")] = bad
+                    mock_port = _MockMarketDataPort(df)
+                    with self.assertLogs("src.rule_engine.pipeline", level="WARNING") as logs:
+                        result = _get_today_signal(
+                            "jp", "7203", rule_name, mock_port, signal_date=date(2024, 3, 22)
+                        )
+                    self.assertIsNone(result)
+                    self.assertIn("jp/7203", "\n".join(logs.output))
+
+    def test_complete_bars_return_rule_signal_and_last_close(self):
+        """終値がそろった足では、規則の最後のシグナルと最後の終値を今までどおり返す。"""
+        from src.rule_engine.pipeline import _RULE_INSTANCES, _get_today_signal
+
+        df = _make_ohlcv()
+        for rule_name in ["rsi_contrarian", "ema_momentum", "volume_breakout"]:
+            with self.subTest(rule=rule_name):
+                expected = int(_RULE_INSTANCES[rule_name].generate_signal(df).iloc[-1])
+                result = _get_today_signal(
+                    "jp",
+                    "7203",
+                    rule_name,
+                    _MockMarketDataPort(df),
+                    signal_date=date(2024, 3, 22),
+                )
+                self.assertEqual(result, (expected, float(df["Close"].iloc[-1])))
+
     def test_jp_holiday_signal_date_is_not_counted(self):
         """jp で signal_date が休場日なら、その日を遅れに数えない（#1164）。"""
         from src.rule_engine.pipeline import _count_weekdays_behind
@@ -256,6 +290,49 @@ class TestRunRuleSignalPipeline(unittest.TestCase):
                     return short
                 if ticker.startswith("8306"):
                     raise RuntimeError("fetch error")
+                return good
+
+        with (
+            patch("src.rule_engine.pipeline.load_effective_rules", return_value=effective_df),
+            patch("src.rule_engine.pipeline.upsert_rule_signal") as mock_upsert,
+        ):
+            batch = generate_rule_signals(
+                "jp", signal_date=date(2024, 3, 22), market_data_port=_Port()
+            )
+        self.assertEqual(batch.total, 4)
+        self.assertEqual([s["symbol"] for s in batch.signals], ["7203"])
+        self.assertEqual(sorted(u.symbol for u in batch.unavailable), ["6758", "8306", "9984"])
+        mock_upsert.assert_called_once()
+        self.assertEqual(mock_upsert.call_args.args[2], "7203")
+
+    def test_bad_last_close_symbol_is_unavailable_and_not_saved(self):
+        """最後の足の終値が欠けた銘柄は HOLD として保存せず unavailable に入れる（#1409）。"""
+        from src.rule_engine.pipeline import generate_rule_signals
+
+        effective_df = pd.DataFrame(
+            [
+                {"symbol": "7203", "best_rule": "rsi_contrarian", "win_rate": 0.6, "net_profit": 1},
+                {"symbol": "9984", "best_rule": "rsi_contrarian", "win_rate": 0.6, "net_profit": 1},
+                {"symbol": "6758", "best_rule": "ema_momentum", "win_rate": 0.6, "net_profit": 1},
+                {"symbol": "8306", "best_rule": "rsi_contrarian", "win_rate": 0.6, "net_profit": 1},
+            ]
+        )
+        good = _make_ohlcv()
+        nan_close = _make_ohlcv()
+        nan_close.iloc[-1, nan_close.columns.get_loc("Close")] = np.nan
+        inf_close = _make_ohlcv()
+        inf_close.iloc[-1, inf_close.columns.get_loc("Close")] = np.inf
+        zero_close = _make_ohlcv()
+        zero_close.iloc[-1, zero_close.columns.get_loc("Close")] = 0.0
+
+        class _Port:
+            def get_ohlcv_with_indicators(self, ticker, lookback_days):
+                if ticker.startswith("9984"):
+                    return nan_close
+                if ticker.startswith("6758"):
+                    return inf_close
+                if ticker.startswith("8306"):
+                    return zero_close
                 return good
 
         with (
