@@ -39,6 +39,7 @@ class Backtester:
         slippage_fn: Optional[Callable[[int, float, float], float]] = None,
         execution_lag: int = 1,
         include_monte_carlo: bool = False,
+        limit_order_fill: bool = True,
     ):
         self.model_manager = model_manager
         self.signal_generator = signal_generator
@@ -69,6 +70,9 @@ class Backtester:
         # 0 で従来の同バー(当日Close)約定に戻す（後方互換）。
         self.execution_lag = max(0, int(execution_lag))
         self.include_monte_carlo = include_monte_carlo  # #374: MCリスク統計を含めるか
+        # #1418: 本番の予想のシグナルは流動性の低い銘柄を指値で出すため、既定で指値の判定を当てる。
+        # 本番が成行で出すルールの発注（rule_execution）のバックテストは False で翌バーの始値に戻す
+        self.limit_order_fill = limit_order_fill
 
     def _get_slippage(self, qty: int, price: float, volume: float = 0.0) -> float:
         """有効スリッページ率を返す（#494）。
@@ -208,7 +212,9 @@ class Backtester:
         # 最終バーで判定したものは約定先バーが無いため、最終日の強制決済に任せる。
         pending_exit: Optional[str] = None
         # #1418: 本番で指値になる日は、翌バーが指値に届いたときだけ指値で約定する
-        limit_fill = LimitFillModel(df, close_col, self.market, self.execution_lag > 0)
+        limit_fill = LimitFillModel(
+            df, close_col, self.market, self.limit_order_fill and self.execution_lag > 0
+        )
 
         for date in df.index:
             price = df.loc[date, close_col]
