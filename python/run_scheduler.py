@@ -538,7 +538,7 @@ def _register_jobs(scheduler, queue_manager):
         logger.info(f"ジョブ登録: {job_id} - {config['description']}")
 
     scheduler.add_job(
-        lambda: _poll_recovery_jobs(queue_manager),
+        lambda: _poll_recovery_jobs(queue_manager, with_cutoff=False),
         trigger="interval",
         minutes=5,
         id="recovery_poller",
@@ -548,12 +548,30 @@ def _register_jobs(scheduler, queue_manager):
     )
     logger.info("ジョブ登録: recovery_poller - 5分間隔で未実行ジョブを補完")
 
+    # 締め（recovery_until）を持つジョブは、日次の道などの長い補完でふさがる recovery_poller と
+    # 別のスレッドで判定する。ふさがっている間に補完の時刻を迎えても締めの内に補完するため（#1410）
+    scheduler.add_job(
+        lambda: _poll_recovery_jobs(queue_manager, with_cutoff=True),
+        trigger="interval",
+        minutes=1,
+        id="recovery_cutoff_poller",
+        name="締めのあるジョブの未実行補完ポーリング",
+        coalesce=True,
+        max_instances=1,
+    )
+    logger.info("ジョブ登録: recovery_cutoff_poller - 1分間隔で締めのあるジョブを補完")
 
-def _poll_recovery_jobs(queue_manager):
-    """所定時刻を過ぎても未実行のジョブを補完実行する（前日分も含む）"""
-    # 外部死活監視（#496）: スケジューラ生存を5分間隔で通知。
-    # 補完ジョブの失敗で生存信号が途切れないよう、ポーリング冒頭で送る。
-    ping_heartbeat(SCHEDULER_ALIVE_SLUG)
+
+def _poll_recovery_jobs(queue_manager, with_cutoff: bool | None = None):
+    """所定時刻を過ぎても未実行のジョブを補完実行する（前日分も含む）
+
+    with_cutoff が True なら締め（recovery_until）のあるジョブだけ、False なら締めの無いジョブだけ、
+    None なら両方を見る。同じジョブは1つのポーリングだけが判定する（#1410）。
+    """
+    if with_cutoff is not True:
+        # 外部死活監視（#496）: スケジューラ生存を5分間隔で通知。
+        # 補完ジョブの失敗で生存信号が途切れないよう、ポーリング冒頭で送る。
+        ping_heartbeat(SCHEDULER_ALIVE_SLUG)
 
     # 締め（recovery_until）を持つジョブを先に回す。締めの無い長い補完（日次の道など）の後ろで
     # 自動発注の補完が締めを過ぎて飛ばされないため（#1395）。sorted は安定なので同じ組の中は今の順のまま。
@@ -562,6 +580,9 @@ def _poll_recovery_jobs(queue_manager):
     )
     for job_id, config in ordered:
         if not config.get("auto_schedule", True):
+            continue
+        has_cutoff = config.get("recovery_until") is not None
+        if with_cutoff is not None and has_cutoff != with_cutoff:
             continue
 
         # 1つのジョブが落ちても後のジョブ（発注・約定）の補完を同じ回で進める（#1186）。
