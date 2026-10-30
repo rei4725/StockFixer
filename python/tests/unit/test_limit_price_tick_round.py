@@ -29,6 +29,11 @@ def _general_tick(price: float) -> int:
     raise AssertionError(f"表の外の値段: {price}")
 
 
+def _buffer(current: float) -> float:
+    # 余裕の幅は少なくとも現在値の帯の単位1つ分（#1403）
+    return max(current * LIMIT_ORDER_PRICE_BUFFER, _general_tick(current))
+
+
 def _is_multiple(price: float, unit: float) -> bool:
     ratio = price / unit
     return abs(ratio - round(ratio)) < 1e-9
@@ -66,7 +71,7 @@ class TestJpLimitPriceTickRound(unittest.TestCase):
             for current in _BAND_EDGE_PRICES:
                 with self.subTest(side=side, current=current):
                     price, session = self._limit(side, current)
-                    raw = current + current * LIMIT_ORDER_PRICE_BUFFER
+                    raw = current + _buffer(current)
                     self.assertTrue(
                         _is_multiple(price, _general_tick(price)),
                         f"{price} は単位 {_general_tick(price)} の倍数でない",
@@ -80,7 +85,7 @@ class TestJpLimitPriceTickRound(unittest.TestCase):
             for current in _BAND_EDGE_PRICES:
                 with self.subTest(side=side, current=current):
                     price, session = self._limit(side, current)
-                    raw = current - current * LIMIT_ORDER_PRICE_BUFFER
+                    raw = current - _buffer(current)
                     self.assertTrue(
                         _is_multiple(price, _general_tick(price)),
                         f"{price} は単位 {_general_tick(price)} の倍数でない",
