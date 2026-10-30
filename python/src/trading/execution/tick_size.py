@@ -27,6 +27,13 @@ def _jp_tick(price: Decimal) -> Decimal:
     return Decimal(_JP_TICK_TOP)
 
 
+def tick_size(market: str, price: float) -> float:
+    """その値段の帯の呼値の単位を返す（#1403）。"""
+    if market != "jp":
+        return float(_US_TICK)
+    return float(_jp_tick(Decimal(str(price))))
+
+
 def round_limit_price(market: str, price: float, is_buy_side: bool) -> float:
     """指値を呼値の単位に丸める。買いは切り下げ、売りは切り上げる。
 

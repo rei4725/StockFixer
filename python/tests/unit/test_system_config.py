@@ -3,6 +3,8 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
+from tests.unit.models_dir_isolation import isolate_models_dir  # noqa: F401
+
 
 class TestGetConfigValue(unittest.TestCase):
     def _mock_db(self, row):
