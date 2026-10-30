@@ -22,7 +22,7 @@ from src.utils.logger import get_logger
 from src.utils.optimal_params_loader import OptimalParamsUnreadableError, get_optimal_params
 
 from .stats import OrderExecutionStats
-from .tick_size import round_limit_price
+from .tick_size import round_limit_price, tick_size
 
 logger = get_logger(__name__)
 
@@ -244,7 +244,9 @@ def _choose_order_params(
     # 低流動性 → 引け指値（引け時点で流動性が集まりやすく価格優位性が高い）
     # 広スプレッドのみ → 寄付指値（寄付時の価格優位性を活用）
     order_session = "close" if any("low_volume" in r for r in reasons) else "open"
-    buffer = current_price * LIMIT_ORDER_PRICE_BUFFER
+    # 余裕の幅は少なくとも現在値の帯の単位1つ分にとり、丸めの後も買いは現在値以上・
+    # 売りは現在値以下に残す（#1403）
+    buffer = max(current_price * LIMIT_ORDER_PRICE_BUFFER, tick_size(market, current_price))
     # 買い（BUY・SHORT_COVER）は現在値より上、売り（SELL・SHORT）は下に指値を置く
     is_buy_side = side in (OrderSide.BUY, OrderSide.SHORT_COVER)
     limit_price = current_price + buffer if is_buy_side else max(0.0, current_price - buffer)
