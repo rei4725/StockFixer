@@ -12,6 +12,7 @@ import os
 import warnings
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import replace
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -23,7 +24,7 @@ from src.prediction.db import save_prediction_results
 from src.prediction.multi_horizon import predict_all_unified_multi_horizon  # noqa: F401
 from src.prediction.predict_single import predict_single_stock
 from src.prediction.prediction_run_stats import collect_prediction_run_stats
-from src.prediction.types import PredictionResult
+from src.prediction.types import INDIVIDUAL_MODEL_VERSION, PredictionResult
 from src.prediction.unified_run_summary import log_unified_prediction_summary
 from src.utils.data_path_utils import get_models_dir
 from src.utils.db import get_active_symbols
@@ -276,8 +277,6 @@ def output_top_worst_results(
         tagged_rows = []
         for r in output_rows:
             if r.model_version is None:
-                from dataclasses import replace
-
                 tagged_rows.append(replace(r, model_version=model_version))
             else:
                 tagged_rows.append(r)
@@ -323,6 +322,9 @@ def run_predict_single(market: str, symbol: str):
     """
     単一銘柄の予測結果を表示・DB保存する
 
+    銘柄別のモデルの予想なので INDIVIDUAL_MODEL_VERSION で保存し、production の採点に
+    混ぜない（#1457）。
+
     Args:
         market: マーケット識別子
         symbol: 銘柄シンボル
@@ -335,11 +337,11 @@ def run_predict_single(market: str, symbol: str):
     else:
         pprint.pprint(vars(result), sort_dicts=False, width=120)
         now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-        save_prediction_results(now_str, [result])
+        save_prediction_results(now_str, [replace(result, model_version=INDIVIDUAL_MODEL_VERSION)])
 
 
 def run_predict_watchlist():
-    """監視リストの全銘柄を予測・DB保存する。"""
+    """監視リストの全銘柄を予測・DB保存する（INDIVIDUAL_MODEL_VERSION で保存。#1457）。"""
     import csv
 
     from src.utils.data_path_utils import get_monitor_list_path
@@ -362,7 +364,7 @@ def run_predict_watchlist():
 
                 pprint.pprint(vars(result), sort_dicts=False, width=120)
                 print("-" * 40)
-                output_rows.append(result)
+                output_rows.append(replace(result, model_version=INDIVIDUAL_MODEL_VERSION))
 
     if output_rows:
         now_str = datetime.now().strftime("%Y%m%d_%H%M%S")

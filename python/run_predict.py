@@ -19,6 +19,7 @@ from src.prediction.prediction_pipeline import (
     run_predict_single,
     run_predict_watchlist,
 )
+from src.prediction.types import INDIVIDUAL_MODEL_VERSION
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -29,6 +30,7 @@ def run_top10(use_individual: bool = False):
 
     日次の [3/6] と同じく保存の前に印を消し、統合モデルの回で jp の欠けが線の内のときだけ
     印を立てる。銘柄別のモデルの回は 8:50 の発注に使わせないため印を立てない（#1449）。
+    銘柄別のモデルの回は production と別の model_version で保存し、採点に混ぜない（#1457）。
     """
     from collections import Counter
 
@@ -42,7 +44,12 @@ def run_top10(use_individual: bool = False):
     clear_prediction_saved_marker()
     if use_individual:
         output_rows = predict_all_individual()
-        output_top_worst_results(output_rows, mode="individual")
+        output_top_worst_results(
+            output_rows,
+            mode="individual",
+            shadow_mode=True,
+            model_version=INDIVIDUAL_MODEL_VERSION,
+        )
     else:
         output_rows = predict_all_unified()
         output_top_worst_results(output_rows, mode="unified")
