@@ -26,6 +26,7 @@ from zoneinfo import ZoneInfo
 from filelock import FileLock
 
 from config.settings import settings
+from src.orchestration.job_errors import NonRetryableJobError
 from src.orchestration.scheduler_cutoff import (
     is_past_recovery_until,
     warn_scheduled_start_past_cutoff,
@@ -274,7 +275,7 @@ class SchedulerQueueManager:
                 config["func"]()
                 return
             except Exception as exc:
-                if attempt < max_retries:
+                if attempt < max_retries and not isinstance(exc, NonRetryableJobError):
                     wait = base_wait * (2**attempt) + random.uniform(0, base_wait * 0.1)
                     self._append_event(
                         {
