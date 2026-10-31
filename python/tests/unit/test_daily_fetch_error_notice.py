@@ -22,8 +22,11 @@ def _batch(n_success: int, n_error: int, n_skip: int) -> BatchResult:
     )
 
 
-def _run_daily_pipeline(batch_result: BatchResult, total: int, tasks=None):
-    """日次の道を外の依存を差し替えて流し、差し替えた mock を返す。"""
+def _run_daily_pipeline(batch_result: BatchResult, total: int, tasks=None, rows=None):
+    """日次の道を外の依存を差し替えて流し、差し替えた mock を返す。
+
+    rows は [3/6] の予想の結果（#1438）。
+    """
     from src.orchestration.jobs.daily import run_daily_pipeline
 
     if tasks is None:
@@ -38,7 +41,10 @@ def _run_daily_pipeline(batch_result: BatchResult, total: int, tasks=None):
             "completion": p(f"{_DISCORD}.send_daily_pipeline_completion"),
             "error": p(f"{_DISCORD}.send_daily_pipeline_error"),
             "accuracy": p("src.prediction.prediction_pipeline.run_accuracy_check"),
-            "predict": p("src.prediction.prediction_pipeline.predict_all_unified", return_value=[]),
+            "predict": p(
+                "src.prediction.prediction_pipeline.predict_all_unified",
+                return_value=rows or [],
+            ),
         }
         p(f"{_DISCORD}.send_accuracy_summary")
         p("src.prediction.prediction_pipeline.output_top_worst_results")

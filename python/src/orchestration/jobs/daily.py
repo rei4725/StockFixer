@@ -38,6 +38,7 @@ from src.orchestration.jobs.unavailable_gates import (
     _raise_if_fetch_mostly_unavailable,
     _raise_if_rule_signals_mostly_unavailable,
     _rule_signals_mostly_unavailable,
+    order_market_predictions_mostly_missing,
 )
 from src.orchestration.types import PipelineStage
 from src.utils.logger import get_logger
@@ -79,6 +80,7 @@ def run_daily_pipeline():
     from src.market_data.pipeline import run_batch_pipeline
     from src.watchlist.batch_runner import load_target_symbols
 
+    market_totals: Counter[str] = Counter()  # [3/6] の jp の欠けの線にも使う（#1438）
     try:
         tasks = load_target_symbols()
         batch_result = run_batch_pipeline(tasks, notification_port=DiscordNotificationAdapter())
@@ -169,7 +171,9 @@ def run_daily_pipeline():
         output_top_worst_results(
             output_rows, mode="unified", shadow_mode=True, model_version="production"
         )
-        mark_prediction_saved()
+        # jp の予想が大きく欠けた回は印を立てず、8:50 の新規を止める（#1438）
+        if not order_market_predictions_mostly_missing(market_totals, output_rows):
+            mark_prediction_saved()
         logger.info("[3/6] 予測完了 (production): %d 銘柄", len(output_rows))
         notify_prediction_errors(predict_errors)
     except Exception as e:

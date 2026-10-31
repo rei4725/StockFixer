@@ -73,6 +73,33 @@ def _raise_if_order_market_mostly_unavailable(
         )
 
 
+def order_market_predictions_mostly_missing(
+    market_totals: dict[str, int], output_rows: list
+) -> bool:
+    """発注する市場の対象のうち予想の出なかった割合が線を超えたら知らせて True を返す（#1438）。
+
+    [3/6] は基準の値段が取れない銘柄などを黙って飛ばすため、[1/6] の線の後でも jp の
+    予想が大きく欠けうる。呼び出し元は True のとき保存の印を立てず、8:50 の新規を止める。
+    """
+    from config.settings import DAILY_FETCH_MAX_UNAVAILABLE_RATIO
+
+    market = _ORDER_MARKET
+    market_total = market_totals.get(market, 0)
+    if market_total <= 0:
+        return False
+    n_predicted = sum(1 for r in output_rows if getattr(r, "market", None) == market)
+    n_missing = max(market_total - n_predicted, 0)
+    if n_missing / market_total <= DAILY_FETCH_MAX_UNAVAILABLE_RATIO:
+        return False
+    message = (
+        f"{market} の予想の出なかった銘柄が多すぎる: {n_missing} / {market} の対象 {market_total}"
+        f"（線 {DAILY_FETCH_MAX_UNAVAILABLE_RATIO:.0%}）。予想は保存したが、今日の新規は止める"
+    )
+    logger.warning("[3/6] 予測 (production): %s", message)
+    _notify_stage_failure(f"[3/6] 予測 (production) の {market} の欠け", RuntimeError(message))
+    return True
+
+
 def _skipped_market(skipped: object) -> Optional[str]:
     """スキップの結果（market の鍵を持つ dict）から市場を返す。"""
     if isinstance(skipped, dict):
