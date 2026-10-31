@@ -69,16 +69,15 @@ class TestGateCountsShortPositions(unittest.TestCase):
         self.assertEqual(status.reason_code, "max_positions")
         self.assertEqual(status.position_count, MAX_POSITIONS)
 
-    def test_broker_without_short_positions_counts_longs_only(self):
+    def test_unreadable_short_positions_raise_instead_of_counting_longs_only(self):
+        """空売りが読めない broker では買い持ちだけで数えず例外を出す（#1458）"""
         broker = MagicMock(spec=["get_balance", "get_positions", "broker_name"])
         broker.broker_name = "paper"
         broker.get_balance.return_value = 1_000_000.0
         broker.get_positions.return_value = [_long("7203")]
 
-        status = self._gate(broker)
-
-        self.assertTrue(status.is_allowed)
-        self.assertEqual(status.position_count, 1)
+        with self.assertRaises(AttributeError):
+            self._gate(broker)
 
 
 class TestRunnerCountsShortPositions(unittest.TestCase):

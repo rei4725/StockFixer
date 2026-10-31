@@ -1006,13 +1006,14 @@ class TestTotalEquityBasedDrawdown(unittest.TestCase):
             equity = risk.get_total_equity()
         self.assertAlmostEqual(equity, 795_000.0)
 
-    def test_total_equity_without_short_positions_method(self):
-        """get_short_positions を持たない broker では空売りを空として扱う"""
+    def test_total_equity_raises_when_short_positions_unreadable(self):
+        """空売りが読めない broker では空売り抜きの総資産を返さず例外を出す（#1458）"""
         broker = MagicMock(spec=["get_balance", "get_positions", "broker_name"])
         broker.get_balance.return_value = 500_000.0
         broker.get_positions.return_value = self._positions()
         risk = RiskManager(broker)
-        self.assertAlmostEqual(risk.get_total_equity(), 795_000.0)
+        with self.assertRaises(AttributeError):
+            risk.get_total_equity()
 
     def test_total_equity_is_cached_across_calls(self):
         """発注ループ中に銘柄ごとへ再取得しないこと（ポジション時価取得は高コスト）"""
