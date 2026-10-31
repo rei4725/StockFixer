@@ -22,11 +22,12 @@ def _batch(n_success: int, n_error: int, n_skip: int) -> BatchResult:
     )
 
 
-def _run_daily_pipeline(batch_result: BatchResult, total: int):
+def _run_daily_pipeline(batch_result: BatchResult, total: int, tasks=None):
     """日次の道を外の依存を差し替えて流し、差し替えた mock を返す。"""
     from src.orchestration.jobs.daily import run_daily_pipeline
 
-    tasks = [SymbolTask(market="us", symbol=f"T{i}") for i in range(total)]
+    if tasks is None:
+        tasks = [SymbolTask(market="us", symbol=f"T{i}") for i in range(total)]
     with ExitStack() as stack:
 
         def p(target, **kwargs):
