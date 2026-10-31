@@ -1,12 +1,30 @@
-"""週次ルール評価の後始末（知らせと失敗の判定）。
+"""週次ルール評価の期間の決め方と後始末（知らせと失敗の判定）。
 
 weekly.py の行数の上限（600 行）を超えないよう、run_weekly_rule_evaluation から分けた。
 """
+
+from datetime import date
+
+import pandas as pd
 
 from src.orchestration.job_errors import NonRetryableJobError
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+def rule_evaluation_window(
+    today: date, years: int, start: str | None = None, end: str | None = None
+) -> tuple[str, str]:
+    """評価の期間（start, end）を返す。end は yfinance と同じく含まない日。
+
+    既定は today を終わりとする直近 years 年。期間の終わりを固定していると、
+    それより後に上場した銘柄が毎週失敗に数えられ、最近の値動きも評価に入らない。
+    start / end を渡したとき（環境変数で固定したとき）はそちらを使う。
+    """
+    window_end = pd.Timestamp(end) if end else pd.Timestamp(today)
+    window_start = pd.Timestamp(start) if start else window_end - pd.DateOffset(years=years)
+    return window_start.strftime("%Y-%m-%d"), window_end.strftime("%Y-%m-%d")
 
 
 def finish_rule_evaluation(summary: dict[str, int], market: str) -> None:
