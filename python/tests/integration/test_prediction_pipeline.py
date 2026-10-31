@@ -6,8 +6,6 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-import pandas as pd
-
 import src.utils.data_path_utils as path_utils
 import src.utils.db as db_module
 from src.prediction.prediction_pipeline import find_model_files, output_top_worst_results
@@ -188,20 +186,16 @@ class TestRunPredictSingle(unittest.TestCase):
         """単一銘柄の予測が正常に完了することを確認"""
         from src.prediction.prediction_pipeline import run_predict_single
 
-        # テスト用予測結果
-        result_df = pd.DataFrame(
-            [
-                {
-                    "market": "us",
-                    "symbol": "AAPL",
-                    "current_price": 150.0,
-                    "avg_pred_price": 155.0,
-                    "diff_ratio": 0.033,
-                    "model_count": 2,
-                }
-            ]
+        # テスト用予測結果（本物の predict_single_stock と同じく PredictionResult を返す）
+        mock_predict.return_value = PredictionResult(
+            market="us",
+            symbol="AAPL",
+            current_price=150.0,
+            avg_pred_price=155.0,
+            diff_ratio=0.033,
+            model_count=2,
+            model_version="production",
         )
-        mock_predict.return_value = result_df
 
         # 実行
         run_predict_single("us", "AAPL")
@@ -210,6 +204,9 @@ class TestRunPredictSingle(unittest.TestCase):
         mock_predict.assert_called_once_with("us", "AAPL")
         # save_prediction_resultsが呼ばれたことを確認
         mock_save.assert_called_once()
+        # 銘柄別のモデルの回は individual で保存される（#1457）
+        saved_rows = mock_save.call_args[0][1]
+        self.assertEqual([r.model_version for r in saved_rows], ["individual"])
 
     @patch("src.prediction.prediction_pipeline.predict_single_stock")
     def test_predict_single_failure(self, mock_predict):
@@ -274,19 +271,16 @@ class TestRunPredictWatchlist(unittest.TestCase):
 
         mock_get_path.return_value = watchlist_file.name
 
-        # テスト用予測結果
-        result_df = pd.DataFrame(
-            [
-                {
-                    "market": "us",
-                    "current_price": 150.0,
-                    "avg_pred_price": 155.0,
-                    "diff_ratio": 0.033,
-                    "model_count": 2,
-                }
-            ]
+        # テスト用予測結果（本物の predict_single_stock と同じく PredictionResult を返す）
+        mock_predict.side_effect = lambda market, symbol: PredictionResult(
+            market=market,
+            symbol=symbol,
+            current_price=150.0,
+            avg_pred_price=155.0,
+            diff_ratio=0.033,
+            model_count=2,
+            model_version="production",
         )
-        mock_predict.return_value = result_df
 
         # 実行
         run_predict_watchlist()
@@ -295,6 +289,10 @@ class TestRunPredictWatchlist(unittest.TestCase):
         self.assertEqual(mock_predict.call_count, 2)
         # save_prediction_resultsが呼ばれたことを確認
         mock_save.assert_called_once()
+        # 銘柄別のモデルの回は individual で保存される（#1457）
+        saved_rows = mock_save.call_args[0][1]
+        self.assertEqual([r.symbol for r in saved_rows], ["AAPL", "MSFT"])
+        self.assertEqual([r.model_version for r in saved_rows], ["individual", "individual"])
 
         # テスト用ファイルを削除
         os.remove(watchlist_file.name)
