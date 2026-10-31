@@ -13,7 +13,7 @@ from typing import Any
 import pandas as pd
 
 from src.backtest.backtester import Backtester
-from src.backtest.data_port import get_backtest_data_port
+from src.backtest.data_port import BacktestDataPort, get_backtest_data_port
 from src.backtest.rules.base import TradingRule
 from src.backtest.slippage import make_slippage_fn
 from src.utils.data_path_utils import get_ticker
@@ -57,6 +57,25 @@ def _make_backtester(
     )
 
 
+def _listed_after(dp: BacktestDataPort, ticker: str, start: str, end: str) -> bool:
+    """期間の値段が無い銘柄が、期間の終わりより後に上場したのかを確かめる。
+
+    start から今日までを取り直し、最初の日が end 以降なら上場が期間の後。
+    取り直しも空なら取得の失敗と区別できないので False（失敗のまま）を返す。
+    """
+    try:
+        later = dp.download(ticker, start=start)
+    except Exception:
+        logger.error(f"上場日の確認に失敗: {ticker}", exc_info=True)
+        return False
+    if later is None or later.empty:
+        return False
+    first = pd.Timestamp(later.index.min())
+    if first.tzinfo is not None:
+        first = first.tz_localize(None)
+    return bool(first >= pd.Timestamp(end))
+
+
 def run_rule_backtest(
     market: str,
     symbol: str,
@@ -98,6 +117,10 @@ def run_rule_backtest(
     _dp = get_backtest_data_port()
     df = _dp.download(ticker, start=start, end=end)
     if df is None or df.empty:
+        if _listed_after(_dp, ticker, start, end):
+            # 期間の後に上場した銘柄は、何度取り直しても値段が無い。有効ルールなしとして返す
+            logger.warning(f"評価期間 ({start} → {end}) の後の上場のため値段なし: {ticker}")
+            return []
         logger.error(f"データ取得失敗: {ticker}")
         if raise_on_fetch_failure:
             raise RuleBacktestDataError(f"データ取得失敗: {ticker}")
