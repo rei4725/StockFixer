@@ -111,7 +111,8 @@ def _build_production_like_daily_config(func):
 
 def test_should_recover_false_while_scheduled_run_is_in_progress(tmp_path):
     """22:30Z の回が動いている間は、補完ポーリングが補完を始めないこと（#806）。
-    以前は should_recover が True を返し、5分おきに「補完実行を開始」の行が出ていた。"""
+    以前は should_recover が True を返し、5分おきに「補完実行を開始」の行が出ていた。
+    """
     import threading
 
     started = threading.Event()
@@ -146,7 +147,8 @@ def test_should_recover_false_while_scheduled_run_is_in_progress(tmp_path):
 
 def test_should_recover_false_after_scheduled_run_completes_same_day(tmp_path):
     """22:30Z の回が完了した日は、その日の補完が始まらないこと（#806）。
-    完了の記録の period_key と should_recover の period_key が同じ JST の日付になる。"""
+    完了の記録の period_key と should_recover の period_key が同じ JST の日付になる。
+    """
     counter = {"n": 0}
 
     def _func():
@@ -194,7 +196,8 @@ def test_run_job_respects_execution_limit(tmp_path):
 
 def test_recovery_stops_at_limit_when_process_is_killed_mid_job(tmp_path):
     """ジョブの途中でプロセスが消えた（finally が走らない）実行も回数に数え、
-    同じ period_key の補完が max_executions_per_period 回で止まること。"""
+    同じ period_key の補完が max_executions_per_period 回で止まること。
+    """
     state_path = tmp_path / "scheduler_queue_state.json"
     calls = {"n": 0}
     snapshot: dict[str, bytes] = {}
@@ -979,6 +982,39 @@ def test_retry_zero_means_no_retry(mock_sleep, tmp_path):
 
     assert call_count["n"] == 1
     mock_sleep.assert_not_called()
+
+
+@patch("src.orchestration.scheduler_queue.time.sleep")
+def test_non_retryable_error_is_not_retried(mock_sleep, tmp_path):
+    """NonRetryableJobError はリトライせず、1回で失敗にして知らせを1回送ること"""
+    from src.orchestration.job_errors import NonRetryableJobError
+
+    state_path = tmp_path / "state.json"
+    config, call_count = _make_failing_config(state_path, max_retries=3, fail_count=999)
+    inner = config["flaky_job"]["func"]
+
+    def _func():
+        try:
+            inner()
+        except RuntimeError as exc:
+            raise NonRetryableJobError(str(exc)) from exc
+
+    config["flaky_job"]["func"] = _func
+    notifier = MagicMock()
+    manager = SchedulerQueueManager(
+        config, state_file_path=str(state_path), error_notifier=notifier
+    )
+
+    with pytest.raises(NonRetryableJobError):
+        manager.run_job("flaky_job", reason="test")
+
+    assert call_count["n"] == 1
+    mock_sleep.assert_not_called()
+    notifier.assert_called_once()
+    saved = json.loads(state_path.read_text(encoding="utf-8"))
+    statuses = [e["status"] for e in saved["events"]]
+    assert "retry" not in statuses
+    assert statuses[-1] == "error"
 
 
 def _schedule_config_with_failing_func(job_id: str):
