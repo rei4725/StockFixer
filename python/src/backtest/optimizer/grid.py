@@ -33,6 +33,31 @@ def _parse_grid_values(values: Optional[list[float]], default: float) -> list[fl
     return [float(v) for v in values]
 
 
+def _pooled_kelly_inputs(wf_df: pd.DataFrame) -> dict[str, float]:
+    """全 fold の取引をまとめた win_rate・avg_win・avg_loss を返す（#1436）。
+
+    fold の単純平均だと、取引の無い fold・負けの無い fold が「数が無い」代わりに返す
+    0.0 が平均に入り、Kelly の入力の平均の負けを小さく見てしまう。勝ち負けの分け方は
+    metrics.core と同じ（0 以上を勝ち、負けは絶対値）。trade_returns の列が無いときは
+    空の dict を返し、fold の平均のままにする。
+    """
+    if "trade_returns" not in wf_df.columns:
+        return {}
+    pooled = [
+        float(r)
+        for returns in wf_df["trade_returns"]
+        if isinstance(returns, (list, tuple))
+        for r in returns
+    ]
+    win_returns = [r for r in pooled if r >= 0]
+    loss_returns = [abs(r) for r in pooled if r < 0]
+    return {
+        "win_rate": round(len(win_returns) / len(pooled), 4) if pooled else 0.0,
+        "avg_win": round(sum(win_returns) / len(win_returns), 6) if win_returns else 0.0,
+        "avg_loss": round(sum(loss_returns) / len(loss_returns), 6) if loss_returns else 0.0,
+    }
+
+
 def run_optimization(
     market: str,
     symbol: str,
@@ -182,6 +207,7 @@ def run_optimization(
                 for col in wf_df_numeric.columns:
                     wf_df_numeric[col] = pd.to_numeric(wf_df_numeric[col], errors="coerce")
                 summary = wf_df_numeric.mean().to_dict()
+                summary.update(_pooled_kelly_inputs(wf_df))
                 summary["threshold"] = threshold
                 summary["stop_loss_pct"] = stop_loss
                 summary["take_profit_pct"] = take_profit
