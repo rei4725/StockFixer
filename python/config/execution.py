@@ -20,12 +20,15 @@ class ExecutionSettings(BaseSettings):
 
     # 週次ルール評価ジョブのパラメータ
     RULE_EVAL_MARKET: str = Field(default="jp")
-    RULE_EVAL_START: str = Field(default="2022-01-01")
-    RULE_EVAL_END: str = Field(default="2025-01-01")
+    # 期間は既定で実行日までの直近 RULE_EVAL_YEARS 年。START/END を入れたときだけ固定する
+    RULE_EVAL_YEARS: int = Field(default=3, ge=1)
+    RULE_EVAL_START: str | None = Field(default=None)
+    RULE_EVAL_END: str | None = Field(default=None)
 
 
 execution_settings = ExecutionSettings()
 
 RULE_EVAL_MARKET: str = execution_settings.RULE_EVAL_MARKET
-RULE_EVAL_START: str = execution_settings.RULE_EVAL_START
-RULE_EVAL_END: str = execution_settings.RULE_EVAL_END
+RULE_EVAL_YEARS: int = execution_settings.RULE_EVAL_YEARS
+RULE_EVAL_START: str | None = execution_settings.RULE_EVAL_START
+RULE_EVAL_END: str | None = execution_settings.RULE_EVAL_END

@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from datetime import date
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
 
 from src.orchestration.job_errors import NonRetryableJobError
+from src.orchestration.jobs.rule_evaluation import rule_evaluation_window
 from src.orchestration.jobs.weekly import run_weekly_rule_evaluation
 
 _EVAL = "src.backtest.rule_selector.evaluate_all_symbols"
@@ -102,3 +104,44 @@ def test_no_valid_rule_is_skipped_and_job_succeeds() -> None:
     notify.assert_called_once()
     assert notify.call_args.kwargs["skipped"] == 2
     assert notify.call_args.kwargs["errors"] == 0
+
+
+def test_window_defaults_to_last_years_until_today() -> None:
+    """既定の期間は実行日までの直近 years 年で、週ごとに動く。"""
+    assert rule_evaluation_window(date(2026, 11, 8), 3) == ("2023-11-08", "2026-11-08")
+
+
+def test_window_handles_leap_day() -> None:
+    assert rule_evaluation_window(date(2028, 2, 29), 3) == ("2025-02-28", "2028-02-29")
+
+
+def test_window_uses_fixed_start_and_end_when_given() -> None:
+    """環境変数で固定した期間は、そのまま使う。"""
+    assert rule_evaluation_window(date(2026, 11, 8), 3, "2022-01-01", "2025-01-01") == (
+        "2022-01-01",
+        "2025-01-01",
+    )
+
+
+def test_window_fixed_end_only_counts_years_back() -> None:
+    assert rule_evaluation_window(date(2026, 11, 8), 3, None, "2025-01-01") == (
+        "2022-01-01",
+        "2025-01-01",
+    )
+
+
+def test_job_passes_rolling_window_to_evaluation() -> None:
+    """ジョブは実行日（JST）までの直近の期間で評価を呼ぶ。"""
+    from datetime import datetime
+
+    with (
+        patch("src.utils.japan_time.now_jst", return_value=datetime(2026, 11, 8, 2, 0)),
+        patch("config.execution.RULE_EVAL_START", None),
+        patch("config.execution.RULE_EVAL_END", None),
+        patch("config.execution.RULE_EVAL_YEARS", 3),
+        patch(_EVAL, return_value=_summary(1, 1, 0, 0)) as evaluate,
+        patch(_NOTIFY, return_value=True),
+    ):
+        run_weekly_rule_evaluation()
+    assert evaluate.call_args.kwargs["backtest_start"] == "2023-11-08"
+    assert evaluate.call_args.kwargs["backtest_end"] == "2026-11-08"

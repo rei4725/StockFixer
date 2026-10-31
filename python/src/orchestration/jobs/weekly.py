@@ -412,15 +412,23 @@ def run_weekly_rule_evaluation() -> None:
     週次実行（日曜 02:00）: 全銘柄 × 全ルールをバックテストし
     「最優秀ルール」を DuckDB に保存する。
 
+    期間は既定で実行日までの直近 RULE_EVAL_YEARS 年（config/execution.py）。
     判定基準: 勝率 50% 以上 AND 純利益プラス
     完了後 Discord に評価サマリーを通知し、評価の失敗があればジョブを失敗にする（#1087）。
     """
-    from config.execution import RULE_EVAL_END, RULE_EVAL_MARKET, RULE_EVAL_START
+    from config.execution import RULE_EVAL_END, RULE_EVAL_MARKET, RULE_EVAL_START, RULE_EVAL_YEARS
+    from src.orchestration.jobs.rule_evaluation import (
+        finish_rule_evaluation,
+        rule_evaluation_window,
+    )
+    from src.utils.japan_time import now_jst
 
     logger.info("=== 週次ルール評価開始 ===")
     market = RULE_EVAL_MARKET
-    backtest_start = RULE_EVAL_START
-    backtest_end = RULE_EVAL_END
+    backtest_start, backtest_end = rule_evaluation_window(
+        now_jst().date(), RULE_EVAL_YEARS, RULE_EVAL_START, RULE_EVAL_END
+    )
+    logger.info("評価期間: %s → %s", backtest_start, backtest_end)
 
     try:
         from src.backtest.rule_selector import evaluate_all_symbols
@@ -438,7 +446,5 @@ def run_weekly_rule_evaluation() -> None:
     except Exception as e:
         logger.error("週次ルール評価失敗: %s", e, exc_info=True)
         raise
-
-    from src.orchestration.jobs.rule_evaluation import finish_rule_evaluation
 
     finish_rule_evaluation(summary, market)
