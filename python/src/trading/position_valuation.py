@@ -63,11 +63,13 @@ def short_positions_unrealized_pnl(
 
 
 def read_short_positions(broker: Any) -> list[dict[str, Any]]:
-    """broker の空売りの保有を返す。get_short_positions を持たない broker は空とする。"""
-    try:
-        return list(broker.get_short_positions())
-    except AttributeError:
-        return []
+    """broker の空売りの保有を返す。
+
+    読めないときは例外をそのまま上へ出す（#1458）。0件にのみこむと、保有の上限・
+    空売り中の銘柄の除外・総資産から空売りが黙って抜けて新規を出す。
+    get_short_positions は BrokerBase に既定（空のリスト）がある。
+    """
+    return list(broker.get_short_positions())
 
 
 def coverable_short_qty(pos: Mapping[str, Any]) -> int:
@@ -95,7 +97,7 @@ def short_held_codes(broker: Any) -> set[str]:
 def broker_positions_value(broker: Any, logger: logging.Logger) -> float:
     """broker の保有を総資産に足す額（買い持ちの時価 + 空売りの含み損益）を返す（#1148）。
 
-    get_short_positions を持たない broker（AttributeError）は空売りを空として扱う。
+    空売りの保有が読めないときは例外を上へ出す（#1458）。
     """
     market_value = positions_market_value(broker.get_positions(), logger)
     short_positions = read_short_positions(broker)
