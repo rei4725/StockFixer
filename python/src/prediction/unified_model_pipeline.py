@@ -17,6 +17,7 @@ from config.settings import (
     FEATURE_SELECTION_MIN_FEATURES,
     PERMUTATION_IMPORTANCE_REPEATS,
 )
+from src.domain.sentiment_sources import any_sentiment_source_configured, is_sentiment_feature
 from src.prediction.db import load_excluded_features, save_feature_selection
 from src.prediction.ports import get_market_data_port
 from src.utils.data_path_utils import ensure_dir, get_models_dir
@@ -187,6 +188,12 @@ def prepare_unified_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]
     # 配当・分割のラグの列は特徴量にしない。取得の道で有り無しが変わっていたため、
     # 表には銘柄によって全行 NULL のまま残っている（#816）
     X = X.drop(columns=[c for c in X.columns if str(c).startswith(_CORPORATE_ACTION_LAG_PREFIXES)])
+
+    # 取得元のキー（us: NEWSAPI_KEY, jp: EDINET_API_KEY）がどの市場にも無いときは、
+    # 値が一度も入らないセンチメントの列を特徴量にしない（#1417）
+    markets = df["market"].dropna().unique() if "market" in df.columns else []
+    if not any_sentiment_source_configured(markets):
+        X = X.drop(columns=[c for c in X.columns if is_sentiment_feature(c)])
 
     # NaNを除去
     valid_idx = X.notna().all(axis=1) & y.notna()
