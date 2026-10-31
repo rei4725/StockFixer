@@ -75,16 +75,20 @@ def exit_expired_positions() -> list[str]:
     # 送った注文は約定まで保有を変えないので、保有の一覧はループの前に1回だけ読む（#1095）
     positions = broker.get_positions() if long_symbols else []
     short_positions: list[dict[str, Any]] = []
+    short_read_failed = False
     if short_symbols:
+        # 読めない日は空売りを0件として黙って飛ばさず、買い持ちを決済した後に失敗にする (#1451)
         try:
             short_positions = broker.get_short_positions()
-        except AttributeError:
-            short_positions = []
+        except Exception:
+            logger.error("[horizon_exit] 空売りの保有を読めない: %s", short_symbols, exc_info=True)
+            short_read_failed = True
 
     # 保有の一覧は約定前の SELL・SHORT_COVER を引かないため、重ねると返済の二重発注になる (#1168)
     pending = _read_pending_exits()
     exits: list[tuple[str, OrderSide, dict[str, Any] | None]] = []
     skipped: list[str] = []
+    failed: list[str] = []
     for symbol in long_symbols:
         if pending.has(symbol, OrderSide.SELL):
             skipped.append(symbol)
@@ -94,11 +98,13 @@ def exit_expired_positions() -> list[str]:
         if pending.has(symbol, OrderSide.SHORT_COVER):
             skipped.append(symbol)
             continue
+        if short_read_failed:
+            failed.append(symbol)
+            continue
         exits.append((symbol, OrderSide.SHORT_COVER, _find_position(short_positions, symbol)))
     _log_pending_skips("horizon_exit", skipped)
 
     exited: list[str] = []
-    failed: list[str] = []
     for symbol, side, pos in exits:
         if pos is None:
             continue

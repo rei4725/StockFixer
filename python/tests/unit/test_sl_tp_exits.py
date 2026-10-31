@@ -209,6 +209,16 @@ class TestCheckSlTpShortExits(unittest.TestCase):
         self.assertEqual(triggered, {"7203"})
         self.assertEqual(stats["short_orders"], 0)
 
+    def test_short_positions_read_error_is_not_treated_as_empty(self):
+        # 空売りの保有を読む中で落ちた AttributeError を0件としてのみこまない（#1451）
+        positions = [{"symbol": "7203", "qty": 100, "avg_price": 1000.0, "current_price": 940.0}]
+        broker = _make_broker(positions)
+        broker.get_short_positions.side_effect = AttributeError("split adjust broken")
+        stats = _make_stats()
+
+        with self.assertRaises(AttributeError):
+            self._run(broker, stats)
+
 
 class TestCheckSlTpExits(unittest.TestCase):
     def _patch_risk(self, sl=False, tp=False, reason=""):

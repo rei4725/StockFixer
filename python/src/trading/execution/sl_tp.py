@@ -59,10 +59,8 @@ def _check_sl_tp_exits(
     """
     triggered: set[str] = set()
     record = _recorder(_record_order, stats)  # 記録の失敗でも売りは出たものとして除外する (#1104)
-    try:
-        short_positions = broker.get_short_positions()
-    except AttributeError:
-        short_positions = []
+    # 空売りの保有を読めない日は0件として黙って進めず、買い持ちの読みの失敗と同じく上へ出す（#1451）
+    short_positions = broker.get_short_positions()
     exits = [(pos, False) for pos in broker.get_positions()]
     exits += [(pos, True) for pos in short_positions]
     pending = _load_pending_exits(broker)

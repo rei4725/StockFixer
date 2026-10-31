@@ -378,8 +378,10 @@ class TestRunHorizonExitCheck(unittest.TestCase):
         broker.send_order.assert_called_once_with("7203", OrderSide.SHORT_COVER, 60)
 
     @patch(_BROKER_PATCH)
-    def test_short_positions_unsupported_treated_as_empty(self, mock_broker_cls):
-        """get_short_positions が無い broker でも買い持ちの決済は続ける (#1145)。"""
+    def test_short_positions_read_error_fails_job(self, mock_broker_cls):
+        """空売りの保有を読む中で落ちた AttributeError を空としてのみこまず、
+        買い持ちを決済した後にジョブを失敗にする (#1451)。"""
+        from src.orchestration.jobs.horizon_exit import exit_expired_positions
         from src.orchestration.scheduler import run_horizon_exit_check
 
         self._insert_overdue_order("ORD-310", "7203")
@@ -393,7 +395,36 @@ class TestRunHorizonExitCheck(unittest.TestCase):
 
         broker = MagicMock()
         broker.get_positions.return_value = [{"symbol": "7203", "qty": 100}]
-        broker.get_short_positions.side_effect = AttributeError
+        broker.get_short_positions.side_effect = AttributeError("split adjust broken")
+        mock_broker_cls.return_value = broker
+
+        with self.assertLogs("src.orchestration.jobs.horizon_exit", level="ERROR"):
+            self.assertEqual(exit_expired_positions(), ["9984"])
+        broker.send_order.assert_called_once_with("7203", OrderSide.SELL, 100)
+
+        broker.send_order.reset_mock()
+        with self.assertLogs("src.orchestration.jobs.daily", level="ERROR"):
+            with self.assertRaises(RuntimeError):
+                run_horizon_exit_check()
+        broker.send_order.assert_called_once_with("7203", OrderSide.SELL, 100)
+
+    @patch(_BROKER_PATCH)
+    def test_empty_short_positions_exits_long_only(self, mock_broker_cls):
+        """get_short_positions が空のリストを返す broker では買い持ちの決済だけを出す (#1145)。"""
+        from src.orchestration.scheduler import run_horizon_exit_check
+
+        self._insert_overdue_order("ORD-312", "7203")
+        self._insert_order(
+            "ORD-313",
+            "9984",
+            OrderSide.SHORT,
+            "filled",
+            (date.today() - timedelta(days=1)).isoformat(),
+        )
+
+        broker = MagicMock()
+        broker.get_positions.return_value = [{"symbol": "7203", "qty": 100}]
+        broker.get_short_positions.return_value = []
         mock_broker_cls.return_value = broker
 
         run_horizon_exit_check()
