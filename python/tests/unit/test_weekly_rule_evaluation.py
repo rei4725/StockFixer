@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 import pytest
 
+from src.orchestration.job_errors import NonRetryableJobError
 from src.orchestration.jobs.weekly import run_weekly_rule_evaluation
 
 _EVAL = "src.backtest.rule_selector.evaluate_all_symbols"
@@ -16,18 +17,24 @@ _PORT = "src.backtest.rule_backtester.get_backtest_data_port"
 _UPSERT = "src.backtest.rule_selector.upsert_rule_best"
 
 
+def _record(calls: list[str]) -> bool:
+    calls.append("notify")
+    return True
+
+
 def _summary(evaluated: int, effective: int, skipped: int, errors: int) -> dict[str, int]:
     return {"evaluated": evaluated, "effective": effective, "skipped": skipped, "errors": errors}
 
 
 def test_errors_notify_then_raise() -> None:
     calls: list[str] = []
-    notify = MagicMock(side_effect=lambda **_: calls.append("notify") or True)
+    notify = MagicMock(side_effect=lambda **_: _record(calls))
     with (
         patch(_EVAL, return_value=_summary(3, 1, 0, 2)),
         patch(_NOTIFY, notify),
     ):
-        with pytest.raises(RuntimeError, match="2"):
+        # やり直しても同じ失敗と同じ知らせが重なるだけなので、リトライさせない型で投げる
+        with pytest.raises(NonRetryableJobError, match="2"):
             run_weekly_rule_evaluation()
     assert calls == ["notify"]
     assert notify.call_args.kwargs["errors"] == 2
@@ -53,7 +60,7 @@ def _port(frame: pd.DataFrame) -> MagicMock:
 def test_all_fetch_empty_notify_then_raise() -> None:
     """全銘柄の値段の取得が空なら、知らせを送ってからジョブを失敗にする（#1270）。"""
     calls: list[str] = []
-    notify = MagicMock(side_effect=lambda **_: calls.append("notify") or True)
+    notify = MagicMock(side_effect=lambda **_: _record(calls))
     with (
         patch(_SYMBOLS, return_value=["7203", "6758"]),
         patch(_PORT, return_value=_port(pd.DataFrame())),

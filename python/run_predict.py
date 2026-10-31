@@ -25,13 +25,37 @@ logger = get_logger(__name__)
 
 
 def run_top10(use_individual: bool = False):
-    """Top10/Worst10銘柄を予測・表示・DB保存する"""
+    """Top10/Worst10銘柄を予測・表示・DB保存する
+
+    日次の [3/6] と同じく保存の前に印を消し、統合モデルの回で jp の欠けが線の内のときだけ
+    印を立てる。銘柄別のモデルの回は 8:50 の発注に使わせないため印を立てない（#1449）。
+    """
+    from collections import Counter
+
+    from src.orchestration.jobs.prediction_saved_marker import (
+        clear_prediction_saved_marker,
+        mark_prediction_saved,
+    )
+    from src.orchestration.jobs.unavailable_gates import order_market_predictions_mostly_missing
+    from src.watchlist.batch_runner import load_target_symbols
+
+    clear_prediction_saved_marker()
     if use_individual:
         output_rows = predict_all_individual()
         output_top_worst_results(output_rows, mode="individual")
     else:
         output_rows = predict_all_unified()
         output_top_worst_results(output_rows, mode="unified")
+        market_totals = Counter(str(getattr(t, "market", "")) for t in load_target_symbols())
+        if not order_market_predictions_mostly_missing(market_totals, output_rows):
+            mark_prediction_saved()
+
+
+def _clear_saved_marker() -> None:
+    """一部の銘柄だけを production に保存する回は、8:50 の新規を止めるため印を消す（#1449）"""
+    from src.orchestration.jobs.prediction_saved_marker import clear_prediction_saved_marker
+
+    clear_prediction_saved_marker()
 
 
 def run_check_accuracy(horizon: int = 1):
@@ -77,8 +101,10 @@ def main():
     elif args.mode == "single":
         if not args.market or not args.symbol:
             parser.error("singleモードでは --market と --symbol が必須です")
+        _clear_saved_marker()
         run_predict_single(args.market, args.symbol)
     elif args.mode == "watchlist":
+        _clear_saved_marker()
         run_predict_watchlist()
     else:
         run_top10(use_individual=args.individual)

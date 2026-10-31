@@ -200,8 +200,12 @@ class TestEvaluateAllSymbols(unittest.TestCase):
         from src.backtest.rule_selector import evaluate_all_symbols
 
         port = MagicMock()
-        # 7203 は取得が空、6758 は取れるがルールが無いので有効ルールなし
-        port.download.side_effect = [pd.DataFrame(), pd.DataFrame({"Close": [100.0, 101.0]})]
+        # 7203 は取得が空（上場日の確かめの取り直しも空）、6758 は取れるがルールが無いので有効ルールなし
+        port.download.side_effect = [
+            pd.DataFrame(),
+            pd.DataFrame(),
+            pd.DataFrame({"Close": [100.0, 101.0]}),
+        ]
         port.add_technical_indicators.side_effect = lambda df: df
         with (
             patch("src.backtest.rule_selector._WATCHLIST_PATH", self.watchlist_path),
@@ -214,6 +218,89 @@ class TestEvaluateAllSymbols(unittest.TestCase):
         self.assertEqual(result["skipped"], 1)
         self.assertEqual(result["evaluated"], 1)
         mock_upsert.assert_not_called()
+
+    def _listed_after_port(self, probe: object) -> MagicMock:
+        """7203 は期間の値段が空で、取り直し（end を付けない）は probe を返す。6758 は取れる。"""
+        import pandas as pd
+
+        def _download(ticker: str, *, start: str | None = None, end: str | None = None) -> object:
+            if ticker.startswith("7203"):
+                if end is None:
+                    if isinstance(probe, Exception):
+                        raise probe
+                    return probe
+                return pd.DataFrame()
+            return pd.DataFrame({"Close": [100.0, 101.0]})
+
+        port = MagicMock()
+        port.download.side_effect = _download
+        port.add_technical_indicators.side_effect = lambda df: df
+        return port
+
+    def test_listed_after_window_counts_as_skipped_not_error(self):
+        """期間の後に上場した銘柄は、取得の失敗でなく有効ルールなしに数え、前の行を消す。"""
+        import pandas as pd
+
+        from src.backtest.rule_selector import evaluate_all_symbols
+        from src.utils.db.rule_results import load_effective_rules
+
+        self._seed_previous_week()
+        later = pd.DataFrame(
+            {"Close": [3000.0, 3010.0]},
+            index=pd.to_datetime(["2025-03-19", "2025-03-21"]),
+        )
+        with (
+            patch("src.backtest.rule_selector._WATCHLIST_PATH", self.watchlist_path),
+            patch("src.backtest.rule_selector.ALL_RULES", []),
+            patch(
+                "src.backtest.rule_backtester.get_backtest_data_port",
+                return_value=self._listed_after_port(later),
+            ),
+        ):
+            result = evaluate_all_symbols("jp", "2022-01-01", "2025-01-01")
+        self.assertEqual(result["errors"], 0)
+        self.assertEqual(result["skipped"], 2)
+        self.assertNotIn("7203", set(load_effective_rules("jp")["symbol"]))
+
+    def test_listed_before_window_end_stays_error(self):
+        """取り直しで期間の内の値段が出る（一時の取得の失敗）なら、失敗のまま数える。"""
+        import pandas as pd
+
+        from src.backtest.rule_selector import evaluate_all_symbols
+
+        earlier = pd.DataFrame(
+            {"Close": [1000.0, 1010.0]},
+            index=pd.to_datetime(["2022-01-04", "2022-01-05"], utc=True),
+        )
+        with (
+            patch("src.backtest.rule_selector._WATCHLIST_PATH", self.watchlist_path),
+            patch("src.backtest.rule_selector.ALL_RULES", []),
+            patch(
+                "src.backtest.rule_backtester.get_backtest_data_port",
+                return_value=self._listed_after_port(earlier),
+            ),
+            patch("src.backtest.rule_selector.upsert_rule_best"),
+        ):
+            result = evaluate_all_symbols("jp", "2022-01-01", "2025-01-01")
+        self.assertEqual(result["errors"], 1)
+        self.assertEqual(result["skipped"], 1)
+
+    def test_listing_probe_failure_stays_error(self):
+        """上場日の確かめの取り直しが落ちても、取得の失敗として数える。"""
+        from src.backtest.rule_selector import evaluate_all_symbols
+
+        with (
+            patch("src.backtest.rule_selector._WATCHLIST_PATH", self.watchlist_path),
+            patch("src.backtest.rule_selector.ALL_RULES", []),
+            patch(
+                "src.backtest.rule_backtester.get_backtest_data_port",
+                return_value=self._listed_after_port(RuntimeError("network")),
+            ),
+            patch("src.backtest.rule_selector.upsert_rule_best"),
+        ):
+            result = evaluate_all_symbols("jp", "2022-01-01", "2025-01-01")
+        self.assertEqual(result["errors"], 1)
+        self.assertEqual(result["skipped"], 1)
 
     def _seed_previous_week(self) -> None:
         from src.utils.db.rule_results import upsert_rule_best
@@ -297,8 +384,12 @@ class TestEvaluateAllSymbols(unittest.TestCase):
 
         self._seed_previous_week()
         port = MagicMock()
-        # 7203 は取得が空、6758 は取れるがルールが無いので有効ルールなし
-        port.download.side_effect = [pd.DataFrame(), pd.DataFrame({"Close": [100.0, 101.0]})]
+        # 7203 は取得が空（上場日の確かめの取り直しも空）、6758 は取れるがルールが無いので有効ルールなし
+        port.download.side_effect = [
+            pd.DataFrame(),
+            pd.DataFrame(),
+            pd.DataFrame({"Close": [100.0, 101.0]}),
+        ]
         port.add_technical_indicators.side_effect = lambda df: df
         with (
             patch("src.backtest.rule_selector._WATCHLIST_PATH", self.watchlist_path),
