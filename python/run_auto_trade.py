@@ -98,6 +98,7 @@ def main(argv: list[str] | None = None) -> int:
             for s in settled:
                 print(f"  {s['symbol']} {s['qty']}株 @ {s['fill_price']:.1f}円")
         else:
+            from src.orchestration.jobs import prediction_saved_marker
             from src.trading.execution import run_daily_orders
 
             stats = run_daily_orders(
@@ -107,6 +108,8 @@ def main(argv: list[str] | None = None) -> int:
                 prediction_repo=PostgresPredictionResultRepository(),
                 market=args.market,
                 mode=args.mode,
+                # 保存の済んでいない朝に手でやり直しても新規を出さない（#1443）
+                prediction_saved_day=prediction_saved_marker.read_prediction_saved_day(),
             )
             print(
                 f"発注完了 — 買い: {stats['buy_orders']} 売り: {stats['sell_orders']} "

@@ -6,6 +6,8 @@ Phase 4a で生まれた失敗様式への対処。DI 後は「呼び出しが�
 """
 
 import unittest
+from contextlib import ExitStack
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -69,6 +71,127 @@ class TestRunAutoTradeCompositionRoot(unittest.TestCase):
             run_auto_trade.main(["--mode", "paper"])
 
         self.assertIs(seen_sinks[0], captured["trade_diff_sink"])
+
+    def test_main_passes_prediction_saved_marker(self):
+        """CLI も保存の終わりの印を run_daily_orders に渡す（#1443）"""
+        import run_auto_trade
+
+        captured: dict = {}
+
+        def _capture(**kwargs):
+            captured.update(kwargs)
+            return {"buy_orders": 0, "sell_orders": 0, "skipped": 0, "errors": 0}
+
+        with patch("src.trading.execution.run_daily_orders", _capture), patch.object(
+            run_auto_trade, "build_broker", return_value=MagicMock()
+        ), patch(
+            "src.orchestration.jobs.prediction_saved_marker.read_prediction_saved_day",
+            return_value="20261030",
+        ):
+            rc = run_auto_trade.main(["--mode", "paper"])
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(captured["prediction_saved_day"], "20261030")
+
+    def test_main_without_marker_blocks_new_and_keeps_sl(self):
+        """印が無い朝に CLI で流しても、新規の買いは出ず SL の決済は出る（#1443）"""
+        import pandas as pd
+        import run_auto_trade
+
+        from src.infrastructure.in_memory import (
+            InMemoryOrderRunSink,
+            InMemoryPredictionRepository,
+            InMemoryTradeDiffSink,
+        )
+        from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
+        from src.trading.types import CorrelationGateResult, TradingGateStatus
+
+        today_run = "20261029_224343"  # 7:43 JST の今日の回
+        predictions = pd.DataFrame(
+            [
+                {
+                    "market": "jp",
+                    "symbol": "7200",
+                    "predicted_at": today_run,
+                    "current_price": 1000.0,
+                    "diff_ratio": 0.03,
+                    "confidence_ratio": 1.0,
+                }
+            ]
+        )
+        repo = InMemoryPredictionRepository()
+        broker = MagicMock(spec=BrokerBase)
+        broker.broker_name = "paper"
+        broker.get_balance.return_value = 1_000_000.0
+        broker.get_positions.return_value = [
+            {"symbol": "9000", "qty": 100, "avg_price": 1000.0, "current_price": 900.0}
+        ]
+        broker.get_short_positions = MagicMock(return_value=[])
+        broker.send_order.return_value = {"order_id": "test-001", "status": "pending"}
+        sl_risk = MagicMock()
+        sl_risk.return_value.check_sl_tp.side_effect = lambda avg, cur: (
+            (cur - avg) / avg <= -0.05,
+            False,
+            "SL発動",
+        )
+        open_gate = TradingGateStatus(
+            is_allowed=True, stop_active=False, daily_loss=0.0, daily_loss_limit=20_000.0
+        )
+        with ExitStack() as stack:
+
+            def p(*args, **kwargs):
+                return stack.enter_context(patch(*args, **kwargs))
+
+            stack.enter_context(patch.object(run_auto_trade, "build_broker", return_value=broker))
+            stack.enter_context(
+                patch.object(run_auto_trade, "PostgresTradeDiffSink", InMemoryTradeDiffSink)
+            )
+            stack.enter_context(
+                patch.object(run_auto_trade, "PostgresOrderRunSink", InMemoryOrderRunSink)
+            )
+            stack.enter_context(
+                patch.object(
+                    run_auto_trade, "PostgresPredictionResultRepository", return_value=repo
+                )
+            )
+            stack.enter_context(
+                patch.object(repo, "get_latest_by_market", return_value=predictions)
+            )
+            p(
+                "src.orchestration.jobs.prediction_saved_marker.read_prediction_saved_day",
+                return_value="",
+            )
+            p(
+                "src.trading.execution.freshness._local_now",
+                return_value=datetime(2026, 10, 29, 23, 50, tzinfo=timezone.utc),
+            )
+            p("src.trading.execution.runner._record_order")
+            p("src.trading.execution.sl_tp._record_order")
+            p(
+                "src.trading.execution.runner._choose_order_params",
+                return_value=(OrderType.MARKET, 0.0, "market", "open"),
+            )
+            p("src.trading.execution.sl_tp.RiskManager", sl_risk)
+            p("src.trading.execution.RiskManager.evaluate_trading_gate", return_value=open_gate)
+            p("src.trading.execution.RiskManager.calc_position_size", return_value=100)
+            p("src.trading.execution.RiskManager.update_peak_balance")
+            p(
+                "src.trading.execution.runner.evaluate_correlation_gate",
+                return_value=CorrelationGateResult(
+                    is_allowed=True, enc=2.0, enc_threshold=2.0, avg_correlation=0.0, n_symbols=1
+                ),
+            )
+            p("src.trading.execution.runner._load_exit_model", return_value=None)
+            p("src.trading.execution.params.get_optimal_params", return_value={})
+            p(
+                "src.trading.execution.selection.get_symbol_sector",
+                side_effect=lambda market, symbol: f"UNKNOWN:{market}:{symbol}",
+            )
+            rc = run_auto_trade.main(["--mode", "paper"])
+
+        self.assertEqual(rc, 0)
+        sent = [(c.args[0], c.args[1]) for c in broker.send_order.call_args_list]
+        self.assertEqual(sent, [("9000", OrderSide.SELL)])
 
 
 class TestDailyJobCompositionRoot(unittest.TestCase):
