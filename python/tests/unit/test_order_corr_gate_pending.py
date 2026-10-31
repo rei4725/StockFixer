@@ -161,18 +161,28 @@ class TestCorrelationGateCountsPendingBuys(unittest.TestCase):
         )
         self.assertEqual(gate.call_args.args[0], ["9000", "9001"])
 
-    def test_reader_failure_uses_held_only(self):
-        """約定待ちを読んで例外になる Broker では、約定済みの保有だけで評価する"""
-        broker = _make_broker([{"symbol": "9000", "qty": 100}, {"symbol": "9001", "qty": 100}])
-        broker.get_pending_buy_symbols = MagicMock(side_effect=RuntimeError("db down"))
+    def test_reader_failure_blocks_new_buy_but_exits_run_then_raises(self):
+        """約定待ちを読めない日は新規の BUY を止め、売りシグナルと SL の決済は出して失敗にする（#1465）"""
+        positions = [
+            {"symbol": "9000", "qty": 100, "avg_price": 1000.0, "current_price": 900.0},
+            {"symbol": "9001", "qty": 100, "avg_price": 1000.0, "current_price": 1000.0},
+        ]
+        broker = _make_broker(positions)
+        err = RuntimeError("db down")
+        broker.get_pending_buy_symbols = MagicMock(side_effect=err)
         gate = MagicMock(return_value=_CORR_OK)
-        stats = _run(
-            broker,
-            pd.DataFrame([_row("7200", 0.03)]),
-            patch("src.trading.execution.runner.evaluate_correlation_gate", gate),
-        )
-        self.assertEqual(gate.call_args.args[0], ["9000", "9001"])
-        self.assertEqual(stats["buy_orders"], 1)
+        predictions = pd.DataFrame([_row("9001", -0.03), _row("7200", 0.03)])
+        with self.assertRaises(RuntimeError) as ctx:
+            _run(
+                broker,
+                predictions,
+                patch("src.trading.execution.runner.evaluate_correlation_gate", gate),
+            )
+        self.assertIs(ctx.exception, err)
+        sent = _sent(broker)
+        self.assertIn(("9000", OrderSide.SELL), sent)  # SL
+        self.assertIn(("9001", OrderSide.SELL), sent)  # 売りシグナル
+        self.assertNotIn(("7200", OrderSide.BUY), sent)
 
 
 if __name__ == "__main__":

@@ -96,10 +96,12 @@ class TestPendingBuysInCaps(unittest.TestCase):
         broker = _make_broker()
         self.assertEqual(selection._get_pending_buy_symbols(broker), set())
 
-    def test_reader_failure_counts_no_pending(self):
+    def test_reader_failure_raises(self):
+        """読めない日を0件と取り違えず、例外を上へ出す（#1465）。"""
         broker = _make_broker()
         broker.get_pending_buy_symbols = MagicMock(side_effect=RuntimeError("db down"))
-        self.assertEqual(selection._get_pending_buy_symbols(broker), set())
+        with self.assertRaises(RuntimeError):
+            selection._get_pending_buy_symbols(broker)
 
 
 class TestPaperBrokerPendingBuySymbols(unittest.TestCase):
