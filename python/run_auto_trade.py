@@ -98,9 +98,12 @@ def main(argv: list[str] | None = None) -> int:
             for s in settled:
                 print(f"  {s['symbol']} {s['qty']}株 @ {s['fill_price']:.1f}円")
         else:
+            from src.infrastructure.yfinance_market_data_adapter import YFinanceMarketDataAdapter
             from src.orchestration.jobs import prediction_saved_marker
             from src.trading.execution import run_daily_orders
 
+            # 日次の道と同じく、ペーパーでは値段の取り元を渡して指値の判定を効かせる（#1450）
+            market_data = YFinanceMarketDataAdapter() if args.mode == "paper" else None
             stats = run_daily_orders(
                 broker=broker,
                 order_run_sink=PostgresOrderRunSink(),
@@ -108,6 +111,7 @@ def main(argv: list[str] | None = None) -> int:
                 prediction_repo=PostgresPredictionResultRepository(),
                 market=args.market,
                 mode=args.mode,
+                market_data=market_data,
                 # 保存の済んでいない朝に手でやり直しても新規を出さない（#1443）
                 prediction_saved_day=prediction_saved_marker.read_prediction_saved_day(),
             )
@@ -115,6 +119,10 @@ def main(argv: list[str] | None = None) -> int:
                 f"発注完了 — 買い: {stats['buy_orders']} 売り: {stats['sell_orders']} "
                 f"スキップ: {stats['skipped']} エラー: {stats['errors']}"
             )
+            # 注文の失敗を成功に見せない（日次の道の #1074 と同じ）
+            if stats.get("errors", 0) > 0:
+                logger.error("自動発注で注文の失敗が %s 件あった", stats["errors"])
+                return 1
         return 0
 
     except Exception as e:
