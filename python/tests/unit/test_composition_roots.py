@@ -458,8 +458,9 @@ class TestRunRuleSignalsCompositionRoot(unittest.TestCase):
         }
 
         with patch("run_rule_signals.YFinanceMarketDataAdapter"), patch(
-            "run_rule_signals.run_rule_signal_pipeline", return_value=[fake_signal]
-        ), patch(
+            "run_rule_signals.generate_rule_signals",
+            return_value=RuleSignalBatch(signals=[fake_signal], total=1),
+        ), patch("run_rule_signals.make_order_broker"), patch(
             "run_rule_signals.execute_rule_paper_trades",
             side_effect=_fake_execute_rule_paper_trades,
         ), patch(
