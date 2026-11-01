@@ -182,6 +182,11 @@ def main():
     logger.info(f"\n結果保存（CSV）: {csv_path}")
 
     json_path = save_optimal_params_json(result_df, args.market, args.symbol, sort_by=args.sort_by)
+    if not json_path:
+        logger.error(
+            "最適パラメータを保存しなかった（有効な結果なし）: %s/%s", args.market, args.symbol
+        )
+        sys.exit(1)
     logger.info(f"最適パラメータ保存（JSON）: {json_path}")
 
 

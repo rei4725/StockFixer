@@ -152,6 +152,12 @@ def main():
             print(f"    {e['market']}/{e['symbol']}: {e.get('error', '不明')}")
     print(f"{'='*60}")
 
+    if errors:
+        logger.error(
+            "全銘柄最適化バッチで最適パラメータを書けなかった銘柄が %d 件あった", len(errors)
+        )
+        sys.exit(1)
+
 
 if __name__ == "__main__":
     try:
