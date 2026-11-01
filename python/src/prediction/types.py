@@ -29,6 +29,11 @@ from src.domain.types import SignalSnapshot as SignalSnapshot  # noqa: F401
 # とは別物なので混同しないこと。
 UNIFIED_PREDICTION_MODEL_NAMES: list[str] = ["UnifiedStockXGBoost", "UnifiedStockLightGBM"]
 
+# 手で流す銘柄別のモデルの回（run_predict.py の --individual・single・watchlist）を
+# prediction_results に保存するときの model_version。production で保存すると
+# Delete-Insert で統合モデルの行を上書きし、日次の採点に混ざる（#1457）。
+INDIVIDUAL_MODEL_VERSION = "individual"
+
 
 @dataclass
 class TrainingMetrics:
