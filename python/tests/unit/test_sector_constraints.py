@@ -1,8 +1,12 @@
 import unittest
 from unittest.mock import patch
 
+import pandas as pd
+
+from config.settings import MAX_SECTOR_POSITIONS
 from src.domain.sector_cap import filter_by_sector_cap
-from src.utils.sector_constraints import get_symbol_sector
+from src.trading.execution.selection import _apply_buy_sector_limit
+from src.utils.sector_constraints import UNKNOWN_SECTOR, get_symbol_sector
 
 
 class TestFilterBySectorCap(unittest.TestCase):
@@ -125,5 +129,83 @@ class TestGetSymbolSector(unittest.TestCase):
         self.assertEqual(second, "Energy")
         self.assertEqual(mock_cls.call_count, 1)
 
+    def test_unresolved_symbols_share_one_sector(self):
+        """#1469: 引けなかった銘柄は銘柄ごとの別の業種でなく、同じ1つの業種になる。"""
+        get_symbol_sector.cache_clear()
+        empty_ticker = unittest.mock.MagicMock()
+        empty_ticker.info = {}
+        with patch(
+            "src.utils.sector_constraints.yf.Ticker",
+            side_effect=[RuntimeError("429"), RuntimeError("429"), empty_ticker],
+        ):
+            sectors = {
+                get_symbol_sector("jp", "1001"),
+                get_symbol_sector("jp", "1002"),
+                get_symbol_sector("us", "ETF"),
+            }
+        self.assertEqual(sectors, {UNKNOWN_SECTOR})
+
     def tearDown(self):
         get_symbol_sector.cache_clear()
+
+
+class TestUnresolvedSectorCap(unittest.TestCase):
+    """#1469: yfinance で業種が引けない日も同一業種の上限が効く。"""
+
+    def setUp(self):
+        get_symbol_sector.cache_clear()
+
+    def tearDown(self):
+        get_symbol_sector.cache_clear()
+
+    def _candidates(self, symbols: list[str]) -> pd.DataFrame:
+        return pd.DataFrame(
+            [
+                {
+                    "market": "jp",
+                    "symbol": s,
+                    "diff_ratio": 0.05 - 0.001 * i,
+                    "current_price": 1000.0,
+                }
+                for i, s in enumerate(symbols)
+            ]
+        )
+
+    def test_lookup_failure_candidates_are_capped(self):
+        symbols = [str(9000 + i) for i in range(MAX_SECTOR_POSITIONS + 2)]
+        with patch("src.utils.sector_constraints.yf.Ticker", side_effect=RuntimeError("429")):
+            limited = _apply_buy_sector_limit(
+                self._candidates(symbols), max_sector_positions=MAX_SECTOR_POSITIONS
+            )
+        self.assertEqual(limited["symbol"].tolist(), symbols[:MAX_SECTOR_POSITIONS])
+
+    def test_lookup_failure_holdings_count_toward_cap(self):
+        symbols = [str(9000 + i) for i in range(MAX_SECTOR_POSITIONS + 2)]
+        with patch("src.utils.sector_constraints.yf.Ticker", side_effect=RuntimeError("429")):
+            limited = _apply_buy_sector_limit(
+                self._candidates(symbols),
+                max_sector_positions=MAX_SECTOR_POSITIONS,
+                held_symbols={"8000"},
+                market="jp",
+            )
+        self.assertEqual(limited["symbol"].tolist(), symbols[: MAX_SECTOR_POSITIONS - 1])
+
+    def test_resolved_sectors_are_counted_separately(self):
+        sectors = {"7200": "Auto", "7201": "Auto", "6758": "Technology"}
+
+        def _ticker(ticker: str) -> unittest.mock.MagicMock:
+            mock = unittest.mock.MagicMock()
+            symbol = ticker.split(".")[0]
+            if symbol in sectors:
+                mock.info = {"sector": sectors[symbol]}
+            else:
+                type(mock).info = unittest.mock.PropertyMock(side_effect=RuntimeError("429"))
+            return mock
+
+        with patch("src.utils.sector_constraints.yf.Ticker", side_effect=_ticker):
+            limited = _apply_buy_sector_limit(
+                self._candidates(["7200", "7201", "9000", "9001", "6758"]),
+                max_sector_positions=1,
+            )
+        self.assertEqual(limited["symbol"].tolist(), ["7200", "9000", "6758"])
+        self.assertEqual(limited["sector"].tolist(), ["Auto", UNKNOWN_SECTOR, "Technology"])

@@ -10,11 +10,14 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+# 業種を引けなかった銘柄は全部この1つの業種として数え、同一業種の上限を当てる（#1469）。
+UNKNOWN_SECTOR = "UNKNOWN"
 
-def _normalize_sector(sector: str | None, fallback_key: str) -> str:
+
+def _normalize_sector(sector: str | None) -> str:
     if sector and str(sector).strip():
         return str(sector).strip()
-    return f"UNKNOWN:{fallback_key}"
+    return UNKNOWN_SECTOR
 
 
 class _SectorUnresolvedError(Exception):
@@ -36,18 +39,19 @@ def _lookup_symbol_sector(market: str, symbol: str) -> str:
     sector = info.get("sector") or info.get("industry")
     if not (sector and str(sector).strip()):
         raise _SectorUnresolvedError
-    return _normalize_sector(sector, f"{market}:{symbol}")
+    return _normalize_sector(sector)
 
 
 def get_symbol_sector(market: str, symbol: str) -> str:
     """銘柄のセクター情報を yfinance から取得し、引けたものだけをプロセス内でキャッシュする。
 
-    yfinance の例外やセクターが空のときは UNKNOWN を返すが、キャッシュせず次回引き直す。
+    yfinance の例外やセクターが空のときは、銘柄によらず同じ UNKNOWN_SECTOR を返す。
+    引けない銘柄どうしも同一業種の上限に当たる（#1469）。キャッシュはせず次回引き直す。
     """
     try:
         return _lookup_symbol_sector(market, symbol)
     except _SectorUnresolvedError:
-        return _normalize_sector(None, f"{market}:{symbol}")
+        return UNKNOWN_SECTOR
 
 
 get_symbol_sector.cache_clear = _lookup_symbol_sector.cache_clear  # type: ignore[attr-defined]
