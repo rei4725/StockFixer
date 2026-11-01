@@ -132,13 +132,13 @@ def run_daily_orders(
         if entry_error is not None:
             raise entry_error
         return stats
-    # 前の回の約定待ちの BUY も、相関ゲート・保有・業種の上限に数える（#1137・#1320）
-    held_or_pending = held_symbols | _get_pending_buy_symbols(broker)
+    held_or_pending = held_symbols  # 約定待ちの BUY を読めない日は新規を止める（#1465）
     # 相関ゲートを評価しない・評価が落ちた日も corr_gate に不合格の値が入るよう先に置く
     blocked_status, corr_gate = _block_entries(gate_status)
     if entry_error is None:
         try:
-            # --- 相関ゲート: 保有銘柄間の相関上昇時に新規買いをブロック ---
+            # 前の回の約定待ちの BUY も、相関ゲート・保有・業種の上限に数える（#1137・#1320）
+            held_or_pending = held_symbols | _get_pending_buy_symbols(broker)
             corr_gate = evaluate_correlation_gate(
                 sorted(held_or_pending),
                 market,
@@ -146,7 +146,7 @@ def run_daily_orders(
                 enc_threshold=CORRELATION_ENC_THRESHOLD,
             )
         except Exception as exc:
-            logger.error("[exec] 相関ゲートの評価に失敗。新規は止め、決済は続ける", exc_info=True)
+            logger.error("[exec] 約定待ち・相関ゲートに失敗。新規を止め決済は出す", exc_info=True)
             entry_error = exc
     if entry_error is not None:
         gate_status = blocked_status

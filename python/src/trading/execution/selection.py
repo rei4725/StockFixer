@@ -66,15 +66,18 @@ def _get_held_symbols(broker: BrokerBase) -> set[str]:
 
 
 def _get_pending_buy_symbols(broker: BrokerBase) -> set[str]:
-    """約定待ちの BUY の銘柄コードを返す。読む関数が無い Broker と読めないときは空（#1137）。"""
+    """約定待ちの BUY の銘柄コードを返す。読む関数が無い Broker は空（#1137）。
+
+    読めない日を0件と取り違えると上限が甘くなるため、例外は上へ出す（#1465）。
+    """
     reader = getattr(broker, "get_pending_buy_symbols", None)
     if reader is None:
         return set()
     try:
         return {str(s).replace(".T", "") for s in reader()}
     except Exception:
-        logger.error("[exec] 約定待ちの BUY を読めない（保有だけで数えて続ける）", exc_info=True)
-        return set()
+        logger.error("[exec] 約定待ちの BUY を読めない（新規は止める）", exc_info=True)
+        raise
 
 
 def _load_exit_model(market: str) -> ExitModel | None:

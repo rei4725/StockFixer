@@ -831,15 +831,10 @@ class TestRunClaudeTrader(unittest.TestCase):
         self.assertEqual(results[0]["status"], "placed")
         broker.send_order.assert_called_once()
 
-    def test_unreadable_pending_buys_keep_current_behavior(self):
-        with patch("src.trading.claude_order_caps.MAX_POSITIONS", 10):
-            stats, broker, results = self._run_with_buys(
-                ["S0"], positions=self._nine_held(), pending=RuntimeError("DB 読めない")
-            )
-
-        self.assertEqual(results[0]["status"], "placed")
-        broker.send_order.assert_called_once()
-        self.assertEqual(stats["errors"], 0)
+    def test_unreadable_pending_buys_block_buy_and_sell_then_raise(self):
+        # 約定待ちの BUY を読めない日は0件と取り違えず、新規の buy だけ止める（#1465）
+        err = RuntimeError("DB 読めない")
+        self._assert_buy_step_error_sells_then_raises(err, pending=err)
 
     def test_short_positions_count_toward_max_positions(self):
         # 買い持ち7件＋空売り2件＋この回の買い1件で MAX_POSITIONS=10 に達する（#1211）

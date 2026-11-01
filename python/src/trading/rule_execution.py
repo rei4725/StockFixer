@@ -80,7 +80,8 @@ def execute_rule_paper_trades(
         raise
     held_symbols = {p["symbol"] for p in positions}
     # 約定待ちの BUY は朝の約定まで get_positions に出ないため、新規買いの数えに足す（#1176）。
-    # SELL の分かれ道は約定済みの保有（held_symbols）だけを見る。
+    # SELL の分かれ道は約定済みの保有（held_symbols）だけを見る。読めない日は保有と同じく
+    # ジョブを失敗にする（#1465）
     held_or_pending = held_symbols | _get_pending_buy_symbols(broker)
     # 空売り中の銘柄へ逆向きの新規買いを重ねない（#1349）。読めなければ新規買いの手順で止まる
     short_codes: set[str] = set()

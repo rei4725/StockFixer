@@ -1,7 +1,8 @@
 """ユニットテスト: 16:30 のルールの道が約定待ちの BUY を保有上限・業種の上限・相関ゲートに数える（#1176）
 
 紙の BUY は朝の約定まで get_positions に出ないため、ルールの道は約定待ちの買いを数えずに
-保有上限と業種の上限を超えて建てていた。読む関数が無い・読めないときは約定済みの保有だけで続ける。
+保有上限と業種の上限を超えて建てていた。読む関数が無いときは約定済みの保有だけで続け、
+読めないときはジョブを失敗にする（#1465）。
 """
 
 import unittest
@@ -107,14 +108,15 @@ class TestRuleExecutionCountsPendingBuys(unittest.TestCase):
         )
         self.assertEqual(result["buy_orders"], 1)
 
-    def test_reader_failure_keeps_held_only(self):
+    def test_reader_failure_fails_job_without_orders(self):
+        # 読めない日を0件と取り違えず、保有を読めない日と同じくジョブを失敗にする（#1465）
         held = [_long(str(1000 + i)) for i in range(9)]
         broker = _broker(held, pending_buys=RuntimeError("db down"))
 
-        result, _ = self._run(broker, [{"symbol": "3000", "signal": 1, "price": 1000.0}])
+        with self.assertRaises(RuntimeError):
+            self._run(broker, [{"symbol": "3000", "signal": 1, "price": 1000.0}])
 
-        self.assertEqual(result["buy_orders"], 1)
-        self.assertEqual(result["errors"], 0)
+        broker.send_order.assert_not_called()
 
     def test_sell_branch_uses_settled_positions_only(self):
         broker = _broker([_long("1000")], pending_buys={"2000"})
