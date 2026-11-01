@@ -21,8 +21,8 @@ from src.watchlist.batch_runner import load_target_symbols
 logger = get_logger(__name__)
 
 
-def run_single(market: str, symbol: str, start_date=None, end_date=None, fetch_only=False):
-    """単一銘柄のデータを取得・保存する"""
+def run_single(market: str, symbol: str, start_date=None, end_date=None, fetch_only=False) -> bool:
+    """単一銘柄のデータを取得・保存する。例外で落ちたら False（取得できないスキップは True）"""
     try:
         if fetch_only:
             result = fetch_stock_data_with_features(
@@ -33,13 +33,13 @@ def run_single(market: str, symbol: str, start_date=None, end_date=None, fetch_o
             )
             if result is None:
                 logger.warning(f"[取得失敗] {market}/{symbol}")
-                return
+                return True
             market, symbol, data, _, quality_result = result
             if data is None:
                 issues = [] if quality_result is None else quality_result.issues
                 detail = ", ".join(f"{i.check}({i.level}): {i.detail}" for i in issues)
                 logger.warning(f"[特徴量なし] {market}/{symbol} - 品質: {detail or '結果なし'}")
-                return
+                return True
             logger.info(f"[取得完了] {market}/{symbol} - {len(data)}行")
         else:
             save_stock_data_with_features(
@@ -50,6 +50,8 @@ def run_single(market: str, symbol: str, start_date=None, end_date=None, fetch_o
             )
     except Exception as e:
         logger.error(f"エラーが発生しました: {e}", exc_info=True)
+        return False
+    return True
 
 
 def main():
@@ -75,13 +77,18 @@ def main():
 
     if args.batch:
         tasks = load_target_symbols()
-        run_batch_pipeline(tasks, fetch_only=args.fetch_only)
+        result = run_batch_pipeline(tasks, fetch_only=args.fetch_only)
+        if result.failed:
+            logger.error("データ作成で失敗した銘柄がある: %d件", len(result.failed))
+            sys.exit(1)
     else:
         if not args.market or not args.symbol:
             parser.error("--market と --symbol は必須です（--batch 指定時を除く）")
-        run_single(
+        ok = run_single(
             args.market, args.symbol, args.start_date, args.end_date, fetch_only=args.fetch_only
         )
+        if not ok:
+            sys.exit(1)
 
 
 if __name__ == "__main__":
