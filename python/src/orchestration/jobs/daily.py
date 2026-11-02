@@ -25,6 +25,7 @@ from src.orchestration.jobs.challenger_shadow import run_challenger_shadow_stage
 from src.orchestration.jobs.common import (
     _handle_stage_error,
     _notify_stage_failure,
+    _skip_if_jp_market_closed,
     is_today_jst,
 )
 from src.orchestration.jobs.drift_check import run_daily_drift_check
@@ -245,6 +246,10 @@ def run_daily_auto_order():
     本番切り替え時は環境変数 AUTO_TRADE_MODE=live に変更する。
     """
     import os
+
+    # SL/TP・ホライズン決済も出さない（約定は次の営業日の寄りで、その朝の 8:50 が同じ判断をする）
+    if _skip_if_jp_market_closed("自動発注"):
+        return
 
     from src.infrastructure.discord_notification_adapter import DiscordNotificationAdapter
     from src.infrastructure.persistence.order_run_repository import PostgresOrderRunSink
@@ -517,6 +522,8 @@ def run_daily_rule_signals() -> None:
 
     logger.info("=== 日次ルールシグナルジョブ開始 ===")
     market = os.environ.get("RULE_EVAL_MARKET", "jp")
+    if market == "jp" and _skip_if_jp_market_closed("日次ルールシグナル"):
+        return
 
     try:
         from src.infrastructure.discord_notification_adapter import DiscordNotificationAdapter
