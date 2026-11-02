@@ -13,6 +13,9 @@ from src.domain.types import HoldRules
 DEFAULT_BENCHMARKS = {"jp": "1306.T", "us": "^GSPC"}
 _FALLBACK_BENCHMARK = "^GSPC"
 
+# 撤退・部分利確の判定を丸める頻度（#1488）。
+EXIT_REVIEW_FREQS = ("daily", "monthly")
+
 
 def default_benchmark_ticker(market: str) -> str:
     """market に対応するベンチマークの既定のティッカーを返す。"""
@@ -39,6 +42,11 @@ class LongtermBacktestConfig:
     benchmark_ticker: 比べる指数。空なら market の既定（`DEFAULT_BENCHMARKS`）を使う。
     dynamic_slippage: True（既定）なら約定の日より前の 20 本の平均出来高で
                    市場インパクト（`make_slippage_fn`）を上乗せする。False で切る。
+    exit_review_freq: 撤退・部分利確の判定をどの頻度で人間に知らせるか（#1488）。
+                   "daily"（既定）は丸めず、判定の日から execution_lag 営業日後に
+                   約定する。"monthly" は本番の multibagger_job（毎月1日に前の月の
+                   終値までで判定して知らせる）に合わせ、判定の日をその月の最後の
+                   取引日に丸めてから execution_lag 営業日後に約定する。
     """
 
     market: str = "us"
@@ -52,12 +60,17 @@ class LongtermBacktestConfig:
     benchmark_ticker: str = ""
     n_trials: int = 0
     dynamic_slippage: bool = True
+    exit_review_freq: str = "daily"
     costs: TradingCosts = field(default_factory=TradingCosts)
     rules: HoldRules = field(default_factory=HoldRules)
 
     def __post_init__(self) -> None:
         if self.execution_lag < 0:
             raise ValueError(f"execution_lag は 0 以上である必要があります: {self.execution_lag}")
+        if self.exit_review_freq not in EXIT_REVIEW_FREQS:
+            raise ValueError(
+                f"exit_review_freq は {EXIT_REVIEW_FREQS} のいずれかです: {self.exit_review_freq}"
+            )
         if not self.benchmark_ticker:
             object.__setattr__(self, "benchmark_ticker", default_benchmark_ticker(self.market))
 
