@@ -7,12 +7,14 @@ yfinance は分割の前の足も調整し直して返すが、DB の古い足�
 分割は差分の足の Stock Splits の列だけでは見落とす（PR 892 より前の分割・
 取得が止まっていた間の分割・yfinance が行を返さない分割）。そのため、
 差分を DB の直近の足と重ねて取って終値を突き合わせ、取り直した後も
-前日比が極端な足が残る銘柄は予想から外す。
+前日比が極端な足が残り、その近くに分割の記録がある銘柄は予想から外す
+（記録の無い段差は本当の値動きとみなす。#1492）。
 取り直しは取得の窓より前の DB の足も含める（#1392）。
 """
 
 from typing import Callable, List, Optional, Tuple
 
+import numpy as np
 import pandas as pd
 
 from src.market_data.base import DataSourceBase
@@ -28,6 +30,10 @@ OVERLAP_CLOSE_TOLERANCE = 0.03
 # 前日比の終値がこの範囲の外の足を段差とみなす
 PRICE_STEP_MIN_RATIO = 0.55
 PRICE_STEP_MAX_RATIO = 1.8
+# 取り直した後に残る段差は、この営業日数以内に分割の記録があれば分割の残りとみなす（#1492）
+SPLIT_RECORD_NEAR_WEEKDAYS = 5
+# 段差の比と分割の比（またはその逆数）の積がこの割合を超えて 1 からずれなければ、比が近いとみなす
+SPLIT_RATIO_TOLERANCE = 0.05
 
 
 def stock_split_ratios(fresh_data: Optional[pd.DataFrame]) -> list:
@@ -96,6 +102,56 @@ def find_price_steps(df: Optional[pd.DataFrame]) -> List[Tuple[str, float]]:
     steps = ratios[(ratios < PRICE_STEP_MIN_RATIO) | (ratios > PRICE_STEP_MAX_RATIO)]
     days = _day_index(steps.index)
     return [(day.strftime("%Y-%m-%d"), float(r)) for day, r in zip(days, steps)]
+
+
+def steps_near_split_records(
+    steps: List[Tuple[str, float]], full_data: Optional[pd.DataFrame]
+) -> List[Tuple[str, float]]:
+    """
+    取り直した足の Stock Splits の列に照らし、分割の残りとみなす段差だけを返す（#1492）。
+
+    取り直した足は yfinance が調整し直した1本の系列なので、残る段差は調整し損ねた分割か
+    本当の値動きかのどちらか。近い日（SPLIT_RECORD_NEAR_WEEKDAYS 営業日以内）に分割の
+    記録があるか、比が記録された分割の比に近い段差だけを分割の残りとする。
+    Stock Splits の列が無ければ見分けられないため、段差をすべて返す（今までどおり外す）。
+    """
+    if not steps:
+        return []
+    if full_data is None or "Stock Splits" not in full_data.columns:
+        return list(steps)
+    splits = pd.to_numeric(full_data["Stock Splits"], errors="coerce").fillna(0.0)
+    splits = splits[splits > 0]
+    split_days = _day_index(splits.index).values.astype("datetime64[D]")
+    split_ratios = [float(v) for v in splits]
+    kept = []
+    for day, ratio in steps:
+        step_day = np.datetime64(day, "D")
+        near_day = any(
+            abs(int(np.busday_count(min(step_day, d), max(step_day, d))))
+            <= SPLIT_RECORD_NEAR_WEEKDAYS
+            for d in split_days
+        )
+        near_ratio = any(
+            min(abs(ratio * s - 1.0), abs(ratio / s - 1.0)) <= SPLIT_RATIO_TOLERANCE
+            for s in split_ratios
+        )
+        if near_day or near_ratio:
+            kept.append((day, ratio))
+    return kept
+
+
+def split_residual_steps(
+    market: str, symbol: str, df: pd.DataFrame, full_data: Optional[pd.DataFrame]
+) -> List[Tuple[str, float]]:
+    """取り直した後の窓の足 df に残る段差のうち、分割の残りとみなすものを返す（#1492）。"""
+    left_steps = find_price_steps(df)
+    steps = steps_near_split_records(left_steps, full_data)
+    if len(steps) < len(left_steps):
+        logger.info(
+            f"分割の記録が無い段差は本当の値動きとして特徴量を作る: {market}/{symbol} "
+            f"{[s for s in left_steps if s not in steps][:3]}"
+        )
+    return steps
 
 
 def refetch_full_history(
