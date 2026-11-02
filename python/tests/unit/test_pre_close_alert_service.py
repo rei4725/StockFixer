@@ -1,9 +1,11 @@
 """ユニットテスト: 引け前ポジション再評価アラートサービス（R-409）"""
 
 import unittest
+from datetime import date
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
+import pytest
 
 from src.infrastructure.in_memory import InMemoryPredictionRepository, InMemoryTradeDiffSink
 from src.trading.pre_close_alert_service import (
@@ -17,6 +19,16 @@ from src.trading.pre_close_alert_service import (
 
 # 注入する予測リポジトリ。テストは latest_timestamp / results_at を patch.object で差し替える
 _PREDICTIONS = InMemoryPredictionRepository()
+
+
+@pytest.fixture(autouse=True)
+def _fixed_today():
+    """既存のテストの予想の回（2026-01-01）が古いと見なされないよう、今日を固定する。"""
+    with patch(
+        "src.trading.pre_close_alert_service._today_jst",
+        return_value=date(2026, 1, 1),
+    ):
+        yield
 
 
 def _make_position(symbol: str, qty: int, avg_price: float, current_price: float) -> dict:
@@ -276,6 +288,73 @@ class TestPredictionRepositoryWiring(unittest.TestCase):
         self.assertEqual(len(alerts), 1)
         # 古い時点（+5%）ではなく最新時点（-2%）の予測で判定される
         self.assertAlmostEqual(alerts[0].diff_ratio, -0.02)
+        self.assertEqual(alerts[0].alert_type, AlertType.STOP_LOSS)
+
+    def _evaluate_one_position(self, repo: InMemoryPredictionRepository) -> list[PositionAlert]:
+        with patch("src.trading.brokers.paper.paper_broker.PaperBroker") as mock_broker_cls:
+            broker = MagicMock()
+            broker.get_positions.return_value = [_make_position("7203", 100, 1000.0, 980.0)]
+            mock_broker_cls.return_value = broker
+            return evaluate_positions(trade_diff_sink=InMemoryTradeDiffSink(), prediction_repo=repo)
+
+    def test_uses_production_run_not_newer_challenger(self):
+        repo = InMemoryPredictionRepository()
+        repo.add(
+            "20260101_073000",
+            [{"market": "jp", "symbol": "7203", "avg_pred_price": 960.0, "diff_ratio": -0.02}],
+        )
+        # production の後に保存される challenger の回は時刻が新しいが、アラートには使わない
+        repo.add(
+            "20260101_073500",
+            [
+                {
+                    "market": "jp",
+                    "symbol": "7203",
+                    "avg_pred_price": 1030.0,
+                    "diff_ratio": 0.05,
+                    "model_version": "challenger",
+                }
+            ],
+        )
+        alerts = self._evaluate_one_position(repo)
+
+        self.assertEqual(len(alerts), 1)
+        self.assertAlmostEqual(alerts[0].diff_ratio, -0.02)
+        self.assertEqual(alerts[0].alert_type, AlertType.STOP_LOSS)
+
+    def test_skips_when_production_run_older_than_previous_business_day(self):
+        repo = InMemoryPredictionRepository()
+        repo.add(
+            "20260109_073000",
+            [{"market": "jp", "symbol": "7203", "avg_pred_price": 960.0, "diff_ratio": -0.02}],
+        )
+        # 2026-01-14（水）の前の営業日は 01-13（火）。01-09（金）の回は古い
+        with (
+            patch(
+                "src.trading.pre_close_alert_service._today_jst",
+                return_value=date(2026, 1, 14),
+            ),
+            self.assertLogs("src.trading.pre_close_alert_service", level="WARNING") as logs,
+        ):
+            alerts = self._evaluate_one_position(repo)
+
+        self.assertEqual(alerts, [])
+        self.assertTrue(any("古い" in line for line in logs.output))
+
+    def test_uses_run_of_previous_business_day(self):
+        repo = InMemoryPredictionRepository()
+        repo.add(
+            "20260109_073000",
+            [{"market": "jp", "symbol": "7203", "avg_pred_price": 960.0, "diff_ratio": -0.02}],
+        )
+        # 2026-01-13（火）の前の営業日は、成人の日（01-12）を飛ばして 01-09（金）
+        with patch(
+            "src.trading.pre_close_alert_service._today_jst",
+            return_value=date(2026, 1, 13),
+        ):
+            alerts = self._evaluate_one_position(repo)
+
+        self.assertEqual(len(alerts), 1)
         self.assertEqual(alerts[0].alert_type, AlertType.STOP_LOSS)
 
     def test_prediction_repo_is_required(self):
