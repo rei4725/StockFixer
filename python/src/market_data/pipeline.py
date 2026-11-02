@@ -34,6 +34,7 @@ from src.market_data.macro_features import (
     add_macro_derived_features,
     fetch_additional_macro_features,
 )
+from src.market_data.macro_join import join_macro_frame, missing_macro_columns
 from src.market_data.quality_check import QualityCheckResult, price_step_issue, run_quality_checks
 from src.market_data.saver import save_raw_ohlcv
 from src.market_data.sentiment_features import add_sentiment_features, fetch_news_sentiment_with_llm
@@ -245,33 +246,20 @@ def fetch_stock_data_with_features(
     # テクニカル指標を追加
     df = add_technical_indicators(df)
 
-    # クロスアセット特徴量を結合（R-306：VIX / USD/JPY / 米国10年債利回り）
+    # クロスアセット（R-306：VIX / USD/JPY / 米国10年債利回り）と
+    # 追加マクロ（R-201：S&P500 / ドルインデックス / 金先物）を取得する
     cross_asset = fetch_cross_asset_features(start_date, end_date)
-    if cross_asset is not None and not cross_asset.empty:
-        df_idx = df.index
-        if isinstance(df_idx, pd.DatetimeIndex) and df_idx.tz is not None:
-            df.index = df_idx.tz_localize(None)
-        df = df.join(cross_asset, how="left")
-        for col in cross_asset.columns:
-            if col in df.columns:
-                # bfill は未来情報リーク（ルックアヘッド）になるため ffill のみ
-                df[col] = df[col].ffill()
-        logger.debug(f"クロスアセット特徴量を付与: {list(cross_asset.columns)} ({market}/{symbol})")
-
-    # 追加マクロ特徴量を結合（R-201：S&P500 / ドルインデックス / 金先物）
     additional_macro = fetch_additional_macro_features(start_date, end_date)
-    if additional_macro is not None and not additional_macro.empty:
-        df_idx = df.index
-        if isinstance(df_idx, pd.DatetimeIndex) and df_idx.tz is not None:
-            df.index = df_idx.tz_localize(None)
-        df = df.join(additional_macro, how="left")
-        for col in additional_macro.columns:
-            if col in df.columns:
-                # bfill は未来情報リーク（ルックアヘッド）になるため ffill のみ
-                df[col] = df[col].ffill()
-        logger.debug(
-            "追加マクロ特徴量を付与: %s (%s/%s)", list(additional_macro.columns), market, symbol
+    # 一部の列だけ取れた銘柄は、欠けた列が予想の道で0に埋まるため特徴量を作らない（#1491）
+    missing_macro = missing_macro_columns(cross_asset, additional_macro)
+    if missing_macro:
+        logger.warning(
+            f"相場の指標の列が欠けたため特徴量生成をスキップ: {market}/{symbol} "
+            f"（欠けた列 {missing_macro}）"
         )
+        return _raw_only_result(market, symbol, raw_data_to_save)
+    df = join_macro_frame(df, cross_asset, "クロスアセット特徴量", market, symbol)
+    df = join_macro_frame(df, additional_macro, "追加マクロ特徴量", market, symbol)
 
     # 派生マクロ指標を追加（VIX MA / スパイクフラグ / 利回りモメンタム等）
     df = add_macro_derived_features(df)
