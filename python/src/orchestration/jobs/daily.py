@@ -6,7 +6,6 @@
 
 from collections import Counter
 
-from src.domain.jp_market_holidays import is_jp_business_day
 from src.orchestration.jobs.accuracy_json import (
     append_accuracy_json_sectors,
     production_already_predicted_today,
@@ -26,6 +25,7 @@ from src.orchestration.jobs.challenger_shadow import run_challenger_shadow_stage
 from src.orchestration.jobs.common import (
     _handle_stage_error,
     _notify_stage_failure,
+    _skip_if_jp_market_closed,
     is_today_jst,
 )
 from src.orchestration.jobs.drift_check import run_daily_drift_check
@@ -42,23 +42,9 @@ from src.orchestration.jobs.unavailable_gates import (
     order_market_predictions_mostly_missing,
 )
 from src.orchestration.types import PipelineStage
-from src.utils.japan_time import now_jst
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
-
-
-def _skip_if_jp_market_closed(job: str) -> bool:
-    """日本時間の今日が東証の休場日なら INFO を出して True（発注しない）を返す（#1185）。
-
-    休場日の注文は次の営業日の寄りで約定し、その朝の発注と同じ足の情報で
-    2回分の新規買いが建つため、休場日には発注の道に入らない。
-    """
-    today = now_jst().date()
-    if is_jp_business_day(today):
-        return False
-    logger.info("%s: 東証の休場日 %s のため発注しない", job, today.isoformat())
-    return True
 
 
 def run_daily_pipeline():

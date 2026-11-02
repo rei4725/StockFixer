@@ -19,13 +19,13 @@ BUSINESS_DAY = datetime(2026, 11, 4, 8, 50, tzinfo=JST)
 
 class TestAutoOrderSkipsJpHoliday(unittest.TestCase):
     def _run(self, now: datetime) -> tuple[MagicMock, MagicMock, MagicMock]:
-        from src.orchestration.jobs import daily
+        from src.orchestration.jobs import common, daily
 
         broker = MagicMock()
         stats = {"buy_orders": 1, "sell_orders": 0, "errors": 0}
         with ExitStack() as stack:
             stack.enter_context(patch.dict("os.environ", {"AUTO_TRADE_MODE": "paper"}))
-            stack.enter_context(patch.object(daily, "now_jst", return_value=now))
+            stack.enter_context(patch.object(common, "now_jst", return_value=now))
 
             def run_orders(**kwargs):
                 kwargs["broker"].send_order("7203", "BUY", 100)
@@ -56,7 +56,7 @@ class TestAutoOrderSkipsJpHoliday(unittest.TestCase):
         return run_orders_mock, broker, horizon_exit
 
     def test_holiday_places_no_orders(self):
-        with self.assertLogs("src.orchestration.jobs.daily", level="INFO") as logs:
+        with self.assertLogs("src.orchestration.jobs.common", level="INFO") as logs:
             run_orders, broker, horizon_exit = self._run(HOLIDAY)
         run_orders.assert_not_called()
         broker.send_order.assert_not_called()
@@ -72,7 +72,7 @@ class TestAutoOrderSkipsJpHoliday(unittest.TestCase):
 
 class TestRuleSignalsSkipJpHoliday(unittest.TestCase):
     def _run(self, now: datetime, market: str) -> tuple[MagicMock, MagicMock, MagicMock]:
-        from src.orchestration.jobs import daily
+        from src.orchestration.jobs import common, daily
 
         broker = MagicMock()
         batch = RuleSignalBatch(
@@ -87,7 +87,7 @@ class TestRuleSignalsSkipJpHoliday(unittest.TestCase):
 
         with ExitStack() as stack:
             stack.enter_context(patch.dict("os.environ", {"RULE_EVAL_MARKET": market}))
-            stack.enter_context(patch.object(daily, "now_jst", return_value=now))
+            stack.enter_context(patch.object(common, "now_jst", return_value=now))
             generate = stack.enter_context(
                 patch("src.rule_engine.pipeline.generate_rule_signals", return_value=batch)
             )
@@ -111,7 +111,7 @@ class TestRuleSignalsSkipJpHoliday(unittest.TestCase):
         return generate, execute_mock, broker
 
     def test_jp_holiday_places_no_orders(self):
-        with self.assertLogs("src.orchestration.jobs.daily", level="INFO") as logs:
+        with self.assertLogs("src.orchestration.jobs.common", level="INFO") as logs:
             generate, execute, broker = self._run(HOLIDAY, "jp")
         generate.assert_not_called()
         execute.assert_not_called()
