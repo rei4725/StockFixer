@@ -71,25 +71,6 @@ from src.utils.japan_time import format_jst, format_jst_from_iso
 logger = logging.getLogger(__name__)
 
 
-def _append_llm_reasons(parts: list[str], results: list, max_count: int = 3) -> None:
-    """上位銘柄の LLM 推薦理由を parts リストに追記する。
-
-    Ollama が未接続の場合は何もしない。
-    """
-    try:
-        from src.reporting.llm_reason import generate_reasons_for_top  # noqa: PLC0415
-
-        reasons = generate_reasons_for_top(results, max_count=max_count)
-        if not reasons:
-            return
-        lines = ["💡 推薦理由（上位3銘柄）"]
-        for symbol, reason in reasons.items():
-            lines.append(f"・{symbol_label(None, symbol)}: {reason}")
-        parts.append("\n".join(lines))
-    except Exception as e:
-        logger.debug("LLM 推薦理由生成をスキップ: %s", e)
-
-
 def send_daily_pipeline_completion(
     data_count: Optional[int] = None,
     prediction_markets: Optional[list] = None,
@@ -141,7 +122,6 @@ def _send_prediction_snapshot(snapshot, ts_label: str) -> None:
     if snapshot.top_results:
         parts.append("📈 **上位（予想上昇）**")
         parts.extend(build_prediction_list(snapshot.top_results, max_n=10))
-        _append_llm_reasons(parts, snapshot.top_results)
     if snapshot.worst_results:
         if parts:
             parts.append("")
