@@ -430,12 +430,17 @@ class TestRunClaudeTraderCompositionRoot(unittest.TestCase):
 
         with patch("config.settings.CLAUDE_TRADER_ENABLED", True), patch(
             "src.trading.claude_agent.run_claude_trader", side_effect=_capture
-        ), patch.object(run_claude_trader, "build_broker", return_value=MagicMock()):
+        ), patch.object(run_claude_trader, "build_broker", return_value=MagicMock()), patch(
+            "src.orchestration.jobs.prediction_saved_marker.read_prediction_saved_day",
+            return_value="20261030",
+        ):
             rc = run_claude_trader.main(["--mode", "paper", "--market", "jp"])
 
         self.assertEqual(rc, 0)
         self.assertIsInstance(captured.get("trade_diff_sink"), PostgresTradeDiffSink)
         self.assertIsInstance(captured.get("prediction_repo"), PostgresPredictionResultRepository)
+        # 保存の済んでいない朝に流しても新規の buy を出さないよう、印を渡す（#1490）
+        self.assertEqual(captured["prediction_saved_day"], "20261030")
 
 
 class TestRunRuleSignalsCompositionRoot(unittest.TestCase):
