@@ -27,6 +27,7 @@ import について:
 from __future__ import annotations
 
 from bisect import bisect_left
+from dataclasses import replace
 from typing import Any, Optional
 
 import pandas as pd
@@ -70,6 +71,41 @@ def group_events_by_date(events: list) -> dict[str, list]:
         if ev.action == "entry":
             continue
         out.setdefault(ev.date, []).append(ev)
+    return out
+
+
+def defer_events(
+    events_by_date: dict[str, list],
+    calendar: list[str],
+    closes: dict[str, float],
+    entry_price: float,
+    lag: int,
+) -> dict[str, list]:
+    """判定した日のイベントを lag 営業日後の終値で約定するイベントへ移す（#977）。
+
+    `simulate_position` は判定した日の終値を price に入れて返すが、本番で売れる
+    のはその後の営業日である。入り（`resolve_entry_date`）と同じく約定を lag
+    営業日後へずらし、price・multiple をその日の終値で付け直す。約定日が
+    カレンダーの末尾を越えるものは末尾の日の終値で手仕舞う。同じ約定日に
+    集まったイベントは判定の順を保つ。lag が 0 なら元のまま返す。
+    """
+    if lag <= 0 or not calendar:
+        return events_by_date
+    out: dict[str, list] = {}
+    for date in sorted(events_by_date):
+        i = bisect_left(calendar, date)
+        fill_date = calendar[min(i + lag, len(calendar) - 1)]
+        price = closes.get(fill_date)
+        for ev in events_by_date[date]:
+            fill_price = ev.price if price is None or pd.isna(price) else float(price)
+            out.setdefault(fill_date, []).append(
+                replace(
+                    ev,
+                    date=fill_date,
+                    price=fill_price,
+                    multiple=fill_price / entry_price if entry_price > 0 else 0.0,
+                )
+            )
     return out
 
 
@@ -241,6 +277,8 @@ def run_longterm_backtest(
            のまま埋めてしまい max_positions を超過しうるため、埋める直前に
            必ず再計算する。
         4. 各ポジションを simulate_position で評価し撤退/利確イベントを得る。
+           イベントは判定した日の終値で返るため、`defer_events` で約定を
+           execution_lag 営業日後の終値へずらす（入りと同じ決まり）。
         5. 空き現金を均等配分し、手数料とスリッページを売買に課金（ExecutionModel）。
            撤退で現金回収→再投資。
         6. 日次でポートフォリオ評価額を集計し equity_df を作る（現金の減算・
@@ -310,6 +348,17 @@ def run_longterm_backtest(
         queued = pending_entries.pop(date, None)
         if queued:
             enter_candidates(config, portfolio, date, queued, price_map, execution)
+            # 撤退・部分利確の約定を判定の日から execution_lag 営業日後へずらす。
+            # 約定日までは保有のまま評価し、枠と現金は約定日に空く。
+            for pos in portfolio.positions.values():
+                if pos.entry_date == date:
+                    pos.events_by_date = defer_events(
+                        pos.events_by_date,
+                        calendar,
+                        lookups.get(pos.symbol, {}),
+                        pos.entry_price,
+                        config.execution_lag,
+                    )
 
         # 4) 日次ポートフォリオ評価額
         equity_rows.append(
