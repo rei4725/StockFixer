@@ -26,7 +26,7 @@ apscheduler==3.11.3
 plotly>=7.1.0
 filelock>=4.2.4
 optuna>=5.0.0
-pydantic-settings>=2.16.1
+pydantic-settings>=2.16.2
 prometheus-client>=0.26.0
 anthropic>=2.1.0
 xlrd>=2.0.2             # JPX の東証上場銘柄一覧（.xls）を pandas で読む（run_symbol_master.py）
