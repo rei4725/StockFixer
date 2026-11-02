@@ -37,4 +37,3 @@ openpyxl>=3.1.5         # 同じ一覧の .xlsx 版（2026-10 に JPX が .xlsx 
 jaraco.context>=6.1.2   # CVE-2026-23949 (HIGH): Path traversal via malicious tar archives
 wheel>=0.48.0            # CVE-2026-24049 (HIGH): Privilege Escalation via malicious wheel file
 pillow>=13.0.0           # CVE-2026-112895, CVE-2026-112400, CVE-2026-112397, CVE-2026-112896, CVE-2026-112897, CVE-2026-112395, CVE-2026-112404, CVE-2026-112899: matplotlib 経由の推移的依存 pillow 12.3.0 の既知の脆弱性8件
-msgpack>=1.2.3          # CVE-2026-114613 (HIGH): Denial of Service via memory leak during map deserialization（推移的依存 msgpack 1.1.2）

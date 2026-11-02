@@ -31,6 +31,11 @@ CVE-2026-24049
 # GHSA-6v7p-g79w-8964: msgpack out-of-bounds read (pip._vendor.msgpack 1.1.2)
 GHSA-6v7p-g79w-8964
 
+# CVE-2026-114613: msgpack DoS via memory leak during map deserialization (pip._vendor.msgpack 1.1.2)
+# pip 26.2.2（2026-11-02 時点の最新）も 1.1.2 のまま。pypa/pip の main の vendor.txt は msgpack==1.2.3 に
+# 上がっているので、それを含む pip が出て Dockerfile が入れるようになったら外す。
+CVE-2026-114613
+
 # CVE-2025-47273: setuptools path traversal (pip._vendor 同梱の setuptools 70.3.0)
 CVE-2025-47273
 
