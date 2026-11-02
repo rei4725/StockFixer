@@ -280,6 +280,17 @@ def run_daily_auto_order():
             notifier=DiscordNotificationAdapter(),
         )
 
+    # ホライズン期限切れポジションの成行の決済を、SL/TP と売りシグナルの決済より先に出す。
+    # 後に回すと、同じ回の売りシグナルの指値の SELL を約定待ちと見て飛ばし、指値が失効すると
+    # 期限を過ぎた保有が残る（#1388）。後の道は約定待ちの SELL を見て2本目を出さない（#1117）。
+    # 失敗は相関の警告を送った後に投げ直し、ジョブの失敗として見せる（#886）
+    horizon_exit_error: Exception | None = None
+    try:
+        run_horizon_exit_check()
+    except Exception as e:
+        logger.error("ホライズン決済チェック失敗: %s", e, exc_info=True)
+        horizon_exit_error = e
+
     try:
         stats = run_daily_orders(
             broker=broker,
@@ -295,12 +306,8 @@ def run_daily_auto_order():
             "=== 自動発注完了: 買い=%s 売り=%s ===", stats["buy_orders"], stats["sell_orders"]
         )
     except Exception as e:
+        # 期限を過ぎた保有の決済は先に走らせてある（#932）
         logger.error("自動発注失敗: %s", e, exc_info=True)
-        # 発注の道が落ちても、期限を過ぎた保有の決済は走らせてからジョブを失敗にする（#932）
-        try:
-            run_horizon_exit_check()
-        except Exception:
-            logger.error("ホライズン決済チェック失敗", exc_info=True)
         raise
     record_loss_limit_streak(stats)  # NF-303-2 の連続回数（#934）
 
@@ -322,15 +329,6 @@ def run_daily_auto_order():
     except Exception as e:
         logger.error("自動発注完了通知失敗: %s", e, exc_info=True)
     _notify_stale_prediction(stats)
-
-    # ホライズン期限切れポジションの自動決済。失敗は相関の警告を送った後に投げ直し、
-    # 期限を過ぎた保有が決済されずに残ったことをジョブの失敗として見せる（#886）
-    horizon_exit_error: Exception | None = None
-    try:
-        run_horizon_exit_check()
-    except Exception as e:
-        logger.error("ホライズン決済チェック失敗: %s", e, exc_info=True)
-        horizon_exit_error = e
 
     # 相関リスク警告通知
     if stats.get("correlation_blocked"):
