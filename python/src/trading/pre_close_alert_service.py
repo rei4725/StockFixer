@@ -5,8 +5,11 @@
 """
 
 from dataclasses import dataclass
+from datetime import date, datetime, timedelta
 from enum import Enum
+from zoneinfo import ZoneInfo
 
+from src.domain.jp_market_holidays import is_jp_business_day
 from src.domain.ports import PredictionResultRepository, TradeDiffSink
 from src.utils.db.symbol_master import symbol_name_suffix
 from src.utils.logger import get_logger
@@ -36,6 +39,31 @@ class PositionAlert:
     unrealized_pnl: float
     hold_pnl_ratio: float
     alert_type: AlertType
+
+
+def _today_jst() -> date:
+    """日本時間の今日（テストで差し替える）。"""
+    return datetime.now(ZoneInfo("Asia/Tokyo")).date()
+
+
+def _previous_business_day(today: date) -> date:
+    """today の前の東証の営業日（土日と表の休場日を飛ばす）。"""
+    previous = today - timedelta(days=1)
+    while not is_jp_business_day(previous):
+        previous -= timedelta(days=1)
+    return previous
+
+
+def _run_date(predicted_at: str) -> date | None:
+    """予想の回の時刻（20261021_073000 か ISO 形式）から日付を読む。読めなければ None。"""
+    try:
+        return datetime.strptime(predicted_at[:15], "%Y%m%d_%H%M%S").date()
+    except ValueError:
+        pass
+    try:
+        return datetime.fromisoformat(predicted_at).date()
+    except (ValueError, TypeError):
+        return None
 
 
 def evaluate_positions(
@@ -78,9 +106,21 @@ def evaluate_positions(
         logger.info("保有ポジションなし — 引け前アラートをスキップ")
         return []
 
-    ts = prediction_repo.latest_timestamp()
+    # production の後に保存される challenger の回を掴まないよう、版を絞る
+    ts = prediction_repo.latest_timestamp(model_version="production")
     if ts is None:
         logger.warning("予測データなし — 引け前アラートをスキップ")
+        return []
+
+    # 朝の予想が止まった日に、前の日より古い回を今日の予想として使わない
+    run_date = _run_date(ts)
+    previous_day = _previous_business_day(_today_jst())
+    if run_date is not None and run_date < previous_day:
+        logger.warning(
+            "production の予想の回 %s が前の営業日 %s より古い — 引け前アラートをスキップ",
+            ts,
+            previous_day.isoformat(),
+        )
         return []
 
     pred_df = prediction_repo.results_at(predicted_at=ts)
