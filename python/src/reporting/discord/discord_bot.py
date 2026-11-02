@@ -27,6 +27,7 @@ from src.reporting.types import (
     WatchlistPredictionRow,
     WatchlistPredictionView,
 )
+from src.utils.db.symbol_master import symbol_label
 from src.utils.japan_time import format_jst_from_iso
 from src.utils.logger import get_logger
 from src.utils.scheduler_types import SchedulerJobStatus
@@ -88,7 +89,7 @@ def build_signal_lines(
     signal = determine_signal_label(diff_ratio)
 
     lines = [
-        f"=== {market.upper()} / {symbol} ===",
+        f"=== {market.upper()} / {symbol_label(market, symbol)} ===",
         f"現在値  : {current_disp}",
         f"予想終値: {pred_disp}",
         f"予想変化率: {change_pct}",

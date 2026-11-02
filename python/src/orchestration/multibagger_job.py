@@ -25,6 +25,7 @@ from src.screening.quality_gate import apply_quality_gate
 from src.screening.trend_screener import screen_trend_candidates
 from src.screening.types import MultibaggerCandidate, Position
 from src.utils.db.stock_features import load_stock_features
+from src.utils.db.symbol_master import symbol_name_suffix
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -201,6 +202,7 @@ def _format_message(
             lines.append(
                 f"{c.symbol:<8}{c.multibagger_score:>8.3f}{c.close:>10.2f}"
                 f"{_pct(c.revenue_cagr_3y):>8}{_pct(c.roe):>8}"
+                f"{symbol_name_suffix(market, c.symbol)}"
             )
         lines.append("```")
     else:
@@ -214,13 +216,14 @@ def _format_message(
         for a in actions:
             lines.append(
                 f"{a['symbol']:<8}{a['action']:<10}{a['multiple']:>6.2f}x{a['reason']:>14}"
+                f"{symbol_name_suffix(market, a['symbol'])}"
             )
         lines.append("```")
     if skipped:
         lines.append(f"⚠️ 判定できず: {len(skipped)} 件")
         lines.append("```")
         for s in skipped:
-            lines.append(f"{s['symbol']:<8}{s['reason']}")
+            lines.append(f"{s['symbol']:<8}{s['reason']}{symbol_name_suffix(market, s['symbol'])}")
         lines.append("```")
     if not actions and not skipped:
         lines.append("保有なし")

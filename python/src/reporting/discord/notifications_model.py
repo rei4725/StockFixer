@@ -22,6 +22,7 @@ from src.reporting.discord.webhook_sender import (
     send_webhook_notification,
     send_webhook_text_chunked,
 )
+from src.utils.db.symbol_master import symbol_name_suffix
 from src.utils.japan_time import format_jst
 
 logger = logging.getLogger(__name__)
@@ -308,9 +309,14 @@ def send_feature_suggestion_notification(
         symbol = entry.get("symbol", "?")
         candidates_df = entry.get("candidates")
         if not isinstance(candidates_df, pd.DataFrame) or candidates_df.empty:
-            lines.append(f"• `{market}/{symbol}` — 除外候補なし")
+            lines.append(
+                f"• `{market}/{symbol}`{symbol_name_suffix(market, symbol)} — 除外候補なし"
+            )
             continue
-        lines.append(f"• `{market}/{symbol}` 除外候補 {len(candidates_df)} 件:")
+        lines.append(
+            f"• `{market}/{symbol}`"
+            f"{symbol_name_suffix(market, symbol)} 除外候補 {len(candidates_df)} 件:"
+        )
         for _, row in candidates_df.iterrows():
             lines.append(
                 f"  - `{row['feature']}` "

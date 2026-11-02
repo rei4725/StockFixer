@@ -9,16 +9,13 @@ Discord ドリフト / 予測精度通知
 import logging
 
 from src.reporting.discord.discord_notification_specs import HIT_RATE_DRIFT_ALERT
-from src.reporting.discord.discord_text import (
-    DISCORD_DATE_FORMAT,
-    DISCORD_MINUTE_FORMAT,
-    fit_lines,
-)
+from src.reporting.discord.discord_text import DISCORD_DATE_FORMAT, DISCORD_MINUTE_FORMAT, fit_lines
 from src.reporting.discord.webhook_sender import (
     send_status_fields,
     send_webhook_notification,
     send_webhook_text,
 )
+from src.utils.db.symbol_master import symbol_name_suffix
 from src.utils.japan_time import format_jst
 
 logger = logging.getLogger(__name__)
@@ -58,7 +55,7 @@ def send_miss_analysis_summary(
         sign = "+" if pred >= 0 else ""
         actual_sign = "+" if actual >= 0 else ""
         lines.append(
-            f"● `{market}/{symbol}` 外れ幅={abs_err:.2%}"
+            f"● `{market}/{symbol}`{symbol_name_suffix(market, symbol)} 外れ幅={abs_err:.2%}"
             f"  予測={sign}{pred:.2%} / 実績={actual_sign}{actual:.2%}"
         )
         causes = analysis_results.get((market, symbol), [])
@@ -116,7 +113,9 @@ def send_drift_alert(summary_df, horizon: int = 1, threshold: float = 0.45) -> b
         err = row.get("mean_abs_error", 0)
         n = int(row.get("n_samples", 0))
         lines.append(
-            f"• `{row['market']}/{row['symbol']}` " f"正解率={acc:.1%}, 平均誤差={err:.4f}, N={n}"
+            f"• `{row['market']}/{row['symbol']}`"
+            f"{symbol_name_suffix(row['market'], row['symbol'])} "
+            f"正解率={acc:.1%}, 平均誤差={err:.4f}, N={n}"
         )
 
     return send_webhook_text(fit_lines(lines, unit="銘柄"))
@@ -148,7 +147,9 @@ def send_accuracy_summary(summary_df, horizon: int = 1) -> bool:
         err = row.get("mean_abs_error", 0)
         n = int(row.get("n_samples", 0))
         lines.append(
-            f"• `{row['market']}/{row['symbol']}` " f"正解率={acc:.1%}, 平均誤差={err:.4f}, N={n}"
+            f"• `{row['market']}/{row['symbol']}`"
+            f"{symbol_name_suffix(row['market'], row['symbol'])} "
+            f"正解率={acc:.1%}, 平均誤差={err:.4f}, N={n}"
         )
 
     # 銘柄が多いと1通の上限を超えて 400 になるため、正解率の低い順に収まるだけ載せる（#810）
@@ -182,7 +183,8 @@ def send_drift_retrain_notification(
     ]
     for sym in triggered_symbols:
         lines.append(
-            f"• `{sym['market']}/{sym['symbol']}` "
+            f"• `{sym['market']}/{sym['symbol']}`"
+            f"{symbol_name_suffix(sym['market'], sym['symbol'])} "
             f"MAE={sym.get('mean_abs_error', 0):.4f} "
             f"HitRate={sym.get('direction_accuracy', 0):.1%}"
         )
@@ -258,7 +260,7 @@ def send_correlation_alert(
         f"保有銘柄数: {n_symbols}",
     ]
     if symbols:
-        syms = ", ".join(f"`{s}`" for s in symbols[:10])
+        syms = ", ".join(f"`{s}`{symbol_name_suffix(None, s)}" for s in symbols[:10])
         lines.append(f"保有銘柄: {syms}")
 
     return send_webhook_notification(

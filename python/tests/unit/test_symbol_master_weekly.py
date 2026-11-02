@@ -29,19 +29,25 @@ def test_weekly_db_maintenance_fills_symbol_master(_conn, mock_send, _purge, tmp
 
     record = SymbolName(market="jp", symbol="7203", name_ja="トヨタ自動車", source="jpx")
     built = SymbolMasterBuildResult(records=[record], missing=["1111"])
+    us_record = SymbolName(market="us", symbol="AAPL", name_ja=None, name_en="Apple Inc.")
+    us_built = SymbolMasterBuildResult(records=[us_record])
     path = _write_watchlist(tmp_path, ["7203", "1111"])
     with (
         patch("src.utils.data_path_utils.get_watchlist_path", return_value=path),
         patch(
             "src.market_data.symbol_master.build_jp_symbol_master", return_value=built
         ) as mock_build,
+        patch(
+            "src.market_data.symbol_master.build_us_symbol_master", return_value=us_built
+        ) as mock_build_us,
         patch("src.market_data.symbol_master.upsert_symbol_names", return_value=1) as mock_upsert,
     ):
         run_weekly_db_maintenance()
 
     mock_build.assert_called_once()
     assert mock_build.call_args.args[0] == ["7203", "1111"]
-    mock_upsert.assert_called_once_with([record])
+    mock_build_us.assert_called_once_with(["AAPL"])
+    assert [c.args[0] for c in mock_upsert.call_args_list] == [[record], [us_record]]
     mock_send.assert_called_once()
 
 
@@ -58,6 +64,10 @@ def test_symbol_master_fetch_failure_keeps_job_running(_conn, mock_send, mock_pu
             "src.market_data.symbol_master.build_jp_symbol_master",
             side_effect=RuntimeError("JPX 取得失敗"),
         ),
+        patch(
+            "src.market_data.symbol_master.build_us_symbol_master",
+            side_effect=RuntimeError("Nasdaq 取得失敗"),
+        ) as mock_build_us,
         patch("src.market_data.symbol_master.upsert_symbol_names") as mock_upsert,
         patch("src.orchestration.jobs.symbol_master_job.logger") as mock_logger,
     ):
@@ -67,7 +77,8 @@ def test_symbol_master_fetch_failure_keeps_job_running(_conn, mock_send, mock_pu
     mock_purge.assert_called_once()
     mock_send.assert_called_once()
     assert mock_send.call_args.kwargs.get("error") is None
-    mock_logger.warning.assert_called_once()
+    mock_build_us.assert_called_once()  # jp が落ちても us は試す
+    assert mock_logger.warning.call_count == 2
 
 
 def test_symbol_master_is_not_on_daily_path():

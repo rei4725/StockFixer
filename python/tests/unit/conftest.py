@@ -237,6 +237,16 @@ def _isolate_db(_shared_test_connection):
         close_connection()
 
 
+@pytest.fixture(autouse=True)
+def _clear_symbol_display_names():
+    """通知の銘柄の表示名キャッシュ（プロセス内）がテストをまたいで残らないようにする。"""
+    from src.utils.db.symbol_master import clear_symbol_display_name_cache
+
+    clear_symbol_display_name_cache()
+    yield
+    clear_symbol_display_name_cache()
+
+
 # ============================================
 # Mock オブジェクト Factory
 # ============================================

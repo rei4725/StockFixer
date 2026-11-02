@@ -65,6 +65,7 @@ from src.reporting.discord.webhook_sender import (  # noqa: F401  # re-export + 
     send_webhook_text_chunked,
 )
 from src.reporting.query_service import get_latest_market_prediction_snapshots
+from src.utils.db.symbol_master import symbol_label, symbol_name_suffix
 from src.utils.japan_time import format_jst, format_jst_from_iso
 
 logger = logging.getLogger(__name__)
@@ -83,7 +84,7 @@ def _append_llm_reasons(parts: list[str], results: list, max_count: int = 3) -> 
             return
         lines = ["💡 推薦理由（上位3銘柄）"]
         for symbol, reason in reasons.items():
-            lines.append(f"・{symbol}: {reason}")
+            lines.append(f"・{symbol_label(None, symbol)}: {reason}")
         parts.append("\n".join(lines))
     except Exception as e:
         logger.debug("LLM 推薦理由生成をスキップ: %s", e)
@@ -215,7 +216,7 @@ def send_daily_order_completion(
             {
                 "name": "⚠️ SL/TP 評価できず",
                 "value": f"{len(sl_tp_unevaluable_symbols):,} 件: "
-                + ", ".join(sl_tp_unevaluable_symbols),
+                + ", ".join(symbol_label("jp", s) for s in sl_tp_unevaluable_symbols),
                 "inline": False,
             }
         )
@@ -283,7 +284,8 @@ def send_paper_trade_position_report(positions: list[dict], summary: dict) -> bo
             pnl = p["unrealized_pnl"]
             pnl_str = f"{pnl:+,.0f}".rjust(10)
             icon = "📈" if pnl >= 0 else "📉"
-            lines.append(f"`{sym}` | {qty}株 | {avg}円 | {cur}円 | {pnl_str}円 {icon}")
+            name = symbol_name_suffix(None, p["symbol"])
+            lines.append(f"`{sym}` | {qty}株 | {avg}円 | {cur}円 | {pnl_str}円 {icon}{name}")
         position_block = "\n".join(lines)
     else:
         position_block = "現在保有中のポジションはありません。"
@@ -353,15 +355,17 @@ def send_watchlist_update_report(diffs) -> bool:
             continue
 
         if diff.added:
-            syms = ", ".join(f"`{s}`" for s in diff.added)
+            syms = ", ".join(f"`{s}`{symbol_name_suffix(diff.market, s)}" for s in diff.added)
             lines.append(f"➕ 追加 ({len(diff.added)}銘柄): {syms}")
 
         if diff.removed:
-            syms = ", ".join(f"`{s}`" for s in diff.removed)
+            syms = ", ".join(f"`{s}`{symbol_name_suffix(diff.market, s)}" for s in diff.removed)
             lines.append(f"➖ 削除 ({len(diff.removed)}銘柄): {syms}")
 
         if diff.removed_unverified:
-            syms = ", ".join(f"`{s}`" for s in diff.removed_unverified)
+            syms = ", ".join(
+                f"`{s}`{symbol_name_suffix(diff.market, s)}" for s in diff.removed_unverified
+            )
             lines.append(
                 f"⚠️ 指数除外・取引可能のため保留 ({len(diff.removed_unverified)}銘柄): {syms}"
             )
@@ -501,7 +505,8 @@ def send_rule_daily_signals(
         for s in buy_signals:
             price_str = f"{s['price']:,.0f}円" if s.get("price") else "---"
             lines.append(
-                f"  • `{s['symbol']}` [{s['rule']}]  " f"価格={price_str}  勝率={s['win_rate']:.1%}"
+                f"  • `{s['symbol']}`{symbol_name_suffix(market, s['symbol'])} [{s['rule']}]  "
+                f"価格={price_str}  勝率={s['win_rate']:.1%}"
             )
 
     if sell_signals:
@@ -510,7 +515,8 @@ def send_rule_daily_signals(
         for s in sell_signals:
             price_str = f"{s['price']:,.0f}円" if s.get("price") else "---"
             lines.append(
-                f"  • `{s['symbol']}` [{s['rule']}]  " f"価格={price_str}  勝率={s['win_rate']:.1%}"
+                f"  • `{s['symbol']}`{symbol_name_suffix(market, s['symbol'])} [{s['rule']}]  "
+                f"価格={price_str}  勝率={s['win_rate']:.1%}"
             )
 
     if not buy_signals and not sell_signals:

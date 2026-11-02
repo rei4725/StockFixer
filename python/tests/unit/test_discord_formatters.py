@@ -237,3 +237,58 @@ class TestConvertDfForDiscord(unittest.TestCase):
         )
         result = convert_df_for_discord(df)
         assert result["予想変化率"].iloc[0] == "invalid"
+
+
+class TestSymbolNamesInDiscordText(unittest.TestCase):
+    """銘柄マスタに社名があれば、コードの横に社名を出す。"""
+
+    _NAMES = {"jp": {"7203": "トヨタ自動車"}, "us": {"AAPL": "Apple Inc."}}
+
+    def _patch_names(self):
+        from unittest.mock import patch
+
+        return patch(
+            "src.utils.db.symbol_master.load_symbol_display_names",
+            side_effect=lambda market: self._NAMES.get(market, {}),
+        )
+
+    def test_prediction_list_shows_name_next_to_code(self):
+        from src.reporting.discord.discord_formatters import build_prediction_list
+
+        with self._patch_names():
+            lines = build_prediction_list(
+                [_PredStub("7203", 2500, 2530, 0.012), _PredStub("9999", 100, 101, 0.01)]
+            )
+        assert "**7203** トヨタ自動車  " in lines[0]
+        assert "**9999**  " in lines[1]  # 未登録はコードだけ
+
+    def test_watchlist_table_puts_name_in_last_column(self):
+        from src.reporting.discord.discord_formatters import convert_df_for_discord
+
+        df = pd.DataFrame(
+            {
+                "symbol": ["AAPL", "ZZZZ"],
+                "current_price": [200.0, 1.0],
+                "avg_pred_price": [202.0, 1.0],
+            }
+        )
+        with self._patch_names():
+            out = convert_df_for_discord(df)
+        assert list(out.columns)[-1] == "銘柄名"
+        assert list(out["銘柄名"]) == ["Apple Inc.", ""]
+
+    def test_signal_header_and_drift_lines(self):
+        from unittest.mock import patch
+
+        from src.reporting.discord.discord_bot import build_signal_lines
+        from src.reporting.discord.notifications_drift import send_accuracy_summary
+
+        with self._patch_names():
+            lines = build_signal_lines("jp", "7203", 2500.0, 2530.0, 0.012, 3)
+            summary = pd.DataFrame([{"market": "us", "symbol": "AAPL", "direction_accuracy": 0.6}])
+            with patch(
+                "src.reporting.discord.notifications_drift.send_webhook_text", return_value=True
+            ) as send:
+                send_accuracy_summary(summary)
+        assert lines[0] == "=== JP / 7203 トヨタ自動車 ==="
+        assert "`us/AAPL` Apple Inc. " in send.call_args.args[0]

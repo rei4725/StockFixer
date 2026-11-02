@@ -20,6 +20,7 @@ from src.reporting.discord.webhook_sender import (
     send_text_file_chunked,
     send_webhook_text_chunked,
 )
+from src.utils.db.symbol_master import symbol_name_suffix
 from src.utils.japan_time import format_jst
 
 logger = logging.getLogger(__name__)
@@ -69,7 +70,8 @@ def send_weekly_report(
         n = int(row.get("n_samples", 0))
         flag = " ⚠️" if acc <= 0.45 else ""
         lines.append(
-            f"• `{row['market']}/{row['symbol']}` "
+            f"• `{row['market']}/{row['symbol']}`"
+            f"{symbol_name_suffix(row['market'], row['symbol'])} "
             f"正解率={acc:.1%}, 平均誤差={err:.4f}, N={n}{flag}"
         )
 
@@ -99,7 +101,8 @@ def send_weekly_report(
                 for _, r in top_improved.iterrows():
                     sign = "+" if r["delta"] >= 0 else ""
                     lines.append(
-                        f"• `{r['market']}/{r['symbol']}` "
+                        f"• `{r['market']}/{r['symbol']}`"
+                        f"{symbol_name_suffix(r['market'], r['symbol'])} "
                         f"{r['prev_accuracy']:.1%} → {r['direction_accuracy']:.1%} "
                         f"({sign}{r['delta']:.1%})"
                     )
@@ -108,7 +111,8 @@ def send_weekly_report(
                 for _, r in top_worsened.iterrows():
                     sign = "+" if r["delta"] >= 0 else ""
                     lines.append(
-                        f"• `{r['market']}/{r['symbol']}` "
+                        f"• `{r['market']}/{r['symbol']}`"
+                        f"{symbol_name_suffix(r['market'], r['symbol'])} "
                         f"{r['prev_accuracy']:.1%} → {r['direction_accuracy']:.1%} "
                         f"({sign}{r['delta']:.1%})"
                     )
