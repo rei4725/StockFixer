@@ -34,11 +34,7 @@ from src.market_data.macro_features import (
     add_macro_derived_features,
     fetch_additional_macro_features,
 )
-from src.market_data.quality_check import (
-    QualityCheckResult,
-    price_step_issue,
-    run_quality_checks,
-)
+from src.market_data.quality_check import QualityCheckResult, price_step_issue, run_quality_checks
 from src.market_data.saver import save_raw_ohlcv
 from src.market_data.sentiment_features import add_sentiment_features, fetch_news_sentiment_with_llm
 from src.market_data.split_refetch import (
@@ -54,6 +50,7 @@ from src.market_data.technical import add_technical_indicators, create_basic_lag
 from src.market_data.wikipedia_features import add_pageview_features, fetch_pageview_features
 from src.utils.data_path_utils import get_ticker, normalize_col
 from src.utils.db import delete_stock_features, upsert_stock_features
+from src.utils.db.symbol_master import symbol_name_suffix
 from src.utils.logger import get_logger
 
 from src.market_data.latest_feature_row import (  # noqa: F401  # isort: skip
@@ -447,7 +444,7 @@ def _notify_quality_issues(
     level = (
         AlertLevel.ERROR if any(i.level == "error" for i in notify_issues) else AlertLevel.WARNING
     )
-    title = f"[データ品質] {market}/{symbol}"
+    title = f"[データ品質] {market}/{symbol}{symbol_name_suffix(market, symbol)}"
     message = "\n".join(f"・{i.detail}" for i in notify_issues)
     try:
         notification_port.send_alert(title=title, message=message, level=level)

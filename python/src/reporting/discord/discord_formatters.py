@@ -7,6 +7,8 @@ from typing import Any, Sequence
 import numpy as np
 import pandas as pd
 
+from src.utils.db.symbol_master import symbol_display_name, symbol_name_suffix
+
 MARKET_EMOJI = {
     "JP": "🇯🇵",
     "NASDAQ": "🇺🇸",
@@ -48,7 +50,7 @@ def build_prediction_list(results: Sequence[Any], max_n: int = 10) -> list[str]:
     PredictionResult を想定（duck typing）。スマホでの折り返しを避けるため
     1 銘柄 1 行に収める。
 
-    例: `` 1`` ⬆️ **7203**  2,500 → 2,530  (+1.2%)
+    例: `` 1`` ⬆️ **7203** トヨタ自動車  2,500 → 2,530  (+1.2%)
     """
     lines: list[str] = []
     for i, r in enumerate(list(results)[:max_n], start=1):
@@ -57,7 +59,9 @@ def build_prediction_list(results: Sequence[Any], max_n: int = 10) -> list[str]:
         cur = format_price(getattr(r, "current_price", None))
         pred = format_price(getattr(r, "avg_pred_price", None))
         pct = f"{ratio * 100:+.1f}%" if ratio is not None else "—"
-        lines.append(f"`{i:>2}` {emoji} **{getattr(r, 'symbol', '?')}**  {cur} → {pred}  ({pct})")
+        symbol = getattr(r, "symbol", "?")
+        name = symbol_name_suffix(getattr(r, "market", None), symbol)
+        lines.append(f"`{i:>2}` {emoji} **{symbol}**{name}  {cur} → {pred}  ({pct})")
     return lines
 
 
@@ -80,7 +84,8 @@ def convert_df_for_discord(df: pd.DataFrame) -> pd.DataFrame:
         "diff_ratio": "予想変化率",
         "予想値": "予想終値",
     }
-    col_order = ["シンボル", "現在値", "予想終値", "予想変化率", "予想±"]
+    # 銘柄名は全角が混じり等幅の表の桁がずれるので、いちばん右に置く
+    col_order = ["シンボル", "現在値", "予想終値", "予想変化率", "予想±", "銘柄名"]
     df = df.rename(columns=columns_map)
     if "現在値" in df.columns and "予想終値" in df.columns and "予想変化率" not in df.columns:
         try:
@@ -137,5 +142,8 @@ def convert_df_for_discord(df: pd.DataFrame) -> pd.DataFrame:
                 return ""
 
         df["予想±"] = df.apply(format_interval, axis=1)
+
+    if "シンボル" in df.columns:
+        df["銘柄名"] = df["シンボル"].apply(lambda s: symbol_display_name(None, str(s)) or "")
 
     return df[[column for column in col_order if column in df.columns]]

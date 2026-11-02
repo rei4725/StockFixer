@@ -1,18 +1,23 @@
 """
-日本株の銘柄マスタ（コード → 日本語社名・33業種）を JPX の東証上場銘柄一覧から作る。
+銘柄マスタ（コード → 社名）を作る。
 
-出どころ: JPX「東証上場銘柄一覧」(data_j.xls、月1回更新)
+日本株: JPX「東証上場銘柄一覧」(data_j.xlsx、月1回更新) から日本語社名・33業種
     https://www.jpx.co.jp/markets/statistics-equities/misc/01.html
+米国株: Nasdaq Trader の Symbol Directory (nasdaqlisted.txt / otherlisted.txt、毎日更新) から英語名
+    https://www.nasdaqtrader.com/trader.aspx?id=symboldirdefs
 取得は週の DB メンテナンスのジョブと run_symbol_master.py から流す（毎日のジョブには入れない）。
-.xls の読み込みには pandas の xlrd エンジンを使う。
+.xlsx は openpyxl、.xls は xlrd で読む（pandas が中身から見分ける）。
 """
 
 from __future__ import annotations
 
 import io
 import json
+import re
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional, Sequence
+from urllib.parse import urljoin
 
 import pandas as pd
 import requests
@@ -23,15 +28,30 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+# 一覧のファイルの URL は JPX 側で変わる（2026-10 に data_j.xls → data_j.xlsx になり 404 で落ちた）。
+# 掲載ページからリンクを拾い、拾えなかったときだけ既定の URL を使う。
+JPX_LISTED_ISSUES_PAGE_URL = "https://www.jpx.co.jp/markets/statistics-equities/misc/01.html"
 JPX_LISTED_ISSUES_URL = (
-    "https://www.jpx.co.jp/markets/statistics-equities/misc/tvdivq0000001vg2-att/data_j.xls"
+    "https://www.jpx.co.jp/markets/statistics-equities/misc/tvdivq0000001vg2-att/data_j.xlsx"
 )
+_JPX_FILE_LINK = re.compile(r'href="([^"]*data_j\.xlsx?)"', re.IGNORECASE)
 JPX_SOURCE = "jpx_listed_issues"
 _TIMEOUT_SEC = 60
 
 _COL_CODE = "コード"
 _COL_NAME = "銘柄名"
 _COL_SECTOR = "33業種区分"
+
+NASDAQ_LISTED_URL = "https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt"
+OTHER_LISTED_URL = "https://www.nasdaqtrader.com/dynamic/SymDir/otherlisted.txt"
+NASDAQ_SOURCE = "nasdaqtrader_symdir"
+
+# 銘柄名の末尾の株式種別（"Apple Inc. - Common Stock" / "Alcoa Corporation Common Stock"）を落とす
+_US_NAME_SUFFIX = re.compile(
+    r"(\s+-\s+.*|\s*(New\s+)?(Class\s+[A-Z]\s+)?"
+    r"(Common\s+Stock|Common\s+Shares?|Ordinary\s+Shares?|Capital\s+Stock)\b.*)$",
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -42,8 +62,25 @@ class SymbolMasterBuildResult:
     missing: List[str] = field(default_factory=list)
 
 
-def download_jpx_listed_issues(url: str = JPX_LISTED_ISSUES_URL) -> bytes:
-    """JPX の東証上場銘柄一覧（.xls）をダウンロードしてバイト列で返す。"""
+def find_jpx_listed_issues_url(page_url: str = JPX_LISTED_ISSUES_PAGE_URL) -> str:
+    """掲載ページから一覧のファイル（data_j.xls / data_j.xlsx）の URL を拾う。拾えなければ既定の URL。"""
+    try:
+        resp = requests.get(page_url, timeout=_TIMEOUT_SEC)
+        resp.raise_for_status()
+    except requests.RequestException as e:
+        logger.warning("JPX 掲載ページを読めない（既定の URL を使う）: %s", e)
+        return JPX_LISTED_ISSUES_URL
+    match = _JPX_FILE_LINK.search(resp.text)
+    if match is None:
+        logger.warning("JPX 掲載ページに一覧のリンクが無い（既定の URL を使う）: %s", page_url)
+        return JPX_LISTED_ISSUES_URL
+    return urljoin(page_url, match.group(1))
+
+
+def download_jpx_listed_issues(url: Optional[str] = None) -> bytes:
+    """JPX の東証上場銘柄一覧（.xls / .xlsx）をダウンロードしてバイト列で返す。"""
+    if url is None:
+        url = find_jpx_listed_issues_url()
     resp = requests.get(url, timeout=_TIMEOUT_SEC)
     resp.raise_for_status()
     return resp.content
@@ -78,7 +115,7 @@ def parse_jpx_listed_issues(df: pd.DataFrame) -> List[SymbolName]:
             SymbolName(
                 market="jp",
                 symbol=code,
-                name_ja=str(name).strip(),
+                name_ja=unicodedata.normalize("NFKC", str(name)).strip(),
                 sector=sector_text,
                 source=JPX_SOURCE,
             )
@@ -117,16 +154,119 @@ def build_jp_symbol_master(
     return result
 
 
+def _clean_us_name(name: str) -> str:
+    """Symbol Directory の銘柄名から株式種別の飾りを落とす。落としきって空なら元のまま。"""
+    text = name.strip()
+    cleaned = _US_NAME_SUFFIX.sub("", text).strip()
+    return cleaned or text
+
+
+def parse_nasdaq_symbol_directory(text: str) -> List[SymbolName]:
+    """Symbol Directory の1ファイル（| 区切り）を SymbolName のリストにする。
+
+    nasdaqlisted.txt は "Symbol" 列、otherlisted.txt は "ACT Symbol" 列にコードがある。
+    コードの "." は yfinance／watchlist の書き方の "-" にそろえる（BRK.B → BRK-B）。
+    テスト銘柄（Test Issue = Y）と末尾の "File Creation Time" 行は捨てる。
+    """
+    lines = [line for line in text.splitlines() if line.strip()]
+    if not lines:
+        return []
+    header = lines[0].split("|")
+    symbol_col = "Symbol" if "Symbol" in header else "ACT Symbol"
+    for col in (symbol_col, "Security Name"):
+        if col not in header:
+            raise ValueError(f"Symbol Directory に列がありません: {col}")
+    i_sym = header.index(symbol_col)
+    i_name = header.index("Security Name")
+    i_test = header.index("Test Issue") if "Test Issue" in header else None
+    records: List[SymbolName] = []
+    for line in lines[1:]:
+        if line.startswith("File Creation Time"):
+            continue
+        cols = line.split("|")
+        if len(cols) <= max(i_sym, i_name):
+            continue
+        if i_test is not None and len(cols) > i_test and cols[i_test].strip() == "Y":
+            continue
+        symbol = cols[i_sym].strip().replace(".", "-")
+        name = cols[i_name].strip()
+        if not symbol or not name:
+            continue
+        records.append(
+            SymbolName(
+                market="us",
+                symbol=symbol,
+                name_ja=None,
+                name_en=_clean_us_name(name),
+                source=NASDAQ_SOURCE,
+            )
+        )
+    return records
+
+
+def download_nasdaq_symbol_directory() -> List[str]:
+    """nasdaqlisted.txt と otherlisted.txt を取得してテキストで返す。"""
+    texts = []
+    for url in (NASDAQ_LISTED_URL, OTHER_LISTED_URL):
+        resp = requests.get(url, timeout=_TIMEOUT_SEC)
+        resp.raise_for_status()
+        texts.append(resp.text)
+    return texts
+
+
+def build_us_symbol_master(
+    watchlist_symbols: Sequence[str],
+    downloader: Callable[[], List[str]] = download_nasdaq_symbol_directory,
+) -> SymbolMasterBuildResult:
+    """ウォッチリストの us 銘柄について、Symbol Directory から英語名を引く。"""
+    by_code: dict[str, SymbolName] = {}
+    for text in downloader():
+        for parsed in parse_nasdaq_symbol_directory(text):
+            by_code.setdefault(parsed.symbol, parsed)
+    logger.info("Nasdaq Symbol Directory: %d 件", len(by_code))
+    result = SymbolMasterBuildResult()
+    for symbol in watchlist_symbols:
+        record = by_code.get(str(symbol).upper())
+        if record is None:
+            result.missing.append(str(symbol))
+        else:
+            result.records.append(record)
+    if result.missing:
+        logger.warning(
+            "Symbol Directory に無い銘柄 %d 件: %s", len(result.missing), ", ".join(result.missing)
+        )
+    return result
+
+
+def _load_watchlist_symbols(market: str) -> List[str]:
+    from src.utils.data_path_utils import get_watchlist_path
+
+    with open(get_watchlist_path(), encoding="utf-8") as f:
+        return list(json.load(f).get(market, []))
+
+
+def refresh_us_symbol_master() -> int:
+    """watchlist.json の us 銘柄の英語名を Symbol Directory から引き、symbol_master に保存する。
+
+    Returns:
+        保存した件数
+    """
+    symbols = _load_watchlist_symbols("us")
+    result = build_us_symbol_master(symbols)
+    saved = upsert_symbol_names(result.records)
+    logger.info(
+        "銘柄マスタ(us)更新完了: %d/%d 銘柄 (missing=%s)", saved, len(symbols), result.missing
+    )
+    return saved
+
+
 def refresh_jp_symbol_master() -> int:
     """watchlist.json の jp 銘柄の社名を JPX 一覧から引き、symbol_master に保存する（#1080）。
 
     Returns:
         保存した件数
     """
-    from src.utils.data_path_utils import get_watchlist_path
-
-    with open(get_watchlist_path(), encoding="utf-8") as f:
-        symbols = json.load(f).get("jp", [])
+    symbols = _load_watchlist_symbols("jp")
     result = build_jp_symbol_master(symbols)
     saved = upsert_symbol_names(result.records)
     logger.info("銘柄マスタ更新完了: %d/%d 銘柄 (missing=%s)", saved, len(symbols), result.missing)

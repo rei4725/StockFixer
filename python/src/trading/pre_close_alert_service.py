@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from src.domain.ports import PredictionResultRepository, TradeDiffSink
+from src.utils.db.symbol_master import symbol_name_suffix
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -171,7 +172,7 @@ def get_pre_close_alerts(
         lines.append("🔴 **損切り推奨（SL接近）**")
         for a in stop_loss:
             lines.append(
-                f"  • `{a.symbol}` "
+                f"  • `{a.symbol}`{symbol_name_suffix(None, a.symbol)} "
                 f"現在値={a.current_price:,.0f}円 "
                 f"予測={a.avg_pred_price:,.0f}円({a.diff_ratio:+.1%}) "
                 f"含み損益={a.unrealized_pnl:+,.0f}円"
@@ -182,7 +183,7 @@ def get_pre_close_alerts(
         lines.append("🟡 **利確推奨（目標値超）**")
         for a in take_profit:
             lines.append(
-                f"  • `{a.symbol}` "
+                f"  • `{a.symbol}`{symbol_name_suffix(None, a.symbol)} "
                 f"現在値={a.current_price:,.0f}円 "
                 f"予測={a.avg_pred_price:,.0f}円({a.diff_ratio:+.1%}) "
                 f"含み益={a.unrealized_pnl:+,.0f}円({a.hold_pnl_ratio:+.1%})"
@@ -193,7 +194,7 @@ def get_pre_close_alerts(
         lines.append("🟢 **保有継続**")
         for a in hold:
             lines.append(
-                f"  • `{a.symbol}` "
+                f"  • `{a.symbol}`{symbol_name_suffix(None, a.symbol)} "
                 f"現在値={a.current_price:,.0f}円 "
                 f"予測={a.avg_pred_price:,.0f}円({a.diff_ratio:+.1%}) "
                 f"含み損益={a.unrealized_pnl:+,.0f}円"
