@@ -18,6 +18,7 @@ from src.domain.trading_rules import get_lot_size
 from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
 from src.trading.brokers.paper.paper_broker import PaperBroker
 from src.trading.correlation_risk import evaluate_correlation_gate
+from src.trading.execution.gate_record import RuleGateRecord, save_rule_gate_record
 from src.trading.execution.pending import _load_pending_exits, _log_pending_skips
 from src.trading.execution.selection import _get_pending_buy_symbols
 from src.trading.position_valuation import count_short_positions, short_held_codes
@@ -29,6 +30,20 @@ from src.utils.sector_constraints import get_symbol_sector
 logger = get_logger(__name__)
 
 
+def _str_or_none(value: Any) -> str | None:
+    """判定の理由を記録に写す。文字列でない値（未設定など）は None にする。"""
+    return value if isinstance(value, str) else None
+
+
+def _stopped_buy_reason(record: RuleGateRecord) -> str:
+    """新規買いを手順の手前で止めた理由の名前（記録の skip_reasons の鍵）。"""
+    if record.new_buy_step_error is not None:
+        return "new_buy_step_error"
+    if record.risk_gate_allowed is False:
+        return "risk_gate"
+    return "allow_new_buys"
+
+
 def execute_rule_paper_trades(
     signals: list[dict[str, Any]],
     market: str,
@@ -38,6 +53,7 @@ def execute_rule_paper_trades(
     trade_diff_sink: TradeDiffSink,
     broker: BrokerBase | None = None,
     allow_new_buys: bool = True,
+    record_gate: bool = False,
 ) -> dict[str, int]:
     """
     シグナルに基づきペーパートレードを実行する。
@@ -54,6 +70,9 @@ def execute_rule_paper_trades(
         broker: 注文を出す先（省略時は PaperBroker。影の運用では ShadowBroker）
         allow_new_buys: False なら新規の BUY だけ止めて skipped に数え、保有の SELL は出す
             （シグナルを出せなかった銘柄が多すぎる日。#1191）
+        record_gate: True なら新規買いを止めた判定と止めた理由ごとの数を
+            results/orders/rule/<JST の日付>.json に書く（16:30 のジョブ。#1514）。
+            書き込みの失敗は ERROR のログだけで、注文と戻り値は変えない
 
     Returns:
         {"buy_orders": int, "sell_orders": int, "skipped": int, "errors": int}
@@ -85,6 +104,8 @@ def execute_rule_paper_trades(
     held_or_pending = held_symbols | _get_pending_buy_symbols(broker)
     # 空売り中の銘柄へ逆向きの新規買いを重ねない（#1349）。読めなければ新規買いの手順で止まる
     short_codes: set[str] = set()
+    record = RuleGateRecord(market=market, allow_new_buys=allow_new_buys)
+    skip_reasons: Counter[str] = Counter()
 
     if not allow_new_buys:
         logger.warning("[rule] 呼び出し元の指定で新規買いを停止し、保有の決済だけ出す")
@@ -100,6 +121,9 @@ def execute_rule_paper_trades(
         # 保有上限）を評価する。不合格時は新規買いを停止するが、決済（SELL）は許可する。
         risk.update_peak_balance()
         gate = risk.evaluate_trading_gate()
+        record.risk_gate_allowed = bool(gate.is_allowed)
+        record.risk_gate_reason = _str_or_none(gate.reason)
+        record.risk_gate_reason_code = _str_or_none(getattr(gate, "reason_code", None))
         if not gate.is_allowed:
             logger.warning(
                 "[rule] リスクゲート不合格のため新規買いを停止: %s",
@@ -124,6 +148,10 @@ def execute_rule_paper_trades(
                 window=CORRELATION_WINDOW_DAYS,
                 enc_threshold=CORRELATION_ENC_THRESHOLD,
             )
+            record.correlation_gate_allowed = bool(corr_gate.is_allowed)
+            record.correlation_gate_reason = _str_or_none(corr_gate.reason)
+            enc = getattr(corr_gate, "enc", None)
+            record.enc = float(enc) if isinstance(enc, (int, float)) else None
             if corr_gate.is_allowed:
                 selected = filter_by_sector_cap(
                     buy_candidates,
@@ -144,6 +172,7 @@ def execute_rule_paper_trades(
     except Exception as exc:
         logger.error("[rule] 新規買いの判定の手順に失敗。保有の SELL だけ出す", exc_info=True)
         buy_step_error = exc
+        record.new_buy_step_error = repr(exc)
         sector_allowed = set()
     buy_orders_this_run = 0
     # 朝の約定で据え置かれた SELL がある銘柄には2本目を出さない（#1169。8:50 の道と同じ確かめ）
@@ -158,20 +187,25 @@ def execute_rule_paper_trades(
         try:
             if signal == 1 and symbol not in held_or_pending:
                 if not buys_allowed:
+                    skip_reasons[_stopped_buy_reason(record)] += 1
                     skipped += 1
                     continue
                 if str(symbol).replace(".T", "") in short_codes:
                     logger.info("[rule] %s: 空売り中のため新規買いスキップ", symbol)
+                    skip_reasons["short_held"] += 1
                     skipped += 1
                     continue
                 if symbol not in sector_allowed:
                     logger.info("[rule] %s: 相関ゲートか同一業種の上限で新規買いスキップ", symbol)
+                    corr_blocked = record.correlation_gate_allowed is False
+                    skip_reasons["correlation_gate" if corr_blocked else "sector_cap"] += 1
                     skipped += 1
                     continue
                 if position_count >= MAX_POSITIONS:
                     logger.info(
                         "[rule] %s: 保有上限 %d 到達のため新規買いスキップ", symbol, MAX_POSITIONS
                     )
+                    skip_reasons["max_positions"] += 1
                     skipped += 1
                     continue
                 if buy_orders_this_run >= MAX_ORDERS_PER_RUN:
@@ -180,6 +214,7 @@ def execute_rule_paper_trades(
                         symbol,
                         MAX_ORDERS_PER_RUN,
                     )
+                    skip_reasons["max_orders_per_run"] += 1
                     skipped += 1
                     continue
 
@@ -191,6 +226,7 @@ def execute_rule_paper_trades(
                     qty = min(qty, budget_cap)
                 if qty <= 0:
                     logger.info("[rule] %s: 発注株数 0（残高不足 or サイズ上限）→ スキップ", symbol)
+                    skip_reasons["zero_qty"] += 1
                     skipped += 1
                     continue
 
@@ -209,6 +245,7 @@ def execute_rule_paper_trades(
             elif signal == -1 and symbol in held_symbols:
                 if pending.has(symbol, OrderSide.SELL):
                     pending_skipped.append(symbol)
+                    skip_reasons["pending_sell"] += 1
                     skipped += 1
                     continue
                 pos = next((p for p in positions if p["symbol"] == symbol), None)
@@ -224,6 +261,13 @@ def execute_rule_paper_trades(
                 logger.info(f"  SELL 注文: {symbol}  {qty}株  現在値={price:.0f}円")
 
             else:
+                # 保有中の BUY・保有の無い SELL は止めた理由と分け、シグナルの無い銘柄とも分ける
+                if signal == 1:
+                    skip_reasons["already_held"] += 1
+                elif signal == -1:
+                    skip_reasons["sell_not_held"] += 1
+                else:
+                    skip_reasons["no_signal"] += 1
                 skipped += 1
 
         except Exception as exc:
@@ -237,6 +281,14 @@ def execute_rule_paper_trades(
         f"ペーパートレード実行: BUY={buy_orders}  SELL={sell_orders}  "
         f"スキップ={skipped}  失敗={errors}"
     )
+    if record_gate:
+        # 新規買いの判定の手順の例外を投げ直す日も、投げる前に書く（#1514）
+        record.skip_reasons = dict(skip_reasons)
+        record.buy_orders = buy_orders
+        record.sell_orders = sell_orders
+        record.skipped = skipped
+        record.errors = errors
+        save_rule_gate_record(record)
     if buy_step_error is not None:
         raise buy_step_error
     return {
