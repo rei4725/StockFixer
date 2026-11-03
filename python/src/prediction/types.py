@@ -99,6 +99,34 @@ class EnsembleOutcome:
 
 
 @dataclass
+class WinDecision:
+    """バックテストの候補が production に勝ったかの判定。
+
+    Attributes:
+        won: すべての条件を満たしたとき True
+        reasons: 落ちた条件ごとに1つ（日本語）。勝ちなら空
+    """
+
+    won: bool
+    reasons: list[str] = field(default_factory=list)
+
+
+@dataclass
+class RollbackDecision:
+    """仮の入れ替えのあとの見張りの判定。
+
+    Attributes:
+        rollback: 戻すとき True（triggered があり、かつ old_is_better）
+        triggered: 当たった見張りの条件（日本語）
+        old_is_better: 旧 production のバックテストが新 production の実測を両方で上回るか
+    """
+
+    rollback: bool
+    triggered: list[str] = field(default_factory=list)
+    old_is_better: bool = False
+
+
+@dataclass
 class DriftMonitorResult:
     """週次 Hit Rate ドリフト検知結果。
 
