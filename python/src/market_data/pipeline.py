@@ -45,6 +45,7 @@ from src.market_data.split_refetch import (
     overlap_close_mismatch,
     overlap_fetch_start,
     refetch_full_history,
+    split_residual_steps,
     stock_split_ratios,
 )
 from src.market_data.technical import add_technical_indicators, create_basic_lag_features
@@ -208,7 +209,8 @@ def fetch_stock_data_with_features(
             return None
 
     # 前日比が極端な足（DB に残った分割の段差）があれば全期間を取り直し、
-    # それでも残る銘柄は特徴量を作らず、予想の上位とシグナルから外す（#1386）
+    # それでも残る銘柄は特徴量を作らず、予想の上位とシグナルから外す（#1386）。
+    # 取り直した後に残る段差は、近くに分割の記録があるものだけ外す（#1492）
     steps = find_price_steps(df)
     if steps and not full_fetched:
         full_data = refetch_full_history(
@@ -226,7 +228,7 @@ def fetch_stock_data_with_features(
         if full_data is not None and not full_data.empty:
             df = bars_from(full_data, start_date)
             raw_data_to_save = _save_or_defer_raw(market, symbol, full_data, defer_raw_save)
-            steps = find_price_steps(df)
+            steps = split_residual_steps(market, symbol, df, full_data)
     if steps:
         return _price_step_result(market, symbol, steps, raw_data_to_save)
 
