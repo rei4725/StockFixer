@@ -42,6 +42,7 @@ from src.utils.logger import get_logger
 
 from .entry_gates import _block_entries, _evaluate_entry_gate
 from .freshness import _block_new_if_stale
+from .gate_record import finish_order_run
 from .params import (
     _SPLIT_LOW_CONFIDENCE,
     _apply_split_qty,
@@ -129,9 +130,7 @@ def run_daily_orders(
             "[exec] 予測結果が存在しません（SL/TP の決済だけ行う）。run_predict.py を確認"
         )
         _sl_tp_exits_only(broker, market, mode, market_data, stats, trade_diff_sink, gate_status)
-        if entry_error is not None:
-            raise entry_error
-        return stats
+        return finish_order_run(stats, market=market, mode=mode, entry_error=entry_error)
     held_or_pending = held_symbols  # 約定待ちの BUY を読めない日は新規を止める（#1465）
     # 相関ゲートを評価しない・評価が落ちた日も corr_gate に不合格の値が入るよう先に置く
     blocked_status, corr_gate = _block_entries(gate_status)
@@ -168,6 +167,7 @@ def run_daily_orders(
             "correlation_blocked": not corr_gate.is_allowed,
             "enc": corr_gate.enc,
             "avg_correlation": corr_gate.avg_correlation,
+            "threshold_scale": float(predictions["threshold_scale"].iloc[0]),
         }
     )
 
@@ -595,6 +595,4 @@ def run_daily_orders(
         )
     except Exception:
         logger.error("[exec] order_run_summary 保存失敗", exc_info=True)
-    if entry_error is not None:
-        raise entry_error
-    return stats
+    return finish_order_run(stats, market=market, mode=mode, entry_error=entry_error)
