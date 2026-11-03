@@ -84,14 +84,45 @@ def _check_weight_names(models: list[tuple[str, Any]], label: str) -> None:
         )
 
 
+class _WeightsRecorder:
+    """load_model_weights を呼び、返った重みを名前ごとに集める（結果に小さく書くため）。"""
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.sums: dict[str, float] = {}
+        self.counts: dict[str, int] = {}
+        self.vectors: set = set()
+
+    def __call__(self, market: str, symbol: str, names: list[str]) -> list[float]:
+        weights = load_model_weights(market, symbol, names)
+        self.calls += 1
+        self.vectors.add(tuple(zip(names, (round(float(w), 6) for w in weights))))
+        for name, weight in zip(names, weights):
+            self.sums[name] = self.sums.get(name, 0.0) + float(weight)
+            self.counts[name] = self.counts.get(name, 0) + 1
+        return weights
+
+    def summary(self) -> dict:
+        return {
+            "calls": self.calls,
+            "distinct": len(self.vectors),
+            "mean": {name: self.sums[name] / self.counts[name] for name in sorted(self.sums)},
+        }
+
+
 def _production_outcome(
-    latest_X: pd.DataFrame, price: float, market: str, symbol: str, models: list
+    latest_X: pd.DataFrame,
+    price: float,
+    market: str,
+    symbol: str,
+    models: list,
+    weights_fn: Callable[[str, str, list[str]], list[float]] = load_model_weights,
 ) -> tuple[Optional[EnsembleOutcome], bool]:
     """production の予想。全モデルが例外なら (None, True) を返す（その行は飛ばす）。"""
     try:
         return (
             ensemble_diff_ratio(
-                latest_X, price, market, symbol, _HORIZON, models, weights_fn=load_model_weights
+                latest_X, price, market, symbol, _HORIZON, models, weights_fn=weights_fn
             ),
             False,
         )
@@ -195,7 +226,6 @@ def evaluate_holdout(
     universe = sorted(get_all_symbols())
     if not universe:
         raise ValueError("stock_features に銘柄が無い")
-    path_symbols = set(universe[:PATH_CHECK_SAMPLE])
 
     n_cand_models = len(candidate_models)
     n_prod_models = len(production_models)
@@ -203,6 +233,11 @@ def evaluate_holdout(
     skipped = {"no_price": 0, "candidate_none": 0, "production_none": 0, "production_error": 0}
     rows: list[dict] = []
     path_diffs: list[float] = []
+    # 取っておいた日に y の埋まった行がある銘柄（上場廃止などで行の無い銘柄は数えない）
+    n_symbols = 0
+    path_sampled = 0
+    cand_weights = _WeightsRecorder()
+    prod_weights = _WeightsRecorder()
 
     for market, symbol in universe:
         df = load_stock_features(market, symbol, raise_on_error=True)
@@ -215,10 +250,14 @@ def evaluate_holdout(
         positions = {
             pd.Timestamp(d): i for i, d in enumerate(row_days) if pd.notna(d) and d in day_set
         }
-        for day, pos in sorted(positions.items()):
+        target_positions = [
+            (day, pos) for day, pos in sorted(positions.items()) if pd.notna(df["y"].iloc[pos])
+        ]
+        if not target_positions:
+            continue
+        n_symbols += 1
+        for day, pos in target_positions:
             actual = df["y"].iloc[pos]
-            if pd.isna(actual):
-                continue
             price = closes.get(day)
             if price is None:
                 skipped["no_price"] += 1
@@ -231,10 +270,10 @@ def evaluate_holdout(
                 symbol,
                 _HORIZON,
                 candidate_models,
-                weights_fn=load_model_weights,
+                weights_fn=cand_weights,
             )
             prod, prod_failed = _production_outcome(
-                latest_X, price, market, symbol, production_models
+                latest_X, price, market, symbol, production_models, prod_weights
             )
             if prod_failed:
                 skipped["production_error"] += 1
@@ -260,8 +299,10 @@ def evaluate_holdout(
                 }
             )
 
-        if (market, symbol) in path_symbols:
-            diff = _path_diff(df, row_days, closes, market, symbol, production_models, live_predict)
+        # 先頭の PATH_CHECK_SAMPLE 銘柄（market, symbol の順）で道の一致を確かめる
+        if path_sampled < PATH_CHECK_SAMPLE:
+            path_sampled += 1
+            diff = _path_diff(df, market, symbol, production_models, live_predict)
             if diff is not None:
                 path_diffs.append(diff)
 
@@ -282,7 +323,7 @@ def evaluate_holdout(
 
     # 物差しの無い日は勝ちに数えず、日数には入れる
     daily_diff = [0.0 if d["diff"] is None else float(d["diff"]) for d in daily]
-    decision = judge_win(candidate, production, daily_diff, len(days) * len(universe))
+    decision = judge_win(candidate, production, daily_diff, len(days) * n_symbols)
     reasons = list(decision.reasons)
     if degraded["candidate"]:
         reasons.append(_DEGRADED_CANDIDATE.format(n=degraded["candidate"]))
@@ -300,7 +341,7 @@ def evaluate_holdout(
     return HoldoutEvaluation(
         cutoff=date_strs[0],
         dates=date_strs,
-        n_symbols=len(universe),
+        n_symbols=n_symbols,
         candidate=candidate,
         production=production,
         daily=daily,
@@ -309,13 +350,12 @@ def evaluate_holdout(
         decision=decision,
         degraded_rows=degraded,
         skipped_rows=skipped,
+        weights={"candidate": cand_weights.summary(), "production": prod_weights.summary()},
     )
 
 
 def _path_diff(
     df: pd.DataFrame,
-    row_days: pd.Series,
-    closes: dict,
     market: str,
     symbol: str,
     production_models: list,
@@ -323,20 +363,16 @@ def _path_diff(
 ) -> Optional[float]:
     """最後の行について、この道の production と本番の予想の diff_ratio の差の絶対値。
 
-    この道で予想が出ない（終値が無い・モデルが無い・全モデルが例外）か、本番が None なら None。
+    値段の出どころの違いを道の違いと取り違えないよう、この道にも本番の予想の基準の値段
+    （current_price）を渡す。本番が None か、この道で予想が出ない（モデルが無い・
+    全モデルが例外）なら None。
     """
-    last_day = row_days.iloc[-1]
-    if pd.isna(last_day):
-        return None
-    price = closes.get(pd.Timestamp(last_day))
-    if price is None:
-        return None
-    outcome, failed = _production_outcome(
-        feature_row(df, -1, market), price, market, symbol, production_models
-    )
-    if failed or outcome is None:
-        return None
     live = live_predict(market, symbol)
     if live is None:
+        return None
+    outcome, failed = _production_outcome(
+        feature_row(df, -1, market), float(live.current_price), market, symbol, production_models
+    )
+    if failed or outcome is None:
         return None
     return abs(float(live.diff_ratio) - outcome.diff_ratio)

@@ -17,7 +17,9 @@ from src.prediction.backtest_promotion.holdout import (
     holdout_dates,
     latest_holdout_dates,
 )
+from src.prediction.backtest_promotion.judge import PATH_CHECK_TOL
 from src.prediction.predict_unified import ensemble_diff_ratio as real_ensemble
+from src.prediction.predict_unified import feature_row
 from src.prediction.types import HoldoutEvaluation, PredictionResult
 
 NAMES = ["UnifiedStockXGBoost", "UnifiedStockLightGBM"]
@@ -46,7 +48,7 @@ def _y(i: int, j: int) -> float:
     return 0.01 * ((i + j) % 5 - 2) + 0.001 * (j + 1) + 1e-5 * i
 
 
-def _features(j: int) -> pd.DataFrame:
+def _features(j: int, atr: float = 10.0) -> pd.DataFrame:
     ys = [_y(i, j) for i in range(len(DAYS))]
     feat = list(ys)
     ys[-1] = np.nan  # 最後の日は翌日の値がまだ無い
@@ -54,7 +56,7 @@ def _features(j: int) -> pd.DataFrame:
         {
             "date": DAYS,
             "feat_a": feat,
-            "atr_lag1": [10.0] * len(DAYS),
+            "atr_lag1": [atr] * len(DAYS),
             "market_encoded": [0] * len(DAYS),
             "y": ys,
         }
@@ -67,9 +69,12 @@ def _ohlcv(drop: Optional[pd.Timestamp] = None) -> pd.DataFrame:
     return df
 
 
-def _patch(monkeypatch, *, weights_calls=None, drop_price=None, accuracy=None):
-    frames = {s: _features(j) for j, s in enumerate(SYMBOLS)}
-    monkeypatch.setattr(holdout, "get_all_symbols", lambda: list(SYMBOLS))
+def _patch(
+    monkeypatch, *, weights_calls=None, drop_price=None, accuracy=None, atr=10.0, extra=None
+):
+    frames = {s: _features(j, atr) for j, s in enumerate(SYMBOLS)}
+    frames.update(extra or {})
+    monkeypatch.setattr(holdout, "get_all_symbols", lambda: sorted(frames))
     monkeypatch.setattr(
         holdout, "load_stock_features", lambda m, s, raise_on_error=False: frames[(m, s)].copy()
     )
@@ -268,3 +273,49 @@ def test_recorded_reference_compares_recorded_production(monkeypatch):
     assert ref["n_matched"] == 3
     assert ref["direction_agreement"] == pytest.approx(1.0)
     assert ref["median_ratio_diff"] == pytest.approx(1e-5)
+
+
+def test_symbol_without_rows_in_window_is_not_counted(monkeypatch):
+    # 上場廃止で取っておいた期間に行の無い銘柄は n_symbols と expected_rows に入れない
+    delisted = _features(0).assign(date=pd.bdate_range("2025-01-01", periods=len(DAYS)))
+    _patch(monkeypatch, extra={("us", "ZZZ"): delisted})
+    ev = evaluate_holdout(_dates(), _models(1.0), _models(-1.0), _live_matching())
+    assert ev.n_symbols == 2
+    assert ev.decision.won is True, ev.decision.reasons
+
+
+def test_path_check_uses_live_price(monkeypatch):
+    # atr_lag1=0.5・価格100 で上限は ±0.015 となりクリップが効く。本番の値段は DB の終値より 1% 高い
+    _patch(monkeypatch, atr=0.5)
+    prod = _models(-1.0)
+
+    def _live(market: str, symbol: str) -> Optional[PredictionResult]:
+        row = feature_row(_features(SYMBOLS.index((market, symbol)), 0.5), -1, market)
+        out = real_ensemble(row, 101.0, market, symbol, 1, prod, weights_fn=lambda *a: [0.5, 0.5])
+        at_db_price = real_ensemble(
+            row, 100.0, market, symbol, 1, prod, weights_fn=lambda *a: [0.5, 0.5]
+        )
+        # 値段の違いだけで許容差を超える（DB の終値で比べると落ちる）
+        assert abs(out.diff_ratio - at_db_price.diff_ratio) > PATH_CHECK_TOL
+        return PredictionResult(
+            market=market,
+            symbol=symbol,
+            current_price=101.0,
+            avg_pred_price=101.0 * (1 + out.diff_ratio),
+            diff_ratio=out.diff_ratio,
+            model_count=2,
+        )
+
+    ev = evaluate_holdout(_dates(), _models(1.0), prod, _live)
+    assert ev.path_check["compared"] == 2
+    assert ev.path_check["passed"] is True
+
+
+def test_weights_summary_is_recorded(monkeypatch):
+    _patch(monkeypatch)
+    ev = evaluate_holdout(_dates(), _models(1.0), _models(-1.0), _live_matching())
+    for label in ("candidate", "production"):
+        summary = ev.weights[label]
+        assert summary["calls"] == 40
+        assert summary["distinct"] == 1
+        assert summary["mean"] == pytest.approx({name: 0.5 for name in NAMES})

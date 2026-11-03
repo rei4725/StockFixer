@@ -127,6 +127,7 @@ class HoldoutEvaluation:
         decision: 勝ちの判定
         degraded_rows: モデルが欠けて予想した行の数（candidate・production）
         skipped_rows: 飛ばした行の数（理由ごと）
+        weights: 使った重みのまとめ（candidate・production ごとに calls・distinct・名前ごとの mean）
     """
 
     cutoff: str
@@ -140,6 +141,7 @@ class HoldoutEvaluation:
     decision: WinDecision
     degraded_rows: dict = field(default_factory=dict)
     skipped_rows: dict = field(default_factory=dict)
+    weights: dict = field(default_factory=dict)
 
 
 @dataclass
