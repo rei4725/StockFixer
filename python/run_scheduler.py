@@ -69,6 +69,13 @@ def job_daily_auto_order():
     run_daily_auto_order()
 
 
+def job_daily_horizon_exit():
+    """毎営業日 9:00 - 期限を過ぎたペーパーの保有のホライズン決済（8:50 の回の漏れを補う）"""
+    from src.orchestration.scheduler import run_horizon_exit_check
+
+    run_horizon_exit_check()
+
+
 def job_daily_settle_orders():
     """毎営業日 9:05 - ペーパートレード pending 注文を当日始値で約定処理"""
     from src.orchestration.scheduler import run_daily_settle_orders
@@ -221,6 +228,7 @@ def _job_listener(event):
 # 前の回の出した注文を知らずに同じ注文を出し直すため、これを付ける（#836）。
 # rerun_if_interrupted: True のジョブは、前の起動のプロセスで消えた回（デプロイの起き直しなど）を
 # 1期間に1回まで回数に数えずに補完する。発注のジョブと週の学習（#807）には付けない（#946）。
+# ホライズン決済は約定待ちの決済を飛ばし二重にならないため、発注のジョブでも付ける（#1321）。
 SCHEDULE_CONFIG = {
     "daily_pipeline": {
         "func": job_daily_pipeline,
@@ -271,6 +279,24 @@ SCHEDULE_CONFIG = {
         "max_executions_per_period": 1,
         "max_retries": 0,
         "description": "毎営業日 08:50 - 自動発注（ペーパートレード）",
+    },
+    # 8:50 の回がデプロイの起き直しなどでホライズン決済の前に消えても、同じ朝のうちに決済し直す。
+    # 8:50 の回が出した約定待ちの SELL・SHORT_COVER がある銘柄は飛ばすため重ならない。9:05 の
+    # 約定より前に出せば当日始値で約定し、遅れても 9:15〜9:55 の約定のやり直しが拾う（#1321）
+    "daily_horizon_exit": {
+        "func": job_daily_horizon_exit,
+        "trigger": "cron",
+        "period": "daily",
+        "day_of_week": "mon-fri",
+        "hour": 9,
+        "minute": 0,
+        "recovery_delay_minutes": 5,
+        # 締めは 8:50 の発注と同じ 09:30。寄りから遅れるほど先読みになる（#835）
+        "recovery_until": (9, 30),
+        "max_executions_per_period": 1,
+        "max_retries": 0,
+        "description": "毎営業日 09:00 - ホライズン決済（ペーパートレード）",
+        "rerun_if_interrupted": True,
     },
     "daily_settle_orders": {
         "func": job_daily_settle_orders,
