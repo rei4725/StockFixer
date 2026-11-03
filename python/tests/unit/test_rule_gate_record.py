@@ -50,6 +50,15 @@ _SIGNALS = [
     {"symbol": "4000", "signal": 0, "price": 1000.0},
 ]
 
+# 保有中で足が止まった 5202 と、保有していない 6000（シグナルを出せなかった銘柄。#1520）
+_HELD_5202 = {"symbol": "5202", "qty": 100, "avg_price": 1000.0, "current_price": 1000.0}
+_NG_HELD_ROW = {"symbol": "5202", "rule": "rsi_contrarian", "reason": "シグナルなし"}
+_NG_NOT_HELD_ROW = {"symbol": "6000", "rule": "macd_cross", "reason": "例外"}
+_UNAVAILABLE = [
+    UnavailableRuleSymbol(**_NG_HELD_ROW),
+    UnavailableRuleSymbol(**_NG_NOT_HELD_ROW),
+]
+
 
 def _broker() -> MagicMock:
     broker = MagicMock(spec=BrokerBase)
@@ -98,8 +107,9 @@ def _patches(gate, corr, extra=()):
 
 
 class TestRuleGateRecord(unittest.TestCase):
-    def _run(self, gate, corr, *, extra=(), record_gate=True, allow_new_buys=True):
+    def _run(self, gate, corr, *, extra=(), record_gate=True, allow_new_buys=True, **kwargs):
         broker = _broker()
+        broker.get_positions.return_value.append(_HELD_5202)
         patches = _patches(gate, corr, extra)
         for p in patches:
             p.start()
@@ -111,6 +121,7 @@ class TestRuleGateRecord(unittest.TestCase):
                 broker=broker,
                 allow_new_buys=allow_new_buys,
                 record_gate=record_gate,
+                **kwargs,
             )
         finally:
             for p in reversed(patches):
@@ -197,6 +208,57 @@ class TestRuleGateRecord(unittest.TestCase):
         self._run(_LOSS_LIMIT, _CORR_OK, record_gate=False)
         self.assertFalse(os.path.exists(_rule_path()))
 
+    def _assert_unavailable_recorded(self, record):
+        self.assertEqual(record["unavailable_symbols"], [_NG_HELD_ROW, _NG_NOT_HELD_ROW])
+        self.assertEqual(record["unavailable_count"], 2)
+        self.assertEqual(record["unavailable_held_symbols"], [_NG_HELD_ROW])
+        self.assertEqual(record["unavailable_held_count"], 1)
+
+    def test_unavailable_symbols_are_recorded(self):
+        """出せなかった銘柄の一覧と数が入り、保有中の銘柄は別の一覧と数に入る（#1520）"""
+        result, broker = self._run(_ALLOWED, _CORR_OK, unavailable_symbols=_UNAVAILABLE)
+        self._assert_unavailable_recorded(_read())
+        self.assertEqual(result["sell_orders"], 1)
+        self.assertEqual(result["buy_orders"], 1)
+        self.assertNotIn("5202.T", [symbol for symbol, _ in self._sent(broker)])
+
+    def test_unavailable_symbols_are_recorded_when_new_buys_are_stopped(self):
+        """allow_new_buys=False の日も、一覧と数が入る（#1520）"""
+        self._run(_ALLOWED, _CORR_OK, allow_new_buys=False, unavailable_symbols=_UNAVAILABLE)
+        record = _read()
+        self.assertFalse(record["allow_new_buys"])
+        self._assert_unavailable_recorded(record)
+
+    def test_unavailable_symbols_are_recorded_before_buy_step_error_raise(self):
+        """新規買いの判定の手順が落ちて投げ直す日も、一覧と数が入る（#1520）"""
+        with self.assertRaisesRegex(RuntimeError, "gate down"):
+            self._run(RuntimeError("gate down"), _CORR_OK, unavailable_symbols=_UNAVAILABLE)
+        record = _read()
+        self.assertIn("gate down", record["new_buy_step_error"])
+        self._assert_unavailable_recorded(record)
+
+    def test_no_unavailable_day_records_empty_lists_and_zero(self):
+        """出せなかった銘柄が無い日は、空の一覧と 0 が入る（#1520）"""
+        self._run(_ALLOWED, _CORR_OK)
+        record = _read()
+        self.assertEqual(record["unavailable_symbols"], [])
+        self.assertEqual(record["unavailable_count"], 0)
+        self.assertEqual(record["unavailable_held_symbols"], [])
+        self.assertEqual(record["unavailable_held_count"], 0)
+
+    def test_write_failure_with_unavailable_keeps_orders_and_result(self):
+        """出せなかった銘柄がある日も、書き込みが落ちて戻り値と注文は変わらない（#1520）"""
+        result_ok, broker_ok = self._run(_ALLOWED, _CORR_OK, unavailable_symbols=_UNAVAILABLE)
+        failing = patch(
+            "src.trading.execution.gate_record._write_record", side_effect=OSError("disk full")
+        )
+        with self.assertLogs("src.trading.execution.gate_record", level="ERROR"):
+            result_ng, broker_ng = self._run(
+                _ALLOWED, _CORR_OK, extra=(failing,), unavailable_symbols=_UNAVAILABLE
+            )
+        self.assertEqual(result_ng, result_ok)
+        self.assertEqual(self._sent(broker_ng), self._sent(broker_ok))
+
 
 class TestDailyRuleSignalsGateRecord(unittest.TestCase):
     def test_mostly_unavailable_day_is_recorded(self):
@@ -235,6 +297,14 @@ class TestDailyRuleSignalsGateRecord(unittest.TestCase):
         self.assertEqual(record["skip_reasons"], {"allow_new_buys": 1, "no_signal": 1})
         self.assertEqual(record["sell_orders"], 1)
         self.assertEqual(record["buy_orders"], 0)
+        # 16:30 のジョブが batch.unavailable を渡す（#1520）。NG0〜3 は保有でない
+        self.assertEqual(record["unavailable_count"], 4)
+        self.assertEqual(
+            [row["symbol"] for row in record["unavailable_symbols"]],
+            ["NG0", "NG1", "NG2", "NG3"],
+        )
+        self.assertEqual(record["unavailable_held_symbols"], [])
+        self.assertEqual(record["unavailable_held_count"], 0)
 
 
 if __name__ == "__main__":
