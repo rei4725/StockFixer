@@ -160,6 +160,23 @@ class RollbackDecision:
 
 
 @dataclass
+class BacktestPromotionState:
+    """仮の入れ替えの状態（results/backtest_promotion/state.json）。
+
+    Attributes:
+        last_evaluated_version: 最後にバックテストで比べた予想のコードの版
+        rolled_back_versions: 戻した候補のコードの版（この版からは再び入れ替えない）
+        watch: 入れ替えたあとの見張り。無ければ None。
+            version・swapped_at（JST の ISO）・swap_date（YYYY-MM-DD）・
+            backups（戻せる写しのパス）・backtest_candidate・backtest_old_production を持つ
+    """
+
+    last_evaluated_version: Optional[str] = None
+    rolled_back_versions: list[str] = field(default_factory=list)
+    watch: Optional[dict] = None
+
+
+@dataclass
 class DriftMonitorResult:
     """週次 Hit Rate ドリフト検知結果。
 

@@ -1,4 +1,4 @@
-"""バックテストによる仮の入れ替え（候補の勝ち判定・見張り）。"""
+"""バックテストによる仮の入れ替え（候補の勝ち判定・見張り・状態と入れ替え）。"""
 
 from src.prediction.backtest_promotion.holdout import (
     evaluate_holdout,
@@ -17,19 +17,43 @@ from src.prediction.backtest_promotion.judge import (
     judge_rollback,
     judge_win,
 )
+from src.prediction.backtest_promotion.state import (
+    CANDIDATE_NAMES,
+    SWAP_PRODUCTION_NAMES,
+    clear_watch,
+    copy_with_backup,
+    load_state,
+    prediction_code_version,
+    restore_backups,
+    results_dir,
+    save_state,
+    swap_in_candidate,
+    unified_model_lock,
+)
 
 __all__ = [
+    "CANDIDATE_NAMES",
     "HOLDOUT_TRADING_DAYS",
     "MIN_COVERAGE",
     "PATH_CHECK_SAMPLE",
     "PATH_CHECK_TOL",
     "ROLLBACK_HIT_MARGIN",
+    "SWAP_PRODUCTION_NAMES",
     "UP_RATE_HIGH",
     "UP_RATE_LOW",
     "WATCH_TRADING_DAYS",
+    "clear_watch",
+    "copy_with_backup",
     "evaluate_holdout",
     "holdout_dates",
     "judge_rollback",
     "judge_win",
     "latest_holdout_dates",
+    "load_state",
+    "prediction_code_version",
+    "restore_backups",
+    "results_dir",
+    "save_state",
+    "swap_in_candidate",
+    "unified_model_lock",
 ]
