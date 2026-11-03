@@ -13,6 +13,7 @@ import unittest
 from unittest.mock import patch
 
 import pandas as pd
+from tests.unit.optimal_params_isolation import redirect_optimal_params
 
 from src.backtest.optimizer import persistence
 
@@ -27,9 +28,7 @@ class _TmpConfigDirMixin(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         root = self._tmp.name
-        # dirname を4回たどると root になる位置に __file__ を置く
-        fake_file = os.path.join(root, "src", "backtest", "optimizer", "persistence.py")
-        file_patch = patch.object(persistence, "__file__", fake_file)
+        file_patch = redirect_optimal_params(root)
         file_patch.start()
         self.addCleanup(file_patch.stop)
         self.addCleanup(self._tmp.cleanup)

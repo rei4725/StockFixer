@@ -173,6 +173,8 @@ def run_weekly_optimization():
             from src.backtest.optimizer import run_optimize_batch
 
             logger.info("最適化エンジン: グリッドサーチ")
+            # 全銘柄で丸1日以上かかり、デプロイの起き直しで消えた回は補完で始め直す。
+            # その週に済んだ銘柄を飛ばし、続きから進める（#1081）
             results = run_optimize_batch(
                 tasks,
                 model_type="XGBoostModel",
@@ -181,6 +183,7 @@ def run_weekly_optimization():
                 n_splits=5,
                 max_workers=3,
                 sort_by="sharpe_ratio",
+                skip_days=6,
             )
     except Exception as e:
         # 全体が落ちた回は失敗と知らせたうえで投げ直し、run_job に error と記録させる（#973）
