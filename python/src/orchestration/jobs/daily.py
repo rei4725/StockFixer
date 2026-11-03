@@ -546,13 +546,12 @@ def run_pre_close_alert() -> None:
 
 def run_daily_rule_signals() -> None:
     """
-    日次実行（平日 16:00）: 有効ルールを持つ銘柄に当日シグナルを適用し
-    ペーパートレード注文を自動発行する。
+    日次実行（平日 16:00）: 有効ルールを持つ銘柄に当日シグナルを適用し注文を自動発行する。
 
     フロー:
         1. rule_best_by_symbol から有効銘柄を読み込む
         2. 各銘柄の最新データにルールを適用して Buy/Sell/Hold を判定
-        3. ペーパートレード注文を PaperBroker 経由で発行
+        3. 注文を発行し、新規買いを止めた判定を results/orders/rule/ に残す（#1514）
         4. Discord にシグナルサマリーを通知
     """
     import os
@@ -589,6 +588,7 @@ def run_daily_rule_signals() -> None:
                 notifier=DiscordNotificationAdapter(),
             ),
             allow_new_buys=not mostly_unavailable,
+            record_gate=True,
         )
         if mostly_unavailable:
             logger.warning(
