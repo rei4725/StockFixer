@@ -88,7 +88,8 @@ def judge_rollback(
 
     見張りの条件のどれかに当たり、かつ旧 production のバックテストの
     hit_rate_minus_majority と rank_corr がどちらも新 production の実測を上回るときだけ戻す。
-    実測の値が None の条件は当たりにしない（判断材料が無いまま戻さない）。
+    実測の rank_corr が None のときは 0.0 として扱う（予想が一定で順位が付かない場合を通さない）。
+    それ以外の実測の値が None の条件は当たりにしない（判断材料が無いまま戻さない）。
     旧 production 側か実測側の値が None なら old_is_better は False。
 
     Args:
@@ -110,7 +111,9 @@ def judge_rollback(
         )
 
     live_rc = _get(live, "rank_corr")
-    if live_rc is not None and live_rc <= 0:
+    if live_rc is None:
+        live_rc = 0.0  # 順位相関が出ない（予想が一定など）のは見張りを通さない
+    if live_rc <= 0:
         triggered.append(f"実測の順位相関が0以下（{live_rc}）")
 
     up_rate = _get(live, "predicted_up_rate")
@@ -123,7 +126,6 @@ def judge_rollback(
         old_hit is not None
         and old_rc is not None
         and live_hit is not None
-        and live_rc is not None
         and old_hit > live_hit
         and old_rc > live_rc
     )

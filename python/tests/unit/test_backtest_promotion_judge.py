@@ -93,3 +93,18 @@ def test_rollback_none_is_conservative():
     assert d.triggered == [] and d.old_is_better is False and d.rollback is False
     d = judge_rollback(LIVE, BT_CAND, {"hit_rate_minus_majority": None, "rank_corr": 0.1})
     assert d.triggered and d.old_is_better is False and d.rollback is False
+
+
+def test_rollback_none_live_rank_corr_is_treated_as_zero():
+    live = {"hit_rate_minus_majority": 0.0, "rank_corr": None, "predicted_up_rate": 1.0}
+    d = judge_rollback(live, BT_CAND, {"hit_rate_minus_majority": 0.01, "rank_corr": 0.02})
+    assert d.triggered and d.rollback is True
+    d = judge_rollback(live, BT_CAND, {"hit_rate_minus_majority": 0.01, "rank_corr": -0.01})
+    assert d.rollback is False and d.old_is_better is False
+
+
+def test_win_loses_on_rank_corr_not_above_production_or_tied_hit():
+    prod = {**PROD, "rank_corr": 0.08}
+    assert judge_win(GOOD, prod, [0.01] * 20, 1000).won is False  # 0 < 0.05 <= 0.08
+    tied = {**GOOD, "hit_rate_minus_majority": PROD["hit_rate_minus_majority"]}
+    assert judge_win(tied, PROD, [0.01] * 20, 1000).won is False
