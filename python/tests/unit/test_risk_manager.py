@@ -570,10 +570,12 @@ class TestRiskManagerKellyBtFeedback(unittest.TestCase):
         risk.get_current_dd_ratio = MagicMock(return_value=0.0)
 
         # 明示的に低い勝率を指定 → インスタンス属性の 0.62 より少ない株数になるはず
-        qty_explicit = risk.calc_position_size(
-            "7203", 1000.0, win_rate=0.4, avg_win=0.01, avg_loss=0.01
-        )
-        qty_instance = risk.calc_position_size("7203", 1000.0)
+        # VIX が分からないと縮小で 100 株未満に丸まるため、閾値未満の値を与える（#1508）
+        with patch("src.trading.risk_manager.fetch_latest_vix", return_value=15.0):
+            qty_explicit = risk.calc_position_size(
+                "7203", 1000.0, win_rate=0.4, avg_win=0.01, avg_loss=0.01
+            )
+            qty_instance = risk.calc_position_size("7203", 1000.0)
 
         self.assertGreater(qty_instance, qty_explicit)
 
@@ -624,10 +626,15 @@ class TestRiskManagerKellyBtFeedback(unittest.TestCase):
 class TestComputeVixPositionScale(unittest.TestCase):
     """compute_vix_position_scale() の単体テスト"""
 
-    def test_none_vix_returns_one(self):
+    def test_none_vix_returns_scale(self):
+        """VIX が分からない（None）ときは急騰と同じく縮小する（#1508）。
+
+        取れない日や古い値しか無い日に満額で建てないよう、縮小なしの 1.0 から改めた。
+        """
+        from config.trading_policy import VIX_POSITION_SCALE
         from src.trading.risk_manager import compute_vix_position_scale
 
-        self.assertAlmostEqual(compute_vix_position_scale(None), 1.0)
+        self.assertAlmostEqual(compute_vix_position_scale(None), VIX_POSITION_SCALE)
 
     def test_vix_below_threshold_returns_one(self):
         from src.trading.risk_manager import compute_vix_position_scale
@@ -655,11 +662,13 @@ class TestFetchLatestVix(unittest.TestCase):
 
     def test_returns_float_when_data_exists(self):
         from contextlib import contextmanager
+        from datetime import date
 
         from src.trading.risk_manager import fetch_latest_vix
 
         mock_con = MagicMock()
-        mock_con.execute.return_value.fetchone.return_value = (28.5, "2026-10-22")
+        # 古い日付だと分からない扱いで None になるため、今日の日付にする（#1508）
+        mock_con.execute.return_value.fetchone.return_value = (28.5, date.today())
 
         @contextmanager
         def mock_db():
@@ -770,7 +779,7 @@ class TestFetchLatestVixUsesLatestClose(unittest.TestCase):
         ticker.history.return_value = hist
 
         base_risk = self._make_risk()
-        with patch("src.trading.risk_manager.fetch_latest_vix", return_value=None):
+        with patch("src.trading.risk_manager.fetch_latest_vix", return_value=15.0):
             qty_base = base_risk.calc_position_size("AAPL", price=100.0, **self._KELLY)
 
         risk = self._make_risk()
@@ -809,7 +818,7 @@ class TestFetchLatestVixUsesLatestClose(unittest.TestCase):
         self.assertTrue(any("lag1" in m for m in logs.output))
 
     def test_stale_latest_close_warns(self):
-        """返す値の日付が5営業日より前なら WARNING を出す。"""
+        """返す値の日付が5営業日より前なら WARNING を出し、分からない（None）とする（#1508）。"""
         from datetime import date, timedelta
 
         from src.trading.risk_manager import fetch_latest_vix
@@ -822,8 +831,83 @@ class TestFetchLatestVixUsesLatestClose(unittest.TestCase):
         ):
             vix = fetch_latest_vix()
 
-        self.assertAlmostEqual(vix, 25.0)
+        self.assertIsNone(vix)
         self.assertTrue(any("古" in m for m in logs.output))
+
+    def _qty_with_vix(self, value):
+        risk = self._make_risk()
+        with patch("src.trading.risk_manager.fetch_latest_vix", return_value=value):
+            return risk.calc_position_size("AAPL", price=100.0, **self._KELLY)
+
+    def test_unknown_vix_scales_position(self):
+        """fetch_latest_vix が None のとき、縮小を掛けた株数を返す（#1508）。"""
+        from src.trading.risk_manager import VIX_POSITION_SCALE
+
+        qty_calm = self._qty_with_vix(15.0)
+        qty_unknown = self._qty_with_vix(None)
+
+        self.assertGreater(qty_calm, 0)
+        self.assertEqual(qty_unknown, int(qty_calm * VIX_POSITION_SCALE))
+
+    def test_stale_vix_below_threshold_scales_position(self):
+        """値が古いときは閾値未満でも縮小を掛け、日付つきの WARNING を出す（#1508）。"""
+        from datetime import date, timedelta
+
+        from src.trading.risk_manager import VIX_POSITION_SCALE
+
+        qty_calm = self._qty_with_vix(15.0)
+        stale_day = date.today() - timedelta(days=14)
+        ticker = MagicMock()
+        ticker.history.return_value = _vix_history([15.0], end=stale_day)
+        risk = self._make_risk()
+        with (
+            patch("yfinance.Ticker", return_value=ticker),
+            self.assertLogs("src.trading.risk_manager", level="WARNING") as logs,
+        ):
+            qty = risk.calc_position_size("AAPL", price=100.0, **self._KELLY)
+
+        self.assertGreater(qty_calm, 0)
+        self.assertEqual(qty, int(qty_calm * VIX_POSITION_SCALE))
+        as_of = str(_vix_history([15.0], end=stale_day).index[-1].date())
+        self.assertTrue(any("古" in m and as_of in m for m in logs.output))
+
+    def test_fresh_vix_below_threshold_does_not_scale(self):
+        """取れた新しい値が閾値未満なら、今までどおり縮小しない。"""
+        from datetime import date
+
+        qty_calm = self._qty_with_vix(15.0)
+        ticker = MagicMock()
+        ticker.history.return_value = _vix_history([15.0], end=date.today())
+        risk = self._make_risk()
+        with patch("yfinance.Ticker", return_value=ticker):
+            qty = risk.calc_position_size("AAPL", price=100.0, **self._KELLY)
+
+        self.assertGreater(qty, 0)
+        self.assertEqual(qty, qty_calm)
+
+    def test_unavailable_vix_warns(self):
+        """^VIX も lag1 も取れないときは、取れなかったことを WARNING に出す（#1508）。"""
+        from src.trading.risk_manager import fetch_latest_vix
+
+        with (
+            patch("yfinance.Ticker", side_effect=RuntimeError("network down")),
+            patch("src.trading.risk_manager._db_connection", new=self._lag1_db_none()),
+            self.assertLogs("src.trading.risk_manager", level="WARNING") as logs,
+        ):
+            vix = fetch_latest_vix()
+
+        self.assertIsNone(vix)
+        self.assertTrue(any("取れない" in m and "縮小" in m for m in logs.output))
+
+    def _lag1_db_none(self):
+        mock_con = MagicMock()
+        mock_con.execute.return_value.fetchone.return_value = None
+
+        @contextmanager
+        def mock_db():
+            yield mock_con
+
+        return mock_db
 
     def test_threshold_and_scale_values_unchanged(self):
         from src.trading.risk_manager import VIX_POSITION_SCALE, VIX_SPIKE_THRESHOLD

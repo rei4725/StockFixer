@@ -93,8 +93,9 @@ def _fetch_lag1_vix() -> Optional[tuple[float, date]]:
 def fetch_latest_vix() -> Optional[float]:
     """発注の時点で分かっている最新の VIX の終値（T）を返す（R-406・#823）。
 
-    取れなければ vix_close_lag1（T-1）に WARNING つきで戻す。値の日付をログに出し、
-    VIX_STALE_BUSINESS_DAYS 営業日より古ければ WARNING。どちらも取れなければ None。
+    取れなければ vix_close_lag1（T-1）に WARNING つきで戻す。値の日付をログに出す。
+    どちらも取れないか、VIX_STALE_BUSINESS_DAYS 営業日より古ければ、WARNING を出して
+    「分からない」として None を返す（#1508。呼ぶ側は急騰と同じく縮小する）。
     """
     result: Optional[tuple[float, date]] = None
     source = VIX_TICKER
@@ -109,24 +110,28 @@ def fetch_latest_vix() -> Optional[float]:
             result = _fetch_lag1_vix()
         except Exception:
             logger.warning("[risk] VIX の取得に失敗しました", exc_info=True)
-            return None
     if result is None:
+        logger.warning("[risk] VIX が取れないため、分からないとして縮小を掛けます")
         return None
     vix, as_of = result
     logger.info(f"[risk] VIX={vix:.2f} as_of={as_of} source={source}")
     age = int(np.busday_count(as_of, datetime.now(timezone.utc).date()))
     if age > VIX_STALE_BUSINESS_DAYS:
-        logger.warning(f"[risk] VIX の値が古すぎます as_of={as_of} ({age}営業日前) source={source}")
+        logger.warning(
+            f"[risk] VIX の値が古すぎるため、分からないとして縮小を掛けます "
+            f"as_of={as_of} ({age}営業日前) source={source}"
+        )
+        return None
     return vix
 
 
 def compute_vix_position_scale(vix: Optional[float]) -> float:
     """VIX 水準に応じたポジションスケール係数を返す（R-406）。
 
-    - vix が None または閾値未満: scale = 1.0（縮小なし）
-    - vix >= VIX_SPIKE_THRESHOLD: scale = VIX_POSITION_SCALE（縮小）
+    - vix が閾値未満: scale = 1.0（縮小なし）
+    - vix >= VIX_SPIKE_THRESHOLD、または None（分からない。#1508）: scale = VIX_POSITION_SCALE
     """
-    if vix is None or vix < VIX_SPIKE_THRESHOLD:
+    if vix is not None and vix < VIX_SPIKE_THRESHOLD:
         return 1.0
     return VIX_POSITION_SCALE
 
@@ -411,9 +416,10 @@ class RiskManager:
         vix = self._vix_cache.get()  # R-406: VIX 急騰時のポジション縮小（1回の発注で1度だけ読む）
         vix_scale = compute_vix_position_scale(vix)
         if vix_scale < 1.0:
+            vix_text = "不明" if vix is None else f"{vix:.1f}"
             logger.info(
-                f"[risk] {symbol}: VIX急騰によるポジション縮小 "
-                f"vix={vix:.1f} threshold={VIX_SPIKE_THRESHOLD:.1f} scale={vix_scale:.2f}"
+                f"[risk] {symbol}: VIX急騰または不明によるポジション縮小 "
+                f"vix={vix_text} threshold={VIX_SPIKE_THRESHOLD:.1f} scale={vix_scale:.2f}"
             )
         qty = int(qty * vix_scale)
 
