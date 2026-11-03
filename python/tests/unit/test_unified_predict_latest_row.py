@@ -39,6 +39,7 @@ def _fetch_features(ohlcv: pd.DataFrame) -> pd.DataFrame:
         patch("src.market_data.pipeline.fetch_additional_macro_features", return_value=None),
         patch("src.market_data.pipeline.fetch_news_sentiment_with_llm", return_value=None),
         patch("src.market_data.pipeline.fetch_pageview_features", return_value=None),
+        patch("src.market_data.pipeline.resolve_article", return_value=None),
     ):
         result = fetch_stock_data_with_features(
             market="us", symbol="AAPL", start_date="2023-01-01", end_date="2023-04-30"

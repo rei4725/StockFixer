@@ -48,6 +48,7 @@ def _run(missing_ticker, caplog):
         patch("src.market_data.pipeline.drop_unclosed_bars", side_effect=lambda df, _m: df),
         patch("src.market_data.pipeline.fetch_news_sentiment_with_llm", return_value=None),
         patch("src.market_data.pipeline.fetch_pageview_features", return_value=None),
+        patch("src.market_data.pipeline.resolve_article", return_value=None),
         caplog.at_level("WARNING"),
     ):
         result = fetch_stock_data_with_features(
