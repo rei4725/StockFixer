@@ -167,7 +167,7 @@ try {
     $deployNow = if ($env:AUTO_DEPLOY_NOW) { [datetime]::Parse($env:AUTO_DEPLOY_NOW) } else { Get-Date }
     $blackout = Get-DeployBlackout $deployNow
     if ($blackout) {
-        Write-Log "[window] 発注の時間帯 ($blackout) のため develop $($remoteSha.Substring(0,7)) のデプロイを見送る"
+        Write-Log "[window] 見送る時間帯 ($blackout) のため develop $($remoteSha.Substring(0,7)) のデプロイを見送る"
         exit 0
     }
 

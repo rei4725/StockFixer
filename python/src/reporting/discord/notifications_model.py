@@ -2,13 +2,21 @@
 Discord モデル/学習系通知
 
 昇格評価・最適化完了・戦略ファクトリー・SHAP 寄与・特徴量提案・シャドー評価の
-通知関数群。discord_utils.py の段階的分割（#497 第4弾）で抽出。
+通知関数群。バックテストによる仮の入れ替えの通知もここに置く。discord_utils.py の段階的分割（#497 第4弾）で抽出。
 送信基盤は webhook_sender に依存する。
 """
 
 import logging
 
 from src.reporting.discord.discord_notification_specs import (
+    BACKTEST_PROMOTION_FAILED,
+    BACKTEST_PROMOTION_LOST,
+    BACKTEST_PROMOTION_NOT_COMPARABLE,
+    BACKTEST_PROMOTION_ROLLBACK,
+    BACKTEST_PROMOTION_SKIPPED,
+    BACKTEST_PROMOTION_SWAP,
+    BACKTEST_PROMOTION_WATCH_KEPT,
+    BACKTEST_PROMOTION_WON,
     FACTORY_ERROR,
     OPTIMIZATION_ERROR,
     SHADOW_EVALUATION_CHALLENGER_WINS,
@@ -443,3 +451,119 @@ def send_allocation_rebalance_report(
         },
     ]
     return send_status_fields(ALLOCATION_REBALANCE_COMPLETION, fields)
+
+
+_BACKTEST_PROMOTION_SPECS = {
+    "won": BACKTEST_PROMOTION_WON,
+    "lost": BACKTEST_PROMOTION_LOST,
+    "not_comparable": BACKTEST_PROMOTION_NOT_COMPARABLE,
+    "failed": BACKTEST_PROMOTION_FAILED,
+}
+_FIELD_LIMIT = 1000  # Discord の field の値は 1024 字まで
+
+
+def _bp_num(v) -> str:
+    return f"{v:.4f}" if isinstance(v, (int, float)) else "N/A"
+
+
+def _bp_field(name: str, value: str, inline: bool = False) -> dict:
+    return {"name": name, "value": (value or "-")[:_FIELD_LIMIT], "inline": inline}
+
+
+def _bp_metrics(m: dict | None) -> str:
+    m = m or {}
+    return (
+        f"基準差 {_bp_num(m.get('hit_rate_minus_majority'))} / MAE {_bp_num(m.get('mae'))}"
+        f" / 順位相関 {_bp_num(m.get('rank_corr'))} / 上げ率 {_bp_num(m.get('predicted_up_rate'))}"
+        f" (n={m.get('n_baseline', 0)})"
+    )
+
+
+def send_backtest_promotion_result(result: dict) -> bool:
+    """バックテストの評価の結果（勝ち／負け／比べが成り立たない／失敗／見送り）を送る。
+
+    Args:
+        result: run_backtest_promotion() の戻り値
+    """
+    outcome = str(result.get("outcome") or "")
+    spec = _BACKTEST_PROMOTION_SPECS.get(outcome, BACKTEST_PROMOTION_SKIPPED)
+    fields = [
+        _bp_field("🕐 時刻", format_jst(fmt=DISCORD_DATETIME_FORMAT), True),
+        _bp_field("🔖 版", f"`{result.get('version') or '-'}`", True),
+    ]
+    if result.get("dry_run"):
+        fields.append(_bp_field("🧪 dry-run", "入れ替えない回", True))
+    evaluation = result.get("evaluation") or {}
+    dates = result.get("dates") or []
+    if dates:
+        n_symbols = evaluation.get("n_symbols", 0)
+        fields.append(
+            _bp_field("📅 期間", f"{dates[0]}〜{dates[-1]}（{len(dates)} 日・{n_symbols} 銘柄）")
+        )
+    if evaluation:
+        fields.append(_bp_field("🧪 候補", _bp_metrics(evaluation.get("candidate"))))
+        fields.append(_bp_field("🏭 Production", _bp_metrics(evaluation.get("production"))))
+        daily = evaluation.get("daily") or []
+        wins = sum(1 for d in daily if isinstance(d.get("diff"), (int, float)) and d["diff"] > 0)
+        path = evaluation.get("path_check") or {}
+        fields.append(_bp_field("📈 日ごとの勝ち越し", f"{wins}/{len(daily)} 日", True))
+        fields.append(
+            _bp_field(
+                "🛣️ 道の一致",
+                f"{'OK' if path.get('passed') else 'NG'}"
+                f"（{path.get('compared', 0)} 銘柄・最大差 {_bp_num(path.get('max_abs_diff'))}）",
+                True,
+            )
+        )
+    reasons = (evaluation.get("decision") or {}).get("reasons") or []
+    detail = "\n".join(reasons) or result.get("reason") or ""
+    if result.get("error"):
+        detail = f"{result.get('reason') or ''}\n{result['error']}"
+    if detail:
+        fields.append(_bp_field("📝 理由", detail))
+    if result.get("restore_error"):
+        backups = "\n".join(result.get("backups") or []) or "-"
+        fields.append(_bp_field("⚠️ production が候補のままの恐れ（戻す写し）", backups))
+    watch = result.get("watch") or {}
+    if watch.get("rolled_back"):
+        restored = "\n".join(watch.get("backups") or []) or "-"
+        fields.append(_bp_field("⏪ production は旧モデルに戻した（戻した写し）", restored))
+    fields.append(_bp_field("📄 JSON", result.get("result_path") or "-"))
+    return send_status_fields(spec, fields)
+
+
+def send_backtest_promotion_swap(result: dict) -> bool:
+    """バックテストで勝った候補を本番の名前で置いたことを送る。"""
+    fields = [
+        _bp_field("🕐 時刻", format_jst(fmt=DISCORD_DATETIME_FORMAT), True),
+        _bp_field("🔖 版", f"`{result.get('version') or '-'}`", True),
+        _bp_field("💾 写し（戻す先）", "\n".join(result.get("backups") or []) or "-"),
+    ]
+    description = (
+        "次の予想の回から新しい production を使う。採点済みの日が5日たまったら見張りで判定する。"
+    )
+    return send_status_fields(BACKTEST_PROMOTION_SWAP, fields, description=description)
+
+
+def send_backtest_promotion_rollback(result: dict) -> bool:
+    """入れ替えの後の見張りの判定（戻した／戻さない）を送る。"""
+    watch = result.get("watch") or {}
+    spec = (
+        BACKTEST_PROMOTION_ROLLBACK if watch.get("rolled_back") else BACKTEST_PROMOTION_WATCH_KEPT
+    )
+    triggered = "\n".join(watch.get("triggered") or []) or "当たらなかった"
+    if watch.get("triggered") and not watch.get("rolled_back"):
+        triggered += "\n→ 戻す先のバックテストも良くないため戻さない"
+    fields = [
+        _bp_field("🕐 時刻", format_jst(fmt=DISCORD_DATETIME_FORMAT), True),
+        _bp_field("🔖 入れ替えた版", f"`{watch.get('version') or '-'}`", True),
+        _bp_field("📊 実測（最初の5日）", _bp_metrics(watch.get("live"))),
+        _bp_field("🚨 見張りの条件", triggered),
+    ]
+    if watch.get("rolled_back"):
+        restored = "\n".join(watch.get("backups") or []) or "-"
+        fields.append(_bp_field("💾 戻した写し", restored))
+    if watch.get("error"):
+        fields.append(_bp_field("⚠️ 状態を保存できなかった（見張りが残る）", watch["error"]))
+    fields.append(_bp_field("📄 JSON", result.get("result_path") or "-"))
+    return send_status_fields(spec, fields)

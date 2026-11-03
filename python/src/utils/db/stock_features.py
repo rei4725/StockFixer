@@ -241,3 +241,24 @@ def get_active_symbols() -> list:
     if excluded:
         logger.info(f"監視対象外の {excluded} 銘柄を予測対象から除外しました")
     return active
+
+
+def get_target_dates() -> list:
+    """
+    stock_features で目的変数 y が埋まった行の日付を、重複なしの古い順で返す。
+
+    Returns:
+        list of pd.Timestamp
+
+    Raises:
+        Exception: 読み込みの失敗（DB の例外）。日付が無いことと分ける
+    """
+    with _db_connection() as con:
+        try:
+            result = con.execute(
+                "SELECT DISTINCT date FROM stock_features WHERE y IS NOT NULL ORDER BY date"
+            ).fetchall()
+        except Exception as e:
+            logger.error(f"stock_features の日付一覧取得失敗: {e}", exc_info=True)
+            raise
+    return [pd.Timestamp(row[0]) for row in result if row[0] is not None]

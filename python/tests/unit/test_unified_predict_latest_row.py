@@ -147,7 +147,7 @@ class TestPredictUsesLatestRow(unittest.TestCase):
             patch("src.prediction.predict_unified.load_feature_data", return_value=stored),
             patch("src.prediction.predict_unified.get_cached_model", return_value=mock_model),
             patch(
-                "src.prediction.predict_unified.resolve_expected_features",
+                "src.prediction.unified_ensemble.resolve_expected_features",
                 return_value=expected_features,
             ),
             patch("src.prediction.predict_unified.get_service_url", return_value=None),
@@ -186,7 +186,7 @@ class TestPredictUsesLatestRow(unittest.TestCase):
             patch("src.prediction.predict_unified.load_feature_data", return_value=stored),
             patch("src.prediction.predict_unified.get_cached_model", return_value=mock_model),
             patch(
-                "src.prediction.predict_unified.resolve_expected_features",
+                "src.prediction.unified_ensemble.resolve_expected_features",
                 return_value=expected_features,
             ),
             patch("src.prediction.predict_unified.get_service_url", return_value=None),

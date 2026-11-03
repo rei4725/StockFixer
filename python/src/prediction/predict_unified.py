@@ -8,13 +8,14 @@ import logging
 import os
 import warnings
 from datetime import date, datetime, timedelta
+from functools import partial
 from threading import Lock
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import pandas as pd
 import yfinance as yf
 
-from config.settings import PREDICTION_ATR_CLIP_MULTIPLIER, STALE_BARS_MAX_WEEKDAYS
+from config.settings import STALE_BARS_MAX_WEEKDAYS
 from src.domain.jp_market_holidays import is_jp_business_day
 from src.prediction.db import load_model_weights
 from src.prediction.prediction_run_stats import (
@@ -22,9 +23,14 @@ from src.prediction.prediction_run_stats import (
     record_clip,
     record_zero_fill,
 )
-from src.prediction.range_clipping import atr_clip_max_ratio, clip_diff_ratio_to_atr_range
 from src.prediction.remote_client import get_service_url, predict_via_service
 from src.prediction.types import PredictionResult
+from src.prediction.unified_ensemble import (  # noqa: F401 (re-export)
+    _run_ensemble,
+    ensemble_diff_ratio,
+    feature_row,
+    resolve_expected_features,
+)
 from src.utils.data_path_utils import get_models_dir, get_ticker
 from src.utils.db import get_active_symbols, load_stock_features
 from src.utils.logger import get_logger
@@ -118,45 +124,6 @@ def preload_models(model_types: List[str] = None) -> List[str]:
             logger.info("  - %s: 見つかりません", model_name)
     logger.info("モデルの事前ロード完了: %d/%d", len(loaded), len(model_types))
     return loaded
-
-
-def _as_feature_list(names: Any) -> Optional[List[str]]:
-    """特徴量名の並びを list[str] に正規化する。名前として使えなければ None。"""
-    if names is None or isinstance(names, (str, bytes)):
-        return None
-    try:
-        items = list(names)
-    except TypeError:
-        return None
-    return [str(name) for name in items] if items else None
-
-
-def resolve_expected_features(model: Any) -> Optional[List[str]]:
-    """モデルが学習時に使った特徴量名を解決する。解決できなければ None。
-
-    sklearn 互換の ``feature_names_in_`` だけを見ると LightGBM を取りこぼす。
-    lightgbm がこの属性を持つようになったのは 4.5.0 からで、それ以前に pickle
-    されたモデルは LightGBM 独自の ``feature_name_`` にしか名前を持たない。
-    属性が無い場合は AttributeError を送出するプロパティとして実装されている
-    ため、``hasattr`` ではなく getattr チェーンで順に解決する。
-
-    引数は ModelManager のラッパー（``.model`` に推定器を持つ）でも生の推定器
-    でもよい。
-
-    ``booster_.feature_name()`` へはフォールバックしない。DataFrame で学習した
-    モデルなら上の2属性で必ず解決でき、numpy 配列で学習したモデルでは booster が
-    ``f0`` / ``Column_0`` といった合成名を返すため、それを本物の特徴量名として
-    扱うと全列 0 埋めのフレームで predict が「成功」してしまう。解決できない
-    ことを None で表明する方が安全である。
-    """
-    estimator = getattr(model, "model", model)
-
-    for attr in ("feature_names_in_", "feature_name_"):
-        resolved = _as_feature_list(getattr(estimator, attr, None))
-        if resolved is not None:
-            return resolved
-
-    return None
 
 
 def _is_open_day(day: date, market: Optional[str]) -> bool:
@@ -333,31 +300,14 @@ def predict_with_unified_model(
                 on_stale(market, symbol)
             return None
 
-    # 特徴量列（文字列列・日付列・ターゲットを除外）
-    # 除外条件は学習側の prepare_unified_features() と揃えること。学習時に
-    # 存在しない date 列を予測時だけ通すと、アラインメントを解決できなかった
-    # 場合に日付が predict() へ流れ込んで失敗する（#615）。
-    exclude_cols = ["y", "market", "symbol", "date"]
-    feature_cols = [
-        c
-        for c in df.columns
-        if c not in exclude_cols and not pd.api.types.is_datetime64_any_dtype(df[c])
-    ]
-    X = df[feature_cols]
-
-    # 最新行を取得（必ずコピーを作成）
-    latest_X = X.iloc[[-1]].copy()
+    # 最新行を取得
+    latest_X = feature_row(df, -1, market)
 
     # 基準の値段は特徴量の最後の行の日の終値。足の日付が合わない・取れないときは
     # 1日ずれた値段で予想の値段を出さないよう、予想を出さない（#845）
     current_price = _fetch_current_price(market, symbol, last_date)
     if current_price is None:
         return None
-
-    # market_encoded列がない場合のみ追加（後方互換性）
-    if "market_encoded" not in latest_X.columns:
-        market_codes = {"us": 0, "jp": 1}
-        latest_X["market_encoded"] = market_codes.get(market, 0)
 
     # 推論サービスが有効なときだけ委譲する。
     # get_service_url() で先に判定するのは、未設定の既定パスで load_model_weights()
@@ -390,114 +340,35 @@ def predict_with_unified_model(
                 exc_info=True,
             )
 
-    # 各モデルで予測（キャッシュされたモデルを使用）
-    pred_prices = []
-    succeeded_model_names = []
-    last_model_error: Optional[Exception] = None
-    # モデルをまたいで0で埋めた特徴量（回ごとのログに出す、#1318）
-    zero_filled: set = set()
-    for model_name in model_types:
-        try:
-            model = get_cached_model(model_name)
-            if model is None:
-                continue
-
-            # モデルの特徴量と入力特徴量を揃える（コピーを作成して変更）
-            latest_X_aligned = latest_X.copy()
-            expected_features = resolve_expected_features(model)
-            if expected_features is not None:
-                # 不足している特徴量は0で埋める
-                for feat in expected_features:
-                    if feat not in latest_X_aligned.columns:
-                        latest_X_aligned[feat] = 0
-                        zero_filled.add(feat)
-                # 期待される特徴量のみ選択
-                latest_X_aligned = latest_X_aligned[expected_features]
-                # 列はあっても値が NaN のもの（DB に NULL のまま残った列）も0で埋める（#1425）
-                nan_features = [
-                    feat for feat in expected_features if pd.isna(latest_X_aligned[feat].iloc[0])
-                ]
-                if nan_features:
-                    latest_X_aligned = latest_X_aligned.fillna({f: 0 for f in nan_features})
-                    zero_filled.update(nan_features)
-            else:
-                logger.warning(
-                    "モデルの期待特徴量を解決できずアラインメントをスキップ: model=%s",
-                    model_name,
-                )
-
-            pred = model.predict(latest_X_aligned)
-            if isinstance(pred, pd.Series):
-                pred_return = float(pred.iloc[-1])
-            elif isinstance(pred, (list, tuple)):
-                pred_return = float(pred[-1])
-            else:
-                pred_return = float(pred)
-            # 変化率から絶対価格を計算
-            pred_price = current_price * (1 + pred_return)
-            pred_prices.append(pred_price)
-            succeeded_model_names.append(model_name)
-        except Exception as e:
-            last_model_error = e
-            # WARNING では埋もれる。1モデル落ちるとアンサンブルが単一モデルに
-            # 縮退したまま予測値は出続けるため、失敗が見えないと気づけない（#615）。
-            logger.error(
-                "モデル予測スキップ（アンサンブルが縮退します）: model=%s market=%s symbol=%s",
-                model_name,
+    # 各モデルで予測（キャッシュされたモデルを使用）。モデルの読み込みは今までどおり
+    # 1モデルずつ予想の直前に行い、読み込みの例外も予想の例外と同じに扱う
+    def _record_zero_filled(zero_filled: List[str]) -> None:
+        if zero_filled:
+            logger.info(
+                "予想の特徴量を0で埋めた: market=%s symbol=%s horizon=%d 列=%s",
                 market,
                 symbol,
-                exc_info=True,
+                horizon,
+                ",".join(zero_filled),
             )
-            continue
+        record_zero_fill(market, horizon, zero_filled)
 
-    if zero_filled:
-        logger.info(
-            "予想の特徴量を0で埋めた: market=%s symbol=%s horizon=%d 列=%s",
-            market,
-            symbol,
-            horizon,
-            ",".join(sorted(zero_filled)),
-        )
-    record_zero_fill(market, horizon, sorted(zero_filled))
-
-    if not pred_prices:
-        # 例外で全滅したときは None にせず投げ、呼び出し元の例外の数と知らせに乗せる（#1140）
-        if last_model_error is not None:
-            raise RuntimeError(
-                f"全モデルの予測が例外で失敗: market={market} symbol={symbol}"
-            ) from last_model_error
+    outcome = _run_ensemble(
+        latest_X,
+        current_price,
+        market,
+        symbol,
+        horizon,
+        [(name, partial(get_cached_model, name)) for name in model_types],
+        weights_fn=load_model_weights,
+        on_zero_filled=_record_zero_filled,
+    )
+    if outcome is None:
         return None
 
-    # model_metrics の directional_accuracy をソフトマックス重みでアンサンブル（R-202）
-    weights = load_model_weights(market, symbol, succeeded_model_names)
-    avg_pred_price = float(sum(p * w for p, w in zip(pred_prices, weights)))
-    diff_ratio = (avg_pred_price - current_price) / current_price
-
-    # ATR ベースの妥当なレンジへクリップ（あり得ない外れ値予測の丸め）。
-    # stock_features には生の High/Low は残らずラグ特徴量しか無いため、
-    # 直近1営業日分の ATR として atr_lag1 を使う（predict_single 側は
-    # 生 OHLC から都度計算するのと対照的）。
-    atr_value: Optional[float] = None
-    if "atr_lag1" in latest_X.columns:
-        raw_atr = latest_X["atr_lag1"].iloc[0]
-        if pd.notna(raw_atr):
-            atr_value = float(raw_atr)
     # 上限・下限に当たった数を回ごとのログに出す（#1318）
-    record_clip(
-        market,
-        horizon,
-        diff_ratio,
-        atr_clip_max_ratio(
-            atr_value, current_price, horizon, atr_multiplier=PREDICTION_ATR_CLIP_MULTIPLIER
-        ),
-    )
-    diff_ratio = clip_diff_ratio_to_atr_range(
-        diff_ratio,
-        atr_value,
-        current_price,
-        horizon=horizon,
-        atr_multiplier=PREDICTION_ATR_CLIP_MULTIPLIER,
-    )
+    record_clip(market, horizon, outcome.diff_ratio_raw, outcome.clip_max_ratio)
+    diff_ratio = outcome.diff_ratio
     avg_pred_price = float(current_price * (1 + diff_ratio))
 
     return PredictionResult(
@@ -506,7 +377,7 @@ def predict_with_unified_model(
         current_price=float(current_price),
         avg_pred_price=float(avg_pred_price),
         diff_ratio=float(diff_ratio),
-        model_count=int(len(pred_prices)),
+        model_count=int(outcome.model_count),
     )
 
 

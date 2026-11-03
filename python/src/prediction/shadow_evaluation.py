@@ -457,9 +457,7 @@ def promote_unified_challenger(dry_run: bool = False) -> dict:
             backups: list[str] — 写した前の本番のファイルのパス
             dry_run: bool
     """
-    import os
-    import shutil
-
+    from src.prediction.backtest_promotion.state import copy_with_backup
     from src.utils.data_path_utils import get_models_dir
     from src.utils.japan_time import now_jst
 
@@ -490,17 +488,10 @@ def promote_unified_challenger(dry_run: bool = False) -> dict:
         }
 
     # 先に全部の本番のファイルを写す。失敗したら上書きの前に止まる（例外は呼ぶ側が知らせる）
-    backups = []
-    for _, production_name, _, dst in pairs:
-        if os.path.exists(dst):
-            backup = os.path.join(unified_dir, f"{production_name}_{stamp}.joblib")
-            shutil.copy2(dst, backup)
-            backups.append(backup)
-            logger.info(f"昇格の前に本番のモデルを写した: {backup}")
+    backups = copy_with_backup([(src, dst) for _, _, src, dst in pairs], stamp)
 
     promoted = []
-    for challenger_name, production_name, src, dst in pairs:
-        shutil.copy2(src, dst)
+    for challenger_name, production_name, _, _ in pairs:
         logger.info(f"統合モデル昇格完了: {challenger_name} -> {production_name}")
         promoted.append(production_name)
 

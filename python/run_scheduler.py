@@ -209,6 +209,13 @@ def job_regime_leverage_daily_margin():
     run_regime_leverage_daily_margin_job()
 
 
+def job_nightly_backtest_promotion():
+    """毎日 22:00 - 予想のコードが変わったらバックテストで候補を評価し暫定昇格"""
+    from src.orchestration.scheduler import run_backtest_promotion
+
+    run_backtest_promotion()
+
+
 # ── イベントリスナー ──────────────────────────────────
 def _job_listener(event):
     """ジョブ実行結果のログ出力"""
@@ -478,6 +485,17 @@ SCHEDULE_CONFIG = {
         "max_executions_per_period": 1,
         "description": "毎日 05:00 - 戦略ファクトリー夜間バッチ（jp/us 日替わり、#369）",
         "backfill": True,
+    },
+    "nightly_backtest_promotion": {
+        "func": job_nightly_backtest_promotion,
+        "trigger": "cron",
+        "period": "daily",
+        "day_of_week": "mon-sun",
+        "hour": 22,
+        "minute": 0,
+        "recovery_delay_minutes": 60,
+        "max_executions_per_period": 1,
+        "description": "毎日 22:00 - 予想のコードが変わったらバックテストで候補を評価し暫定昇格",
     },
     "strategy_promotion_check": {
         "func": job_strategy_promotion_check,
