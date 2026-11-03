@@ -107,11 +107,12 @@ class TestAlertTypeClassification(unittest.TestCase):
         alert = self._run_with_one_position(pos, pred)
         self.assertEqual(alert.alert_type, AlertType.HOLD)
 
-    def test_no_prediction_defaults_to_hold(self):
+    def test_position_missing_from_run_is_no_prediction_not_hold(self):
         pos = _make_position("9999", 50, 500.0, 510.0)
         pred = pd.DataFrame()  # no prediction data
         alert = self._run_with_one_position(pos, pred)
-        self.assertEqual(alert.alert_type, AlertType.HOLD)
+        self.assertEqual(alert.alert_type, AlertType.NO_PREDICTION)
+        self.assertNotEqual(alert.alert_type, AlertType.HOLD)
         self.assertEqual(alert.diff_ratio, 0.0)
         self.assertEqual(alert.avg_pred_price, 510.0)
 
@@ -356,6 +357,62 @@ class TestPredictionRepositoryWiring(unittest.TestCase):
 
         self.assertEqual(len(alerts), 1)
         self.assertEqual(alerts[0].alert_type, AlertType.STOP_LOSS)
+
+    def _pre_close_lines(self, repo: InMemoryPredictionRepository, positions: list[dict]):
+        with patch("src.trading.brokers.paper.paper_broker.PaperBroker") as mock_broker_cls:
+            broker = MagicMock()
+            broker.get_positions.return_value = positions
+            mock_broker_cls.return_value = broker
+            return get_pre_close_alerts(
+                trade_diff_sink=InMemoryTradeDiffSink(), prediction_repo=repo
+            )
+
+    def test_lines_differ_from_no_position_when_no_production_run(self):
+        repo = InMemoryPredictionRepository()
+        lines = self._pre_close_lines(repo, [_make_position("7203", 100, 1000.0, 980.0)])
+
+        full_text = "\n".join(lines)
+        self.assertNotIn("保有ポジションなし", full_text)
+        self.assertIn("予想の回が無い", full_text)
+
+    def test_lines_differ_from_no_position_when_production_run_is_stale(self):
+        repo = InMemoryPredictionRepository()
+        repo.add(
+            "20260109_073000",
+            [{"market": "jp", "symbol": "7203", "avg_pred_price": 960.0, "diff_ratio": -0.02}],
+        )
+        with patch(
+            "src.trading.pre_close_alert_service._today_jst",
+            return_value=date(2026, 1, 14),
+        ):
+            lines = self._pre_close_lines(repo, [_make_position("7203", 100, 1000.0, 980.0)])
+
+        full_text = "\n".join(lines)
+        self.assertNotIn("保有ポジションなし", full_text)
+        self.assertIn("予想の回が古い", full_text)
+        self.assertIn("20260109_073000", full_text)
+
+    def test_position_missing_from_run_is_listed_as_no_prediction(self):
+        repo = InMemoryPredictionRepository()
+        repo.add(
+            "20260101_073000",
+            [{"market": "jp", "symbol": "7203", "avg_pred_price": 1030.0, "diff_ratio": 0.02}],
+        )
+        positions = [
+            _make_position("7203", 100, 1000.0, 1010.0),
+            _make_position("6758", 50, 500.0, 510.0),
+        ]
+        with self.assertLogs("src.trading.pre_close_alert_service", level="WARNING") as logs:
+            lines = self._pre_close_lines(repo, positions)
+
+        full_text = "\n".join(lines)
+        self.assertIn("保有継続: 1", full_text)
+        self.assertIn("予想なし: 1", full_text)
+        no_pred_index = next(i for i, line in enumerate(lines) if "予想なし（" in line)
+        self.assertIn("6758", "\n".join(lines[no_pred_index:]))
+        hold_index = next(i for i, line in enumerate(lines) if "**保有継続**" in line)
+        self.assertNotIn("6758", "\n".join(lines[hold_index:no_pred_index]))
+        self.assertTrue(any("予想なし" in line and "1件" in line for line in logs.output))
 
     def test_prediction_repo_is_required(self):
         with self.assertRaisesRegex(TypeError, "prediction_repo"):

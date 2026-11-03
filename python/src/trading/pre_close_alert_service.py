@@ -26,6 +26,16 @@ class AlertType(str, Enum):
     TAKE_PROFIT = "利確推奨"
     STOP_LOSS = "損切り推奨"
     HOLD = "保有継続"
+    NO_PREDICTION = "予想なし"
+
+
+class SkipReason(str, Enum):
+    """アラートを出さなかった理由。"""
+
+    MODE_UNSUPPORTED = "対象外の発注のモード"
+    NO_POSITIONS = "保有ポジションなし"
+    NO_PREDICTION_RUN = "予想の回が無い"
+    STALE_PREDICTION_RUN = "予想の回が古い"
 
 
 @dataclass
@@ -39,6 +49,15 @@ class PositionAlert:
     unrealized_pnl: float
     hold_pnl_ratio: float
     alert_type: AlertType
+
+
+@dataclass
+class PreCloseEvaluation:
+    """引け前の評価の結果。alerts が空のときは skip_reason に理由を持つ。"""
+
+    alerts: list[PositionAlert]
+    skip_reason: SkipReason | None = None
+    predicted_at: str | None = None
 
 
 def _today_jst() -> date:
@@ -78,6 +97,7 @@ def evaluate_positions(
     分類基準:
         損切り推奨: モデルの予測下落率 diff_ratio <= STOP_LOSS_PRED_THRESHOLD
         利確推奨: 保有含み益率 >= TAKE_PROFIT_HOLD_THRESHOLD かつ diff_ratio <= 0
+        予想なし: 予想の回にその銘柄が載っていない
         保有継続: 上記以外
 
     Args:
@@ -86,8 +106,23 @@ def evaluate_positions(
         prediction_repo: 予測結果の読み取り元（合成ルートが必ず渡す）
 
     Returns:
-        PositionAlert リスト（ポジションなし・予測データなしの場合は空リスト）
+        PositionAlert リスト（ポジションなし・予測データなしの場合は空リスト。
+        空の理由は evaluate_pre_close の skip_reason で読む）
     """
+    return evaluate_pre_close(
+        market_data_port=market_data_port,
+        trade_diff_sink=trade_diff_sink,
+        prediction_repo=prediction_repo,
+    ).alerts
+
+
+def evaluate_pre_close(
+    market_data_port=None,
+    *,
+    trade_diff_sink: TradeDiffSink,
+    prediction_repo: PredictionResultRepository,
+) -> PreCloseEvaluation:
+    """evaluate_positions と同じ評価をし、アラートを出さなかった理由も返す。"""
     import os
 
     from src.trading.brokers.paper.paper_broker import PaperBroker
@@ -95,7 +130,7 @@ def evaluate_positions(
     mode = os.environ.get("AUTO_TRADE_MODE", "paper")
     if mode == "live":
         logger.info("live モードのため引け前アラートをスキップ（kabuポジション未対応）")
-        return []
+        return PreCloseEvaluation(alerts=[], skip_reason=SkipReason.MODE_UNSUPPORTED)
 
     broker = PaperBroker(
         market_data_port=market_data_port,
@@ -104,13 +139,13 @@ def evaluate_positions(
     positions = broker.get_positions()
     if not positions:
         logger.info("保有ポジションなし — 引け前アラートをスキップ")
-        return []
+        return PreCloseEvaluation(alerts=[], skip_reason=SkipReason.NO_POSITIONS)
 
     # production の後に保存される challenger の回を掴まないよう、版を絞る
     ts = prediction_repo.latest_timestamp(model_version="production")
     if ts is None:
         logger.warning("予測データなし — 引け前アラートをスキップ")
-        return []
+        return PreCloseEvaluation(alerts=[], skip_reason=SkipReason.NO_PREDICTION_RUN)
 
     # 朝の予想が止まった日に、前の日より古い回を今日の予想として使わない
     run_date = _run_date(ts)
@@ -121,7 +156,9 @@ def evaluate_positions(
             ts,
             previous_day.isoformat(),
         )
-        return []
+        return PreCloseEvaluation(
+            alerts=[], skip_reason=SkipReason.STALE_PREDICTION_RUN, predicted_at=ts
+        )
 
     pred_df = prediction_repo.results_at(predicted_at=ts)
     pred_map: dict[str, dict] = {}
@@ -146,7 +183,10 @@ def evaluate_positions(
             avg_pred_price = current_price
             diff_ratio = 0.0
 
-        if diff_ratio <= STOP_LOSS_PRED_THRESHOLD:
+        if pred is None:
+            # 予想の回に載らない保有を、モデルが「持っていてよい」と言った保有継続に混ぜない
+            alert_type = AlertType.NO_PREDICTION
+        elif diff_ratio <= STOP_LOSS_PRED_THRESHOLD:
             alert_type = AlertType.STOP_LOSS
         elif hold_pnl_ratio >= TAKE_PROFIT_HOLD_THRESHOLD and diff_ratio < 0.0:
             alert_type = AlertType.TAKE_PROFIT
@@ -167,14 +207,43 @@ def evaluate_positions(
             )
         )
 
+    no_prediction = [a.symbol for a in alerts if a.alert_type == AlertType.NO_PREDICTION]
+    if no_prediction:
+        logger.warning(
+            "予想の回 %s に載らない保有（予想なし）が %d件: %s",
+            ts,
+            len(no_prediction),
+            ", ".join(no_prediction),
+        )
+
     logger.info(
-        "引け前アラート評価完了: %d件 (損切り=%d 利確=%d 保有継続=%d)",
+        "引け前アラート評価完了: %d件 (損切り=%d 利確=%d 保有継続=%d 予想なし=%d)",
         len(alerts),
         sum(1 for a in alerts if a.alert_type == AlertType.STOP_LOSS),
         sum(1 for a in alerts if a.alert_type == AlertType.TAKE_PROFIT),
         sum(1 for a in alerts if a.alert_type == AlertType.HOLD),
+        len(no_prediction),
     )
-    return alerts
+    return PreCloseEvaluation(alerts=alerts, predicted_at=ts)
+
+
+def _skip_lines(now: str, evaluation: PreCloseEvaluation) -> list[str]:
+    """アラートを出さなかったときの文を、理由ごとに分けて返す。"""
+    reason = evaluation.skip_reason
+    if reason == SkipReason.NO_PREDICTION_RUN:
+        return [
+            f"時刻: {now}",
+            "⚠️ production の予想の回が無いため、引け前アラートを出せない（朝の予想が保存されていない）",
+        ]
+    if reason == SkipReason.STALE_PREDICTION_RUN:
+        return [
+            f"時刻: {now}",
+            f"⚠️ production の予想の回が古い（{evaluation.predicted_at}）ため、"
+            "引け前アラートを出せない（朝の予想が止まっている）",
+        ]
+    if reason == SkipReason.MODE_UNSUPPORTED:
+        return [f"時刻: {now}", "この発注のモードでは引け前アラートを出さない"]
+    return [f"時刻: {now}", "保有ポジションなし"]
 
 
 def get_pre_close_alerts(
@@ -189,22 +258,25 @@ def get_pre_close_alerts(
     MINUTE_FORMAT = "%Y-%m-%d %H:%M JST"
     now = format_jst(fmt=MINUTE_FORMAT)
 
-    alerts = evaluate_positions(
+    evaluation = evaluate_pre_close(
         market_data_port=market_data_port,
         trade_diff_sink=trade_diff_sink,
         prediction_repo=prediction_repo,
     )
+    alerts = evaluation.alerts
 
     if not alerts:
-        return [f"時刻: {now}", "保有ポジションなし"]
+        return _skip_lines(now, evaluation)
 
     stop_loss = [a for a in alerts if a.alert_type == AlertType.STOP_LOSS]
     take_profit = [a for a in alerts if a.alert_type == AlertType.TAKE_PROFIT]
     hold = [a for a in alerts if a.alert_type == AlertType.HOLD]
+    no_prediction = [a for a in alerts if a.alert_type == AlertType.NO_PREDICTION]
 
     lines = [
         f"**[引け前ポジション再評価] {now}**",
-        f"保有: {len(alerts)}銘柄  |  損切り: {len(stop_loss)}  利確: {len(take_profit)}  保有継続: {len(hold)}",
+        f"保有: {len(alerts)}銘柄  |  損切り: {len(stop_loss)}  利確: {len(take_profit)}  "
+        f"保有継続: {len(hold)}  予想なし: {len(no_prediction)}",
         "",
     ]
 
@@ -238,6 +310,16 @@ def get_pre_close_alerts(
                 f"現在値={a.current_price:,.0f}円 "
                 f"予測={a.avg_pred_price:,.0f}円({a.diff_ratio:+.1%}) "
                 f"含み損益={a.unrealized_pnl:+,.0f}円"
+            )
+
+    if no_prediction:
+        lines.append("")
+        lines.append("⚪ **予想なし（予想の回に載らない銘柄。モデルの判断ではない）**")
+        for a in no_prediction:
+            lines.append(
+                f"  • `{a.symbol}`{symbol_name_suffix(None, a.symbol)} "
+                f"現在値={a.current_price:,.0f}円 "
+                f"含み損益={a.unrealized_pnl:+,.0f}円({a.hold_pnl_ratio:+.1%})"
             )
 
     return lines
