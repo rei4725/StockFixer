@@ -90,7 +90,8 @@ def test_rollback_triggers_individually():
 def test_rollback_none_is_conservative():
     none_live = {"hit_rate_minus_majority": None, "rank_corr": None, "predicted_up_rate": None}
     d = judge_rollback(none_live, BT_CAND, OLD_BETTER)
-    assert d.triggered == [] and d.old_is_better is False and d.rollback is False
+    # rank_corr の None は 0 扱いで当たるが、的中率が None なので戻さない
+    assert len(d.triggered) == 1 and d.old_is_better is False and d.rollback is False
     d = judge_rollback(LIVE, BT_CAND, {"hit_rate_minus_majority": None, "rank_corr": 0.1})
     assert d.triggered and d.old_is_better is False and d.rollback is False
 
