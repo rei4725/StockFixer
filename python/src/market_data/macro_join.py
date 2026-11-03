@@ -21,7 +21,7 @@ def missing_macro_columns(
     """
     取れた相場の指標の表に無い、決まった列の名前を返す（#1491）。
 
-    表そのものが無い（全部のティッカーが落ちた）ときは欠けとみなさない。
+    表そのものが無い（全部のティッカーが落ちた）ときは、そのグループの列を全部欠けとみなす（#1499）。
     """
     missing: list[str] = []
     for frame, tickers in (
@@ -29,6 +29,7 @@ def missing_macro_columns(
         (additional_macro, _ADDITIONAL_MACRO_TICKERS),
     ):
         if frame is None or frame.empty:
+            missing += list(tickers)
             continue
         missing += [col for col in tickers if col not in frame.columns]
     return missing

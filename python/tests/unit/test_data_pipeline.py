@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
+from tests.unit.macro_frames_stub import additional_macro_frame, cross_asset_frame
 
 import src.utils.data_path_utils as path_utils
 import src.utils.db as db_module
@@ -170,8 +171,11 @@ class TestFetchStockDataWithFeatures(_TmpDbTestCase):
 
     @patch("src.market_data.pipeline.fetch_pageview_features", return_value=None)
     @patch("src.market_data.pipeline.fetch_news_sentiment_with_llm", return_value=None)
-    @patch("src.market_data.pipeline.fetch_additional_macro_features", return_value=None)
-    @patch("src.market_data.pipeline.fetch_cross_asset_features", return_value=None)
+    @patch(
+        "src.market_data.pipeline.fetch_additional_macro_features",
+        side_effect=additional_macro_frame,
+    )
+    @patch("src.market_data.pipeline.fetch_cross_asset_features", side_effect=cross_asset_frame)
     @patch("src.market_data.pipeline.get_stock_data")
     @patch("src.market_data.pipeline.should_fetch_fresh_data", return_value=True)
     @patch("src.market_data.pipeline.get_raw_ohlcv_from_db")
@@ -216,8 +220,11 @@ class TestFetchStockDataWithFeatures(_TmpDbTestCase):
 
     @patch("src.market_data.pipeline.fetch_pageview_features", return_value=None)
     @patch("src.market_data.pipeline.fetch_news_sentiment_with_llm", return_value=None)
-    @patch("src.market_data.pipeline.fetch_additional_macro_features", return_value=None)
-    @patch("src.market_data.pipeline.fetch_cross_asset_features", return_value=None)
+    @patch(
+        "src.market_data.pipeline.fetch_additional_macro_features",
+        side_effect=additional_macro_frame,
+    )
+    @patch("src.market_data.pipeline.fetch_cross_asset_features", side_effect=cross_asset_frame)
     @patch("src.market_data.pipeline.get_stock_data")
     @patch("src.market_data.pipeline.should_fetch_fresh_data")
     @patch("src.market_data.pipeline.get_raw_ohlcv_from_db")
@@ -268,8 +275,11 @@ class TestFetchStockDataWithFeatures(_TmpDbTestCase):
 
     @patch("src.market_data.pipeline.fetch_pageview_features", return_value=None)
     @patch("src.market_data.pipeline.fetch_news_sentiment_with_llm", return_value=None)
-    @patch("src.market_data.pipeline.fetch_additional_macro_features", return_value=None)
-    @patch("src.market_data.pipeline.fetch_cross_asset_features", return_value=None)
+    @patch(
+        "src.market_data.pipeline.fetch_additional_macro_features",
+        side_effect=additional_macro_frame,
+    )
+    @patch("src.market_data.pipeline.fetch_cross_asset_features", side_effect=cross_asset_frame)
     @patch("src.market_data.pipeline.get_stock_data")
     @patch("src.market_data.pipeline.should_fetch_fresh_data")
     @patch("src.market_data.pipeline.get_raw_ohlcv_from_db")
@@ -332,8 +342,11 @@ class TestFetchStockDataWithFeatures(_TmpDbTestCase):
 
     @patch("src.market_data.pipeline.fetch_pageview_features", return_value=None)
     @patch("src.market_data.pipeline.fetch_news_sentiment_with_llm", return_value=None)
-    @patch("src.market_data.pipeline.fetch_additional_macro_features", return_value=None)
-    @patch("src.market_data.pipeline.fetch_cross_asset_features", return_value=None)
+    @patch(
+        "src.market_data.pipeline.fetch_additional_macro_features",
+        side_effect=additional_macro_frame,
+    )
+    @patch("src.market_data.pipeline.fetch_cross_asset_features", side_effect=cross_asset_frame)
     @patch("src.market_data.pipeline.get_stock_data")
     @patch("src.market_data.pipeline.get_raw_ohlcv_from_db")
     def test_stale_db_bars_with_empty_diff_are_skipped(
@@ -361,8 +374,11 @@ class TestFetchStockDataWithFeatures(_TmpDbTestCase):
 
     @patch("src.market_data.pipeline.fetch_pageview_features", return_value=None)
     @patch("src.market_data.pipeline.fetch_news_sentiment_with_llm", return_value=None)
-    @patch("src.market_data.pipeline.fetch_additional_macro_features", return_value=None)
-    @patch("src.market_data.pipeline.fetch_cross_asset_features", return_value=None)
+    @patch(
+        "src.market_data.pipeline.fetch_additional_macro_features",
+        side_effect=additional_macro_frame,
+    )
+    @patch("src.market_data.pipeline.fetch_cross_asset_features", side_effect=cross_asset_frame)
     @patch("src.market_data.pipeline.get_stock_data")
     @patch("src.market_data.pipeline.get_raw_ohlcv_from_db")
     def test_short_gap_with_empty_diff_still_builds_features(
@@ -403,8 +419,11 @@ class TestFetchStockDataWithFeatures(_TmpDbTestCase):
 
     @patch("src.market_data.pipeline.fetch_pageview_features", return_value=None)
     @patch("src.market_data.pipeline.fetch_news_sentiment_with_llm", return_value=None)
-    @patch("src.market_data.pipeline.fetch_additional_macro_features", return_value=None)
-    @patch("src.market_data.pipeline.fetch_cross_asset_features", return_value=None)
+    @patch(
+        "src.market_data.pipeline.fetch_additional_macro_features",
+        side_effect=additional_macro_frame,
+    )
+    @patch("src.market_data.pipeline.fetch_cross_asset_features", side_effect=cross_asset_frame)
     @patch("src.market_data.pipeline.get_stock_data")
     @patch("src.market_data.pipeline.get_raw_ohlcv_from_db")
     def test_jp_golden_week_gap_with_empty_diff_still_builds_features(
@@ -417,8 +436,11 @@ class TestFetchStockDataWithFeatures(_TmpDbTestCase):
 
     @patch("src.market_data.pipeline.fetch_pageview_features", return_value=None)
     @patch("src.market_data.pipeline.fetch_news_sentiment_with_llm", return_value=None)
-    @patch("src.market_data.pipeline.fetch_additional_macro_features", return_value=None)
-    @patch("src.market_data.pipeline.fetch_cross_asset_features", return_value=None)
+    @patch(
+        "src.market_data.pipeline.fetch_additional_macro_features",
+        side_effect=additional_macro_frame,
+    )
+    @patch("src.market_data.pipeline.fetch_cross_asset_features", side_effect=cross_asset_frame)
     @patch("src.market_data.pipeline.get_stock_data")
     @patch("src.market_data.pipeline.get_raw_ohlcv_from_db")
     def test_jp_four_business_days_gap_and_us_weekday_gap_are_skipped(
@@ -446,8 +468,11 @@ class TestFetchStockDataWithFeatures(_TmpDbTestCase):
 
     @patch("src.market_data.pipeline.fetch_pageview_features", return_value=None)
     @patch("src.market_data.pipeline.fetch_news_sentiment_with_llm", return_value=None)
-    @patch("src.market_data.pipeline.fetch_additional_macro_features", return_value=None)
-    @patch("src.market_data.pipeline.fetch_cross_asset_features", return_value=None)
+    @patch(
+        "src.market_data.pipeline.fetch_additional_macro_features",
+        side_effect=additional_macro_frame,
+    )
+    @patch("src.market_data.pipeline.fetch_cross_asset_features", side_effect=cross_asset_frame)
     @patch("src.market_data.pipeline.get_stock_data")
     @patch("src.market_data.pipeline.should_fetch_fresh_data", return_value=True)
     @patch("src.market_data.pipeline.get_raw_ohlcv_from_db")
@@ -493,8 +518,11 @@ class TestFetchStockDataWithFeatures(_TmpDbTestCase):
     @patch("src.market_data.pipeline.save_raw_ohlcv")
     @patch("src.market_data.pipeline.fetch_pageview_features", return_value=None)
     @patch("src.market_data.pipeline.fetch_news_sentiment_with_llm", return_value=None)
-    @patch("src.market_data.pipeline.fetch_additional_macro_features", return_value=None)
-    @patch("src.market_data.pipeline.fetch_cross_asset_features", return_value=None)
+    @patch(
+        "src.market_data.pipeline.fetch_additional_macro_features",
+        side_effect=additional_macro_frame,
+    )
+    @patch("src.market_data.pipeline.fetch_cross_asset_features", side_effect=cross_asset_frame)
     @patch("src.market_data.pipeline.get_stock_data")
     @patch("src.market_data.pipeline.should_fetch_fresh_data", return_value=True)
     @patch("src.market_data.pipeline.get_raw_ohlcv_from_db")
@@ -525,8 +553,11 @@ class TestFetchStockDataWithFeatures(_TmpDbTestCase):
     @patch("src.market_data.pipeline.save_raw_ohlcv")
     @patch("src.market_data.pipeline.fetch_pageview_features", return_value=None)
     @patch("src.market_data.pipeline.fetch_news_sentiment_with_llm", return_value=None)
-    @patch("src.market_data.pipeline.fetch_additional_macro_features", return_value=None)
-    @patch("src.market_data.pipeline.fetch_cross_asset_features", return_value=None)
+    @patch(
+        "src.market_data.pipeline.fetch_additional_macro_features",
+        side_effect=additional_macro_frame,
+    )
+    @patch("src.market_data.pipeline.fetch_cross_asset_features", side_effect=cross_asset_frame)
     @patch("src.market_data.pipeline.get_stock_data")
     @patch("src.market_data.pipeline.should_fetch_fresh_data", return_value=True)
     @patch("src.market_data.pipeline.get_raw_ohlcv_from_db")
@@ -556,8 +587,11 @@ class TestFetchStockDataWithFeatures(_TmpDbTestCase):
 
     @patch("src.market_data.pipeline.fetch_pageview_features", return_value=None)
     @patch("src.market_data.pipeline.fetch_news_sentiment_with_llm", return_value=None)
-    @patch("src.market_data.pipeline.fetch_additional_macro_features", return_value=None)
-    @patch("src.market_data.pipeline.fetch_cross_asset_features", return_value=None)
+    @patch(
+        "src.market_data.pipeline.fetch_additional_macro_features",
+        side_effect=additional_macro_frame,
+    )
+    @patch("src.market_data.pipeline.fetch_cross_asset_features", side_effect=cross_asset_frame)
     @patch("src.market_data.pipeline.get_stock_data")
     @patch("src.market_data.pipeline.should_fetch_fresh_data", return_value=True)
     @patch("src.market_data.pipeline.get_raw_ohlcv_from_db")
@@ -788,8 +822,11 @@ class TestRunBatchPipeline(_TmpDbTestCase):
     @patch("src.market_data.pipeline.save_features_to_db")
     @patch("src.market_data.pipeline.fetch_pageview_features", return_value=None)
     @patch("src.market_data.pipeline.fetch_news_sentiment_with_llm", return_value=None)
-    @patch("src.market_data.pipeline.fetch_additional_macro_features", return_value=None)
-    @patch("src.market_data.pipeline.fetch_cross_asset_features", return_value=None)
+    @patch(
+        "src.market_data.pipeline.fetch_additional_macro_features",
+        side_effect=additional_macro_frame,
+    )
+    @patch("src.market_data.pipeline.fetch_cross_asset_features", side_effect=cross_asset_frame)
     @patch("src.market_data.pipeline.get_stock_data")
     @patch("src.market_data.pipeline.get_raw_ohlcv_from_db")
     def test_batch_stale_bars_count_as_skip_without_db_write(
@@ -823,8 +860,11 @@ class TestRunBatchPipeline(_TmpDbTestCase):
     @patch("src.market_data.pipeline.save_features_to_db")
     @patch("src.market_data.pipeline.fetch_pageview_features", return_value=None)
     @patch("src.market_data.pipeline.fetch_news_sentiment_with_llm", return_value=None)
-    @patch("src.market_data.pipeline.fetch_additional_macro_features", return_value=None)
-    @patch("src.market_data.pipeline.fetch_cross_asset_features", return_value=None)
+    @patch(
+        "src.market_data.pipeline.fetch_additional_macro_features",
+        side_effect=additional_macro_frame,
+    )
+    @patch("src.market_data.pipeline.fetch_cross_asset_features", side_effect=cross_asset_frame)
     @patch("src.market_data.pipeline.should_fetch_fresh_data", return_value=True)
     @patch("src.market_data.pipeline.get_stock_data")
     @patch("src.market_data.pipeline.get_raw_ohlcv_from_db")

@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
+from tests.unit.macro_frames_stub import additional_macro_frame, cross_asset_frame
 
 from src.domain.types import BatchResult
 from src.market_data.batch_db_write import write_batch_to_db
@@ -70,8 +71,8 @@ def _fetch(symbol: str = "8035"):
 
 @patch(f"{_P}.fetch_pageview_features", return_value=None)
 @patch(f"{_P}.fetch_news_sentiment_with_llm", return_value=None)
-@patch(f"{_P}.fetch_additional_macro_features", return_value=None)
-@patch(f"{_P}.fetch_cross_asset_features", return_value=None)
+@patch(f"{_P}.fetch_additional_macro_features", side_effect=additional_macro_frame)
+@patch(f"{_P}.fetch_cross_asset_features", side_effect=cross_asset_frame)
 @patch(f"{_P}.should_fetch_fresh_data", return_value=True)
 class TestOverlapDetect(unittest.TestCase):
     def test_adjusted_overlap_without_split_row_refetches_full_history(self, *_mocks):
