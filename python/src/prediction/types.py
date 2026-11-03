@@ -112,6 +112,37 @@ class WinDecision:
 
 
 @dataclass
+class HoldoutEvaluation:
+    """取っておいた期間で候補と production を比べた結果（evaluate_holdout）。
+
+    Attributes:
+        cutoff: 締め日（取っておいた期間の先頭の日、YYYY-MM-DD）
+        dates: 取っておいた日（YYYY-MM-DD、古い順）
+        n_symbols: 対象銘柄数（stock_features にある (market, symbol) の数）
+        candidate: 候補の baseline_metrics()（両方の予想がそろった行だけ）
+        production: production の baseline_metrics()（同じ行）
+        daily: 日ごとの date・candidate・production・diff（hit_rate_minus_majority）
+        path_check: 道の一致の検査の compared・max_abs_diff・passed
+        recorded_reference: prediction_accuracy の production の記録との突き合わせ（参考のみ）
+        decision: 勝ちの判定
+        degraded_rows: モデルが欠けて予想した行の数（candidate・production）
+        skipped_rows: 飛ばした行の数（理由ごと）
+    """
+
+    cutoff: str
+    dates: list[str]
+    n_symbols: int
+    candidate: dict
+    production: dict
+    daily: list[dict]
+    path_check: dict
+    recorded_reference: dict
+    decision: WinDecision
+    degraded_rows: dict = field(default_factory=dict)
+    skipped_rows: dict = field(default_factory=dict)
+
+
+@dataclass
 class RollbackDecision:
     """仮の入れ替えのあとの見張りの判定。
 

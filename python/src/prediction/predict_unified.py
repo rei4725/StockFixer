@@ -442,6 +442,39 @@ def _run_ensemble(
     )
 
 
+def feature_row(df: pd.DataFrame, position: int, market: str) -> pd.DataFrame:
+    """
+    load_stock_features の表から、予想に渡す特徴量の1行（コピー）を作る
+
+    本番の予想（predict_with_unified_model）とバックテストが同じ行の作り方を使う。
+
+    Args:
+        df: load_stock_features の結果
+        position: 行の位置（iloc。-1 で最後の行）
+        market: 市場名（market_encoded 列が無いときに使う）
+
+    Returns:
+        1行の DataFrame
+    """
+    # 特徴量列（文字列列・日付列・ターゲットを除外）
+    # 除外条件は学習側の prepare_unified_features() と揃えること。学習時に
+    # 存在しない date 列を予測時だけ通すと、アラインメントを解決できなかった
+    # 場合に日付が predict() へ流れ込んで失敗する（#615）。
+    exclude_cols = ["y", "market", "symbol", "date"]
+    feature_cols = [
+        c
+        for c in df.columns
+        if c not in exclude_cols and not pd.api.types.is_datetime64_any_dtype(df[c])
+    ]
+    row = df[feature_cols].iloc[[position]].copy()
+
+    # market_encoded列がない場合のみ追加（後方互換性）
+    if "market_encoded" not in row.columns:
+        market_codes = {"us": 0, "jp": 1}
+        row["market_encoded"] = market_codes.get(market, 0)
+    return row
+
+
 def predict_with_unified_model(
     market: str,
     symbol: str,
@@ -501,31 +534,14 @@ def predict_with_unified_model(
                 on_stale(market, symbol)
             return None
 
-    # 特徴量列（文字列列・日付列・ターゲットを除外）
-    # 除外条件は学習側の prepare_unified_features() と揃えること。学習時に
-    # 存在しない date 列を予測時だけ通すと、アラインメントを解決できなかった
-    # 場合に日付が predict() へ流れ込んで失敗する（#615）。
-    exclude_cols = ["y", "market", "symbol", "date"]
-    feature_cols = [
-        c
-        for c in df.columns
-        if c not in exclude_cols and not pd.api.types.is_datetime64_any_dtype(df[c])
-    ]
-    X = df[feature_cols]
-
-    # 最新行を取得（必ずコピーを作成）
-    latest_X = X.iloc[[-1]].copy()
+    # 最新行を取得
+    latest_X = feature_row(df, -1, market)
 
     # 基準の値段は特徴量の最後の行の日の終値。足の日付が合わない・取れないときは
     # 1日ずれた値段で予想の値段を出さないよう、予想を出さない（#845）
     current_price = _fetch_current_price(market, symbol, last_date)
     if current_price is None:
         return None
-
-    # market_encoded列がない場合のみ追加（後方互換性）
-    if "market_encoded" not in latest_X.columns:
-        market_codes = {"us": 0, "jp": 1}
-        latest_X["market_encoded"] = market_codes.get(market, 0)
 
     # 推論サービスが有効なときだけ委譲する。
     # get_service_url() で先に判定するのは、未設定の既定パスで load_model_weights()
