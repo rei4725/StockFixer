@@ -154,12 +154,33 @@ def _warn_dropped_rows(valid: pd.Series, market: pd.Series, symbol: pd.Series) -
     )
 
 
-def prepare_unified_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:
+def drop_rows_reaching_cutoff(df: pd.DataFrame, cutoff: pd.Timestamp) -> pd.DataFrame:
+    """y が締め日以降の終値に届く行を落とす（学習に締め日以降の値を漏らさないため）。
+
+    y は次の行の終値で決まる（market_data/technical.py の target）ので、
+    銘柄（market, symbol）ごとに日付順で、次の行の日付が cutoff 未満の行だけを残す。
+    最後の行（次の行が無い）も落とす。index は元のまま残す。
+    """
+    if df.empty:
+        return df
+    day = pd.to_datetime(df["date"], errors="coerce")
+    order = pd.DataFrame(
+        {"market": df["market"], "symbol": df["symbol"], "day": day}, index=df.index
+    ).sort_values(["market", "symbol", "day"], kind="stable")
+    next_day = order.groupby(["market", "symbol"], sort=False)["day"].shift(-1)
+    keep = (next_day < pd.Timestamp(cutoff)).reindex(df.index)
+    return df[keep.to_numpy(dtype=bool)]
+
+
+def prepare_unified_features(
+    df: pd.DataFrame, apply_saved_exclusions: bool = True
+) -> Tuple[pd.DataFrame, pd.Series]:
     """
     統合モデル用の特徴量を準備する
 
     Args:
         df: 全銘柄の結合データ
+        apply_saved_exclusions: False のとき、保存済みの除外特徴量を適用しない
 
     Returns:
         X: 特徴量DataFrame
@@ -202,7 +223,8 @@ def prepare_unified_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]
     X = X[valid_idx]
     y = y[valid_idx]
 
-    X = _apply_unified_feature_exclusions(X)
+    if apply_saved_exclusions:
+        X = _apply_unified_feature_exclusions(X)
 
     return X, y
 
@@ -251,6 +273,9 @@ def train_unified_model(
     data_dir: str = None,
     save_dir: str = None,
     horizon: int = 1,
+    train_end_date: Optional[pd.Timestamp] = None,
+    apply_saved_exclusions: bool = True,
+    save_selection: bool = True,
 ) -> None:
     """
     全銘柄のデータを使って統合モデルを学習・保存する
@@ -261,11 +286,18 @@ def train_unified_model(
         data_dir: データディレクトリ（未使用、後方互換）
         save_dir: モデル保存ディレクトリ
         horizon: 予測ホライズン（営業日）。1=翌日（デフォルト）。
+        train_end_date: 締め日。渡すと、y が締め日以降の終値に届く行を学習から外す（horizon=1 のみ）。
+        apply_saved_exclusions: False のとき、保存済みの除外特徴量を適用しない。
+        save_selection: False のとき、特徴量選択の結果を保存しない。
 
     Raises:
         RuntimeError: 学習に使うデータが空のとき（読み込みの失敗を含む）
+        ValueError: horizon が 1 以外のときに train_end_date を渡したとき
     """
     from src.prediction.manager import ModelManager
+
+    if train_end_date is not None and horizon != 1:
+        raise ValueError("train_end_date は horizon=1 のときだけ使えます")
 
     logger.info(f"=== 統合モデル学習開始 (horizon={horizon}d) ===")
 
@@ -276,8 +308,12 @@ def train_unified_model(
         if df.empty:
             # 読み込みの失敗も空で返るため、学習の失敗として投げ、呼び出し元に成功と見せない（#1243）
             raise RuntimeError("stock_features が空か読み込みに失敗したため学習できません")
+        if train_end_date is not None:
+            df = drop_rows_reaching_cutoff(df, train_end_date)
+            if df.empty:
+                raise RuntimeError("締め日より前の行が無いため学習できません")
         logger.info("2. 特徴量準備中...")
-        X, y = prepare_unified_features(df)
+        X, y = prepare_unified_features(df, apply_saved_exclusions=apply_saved_exclusions)
         dates = df["date"].loc[X.index] if "date" in df.columns else None
         # 全銘柄の表は X の写しを作った後は要らない。学習の間まで持つと 8GB の上限に近づく（#807）
         del df
@@ -290,7 +326,8 @@ def train_unified_model(
         # 日付は X の index で受け取る（_load_all_ohlcv_for_unified）
         dates = pd.Series(X.index) if isinstance(X.index, pd.DatetimeIndex) else None
 
-    X = _apply_unified_feature_exclusions(X)
+    if apply_saved_exclusions:
+        X = _apply_unified_feature_exclusions(X)
     X, y, day = _sort_by_date(X, y, dates)
 
     logger.info(f"特徴量数: {len(X.columns)}, サンプル数: {len(X)}")
@@ -302,7 +339,8 @@ def train_unified_model(
     mm = ModelManager(model_dir=save_dir)
     model = mm.create_model(model_type, model_name)
     model.train(X_train_u, y_train_u, eval_set=train_eval_set)
-    _compute_and_save_unified_feature_selection(model, X, y)
+    if save_selection:
+        _compute_and_save_unified_feature_selection(model, X, y)
 
     # 保存（unified/ディレクトリに保存）
     logger.info("4. モデル保存中...")
