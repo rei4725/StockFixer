@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
+from tests.unit.macro_frames_stub import cross_asset_frame
 
 from src.market_data.base import DataSourceBase
 from src.market_data.yfinance_source import YFinanceDataSource
@@ -145,7 +146,7 @@ class TestPipelineWithMockDataSource(unittest.TestCase):
 
         mock_from_db.return_value = None
         mock_fresh_check.return_value = True
-        mock_cross_asset.return_value = None
+        mock_cross_asset.side_effect = cross_asset_frame
 
         mock_ds = MockDataSource(stock_df=self._make_ohlcv_local(60))
         result = fetch_stock_data_with_features(
@@ -177,7 +178,7 @@ class TestPipelineWithMockDataSource(unittest.TestCase):
         mock_from_db.return_value = None
         mock_fresh_check.return_value = True
         mock_get_data.return_value = self._make_ohlcv_local(60)
-        mock_cross_asset.return_value = None
+        mock_cross_asset.side_effect = cross_asset_frame
 
         result = fetch_stock_data_with_features(
             market="us",

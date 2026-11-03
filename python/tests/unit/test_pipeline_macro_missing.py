@@ -48,6 +48,7 @@ def _run(missing_ticker, caplog):
         patch("src.market_data.pipeline.drop_unclosed_bars", side_effect=lambda df, _m: df),
         patch("src.market_data.pipeline.fetch_news_sentiment_with_llm", return_value=None),
         patch("src.market_data.pipeline.fetch_pageview_features", return_value=None),
+        patch("src.market_data.pipeline.resolve_article", return_value=None),
         caplog.at_level("WARNING"),
     ):
         result = fetch_stock_data_with_features(
@@ -75,6 +76,30 @@ def test_missing_macro_ticker_skips_features_and_keeps_bars(missing_ticker, miss
     pd.testing.assert_frame_equal(raw, fresh)
     warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
     assert any("jp/7203" in m and missing_col in m for m in warnings)
+
+
+@pytest.mark.parametrize(
+    "fetcher, missing_cols",
+    [
+        ("fetch_cross_asset_features", ("vix_close", "usdjpy_close", "tnx_close")),
+        ("fetch_additional_macro_features", ("sp500_close", "dxy_close", "gold_close")),
+    ],
+)
+@pytest.mark.parametrize("empty_value", [None, pd.DataFrame()])
+def test_whole_macro_group_missing_skips_features_and_keeps_bars(
+    fetcher, missing_cols, empty_value, caplog
+):
+    """取得の関数が None か空の表を返した日も、そのグループの列を全部欠けとして数える（#1499）"""
+    with patch(f"src.market_data.pipeline.{fetcher}", return_value=empty_value):
+        result, fresh = _run(None, caplog)
+
+    assert result is not None
+    _market, _symbol, data, raw, quality = result
+    assert data is None
+    assert quality is None
+    pd.testing.assert_frame_equal(raw, fresh)
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert any("jp/7203" in m and all(col in m for col in missing_cols) for m in warnings)
 
 
 def test_all_macro_tickers_fetched_builds_features(caplog):

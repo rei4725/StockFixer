@@ -50,10 +50,7 @@ ALLOWED_UTILS_MODULES: dict[str, str] = {
     "sector_constraints.py": _LATER,
     "signal_generator.py": _LATER,
 }
-TEMPORARY_SHIMS: dict[str, str] = {
-    "regime_weights.py": "転送: PR 5 で消す",
-    "jp_market_holidays.py": "転送: PR 5 で消す",
-}
+TEMPORARY_SHIMS: dict[str, str] = {}
 
 
 def _utils_modules() -> set[str]:
@@ -73,22 +70,35 @@ def test_allowlist_has_no_stale_entries():
     assert not stale, f"許可リストに消えたモジュールが残っている: {sorted(stale)}"
 
 
-def _absolute_imports(tree: ast.AST) -> list[str]:
+def _imports(tree: ast.AST, package: str) -> list[str]:
+    """import の名前を絶対名で返す。相対 import は package を起点に解く。"""
     names: list[str] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             names.extend(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-            names.append(node.module)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level == 0:
+                if node.module:
+                    names.append(node.module)
+                continue
+            parts = package.split(".")
+            base = parts[: len(parts) - (node.level - 1)]
+            names.append(".".join(base + ([node.module] if node.module else [])))
     return names
+
+
+def _is_domain(name: str) -> bool:
+    return name == "src.domain" or name.startswith("src.domain.")
 
 
 def test_domain_imports_nothing_outside_domain():
     bad = []
     for path in (SRC / "domain").rglob("*.py"):
+        rel = path.relative_to(SRC.parent).with_suffix("")
+        package = ".".join(rel.parts[:-1])
         tree = ast.parse(path.read_text(encoding="utf-8"))
-        for name in _absolute_imports(tree):
+        for name in _imports(tree, package):
             top = name.split(".")[0]
-            if top == "config" or (top == "src" and not name.startswith("src.domain")):
+            if top == "config" or (top == "src" and not _is_domain(name)):
                 bad.append(f"{path.name}: {name}")
     assert not bad, f"domain が外を import している: {bad}"
