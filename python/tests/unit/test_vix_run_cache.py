@@ -50,7 +50,7 @@ def test_cached_vix_still_scales_every_symbol():
     from src.trading.risk_manager import VIX_POSITION_SCALE
 
     base = _make_risk()
-    with patch("src.trading.risk_manager.fetch_latest_vix", return_value=None):
+    with patch("src.trading.risk_manager.fetch_latest_vix", return_value=15.0):
         qty_base = base.calc_position_size("AAPL", price=100.0, **_KELLY)
 
     risk = _make_risk()
