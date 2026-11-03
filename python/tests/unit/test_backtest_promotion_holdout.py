@@ -286,7 +286,8 @@ def test_symbol_without_rows_in_window_is_not_counted(monkeypatch):
 
 def test_path_check_uses_live_price(monkeypatch):
     # atr_lag1=0.5・価格100 で上限は ±0.015 となりクリップが効く。本番の値段は DB の終値より 1% 高い
-    _patch(monkeypatch, atr=0.5)
+    calls: list = []
+    _patch(monkeypatch, atr=0.5, weights_calls=calls)
     prod = _models(-1.0)
 
     def _live(market: str, symbol: str) -> Optional[PredictionResult]:
@@ -309,6 +310,8 @@ def test_path_check_uses_live_price(monkeypatch):
     ev = evaluate_holdout(_dates(), _models(1.0), prod, _live)
     assert ev.path_check["compared"] == 2
     assert ev.path_check["passed"] is True
+    # 道の検査も差し替えた重みを引く（取っておいた行 40 × 2 組 + 道の検査 2 銘柄）
+    assert len(calls) == 40 * 2 + 2
 
 
 def test_weights_summary_is_recorded(monkeypatch):
@@ -319,3 +322,17 @@ def test_weights_summary_is_recorded(monkeypatch):
         assert summary["calls"] == 40
         assert summary["distinct"] == 1
         assert summary["mean"] == pytest.approx({name: 0.5 for name in NAMES})
+
+
+def test_degraded_candidate_on_row_production_failed_still_blocks_win(monkeypatch):
+    # production が全モデルで落ちて飛ばす行でも、候補の欠けは数えて勝ちを止める
+    _patch(monkeypatch)
+    broken = _features(0)["feat_a"].iloc[-3]
+    cand = [
+        (NAMES[0], _Model(1.0, raise_on={broken})),
+        (NAMES[1], _Model(1.0)),
+    ]
+    ev = evaluate_holdout(_dates(), cand, _models(-1.0, raise_on={broken}), _live_matching())
+    assert ev.skipped_rows["production_error"] == 1
+    assert ev.degraded_rows["candidate"] == 1
+    assert ev.decision.won is False

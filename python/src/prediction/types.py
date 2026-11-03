@@ -118,7 +118,7 @@ class HoldoutEvaluation:
     Attributes:
         cutoff: 締め日（取っておいた期間の先頭の日、YYYY-MM-DD）
         dates: 取っておいた日（YYYY-MM-DD、古い順）
-        n_symbols: 対象銘柄数（stock_features にある (market, symbol) の数）
+        n_symbols: 取っておいた期間に y の入った行を持つ (market, symbol) の数
         candidate: 候補の baseline_metrics()（両方の予想がそろった行だけ）
         production: production の baseline_metrics()（同じ行）
         daily: 日ごとの date・candidate・production・diff（hit_rate_minus_majority）

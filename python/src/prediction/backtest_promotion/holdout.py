@@ -116,9 +116,12 @@ def _production_outcome(
     market: str,
     symbol: str,
     models: list,
-    weights_fn: Callable[[str, str, list[str]], list[float]] = load_model_weights,
+    weights_fn: Callable[[str, str, list[str]], list[float]],
 ) -> tuple[Optional[EnsembleOutcome], bool]:
-    """production の予想。全モデルが例外なら (None, True) を返す（その行は飛ばす）。"""
+    """production の予想。全モデルが例外なら (None, True) を返す（その行は飛ばす）。
+
+    weights_fn は呼び出し元で渡す（既定値にすると定義の時に束縛され、差し替えが届かない）。
+    """
     try:
         return (
             ensemble_diff_ratio(
@@ -272,9 +275,14 @@ def evaluate_holdout(
                 candidate_models,
                 weights_fn=cand_weights,
             )
+            # 欠けは予想した行ごとに数える（相手側で飛ばす行でも、候補の欠けは勝ちを止める）
+            if cand is not None and cand.model_count < n_cand_models:
+                degraded["candidate"] += 1
             prod, prod_failed = _production_outcome(
                 latest_X, price, market, symbol, production_models, prod_weights
             )
+            if prod is not None and prod.model_count < n_prod_models:
+                degraded["production"] += 1
             if prod_failed:
                 skipped["production_error"] += 1
                 continue
@@ -284,10 +292,6 @@ def evaluate_holdout(
             if prod is None:
                 skipped["production_none"] += 1
                 continue
-            if cand.model_count < n_cand_models:
-                degraded["candidate"] += 1
-            if prod.model_count < n_prod_models:
-                degraded["production"] += 1
             rows.append(
                 {
                     "market": market,
@@ -371,7 +375,12 @@ def _path_diff(
     if live is None:
         return None
     outcome, failed = _production_outcome(
-        feature_row(df, -1, market), float(live.current_price), market, symbol, production_models
+        feature_row(df, -1, market),
+        float(live.current_price),
+        market,
+        symbol,
+        production_models,
+        weights_fn=load_model_weights,
     )
     if failed or outcome is None:
         return None
