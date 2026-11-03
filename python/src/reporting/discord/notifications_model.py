@@ -493,20 +493,19 @@ def send_backtest_promotion_result(result: dict) -> bool:
     ]
     if result.get("dry_run"):
         fields.append(_bp_field("🧪 dry-run", "入れ替えない回", True))
+    evaluation = result.get("evaluation") or {}
     dates = result.get("dates") or []
     if dates:
+        n_symbols = evaluation.get("n_symbols", 0)
         fields.append(
-            _bp_field(
-                "📅 期間",
-                f"{dates[0]}〜{dates[-1]}（{len(dates)} 日・{result.get('n_symbols', 0)} 銘柄）",
-            )
+            _bp_field("📅 期間", f"{dates[0]}〜{dates[-1]}（{len(dates)} 日・{n_symbols} 銘柄）")
         )
-    if result.get("candidate") is not None:
-        fields.append(_bp_field("🧪 候補", _bp_metrics(result.get("candidate"))))
-        fields.append(_bp_field("🏭 Production", _bp_metrics(result.get("production"))))
-        daily = result.get("daily") or []
+    if evaluation:
+        fields.append(_bp_field("🧪 候補", _bp_metrics(evaluation.get("candidate"))))
+        fields.append(_bp_field("🏭 Production", _bp_metrics(evaluation.get("production"))))
+        daily = evaluation.get("daily") or []
         wins = sum(1 for d in daily if isinstance(d.get("diff"), (int, float)) and d["diff"] > 0)
-        path = result.get("path_check") or {}
+        path = evaluation.get("path_check") or {}
         fields.append(_bp_field("📈 日ごとの勝ち越し", f"{wins}/{len(daily)} 日", True))
         fields.append(
             _bp_field(
@@ -516,7 +515,7 @@ def send_backtest_promotion_result(result: dict) -> bool:
                 True,
             )
         )
-    reasons = (result.get("decision") or {}).get("reasons") or []
+    reasons = (evaluation.get("decision") or {}).get("reasons") or []
     detail = "\n".join(reasons) or result.get("reason") or ""
     if result.get("error"):
         detail = f"{result.get('reason') or ''}\n{result['error']}"
@@ -525,6 +524,10 @@ def send_backtest_promotion_result(result: dict) -> bool:
     if result.get("restore_error"):
         backups = "\n".join(result.get("backups") or []) or "-"
         fields.append(_bp_field("⚠️ production が候補のままの恐れ（戻す写し）", backups))
+    watch = result.get("watch") or {}
+    if watch.get("rolled_back"):
+        restored = "\n".join(watch.get("backups") or []) or "-"
+        fields.append(_bp_field("⏪ production は旧モデルに戻した（戻した写し）", restored))
     fields.append(_bp_field("📄 JSON", result.get("result_path") or "-"))
     return send_status_fields(spec, fields)
 
@@ -556,6 +559,11 @@ def send_backtest_promotion_rollback(result: dict) -> bool:
         _bp_field("🔖 入れ替えた版", f"`{watch.get('version') or '-'}`", True),
         _bp_field("📊 実測（最初の5日）", _bp_metrics(watch.get("live"))),
         _bp_field("🚨 見張りの条件", triggered),
-        _bp_field("📄 JSON", result.get("result_path") or "-"),
     ]
+    if watch.get("rolled_back"):
+        restored = "\n".join(watch.get("backups") or []) or "-"
+        fields.append(_bp_field("💾 戻した写し", restored))
+    if watch.get("error"):
+        fields.append(_bp_field("⚠️ 状態を保存できなかった（見張りが残る）", watch["error"]))
+    fields.append(_bp_field("📄 JSON", result.get("result_path") or "-"))
     return send_status_fields(spec, fields)

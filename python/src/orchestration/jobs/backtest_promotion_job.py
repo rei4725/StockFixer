@@ -109,6 +109,7 @@ def _new_result(started: datetime, force: bool, dry_run: bool) -> dict:
         "watch": None,
         "cutoff": None,
         "dates": None,
+        "evaluation": None,
         "swapped": False,
         "backups": [],
         "swap_blocked_reason": None,
@@ -134,8 +135,18 @@ def _run_locked(result: dict, force: bool, dry_run: bool) -> None:
             _check_watch(state, result)
         except Exception as e:
             logger.error("仮の入れ替えの見張りの判定に失敗", exc_info=True)
-            result["watch"] = {"judged": False, "error": f"{type(e).__name__}: {e}"}
-            _end(result, FAILED, "見張りの判定に失敗（見張りは残す）", e)
+            # 判定の途中までの結果（戻したかどうか）は消さずに残す
+            verdict = result["watch"] if result["watch"] is not None else {"judged": False}
+            verdict["error"] = f"{type(e).__name__}: {e}"
+            result["watch"] = verdict
+            if verdict.get("rolled_back"):
+                reason = (
+                    "見張りで production を旧モデルに戻したが、状態を保存できなかった"
+                    "（state.json には見張りが残る）"
+                )
+            else:
+                reason = "見張りの判定に失敗（見張りは残す）"
+            _end(result, FAILED, reason, e)
             return
     if state.watch is not None:
         _end(result, SKIPPED, "見張り中のため評価しない")
@@ -228,7 +239,7 @@ def _train_and_evaluate(result: dict) -> HoldoutEvaluation:
 
 
 def _apply_evaluation(result: dict, evaluation: HoldoutEvaluation) -> None:
-    result.update(asdict(evaluation))
+    result["evaluation"] = asdict(evaluation)
     if not evaluation.path_check.get("passed"):
         outcome = NOT_COMPARABLE
     elif evaluation.decision.won:

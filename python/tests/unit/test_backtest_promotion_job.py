@@ -17,6 +17,12 @@ from filelock import Timeout
 from src.orchestration.jobs import backtest_promotion_job as job
 from src.prediction.backtest_promotion import state as st
 from src.prediction.types import BacktestPromotionState, HoldoutEvaluation, WinDecision
+from src.reporting.discord.notifications_model import (
+    send_backtest_promotion_result as _real_send_result,
+)
+from src.reporting.discord.notifications_model import (
+    send_backtest_promotion_rollback as _real_send_rollback,
+)
 
 _VERSION = "abc123def456"
 _DATES = [pd.Timestamp("2026-10-06") + pd.Timedelta(days=i) for i in range(20)]
@@ -273,8 +279,11 @@ def test_win_swaps_and_starts_watch(env):
     assert data["outcome"] == "won"
     assert data["swapped"] is True
     assert data["cutoff"] == "2026-10-06"
-    assert data["decision"]["won"] is True
-    assert data["path_check"]["passed"] is True
+    assert data["evaluation"]["decision"]["won"] is True
+    assert data["evaluation"]["path_check"]["passed"] is True
+    assert data["evaluation"]["cutoff"] == "2026-10-06"
+    # 評価の中身はジョブのキーを上書きしない
+    assert data["outcome"] == "won" and data["dates"] == result["dates"]
     assert data["backups"] == result["backups"]
     env["result"].assert_called_once()
     env["swap"].assert_called_once()
@@ -552,6 +561,44 @@ def test_watch_triggered_but_old_worse_keeps_model_and_notifies(env):
     assert len(_result_files(env)) == 1
 
 
+def test_watch_rollback_then_state_save_failure_keeps_rollback_in_result(env, monkeypatch):
+    backups = _swapped_env(env)
+    env["accuracy"].return_value = _scored_rows(
+        5, [0.01, 0.02, 0.03, 0.04], [0.02, 0.01, -0.01, -0.02]
+    )
+    monkeypatch.setattr(job, "save_state", MagicMock(side_effect=OSError("state を書けない")))
+
+    result = job.run_backtest_promotion()
+
+    # 本番は旧モデルに戻っている
+    for prod in st.SWAP_PRODUCTION_NAMES:
+        assert (env["unified"] / f"{prod}.joblib").read_bytes() == f"old {prod}".encode()
+    watch = result["watch"]
+    assert watch["judged"] is True
+    assert watch["rolled_back"] is True
+    assert watch["backups"] == backups
+    assert "state を書けない" in watch["error"]
+    assert result["outcome"] == "failed"
+    assert "旧モデルに戻した" in result["reason"]
+    data = _read_json(_result_files(env)[0])
+    assert data["watch"]["rolled_back"] is True
+    assert "state を書けない" in data["watch"]["error"]
+    # 状態は書けなかったので見張りは残る（次の夜にもう一度判定する）
+    assert st.load_state().watch is not None
+    env["rollback"].assert_called_once()
+    env["result"].assert_called_once()
+    env["train"].assert_not_called()
+
+    # env は通知を差し替えているので、本物の通知の関数で中身を確かめる
+    _, fields = _sent(MagicMock(return_value=True), _real_send_result, result)
+    restored = [f for f in fields if "旧モデルに戻した" in f["name"]]
+    assert restored and os.path.basename(backups[0]) in restored[0]["value"]
+    spec, fields = _sent(MagicMock(return_value=True), _real_send_rollback, result)
+    assert "戻した" in spec.title
+    assert any("状態を保存できなかった" in f["name"] for f in fields)
+    assert any(os.path.basename(backups[0]) in f["value"] for f in fields)
+
+
 def test_watch_error_keeps_watch_and_fails(env):
     _swapped_env(env)
     env["accuracy"].side_effect = RuntimeError("DB が読めない")
@@ -767,12 +814,14 @@ def test_result_notification_title_follows_outcome(outcome, word):
         "version": _VERSION,
         "cutoff": "2026-10-06",
         "dates": ["2026-10-06", "2026-11-02"],
-        "n_symbols": 20,
-        "candidate": _CANDIDATE,
-        "production": _PRODUCTION,
-        "daily": [{"diff": 0.01}, {"diff": -0.01}, {"diff": None}],
-        "path_check": {"compared": 50, "max_abs_diff": 0.0, "passed": True},
-        "decision": {"won": outcome == "won", "reasons": ["MAE が小さくない"]},
+        "evaluation": {
+            "n_symbols": 20,
+            "candidate": _CANDIDATE,
+            "production": _PRODUCTION,
+            "daily": [{"diff": 0.01}, {"diff": -0.01}, {"diff": None}],
+            "path_check": {"compared": 50, "max_abs_diff": 0.0, "passed": True},
+            "decision": {"won": outcome == "won", "reasons": ["MAE が小さくない"]},
+        },
         "error": "RuntimeError: 空" if outcome == "failed" else None,
         "result_path": "/r/20261103_220000.json",
         "dry_run": False,
@@ -781,6 +830,10 @@ def test_result_notification_title_follows_outcome(outcome, word):
     assert word in spec.title
     text = "\n".join(f["value"] for f in fields)
     assert _VERSION in text
+    assert "20 銘柄" in text
+    assert "1/3 日" in text
+    if outcome != "failed":
+        assert "MAE が小さくない" in text
     assert all(len(f["value"]) <= 1024 for f in fields)
 
 
