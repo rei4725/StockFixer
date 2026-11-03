@@ -4,6 +4,7 @@
 ドリフト監視・バックアップ・ルールシグナルのオーケストレーション。
 """
 
+import threading
 from collections import Counter
 
 from src.orchestration.jobs.accuracy_json import (
@@ -373,13 +374,23 @@ def _notify_stale_prediction(stats) -> None:
         logger.error("新規を止めた知らせの送信失敗: %s", e, exc_info=True)
 
 
+# 8:50 の自動発注と 9:00 のホライズン決済のジョブが同時に判定して二重に決済しないため（#1321）
+_HORIZON_EXIT_LOCK = threading.Lock()
+
+
 def run_horizon_exit_check() -> None:
     """
     毎営業日実行: target_exit_date を過ぎたペーパーポジションを成行で強制決済する。
 
     買い持ちは成行売り、空売りは SHORT_COVER で返済する（horizon_exit.py, #1145）。
-    live モードでは処理をスキップする。
+    live モードでは処理をスキップする。8:50 の自動発注と 9:00 の daily_horizon_exit（#1321）から
+    呼ばれ、約定待ちの決済がある銘柄は飛ばす。2つは別スレッドで重なりうるのでロックで1回ずつ通す。
     """
+    with _HORIZON_EXIT_LOCK:
+        _run_horizon_exit_check_locked()
+
+
+def _run_horizon_exit_check_locked() -> None:
     import os
 
     from src.orchestration.jobs.horizon_exit import exit_expired_positions
