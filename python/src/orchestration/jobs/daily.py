@@ -306,6 +306,7 @@ def run_daily_auto_order():
             market="jp",
             mode=mode,
             market_data=market_data,
+            notifier=DiscordNotificationAdapter(),
             prediction_saved_day=read_prediction_saved_day(),
         )
         logger.info(
