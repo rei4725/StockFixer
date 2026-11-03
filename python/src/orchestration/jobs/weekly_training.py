@@ -38,6 +38,17 @@ def _challengers_trained_this_week(challenger_names: list[str]) -> list[str]:
     return fresh
 
 
+def _save_shadow_record(record: dict) -> None:
+    """週の影の比べの記録を書く。失敗は知らせて週の学習を続ける（#1503）。"""
+    try:
+        from src.prediction import shadow_record
+
+        shadow_record.save_weekly_shadow_record(record)
+    except Exception as e:
+        _handle_stage_error(PipelineStage.NON_CRITICAL, "影の比べの記録の保存", e)
+        _notify_stage_failure("週次学習 影の比べの記録の保存", e)
+
+
 def run_weekly_training():
     """
     週次実行: Shadow 評価 → 昇格ゲート → Challenger 再学習 → 精度チェック → Discord通知
@@ -60,10 +71,15 @@ def run_weekly_training():
     from src.prediction.shadow_evaluation import (
         _UNIFIED_CHALLENGER_NAMES,
         _UNIFIED_PRODUCTION_NAMES,
+        DEFAULT_EVALUATION_DAYS,
         evaluate_shadow_models,
         promote_unified_challenger,
     )
+    from src.prediction.shadow_record import apply_shadow_result, new_weekly_shadow_record
     from src.prediction.unified_model_pipeline import train_unified_model
+
+    # 影の比べと昇格の結果を毎週1本の JSON に残す（#1503）
+    record = new_weekly_shadow_record(days=DEFAULT_EVALUATION_DAYS)
 
     # 1. Shadow 評価（NON_CRITICAL: 失敗は知らせて継続）
     logger.info("[1/4] Shadow 評価開始")
@@ -78,6 +94,7 @@ def run_weekly_training():
                 raise_on_error=True,
             )
             shadow_results.append((prod_name, chal_name, result))
+            apply_shadow_result(record, result)
             logger.info(
                 "Shadow 評価: production=hit=%s sharpe=%s / challenger=hit=%s sharpe=%s / wins=%s",
                 result["production_hit_rate"],
@@ -90,26 +107,33 @@ def run_weekly_training():
             _handle_stage_error(PipelineStage.NON_CRITICAL, "Shadow 評価", e)
             _notify_stage_failure("週次学習 [1/4] Shadow 評価", e)
             shadow_failed = True
+            record["shadow_failed"] = True
+            record["shadow_error"] = str(e)[:1000]
         break  # prediction_accuracy の model_name は "production"/"challenger" で共通なので1回でよい
 
     # 2 & 3. 昇格ゲート + 昇格（RECOVERABLE: 昇格不可でも後続の再学習は継続）
     promoted = False
     gate_result = None
     fresh_challengers = _challengers_trained_this_week(list(_UNIFIED_CHALLENGER_NAMES))
+    record["fresh_challengers"] = fresh_challengers
     if shadow_results and shadow_results[0][2]["challenger_wins"] and fresh_challengers:
         logger.warning(
             "[2/4] 昇格を飛ばす: challenger が今週学習し直されており影の比べを経ていない"
             "（同じ週のやり直しの見込み） fresh=%s",
             fresh_challengers,
         )
+        record["gate_skipped_reason"] = "challenger_trained_this_week"
     elif shadow_results and shadow_results[0][2]["challenger_wins"]:
         logger.info("[2/4] 昇格ゲート評価開始")
+        record["gate_evaluated"] = True
         try:
             gate_result = evaluate_promotion(
                 shadow_model_name="challenger",
                 current_model_name="production",
                 require_manual_approval=not AUTO_PROMOTE_MODEL,
             )
+            record["eligible"] = gate_result.eligible
+            record["reason"] = gate_result.reason
             save_promotion_result(gate_result)
             logger.info(
                 "昇格ゲート判定: eligible=%s reason=%s", gate_result.eligible, gate_result.reason
@@ -121,6 +145,7 @@ def run_weekly_training():
                 if promote_result["promoted"]:
                     logger.info("昇格完了: %s", promote_result["promoted"])
                     promoted = True
+                    record["promoted"] = True
                 else:
                     logger.warning("昇格対象ファイルなし: skipped=%s", promote_result["skipped"])
             elif gate_result.eligible:
@@ -130,12 +155,17 @@ def run_weekly_training():
         except Exception as e:
             _handle_stage_error(PipelineStage.RECOVERABLE, "昇格ゲート評価", e)
             _notify_stage_failure("週次学習 [2/4] 昇格ゲート評価", e)
+            record["gate_failed"] = True
     elif shadow_results:
         logger.info("[2/4] challenger_wins=False のため昇格ゲートをスキップ")
+        record["gate_skipped_reason"] = "challenger_lost"
     elif shadow_failed:
         logger.warning("[2/4] Shadow 評価が失敗したため昇格ゲートをスキップ")
+        record["gate_skipped_reason"] = "shadow_failed"
     else:
         logger.info("[2/4] Shadow 評価データなし（初回実行）のため昇格ゲートをスキップ")
+        record["gate_skipped_reason"] = "no_shadow_data"
+    _save_shadow_record(record)
 
     # 4. Challenger 再学習（CRITICAL: 失敗時はパイプライン停止）
     logger.info("[4/4] Challenger 再学習開始")
