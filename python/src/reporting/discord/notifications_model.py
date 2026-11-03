@@ -522,6 +522,9 @@ def send_backtest_promotion_result(result: dict) -> bool:
         detail = f"{result.get('reason') or ''}\n{result['error']}"
     if detail:
         fields.append(_bp_field("📝 理由", detail))
+    if result.get("restore_error"):
+        backups = "\n".join(result.get("backups") or []) or "-"
+        fields.append(_bp_field("⚠️ production が候補のままの恐れ（戻す写し）", backups))
     fields.append(_bp_field("📄 JSON", result.get("result_path") or "-"))
     return send_status_fields(spec, fields)
 

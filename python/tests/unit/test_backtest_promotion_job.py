@@ -368,6 +368,61 @@ def test_swap_error_is_failure_and_version_not_marked(env, monkeypatch):
     env["swap"].assert_not_called()
 
 
+def test_state_save_failure_after_swap_undoes_swap(env, monkeypatch):
+    monkeypatch.setattr(job, "save_state", MagicMock(side_effect=OSError("state を書けない")))
+
+    result = job.run_backtest_promotion()
+
+    assert result["outcome"] == "failed"
+    assert result["swapped"] is False
+    assert result["swap_undone"] is True
+    assert "state を書けない" in result["error"]
+    for prod in st.SWAP_PRODUCTION_NAMES:
+        assert (env["unified"] / f"{prod}.joblib").read_bytes() == f"old {prod}".encode()
+    state = st.load_state()
+    assert state.last_evaluated_version is None
+    assert state.watch is None
+    env["swap"].assert_not_called()
+    assert env["result"].call_args[0][0]["outcome"] == "failed"
+    assert _read_json(_result_files(env)[0])["swap_undone"] is True
+
+
+def test_state_save_and_restore_failure_reports_both(env, monkeypatch):
+    monkeypatch.setattr(job, "save_state", MagicMock(side_effect=OSError("state を書けない")))
+    monkeypatch.setattr(job, "restore_backups", MagicMock(side_effect=OSError("戻せない")))
+
+    result = job.run_backtest_promotion()
+
+    assert result["outcome"] == "failed"
+    assert result["swapped"] is True
+    assert result["swap_undone"] is False
+    assert "state を書けない" in result["error"] and "戻せない" in result["error"]
+    assert "候補のまま" in result["reason"]
+    assert len(result["backups"]) == 2
+    assert st.load_state().last_evaluated_version is None
+    env["swap"].assert_not_called()
+    sent = env["result"].call_args[0][0]
+    assert sent["restore_error"] and sent["backups"] == result["backups"]
+
+
+def test_result_notification_warns_when_restore_failed():
+    from src.reporting.discord import notifications_model as nm
+
+    result = {
+        "outcome": "failed",
+        "reason": "入れ替えた後に状態を保存できず、戻しにも失敗した。production が候補のままの恐れ",
+        "error": "OSError: state を書けない\n戻しの失敗: OSError: 戻せない",
+        "restore_error": "OSError: 戻せない",
+        "backups": ["/m/UnifiedStockXGBoost_20261103_220000.joblib"],
+        "result_path": "/r/x.json",
+    }
+    spec, fields = _sent(MagicMock(return_value=True), nm.send_backtest_promotion_result, result)
+    assert "失敗" in spec.title
+    warn = [f for f in fields if "候補のまま" in f["name"]]
+    assert warn and "UnifiedStockXGBoost_20261103_220000" in warn[0]["value"]
+    assert any("戻せない" in f["value"] for f in fields)
+
+
 def test_unreadable_state_is_failure_and_notified(env, monkeypatch):
     monkeypatch.setattr(job, "load_state", MagicMock(side_effect=ValueError("壊れた JSON")))
 

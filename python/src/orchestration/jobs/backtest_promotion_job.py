@@ -112,6 +112,8 @@ def _new_result(started: datetime, force: bool, dry_run: bool) -> dict:
         "swapped": False,
         "backups": [],
         "swap_blocked_reason": None,
+        "swap_undone": None,
+        "restore_error": None,
         "result_path": None,
     }
 
@@ -165,6 +167,33 @@ def _run_locked(result: dict, force: bool, dry_run: bool) -> None:
     except Exception as e:
         logger.error("仮の入れ替えの評価に失敗", exc_info=True)
         _end(result, FAILED, "学習か評価か入れ替えに失敗（負けではない）", e)
+        if result["swapped"]:
+            # 入れ替えた後に見張りを保存できなかった。見張りの無い候補を本番に残さない
+            _undo_swap(result)
+
+
+def _undo_swap(result: dict) -> None:
+    """入れ替えた後に状態を保存できなかったとき、写しから本番を戻す。"""
+    backups = result["backups"]
+    try:
+        restore_backups(backups)
+    except Exception as e:
+        logger.error(
+            "状態の保存に失敗し、入れ替えも戻せなかった。production が候補のままの恐れ: 写し %s",
+            backups,
+            exc_info=True,
+        )
+        result["swap_undone"] = False
+        result["restore_error"] = f"{type(e).__name__}: {e}"
+        result["reason"] = (
+            "入れ替えた後に状態を保存できず、戻しにも失敗した。production が候補のままの恐れ"
+        )
+        result["error"] = f"{result['error']}\n戻しの失敗: {result['restore_error']}"
+        return
+    logger.warning("入れ替えた後に状態を保存できなかったため、写しから本番を戻した: %s", backups)
+    result["swapped"] = False
+    result["swap_undone"] = True
+    result["reason"] = "入れ替えた後に状態を保存できなかったため、入れ替えを戻した（負けではない）"
 
 
 def _train_and_evaluate(result: dict) -> HoldoutEvaluation:
@@ -243,7 +272,9 @@ def _predicted_at_jst(predicted_at: Any) -> Optional[datetime]:
 def _scored_rows_since_swap(watch: dict) -> pd.DataFrame:
     """入れ替えの後に予想され、採点が済んだ production（horizon=1）の行。_day に JST の日付。
 
-    predicted_at はプロセスの時計（本番は UTC）なので、日付でなく時刻で入れ替えの後かを見る。
+    predicted_at はプロセスの時計（本番は UTC）の時刻なので、日付でなく時刻で入れ替えの後かを見る。
+    22:00 JST に入れ替えた翌朝 07:30 JST の回は、UTC では入れ替えと同じ日付（前日 22:30）になり、
+    「predicted_at の日付 > swap_date」で比べるとその回を落とすためである。日数は JST の日付で数える。
     """
     swapped_at = datetime.fromisoformat(watch["swapped_at"])
     since_days = (now_jst().date() - date.fromisoformat(watch["swap_date"])).days + 2
@@ -337,7 +368,7 @@ def _notify(result: dict) -> None:
         sends.append(("見張り", nm.send_backtest_promotion_rollback))
     if result["outcome"] != SKIPPED or result["lock_timeout"]:
         sends.append(("評価の結果", nm.send_backtest_promotion_result))
-    if result["swapped"]:
+    if result["swapped"] and result["outcome"] != FAILED:
         sends.append(("入れ替え", nm.send_backtest_promotion_swap))
     for label, send in sends:
         try:
