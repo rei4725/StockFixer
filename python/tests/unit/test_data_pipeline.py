@@ -32,6 +32,10 @@ class _TmpDbTestCase(unittest.TestCase):
         path_utils.get_db_path = lambda: self.tmp_db
         db_module.get_db_path = lambda: self.tmp_db
         db_module._tables_initialized = False
+        # ページビューを None で差し替えるテストは、記事の無い銘柄として 0 で埋める（#1500）
+        no_article = patch("src.market_data.pipeline.resolve_article", return_value=None)
+        no_article.start()
+        self.addCleanup(no_article.stop)
 
     def tearDown(self):
         db_module.close_connection()

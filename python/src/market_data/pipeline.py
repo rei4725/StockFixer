@@ -17,6 +17,7 @@ from config.data import MAX_DATA_WORKERS
 from config.settings import SENTIMENT_LOOKBACK_DAYS, STALE_BARS_MAX_WEEKDAYS
 from src.domain.jp_market_holidays import is_jp_business_day
 from src.domain.ports import AlertLevel, NotificationPort
+from src.market_data.adapters.wikipedia_pageviews import resolve_article
 from src.market_data.bar_close import drop_unclosed_bars
 from src.market_data.base import DataSourceBase
 from src.market_data.batch_db_write import has_price_step
@@ -279,8 +280,14 @@ def fetch_stock_data_with_features(
     df = add_sentiment_features(df, sentiment_df=sentiment_df)
 
     # Wikipedia ページビュー特徴量を付与（#370：注目度の先行指標オルタナデータ）
-    # 記事未登録銘柄・取得失敗時は中立値（0）で埋まるため全銘柄で安全に呼び出せる。
+    # 記事未登録銘柄は中立値（0）で埋める。記事のある銘柄で取れなかったときは、
+    # 全期間0で前の行を上書きしないよう特徴量を作らない（#1500）
     pageview_df = fetch_pageview_features(symbol, market, start_date, end_date)
+    if pageview_df is None and resolve_article(market, symbol) is not None:
+        logger.warning(
+            f"ページビューの取得が落ちたか空のため特徴量生成をスキップ: {market}/{symbol}"
+        )
+        return _raw_only_result(market, symbol, raw_data_to_save)
     df = add_pageview_features(df, pageview_df=pageview_df)
 
     # 部分的なNaN値を前方補完（OHLCV欠損日等によるdropna行数増大を防ぐ）。
