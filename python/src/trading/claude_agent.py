@@ -29,8 +29,18 @@ from config.settings import (
 )
 from src.domain.ports import PredictionResultRepository, TradeDiffSink
 from src.trading.brokers.base import BrokerBase, BrokerError, OrderSide
+from src.trading.claude_buy_blocks import (
+    _PARAMS_UNREADABLE_REASON,
+    _params_unreadable,
+    _stale_prediction_reason,
+)
 from src.trading.claude_order_caps import RunBuyCaps, start_run_buy_caps
 from src.trading.claude_reasoning_log import save_reasoning_log
+from src.trading.claude_state_tools import (
+    _handle_get_balance,
+    _handle_get_positions,
+    _handle_get_risk_status,
+)
 from src.trading.claude_tools import TOOLS as _TOOLS
 from src.trading.execution import (
     _attach_dynamic_thresholds,
@@ -39,13 +49,11 @@ from src.trading.execution import (
     _record_order,
     _resolve_kelly_params,
 )
-from src.trading.execution.params import _PARAMS_UNREADABLE_COL
 from src.trading.execution.pending import _load_pending_exits
 from src.trading.execution.selection import _get_pending_buy_symbols
 from src.trading.position_valuation import count_short_positions, short_held_codes
 from src.trading.risk_manager import RiskManager
 from src.trading.signal_generator import apply_multi_horizon_score_column
-from src.trading.types import TradingGateStatus
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -56,18 +64,6 @@ _MAX_AGENT_TURNS = 20
 # Claude に渡す予測候補の上限行数（トークン節約）
 _MAX_PREDICTION_ROWS = 50
 
-# optimal_params.json が読めない日に新規の buy を止める理由（#1227、8:50 の道の #1214 と同じ止め方）
-_PARAMS_UNREADABLE_REASON = (
-    "optimal_params.json が読めないため新規の buy を止める（保有の sell は可）"
-)
-
-
-def _params_unreadable(predictions: pd.DataFrame) -> bool:
-    """閾値を既定値で決めた行があるか。あれば新規の buy を止める（#1227）。"""
-    if _PARAMS_UNREADABLE_COL not in predictions.columns:
-        return False
-    return bool(predictions[_PARAMS_UNREADABLE_COL].astype(bool).any())
-
 
 # ---------------------------------------------------------------------------
 # Tool ハンドラー
@@ -75,9 +71,15 @@ def _params_unreadable(predictions: pd.DataFrame) -> bool:
 
 
 def _handle_get_predictions(
-    market: str, broker: BrokerBase, prediction_repo: PredictionResultRepository
+    market: str,
+    broker: BrokerBase,
+    prediction_repo: PredictionResultRepository,
+    buy_block_reason: str | None = None,
 ) -> dict[str, Any]:
-    """閾値通過候補の予測を返す。トークン節約のため上位 N 行に絞る。"""
+    """閾値通過候補の予測を返す。トークン節約のため上位 N 行に絞る。
+
+    buy_block_reason があれば（予想が古い日など、#1490）buy の候補を空にする。
+    """
     try:
         predictions = prediction_repo.get_latest_by_market(market)
         if predictions.empty:
@@ -87,7 +89,7 @@ def _handle_get_predictions(
         predictions = apply_multi_horizon_score_column(predictions)
 
         held_symbols = _get_held_symbols(broker)
-        buy_blocked = _params_unreadable(predictions)
+        buy_blocked = buy_block_reason is not None or _params_unreadable(predictions)
 
         buy_candidates = predictions[
             (~predictions["symbol"].isin(held_symbols))
@@ -128,45 +130,10 @@ def _handle_get_predictions(
             ),
         }
         if buy_blocked:
-            result["buy_blocked_reason"] = _PARAMS_UNREADABLE_REASON
+            result["buy_blocked_reason"] = buy_block_reason or _PARAMS_UNREADABLE_REASON
         return result
     except Exception as e:
         logger.error("[claude_agent] get_predictions エラー: %s", e, exc_info=True)
-        return {"error": str(e)}
-
-
-def _handle_get_positions(broker: BrokerBase) -> dict[str, Any]:
-    try:
-        return {"positions": broker.get_positions()}
-    except Exception as e:
-        logger.error("[claude_agent] get_positions エラー: %s", e, exc_info=True)
-        return {"error": str(e)}
-
-
-def _handle_get_balance(broker: BrokerBase) -> dict[str, Any]:
-    try:
-        return {"balance": broker.get_balance()}
-    except Exception as e:
-        logger.error("[claude_agent] get_balance エラー: %s", e, exc_info=True)
-        return {"error": str(e)}
-
-
-def _handle_get_risk_status(risk: RiskManager) -> dict[str, Any]:
-    try:
-        gate: TradingGateStatus = risk.evaluate_trading_gate()
-        return {
-            "is_allowed": gate.is_allowed,
-            "stop_active": gate.stop_active,
-            "reason_code": gate.reason_code,
-            "reason": gate.reason,
-            "daily_loss": gate.daily_loss,
-            "daily_loss_limit": gate.daily_loss_limit,
-            "consecutive_losses": gate.consecutive_losses,
-            "position_count": gate.position_count,
-            "max_positions": gate.max_positions,
-        }
-    except Exception as e:
-        logger.error("[claude_agent] get_risk_status エラー: %s", e, exc_info=True)
         return {"error": str(e)}
 
 
@@ -359,6 +326,7 @@ def run_claude_trader(
     *,
     trade_diff_sink: TradeDiffSink,
     prediction_repo: PredictionResultRepository,
+    prediction_saved_day: str | None = None,
 ) -> dict[str, Any]:
     """
     Claude Opus を用いたトレード判断エージェントを実行する。
@@ -369,6 +337,7 @@ def run_claude_trader(
         mode: "paper" or "live"
         trade_diff_sink: 約定乖離の記録先（TradeDiffSink 実装。合成ルートが必ず渡す）
         prediction_repo: 予測結果の読み取り元（合成ルートが必ず渡す）
+        prediction_saved_day: 日次の道の [3/6] の保存の終わりの JST の日付（#1490）。None なら確かめない
 
     Returns:
         buy_orders, sell_orders, skipped, errors 等の実行統計
@@ -457,6 +426,12 @@ def run_claude_trader(
             "保有の sell だけを判断すること。\n"
         )
 
+    # 最新の回と保存の終わりの印が今日（JST）でなければ、古い予想と値段で新規を出さない（#1490、8:50 の道の #1394）
+    stale_reason = _stale_prediction_reason(predictions_cache, prediction_saved_day, stats)
+    if stale_reason is not None:
+        buy_block_reason = buy_block_reason or stale_reason
+        gate_notice += f"\n## 予想の鮮度\n{stale_reason}。保有の sell だけを判断すること。\n"
+
     # システムプロンプト
     system_prompt = f"""あなたは株式トレードの判断を行う AI エージェントです。
 
@@ -532,7 +507,7 @@ market: {market}, mode: {mode}
 
             if tool_name == "get_predictions":
                 result = _handle_get_predictions(
-                    tool_input.get("market", market), broker, prediction_repo
+                    tool_input.get("market", market), broker, prediction_repo, buy_block_reason
                 )
 
             elif tool_name == "get_positions":
