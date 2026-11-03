@@ -30,12 +30,14 @@ from src.orchestration.jobs.common import (
     is_today_jst,
 )
 from src.orchestration.jobs.drift_check import run_daily_drift_check
+from src.orchestration.jobs.features_marker import current_code_version, record_features_version
 from src.orchestration.jobs.prediction_errors import notify_prediction_errors
 from src.orchestration.jobs.prediction_saved_marker import (
     clear_prediction_saved_marker,
     mark_prediction_saved,
     read_prediction_saved_day,
 )
+from src.orchestration.jobs.stale_prediction_notice import notify_stale_prediction
 from src.orchestration.jobs.unavailable_gates import (
     _raise_if_fetch_mostly_unavailable,
     _raise_if_rule_signals_mostly_unavailable,
@@ -46,28 +48,6 @@ from src.orchestration.types import PipelineStage
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
-
-
-def _current_code_version() -> str | None:
-    """予想のコードの版。出せなければ None（日次の道は止めない）。"""
-    from src.prediction.backtest_promotion import prediction_code_version
-
-    try:
-        return prediction_code_version()
-    except Exception:
-        logger.error("予想のコードの版を出せなかった（特徴量の版の印は書かない）", exc_info=True)
-        return None
-
-
-def _record_features_version(version: str) -> None:
-    """stock_features を作り直したコードの版の印を書く。失敗しても日次の道は止めない。"""
-    from src.prediction.backtest_promotion import save_features_version
-
-    try:
-        save_features_version(version)
-        logger.info("特徴量の版の印を書いた: %s", version)
-    except Exception:
-        logger.error("特徴量の版の印を書けなかった", exc_info=True)
 
 
 def run_daily_pipeline():
@@ -106,22 +86,19 @@ def run_daily_pipeline():
 
     market_totals: Counter[str] = Counter()  # [3/6] の jp の欠けの線にも使う（#1438）
     # stock_features を作り直すコードの版（夜間の仮の入れ替えが、今の版の特徴量かを見る）
-    features_version = _current_code_version()
-    features_rebuilt = False
+    features_version = current_code_version()
     try:
         tasks = load_target_symbols()
         batch_result = run_batch_pipeline(tasks, notification_port=DiscordNotificationAdapter())
         market_totals = Counter(str(getattr(t, "market", "")) for t in tasks)
         _raise_if_fetch_mostly_unavailable(len(tasks), batch_result, market_totals)
-        features_rebuilt = True
+        record_features_version(features_version)  # 失敗しても投げない
         logger.info("[1/6] データ取得完了")
     except Exception as e:
         if _handle_stage_error(
             PipelineStage.CRITICAL, "[1/6] データ取得", e, send_daily_pipeline_error
         ):
             raise
-    if features_rebuilt and features_version is not None:
-        _record_features_version(features_version)
 
     # 2. 前日予測の精度チェック（NON_CRITICAL: 失敗しても後続処理を継続）
     # 3 で当日分の prediction_results を保存する前に読む（Delete-Insert 対策）。
@@ -357,7 +334,7 @@ def run_daily_auto_order():
         )
     except Exception as e:
         logger.error("自動発注完了通知失敗: %s", e, exc_info=True)
-    _notify_stale_prediction(stats)
+    notify_stale_prediction(stats)
 
     # 相関リスク警告通知
     if stats.get("correlation_blocked"):
@@ -381,25 +358,6 @@ def run_daily_auto_order():
     # daily_auto_order は max_retries: 0 のため、失敗にしても発注は呼び直されない。
     if stats.get("errors", 0) > 0:
         raise RuntimeError(f"自動発注で注文の失敗が {stats['errors']} 件あった")
-
-
-def _notify_stale_prediction(stats) -> None:
-    """今日の予想の保存が終わっておらず新規を止めた日に、件数と理由を1回知らせる（#1394）。"""
-    reason = stats.get("stale_prediction_reason")
-    if not reason:
-        return
-    try:
-        from src.domain.ports import AlertLevel
-        from src.infrastructure.discord_notification_adapter import DiscordNotificationAdapter
-
-        DiscordNotificationAdapter().send_alert(
-            "自動発注: 今日の予想が無いため新規を止めた",
-            f"{reason}\n新規の買い・ショートは出さず、決済だけ行った"
-            f"（売り={stats.get('sell_orders', 0)} 件、スキップ={stats.get('skipped', 0)} 件）。",
-            level=AlertLevel.WARNING,
-        )
-    except Exception as e:
-        logger.error("新規を止めた知らせの送信失敗: %s", e, exc_info=True)
 
 
 # 8:50 の自動発注と 9:00 のホライズン決済のジョブが同時に判定して二重に決済しないため（#1321）
