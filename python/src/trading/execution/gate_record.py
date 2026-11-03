@@ -2,7 +2,7 @@
 
 置き場: 8:50 は results/orders/<JST の日付>.json、16:30 のルールの道は
 results/orders/rule/<JST の日付>.json（8:50 の記録を上書きしない。同じ道のやり直しは上書きする）。
-ゲートの判定はそのまま写す。書き込みの失敗は ERROR のログで知らせ、発注は止めない。
+ゲートの判定はそのまま写す。8:50 の記録には SL/TP を評価できなかった保有の銘柄と数も写す（#1516）。書き込みの失敗は ERROR のログで知らせ、発注は止めない。
 """
 
 import json
@@ -64,6 +64,10 @@ def save_order_gate_record(
         }
         for key in _GATE_KEYS:
             payload[key] = stats.get(key)
+        # SL/TP を評価できずに飛ばした保有（#1516）。判定はせず stats を写すだけ
+        unevaluable = list(stats.get("sl_tp_unevaluable_symbols") or [])
+        payload["sl_tp_unevaluable_symbols"] = unevaluable
+        payload["sl_tp_unevaluable_count"] = len(unevaluable)
         _write_record(dest, payload)
     except Exception:
         logger.error("[exec] 新規を止めた判定の記録に失敗（発注は続ける）", exc_info=True)
