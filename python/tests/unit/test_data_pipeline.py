@@ -141,9 +141,13 @@ class TestFetchStockDataWithFeatures(_TmpDbTestCase):
         vix_start = ohlcv.index[50]
         sp500_start = ohlcv.index[55]
         vix = pd.DataFrame({"vix_close": np.arange(70, dtype=float) + 10.0}, index=ohlcv.index[50:])
+        vix["usdjpy_close"] = 150.0
+        vix["tnx_close"] = 4.0
         sp500 = pd.DataFrame(
             {"sp500_close": np.arange(65, dtype=float) + 4000.0}, index=ohlcv.index[55:]
         )
+        sp500["dxy_close"] = 100.0
+        sp500["gold_close"] = 2000.0
         mock_cross_asset.return_value = vix
         mock_macro.return_value = sp500
 
