@@ -67,6 +67,7 @@ def _with_actions(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+@patch(f"{_P}.resolve_article", return_value=None)
 @patch(f"{_P}.fetch_pageview_features", return_value=None)
 @patch(f"{_P}.fetch_news_sentiment_with_llm", return_value=None)
 @patch(f"{_P}.fetch_additional_macro_features", side_effect=additional_macro_frame)

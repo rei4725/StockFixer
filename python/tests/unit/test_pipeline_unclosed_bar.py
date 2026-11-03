@@ -43,6 +43,7 @@ def _run(market: str, now_utc: datetime, db_has_rows: bool = True):
         ),
         patch("src.market_data.pipeline.fetch_news_sentiment_with_llm", return_value=None),
         patch("src.market_data.pipeline.fetch_pageview_features", return_value=None),
+        patch("src.market_data.pipeline.resolve_article", return_value=None),
     ):
         result = fetch_stock_data_with_features(
             market=market, symbol="7203", start_date="2021-10-22", end_date="2026-10-22"
