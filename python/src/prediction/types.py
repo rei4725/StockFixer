@@ -80,6 +80,25 @@ class MarketPredictionSnapshot:
 
 
 @dataclass
+class EnsembleOutcome:
+    """統合モデルのアンサンブルの芯（ensemble_diff_ratio）の結果。
+
+    Attributes:
+        diff_ratio_raw: 重みで混ぜた予想の変化率（ATR クリップ前）
+        diff_ratio: ATR クリップ後の予想の変化率
+        clip_max_ratio: クリップの上限（ATR が取れなければ None）
+        model_count: 予想に使えたモデルの数
+        zero_filled: 0で埋めた特徴量（名前の順）
+    """
+
+    diff_ratio_raw: float
+    diff_ratio: float
+    clip_max_ratio: Optional[float]
+    model_count: int
+    zero_filled: list[str] = field(default_factory=list)
+
+
+@dataclass
 class DriftMonitorResult:
     """週次 Hit Rate ドリフト検知結果。
 
