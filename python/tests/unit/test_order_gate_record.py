@@ -51,13 +51,15 @@ _CORR_BLOCKED = CorrelationGateResult(
 )
 
 
-def _make_broker():
+_HELD = {"symbol": "9000", "qty": 100, "avg_price": 1000.0, "current_price": 1000.0}
+_UNPRICED = {"symbol": "7203", "qty": 100, "avg_price": 0.0, "current_price": 1000.0}
+
+
+def _make_broker(positions=(_HELD,)):
     broker = MagicMock(spec=BrokerBase)
     broker.broker_name = "paper"
     broker.get_balance.return_value = 1_000_000.0
-    broker.get_positions.return_value = [
-        {"symbol": "9000", "qty": 100, "avg_price": 1000.0, "current_price": 1000.0},
-    ]
+    broker.get_positions.return_value = [dict(p) for p in positions]
     broker.get_short_positions = MagicMock(return_value=[])
     broker.send_order.return_value = {"order_id": "test-001", "status": "pending"}
     return broker
@@ -84,11 +86,12 @@ def _record_path():
 
 
 class TestOrderGateRecord(unittest.TestCase):
-    def _run(self, gate_status, corr_gate, extra_patches=()):
+    def _run(self, gate_status, corr_gate, extra_patches=(), positions=(_HELD,), predictions=None):
         sl_risk = MagicMock()
         sl_risk.return_value.check_sl_tp.return_value = (False, False, "")
+        frame = _predictions() if predictions is None else predictions
         patches = [
-            patch.object(_PREDICTIONS, "get_latest_by_market", return_value=_predictions()),
+            patch.object(_PREDICTIONS, "get_latest_by_market", return_value=frame),
             patch("src.trading.execution.runner._record_order"),
             patch("src.trading.execution.sl_tp._record_order"),
             patch(
@@ -114,7 +117,7 @@ class TestOrderGateRecord(unittest.TestCase):
         ]
         for p in patches:
             p.start()
-        broker = _make_broker()
+        broker = _make_broker(positions)
         try:
             stats = run_daily_orders(
                 broker,
@@ -183,6 +186,34 @@ class TestOrderGateRecord(unittest.TestCase):
         self.assertEqual(record["sell_orders"], 1)
         self.assertEqual(record["mode"], "paper")
         self.assertIsNone(record["entry_error"])
+
+    def test_unevaluable_holdings_are_recorded_on_prediction_day(self):
+        """予測のある日に SL/TP を評価できなかった保有の銘柄と数が入る（#1516）"""
+        stats, _ = self._run(_ALLOWED, _CORR_OK, positions=(_HELD, _UNPRICED))
+        record = self._read()
+        self.assertEqual(stats["sl_tp_unevaluable_symbols"], ["7203"])
+        self.assertEqual(record["sl_tp_unevaluable_symbols"], ["7203"])
+        self.assertEqual(record["sl_tp_unevaluable_count"], 1)
+
+    def test_unevaluable_holdings_are_recorded_on_exits_only_day(self):
+        """予測の無い SL/TP だけの日も、評価できなかった保有の銘柄と数が入る（#1516）"""
+        stats, _ = self._run(
+            _ALLOWED, _CORR_OK, positions=(_HELD, _UNPRICED), predictions=pd.DataFrame()
+        )
+        record = self._read()
+        self.assertEqual(stats["sl_tp_unevaluable_symbols"], ["7203"])
+        self.assertEqual(record["sl_tp_unevaluable_symbols"], ["7203"])
+        self.assertEqual(record["sl_tp_unevaluable_count"], 1)
+        self.assertEqual(record["buy_orders"], 0)
+
+    def test_no_unevaluable_holdings_records_empty_list_and_zero(self):
+        """評価できない保有が無い日は、空の一覧と 0 が入る"""
+        for predictions in (None, pd.DataFrame()):
+            with self.subTest(exits_only=predictions is not None):
+                self._run(_ALLOWED, _CORR_OK, predictions=predictions)
+                record = self._read()
+                self.assertEqual(record["sl_tp_unevaluable_symbols"], [])
+                self.assertEqual(record["sl_tp_unevaluable_count"], 0)
 
     def test_write_failure_keeps_orders_and_stats(self):
         """書き込みが落ちても、戻り値と注文は書けた日と同じ"""
