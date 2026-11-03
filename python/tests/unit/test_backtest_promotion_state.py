@@ -8,8 +8,10 @@ import json
 import os
 import re
 import shutil
+import threading
 
 import pytest
+from filelock import Timeout
 
 from src.prediction.backtest_promotion import state as st
 from src.prediction.types import BacktestPromotionState
@@ -182,6 +184,94 @@ def test_restore_unknown_backup_raises_without_touching(dirs, tmp_path):
         assert _read(prod_path) == f"old {prod}".encode()
 
 
+def test_copy_failure_in_temp_leaves_dst_byte_identical(dirs, monkeypatch):
+    """一時ファイルへの写しが書きかけで落ちても、本番のファイルは元のまま。一時ファイルも残らない"""
+    unified, _ = dirs
+    files = _make_models(unified)
+    real_copy2 = shutil.copy2
+    targets = []
+
+    def _copy2(src, dst, *a, **k):
+        if "_candidate" in os.path.basename(str(src)):
+            targets.append(str(dst))
+            _write(dst, b"half")  # 書きかけ
+            raise OSError("killed")
+        return real_copy2(src, dst, *a, **k)
+
+    monkeypatch.setattr("shutil.copy2", _copy2)
+    with pytest.raises(OSError, match="killed"):
+        st.swap_in_candidate()
+
+    for prod, (prod_path, _) in files.items():
+        assert _read(prod_path) == f"old {prod}".encode()
+    assert not [n for n in os.listdir(unified) if n.endswith(".tmp")]
+    # 本番のファイルへ直に書いていない（同じ置き場の一時ファイルに書いた）
+    assert targets
+    for target in targets:
+        assert os.path.dirname(target) == str(unified)
+        assert target not in {str(p) for p, _ in files.values()}
+
+
+def test_rollback_continues_after_non_oserror(dirs, monkeypatch):
+    """戻しの1つが OSError 以外で落ちても残りは戻し、元の例外を投げ直す"""
+    unified, _ = dirs
+    files = _make_models(unified)
+    real_copy2 = shutil.copy2
+    state = {"n": 0}
+
+    def _copy2(src, dst, *a, **k):
+        name = os.path.basename(str(src))
+        if "_candidate" in name:
+            state["n"] += 1
+            if state["n"] == 2:
+                raise OSError("disk full")
+        elif name.startswith("UnifiedStockXGBoost_2"):
+            raise RuntimeError("restore broke")  # XGBoost の戻しだけ落とす
+        return real_copy2(src, dst, *a, **k)
+
+    monkeypatch.setattr("shutil.copy2", _copy2)
+    with pytest.raises(OSError, match="disk full"):
+        st.swap_in_candidate()
+
+    # LightGBM は戻せている
+    assert _read(files["UnifiedStockLightGBM"][0]) == b"old UnifiedStockLightGBM"
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "UnifiedStockXGBoost_candidate.joblib",
+        "UnifiedStockXGBoost_challenger.joblib",
+        "UnifiedStockXGBoost.joblib",
+        "UnifiedStockXGBoost_20261103.joblib",
+        "UnifiedStockXGBoost_20261103_120000.joblib.tmp",
+    ],
+)
+def test_restore_rejects_non_backup_names(dirs, name):
+    unified, _ = dirs
+    files = _make_models(unified)
+    _write(unified / "UnifiedStockXGBoost_challenger.joblib", b"challenger")
+    _write(unified / "UnifiedStockXGBoost_20261103.joblib", b"x")
+    _write(unified / "UnifiedStockXGBoost_20261103_120000.joblib.tmp", b"x")
+    before = sorted(os.listdir(unified))
+
+    with pytest.raises(ValueError):
+        st.restore_backups([str(unified / name)])
+
+    assert sorted(os.listdir(unified)) == before
+    for prod, (prod_path, _) in files.items():
+        assert _read(prod_path) == f"old {prod}".encode()
+
+
+def test_restore_accepts_numbered_backup(dirs):
+    unified, _ = dirs
+    files = _make_models(unified)
+    backup = unified / "UnifiedStockXGBoost_20261103_120000_2.joblib"
+    _write(backup, b"numbered")
+    st.restore_backups([str(backup)])
+    assert _read(files["UnifiedStockXGBoost"][0]) == b"numbered"
+
+
 # ---------------------------------------------------------------------------
 # 状態のファイル
 # ---------------------------------------------------------------------------
@@ -300,6 +390,28 @@ def test_unified_model_lock_is_shared_and_reentrant(dirs):
         with st.unified_model_lock(timeout_s=0):
             assert lock.is_locked
     assert not lock.is_locked
+
+
+def test_unified_model_lock_excludes_other_thread(dirs):
+    """別のスレッドが持っている間は、timeout=0 で取ろうとすると Timeout"""
+    held, release = threading.Event(), threading.Event()
+
+    def _hold():
+        with st.unified_model_lock():
+            held.set()
+            release.wait(10)
+
+    t = threading.Thread(target=_hold)
+    t.start()
+    try:
+        assert held.wait(10)
+        with pytest.raises(Timeout):
+            st.unified_model_lock(timeout_s=0).acquire()
+    finally:
+        release.set()
+        t.join(10)
+    with st.unified_model_lock(timeout_s=0):
+        pass
 
 
 # ---------------------------------------------------------------------------

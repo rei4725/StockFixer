@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import tempfile
 from dataclasses import asdict
@@ -79,6 +80,8 @@ def save_state(state: BacktestPromotionState) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(asdict(state), f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, path)
     except BaseException:
         if os.path.exists(tmp):
@@ -137,6 +140,8 @@ def unified_model_lock(timeout_s: float = 3 * 3600) -> FileLock:
     同じパスには同じ FileLock を返す。FileLock は同じオブジェクトなら同じスレッドで
     入れ子に取れるので、同じプロセスの中で二重に取っても詰まらない。
     別のスレッドや別のプロセスとは排他になる。timeout_s は呼ぶたびに置き換える。
+    thread_local=True（既定）なので timeout はスレッドごとに持つ。別のスレッドで呼ぶときも
+    この関数を通せば、そのスレッドの timeout が timeout_s になる。
     """
     unified = _unified_dir()
     os.makedirs(unified, exist_ok=True)
@@ -167,10 +172,29 @@ def _backup_path(dst: str, stamp: str) -> str:
     return path
 
 
+def _copy_replace(src: str, dst: str) -> None:
+    """src を dst と同じ置き場の一時ファイルに写してから dst に置き換える。
+
+    途中で落ちても dst は前の中身のまま残り、書きかけの dst を読む人も出ない。
+    """
+    fd, tmp = tempfile.mkstemp(
+        prefix=f".{os.path.basename(dst)}.", suffix=".tmp", dir=os.path.dirname(dst) or "."
+    )
+    os.close(fd)
+    try:
+        shutil.copy2(src, tmp)
+        os.replace(tmp, dst)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        raise
+
+
 def copy_with_backup(pairs: list[tuple[str, str]], stamp: str) -> list[str]:
     """(src, dst) の組ごとに src を dst に写す。先に今の dst を全部写しておく。
 
     写しに1つでも失敗したら、どの dst も上書きせずに例外を投げる（#824）。
+    コピーは一時ファイルに写してから置き換えるので、1つの dst が書きかけになることはない。
     コピーの途中で落ちたら、写しから全部の dst を戻し（前に無かった dst は消し）、
     例外を投げ直す。
 
@@ -191,7 +215,7 @@ def copy_with_backup(pairs: list[tuple[str, str]], stamp: str) -> list[str]:
 
     try:
         for src, dst in pairs:
-            shutil.copy2(src, dst)
+            _copy_replace(src, dst)
     except BaseException:
         logger.error("コピーの途中で落ちた。写しから元に戻す", exc_info=True)
         for dst, saved in originals:
@@ -200,8 +224,8 @@ def copy_with_backup(pairs: list[tuple[str, str]], stamp: str) -> list[str]:
                     if os.path.exists(dst):
                         os.remove(dst)
                 else:
-                    shutil.copy2(saved, dst)
-            except OSError:
+                    _copy_replace(saved, dst)
+            except Exception:
                 # 1つ戻せなくても残りは戻し、元の例外を投げ直す
                 logger.error(f"写しから戻せなかった: {dst}（写し {saved}）", exc_info=True)
         raise
@@ -230,9 +254,10 @@ def swap_in_candidate() -> list[str]:
 
 
 def _production_for_backup(backup: str) -> str:
+    """写しの名前 `<本番の名前>_YYYYMMDD_HHMMSS(_N)?.joblib` から本番の名前を返す。"""
     name = os.path.basename(backup)
     for production in SWAP_PRODUCTION_NAMES:
-        if name.startswith(f"{production}_") and name.endswith(".joblib"):
+        if re.fullmatch(rf"{re.escape(production)}_\d{{8}}_\d{{6}}(_\d+)?\.joblib", name):
             return production
     raise ValueError(f"本番のモデルの写しではありません: {backup}")
 
