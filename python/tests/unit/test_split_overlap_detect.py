@@ -52,6 +52,12 @@ def _yf(bars: pd.DataFrame):
     return _fetch
 
 
+def steps_near_split_records(steps, bars):
+    from src.market_data.split_refetch import steps_near_split_records as near
+
+    return near(steps, bars)
+
+
 def _fetch(symbol: str = "8035"):
     return fetch_stock_data_with_features(
         market="jp",
@@ -127,8 +133,11 @@ class TestOverlapDetect(unittest.TestCase):
         self.assertFalse([i for i in quality.issues if i.check == "price_step"])
 
     def test_step_left_after_refetch_is_warned_and_excluded(self, *_mocks):
-        """取り直しても前日比が極端な足が残る銘柄は、WARNING にして特徴量を作らない"""
+        """取り直しても段差が残り、近くに分割の記録がある（yfinance が調整し損ねた）銘柄は、
+        WARNING にして特徴量を作らない（#1492）"""
         stepped = _with_actions(_scale_before(_make_ohlcv(), 30, 3.0))
+        # 段差の 2023-01-31 の 2 日後に 1:3 分割の記録がある
+        stepped.loc["2023-02-02", "Stock Splits"] = 3.0
         db_bars = stepped.drop(columns=["Dividends", "Stock Splits"]).iloc[:60]
         with (
             patch(f"{_P}.get_raw_ohlcv_from_db", return_value=db_bars),
@@ -149,6 +158,64 @@ class TestOverlapDetect(unittest.TestCase):
         self.assertEqual(steps[0].level, "warning")
         self.assertIn("2023-01-31", steps[0].detail)
         self.assertTrue([m for m in logs.output if "WARNING" in m and "jp/5706" in m])
+
+    def test_step_without_split_record_builds_features(self, *_mocks):
+        """取り直しても段差が残るが、分割の記録が無い（本当の急変の）銘柄は特徴量を作る（#1492）"""
+        stepped = _with_actions(_scale_before(_make_ohlcv(), 30, 3.0))
+        db_bars = stepped.drop(columns=["Dividends", "Stock Splits"]).iloc[:60]
+        with (
+            patch(f"{_P}.get_raw_ohlcv_from_db", return_value=db_bars),
+            patch(f"{_P}.get_stock_data", side_effect=_yf(stepped)) as mock_get,
+        ):
+            result = _fetch("3350")
+
+        self.assertEqual(mock_get.call_count, 2)
+        self.assertIsNotNone(result)
+        _m, _s, data, raw, quality = result
+        self.assertIsNotNone(data)
+        self.assertEqual(len(raw), len(stepped))
+        self.assertFalse([i for i in quality.issues if i.check == "price_step"])
+
+    def test_step_without_split_column_is_excluded(self, *_mocks):
+        """取り直した足に Stock Splits の列が無く見分けられない銘柄は、今までどおり外す（#1492）"""
+        stepped = _scale_before(_make_ohlcv(), 30, 3.0)
+        with (
+            patch(f"{_P}.get_raw_ohlcv_from_db", return_value=stepped.iloc[:60]),
+            patch(f"{_P}.get_stock_data", side_effect=_yf(stepped)),
+        ):
+            result = _fetch("5707")
+
+        self.assertIsNotNone(result)
+        _m, _s, data, _raw, quality = result
+        self.assertIsNone(data)
+        self.assertTrue([i for i in quality.issues if i.check == "price_step"])
+
+
+class TestStepsNearSplitRecords(unittest.TestCase):
+    def _bars(self, split_day: str, ratio: float) -> pd.DataFrame:
+        bars = _with_actions(_make_ohlcv())
+        bars.loc[split_day, "Stock Splits"] = ratio
+        return bars
+
+    def test_split_record_within_weekdays_keeps_step(self):
+        """段差の日から 5 営業日以内の分割の記録があれば、分割の残りとして残す"""
+        steps = [("2023-01-31", 0.333)]
+        self.assertEqual(steps_near_split_records(steps, self._bars("2023-02-07", 2.0)), steps)
+
+    def test_far_split_record_with_close_ratio_keeps_step(self):
+        """日が離れていても、比が記録された分割の比の逆数に近ければ分割の残りとして残す"""
+        steps = [("2023-01-31", 0.34)]
+        self.assertEqual(steps_near_split_records(steps, self._bars("2023-03-05", 3.0)), steps)
+
+    def test_far_split_record_with_other_ratio_drops_step(self):
+        """日も比も離れた分割の記録しか無い段差は、本当の値動きとして外す"""
+        steps = [("2023-01-31", 0.469)]
+        self.assertEqual(steps_near_split_records(steps, self._bars("2023-03-05", 2.0)), [])
+
+    def test_missing_split_column_keeps_all_steps(self):
+        """Stock Splits の列が無ければ見分けられないため、段差をすべて残す"""
+        steps = [("2023-01-31", 0.469)]
+        self.assertEqual(steps_near_split_records(steps, _make_ohlcv()), steps)
 
 
 class TestStepQualityLogInBatch(unittest.TestCase):

@@ -74,12 +74,27 @@ def group_events_by_date(events: list) -> dict[str, list]:
     return out
 
 
+def round_to_review_index(calendar: list[str], i: int, review_freq: str) -> int:
+    """カレンダーの i 番目の判定を、知らせる日のインデックスへ丸める（#1488）。
+
+    "monthly" は本番の multibagger_job（毎月1日に前の月の終値までで判定する）に
+    合わせ、同じ月の最後の取引日へ丸める。"daily" はそのまま返す。
+    """
+    if review_freq != "monthly" or i >= len(calendar):
+        return i
+    month = calendar[i][:7]
+    while i + 1 < len(calendar) and calendar[i + 1][:7] == month:
+        i += 1
+    return i
+
+
 def defer_events(
     events_by_date: dict[str, list],
     calendar: list[str],
     closes: dict[str, float],
     entry_price: float,
     lag: int,
+    review_freq: str = "daily",
 ) -> dict[str, list]:
     """判定した日のイベントを lag 営業日後の終値で約定するイベントへ移す（#977）。
 
@@ -87,13 +102,15 @@ def defer_events(
     のはその後の営業日である。入り（`resolve_entry_date`）と同じく約定を lag
     営業日後へずらし、price・multiple をその日の終値で付け直す。約定日が
     カレンダーの末尾を越えるものは末尾の日の終値で手仕舞う。同じ約定日に
-    集まったイベントは判定の順を保つ。lag が 0 なら元のまま返す。
+    集まったイベントは判定の順を保つ。review_freq が "monthly" なら、判定の日を
+    その月の最後の取引日に丸めてから lag を足す（#1488）。lag が 0 で丸めも
+    しないなら元のまま返す。
     """
-    if lag <= 0 or not calendar:
+    if (lag <= 0 and review_freq == "daily") or not calendar:
         return events_by_date
     out: dict[str, list] = {}
     for date in sorted(events_by_date):
-        i = bisect_left(calendar, date)
+        i = round_to_review_index(calendar, bisect_left(calendar, date), review_freq)
         fill_date = calendar[min(i + lag, len(calendar) - 1)]
         price = closes.get(fill_date)
         for ev in events_by_date[date]:
@@ -279,6 +296,7 @@ def run_longterm_backtest(
         4. 各ポジションを simulate_position で評価し撤退/利確イベントを得る。
            イベントは判定した日の終値で返るため、`defer_events` で約定を
            execution_lag 営業日後の終値へずらす（入りと同じ決まり）。
+           exit_review_freq が "monthly" なら判定の日を月末の取引日に丸めてからずらす。
         5. 空き現金を均等配分し、手数料とスリッページを売買に課金（ExecutionModel）。
            撤退で現金回収→再投資。
         6. 日次でポートフォリオ評価額を集計し equity_df を作る（現金の減算・
@@ -358,6 +376,7 @@ def run_longterm_backtest(
                         lookups.get(pos.symbol, {}),
                         pos.entry_price,
                         config.execution_lag,
+                        config.exit_review_freq,
                     )
 
         # 4) 日次ポートフォリオ評価額

@@ -77,6 +77,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     try:
+        from src.orchestration.jobs import prediction_saved_marker
         from src.trading.claude_agent import run_claude_trader
 
         trade_diff_sink = PostgresTradeDiffSink()
@@ -87,6 +88,8 @@ def main(argv: list[str] | None = None) -> int:
             mode=args.mode,
             trade_diff_sink=trade_diff_sink,
             prediction_repo=PostgresPredictionResultRepository(),
+            # 保存の済んでいない朝に流しても新規の buy を出さない（#1490）
+            prediction_saved_day=prediction_saved_marker.read_prediction_saved_day(),
         )
         print(
             f"完了 — 買い: {stats['buy_orders']} 売り: {stats['sell_orders']} "
