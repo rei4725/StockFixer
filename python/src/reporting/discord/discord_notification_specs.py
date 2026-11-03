@@ -51,6 +51,18 @@ SHADOW_EVALUATION_CHALLENGER_WINS = NotificationSpec(
 )
 SHADOW_EVALUATION_NO_WINNER = NotificationSpec("ℹ️ A/Bテスト: 評価完了", COLOR_INFO)
 HIT_RATE_DRIFT_ALERT = NotificationSpec("⚠️ モデルドリフト検知: Hit Rate 低下", COLOR_WARNING)
+BACKTEST_PROMOTION_WON = NotificationSpec("🏆 バックテスト: 候補の勝ち", COLOR_SUCCESS)
+BACKTEST_PROMOTION_LOST = NotificationSpec("ℹ️ バックテスト: 候補の負け", COLOR_INFO)
+BACKTEST_PROMOTION_NOT_COMPARABLE = NotificationSpec(
+    "⚠️ バックテスト: 比べが成り立たない", COLOR_WARNING
+)
+BACKTEST_PROMOTION_FAILED = NotificationSpec("❌ バックテスト: 評価の失敗", COLOR_ERROR)
+BACKTEST_PROMOTION_SKIPPED = NotificationSpec("⚠️ バックテスト: 見送り", COLOR_WARNING)
+BACKTEST_PROMOTION_SWAP = NotificationSpec("🔁 バックテスト: 候補を本番に入れ替え", COLOR_WARNING)
+BACKTEST_PROMOTION_ROLLBACK = NotificationSpec("⏪ バックテスト: 見張りで元に戻した", COLOR_WARNING)
+BACKTEST_PROMOTION_WATCH_KEPT = NotificationSpec(
+    "ℹ️ バックテスト: 見張りを終えた（戻さない）", COLOR_INFO
+)
 
 
 def get_daily_order_spec(*, trading_stopped: bool) -> NotificationSpec:

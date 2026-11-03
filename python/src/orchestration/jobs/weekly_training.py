@@ -53,6 +53,41 @@ def run_weekly_training():
     """
     週次実行: Shadow 評価 → 昇格ゲート → Challenger 再学習 → 精度チェック → Discord通知
 
+    全体を統合モデルのロックの中で動かし、バックテストによる仮の入れ替えの夜間ジョブと
+    同時に動かない。ロックが取れなければ Discord へ知らせ、ロックなしでは学習しない。
+    """
+    from filelock import Timeout
+
+    from src.prediction.backtest_promotion.state import unified_model_lock
+
+    lock = unified_model_lock()
+    try:
+        lock.acquire()
+    except Timeout as e:
+        logger.error("週次学習: 統合モデルのロックが取れないため学習しない: %s", e)
+        _notify_stage_failure("週次学習 統合モデルのロック（学習しなかった）", e)
+        return
+    try:
+        _run_weekly_training_locked()
+    finally:
+        lock.release()
+
+
+def _clear_backtest_watch() -> None:
+    """週次の昇格で production が変わったら、仮の入れ替えの見張りをやめる（戻す先が無くなる）。"""
+    try:
+        from src.prediction.backtest_promotion.state import clear_watch
+
+        clear_watch("週次の昇格")
+    except Exception as e:
+        _handle_stage_error(PipelineStage.NON_CRITICAL, "仮の入れ替えの見張りの解除", e)
+        _notify_stage_failure("週次学習 仮の入れ替えの見張りの解除", e)
+
+
+def _run_weekly_training_locked():
+    """
+    run_weekly_training の本体（統合モデルのロックを持って呼ぶ）。
+
     流れ:
         1. Shadow 評価: 前週の production vs challenger の Hit Rate / Sharpe を比較
         2. 昇格ゲート: 全基準（Net Return/MDD/Sharpe/Hit Rate/Slippage）を判定
@@ -146,6 +181,7 @@ def run_weekly_training():
                     logger.info("昇格完了: %s", promote_result["promoted"])
                     promoted = True
                     record["promoted"] = True
+                    _clear_backtest_watch()
                 else:
                     logger.warning("昇格対象ファイルなし: skipped=%s", promote_result["skipped"])
             elif gate_result.eligible:
