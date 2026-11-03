@@ -17,11 +17,10 @@ class TestGetOptimalParams(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             # json ファイルを作らない
             nonexistent = Path(tmp) / "config" / "optimal_params.json"
-            with patch("src.prediction.prediction_pipeline.Path") as MockPath:
-                # chaining: Path(__file__).parents[2] / "config"
-                mock_chain = MockPath.return_value
-                chained = mock_chain.parents.__getitem__.return_value
-                chained.__truediv__.return_value.__truediv__.return_value = nonexistent
+            with patch(
+                "src.prediction.prediction_pipeline.optimal_params_read_path",
+                return_value=nonexistent,
+            ):
                 result = get_optimal_params("us", "AAPL")
         self.assertEqual(result, {})
 
@@ -35,9 +34,10 @@ class TestGetOptimalParams(unittest.TestCase):
             data = {"us_AAPL": {"threshold": 0.02, "metrics": {"sharpe_ratio": 1.5}}}
             json_path.write_text(json.dumps(data), encoding="utf-8")
 
-            with patch("src.prediction.prediction_pipeline.Path") as MockPath:
-                parents_mock = MockPath.return_value.parents.__getitem__.return_value
-                parents_mock.__truediv__.return_value.__truediv__.return_value = json_path
+            with patch(
+                "src.prediction.prediction_pipeline.optimal_params_read_path",
+                return_value=json_path,
+            ):
                 result = get_optimal_params("us", "AAPL")
         self.assertEqual(result.get("threshold"), 0.02)
 
@@ -51,9 +51,10 @@ class TestGetOptimalParams(unittest.TestCase):
             data = {"us_GOOG": {"threshold": 0.01}}
             json_path.write_text(json.dumps(data), encoding="utf-8")
 
-            with patch("src.prediction.prediction_pipeline.Path") as MockPath:
-                parents_mock = MockPath.return_value.parents.__getitem__.return_value
-                parents_mock.__truediv__.return_value.__truediv__.return_value = json_path
+            with patch(
+                "src.prediction.prediction_pipeline.optimal_params_read_path",
+                return_value=json_path,
+            ):
                 result = get_optimal_params("us", "AAPL")
         self.assertEqual(result, {})
 
@@ -66,9 +67,10 @@ class TestGetOptimalParams(unittest.TestCase):
             json_path = config_dir / "optimal_params.json"
             json_path.write_text("not-json", encoding="utf-8")
 
-            with patch("src.prediction.prediction_pipeline.Path") as MockPath:
-                parents_mock = MockPath.return_value.parents.__getitem__.return_value
-                parents_mock.__truediv__.return_value.__truediv__.return_value = json_path
+            with patch(
+                "src.prediction.prediction_pipeline.optimal_params_read_path",
+                return_value=json_path,
+            ):
                 result = get_optimal_params("us", "AAPL")
         self.assertEqual(result, {})
 

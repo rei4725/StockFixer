@@ -13,6 +13,7 @@ from typing import Any, Dict, NoReturn, Optional
 import pandas as pd
 from filelock import FileLock
 
+from src.utils import optimal_params_loader
 from src.utils.data_path_utils import ensure_dir
 from src.utils.logger import get_logger
 from src.utils.results_io import save_result_csvs
@@ -146,7 +147,8 @@ def save_optimal_params_json(
     """
     最適パラメータを JSON に保存する。
     シャープレシオ（またはソート基準）が最高のパラメータを抽出し、
-    python/config/optimal_params.json に統合保存する。
+    results/optimal_params.json に統合保存する。results/ は本番でホストにマウントされ、
+    デプロイの起き直しで消えない（#1081）。まだ無いときは config/ の初めの値を引き継ぐ。
 
     Args:
         result_df: run_optimization が返す DataFrame
@@ -232,17 +234,16 @@ def save_optimal_params_json(
     }
 
     # 既存の JSON ファイルを読み込み、統合
-    # python/src/backtest/optimizer/persistence.py -> python/config
-    config_dir = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
-        "config",
-    )
-    ensure_dir(config_dir)
-    json_path = os.path.join(config_dir, "optimal_params.json")
+    json_path = str(optimal_params_loader.optimal_params_results_path())
+    ensure_dir(os.path.dirname(json_path))
 
     # 別のプロセス（手での実行とスケジューラ）が足した銘柄を消さないよう、ロックの内で読み直してから足す
     with FileLock(f"{json_path}.lock"):
-        all_params = _load_params_for_update(json_path)
+        if os.path.exists(json_path):
+            all_params = _load_params_for_update(json_path)
+        else:
+            # 最適化し直していない銘柄が初めの値のまま読まれるよう、引き継いでから足す
+            all_params = _load_seed_params(str(optimal_params_loader.OPTIMAL_PARAMS_PATH))
 
         # マーケット・シンボルをキーに保存
         key = f"{market}_{symbol}"
@@ -275,6 +276,30 @@ def _load_params_for_update(json_path: str) -> Dict[str, Any]:
     if not isinstance(all_params, dict):
         _quarantine_params_file(json_path, f"最上位が dict ではない: {type(all_params).__name__}")
     return all_params
+
+
+def _load_seed_params(seed_path: str) -> Dict[str, Any]:
+    """初めの値（config/ の写し）を読む。リポジトリが持つファイルなので退避はしない。
+
+    読めなければ保存を止める（空として続けると、初めの値の銘柄を全部消すため）。
+    """
+    if not os.path.exists(seed_path):
+        return {}
+    try:
+        with open(seed_path, "r", encoding="utf-8") as f:
+            seed = json.load(f)
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError) as e:
+        logger.error(
+            f"初めの最適パラメータJSONが読めないため保存を止めます: {seed_path}", exc_info=True
+        )
+        raise OptimalParamsCorruptedError(
+            f"初めの最適パラメータJSONを読めません: {seed_path}"
+        ) from e
+    if not isinstance(seed, dict):
+        raise OptimalParamsCorruptedError(
+            f"初めの最適パラメータJSONの最上位が dict ではありません: {seed_path}"
+        )
+    return seed
 
 
 def _quarantine_params_file(json_path: str, detail: str) -> NoReturn:
@@ -333,12 +358,8 @@ def get_optimal_params(
             最上位が dict でない場合（未登録と区別し、良い結果を上書きしないため）
     """
     if json_path is None:
-        # python/src/backtest/optimizer/persistence.py -> python/config
-        config_dir = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
-            "config",
-        )
-        json_path = os.path.join(config_dir, "optimal_params.json")
+        # 発注の読む側と同じ置き場（最適化の結果があればそれ、無ければ初めの値）
+        json_path = str(optimal_params_loader.optimal_params_read_path())
 
     if not os.path.exists(json_path):
         return None

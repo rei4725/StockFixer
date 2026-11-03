@@ -326,3 +326,21 @@ def _jp_business_day_for_daily_jobs(monkeypatch):
         "src.orchestration.jobs.common.now_jst",
         lambda: datetime(2026, 10, 27, 8, 50, tzinfo=ZoneInfo("Asia/Tokyo")),
     )
+
+
+# ============================================
+# 結果の置き場を一時フォルダへ（unit テスト全体に適用）
+# ============================================
+
+
+@pytest.fixture(autouse=True)
+def _isolate_results_dir(monkeypatch, tmp_path_factory):
+    """get_results_dir() をテストごとの一時フォルダに向ける（#902・#1081）。
+
+    週の最適化の結果（results/optimal_params.json）は本番でホストにマウントされ、
+    自動デプロイはホストの checkout で unit テストを流す。テストの保存が本番の
+    最適パラメータを上書きしないよう、results/ に書く道を全部ここへ逃がす。
+    """
+    # テスト自身の tmp_path の中身を数えるテストがあるので、別の一時フォルダに置く
+    results_dir = tmp_path_factory.mktemp("results")
+    monkeypatch.setenv("STOCKFIXER_RESULTS_DIR", str(results_dir))
