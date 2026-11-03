@@ -14,7 +14,6 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import replace
 from datetime import datetime, time, timedelta, timezone
-from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -30,6 +29,7 @@ from src.utils.data_path_utils import get_models_dir
 from src.utils.db import get_active_symbols
 from src.utils.df_to_string import df_to_pretty_string
 from src.utils.logger import get_logger
+from src.utils.optimal_params_loader import optimal_params_read_path
 from src.utils.run_context import new_run_context
 
 # yfinanceの警告を抑制
@@ -109,9 +109,8 @@ def get_optimal_params(market: str, symbol: str) -> dict:
     Returns:
         最適パラメータ辞書、見つからない場合は空辞書
     """
-    # python/src/services/prediction_pipeline.py -> python/config
-    config_dir = Path(__file__).parents[2] / "config"
-    json_path = config_dir / "optimal_params.json"
+    # 発注の読む側と同じ置き場（週の最適化の結果があればそれ、無ければ初めの値）（#1081）
+    json_path = optimal_params_read_path()
 
     if not json_path.exists():
         return {}

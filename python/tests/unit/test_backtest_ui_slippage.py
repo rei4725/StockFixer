@@ -20,6 +20,7 @@ from typing import Any, Dict, Optional
 from unittest.mock import patch
 
 import pandas as pd
+from tests.unit.optimal_params_isolation import redirect_optimal_params
 
 from src.backtest.optimizer import persistence
 from src.orchestration import port_wiring
@@ -121,9 +122,8 @@ class _UiMixin(unittest.TestCase):
         root = self._tmp.name
         self.ui_path = os.path.join(root, "run_backtest_ui.py")
         shutil.copyfile(_UI_PATH, self.ui_path)
-        # persistence も同じ root/config を向く（dirname を4回たどると root）
-        fake_file = os.path.join(root, "src", "backtest", "optimizer", "persistence.py")
-        file_patch = patch.object(persistence, "__file__", fake_file)
+        # 最適パラメータの保存先も同じ root/config を向く
+        file_patch = redirect_optimal_params(root)
         file_patch.start()
         self.addCleanup(file_patch.stop)
         self.config_dir = os.path.join(root, "config")
