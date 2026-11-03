@@ -331,11 +331,10 @@ class TestRunOptimization(unittest.TestCase):
 
 
 def _patch_config_root(root):
-    """persistence の保存先 config/ を root/config へ向ける（実ファイルに触れない）。"""
-    from src.backtest.optimizer import persistence
+    """最適パラメータの保存先を root/config へ向ける（実ファイルに触れない）。"""
+    from tests.unit.optimal_params_isolation import redirect_optimal_params
 
-    fake_file = os.path.join(root, "src", "backtest", "optimizer", "persistence.py")
-    return patch.object(persistence, "__file__", fake_file)
+    return redirect_optimal_params(root)
 
 
 def _save_and_read(df):

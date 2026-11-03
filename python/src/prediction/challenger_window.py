@@ -14,12 +14,16 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
+from src.prediction.prediction_pipeline import _base_bar_date
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+_JST = ZoneInfo("Asia/Tokyo")
 
 # 版にかかわらず challenger の影の予想の採点に使うラベル
 CHALLENGER_LABEL = "challenger"
@@ -73,16 +77,38 @@ def _predicted_at_utc(predicted_at: object) -> Optional[datetime]:
         return None
 
 
-def _predicted_day(predicted_at: object) -> str:
-    """predicted_at の日付（数字の先頭8字。load_prediction_accuracy の days の窓と同じ）。"""
-    return re.sub(r"[^0-9]", "", str(predicted_at))[:8]
+def _predicted_day(predicted_at: object, market: Optional[str] = None) -> str:
+    """predicted_at の取引日（YYYYMMDD）を返す（#1493）。
+
+    market があれば採点の基準の日（_base_bar_date）と同じく、予想の時刻に引けていた最後の
+    足の日にする。market が無ければ JST の日付にする。UTC の 00:00 を過ぎたやり直しの回が、
+    次の朝の回と同じ日に入らないようにするため。時刻が読めなければ数字の先頭8字を返す。
+    """
+    digits = re.sub(r"[^0-9]", "", str(predicted_at))
+    utc = _predicted_at_utc(digits)
+    if utc is None:
+        return digits[:8]
+    if market is None:
+        return utc.astimezone(_JST).strftime("%Y%m%d")
+    return _base_bar_date(utc.strftime("%Y%m%d_%H%M%S"), market).strftime("%Y%m%d")
+
+
+def _day_series(df: pd.DataFrame) -> pd.Series:
+    """行ごとの取引日。market の列が無ければ JST の日付。"""
+    if "market" not in df.columns:
+        return df["predicted_at"].map(_predicted_day)
+    return pd.Series(
+        [_predicted_day(pa, str(m)) for pa, m in zip(df["predicted_at"], df["market"])],
+        index=df.index,
+        dtype=object,
+    )
 
 
 def _key_series(df: pd.DataFrame) -> Optional[pd.Series]:
-    """行ごとの（日・market・symbol）の組。market か symbol の列が無ければ None。"""
+    """行ごとの（取引日・market・symbol）の組。market か symbol の列が無ければ None。"""
     if df.empty or not {"predicted_at", "market", "symbol"}.issubset(df.columns):
         return None
-    days = df["predicted_at"].map(_predicted_day)
+    days = _day_series(df)
     return pd.Series(
         list(zip(days, df["market"].astype(str), df["symbol"].astype(str))), index=df.index
     )
@@ -101,7 +127,7 @@ def filter_current_challenger(df_chal: pd.DataFrame) -> tuple[pd.DataFrame, Chal
     else:
         times = df_chal["predicted_at"].map(_predicted_at_utc)
         kept = df_chal[times.map(lambda t: t is not None and t > trained_at).astype(bool)]
-    days = sorted(set(kept["predicted_at"].map(_predicted_day))) if not kept.empty else []
+    days = sorted(set(_day_series(kept))) if not kept.empty else []
     window = ChallengerWindow(
         trained_at=trained_at, days=days, n_challenger=len(kept), keys=_row_keys(kept)
     )
@@ -128,7 +154,7 @@ def filter_to_days(df: pd.DataFrame, window: ChallengerWindow) -> pd.DataFrame:
     elif keys is not None and window.keys is not None:
         kept = df[keys.isin(window.keys)]
     else:
-        kept = df[df["predicted_at"].map(_predicted_day).isin(window.days)]
+        kept = df[_day_series(df).isin(window.days)]
     window.n_production = len(kept)
     logger.info(
         "production を今の challenger と同じ%sに絞る: 日数=%d production の件数=%d（絞る前 %d 件）",

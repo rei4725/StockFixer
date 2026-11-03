@@ -22,6 +22,9 @@ $repo      = "rei4725/StockFixer"
 $failLabel = "deploy-failure"
 $lockMaxAgeMin = 40   # これより古いロックは stale とみなし上書き
 
+# 発注と約定の時間帯の判定（#1322）
+. (Join-Path $repoDir "deploy_window.ps1")
+
 function Write-Log($msg) {
     $ts   = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     $line = "$ts $msg"
@@ -155,6 +158,16 @@ try {
     $lastSha = if (Test-Path $stateFile) { (Get-Content $stateFile -Raw).Trim() } else { "" }
     if ($remoteSha -eq $lastSha) {
         # 変化なし=デプロイ不要。静かに終了。
+        exit 0
+    }
+
+    # ---- 発注と約定の時間帯は見送る（#1322） ----
+    # 状態ファイルは書かないので、窓を抜けた次の起動でこの commit をデプロイする。
+    # AUTO_DEPLOY_NOW（例: "2026-11-04 08:50"）で今の時刻を差し替えて確かめられる。
+    $deployNow = if ($env:AUTO_DEPLOY_NOW) { [datetime]::Parse($env:AUTO_DEPLOY_NOW) } else { Get-Date }
+    $blackout = Get-DeployBlackout $deployNow
+    if ($blackout) {
+        Write-Log "[window] 発注の時間帯 ($blackout) のため develop $($remoteSha.Substring(0,7)) のデプロイを見送る"
         exit 0
     }
 

@@ -6,13 +6,12 @@ cost_impact_* は gross - net（コストで失った分）で、小さいほど
 
 import io
 import json
-import os
 import tempfile
 import unittest
 from contextlib import redirect_stdout
-from unittest.mock import patch
 
 import pandas as pd
+from tests.unit.optimal_params_isolation import redirect_optimal_params
 
 from src.backtest.optimizer import persistence
 
@@ -36,8 +35,7 @@ class TestSaveOptimalParamsBestRow(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         root = self._tmp.name
-        fake_file = os.path.join(root, "src", "backtest", "optimizer", "persistence.py")
-        file_patch = patch.object(persistence, "__file__", fake_file)
+        file_patch = redirect_optimal_params(root)
         file_patch.start()
         self.addCleanup(file_patch.stop)
         self.addCleanup(self._tmp.cleanup)
