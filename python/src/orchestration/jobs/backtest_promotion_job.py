@@ -1,7 +1,7 @@
 """バックテストによる仮の入れ替えの夜間ジョブ。
 
-予想のコードの版が前回の評価から変わった夜に、取っておいた直近の期間を外して候補を学習し、
-その期間で今の production と比べる。勝てば候補を本番の名前で置き、5営業日見張る。
+予想のコードの版が前回の評価から変わり、stock_features もその版で作り直された夜に、
+取っておいた直近の期間を外して候補を学習し、その期間で今の production と比べる。勝てば候補を本番の名前で置き、5営業日見張る。
 見張りで悪ければ、戻す先のほうが良いときだけ写しから戻す。
 
 全体を統合モデルのロックの中で動かし、週次の学習と同時に動かない。
@@ -21,11 +21,13 @@ from filelock import Timeout
 from src.orchestration.jobs.common import _local_now
 from src.prediction.backtest_promotion import (
     CANDIDATE_NAMES,
+    CODE_VERSION_SCOPE,
     SWAP_PRODUCTION_NAMES,
     WATCH_TRADING_DAYS,
     evaluate_holdout,
     judge_rollback,
     latest_holdout_dates,
+    load_features_version,
     load_state,
     prediction_code_version,
     restore_backups,
@@ -58,7 +60,8 @@ def run_backtest_promotion(force: bool = False, dry_run: bool = False) -> dict:
     """見張りの判定 → 評価 → 勝てば入れ替え、を1回動かす。
 
     Args:
-        force: 同じ版・戻した版でも評価し直す（戻した版からは入れ替えない。見張り中は評価しない）
+        force: 同じ版・戻した版・特徴量がまだ古い版でも評価し直す
+            （戻した版からは入れ替えない。見張り中は評価しない）
         dry_run: 評価だけして、モデルのファイルも状態も変えない（見張りの判定もしない）
 
     Returns:
@@ -100,6 +103,8 @@ def _new_result(started: datetime, force: bool, dry_run: bool) -> dict:
     return {
         "started_at": started.isoformat(),
         "version": None,
+        "version_scope": list(CODE_VERSION_SCOPE),
+        "features_version": None,
         "force": force,
         "dry_run": dry_run,
         "outcome": SKIPPED,
@@ -161,12 +166,19 @@ def _run_locked(result: dict, force: bool, dry_run: bool) -> None:
     if not force and version in state.rolled_back_versions:
         _end(result, SKIPPED, "この版の候補は前に戻した")
         return
+    # stock_features は日次の道（平日 07:30）でしか作り直さない。昼に入れた版を古いコードの
+    # 特徴量で比べて「比べた」にしないよう、印が今の版になるまで待つ（版は記録しない）
+    result["features_version"] = load_features_version()
+    if not force and result["features_version"] != version:
+        _end(result, SKIPPED, "特徴量がまだ今のコードで作り直されていない")
+        return
 
     # 3〜6. 学習・評価・入れ替え・版の記録。ここで落ちたら版は記録しない（次の夜にやり直す）
     try:
         evaluation = _train_and_evaluate(result)
         _apply_evaluation(result, evaluation)
-        if dry_run:
+        if dry_run or result["outcome"] == FAILED:
+            # 比べられなかった回は版を記録しない（次の夜にやり直す）
             return
         if result["outcome"] == WON:
             if version in state.rolled_back_versions:
@@ -240,6 +252,10 @@ def _train_and_evaluate(result: dict) -> HoldoutEvaluation:
 
 def _apply_evaluation(result: dict, evaluation: HoldoutEvaluation) -> None:
     result["evaluation"] = asdict(evaluation)
+    if not evaluation.path_check.get("compared"):
+        # 本番の予想が1つも出ず（yfinance の止まりなど）道を確かめられなかった。食い違いではない
+        _end(result, FAILED, "道の一致の検査で比べられた銘柄が無い（本番の予想が出ない）")
+        return
     if not evaluation.path_check.get("passed"):
         outcome = NOT_COMPARABLE
     elif evaluation.decision.won:

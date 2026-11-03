@@ -93,6 +93,8 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(f"{nm}.send_backtest_promotion_rollback", mocks["rollback"])
     mocks["unified"] = unified
     mocks["results"] = results / "backtest_promotion"
+    # 既定では stock_features は今の版で作り直し済み
+    st.save_features_version(_VERSION)
     return mocks
 
 
@@ -100,7 +102,9 @@ def _result_files(env) -> list:
     folder = env["results"]
     if not folder.exists():
         return []
-    return sorted(p for p in folder.glob("*.json") if p.name != "state.json")
+    return sorted(
+        p for p in folder.glob("*.json") if p.name not in ("state.json", "features_version.json")
+    )
 
 
 def _read_json(path) -> dict:
@@ -159,6 +163,56 @@ def _scored_rows(n_days: int, predicted: list[float], actual: list[float]) -> pd
 # ---------------------------------------------------------------------------
 # 評価するかどうか
 # ---------------------------------------------------------------------------
+
+
+def test_stale_features_skip_without_marking_version(env):
+    st.save_features_version("oldcode00000")
+
+    result = job.run_backtest_promotion()
+
+    assert result["outcome"] == "skipped"
+    assert result["reason"] == "特徴量がまだ今のコードで作り直されていない"
+    assert result["features_version"] == "oldcode00000"
+    assert result["result_path"] is None
+    assert st.load_state().last_evaluated_version is None
+    env["train"].assert_not_called()
+    env["result"].assert_not_called()
+    assert _result_files(env) == []
+
+
+def test_missing_features_marker_skips(env):
+    (env["results"] / "features_version.json").unlink()
+
+    result = job.run_backtest_promotion()
+
+    assert result["outcome"] == "skipped"
+    assert result["reason"] == "特徴量がまだ今のコードで作り直されていない"
+    assert st.load_state().last_evaluated_version is None
+    env["train"].assert_not_called()
+
+
+def test_features_marker_equal_to_version_evaluates(env):
+    result = job.run_backtest_promotion()
+
+    assert result["outcome"] == "won"
+    assert result["features_version"] == _VERSION
+    env["train"].assert_called()
+
+
+def test_force_evaluates_with_stale_features(env):
+    st.save_features_version("oldcode00000")
+
+    result = job.run_backtest_promotion(force=True)
+
+    assert result["outcome"] == "won"
+    env["train"].assert_called()
+
+
+def test_result_records_code_version_scope(env):
+    result = job.run_backtest_promotion()
+
+    saved = _read_json(result["result_path"])
+    assert saved["version_scope"] == ["src/prediction", "src/market_data", "config/settings.py"]
 
 
 def test_same_version_is_not_reevaluated(env):
@@ -336,6 +390,21 @@ def test_path_check_failure_is_not_comparable(env):
     assert result["swapped"] is False
     assert st.load_state().last_evaluated_version == _VERSION
     assert env["result"].call_args[0][0]["outcome"] == "not_comparable"
+
+
+def test_path_check_that_compared_nothing_is_failure_and_version_not_marked(env):
+    st.save_state(BacktestPromotionState(last_evaluated_version="previous0000"))
+    evaluation = _evaluation(won=False, passed=False)
+    evaluation.path_check = {"compared": 0, "max_abs_diff": None, "passed": False}
+    env["evaluate"].return_value = evaluation
+
+    result = job.run_backtest_promotion()
+
+    assert result["outcome"] == "failed"
+    assert result["swapped"] is False
+    assert st.load_state().last_evaluated_version == "previous0000"
+    assert env["result"].call_args[0][0]["outcome"] == "failed"
+    assert _read_json(result["result_path"])["evaluation"]["path_check"]["compared"] == 0
 
 
 def test_failure_is_not_recorded_as_loss_and_version_not_marked(env):

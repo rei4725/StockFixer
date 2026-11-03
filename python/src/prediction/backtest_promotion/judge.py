@@ -40,7 +40,7 @@ def judge_win(
         candidate: 候補の baseline_metrics()
         production: production の baseline_metrics()
         daily_diff: 日ごとの（候補 - production）の hit_rate_minus_majority
-        expected_rows: 20 × 対象銘柄数
+        expected_rows: 採点の行の見込み（市場ごとの y のある日の数 × 銘柄の数の合計）
 
     Returns:
         WinDecision（落ちた条件ごとに reasons へ1つ）

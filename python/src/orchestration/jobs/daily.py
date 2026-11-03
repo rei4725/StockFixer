@@ -48,6 +48,28 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+def _current_code_version() -> str | None:
+    """予想のコードの版。出せなければ None（日次の道は止めない）。"""
+    from src.prediction.backtest_promotion import prediction_code_version
+
+    try:
+        return prediction_code_version()
+    except Exception:
+        logger.error("予想のコードの版を出せなかった（特徴量の版の印は書かない）", exc_info=True)
+        return None
+
+
+def _record_features_version(version: str) -> None:
+    """stock_features を作り直したコードの版の印を書く。失敗しても日次の道は止めない。"""
+    from src.prediction.backtest_promotion import save_features_version
+
+    try:
+        save_features_version(version)
+        logger.info("特徴量の版の印を書いた: %s", version)
+    except Exception:
+        logger.error("特徴量の版の印を書けなかった", exc_info=True)
+
+
 def run_daily_pipeline():
     """
     毎日実行: データ取得 → 精度チェック → 予測 → 出力invariant評価
@@ -83,17 +105,23 @@ def run_daily_pipeline():
     from src.watchlist.batch_runner import load_target_symbols
 
     market_totals: Counter[str] = Counter()  # [3/6] の jp の欠けの線にも使う（#1438）
+    # stock_features を作り直すコードの版（夜間の仮の入れ替えが、今の版の特徴量かを見る）
+    features_version = _current_code_version()
+    features_rebuilt = False
     try:
         tasks = load_target_symbols()
         batch_result = run_batch_pipeline(tasks, notification_port=DiscordNotificationAdapter())
         market_totals = Counter(str(getattr(t, "market", "")) for t in tasks)
         _raise_if_fetch_mostly_unavailable(len(tasks), batch_result, market_totals)
+        features_rebuilt = True
         logger.info("[1/6] データ取得完了")
     except Exception as e:
         if _handle_stage_error(
             PipelineStage.CRITICAL, "[1/6] データ取得", e, send_daily_pipeline_error
         ):
             raise
+    if features_rebuilt and features_version is not None:
+        _record_features_version(features_version)
 
     # 2. 前日予測の精度チェック（NON_CRITICAL: 失敗しても後続処理を継続）
     # 3 で当日分の prediction_results を保存する前に読む（Delete-Insert 対策）。

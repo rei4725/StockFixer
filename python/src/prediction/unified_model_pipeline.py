@@ -160,6 +160,10 @@ def drop_rows_reaching_cutoff(df: pd.DataFrame, cutoff: pd.Timestamp) -> pd.Data
     y は次の行の終値で決まる（market_data/technical.py の target）ので、
     銘柄（market, symbol）ごとに日付順で、次の行の日付が cutoff 未満の行だけを残す。
     最後の行（次の行が無い）も落とす。index は元のまま残す。
+
+    load_all_stock_data() が決算の前後の行を先に外すので、その隙間の手前の行は
+    「次の行」が隙間の先になり、締め日より前の行でも少し余分に落ちることがある
+    （落とす側に倒れるだけで、漏れにはならない）。
     """
     if df.empty:
         return df

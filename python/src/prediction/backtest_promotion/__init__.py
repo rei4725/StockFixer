@@ -19,13 +19,16 @@ from src.prediction.backtest_promotion.judge import (
 )
 from src.prediction.backtest_promotion.state import (
     CANDIDATE_NAMES,
+    CODE_VERSION_SCOPE,
     SWAP_PRODUCTION_NAMES,
     clear_watch,
     copy_with_backup,
+    load_features_version,
     load_state,
     prediction_code_version,
     restore_backups,
     results_dir,
+    save_features_version,
     save_state,
     swap_in_candidate,
     unified_model_lock,
@@ -33,6 +36,7 @@ from src.prediction.backtest_promotion.state import (
 
 __all__ = [
     "CANDIDATE_NAMES",
+    "CODE_VERSION_SCOPE",
     "HOLDOUT_TRADING_DAYS",
     "MIN_COVERAGE",
     "PATH_CHECK_SAMPLE",
@@ -49,10 +53,12 @@ __all__ = [
     "judge_rollback",
     "judge_win",
     "latest_holdout_dates",
+    "load_features_version",
     "load_state",
     "prediction_code_version",
     "restore_backups",
     "results_dir",
+    "save_features_version",
     "save_state",
     "swap_in_candidate",
     "unified_model_lock",

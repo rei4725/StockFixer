@@ -124,6 +124,50 @@ def test_cutoff_training_ignores_marked_targets_after_cutoff(monkeypatch, tmp_pa
     assert calls["save_selection"] == []
 
 
+def _make_marked_frame(cutoff: pd.Timestamp, marker: float) -> pd.DataFrame:
+    """締め日以降の行と、y が締め日の終値に届く行（締め日の直前の行）に目印 marker を入れる。"""
+    df = _make_frame(cutoff)
+    boundary = df["date"] == df.loc[df["date"] < cutoff, "date"].max()
+    leak = (df["date"] >= cutoff) | boundary
+    df.loc[leak, ["y", "f1"]] = marker
+    return df
+
+
+def test_cutoff_training_ignores_post_cutoff_and_boundary_rows(monkeypatch, tmp_path):
+    # 目印だけが違う2つのデータで学習し、予想が同じなら目印の行は学習に入っていない
+    # （比べる相手を drop_rows_reaching_cutoff で作らない）
+    cutoff = pd.Timestamp("2026-10-01")
+    plus = _make_marked_frame(cutoff, 1e6)
+    minus = _make_marked_frame(cutoff, -1e6)
+    calls = {"save_selection": [], "split_max": [], "models": []}
+    _setup(monkeypatch, plus, calls)
+    ump.train_unified_model(
+        model_name="plus",
+        save_dir=str(tmp_path / "plus"),
+        train_end_date=cutoff,
+        apply_saved_exclusions=False,
+        save_selection=False,
+    )
+    monkeypatch.setattr(ump, "load_all_stock_data", lambda data_dir=None: minus.copy())
+    ump.train_unified_model(
+        model_name="minus",
+        save_dir=str(tmp_path / "minus"),
+        train_end_date=cutoff,
+        apply_saved_exclusions=False,
+        save_selection=False,
+    )
+
+    # 目印の値そのものも含めて予想させる（学習に入っていれば ±1e6 の側で値が分かれる）
+    probe = pd.concat([plus, minus], ignore_index=True)
+    X_probe = probe[["f1", "f2", "f3"]].assign(market_encoded=0)
+    m_plus, m_minus = calls["models"]
+    pred_plus = np.asarray(m_plus.predict(X_probe))
+    pred_minus = np.asarray(m_minus.predict(X_probe))
+
+    assert np.array_equal(pred_plus, pred_minus)
+    assert np.abs(pred_plus).max() < 1e3
+
+
 def test_save_selection_default_still_saves(monkeypatch, tmp_path):
     cutoff = pd.Timestamp("2026-10-01")
     calls = {"save_selection": [], "split_max": [], "models": []}

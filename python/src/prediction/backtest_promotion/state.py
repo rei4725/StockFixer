@@ -31,8 +31,8 @@ SWAP_PRODUCTION_NAMES = ["UnifiedStockXGBoost", "UnifiedStockLightGBM"]
 
 # python/ の置き場（CWD ではなく、このファイルの場所から決める）
 _PYTHON_DIR = Path(__file__).resolve().parents[3]
-# 予想のコードの版に入れるコードの置き場（python/ からの相対）
-_CODE_VERSION_DIRS = ["src/prediction", "src/market_data"]
+# 予想のコードの版に入れるコードの置き場（python/ からの相対。フォルダか .py のファイル）
+CODE_VERSION_SCOPE = ["src/prediction", "src/market_data", "config/settings.py"]
 
 _LOCK_FILE_NAME = ".unified_models.lock"
 # 同じパスのロックは1つの FileLock を使い回す（同じプロセスの入れ子で詰まらないように）
@@ -51,6 +51,26 @@ def results_dir() -> Path:
 
 def _state_path() -> Path:
     return results_dir() / "state.json"
+
+
+def _features_version_path() -> Path:
+    return results_dir() / "features_version.json"
+
+
+def _write_json_atomic(path: Path, data: dict) -> None:
+    """同じ置き場の一時ファイルに書いてから置き換える。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=f".{path.stem}_", suffix=".json.tmp", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -74,19 +94,7 @@ def load_state() -> BacktestPromotionState:
 
 def save_state(state: BacktestPromotionState) -> None:
     """状態を書く。同じ置き場の一時ファイルに書いてから置き換える。"""
-    path = _state_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(prefix=".state_", suffix=".json.tmp", dir=str(path.parent))
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(asdict(state), f, ensure_ascii=False, indent=2)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, path)
-    except BaseException:
-        if os.path.exists(tmp):
-            os.remove(tmp)
-        raise
+    _write_json_atomic(_state_path(), asdict(state))
 
 
 def clear_watch(reason: str) -> None:
@@ -101,19 +109,45 @@ def clear_watch(reason: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# 特徴量を作り直したコードの版の印
+# ---------------------------------------------------------------------------
+
+
+def save_features_version(version: str) -> None:
+    """stock_features を作り直したコードの版を印のファイルに書く（日次の道が呼ぶ）。"""
+    _write_json_atomic(
+        _features_version_path(), {"version": version, "written_at": now_jst().isoformat()}
+    )
+
+
+def load_features_version() -> str | None:
+    """stock_features を作り直したコードの版。印のファイルが無ければ None。"""
+    path = _features_version_path()
+    if not path.exists():
+        return None
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    version = data.get("version") if isinstance(data, dict) else None
+    return None if version is None else str(version)
+
+
+# ---------------------------------------------------------------------------
 # 予想のコードの版
 # ---------------------------------------------------------------------------
 
 
 def prediction_code_version() -> str:
-    """予想に関わるコード（prediction と market_data の .py）のハッシュの先頭12桁。
+    """予想に関わるコード（CODE_VERSION_SCOPE の .py）のハッシュの先頭12桁。
 
     相対パスの順に、パスと中身を sha256 に入れる。__pycache__ は除く。
     改行は LF にそろえる（チェックアウトの違いで版が変わらないように）。
     """
     files = []
-    for rel_dir in _CODE_VERSION_DIRS:
-        base = _PYTHON_DIR / rel_dir
+    for rel in CODE_VERSION_SCOPE:
+        base = _PYTHON_DIR / rel
+        if base.is_file():
+            files.append((base.relative_to(_PYTHON_DIR).as_posix(), base))
+            continue
         if not base.exists():
             continue
         for path in base.rglob("*.py"):

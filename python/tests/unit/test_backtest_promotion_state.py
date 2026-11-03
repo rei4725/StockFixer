@@ -314,6 +314,22 @@ def test_state_round_trip_and_atomic_write(dirs, monkeypatch):
     assert os.listdir(results / "backtest_promotion") == ["state.json"]
 
 
+def test_features_version_round_trip(dirs):
+    _, results = dirs
+    assert st.load_features_version() is None
+
+    st.save_features_version("abc123def456")
+
+    assert st.load_features_version() == "abc123def456"
+    saved = json.loads(
+        (results / "backtest_promotion" / "features_version.json").read_text("utf-8")
+    )
+    assert saved["version"] == "abc123def456"
+    assert "written_at" in saved
+    # 一時ファイルは残さない
+    assert [p.name for p in (results / "backtest_promotion").iterdir()] == ["features_version.json"]
+
+
 def test_clear_watch(dirs):
     st.save_state(
         BacktestPromotionState(last_evaluated_version="v1", watch={"version": "v1", "backups": []})
@@ -368,9 +384,27 @@ def test_code_version_changes_only_with_prediction_or_market_data_code(tmp_path,
     assert st.prediction_code_version() != after_md
 
 
+def test_code_version_includes_settings(tmp_path, monkeypatch):
+    root = tmp_path / "python"
+    for rel in ["src/prediction/a.py", "config/settings.py", "config/other.py"]:
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text(f"# {rel}\n", encoding="utf-8")
+    monkeypatch.setattr(st, "_PYTHON_DIR", root)
+    base = st.prediction_code_version()
+
+    # config/ のほかのファイルは版を変えない
+    (root / "config/other.py").write_text("changed\n", encoding="utf-8")
+    assert st.prediction_code_version() == base
+
+    (root / "config/settings.py").write_text("changed\n", encoding="utf-8")
+    assert st.prediction_code_version() != base
+    assert "config/settings.py" in st.CODE_VERSION_SCOPE
+
+
 def test_code_version_uses_module_location():
     """既定の置き場は python/ （CWD ではない）"""
     assert (st._PYTHON_DIR / "src" / "prediction" / "backtest_promotion" / "state.py").exists()
+    assert all((st._PYTHON_DIR / rel).exists() for rel in st.CODE_VERSION_SCOPE)
     assert len(st.prediction_code_version()) == 12
 
 

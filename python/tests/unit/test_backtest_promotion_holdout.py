@@ -216,6 +216,9 @@ def test_path_check_ignores_live_none(monkeypatch):
     assert ev.path_check["compared"] == 0
     assert ev.path_check["passed"] is False
     assert ev.decision.won is False
+    # 食い違いではなく、比べられなかったと分かる理由にする
+    assert "道の一致の検査で比べられた銘柄が無い（本番の予想が出ない）" in ev.decision.reasons
+    assert "道の一致の検査に落ちた" not in ev.decision.reasons
 
 
 def test_degraded_candidate_cannot_win(monkeypatch):
@@ -336,3 +339,46 @@ def test_degraded_candidate_on_row_production_failed_still_blocks_win(monkeypatc
     assert ev.skipped_rows["production_error"] == 1
     assert ev.degraded_rows["candidate"] == 1
     assert ev.decision.won is False
+
+
+def test_expected_rows_follow_each_markets_dates(monkeypatch):
+    # jp だけ 9 日休場（行が無い）。日は jp と us を合わせた 20 日なので、
+    # 20 日 × 2 銘柄 = 40 の 80%（32）だと jp の休場だけで負ける。市場ごとに数えれば勝てる
+    holiday = set(_dates()[3:12])
+    jp = _features(0)
+    jp = jp[~jp["date"].isin(holiday)].reset_index(drop=True)
+    _patch(monkeypatch, extra={("jp", "1111"): jp})
+    ev = evaluate_holdout(_dates(), _models(1.0), _models(-1.0), _live_matching())
+    assert ev.candidate["n_baseline"] == 31
+    assert ev.markets == {
+        "jp": {"n_symbols": 1, "n_dates": 11, "expected_rows": 11},
+        "us": {"n_symbols": 1, "n_dates": 20, "expected_rows": 20},
+    }
+    assert ev.expected_rows == 31
+    assert ev.decision.won is True, ev.decision.reasons
+
+
+def test_path_check_samples_each_market(monkeypatch):
+    # 銘柄は jp が先に並ぶ。上限 2 を市場で分け、jp と us から 1 銘柄ずつ確かめる
+    extra = {("jp", "2222"): _features(0), ("jp", "3333"): _features(0)}
+    _patch(monkeypatch, extra=extra)
+    monkeypatch.setattr(holdout, "PATH_CHECK_SAMPLE", 2)
+    asked: list = []
+    live = _live_matching()
+
+    def _live(market: str, symbol: str) -> Optional[PredictionResult]:
+        asked.append((market, symbol))
+        return live(market, symbol) if (market, symbol) in SYMBOLS else None
+
+    ev = evaluate_holdout(_dates(), _models(1.0), _models(-1.0), _live)
+    assert asked == [("jp", "1111"), ("us", "AAA")]
+    assert ev.path_check["compared"] == 2
+    assert ev.path_check["compared_by_market"] == {"jp": 1, "us": 1}
+
+
+def test_path_check_quotas_split_evenly_in_market_order(monkeypatch):
+    universe = [("jp", "1"), ("jp", "2"), ("us", "A")]
+    monkeypatch.setattr(holdout, "PATH_CHECK_SAMPLE", 3)
+    assert holdout._path_check_quotas(universe) == {"jp": 2, "us": 1}
+    monkeypatch.setattr(holdout, "PATH_CHECK_SAMPLE", 50)
+    assert holdout._path_check_quotas(universe) == {"jp": 25, "us": 25}

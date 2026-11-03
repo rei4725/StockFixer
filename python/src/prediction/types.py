@@ -119,10 +119,12 @@ class HoldoutEvaluation:
         cutoff: 締め日（取っておいた期間の先頭の日、YYYY-MM-DD）
         dates: 取っておいた日（YYYY-MM-DD、古い順）
         n_symbols: 取っておいた期間に y の入った行を持つ (market, symbol) の数
+        expected_rows: 採点の行の見込み（markets の expected_rows の合計。覆う割合の分母）
+        markets: 市場ごとの n_symbols・n_dates（y のある日の数）・expected_rows
         candidate: 候補の baseline_metrics()（両方の予想がそろった行だけ）
         production: production の baseline_metrics()（同じ行）
         daily: 日ごとの date・candidate・production・diff（hit_rate_minus_majority）
-        path_check: 道の一致の検査の compared・max_abs_diff・passed
+        path_check: 道の一致の検査の compared・max_abs_diff・passed・compared_by_market
         recorded_reference: prediction_accuracy の production の記録との突き合わせ（参考のみ）
         decision: 勝ちの判定
         degraded_rows: モデルが欠けて予想した行の数（candidate・production）
@@ -139,6 +141,8 @@ class HoldoutEvaluation:
     path_check: dict
     recorded_reference: dict
     decision: WinDecision
+    expected_rows: int = 0
+    markets: dict = field(default_factory=dict)
     degraded_rows: dict = field(default_factory=dict)
     skipped_rows: dict = field(default_factory=dict)
     weights: dict = field(default_factory=dict)
