@@ -24,7 +24,8 @@ def dirs(tmp_path, monkeypatch):
     (models / "unified").mkdir(parents=True)
     results.mkdir()
     monkeypatch.setattr("src.utils.data_path_utils.get_models_dir", lambda: str(models))
-    monkeypatch.setattr("src.utils.data_path_utils.get_results_dir", lambda: str(results))
+    # 定義元の差し替えは、この間に初めて import した消費先に残るので環境変数で向ける
+    monkeypatch.setenv("STOCKFIXER_RESULTS_DIR", str(results))
     return models / "unified", results
 
 

@@ -68,7 +68,8 @@ def env(tmp_path, monkeypatch):
     unified.mkdir(parents=True)
     results.mkdir()
     monkeypatch.setattr("src.utils.data_path_utils.get_models_dir", lambda: str(models))
-    monkeypatch.setattr("src.utils.data_path_utils.get_results_dir", lambda: str(results))
+    # 定義元の差し替えは、この間に初めて import した消費先に残るので環境変数で向ける
+    monkeypatch.setenv("STOCKFIXER_RESULTS_DIR", str(results))
     for prod, cand in zip(st.SWAP_PRODUCTION_NAMES, st.CANDIDATE_NAMES):
         (unified / f"{prod}.joblib").write_bytes(f"old {prod}".encode())
         (unified / f"{cand}.joblib").write_bytes(f"new {prod}".encode())
