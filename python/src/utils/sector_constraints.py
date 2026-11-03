@@ -4,7 +4,6 @@ from functools import lru_cache
 
 import yfinance as yf
 
-from src.domain.sector_cap import filter_by_sector_cap as filter_by_sector_cap  # noqa: F401
 from src.utils.data_path_utils import get_ticker
 from src.utils.logger import get_logger
 

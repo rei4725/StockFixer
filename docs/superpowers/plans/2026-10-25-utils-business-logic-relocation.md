@@ -281,9 +281,9 @@ def test_domain_imports_nothing_outside_domain():
 - Delete: `python/tests/unit/test_utils_shims.py`
 - Modify: その時点で古い場所を import している `src/`・`tests/` のファイル
 
-- [ ] **Step 1:** `git fetch && git switch develop && git pull --ff-only` の後、古い場所を使っている箇所を一覧にする。
+- [x] **Step 1:** `git fetch && git switch develop && git pull --ff-only` の後、古い場所を使っている箇所を一覧にする。
   Run: `git grep -nE "utils(\.| import )(regime_weights|jp_market_holidays)|utils\.sector_constraints import .*filter_by_sector_cap" -- src tests`
   Expected: 一覧が出る（無くてもよい）。開いた PR も Task 0 の Step 2 の式で確かめ、該当があれば PR 番号を PR 5 の本文に書く。
-- [ ] **Step 2:** Step 1 の箇所を新しい場所へ書き換え、上の Files を消す・直す。
-- [ ] **Step 3:** Step 1 のコマンドが何も出さないこと、`py -m pytest tests/unit/test_utils_allowlist.py -v` が PASS（`stale` にならない）ことを確かめる。
-- [ ] **Step 4:** `.\check-ci.ps1` が全部 PASS。コミット `refactor: utils の転送を消す`、push して PR 5 を作り、CI が緑ならマージする。
+- [x] **Step 2:** Step 1 の箇所を新しい場所へ書き換え、上の Files を消す・直す。
+- [x] **Step 3:** Step 1 のコマンドが何も出さないこと、`py -m pytest tests/unit/test_utils_allowlist.py -v` が PASS（`stale` にならない）ことを確かめる。
+- [x] **Step 4:** `.\check-ci.ps1` が全部 PASS。コミット `refactor: utils の転送を消す`、push して PR 5 を作り、CI が緑ならマージする。
