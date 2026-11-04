@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
 import pandas as pd
@@ -172,6 +172,21 @@ def load_rule_best_history(market: str) -> pd.DataFrame:
         )
 
 
+def load_rule_outcomes_scored(market: str, start: datetime, end: datetime) -> pd.DataFrame:
+    """scored_at が [start, end) に入った採点の行を返す（時刻は UTC の naive）。"""
+    ensure_scoring_tables()
+    with _db_connection() as con:
+        return pd.read_sql(
+            """
+            SELECT * FROM rule_signal_outcomes
+            WHERE market = %s AND scored_at >= %s AND scored_at < %s
+            ORDER BY signal_date, symbol, horizon
+            """,
+            con,
+            params=[market, start, end],
+        )
+
+
 # ---------------------------------------------------------------------------
 # 書き込み
 # ---------------------------------------------------------------------------
@@ -260,7 +275,11 @@ def _py(v: Any) -> Any:
 
 
 def upsert_rule_outcomes(df: pd.DataFrame) -> int:
-    """採点結果を主キーで上書き保存する。渡した行数を返す。"""
+    """採点結果を主キーで上書き保存する。渡した行数を返す。
+
+    scored_at は初めて採点した時刻として残し、上書きしない（週の集計が
+    「その週に採点が増えた分」を scored_at で切るため）。
+    """
     if df.empty:
         return 0
     ensure_scoring_tables()
@@ -269,7 +288,7 @@ def upsert_rule_outcomes(df: pd.DataFrame) -> int:
     updates = ", ".join(
         f"{c} = EXCLUDED.{c}"
         for c in _OUTCOME_COLS
-        if c not in ("signal_date", "market", "symbol", "horizon")
+        if c not in ("signal_date", "market", "symbol", "horizon", "scored_at")
     )
     sql = (
         f"INSERT INTO rule_signal_outcomes ({', '.join(_OUTCOME_COLS)})"  # nosec B608
@@ -277,6 +296,6 @@ def upsert_rule_outcomes(df: pd.DataFrame) -> int:
         f" ON CONFLICT (signal_date, market, symbol, horizon) DO UPDATE SET {updates}"
     )
     with _db_connection() as con:
-        for row in rows:
-            con.execute(sql, row)
+        with con.cursor() as cur:
+            cur.executemany(sql, rows)
     return len(rows)

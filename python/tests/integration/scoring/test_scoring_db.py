@@ -132,3 +132,28 @@ def test_read_app_version_strips_bom(tmp_path: Path):
     p.write_bytes(b"\xef\xbb\xbf2.37.0\n")
     assert read_app_version(p) == "2.37.0"
     assert read_app_version(tmp_path / "missing") is None
+
+
+def test_upsert_rule_outcomes_keeps_first_scored_at():
+    sdb.ensure_scoring_tables()
+    first = datetime(2026, 11, 3, 1, 0, 0)
+    row = {
+        "signal_date": D,
+        "market": "jp",
+        "symbol": "7203",
+        "rule_name": "r1",
+        "signal": 1,
+        "horizon": 5,
+        "hit": True,
+        "baseline": 0.5,
+        "signed_return": 0.01,
+        "app_version": None,
+        "scored_at": first,
+    }
+    other = {**row, "symbol": "6758", "scored_at": datetime(2026, 11, 10, 1, 0, 0)}
+    assert sdb.upsert_rule_outcomes(pd.DataFrame([row, other])) == 2
+    sdb.upsert_rule_outcomes(pd.DataFrame([{**row, "scored_at": datetime(2026, 11, 4, 1, 0, 0)}]))
+    got = sdb.load_rule_outcomes_scored("jp", datetime(2026, 11, 3), datetime(2026, 11, 4))
+    assert list(got["symbol"]) == ["7203"]
+    assert got["scored_at"].iloc[0] == pd.Timestamp(first)
+    assert sdb.load_rule_outcomes_scored("us", datetime(2026, 11, 1), datetime(2026, 12, 1)).empty
