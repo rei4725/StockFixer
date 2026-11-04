@@ -4,14 +4,14 @@ import pandas as pd
 
 from src.backtest.data_port import get_backtest_data_port
 from src.backtest.execution import ExecutionModel, TradingCosts, lot_size_for
+from src.backtest.execution_inputs import build_execution_inputs
 from src.backtest.limit_fill import LimitFillModel
 from src.backtest.mark_to_market import build_equity_curves, mark_to_market
 from src.backtest.metrics import compute_cost_comparison_metrics
 from src.backtest.position_sizing import calc_position_details
 from src.backtest.task import BacktestTask, ReturnRegressionTask
-
-# 動的スリッページの平均出来高算出ウィンドウ（バー数）— #494
-_AVG_VOL_WINDOW = 20
+from src.backtest.volatility_overlay import VolatilityOverlay
+from src.domain.volatility_sizing import VolatilitySizingParams
 
 
 class Backtester:
@@ -40,6 +40,8 @@ class Backtester:
         execution_lag: int = 1,
         include_monte_carlo: bool = False,
         limit_order_fill: bool = True,
+        volatility_size_params: Optional[VolatilitySizingParams] = None,
+        volatility_stop_params: Optional[VolatilitySizingParams] = None,
     ):
         self.model_manager = model_manager
         self.signal_generator = signal_generator
@@ -73,6 +75,9 @@ class Backtester:
         # #1418: 本番の予想のシグナルは流動性の低い銘柄を指値で出すため、既定で指値の判定を当てる。
         # 本番が成行で出すルールの発注（rule_execution）のバックテストは False で翌バーの始値に戻す
         self.limit_order_fill = limit_order_fill
+        # #1547: 値動きの見込みの量と損切りの線。既定は off（None か enabled=False）
+        self.volatility_size_params = volatility_size_params
+        self.volatility_stop_params = volatility_stop_params
 
     def _get_slippage(self, qty: int, price: float, volume: float = 0.0) -> float:
         """有効スリッページ率を返す（#494）。
@@ -138,6 +143,7 @@ class Backtester:
         signal: pd.Series,
         pred: Optional[pd.Series] = None,
         collect_equity: bool = False,
+        volatility_closes: Optional[pd.Series] = None,
     ) -> tuple[pd.DataFrame, dict[str, Any]]:
         """
         仮想売買シミュレーションを実行する。
@@ -152,6 +158,7 @@ class Backtester:
                 equity（net）を載せる。複数銘柄のポートフォリオ equity を合成する
                 用途向け。既定 False では従来どおり載せない（metrics を JSON/DB に
                 そのまま流す既存経路に Series が混入しないようにするため）。
+            volatility_closes: 値動きの見込みを作る終値。df より前の足を含められる。None なら df の終値。
 
         Returns:
             (result_df, metrics) のタプル
@@ -170,42 +177,19 @@ class Backtester:
         equity_records: list[tuple[Any, float, float]] = []
 
         close_col = "Close" if "Close" in df.columns else "close"
-        # #494: 動的スリッページ用の平均出来高系列（Volume 列が無ければ全て0でフラットのみ適用）
-        if "Volume" in df.columns:
-            avg_vol = df["Volume"].rolling(_AVG_VOL_WINDOW, min_periods=1).mean()
-        else:
-            avg_vol = pd.Series(0.0, index=df.index)
-        # #493: 実行ラグ。シグナル/確信度を execution_lag バー遅延させ、翌バーで約定する。
-        # 約定価格は翌バー始値(Open)。Open 列が無ければ Close にフォールバック。
-        # SL/TP の判定と mark-to-market は当バー Close 基準。SL/TP の約定は翌バー始値（#964）。
-        # 最終バーまでに約定先バーが無いシグナルは shift により自然に破棄される。
-        exec_col = "Open" if (self.execution_lag > 0 and "Open" in df.columns) else close_col
-        if self.execution_lag > 0:
-            exec_signal = signal.reindex(df.index).shift(self.execution_lag)
-            exec_pred = (
-                pred.reindex(df.index).shift(self.execution_lag) if pred is not None else None
-            )
-        else:
-            exec_signal = signal
-            exec_pred = pred
-        # シグナル約定（execution_lag > 0 なら翌バー始値）のコスト・サイジングには、
-        # 約定時点で既知の前バーまでの平均出来高を使う（当バー出来高の先読みを防ぐ）。
-        # 先頭バーは前バーが無いため 0（フラットのみ適用）。SL/TP の翌バー決済も同じ exec_avg_vol を使う。
-        if self.execution_lag > 0:
-            exec_avg_vol = avg_vol.shift(1).fillna(0.0)
-        else:
-            exec_avg_vol = avg_vol
-        # #800: ATR サイジングも約定時点で既知の前バーまでの ATR を使う。
-        # atr_lag1 があれば各行の前バー ATR としてそのまま使い（file/api/raw で同じ意味）、
-        # 無ければ当バー高安引けを含む atr を 1 本ずらす。同バー約定は当バー atr のまま。
-        exec_atr: Optional[pd.Series] = None
-        if self.execution_lag > 0:
-            if "atr_lag1" in df.columns:
-                exec_atr = df["atr_lag1"]
-            elif "atr" in df.columns:
-                exec_atr = df["atr"].shift(1)
-        elif "atr" in df.columns:
-            exec_atr = df["atr"]
+        inputs = build_execution_inputs(df, signal, pred, close_col, self.execution_lag)
+        avg_vol, exec_avg_vol = inputs.avg_vol, inputs.exec_avg_vol
+        exec_col, exec_signal = inputs.exec_col, inputs.exec_signal
+        exec_pred, exec_atr = inputs.exec_pred, inputs.exec_atr
+        # #1547: 値動きの見込みの量と損切りの線。off なら量も線も今のまま
+        overlay = VolatilityOverlay(
+            self.volatility_size_params,
+            self.volatility_stop_params,
+            df[close_col] if volatility_closes is None else volatility_closes,
+            df.index,
+            self.execution,
+        )
+        position_stop_pct = self.stop_loss_pct
 
         # #964: execution_lag > 0 では SL/TP を当バー Close で判定し、決済は翌バーの
         # exec_price（始値、無ければ終値）と exec_vol で行う。判定済みの決済の種類を持ち越す。
@@ -265,7 +249,7 @@ class Backtester:
             if self.execution_lag == 0 and position > 0 and position_price > 0:
                 change_from_entry = (price - position_price) / position_price
 
-                if self.stop_loss_pct is not None and change_from_entry <= -self.stop_loss_pct:
+                if position_stop_pct is not None and change_from_entry <= -position_stop_pct:
                     proceeds = self.execution.sell_proceeds(position, price, vol)
                     proceeds_gross = position * price
                     cash += proceeds
@@ -377,8 +361,9 @@ class Backtester:
                     atr_value=atr_value,
                     volume=exec_vol,
                 )
-                qty = position_details["qty"]
+                qty = overlay.scale_qty(position_details["qty"], date, cash, exec_price, exec_vol)
                 if qty > 0:
+                    position_stop_pct = overlay.stop_loss_pct(self.stop_loss_pct, date)
                     cost = self.execution.buy_cost(qty, exec_price, exec_vol)
                     cost_gross = qty * exec_price
                     cash -= cost
@@ -430,7 +415,7 @@ class Backtester:
                     atr_value=atr_value,
                     volume=exec_vol,
                 )
-                qty = position_details["qty"]
+                qty = overlay.scale_qty(position_details["qty"], date, cash, exec_price, exec_vol)
                 if qty > 0:
                     short_position = qty
                     short_price = exec_price
@@ -451,7 +436,7 @@ class Backtester:
             # 寄りの約定を当バーの終値で取り消さない（終値は寄りの時点で分からない）。
             if self.execution_lag > 0 and position > 0 and position_price > 0:
                 change_from_entry = (price - position_price) / position_price
-                if self.stop_loss_pct is not None and change_from_entry <= -self.stop_loss_pct:
+                if position_stop_pct is not None and change_from_entry <= -position_stop_pct:
                     pending_exit = "stop_loss"
                 elif self.take_profit_pct is not None and change_from_entry >= self.take_profit_pct:
                     pending_exit = "take_profit"

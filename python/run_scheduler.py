@@ -133,6 +133,13 @@ def job_weekly_rule_evaluation():
     run_weekly_rule_evaluation()
 
 
+def job_weekly_volatility_sizing_compare():
+    """週次実行 (日曜 13:00): 値動きに合わせた量と損切りの線の比べを results/ に書く"""
+    from src.orchestration.scheduler import run_weekly_volatility_sizing_compare
+
+    run_weekly_volatility_sizing_compare()
+
+
 def job_daily_rule_signals():
     """日次実行 (平日 16:30): 最優秀ルールによるシグナル生成 + ペーパートレード発注"""
     from src.orchestration.scheduler import run_daily_rule_signals
@@ -412,6 +419,21 @@ SCHEDULE_CONFIG = {
         "recovery_delay_minutes": 60,
         "max_executions_per_period": 1,
         "description": "毎週日曜 02:00 - 全銘柄ルールバックテスト評価",
+        "rerun_if_interrupted": True,
+    },
+    # 発注の無い日曜の昼間。週の最適化の補完（水曜から週末まで）の後ろで、夜中の評価・バックアップ・
+    # 工場・配分の定時とも2時間ごとの30分の昇格の確かめとも重ならない。比べは発注を変えない（#1547）
+    "weekly_volatility_sizing_compare": {
+        "func": job_weekly_volatility_sizing_compare,
+        "trigger": "cron",
+        "period": "weekly",
+        "day_of_week": "sun",
+        "hour": 13,
+        "minute": 0,
+        "recovery_delay_minutes": 30,
+        "max_executions_per_period": 1,
+        "max_retries": 0,
+        "description": "毎週日曜 13:00 - 値動きに合わせた量と損切りの線の比べ",
         "rerun_if_interrupted": True,
     },
     "daily_rule_signals": {
