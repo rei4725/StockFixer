@@ -465,6 +465,36 @@ class TestRunClaudeTraderCompositionRoot(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIs(captured.get("market_data"), adapter.return_value)
 
+    def _run_main_with_errors(self, errors):
+        import run_claude_trader
+
+        stats = {"buy_orders": 0, "sell_orders": 0, "skipped": 0, "errors": errors}
+        with patch("config.settings.CLAUDE_TRADER_ENABLED", True), patch(
+            "src.trading.claude_agent.run_claude_trader", return_value=stats
+        ), patch.object(run_claude_trader, "build_broker", return_value=MagicMock()), patch(
+            "src.orchestration.jobs.prediction_saved_marker.read_prediction_saved_day",
+            return_value="20261030",
+        ), patch(
+            "src.infrastructure.yfinance_market_data_adapter.YFinanceMarketDataAdapter"
+        ), patch.object(
+            run_claude_trader, "logger"
+        ) as logger:
+            rc = run_claude_trader.main(["--mode", "paper", "--market", "jp"])
+        return rc, logger
+
+    def test_main_returns_1_when_errors(self):
+        # #1550: 注文の失敗を成功に見せない（run_auto_trade と同じ形）
+        rc, logger = self._run_main_with_errors(1)
+
+        self.assertEqual(rc, 1)
+        logger.error.assert_called_once()
+
+    def test_main_returns_0_without_errors(self):
+        rc, logger = self._run_main_with_errors(0)
+
+        self.assertEqual(rc, 0)
+        logger.error.assert_not_called()
+
 
 class TestRunRuleSignalsCompositionRoot(unittest.TestCase):
     def test_main_injects_postgres_trade_diff_sink(self):
