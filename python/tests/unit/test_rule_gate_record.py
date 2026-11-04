@@ -116,10 +116,14 @@ class TestRuleGateRecord(unittest.TestCase):
         record_gate=True,
         allow_new_buys=True,
         pending_buys_error=None,
+        positions_error=None,
+        broker=None,
         **kwargs,
     ):
-        broker = _broker()
+        broker = broker or _broker()
         broker.get_positions.return_value.append(_HELD_5202)
+        if positions_error is not None:
+            broker.get_positions.side_effect = positions_error
         if pending_buys_error is not None:
             broker.get_pending_buy_symbols = MagicMock(side_effect=pending_buys_error)
         patches = _patches(gate, corr, extra)
@@ -202,6 +206,64 @@ class TestRuleGateRecord(unittest.TestCase):
         self.assertEqual(record["skip_reasons"], {"new_buy_step_error": 1, "no_signal": 1})
         self.assertEqual(record["buy_orders"], 0)
         self.assertEqual(record["sell_orders"], 1)
+
+    def test_positions_read_failure_day_is_recorded_before_raise(self):
+        """保有を読めない日も、注文を出さず、記録を書いてから同じ例外を投げる（#1549）"""
+        error = RuntimeError("positions down")
+        broker = _broker()
+        with self.assertRaises(RuntimeError) as caught:
+            self._run(_ALLOWED, _CORR_OK, positions_error=error, broker=broker)
+        self.assertIs(caught.exception, error)
+        broker.send_order.assert_not_called()
+        record = _read()
+        self.assertIn("positions down", record["new_buy_step_error"])
+        self.assertIsNone(record["risk_gate_allowed"])
+        self.assertIsNone(record["correlation_gate_allowed"])
+        self.assertEqual(record["skip_reasons"], {})
+        self.assertEqual(record["buy_orders"], 0)
+        self.assertEqual(record["sell_orders"], 0)
+        self.assertEqual(record["skipped"], 0)
+        self.assertEqual(record["errors"], 0)
+
+    def test_positions_read_failure_day_records_null_for_held_lists(self):
+        """保有を読めない日の保有の一覧と数は null で、判定した日の空と 0 と分ける（#1549）"""
+        with self.assertRaisesRegex(RuntimeError, "positions down"):
+            self._run(
+                _ALLOWED,
+                _CORR_OK,
+                positions_error=RuntimeError("positions down"),
+                unavailable_symbols=_UNAVAILABLE,
+            )
+        record = _read()
+        self.assertIsNone(record["unjudged_held_symbols"])
+        self.assertIsNone(record["unjudged_held_count"])
+        self.assertIsNone(record["unavailable_held_symbols"])
+        self.assertIsNone(record["unavailable_held_count"])
+        # 保有に関わらない、出せなかった銘柄の一覧と数はそのまま写す
+        self.assertEqual(record["unavailable_symbols"], [_NG_HELD_ROW, _NG_NOT_HELD_ROW])
+        self.assertEqual(record["unavailable_count"], 2)
+
+    def test_positions_read_failure_not_recorded_unless_asked(self):
+        """record_gate=False の呼び手では、保有を読めない日も書かない（#1549）"""
+        with self.assertRaisesRegex(RuntimeError, "positions down"):
+            self._run(
+                _ALLOWED,
+                _CORR_OK,
+                record_gate=False,
+                positions_error=RuntimeError("positions down"),
+            )
+        self.assertFalse(os.path.exists(_rule_path()))
+
+    def test_positions_read_failure_write_failure_raises_original_error(self):
+        """記録の書き込みが落ちても、元の例外がそのまま投げられる（#1549）"""
+        error = RuntimeError("positions down")
+        failing = patch(
+            "src.trading.execution.gate_record._write_record", side_effect=OSError("disk full")
+        )
+        with self.assertLogs("src.trading.execution.gate_record", level="ERROR"):
+            with self.assertRaises(RuntimeError) as caught:
+                self._run(_ALLOWED, _CORR_OK, extra=(failing,), positions_error=error)
+        self.assertIs(caught.exception, error)
 
     def test_does_not_overwrite_morning_record(self):
         """同じ日の 8:50 の記録のファイルを上書きしない"""

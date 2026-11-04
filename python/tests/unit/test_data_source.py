@@ -121,6 +121,18 @@ class TestYFinanceDataSource(unittest.TestCase):
         self.assertFalse(result.empty)
 
     @patch("src.market_data.yfinance_source.yf_client")
+    def test_get_forex_data_passes_next_day_as_end(self, mock_yf_client):
+        """yfinance の end は exclusive なので、指定した日の足まで取るよう翌日を渡すこと"""
+        mock_yf_client.download.return_value = pd.DataFrame(
+            {"Close": [150.0]}, index=pd.date_range("2023-01-01", periods=1)
+        )
+        ds = YFinanceDataSource()
+        ds.get_forex_data("JPY=X", "2023-01-01", "2023-03-31")
+        mock_yf_client.download.assert_called_once_with(
+            "JPY=X", start="2023-01-01", end="2023-04-01", auto_adjust=True
+        )
+
+    @patch("src.market_data.yfinance_source.yf_client")
     def test_get_forex_data_raises_on_empty(self, mock_yf_client):
         mock_yf_client.download.return_value = pd.DataFrame()
         ds = YFinanceDataSource()

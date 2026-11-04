@@ -387,6 +387,7 @@ def run_claude_trader(
         broker.get_token()
     except BrokerError as e:
         logger.error("[claude_agent] トークン取得失敗: %s", e, exc_info=True)
+        stats["errors"] += 1
         return stats
 
     risk = RiskManager(broker, market=market)
