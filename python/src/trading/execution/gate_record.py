@@ -7,6 +7,7 @@ results/orders/rule/<JST の日付>.json（8:50 の記録を上書きしない�
 16:30 の記録にはシグナルを出せなかった銘柄と、そのうち保有中の銘柄の一覧と数も写す（#1520）。
 その日のルールの判定の対象に入らなかった保有の一覧と数も写す（#1527）。
 8:50 にトークンを取れなかった朝は、その失敗を token_error に写す（#1533）。
+手順が例外で途中で落ちた朝は、その例外を entry_error に写す（#1548）。
 書き込みの失敗は ERROR のログで知らせ、発注は止めない。
 """
 
@@ -197,9 +198,25 @@ def finish_order_run(
 
     token_error はトークンを取れなかった朝の失敗で、記録に書くだけで投げ直さない（#1533）。
     """
+    stats["order_record_written"] = True  # ここから投げる例外を record_failed_run が書き直さない
     save_order_gate_record(
         stats, market=market, mode=mode, entry_error=entry_error, token_error=token_error
     )
     if entry_error is not None:
         raise entry_error
     return stats
+
+
+def record_failed_run(
+    stats: OrderExecutionStats, error: Exception, *, market: str, mode: str
+) -> None:
+    """finish_order_run より前に抜けた例外を、その回の記録として1回だけ書く（#1548）。
+
+    書くのは例外までに stats に入った分である。呼び出し元が同じ例外を投げ直す。
+    書き込みの失敗は save_order_gate_record の中で止まるので、元の例外は変わらない。
+    """
+    if stats["order_record_written"]:
+        return
+    logger.error("[exec] 発注の手順が例外で途中で止まった: %r", error, exc_info=error)
+    stats["order_record_written"] = True
+    save_order_gate_record(stats, market=market, mode=mode, entry_error=error)
