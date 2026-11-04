@@ -42,7 +42,7 @@ from src.utils.logger import get_logger
 
 from .entry_gates import _block_entries, _evaluate_entry_gate
 from .freshness import _block_new_if_stale
-from .gate_record import finish_order_run
+from .gate_record import finish_order_run, held_without_prediction
 from .params import (
     _SPLIT_LOW_CONFIDENCE,
     _apply_split_qty,
@@ -120,10 +120,10 @@ def run_daily_orders(
             predictions = _attach_dynamic_thresholds(predictions)
             predictions = apply_multi_horizon_score_column(predictions)
             held_symbols = _get_held_symbols(broker)
-    except Exception:
+    except Exception as exc:
         logger.error("[exec] SL/TP より前の手順に失敗。SL/TP の決済だけ行う", exc_info=True)
         _sl_tp_exits_only(broker, market, mode, market_data, stats, trade_diff_sink, gate_status)
-        raise
+        return finish_order_run(stats, market=market, mode=mode, entry_error=exc)
     if held_symbols is None:
         # SL/TP は予測を使わないので決済だけは走らせ、新規と売りシグナルの決済は飛ばす（#1049）
         logger.warning(
@@ -157,13 +157,13 @@ def run_daily_orders(
         predictions["effective_buy_threshold"].min() * 100,
         predictions["effective_buy_threshold"].max() * 100,
     )
-
     stats.update(
         {
             "daily_loss": gate_status.daily_loss,
             "daily_loss_limit": gate_status.daily_loss_limit,
             "n_held_symbols": len(held_symbols),
             "held_symbols_list": sorted(held_symbols),
+            "held_without_prediction_symbols": held_without_prediction(predictions, held_symbols),
             "correlation_blocked": not corr_gate.is_allowed,
             "enc": corr_gate.enc,
             "avg_correlation": corr_gate.avg_correlation,
