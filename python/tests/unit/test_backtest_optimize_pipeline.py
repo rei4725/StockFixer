@@ -426,6 +426,91 @@ class TestSaveOptimalParamsJson(unittest.TestCase):
 class TestRunOptimizeBatch(unittest.TestCase):
     """run_optimize_batch のテスト"""
 
+    def setUp(self):
+        # 計算の前の特徴量の確かめは、既定では全銘柄に行があるものとする
+        patcher = patch(
+            "src.backtest.optimizer.batch.load_stock_features",
+            return_value=pd.DataFrame({"y": [0.01]}),
+        )
+        self.mock_features = patcher.start()
+        self.addCleanup(patcher.stop)
+
+    @patch("src.backtest.optimizer.batch.save_optimal_params_json")
+    @patch("src.backtest.optimizer.batch.save_optimization_results")
+    @patch("src.backtest.optimizer.batch.run_optimization")
+    def test_no_features_skips_without_grid(self, mock_run, mock_save, mock_json):
+        """特徴量の無い銘柄はグリッドを回さず skipped で、ある銘柄は計算と保存が変わらないこと（#1579）"""
+        from src.backtest.optimizer import run_optimize_batch
+        from src.domain.types import SymbolTask
+
+        good_df = pd.DataFrame({"threshold": [0.02], "sharpe_ratio": [1.5]})
+        self.mock_features.side_effect = lambda market, symbol, **kwargs: (
+            None if symbol == "VYLR" else pd.DataFrame({"y": [0.01]})
+        )
+        mock_run.return_value = good_df
+        mock_save.return_value = "/tmp/results.csv"
+        mock_json.return_value = "/tmp/params.json"
+
+        with self.assertLogs("src.backtest.optimizer.batch", level="WARNING") as logs:
+            results = run_optimize_batch(
+                [SymbolTask(market="us", symbol="VYLR"), SymbolTask(market="us", symbol="AAPL")],
+                model_type="XGBoostModel",
+                max_workers=1,
+            )
+
+        by_symbol = {r["symbol"]: r for r in results}
+        self.assertEqual(by_symbol["VYLR"], {"market": "us", "symbol": "VYLR", "status": "skipped"})
+        self.assertEqual(by_symbol["AAPL"], {"market": "us", "symbol": "AAPL", "status": "success"})
+        self.assertEqual([c.kwargs["symbol"] for c in mock_run.call_args_list], ["AAPL"])
+        mock_save.assert_called_once_with(good_df, "us", "AAPL")
+        mock_json.assert_called_once_with(good_df, "us", "AAPL", sort_by="sharpe_ratio")
+        self.assertEqual(self.mock_features.call_count, 2)
+        vylr_logs = [r for r in logs.records if "us/VYLR" in r.getMessage()]
+        self.assertEqual([r.levelname for r in vylr_logs], ["WARNING"])
+
+    @patch("src.backtest.optimizer.batch.run_optimization")
+    def test_feature_check_failure_counts_as_error(self, mock_run):
+        """特徴量の確かめが例外で落ちる日は skipped にせず error に数えること（#1579）"""
+        from src.backtest.optimizer import run_optimize_batch
+        from src.domain.types import SymbolTask
+
+        self.mock_features.side_effect = RuntimeError("接続できません")
+
+        results = run_optimize_batch(
+            [SymbolTask(market="us", symbol="AAPL")],
+            model_type="XGBoostModel",
+            max_workers=1,
+        )
+
+        self.assertEqual(
+            results,
+            [{"market": "us", "symbol": "AAPL", "status": "error", "error": "接続できません"}],
+        )
+        self.assertEqual(self.mock_features.call_args.kwargs, {"raise_on_error": True})
+        mock_run.assert_not_called()
+
+    @patch("src.backtest.optimizer.batch.save_optimal_params_json")
+    @patch("src.backtest.optimizer.batch.save_optimization_results")
+    @patch("src.backtest.optimizer.batch.run_optimization")
+    def test_other_source_does_not_check_features(self, mock_run, mock_save, mock_json):
+        """stock_features を読まない source では確かめずに今までどおり計算すること（#1579）"""
+        from src.backtest.optimizer import run_optimize_batch
+        from src.domain.types import SymbolTask
+
+        mock_run.return_value = pd.DataFrame({"threshold": [0.02], "sharpe_ratio": [1.5]})
+        mock_save.return_value = "/tmp/results.csv"
+        mock_json.return_value = "/tmp/params.json"
+
+        results = run_optimize_batch(
+            [SymbolTask(market="us", symbol="AAPL")],
+            model_type="XGBoostModel",
+            source="api",
+            max_workers=1,
+        )
+
+        self.assertEqual(results[0]["status"], "success")
+        self.mock_features.assert_not_called()
+
     @patch("src.backtest.optimizer.batch.save_optimal_params_json")
     @patch("src.backtest.optimizer.batch.save_optimization_results")
     @patch("src.backtest.optimizer.batch.run_optimization")
