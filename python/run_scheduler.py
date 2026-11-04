@@ -219,9 +219,12 @@ def job_regime_leverage_daily_margin():
 
 def job_nightly_backtest_promotion():
     """毎日 22:00 - 予想のコードが変わったらバックテストで候補を評価し暫定昇格"""
-    from src.orchestration.scheduler import run_backtest_promotion
+    from src.orchestration.scheduler import (
+        raise_if_backtest_promotion_failed,
+        run_backtest_promotion,
+    )
 
-    run_backtest_promotion()
+    raise_if_backtest_promotion_failed(run_backtest_promotion())
 
 
 # ── イベントリスナー ──────────────────────────────────
