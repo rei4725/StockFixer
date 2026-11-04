@@ -5,6 +5,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import MagicMock, patch
 
+from src.orchestration.job_errors import NonRetryableJobError
 from src.rule_engine.types import RuleSignalBatch, UnavailableRuleSymbol
 
 
@@ -150,6 +151,93 @@ class TestRunDailyRuleSignalsOrderErrors(unittest.TestCase):
         execute, notify = self._run({"buy_orders": 1, "sell_orders": 1, "skipped": 0, "errors": 0})
         execute.assert_called_once()
         notify.assert_called_once()
+
+
+class TestRunDailyRuleSignalsNoEffectiveRules(unittest.TestCase):
+    """有効ルールが0銘柄の日は、記録と知らせの後にジョブを失敗にする（#1571）。"""
+
+    @staticmethod
+    def _targets(batch: RuleSignalBatch, execute: MagicMock) -> list:
+        return [
+            patch("src.rule_engine.pipeline.generate_rule_signals", return_value=batch),
+            patch("src.trading.rule_execution.execute_rule_paper_trades", execute),
+            patch("src.infrastructure.yfinance_market_data_adapter.YFinanceMarketDataAdapter"),
+            patch("src.infrastructure.persistence.trade_diff_repository.PostgresTradeDiffSink"),
+            patch("src.orchestration.jobs.daily._skip_if_jp_market_closed", return_value=False),
+        ]
+
+    def _run(self, batch: RuleSignalBatch, notify_target: str, notify: MagicMock) -> MagicMock:
+        from src.orchestration.jobs import daily
+
+        execute = MagicMock(return_value={"buy_orders": 0, "sell_orders": 0})
+        patches = self._targets(batch, execute) + [patch(notify_target, notify)]
+        for p in patches:
+            p.start()
+        try:
+            daily.run_daily_rule_signals()
+        finally:
+            for p in reversed(patches):
+                p.stop()
+        return execute
+
+    def test_raises_after_recording_and_notifying(self):
+        order = MagicMock()
+        order.execute.return_value = {"buy_orders": 0, "sell_orders": 0}
+        from src.orchestration.jobs import daily
+
+        patches = self._targets(RuleSignalBatch(), order.execute) + [
+            patch("src.reporting.discord.discord_utils.send_rule_daily_signals", order.notify)
+        ]
+        for p in patches:
+            p.start()
+        try:
+            with self.assertLogs("src.orchestration.jobs.unavailable_gates", level="ERROR"):
+                with self.assertRaisesRegex(NonRetryableJobError, "有効ルールが0銘柄"):
+                    daily.run_daily_rule_signals()
+        finally:
+            for p in reversed(patches):
+                p.stop()
+        self.assertEqual([c[0] for c in order.mock_calls], ["execute", "notify"])
+        # 記録の道（record_gate）を通し、ルールの判定と新規の許しは変えない
+        self.assertEqual(order.execute.call_args.kwargs["signals"], [])
+        self.assertTrue(order.execute.call_args.kwargs["record_gate"])
+        self.assertTrue(order.execute.call_args.kwargs["allow_new_buys"])
+
+    def test_raises_even_when_notification_fails(self):
+        notify = MagicMock(side_effect=RuntimeError("webhook down"))
+        with self.assertRaises(NonRetryableJobError):
+            self._run(
+                RuleSignalBatch(),
+                "src.reporting.discord.discord_utils.send_rule_daily_signals",
+                notify,
+            )
+
+    def test_body_says_not_judged_instead_of_all_hold(self):
+        webhook = MagicMock(return_value=True)
+        with self.assertRaises(NonRetryableJobError):
+            self._run(
+                RuleSignalBatch(), "src.reporting.discord.discord_utils.send_webhook_text", webhook
+            )
+        webhook.assert_called_once()
+        body = webhook.call_args.args[0]
+        self.assertIn("有効ルールが0銘柄のため判定できず", body)
+        self.assertNotIn("全銘柄 HOLD", body)
+
+    def test_all_hold_day_with_targets_succeeds_with_hold_text(self):
+        batch = RuleSignalBatch(
+            signals=[
+                {"symbol": f"H{i}", "rule": "rsi_contrarian", "signal": 0, "price": 100.0}
+                for i in range(2)
+            ],
+            total=2,
+        )
+        webhook = MagicMock(return_value=True)
+        execute = self._run(batch, "src.reporting.discord.discord_utils.send_webhook_text", webhook)
+        execute.assert_called_once()
+        webhook.assert_called_once()
+        body = webhook.call_args.args[0]
+        self.assertIn("本日はシグナルなし（全銘柄 HOLD）", body)
+        self.assertNotIn("判定できず", body)
 
 
 class TestDailyRuleSignalsScheduleIsNotRetried(unittest.TestCase):

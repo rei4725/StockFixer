@@ -282,6 +282,15 @@ class TestOrderGateRecord(unittest.TestCase):
         self.assertIsNone(record["held_without_prediction_symbols"])
         self.assertIsNone(record["held_without_prediction_count"])
 
+    def test_empty_predictions_records_stale_reason(self):
+        """予測が空の日は理由が記録に入り、ゲートの判定は変えない（#1572）"""
+        stats, _ = self._run(_ALLOWED, _CORR_OK, predictions=pd.DataFrame())
+        record = self._read()
+        self.assertIn("production の予想の行が0件", stats["stale_prediction_reason"])
+        self.assertEqual(record["stale_prediction_reason"], stats["stale_prediction_reason"])
+        self.assertFalse(record["trading_stopped"])
+        self.assertIsNone(record["stop_reason"])
+
     def test_read_failure_day_is_recorded_before_same_raise(self):
         """予測か保有を読めない日も、SL/TP を1回出して記録を書き、同じ例外を投げる（#1530）"""
         error = RuntimeError("read down")

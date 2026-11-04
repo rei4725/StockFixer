@@ -8,6 +8,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from src.orchestration.jobs.daily import run_daily_settle_orders
+from src.orchestration.jobs.settle_notify import raise_if_settle_errors
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -32,6 +33,8 @@ def run_daily_settle_retry(now: datetime | None = None) -> None:
     毎営業日 9:15〜9:55 実行: 据え置いた pending 注文の約定をやり直す。
     約定待ちが無ければ約定の処理を動かさない。締めの回で残れば WARNING と知らせを1回出す。
     注文は取り消さない（残った注文は翌営業日まで据え置く）。
+    締めの回に例外の注文が残れば、知らせの後にジョブを失敗にする。締めより前の回は後の回が
+    約定し直すので失敗にせず、当日の行が無いだけの据え置きも失敗にしない（#1565）。
     """
     now_jst = (now or datetime.now(_JST)).astimezone(_JST)
     is_final = (now_jst.hour, now_jst.minute) >= SETTLE_RETRY_CUTOFF_JST
@@ -66,3 +69,4 @@ def run_daily_settle_retry(now: datetime | None = None) -> None:
         send_webhook_notification("⚠️ ペーパートレード約定待ちの残り", message, color=0xFFA500)
     except Exception as e:
         logger.error("約定待ちの残りの通知失敗: %s", e, exc_info=True)
+    raise_if_settle_errors(errors)

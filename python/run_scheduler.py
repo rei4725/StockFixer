@@ -79,9 +79,10 @@ def job_daily_horizon_exit():
 
 def job_daily_settle_orders():
     """毎営業日 9:05 - ペーパートレード pending 注文を当日始値で約定処理"""
+    from src.orchestration.jobs.settle_notify import raise_if_settle_errors
     from src.orchestration.scheduler import run_daily_settle_orders
 
-    run_daily_settle_orders()
+    raise_if_settle_errors(run_daily_settle_orders())
 
 
 def job_daily_settle_orders_retry():
@@ -219,9 +220,12 @@ def job_regime_leverage_daily_margin():
 
 def job_nightly_backtest_promotion():
     """毎日 22:00 - 予想のコードが変わったらバックテストで候補を評価し暫定昇格"""
-    from src.orchestration.scheduler import run_backtest_promotion
+    from src.orchestration.scheduler import (
+        raise_if_backtest_promotion_failed,
+        run_backtest_promotion,
+    )
 
-    run_backtest_promotion()
+    raise_if_backtest_promotion_failed(run_backtest_promotion())
 
 
 # ── イベントリスナー ──────────────────────────────────

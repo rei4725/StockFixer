@@ -8,13 +8,16 @@
 import json
 import os
 from contextlib import ExitStack
+from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
 from filelock import Timeout
 
+from src.orchestration.job_errors import NonRetryableJobError
 from src.orchestration.jobs import backtest_promotion_job as job
+from src.orchestration.scheduler_queue import SchedulerQueueManager
 from src.prediction.backtest_promotion import state as st
 from src.prediction.types import BacktestPromotionState, HoldoutEvaluation, WinDecision
 from src.reporting.discord.notifications_model import (
@@ -766,7 +769,8 @@ def test_weekly_training_lock_timeout_notifies_and_does_not_train(env, monkeypat
     mock_send = MagicMock()
     with ExitStack() as stack:
         _weekly_patches(stack, mock_train, {"promoted": [], "skipped": []}, mock_send)
-        run_weekly_training()
+        with pytest.raises(NonRetryableJobError, match="ロック"):
+            run_weekly_training()
 
     mock_train.assert_not_called()
     assert mock_send.call_count == 1
@@ -820,9 +824,134 @@ def test_schedule_config_has_nightly_backtest_promotion():
 def test_schedule_job_calls_run_backtest_promotion():
     import run_scheduler
 
-    with patch("src.orchestration.scheduler.run_backtest_promotion") as run:
+    result = {"outcome": "lost", "lock_timeout": False}
+    with patch("src.orchestration.scheduler.run_backtest_promotion", return_value=result) as run:
         run_scheduler.SCHEDULE_CONFIG["nightly_backtest_promotion"]["func"]()
     run.assert_called_once_with()
+
+
+def _queue_manager(job_id: str, tmp_path, notifier=None) -> SchedulerQueueManager:
+    """本番の SCHEDULE_CONFIG の job_id の設定のままのキューを作る。"""
+    from run_scheduler import SCHEDULE_CONFIG
+
+    return SchedulerQueueManager(
+        {job_id: SCHEDULE_CONFIG[job_id]},
+        state_file_path=str(tmp_path / "queue_state.json"),
+        error_notifier=notifier,
+    )
+
+
+def _saved_statuses(tmp_path) -> list:
+    saved = json.loads((tmp_path / "queue_state.json").read_text(encoding="utf-8"))
+    return [e["status"] for e in saved["events"]]
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        {"outcome": "failed", "lock_timeout": False, "reason": "見張りの判定に失敗"},
+        {"outcome": "skipped", "lock_timeout": True, "reason": "統合モデルのロックが取れない"},
+    ],
+)
+@patch("src.orchestration.scheduler_queue.time.sleep")
+def test_nightly_job_failure_is_recorded_as_error_once(mock_sleep, result, tmp_path):
+    """failed とロック切れは error で記録し、heartbeat を失敗にして、呼び直さない（#1564）"""
+    notifier = MagicMock()
+    manager = _queue_manager("nightly_backtest_promotion", tmp_path, notifier)
+
+    with (
+        patch("src.orchestration.scheduler.run_backtest_promotion", return_value=result) as run,
+        patch("src.orchestration.scheduler_queue.ping_heartbeat") as ping,
+        pytest.raises(NonRetryableJobError, match=result["reason"]),
+    ):
+        manager.run_job("nightly_backtest_promotion", reason="scheduled", force=True)
+
+    run.assert_called_once_with()
+    mock_sleep.assert_not_called()
+    ping.assert_called_once_with("nightly_backtest_promotion", success=False)
+    notifier.assert_called_once()
+    statuses = _saved_statuses(tmp_path)
+    assert "retry" not in statuses
+    assert statuses[-1] == "error"
+
+
+@pytest.mark.parametrize(
+    "outcome,reason",
+    [
+        ("won", None),
+        ("lost", "MAE が production より小さくない"),
+        ("not_comparable", "道の一致の検査に落ちた"),
+        ("skipped", "この版はもう比べた"),
+    ],
+)
+def test_nightly_job_without_failure_is_recorded_as_success(outcome, reason, tmp_path):
+    result = {"outcome": outcome, "lock_timeout": False, "reason": reason}
+    notifier = MagicMock()
+    manager = _queue_manager("nightly_backtest_promotion", tmp_path, notifier)
+
+    with (
+        patch("src.orchestration.scheduler.run_backtest_promotion", return_value=result),
+        patch("src.orchestration.scheduler_queue.ping_heartbeat") as ping,
+    ):
+        manager.run_job("nightly_backtest_promotion", reason="scheduled", force=True)
+
+    ping.assert_called_once_with("nightly_backtest_promotion", success=True)
+    notifier.assert_not_called()
+    assert _saved_statuses(tmp_path)[-1] == "success"
+
+
+def test_nightly_job_records_error_after_writing_result_and_notifying(env, tmp_path):
+    """本物の夜間ジョブで評価が落ちても、JSON と知らせを出してから error にし、学習し直さない"""
+    env["evaluate"].side_effect = RuntimeError("評価が落ちた")
+    manager = _queue_manager("nightly_backtest_promotion", tmp_path)
+
+    with (
+        patch("src.orchestration.scheduler_queue.ping_heartbeat"),
+        pytest.raises(NonRetryableJobError, match="評価が落ちた"),
+    ):
+        manager.run_job("nightly_backtest_promotion", reason="scheduled", force=True)
+
+    assert env["train"].call_count == 2
+    env["result"].assert_called_once()
+    assert len(_result_files(env)) == 1
+    assert _saved_statuses(tmp_path)[-1] == "error"
+
+
+@patch("src.orchestration.scheduler_queue.time.sleep")
+def test_weekly_training_lock_timeout_is_error_and_recovers_same_day(
+    mock_sleep, env, monkeypatch, tmp_path
+):
+    """週次学習のロック切れは error で記録し、呼び直さず、同じ日の補完に乗る（#1564）"""
+    lock = MagicMock()
+    lock.acquire.side_effect = Timeout("lock")
+    monkeypatch.setattr(
+        "src.prediction.backtest_promotion.state.unified_model_lock", lambda *a, **k: lock
+    )
+    job_id = "weekly_model_training"
+    notifier = MagicMock()
+    manager = _queue_manager(job_id, tmp_path, notifier)
+    # 2026-11-03 は定時の曜日の火曜。定時は 01:00、補完の待ちは 15 分
+    now = datetime(2026, 11, 3, 1, 20, tzinfo=manager.tz)
+    period_key = manager._build_period_key(manager.schedule_config[job_id], now)
+
+    mock_train = MagicMock()
+    with (
+        ExitStack() as stack,
+        patch("src.orchestration.scheduler_queue.ping_heartbeat") as ping,
+    ):
+        _weekly_patches(stack, mock_train, {"promoted": [], "skipped": []}, MagicMock())
+        with pytest.raises(NonRetryableJobError):
+            manager.run_job(job_id, reason="scheduled", period_key=period_key)
+
+    lock.acquire.assert_called_once()
+    mock_train.assert_not_called()
+    mock_sleep.assert_not_called()
+    ping.assert_called_once_with(job_id, success=False)
+    notifier.assert_called_once()
+    statuses = _saved_statuses(tmp_path)
+    assert "retry" not in statuses
+    assert statuses[-1] == "error"
+    assert manager.should_recover(job_id, now=now) is True
 
 
 def test_cli_passes_flags_and_prints_result_path(capsys):

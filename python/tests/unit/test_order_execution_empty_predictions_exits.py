@@ -15,6 +15,7 @@ from src.infrastructure.in_memory import (
     InMemoryPredictionRepository,
     InMemoryTradeDiffSink,
 )
+from src.orchestration.jobs.stale_prediction_notice import notify_stale_prediction
 from src.trading.brokers.base import BrokerBase, OrderSide
 from src.trading.execution import run_daily_orders
 from src.trading.types import TradingGateStatus
@@ -112,6 +113,23 @@ class TestEmptyPredictionsStillExits(unittest.TestCase):
         stats, _ = self._run([])
         self.assertEqual(stats["daily_loss"], _ALLOWED_GATE.daily_loss)
         self.assertEqual(stats["daily_loss_limit"], _ALLOWED_GATE.daily_loss_limit)
+
+    def test_notice_says_prediction_sells_not_judged(self):
+        """予測が空の日は知らせが1回出て、予想の売りを判定していないことが本文で分かる（#1572）"""
+        positions = [
+            {"symbol": "9000", "qty": 100, "avg_price": 1000.0, "current_price": 900.0},
+        ]
+        stats, _ = self._run(positions)
+        with patch(
+            "src.infrastructure.discord_notification_adapter.DiscordNotificationAdapter"
+        ) as adapter:
+            notify_stale_prediction(stats)
+        send_alert = adapter.return_value.send_alert
+        send_alert.assert_called_once()
+        body = send_alert.call_args.args[1]
+        self.assertIn("production の予想の行が0件", body)
+        self.assertIn("予想の売りを判定していない", body)
+        self.assertIn("売り=1 件", body)
 
 
 if __name__ == "__main__":
