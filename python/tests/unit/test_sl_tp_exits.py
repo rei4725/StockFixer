@@ -219,6 +219,79 @@ class TestCheckSlTpShortExits(unittest.TestCase):
         with self.assertRaises(AttributeError):
             self._run(broker, stats)
 
+    def test_short_read_error_is_raised_after_long_stop_is_sent(self):
+        # 空売りを読めない日も買い持ちの SL は出し、その後に同じ例外で失敗にする（#1567）
+        positions = [{"symbol": "7203", "qty": 100, "avg_price": 1000.0, "current_price": 940.0}]
+        broker = _make_broker(positions)
+        error = AttributeError("split adjust broken")
+        broker.get_short_positions.side_effect = error
+        stats = _make_stats()
+
+        with self.assertLogs("src.trading.execution.sl_tp", level="ERROR"):
+            with self.assertRaises(AttributeError) as raised:
+                self._run(broker, stats)
+
+        self.assertIs(raised.exception, error)
+        broker.send_order.assert_called_once_with(
+            "7203", OrderSide.SELL, 100, price=0.0, order_type=OrderType.MARKET
+        )
+        self.assertEqual(stats["sell_orders"], 1)
+
+
+class TestSlTpOneSymbolError(unittest.TestCase):
+    """1銘柄の判定が落ちても、残りの保有の SL/TP を判定する（#1567）"""
+
+    @staticmethod
+    def _params(_market, symbol):
+        # 7203 だけ win_rate が null で、RiskManager の float() が TypeError を投げる
+        win_rate = None if symbol == "7203" else 0.5
+        return {"stop_loss_pct": 0.05, "take_profit_pct": 0.10, "metrics": {"win_rate": win_rate}}
+
+    def _run(self, broker, stats):
+        with patch("src.trading.risk_manager.get_optimal_params", side_effect=self._params):
+            with patch("src.trading.execution.sl_tp._record_order"):
+                with self.assertLogs("src.trading.execution.sl_tp", level="ERROR") as logs:
+                    triggered = _check_sl_tp_exits(
+                        broker, "jp", "paper", MagicMock(), stats, InMemoryTradeDiffSink()
+                    )
+        return triggered, logs
+
+    def test_risk_manager_error_on_first_holding_still_stops_second(self):
+        positions = [
+            {"symbol": "7203", "qty": 100, "avg_price": 1000.0, "current_price": 940.0},
+            {"symbol": "9984", "qty": 200, "avg_price": 1000.0, "current_price": 940.0},
+        ]
+        broker = _make_broker(positions)
+        stats = _make_stats()
+
+        triggered, logs = self._run(broker, stats)
+
+        broker.send_order.assert_called_once_with(
+            "9984", OrderSide.SELL, 200, price=0.0, order_type=OrderType.MARKET
+        )
+        self.assertEqual(triggered, {"9984"})
+        self.assertEqual(stats["errors"], 1)
+        self.assertEqual(stats["sell_orders"], 1)
+        self.assertTrue(any("7203" in m for m in logs.output))
+
+    def test_broken_holding_row_still_stops_next_short(self):
+        # 保有の行の値が数にならない銘柄も数えて飛ばし、後の空売りの SL を出す
+        positions = [{"symbol": "9000", "qty": "abc", "avg_price": 1000.0, "current_price": 940.0}]
+        shorts = [
+            {"symbol": "6758", "qty": 100, "avg_short_price": 1000.0, "current_price": 1060.0}
+        ]
+        broker = _make_broker(positions, short_positions=shorts)
+        stats = _make_stats()
+
+        triggered, logs = self._run(broker, stats)
+
+        broker.send_order.assert_called_once_with(
+            "6758", OrderSide.SHORT_COVER, 100, price=0.0, order_type=OrderType.MARKET
+        )
+        self.assertEqual(triggered, {"6758"})
+        self.assertEqual(stats["errors"], 1)
+        self.assertTrue(any("9000" in m for m in logs.output))
+
 
 class TestCheckSlTpExits(unittest.TestCase):
     def _patch_risk(self, sl=False, tp=False, reason=""):
