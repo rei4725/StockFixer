@@ -244,7 +244,14 @@ def test_backtest_gap_approx_flag() -> None:
     gap = report["backtest_gap"]
     assert set(gap) == {"rsi", "bollinger"}
     assert gap["rsi"]["approx"] is True
-    assert set(gap["rsi"]) == {"backtest_win_rate", "live_hit_rate_h5", "n_h5", "approx"}
+    assert set(gap["rsi"]) == {
+        "backtest_win_rate",
+        "live_hit_rate_h5",
+        "n_h5",
+        "n_unmatched",
+        "approx",
+    }
+    assert gap["rsi"]["n_unmatched"] == 0 and gap["bollinger"]["n_unmatched"] == 0
     assert abs(gap["bollinger"]["backtest_win_rate"] - 0.6) < 1e-9
     assert gap["bollinger"]["live_hit_rate_h5"] == 0.0
 
@@ -262,6 +269,24 @@ def test_backtest_gap_uses_history_when_covered() -> None:
     # 10-01 より前のシグナルは 0.9、以後は 0.8 が当たるので、その間の値になる
     assert 0.8 < gap["backtest_win_rate"] < 0.9
     assert report["backtest_gap"]["rsi"]["approx"] is True
+
+
+def test_backtest_gap_counts_unmatched() -> None:
+    # B の評価は 10-01 までは rsi、10-01 から bollinger。9 月の B の bollinger は数えず n_unmatched へ
+    hist = _best_history(
+        [
+            (date(2026, 8, 1), "B", "rsi", 0.9),
+            (date(2026, 10, 1), "B", "bollinger", 0.8),
+        ]
+    )
+    report, rows = build_rule_accuracy("jp", AS_OF, loaders=_loaders(best_history=hist))
+    gap = report["backtest_gap"]["bollinger"]
+    n_sept = len(_bdays("2026-09-01", "2026-09-30"))
+    n_all = int(((rows["rule_name"] == "bollinger") & (rows["horizon"] == 5)).sum())
+    assert gap["n_unmatched"] == n_sept
+    assert gap["n_h5"] == n_all - n_sept
+    assert abs(gap["backtest_win_rate"] - 0.8) < 1e-9
+    assert report["backtest_gap"]["rsi"]["n_unmatched"] == 0
 
 
 def test_rerun_same_output() -> None:

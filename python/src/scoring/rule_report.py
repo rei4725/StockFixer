@@ -245,7 +245,8 @@ def _backtest_gap(
 
     シグナルの日以前で一番新しい rule_best_history の評価を当てる。その銘柄に評価が
     まだ無いシグナルは今の rule_best_by_symbol を当て、approx を立てる。
-    評価のルールがシグナルのルールと違う行は、勝率が無いので数えない。
+    評価のルールがシグナルのルールと違う行は、勝率が無いので数えない（その数を
+    n_unmatched に出す）。
     """
     h5 = rule_scored[rule_scored["horizon"] == ANCHOR_HORIZON]
     rules = sorted(h5["key"].unique())
@@ -274,6 +275,7 @@ def _backtest_gap(
         m.loc[approx, "best_rule"] = fb.loc[approx, "best_rule"]
         m.loc[approx, "win_rate"] = fb.loc[approx, "win_rate"]
     m = m.assign(approx=approx)
+    unmatched = m[m["best_rule"].notna() & (m["best_rule"] != m["key"])]["key"].value_counts()
     m = m[(m["best_rule"] == m["key"]) & m["win_rate"].notna()]
     out: dict[str, Any] = {}
     for r in rules:
@@ -283,6 +285,7 @@ def _backtest_gap(
             "backtest_win_rate": _num(sub["win_rate"].astype(float).mean()) if n else None,
             "live_hit_rate_h5": float(sub["hit"].astype(float).mean()) if n else None,
             "n_h5": n,
+            "n_unmatched": int(unmatched.get(r, 0)),
             "approx": bool(sub["approx"].any()) if n else True,
         }
     return out
