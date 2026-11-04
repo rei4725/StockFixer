@@ -105,7 +105,7 @@ def run_daily_orders(
                 f"トークン取得に失敗したため本日の発注をスキップします。\n{e}",
                 level=AlertLevel.ERROR,
             )
-        return stats
+        return finish_order_run(stats, market=market, mode=mode, token_error=e)  # #1533
 
     risk = RiskManager(broker, market=market)
     lot = get_lot_size(market)
