@@ -32,8 +32,25 @@ def _random_closes(n: int = 120) -> pd.Series:
 
 
 class TestForecastVolatility:
-    def test_constant_daily_move_is_recovered(self) -> None:
-        assert forecast_volatility(_alternating_closes(0.03)) == pytest.approx(0.03)
+    def test_default_is_sample_std_of_last_20_daily_log_returns(self) -> None:
+        closes = _random_closes()
+        log_returns = np.diff(np.log(closes.to_numpy()))
+        expected = float(np.std(log_returns[-20:], ddof=1))
+        assert forecast_volatility(closes) == pytest.approx(expected)
+
+    def test_series_matches_std_of_trailing_window_at_each_t(self) -> None:
+        closes = _random_closes()
+        log_returns = np.diff(np.log(closes.to_numpy()))
+        series = forecast_volatility_series(closes)
+        for t in (20, 21, 60, 119):
+            expected = float(np.std(log_returns[t - 20 : t], ddof=1))
+            assert float(series.iloc[t]) == pytest.approx(expected)
+
+    def test_close_older_than_the_window_does_not_change_forecast(self) -> None:
+        closes = _random_closes()
+        changed = closes.copy()
+        changed.iloc[:-21] = changed.iloc[:-21] * 3.0
+        assert forecast_volatility(changed) == pytest.approx(forecast_volatility(closes))
 
     def test_value_at_t_equals_value_from_closes_up_to_t(self) -> None:
         closes = _random_closes()
@@ -57,7 +74,8 @@ class TestForecastVolatility:
 
     def test_exactly_enough_observations_gives_value(self) -> None:
         closes = _alternating_closes(0.02, n=DEFAULT_VOLATILITY_SIZING.min_observations)
-        assert forecast_volatility(closes) == pytest.approx(0.02)
+        expected = float(np.std(np.diff(np.log(closes)), ddof=1))
+        assert forecast_volatility(closes) == pytest.approx(expected)
 
     def test_one_observation_short_gives_none(self) -> None:
         closes = _alternating_closes(0.02, n=DEFAULT_VOLATILITY_SIZING.min_observations - 1)
@@ -79,10 +97,32 @@ class TestForecastVolatility:
     def test_flat_price_gives_none(self) -> None:
         assert forecast_volatility([1000.0] * 40) is None
 
-    def test_bad_close_is_not_bridged_into_a_return(self) -> None:
+    def test_flat_tail_after_moves_gives_none(self) -> None:
+        closes = _alternating_closes(0.02) + [1000.0] * 21
+        assert forecast_volatility(closes) is None
+
+    @pytest.mark.parametrize("bad_close", [0.0, -1.0, float("nan"), float("inf")])
+    @pytest.mark.parametrize("position", [-1, -10, -21])
+    def test_bad_close_in_window_gives_none(self, bad_close: float, position: int) -> None:
         closes = _alternating_closes(0.02)
-        closes[-10] = 0.0  # 0 を欠けとして扱い、前後の大きなリターンを作らない
-        assert forecast_volatility(closes) == pytest.approx(0.02)
+        closes[position] = bad_close
+        assert forecast_volatility(closes) is None
+
+    def test_bad_close_out_of_window_is_ignored(self) -> None:
+        closes = _alternating_closes(0.02)
+        expected = forecast_volatility(closes)
+        closes[-22] = 0.0
+        assert forecast_volatility(closes) == pytest.approx(expected)
+
+    def test_bad_close_is_not_bridged_into_a_return(self) -> None:
+        # 要る数を窓より減らすと欠けを除いて計算する。欠けの前後のリターンは作らない
+        params = VolatilitySizingParams(min_observations=15)
+        closes = _alternating_closes(0.02)
+        log_returns = np.diff(np.log(closes))
+        closes[-10] = 0.0
+        kept = np.delete(log_returns[-20:], [10, 11])
+        expected = float(np.std(kept, ddof=1))
+        assert forecast_volatility(closes, params=params) == pytest.approx(expected)
 
 
 class TestPositionSize:
@@ -148,12 +188,16 @@ class TestParams:
     def test_default_is_off(self) -> None:
         assert DEFAULT_VOLATILITY_SIZING.enabled is False
 
+    def test_default_window_is_20_days(self) -> None:
+        assert DEFAULT_VOLATILITY_SIZING.volatility_window == 20
+        assert DEFAULT_VOLATILITY_SIZING.min_observations == 20
+
     @pytest.mark.parametrize(
         "kwargs",
         [
-            {"ewma_lambda": 1.0},
-            {"ewma_lambda": 0.0},
+            {"volatility_window": 1},
             {"min_observations": 0},
+            {"min_observations": 21},
             {"target_daily_volatility": 0.0},
             {"min_scale": 0.0},
             {"min_scale": 3.0},

@@ -3,6 +3,9 @@
 backtest と trading の両 BC から比べに使えるよう domain に置く。既定は off で、どの発注の道からも
 まだ呼んでいない。on にするかは、バックテストの比べの数字が出てから決める。
 
+見込みは、過去20日の日次リターンの標準偏差をそのまま使う基準である（#1526 の下調べで効きを測った
+ものと同じ定義）。学習したモデルなどの別の見込みを足すのは、この基準より良い場合だけとする。
+
 値が足りない銘柄の既定の扱い: 見込みは None になり、量は補正せず（倍率 1.0）、損切りの線は
 渡された固定の率のままにする。荒いかどうか分からない銘柄を、見込みなしで増やしも減らしもしない。
 
@@ -27,8 +30,8 @@ class VolatilitySizingParams:
 
     Attributes:
         enabled: 補正の切り替え。False なら量も損切りの線も今のまま。
-        ewma_lambda: 指数加重の減衰率（0 より大きく 1 より小さい）。
-        min_observations: 見込みを出すのに要る日次リターンの数。
+        volatility_window: 標準偏差を取る窓の長さ（日次リターンの数）。
+        min_observations: 窓の中で見込みを出すのに要る日次リターンの数（窓の長さ以下）。
         target_daily_volatility: 倍率が 1.0 になる1日の値動き（率）。
         min_scale: 量の倍率の下限。
         max_scale: 量の倍率の上限。
@@ -37,7 +40,7 @@ class VolatilitySizingParams:
     """
 
     enabled: bool = False
-    ewma_lambda: float = 0.94
+    volatility_window: int = 20
     min_observations: int = 20
     target_daily_volatility: float = 0.02
     min_scale: float = 0.25
@@ -46,10 +49,10 @@ class VolatilitySizingParams:
     max_stop_loss_pct: float = 0.30
 
     def __post_init__(self) -> None:
-        if not 0.0 < self.ewma_lambda < 1.0:
-            raise ValueError(f"ewma_lambda は 0 と 1 の間: {self.ewma_lambda}")
-        if self.min_observations < 1:
-            raise ValueError(f"min_observations は 1 以上: {self.min_observations}")
+        if self.volatility_window < 2:
+            raise ValueError(f"volatility_window は 2 以上: {self.volatility_window}")
+        if not 1 <= self.min_observations <= self.volatility_window:
+            raise ValueError(f"min_observations は 1 以上で窓の長さ以下: {self.min_observations}")
         if self.target_daily_volatility <= 0.0:
             raise ValueError(f"target_daily_volatility は正: {self.target_daily_volatility}")
         if not 0.0 < self.min_scale <= self.max_scale:
@@ -68,28 +71,30 @@ def forecast_volatility_series(
     *,
     params: VolatilitySizingParams = DEFAULT_VOLATILITY_SIZING,
 ) -> pd.Series:
-    """各時点の1日の値動きの見込み（日次対数リターンの EWMA 標準偏差）を返す。
+    """各時点の1日の値動きの見込み（過去の窓の日次対数リターンの標本標準偏差）を返す。
 
     t の値は t までの終値だけで作る（後ろ向きの計算だけで先読みが無い）。t の終値で約定する比べには、
-    1日ずらして使う。平均は 0 とみなす。
+    1日ずらして使う。標準偏差は窓の中の平均を引く標本の式（ddof=1）で計算する。
+
+    0以下・NaN・無限の終値は欠けとして扱い、その前後のリターンを作らない。窓の長さはリターンの
+    時点の数で数え、欠けを飛ばして窓を過去へ広げない。既定は窓の長さと要る数が同じ 20 なので、
+    窓の中に欠けが1つでもある時点は NaN になる（終値の欠けは2つのリターンを消すため、欠けが窓を
+    抜けるまで21時点が NaN）。min_observations を窓の長さより小さくすると、窓の中の残りの
+    リターンが足りる時点は、それらだけで計算する。
 
     Args:
         closes: 終値。古い順に並べる。
-        params: 減衰率と要る観測数を読む。
+        params: 窓の長さと要る観測数を読む。
 
     Returns:
         closes と同じ長さの Series。観測が足りない時点は NaN。
-        0以下・NaN・無限の終値は欠けとして扱い、その前後のリターンを作らない。
     """
     series = pd.Series(closes, dtype=float)
     valid = series.where(np.isfinite(series) & (series > 0.0))
     log_returns = pd.Series(np.log(valid / valid.shift(1)), index=series.index)
-    variance = (
-        log_returns.pow(2)
-        .ewm(alpha=1.0 - params.ewma_lambda, min_periods=params.min_observations)
-        .mean()
-    )
-    return variance.pow(0.5)
+    return log_returns.rolling(
+        window=params.volatility_window, min_periods=params.min_observations
+    ).std(ddof=1)
 
 
 def forecast_volatility(
