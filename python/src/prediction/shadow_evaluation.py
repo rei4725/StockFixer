@@ -25,7 +25,7 @@ import pandas as pd
 
 from src.prediction.challenger_window import (
     CHALLENGER_LABEL,
-    filter_current_challenger,
+    filter_comparable_challenger,
     filter_to_days,
 )
 from src.prediction.db import load_prediction_accuracy
@@ -123,10 +123,12 @@ def evaluate_shadow_models(
             n_challenger: int
             以下は challenger_version が challenger のラベルのときだけ（#1327）:
             challenger_trained_at: str | None  # 今の challenger のファイルの更新時刻
-            window_days: int  # 今の challenger の予想の日数
+            production_changed_at: str | None  # production が最後に変わった時刻（#1559）
+            window_days: int  # 今の challenger と今の production の予想がそろう日数
 
-    challenger のラベルの行は、今の challenger のファイルの更新時刻より後の predicted_at に絞り、
-    production もその日だけで比べる。ファイルが無いか0件なら challenger は「データなし」になる。
+    challenger のラベルの行は、今の challenger のファイルの更新時刻と production が最後に変わった
+    時刻の遅い方より後の predicted_at に絞り、production もその後の同じ日だけで比べる。
+    ファイルが無いか0件なら challenger は「データなし」になる。
     """
     logger.info(
         f"=== シャドーモード評価開始 "
@@ -157,13 +159,15 @@ def evaluate_shadow_models(
     )
     df_chal = df_chal[df_chal["model_name"] == challenger_version] if not df_chal.empty else df_chal
 
-    # challenger のラベルは毎週の版が混ざるので、今の版の予想の日だけで両方を比べる（#1327）
+    # challenger のラベルは毎週の版が混ざるので、今の版の予想の日だけで両方を比べる（#1327）。
+    # production のラベルも入れ替えで版が混ざるので、変わり目より後の行だけにする（#1559）
     window_info: dict = {}
     if challenger_version == CHALLENGER_LABEL:
-        df_chal, window = filter_current_challenger(df_chal)
+        df_chal, window = filter_comparable_challenger(df_chal)
         df_prod = filter_to_days(df_prod, window)
         window_info = {
             "challenger_trained_at": window.as_dict()["challenger_trained_at"],
+            "production_changed_at": window.as_dict()["production_changed_at"],
             "window_days": len(window.days),
         }
 

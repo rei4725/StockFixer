@@ -1,8 +1,11 @@
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
+
+import pandas as pd
 
 from src.domain.types import TrendCandidate
 from src.screening.quality_gate import apply_quality_gate
+from src.utils.db.stock_fundamentals import load_fundamentals
 
 
 def _candidate(symbol: str, score: float = 0.8) -> TrendCandidate:
@@ -181,6 +184,60 @@ class TestApplyQualityGate(unittest.TestCase):
         """不正な on_missing は ValueError。"""
         with self.assertRaises(ValueError):
             apply_quality_gate([_candidate("X")], on_missing="bogus")
+
+    def test_nan_gate_field_excluded(self):
+        """ゲートの4項目のどれかが NaN なら検証不能として除外される（#1558）。"""
+        for field in ("revenue_cagr_3y", "roe", "debt_to_equity", "market_cap"):
+            with self.subTest(field=field):
+                cands = [_candidate("GOOD"), _candidate("NANFUND")]
+                fmap = {
+                    ("us", "GOOD"): _fund(),
+                    ("us", "NANFUND"): _fund(**{field: float("nan")}),
+                }
+                with _patch_loader(fmap):
+                    result = apply_quality_gate(cands)
+                self.assertEqual([c.symbol for c in result], ["GOOD"])
+
+    def test_null_from_db_excluded_through_load_fundamentals(self):
+        """DB の NULL は本物の load_fundamentals を通ると NaN で届き、除外される。
+
+        psycopg の pd.read_sql は全行 NULL の列を object（値は None）で返し、
+        float の列なら NaN で返す。どちらでも coerce の後は NaN になる。
+        """
+        base = {
+            "market": "us",
+            "symbol": "NULLROE",
+            "revenue_cagr_3y": 0.30,
+            "debt_to_equity": 50.0,
+            "market_cap": 5e9,
+            "op_margin": 0.20,
+            "net_margin": 0.15,
+        }
+        rows = {
+            "object": pd.DataFrame([{**base, "roe": None}]).astype({"roe": object}),
+            "float": pd.DataFrame([{**base, "roe": float("nan")}]),
+        }
+        for dtype, df in rows.items():
+            with self.subTest(dtype=dtype):
+                self.assertEqual(df["roe"].dtype, object if dtype == "object" else float)
+                with (
+                    patch("src.utils.db.stock_fundamentals._db_connection", MagicMock()),
+                    patch("src.utils.db.stock_fundamentals.pd.read_sql", return_value=df),
+                ):
+                    loaded = load_fundamentals("us", "NULLROE")
+                    result = apply_quality_gate([_candidate("NULLROE")])
+                self.assertIsNotNone(loaded)
+                self.assertTrue(pd.isna(loaded["roe"]))
+                self.assertIsNotNone(loaded["roe"])
+                self.assertEqual(result, [])
+
+    def test_nan_in_ungated_field_does_not_change_verdict(self):
+        """ゲートの外の項目（純マージン）の NaN では除外されない。"""
+        cands = [_candidate("NANMARGIN")]
+        fmap = {("us", "NANMARGIN"): _fund(net_margin=float("nan"))}
+        with _patch_loader(fmap):
+            result = apply_quality_gate(cands)
+        self.assertEqual([c.symbol for c in result], ["NANMARGIN"])
 
 
 if __name__ == "__main__":
