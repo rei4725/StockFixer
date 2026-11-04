@@ -20,7 +20,7 @@ if "anthropic" not in sys.modules:
 from config.settings import LIMIT_ORDER_AVG_VOLUME_THRESHOLD
 from src.domain.ports import MarketDataPort
 from src.infrastructure.in_memory import InMemoryPredictionRepository, InMemoryTradeDiffSink
-from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
+from src.trading.brokers.base import BrokerBase, BrokerError, OrderSide, OrderType
 from src.trading.types import TradingGateStatus
 
 # claude_agent に注入する予測リポジトリ。テストは get_latest_by_market を patch.object で差し替える
@@ -478,6 +478,32 @@ class TestRunClaudeTrader(unittest.TestCase):
         self.assertIn("sell_orders", stats)
         self.assertIn("skipped", stats)
         self.assertIn("errors", stats)
+
+    @patch("src.trading.claude_agent.RiskManager")
+    @patch.object(_PREDICTIONS, "get_latest_by_market")
+    @patch("anthropic.Anthropic")
+    def test_token_failure_counts_as_error(self, mock_anthropic_cls, mock_load, mock_risk_cls):
+        # #1550: 発注できなかった回を成功に見せない（8:50 の道の #1523 と同じ形）
+        broker = _make_broker()
+        broker.get_token.side_effect = BrokerError("token failed")
+
+        from src.trading.claude_agent import run_claude_trader
+
+        stats = run_claude_trader(
+            broker=broker,
+            market="jp",
+            mode="paper",
+            trade_diff_sink=InMemoryTradeDiffSink(),
+            prediction_repo=_PREDICTIONS,
+        )
+
+        self.assertEqual(stats["errors"], 1)
+        self.assertEqual(stats["buy_orders"], 0)
+        self.assertEqual(stats["sell_orders"], 0)
+        broker.send_order.assert_not_called()
+        mock_anthropic_cls.assert_not_called()
+        mock_risk_cls.assert_not_called()
+        mock_load.assert_not_called()
 
     @patch("src.trading.claude_agent.RiskManager")
     @patch.object(_PREDICTIONS, "get_latest_by_market")
