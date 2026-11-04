@@ -23,16 +23,21 @@ def price_frame(raw: pd.DataFrame) -> pd.DataFrame:
     out = pd.DataFrame(
         {
             "symbol": raw["symbol"].to_numpy(),
-            "date": pd.to_datetime(raw["ts"]).dt.date.to_numpy(),
+            "ts": pd.to_datetime(raw["ts"]).to_numpy(),
             "px": px.to_numpy(),
         }
     )
-    return out
+    # 価格の欠損行は捨てる（残すと行の並びの h 本先が欠損をまたぎ、飛びを見逃す）
+    out = out.dropna(subset=["px"]).sort_values(["symbol", "ts"])
+    out["date"] = pd.to_datetime(out["ts"]).dt.date
+    # 同じ日に ts が複数あれば最後の足だけ残す（行の並びで h 本先を取るため日付は一意にする）
+    out = out.drop_duplicates(["symbol", "date"], keep="last")
+    return out[["symbol", "date", "px"]].reset_index(drop=True)
 
 
 def forward_returns(px: pd.DataFrame, horizons: tuple[int, ...] = HORIZONS) -> pd.DataFrame:
     """銘柄ごとの行の並びで h 本先の騰落率 ret_h と、窓内の飛び split_h を付ける。"""
-    out = px.sort_values(["symbol", "date"]).reset_index(drop=True)
+    out = px.dropna(subset=["px"]).sort_values(["symbol", "date"]).reset_index(drop=True)
     grp = out.groupby("symbol", sort=False)["px"]
     jump = (grp.pct_change().abs() >= SPLIT_JUMP).astype(bool)
     jump_grp = jump.groupby(out["symbol"], sort=False)

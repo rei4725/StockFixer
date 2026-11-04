@@ -129,3 +129,49 @@ def test_summarize_edge() -> None:
     assert row["baseline_rate"] == 0.5
     assert row["edge"] == 0.25
     assert abs(row["mean_signed_return"] - 0.05) < 1e-12
+
+
+def test_price_frame_drops_nan_and_keeps_last_ts_per_day() -> None:
+    raw = pd.DataFrame(
+        {
+            "symbol": ["A", "A", "A", "A"],
+            "ts": pd.to_datetime(
+                [
+                    "2026-01-05 09:00",
+                    "2026-01-05 15:00",
+                    "2026-01-06 09:00",
+                    "2026-01-07 09:00",
+                ]
+            ),
+            "close": [100.0, 101.0, np.nan, 103.0],
+            "adj_close": [np.nan, np.nan, np.nan, np.nan],
+        }
+    )
+    out = price_frame(raw)
+    assert out["px"].tolist() == [101.0, 103.0]
+    assert out["date"].map(lambda d: d.isoformat()).tolist() == [
+        "2026-01-05",
+        "2026-01-07",
+    ]
+
+
+def test_missing_price_does_not_hide_split() -> None:
+    dates = pd.date_range("2026-01-05", periods=4).date
+    px = pd.DataFrame({"symbol": "A", "date": dates, "px": [100.0, np.nan, 200.0, 200.0]})
+    fwd = forward_returns(px, horizons=(2,))
+    assert len(fwd) == 3
+    assert bool(fwd["split_2"].iloc[0]) is True
+    sig = _sig([(dates[0].isoformat(), "A", "k", 1)])
+    scored, n_excl = score_signals(sig, fwd, horizons=(2,))
+    assert scored.empty
+    assert n_excl == 1
+
+
+def test_jump_on_signal_bar_itself_is_not_excluded() -> None:
+    dates = pd.date_range("2026-01-05", periods=4).date
+    px = pd.DataFrame({"symbol": "A", "date": dates, "px": [100.0, 200.0, 201.0, 202.0]})
+    fwd = forward_returns(px, horizons=(2,))
+    sig = _sig([(dates[1].isoformat(), "A", "k", 1)])
+    scored, n_excl = score_signals(sig, fwd, horizons=(2,))
+    assert n_excl == 0
+    assert len(scored) == 1
