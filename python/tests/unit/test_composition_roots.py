@@ -442,6 +442,29 @@ class TestRunClaudeTraderCompositionRoot(unittest.TestCase):
         # 保存の済んでいない朝に流しても新規の buy を出さないよう、印を渡す（#1490）
         self.assertEqual(captured["prediction_saved_day"], "20261030")
 
+    def test_main_paper_passes_market_data(self):
+        # #1543: 紙では値段の取り元を渡して指値の判定を効かせる（run_auto_trade の #1450 と同じ形）
+        import run_claude_trader
+
+        captured: dict = {}
+
+        def _capture(**kwargs):
+            captured.update(kwargs)
+            return {"buy_orders": 0, "sell_orders": 0, "skipped": 0, "errors": 0}
+
+        with patch("config.settings.CLAUDE_TRADER_ENABLED", True), patch(
+            "src.trading.claude_agent.run_claude_trader", side_effect=_capture
+        ), patch.object(run_claude_trader, "build_broker", return_value=MagicMock()), patch(
+            "src.orchestration.jobs.prediction_saved_marker.read_prediction_saved_day",
+            return_value="20261030",
+        ), patch(
+            "src.infrastructure.yfinance_market_data_adapter.YFinanceMarketDataAdapter"
+        ) as adapter:
+            rc = run_claude_trader.main(["--mode", "paper", "--market", "jp"])
+
+        self.assertEqual(rc, 0)
+        self.assertIs(captured.get("market_data"), adapter.return_value)
+
 
 class TestRunRuleSignalsCompositionRoot(unittest.TestCase):
     def test_main_injects_postgres_trade_diff_sink(self):
