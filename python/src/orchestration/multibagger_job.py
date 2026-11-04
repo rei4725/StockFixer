@@ -6,7 +6,7 @@
 2. 既存保有ポジション（#430 保有/撤退エンジン）の HOLD / SCALE_OUT / EXIT シグナル
 
 を Discord に通知する。**売買は人間が最終判断（半自動）** のため、本ジョブは
-発注を行わず、保有状態の更新と通知のみを担う。
+発注を行わず、候補の財務と保有状態の更新、通知のみを担う。
 
 レイヤー: orchestration（最上位）から screening / reporting / utils（下位）を参照する
 のは合法（上位 → 下位）。
@@ -14,17 +14,20 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Optional
 
 import pandas as pd
 
-from src.domain.types import PositionEvent
+from src.domain.types import PositionEvent, TrendCandidate
+from src.market_data.fundamentals import fetch_fundamentals
 from src.screening.hold_engine import simulate_position
 from src.screening.positions import close_position, list_positions, update_position
 from src.screening.quality_gate import apply_quality_gate
 from src.screening.trend_screener import screen_trend_candidates
 from src.screening.types import MultibaggerCandidate, Position
 from src.utils.db.stock_features import load_stock_features
+from src.utils.db.stock_fundamentals import load_fundamentals, upsert_fundamentals
 from src.utils.db.symbol_master import symbol_name_suffix
 from src.utils.logger import get_logger
 
@@ -32,6 +35,26 @@ logger = get_logger(__name__)
 
 # 撤退を意味する PositionEvent.reason（end_of_data は「未撤退で系列末尾」を表す）
 _EXIT_REASONS = {"ma_break", "trail_stop", "thesis_break"}
+
+
+@dataclass(frozen=True)
+class _FundamentalsRefresh:
+    """質ゲートの前に行ったトレンド候補の財務の更新の結果。
+
+    Attributes:
+        total: トレンド候補の数。
+        failed: 今回の取得・保存ができなかった銘柄の数。
+        missing: failed のうち、前の行も無く質ゲートが判定できない銘柄の数。
+    """
+
+    total: int = 0
+    failed: int = 0
+    missing: int = 0
+
+    @property
+    def all_missing(self) -> bool:
+        """候補の全部で財務が無く、質ゲートが1銘柄も判定できないとき真。"""
+        return self.total > 0 and self.missing == self.total
 
 
 def run_monthly_multibagger_screen(market: str = "us", top_n: int = 10) -> dict:
@@ -46,7 +69,7 @@ def run_monthly_multibagger_screen(market: str = "us", top_n: int = 10) -> dict:
     """
     logger.info("=== 月次 multibagger スクリーン開始 (market=%s) ===", market)
 
-    new_candidates, screen_failed = _screen_new_candidates(market, top_n)
+    new_candidates, screen_failed, refresh = _screen_new_candidates(market, top_n)
     position_actions, skipped_positions = _evaluate_positions(market)
 
     message = _format_message(
@@ -55,6 +78,7 @@ def run_monthly_multibagger_screen(market: str = "us", top_n: int = 10) -> dict:
         position_actions,
         skipped=skipped_positions,
         screen_failed=screen_failed,
+        refresh=refresh,
     )
     _notify(message)
 
@@ -68,6 +92,8 @@ def run_monthly_multibagger_screen(market: str = "us", top_n: int = 10) -> dict:
         "market": market,
         "new_candidates": new_candidates,
         "screen_failed": screen_failed,
+        "fundamentals_failed": refresh.failed,
+        "fundamentals_missing": refresh.missing,
         "position_actions": position_actions,
         "skipped_positions": skipped_positions,
         "message": message,
@@ -78,19 +104,53 @@ class _PositionSkipped(Exception):
     """保有の判定ができなかったこと（価格データなし・イベントなし）を表す。"""
 
 
-def _screen_new_candidates(market: str, top_n: int) -> tuple[list[MultibaggerCandidate], bool]:
+def _screen_new_candidates(
+    market: str, top_n: int
+) -> tuple[list[MultibaggerCandidate], bool, _FundamentalsRefresh]:
     """#433 の最終スクリーン（トレンド + 質ゲート）で新規候補を取得する。
 
+    質ゲートは ``stock_fundamentals`` を読むだけなので、その前にトレンド候補の財務を更新する。
+
     Returns:
-        (新規候補, スクリーンが例外で失敗したか)
+        (新規候補, スクリーンが例外で失敗したか, 財務の更新の結果)
     """
     try:
         trend = screen_trend_candidates(market=market)
+        refresh = _refresh_fundamentals(trend)
         final = apply_quality_gate(trend)
-        return final[:top_n], False
+        return final[:top_n], False, refresh
     except Exception as e:
         logger.error("新規候補スクリーン失敗: %s", e, exc_info=True)
-        return [], True
+        return [], True, _FundamentalsRefresh()
+
+
+def _refresh_fundamentals(trend: list[TrendCandidate]) -> _FundamentalsRefresh:
+    """トレンド候補の財務を取得・保存する。1銘柄の失敗で残りの銘柄を止めない。"""
+    failed = [c for c in trend if not _refresh_one_fundamental(c)]
+    missing = sum(1 for c in failed if load_fundamentals(c.market, c.symbol) is None)
+    logger.info(
+        "財務更新完了: 成功=%d/%d 件, 判定できず=%d 件",
+        len(trend) - len(failed),
+        len(trend),
+        missing,
+    )
+    return _FundamentalsRefresh(total=len(trend), failed=len(failed), missing=missing)
+
+
+def _refresh_one_fundamental(candidate: TrendCandidate) -> bool:
+    """1銘柄の財務を取得・保存し、できたかを返す。"""
+    try:
+        record = fetch_fundamentals(candidate.market, candidate.symbol)
+        if record is None:
+            logger.warning("[スキップ] 財務取得失敗: %s/%s", candidate.market, candidate.symbol)
+            return False
+        upsert_fundamentals(record)
+        return True
+    except Exception as e:
+        logger.error(
+            "財務更新失敗 (%s/%s): %s", candidate.market, candidate.symbol, e, exc_info=True
+        )
+        return False
 
 
 def _evaluate_positions(market: str) -> tuple[list[dict], list[dict]]:
@@ -183,13 +243,17 @@ def _format_message(
     actions: list[dict],
     skipped: Optional[list[dict]] = None,
     screen_failed: bool = False,
+    refresh: Optional[_FundamentalsRefresh] = None,
 ) -> str:
     """新規候補 + 保有アクションを Discord 向けテキスト（コードフェンス）に整形する。
 
     判定できなかった保有は「判定できず」として載せ、開いた保有があるときは
     「保有なし」と書かない。スクリーンの失敗は「該当なし」と分けて書く。
+    候補の全部で財務が無いときも「該当なし」と書かず、判定できなかった数を書く。
+    財務を取れなかった銘柄があるときは、その数を添える。
     """
     skipped = skipped or []
+    refresh = refresh or _FundamentalsRefresh()
     lines: list[str] = [f"📈 月次 multibagger スクリーン ({market.upper()})", ""]
 
     lines.append("【新規候補】")
@@ -205,8 +269,12 @@ def _format_message(
                 f"{symbol_name_suffix(market, c.symbol)}"
             )
         lines.append("```")
+    elif refresh.all_missing:
+        lines.append(f"⚠️ 財務が無く判定できず: {refresh.missing}/{refresh.total} 件")
     else:
         lines.append("該当なし")
+    if refresh.failed and not refresh.all_missing:
+        lines.append(f"⚠️ 財務を取れず: {refresh.failed}/{refresh.total} 件")
 
     lines.append("")
     lines.append("【保有ポジション】")
