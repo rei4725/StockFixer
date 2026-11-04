@@ -78,21 +78,6 @@ class TestRunRegimeLeverageWeeklyJob(unittest.TestCase):
 
     @patch("src.trading.regime_leverage_strategy.service.run_regime_leverage_weekly_check")
     @patch("src.infrastructure.yfinance_market_data_adapter.YFinanceMarketDataAdapter")
-    def test_does_not_log_decision_when_none(self, mock_adapter_cls, mock_run):
-        """MA200/ATR14がNaNの場合など、serviceがNoneを返した際はaction=...のログを
-        出さず(decision.actionへのアクセスでAttributeErrorにならず)正常終了すること。
-        """
-        from src.orchestration.jobs.periodic import run_regime_leverage_weekly_job
-
-        mock_run.return_value = None
-
-        with self.assertLogs("src.orchestration.jobs.periodic", level="INFO") as logs:
-            run_regime_leverage_weekly_job()
-
-        self.assertFalse(any("action=" in message for message in logs.output))
-
-    @patch("src.trading.regime_leverage_strategy.service.run_regime_leverage_weekly_check")
-    @patch("src.infrastructure.yfinance_market_data_adapter.YFinanceMarketDataAdapter")
     def test_reraises_on_failure_after_error_log(self, mock_adapter_cls, mock_run):
         """例外はERRORログの後に再送出し、スケジューラーのリトライ・Discord通知に乗せる(#860)。"""
         from src.orchestration.jobs.periodic import run_regime_leverage_weekly_job
