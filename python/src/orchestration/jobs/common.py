@@ -123,6 +123,15 @@ def _notify_stage_failure(label: str, exc: Exception) -> None:
         logger.error("%s の失敗通知失敗: %s", label, notify_error, exc_info=True)
 
 
+def notify_job_failure(job_id: str, error_message: str) -> None:
+    """やり直しが尽きて落ちたジョブを Discord へ知らせる（SchedulerQueueManager の error_notifier）。
+
+    発注・約定・レバレッジの判定のように、ログの後に投げ直すだけのジョブの失敗も
+    当日のうちに届くようにする（#1535）。
+    """
+    _notify_stage_failure(f"ジョブ {job_id}", RuntimeError(error_message))
+
+
 def _is_first_week_of_month(now: "datetime") -> bool:
     """月初週（1〜7日）かどうか。月次オートコンパクションの発火判定に使う。
 
