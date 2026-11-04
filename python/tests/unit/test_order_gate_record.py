@@ -306,6 +306,112 @@ class TestOrderGateRecord(unittest.TestCase):
                 self.assertIsNone(record["held_without_prediction_symbols"])
                 self.assertIsNone(record["held_without_prediction_count"])
 
+    def _run_failing(self, *failing, broker=None, predictions=None):
+        """前の記録を消して例外で落ちる朝を流し、投げられた例外と broker を返す（#1548）"""
+        if os.path.exists(_record_path()):
+            os.remove(_record_path())
+        broker = broker or _make_broker()
+        with self.assertRaises(RuntimeError) as caught:
+            self._run(
+                _ALLOWED, _CORR_OK, extra_patches=failing, broker=broker, predictions=predictions
+            )
+        return caught.exception, broker
+
+    def test_sl_tp_step_error_is_recorded_before_same_raise(self):
+        """_check_sl_tp_exits が投げる朝は entry_error とゲートの判定を書き、同じ例外で落ちる（#1548）"""
+        error = RuntimeError("sl tp down")
+        failing = patch("src.trading.execution.runner._check_sl_tp_exits", side_effect=error)
+        caught, broker = self._run_failing(failing)
+        self.assertIs(caught, error)
+        self.assertEqual(self._sent(broker), [])
+        record = self._read()
+        self.assertEqual(record["entry_error"], repr(error))
+        self.assertIsNone(record["token_error"])
+        self.assertFalse(record["trading_stopped"])
+        self.assertEqual(record["daily_loss"], 1_000.0)
+        self.assertEqual(record["sell_orders"], 0)
+
+    def test_short_read_in_sl_tp_error_is_recorded(self):
+        """SL/TP の中の空売りの読み込みの例外（#1451）は投げたまま、記録を書く（#1548）"""
+        broker = _make_broker()
+        error = RuntimeError("short read down")
+        broker.get_short_positions.side_effect = error
+        caught, _ = self._run_failing(broker=broker)
+        self.assertIs(caught, error)
+        self.assertEqual(self._read()["entry_error"], repr(error))
+
+    def test_short_positions_error_after_sells_records_sell_count(self):
+        """売りを出した後に read_short_positions が投げる朝は、出した売りの数も入る（#1548）"""
+        error = RuntimeError("short positions down")
+        failing = patch("src.trading.execution.runner.read_short_positions", side_effect=error)
+        caught, broker = self._run_failing(failing)
+        self.assertIs(caught, error)
+        self.assertEqual(self._sent(broker), [("9000", OrderSide.SELL)])
+        record = self._read()
+        self.assertEqual(record["entry_error"], repr(error))
+        self.assertEqual(record["sell_orders"], 1)
+        self.assertEqual(record["buy_orders"], 0)
+
+    def test_sector_limit_error_after_sells_records_sell_count(self):
+        """売りの後に業種の上限の手順が投げる朝も、出した売りの数が入る（#1548）"""
+        error = RuntimeError("sector down")
+        failing = patch("src.trading.execution.runner._apply_buy_sector_limit", side_effect=error)
+        caught, broker = self._run_failing(failing)
+        self.assertIs(caught, error)
+        self.assertEqual(self._sent(broker), [("9000", OrderSide.SELL)])
+        record = self._read()
+        self.assertEqual(record["entry_error"], repr(error))
+        self.assertEqual(record["sell_orders"], 1)
+
+    def test_exits_only_error_is_recorded(self):
+        """予測が空の朝も予測を読めない朝も、SL/TP の例外を書いて同じ例外で落ちる（#1548）"""
+        read_down = patch.object(
+            _PREDICTIONS, "get_latest_by_market", side_effect=RuntimeError("read down")
+        )
+        for name, extra, frame in (
+            ("empty", (), pd.DataFrame()),
+            ("read_failure", (read_down,), None),
+        ):
+            with self.subTest(path=name):
+                error = RuntimeError("exits down")
+                failing = patch("src.trading.execution.sl_tp._check_sl_tp_exits", side_effect=error)
+                caught, _ = self._run_failing(failing, *extra, predictions=frame)
+                self.assertIs(caught, error)
+                self.assertEqual(self._read()["entry_error"], repr(error))
+
+    def test_record_is_written_once_per_run(self):
+        """投げ直しの道でも手順の例外の道でも、記録は1回だけ書く（#1548）"""
+        step_error = patch(
+            "src.trading.execution.runner.read_short_positions",
+            side_effect=RuntimeError("short positions down"),
+        )
+        rethrow = patch(
+            "src.trading.execution.runner.evaluate_correlation_gate",
+            side_effect=RuntimeError("corr down"),
+        )
+        for name, failing in (("step_error", step_error), ("rethrow", rethrow)):
+            with self.subTest(path=name):
+                with patch("src.trading.execution.gate_record._write_record") as write:
+                    self._run_failing(failing)
+                self.assertEqual(write.call_count, 1)
+
+    def test_write_failure_keeps_original_exception_and_is_not_retried(self):
+        """書き込みが落ちても元の例外がそのまま投げられ、書き直さない（#1548）"""
+        targets = (
+            "src.trading.execution.runner.read_short_positions",
+            "src.trading.execution.runner.evaluate_correlation_gate",
+        )
+        for target in targets:
+            with self.subTest(target=target):
+                error = RuntimeError("step down")
+                with patch(
+                    "src.trading.execution.gate_record._write_record",
+                    side_effect=OSError("disk full"),
+                ) as write:
+                    caught, _ = self._run_failing(patch(target, side_effect=error))
+                self.assertIs(caught, error)
+                self.assertEqual(write.call_count, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

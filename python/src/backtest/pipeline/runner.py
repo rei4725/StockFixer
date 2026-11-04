@@ -3,6 +3,7 @@
 run_backtest.py 等のラッパーから呼ばれるサービス層の実行関数群。
 """
 
+from dataclasses import dataclass
 from typing import Any, Callable, Optional, Tuple
 
 import pandas as pd
@@ -27,6 +28,18 @@ def _resolve_slippage(
     eff_slippage = slippage if slippage is not None else default_slippage_for(market)
     slippage_fn = make_slippage_fn() if dynamic_slippage else None
     return eff_slippage, slippage_fn
+
+
+@dataclass(frozen=True)
+class PreparedBacktest:
+    """学習と予測まで済ませた、1銘柄のシミュレーションの入力。"""
+
+    sim_df: pd.DataFrame
+    test_df: pd.DataFrame
+    closes: pd.Series  # 学習の期間も含む終値（値動きの見込みの助走に使う）
+    signal: pd.Series
+    pred: pd.Series
+    model_manager: Any
 
 
 def run_backtest_single(
@@ -93,6 +106,81 @@ def run_backtest_single(
     from src.backtest.backtester import Backtester
     from src.utils.signal_generator import SignalGenerator
 
+    prepared = prepare_backtest_signals(
+        market,
+        symbol,
+        model_type=model_type,
+        model_name=model_name,
+        task_name=task_name,
+        threshold=threshold,
+        source=source,
+        start_date=start_date,
+        end_date=end_date,
+        train_ratio=train_ratio,
+        ensemble=ensemble,
+        exclude_sentiment=exclude_sentiment,
+    )
+    test_df, signal, pred = prepared.test_df, prepared.signal, prepared.pred
+
+    # スリッページ解決（未指定は市場別デフォルト、動的モデルは任意）
+    eff_slippage, slippage_fn = _resolve_slippage(market, slippage, dynamic_slippage)
+
+    # シミュレーション
+    backtester = Backtester(
+        model_manager=prepared.model_manager,
+        signal_generator=SignalGenerator(market=market, symbol=symbol),
+        data_loader=None,
+        start_date=None,
+        end_date=None,
+        market=market,
+        symbol=symbol,
+        initial_cash=initial_cash,
+        fee_rate=fee_rate,
+        slippage=eff_slippage,
+        slippage_fn=slippage_fn,
+        stop_loss_pct=stop_loss_pct,
+        take_profit_pct=take_profit_pct,
+        position_sizing=position_sizing,
+        position_fraction=position_fraction,
+        atr_risk_pct=atr_risk_pct,
+        atr_multiplier=atr_multiplier,
+        atr_min_fraction=atr_min_fraction,
+        atr_max_fraction=atr_max_fraction,
+        include_monte_carlo=include_monte_carlo,
+    )
+    result_df, metrics = backtester.simulate_trading(
+        prepared.sim_df,
+        signal,
+        pred=pred,
+    )
+    # ベンチマークを戦略と同じ検証期間で取れるよう、検証期間を metrics に入れる
+    if metrics and isinstance(test_df.index, pd.DatetimeIndex) and len(test_df) > 0:
+        metrics["test_start"] = str(test_df.index[0])[:10]
+        metrics["test_end"] = str(test_df.index[-1])[:10]
+    close_col = "Close" if "Close" in test_df.columns else "close"
+    price_series = test_df[close_col].rename("price")
+    return result_df, metrics, price_series
+
+
+def prepare_backtest_signals(
+    market: str,
+    symbol: str,
+    model_type: str = "XGBoostModel",
+    model_name: Optional[str] = None,
+    task_name: str = "return_regression",
+    threshold: float = 0.0,
+    source: str = "file",
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    train_ratio: float = 0.8,
+    ensemble: bool = False,
+    exclude_sentiment: bool = False,
+) -> PreparedBacktest:
+    """特徴量を読み、学習の期間で学習して検証の期間の予測とシグナルを返す。
+
+    同じシグナルで条件を変えて何度もシミュレーションする比べ（#1547）のため、
+    run_backtest_single から抽出した。引数の意味は run_backtest_single と同じ。
+    """
     task = _build_task(task_name, threshold)
     model_name = model_name or f"Backtest{model_type}"
 
@@ -165,45 +253,15 @@ def run_backtest_single(
         pred = pd.Series(mm.predict_with_model(model_name, X_test), index=X_test.index)
 
     signal = task.make_signal(pred)
-
-    # スリッページ解決（未指定は市場別デフォルト、動的モデルは任意）
-    eff_slippage, slippage_fn = _resolve_slippage(market, slippage, dynamic_slippage)
-
-    # シミュレーション
-    backtester = Backtester(
-        model_manager=mm,
-        signal_generator=SignalGenerator(market=market, symbol=symbol),
-        data_loader=None,
-        start_date=None,
-        end_date=None,
-        market=market,
-        symbol=symbol,
-        initial_cash=initial_cash,
-        fee_rate=fee_rate,
-        slippage=eff_slippage,
-        slippage_fn=slippage_fn,
-        stop_loss_pct=stop_loss_pct,
-        take_profit_pct=take_profit_pct,
-        position_sizing=position_sizing,
-        position_fraction=position_fraction,
-        atr_risk_pct=atr_risk_pct,
-        atr_multiplier=atr_multiplier,
-        atr_min_fraction=atr_min_fraction,
-        atr_max_fraction=atr_max_fraction,
-        include_monte_carlo=include_monte_carlo,
-    )
-    result_df, metrics = backtester.simulate_trading(
-        test_df.loc[X_test.index],
-        signal,
+    close_col = "Close" if "Close" in df.columns else "close"
+    return PreparedBacktest(
+        sim_df=test_df.loc[X_test.index],
+        test_df=test_df,
+        closes=df[close_col],
+        signal=signal,
         pred=pred,
+        model_manager=mm,
     )
-    # ベンチマークを戦略と同じ検証期間で取れるよう、検証期間を metrics に入れる
-    if metrics and isinstance(test_df.index, pd.DatetimeIndex) and len(test_df) > 0:
-        metrics["test_start"] = str(test_df.index[0])[:10]
-        metrics["test_end"] = str(test_df.index[-1])[:10]
-    close_col = "Close" if "Close" in test_df.columns else "close"
-    price_series = test_df[close_col].rename("price")
-    return result_df, metrics, price_series
 
 
 def run_backtest_walk_forward(

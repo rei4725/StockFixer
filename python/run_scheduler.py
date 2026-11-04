@@ -133,6 +133,13 @@ def job_weekly_rule_evaluation():
     run_weekly_rule_evaluation()
 
 
+def job_weekly_volatility_sizing_compare():
+    """週次実行 (日曜 13:00): 値動きに合わせた量と損切りの線の比べを results/ に書く"""
+    from src.orchestration.scheduler import run_weekly_volatility_sizing_compare
+
+    run_weekly_volatility_sizing_compare()
+
+
 def job_daily_rule_signals():
     """日次実行 (平日 16:30): 最優秀ルールによるシグナル生成 + ペーパートレード発注"""
     from src.orchestration.scheduler import run_daily_rule_signals
@@ -242,6 +249,9 @@ def _job_listener(event):
 # 上限の40は、起動が1時間に1回ほどの週でも全銘柄の約29時間に届く数である（#1534）。
 # recover_rest_of_week: True の週次ジョブは、定時の曜日より後の同じ ISO 週の日も、その週の成功が無く
 # 上限が残っていれば補完する。定時の曜日より前の日は補完しない。全銘柄が1週のうちに終わるため（#1534）。
+# long_recovery: True のジョブは、補完を専用のポーリング（recovery_long_job_poller）で判定する。
+# 補完が日をまたいで戻らなくても、締めの無いほかのジョブの補完をふさがないため（#1542）。
+# 締め（recovery_until）のあるジョブには付けない。締めのポーリングが判定するので印は効かない。
 SCHEDULE_CONFIG = {
     "daily_pipeline": {
         "func": job_daily_pipeline,
@@ -359,6 +369,7 @@ SCHEDULE_CONFIG = {
         "rerun_if_interrupted": True,
         "max_interrupted_reruns_per_period": 40,
         "recover_rest_of_week": True,
+        "long_recovery": True,
     },
     "weekly_walk_forward_report": {
         "func": job_weekly_walk_forward_report,
@@ -408,6 +419,21 @@ SCHEDULE_CONFIG = {
         "recovery_delay_minutes": 60,
         "max_executions_per_period": 1,
         "description": "毎週日曜 02:00 - 全銘柄ルールバックテスト評価",
+        "rerun_if_interrupted": True,
+    },
+    # 発注の無い日曜の昼間。週の最適化の補完（水曜から週末まで）の後ろで、夜中の評価・バックアップ・
+    # 工場・配分の定時とも2時間ごとの30分の昇格の確かめとも重ならない。比べは発注を変えない（#1547）
+    "weekly_volatility_sizing_compare": {
+        "func": job_weekly_volatility_sizing_compare,
+        "trigger": "cron",
+        "period": "weekly",
+        "day_of_week": "sun",
+        "hour": 13,
+        "minute": 0,
+        "recovery_delay_minutes": 30,
+        "max_executions_per_period": 1,
+        "max_retries": 0,
+        "description": "毎週日曜 13:00 - 値動きに合わせた量と損切りの線の比べ",
         "rerun_if_interrupted": True,
     },
     "daily_rule_signals": {
@@ -594,8 +620,23 @@ def _register_jobs(scheduler, queue_manager):
         )
         logger.info(f"ジョブ登録: {job_id} - {config['description']}")
 
+    # 外部死活監視（#496）: スケジューラの生存を5分間隔で通知する。補完の呼び出しが戻らない間も
+    # 途切れないよう、補完のポーリングと別のジョブで送る（#1542）。長いジョブの負荷でスケジューラの
+    # 目覚めが遅れても1回分を飛ばさないよう、遅れの猶予を既定の1秒より広げる
     scheduler.add_job(
-        lambda: _poll_recovery_jobs(queue_manager, with_cutoff=False),
+        _ping_scheduler_alive,
+        trigger="interval",
+        minutes=5,
+        id="scheduler_alive_ping",
+        name="スケジューラの生存の通知",
+        misfire_grace_time=60,
+        coalesce=True,
+        max_instances=1,
+    )
+    logger.info("ジョブ登録: scheduler_alive_ping - 5分間隔で生存を通知")
+
+    scheduler.add_job(
+        lambda: _poll_recovery_jobs(queue_manager, with_cutoff=False, long_recovery=False),
         trigger="interval",
         minutes=5,
         id="recovery_poller",
@@ -618,18 +659,34 @@ def _register_jobs(scheduler, queue_manager):
     )
     logger.info("ジョブ登録: recovery_cutoff_poller - 1分間隔で締めのあるジョブを補完")
 
+    # long_recovery のジョブ（週の最適化）は、戻るまで日をまたぐ補完で recovery_poller をふさがないよう
+    # 別のスレッドで判定する。締めの無いほかのジョブの補完を止めないため（#1542）
+    scheduler.add_job(
+        lambda: _poll_recovery_jobs(queue_manager, with_cutoff=False, long_recovery=True),
+        trigger="interval",
+        minutes=5,
+        id="recovery_long_job_poller",
+        name="長い補完のジョブの未実行補完ポーリング",
+        coalesce=True,
+        max_instances=1,
+    )
+    logger.info("ジョブ登録: recovery_long_job_poller - 5分間隔で長い補完のジョブを補完")
 
-def _poll_recovery_jobs(queue_manager, with_cutoff: bool | None = None):
+
+def _ping_scheduler_alive() -> None:
+    """スケジューラの生存を外部死活監視へ通知する"""
+    ping_heartbeat(SCHEDULER_ALIVE_SLUG)
+
+
+def _poll_recovery_jobs(
+    queue_manager, with_cutoff: bool | None = None, long_recovery: bool | None = None
+):
     """所定時刻を過ぎても未実行のジョブを補完実行する（前日分も含む）
 
     with_cutoff が True なら締め（recovery_until）のあるジョブだけ、False なら締めの無いジョブだけ、
-    None なら両方を見る。同じジョブは1つのポーリングだけが判定する（#1410）。
+    None なら両方を見る。long_recovery も同じで、True なら長い補完の印のあるジョブだけ、False なら
+    印の無いジョブだけを見る。同じジョブは1つのポーリングだけが判定する（#1410, #1542）。
     """
-    if with_cutoff is not True:
-        # 外部死活監視（#496）: スケジューラ生存を5分間隔で通知。
-        # 補完ジョブの失敗で生存信号が途切れないよう、ポーリング冒頭で送る。
-        ping_heartbeat(SCHEDULER_ALIVE_SLUG)
-
     # 締め（recovery_until）を持つジョブを先に回す。締めの無い長い補完（日次の道など）の後ろで
     # 自動発注の補完が締めを過ぎて飛ばされないため（#1395）。sorted は安定なので同じ組の中は今の順のまま。
     ordered = sorted(
@@ -640,6 +697,8 @@ def _poll_recovery_jobs(queue_manager, with_cutoff: bool | None = None):
             continue
         has_cutoff = config.get("recovery_until") is not None
         if with_cutoff is not None and has_cutoff != with_cutoff:
+            continue
+        if long_recovery is not None and config.get("long_recovery", False) != long_recovery:
             continue
 
         # 1つのジョブが落ちても後のジョブ（発注・約定）の補完を同じ回で進める（#1186）。
