@@ -6,6 +6,7 @@ results/orders/rule/<JST の日付>.json（8:50 の記録を上書きしない�
 売りの判定に使える予想が無かった保有の銘柄と数も写し、判定をしなかった日は null にする（#1530）。
 16:30 の記録にはシグナルを出せなかった銘柄と、そのうち保有中の銘柄の一覧と数も写す（#1520）。
 その日のルールの判定の対象に入らなかった保有の一覧と数も写す（#1527）。
+8:50 にトークンを取れなかった朝は、その失敗を token_error に写す（#1533）。
 書き込みの失敗は ERROR のログで知らせ、発注は止めない。
 """
 
@@ -72,8 +73,13 @@ def save_order_gate_record(
     market: str,
     mode: str,
     entry_error: Optional[Exception] = None,
+    token_error: Optional[Exception] = None,
 ) -> Optional[str]:
-    """stats のゲートの判定を書き、ファイルのパスを返す。書けなければ None を返す。"""
+    """stats のゲートの判定を書き、ファイルのパスを返す。書けなければ None を返す。
+
+    token_error が入った朝は SL/TP も評価していないので、SL/TP の評価できない数の 0 は
+    「全部評価できた」の意味にならない（#1533）。
+    """
     try:
         now = now_jst()
         day = now.date().isoformat()
@@ -84,6 +90,7 @@ def save_order_gate_record(
             "market": market,
             "mode": mode,
             "entry_error": repr(entry_error) if entry_error is not None else None,
+            "token_error": repr(token_error) if token_error is not None else None,
         }
         for key in _GATE_KEYS:
             payload[key] = stats.get(key)
@@ -184,9 +191,15 @@ def finish_order_run(
     market: str,
     mode: str,
     entry_error: Optional[Exception] = None,
+    token_error: Optional[Exception] = None,
 ) -> OrderExecutionStats:
-    """判定を記録してから、新規の手順の例外があれば投げ直し、無ければ stats を返す。"""
-    save_order_gate_record(stats, market=market, mode=mode, entry_error=entry_error)
+    """判定を記録してから、新規の手順の例外があれば投げ直し、無ければ stats を返す。
+
+    token_error はトークンを取れなかった朝の失敗で、記録に書くだけで投げ直さない（#1533）。
+    """
+    save_order_gate_record(
+        stats, market=market, mode=mode, entry_error=entry_error, token_error=token_error
+    )
     if entry_error is not None:
         raise entry_error
     return stats

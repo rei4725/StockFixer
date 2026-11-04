@@ -118,6 +118,23 @@ class TestRuleExecutionCountsPendingBuys(unittest.TestCase):
 
         broker.send_order.assert_not_called()
 
+    def test_reader_failure_places_held_sell_then_reraises(self):
+        # 読み込みは新規買いにしか要らないので、読めない日も保有の SELL は出す（#1539）
+        error = RuntimeError("db down")
+        broker = _broker([_long("1000")], pending_buys=error)
+        signals = [
+            {"symbol": "3000", "signal": 1, "price": 1000.0},
+            {"symbol": "1000", "signal": -1, "price": 1000.0},
+        ]
+
+        with self.assertRaises(RuntimeError) as caught:
+            self._run(broker, signals)
+
+        self.assertIs(caught.exception, error)
+        broker.send_order.assert_called_once_with(
+            symbol="1000.T", side=OrderSide.SELL, qty=100, order_type=OrderType.MARKET
+        )
+
     def test_sell_branch_uses_settled_positions_only(self):
         broker = _broker([_long("1000")], pending_buys={"2000"})
         signals = [
