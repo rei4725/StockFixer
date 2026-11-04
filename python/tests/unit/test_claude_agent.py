@@ -17,6 +17,8 @@ if "anthropic" not in sys.modules:
     _mock_anthropic = MagicMock()
     sys.modules["anthropic"] = _mock_anthropic
 
+from config.settings import LIMIT_ORDER_AVG_VOLUME_THRESHOLD
+from src.domain.ports import MarketDataPort
 from src.infrastructure.in_memory import InMemoryPredictionRepository, InMemoryTradeDiffSink
 from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
 from src.trading.types import TradingGateStatus
@@ -155,6 +157,39 @@ class TestHandlePlaceOrder(unittest.TestCase):
         self.broker.send_order.assert_called_once()
         call_args = self.broker.send_order.call_args
         self.assertEqual(call_args[0][1], OrderSide.BUY)
+
+    @patch("src.trading.claude_agent._record_order")
+    @patch("src.trading.claude_agent._get_held_symbols", return_value=set())
+    @patch("src.trading.claude_agent._resolve_kelly_params", return_value=(0.55, 0.015, 0.008))
+    @patch(
+        "src.trading.claude_agent._choose_order_params",
+        return_value=(OrderType.MARKET, 0.0, "market", "open"),
+    )
+    def test_buy_records_horizon_from_prediction_row(self, _choose, _kelly, _held, _record):
+        # #1543: 変化率が最大の5日を horizon に渡す。無いと紙の買いの target_exit_date が NULL で、
+        # ホライズン決済が見ない期限の無い保有が残る
+        self.predictions.loc[self.predictions["symbol"] == "7200", "diff_ratio_5d"] = 0.05
+
+        result = self._call("7200", "buy")
+
+        self.assertEqual(result["status"], "placed")
+        self.assertEqual(_record.call_args.kwargs.get("horizon"), 5)
+
+    @patch("src.trading.claude_agent._record_order")
+    @patch(
+        "src.trading.claude_agent._choose_order_params",
+        return_value=(OrderType.MARKET, 0.0, "market", "open"),
+    )
+    def test_sell_records_no_horizon(self, _choose, _record):
+        # #1543: 8:50 の道の売りと同じく horizon を渡さず、SELL の行の horizon の列を空に保つ
+        self.broker.get_positions.return_value = [
+            {"symbol": "7200", "qty": 200, "avg_price": 990.0, "current_price": 1000.0}
+        ]
+
+        result = self._call("7200", "sell")
+
+        self.assertEqual(result["status"], "placed")
+        self.assertIsNone(_record.call_args.kwargs.get("horizon"))
 
     @patch("src.trading.claude_agent._record_order")
     @patch(
@@ -535,6 +570,7 @@ class TestRunClaudeTrader(unittest.TestCase):
         params_path=None,
         risk_errors=None,
         raises=None,
+        market_data=None,
     ):
         """1回の中で symbols の順に place_order の買いを呼ばせ、(stats, broker, 結果) を返す
 
@@ -547,6 +583,7 @@ class TestRunClaudeTrader(unittest.TestCase):
         渡さないときは broker に get_short_positions が無い。
         params_path を渡すと、optimal_params.json をそのファイルにし、閾値と Kelly の入力を
         本物の読み込みで決める。
+        market_data を渡すと run_claude_trader に渡し、_choose_order_params を差し替えない。
         """
         from contextlib import ExitStack
 
@@ -606,15 +643,19 @@ class TestRunClaudeTrader(unittest.TestCase):
         ), patch(
             "src.trading.claude_agent._resolve_kelly_params", **kelly
         ), patch(
-            "src.trading.claude_agent._choose_order_params",
-            return_value=(OrderType.MARKET, 0.0, "market", "open"),
-        ), patch(
             "src.trading.correlation_risk._load_recent_returns",
             return_value=pd.DataFrame() if returns is None else returns,
         ), patch(
             "src.utils.sector_constraints._lookup_symbol_sector",
             side_effect=lambda market, symbol: sector_map.get(symbol, f"sector-{symbol}"),
         ):
+            if market_data is None:
+                stack.enter_context(
+                    patch(
+                        "src.trading.claude_agent._choose_order_params",
+                        return_value=(OrderType.MARKET, 0.0, "market", "open"),
+                    )
+                )
             if params_path is not None:
                 stack.enter_context(
                     patch("src.utils.optimal_params_loader.OPTIMAL_PARAMS_PATH", params_path)
@@ -632,6 +673,8 @@ class TestRunClaudeTrader(unittest.TestCase):
                 trade_diff_sink=InMemoryTradeDiffSink(),
                 prediction_repo=_PREDICTIONS,
             )
+            if market_data is not None:
+                kwargs["market_data"] = market_data
             if raises is None:
                 stats = run_claude_trader(**kwargs)
             else:
@@ -894,6 +937,27 @@ class TestRunClaudeTrader(unittest.TestCase):
         self.assertEqual(results[0]["status"], "placed")
         broker.send_order.assert_called_once()
         self.assertEqual(stats["errors"], 0)
+
+    def test_low_volume_buy_goes_out_as_limit_order(self):
+        # #1543: 値段の取り元が _choose_order_params まで届き、plan_limit_order が指値を選ぶ
+        market_data = MagicMock(spec=MarketDataPort)
+        market_data.get_ohlcv.return_value = pd.DataFrame(
+            {
+                "High": [1001.0] * 7,
+                "Low": [999.0] * 7,
+                "Close": [1000.0] * 7,
+                "Volume": [LIMIT_ORDER_AVG_VOLUME_THRESHOLD / 10] * 7,
+            }
+        )
+
+        _stats, broker, results = self._run_with_buys(["S0"], market_data=market_data)
+
+        self.assertEqual(results[0]["status"], "placed")
+        self.assertEqual(results[0]["order_type"], "LIMIT")
+        market_data.get_ohlcv.assert_called_once()
+        call = broker.send_order.call_args
+        self.assertEqual(call.kwargs["order_type"], OrderType.LIMIT)
+        self.assertGreaterEqual(call.kwargs["price"], 1000.0)
 
     def test_import_error_raised_without_anthropic(self):
         broker = _make_broker()
