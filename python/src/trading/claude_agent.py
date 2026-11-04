@@ -27,7 +27,7 @@ from config.settings import (
     MAX_ORDERS_PER_RUN,
     MIN_CHANGE_RATIO,
 )
-from src.domain.ports import PredictionResultRepository, TradeDiffSink
+from src.domain.ports import MarketDataPort, PredictionResultRepository, TradeDiffSink
 from src.trading.brokers.base import BrokerBase, BrokerError, OrderSide
 from src.trading.claude_buy_blocks import (
     _PARAMS_UNREADABLE_REASON,
@@ -45,6 +45,7 @@ from src.trading.claude_tools import TOOLS as _TOOLS
 from src.trading.execution import (
     _attach_dynamic_thresholds,
     _choose_order_params,
+    _determine_entry_horizon,
     _get_held_symbols,
     _record_order,
     _resolve_kelly_params,
@@ -151,10 +152,12 @@ def _handle_place_order(
     trade_diff_sink: TradeDiffSink,
     caps: RunBuyCaps | None = None,
     buy_block_reason: str | None = None,
+    market_data: MarketDataPort | None = None,
 ) -> dict[str, Any]:
     """
     RiskManager ゲート・1回の買いの上限（caps）・ポジションサイジングを強制適用して注文を発注する。
     Claude がこれらをバイパスする手段はない。buy_block_reason があれば新規の買いだけ止める。
+    market_data は指値の判定の値段の取り元（#1543）。None なら成行で出す。
     """
     # 発注方向の変換
     side = OrderSide.BUY if side_str == "buy" else OrderSide.SELL
@@ -255,6 +258,7 @@ def _handle_place_order(
             symbol=symbol,
             side=side,
             current_price=current_price,
+            market_data=market_data,
         )
         result = broker.send_order(symbol, side, qty, price=order_price, order_type=order_type)
         _record_order(
@@ -271,6 +275,8 @@ def _handle_place_order(
             mode=mode,
             order_session=order_session,
             trade_diff_sink=trade_diff_sink,
+            # 期限の無い保有を残さない。8:50 の道と同じく新規の買いにだけ渡す（#1543）
+            horizon=_determine_entry_horizon(row) if side == OrderSide.BUY else None,
         )
         if side == OrderSide.BUY:
             stats["buy_orders"] += 1
@@ -327,6 +333,7 @@ def run_claude_trader(
     trade_diff_sink: TradeDiffSink,
     prediction_repo: PredictionResultRepository,
     prediction_saved_day: str | None = None,
+    market_data: MarketDataPort | None = None,
 ) -> dict[str, Any]:
     """
     Claude Opus を用いたトレード判断エージェントを実行する。
@@ -338,6 +345,7 @@ def run_claude_trader(
         trade_diff_sink: 約定乖離の記録先（TradeDiffSink 実装。合成ルートが必ず渡す）
         prediction_repo: 予測結果の読み取り元（合成ルートが必ず渡す）
         prediction_saved_day: 日次の道の [3/6] の保存の終わりの JST の日付（#1490）。None なら確かめない
+        market_data: 指値の判定に使う値段の取り元（#1543）。None なら成行で出す
 
     Returns:
         buy_orders, sell_orders, skipped, errors 等の実行統計
@@ -533,6 +541,7 @@ market: {market}, mode: {mode}
                     trade_diff_sink=trade_diff_sink,
                     caps=caps,
                     buy_block_reason=buy_block_reason,
+                    market_data=market_data,
                 )
             else:
                 result = {"error": f"未知の tool: {tool_name}"}
