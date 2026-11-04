@@ -404,7 +404,7 @@ class TestRunDailyRuleSignalsCompositionRoot(unittest.TestCase):
             return {"buy_orders": 0, "sell_orders": 0}
 
         with patch(
-            "src.rule_engine.pipeline.generate_rule_signals", return_value=RuleSignalBatch()
+            "src.rule_engine.pipeline.generate_rule_signals", return_value=RuleSignalBatch(total=1)
         ), patch(
             "src.trading.rule_execution.execute_rule_paper_trades",
             side_effect=_fake_execute_rule_paper_trades,
