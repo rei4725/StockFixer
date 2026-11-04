@@ -161,3 +161,104 @@ def test_event_types_are_position_event():
     events = simulate_position(df, _entry_date(df))
     assert events
     assert all(isinstance(e, PositionEvent) for e in events)
+
+
+def test_nan_close_mid_series_still_detects_ma_break():
+    """途中の足の終値が NaN でも、その後の MA 割れで撤退する（#1584）。"""
+    closes = np.full(206, 100.0)
+    closes[150] = np.nan
+    closes[-1] = 99.0
+    df = _make_df(closes)
+
+    events = simulate_position(df, _entry_date(df))
+
+    assert events[-1].action == "exit"
+    assert events[-1].reason == "ma_break"
+    assert events[-1].date == str(df["date"].iloc[-1])
+    assert events[-1].price == 99.0
+
+
+def test_nan_close_before_entry_still_detects_ma_break():
+    """エントリーより前の足の欠けでも、MA の判定が抜けない（#1584）。"""
+    closes = np.full(206, 100.0)
+    closes[100] = np.nan
+    closes[-1] = 99.0
+    df = _make_df(closes)
+
+    events = simulate_position(df, str(df["date"].iloc[120]))
+
+    assert events[-1].reason == "ma_break"
+
+
+@pytest.mark.parametrize("bad_close", [np.nan, np.inf, -np.inf, 0.0, -1.0])
+def test_invalid_close_is_dropped_before_judging(bad_close):
+    """NaN・無限・0以下の足は判定に使わず、イベントも出さない（#1584）。"""
+    closes = np.full(206, 100.0)
+    closes[150] = bad_close
+    closes[-1] = 99.0
+    df = _make_df(closes)
+
+    events = simulate_position(df, _entry_date(df))
+
+    assert [(e.action, e.reason) for e in events] == [("entry", "entry"), ("exit", "ma_break")]
+    assert events[-1].date == str(df["date"].iloc[-1])
+
+
+def test_ma_not_judged_until_window_filled_by_valid_bars():
+    """有効な足が窓に満たないうちは、MA 割れを判定しない（#1584）。"""
+    closes = np.full(200, 100.0)
+    closes[10] = np.nan  # 有効な足は 199 本で、200日の窓に1本足りない
+    closes[-1] = 99.0
+    df = _make_df(closes)
+
+    events = simulate_position(df, _entry_date(df))
+
+    assert [e.reason for e in events] == ["entry", "end_of_data"]
+
+
+def test_nan_entry_close_returns_empty():
+    """エントリーの日の終値が NaN なら空のリストを返す（#1584）。"""
+    closes = np.linspace(10.0, 20.0, 30)
+    closes[0] = np.nan
+    df = _make_df(closes)
+
+    assert simulate_position(df, _entry_date(df)) == []
+
+
+def test_all_closes_invalid_returns_empty():
+    """有効な足が1本も無ければ空のリストを返す（#1584）。"""
+    df = _make_df(np.full(5, np.nan))
+
+    assert simulate_position(df, _entry_date(df)) == []
+
+
+def test_nan_last_close_ends_on_last_valid_bar():
+    """最後の足の終値が NaN なら、最後の有効な足の値で手仕舞う（#1584）。"""
+    closes = np.linspace(10.0, 30.0, 50)
+    closes[-1] = np.nan
+    df = _make_df(closes)
+    rules = HoldRules(scale_out_multiples=[])
+
+    events = simulate_position(df, _entry_date(df), rules)
+
+    last = events[-1]
+    assert last.reason == "end_of_data"
+    assert last.date == str(df["date"].iloc[-2])
+    assert last.price == closes[-2]
+    assert last.multiple == pytest.approx(closes[-2] / 10.0)
+
+
+def test_events_unchanged_for_series_without_missing_bars():
+    """欠けの無い系列のイベントは、利確から撤退まで今までと同じ（#1584）。"""
+    closes = np.concatenate([np.linspace(10.0, 60.0, 101), np.linspace(59.0, 30.0, 10)])
+    df = _make_df(closes)
+
+    events = simulate_position(df, _entry_date(df))
+
+    assert [(e.date, e.action, e.reason) for e in events] == [
+        ("2024-01-01", "entry", "entry"),
+        (str(df["date"].iloc[20]), "scale_out", "scale_2x"),
+        (str(df["date"].iloc[80]), "scale_out", "scale_5x"),
+        (str(df["date"].iloc[108]), "exit", "trail_stop"),
+    ]
+    assert events[-1].price == pytest.approx(closes[108])
