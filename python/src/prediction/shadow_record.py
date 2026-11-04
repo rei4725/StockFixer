@@ -16,6 +16,7 @@ logger = get_logger(__name__)
 
 _SHADOW_KEYS = (
     "challenger_trained_at",
+    "production_changed_at",
     "window_days",
     "production_hit_rate",
     "production_sharpe",
