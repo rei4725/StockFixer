@@ -507,20 +507,19 @@ class TestRunRegimeLeverageDailyMarginCheck(unittest.TestCase):
 
 class TestRegimeLeverageNaNGuard(unittest.TestCase):
     """Finding 2: MA200/ATR14がNaNの場合、判定を行わずDBにも書き込まないこと。
-    未保有ならNoneを返し、保有中なら例外を送出する(#870)。"""
+    保有の有無によらず例外を送出する(#870・#1583)。"""
 
-    @patch("src.trading.regime_leverage_strategy.service.insert_snapshot")
-    @patch("src.trading.regime_leverage_strategy.service.get_latest_snapshot")
-    def test_weekly_check_returns_none_when_ma200_is_nan(self, mock_latest, mock_insert):
-        from src.trading.regime_leverage_strategy.service import run_regime_leverage_weekly_check
+    @staticmethod
+    def _unheld_snapshots() -> list:
+        """未保有の2つの形: 記録が無い初回と、決済の後(shares=0)。"""
+        return [None, _holding_snapshot(shares=0.0, equity_now_jpy=1_200_000.0)]
 
-        mock_latest.return_value = None
+    @staticmethod
+    def _port(periods: int, start: float = 400.0, end: float = 500.0) -> MagicMock:
+        idx = pd.bdate_range("2025-01-01", periods=periods)
+        prices = pd.Series(np.linspace(start, end, periods), index=idx)
         mock_port = MagicMock()
-        # 200日線が計算できるだけの行数(200)に満たないデータ(150行)を与え、
-        # 最終行のMA200がNaNになるようにする。
-        idx = pd.bdate_range("2025-01-01", periods=150)
-        prices = pd.Series(np.linspace(400.0, 500.0, 150), index=idx)
-        df = pd.DataFrame(
+        mock_port.get_stock_data.return_value = pd.DataFrame(
             {
                 "Open": prices,
                 "High": prices + 2,
@@ -530,14 +529,72 @@ class TestRegimeLeverageNaNGuard(unittest.TestCase):
             },
             index=idx,
         )
-        mock_port.get_stock_data.return_value = df
-        fx_df = pd.DataFrame({"Close": [145.0]}, index=[idx[-1]])
-        mock_port.get_forex_data.return_value = fx_df
+        mock_port.get_forex_data.return_value = pd.DataFrame({"Close": [145.0]}, index=[idx[-1]])
+        return mock_port
 
-        decision = run_regime_leverage_weekly_check(mock_port)
+    def _assert_raises_without_insert(self, snapshot, mock_port: MagicMock, pattern: str) -> None:
+        from src.trading.regime_leverage_strategy.service import run_regime_leverage_weekly_check
 
-        self.assertIsNone(decision)
+        base = "src.trading.regime_leverage_strategy.service"
+        with patch(f"{base}.get_latest_snapshot", return_value=snapshot), patch(
+            f"{base}.insert_snapshot"
+        ) as mock_insert:
+            with self.assertRaisesRegex(RuntimeError, pattern):
+                run_regime_leverage_weekly_check(mock_port)
         mock_insert.assert_not_called()
+
+    def test_weekly_check_unheld_raises_when_ma200_is_nan(self):
+        """未保有でMA200がNaNの回は、新規エントリーの判定が黙って1週飛ばないよう例外を送出する
+        (スケジューラーのやり直しと補完に乗せる。#1583)。"""
+        for snapshot in self._unheld_snapshots():
+            with self.subTest(snapshot=snapshot):
+                # 200日線が計算できるだけの行数(200)に満たないデータ(150行)を与え、
+                # 最終行のMA200がNaNになるようにする。
+                self._assert_raises_without_insert(
+                    snapshot, self._port(periods=150), "ma200_usd=nan"
+                )
+
+    def test_weekly_check_unheld_raises_when_atr14_is_nan(self):
+        """未保有でATR14だけがNaNの回も例外を送出する(#1583)。最終行の高値・安値が欠けると
+        MA200も一緒にNaNになるため、ATR14だけのNaNは計算の結果を差し替えて作る。"""
+        from src.trading.regime_leverage_strategy.indicators import build_weekly_frame
+
+        mock_port = self._port(periods=260)
+        frame = build_weekly_frame(mock_port.get_stock_data.return_value)
+        frame.loc[frame.index[-1], "ATR14"] = np.nan
+        base = "src.trading.regime_leverage_strategy.service"
+        for snapshot in self._unheld_snapshots():
+            with self.subTest(snapshot=snapshot), patch(
+                f"{base}.build_weekly_frame", return_value=frame
+            ):
+                self._assert_raises_without_insert(
+                    snapshot, mock_port, r"ma200_usd=\d.*atr14_usd=nan"
+                )
+
+    def test_weekly_check_unheld_raises_when_last_row_high_low_are_missing(self):
+        """未保有で最終行の高値・安値が欠けた回(次の回に解ける見込みの欠け)も例外を送出する。"""
+        for snapshot in self._unheld_snapshots():
+            with self.subTest(snapshot=snapshot):
+                mock_port = self._port(periods=260)
+                df = mock_port.get_stock_data.return_value
+                df.loc[df.index[-1], ["High", "Low"]] = np.nan
+                self._assert_raises_without_insert(snapshot, mock_port, "atr14_usd=nan")
+
+    def test_weekly_check_unheld_records_noop_when_indicators_complete_and_regime_down(self):
+        """MA200・ATR14がそろった未保有の回は、レジーム下降なら今までどおりweekly_noopを記録する。"""
+        from src.trading.regime_leverage_strategy.service import run_regime_leverage_weekly_check
+
+        base = "src.trading.regime_leverage_strategy.service"
+        for snapshot in self._unheld_snapshots():
+            with self.subTest(snapshot=snapshot):
+                with patch(f"{base}.get_latest_snapshot", return_value=snapshot), patch(
+                    f"{base}.insert_snapshot"
+                ) as mock_insert:
+                    decision = run_regime_leverage_weekly_check(
+                        self._port(periods=260, start=500.0, end=400.0)
+                    )
+                self.assertEqual(decision.reason, "weekly_noop")
+                mock_insert.assert_called_once_with(decision)
 
     @patch("src.trading.regime_leverage_strategy.service.insert_snapshot")
     @patch("src.trading.regime_leverage_strategy.service.get_latest_snapshot")

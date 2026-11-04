@@ -170,3 +170,17 @@ def raise_if_optimization_mostly_failed(total: int, failed: int) -> None:
             f"週次バックテスト最適化で失敗した銘柄が多すぎる: {failed} / 結果 {total}"
             f"（線 {DAILY_FETCH_MAX_UNAVAILABLE_RATIO:.0%}）"
         )
+
+
+def _raise_if_no_effective_rules(batch: "RuleSignalBatch") -> None:
+    """対象が0銘柄の日に NonRetryableJobError を投げる（#1571）。
+
+    有効ルールの表が空の日は保有の SELL が1件も判定されないのに、取れなかった銘柄も
+    注文の失敗も0件のため成功で終わる。呼び出し元は記録と知らせの後に呼ぶ。やり直しても
+    表は空のままで同じ知らせが重なるだけなので、リトライはさせない。
+    """
+    if batch.total > 0:
+        return
+    message = "有効ルールが0銘柄のため、保有の SELL も含めて判定できなかった"
+    logger.error("日次ルールシグナル: %s", message)
+    raise NonRetryableJobError(message)
