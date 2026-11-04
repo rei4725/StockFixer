@@ -27,7 +27,7 @@ type = layers
 layers =
     src.api | src.orchestration
     src.infrastructure
-    src.backtest | src.prediction | src.trading | src.reporting | src.watchlist | src.market_data | src.rule_engine | src.quality | src.screening
+    src.backtest | src.prediction | src.trading | src.reporting | src.watchlist | src.market_data | src.rule_engine | src.quality | src.screening | src.scoring
     src.utils
     src.domain
 
@@ -63,6 +63,7 @@ modules =
     src.rule_engine
     src.quality
     src.screening
+    src.scoring
 
 # ============================================================
 # Contract 3: domain purity 契約
@@ -94,3 +95,4 @@ forbidden_modules =
     src.rule_engine
     src.quality
     src.screening
+    src.scoring

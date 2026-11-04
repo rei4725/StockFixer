@@ -38,7 +38,9 @@ class YFinanceDataSource(DataSourceBase):
         start_date: str,
         end_date: str,
     ) -> pd.DataFrame:
-        data = yf_client.download(pair, start=str(start_date), end=str(end_date), auto_adjust=True)
+        # yfinance の end は exclusive なので 1 日加算（get_stock_data と同じ日の足まで取る）
+        end_date_adj = (pd.to_datetime(end_date) + timedelta(days=1)).strftime("%Y-%m-%d")
+        data = yf_client.download(pair, start=str(start_date), end=end_date_adj, auto_adjust=True)
         if data.empty:
             raise ValueError(f"No data found for forex pair {pair}")
         return data
