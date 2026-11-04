@@ -259,21 +259,42 @@ class TestRuleGateRecord(unittest.TestCase):
         self.assertEqual(result_ng, result_ok)
         self.assertEqual(self._sent(broker_ng), self._sent(broker_ok))
 
+    def test_unjudged_holding_is_recorded(self):
+        """signals にも unavailable にも入らない保有が一覧と数に入る（#1527）"""
+        result, broker = self._run(_ALLOWED, _CORR_OK)
+        record = _read()
+        self.assertEqual(record["unjudged_held_symbols"], ["5202"])
+        self.assertEqual(record["unjudged_held_count"], 1)
+        self.assertEqual(record["unavailable_held_symbols"], [])
+        self.assertEqual(result["sell_orders"], 1)
+        self.assertNotIn("5202.T", [symbol for symbol, _ in self._sent(broker)])
+
+    def test_no_unjudged_day_records_empty_list_and_zero(self):
+        """保有がどれも signals か unavailable に入る日は、空の一覧と 0 が入る（#1527）"""
+        self._run(_ALLOWED, _CORR_OK, unavailable_symbols=_UNAVAILABLE)
+        record = _read()
+        self.assertEqual(record["unjudged_held_symbols"], [])
+        self.assertEqual(record["unjudged_held_count"], 0)
+        self._assert_unavailable_recorded(record)
+
+    def test_write_failure_with_unjudged_holding_keeps_orders_and_result(self):
+        """対象に入らなかった保有がある日も、書き込みが落ちて戻り値と注文は変わらない（#1527）"""
+        result_ok, broker_ok = self._run(_ALLOWED, _CORR_OK)
+        self.assertEqual(_read()["unjudged_held_count"], 1)
+        failing = patch(
+            "src.trading.execution.gate_record._write_record", side_effect=OSError("disk full")
+        )
+        with self.assertLogs("src.trading.execution.gate_record", level="ERROR"):
+            result_ng, broker_ng = self._run(_ALLOWED, _CORR_OK, extra=(failing,))
+        self.assertEqual(result_ng, result_ok)
+        self.assertEqual(self._sent(broker_ng), self._sent(broker_ok))
+
 
 class TestDailyRuleSignalsGateRecord(unittest.TestCase):
-    def test_mostly_unavailable_day_is_recorded(self):
-        """取れない銘柄が多すぎる日は、allow_new_buys=False と止めた数が入る"""
+    @staticmethod
+    def _run_daily(batch, broker):
         from src.orchestration.jobs import daily
 
-        batch = RuleSignalBatch(
-            signals=list(_SIGNALS),
-            unavailable=[
-                UnavailableRuleSymbol(symbol=f"NG{i}", rule="rsi_contrarian", reason="データ不足")
-                for i in range(4)
-            ],
-            total=7,
-        )
-        broker = _broker()
         patches = _patches(_ALLOWED, _CORR_OK) + [
             patch("src.rule_engine.pipeline.generate_rule_signals", return_value=batch),
             patch("src.trading.brokers.account.factory.make_order_broker", return_value=broker),
@@ -286,11 +307,35 @@ class TestDailyRuleSignalsGateRecord(unittest.TestCase):
         for p in patches:
             p.start()
         try:
-            with self.assertRaises(RuntimeError):
-                daily.run_daily_rule_signals()
+            daily.run_daily_rule_signals()
         finally:
             for p in reversed(patches):
                 p.stop()
+
+    def test_no_effective_rule_day_records_all_holdings(self):
+        """有効なルールが0件の日も記録が書かれ、保有が一覧と数に入る（#1527）"""
+        broker = _broker()
+        broker.get_positions.return_value.append(_HELD_5202)
+        self._run_daily(RuleSignalBatch(), broker)
+        record = _read()
+        self.assertEqual(record["unjudged_held_symbols"], ["1000", "5202"])
+        self.assertEqual(record["unjudged_held_count"], 2)
+        self.assertEqual(record["unavailable_count"], 0)
+        self.assertEqual(record["sell_orders"], 0)
+        broker.send_order.assert_not_called()
+
+    def test_mostly_unavailable_day_is_recorded(self):
+        """取れない銘柄が多すぎる日は、allow_new_buys=False と止めた数が入る"""
+        batch = RuleSignalBatch(
+            signals=list(_SIGNALS),
+            unavailable=[
+                UnavailableRuleSymbol(symbol=f"NG{i}", rule="rsi_contrarian", reason="データ不足")
+                for i in range(4)
+            ],
+            total=7,
+        )
+        with self.assertRaises(RuntimeError):
+            self._run_daily(batch, _broker())
         record = _read()
         self.assertFalse(record["allow_new_buys"])
         self.assertTrue(record["risk_gate_allowed"])
