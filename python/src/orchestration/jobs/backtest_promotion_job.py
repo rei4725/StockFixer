@@ -18,6 +18,7 @@ from typing import Any, Optional
 import pandas as pd
 from filelock import Timeout
 
+from src.orchestration.job_errors import NonRetryableJobError
 from src.orchestration.jobs.common import _local_now
 from src.prediction.backtest_promotion import (
     CANDIDATE_NAMES,
@@ -97,6 +98,18 @@ def run_backtest_promotion(force: bool = False, dry_run: bool = False) -> dict:
         result["result_path"],
     )
     return result
+
+
+def raise_if_backtest_promotion_failed(result: dict) -> None:
+    """失敗とロック切れの回をスケジューラの失敗にする（#1564）。手の CLI は呼ばない。
+
+    run_backtest_promotion は JSON と知らせのために結果を dict で返すので、
+    定時の回は戻り値を見て投げる。やり直すと学習が頭から走るのでリトライはさせない。
+    """
+    if result["outcome"] != FAILED and not result["lock_timeout"]:
+        return
+    detail = f"{result['reason']}（{result['error']}）" if result.get("error") else result["reason"]
+    raise NonRetryableJobError(f"仮の入れ替えの夜間ジョブが {result['outcome']}: {detail}")
 
 
 def _new_result(started: datetime, force: bool, dry_run: bool) -> dict:
@@ -404,4 +417,4 @@ def _notify(result: dict) -> None:
             logger.error("仮の入れ替えの%sの通知に失敗", label, exc_info=True)
 
 
-__all__ = ["run_backtest_promotion"]
+__all__ = ["raise_if_backtest_promotion_failed", "run_backtest_promotion"]
