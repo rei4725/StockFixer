@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Sequence
 from typing import Any
 
 from config.settings import (
@@ -18,7 +19,11 @@ from src.domain.trading_rules import get_lot_size
 from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
 from src.trading.brokers.paper.paper_broker import PaperBroker
 from src.trading.correlation_risk import evaluate_correlation_gate
-from src.trading.execution.gate_record import RuleGateRecord, save_rule_gate_record
+from src.trading.execution.gate_record import (
+    RuleGateRecord,
+    UnavailableSymbol,
+    save_rule_gate_record,
+)
 from src.trading.execution.pending import _load_pending_exits, _log_pending_skips
 from src.trading.execution.selection import _get_pending_buy_symbols
 from src.trading.position_valuation import count_short_positions, short_held_codes
@@ -54,6 +59,7 @@ def execute_rule_paper_trades(
     broker: BrokerBase | None = None,
     allow_new_buys: bool = True,
     record_gate: bool = False,
+    unavailable_symbols: Sequence[UnavailableSymbol] = (),
 ) -> dict[str, int]:
     """
     シグナルに基づきペーパートレードを実行する。
@@ -73,6 +79,9 @@ def execute_rule_paper_trades(
         record_gate: True なら新規買いを止めた判定と止めた理由ごとの数を
             results/orders/rule/<JST の日付>.json に書く（16:30 のジョブ。#1514）。
             書き込みの失敗は ERROR のログだけで、注文と戻り値は変えない
+        unavailable_symbols: シグナルを出せなかった銘柄（RuleSignalBatch.unavailable）。
+            record_gate=True のとき、そのまま記録に写し、保有中の銘柄を別の一覧にも写す
+            （#1520）。判定と注文には使わない
 
     Returns:
         {"buy_orders": int, "sell_orders": int, "skipped": int, "errors": int}
@@ -288,7 +297,9 @@ def execute_rule_paper_trades(
         record.sell_orders = sell_orders
         record.skipped = skipped
         record.errors = errors
-        save_rule_gate_record(record)
+        save_rule_gate_record(
+            record, unavailable_symbols=unavailable_symbols, held_symbols=held_symbols
+        )
     if buy_step_error is not None:
         raise buy_step_error
     return {

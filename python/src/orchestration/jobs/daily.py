@@ -548,6 +548,7 @@ def run_daily_rule_signals() -> None:
             ),
             allow_new_buys=not mostly_unavailable,
             record_gate=True,
+            unavailable_symbols=batch.unavailable,
         )
         if mostly_unavailable:
             logger.warning(

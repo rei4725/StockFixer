@@ -2,13 +2,16 @@
 
 置き場: 8:50 は results/orders/<JST の日付>.json、16:30 のルールの道は
 results/orders/rule/<JST の日付>.json（8:50 の記録を上書きしない。同じ道のやり直しは上書きする）。
-ゲートの判定はそのまま写す。8:50 の記録には SL/TP を評価できなかった保有の銘柄と数も写す（#1516）。書き込みの失敗は ERROR のログで知らせ、発注は止めない。
+ゲートの判定はそのまま写す。8:50 の記録には SL/TP を評価できなかった保有の銘柄と数も写す（#1516）。
+16:30 の記録にはシグナルを出せなかった銘柄と、そのうち保有中の銘柄の一覧と数も写す（#1520）。
+書き込みの失敗は ERROR のログで知らせ、発注は止めない。
 """
 
 import json
+from collections.abc import Collection, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Protocol
 
 from src.utils.data_path_utils import get_results_dir
 from src.utils.japan_time import now_jst
@@ -100,13 +103,41 @@ class RuleGateRecord:
     errors: int = 0
 
 
-def save_rule_gate_record(record: RuleGateRecord) -> Optional[str]:
-    """ルールの道の判定を results/orders/rule/ に書き、パスを返す。書けなければ None を返す。"""
+class UnavailableSymbol(Protocol):
+    """シグナルを出せなかった銘柄（rule_engine の UnavailableRuleSymbol の形。#1520）。
+
+    BC どうしは import しないので、記録に要る属性だけをここに書く。
+    """
+
+    symbol: str
+    rule: str
+    reason: str
+
+
+def save_rule_gate_record(
+    record: RuleGateRecord,
+    *,
+    unavailable_symbols: Sequence[UnavailableSymbol] = (),
+    held_symbols: Collection[str] = (),
+) -> Optional[str]:
+    """ルールの道の判定を results/orders/rule/ に書き、パスを返す。書けなければ None を返す。
+
+    unavailable_symbols はシグナルを出せなかった銘柄で、held_symbols（約定済みの保有）に
+    入るものは、その日のルールの売りを判定できなかった保有として別の一覧にも写す（#1520）。
+    """
     try:
         now = now_jst()
         day = now.date().isoformat()
         dest = Path(get_results_dir()) / "orders" / "rule" / f"{day}.json"
         payload: dict[str, Any] = {"date": day, "written_at": now.isoformat(), **asdict(record)}
+        rows = [
+            {"symbol": u.symbol, "rule": u.rule, "reason": u.reason} for u in unavailable_symbols
+        ]
+        held_rows = [row for row in rows if row["symbol"] in held_symbols]
+        payload["unavailable_symbols"] = rows
+        payload["unavailable_count"] = len(rows)
+        payload["unavailable_held_symbols"] = held_rows
+        payload["unavailable_held_count"] = len(held_rows)
         _write_record(dest, payload)
     except Exception:
         logger.error("[rule] 新規を止めた判定の記録に失敗（発注は続ける）", exc_info=True)
