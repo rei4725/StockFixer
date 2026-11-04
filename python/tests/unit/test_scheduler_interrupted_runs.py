@@ -155,7 +155,7 @@ def test_interrupted_recovery_stops_after_two_consecutive_interruptions(tmp_path
 
 @pytest.mark.parametrize(
     "interrupted, expected_recover, expected_count",
-    [(2, True, 0), (12, True, 0), (13, False, 1)],
+    [(2, True, 0), (40, True, 0), (41, False, 1)],
 )
 def test_weekly_optimization_recovers_up_to_configured_limit(
     tmp_path, interrupted, expected_recover, expected_count
@@ -164,7 +164,7 @@ def test_weekly_optimization_recovers_up_to_configured_limit(
     from run_scheduler import SCHEDULE_CONFIG
 
     assert SCHEDULE_CONFIG["weekly_optimization"]["max_executions_per_period"] == 1
-    assert SCHEDULE_CONFIG["weekly_optimization"]["max_interrupted_reruns_per_period"] == 12
+    assert SCHEDULE_CONFIG["weekly_optimization"]["max_interrupted_reruns_per_period"] == 40
     state_path = tmp_path / "state.json"
     for i in range(interrupted):
         _write_started(state_path, "weekly_optimization", "2026-W45", f"run-{i}", f"boot-{i}")
@@ -201,7 +201,7 @@ def test_weekly_optimization_finished_run_still_counts_against_limit(tmp_path):
 
 
 def test_weekly_optimization_stops_after_limit_of_interruptions(tmp_path):
-    """定時の1回と補完の12回で計13回動き、13回目も消えたらそれ以上は補完しないこと（#1522）"""
+    """定時の1回と補完の40回で計41回動き、41回目も消えたらそれ以上は補完しないこと（#1534）"""
     from run_scheduler import SCHEDULE_CONFIG
 
     state_path = tmp_path / "state.json"
@@ -227,7 +227,7 @@ def test_weekly_optimization_stops_after_limit_of_interruptions(tmp_path):
     first.run_job("weekly_optimization", reason="scheduled")
     state_path.write_bytes(snapshot["state"])
 
-    for _ in range(30):
+    for _ in range(60):
         manager = SchedulerQueueManager(config, state_file_path=str(state_path))
         manager.now = lambda: now  # type: ignore[method-assign]
         if not manager.should_recover("weekly_optimization", now=now):
@@ -235,7 +235,7 @@ def test_weekly_optimization_stops_after_limit_of_interruptions(tmp_path):
         manager.run_job("weekly_optimization", reason="recovery")
         state_path.write_bytes(snapshot["state"])
 
-    assert calls["n"] == 13
+    assert calls["n"] == 41
 
 
 def test_only_weekly_optimization_has_more_interrupted_reruns(tmp_path):
