@@ -5,6 +5,7 @@
 """
 
 from src.orchestration.jobs.common import _is_first_week_of_month
+from src.orchestration.jobs.scoring_stage import weekly_rule_scoring_stage
 from src.orchestration.jobs.symbol_master_job import run_symbol_master_refresh
 from src.orchestration.jobs.weekly_training import (  # noqa: F401  re-export（#1295）
     _challengers_trained_this_week,
@@ -450,4 +451,5 @@ def run_weekly_rule_evaluation() -> None:
         logger.error("週次ルール評価失敗: %s", e, exc_info=True)
         raise
 
+    weekly_rule_scoring_stage(market, now_jst().date())
     finish_rule_evaluation(summary, market)

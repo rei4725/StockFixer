@@ -1,5 +1,5 @@
 """
-run_daily_orders — 自動発注オーケストレーター
+run_order_steps — 自動発注の手順（入口の run_daily_orders は order_run.py）
 
 DuckDB の最新予測結果を読み込み、RiskManager のゲートチェックを通過した
 銘柄に対して Broker 経由で成行注文を発注する。
@@ -63,12 +63,13 @@ from .selection import (
     _load_exit_model,
 )
 from .sl_tp import _check_sl_tp_exits, _sl_tp_exits_only
-from .stats import OrderExecutionStats, _new_stats
+from .stats import OrderExecutionStats
 
 logger = get_logger(__name__)
 
 
-def run_daily_orders(
+def run_order_steps(
+    stats: OrderExecutionStats,
     broker: BrokerBase,
     *,
     order_run_sink: OrderRunSink,
@@ -81,7 +82,7 @@ def run_daily_orders(
     prediction_saved_day: str | None = None,  # [3/6] の保存の終わりの JST の日付（#1394）
 ) -> OrderExecutionStats:
     """
-    日次自動発注メインエントリーポイント。
+    日次自動発注の手順を流し、stats に集計を書く（入口は order_run.py の run_daily_orders）。
 
     Args:
         broker: BrokerBase 実装（KabuBroker or PaperBroker）
@@ -92,7 +93,6 @@ def run_daily_orders(
     """
     logger.info(f"=== 自動発注開始: market={market} mode={mode} broker={broker.broker_name} ===")
 
-    stats = _new_stats()
     record = _recorder(_record_order, stats)  # 記録の失敗でも注文は出たものとして数える (#1104)
     try:
         broker.get_token()

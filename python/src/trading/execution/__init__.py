@@ -12,6 +12,7 @@ from config.settings import (  # noqa: F401  re-export for tests/backward-compat
 )
 from src.trading.risk_manager import RiskManager  # noqa: F401  patch target 後方互換
 
+from .order_run import run_daily_orders  # noqa: F401
 from .params import (  # noqa: F401
     _apply_split_qty,
     _attach_dynamic_thresholds,
@@ -27,7 +28,6 @@ from .recording import (  # noqa: F401
     _record_order,
     _sync_live_execution_diffs,
 )
-from .runner import run_daily_orders  # noqa: F401
 from .selection import (  # noqa: F401
     _apply_buy_sector_limit,
     _compute_ml_exit_signals,

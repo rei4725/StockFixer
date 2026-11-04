@@ -25,6 +25,7 @@ class OrderExecutionStats(TypedDict):
     held_without_prediction_symbols: list[str] | None  # 判定をしなかった日は None（#1530）
     stale_prediction_reason: str | None
     threshold_scale: float | None
+    order_record_written: bool  # その回の記録を書きに行ったか。二重に書かない（#1548）
 
 
 def _new_stats() -> OrderExecutionStats:
@@ -51,4 +52,5 @@ def _new_stats() -> OrderExecutionStats:
         "held_without_prediction_symbols": None,
         "stale_prediction_reason": None,
         "threshold_scale": None,
+        "order_record_written": False,
     }
