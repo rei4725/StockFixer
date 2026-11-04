@@ -46,6 +46,7 @@ from src.orchestration.jobs.scoring_stage import (
 from src.orchestration.jobs.stale_prediction_notice import notify_stale_prediction
 from src.orchestration.jobs.unavailable_gates import (
     _raise_if_fetch_mostly_unavailable,
+    _raise_if_no_effective_rules,
     _raise_if_rule_signals_mostly_unavailable,
     _rule_signals_mostly_unavailable,
     order_market_predictions_mostly_missing,
@@ -585,6 +586,7 @@ def run_daily_rule_signals() -> None:
             market=market,
             buy_orders=trade_stats["buy_orders"],
             sell_orders=trade_stats["sell_orders"],
+            total=batch.total,
         )
     except Exception as e:
         logger.error("ルールシグナル通知失敗: %s", e, exc_info=True)
@@ -595,3 +597,4 @@ def run_daily_rule_signals() -> None:
     if errors > 0:
         logger.error("日次ルールシグナルで注文の失敗が %d 件あった", errors)
         raise RuntimeError(f"日次ルールシグナルで注文の失敗が {errors} 件あった")
+    _raise_if_no_effective_rules(batch)
