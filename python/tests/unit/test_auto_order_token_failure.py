@@ -2,11 +2,17 @@
 
 その日は SL/TP も含めて全部止まるので、成功の完了に見せず、ERROR の知らせを出して失敗で終える。
 トークンを取れた日（紙の日）は、errors も知らせも増えない。
+その朝は日ごとの記録にも失敗を書いてから返す（#1533）。
 """
 
+import json
+import tempfile
 import unittest
 from contextlib import ExitStack
+from datetime import datetime
+from pathlib import Path
 from unittest.mock import MagicMock, patch
+from zoneinfo import ZoneInfo
 
 from src.domain.ports import AlertLevel
 from src.infrastructure.in_memory import (
@@ -72,6 +78,87 @@ class TestRunDailyOrdersCountsTokenFailure(unittest.TestCase):
         exits_only.assert_called_once()
         self.assertEqual(stats["errors"], 0)
         self.assertEqual(notifier.sent_alerts, [])
+
+
+class TestTokenFailureOrderRecord(unittest.TestCase):
+    """トークンを取れない朝も results/orders/<JST の日付>.json に失敗が残る（#1533）。"""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dest = Path(tmp.name) / "orders" / "2026-11-04.json"
+        for target, value in (
+            ("get_results_dir", tmp.name),
+            ("now_jst", datetime(2026, 11, 4, 8, 50, tzinfo=ZoneInfo("Asia/Tokyo"))),
+        ):
+            started = patch(f"src.trading.execution.gate_record.{target}", return_value=value)
+            started.start()
+            self.addCleanup(started.stop)
+        self.broker = _token_failing_broker()
+        self.notifier = InMemoryNotificationAdapter()
+
+    def _run(self):
+        from src.trading.execution import run_daily_orders
+
+        return run_daily_orders(
+            self.broker,
+            order_run_sink=InMemoryOrderRunSink(),
+            trade_diff_sink=InMemoryTradeDiffSink(),
+            prediction_repo=InMemoryPredictionRepository(),
+            market="jp",
+            mode="paper",
+            notifier=self.notifier,
+        )
+
+    def _assert_unchanged_outcome(self, stats):
+        self.assertEqual(stats["errors"], 1)
+        self.assertEqual(stats["buy_orders"], 0)
+        self.assertEqual(stats["sell_orders"], 0)
+        self.broker.send_order.assert_not_called()
+        self.assertEqual([a["level"] for a in self.notifier.sent_alerts], [AlertLevel.ERROR])
+
+    def test_token_failure_is_written_to_the_day_record(self):
+        with self.assertLogs(level="ERROR"):
+            stats = self._run()
+
+        self._assert_unchanged_outcome(stats)
+        record = json.loads(self.dest.read_text(encoding="utf-8"))
+        self.assertEqual(record["date"], "2026-11-04")
+        self.assertEqual(record["mode"], "paper")
+        self.assertIn("token error", record["token_error"])
+        self.assertIsNone(record["entry_error"])
+        self.assertEqual(record["errors"], 1)
+        self.assertEqual(record["buy_orders"], 0)
+        self.assertEqual(record["sell_orders"], 0)
+
+    def test_write_failure_keeps_the_same_outcome(self):
+        with (
+            patch(
+                "src.trading.execution.gate_record._write_record",
+                side_effect=OSError("disk full"),
+            ),
+            self.assertLogs("src.trading.execution.gate_record", level="ERROR"),
+        ):
+            stats = self._run()
+
+        self._assert_unchanged_outcome(stats)
+        self.assertFalse(self.dest.exists())
+
+    def test_token_ok_day_records_null(self):
+        broker = MagicMock(spec=BrokerBase)
+        broker.broker_name = "paper"
+        self.broker = broker
+
+        with (
+            patch("src.trading.execution.runner.RiskManager"),
+            patch("src.trading.execution.runner._evaluate_entry_gate") as gate,
+            patch("src.trading.execution.runner._sl_tp_exits_only"),
+        ):
+            gate.return_value = (MagicMock(), None)
+            self._run()
+
+        record = json.loads(self.dest.read_text(encoding="utf-8"))
+        self.assertIsNone(record["token_error"])
 
 
 class TestDailyAutoOrderTokenFailure(unittest.TestCase):
