@@ -188,14 +188,14 @@ def test_weekly_job_without_flag_is_only_recovered_on_scheduled_day(tmp_path):
         assert manager.should_recover(job_id, now=now) is False
 
 
-def test_flag_only_on_weekly_optimization():
-    """印を持つのは週の最適化だけで、ほかのジョブの判定は変わらないこと"""
+def test_flag_only_on_listed_weekly_jobs():
+    """印を持つのは週の最適化とレジームレバレッジの週次判定だけで、ほかの判定は変わらないこと"""
     from run_scheduler import SCHEDULE_CONFIG
 
-    flagged = [
+    flagged = {
         job_id for job_id, config in SCHEDULE_CONFIG.items() if config.get("recover_rest_of_week")
-    ]
-    assert flagged == [_JOB_ID]
+    }
+    assert flagged == {_JOB_ID, "regime_leverage_weekly"}
 
 
 def test_flag_is_ignored_on_non_weekly_job(tmp_path):
