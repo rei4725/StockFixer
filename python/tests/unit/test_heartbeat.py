@@ -74,5 +74,5 @@ def test_ping_non_2xx_returns_false(monkeypatch):
 
 
 def test_scheduler_alive_slug_constant():
-    """recovery_poller が使う slug 定数が期待値であること"""
+    """scheduler_alive_ping ジョブが使う slug 定数が期待値であること"""
     assert SCHEDULER_ALIVE_SLUG == "scheduler-alive"
