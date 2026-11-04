@@ -6,6 +6,7 @@ results/orders/rule/<JST の日付>.json（8:50 の記録を上書きしない�
 売りの判定に使える予想が無かった保有の銘柄と数も写し、判定をしなかった日は null にする（#1530）。
 16:30 の記録にはシグナルを出せなかった銘柄と、そのうち保有中の銘柄の一覧と数も写す（#1520）。
 その日のルールの判定の対象に入らなかった保有の一覧と数も写す（#1527）。
+16:30 に保有を読めなかった日は、保有で分ける一覧と数を null にする（#1549）。
 8:50 にトークンを取れなかった朝は、その失敗を token_error に写す（#1533）。
 手順が例外で途中で落ちた朝は、その例外を entry_error に写す（#1548）。
 書き込みの失敗は ERROR のログで知らせ、発注は止めない。
@@ -151,7 +152,7 @@ def save_rule_gate_record(
     record: RuleGateRecord,
     *,
     unavailable_symbols: Sequence[UnavailableSymbol] = (),
-    held_symbols: Collection[str] = (),
+    held_symbols: Optional[Collection[str]] = (),
     signals: Sequence[Mapping[str, Any]] = (),
 ) -> Optional[str]:
     """ルールの道の判定を results/orders/rule/ に書き、パスを返す。書けなければ None を返す。
@@ -160,6 +161,8 @@ def save_rule_gate_record(
     入るものは、その日のルールの売りを判定できなかった保有として別の一覧にも写す（#1520）。
     held_symbols のうち signals にも unavailable_symbols にも入らない銘柄は、その日のルールの
     判定の対象に入らなかった保有として、銘柄の順の一覧と数に写す（#1527）。
+    held_symbols=None は保有を読めなかった日で、保有で分ける一覧と数を空と 0 でなく null にし、
+    判定した日の「該当なし」と分ける（#1549）。
     """
     try:
         now = now_jst()
@@ -169,15 +172,18 @@ def save_rule_gate_record(
         rows = [
             {"symbol": u.symbol, "rule": u.rule, "reason": u.reason} for u in unavailable_symbols
         ]
-        held_rows = [row for row in rows if row["symbol"] in held_symbols]
         payload["unavailable_symbols"] = rows
         payload["unavailable_count"] = len(rows)
+        held_rows: Optional[list[dict[str, str]]] = None
+        unjudged: Optional[list[str]] = None
+        if held_symbols is not None:
+            held_rows = [row for row in rows if row["symbol"] in held_symbols]
+            judged = {item["symbol"] for item in signals} | {row["symbol"] for row in rows}
+            unjudged = sorted(set(held_symbols) - judged)
         payload["unavailable_held_symbols"] = held_rows
-        payload["unavailable_held_count"] = len(held_rows)
-        judged = {item["symbol"] for item in signals} | {row["symbol"] for row in rows}
-        unjudged = sorted(set(held_symbols) - judged)
+        payload["unavailable_held_count"] = None if held_rows is None else len(held_rows)
         payload["unjudged_held_symbols"] = unjudged
-        payload["unjudged_held_count"] = len(unjudged)
+        payload["unjudged_held_count"] = None if unjudged is None else len(unjudged)
         _write_record(dest, payload)
     except Exception:
         logger.error("[rule] 新規を止めた判定の記録に失敗（発注は続ける）", exc_info=True)
