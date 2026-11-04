@@ -239,6 +239,9 @@ def _job_listener(event):
 # ホライズン決済は約定待ちの決済を飛ばし二重にならないため、発注のジョブでも付ける（#1321）。
 # max_interrupted_reruns_per_period: その補完の1回までを、そのジョブだけ増やす。週の最適化は
 # 全銘柄に約29時間かかりデプロイの起き直しで週に何度も消え、済んだ銘柄を飛ばして続きから進むため（#1522）。
+# 上限の40は、起動が1時間に1回ほどの週でも全銘柄の約29時間に届く数である（#1534）。
+# recover_rest_of_week: True の週次ジョブは、定時の曜日より後の同じ ISO 週の日も、その週の成功が無く
+# 上限が残っていれば補完する。定時の曜日より前の日は補完しない。全銘柄が1週のうちに終わるため（#1534）。
 SCHEDULE_CONFIG = {
     "daily_pipeline": {
         "func": job_daily_pipeline,
@@ -354,7 +357,8 @@ SCHEDULE_CONFIG = {
         "max_executions_per_period": 1,
         "description": "毎週水曜 01:00 - 全銘柄バックテスト最適化",
         "rerun_if_interrupted": True,
-        "max_interrupted_reruns_per_period": 12,
+        "max_interrupted_reruns_per_period": 40,
+        "recover_rest_of_week": True,
     },
     "weekly_walk_forward_report": {
         "func": job_weekly_walk_forward_report,
