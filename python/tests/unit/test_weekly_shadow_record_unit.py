@@ -22,6 +22,7 @@ _EXPECTED_KEYS = {
     "shadow_failed",
     "shadow_error",
     "challenger_trained_at",
+    "production_changed_at",
     "days",
     "window_days",
     "production_hit_rate",

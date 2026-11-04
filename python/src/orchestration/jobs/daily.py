@@ -6,6 +6,7 @@
 
 import threading
 from collections import Counter
+from datetime import date
 
 from src.orchestration.jobs.accuracy_json import (
     append_accuracy_json_sectors,
@@ -36,6 +37,11 @@ from src.orchestration.jobs.prediction_saved_marker import (
     clear_prediction_saved_marker,
     mark_prediction_saved,
     read_prediction_saved_day,
+)
+from src.orchestration.jobs.scoring_stage import (
+    daily_scoring_stage,
+    log_rule_signal_versions_stage,
+    snapshot_predictions_stage,
 )
 from src.orchestration.jobs.stale_prediction_notice import notify_stale_prediction
 from src.orchestration.jobs.unavailable_gates import (
@@ -204,6 +210,7 @@ def run_daily_pipeline():
 
     # 3.5. Challenger shadow 予測（NON_CRITICAL: モデルが存在しない場合はスキップ、失敗しても継続）
     run_challenger_shadow_stage()
+    snapshot_predictions_stage()
 
     # 4. 日次ドリフトチェック（NON_CRITICAL: 失敗しても後続処理を継続）
     logger.info("[4/6] 日次ドリフトチェック開始")
@@ -241,6 +248,7 @@ def run_daily_pipeline():
 
     # 採点の JSON に業種の内訳を書き足す（NON_CRITICAL。[2/6] で作った材料を使う）
     append_accuracy_json_sectors(accuracy_report)
+    daily_scoring_stage()
 
     logger.info("=== 日次パイプライン完了 ===")
 
@@ -530,6 +538,7 @@ def run_daily_rule_signals() -> None:
 
         market_data_adapter = YFinanceMarketDataAdapter()
         batch = generate_rule_signals(market=market, market_data_port=market_data_adapter)
+        log_rule_signal_versions_stage(date.today(), market)
         # 取れなかった銘柄が多すぎる日も、取れた銘柄の保有の SELL は出し、新規の BUY だけ
         # 止めてからジョブを失敗にする（#1191。8:50 の道・Claude の道と同じ形）。
         mostly_unavailable = _rule_signals_mostly_unavailable(batch)
