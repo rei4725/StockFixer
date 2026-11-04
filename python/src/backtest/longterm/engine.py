@@ -26,6 +26,7 @@ import について:
 
 from __future__ import annotations
 
+import math
 from bisect import bisect_left
 from dataclasses import replace
 from typing import Any, Optional
@@ -206,7 +207,8 @@ def enter_candidates(
         if entry_row.empty:
             continue
         entry_price = float(entry_row["Close"].iloc[0])
-        if entry_price <= 0 or per_position <= 0:
+        # 終値の欠けた足は NaN が比べを素通りするので、有限の正の数かを確かめる（#1584）。
+        if not math.isfinite(entry_price) or entry_price <= 0 or per_position <= 0:
             continue
 
         # 約定の日より前の平均出来高（約定の日を含めない）で市場インパクトを数える。

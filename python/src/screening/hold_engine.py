@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Optional
 
 import pandas as pd
@@ -18,6 +19,16 @@ from src.domain.types import HoldRules, PositionEvent
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+def _drop_invalid_closes(prices: pd.DataFrame) -> pd.DataFrame:
+    """終値が NaN・無限・0以下の足を除く。
+
+    窓の途中の1本の欠けで、その足から窓の長さの分だけ MA が NaN になり、MA 割れの
+    撤退が判定から抜けるのを防ぐ。判定はすべて残った足だけで行う(#1584)。
+    """
+    close = prices["Close"].astype(float)
+    return prices[close.gt(0) & close.lt(math.inf)].reset_index(drop=True)
 
 
 def _ma_window(rules: HoldRules) -> int:
@@ -69,12 +80,14 @@ def simulate_position(
 
     Args:
         prices: columns に date, Close を持つ昇順系列（エントリー日以降）。
+            終値が NaN・無限・0以下の足は除いて判定する。
         entry_date: エントリー日（YYYY-MM-DD）。prices に含まれること。
         rules: 保有/撤退ルール。
 
     Returns:
         発生した PositionEvent のリスト（entry → scale_out... → exit）。
         held_fraction が変化したイベント（entry/scale_out/exit）のみ記録する。
+        エントリー日が無いか、その日の終値が不正なら空のリストを返す。
 
     Note:
         未来データを参照しない（ルックアヘッド禁止）。各営業日の判定は、
@@ -89,21 +102,19 @@ def simulate_position(
         logger.warning("simulate_position: prices に date / Close 列がありません")
         return []
 
-    df = prices.reset_index(drop=True)
+    df = _drop_invalid_closes(prices)
     dates = df["date"].astype(str)
     close = df["Close"].astype(float)
 
     entry_idx_matches = df.index[dates == entry_date].tolist()
     if not entry_idx_matches:
-        logger.warning("simulate_position: entry_date=%s が prices に存在しません", entry_date)
+        logger.warning(
+            "simulate_position: entry_date=%s が prices に無いか終値が不正です", entry_date
+        )
         return []
     entry_idx = int(entry_idx_matches[0])
 
     entry_price = float(close.iloc[entry_idx])
-    if entry_price <= 0:
-        logger.warning("simulate_position: entry_price=%s が不正です", entry_price)
-        return []
-
     ma = _rolling_ma(close, rules)
 
     events: list[PositionEvent] = [
