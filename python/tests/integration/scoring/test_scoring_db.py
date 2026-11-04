@@ -157,3 +157,53 @@ def test_upsert_rule_outcomes_keeps_first_scored_at():
     assert list(got["symbol"]) == ["7203"]
     assert got["scored_at"].iloc[0] == pd.Timestamp(first)
     assert sdb.load_rule_outcomes_scored("us", datetime(2026, 11, 1), datetime(2026, 12, 1)).empty
+
+
+def _outcome(symbol: str, horizon: int, scored_at: datetime, signal_date: date = D) -> dict:
+    return {
+        "signal_date": signal_date,
+        "market": "jp",
+        "symbol": symbol,
+        "rule_name": "r1",
+        "signal": 1,
+        "horizon": horizon,
+        "hit": True,
+        "baseline": 0.5,
+        "signed_return": 0.01,
+        "app_version": None,
+        "scored_at": scored_at,
+    }
+
+
+def test_replace_rule_outcomes_deletes_stale_and_keeps_scored_at():
+    sdb.ensure_scoring_tables()
+    first = datetime(2026, 11, 3, 1, 0, 0)
+    keep = _outcome("7203", 5, first)
+    stale = _outcome("6758", 5, first)
+    old = _outcome("9984", 5, first, signal_date=date(2026, 5, 1))  # SINCE より前は触らない
+    other_market = {**stale, "market": "us"}
+    sdb.upsert_rule_outcomes(pd.DataFrame([keep, stale, old, other_market]))
+
+    later = datetime(2026, 11, 4, 1, 0, 0)
+    fresh = pd.DataFrame([{**keep, "scored_at": later}, _outcome("7203", 1, later)])
+    assert sdb.replace_rule_outcomes(fresh, "jp", date(2026, 5, 16), D) == (2, 1)
+
+    with _db_connection() as con:
+        got = con.execute(
+            "SELECT market, symbol, horizon, scored_at FROM rule_signal_outcomes"
+            " ORDER BY market, symbol, horizon"
+        ).fetchall()
+    assert got == [
+        ("jp", "7203", 1, later),
+        ("jp", "7203", 5, first),
+        ("jp", "9984", 5, first),
+        ("us", "6758", 5, first),
+    ]
+
+
+def test_replace_rule_outcomes_empty_fresh_set_keeps_rows():
+    sdb.ensure_scoring_tables()
+    sdb.upsert_rule_outcomes(pd.DataFrame([_outcome("7203", 5, datetime(2026, 11, 3))]))
+    empty = pd.DataFrame(columns=list(_outcome("x", 5, datetime(2026, 11, 3))))
+    assert sdb.replace_rule_outcomes(empty, "jp", date(2026, 5, 16), D) == (0, 0)
+    assert _count("rule_signal_outcomes") == 1

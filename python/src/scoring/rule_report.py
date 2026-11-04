@@ -416,13 +416,14 @@ def run_daily_scoring(market: str = "jp", as_of: date | None = None) -> Path:
     """全期間を採点し直し、rule_signal_outcomes と rule_accuracy の JSON を書く。"""
     as_of = as_of or (now_utc() + _JST_OFFSET).date()
     report, rows = build_rule_accuracy(market, as_of)
-    n = db.upsert_rule_outcomes(rows)
+    n, n_deleted = db.replace_rule_outcomes(rows, market, SINCE, as_of)
     path = write_rule_accuracy(report, as_of)
     logger.info(
-        "rule_accuracy: %s market=%s outcomes=%d app_version=%s",
+        "rule_accuracy: %s market=%s outcomes=%d deleted=%d app_version=%s",
         path,
         market,
         n,
+        n_deleted,
         read_app_version(),
     )
     return path

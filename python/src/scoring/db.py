@@ -274,6 +274,24 @@ def _py(v: Any) -> Any:
     return item() if callable(item) else v
 
 
+def _upsert_outcomes_sql() -> str:
+    placeholders = ", ".join(["%s"] * len(_OUTCOME_COLS))
+    updates = ", ".join(
+        f"{c} = EXCLUDED.{c}"
+        for c in _OUTCOME_COLS
+        if c not in ("signal_date", "market", "symbol", "horizon", "scored_at")
+    )
+    return (
+        f"INSERT INTO rule_signal_outcomes ({', '.join(_OUTCOME_COLS)})"  # nosec B608
+        f" VALUES ({placeholders})"
+        f" ON CONFLICT (signal_date, market, symbol, horizon) DO UPDATE SET {updates}"
+    )
+
+
+def _outcome_values(df: pd.DataFrame) -> list[list[Any]]:
+    return [[_py(r.get(c)) for c in _OUTCOME_COLS] for r in df.to_dict("records")]
+
+
 def upsert_rule_outcomes(df: pd.DataFrame) -> int:
     """採点結果を主キーで上書き保存する。渡した行数を返す。
 
@@ -283,19 +301,52 @@ def upsert_rule_outcomes(df: pd.DataFrame) -> int:
     if df.empty:
         return 0
     ensure_scoring_tables()
-    rows = [[_py(r.get(c)) for c in _OUTCOME_COLS] for r in df.to_dict("records")]
-    placeholders = ", ".join(["%s"] * len(_OUTCOME_COLS))
-    updates = ", ".join(
-        f"{c} = EXCLUDED.{c}"
-        for c in _OUTCOME_COLS
-        if c not in ("signal_date", "market", "symbol", "horizon", "scored_at")
-    )
-    sql = (
-        f"INSERT INTO rule_signal_outcomes ({', '.join(_OUTCOME_COLS)})"  # nosec B608
-        f" VALUES ({placeholders})"
-        f" ON CONFLICT (signal_date, market, symbol, horizon) DO UPDATE SET {updates}"
-    )
+    rows = _outcome_values(df)
     with _db_connection() as con:
         with con.cursor() as cur:
-            cur.executemany(sql, rows)
+            cur.executemany(_upsert_outcomes_sql(), rows)
     return len(rows)
+
+
+_DELETE_STALE_SQL = """
+DELETE FROM rule_signal_outcomes o
+WHERE o.market = %s AND o.signal_date >= %s AND o.signal_date <= %s
+  AND NOT EXISTS (
+    SELECT 1 FROM unnest(%s::date[], %s::text[], %s::int[]) AS k(d, s, h)
+    WHERE k.d = o.signal_date AND k.s = o.symbol AND k.h = o.horizon
+  )
+"""
+
+
+def replace_rule_outcomes(
+    df: pd.DataFrame, market: str, since: date, until: date
+) -> tuple[int, int]:
+    """全期間の採点し直しの結果で、market の [since, until] の行を置き換える。
+
+    1つのトランザクションで、主キーで上書き（scored_at は初めの値を残す）し、
+    新しい結果に無い (signal_date, symbol, horizon) の行を消す。
+    (書いた行数, 消した行数) を返す。新しい結果が空なら何もしない（読み込みの
+    取りこぼしで全部を消さないため）。
+    """
+    if df.empty:
+        return 0, 0
+    ensure_scoring_tables()
+    rows = _outcome_values(df)
+    keys = df[df["market"] == market]
+    with _db_connection() as con:
+        with con.transaction():
+            with con.cursor() as cur:
+                cur.executemany(_upsert_outcomes_sql(), rows)
+                cur.execute(
+                    _DELETE_STALE_SQL,
+                    [
+                        market,
+                        since,
+                        until,
+                        [_py(v) for v in keys["signal_date"]],
+                        [str(v) for v in keys["symbol"]],
+                        [int(v) for v in keys["horizon"]],
+                    ],
+                )
+                deleted = cur.rowcount
+    return len(rows), int(deleted)
