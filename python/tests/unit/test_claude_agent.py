@@ -384,24 +384,20 @@ class TestHandlePlaceOrder(unittest.TestCase):
             caps=caps,
         )
 
+    def _patch_buy_steps(self, record):
+        """買いの手順の読み出しと _record_order をまとめて差し替える"""
+        return patch.multiple(
+            "src.trading.claude_agent",
+            _record_order=record,
+            _get_held_symbols=MagicMock(return_value=set()),
+            _resolve_kelly_params=MagicMock(return_value=(0.55, 0.015, 0.008)),
+            _choose_order_params=MagicMock(return_value=(OrderType.MARKET, 0.0, "market", "open")),
+        )
+
     def _buy_two_with_failing_record(self, caps):
         """記録が落ちる形で 7200 と 7201 の買いを続けて出し、(1本目, 2本目, stats) を返す"""
         stats = {"buy_orders": 0, "sell_orders": 0, "skipped": 0, "errors": 0}
-        with (
-            patch(
-                "src.trading.claude_agent._record_order",
-                side_effect=RuntimeError("記録の失敗"),
-            ),
-            patch("src.trading.claude_agent._get_held_symbols", return_value=set()),
-            patch(
-                "src.trading.claude_agent._resolve_kelly_params",
-                return_value=(0.55, 0.015, 0.008),
-            ),
-            patch(
-                "src.trading.claude_agent._choose_order_params",
-                return_value=(OrderType.MARKET, 0.0, "market", "open"),
-            ),
-        ):
+        with self._patch_buy_steps(MagicMock(side_effect=RuntimeError("記録の失敗"))):
             first = self._place("7200", "buy", stats, caps, InMemoryTradeDiffSink())
             second = self._place("7201", "buy", stats, caps, InMemoryTradeDiffSink())
         return first, second, stats
@@ -446,9 +442,10 @@ class TestHandlePlaceOrder(unittest.TestCase):
         from src.trading.claude_order_caps import RunBuyCaps
 
         caps = RunBuyCaps(position_count=0, sector_counts=Counter())
-        with (
-            patch("src.trading.claude_order_caps.MAX_SECTOR_POSITIONS", 1),
-            patch("src.trading.claude_order_caps.get_symbol_sector", return_value="輸送用機器"),
+        with patch.multiple(
+            "src.trading.claude_order_caps",
+            MAX_SECTOR_POSITIONS=1,
+            get_symbol_sector=MagicMock(return_value="輸送用機器"),
         ):
             first, second, stats = self._buy_two_with_failing_record(caps)
 
@@ -537,18 +534,8 @@ class TestHandlePlaceOrder(unittest.TestCase):
         self.broker.send_order.side_effect = BrokerError("発注の失敗")
         caps = RunBuyCaps(position_count=0)
         stats = {"buy_orders": 0, "sell_orders": 0, "skipped": 0, "errors": 0}
-        with (
-            patch("src.trading.claude_agent._record_order") as record,
-            patch("src.trading.claude_agent._get_held_symbols", return_value=set()),
-            patch(
-                "src.trading.claude_agent._resolve_kelly_params",
-                return_value=(0.55, 0.015, 0.008),
-            ),
-            patch(
-                "src.trading.claude_agent._choose_order_params",
-                return_value=(OrderType.MARKET, 0.0, "market", "open"),
-            ),
-        ):
+        record = MagicMock()
+        with self._patch_buy_steps(record):
             result = self._place("7200", "buy", stats, caps, InMemoryTradeDiffSink())
 
         self.assertEqual(result["status"], "error")
@@ -578,9 +565,8 @@ class TestHandleGetPredictions(unittest.TestCase):
 
         broker = _make_broker()
 
-        with (
-            patch("src.trading.claude_agent._attach_dynamic_thresholds", return_value=df),
-            patch("src.trading.claude_agent.apply_multi_horizon_score_column", return_value=df),
+        with patch("src.trading.claude_agent._attach_dynamic_thresholds", return_value=df), patch(
+            "src.trading.claude_agent.apply_multi_horizon_score_column", return_value=df
         ):
             from src.trading.claude_agent import _handle_get_predictions
 
@@ -604,9 +590,8 @@ class TestHandleGetPredictions(unittest.TestCase):
         df["optimal_params_unreadable"] = True
         _load.return_value = df
 
-        with (
-            patch("src.trading.claude_agent._attach_dynamic_thresholds", return_value=df),
-            patch("src.trading.claude_agent.apply_multi_horizon_score_column", return_value=df),
+        with patch("src.trading.claude_agent._attach_dynamic_thresholds", return_value=df), patch(
+            "src.trading.claude_agent.apply_multi_horizon_score_column", return_value=df
         ):
             from src.trading.claude_agent import _handle_get_predictions
 
@@ -654,14 +639,10 @@ class TestRunClaudeTrader(unittest.TestCase):
 
         from src.trading.claude_agent import run_claude_trader
 
-        with (
-            patch(
-                "src.trading.claude_agent._attach_dynamic_thresholds", return_value=pd.DataFrame()
-            ),
-            patch(
-                "src.trading.claude_agent.apply_multi_horizon_score_column",
-                return_value=pd.DataFrame(),
-            ),
+        with patch(
+            "src.trading.claude_agent._attach_dynamic_thresholds", return_value=pd.DataFrame()
+        ), patch(
+            "src.trading.claude_agent.apply_multi_horizon_score_column", return_value=pd.DataFrame()
         ):
             stats = run_claude_trader(
                 broker=broker,
@@ -738,14 +719,10 @@ class TestRunClaudeTrader(unittest.TestCase):
 
         from src.trading.claude_agent import run_claude_trader
 
-        with (
-            patch(
-                "src.trading.claude_agent._attach_dynamic_thresholds", return_value=pd.DataFrame()
-            ),
-            patch(
-                "src.trading.claude_agent.apply_multi_horizon_score_column",
-                return_value=pd.DataFrame(),
-            ),
+        with patch(
+            "src.trading.claude_agent._attach_dynamic_thresholds", return_value=pd.DataFrame()
+        ), patch(
+            "src.trading.claude_agent.apply_multi_horizon_score_column", return_value=pd.DataFrame()
         ):
             run_claude_trader(
                 broker=broker,
@@ -829,23 +806,26 @@ class TestRunClaudeTrader(unittest.TestCase):
             attach = {"side_effect": _attach_dynamic_thresholds}
             score = {"side_effect": lambda d: d}
             kelly = {"side_effect": _resolve_kelly_params}
-        with (
-            ExitStack() as stack,
-            patch("src.trading.claude_agent.RiskManager") as mock_risk_cls,
-            patch.object(_PREDICTIONS, "get_latest_by_market", return_value=df),
-            patch("anthropic.Anthropic", return_value=client),
-            patch("src.trading.claude_agent._attach_dynamic_thresholds", **attach),
-            patch("src.trading.claude_agent.apply_multi_horizon_score_column", **score),
-            patch("src.trading.claude_agent._record_order"),
-            patch("src.trading.claude_agent._resolve_kelly_params", **kelly),
-            patch(
-                "src.trading.correlation_risk._load_recent_returns",
-                return_value=pd.DataFrame() if returns is None else returns,
-            ),
-            patch(
-                "src.utils.sector_constraints._lookup_symbol_sector",
-                side_effect=lambda market, symbol: sector_map.get(symbol, f"sector-{symbol}"),
-            ),
+        with ExitStack() as stack, patch(
+            "src.trading.claude_agent.RiskManager"
+        ) as mock_risk_cls, patch.object(
+            _PREDICTIONS, "get_latest_by_market", return_value=df
+        ), patch(
+            "anthropic.Anthropic", return_value=client
+        ), patch(
+            "src.trading.claude_agent._attach_dynamic_thresholds", **attach
+        ), patch(
+            "src.trading.claude_agent.apply_multi_horizon_score_column", **score
+        ), patch(
+            "src.trading.claude_agent._record_order"
+        ), patch(
+            "src.trading.claude_agent._resolve_kelly_params", **kelly
+        ), patch(
+            "src.trading.correlation_risk._load_recent_returns",
+            return_value=pd.DataFrame() if returns is None else returns,
+        ), patch(
+            "src.utils.sector_constraints._lookup_symbol_sector",
+            side_effect=lambda market, symbol: sector_map.get(symbol, f"sector-{symbol}"),
         ):
             if market_data is None:
                 stack.enter_context(
