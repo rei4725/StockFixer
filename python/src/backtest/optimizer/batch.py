@@ -15,6 +15,7 @@ from src.backtest.optimizer.persistence import (
     save_optimal_params_json,
     save_optimization_results,
 )
+from src.utils.db import load_stock_features
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -87,6 +88,8 @@ def run_optimize_batch(
 
     計算の順は、最後に最適化した日が古い銘柄から（同じ日なら jp を先に）とする（#1522）
 
+    source が file のとき、stock_features に行が無い銘柄は計算せず skipped で返す（#1579）
+
     Args:
         tasks: 対象銘柄タスクリスト（SymbolTask または dict）
         model_type: モデルタイプ
@@ -148,6 +151,14 @@ def run_optimize_batch(
                     pass  # timestamp パース失敗時は通常実行
 
         try:
+            # 特徴量の無い銘柄はグリッドの組ごとに同じ ERROR を出すので、1回だけ確かめて飛ばす。
+            # 読めなかった日は無いと取り違えず、下の except で error に数える（#1579）
+            if source == "file":
+                features = load_stock_features(market, symbol, raise_on_error=True)
+                if features is None or features.empty:
+                    logger.warning(f"[{market}/{symbol}] スキップ（stock_features にデータなし）")
+                    return {"market": market, "symbol": symbol, "status": "skipped"}
+
             result_df = run_optimization(
                 market=market,
                 symbol=symbol,

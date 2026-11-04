@@ -366,18 +366,20 @@ class PaperBroker(BrokerBase):
                         [qty, fill_price, order_id],
                     )
                 if market and predicted_at and signal_price is not None:
-                    self._trade_diff_sink.record(
-                        TradeDiffRecord(
-                            market=str(market),
-                            symbol=str(symbol),
-                            predicted_at=str(predicted_at),
-                            side=int(side),
-                            signal_price=float(signal_price),
-                            mode="paper",
-                            order_id=str(order_id),
-                            actual_price=fill_price,
-                        )
+                    diff = TradeDiffRecord(
+                        market=str(market),
+                        symbol=str(symbol),
+                        predicted_at=str(predicted_at),
+                        side=int(side),
+                        signal_price=float(signal_price),
+                        mode="paper",
+                        order_id=str(order_id),
+                        actual_price=fill_price,
                     )
+                    try:
+                        self._trade_diff_sink.record(diff)
+                    except Exception:  # 約定は確定済みで戻らないので、約定に数える（#1573）
+                        logger.error(f"[paper] 約定の差分の記録に失敗: {order_id}", exc_info=True)
                 logger.info(
                     f"[paper] 約定: {symbol} {OrderSide(side).name} {qty}株 @ {fill_price:.1f}円"
                 )

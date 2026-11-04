@@ -324,16 +324,17 @@ def _load_latest_usdjpy(market_data_port: MarketDataPort) -> float:
 
 def run_regime_leverage_weekly_check(
     market_data_port: MarketDataPort,
-) -> Optional[RegimeLeverageDecision]:
+) -> RegimeLeverageDecision:
     """週次ジョブ本体: レジーム転換の判定、または未保有時の新規エントリー判定を行い、
     結果をDBに記録して返す。
 
     MA200/ATR14がNaN(取得データが200/14日分に満たない等、データ劣化時)の場合は
-    判定を行わない(NaN比較は常にFalseになるため、誤って「レジーム下降」と
-    解釈して保有ポジションを強制決済してしまうことを防ぐ)。未保有ならNoneを返し、
-    保有中ならRuntimeErrorを送出する(レジーム転換の判定が飛んだことを
-    スケジューラーのリトライ・Discord通知に乗せるため。#870)。MA200/ATR14は欠けた行を
-    除いた日足から計算するため、NaNになるのは最後の行が欠けたときかデータが足りないとき(#1228)。
+    判定を行わず、DBにも書かない(NaN比較は常にFalseになるため、誤って「レジーム下降」と
+    解釈して保有ポジションを強制決済してしまうことを防ぐ)。保有の有無によらず
+    RuntimeErrorを送出する(レジーム転換・新規エントリーの判定はこの週次の回だけが見るため、
+    判定が飛んだことをスケジューラーのリトライ・補完・Discord通知に乗せる。#870・#1583)。
+    MA200/ATR14は欠けた行を除いた日足から計算するため、NaNになるのは最後の行が欠けたときか
+    データが足りないとき(#1228)。
     """
     from config.settings import REGIME_LEVERAGE_SYMBOL
 
@@ -345,18 +346,11 @@ def run_regime_leverage_weekly_check(
     atr14_usd = float(latest_row["ATR14"])
     snapshot = get_latest_snapshot()
     if pd.isna(ma200_usd) or pd.isna(atr14_usd):
-        if snapshot is not None and snapshot.shares > 0:
-            raise RuntimeError(
-                "レジームレバレッジ戦略(週次): 保有中にMA200またはATR14がNaNのため判定を中止しました"
-                f"(ma200_usd={ma200_usd}, atr14_usd={atr14_usd}, shares={snapshot.shares})"
-            )
-        logger.warning(
-            "レジームレバレッジ戦略(週次): MA200またはATR14がNaNのため判定を中止します"
-            "(ma200_usd=%s, atr14_usd=%s)",
-            ma200_usd,
-            atr14_usd,
+        shares = snapshot.shares if snapshot is not None else 0.0
+        raise RuntimeError(
+            "レジームレバレッジ戦略(週次): MA200またはATR14がNaNのため判定を中止しました"
+            f"(ma200_usd={ma200_usd}, atr14_usd={atr14_usd}, shares={shares})"
         )
-        return None
     now = datetime.now(_JST)
 
     if snapshot is None or snapshot.shares <= 0:

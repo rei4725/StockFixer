@@ -6,7 +6,10 @@ logger = get_logger(__name__)
 
 
 def notify_stale_prediction(stats) -> None:
-    """今日の予想の保存が終わっておらず新規を止めた日に、件数と理由を1回知らせる（#1394）。"""
+    """今日の予想が無く新規を止めた日に、件数と理由を1回知らせる（#1394）。
+
+    予想の行が0件の日は、予想の売りも判定していないことを理由の文が伝える（#1572）。
+    """
     reason = stats.get("stale_prediction_reason")
     if not reason:
         return

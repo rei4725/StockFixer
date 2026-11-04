@@ -177,6 +177,7 @@ def main() -> None:
                 market=args.market,
                 buy_orders=buy_orders,
                 sell_orders=sell_orders,
+                total=batch.total,
             )
         except Exception as exc:
             logger.warning(f"Discord通知失敗: {exc}")

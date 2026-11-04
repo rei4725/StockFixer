@@ -14,6 +14,7 @@ from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
 from src.infrastructure.in_memory import InMemoryTradeDiffSink
+from src.orchestration.job_errors import NonRetryableJobError
 from src.rule_engine.types import RuleSignalBatch, UnavailableRuleSymbol
 from src.trading.brokers.base import BrokerBase
 from src.trading.rule_execution import execute_rule_paper_trades
@@ -376,7 +377,7 @@ class TestRuleGateRecord(unittest.TestCase):
 
 class TestDailyRuleSignalsGateRecord(unittest.TestCase):
     @staticmethod
-    def _run_daily(batch, broker):
+    def _run_daily(batch, broker, notify=None):
         from src.orchestration.jobs import daily
 
         patches = _patches(_ALLOWED, _CORR_OK) + [
@@ -385,7 +386,10 @@ class TestDailyRuleSignalsGateRecord(unittest.TestCase):
             patch("src.infrastructure.discord_notification_adapter.DiscordNotificationAdapter"),
             patch("src.infrastructure.yfinance_market_data_adapter.YFinanceMarketDataAdapter"),
             patch("src.infrastructure.persistence.trade_diff_repository.PostgresTradeDiffSink"),
-            patch("src.reporting.discord.discord_utils.send_rule_daily_signals"),
+            patch(
+                "src.reporting.discord.discord_utils.send_rule_daily_signals",
+                notify or MagicMock(),
+            ),
             patch("src.orchestration.jobs.daily._skip_if_jp_market_closed", return_value=False),
         ]
         for p in patches:
@@ -397,10 +401,20 @@ class TestDailyRuleSignalsGateRecord(unittest.TestCase):
                 p.stop()
 
     def test_no_effective_rule_day_records_all_holdings(self):
-        """有効なルールが0件の日も記録が書かれ、保有が一覧と数に入る（#1527）"""
+        """有効なルールが0件の日も記録が書かれ、保有が一覧と数に入る（#1527）
+
+        ジョブは失敗で終わるが、記録は知らせの前に書かれている（#1571）。
+        """
         broker = _broker()
         broker.get_positions.return_value.append(_HELD_5202)
-        self._run_daily(RuleSignalBatch(), broker)
+        held_at_notice = []
+        notify = MagicMock(
+            side_effect=lambda **_: held_at_notice.append(_read()["unjudged_held_count"])
+        )
+        with self.assertLogs("src.orchestration.jobs.unavailable_gates", level="ERROR"):
+            with self.assertRaises(NonRetryableJobError):
+                self._run_daily(RuleSignalBatch(), broker, notify)
+        self.assertEqual(held_at_notice, [2])
         record = _read()
         self.assertEqual(record["unjudged_held_symbols"], ["1000", "5202"])
         self.assertEqual(record["unjudged_held_count"], 2)
