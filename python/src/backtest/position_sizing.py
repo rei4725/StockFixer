@@ -88,7 +88,7 @@ def calc_position_details(
             if min_qty > effective_max_qty:
                 min_qty = effective_max_qty
             qty = max(min_qty, qty)
-        qty = _cap_to_cash(execution.round_to_lot(qty), cash, price, volume, execution)
+        qty = cap_to_cash(execution.round_to_lot(qty), cash, price, volume, execution)
         return build_position_details(
             qty=qty,
             cash=cash,
@@ -103,7 +103,7 @@ def calc_position_details(
         available = cash
         fallback_used = position_sizing == "atr"
 
-    qty = _cap_to_cash(
+    qty = cap_to_cash(
         execution.round_to_lot(int(available // unit_cost)), cash, price, volume, execution
     )
     return build_position_details(
@@ -116,7 +116,7 @@ def calc_position_details(
     )
 
 
-def _cap_to_cash(
+def cap_to_cash(
     qty: int, cash: float, price: float, volume: float, execution: ExecutionModel
 ) -> int:
     """約定代金（動的スリッページ込み）が cash を超える場合に qty を切り下げる。
