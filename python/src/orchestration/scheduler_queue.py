@@ -29,6 +29,7 @@ from config.settings import settings
 from src.orchestration.job_errors import NonRetryableJobError
 from src.orchestration.scheduler_cutoff import (
     is_past_recovery_until,
+    scheduled_datetime_for_recovery,
     warn_scheduled_start_past_cutoff,
 )
 from src.orchestration.scheduler_interrupted import (
@@ -387,26 +388,12 @@ class SchedulerQueueManager:
         if not isinstance(config["hour"], int) or not isinstance(config["minute"], int):
             return False
 
-        if not self._is_scheduled_day(config, now):
+        scheduled_dt = scheduled_datetime_for_recovery(
+            config, now, self._parse_day_of_week(config.get("day_of_week", "*"))
+        )
+        if scheduled_dt is None:
             return False
 
-        # monthly は設定の day の日（とそれ以後の同じ月）だけ補完を考え、
-        # 所定時刻はその月の day の日の時刻とする
-        scheduled_day = now.day
-        if config.get("period", "daily") == "monthly":
-            scheduled_day = config.get("day", 1)
-            if not isinstance(scheduled_day, int):
-                return False
-            if now.day < scheduled_day:
-                return False
-
-        scheduled_dt = now.replace(
-            day=scheduled_day,
-            hour=config["hour"],
-            minute=config["minute"],
-            second=0,
-            microsecond=0,
-        )
         recovery_delay = timedelta(minutes=config.get("recovery_delay_minutes", 10))
 
         if now < (scheduled_dt + recovery_delay):
