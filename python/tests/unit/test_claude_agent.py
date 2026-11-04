@@ -366,6 +366,197 @@ class TestHandlePlaceOrder(unittest.TestCase):
         self.broker.send_order.assert_not_called()
         self.assertEqual(stats["skipped"], 1)
 
+    def _place(self, symbol, side_str, stats, caps, trade_diff_sink):
+        """run_claude_trader と同じく _place_order_or_error を通して発注する"""
+        from src.trading.claude_agent import _place_order_or_error
+
+        return _place_order_or_error(
+            symbol=symbol,
+            side_str=side_str,
+            reasoning="テスト用の理由",
+            market="jp",
+            broker=self.broker,
+            risk=self.risk,
+            predictions_cache=self.predictions,
+            mode="paper",
+            stats=stats,
+            trade_diff_sink=trade_diff_sink,
+            caps=caps,
+        )
+
+    def _buy_two_with_failing_record(self, caps):
+        """記録が落ちる形で 7200 と 7201 の買いを続けて出し、(1本目, 2本目, stats) を返す"""
+        stats = {"buy_orders": 0, "sell_orders": 0, "skipped": 0, "errors": 0}
+        with (
+            patch(
+                "src.trading.claude_agent._record_order",
+                side_effect=RuntimeError("記録の失敗"),
+            ),
+            patch("src.trading.claude_agent._get_held_symbols", return_value=set()),
+            patch(
+                "src.trading.claude_agent._resolve_kelly_params",
+                return_value=(0.55, 0.015, 0.008),
+            ),
+            patch(
+                "src.trading.claude_agent._choose_order_params",
+                return_value=(OrderType.MARKET, 0.0, "market", "open"),
+            ),
+        ):
+            first = self._place("7200", "buy", stats, caps, InMemoryTradeDiffSink())
+            second = self._place("7201", "buy", stats, caps, InMemoryTradeDiffSink())
+        return first, second, stats
+
+    def test_record_failure_after_send_counts_buy_toward_caps(self):
+        # #1555: 注文はもう出ているので、記録が落ちても買いを数え、errors は1だけ増やす
+        from src.trading.claude_order_caps import RunBuyCaps
+
+        caps = RunBuyCaps(position_count=2)
+        with patch("src.trading.claude_order_caps.MAX_ORDERS_PER_RUN", 1):
+            first, second, stats = self._buy_two_with_failing_record(caps)
+
+        self.assertEqual(first["status"], "placed")
+        self.assertEqual(first["order_id"], "test-001")
+        self.assertEqual(stats["buy_orders"], 1)
+        self.assertEqual(stats["errors"], 1)
+        self.assertEqual(caps.buy_orders, 1)
+        self.assertEqual(caps.position_count, 3)
+        self.assertEqual(caps.bought_symbols, {"7200"})
+        self.assertEqual(second["status"], "skipped")
+        self.assertIn("MAX_ORDERS_PER_RUN", second["reason"])
+        self.broker.send_order.assert_called_once()
+
+    def test_record_failure_after_send_stops_next_buy_at_max_positions(self):
+        # #1555: 紙の買いは約定まで保有に出ないので、caps の数だけが次の買いを止める
+        from src.trading.claude_order_caps import RunBuyCaps
+
+        caps = RunBuyCaps(position_count=4)
+        with patch("src.trading.claude_order_caps.MAX_POSITIONS", 5):
+            first, second, stats = self._buy_two_with_failing_record(caps)
+
+        self.assertEqual(first["status"], "placed")
+        self.assertEqual(second["status"], "skipped")
+        self.assertIn("MAX_POSITIONS", second["reason"])
+        self.assertEqual(stats["errors"], 1)
+        self.broker.send_order.assert_called_once()
+
+    def test_record_failure_after_send_stops_next_buy_at_sector_limit(self):
+        # #1555: 業種の数も同じく caps だけが持つ
+        from collections import Counter
+
+        from src.trading.claude_order_caps import RunBuyCaps
+
+        caps = RunBuyCaps(position_count=0, sector_counts=Counter())
+        with (
+            patch("src.trading.claude_order_caps.MAX_SECTOR_POSITIONS", 1),
+            patch("src.trading.claude_order_caps.get_symbol_sector", return_value="輸送用機器"),
+        ):
+            first, second, stats = self._buy_two_with_failing_record(caps)
+
+        self.assertEqual(first["status"], "placed")
+        self.assertEqual(second["status"], "skipped")
+        self.assertIn("MAX_SECTOR_POSITIONS", second["reason"])
+        self.assertEqual(stats["errors"], 1)
+        self.broker.send_order.assert_called_once()
+
+    @patch("src.trading.execution.recording._link_paper_order_metadata")
+    @patch("src.trading.claude_agent._get_held_symbols", return_value=set())
+    @patch("src.trading.claude_agent._resolve_kelly_params", return_value=(0.55, 0.015, 0.008))
+    @patch(
+        "src.trading.claude_agent._choose_order_params",
+        return_value=(OrderType.MARKET, 0.0, "market", "open"),
+    )
+    def test_trade_diff_sink_failure_leaves_pending_buy_counted(
+        self, _choose, _kelly, _held, _link
+    ):
+        # #1555: 本物の _record_order を通す。差分の記録の失敗では注文は取り消されず残る
+        from src.trading.claude_order_caps import RunBuyCaps
+
+        sink = MagicMock()
+        sink.record.side_effect = RuntimeError("差分の記録の失敗")
+        caps = RunBuyCaps(position_count=0)
+        stats = {"buy_orders": 0, "sell_orders": 0, "skipped": 0, "errors": 0}
+
+        result = self._place("7200", "buy", stats, caps, sink)
+
+        self.assertEqual(result["status"], "placed")
+        sink.record.assert_called_once()
+        self.broker.cancel_order.assert_not_called()
+        self.assertEqual(stats["buy_orders"], 1)
+        self.assertEqual(stats["errors"], 1)
+        self.assertEqual(caps.buy_orders, 1)
+        self.assertEqual(caps.bought_symbols, {"7200"})
+
+    @patch(
+        "src.trading.claude_agent._record_order",
+        side_effect=RuntimeError("記録の失敗"),
+    )
+    @patch(
+        "src.trading.claude_agent._choose_order_params",
+        return_value=(OrderType.MARKET, 0.0, "market", "open"),
+    )
+    def test_record_failure_after_send_counts_sell(self, _choose, _record):
+        # #1555: 売りも出たものとして数え、error と返さない（返すと売り直しに行く）
+        self.broker.get_positions.return_value = [
+            {"symbol": "7200", "qty": 200, "avg_price": 990.0, "current_price": 1000.0}
+        ]
+        stats = {"buy_orders": 0, "sell_orders": 0, "skipped": 0, "errors": 0}
+
+        result = self._place("7200", "sell", stats, None, InMemoryTradeDiffSink())
+
+        self.assertEqual(result["status"], "placed")
+        self.assertEqual(stats["sell_orders"], 1)
+        self.assertEqual(stats["errors"], 1)
+
+    @patch("src.trading.claude_agent._record_order")
+    @patch("src.trading.claude_agent._get_held_symbols", return_value=set())
+    @patch("src.trading.claude_agent._resolve_kelly_params", return_value=(0.55, 0.015, 0.008))
+    @patch(
+        "src.trading.claude_agent._choose_order_params",
+        return_value=(OrderType.MARKET, 0.0, "market", "open"),
+    )
+    def test_record_success_keeps_errors_zero_and_counts_buy(self, _choose, _kelly, _held, _record):
+        # #1555: 記録が投げないときの動きは変わらない
+        from src.trading.claude_order_caps import RunBuyCaps
+
+        caps = RunBuyCaps(position_count=0)
+        stats = {"buy_orders": 0, "sell_orders": 0, "skipped": 0, "errors": 0}
+
+        result = self._place("7200", "buy", stats, caps, InMemoryTradeDiffSink())
+
+        self.assertEqual(result["status"], "placed")
+        _record.assert_called_once()
+        self.assertEqual(stats["buy_orders"], 1)
+        self.assertEqual(stats["errors"], 0)
+        self.assertEqual(caps.buy_orders, 1)
+
+    def test_send_order_failure_is_not_counted_as_buy(self):
+        # #1555: 発注そのものの失敗は今までどおり error で、caps に数えない
+        from src.trading.brokers.base import BrokerError
+        from src.trading.claude_order_caps import RunBuyCaps
+
+        self.broker.send_order.side_effect = BrokerError("発注の失敗")
+        caps = RunBuyCaps(position_count=0)
+        stats = {"buy_orders": 0, "sell_orders": 0, "skipped": 0, "errors": 0}
+        with (
+            patch("src.trading.claude_agent._record_order") as record,
+            patch("src.trading.claude_agent._get_held_symbols", return_value=set()),
+            patch(
+                "src.trading.claude_agent._resolve_kelly_params",
+                return_value=(0.55, 0.015, 0.008),
+            ),
+            patch(
+                "src.trading.claude_agent._choose_order_params",
+                return_value=(OrderType.MARKET, 0.0, "market", "open"),
+            ),
+        ):
+            result = self._place("7200", "buy", stats, caps, InMemoryTradeDiffSink())
+
+        self.assertEqual(result["status"], "error")
+        record.assert_not_called()
+        self.assertEqual(stats["buy_orders"], 0)
+        self.assertEqual(stats["errors"], 1)
+        self.assertEqual(caps.buy_orders, 0)
+
 
 # ---------------------------------------------------------------------------
 # get_predictions ハンドラーテスト
@@ -387,8 +578,9 @@ class TestHandleGetPredictions(unittest.TestCase):
 
         broker = _make_broker()
 
-        with patch("src.trading.claude_agent._attach_dynamic_thresholds", return_value=df), patch(
-            "src.trading.claude_agent.apply_multi_horizon_score_column", return_value=df
+        with (
+            patch("src.trading.claude_agent._attach_dynamic_thresholds", return_value=df),
+            patch("src.trading.claude_agent.apply_multi_horizon_score_column", return_value=df),
         ):
             from src.trading.claude_agent import _handle_get_predictions
 
@@ -412,8 +604,9 @@ class TestHandleGetPredictions(unittest.TestCase):
         df["optimal_params_unreadable"] = True
         _load.return_value = df
 
-        with patch("src.trading.claude_agent._attach_dynamic_thresholds", return_value=df), patch(
-            "src.trading.claude_agent.apply_multi_horizon_score_column", return_value=df
+        with (
+            patch("src.trading.claude_agent._attach_dynamic_thresholds", return_value=df),
+            patch("src.trading.claude_agent.apply_multi_horizon_score_column", return_value=df),
         ):
             from src.trading.claude_agent import _handle_get_predictions
 
@@ -461,10 +654,14 @@ class TestRunClaudeTrader(unittest.TestCase):
 
         from src.trading.claude_agent import run_claude_trader
 
-        with patch(
-            "src.trading.claude_agent._attach_dynamic_thresholds", return_value=pd.DataFrame()
-        ), patch(
-            "src.trading.claude_agent.apply_multi_horizon_score_column", return_value=pd.DataFrame()
+        with (
+            patch(
+                "src.trading.claude_agent._attach_dynamic_thresholds", return_value=pd.DataFrame()
+            ),
+            patch(
+                "src.trading.claude_agent.apply_multi_horizon_score_column",
+                return_value=pd.DataFrame(),
+            ),
         ):
             stats = run_claude_trader(
                 broker=broker,
@@ -541,10 +738,14 @@ class TestRunClaudeTrader(unittest.TestCase):
 
         from src.trading.claude_agent import run_claude_trader
 
-        with patch(
-            "src.trading.claude_agent._attach_dynamic_thresholds", return_value=pd.DataFrame()
-        ), patch(
-            "src.trading.claude_agent.apply_multi_horizon_score_column", return_value=pd.DataFrame()
+        with (
+            patch(
+                "src.trading.claude_agent._attach_dynamic_thresholds", return_value=pd.DataFrame()
+            ),
+            patch(
+                "src.trading.claude_agent.apply_multi_horizon_score_column",
+                return_value=pd.DataFrame(),
+            ),
         ):
             run_claude_trader(
                 broker=broker,
@@ -628,26 +829,23 @@ class TestRunClaudeTrader(unittest.TestCase):
             attach = {"side_effect": _attach_dynamic_thresholds}
             score = {"side_effect": lambda d: d}
             kelly = {"side_effect": _resolve_kelly_params}
-        with ExitStack() as stack, patch(
-            "src.trading.claude_agent.RiskManager"
-        ) as mock_risk_cls, patch.object(
-            _PREDICTIONS, "get_latest_by_market", return_value=df
-        ), patch(
-            "anthropic.Anthropic", return_value=client
-        ), patch(
-            "src.trading.claude_agent._attach_dynamic_thresholds", **attach
-        ), patch(
-            "src.trading.claude_agent.apply_multi_horizon_score_column", **score
-        ), patch(
-            "src.trading.claude_agent._record_order"
-        ), patch(
-            "src.trading.claude_agent._resolve_kelly_params", **kelly
-        ), patch(
-            "src.trading.correlation_risk._load_recent_returns",
-            return_value=pd.DataFrame() if returns is None else returns,
-        ), patch(
-            "src.utils.sector_constraints._lookup_symbol_sector",
-            side_effect=lambda market, symbol: sector_map.get(symbol, f"sector-{symbol}"),
+        with (
+            ExitStack() as stack,
+            patch("src.trading.claude_agent.RiskManager") as mock_risk_cls,
+            patch.object(_PREDICTIONS, "get_latest_by_market", return_value=df),
+            patch("anthropic.Anthropic", return_value=client),
+            patch("src.trading.claude_agent._attach_dynamic_thresholds", **attach),
+            patch("src.trading.claude_agent.apply_multi_horizon_score_column", **score),
+            patch("src.trading.claude_agent._record_order"),
+            patch("src.trading.claude_agent._resolve_kelly_params", **kelly),
+            patch(
+                "src.trading.correlation_risk._load_recent_returns",
+                return_value=pd.DataFrame() if returns is None else returns,
+            ),
+            patch(
+                "src.utils.sector_constraints._lookup_symbol_sector",
+                side_effect=lambda market, symbol: sector_map.get(symbol, f"sector-{symbol}"),
+            ),
         ):
             if market_data is None:
                 stack.enter_context(

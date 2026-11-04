@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from typing import Any
+from typing import Any, cast
 
 import pandas as pd
 
@@ -51,7 +51,9 @@ from src.trading.execution import (
     _resolve_kelly_params,
 )
 from src.trading.execution.pending import _load_pending_exits
+from src.trading.execution.recording import _recorder
 from src.trading.execution.selection import _get_pending_buy_symbols
+from src.trading.execution.stats import OrderExecutionStats
 from src.trading.position_valuation import count_short_positions, short_held_codes
 from src.trading.risk_manager import RiskManager
 from src.trading.signal_generator import apply_multi_horizon_score_column
@@ -261,7 +263,9 @@ def _handle_place_order(
             market_data=market_data,
         )
         result = broker.send_order(symbol, side, qty, price=order_price, order_type=order_type)
-        _record_order(
+        # 記録の失敗でも注文は出たものとして数える。8:50 の道と同じ形（#1104、#1555）
+        record = _recorder(_record_order, cast(OrderExecutionStats, stats))
+        record(
             market=str(row["market"]),
             predicted_at=str(row.get("predicted_at", "")),
             symbol=symbol,
