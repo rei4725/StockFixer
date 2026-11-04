@@ -41,7 +41,7 @@ from src.trading.signal_generator import apply_multi_horizon_score_column
 from src.utils.logger import get_logger
 
 from .entry_gates import _block_entries, _evaluate_entry_gate
-from .freshness import _block_new_if_stale
+from .freshness import _block_new_if_stale, _note_no_predictions
 from .gate_record import finish_order_run, held_without_prediction
 from .params import (
     _SPLIT_LOW_CONFIDENCE,
@@ -127,9 +127,7 @@ def run_order_steps(
         return finish_order_run(stats, market=market, mode=mode, entry_error=exc)
     if held_symbols is None:
         # SL/TP は予測を使わないので決済だけは走らせ、新規と売りシグナルの決済は飛ばす（#1049）
-        logger.warning(
-            "[exec] 予測結果が存在しません（SL/TP の決済だけ行う）。run_predict.py を確認"
-        )
+        _note_no_predictions(market, stats)
         _sl_tp_exits_only(broker, market, mode, market_data, stats, trade_diff_sink, gate_status)
         return finish_order_run(stats, market=market, mode=mode, entry_error=entry_error)
     held_or_pending = held_symbols  # 約定待ちの BUY を読めない日は新規を止める（#1465）

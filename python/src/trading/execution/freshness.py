@@ -2,6 +2,7 @@
 
 日次の道が遅れた朝やり直した朝の 8:50 は、最新の回が前の日の回か、今日の回の保存の
 途中（書き終えた銘柄だけ）になる。そのときは新規（買い・ショート）だけ止め、決済は出す。
+予想の行が0件の日は、予想の売りも判定しない SL/TP だけの日として同じ理由の欄に書く（#1572）。
 """
 
 from dataclasses import replace
@@ -32,6 +33,19 @@ def _jst_day(predicted_at: object, local_now: datetime) -> str:
     except ValueError:
         return ""
     return naive.replace(tzinfo=local_now.tzinfo).astimezone(_JST).strftime("%Y%m%d")
+
+
+def _note_no_predictions(market: str, stats: OrderExecutionStats) -> None:
+    """予想の行が0件の日に、予想の売りを判定しないことを stats に書き WARNING を出す（#1572）。
+
+    この日は _block_new_if_stale に届かない。新規と売りシグナルの決済は呼び出し元が飛ばす。
+    """
+    reason = (
+        f"production の予想の行が0件（market={market}）。"
+        "保有の予想の売りを判定していない（SL/TP の決済だけ行う）"
+    )
+    logger.warning("[exec] %s。run_predict.py を確認", reason)
+    stats["stale_prediction_reason"] = reason
 
 
 def _block_new_if_stale(
