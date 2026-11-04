@@ -78,7 +78,8 @@ def execute_rule_paper_trades(
             （シグナルを出せなかった銘柄が多すぎる日。#1191）
         record_gate: True なら新規買いを止めた判定と止めた理由ごとの数を
             results/orders/rule/<JST の日付>.json に書く（16:30 のジョブ。#1514）。
-            書き込みの失敗は ERROR のログだけで、注文と戻り値は変えない
+            書き込みの失敗は ERROR のログだけで、注文と戻り値は変えない。
+            保有を読めず発注を中止する日も書く（#1549）
         unavailable_symbols: シグナルを出せなかった銘柄（RuleSignalBatch.unavailable）。
             record_gate=True のとき、そのまま記録に写し、保有中の銘柄を別の一覧にも写す
             （#1520）。判定と注文には使わない。保有のうち signals にも unavailable_symbols にも
@@ -102,10 +103,20 @@ def execute_rule_paper_trades(
 
     # 保有を読めないまま空の保有で進めると、保有の数え直し・同じ銘柄の重ね買い・
     # 保有中の売りの取りこぼしが起きるため、注文を出さずにジョブを失敗させる。
+    # その日も判定の記録は残し、保有の欄は null にしてから同じ例外を投げ直す（#1549）。
+    record = RuleGateRecord(market=market, allow_new_buys=allow_new_buys)
     try:
         positions = broker.get_positions()
-    except Exception:
+    except Exception as exc:
         logger.error("[rule] 保有の読み込みに失敗したため発注を中止する", exc_info=True)
+        if record_gate:
+            record.new_buy_step_error = repr(exc)
+            save_rule_gate_record(
+                record,
+                unavailable_symbols=unavailable_symbols,
+                held_symbols=None,
+                signals=signals,
+            )
         raise
     held_symbols = {p["symbol"] for p in positions}
     # 約定待ちの BUY は朝の約定まで get_positions に出ないため、新規買いの数えに足す（#1176）。
@@ -114,7 +125,6 @@ def execute_rule_paper_trades(
     held_or_pending = set(held_symbols)
     # 空売り中の銘柄へ逆向きの新規買いを重ねない（#1349）。読めなければ新規買いの手順で止まる
     short_codes: set[str] = set()
-    record = RuleGateRecord(market=market, allow_new_buys=allow_new_buys)
     skip_reasons: Counter[str] = Counter()
 
     if not allow_new_buys:
