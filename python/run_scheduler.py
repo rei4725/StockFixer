@@ -79,9 +79,10 @@ def job_daily_horizon_exit():
 
 def job_daily_settle_orders():
     """毎営業日 9:05 - ペーパートレード pending 注文を当日始値で約定処理"""
+    from src.orchestration.jobs.settle_notify import raise_if_settle_errors
     from src.orchestration.scheduler import run_daily_settle_orders
 
-    run_daily_settle_orders()
+    raise_if_settle_errors(run_daily_settle_orders())
 
 
 def job_daily_settle_orders_retry():
