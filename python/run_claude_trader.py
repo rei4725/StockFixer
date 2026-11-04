@@ -99,6 +99,10 @@ def main(argv: list[str] | None = None) -> int:
             f"完了 — 買い: {stats['buy_orders']} 売り: {stats['sell_orders']} "
             f"スキップ: {stats['skipped']} エラー: {stats['errors']}"
         )
+        # 注文の失敗を成功に見せない（run_auto_trade.py と同じ。#1550）
+        if stats.get("errors", 0) > 0:
+            logger.error("Claude トレーダーで失敗が %s 件あった", stats["errors"])
+            return 1
         return 0
     except ImportError as e:
         logger.critical("依存パッケージが不足しています: %s", e)

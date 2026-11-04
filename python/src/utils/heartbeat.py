@@ -21,7 +21,7 @@ logger = get_logger(__name__)
 # 監視 ping はジョブ本体を待たせないよう短めに切る
 _TIMEOUT_SECONDS = 10
 
-# recovery_poller が5分間隔で送るスケジューラ死活 ping の slug
+# scheduler_alive_ping ジョブが5分間隔で送るスケジューラ死活 ping の slug
 SCHEDULER_ALIVE_SLUG = "scheduler-alive"
 
 

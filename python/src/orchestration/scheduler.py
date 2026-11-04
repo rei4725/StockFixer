@@ -32,6 +32,7 @@ from src.orchestration.jobs.periodic import (
     run_regime_leverage_weekly_job,
     run_strategy_promotion_check,
 )
+from src.orchestration.jobs.volatility_compare_job import run_weekly_volatility_sizing_compare
 from src.orchestration.jobs.weekly import (
     run_weekly_db_maintenance,
     run_weekly_optimization,
@@ -80,6 +81,7 @@ __all__ = [
     "run_weekly_db_maintenance",
     "run_weekly_shadow_evaluation",
     "run_weekly_rule_evaluation",
+    "run_weekly_volatility_sizing_compare",
     # periodic
     "run_monthly_report_job",
     "run_nightly_strategy_factory",
