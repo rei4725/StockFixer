@@ -98,6 +98,7 @@ def run_daily_orders(
         broker.get_token()
     except BrokerError as e:
         logger.error("[exec] トークン取得失敗。本日の発注をスキップします: %s", e, exc_info=True)
+        stats["errors"] += 1  # SL/TP も止まる日をジョブの失敗にする（#1523）
         if notifier is not None:
             notifier.send_alert(
                 "kabu API トークンエラー",

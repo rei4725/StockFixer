@@ -672,6 +672,109 @@ class TestRunOptimizeBatch(unittest.TestCase):
         )
         self.assertEqual(by_symbol["9984"], {"market": "jp", "symbol": "9984", "status": "success"})
 
+    @patch("src.backtest.optimizer.batch.save_optimal_params_json")
+    @patch("src.backtest.optimizer.batch.save_optimization_results")
+    @patch("src.backtest.optimizer.batch.run_optimization")
+    @patch("src.backtest.optimizer.batch.get_optimal_params")
+    def test_computes_oldest_optimized_first_and_jp_first_on_same_day(
+        self, mock_get, mock_run, mock_save, mock_json
+    ):
+        """最後に最適化した日が古い銘柄から計算し、同じ日なら jp を先にすること（#1522）"""
+        from src.backtest.optimizer import run_optimize_batch
+        from src.domain.types import SymbolTask
+
+        timestamps = {
+            "AAPL": "2026-11-04T01:06:00",
+            "MSFT": "2026-03-23T19:22:30",
+            "GOOG": "2026-03-23T19:22:31",
+            "7203": "2026-03-23T19:22:37",
+            "9984": "2026-03-23T08:00:00",
+            "BROKEN": "壊れた日時",
+        }
+        mock_get.side_effect = lambda market, symbol: (
+            {"timestamp": timestamps[symbol]} if symbol in timestamps else None
+        )
+        mock_run.return_value = pd.DataFrame({"threshold": [0.02], "sharpe_ratio": [1.5]})
+        mock_save.return_value = "/tmp/results.csv"
+        mock_json.return_value = "/tmp/params.json"
+
+        run_optimize_batch(
+            [
+                SymbolTask(market="us", symbol="AAPL"),
+                SymbolTask(market="us", symbol="MSFT"),
+                SymbolTask(market="us", symbol="GOOG"),
+                SymbolTask(market="jp", symbol="7203"),
+                SymbolTask(market="jp", symbol="9984"),
+                SymbolTask(market="us", symbol="BROKEN"),
+                {"market": "us", "symbol": "NEVER"},
+            ],
+            model_type="XGBoostModel",
+            max_workers=1,
+        )
+
+        computed = [c.kwargs["symbol"] for c in mock_run.call_args_list]
+        self.assertEqual(computed, ["BROKEN", "NEVER", "7203", "9984", "MSFT", "GOOG", "AAPL"])
+
+    @patch("src.backtest.optimizer.batch.save_optimal_params_json")
+    @patch("src.backtest.optimizer.batch.save_optimization_results")
+    @patch("src.backtest.optimizer.batch.run_optimization")
+    @patch("src.backtest.optimizer.batch.get_optimal_params")
+    def test_next_week_starts_from_symbols_not_reached(
+        self, mock_get, mock_run, mock_save, mock_json
+    ):
+        """前の週に届かなかった銘柄から始まり、続きの銘柄が先頭の銘柄より先に計算されること（#1522）"""
+        from datetime import datetime, timedelta
+
+        from src.backtest.optimizer import run_optimize_batch
+        from src.domain.types import SymbolTask
+
+        # 先頭の2銘柄だけ前の週に保存された。7日たっているのでスキップされない
+        last_week = (datetime.now() - timedelta(days=7)).isoformat()
+        timestamps = {
+            "AAPL": last_week,
+            "AMZN": last_week,
+            "MSFT": "2026-03-23T19:22:30",
+        }
+        mock_get.side_effect = lambda market, symbol: {"timestamp": timestamps[symbol]}
+        mock_run.return_value = pd.DataFrame({"threshold": [0.02], "sharpe_ratio": [1.5]})
+        mock_save.return_value = "/tmp/results.csv"
+        mock_json.return_value = "/tmp/params.json"
+
+        run_optimize_batch(
+            [SymbolTask(market="us", symbol=symbol) for symbol in timestamps],
+            model_type="XGBoostModel",
+            max_workers=1,
+            skip_days=6,
+        )
+
+        computed = [c.kwargs["symbol"] for c in mock_run.call_args_list]
+        self.assertEqual(computed[0], "MSFT")
+
+    @patch("src.backtest.optimizer.batch.save_optimal_params_json")
+    @patch("src.backtest.optimizer.batch.save_optimization_results")
+    @patch("src.backtest.optimizer.batch.run_optimization")
+    @patch("src.backtest.optimizer.batch.get_optimal_params")
+    def test_unreadable_params_keep_given_order(self, mock_get, mock_run, mock_save, mock_json):
+        """既存の結果が読めないときは渡された順のまま進み、読むのは1回で止めること（#1522）"""
+        from src.backtest.optimizer import run_optimize_batch
+        from src.backtest.optimizer.persistence import OptimalParamsCorruptedError
+        from src.domain.types import SymbolTask
+
+        mock_get.side_effect = OptimalParamsCorruptedError("壊れた最適パラメータJSON")
+        mock_run.return_value = pd.DataFrame({"threshold": [0.02], "sharpe_ratio": [1.5]})
+        mock_save.return_value = "/tmp/results.csv"
+        mock_json.return_value = "/tmp/params.json"
+
+        run_optimize_batch(
+            [SymbolTask(market="us", symbol="AAPL"), SymbolTask(market="jp", symbol="7203")],
+            model_type="XGBoostModel",
+            max_workers=1,
+        )
+
+        computed = [c.kwargs["symbol"] for c in mock_run.call_args_list]
+        self.assertEqual(computed, ["AAPL", "7203"])
+        mock_get.assert_called_once()
+
 
 class TestRunOptunaBatch(unittest.TestCase):
     """run_optuna_batch のテスト"""

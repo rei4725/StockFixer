@@ -5,11 +5,12 @@ results/orders/rule/<JST の日付>.json（8:50 の記録を上書きしない�
 ゲートの判定はそのまま写す。8:50 の記録には SL/TP を評価できなかった保有の銘柄と数も写す（#1516）。
 売りの判定に使える予想が無かった保有の銘柄と数も写し、判定をしなかった日は null にする（#1530）。
 16:30 の記録にはシグナルを出せなかった銘柄と、そのうち保有中の銘柄の一覧と数も写す（#1520）。
+その日のルールの判定の対象に入らなかった保有の一覧と数も写す（#1527）。
 書き込みの失敗は ERROR のログで知らせ、発注は止めない。
 """
 
 import json
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Optional, Protocol
@@ -143,11 +144,14 @@ def save_rule_gate_record(
     *,
     unavailable_symbols: Sequence[UnavailableSymbol] = (),
     held_symbols: Collection[str] = (),
+    signals: Sequence[Mapping[str, Any]] = (),
 ) -> Optional[str]:
     """ルールの道の判定を results/orders/rule/ に書き、パスを返す。書けなければ None を返す。
 
     unavailable_symbols はシグナルを出せなかった銘柄で、held_symbols（約定済みの保有）に
     入るものは、その日のルールの売りを判定できなかった保有として別の一覧にも写す（#1520）。
+    held_symbols のうち signals にも unavailable_symbols にも入らない銘柄は、その日のルールの
+    判定の対象に入らなかった保有として、銘柄の順の一覧と数に写す（#1527）。
     """
     try:
         now = now_jst()
@@ -162,6 +166,10 @@ def save_rule_gate_record(
         payload["unavailable_count"] = len(rows)
         payload["unavailable_held_symbols"] = held_rows
         payload["unavailable_held_count"] = len(held_rows)
+        judged = {item["symbol"] for item in signals} | {row["symbol"] for row in rows}
+        unjudged = sorted(set(held_symbols) - judged)
+        payload["unjudged_held_symbols"] = unjudged
+        payload["unjudged_held_count"] = len(unjudged)
         _write_record(dest, payload)
     except Exception:
         logger.error("[rule] 新規を止めた判定の記録に失敗（発注は続ける）", exc_info=True)

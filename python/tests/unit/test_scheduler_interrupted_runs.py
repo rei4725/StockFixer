@@ -153,6 +153,113 @@ def test_interrupted_recovery_stops_after_two_consecutive_interruptions(tmp_path
     assert manager.get_execution_count("daily_backup", "2026-10-20") == 1
 
 
+@pytest.mark.parametrize(
+    "interrupted, expected_recover, expected_count",
+    [(2, True, 0), (12, True, 0), (13, False, 1)],
+)
+def test_weekly_optimization_recovers_up_to_configured_limit(
+    tmp_path, interrupted, expected_recover, expected_count
+):
+    """週の最適化の消えた回は設定の上限まで数えず、超えた分は数えて補完を止めること（#1522）"""
+    from run_scheduler import SCHEDULE_CONFIG
+
+    assert SCHEDULE_CONFIG["weekly_optimization"]["max_executions_per_period"] == 1
+    assert SCHEDULE_CONFIG["weekly_optimization"]["max_interrupted_reruns_per_period"] == 12
+    state_path = tmp_path / "state.json"
+    for i in range(interrupted):
+        _write_started(state_path, "weekly_optimization", "2026-W45", f"run-{i}", f"boot-{i}")
+    manager = SchedulerQueueManager(SCHEDULE_CONFIG, state_file_path=str(state_path))
+
+    # 2026-11-04 は水曜。01:00 + 30分を過ぎた時刻
+    now = datetime(2026, 11, 4, 2, 0, tzinfo=manager.tz)
+    assert manager.should_recover("weekly_optimization", now=now) is expected_recover
+    assert manager.get_execution_count("weekly_optimization", "2026-W45") == expected_count
+
+
+def test_weekly_optimization_finished_run_still_counts_against_limit(tmp_path):
+    """終わりまで走って落ちた回は、消えた回の上限の外で今までどおり数えること（#1522）"""
+    from run_scheduler import SCHEDULE_CONFIG
+
+    state_path = tmp_path / "state.json"
+    for i in range(3):
+        _write_started(state_path, "weekly_optimization", "2026-W45", f"run-{i}", f"boot-{i}")
+    events = json.loads(state_path.read_text(encoding="utf-8"))["events"]
+    events.append(
+        {
+            "job_id": "weekly_optimization",
+            "status": "error",
+            "period_key": "2026-W45",
+            "run_id": "run-failed",
+        }
+    )
+    state_path.write_text(json.dumps({"events": events}), encoding="utf-8")
+    manager = SchedulerQueueManager(SCHEDULE_CONFIG, state_file_path=str(state_path))
+
+    now = datetime(2026, 11, 4, 2, 0, tzinfo=manager.tz)
+    assert manager.get_execution_count("weekly_optimization", "2026-W45") == 1
+    assert manager.should_recover("weekly_optimization", now=now) is False
+
+
+def test_weekly_optimization_stops_after_limit_of_interruptions(tmp_path):
+    """定時の1回と補完の12回で計13回動き、13回目も消えたらそれ以上は補完しないこと（#1522）"""
+    from run_scheduler import SCHEDULE_CONFIG
+
+    state_path = tmp_path / "state.json"
+    calls = {"n": 0}
+    snapshot: dict[str, bytes] = {}
+
+    def _killed_func():
+        calls["n"] += 1
+        snapshot["state"] = state_path.read_bytes()
+
+    config = {
+        "weekly_optimization": {
+            **SCHEDULE_CONFIG["weekly_optimization"],
+            "func": _killed_func,
+            "max_retries": 0,
+        }
+    }
+    tz = SchedulerQueueManager(config, state_file_path=str(state_path)).tz
+    now = datetime(2026, 11, 4, 2, 0, tzinfo=tz)
+
+    first = SchedulerQueueManager(config, state_file_path=str(state_path))
+    first.now = lambda: now  # type: ignore[method-assign]
+    first.run_job("weekly_optimization", reason="scheduled")
+    state_path.write_bytes(snapshot["state"])
+
+    for _ in range(30):
+        manager = SchedulerQueueManager(config, state_file_path=str(state_path))
+        manager.now = lambda: now  # type: ignore[method-assign]
+        if not manager.should_recover("weekly_optimization", now=now):
+            break
+        manager.run_job("weekly_optimization", reason="recovery")
+        state_path.write_bytes(snapshot["state"])
+
+    assert calls["n"] == 13
+
+
+def test_only_weekly_optimization_has_more_interrupted_reruns(tmp_path):
+    """ほかのジョブは消えた回の補完が1回までのままであること（#1522）"""
+    from run_scheduler import SCHEDULE_CONFIG
+
+    raised = [
+        job_id
+        for job_id, config in SCHEDULE_CONFIG.items()
+        if "max_interrupted_reruns_per_period" in config
+    ]
+    assert raised == ["weekly_optimization"]
+
+    state_path = tmp_path / "state.json"
+    _write_started(state_path, "weekly_walk_forward_report", "2026-W45", "run-a", "boot-a")
+    _write_started(state_path, "weekly_walk_forward_report", "2026-W45", "run-b", "boot-b")
+    manager = SchedulerQueueManager(SCHEDULE_CONFIG, state_file_path=str(state_path))
+
+    # 2026-11-05 は木曜。01:00 + 30分を過ぎた時刻
+    now = datetime(2026, 11, 5, 2, 0, tzinfo=manager.tz)
+    assert manager.should_recover("weekly_walk_forward_report", now=now) is False
+    assert manager.get_execution_count("weekly_walk_forward_report", "2026-W45") == 1
+
+
 def test_run_in_progress_in_same_process_is_not_recovered(tmp_path):
     """同じプロセスで動いている回は、印のあるジョブでも補完しないこと"""
     started = threading.Event()
