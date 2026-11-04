@@ -3,6 +3,7 @@
 置き場: 8:50 は results/orders/<JST の日付>.json、16:30 のルールの道は
 results/orders/rule/<JST の日付>.json（8:50 の記録を上書きしない。同じ道のやり直しは上書きする）。
 ゲートの判定はそのまま写す。8:50 の記録には SL/TP を評価できなかった保有の銘柄と数も写す（#1516）。
+売りの判定に使える予想が無かった保有の銘柄と数も写し、判定をしなかった日は null にする（#1530）。
 16:30 の記録にはシグナルを出せなかった銘柄と、そのうち保有中の銘柄の一覧と数も写す（#1520）。
 その日のルールの判定の対象に入らなかった保有の一覧と数も写す（#1527）。
 書き込みの失敗は ERROR のログで知らせ、発注は止めない。
@@ -13,6 +14,8 @@ from collections.abc import Collection, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Optional, Protocol
+
+import pandas as pd
 
 from src.utils.data_path_utils import get_results_dir
 from src.utils.japan_time import now_jst
@@ -47,6 +50,22 @@ def _write_record(dest: Path, payload: dict[str, Any]) -> None:
     dest.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def held_without_prediction(predictions: pd.DataFrame, held_symbols: Collection[str]) -> list[str]:
+    """統合スコアのある予想の行が無い保有を銘柄の順に返し、WARNING に出す（#1530）。
+
+    行の無い保有と統合スコアが NaN の保有は、売りシグナルの比べが成り立たない。
+    """
+    scored = predictions.loc[predictions["multi_horizon_score"].notna(), "symbol"]
+    missing = sorted(set(held_symbols) - set(scored))
+    if missing:
+        logger.warning(
+            "[exec] 予想の行が無いか統合スコアが NaN で売りの判定ができない保有が %d件: %s",
+            len(missing),
+            missing,
+        )
+    return missing
+
+
 def save_order_gate_record(
     stats: OrderExecutionStats,
     *,
@@ -72,6 +91,11 @@ def save_order_gate_record(
         unevaluable = list(stats.get("sl_tp_unevaluable_symbols") or [])
         payload["sl_tp_unevaluable_symbols"] = unevaluable
         payload["sl_tp_unevaluable_count"] = len(unevaluable)
+        no_prediction = stats.get("held_without_prediction_symbols")
+        payload["held_without_prediction_symbols"] = no_prediction
+        payload["held_without_prediction_count"] = (
+            None if no_prediction is None else len(no_prediction)
+        )
         _write_record(dest, payload)
     except Exception:
         logger.error("[exec] 新規を止めた判定の記録に失敗（発注は続ける）", exc_info=True)

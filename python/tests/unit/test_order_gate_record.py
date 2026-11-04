@@ -53,6 +53,8 @@ _CORR_BLOCKED = CorrelationGateResult(
 
 _HELD = {"symbol": "9000", "qty": 100, "avg_price": 1000.0, "current_price": 1000.0}
 _UNPRICED = {"symbol": "7203", "qty": 100, "avg_price": 0.0, "current_price": 1000.0}
+_NAN_SCORE = {"symbol": "7200", "qty": 100, "avg_price": 1000.0, "current_price": 1000.0}
+_NO_ROW = {"symbol": "3350", "qty": 100, "avg_price": 1000.0, "current_price": 1000.0}
 
 
 def _make_broker(positions=(_HELD,)):
@@ -86,9 +88,18 @@ def _record_path():
 
 
 class TestOrderGateRecord(unittest.TestCase):
-    def _run(self, gate_status, corr_gate, extra_patches=(), positions=(_HELD,), predictions=None):
+    def _run(
+        self,
+        gate_status,
+        corr_gate,
+        extra_patches=(),
+        positions=(_HELD,),
+        predictions=None,
+        broker=None,
+        stop_hit=False,
+    ):
         sl_risk = MagicMock()
-        sl_risk.return_value.check_sl_tp.return_value = (False, False, "")
+        sl_risk.return_value.check_sl_tp.return_value = (stop_hit, False, "SL" if stop_hit else "")
         frame = _predictions() if predictions is None else predictions
         patches = [
             patch.object(_PREDICTIONS, "get_latest_by_market", return_value=frame),
@@ -117,7 +128,7 @@ class TestOrderGateRecord(unittest.TestCase):
         ]
         for p in patches:
             p.start()
-        broker = _make_broker(positions)
+        broker = broker or _make_broker(positions)
         try:
             stats = run_daily_orders(
                 broker,
@@ -238,6 +249,62 @@ class TestOrderGateRecord(unittest.TestCase):
         self.assertTrue(record["correlation_blocked"])
         self.assertIn("corr down", record["entry_error"])
         self.assertEqual(record["buy_orders"], 0)
+
+    def test_held_without_prediction_is_recorded_and_warned(self):
+        """行の無い保有と統合スコアが NaN の保有は、銘柄と数が記録に入り WARNING が出る（#1530）"""
+        frame = _predictions()
+        frame.loc[frame["symbol"] == "7200", "diff_ratio"] = float("nan")
+        with patch("src.trading.execution.gate_record.logger") as log:
+            stats, _ = self._run(
+                _ALLOWED, _CORR_OK, positions=(_HELD, _NAN_SCORE, _NO_ROW), predictions=frame
+            )
+        record = self._read()
+        self.assertEqual(stats["held_without_prediction_symbols"], ["3350", "7200"])
+        self.assertEqual(record["held_without_prediction_symbols"], ["3350", "7200"])
+        self.assertEqual(record["held_without_prediction_count"], 2)
+        log.warning.assert_called_once()
+        self.assertIn("3350", str(log.warning.call_args))
+        self.assertIn("7200", str(log.warning.call_args))
+
+    def test_all_held_predicted_records_empty_list_and_zero(self):
+        """該当が無い日は、空の一覧と 0 が入り WARNING は出ない（#1530）"""
+        with patch("src.trading.execution.gate_record.logger") as log:
+            self._run(_ALLOWED, _CORR_OK)
+        record = self._read()
+        self.assertEqual(record["held_without_prediction_symbols"], [])
+        self.assertEqual(record["held_without_prediction_count"], 0)
+        log.warning.assert_not_called()
+
+    def test_empty_predictions_records_null(self):
+        """予測が空の日は判定をしていないので null が入る（#1530）"""
+        self._run(_ALLOWED, _CORR_OK, predictions=pd.DataFrame())
+        record = self._read()
+        self.assertIsNone(record["held_without_prediction_symbols"])
+        self.assertIsNone(record["held_without_prediction_count"])
+
+    def test_read_failure_day_is_recorded_before_same_raise(self):
+        """予測か保有を読めない日も、SL/TP を1回出して記録を書き、同じ例外を投げる（#1530）"""
+        error = RuntimeError("read down")
+        sources = {
+            "predictions": patch.object(_PREDICTIONS, "get_latest_by_market", side_effect=error),
+            "holdings": patch("src.trading.execution.runner._get_held_symbols", side_effect=error),
+        }
+        for name, failing in sources.items():
+            with self.subTest(failing=name):
+                if os.path.exists(_record_path()):
+                    os.remove(_record_path())
+                broker = _make_broker()
+                with self.assertRaises(RuntimeError) as caught:
+                    self._run(
+                        _ALLOWED, _CORR_OK, extra_patches=(failing,), broker=broker, stop_hit=True
+                    )
+                self.assertIs(caught.exception, error)
+                self.assertEqual(self._sent(broker), [("9000", OrderSide.SELL)])
+                record = self._read()
+                self.assertIn("read down", record["entry_error"])
+                self.assertEqual(record["sell_orders"], 1)
+                self.assertIsNone(record["held_without_prediction_symbols"])
+                self.assertIsNone(record["held_without_prediction_count"])
 
 
 if __name__ == "__main__":
