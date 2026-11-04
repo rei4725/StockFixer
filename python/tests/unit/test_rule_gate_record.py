@@ -107,9 +107,21 @@ def _patches(gate, corr, extra=()):
 
 
 class TestRuleGateRecord(unittest.TestCase):
-    def _run(self, gate, corr, *, extra=(), record_gate=True, allow_new_buys=True, **kwargs):
+    def _run(
+        self,
+        gate,
+        corr,
+        *,
+        extra=(),
+        record_gate=True,
+        allow_new_buys=True,
+        pending_buys_error=None,
+        **kwargs,
+    ):
         broker = _broker()
         broker.get_positions.return_value.append(_HELD_5202)
+        if pending_buys_error is not None:
+            broker.get_pending_buy_symbols = MagicMock(side_effect=pending_buys_error)
         patches = _patches(gate, corr, extra)
         for p in patches:
             p.start()
@@ -179,6 +191,16 @@ class TestRuleGateRecord(unittest.TestCase):
         self.assertIsNone(record["risk_gate_allowed"])
         self.assertIn("gate down", record["new_buy_step_error"])
         self.assertEqual(record["skip_reasons"], {"new_buy_step_error": 1, "no_signal": 1})
+        self.assertEqual(record["sell_orders"], 1)
+
+    def test_pending_buy_read_failure_day_is_recorded_before_raise(self):
+        """約定待ちの BUY を読めない日も、止めた BUY と保有の SELL を書いてから投げる（#1539）"""
+        with self.assertRaisesRegex(RuntimeError, "pending down"):
+            self._run(_ALLOWED, _CORR_OK, pending_buys_error=RuntimeError("pending down"))
+        record = _read()
+        self.assertIn("pending down", record["new_buy_step_error"])
+        self.assertEqual(record["skip_reasons"], {"new_buy_step_error": 1, "no_signal": 1})
+        self.assertEqual(record["buy_orders"], 0)
         self.assertEqual(record["sell_orders"], 1)
 
     def test_does_not_overwrite_morning_record(self):
