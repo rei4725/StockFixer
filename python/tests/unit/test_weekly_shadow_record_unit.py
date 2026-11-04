@@ -165,6 +165,82 @@ def test_record_when_challenger_loses(models_dir):
     assert record["promoted"] is False
 
 
+def _no_challenger_rows(trained_at) -> dict:
+    """challenger の比べる行が0件の週の evaluate_shadow_models() の結果（#1589）。"""
+    return {
+        **_shadow(wins=False),
+        "challenger_hit_rate": None,
+        "challenger_sharpe": None,
+        "n_production": 0,
+        "n_challenger": 0,
+        "challenger_trained_at": trained_at,
+        "window_days": 0,
+    }
+
+
+def _run_watching_notice(models_dir: Path, shadow, mock_train=None):
+    """週の学習を流し、知らせのモックとログのモックを返す。"""
+    with ExitStack() as stack:
+        mock_notify = stack.enter_context(
+            patch("src.orchestration.jobs.weekly_training._notify_stage_failure")
+        )
+        mock_logger = stack.enter_context(patch("src.orchestration.jobs.weekly_training.logger"))
+        _run(stack, models_dir, shadow, mock_train=mock_train)
+    return mock_notify, mock_logger
+
+
+def test_no_comparable_rows_is_no_shadow_data_and_notifies_once(models_dir):
+    """challenger のファイルが在るのに比べる行が無い週は、負けと記録しない（#1589）。"""
+    mock_train = MagicMock()
+    shadow = _no_challenger_rows("2026-10-26T16:30:00+00:00")
+    mock_notify, mock_logger = _run_watching_notice(models_dir, shadow, mock_train)
+
+    record = _read_record()
+    assert record["gate_skipped_reason"] == "no_shadow_data"
+    assert record["shadow_evaluated"] is True
+    assert record["n_challenger"] == 0
+    assert record["window_days"] == 0
+    assert record["promoted"] is False
+
+    assert mock_notify.call_count == 1
+    label, exc = mock_notify.call_args.args
+    assert "影の比べ" in label
+    assert "challenger 0" in str(exc)
+    assert any("比べられなかった" in c.args[0] for c in mock_logger.warning.call_args_list)
+    assert mock_train.call_count == 2
+
+
+def test_one_missing_metric_is_no_shadow_data(models_dir):
+    """行があっても指標が1つ欠けていれば、比べられなかった週である（#1589）。"""
+    shadow = {**_shadow(wins=False), "production_sharpe": None}
+    mock_notify, _ = _run_watching_notice(models_dir, shadow)
+
+    assert _read_record()["gate_skipped_reason"] == "no_shadow_data"
+    assert mock_notify.call_count == 1
+
+
+def test_missing_challenger_file_is_no_shadow_data_without_notice(models_dir):
+    """challenger のファイルが無い週は、比べるものが無いだけなので知らせない（#1589）。"""
+    mock_train = MagicMock()
+    mock_notify, mock_logger = _run_watching_notice(
+        models_dir, _no_challenger_rows(None), mock_train
+    )
+
+    assert _read_record()["gate_skipped_reason"] == "no_shadow_data"
+    mock_notify.assert_not_called()
+    assert any("比べられなかった" in c.args[0] for c in mock_logger.warning.call_args_list)
+    assert mock_train.call_count == 2
+
+
+def test_lost_with_both_metrics_stays_challenger_lost_without_notice(models_dir):
+    mock_train = MagicMock()
+    mock_notify, _ = _run_watching_notice(models_dir, _shadow(wins=False), mock_train)
+
+    assert _read_record()["gate_skipped_reason"] == "challenger_lost"
+    mock_notify.assert_not_called()
+    assert mock_train.call_count == 2
+
+
 def test_record_when_challenger_wins_and_passes_gate(models_dir):
     with ExitStack() as stack:
         _run(stack, models_dir, _shadow(wins=True))
