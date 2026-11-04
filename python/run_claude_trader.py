@@ -77,11 +77,14 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     try:
+        from src.infrastructure.yfinance_market_data_adapter import YFinanceMarketDataAdapter
         from src.orchestration.jobs import prediction_saved_marker
         from src.trading.claude_agent import run_claude_trader
 
         trade_diff_sink = PostgresTradeDiffSink()
         broker = build_broker(args.mode, trade_diff_sink)
+        # 日次の道と同じく、ペーパーでは値段の取り元を渡して指値の判定を効かせる（#1543）
+        market_data = YFinanceMarketDataAdapter() if args.mode == "paper" else None
         stats = run_claude_trader(
             broker=broker,
             market=args.market,
@@ -90,6 +93,7 @@ def main(argv: list[str] | None = None) -> int:
             prediction_repo=PostgresPredictionResultRepository(),
             # 保存の済んでいない朝に流しても新規の buy を出さない（#1490）
             prediction_saved_day=prediction_saved_marker.read_prediction_saved_day(),
+            market_data=market_data,
         )
         print(
             f"完了 — 買い: {stats['buy_orders']} 売り: {stats['sell_orders']} "
