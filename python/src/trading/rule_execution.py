@@ -109,9 +109,9 @@ def execute_rule_paper_trades(
         raise
     held_symbols = {p["symbol"] for p in positions}
     # 約定待ちの BUY は朝の約定まで get_positions に出ないため、新規買いの数えに足す（#1176）。
-    # SELL の分かれ道は約定済みの保有（held_symbols）だけを見る。読めない日は保有と同じく
-    # ジョブを失敗にする（#1465）
-    held_or_pending = held_symbols | _get_pending_buy_symbols(broker)
+    # SELL の分かれ道は約定済みの保有（held_symbols）だけを見る。読み込みは新規買いの手順の
+    # 中で行い、読めない日は新規を止め保有の SELL を出してからジョブを失敗にする（#1465・#1539）
+    held_or_pending = set(held_symbols)
     # 空売り中の銘柄へ逆向きの新規買いを重ねない（#1349）。読めなければ新規買いの手順で止まる
     short_codes: set[str] = set()
     record = RuleGateRecord(market=market, allow_new_buys=allow_new_buys)
@@ -121,11 +121,14 @@ def execute_rule_paper_trades(
         logger.warning("[rule] 呼び出し元の指定で新規買いを停止し、保有の決済だけ出す")
     buys_allowed = False
     sector_allowed: set[str] = set()
-    position_count = len(held_or_pending)
+    position_count = len(held_symbols)
     # 新規買いにだけ使う手順が落ちたら、新規は止め保有の SELL だけ出してから、
     # 同じ例外を投げ直してジョブを失敗にする（#1221。8:50 の道の #1179 と同じ形）
     buy_step_error: Exception | None = None
     try:
+        held_or_pending |= _get_pending_buy_symbols(broker)
+        position_count = len(held_or_pending)
+
         # ML 経路（execution.run_daily_orders）と同等のリスク制御を適用する。
         # R-307: DD 基準値を発注前に更新し、当日発注可否ゲート（日次損失・連続損失・
         # 保有上限）を評価する。不合格時は新規買いを停止するが、決済（SELL）は許可する。
