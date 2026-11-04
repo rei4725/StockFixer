@@ -33,9 +33,10 @@ logger = get_logger(__name__)
 
 def _build_queue_manager():
     """キュー方式ジョブ管理を初期化する"""
+    from src.orchestration.jobs.common import notify_job_failure
     from src.orchestration.scheduler_queue import SchedulerQueueManager
 
-    manager = SchedulerQueueManager(SCHEDULE_CONFIG)
+    manager = SchedulerQueueManager(SCHEDULE_CONFIG, error_notifier=notify_job_failure)
     logger.info(f"キュー状態ログ: {manager.state_file_path}")
     return manager
 

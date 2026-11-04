@@ -22,6 +22,7 @@ class OrderExecutionStats(TypedDict):
     n_held_symbols: int
     held_symbols_list: list[str]
     sl_tp_unevaluable_symbols: list[str]
+    held_without_prediction_symbols: list[str] | None  # 判定をしなかった日は None（#1530）
     stale_prediction_reason: str | None
     threshold_scale: float | None
 
@@ -47,6 +48,7 @@ def _new_stats() -> OrderExecutionStats:
         "n_held_symbols": 0,
         "held_symbols_list": [],
         "sl_tp_unevaluable_symbols": [],
+        "held_without_prediction_symbols": None,
         "stale_prediction_reason": None,
         "threshold_scale": None,
     }
