@@ -13,7 +13,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-# 消えた回を回数に数えずに補完する、1期間あたりの上限。2回続けて消えたら止める（C-014）
+# 消えた回を回数に数えずに補完する、1期間あたりの上限。2回続けて消えたら止める（C-014）。
+# ジョブの設定の max_interrupted_reruns_per_period で、そのジョブだけ増やせる（#1522）
 MAX_FORGIVEN_INTERRUPTIONS_PER_PERIOD = 1
 
 
@@ -43,10 +44,11 @@ def count_executions(
     boot_id: str,
     booted_at: datetime,
     rerun_if_interrupted: bool,
+    max_forgiven: int = MAX_FORGIVEN_INTERRUPTIONS_PER_PERIOD,
 ) -> ExecutionCount:
     """success・error の記録に、終わりの記録が無い started（途中で落ちた実行）を足して数える。
 
-    rerun_if_interrupted のジョブは、消えた回を1期間に1回まで回数から除く。
+    rerun_if_interrupted のジョブは、消えた回を1期間に max_forgiven 回まで回数から除く。
     """
     count = 0
     started_events: dict[str, dict[str, Any]] = {}
@@ -72,5 +74,5 @@ def count_executions(
             interrupted.append(run_id)
 
     if rerun_if_interrupted:
-        count -= min(len(interrupted), MAX_FORGIVEN_INTERRUPTIONS_PER_PERIOD)
+        count -= min(len(interrupted), max_forgiven)
     return ExecutionCount(count=count, interrupted_run_ids=interrupted)

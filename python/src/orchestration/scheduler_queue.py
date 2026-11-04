@@ -31,7 +31,10 @@ from src.orchestration.scheduler_cutoff import (
     is_past_recovery_until,
     warn_scheduled_start_past_cutoff,
 )
-from src.orchestration.scheduler_interrupted import count_executions
+from src.orchestration.scheduler_interrupted import (
+    MAX_FORGIVEN_INTERRUPTIONS_PER_PERIOD,
+    count_executions,
+)
 from src.utils.data_path_utils import ensure_dir, get_results_dir
 from src.utils.heartbeat import ping_heartbeat
 from src.utils.japan_time import isoformat_utc
@@ -442,10 +445,14 @@ class SchedulerQueueManager:
         """success・error の記録に、終わりの記録が無い started（途中で落ちた実行）を足して数える。
 
         設定に ``rerun_if_interrupted: True`` を持つジョブは、前の起動のプロセスで消えた回を
-        1期間に1回まで数えない（#946）。
+        1期間に1回まで数えない（#946）。``max_interrupted_reruns_per_period`` で
+        その回数を増やせる（#1522）。
         """
         config = self.schedule_config.get(job_id, {})
         rerun_if_interrupted = bool(config.get("rerun_if_interrupted", False))
+        max_forgiven = config.get(
+            "max_interrupted_reruns_per_period", MAX_FORGIVEN_INTERRUPTIONS_PER_PERIOD
+        )
         result = count_executions(
             self._state.get("events", []),
             job_id,
@@ -453,7 +460,9 @@ class SchedulerQueueManager:
             boot_id=self._boot_id,
             booted_at=self._booted_at,
             rerun_if_interrupted=rerun_if_interrupted,
+            max_forgiven=max_forgiven,
         )
+        recovery_label = f"あり（1期間に{max_forgiven}回まで）" if rerun_if_interrupted else "なし"
         for run_id in result.interrupted_run_ids:
             if run_id in self._warned_interrupted_run_ids:
                 continue
@@ -461,7 +470,7 @@ class SchedulerQueueManager:
             logger.warning(
                 f"前の起動のプロセスで消えた回を見つけました: job_id={job_id} "
                 f"period_key={period_key} run_id={run_id} "
-                f"補完の対象={'あり（1期間に1回まで）' if rerun_if_interrupted else 'なし'}"
+                f"補完の対象={recovery_label}"
             )
         return result.count
 
