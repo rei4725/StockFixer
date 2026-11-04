@@ -11,7 +11,10 @@
 
 from src.backtest.ports import set_model_manager_factory
 from src.orchestration.jobs.account_shadow import run_daily_account_shadow_report
-from src.orchestration.jobs.backtest_promotion_job import run_backtest_promotion
+from src.orchestration.jobs.backtest_promotion_job import (
+    raise_if_backtest_promotion_failed,
+    run_backtest_promotion,
+)
 from src.orchestration.jobs.common import _handle_stage_error, _is_first_week_of_month
 from src.orchestration.jobs.daily import (
     run_daily_auto_order,
@@ -91,4 +94,5 @@ __all__ = [
     "run_regime_leverage_weekly_job",
     # nightly
     "run_backtest_promotion",
+    "raise_if_backtest_promotion_failed",
 ]

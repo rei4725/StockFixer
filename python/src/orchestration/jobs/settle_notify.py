@@ -3,6 +3,7 @@
 完了の知らせとは別に、例外で約定できなかった注文の件数を、当日の行が無い据え置きと分けて知らせる。
 """
 
+from src.orchestration.job_errors import NonRetryableJobError
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -31,3 +32,12 @@ def notify_settle_result(settled_count: int, error_count: int, notify_when_none:
     except Exception as e:
         logger.error("約定処理エラーの通知失敗: %s", e, exc_info=True)
     return error_count
+
+
+def raise_if_settle_errors(error_count: int) -> None:
+    """例外で約定できなかった注文が残ればジョブを失敗にする（#1565）
+
+    知らせは済んでいるので、やり直して同じ知らせを重ねないよう NonRetryableJobError を投げる。
+    """
+    if error_count > 0:
+        raise NonRetryableJobError(f"約定処理の例外で約定できなかった注文が {error_count} 件ある")
