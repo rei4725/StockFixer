@@ -222,6 +222,7 @@ def test_daily_settle_without_errors_does_not_notify_error():
 
 def test_cutoff_message_separates_deferred_and_errors():
     """締めの知らせは、当日の行が無い件数と例外の件数を分けて出す"""
+    from src.orchestration.job_errors import NonRetryableJobError
     from src.orchestration.jobs import settle_retry
 
     now = datetime(2026, 10, 22, 9, 55, tzinfo=_JST)
@@ -230,7 +231,8 @@ def test_cutoff_message_separates_deferred_and_errors():
         patch.object(settle_retry, "run_daily_settle_orders", return_value=1),
         patch("src.reporting.discord.discord_utils.send_webhook_notification") as mock_notify,
     ):
-        settle_retry.run_daily_settle_retry(now=now)
+        with pytest.raises(NonRetryableJobError):
+            settle_retry.run_daily_settle_retry(now=now)
     message = mock_notify.call_args.args[1]
     assert "当日の行が無い 2 件" in message
     assert "約定処理の例外 1 件" in message

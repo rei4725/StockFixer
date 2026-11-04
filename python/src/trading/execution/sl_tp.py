@@ -1,6 +1,7 @@
 """SL/TP トリガーによる保有ポジションの強制クローズ。"""
 
 import math
+from typing import Any
 
 from config.settings import DEFAULT_STOP_LOSS_PCT
 from src.domain.ports import MarketDataPort, TradeDiffSink
@@ -59,42 +60,54 @@ def _check_sl_tp_exits(
     """
     triggered: set[str] = set()
     record = _recorder(_record_order, stats)  # 記録の失敗でも売りは出たものとして除外する (#1104)
-    # 空売りの保有を読めない日は0件として黙って進めず、買い持ちの読みの失敗と同じく上へ出す（#1451）
-    short_positions = broker.get_short_positions()
+    # 空売りの保有を読めない日は0件として黙って進めず、買い持ちを決済した後に上へ出す（#1451・#1567）
+    short_positions: list[dict[str, Any]] = []
+    short_read_error: Exception | None = None
+    try:
+        short_positions = broker.get_short_positions()
+    except Exception as exc:
+        logger.error("[exec] 空売りの保有を読めない。買い持ちの判定の後に失敗にする", exc_info=True)
+        short_read_error = exc
     exits = [(pos, False) for pos in broker.get_positions()]
     exits += [(pos, True) for pos in short_positions]
     pending = _load_pending_exits(broker)
     pending_skipped: list[str] = []
     for pos, is_short in exits:
         symbol = str(pos.get("symbol", "")).replace(".T", "")
-        # 空売りは約定待ちの SHORT（仮登録）の分を返済しない（#1225）
-        qty = coverable_short_qty(pos) if is_short else int(pos.get("qty") or 0)
-        avg_price = float(pos.get("avg_short_price" if is_short else "avg_price") or 0.0)
-        current_price = float(pos.get("current_price") or 0.0)
-        if qty <= 0:
-            continue
-        if not all(math.isfinite(p) and p > 0 for p in (avg_price, current_price)):
-            # 現在値か買値が取れない保有を損益0として素通りさせない（#844・#1380）
-            logger.warning(
-                "[exec] %s: 現在値か買値が取れず SL/TP を評価できない（%d株）", symbol, qty
-            )
-            # 売らずに飛ばすが、完了の知らせで分かるように数と銘柄を残す（#1296）
-            stats.setdefault("sl_tp_unevaluable_symbols", []).append(symbol)
-            continue
+        try:
+            # 空売りは約定待ちの SHORT（仮登録）の分を返済しない（#1225）
+            qty = coverable_short_qty(pos) if is_short else int(pos.get("qty") or 0)
+            avg_price = float(pos.get("avg_short_price" if is_short else "avg_price") or 0.0)
+            current_price = float(pos.get("current_price") or 0.0)
+            if qty <= 0:
+                continue
+            if not all(math.isfinite(p) and p > 0 for p in (avg_price, current_price)):
+                # 現在値か買値が取れない保有を損益0として素通りさせない（#844・#1380）
+                logger.warning(
+                    "[exec] %s: 現在値か買値が取れず SL/TP を評価できない（%d株）", symbol, qty
+                )
+                # 売らずに飛ばすが、完了の知らせで分かるように数と銘柄を残す（#1296）
+                stats.setdefault("sl_tp_unevaluable_symbols", []).append(symbol)
+                continue
 
-        risk = _sl_tp_risk(broker, market, symbol, stats)
-        if is_short:
-            sl_triggered, tp_triggered, reason = risk.check_sl_tp(
-                avg_price, current_price, is_short=True
-            )
-        else:
-            sl_triggered, tp_triggered, reason = risk.check_sl_tp(avg_price, current_price)
-        if not sl_triggered and not tp_triggered:
-            continue
+            risk = _sl_tp_risk(broker, market, symbol, stats)
+            if is_short:
+                sl_triggered, tp_triggered, reason = risk.check_sl_tp(
+                    avg_price, current_price, is_short=True
+                )
+            else:
+                sl_triggered, tp_triggered, reason = risk.check_sl_tp(avg_price, current_price)
+            if not sl_triggered and not tp_triggered:
+                continue
 
-        side = OrderSide.SHORT_COVER if is_short else OrderSide.SELL
-        if pending.has(symbol, side):
-            pending_skipped.append(symbol)
+            side = OrderSide.SHORT_COVER if is_short else OrderSide.SELL
+            if pending.has(symbol, side):
+                pending_skipped.append(symbol)
+                continue
+        except Exception:
+            # 1銘柄の失敗で残りの保有の損切りを止めない（#1567）
+            logger.error("[exec] %s: SL/TP の判定に失敗。次の保有へ進む", symbol, exc_info=True)
+            stats["errors"] += 1
             continue
         try:
             # 損失の止めは約定を優先する。流動性の判定による指値は窓を開けた日に失効するため使わない（#881）
@@ -140,6 +153,8 @@ def _check_sl_tp_exits(
             stats["errors"] += 1
 
     _log_pending_skips("SL/TP", pending_skipped)
+    if short_read_error is not None:
+        raise short_read_error
     return triggered
 
 
