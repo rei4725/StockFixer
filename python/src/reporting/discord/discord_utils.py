@@ -467,8 +467,9 @@ def send_rule_daily_signals(
     market: str,
     buy_orders: int,
     sell_orders: int,
+    total: int,
 ) -> bool:
-    """ルールベース日次シグナル通知を Discord に送信する。"""
+    """ルールベース日次シグナル通知を Discord に送信する。total は対象の銘柄数（#1571）。"""
     now = format_jst(fmt="%Y/%m/%d %H:%M JST")
     buy_signals = [s for s in signals if s["signal"] == 1]
     sell_signals = [s for s in signals if s["signal"] == -1]
@@ -499,7 +500,9 @@ def send_rule_daily_signals(
                 f"価格={price_str}  勝率={s['win_rate']:.1%}"
             )
 
-    if not buy_signals and not sell_signals:
+    if total <= 0:
+        lines.append("❌ 有効ルールが0銘柄のため判定できず（保有の SELL も判定していない）")
+    elif not buy_signals and not sell_signals:
         lines.append("本日はシグナルなし（全銘柄 HOLD）")
 
     return send_webhook_text("\n".join(lines))
