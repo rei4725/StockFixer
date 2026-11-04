@@ -45,20 +45,22 @@ def _passes_hard_gate(
 ) -> bool:
     """1銘柄の財務がハードゲートをすべて満たすか判定する。
 
-    ゲート対象フィールドが欠損（None）の場合は検証不能とみなし除外する。
+    ゲート対象フィールドが欠損（None/NaN）の場合は検証不能とみなし除外する。
+    DB の NULL は ``load_fundamentals`` を通ると NaN で届き、NaN はどの比較も偽に
+    なるため、None と同じく明示して落とす。
     """
     revenue_cagr = fund.get("revenue_cagr_3y")
     roe = fund.get("roe")
     de = fund.get("debt_to_equity")
     market_cap = fund.get("market_cap")
 
-    if revenue_cagr is None or revenue_cagr < min_revenue_cagr:
+    if revenue_cagr is None or pd.isna(revenue_cagr) or revenue_cagr < min_revenue_cagr:
         return False
-    if roe is None or roe < min_roe:
+    if roe is None or pd.isna(roe) or roe < min_roe:
         return False
-    if de is None or de > max_debt_to_equity:
+    if de is None or pd.isna(de) or de > max_debt_to_equity:
         return False
-    if market_cap is None or market_cap > max_market_cap:
+    if market_cap is None or pd.isna(market_cap) or market_cap > max_market_cap:
         return False
     if require_margin_not_declining and _margin_declining(fund):
         return False
