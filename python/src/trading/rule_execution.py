@@ -81,7 +81,8 @@ def execute_rule_paper_trades(
             書き込みの失敗は ERROR のログだけで、注文と戻り値は変えない
         unavailable_symbols: シグナルを出せなかった銘柄（RuleSignalBatch.unavailable）。
             record_gate=True のとき、そのまま記録に写し、保有中の銘柄を別の一覧にも写す
-            （#1520）。判定と注文には使わない
+            （#1520）。判定と注文には使わない。保有のうち signals にも unavailable_symbols にも
+            入らない銘柄は、判定の対象に入らなかった保有として記録に写す（#1527）
 
     Returns:
         {"buy_orders": int, "sell_orders": int, "skipped": int, "errors": int}
@@ -298,7 +299,10 @@ def execute_rule_paper_trades(
         record.skipped = skipped
         record.errors = errors
         save_rule_gate_record(
-            record, unavailable_symbols=unavailable_symbols, held_symbols=held_symbols
+            record,
+            unavailable_symbols=unavailable_symbols,
+            held_symbols=held_symbols,
+            signals=signals,
         )
     if buy_step_error is not None:
         raise buy_step_error
