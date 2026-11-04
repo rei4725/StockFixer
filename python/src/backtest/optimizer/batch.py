@@ -4,7 +4,7 @@
 （optimal_params.json の同時書き込み破損を防止）。どちらも終わった銘柄から保存する。
 """
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Optional
 
 from src.backtest.optimizer.grid import run_optimization
@@ -18,6 +18,38 @@ from src.backtest.optimizer.persistence import (
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+def _last_optimized_date(market: str, symbol: str) -> date:
+    """最後に最適化した日を返す。記録が無い・日時が読めない銘柄は最も古い日とする。"""
+    existing = get_optimal_params(market, symbol)
+    if not existing or not existing.get("timestamp"):
+        return date.min
+    try:
+        return datetime.fromisoformat(existing["timestamp"]).date()
+    except (TypeError, ValueError):
+        return date.min
+
+
+def _oldest_optimized_first(tasks: list) -> list:
+    """最後に最適化した日が古い銘柄から並べる。同じ日なら発注に使う jp を先にする（#1522）。
+
+    全銘柄に丸1日以上かかるため、毎週同じ先頭の銘柄から計算すると後ろの銘柄に届かない。
+    同じ日で同じ市場の銘柄は渡された順のまま。既存の結果が読めないときは順を変えない
+    （銘柄ごとの扱いは run_optimize_batch の中の読み出しと保存に任せる）。
+    """
+    keyed = []
+    for task in tasks:
+        market = getattr(task, "market", None) or task["market"]
+        symbol = getattr(task, "symbol", None) or task["symbol"]
+        try:
+            last_optimized = _last_optimized_date(market, symbol)
+        except OptimalParamsCorruptedError as e:
+            logger.error(f"既存の最適パラメータが読めないため計算の順を変えません: {e}")
+            return tasks
+        keyed.append(((last_optimized, market != "jp"), task))
+    keyed.sort(key=lambda item: item[0])
+    return [task for _, task in keyed]
 
 
 def run_optimize_batch(
@@ -53,6 +85,8 @@ def run_optimize_batch(
     結果保存（逐次） — 計算が終わった銘柄から呼び出し側のスレッドで1件ずつ保存し、
     optimal_params.json の同時書き込み破損を防ぎつつ、中断時もそれまでの結果を残す
 
+    計算の順は、最後に最適化した日が古い銘柄から（同じ日なら jp を先に）とする（#1522）
+
     Args:
         tasks: 対象銘柄タスクリスト（SymbolTask または dict）
         model_type: モデルタイプ
@@ -81,7 +115,7 @@ def run_optimize_batch(
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    symbols = tasks
+    symbols = _oldest_optimized_first(tasks)
     if not symbols:
         logger.warning("対象銘柄がありません。")
         return []
