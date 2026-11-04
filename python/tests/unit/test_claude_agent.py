@@ -180,6 +180,22 @@ class TestHandlePlaceOrder(unittest.TestCase):
         "src.trading.claude_agent._choose_order_params",
         return_value=(OrderType.MARKET, 0.0, "market", "open"),
     )
+    def test_sell_records_no_horizon(self, _choose, _record):
+        # #1543: 8:50 の道の売りと同じく horizon を渡さず、SELL の行の horizon の列を空に保つ
+        self.broker.get_positions.return_value = [
+            {"symbol": "7200", "qty": 200, "avg_price": 990.0, "current_price": 1000.0}
+        ]
+
+        result = self._call("7200", "sell")
+
+        self.assertEqual(result["status"], "placed")
+        self.assertIsNone(_record.call_args.kwargs.get("horizon"))
+
+    @patch("src.trading.claude_agent._record_order")
+    @patch(
+        "src.trading.claude_agent._choose_order_params",
+        return_value=(OrderType.MARKET, 0.0, "market", "open"),
+    )
     def test_sell_order_uses_position_qty(self, _choose, _record):
         self.broker.get_positions.return_value = [
             {"symbol": "7200", "qty": 200, "avg_price": 990.0, "current_price": 1000.0}

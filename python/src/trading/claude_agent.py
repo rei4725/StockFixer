@@ -275,8 +275,8 @@ def _handle_place_order(
             mode=mode,
             order_session=order_session,
             trade_diff_sink=trade_diff_sink,
-            # 期限の無い保有を残さない（8:50 の道と同じ。売りでは使われない、#1543）
-            horizon=_determine_entry_horizon(row),
+            # 期限の無い保有を残さない。8:50 の道と同じく新規の買いにだけ渡す（#1543）
+            horizon=_determine_entry_horizon(row) if side == OrderSide.BUY else None,
         )
         if side == OrderSide.BUY:
             stats["buy_orders"] += 1
