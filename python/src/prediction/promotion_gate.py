@@ -37,7 +37,7 @@ from src.prediction.baseline_metrics import baseline_metrics
 from src.prediction.challenger_window import (
     CHALLENGER_LABEL,
     ChallengerWindow,
-    filter_current_challenger,
+    filter_comparable_challenger,
     filter_to_days,
 )
 from src.prediction.db import load_prediction_accuracy
@@ -156,13 +156,14 @@ def _load_model_window(
     """指定モデルの直近 DEFAULT_EVALUATION_DAYS 日分の採点の行を全部読む（#958）。
 
     challenger のラベルは今の challenger の予想の行に絞り、window を渡したモデルは
-    その challenger の行がある日に絞る（#1327）。
+    その challenger の行がある日に絞る（#1327）。どちらも production が変わった後の行だけに
+    なる（#1559）。
     """
     df = load_prediction_accuracy(
         horizon=horizon, limit=0, model_name=model_name, days=DEFAULT_EVALUATION_DAYS
     )
     if model_name == CHALLENGER_LABEL:
-        df, _ = filter_current_challenger(df)
+        df, _ = filter_comparable_challenger(df)
     elif window is not None:
         df = filter_to_days(df, window)
     return df
@@ -175,7 +176,7 @@ def _challenger_window(shadow_model_name: str, horizon: int) -> Optional[Challen
     df = load_prediction_accuracy(
         horizon=horizon, limit=0, model_name=shadow_model_name, days=DEFAULT_EVALUATION_DAYS
     )
-    _, window = filter_current_challenger(df)
+    _, window = filter_comparable_challenger(df)
     return window
 
 
@@ -295,7 +296,8 @@ def evaluate_promotion(
         current_sharpe = None
 
     # --- prediction_accuracy 成績 ---
-    # challenger は今の版の予想の日だけ、current もその日だけで比べる（#1327）
+    # challenger は今の版の予想の日だけ、current もその日だけで比べる（#1327）。
+    # production が変わっていれば、変わり目より後の行だけにする（#1559）
     window = _challenger_window(shadow_model_name, horizon)
     paired: dict = {"window": window} if window is not None else {}
     shadow_hit_rate = _compute_hit_rate(shadow_model_name, horizon)
