@@ -9,6 +9,9 @@ Wikipedia ページビュー特徴量モジュール (#370: 無料オルタナ�
     fetch_pageview_features(symbol, market, start_date, end_date) -> Optional[pd.DataFrame]
         Wikimedia API から {date: views} を取得し DataFrame(列: pageviews) に変換する。
 
+    pageviews_stale(pageview_df, last_bar, market, symbol) -> bool
+        表の最後の日が銘柄の最後の足の日より線を超えて古いかを確かめる。
+
     add_pageview_features(df, pageview_df) -> pd.DataFrame
         追加列:
           - pageviews          : その日のページビュー数（欠損日は 0）
@@ -27,6 +30,7 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
+from config.settings import STALE_BARS_MAX_WEEKDAYS
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -71,6 +75,34 @@ def fetch_pageview_features(
         {"date": pd.Timestamp(date_str), "pageviews": views} for date_str, views in records.items()
     ]
     return pd.DataFrame(rows).set_index("date").sort_index()
+
+
+def pageviews_stale(
+    pageview_df: Optional[pd.DataFrame],
+    last_bar: pd.Timestamp,
+    market: str,
+    symbol: str,
+) -> bool:
+    """表の最後の日が銘柄の最後の足の日より線を超えて古ければ WARNING を出して True（#1636）。
+
+    途中の日で止まった応答は None にならず、止まった後の足が全部 0 に埋まる。
+    ページビューは土日も祝日もあるので、平日だけを数える（macro_join の相場の指標と同じ）。
+    表が無いときの判定は呼び出し元が行う（#1500）。
+    """
+    if pageview_df is None or pageview_df.empty:
+        return False
+    last_day = pd.Timestamp(pageview_df.index.max()).tz_localize(None).normalize()
+    bar_day = pd.Timestamp(last_bar).tz_localize(None).normalize()
+    behind = len(pd.bdate_range(last_day + pd.Timedelta(days=1), bar_day))
+    if behind <= STALE_BARS_MAX_WEEKDAYS:
+        return False
+    logger.warning(
+        f"ページビューが止まったため特徴量生成をスキップ: {market}/{symbol} "
+        f"（表の最後の日 {last_day.strftime('%Y-%m-%d')}、"
+        f"銘柄の最後の足 {bar_day.strftime('%Y-%m-%d')}、"
+        f"平日で {behind}日 > {STALE_BARS_MAX_WEEKDAYS}日 古い）"
+    )
+    return True
 
 
 def add_pageview_features(
