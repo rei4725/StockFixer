@@ -44,6 +44,21 @@ def test_good_friday_follows_easter(good_friday):
     assert is_us_market_holiday(good_friday) is True
 
 
+def test_special_closure_is_not_a_business_day():
+    """服喪の日の臨時の休場(2025-01-09、木曜)は規則に無いが休場と答えること(#1651)"""
+    day = date(2025, 1, 9)
+
+    assert is_us_market_holiday(day) is True
+    assert is_us_business_day(day) is False
+
+
+@pytest.mark.parametrize("day", [date(2025, 1, 8), date(2025, 1, 10), date(2026, 1, 8)])
+def test_days_around_special_closure_stay_business_days(day):
+    """臨時の休場はその年のその日だけで、前後の日と別の年の同じ週は営業日のままであること"""
+    assert is_us_market_holiday(day) is False
+    assert is_us_business_day(day) is True
+
+
 @pytest.mark.parametrize(
     "day",
     [
