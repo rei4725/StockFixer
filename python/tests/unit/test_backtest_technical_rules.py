@@ -381,7 +381,7 @@ class TestVolatilityBreakoutRule(unittest.TestCase):
 
 class TestAllRules(unittest.TestCase):
     def test_all_rules_instantiated(self):
-        self.assertEqual(len(ALL_RULES), 6)
+        self.assertEqual(len(ALL_RULES), 5)
 
     def test_all_rules_have_name_and_description(self):
         for r in ALL_RULES:
