@@ -10,11 +10,15 @@ multibagger 候補を抽出・ランキングする。
 from __future__ import annotations
 
 import math
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 import pandas as pd
 
+from config.settings import STALE_BARS_MAX_WEEKDAYS
+from src.domain.jp_market_holidays import is_jp_business_day
 from src.domain.types import TrendCandidate
+from src.domain.us_market_holidays import is_us_business_day
 from src.utils.db.market_data import load_all_raw_ohlcv_symbols, load_raw_ohlcv
 from src.utils.logger import get_logger
 from src.utils.results_io import save_result_csvs
@@ -35,6 +39,11 @@ class ScreeningDataError(RuntimeError):
     """スクリーンの材料が読めず、候補の有無を判定できなかったことを表す。"""
 
 
+def _today() -> date:
+    """as_of 無しの回の基準の日（UTC の今日）を返す。"""
+    return datetime.now(timezone.utc).date()
+
+
 def _drop_invalid_closes(df: pd.DataFrame) -> pd.DataFrame:
     """終値が NaN・無限・0以下の足を除く。
 
@@ -43,6 +52,51 @@ def _drop_invalid_closes(df: pd.DataFrame) -> pd.DataFrame:
     """
     close = df["Close"].astype(float)
     return df[close.gt(0) & close.lt(math.inf)]
+
+
+def _last_valid_bar_day(df: Optional[pd.DataFrame]) -> Optional[date]:
+    """終値が有効な足のうち最後の足の日付を返す。そのような足が無ければ None を返す。
+
+    指標は終値が有効な足だけで計算するため、鮮度も同じ足で見る。
+    """
+    if df is None or df.empty or "Close" not in df.columns:
+        return None
+    valid = _drop_invalid_closes(df)
+    if valid.empty:
+        return None
+    days = valid["date"] if "date" in valid.columns else valid.index
+    return pd.Timestamp(pd.to_datetime(days).max()).date()
+
+
+def _is_open_day(day: date, market: str) -> bool:
+    """jp は東証の営業日、それ以外は米国の取引所の営業日なら True。"""
+    return is_jp_business_day(day) if market == "jp" else is_us_business_day(day)
+
+
+def _business_days_behind(last_bar: date, base_day: date, market: str) -> int:
+    """最後の足の翌日から基準の日までの営業日の数を返す。"""
+    days = pd.date_range(last_bar + timedelta(days=1), base_day)
+    return sum(1 for day in days if _is_open_day(day.date(), market))
+
+
+def _report_stale_symbols(
+    stale: list[str], fresh: int, base_day: date, market: str, as_of: Optional[str]
+) -> None:
+    """外した銘柄の数をログに出す。as_of 無しで新しい足が1銘柄も無ければ例外にする。
+
+    as_of を渡す回（過去の再現）は、その時点で足が無いだけなので例外にしない。
+    """
+    if not stale:
+        return
+    logger.warning(
+        f"足が止まった銘柄を外した: {len(stale)}/{len(stale) + fresh} 銘柄 ({market}) "
+        f"（基準の日 {base_day}、営業日で {STALE_BARS_MAX_WEEKDAYS}日より古い。"
+        f"先頭 {stale[:10]}）"
+    )
+    if as_of is None and fresh == 0:
+        raise ScreeningDataError(
+            f"全 {len(stale)} 銘柄の足が基準の日 {base_day} より古い ({market})"
+        )
 
 
 def _compute_metrics(df: pd.DataFrame) -> Optional[dict]:
@@ -120,6 +174,9 @@ def screen_trend_candidates(
 ) -> list[TrendCandidate]:
     """長期上昇トレンドにある multibagger 候補を抽出・ランキングする。
 
+    基準の日（as_of、無ければ今日）より最後の足が STALE_BARS_MAX_WEEKDAYS 営業日を超えて
+    古い銘柄は、足が止まったとみなして母集団から外す(#1635)。
+
     Args:
         as_of: 評価基準日。指定するとこの日（含む）までの終値のみで判定する。
             長期バックテスト(#431)が過去時点のスクリーンを再現するために使う。
@@ -129,22 +186,33 @@ def screen_trend_candidates(
         一部の銘柄の値段が読めないときは、残りの銘柄で判定する。
 
     Raises:
-        ScreeningDataError: 対象が0銘柄か、全銘柄の値段が読めないとき。読み込みの失敗は
-            `[]` や None になるため、ここで分けないと「該当なし」に見える。
+        ScreeningDataError: 対象が0銘柄か、全銘柄の値段が読めないか、as_of 無しで全銘柄の
+            足が古いとき。読み込みの失敗は `[]` や None になり、古い足は成功に見えるため、
+            ここで分けないと「該当なし」や正常な候補に見える。
     """
     symbols = [(m, s) for (m, s) in load_all_raw_ohlcv_symbols() if m == market]
     logger.info(f"スクリーニング対象: {len(symbols)} 銘柄 ({market})")
     if not symbols:
         raise ScreeningDataError(f"スクリーニング対象の銘柄が0件 ({market})")
 
+    base_day = pd.Timestamp(as_of).date() if as_of is not None else _today()
     rows: list[dict] = []
+    stale: list[str] = []
+    fresh = 0
     loaded = 0
     for m, symbol in symbols:
         df = load_raw_ohlcv(m, symbol)
         if df is not None:
             loaded += 1
         df = _truncate_as_of(df, as_of)
-        if df is None or len(df) < min_data_days:
+        last_bar = _last_valid_bar_day(df)
+        if last_bar is None:
+            continue
+        if _business_days_behind(last_bar, base_day, m) > STALE_BARS_MAX_WEEKDAYS:
+            stale.append(symbol)
+            continue
+        fresh += 1
+        if len(df) < min_data_days:
             continue
 
         metrics = _compute_metrics(df)
@@ -169,6 +237,8 @@ def screen_trend_candidates(
 
     if loaded == 0:
         raise ScreeningDataError(f"全 {len(symbols)} 銘柄の値段を読めず ({market})")
+
+    _report_stale_symbols(stale, fresh, base_day, market, as_of)
 
     if not rows:
         logger.warning("スクリーニング結果が空です（ゲート通過銘柄なし）")
