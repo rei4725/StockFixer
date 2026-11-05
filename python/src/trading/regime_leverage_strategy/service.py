@@ -43,6 +43,8 @@ _COMMISSION_CAP_USD = 16.5
 _JST = ZoneInfo("Asia/Tokyo")
 _US_MARKET_TZ = ZoneInfo("America/New_York")
 _US_MARKET_CLOSE = time(16, 0)
+# ドル円の最後の足の、引けたはずの SPY の足の日からの遅れの許容(平日の数。#1621)
+_USDJPY_MAX_WEEKDAYS_BEHIND = 1
 # 日次の回で、足がこの営業日数だけ古いと投げる(1営業日の遅れは次の回に任せる。#1620)
 _DAILY_STALE_BUSINESS_DAYS = 2
 
@@ -325,12 +327,22 @@ def select_unchecked_closed_bars(
     return closed.iloc[[-1]]
 
 
+def _weekdays_behind(last_bar: date, expected_bar: date) -> int:
+    """last_bar の翌日から expected_bar までの平日の数を返す(週末は数えない)。"""
+    return len(pd.bdate_range(last_bar + timedelta(days=1), expected_bar))
+
+
 def _load_latest_usdjpy(market_data_port: MarketDataPort) -> float:
     """最新のドル円(終値)を返す。
 
     最終行の終値がNaNまたは0以下(データ劣化時)の場合はRuntimeErrorを送出する
     (NaN比較は常にFalseになり、マージンコール・損切りの判定が黙って飛んでNaNの
     評価額が記録されるため。スケジューラーのリトライ・Discord通知に乗せる。#871)。
+
+    最終行の日付が、引けたはずの SPY の足の日より2平日以上古い場合もRuntimeErrorを送出する
+    (取得が止まると窓の中の古いレートで建値・損切りを判定して成功で終わるため。#1621)。
+    遅れは平日の数で数える。ドル円は米国の休場の平日にも動き、週末だけ止まるため。
+    1平日の遅れは、足の更新の遅れやドル円だけの休場として通す。
     """
     end = datetime.now()
     start = end - timedelta(days=10)
@@ -342,6 +354,13 @@ def _load_latest_usdjpy(market_data_port: MarketDataPort) -> float:
         raise RuntimeError(
             "レジームレバレッジ戦略: ドル円の最終行の終値が不正のため判定を中止しました"
             f"(usdjpy_rate={usdjpy_rate})"
+        )
+    last_fx_bar = _last_bar_date(fx_df)
+    expected_bar = _latest_expected_bar_date(datetime.now(_JST))
+    if _weekdays_behind(last_fx_bar, expected_bar) > _USDJPY_MAX_WEEKDAYS_BEHIND:
+        raise RuntimeError(
+            "レジームレバレッジ戦略: ドル円の最後の足が古いため判定を中止しました"
+            f"(last_fx_bar={last_fx_bar}, expected={expected_bar})"
         )
     return usdjpy_rate
 
