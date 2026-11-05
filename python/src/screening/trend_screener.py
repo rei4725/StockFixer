@@ -30,6 +30,10 @@ _W_PROXIMITY = 0.25
 _W_TREND = 0.25
 
 
+class ScreeningDataError(RuntimeError):
+    """スクリーンの材料が読めず、候補の有無を判定できなかったことを表す。"""
+
+
 def _compute_metrics(df: pd.DataFrame) -> Optional[dict]:
     """1銘柄の長期トレンド指標を Close 列から計算する。
 
@@ -110,13 +114,23 @@ def screen_trend_candidates(
 
     Returns:
         スコア降順の TrendCandidate リスト（最大 top_n 件）。該当なしなら空リスト。
+        一部の銘柄の値段が読めないときは、残りの銘柄で判定する。
+
+    Raises:
+        ScreeningDataError: 対象が0銘柄か、全銘柄の値段が読めないとき。読み込みの失敗は
+            `[]` や None になるため、ここで分けないと「該当なし」に見える。
     """
     symbols = [(m, s) for (m, s) in load_all_raw_ohlcv_symbols() if m == market]
     logger.info(f"スクリーニング対象: {len(symbols)} 銘柄 ({market})")
+    if not symbols:
+        raise ScreeningDataError(f"スクリーニング対象の銘柄が0件 ({market})")
 
     rows: list[dict] = []
+    loaded = 0
     for m, symbol in symbols:
         df = load_raw_ohlcv(m, symbol)
+        if df is not None:
+            loaded += 1
         df = _truncate_as_of(df, as_of)
         if df is None or len(df) < min_data_days:
             continue
@@ -140,6 +154,9 @@ def screen_trend_candidates(
         metrics["market"] = m
         metrics["symbol"] = symbol
         rows.append(metrics)
+
+    if loaded == 0:
+        raise ScreeningDataError(f"全 {len(symbols)} 銘柄の値段を読めず ({market})")
 
     if not rows:
         logger.warning("スクリーニング結果が空です（ゲート通過銘柄なし）")

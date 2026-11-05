@@ -22,10 +22,12 @@ def _batch(n_success: int, n_error: int, n_skip: int) -> BatchResult:
     )
 
 
-def _run_daily_pipeline(batch_result: BatchResult, total: int, tasks=None, rows=None):
+def _run_daily_pipeline(
+    batch_result: BatchResult, total: int, tasks=None, rows=None, rerun: bool = False
+):
     """日次の道を外の依存を差し替えて流し、差し替えた mock を返す。
 
-    rows は [3/6] の予想の結果（#1438）。
+    rows は [3/6] の予想の結果（#1438）。rerun は同じ日の2回目以降の回（#1595）。
     """
     from src.orchestration.jobs.daily import run_daily_pipeline
 
@@ -45,6 +47,8 @@ def _run_daily_pipeline(batch_result: BatchResult, total: int, tasks=None, rows=
                 "src.prediction.prediction_pipeline.predict_all_unified",
                 return_value=rows or [],
             ),
+            "alerts": p(f"{_DAILY}.evaluate_and_notify_alerts"),
+            "scoring": p(f"{_DAILY}.daily_scoring_stage"),
         }
         p(f"{_DISCORD}.send_accuracy_summary")
         p("src.prediction.prediction_pipeline.output_top_worst_results")
@@ -53,14 +57,13 @@ def _run_daily_pipeline(batch_result: BatchResult, total: int, tasks=None, rows=
         p("src.watchlist.batch_runner.load_target_symbols", return_value=tasks)
         p("src.market_data.pipeline.run_batch_pipeline", return_value=batch_result)
         p("src.infrastructure.discord_notification_adapter.DiscordNotificationAdapter")
-        p(f"{_DAILY}.production_already_predicted_today", return_value=False)
+        p(f"{_DAILY}.production_already_predicted_today", return_value=rerun)
         p(f"{_DAILY}.write_accuracy_json_without_sectors", return_value=None)
         p(f"{_DAILY}.append_accuracy_json_sectors")
         p(f"{_DAILY}.fetch_previous_run_stats", return_value=None)
         p(f"{_DAILY}.evaluate_output_invariants_stage", return_value=([], {}))
         p(f"{_DAILY}.run_daily_drift_check")
         p(f"{_DAILY}.record_health_degraded_streak")
-        p(f"{_DAILY}.evaluate_and_notify_alerts")
         p(
             "src.infrastructure.persistence.prediction_result_repository."
             "PostgresPredictionResultRepository"

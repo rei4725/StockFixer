@@ -21,6 +21,7 @@ import pandas as pd
 
 from src.domain.types import PositionEvent, TrendCandidate
 from src.market_data.fundamentals import fetch_fundamentals
+from src.orchestration.job_errors import NonRetryableJobError
 from src.screening.hold_engine import simulate_position
 from src.screening.positions import close_position, list_positions, update_position
 from src.screening.quality_gate import apply_quality_gate
@@ -66,6 +67,7 @@ def run_monthly_multibagger_screen(market: str = "us", top_n: int = 10) -> dict:
 
     Returns:
         通知ペイロード（新規候補・保有アクション・本文）を含む dict。
+        回の成否は raise_if_multibagger_failed で確かめる。
     """
     logger.info("=== 月次 multibagger スクリーン開始 (market=%s) ===", market)
 
@@ -80,7 +82,9 @@ def run_monthly_multibagger_screen(market: str = "us", top_n: int = 10) -> dict:
         screen_failed=screen_failed,
         refresh=refresh,
     )
-    _notify(message)
+    notified = _notify(message)
+    # 知らせが届かなかった EXIT は開いたまま残し、補完の回か次の月にもう一度判定して知らせる
+    close_failed = _close_exited_positions(position_actions) if notified else []
 
     logger.info(
         "=== 月次 multibagger スクリーン完了: 新規候補=%d 件, 保有判定=%d 件, 判定できず=%d 件 ===",
@@ -94,10 +98,46 @@ def run_monthly_multibagger_screen(market: str = "us", top_n: int = 10) -> dict:
         "screen_failed": screen_failed,
         "fundamentals_failed": refresh.failed,
         "fundamentals_missing": refresh.missing,
+        "fundamentals_all_missing": refresh.all_missing,
         "position_actions": position_actions,
         "skipped_positions": skipped_positions,
+        "close_failed": close_failed,
+        "notified": notified,
         "message": message,
     }
+
+
+def raise_if_multibagger_failed(result: dict) -> None:
+    """run_monthly_multibagger_screen の結果に欠けがあれば、ジョブを失敗にする。
+
+    欠けのある回を success と記録すると、その月の判定が補完されない。すぐ呼び直しても
+    同じ失敗と同じ知らせを重ねるだけなので NonRetryableJobError を投げ、補完の回に任せる。
+
+    Raises:
+        NonRetryableJobError: スクリーンの失敗・候補の全部で財務が無い・判定できない保有が
+            ある・閉じられなかった EXIT がある・知らせの送信の失敗のどれかがあるとき。
+    """
+    reasons = _failure_reasons(result)
+    if reasons:
+        detail = "、".join(reasons)
+        logger.error("月次 multibagger の回に欠けがある: %s", detail)
+        raise NonRetryableJobError(f"月次 multibagger の回に欠けがある: {detail}")
+
+
+def _failure_reasons(result: dict) -> list[str]:
+    """結果の欠けを、ジョブの失敗の文に載せる語にして返す。"""
+    reasons: list[str] = []
+    if result["screen_failed"]:
+        reasons.append("スクリーンの失敗")
+    if result["fundamentals_all_missing"]:
+        reasons.append(f"候補の全部で財務が無い {result['fundamentals_missing']} 件")
+    if result["skipped_positions"]:
+        reasons.append(f"判定できない保有 {len(result['skipped_positions'])} 件")
+    if result["close_failed"]:
+        reasons.append(f"閉じられなかった EXIT {len(result['close_failed'])} 件")
+    if not result["notified"]:
+        reasons.append("知らせの送信の失敗")
+    return reasons
 
 
 class _PositionSkipped(Exception):
@@ -177,7 +217,10 @@ def _evaluate_positions(market: str) -> tuple[list[dict], list[dict]]:
 
 
 def _evaluate_one_position(pos: Position) -> dict:
-    """1 ポジションを最新価格まで保有シミュレートし、アクションを確定・永続化する。
+    """1 ポジションを最新価格まで保有シミュレートし、アクションを確定する。
+
+    HOLD / SCALE_OUT はここで保存する。EXIT は知らせが届いた後に
+    _close_exited_positions が閉じる（閉じた保有は次の回の判定に出ないため）。
 
     Raises:
         _PositionSkipped: 価格データまたは保有イベントが無く判定できないとき。
@@ -194,9 +237,7 @@ def _evaluate_one_position(pos: Position) -> dict:
 
     action, reason, held_fraction, multiple, price = _interpret_events(events)
 
-    if action == "EXIT":
-        close_position(pos.market, pos.symbol, close_price=price, reason=reason)
-    else:
+    if action != "EXIT":
         update_position(
             pos.market,
             pos.symbol,
@@ -216,6 +257,20 @@ def _evaluate_one_position(pos: Position) -> dict:
         "price": price,
         "entry_price": pos.entry_price,
     }
+
+
+def _close_exited_positions(actions: list[dict]) -> list[str]:
+    """知らせを送った EXIT の保有を閉じ、閉じられなかった symbol を返す。"""
+    failed: list[str] = []
+    for a in actions:
+        if a["action"] != "EXIT":
+            continue
+        try:
+            close_position(a["market"], a["symbol"], close_price=a["price"], reason=a["reason"])
+        except Exception as e:
+            logger.error("保有を閉じられず (%s/%s): %s", a["market"], a["symbol"], e, exc_info=True)
+            failed.append(a["symbol"])
+    return failed
 
 
 def _interpret_events(events: list[PositionEvent]) -> tuple[str, str, float, float, float]:
@@ -306,11 +361,19 @@ def _pct(value: Optional[float]) -> str:
     return f"{value * 100:.1f}%"
 
 
-def _notify(message: str) -> None:
-    """Discord に通知する。送信失敗してもジョブ全体は落とさない（ログのみ）。"""
+def _notify(message: str) -> bool:
+    """Discord に通知し、送れたかを返す。
+
+    送信の失敗はここでは投げず、残りの処理を走らせる。ジョブの失敗にするのは
+    raise_if_multibagger_failed である。
+    """
     try:
         from src.reporting.discord.discord_utils import send_webhook_text_chunked
 
-        send_webhook_text_chunked(message)
+        if send_webhook_text_chunked(message):
+            return True
+        logger.error("月次 multibagger 通知失敗: 送信が False を返した")
+        return False
     except Exception as e:
         logger.error("月次 multibagger 通知失敗: %s", e, exc_info=True)
+        return False

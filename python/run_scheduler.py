@@ -178,9 +178,12 @@ def job_monthly_report():
 
 def job_monthly_multibagger():
     """毎月1日 04:00 - multibagger 月次スクリーン + 保有/撤退アラート"""
-    from src.orchestration.multibagger_job import run_monthly_multibagger_screen
+    from src.orchestration.multibagger_job import (
+        raise_if_multibagger_failed,
+        run_monthly_multibagger_screen,
+    )
 
-    run_monthly_multibagger_screen()
+    raise_if_multibagger_failed(run_monthly_multibagger_screen())
 
 
 def job_nightly_strategy_factory():
@@ -368,7 +371,8 @@ SCHEDULE_CONFIG = {
         "hour": 1,
         "minute": 0,
         "recovery_delay_minutes": 30,
-        "max_executions_per_period": 1,
+        # 結果が空か失敗が線を超えた回の後に、同じ週の補完を1回通す（#1581）
+        "max_executions_per_period": 2,
         "description": "毎週水曜 01:00 - 全銘柄バックテスト最適化",
         "rerun_if_interrupted": True,
         "max_interrupted_reruns_per_period": 40,
@@ -509,7 +513,8 @@ SCHEDULE_CONFIG = {
         "hour": 4,
         "minute": 0,
         "recovery_delay_minutes": 60,
-        "max_executions_per_period": 1,
+        # 失敗の回は同じ月の補完に任せる（すぐの呼び直しはしない）
+        "max_executions_per_period": 3,
         "description": "毎月1日 04:00 - multibagger 月次スクリーン + 保有/撤退アラート",
     },
     "nightly_strategy_factory": {

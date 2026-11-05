@@ -1,6 +1,7 @@
 """月次 multibagger ジョブ + ポジション永続化の単体テスト（#434）"""
 
-from unittest.mock import MagicMock
+from datetime import datetime
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
@@ -8,9 +9,12 @@ import pytest
 from src.domain.types import PositionEvent, TrendCandidate
 from src.market_data import fundamentals
 from src.orchestration import multibagger_job
+from src.orchestration.job_errors import NonRetryableJobError
+from src.orchestration.scheduler_queue import SchedulerQueueManager
 from src.screening import positions as positions_mod
 from src.screening import quality_gate
 from src.screening.positions import add_position, close_position, list_positions, update_position
+from src.screening.trend_screener import ScreeningDataError
 from src.screening.types import MultibaggerCandidate
 
 
@@ -505,3 +509,232 @@ def test_failed_fetch_with_old_row_is_judged_but_counted(tmp_positions, monkeypa
     message = payload["message"]
     assert "該当なし" in message
     assert "財務を取れず: 1/1 件" in message
+
+
+# ── ジョブの成否と同じ月の補完（#1596）──────────────────────────
+
+_EXIT_EVENTS = [
+    PositionEvent("2024-01-01", "entry", 100.0, 1.0, "entry", 1.0),
+    PositionEvent("2024-02-01", "exit", 80.0, 0.0, "ma_break", 0.8),
+]
+
+
+def _patch_notify_false(monkeypatch):
+    """send_webhook_text_chunked が False を返す（送れなかった）形にする。"""
+    import src.reporting.discord.discord_utils as discord_utils
+
+    monkeypatch.setattr(discord_utils, "send_webhook_text_chunked", lambda *_a, **_k: False)
+
+
+def _patch_screen_failure(monkeypatch):
+    def _boom(**_k):
+        raise RuntimeError("screen down")
+
+    monkeypatch.setattr(multibagger_job, "screen_trend_candidates", _boom)
+    _patch_notify(monkeypatch)
+
+
+def _patch_all_fundamentals_missing(monkeypatch):
+    _FundamentalsWorld(monkeypatch, [_trend("AAA"), _trend("BBB")], {})
+    _patch_notify(monkeypatch)
+
+
+def _patch_skipped_position(monkeypatch):
+    add_position("us", "AAPL", "2024-01-01", 100.0)
+    _patch_screen(monkeypatch, [])
+    monkeypatch.setattr(multibagger_job, "load_stock_features", lambda *_: None)
+    _patch_notify(monkeypatch)
+
+
+def _patch_send_false(monkeypatch):
+    _patch_screen(monkeypatch, [_candidate("NVDA")])
+    _patch_notify_false(monkeypatch)
+
+
+_FAILED_RUNS = [
+    _patch_screen_failure,
+    _patch_all_fundamentals_missing,
+    _patch_skipped_position,
+    _patch_send_false,
+]
+
+
+def _queue_manager(tmp_path) -> SchedulerQueueManager:
+    """本番の SCHEDULE_CONFIG の設定のままのキューを作る。"""
+    from run_scheduler import SCHEDULE_CONFIG
+
+    return SchedulerQueueManager(
+        {"monthly_multibagger": dict(SCHEDULE_CONFIG["monthly_multibagger"])},
+        state_file_path=str(tmp_path / "queue_state.json"),
+        error_notifier=MagicMock(),
+    )
+
+
+def _run_job(manager: SchedulerQueueManager, now: datetime) -> None:
+    """monthly_multibagger を now の回として走らせ、成功の heartbeat を確かめる。"""
+    with (
+        patch("src.orchestration.scheduler_queue.ping_heartbeat") as ping,
+        patch.object(manager, "now", return_value=now),
+    ):
+        manager.run_job("monthly_multibagger", reason="recovery")
+    ping.assert_called_once_with("monthly_multibagger", success=True)
+
+
+def _failed_run(manager: SchedulerQueueManager, now: datetime) -> None:
+    """失敗の回として走らせ、やり直しの待ちが無く heartbeat が失敗を送ることを確かめる。"""
+    func = MagicMock(side_effect=manager.schedule_config["monthly_multibagger"]["func"])
+    manager.schedule_config["monthly_multibagger"]["func"] = func
+    with (
+        patch("src.orchestration.scheduler_queue.ping_heartbeat") as ping,
+        patch("src.orchestration.scheduler_queue.time.sleep") as sleep,
+        patch.object(manager, "now", return_value=now),
+    ):
+        with pytest.raises(NonRetryableJobError):
+            manager.run_job("monthly_multibagger", reason="recovery")
+    func.assert_called_once_with()
+    sleep.assert_not_called()
+    ping.assert_called_once_with("monthly_multibagger", success=False)
+
+
+def _statuses(manager: SchedulerQueueManager) -> list[str]:
+    return [e["status"] for e in manager._state["events"] if e["status"] != "started"]
+
+
+@pytest.mark.parametrize("arrange", _FAILED_RUNS)
+def test_failed_run_raises_without_immediate_retry(tmp_positions, tmp_path, monkeypatch, arrange):
+    arrange(monkeypatch)
+    manager = _queue_manager(tmp_path)
+
+    _failed_run(manager, datetime(2026, 11, 1, 4, 0, tzinfo=manager.tz))
+
+    assert _statuses(manager) == ["error"]
+
+
+def test_failed_runs_recover_on_other_days_of_the_month_up_to_three(
+    tmp_positions, tmp_path, monkeypatch
+):
+    _patch_screen_failure(monkeypatch)
+    manager = _queue_manager(tmp_path)
+    first = datetime(2026, 11, 1, 4, 0, tzinfo=manager.tz)
+    other_day = datetime(2026, 11, 20, 12, 0, tzinfo=manager.tz)
+
+    _failed_run(manager, first)
+    assert manager.should_recover("monthly_multibagger", now=other_day) is True
+
+    _failed_run(manager, other_day)
+    assert manager.should_recover("monthly_multibagger", now=other_day) is True
+
+    _failed_run(manager, other_day)
+    assert manager.should_recover("monthly_multibagger", now=other_day) is False
+
+
+def test_recovery_run_succeeds_after_failed_run(tmp_positions, tmp_path, monkeypatch):
+    _patch_screen_failure(monkeypatch)
+    manager = _queue_manager(tmp_path)
+    now = datetime(2026, 11, 1, 5, 30, tzinfo=manager.tz)
+    _failed_run(manager, now)
+
+    _patch_screen(monkeypatch, [_candidate("NVDA")])
+    _run_job(manager, now)
+
+    assert _statuses(manager) == ["error", "success"]
+    assert manager.should_recover("monthly_multibagger", now=now) is False
+
+
+def test_no_holdings_and_no_match_is_success(tmp_positions, tmp_path, monkeypatch):
+    _patch_screen(monkeypatch, [])
+    calls = _patch_notify(monkeypatch)
+    manager = _queue_manager(tmp_path)
+
+    _run_job(manager, datetime(2026, 11, 1, 4, 0, tzinfo=manager.tz))
+
+    assert _statuses(manager) == ["success"]
+    assert "該当なし" in calls[0]
+    assert "保有なし" in calls[0]
+
+
+def test_candidates_failing_the_gate_are_not_a_failed_run(tmp_positions, monkeypatch):
+    """財務の一部が取れない回や質ゲートで落ちただけの回は失敗にしない。"""
+    _FundamentalsWorld(
+        monkeypatch, [_trend("BAD"), _trend("AAA")], {"BAD": None, "AAA": _FAILING_INFO}
+    )
+    _patch_notify(monkeypatch)
+
+    payload = multibagger_job.run_monthly_multibagger_screen(market="us")
+
+    assert payload["fundamentals_failed"] == 1
+    multibagger_job.raise_if_multibagger_failed(payload)
+
+
+def test_unreadable_screen_is_not_reported_as_no_match(tmp_positions, monkeypatch):
+    """全銘柄の値段が読めない回は「該当なし」と書かず、ジョブを失敗にする。"""
+
+    def _boom(**_k):
+        raise ScreeningDataError("全 543 銘柄の値段を読めず (us)")
+
+    monkeypatch.setattr(multibagger_job, "screen_trend_candidates", _boom)
+    calls = _patch_notify(monkeypatch)
+
+    payload = multibagger_job.run_monthly_multibagger_screen(market="us")
+
+    assert "該当なし" not in calls[0]
+    assert "スクリーン失敗" in calls[0]
+    with pytest.raises(NonRetryableJobError, match="スクリーンの失敗"):
+        multibagger_job.raise_if_multibagger_failed(payload)
+
+
+def test_notify_exception_counts_as_not_sent(tmp_positions, monkeypatch):
+    _patch_screen(monkeypatch, [])
+    import src.reporting.discord.discord_utils as discord_utils
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("webhook down")
+
+    monkeypatch.setattr(discord_utils, "send_webhook_text_chunked", _boom)
+
+    payload = multibagger_job.run_monthly_multibagger_screen(market="us")
+
+    assert payload["notified"] is False
+    with pytest.raises(NonRetryableJobError, match="知らせの送信の失敗"):
+        multibagger_job.raise_if_multibagger_failed(payload)
+
+
+def test_exit_stays_open_until_notified_and_is_sent_again(tmp_positions, monkeypatch):
+    """EXIT の知らせが送れなかった回は保有を開いたまま残し、次の回でもう一度知らせて閉じる。"""
+    add_position("us", "AAPL", "2024-01-01", 100.0)
+    _patch_screen(monkeypatch, [])
+    _patch_prices(monkeypatch)
+    _patch_sim(monkeypatch, _EXIT_EVENTS)
+    _patch_notify_false(monkeypatch)
+
+    failed = multibagger_job.run_monthly_multibagger_screen(market="us")
+
+    assert failed["position_actions"][0]["action"] == "EXIT"
+    assert [p.symbol for p in list_positions(status="open")] == ["AAPL"]
+
+    calls = _patch_notify(monkeypatch)
+    payload = multibagger_job.run_monthly_multibagger_screen(market="us")
+
+    assert "EXIT" in calls[0]
+    assert list_positions(status="open") == []
+    assert [p.symbol for p in list_positions(status="closed")] == ["AAPL"]
+    multibagger_job.raise_if_multibagger_failed(payload)
+
+
+def test_close_failure_fails_the_run(tmp_positions, monkeypatch):
+    add_position("us", "AAPL", "2024-01-01", 100.0)
+    _patch_screen(monkeypatch, [])
+    _patch_prices(monkeypatch)
+    _patch_sim(monkeypatch, _EXIT_EVENTS)
+    _patch_notify(monkeypatch)
+
+    def _boom(*_a, **_k):
+        raise OSError("ledger down")
+
+    monkeypatch.setattr(multibagger_job, "close_position", _boom)
+
+    payload = multibagger_job.run_monthly_multibagger_screen(market="us")
+
+    assert payload["close_failed"] == ["AAPL"]
+    with pytest.raises(NonRetryableJobError, match="閉じられなかった EXIT"):
+        multibagger_job.raise_if_multibagger_failed(payload)
