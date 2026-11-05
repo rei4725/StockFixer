@@ -96,7 +96,7 @@ def run_daily_pipeline():
     # stock_features を作り直すコードの版（夜間の仮の入れ替えが、今の版の特徴量かを見る）
     features_version = current_code_version()
     try:
-        tasks = load_target_symbols()
+        tasks = load_target_symbols(include_held=True)
         batch_result = run_batch_pipeline(tasks, notification_port=DiscordNotificationAdapter())
         market_totals = Counter(str(getattr(t, "market", "")) for t in tasks)
         _raise_if_fetch_mostly_unavailable(len(tasks), batch_result, market_totals)
