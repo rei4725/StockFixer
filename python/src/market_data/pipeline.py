@@ -50,7 +50,11 @@ from src.market_data.split_refetch import (
     stock_split_ratios,
 )
 from src.market_data.technical import add_technical_indicators, create_basic_lag_features
-from src.market_data.wikipedia_features import add_pageview_features, fetch_pageview_features
+from src.market_data.wikipedia_features import (
+    add_pageview_features,
+    fetch_pageview_features,
+    pageviews_stale,
+)
 from src.utils.data_path_utils import get_ticker, normalize_col
 from src.utils.db import delete_stock_features, upsert_stock_features
 from src.utils.db.symbol_master import symbol_name_suffix
@@ -282,6 +286,9 @@ def fetch_stock_data_with_features(
         logger.warning(
             f"ページビューの取得が落ちたか空のため特徴量生成をスキップ: {market}/{symbol}"
         )
+        return _raw_only_result(market, symbol, raw_data_to_save)
+    # 線より古い表も、止まった後の足が0になるので特徴量を作らない（#1636）
+    if pageviews_stale(pageview_df, df.index.max(), market, symbol):
         return _raw_only_result(market, symbol, raw_data_to_save)
     df = add_pageview_features(df, pageview_df=pageview_df)
 
