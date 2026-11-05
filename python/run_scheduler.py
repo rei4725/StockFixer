@@ -251,6 +251,7 @@ def _job_listener(event):
 # rerun_if_interrupted: True のジョブは、前の起動のプロセスで消えた回（デプロイの起き直しなど）を
 # 1期間に1回まで回数に数えずに補完する。発注のジョブと週の学習（#807）には付けない（#946）。
 # ホライズン決済は約定待ちの決済を飛ばし二重にならないため、発注のジョブでも付ける（#1321）。
+# 16:30 のルールの発注も、約定待ちの BUY と SELL を飛ばし二重にならないため付ける（#1652）。
 # max_interrupted_reruns_per_period: その補完の1回までを、そのジョブだけ増やす。週の最適化は
 # 全銘柄に約29時間かかりデプロイの起き直しで週に何度も消え、済んだ銘柄を飛ばして続きから進むため（#1522）。
 # 上限の40は、起動が1時間に1回ほどの週でも全銘柄の約29時間に届く数である（#1534）。
@@ -454,6 +455,8 @@ SCHEDULE_CONFIG = {
         "description": "毎週日曜 13:00 - 値動きに合わせた量と損切りの線の比べ",
         "rerun_if_interrupted": True,
     },
+    # 16:30 の回がデプロイの起き直しなどで消えたら、同じ日のうちに1回だけ流し直す。その日の足の保有の
+    # SELL を判定しないまま進めないため。消えた回の出した約定待ちの BUY と SELL は飛ばす（#1652）
     "daily_rule_signals": {
         "func": job_daily_rule_signals,
         "trigger": "cron",
@@ -465,6 +468,7 @@ SCHEDULE_CONFIG = {
         "max_executions_per_period": 1,
         "max_retries": 0,
         "description": "毎営業日 16:30 - ルールシグナル生成 + ペーパートレード発注",
+        "rerun_if_interrupted": True,
     },
     "daily_account_shadow_report": {
         "func": job_daily_account_shadow_report,
