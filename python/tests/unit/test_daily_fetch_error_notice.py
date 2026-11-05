@@ -54,7 +54,7 @@ def _run_daily_pipeline(
         p("src.prediction.prediction_pipeline.output_top_worst_results")
         p("src.prediction.predict_unified.preload_models", return_value=[])
         p("src.prediction.shadow_evaluation.predict_with_challenger_unified", return_value=[])
-        p("src.watchlist.batch_runner.load_target_symbols", return_value=tasks)
+        mocks["targets"] = p("src.watchlist.batch_runner.load_target_symbols", return_value=tasks)
         p("src.market_data.pipeline.run_batch_pipeline", return_value=batch_result)
         p("src.infrastructure.discord_notification_adapter.DiscordNotificationAdapter")
         p(f"{_DAILY}.production_already_predicted_today", return_value=rerun)
@@ -95,6 +95,12 @@ class TestDailyFetchErrorNotice:
         mocks["predict"].assert_called_once()
         mocks["completion"].assert_called_once()
         mocks["error"].assert_not_called()
+
+    def test_fetch_targets_include_held_symbols(self):
+        """[1/6] の取得の対象がウォッチリストの外の保有を足す形で作られること（#1615）"""
+        mocks = _run_daily_pipeline(_batch(784, 0, 0), total=784)
+
+        mocks["targets"].assert_called_once_with(include_held=True)
 
     def test_skip_only_sends_no_notice(self):
         """エラー 0・スキップ 1 のふつうの朝は知らせないこと"""

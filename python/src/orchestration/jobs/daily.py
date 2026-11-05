@@ -96,7 +96,7 @@ def run_daily_pipeline():
     # stock_features を作り直すコードの版（夜間の仮の入れ替えが、今の版の特徴量かを見る）
     features_version = current_code_version()
     try:
-        tasks = load_target_symbols()
+        tasks = load_target_symbols(include_held=True)
         batch_result = run_batch_pipeline(tasks, notification_port=DiscordNotificationAdapter())
         market_totals = Counter(str(getattr(t, "market", "")) for t in tasks)
         _raise_if_fetch_mostly_unavailable(len(tasks), batch_result, market_totals)
@@ -242,7 +242,7 @@ def run_daily_pipeline():
         evaluate_and_notify_alerts(prediction_violation_ids, prediction_details)
         logger.info("[6/6] 運用アラート評価完了")
     except Exception as e:
-        # 落ちた日は NF-303 の警報がどれも評価されないため知らせる（#1368）
+        # 落ちた日・送れなかった日は NF-303 の警報が届かないため知らせる（#1368, #1609）
         _handle_stage_error(PipelineStage.NON_CRITICAL, "[6/6] 運用アラート評価", e)
         _notify_stage_failure("[6/6] 運用アラート評価", e)
 

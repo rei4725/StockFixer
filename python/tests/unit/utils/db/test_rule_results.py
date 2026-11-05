@@ -16,6 +16,7 @@ from src.utils.db.rule_results import (
     delete_rule_best,
     load_effective_rules,
     load_held_symbols,
+    load_open_position_symbols,
     load_rule_best_all,
     load_rule_signals_by_date,
     upsert_rule_best,
@@ -178,6 +179,19 @@ class TestLoadHeldSymbols:
 
         assert {"9981", "9983", "9987"} <= held
         assert not {"9982", "9984", "9985", "9986", "9987.T"} & held
+
+    def test_open_positions_add_shorts_to_held(self):
+        self._position("9981", 100)
+        with _db_connection() as con:
+            con.execute(
+                "INSERT INTO paper_short_positions (symbol, qty, avg_short_price)"
+                " VALUES ('9986', 100, 1000.0), ('9987.T', 100, 1000.0), ('9982', 0, 1000.0)"
+            )
+
+        held = load_open_position_symbols()
+
+        assert {"9981", "9986", "9987"} <= held
+        assert not {"9982", "9987.T"} & held
 
 
 class TestLoadRuleBestAll:

@@ -13,12 +13,16 @@
 
 from __future__ import annotations
 
-import json
-import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from enum import Enum
 
 from src.utils.logger import get_logger
+from src.utils.scheduler_failure_count import (
+    _DAILY_PIPELINE_JOB_ID,
+    SchedulerStateUnreadableError,
+    _count_consecutive_pipeline_failures,
+)
 
 logger = get_logger(__name__)
 
@@ -47,13 +51,21 @@ _KEY_DRIFT_STATS = "alert.drift_warn_streak.stats"  # 割合|閾値超過の数|
 _KEY_DRIFT_NOTIFIED = "alert.drift_warn_streak.notified"  # 前の知らせの連続回数|割合
 _KEY_HEALTH_DEGRADED_STREAK = "alert.health_degraded_streak"
 
-# スケジューラ日次パイプラインのジョブID
-_DAILY_PIPELINE_JOB_ID = "daily_pipeline"
-
 
 # ---------------------------------------------------------------------------
 # データクラス
 # ---------------------------------------------------------------------------
+
+
+class AlertDispatch(Enum):
+    """run_conditional_notification の結果。真になるのは SENT だけ（#1609）。"""
+
+    SENT = "sent"
+    NOT_SENT = "not_sent"
+    FAILED = "failed"
+
+    def __bool__(self) -> bool:
+        return self is AlertDispatch.SENT
 
 
 @dataclass
@@ -146,68 +158,6 @@ def _update_daily_streak(key: str, hit: bool, day_key: str) -> tuple[int, int]:
 # ---------------------------------------------------------------------------
 # ルール 1: 日次パイプライン連続失敗
 # ---------------------------------------------------------------------------
-
-
-class SchedulerStateUnreadableError(Exception):
-    """スケジューラ状態ファイルが在るのに読めない（#924）。"""
-
-
-def _count_consecutive_pipeline_failures(state_file_path: str | None = None) -> int:
-    """scheduler_queue_state.json から daily_pipeline の連続失敗回数を返す。
-
-    ファイルが無いだけ（初回の起動）なら 0。在るのに読めない、または壊れて
-    退避された跡（.corrupt-*）だけが残っているときは SchedulerStateUnreadableError
-    を投げる（0 回と数えて黙らないため、#924）。
-    """
-    if state_file_path is None:
-        from src.utils.data_path_utils import get_results_dir
-
-        state_file_path = os.path.join(get_results_dir(), "scheduler_queue_state.json")
-
-    if not os.path.exists(state_file_path):
-        quarantined = _find_quarantined_state(state_file_path)
-        if quarantined:
-            raise SchedulerStateUnreadableError(
-                f"状態ファイルが退避されたまま本体が無い: {quarantined}"
-            )
-        return 0
-
-    try:
-        with open(state_file_path, "r", encoding="utf-8") as fh:
-            state = json.load(fh)
-    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
-        raise SchedulerStateUnreadableError(f"状態ファイルが読めない: {exc}") from exc
-    if not isinstance(state, dict):
-        raise SchedulerStateUnreadableError(
-            f"状態ファイルが読めない: 最上位が dict ではない: {type(state).__name__}"
-        )
-
-    events = [
-        e
-        for e in state.get("events", [])
-        if e.get("job_id") == _DAILY_PIPELINE_JOB_ID and e.get("status") in {"success", "error"}
-    ]
-    events.sort(key=lambda e: e.get("finished_at", ""), reverse=True)
-
-    consecutive = 0
-    for event in events:
-        if event.get("status") == "error":
-            consecutive += 1
-        else:
-            break
-
-    return consecutive
-
-
-def _find_quarantined_state(state_file_path: str) -> str | None:
-    """state_file_path の隣に退避された状態ファイル（.corrupt-*）の最新の名前を返す。"""
-    state_dir = os.path.dirname(os.path.abspath(state_file_path))
-    prefix = f"{os.path.basename(state_file_path)}.corrupt-"
-    try:
-        names = [name for name in os.listdir(state_dir) if name.startswith(prefix)]
-    except OSError:
-        return None
-    return max(names) if names else None
 
 
 def check_pipeline_fail_rule(state_file_path: str | None = None) -> AlertResult:
@@ -364,15 +314,16 @@ _DRIFT_NOTICE_NAMES = {
 
 
 def check_drift_warn_rule() -> AlertResult:
-    """ドリフト連続警告ルールを評価する。知らせると決めた日は、その日の回数と割合を覚える。"""
+    """ドリフト連続警告ルールを評価する。
+
+    知らせると決めた日は、覚える値を details["notified_mark"] に載せる。ここでは書かず、
+    送れた後に run_conditional_notification が書く（#1609）。
+    """
     count = _get_streak(_KEY_DRIFT_WARN_STREAK)
     share, n_triggered, n_evaluated = _parse_fields(_get_config_str(_KEY_DRIFT_STATS), 3)
     notified_count, notified_share = _parse_fields(_get_config_str(_KEY_DRIFT_NOTIFIED), 2)
     kind = decide_drift_notice(count, share, int(notified_count), notified_share)
-    if kind == "resolved":
-        _set_config_str(_KEY_DRIFT_NOTIFIED, "0|0")
-    elif kind:
-        _set_config_str(_KEY_DRIFT_NOTIFIED, f"{count}|{share:.6f}")
+    mark = "0|0" if kind == "resolved" else f"{count}|{share:.6f}"
     triggered = bool(kind)
     logger.info(
         "ドリフト警告連続チェック: count=%d share=%.1f%% (%d/%d) notice=%s triggered=%s",
@@ -386,13 +337,16 @@ def check_drift_warn_rule() -> AlertResult:
     note = f"  閾値超過 {int(n_triggered)} / 判定 {int(n_evaluated)} 銘柄（割合 {share:.1%}）"
     if notified_count > 0:
         note += f"、前の知らせは連続 {int(notified_count)} 回目・割合 {notified_share:.1%}"
+    details = {"config_key": _KEY_DRIFT_WARN_STREAK, "notice": kind, "notes": [note]}
+    if kind:
+        details["notified_mark"] = mark
     return AlertResult(
         rule_id="NF-303-3",
         name=_DRIFT_NOTICE_NAMES.get(kind, "ドリフト検知（R-104）連続 Warn"),
         triggered=triggered,
         consecutive_count=count,
         threshold=DRIFT_WARN_THRESHOLD,
-        details={"config_key": _KEY_DRIFT_WARN_STREAK, "notice": kind, "notes": [note]},
+        details=details,
     )
 
 
@@ -544,11 +498,19 @@ def _send_alert_detail(results: list[AlertResult], notifier: NotifierFn) -> bool
     return notifier("🚨 運用アラート発報（NF-303）", "\n".join(lines).strip(), 0xFF0000)
 
 
+def _commit_notified_marks(results: list[AlertResult]) -> None:
+    """送れた知らせの印を書く（#1609）。送れなかった日は呼ばない。"""
+    for r in results:
+        mark = r.details.get("notified_mark")
+        if r.triggered and mark is not None:
+            _set_config_str(_KEY_DRIFT_NOTIFIED, mark)
+
+
 def run_conditional_notification(
     results: list[AlertResult] | None = None,
     state_file_path: str | None = None,
     notifier: NotifierFn | None = None,
-) -> bool:
+) -> AlertDispatch:
     """
     アラート条件を評価し、成立時のみ詳細アラートを送信する。
 
@@ -558,19 +520,23 @@ def run_conditional_notification(
         notifier: Discord 送信コールバック（title, message, color） -> bool。None の場合は通知スキップ。
 
     Returns:
-        Discord 送信成功時 True
+        SENT（送れた）/ NOT_SENT（送るものが無い）/ FAILED（条件が成立して送れなかった）
     """
     if results is None:
         results = evaluate_alert_conditions(state_file_path)
 
     if notifier is None:
-        return False
+        return AlertDispatch.NOT_SENT
 
-    any_triggered = any(r.triggered for r in results)
+    triggered = [r.rule_id for r in results if r.triggered]
 
-    if any_triggered:
+    if triggered:
         logger.warning("アラート条件成立 — 詳細通知を送信します")
-        return _send_alert_detail(results, notifier)
+        if not _send_alert_detail(results, notifier):
+            logger.error("アラート通知の送信に失敗: %s", triggered)
+            return AlertDispatch.FAILED
+        _commit_notified_marks(results)
+        return AlertDispatch.SENT
 
     logger.info("アラート条件非成立 — 通知は送信しません")
-    return False
+    return AlertDispatch.NOT_SENT

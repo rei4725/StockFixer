@@ -13,6 +13,7 @@ from src.utils.alert_service import (
     HEALTH_DEGRADED_THRESHOLD,
     LOSS_LIMIT_THRESHOLD,
     PIPELINE_FAIL_THRESHOLD,
+    AlertDispatch,
     AlertResult,
     _count_consecutive_pipeline_failures,
     check_drift_warn_rule,
@@ -458,6 +459,35 @@ class TestRunConditionalNotification(unittest.TestCase):
             ok = run_conditional_notification(results=results, notifier=notifier)
         self.assertFalse(ok)
         mock_detail.assert_not_called()
+
+    def test_failed_send_is_distinct_from_not_triggered(self):
+        """送れなかった日と条件が不成立の日を分けて返す（#1609）。"""
+        triggered = [AlertResult("NF-303-5", "予測出力", True, 1, 1)]
+        silent = [AlertResult("NF-303-5", "予測出力", False, 0, 1)]
+        notifier = Mock(return_value=False)
+        self.assertIs(
+            run_conditional_notification(results=triggered, notifier=notifier),
+            AlertDispatch.FAILED,
+        )
+        self.assertIs(
+            run_conditional_notification(results=silent, notifier=notifier),
+            AlertDispatch.NOT_SENT,
+        )
+        self.assertIs(
+            run_conditional_notification(results=triggered, notifier=Mock(return_value=True)),
+            AlertDispatch.SENT,
+        )
+        self.assertFalse(AlertDispatch.FAILED)
+
+    def test_failed_send_does_not_write_mark(self):
+        result = AlertResult(
+            "NF-303-3", "ドリフト", True, 2, 2, details={"notified_mark": "2|0.200000"}
+        )
+        with patch("src.utils.alert_service._set_config_str") as mock_set:
+            run_conditional_notification(results=[result], notifier=Mock(return_value=False))
+            mock_set.assert_not_called()
+            run_conditional_notification(results=[result], notifier=Mock(return_value=True))
+        mock_set.assert_called_once_with("alert.drift_warn_streak.notified", "2|0.200000")
 
     def test_evaluates_conditions_when_results_none(self):
         all_ok = [
