@@ -248,7 +248,8 @@ class TestDailyRuleSignalsScheduleIsNotRetried(unittest.TestCase):
         config = run_scheduler.SCHEDULE_CONFIG["daily_rule_signals"]
         self.assertEqual(config["max_retries"], 0)
         self.assertEqual(config["max_executions_per_period"], 1)
-        self.assertFalse(config.get("rerun_if_interrupted", False))
+        # 例外で失敗した回は呼び直さないが、プロセスごと消えた回は補完する（#1652）
+        self.assertTrue(config["rerun_if_interrupted"])
 
 
 if __name__ == "__main__":

@@ -76,6 +76,7 @@ class SchedulerQueueManager:
         self._booted_at = datetime.now(timezone.utc).replace(microsecond=0)
         self._warned_interrupted_run_ids: set[str] = set()
         self._error_notifier = error_notifier
+        self._cap_notices_sent: set[tuple[str, str]] = set()  # scheduler_cap_notice が使う
         # 同じプロセスのスレッドの間（定時のジョブと補完のポーリング）を _lock で、
         # プロセスの間（手での即時実行）を _file_lock で守る。取る順は必ず _lock が先
         self._lock = threading.Lock()
