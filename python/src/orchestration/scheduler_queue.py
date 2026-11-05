@@ -36,6 +36,7 @@ from src.orchestration.scheduler_interrupted import (
     MAX_FORGIVEN_INTERRUPTIONS_PER_PERIOD,
     count_executions,
 )
+from src.orchestration.scheduler_recovery_gap import is_within_recovery_gap
 from src.utils.data_path_utils import ensure_dir, get_results_dir
 from src.utils.heartbeat import ping_heartbeat
 from src.utils.japan_time import isoformat_utc
@@ -414,6 +415,9 @@ class SchedulerQueueManager:
         current_count = self.get_execution_count(job_id, period_key)
         max_executions = config.get("max_executions_per_period", 1)
         if current_count >= max_executions:
+            return False
+
+        if is_within_recovery_gap(config, self._state.get("events", []), job_id, period_key, now):
             return False
 
         return True
