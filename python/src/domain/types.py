@@ -206,6 +206,18 @@ class MacroStaleSkip:
 
 
 @dataclass
+class MacroMissingSkip:
+    """相場の指標の列が欠けて特徴量を作らなかった1銘柄（#1642）。
+
+    columns: 欠けた列の名前（ティッカーが丸ごと空だった列）
+    """
+
+    market: str
+    symbol: str
+    columns: list[str]
+
+
+@dataclass
 class BatchResult:
     """run_parallel() の集約結果。
 
@@ -213,12 +225,14 @@ class BatchResult:
     failed:    例外・タイムアウト・status=="error" による失敗エントリのリスト
     skipped:   status=="skip" として返された結果オブジェクトのリスト
     macro_stale: 相場の指標の列が止まって特徴量を作らなかった銘柄のリスト（#1634）
+    macro_missing: 相場の指標の列が欠けて特徴量を作らなかった銘柄のリスト（#1642）
     """
 
     succeeded: list = field(default_factory=list)
     failed: list = field(default_factory=list)
     skipped: list = field(default_factory=list)
     macro_stale: list[MacroStaleSkip] = field(default_factory=list)
+    macro_missing: list[MacroMissingSkip] = field(default_factory=list)
 
 
 @dataclass
