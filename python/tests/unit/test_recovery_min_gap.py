@@ -152,7 +152,7 @@ def test_only_the_named_jobs_have_the_gap():
     gapped = {
         job_id for job_id, config in SCHEDULE_CONFIG.items() if "recovery_min_gap_minutes" in config
     }
-    assert gapped == {"monthly_multibagger", "weekly_rule_evaluation"}
+    assert gapped == {"monthly_multibagger", "weekly_rule_evaluation", "regime_leverage_weekly"}
 
 
 def test_monthly_multibagger_recovery_settings_are_unchanged():
@@ -161,6 +161,14 @@ def test_monthly_multibagger_recovery_settings_are_unchanged():
     config = SCHEDULE_CONFIG["monthly_multibagger"]
     assert config["max_executions_per_period"] == 3
     assert config["recovery_min_gap_minutes"] == 720
+
+
+def test_regime_leverage_weekly_recovery_settings_are_unchanged():
+    from run_scheduler import SCHEDULE_CONFIG
+
+    config = SCHEDULE_CONFIG["regime_leverage_weekly"]
+    assert config["max_executions_per_period"] == 12
+    assert config["recovery_min_gap_minutes"] == 240
 
 
 def test_weekly_optimization_recovery_settings_are_unchanged():
