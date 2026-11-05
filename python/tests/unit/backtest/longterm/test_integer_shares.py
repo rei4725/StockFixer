@@ -116,5 +116,41 @@ class TestEnterCandidatesIntegerSizing(unittest.TestCase):
         self.assertEqual(portfolio.cash, self._PER_POSITION - pos.cost_basis)
 
 
+class TestEnterCandidatesInvalidEntryClose(unittest.TestCase):
+    """入りの足の終値が有限の正の数でなければ、例外を出さずに見送る（#1584）。"""
+
+    _DATE = "2024-01-02"
+
+    def _run(self, entry_close):
+        price_map = {"X": pd.DataFrame({"date": [self._DATE], "Close": [entry_close]})}
+        candidate = TrendCandidate(
+            market="us",
+            symbol="X",
+            score=1.0,
+            close=100.0,
+            dist_from_52w_high=0.0,
+            above_200dma=True,
+            sma200_rising=True,
+            return_6m=0.1,
+            return_12m=0.2,
+            avg_volume=1_000_000.0,
+        )
+        cfg = LongtermBacktestConfig.build(market="us", max_positions=1)
+        portfolio = Portfolio(cash=1000.0)
+
+        set_backtest_screening_port(_StubScreeningPort([]))
+        engine.enter_candidates(
+            cfg, portfolio, self._DATE, [candidate], price_map, ExecutionModel(cfg.costs)
+        )
+        return portfolio
+
+    def test_invalid_entry_close_is_skipped(self):
+        for bad_close in (float("nan"), float("inf"), 0.0, -1.0):
+            with self.subTest(bad_close=bad_close):
+                portfolio = self._run(bad_close)
+                self.assertEqual(portfolio.positions, {})
+                self.assertEqual(portfolio.cash, 1000.0)
+
+
 if __name__ == "__main__":
     unittest.main()

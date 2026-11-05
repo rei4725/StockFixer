@@ -365,12 +365,11 @@ def run_regime_leverage_weekly_job() -> None:
         from src.trading.regime_leverage_strategy.service import run_regime_leverage_weekly_check
 
         decision = run_regime_leverage_weekly_check(YFinanceMarketDataAdapter())
-        if decision is not None:
-            logger.info(
-                "レジームレバレッジ戦略(週次): action=%s reason=%s",
-                decision.action,
-                decision.reason,
-            )
+        logger.info(
+            "レジームレバレッジ戦略(週次): action=%s reason=%s",
+            decision.action,
+            decision.reason,
+        )
     except Exception as e:
         logger.error("レジームレバレッジ戦略(週次)の実行に失敗しました: %s", e, exc_info=True)
         raise

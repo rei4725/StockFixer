@@ -10,6 +10,13 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+_SHADOW_METRIC_KEYS = (
+    "production_hit_rate",
+    "production_sharpe",
+    "challenger_hit_rate",
+    "challenger_sharpe",
+)
+
 
 def _challengers_trained_this_week(challenger_names: list[str]) -> list[str]:
     """今週（UTC の ISO 週）に学習し直された challenger の名前を返す（#905）。
@@ -48,6 +55,30 @@ def _save_shadow_record(record: dict) -> None:
     except Exception as e:
         _handle_stage_error(PipelineStage.NON_CRITICAL, "影の比べの記録の保存", e)
         _notify_stage_failure("週次学習 影の比べの記録の保存", e)
+
+
+def _shadow_metrics_missing(result: dict) -> bool:
+    """影の比べの指標に欠けがあり、勝ち負けを決められなかった週なら True を返す（#1589）。"""
+    return any(result[key] is None for key in _SHADOW_METRIC_KEYS)
+
+
+def _record_no_comparison(record: dict, result: dict) -> None:
+    """比べられなかった週を no_shadow_data と記録し、ファイルが在れば1回知らせる（#1589）。
+
+    challenger のファイルが無い週は比べるものが無いだけなので、知らせない。
+    """
+    detail = (
+        f"件数=production {result.get('n_production')}, challenger {result.get('n_challenger')} "
+        f"日数={result.get('window_days')} challenger_trained_at="
+        f"{result.get('challenger_trained_at')}"
+    )
+    logger.warning("[2/4] 影の比べの指標が欠けて比べられなかった: %s", detail)
+    record["gate_skipped_reason"] = "no_shadow_data"
+    if result.get("challenger_trained_at") is not None:
+        _notify_stage_failure(
+            "週次学習 [1/4] 影の比べ（比べられなかった）",
+            RuntimeError(f"challenger のファイルは在るが指標が欠けた。再学習は続ける。{detail}"),
+        )
 
 
 def run_weekly_training():
@@ -99,7 +130,8 @@ def _run_weekly_training_locked():
         6. Discord 通知（昇格結果含む）
 
     1・2 の失敗は Discord へ1回知らせて 4 へ進む（勝った challenger が知られずに
-    再学習で上書きされないようにする。#1295）。
+    再学習で上書きされないようにする。#1295）。指標が欠けて比べられなかった週は負けと記録せず、
+    challenger のファイルが在れば1回知らせて 4 へ進む（#1589）。
     """
     logger.info("=== 週次モデル学習開始 ===")
 
@@ -194,6 +226,8 @@ def _run_weekly_training_locked():
             _handle_stage_error(PipelineStage.RECOVERABLE, "昇格ゲート評価", e)
             _notify_stage_failure("週次学習 [2/4] 昇格ゲート評価", e)
             record["gate_failed"] = True
+    elif shadow_results and _shadow_metrics_missing(shadow_results[0][2]):
+        _record_no_comparison(record, shadow_results[0][2])
     elif shadow_results:
         logger.info("[2/4] challenger_wins=False のため昇格ゲートをスキップ")
         record["gate_skipped_reason"] = "challenger_lost"
