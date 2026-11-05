@@ -82,22 +82,14 @@ def order_market_predictions_mostly_missing(
     [3/6] は基準の値段が取れない銘柄などを黙って飛ばすため、[1/6] の線の後でも jp の
     予想が大きく欠けうる。呼び出し元は True のとき保存の印を立てず、8:50 の新規を止める。
     """
-    from config.settings import DAILY_FETCH_MAX_UNAVAILABLE_RATIO
-
-    market = _ORDER_MARKET
-    market_total = market_totals.get(market, 0)
-    if market_total <= 0:
+    gap = _order_market_prediction_gap(market_totals, output_rows)
+    if gap is None:
         return False
-    n_predicted = sum(1 for r in output_rows if getattr(r, "market", None) == market)
-    n_missing = max(market_total - n_predicted, 0)
-    if n_missing / market_total <= DAILY_FETCH_MAX_UNAVAILABLE_RATIO:
-        return False
-    message = (
-        f"{market} の予想の出なかった銘柄が多すぎる: {n_missing} / {market} の対象 {market_total}"
-        f"（線 {DAILY_FETCH_MAX_UNAVAILABLE_RATIO:.0%}）。予想は保存したが、今日の新規は止める"
-    )
+    message = f"{gap}。予想は保存したが、今日の新規は止める"
     logger.warning("[3/6] 予測 (production): %s", message)
-    _notify_stage_failure(f"[3/6] 予測 (production) の {market} の欠け", RuntimeError(message))
+    _notify_stage_failure(
+        f"[3/6] 予測 (production) の {_ORDER_MARKET} の欠け", RuntimeError(message)
+    )
     return True
 
 
@@ -184,3 +176,34 @@ def _raise_if_no_effective_rules(batch: "RuleSignalBatch") -> None:
     message = "有効ルールが0銘柄のため、保有の SELL も含めて判定できなかった"
     logger.error("日次ルールシグナル: %s", message)
     raise NonRetryableJobError(message)
+
+
+def _order_market_prediction_gap(market_totals: dict[str, int], output_rows: list) -> Optional[str]:
+    """発注する市場の予想の欠けが線を超えていれば件数の文を返す。線の内なら None（#1438）。"""
+    from config.settings import DAILY_FETCH_MAX_UNAVAILABLE_RATIO
+
+    market = _ORDER_MARKET
+    market_total = market_totals.get(market, 0)
+    if market_total <= 0:
+        return None
+    n_predicted = sum(1 for r in output_rows if getattr(r, "market", None) == market)
+    n_missing = max(market_total - n_predicted, 0)
+    if n_missing / market_total <= DAILY_FETCH_MAX_UNAVAILABLE_RATIO:
+        return None
+    return (
+        f"{market} の予想の出なかった銘柄が多すぎる: {n_missing} / {market} の対象 {market_total}"
+        f"（線 {DAILY_FETCH_MAX_UNAVAILABLE_RATIO:.0%}）"
+    )
+
+
+def _raise_if_order_market_predictions_missing(
+    market_totals: dict[str, int], output_rows: list
+) -> None:
+    """発注する市場の予想の欠けが線を超えた回を NonRetryableJobError で失敗にする（#1595）。
+
+    success で終わると同じ朝の補完が動かず、印が立たないまま 8:50 の新規が止まる。
+    呼び出し元は後の段と知らせの後に呼ぶ。その回の中では道を頭から流し直さず、補完に任せる。
+    """
+    gap = _order_market_prediction_gap(market_totals, output_rows)
+    if gap is not None:
+        raise NonRetryableJobError(f"[3/6] 予測 (production): {gap}")
