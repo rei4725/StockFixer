@@ -14,6 +14,8 @@ from src.utils.data_path_utils import get_watchlist_path
 from src.utils.db._bulk import bulk_insert
 from src.utils.db._connection import _db_connection
 from src.utils.db._read import coerce_object_numeric_columns
+from src.utils.db.rule_results import load_open_position_symbols
+from src.utils.db.symbol_master import guess_market
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -203,14 +205,36 @@ def get_all_symbols() -> list:
             return []
 
 
+def get_held_symbol_keys() -> list:
+    """
+    保有中か約定待ちの買いがある銘柄と空売りの建玉の銘柄を (market, symbol) で返す（#1615）。
+
+    ウォッチリストから外れた保有にも日次の取得と予想を届かせるための読み。
+    保有の表に market が無いため、コードの形から推す。
+    読めない日は ERROR を出して空を返す（予想を丸ごと止めず、ウォッチリストだけで続ける）。
+
+    Returns:
+        list of (market, symbol) tuples
+    """
+    try:
+        symbols = load_open_position_symbols()
+    except Exception as e:
+        logger.error(
+            f"保有銘柄の読み込み失敗のためウォッチリストだけで続けます: {e}", exc_info=True
+        )
+        return []
+    return sorted((guess_market(str(symbol)), str(symbol).upper()) for symbol in symbols)
+
+
 def get_active_symbols() -> list:
     """
-    stock_features に存在し、かつ現在の監視対象である銘柄のリストを返す。
+    stock_features に存在し、かつ現在の監視対象か保有中である銘柄のリストを返す。
 
     stock_features には上場廃止・改称した銘柄の履歴がそのまま残る。
     予測対象をここから素直に取ると廃止銘柄が Top10 に混ざるため
     （#717 の AVB が実際に2位に出た）、config/watchlist.json との
-    積集合を取る。
+    積集合を取る。ウォッチリストから外れた保有は、売りと空売りの返済の
+    判定に予想が要るので残す（#1615）。
 
     watchlist が読めない・空の場合は全銘柄を返す（フェイルオープン）。
     予測が丸ごと止まる方が、廃止銘柄が混ざるより遥かに重大なため。
@@ -236,6 +260,7 @@ def get_active_symbols() -> list:
         logger.warning("watchlist が空のため全銘柄を対象にします")
         return all_symbols
 
+    allowed.update(get_held_symbol_keys())
     active = [s for s in all_symbols if (str(s[0]).lower(), str(s[1]).upper()) in allowed]
     excluded = len(all_symbols) - len(active)
     if excluded:

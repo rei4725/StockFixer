@@ -46,6 +46,7 @@ ALLOWED_UTILS_MODULES: dict[str, str] = {
     "results_io.py": "結果 CSV の保存",
     "retry_helper.py": "リトライ",
     "run_context.py": "run_id の受け渡し",
+    "scheduler_failure_count.py": "alert_service の部品（スケジューラ状態ファイルの読み取り）",
     "scheduler_types.py": "スケジューラーの共有型",
     "sector_constraints.py": _LATER,
     "signal_generator.py": _LATER,

@@ -153,6 +153,16 @@ def load_held_symbols() -> set[str]:
     return {str(symbol).replace(".T", "") for (symbol,) in rows}
 
 
+def load_open_position_symbols() -> set[str]:
+    """load_held_symbols に空売りの建玉（paper_short_positions の qty > 0）を足して返す（#1615）。
+
+    日次の取得と予想の対象を決める用で、読めなければ例外を投げる。
+    """
+    with _db_connection() as con:
+        rows = con.execute("SELECT symbol FROM paper_short_positions WHERE qty > 0").fetchall()
+    return load_held_symbols() | {str(symbol).replace(".T", "") for (symbol,) in rows}
+
+
 def load_rule_best_all(market: str) -> pd.DataFrame:
     """有効な最優秀ルール一覧を返す（全銘柄）。"""
     ensure_rule_tables()
