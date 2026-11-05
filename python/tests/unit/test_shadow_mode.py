@@ -352,6 +352,8 @@ class TestEvaluateShadowModels(_TmpDbTestCase):
             "challenger_hit_rate",
             "challenger_sharpe",
             "challenger_wins",
+            "challenger_prediction_std",
+            "challenger_constant",
             "evaluated_at",
             "n_production",
             "n_challenger",

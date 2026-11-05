@@ -17,6 +17,9 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+# paper_orders.side の買い（trading の OrderSide.BUY。utils からは trading を import できない）
+_ORDER_SIDE_BUY = 1
+
 # ---------------------------------------------------------------------------
 # DDL
 # ---------------------------------------------------------------------------
@@ -132,6 +135,22 @@ def delete_rule_best_except(market: str, keep_symbols: list[str]) -> None:
             f" WHERE market = %s AND symbol NOT IN ({placeholders})",
             [market, *keep_symbols],
         )
+
+
+def load_held_symbols() -> set[str]:
+    """保有中（paper_positions の qty > 0）か、約定待ちの買いがある銘柄コードを返す（#1566）。
+
+    週次評価が rule_best の行を消してよいかの確かめ用で、読めなければ例外を投げる。
+    約定待ちの買いを足すのは、金曜の 16:30 の買いが約定する月曜より前に日曜の評価が走るため。
+    空売りの建玉は足さない（ルールの SELL は買いの保有だけを見る）。
+    """
+    with _db_connection() as con:
+        rows = con.execute(
+            "SELECT symbol FROM paper_positions WHERE qty > 0"
+            " UNION SELECT symbol FROM paper_orders WHERE status = 'pending' AND side = %s",
+            [_ORDER_SIDE_BUY],
+        ).fetchall()
+    return {str(symbol).replace(".T", "") for (symbol,) in rows}
 
 
 def load_rule_best_all(market: str) -> pd.DataFrame:

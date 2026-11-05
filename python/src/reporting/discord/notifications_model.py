@@ -61,6 +61,7 @@ def send_promotion_result(promoted: bool, reason: str, criteria: dict) -> bool:
         "sharpe": "Sharpe",
         "hit_rate": "Hit Rate",
         "slippage": "Slippage",
+        "prediction_spread": "Prediction Spread",
     }
     for key, c in criteria.items():
         label = criteria_labels.get(key, key)

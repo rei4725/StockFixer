@@ -25,7 +25,8 @@ _wired = False
 def wire_ports(force: bool = False) -> None:
     """BC ポートにデフォルトのアダプタを注入する（冪等）。
 
-    注入するもの: market_data / screening / ModelManager / analytics / 注文の broker の選び。
+    注入するもの: market_data / screening / ModelManager / analytics / 注文の broker の選び /
+    学習の知らせ。
 
     Args:
         force: True のとき、既に注入済みでも再注入する（テスト用途）。
@@ -37,6 +38,7 @@ def wire_ports(force: bool = False) -> None:
     from src.backtest.data_port import set_backtest_data_port
     from src.backtest.ports import set_model_manager_factory
     from src.backtest.screening_port import set_backtest_screening_port
+    from src.infrastructure.discord_notification_adapter import DiscordNotificationAdapter
     from src.infrastructure.persistence.analytics_query import PostgresAnalyticsQuery
     from src.infrastructure.persistence.prediction_result_repository import (
         PostgresPredictionResultRepository,
@@ -44,7 +46,7 @@ def wire_ports(force: bool = False) -> None:
     from src.market_data.backtest_adapter import BacktestMarketDataAdapter
     from src.market_data.prediction_adapter import PredictionMarketDataAdapter
     from src.prediction.manager import ModelManager
-    from src.prediction.ports import set_market_data_port
+    from src.prediction.ports import set_market_data_port, set_notification_port
     from src.reporting.ports import set_analytics_query, set_prediction_result_repository
     from src.screening.backtest_adapter import BacktestScreeningAdapter
     from src.trading.brokers.account.factory import (
@@ -54,6 +56,8 @@ def wire_ports(force: bool = False) -> None:
 
     set_backtest_data_port(BacktestMarketDataAdapter())
     set_market_data_port(PredictionMarketDataAdapter())
+    # 統合モデルの学習の道はどれも（週次・夜間・手）この口で定数のモデルを知らせる（#1602）
+    set_notification_port(DiscordNotificationAdapter())
     set_backtest_screening_port(BacktestScreeningAdapter())
     # 手で流すバックテストの CLI・UI も wire_ports() だけでモデルを作れるようにする（#1063）
     set_model_manager_factory(ModelManager)

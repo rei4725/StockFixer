@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+from src.prediction.constant_prediction import CONSTANT_PREDICTION_STD, is_constant_prediction
 from src.prediction.types import RollbackDecision, WinDecision
 
 HOLDOUT_TRADING_DAYS = 20  # 取っておく期間（営業日）
@@ -75,6 +76,13 @@ def judge_win(
     wins = sum(1 for d in daily_diff if d > 0)
     if not daily_diff or not wins * 2 > len(daily_diff):
         reasons.append(f"日ごとの勝ち越しが過半数に届かない（{wins}/{len(daily_diff)} 日）")
+
+    # 順位相関は定数の予想では微小な揺れの順位を測るだけなので、ばらつきそのものを見る（#1602）
+    c_std = _get(candidate, "prediction_std")
+    if is_constant_prediction(c_std):
+        reasons.append(
+            f"候補の予想が全銘柄でほぼ同じ値（標準偏差 {c_std}、線 {CONSTANT_PREDICTION_STD}）"
+        )
 
     return WinDecision(won=not reasons, reasons=reasons)
 
