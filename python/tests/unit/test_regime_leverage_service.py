@@ -20,6 +20,30 @@ from src.trading.regime_leverage_strategy.types import RegimeLeverageSnapshot
 # このファイルに追記される。MagicMock/patch/numpy/pandas はそれらのテストが使う。
 
 
+_JST = ZoneInfo("Asia/Tokyo")
+
+
+def _fixed_datetime(now_jst: datetime):
+    """service.datetime を差し替え、now() だけを固定の JST の時刻にする。"""
+
+    class _FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            if tz is None:
+                return now_jst.replace(tzinfo=None)
+            return now_jst.astimezone(tz)
+
+    return _FixedDatetime
+
+
+# bdate_range("2025-01-01", periods=260) の最後の足(2025-12-30)が引けた後の回に固定する。
+# 今の時計のままだと、この足が古いとして判定しない(#1608)
+_AFTER_LAST_FIXTURE_BAR = patch(
+    "src.trading.regime_leverage_strategy.service.datetime",
+    _fixed_datetime(datetime(2025, 12, 31, 7, 30, tzinfo=_JST)),
+)
+
+
 def _holding_snapshot(**overrides):
     base = dict(
         id=1,
@@ -257,6 +281,7 @@ class TestDecideDailyCheck(unittest.TestCase):
         self.assertAlmostEqual(decision.equity_now_jpy, -173187506.8493, places=1)
 
 
+@_AFTER_LAST_FIXTURE_BAR
 class TestRunRegimeLeverageWeeklyCheck(unittest.TestCase):
     @patch("src.trading.regime_leverage_strategy.service.insert_snapshot")
     @patch("src.trading.regime_leverage_strategy.service.get_latest_snapshot")
@@ -399,6 +424,7 @@ class TestRunRegimeLeverageWeeklyCheck(unittest.TestCase):
         mock_insert.assert_called_once()
 
 
+@_AFTER_LAST_FIXTURE_BAR
 class TestRunRegimeLeverageDailyMarginCheck(unittest.TestCase):
     @patch("src.trading.regime_leverage_strategy.service.get_latest_snapshot")
     def test_returns_none_when_not_holding(self, mock_latest):
@@ -505,6 +531,7 @@ class TestRunRegimeLeverageDailyMarginCheck(unittest.TestCase):
         mock_insert.assert_not_called()
 
 
+@_AFTER_LAST_FIXTURE_BAR
 class TestRegimeLeverageNaNGuard(unittest.TestCase):
     """Finding 2: MA200/ATR14がNaNの場合、判定を行わずDBにも書き込まないこと。
     保有の有無によらず例外を送出する(#870・#1583)。"""
@@ -734,22 +761,6 @@ class TestRegimeLeverageUsdJpyGuard(unittest.TestCase):
             run_regime_leverage_weekly_check(mock_port)
 
         mock_insert.assert_not_called()
-
-
-_JST = ZoneInfo("Asia/Tokyo")
-
-
-def _fixed_datetime(now_jst: datetime):
-    """service.datetime を差し替え、now() だけを固定の JST の時刻にする。"""
-
-    class _FixedDatetime(datetime):
-        @classmethod
-        def now(cls, tz=None):
-            if tz is None:
-                return now_jst.replace(tzinfo=None)
-            return now_jst.astimezone(tz)
-
-    return _FixedDatetime
 
 
 def _daily_port(last_bar: str, lows: dict) -> MagicMock:

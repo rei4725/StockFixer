@@ -7,11 +7,19 @@
 from contextlib import ExitStack
 from unittest.mock import MagicMock, patch
 
+from src.utils.alert_service import AlertResult
+
 _JOBS = "src.orchestration.jobs.daily"
+_ALERT_DONE = "[6/6] 運用アラート評価完了"
 
 
-def _run_pipeline(drift_error=None, alert_error=None, shadow_error=None):
-    """外への呼び出しを止めて日次の道を1回呼び、後の段の mock と知らせの文を返す。"""
+def _run_pipeline(
+    drift_error=None, alert_error=None, shadow_error=None, real_alerts=None, stage_logger=None
+):
+    """外への呼び出しを止めて日次の道を1回呼び、後の段の mock と知らせの文を返す。
+
+    real_alerts は (評価の結果, 送信の戻り値)。渡すと [6/6] の本物を通す（#1609）。
+    """
     from src.orchestration.scheduler import run_daily_pipeline
 
     with ExitStack() as stack:
@@ -47,7 +55,17 @@ def _run_pipeline(drift_error=None, alert_error=None, shadow_error=None):
         )
         completion = p("src.reporting.discord.discord_utils.send_daily_pipeline_completion")
         p(f"{_JOBS}.record_health_degraded_streak")
-        alerts = p(f"{_JOBS}.evaluate_and_notify_alerts", side_effect=alert_error)
+        if real_alerts is None:
+            alerts = p(f"{_JOBS}.evaluate_and_notify_alerts", side_effect=alert_error)
+        else:
+            alerts = None
+            p("src.utils.alert_service.evaluate_alert_conditions", return_value=real_alerts[0])
+            p(
+                "src.reporting.discord.webhook_sender.send_webhook_notification",
+                return_value=real_alerts[1],
+            )
+        if stage_logger is not None:
+            p(f"{_JOBS}.logger", new=stage_logger)
         sectors = p(f"{_JOBS}.append_accuracy_json_sectors")
         webhook = p("src.reporting.discord.discord_utils.send_webhook_text")
 
@@ -78,6 +96,39 @@ def test_alert_evaluation_failure_notifies_once_and_appends_sectors():
 
     assert len(_notices(texts, "[6/6] 運用アラート評価")) == 1
     sectors.assert_called_once()
+
+
+def _alert_stage(triggered: bool, sent: bool):
+    """[6/6] の本物を通し、知らせの文と完了の行を書いたかを返す（#1609）。"""
+    stage_logger = MagicMock()
+    results = [AlertResult("NF-303-1", "パイプライン失敗", triggered, 2, 2)]
+    _, _, _, sectors, texts = _run_pipeline(real_alerts=(results, sent), stage_logger=stage_logger)
+    sectors.assert_called_once()
+    infos = [c.args[0] for c in stage_logger.info.call_args_list]
+    return texts, _ALERT_DONE in infos
+
+
+def test_alert_send_failure_notifies_stage_failure_without_completion():
+    texts, completed = _alert_stage(triggered=True, sent=False)
+
+    notices = _notices(texts, "[6/6] 運用アラート評価")
+    assert len(notices) == 1
+    assert "NF-303-1" in notices[0]
+    assert not completed
+
+
+def test_alert_not_triggered_completes_without_notice():
+    texts, completed = _alert_stage(triggered=False, sent=False)
+
+    assert texts == []
+    assert completed
+
+
+def test_alert_sent_completes_without_notice():
+    texts, completed = _alert_stage(triggered=True, sent=True)
+
+    assert texts == []
+    assert completed
 
 
 def test_challenger_shadow_stage_failure_notifies_once_and_continues():
