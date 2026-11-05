@@ -178,9 +178,12 @@ def job_monthly_report():
 
 def job_monthly_multibagger():
     """毎月1日 04:00 - multibagger 月次スクリーン + 保有/撤退アラート"""
-    from src.orchestration.multibagger_job import run_monthly_multibagger_screen
+    from src.orchestration.multibagger_job import (
+        raise_if_multibagger_failed,
+        run_monthly_multibagger_screen,
+    )
 
-    run_monthly_multibagger_screen()
+    raise_if_multibagger_failed(run_monthly_multibagger_screen())
 
 
 def job_nightly_strategy_factory():
@@ -510,7 +513,8 @@ SCHEDULE_CONFIG = {
         "hour": 4,
         "minute": 0,
         "recovery_delay_minutes": 60,
-        "max_executions_per_period": 1,
+        # 失敗の回は同じ月の補完に任せる（すぐの呼び直しはしない）
+        "max_executions_per_period": 3,
         "description": "毎月1日 04:00 - multibagger 月次スクリーン + 保有/撤退アラート",
     },
     "nightly_strategy_factory": {
