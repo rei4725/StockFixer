@@ -10,6 +10,7 @@ shadow モデルの Walk-Forward 成績が current モデルを上回った場�
     3. Sharpe:     shadow >= current * 0.95（Sharpe は 5% 劣化まで許容）
     4. Hit Rate:   shadow >= 0.50（最低ライン）
     5. slippage 乖離: shadow の avg_abs_diff_ratio < 0.02（2% 以内）
+    6. 予想のばらつき: shadow の予想が全銘柄でほぼ同じ値でないこと（#1602）
 
 WF の要約に model_name の列が無いときは 1〜3 を比べられないとして判定から外し、
 4 に「shadow の Hit Rate が current 以上」を足す（#1269）。
@@ -40,6 +41,7 @@ from src.prediction.challenger_window import (
     filter_comparable_challenger,
     filter_to_days,
 )
+from src.prediction.constant_prediction import CONSTANT_PREDICTION_STD, is_constant_prediction
 from src.prediction.db import load_prediction_accuracy
 from src.prediction.shadow_evaluation import DEFAULT_EVALUATION_DAYS
 from src.utils.data_path_utils import get_results_dir
@@ -94,6 +96,7 @@ class PromotionResult:
                                "threshold": float, "passed": bool},
               "hit_rate":    {"shadow": float, "floor": float, "passed": bool},
               "slippage":    {"shadow": float, "threshold": float, "passed": bool},
+              "prediction_spread": {"shadow": float, "threshold": float, "passed": bool},
             }
         reason: 判定理由のサマリー文（1 行）
         run_ids: 判断に使用した run_id のリスト（A/B テスト連携）
@@ -391,12 +394,23 @@ def evaluate_promotion(
         "passed": slippage_passed,
     }
 
+    # 6. 予想のばらつき（行が無く測れないときは 4・5 が落ちるので判定から外す）
+    baseline_shadow = _compute_baseline_metrics(shadow_model_name, horizon)
+    shadow_std = baseline_shadow.get("prediction_std")
+    spread_passed = None if shadow_std is None else not is_constant_prediction(shadow_std)
+    criteria_spread: dict = {
+        "shadow": shadow_std,
+        "threshold": CONSTANT_PREDICTION_STD,
+        "passed": spread_passed,
+    }
+
     criteria = {
         "net_return": criteria_net_return,
         "mdd": criteria_mdd,
         "sharpe": criteria_sharpe,
         "hit_rate": criteria_hit_rate,
         "slippage": criteria_slippage,
+        "prediction_spread": criteria_spread,
     }
 
     eligible = all(c["passed"] for c in criteria.values() if c["passed"] is not None)
@@ -443,7 +457,7 @@ def evaluate_promotion(
         run_ids=run_ids,
         wf_source_file=wf_filename,
         baseline_metrics={
-            "shadow": _compute_baseline_metrics(shadow_model_name, horizon),
+            "shadow": baseline_shadow,
             "current": baseline_current,
         },
     )
@@ -452,7 +466,7 @@ def evaluate_promotion(
         f"昇格ゲート判定: eligible={eligible} reason={reason} "
         f"net_return={net_return_passed} mdd={mdd_passed} "
         f"sharpe={sharpe_passed} hit_rate={hit_rate_passed} slippage={slippage_passed} "
-        f"窓={window.as_dict() if window is not None else None}"
+        f"prediction_spread={spread_passed} 窓={window.as_dict() if window is not None else None}"
     )
     return result
 

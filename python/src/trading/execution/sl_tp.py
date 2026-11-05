@@ -6,7 +6,7 @@ from typing import Any
 from config.settings import DEFAULT_STOP_LOSS_PCT
 from src.domain.ports import MarketDataPort, TradeDiffSink
 from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
-from src.trading.position_valuation import coverable_short_qty
+from src.trading.position_valuation import coverable_short_qty, is_failed_short_row
 from src.trading.risk_manager import RiskManager
 from src.trading.types import TradingGateStatus
 from src.utils.logger import get_logger
@@ -79,6 +79,11 @@ def _check_sl_tp_exits(
             qty = coverable_short_qty(pos) if is_short else int(pos.get("qty") or 0)
             avg_price = float(pos.get("avg_short_price" if is_short else "avg_price") or 0.0)
             current_price = float(pos.get("current_price") or 0.0)
+            if is_short and is_failed_short_row(pos):
+                # 返済は出さないが、約定待ちだけの空売りと違い判定できない保有として知らせる（#1601）
+                logger.warning("[exec] %s: 空売りの行の処理が落ち SL/TP を評価できない", symbol)
+                stats.setdefault("sl_tp_unevaluable_symbols", []).append(symbol)
+                continue
             if qty <= 0:
                 continue
             if not all(math.isfinite(p) and p > 0 for p in (avg_price, current_price)):

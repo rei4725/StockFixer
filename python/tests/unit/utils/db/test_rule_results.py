@@ -15,6 +15,7 @@ from src.utils.db._connection import _db_connection
 from src.utils.db.rule_results import (
     delete_rule_best,
     load_effective_rules,
+    load_held_symbols,
     load_rule_best_all,
     load_rule_signals_by_date,
     upsert_rule_best,
@@ -121,6 +122,62 @@ class TestDeleteRuleBest:
         delete_rule_best("us", "NOSUCH")
 
         assert "NOSUCH" not in set(load_rule_best_all("us")["symbol"])
+
+
+class TestLoadHeldSymbols:
+    """週次評価が行を消してよいかの確かめに使う読み（#1566）。"""
+
+    SYMBOLS = ("9981", "9982", "9983", "9984", "9985", "9986", "9987.T")
+
+    @pytest.fixture(autouse=True)
+    def _clean(self):
+        def clear():
+            with _db_connection() as con:
+                for table in ("paper_positions", "paper_short_positions", "paper_orders"):
+                    for symbol in self.SYMBOLS:
+                        # 表の名はこのテストの固定の文字列だけ
+                        con.execute(
+                            f"DELETE FROM {table} WHERE symbol = %s", [symbol]  # nosec B608
+                        )
+
+        clear()
+        yield
+        clear()
+
+    @staticmethod
+    def _position(symbol, qty):
+        with _db_connection() as con:
+            con.execute(
+                "INSERT INTO paper_positions (symbol, qty, avg_price) VALUES (%s, %s, 1000.0)",
+                [symbol, qty],
+            )
+
+    @staticmethod
+    def _order(symbol, side, status):
+        with _db_connection() as con:
+            con.execute(
+                "INSERT INTO paper_orders (order_id, symbol, side, qty, order_type, status)"
+                " VALUES (%s, %s, %s, 100, 1, %s)",
+                [f"held-read-{symbol}", symbol, side, status],
+            )
+
+    def test_reads_positions_and_pending_buys_only(self):
+        self._position("9981", 100)
+        self._position("9982", 0)
+        self._order("9983", 1, "pending")
+        self._order("9984", 2, "pending")
+        self._order("9985", 1, "filled")
+        with _db_connection() as con:
+            con.execute(
+                "INSERT INTO paper_short_positions (symbol, qty, avg_short_price)"
+                " VALUES ('9986', 100, 1000.0)"
+            )
+        self._order("9987.T", 1, "pending")
+
+        held = load_held_symbols()
+
+        assert {"9981", "9983", "9987"} <= held
+        assert not {"9982", "9984", "9985", "9986", "9987.T"} & held
 
 
 class TestLoadRuleBestAll:

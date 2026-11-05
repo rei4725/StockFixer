@@ -88,6 +88,17 @@ def _insert_short(symbol: str, qty: int, avg: float, updated_at: str = "2026-03-
         )
 
 
+def _insert_pending_short(symbol: str, qty: int) -> None:
+    """symbol の約定待ちの SHORT の注文を1件足す"""
+    with _db_connection() as con:
+        con.execute(
+            "INSERT INTO paper_orders (order_id, market, symbol, side, qty, price, "
+            "order_type, status, created_at) "
+            "VALUES ('o1', 'jp', %s, %s, %s, 0, 1, 'pending', CURRENT_TIMESTAMP)",
+            [symbol, int(OrderSide.SHORT), qty],
+        )
+
+
 def _by_symbol(positions: list[dict]) -> dict[str, dict]:
     return {p["symbol"]: p for p in positions}
 
@@ -185,13 +196,7 @@ class TestGetShortPositionsRowIsolation:
     def test_failed_row_with_pending_short_is_not_coverable(self):
         """約定待ちを持つ行でも、落ちたら行の株数の全部を約定待ちとして返す"""
         _insert_short(_BROKEN, 150, 1200.0)
-        with _db_connection() as con:
-            con.execute(
-                "INSERT INTO paper_orders (order_id, market, symbol, side, qty, price, "
-                "order_type, status, created_at) "
-                "VALUES ('o1', 'jp', %s, %s, 50, 0, 1, 'pending', CURRENT_TIMESTAMP)",
-                [_BROKEN, int(OrderSide.SHORT)],
-            )
+        _insert_pending_short(_BROKEN, 50)
         pos = _broker(broken_close=True).get_short_positions()[0]
         assert pos["qty"] == 150
         assert pos["pending_qty"] == 150
@@ -244,6 +249,36 @@ class TestSlTpOnRowFailure:
     def test_short_stop_fires_without_covering_failed_row(self):
         _insert_short(_BROKEN, 100, 900.0)
         _insert_short(_HEALTHY, 200, 900.0)  # 1020 は売値から +13%
-        triggered, _ = self._run(_broker(broken_close=True))
+        triggered, stats = self._run(_broker(broken_close=True))
         assert triggered == {_HEALTHY}
         assert self._ordered(OrderSide.SHORT_COVER) == {_HEALTHY}
+        assert stats["sl_tp_unevaluable_symbols"] == [_BROKEN]  # 落ちた行は知らせに載せる（#1601）
+
+    def test_failed_short_with_partial_pending_is_unevaluable(self):
+        """約定待ちを持つ行でも、落ちたら評価できない保有として知らせに載せる（#1601）"""
+        _insert_short(_BROKEN, 150, 900.0)
+        _insert_pending_short(_BROKEN, 50)
+        triggered, stats = self._run(_broker(broken_close=True))
+        assert triggered == set()
+        assert self._ordered(OrderSide.SHORT_COVER) == set()
+        assert stats["sl_tp_unevaluable_symbols"] == [_BROKEN]
+
+    def test_pending_only_short_is_not_unevaluable(self):
+        """約定待ちだけの空売りは返済する分が無く、判定の対象に入らない（#1225・#1601）"""
+        _insert_short(_HEALTHY, 100, 900.0)
+        _insert_pending_short(_HEALTHY, 100)
+        triggered, stats = self._run(_broker())
+        assert triggered == set()
+        assert self._ordered(OrderSide.SHORT_COVER) == set()
+        assert "sl_tp_unevaluable_symbols" not in stats
+
+    def test_pending_only_short_without_price_is_not_unevaluable(self):
+        """現在値が NaN でも、行の処理が通った約定待ちだけの空売りは載せない（#1601）"""
+        _insert_short(_HEALTHY, 100, 900.0)
+        _insert_pending_short(_HEALTHY, 100)
+        broker = _broker()
+        broker._market_data.get_ohlcv.side_effect = RuntimeError("株価を取れない")
+        triggered, stats = self._run(broker)
+        assert triggered == set()
+        assert self._ordered(OrderSide.SHORT_COVER) == set()
+        assert "sl_tp_unevaluable_symbols" not in stats
