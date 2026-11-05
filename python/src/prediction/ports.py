@@ -10,6 +10,8 @@ from typing import Any, List, Optional, Protocol, Tuple, Union, runtime_checkabl
 
 import pandas as pd
 
+from src.domain.ports import NotificationPort
+
 
 @runtime_checkable
 class MarketDataPort(Protocol):
@@ -41,6 +43,18 @@ class MarketDataPort(Protocol):
 
 
 _port: Optional[MarketDataPort] = None
+_notification_port: Optional[NotificationPort] = None
+
+
+def set_notification_port(port: NotificationPort) -> None:
+    """学習の知らせの送り先を注入する（orchestration の合成ルートから呼ぶ）。"""
+    global _notification_port
+    _notification_port = port
+
+
+def get_notification_port() -> Optional[NotificationPort]:
+    """注入済みの NotificationPort を返す。未注入なら None（知らせずログだけにする）。"""
+    return _notification_port
 
 
 def set_market_data_port(port: MarketDataPort) -> None:

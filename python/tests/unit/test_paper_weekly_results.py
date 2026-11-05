@@ -367,13 +367,13 @@ class TestWritePaperWeeklyResults(unittest.TestCase):
 
 
 class TestWeeklyReportCallsPaperResults(unittest.TestCase):
-    """週のレポートの道が週の成績を書き、失敗しても止まらないこと"""
+    """週のレポートの道が週の成績を書き、失敗しても段を止めず、最後に失敗にすること"""
 
     @patch("src.trading.paper_equity.write_paper_weekly_results", side_effect=RuntimeError("x"))
-    def test_failure_does_not_propagate(self, mock_write):
+    def test_failure_returns_false(self, mock_write):
         from src.orchestration.jobs.weekly import run_weekly_paper_results
 
-        run_weekly_paper_results()  # 例外が外に出ないこと
+        self.assertFalse(run_weekly_paper_results())  # 例外は出さず成否を返すこと（#1582）
         mock_write.assert_called_once()
 
     @patch("src.reporting.discord.discord_utils.send_webhook_text")
@@ -394,7 +394,7 @@ class TestWeeklyReportCallsPaperResults(unittest.TestCase):
         """知らせの送信が落ちても、例外が外に出ないこと（#999）"""
         from src.orchestration.jobs.weekly import run_weekly_paper_results
 
-        run_weekly_paper_results()
+        self.assertFalse(run_weekly_paper_results())
         mock_send.assert_called_once()
 
     @patch("src.reporting.discord.discord_utils.send_webhook_text")
@@ -403,7 +403,7 @@ class TestWeeklyReportCallsPaperResults(unittest.TestCase):
         """書き出しが終わった回は、失敗の知らせを送らないこと（#999）"""
         from src.orchestration.jobs.weekly import run_weekly_paper_results
 
-        run_weekly_paper_results()
+        self.assertTrue(run_weekly_paper_results())
         mock_write.assert_called_once()
         mock_send.assert_not_called()
 
@@ -430,10 +430,14 @@ class TestWeeklyReportCallsPaperResults(unittest.TestCase):
         mock_write,
         mock_send,
     ):
-        """書き出しが落ちても、週のレポートと外れの分析が走り、ジョブは例外を上げないこと（#999）"""
+        """書き出しが落ちても、週のレポートと外れの分析が走り、最後に失敗にすること（#999・#1582）"""
+        from src.orchestration.job_errors import NonRetryableJobError
         from src.orchestration.jobs.weekly import run_weekly_report
 
-        run_weekly_report()
+        week_rows = pd.DataFrame([{"symbol": "7203"}])
+        with patch("src.prediction.db.load_weekly_accuracy_summary", return_value=week_rows):
+            with self.assertRaises(NonRetryableJobError):
+                run_weekly_report()
         mock_report.assert_called_once()
         mock_miss_summary.assert_called_once()
         mock_write.assert_called_once()
