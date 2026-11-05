@@ -2,7 +2,7 @@
 
 週次は、引けたはずの足が無ければ判定せず投げて補完に乗せる。日次は、足が遅れた回の noop で
 判定の時刻を進めず、遅れて届いた足を次の回が判定する。足が2営業日以上古い回は投げて知らせに
-乗せる(#1620)。
+乗せる(#1620)。判定する足の並びの途中の営業日の足が欠けた回も、投げて知らせに乗せる(#1633)。
 """
 
 from dataclasses import asdict, replace
@@ -76,8 +76,14 @@ def _holding(executed_at: datetime, reason: str = "daily_noop") -> RegimeLeverag
     )
 
 
-def _port(last_bar: str, closes: tuple = (500.0, 500.0), lows: dict | None = None) -> MagicMock:
-    """last_bar の日までの日足を返す口。closes は最初と最後の終値、lows は日ごとの安値"""
+def _port(
+    last_bar: str,
+    closes: tuple = (500.0, 500.0),
+    lows: dict | None = None,
+    without: tuple = (),
+) -> MagicMock:
+    """last_bar の日までの日足を返す口。closes は最初と最後の終値、lows は日ごとの安値、
+    without は足の無い日"""
     idx = pd.bdate_range(end=last_bar, periods=260)
     prices = pd.Series(np.linspace(closes[0], closes[1], 260), index=idx)
     low = prices - 2
@@ -87,7 +93,7 @@ def _port(last_bar: str, closes: tuple = (500.0, 500.0), lows: dict | None = Non
     port.get_stock_data.return_value = pd.DataFrame(
         {"Open": prices, "High": prices + 2, "Low": low, "Close": prices, "Volume": 1_000_000},
         index=idx,
-    )
+    ).drop(index=[pd.Timestamp(day) for day in without])
     port.get_forex_data.return_value = pd.DataFrame({"Close": [_RATE]}, index=[_FRESH_FX_BAR])
     return port
 
@@ -106,8 +112,11 @@ def _run_weekly(port: MagicMock, moment: datetime, snapshot) -> tuple:
 class _DailyBook:
     """日次の回を続けて動かす。書いた行を次の回が読むように、最新の行を覚えておく"""
 
-    def __init__(self, snapshot: RegimeLeverageSnapshot) -> None:
+    def __init__(
+        self, snapshot: RegimeLeverageSnapshot, last_daily_check: datetime | None = None
+    ) -> None:
         self.latest = snapshot
+        self.last_daily_check = last_daily_check
         self.inserted: list[RegimeLeverageDecision] = []
 
     def run(self, port: MagicMock, moment: datetime) -> RegimeLeverageDecision:
@@ -120,7 +129,7 @@ class _DailyBook:
         with (
             patch(f"{_SERVICE}.datetime", _clock(moment)),
             patch(f"{_SERVICE}.get_latest_snapshot", side_effect=lambda: self.latest),
-            patch(f"{_SERVICE}.get_last_daily_check_at", return_value=None),
+            patch(f"{_SERVICE}.get_last_daily_check_at", return_value=self.last_daily_check),
             patch(f"{_SERVICE}.insert_snapshot", side_effect=_insert),
         ):
             decision = run_regime_leverage_daily_margin_check(port)
@@ -370,3 +379,132 @@ def test_daily_unheld_returns_none_even_when_bars_are_old():
 
     port.get_stock_data.assert_not_called()
     mock_insert.assert_not_called()
+
+
+# 11/3(火)の足が欠けた表。水曜の足まで届き、木曜 07:30 JST の回で判定する
+_GAP_DAY = "2026-11-03"
+_GAP_LAST_BAR = "2026-11-04"
+_GAP_MOMENT = datetime(2026, 11, 5, 7, 30, tzinfo=_JST)
+# 火曜 11/3 07:30 JST の回で月曜 11/2 の足まで判定済み
+_CHECKED_MONDAY = datetime(2026, 11, 2, 22, 30)
+# 月曜 11/2 07:30 JST の回で金曜 10/30 の足まで判定済み
+_CHECKED_FRIDAY = datetime(2026, 11, 1, 22, 30)
+
+
+@pytest.mark.parametrize("checked_at", [_CHECKED_MONDAY, _CHECKED_FRIDAY])
+def test_daily_raises_without_insert_when_middle_bar_is_missing(checked_at):
+    """前の回と届いた足の間、または足と足の間の1営業日が欠けたら、行を書かず投げること(#1633)"""
+    book = _DailyBook(_holding(checked_at))
+    latest = book.latest
+
+    with pytest.raises(RuntimeError, match=_GAP_DAY):
+        book.run(_port(_GAP_LAST_BAR, without=(_GAP_DAY,)), _GAP_MOMENT)
+
+    assert book.inserted == []
+    assert book.latest is latest
+
+
+def test_daily_raises_for_missing_bar_when_latest_row_is_weekly():
+    """最新の行が週次の行でも、前の日次の回の後の欠けを見つけて投げること"""
+    book = _DailyBook(_holding(datetime(2026, 11, 3), "weekly_noop"), _CHECKED_MONDAY)
+
+    with pytest.raises(RuntimeError, match=_GAP_DAY):
+        book.run(_port(_GAP_LAST_BAR, without=(_GAP_DAY,)), _GAP_MOMENT)
+
+    assert book.inserted == []
+
+
+def test_daily_raises_for_missing_bar_when_last_bar_is_one_day_late():
+    """最後の足が1営業日遅れの回でも、途中の欠けがあれば投げること"""
+    book = _DailyBook(_holding(_CHECKED_MONDAY))
+    friday_morning = datetime(2026, 11, 6, 7, 30, tzinfo=_JST)
+
+    with pytest.raises(RuntimeError, match=_GAP_DAY):
+        book.run(_port(_GAP_LAST_BAR, without=(_GAP_DAY,)), friday_morning)
+
+    assert book.inserted == []
+
+
+@pytest.mark.parametrize(
+    "low, reason",
+    [(_STOP_LOW, "initial_stop"), (_MARGIN_CALL_LOW, "margin_call")],
+)
+def test_daily_judges_missing_day_low_after_bar_arrives(low, reason):
+    """投げた回は判定の時刻を進めず、欠けた足が届いた回がその日の安値を判定すること"""
+    book = _DailyBook(_holding(_CHECKED_MONDAY))
+
+    with pytest.raises(RuntimeError):
+        book.run(_port(_GAP_LAST_BAR, without=(_GAP_DAY,)), _GAP_MOMENT)
+
+    decision = book.run(
+        _port(_GAP_LAST_BAR, lows={_GAP_DAY: low}),
+        datetime(2026, 11, 5, 7, 45, tzinfo=_JST),
+    )
+    assert decision.reason == reason
+    assert decision.spy_price_usd == low
+
+
+@pytest.mark.parametrize("low_day", ["2026-11-02", _GAP_LAST_BAR])
+def test_daily_exits_on_hand_bars_even_when_middle_bar_is_missing(low_day):
+    """途中の足が欠けていても、手元の足で決済に当たれば投げずに決済を書くこと"""
+    book = _DailyBook(_holding(_CHECKED_FRIDAY))
+
+    decision = book.run(
+        _port(_GAP_LAST_BAR, lows={low_day: _STOP_LOW}, without=(_GAP_DAY,)),
+        _GAP_MOMENT,
+    )
+
+    assert decision.reason == "initial_stop"
+    assert book.inserted == [decision]
+
+
+@pytest.mark.parametrize(
+    "checked_at, last_bar, without, moment",
+    [
+        # 週末: 土曜 11/7 07:30 JST の回で金曜の足まで判定済み。月曜 11/9 の足が届いた
+        (
+            datetime(2026, 11, 6, 22, 30),
+            "2026-11-09",
+            (),
+            datetime(2026, 11, 10, 7, 30, tzinfo=_JST),
+        ),
+        # Labor Day 9/7: 金曜 9/4 の足の次が火曜 9/8 の足
+        (
+            datetime(2026, 9, 4, 22, 30),
+            "2026-09-08",
+            ("2026-09-07",),
+            datetime(2026, 9, 9, 7, 30, tzinfo=_JST),
+        ),
+        # Labor Day をまたぐ2本を同じ回で判定する
+        (
+            datetime(2026, 9, 3, 22, 30),
+            "2026-09-08",
+            ("2026-09-07",),
+            datetime(2026, 9, 9, 7, 30, tzinfo=_JST),
+        ),
+        # 感謝祭 11/26: 水曜 11/25 の足の次が金曜 11/27 の足
+        (
+            datetime(2026, 11, 24, 22, 30),
+            "2026-11-27",
+            ("2026-11-26",),
+            datetime(2026, 11, 28, 7, 30, tzinfo=_JST),
+        ),
+        # Good Friday 4/3 と週末: 木曜 4/2 の足の次が月曜 4/6 の足
+        (
+            datetime(2026, 4, 1, 22, 30),
+            "2026-04-06",
+            ("2026-04-03",),
+            datetime(2026, 4, 7, 7, 30, tzinfo=_JST),
+        ),
+    ],
+)
+def test_daily_does_not_count_weekend_or_market_holiday_as_missing(
+    checked_at, last_bar, without, moment
+):
+    """週末と米国の休場をまたぐ足の並びは欠けに数えず、今までどおり行を書くこと"""
+    book = _DailyBook(_holding(checked_at))
+
+    decision = book.run(_port(last_bar, without=without), moment)
+
+    assert decision.reason == "daily_noop"
+    assert book.inserted == [decision]
