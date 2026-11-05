@@ -8,6 +8,7 @@ from typing import Optional
 
 import pandas as pd
 
+from config.settings import STALE_BARS_MAX_WEEKDAYS
 from src.market_data.loader import _CROSS_ASSET_TICKERS
 from src.market_data.macro_features import _ADDITIONAL_MACRO_TICKERS
 from src.utils.logger import get_logger
@@ -33,6 +34,71 @@ def missing_macro_columns(
             continue
         missing += [col for col in tickers if col not in frame.columns]
     return missing
+
+
+def stale_macro_columns(
+    cross_asset: Optional[pd.DataFrame],
+    additional_macro: Optional[pd.DataFrame],
+    last_bar: pd.Timestamp,
+) -> dict[str, str]:
+    """
+    最後の値の日が銘柄の最後の足の日より線を超えて古い列と、その日を返す（#1622）。
+
+    止まったティッカーの列は表に残り、直近の行が NaN になる。結合の ffill で止まった日の値に
+    埋まるので、列の有無では分からない。値が1つも無い列は最後の日を「なし」とする。
+    銘柄の足は市場ごとに休場が違うため、休場を数え分けず平日で数える。
+    """
+    bar_day = _naive_day(last_bar)
+    stale: dict[str, str] = {}
+    for frame in (cross_asset, additional_macro):
+        if frame is None or frame.empty:
+            continue  # 欠けた列は missing_macro_columns が見る
+        for col in frame.columns:
+            last_valid = frame[col].last_valid_index()
+            if last_valid is None:
+                stale[col] = "なし"
+                continue
+            day = _naive_day(last_valid)
+            behind = len(pd.bdate_range(day + pd.Timedelta(days=1), bar_day))
+            if behind > STALE_BARS_MAX_WEEKDAYS:
+                stale[col] = day.strftime("%Y-%m-%d")
+    return stale
+
+
+def macro_columns_unusable(
+    cross_asset: Optional[pd.DataFrame],
+    additional_macro: Optional[pd.DataFrame],
+    last_bar: pd.Timestamp,
+    market: str,
+    symbol: str,
+) -> bool:
+    """欠けた列か止まった列があれば WARNING を出して True を返す（#1491・#1499・#1622）。"""
+    missing = missing_macro_columns(cross_asset, additional_macro)
+    if missing:
+        # 一部の列だけ取れた銘柄は、欠けた列が予想の道で0に埋まる
+        logger.warning(
+            f"相場の指標の列が欠けたため特徴量生成をスキップ: {market}/{symbol} "
+            f"（欠けた列 {missing}）"
+        )
+        return True
+    stale = stale_macro_columns(cross_asset, additional_macro, last_bar)
+    if stale:
+        # 止まった日の値が前方補完され、予想と発注の VIX に新しい日付の行として入る
+        logger.warning(
+            f"相場の指標の列が止まったため特徴量生成をスキップ: {market}/{symbol} "
+            f"（銘柄の最後の足 {_naive_day(last_bar).strftime('%Y-%m-%d')}、"
+            f"平日で {STALE_BARS_MAX_WEEKDAYS}日より古い列と最後の日 {stale}）"
+        )
+        return True
+    return False
+
+
+def _naive_day(moment: pd.Timestamp) -> pd.Timestamp:
+    """タイムゾーンを外した、時刻なしの日付を返す。"""
+    day = pd.Timestamp(moment)
+    if day.tzinfo is not None:
+        day = day.tz_localize(None)
+    return day.normalize()
 
 
 def join_macro_frame(
