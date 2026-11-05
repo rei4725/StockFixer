@@ -1,8 +1,11 @@
 """米国の取引所(NYSE)の休場日の判定と、営業日の判定(#1608)
 
 定まった規則の休場だけを計算で持つ。年ごとの表にしないのは、Good Friday を含む規則が
-年で変わらず、表の足し忘れで週次の判定が止まるのを防ぐため。大統領の国葬のような臨時の
-休場は入らない(その日は足が届かないのと同じに扱われ、判定の呼び出し側が失敗を知らせる)。
+年で変わらず、表の足し忘れで週次の判定が止まるのを防ぐため。
+
+大統領の国葬のような臨時の休場は規則で計算できないので、_SPECIAL_CLOSURES に日付で持つ
+(#1651)。新しい臨時の休場は、NYSE の公表を見て人の手でその日を _SPECIAL_CLOSURES に足す。
+足すまでのその日は足が届かないのと同じに扱われ、判定の呼び出し側が失敗を知らせる。
 """
 
 from datetime import date, timedelta
@@ -11,6 +14,12 @@ _MONDAY = 0
 _THURSDAY = 3
 _SATURDAY = 5
 _SUNDAY = 6
+
+_SPECIAL_CLOSURES = frozenset(
+    {
+        date(2025, 1, 9),  # カーター元大統領の服喪の日
+    }
+)
 
 
 def _nth_weekday(year: int, month: int, weekday: int, nth: int) -> date:
@@ -70,7 +79,7 @@ def _holidays(year: int) -> frozenset[date]:
 
 def is_us_market_holiday(day: date) -> bool:
     """土日以外で米国の取引所が休む日なら True。"""
-    return day in _holidays(day.year)
+    return day in _SPECIAL_CLOSURES or day in _holidays(day.year)
 
 
 def is_us_business_day(day: date) -> bool:
