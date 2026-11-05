@@ -4,7 +4,7 @@ import json
 import os
 import sys
 from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -152,9 +152,18 @@ def test_sunday_recovery_counts_in_same_week_and_stops_after_success(tmp_path):
     assert manager.should_recover(_JOB_ID, now=now) is False
 
 
+class _SaturdayRun(datetime):
+    """now() が土曜 11/7 06:30 JST(= UTC 11/6 21:30)を返す datetime"""
+
+    @classmethod
+    def now(cls, tz=None):  # type: ignore[no-untyped-def, override]
+        moment = datetime(2026, 11, 6, 21, 30, tzinfo=timezone.utc)
+        return moment.replace(tzinfo=None) if tz is None else moment.astimezone(tz)
+
+
 def _market_port(start_price: float, end_price: float) -> MagicMock:
-    """start_price から end_price まで一直線に動いた SPY の足を返す口"""
-    idx = pd.bdate_range("2025-01-01", periods=260)
+    """start_price から end_price まで一直線に動いた、金曜 11/6 で終わる SPY の足を返す口"""
+    idx = pd.bdate_range(end="2026-11-06", periods=260)
     prices = pd.Series(np.linspace(start_price, end_price, 260), index=idx)
     port = MagicMock()
     port.get_stock_data.return_value = pd.DataFrame(
@@ -182,6 +191,7 @@ def _run_twice(port: MagicMock, first: RegimeLeverageSnapshot | None) -> list:
 
     base = "src.trading.regime_leverage_strategy.service"
     with (
+        patch(f"{base}.datetime", _SaturdayRun),
         patch(f"{base}.get_latest_snapshot", side_effect=lambda: latest["snapshot"]),
         patch(f"{base}.insert_snapshot", side_effect=_insert),
     ):
