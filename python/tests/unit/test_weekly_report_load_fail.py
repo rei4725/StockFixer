@@ -4,8 +4,10 @@ from contextlib import nullcontext
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
+import pytest
 
 from src.infrastructure.persistence.analytics_query import PostgresAnalyticsQuery
+from src.orchestration.job_errors import NonRetryableJobError
 from src.orchestration.jobs.weekly import run_weekly_report
 from src.prediction.db import load_weekly_accuracy_summary, save_weekly_accuracy_snapshot
 
@@ -50,13 +52,19 @@ def _run(mock_notice: MagicMock, mock_report: MagicMock, mock_save: MagicMock) -
         run_weekly_report()
 
 
+def _run_failing(mock_notice: MagicMock, mock_report: MagicMock, mock_save: MagicMock) -> None:
+    """本体の段が落ちる回は、知らせの後にジョブの失敗になる（#1582）"""
+    with pytest.raises(NonRetryableJobError, match="週のレポート本体"):
+        _run(mock_notice, mock_report, mock_save)
+
+
 @patch("src.prediction.db.load_drift_summary", return_value=_DRIFT_DF)
 @patch(f"{_ACC}._db_connection", return_value=nullcontext(MagicMock()))
 @patch(f"{_ACC}.pd.read_sql", side_effect=RuntimeError("could not write to disk"))
 def test_weekly_summary_read_failure_sends_notice(mock_read_sql, mock_con, mock_drift):
     """週の記録の読み込みが落ちた週は、スナップショットを保存せず失敗を知らせる。"""
     mock_notice, mock_report, mock_save = MagicMock(), MagicMock(), MagicMock()
-    _run(mock_notice, mock_report, mock_save)
+    _run_failing(mock_notice, mock_report, mock_save)
 
     mock_save.assert_not_called()
     mock_report.assert_not_called()
@@ -72,7 +80,7 @@ def test_weekly_summary_read_failure_sends_notice(mock_read_sql, mock_con, mock_
 def test_drift_read_failure_sends_notice(mock_read_sql, mock_con, mock_week):
     """drift の読み込みが落ちた週は「精度データなし」で黙らず失敗を知らせる。"""
     mock_notice, mock_report, mock_save = MagicMock(), MagicMock(), MagicMock()
-    _run(mock_notice, mock_report, mock_save)
+    _run_failing(mock_notice, mock_report, mock_save)
 
     mock_save.assert_not_called()
     mock_report.assert_not_called()
@@ -84,12 +92,13 @@ def test_drift_read_failure_sends_notice(mock_read_sql, mock_con, mock_week):
 
 @patch(f"{_ACC}._db_connection", side_effect=lambda: nullcontext(MagicMock()))
 @patch(f"{_ACC}.pd.read_sql", return_value=pd.DataFrame())
-def test_no_rows_week_does_not_notify(mock_read_sql, mock_con):
-    """読めて0行の週は今までどおり例外にならず、レポートの段まで進む。"""
+def test_no_rows_week_notifies_and_continues(mock_read_sql, mock_con):
+    """読めて0行の週は例外にならず、0行を知らせてレポートの段まで進む（#1582）。"""
     mock_notice, mock_report, mock_save = MagicMock(), MagicMock(), MagicMock()
     _run(mock_notice, mock_report, mock_save)
 
-    mock_notice.assert_not_called()
+    mock_notice.assert_called_once()
+    assert "⚠️ 週の精度の記録が0行" in mock_notice.call_args[0][0]
     mock_save.assert_called_once()
     assert mock_save.call_args.args[1].empty
     mock_report.assert_called_once()
@@ -103,7 +112,7 @@ def test_no_rows_week_does_not_notify(mock_read_sql, mock_con):
 def test_snapshot_save_failure_sends_notice(mock_insert, mock_con, mock_week, mock_drift):
     """週の記録の保存が落ちた週は、黙らず失敗を1回知らせる（#1328）。"""
     mock_notice, mock_report = MagicMock(), MagicMock()
-    _run(mock_notice, mock_report, save_weekly_accuracy_snapshot)
+    _run_failing(mock_notice, mock_report, save_weekly_accuracy_snapshot)
 
     mock_insert.assert_called_once()
     mock_report.assert_not_called()
