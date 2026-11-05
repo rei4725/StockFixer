@@ -2,18 +2,21 @@
 
 import unittest
 from contextlib import ExitStack
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pandas as pd
 
 from src.utils.alert_service import (
     DRIFT_RENOTIFY_DAYS,
     DRIFT_WARN_THRESHOLD,
+    AlertResult,
     check_drift_warn_rule,
     decide_drift_notice,
+    run_conditional_notification,
 )
 
 _KEY_DRIFT = "alert.drift_warn_streak"
+_KEY_NOTIFIED = "alert.drift_warn_streak.notified"
 
 
 def _row(symbol: str, mae: float) -> dict:
@@ -128,6 +131,8 @@ class TestNoticeOnlyOnChange(_StoreTestCase):
     def _day(self, n_bad: int) -> str:
         self._run_day(n_bad)
         result = check_drift_warn_rule()
+        # 印は送れた後に進むので、知らせまで通す（#1609）
+        run_conditional_notification(results=[result], notifier=Mock(return_value=True))
         return result.details["notice"] if result.triggered else ""
 
     def test_same_share_is_not_repeated_until_renotify_days(self):
@@ -154,6 +159,65 @@ class TestNoticeOnlyOnChange(_StoreTestCase):
         # 解けた後にまた始まれば、始まった日として知らせる
         notices = [self._day(4) for _ in range(DRIFT_WARN_THRESHOLD)]
         self.assertEqual(notices[-1], "start")
+
+
+class TestMarkFollowsDelivery(_StoreTestCase):
+    """知らせの印は送れた後に進み、送れなかった知らせは次の評価で出直す（#1609）。"""
+
+    def _evaluate(self, n_bad: int, sent: bool) -> str:
+        self._run_day(n_bad)
+        return self._send(sent)
+
+    def _send(self, sent: bool) -> str:
+        result = check_drift_warn_rule()
+        run_conditional_notification(results=[result], notifier=Mock(return_value=sent))
+        return result.details["notice"]
+
+    def _reach_start(self, sent: bool) -> str:
+        notices = [self._evaluate(4, sent) for _ in range(DRIFT_WARN_THRESHOLD)]
+        return notices[-1]
+
+    def test_failed_start_keeps_mark_and_repeats_next_day(self):
+        self.assertEqual(self._reach_start(sent=False), "start")
+        self.assertNotIn(_KEY_NOTIFIED, self.store)
+        self.assertEqual(self._evaluate(4, sent=True), "start")
+
+    def test_failed_start_repeats_on_same_day_rerun(self):
+        self.assertEqual(self._reach_start(sent=False), "start")
+        self.assertEqual(self._send(sent=True), "start")
+
+    def test_failed_resolved_repeats_next_day(self):
+        self.assertEqual(self._reach_start(sent=True), "start")
+        mark = self.store[_KEY_NOTIFIED]
+        self.assertEqual(self._evaluate(1, sent=False), "resolved")
+        self.assertEqual(self.store[_KEY_NOTIFIED], mark)
+        self.assertEqual(self._evaluate(1, sent=True), "resolved")
+        self.assertEqual(self.store[_KEY_NOTIFIED], "0|0")
+        self.assertEqual(self._evaluate(1, sent=True), "")
+
+    def test_mark_advances_only_on_sent_day(self):
+        self._reach_start(sent=True)
+        self.assertEqual(self.store[_KEY_NOTIFIED], f"{DRIFT_WARN_THRESHOLD}|0.200000")
+        self.assertEqual(self._evaluate(6, sent=False), "worse")
+        self.assertEqual(self.store[_KEY_NOTIFIED], f"{DRIFT_WARN_THRESHOLD}|0.200000")
+        self.assertEqual(self._evaluate(6, sent=True), "worse")
+        self.assertEqual(self.store[_KEY_NOTIFIED], f"{DRIFT_WARN_THRESHOLD + 2}|0.300000")
+
+    def test_evaluation_alone_does_not_touch_mark(self):
+        for _ in range(DRIFT_WARN_THRESHOLD):
+            self._run_day(4)
+        self.assertEqual(check_drift_warn_rule().details["notice"], "start")
+        self.assertNotIn(_KEY_NOTIFIED, self.store)
+
+    def test_other_rule_sent_leaves_silent_drift_mark(self):
+        self._reach_start(sent=True)
+        mark = self.store[_KEY_NOTIFIED]
+        self._run_day(4)
+        silent = check_drift_warn_rule()
+        self.assertFalse(silent.triggered)
+        other = AlertResult("NF-303-1", "パイプライン失敗", True, 2, 2)
+        run_conditional_notification(results=[other, silent], notifier=Mock(return_value=True))
+        self.assertEqual(self.store[_KEY_NOTIFIED], mark)
 
 
 class TestDecideDriftNotice(unittest.TestCase):
