@@ -21,6 +21,26 @@ class TestLoadTargetSymbols(unittest.TestCase):
             json.dump(data, f)
         return path
 
+    @patch("src.watchlist.batch_runner.get_held_symbol_keys")
+    @patch("src.watchlist.batch_runner.get_watchlist_path")
+    def test_include_held_adds_symbols_outside_watchlist(self, mock_path, mock_held):
+        """保有・空売りの銘柄は include_held のときだけ足され、重ならないこと（#1615）"""
+        mock_held.return_value = [("jp", "9984"), ("us", "AAPL"), ("us", "AVB")]
+        with tempfile.TemporaryDirectory() as tmp:
+            mock_path.return_value = self._write_watchlist(
+                tmp, {"us": ["AAPL"], "jp": ["7203"], "unused": []}
+            )
+
+            daily = load_target_symbols(include_held=True)
+            default = load_target_symbols()
+
+        self.assertEqual(
+            [(t.market, t.symbol) for t in daily],
+            [("us", "AAPL"), ("jp", "7203"), ("jp", "9984"), ("us", "AVB")],
+        )
+        self.assertEqual([(t.market, t.symbol) for t in default], [("us", "AAPL"), ("jp", "7203")])
+        mock_held.assert_called_once_with()
+
     @patch("src.watchlist.batch_runner.get_watchlist_path")
     def test_returns_symbol_task_list(self, mock_path):
         """JSON から SymbolTask リストが生成されること"""
