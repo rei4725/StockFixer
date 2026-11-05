@@ -9,6 +9,7 @@ from functools import wraps
 from typing import TYPE_CHECKING, Callable, Optional
 
 from src.domain.jp_market_holidays import is_jp_business_day
+from src.orchestration.jobs.jp_holiday_table_notice import notify_jp_holiday_table_if_needed
 from src.orchestration.types import PipelineStage
 from src.utils.japan_time import now_jst
 from src.utils.logger import get_logger
@@ -149,6 +150,7 @@ def _skip_if_jp_market_closed(job: str) -> bool:
     """
     today = now_jst().date()
     if is_jp_business_day(today):
+        notify_jp_holiday_table_if_needed(today)
         return False
     logger.info("%s: 東証の休場日 %s のため発注しない", job, today.isoformat())
     return True
