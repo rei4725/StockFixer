@@ -74,6 +74,8 @@ def send_optimization_completion(success: int, failed: int, skipped: int = 0) ->
     """
     週次バックテスト最適化完了通知を Discord Webhook に送信する。
 
+    成功が 0 銘柄の回は何も保存していないため、保存先の案内は出さない（#1594）。
+
     Args:
         success: 最適化成功銘柄数
         failed: 最適化失敗銘柄数
@@ -91,13 +93,14 @@ def send_optimization_completion(success: int, failed: int, skipped: int = 0) ->
     ]
     if skipped > 0:
         fields.append({"name": "⏭️ スキップ", "value": f"{skipped:,} 銘柄", "inline": True})
-    fields.append(
-        {
-            "name": "💾 保存先",
-            "value": "最適パラメータを `config/optimal_params.json` に保存しました",
-            "inline": False,
-        }
-    )
+    if success > 0:
+        fields.append(
+            {
+                "name": "💾 保存先",
+                "value": "最適パラメータを `config/optimal_params.json` に保存しました",
+                "inline": False,
+            }
+        )
     return send_status_fields(spec, fields)
 
 

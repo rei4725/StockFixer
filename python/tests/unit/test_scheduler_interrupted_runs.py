@@ -155,15 +155,18 @@ def test_interrupted_recovery_stops_after_two_consecutive_interruptions(tmp_path
 
 @pytest.mark.parametrize(
     "interrupted, expected_recover, expected_count",
-    [(2, True, 0), (40, True, 0), (41, False, 1)],
+    [(2, True, 0), (40, True, 0), (41, True, 1), (42, False, 2)],
 )
 def test_weekly_optimization_recovers_up_to_configured_limit(
     tmp_path, interrupted, expected_recover, expected_count
 ):
-    """週の最適化の消えた回は設定の上限まで数えず、超えた分は数えて補完を止めること（#1522）"""
+    """週の最適化の消えた回は設定の上限まで数えず、超えた分は数えて補完を止めること（#1522）
+
+    回の上限は失敗の回の補完のため 2 回である（#1581）。
+    """
     from run_scheduler import SCHEDULE_CONFIG
 
-    assert SCHEDULE_CONFIG["weekly_optimization"]["max_executions_per_period"] == 1
+    assert SCHEDULE_CONFIG["weekly_optimization"]["max_executions_per_period"] == 2
     assert SCHEDULE_CONFIG["weekly_optimization"]["max_interrupted_reruns_per_period"] == 40
     state_path = tmp_path / "state.json"
     for i in range(interrupted):
@@ -184,24 +187,25 @@ def test_weekly_optimization_finished_run_still_counts_against_limit(tmp_path):
     for i in range(3):
         _write_started(state_path, "weekly_optimization", "2026-W45", f"run-{i}", f"boot-{i}")
     events = json.loads(state_path.read_text(encoding="utf-8"))["events"]
-    events.append(
-        {
-            "job_id": "weekly_optimization",
-            "status": "error",
-            "period_key": "2026-W45",
-            "run_id": "run-failed",
-        }
-    )
+    for run_id in ("run-failed-1", "run-failed-2"):
+        events.append(
+            {
+                "job_id": "weekly_optimization",
+                "status": "error",
+                "period_key": "2026-W45",
+                "run_id": run_id,
+            }
+        )
     state_path.write_text(json.dumps({"events": events}), encoding="utf-8")
     manager = SchedulerQueueManager(SCHEDULE_CONFIG, state_file_path=str(state_path))
 
     now = datetime(2026, 11, 4, 2, 0, tzinfo=manager.tz)
-    assert manager.get_execution_count("weekly_optimization", "2026-W45") == 1
+    assert manager.get_execution_count("weekly_optimization", "2026-W45") == 2
     assert manager.should_recover("weekly_optimization", now=now) is False
 
 
 def test_weekly_optimization_stops_after_limit_of_interruptions(tmp_path):
-    """定時の1回と補完の40回で計41回動き、41回目も消えたらそれ以上は補完しないこと（#1534）"""
+    """消えた回の許しの40回と回の上限の2回で計42回動き、それ以上は補完しないこと（#1534・#1581）"""
     from run_scheduler import SCHEDULE_CONFIG
 
     state_path = tmp_path / "state.json"
@@ -235,7 +239,7 @@ def test_weekly_optimization_stops_after_limit_of_interruptions(tmp_path):
         manager.run_job("weekly_optimization", reason="recovery")
         state_path.write_bytes(snapshot["state"])
 
-    assert calls["n"] == 41
+    assert calls["n"] == 42
 
 
 def test_only_weekly_optimization_has_more_interrupted_reruns(tmp_path):

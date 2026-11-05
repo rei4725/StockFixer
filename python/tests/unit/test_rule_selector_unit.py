@@ -9,6 +9,8 @@ import unittest
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pandas as pd
+
 
 def _make_watchlist_file(market: str, symbols: list[str]) -> str:
     f = tempfile.NamedTemporaryFile(suffix=".json", delete=False, mode="w", encoding="utf-8")
@@ -512,6 +514,100 @@ class TestEvaluateAllSymbols(unittest.TestCase):
             result = evaluate_all_symbols("jp", "2024-01-01", "2024-12-31")
         for key in ("evaluated", "effective", "skipped"):
             self.assertIn(key, result)
+
+
+class _RaisingRule:
+    name = "raising"
+    description = "raising"
+
+    def generate_signal(self, df: pd.DataFrame) -> pd.Series:
+        raise ValueError("rule bug")
+
+
+class _QuietRule:
+    """Buy の信号を出さないルール。"""
+
+    name = "quiet"
+    description = "quiet"
+
+    def generate_signal(self, df: pd.DataFrame) -> pd.Series:
+        return pd.Series(0, index=df.index)
+
+
+def _port(frame: pd.DataFrame) -> MagicMock:
+    port = MagicMock()
+    port.download.return_value = frame
+    port.add_technical_indicators.side_effect = lambda df: df
+    return port
+
+
+def _prices(close: float) -> pd.DataFrame:
+    index = pd.date_range("2024-01-01", periods=5, freq="D")
+    return pd.DataFrame({"Close": [close] * 5}, index=index)
+
+
+class TestUnevaluableSymbolKeepsRuleBest(unittest.TestCase):
+    """評価できなかった銘柄は errors に数え、前の rule_best の行を残す（#1588）。"""
+
+    def _evaluate(self, frame: pd.DataFrame, rules: list[Any]) -> tuple[dict[str, Any], Any, Any]:
+        from src.backtest.rule_selector import evaluate_all_symbols
+
+        with (
+            patch(
+                "src.backtest.rule_backtester.get_backtest_data_port",
+                return_value=_port(frame),
+            ),
+            patch("src.backtest.rule_selector.ALL_RULES", rules),
+            patch("src.backtest.rule_selector.delete_rule_best") as delete,
+            patch("src.backtest.rule_selector.upsert_rule_best") as upsert,
+        ):
+            summary = evaluate_all_symbols("jp", "2024-01-01", "2024-12-31", symbols=["7203"])
+        return summary, delete, upsert
+
+    def _assert_counted_as_error(self, summary: dict[str, Any], delete: Any, upsert: Any) -> None:
+        self.assertEqual(summary["errors"], 1)
+        self.assertEqual(summary["skipped"], 0)
+        self.assertEqual(summary["evaluated"], 0)
+        delete.assert_not_called()
+        upsert.assert_not_called()
+
+    def test_rule_exception_counts_as_error_and_keeps_row(self):
+        summary, delete, upsert = self._evaluate(_prices(100.0), [_QuietRule(), _RaisingRule()])
+        self._assert_counted_as_error(summary, delete, upsert)
+
+    def test_all_nan_close_counts_as_error_and_keeps_row(self):
+        summary, delete, upsert = self._evaluate(_prices(float("nan")), [_QuietRule()])
+        self._assert_counted_as_error(summary, delete, upsert)
+
+    def test_no_buy_signal_stays_skipped_and_drops_row(self):
+        summary, delete, upsert = self._evaluate(_prices(100.0), [_QuietRule()])
+        self.assertEqual(summary["errors"], 0)
+        self.assertEqual(summary["skipped"], 1)
+        delete.assert_called_once_with(market="jp", symbol="7203")
+        upsert.assert_not_called()
+
+
+class TestRunRuleBacktestWithoutRaising(unittest.TestCase):
+    """raise_on_fetch_failure=False の呼び手には、今までどおり空の結果を返す。"""
+
+    def _run(self, frame: pd.DataFrame, rule: Any) -> list[dict[str, Any]]:
+        from src.backtest.rule_backtester import run_rule_backtest
+
+        with patch(
+            "src.backtest.rule_backtester.get_backtest_data_port",
+            return_value=_port(frame),
+        ):
+            return run_rule_backtest("jp", "7203", [rule], "2024-01-01", "2024-12-31")
+
+    def test_rule_exception_returns_empty_result(self):
+        results = self._run(_prices(100.0), _RaisingRule())
+        self.assertEqual([r["rule"] for r in results], ["raising"])
+        self.assertEqual(results[0]["win_rate"], 0.0)
+
+    def test_all_nan_close_returns_empty_result(self):
+        results = self._run(_prices(float("nan")), _QuietRule())
+        self.assertEqual([r["rule"] for r in results], ["quiet"])
+        self.assertEqual(results[0]["net_profit"], 0.0)
 
 
 if __name__ == "__main__":

@@ -33,6 +33,8 @@ def finish_rule_evaluation(summary: dict[str, int], market: str) -> None:
     失敗した銘柄は rule_best_by_symbol が前の週の行のまま（または行が無いまま）
     16:30 のルールの発注に使われるため、知らせを送った後に NonRetryableJobError を投げる。
     やり直しても同じ銘柄が同じく落ち、同じ知らせが重なるだけなのでリトライはさせない。
+    評価が0銘柄の回（ウォッチリストに市場が無い・空）も、何も評価していないのに
+    成功に見えないよう同じく失敗にする（#1588）。
     """
     errors = summary.get("errors", 0)
     try:
@@ -51,3 +53,6 @@ def finish_rule_evaluation(summary: dict[str, int], market: str) -> None:
     if errors > 0:
         logger.error("週次ルール評価で評価の失敗が %d 件あった", errors)
         raise NonRetryableJobError(f"週次ルール評価で評価の失敗が {errors} 件あった")
+    if summary["evaluated"] == 0:
+        logger.error("週次ルール評価の評価が 0 銘柄だった")
+        raise NonRetryableJobError("週次ルール評価の評価が 0 銘柄だった")
