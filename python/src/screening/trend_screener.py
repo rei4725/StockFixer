@@ -9,6 +9,7 @@ multibagger 候補を抽出・ランキングする。
 
 from __future__ import annotations
 
+import math
 from typing import Optional
 
 import pandas as pd
@@ -34,14 +35,25 @@ class ScreeningDataError(RuntimeError):
     """スクリーンの材料が読めず、候補の有無を判定できなかったことを表す。"""
 
 
+def _drop_invalid_closes(df: pd.DataFrame) -> pd.DataFrame:
+    """終値が NaN・無限・0以下の足を除く。
+
+    窓の途中の1本の欠けで、その足から約252営業日 52週高値が NaN になり、銘柄が知らせなく
+    候補から消えるのを防ぐ。窓と分母はすべて残った足だけで計算する(#1597)。
+    """
+    close = df["Close"].astype(float)
+    return df[close.gt(0) & close.lt(math.inf)]
+
+
 def _compute_metrics(df: pd.DataFrame) -> Optional[dict]:
     """1銘柄の長期トレンド指標を Close 列から計算する。
 
-    計算に必要なデータが不足している場合は None を返す。
+    終値が不正な足を除いた残りの足で計算し、残りが足りない場合は None を返す。
     """
     if df is None or df.empty or "Close" not in df.columns:
         return None
 
+    df = _drop_invalid_closes(df)
     close = df["Close"].astype(float).reset_index(drop=True)
     if len(close) < 252:
         return None
