@@ -76,11 +76,14 @@ def test_interrupted_run_logs_warning_once(tmp_path, caplog):
     assert len(warnings) == 1
 
 
-@pytest.mark.parametrize("job_id", ["daily_auto_order", "daily_rule_signals"])
-def test_order_jobs_interrupted_by_previous_boot_are_not_recovered(tmp_path, job_id):
-    """発注のジョブは、前の起動で消えた回も今までどおり補完しないこと"""
+def test_auto_order_interrupted_by_previous_boot_is_not_recovered(tmp_path):
+    """8:50 の自動発注は、前の起動で消えた回も今までどおり補完しないこと
+
+    16:30 のルールの発注は補完する（#1652。test_rule_signals_interrupted_rerun.py）。
+    """
     from run_scheduler import SCHEDULE_CONFIG
 
+    job_id = "daily_auto_order"
     assert not SCHEDULE_CONFIG[job_id].get("rerun_if_interrupted", False)
     state_path = tmp_path / "state.json"
     _write_started(state_path, job_id, "2026-10-20", "run-a", "previous-boot")
