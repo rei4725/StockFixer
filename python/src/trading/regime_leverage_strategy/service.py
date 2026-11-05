@@ -307,6 +307,19 @@ def _us_business_days_behind(last_bar: date, expected_bar: date) -> int:
     )
 
 
+def _missing_business_days(df: pd.DataFrame, since: datetime, last_bar: date) -> list[date]:
+    """since の後に引けたはずで last_bar より前の米国の営業日のうち、df に足が無い日を返す。"""
+    since_aware = _as_aware(since)
+    first_day = since_aware.astimezone(_US_MARKET_TZ).date()
+    bar_days = {pd.Timestamp(ts).date() for ts in df.index}
+    days = (first_day + timedelta(days=n) for n in range((last_bar - first_day).days))
+    return [
+        day
+        for day in days
+        if is_us_business_day(day) and _bar_close_at(day) > since_aware and day not in bar_days
+    ]
+
+
 def select_unchecked_closed_bars(
     df: pd.DataFrame, last_checked_at: Optional[datetime], now: datetime
 ) -> pd.DataFrame:
@@ -432,8 +445,10 @@ def run_regime_leverage_daily_margin_check(
     足があり、その手前の足で決済に当たらない場合はRuntimeErrorを送出する(損切り・
     マージンコールの判定が飛んだことをスケジューラーのリトライ・Discord通知に乗せるため。
     #860・#1228)。引けたはずの足が届いていない回の noop は行を書かない(#1608)。その足が
-    2営業日以上古い回は、判定の止まりに気づけるようRuntimeErrorを送出する(#1620)。手元の足で
-    決済に当たる回は、足が古くても決済を書く。
+    2営業日以上古い回は、判定の止まりに気づけるようRuntimeErrorを送出する(#1620)。前の回の後の
+    営業日の足が、後の足より手前で丸ごと欠けた回も、欠けた日の安値を判定しないまま進まないよう
+    行を書かずRuntimeErrorを送出する(#1633)。手元の足で決済に当たる回は、足が古くても、途中の
+    足が欠けていても決済を書く。
     """
     from config.settings import REGIME_LEVERAGE_SYMBOL
 
@@ -460,6 +475,8 @@ def run_regime_leverage_daily_margin_check(
 
     # 前の回の後に引けた足を古い順に判定し、最初に決済となった足で決済する(#891)。
     # 安値の欠けた足に当たったら、その手前までで決済に当たらなければ投げる(#1228)
+    last_bar = _last_bar_date(bars)
+    missing = _missing_business_days(df, last_checked_at, last_bar) if last_checked_at else []
     day_lows_usd = [float(low) for low in bars["Low"]]
     for low in day_lows_usd:
         if pd.isna(low):
@@ -469,11 +486,23 @@ def run_regime_leverage_daily_margin_check(
             )
         decision = decide_daily_check(snapshot, low, usdjpy_rate, now)
         if decision.action == "exit":
+            if missing:
+                logger.warning(
+                    "レジームレバレッジ戦略(日次): 途中の足が欠けたまま決済を書きます(missing=%s)",
+                    missing,
+                )
             insert_snapshot(decision)
             return decision
+    # 行を書くと判定の時刻が欠けた日の後へ進み、後で足が届いても判定しない。止まり続けないよう
+    # 手元の足の決済は上で書き、決済に当たらない回は投げて知らせに乗せる(#1633)
+    if missing:
+        raise RuntimeError(
+            "レジームレバレッジ戦略(日次): 途中の営業日の足が欠けているため判定を中止しました"
+            f"(missing={[day.isoformat() for day in missing]}, last_bar={last_bar},"
+            f" shares={snapshot.shares})"
+        )
     # noop の行の時刻は次の回の「前の回」になる。引けたはずの足が届いていない回に行を書くと、
     # 遅れて届いた足の引けがその時刻より前になり、次の回が判定しない(#1608)
-    last_bar = _last_bar_date(bars)
     expected_bar = _latest_expected_bar_date(now)
     if last_bar < expected_bar:
         # 1回の遅れは次の回が判定するが、足が止まると古い足の noop が続き、損切りとマージン
