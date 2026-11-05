@@ -242,7 +242,7 @@ def run_daily_pipeline():
         evaluate_and_notify_alerts(prediction_violation_ids, prediction_details)
         logger.info("[6/6] 運用アラート評価完了")
     except Exception as e:
-        # 落ちた日は NF-303 の警報がどれも評価されないため知らせる（#1368）
+        # 落ちた日・送れなかった日は NF-303 の警報が届かないため知らせる（#1368, #1609）
         _handle_stage_error(PipelineStage.NON_CRITICAL, "[6/6] 運用アラート評価", e)
         _notify_stage_failure("[6/6] 運用アラート評価", e)
 

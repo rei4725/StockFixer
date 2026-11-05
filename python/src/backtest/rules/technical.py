@@ -229,8 +229,9 @@ class VolatilityBreakoutRule:
         return signal
 
 
+# 週次のルール評価の候補。VolumeBreakoutRule は実績の edge が買い売りともマイナスなので外した
+# （#1614）。rule_best に行が残る銘柄と戦略ファクトリーのため、クラスは残す。
 ALL_RULES: list = [
-    VolumeBreakoutRule(),
     EMAMomentumRule(),
     RSIContrarianRule(),
     BollingerBandRule(),

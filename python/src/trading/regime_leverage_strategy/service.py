@@ -21,6 +21,7 @@ from config.settings import (
     REGIME_LEVERAGE_SLIPPAGE_PCT,
 )
 from src.domain.ports import MarketDataPort
+from src.domain.us_market_holidays import is_us_business_day
 from src.trading.regime_leverage_strategy.indicators import build_weekly_frame
 from src.trading.regime_leverage_strategy.repository import (
     get_last_daily_check_at,
@@ -281,6 +282,19 @@ def _bar_close_at(bar_date: object) -> datetime:
     return datetime.combine(day, _US_MARKET_CLOSE, tzinfo=_US_MARKET_TZ)
 
 
+def _latest_expected_bar_date(now: datetime) -> date:
+    """now までに引けたはずの一番新しい米国の営業日を返す(金曜が休場の週は木曜。#1608)。"""
+    now_aware = _as_aware(now)
+    day = now_aware.astimezone(_US_MARKET_TZ).date()
+    while not is_us_business_day(day) or _bar_close_at(day) > now_aware:
+        day -= timedelta(days=1)
+    return day
+
+
+def _last_bar_date(df: pd.DataFrame) -> date:
+    return pd.Timestamp(df.index[-1]).date()
+
+
 def select_unchecked_closed_bars(
     df: pd.DataFrame, last_checked_at: Optional[datetime], now: datetime
 ) -> pd.DataFrame:
@@ -335,6 +349,10 @@ def run_regime_leverage_weekly_check(
     判定が飛んだことをスケジューラーのリトライ・補完・Discord通知に乗せる。#870・#1583)。
     MA200/ATR14は欠けた行を除いた日足から計算するため、NaNになるのは最後の行が欠けたときか
     データが足りないとき(#1228)。
+
+    最後の足が引けたはずの米国の営業日より古い回も、同じ理由で判定せず、DBにも書かずに
+    RuntimeErrorを送出する(足が届いていない回を前の足で判定して成功で終えると、補完に
+    乗らない。#1608)。金曜が休場の週は木曜の足がその週の最後の足なので失敗にしない。
     """
     from config.settings import REGIME_LEVERAGE_SYMBOL
 
@@ -352,6 +370,13 @@ def run_regime_leverage_weekly_check(
             f"(ma200_usd={ma200_usd}, atr14_usd={atr14_usd}, shares={shares})"
         )
     now = datetime.now(_JST)
+    last_bar = _last_bar_date(df)
+    expected_bar = _latest_expected_bar_date(now)
+    if last_bar < expected_bar:
+        raise RuntimeError(
+            "レジームレバレッジ戦略(週次): 引けたはずの足が届いていないため判定を中止しました"
+            f"(last_bar={last_bar}, expected={expected_bar})"
+        )
 
     if snapshot is None or snapshot.shares <= 0:
         from config.settings import REGIME_LEVERAGE_INITIAL_CAPITAL_JPY
@@ -377,7 +402,7 @@ def run_regime_leverage_daily_margin_check(
     未保有の場合はNoneを返す(何もしない)。保有中に当日安値(Low)がNaN(データ劣化時)の
     足があり、その手前の足で決済に当たらない場合はRuntimeErrorを送出する(損切り・
     マージンコールの判定が飛んだことをスケジューラーのリトライ・Discord通知に乗せるため。
-    #860・#1228)。
+    #860・#1228)。引けたはずの足が届いていない回の noop は行を書かない(#1608)。
     """
     from config.settings import REGIME_LEVERAGE_SYMBOL
 
@@ -415,5 +440,17 @@ def run_regime_leverage_daily_margin_check(
         if decision.action == "exit":
             insert_snapshot(decision)
             return decision
+    # noop の行の時刻は次の回の「前の回」になる。引けたはずの足が届いていない回に行を書くと、
+    # 遅れて届いた足の引けがその時刻より前になり、次の回が判定しない(#1608)
+    last_bar = _last_bar_date(bars)
+    expected_bar = _latest_expected_bar_date(now)
+    if last_bar < expected_bar:
+        logger.warning(
+            "レジームレバレッジ戦略(日次): 足が届いていないため判定の時刻を進めません"
+            "(last_bar=%s, expected=%s)",
+            last_bar,
+            expected_bar,
+        )
+        return decision
     insert_snapshot(decision)
     return decision

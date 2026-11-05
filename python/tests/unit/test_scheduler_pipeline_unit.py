@@ -13,6 +13,7 @@ import pytest
 
 from src.domain.types import SymbolTask
 from src.infrastructure.persistence.order_run_repository import PostgresOrderRunSink
+from src.orchestration.job_errors import NonRetryableJobError
 from src.orchestration.jobs import drift_check as drift_check_module
 from src.orchestration.scheduler import run_daily_auto_order, run_daily_drift_check
 
@@ -504,14 +505,19 @@ class TestRunWeeklyReport(unittest.TestCase):
     @patch("src.reporting.discord.discord_utils.send_weekly_report")
     @patch("src.infrastructure.persistence.analytics_query.PostgresAnalyticsQuery")
     @patch("src.prediction.db.load_drift_summary", side_effect=Exception("DB エラー"))
-    def test_exception_does_not_propagate(self, mock_drift, _mock_cls, mock_send, _mock_notice):
+    def test_exception_fails_job_after_notice(self, mock_drift, _mock_cls, mock_send, _mock_notice):
         from src.orchestration.scheduler import run_weekly_report
 
-        run_weekly_report()  # 例外が外に出ないこと
+        with self.assertRaises(NonRetryableJobError):  # 知らせの後にジョブの失敗になること（#1582）
+            run_weekly_report()
         mock_drift.assert_called_once()
         mock_send.assert_not_called()
 
 
+@patch(
+    "src.prediction.db.load_weekly_accuracy_summary",
+    return_value=pd.DataFrame([{"symbol": "7203"}]),
+)
 @patch("src.orchestration.jobs.weekly.run_weekly_paper_results")
 @patch("src.reporting.discord.discord_utils.send_miss_analysis_summary")
 @patch("src.prediction.miss_analysis.run_miss_analysis_batch")
@@ -520,7 +526,7 @@ class TestRunWeeklyReport(unittest.TestCase):
 @patch("src.infrastructure.llm.factory.get_text_review_port")
 @patch("src.infrastructure.persistence.analytics_query.PostgresAnalyticsQuery")
 class TestRunWeeklyReportFailureNotice(unittest.TestCase):
-    """週のレポートの段が落ちた回に失敗の知らせを送ること（#1007）"""
+    """週のレポートの段が落ちた回に失敗の知らせを送り、最後に失敗にすること（#1007・#1582）"""
 
     @patch("src.reporting.discord.discord_utils.send_webhook_text")
     @patch("src.reporting.discord.discord_utils.send_weekly_report")
@@ -534,7 +540,8 @@ class TestRunWeeklyReportFailureNotice(unittest.TestCase):
         from src.orchestration.jobs.weekly import run_weekly_report
 
         mock_miss_summary, mock_paper = mocks[5], mocks[6]
-        run_weekly_report()
+        with self.assertRaises(NonRetryableJobError):
+            run_weekly_report()
         mock_report.assert_not_called()
         mock_notice.assert_called_once()
         text = mock_notice.call_args[0][0]
@@ -555,7 +562,8 @@ class TestRunWeeklyReportFailureNotice(unittest.TestCase):
         from src.orchestration.jobs.weekly import run_weekly_report
 
         mock_miss_summary, mock_paper = mocks[5], mocks[6]
-        run_weekly_report()
+        with self.assertRaises(NonRetryableJobError):
+            run_weekly_report()
         mock_notice.assert_called_once()
         text = mock_notice.call_args[0][0]
         self.assertIn("❌ 週次レポート生成失敗", text)
@@ -572,11 +580,13 @@ class TestRunWeeklyReportFailureNotice(unittest.TestCase):
         side_effect=RuntimeError("送信エラー"),
     )
     @patch("src.prediction.db.save_weekly_accuracy_snapshot")
-    def test_notice_failure_does_not_propagate(self, _mock_save, _mock_report, mock_notice, *mocks):
+    def test_notice_failure_keeps_job_failure(self, _mock_save, _mock_report, mock_notice, *mocks):
+        """知らせが落ちても、知らせの例外でなくジョブの失敗で終わること"""
         from src.orchestration.jobs.weekly import run_weekly_report
 
         mock_paper = mocks[6]
-        run_weekly_report()  # 例外が外に出ないこと
+        with self.assertRaises(NonRetryableJobError):
+            run_weekly_report()
         mock_notice.assert_called_once()
         mock_paper.assert_called_once()
 

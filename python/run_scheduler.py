@@ -259,6 +259,8 @@ def _job_listener(event):
 # long_recovery: True のジョブは、補完を専用のポーリング（recovery_long_job_poller）で判定する。
 # 補完が日をまたいで戻らなくても、締めの無いほかのジョブの補完をふさがないため（#1542）。
 # 締め（recovery_until）のあるジョブには付けない。締めのポーリングが判定するので印は効かない。
+# recovery_min_gap_minutes: 同じ期間の前の回の終わりからこの分数の間は補完しない。回数の上限を
+# 短い障害の間に使い切らないため。欄の無いジョブは今までどおり間を空けない（#1607）。
 SCHEDULE_CONFIG = {
     "daily_pipeline": {
         "func": job_daily_pipeline,
@@ -515,6 +517,9 @@ SCHEDULE_CONFIG = {
         "recovery_delay_minutes": 60,
         # 失敗の回は同じ月の補完に任せる（すぐの呼び直しはしない）
         "max_executions_per_period": 3,
+        # 失敗は数秒で終わるので、間が無いと障害の1時間余りで3回を使い切る。12時間なら定時の後の
+        # 16時ごろと翌朝4時ごろに補完し、丸1日の障害まで受ける。月の判定は1日遅れても差し支えない
+        "recovery_min_gap_minutes": 720,
         "description": "毎月1日 04:00 - multibagger 月次スクリーン + 保有/撤退アラート",
     },
     "nightly_strategy_factory": {
