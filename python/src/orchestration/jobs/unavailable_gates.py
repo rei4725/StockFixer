@@ -6,6 +6,7 @@ daily.py からの責務分離（ファイル行数ガード対策）。
 from collections import Counter
 from typing import TYPE_CHECKING, Optional
 
+from src.market_data.batch_db_write import has_price_step
 from src.orchestration.job_errors import NonRetryableJobError
 from src.orchestration.jobs.common import _notify_stage_failure
 from src.utils.logger import get_logger
@@ -16,7 +17,7 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-# 取得のエラーの知らせに並べる銘柄の上限（#1256）
+# 取得のエラーと段差の足の知らせに並べる銘柄の上限（#1256・#1643）
 _FETCH_ERROR_NOTICE_SYMBOL_LIMIT = 5
 
 # 止まった相場の指標の知らせに並べる「列と最後の日」の組の上限（#1634）。[1/6] の知らせは
@@ -41,6 +42,7 @@ def _raise_if_fetch_mostly_unavailable(
     線の下でも取得のエラーが1件以上あれば、件数と先頭の銘柄を1回知らせる（#1256）。
     毎日あるスキップ（足の止まった銘柄）は知らせに数えない。
     相場の指標の列が止まった銘柄は、線の上なら止める文に原因を足し、線の下なら1回知らせる（#1634）。
+    段差の足で外した銘柄は、線の下でも1件以上あれば1回知らせる（#1643）。
     """
     from config.settings import DAILY_FETCH_MAX_UNAVAILABLE_RATIO
 
@@ -56,6 +58,7 @@ def _raise_if_fetch_mostly_unavailable(
     _raise_if_order_market_mostly_unavailable(market_totals or {}, batch_result)
     _notify_fetch_errors(total, batch_result)
     _notify_macro_stale(total, batch_result)
+    _notify_price_step_skips(total, batch_result)
 
 
 def _raise_if_order_market_mostly_unavailable(
@@ -107,6 +110,14 @@ def _skipped_market(skipped: object) -> Optional[str]:
     return getattr(skipped, "market", None)
 
 
+def _head_symbols(names: list[str]) -> str:
+    """知らせに載せる先頭の銘柄の文を返す。上限より多ければ「ほか」を足す。"""
+    head = ", ".join(names[:_FETCH_ERROR_NOTICE_SYMBOL_LIMIT])
+    if len(names) > _FETCH_ERROR_NOTICE_SYMBOL_LIMIT:
+        head += " ほか"
+    return head
+
+
 def _notify_fetch_errors(total: int, batch_result: "BatchResult") -> None:
     """取得のエラーが1件以上なら、件数と先頭の銘柄（市場つき）を知らせる（#1256）。
 
@@ -116,10 +127,7 @@ def _notify_fetch_errors(total: int, batch_result: "BatchResult") -> None:
     if not batch_result.failed:
         return
     names = [f"{f.market}_{f.symbol}" for f in batch_result.failed]
-    head = ", ".join(names[:_FETCH_ERROR_NOTICE_SYMBOL_LIMIT])
-    if len(names) > _FETCH_ERROR_NOTICE_SYMBOL_LIMIT:
-        head += " ほか"
-    message = f"取得のエラーが {len(names)} 件あった（対象 {total}）: {head}"
+    message = f"取得のエラーが {len(names)} 件あった（対象 {total}）: {_head_symbols(names)}"
     logger.warning("[1/6] データ取得: %s", message)
     _notify_stage_failure("[1/6] データ取得の一部の銘柄", RuntimeError(message))
 
@@ -158,6 +166,29 @@ def _notify_macro_stale(total: int, batch_result: "BatchResult") -> None:
     message = f"{summary}（対象 {total}）"
     logger.warning("[1/6] データ取得: %s", message)
     _notify_stage_failure("[1/6] データ取得の相場の指標", RuntimeError(message))
+
+
+def _notify_price_step_skips(total: int, batch_result: "BatchResult") -> None:
+    """段差の足で外した銘柄が1件以上なら、件数と先頭の銘柄（市場つき）を知らせる（#1643）。
+
+    段差の銘柄は予想・学習・新規の候補から外れて stock_features も消えるが、銘柄ごとの
+    WARNING のログと読み手の無い data_quality_log にしか残らず、数日気づかなかった（#1492）。
+    毎日あるスキップ（足の止まった銘柄）と違って品質の結果を持つので、それで見分ける。
+    並びは取得の終わった順によらないよう、市場と銘柄の順にする。
+    """
+    names = sorted(
+        f"{s['market']}_{s['symbol']}"
+        for s in batch_result.skipped
+        if isinstance(s, dict) and has_price_step(s.get("quality_result"))
+    )
+    if not names:
+        return
+    message = (
+        f"全期間を取り直しても段差の足が残り、予想と学習から外した銘柄が {len(names)} 件あった"
+        f"（対象 {total}）: {_head_symbols(names)}"
+    )
+    logger.warning("[1/6] データ取得: %s", message)
+    _notify_stage_failure("[1/6] データ取得の段差の足", RuntimeError(message))
 
 
 def _rule_signals_mostly_unavailable(batch: "RuleSignalBatch") -> bool:

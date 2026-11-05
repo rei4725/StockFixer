@@ -4,7 +4,7 @@ import json
 import os
 import sys
 from collections.abc import Iterator
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -170,12 +170,14 @@ def test_recovery_stops_after_second_failure(tmp_path, mocks):
 
     with pytest.raises(NonRetryableJobError):
         manager.run_job(_JOB_ID, reason="scheduled")
-    assert manager.should_recover(_JOB_ID, now=now) is True
+    later = now + timedelta(minutes=720)
+    manager = _manager(tmp_path, later)
+    assert manager.should_recover(_JOB_ID, now=later) is True
     with pytest.raises(NonRetryableJobError):
         manager.run_job(_JOB_ID, reason="recovery")
 
     assert manager.get_execution_count(_JOB_ID, _WEEK_KEY) == 2
-    assert manager.should_recover(_JOB_ID, now=now) is False
+    assert manager.should_recover(_JOB_ID, now=later + timedelta(minutes=720)) is False
 
 
 def _interrupted(index: int) -> dict[str, Any]:
