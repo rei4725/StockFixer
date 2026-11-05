@@ -18,6 +18,7 @@ from config.settings import (
     PERMUTATION_IMPORTANCE_REPEATS,
 )
 from src.domain.sentiment_sources import any_sentiment_source_configured, is_sentiment_feature
+from src.prediction.constant_prediction import check_unified_training
 from src.prediction.db import load_excluded_features, save_feature_selection
 from src.prediction.ports import get_market_data_port
 from src.utils.data_path_utils import ensure_dir, get_models_dir
@@ -355,6 +356,7 @@ def train_unified_model(
     save_path = os.path.join(save_dir, f"{model_name}.joblib")
     model.save_model(save_path)
     logger.info(f"保存完了: {save_path}")
+    check_unified_training(model, train_eval_set)
 
     logger.info(f"=== 統合モデル学習完了 (horizon={horizon}d) ===")
 
