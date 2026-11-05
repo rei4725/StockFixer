@@ -740,6 +740,11 @@ def _recover_job(queue_manager, job_id: str, now) -> None:
         queue_manager.run_job(job_id, reason="recovery")
         return
 
+    # 週の最適化が回数の上限で補完をやめた週を知らせる。例外は返さない（#1647）
+    from src.orchestration.scheduler_cap_notice import notify_recovery_cap
+
+    notify_recovery_cap(queue_manager, job_id, now)
+
     # 前日分の補完（コンテナ再起動などで当日スケジュール前に前日分が欠落した場合）
     missed_periods = queue_manager.get_missed_past_periods(job_id, lookback_days=2, now=now)
     for missed_period_key in missed_periods:
