@@ -23,7 +23,10 @@ logger = get_logger(__name__)
 
 
 class RuleBacktestDataError(RuntimeError):
-    """値段の取得に失敗した（None・空）ことを、有効ルールなしと分けて伝える（#1270）。"""
+    """評価できなかったことを、有効ルールなしと分けて伝える（#1270・#1588）。
+
+    値段が取れない（None・空）、終値が全部欠けている、ルールが例外で落ちたときに投げる。
+    """
 
 
 def _make_backtester(
@@ -105,8 +108,9 @@ def run_rule_backtest(
         stop_loss_pct: ストップロス率（Noneで無効）
         take_profit_pct: テイクプロフィット率（Noneで無効）
         dynamic_slippage: 出来高に応じた市場インパクトを数えるか（既定 True）
-        raise_on_fetch_failure: 値段の取得の失敗を空のリストでなく
-            RuleBacktestDataError で返すか（既定 False）
+        raise_on_fetch_failure: 評価できなかったことを RuleBacktestDataError で返すか
+            （既定 False）。True なら値段の取得の失敗・終値の全欠け・ルールの例外で投げる。
+            False なら取得の失敗は空のリスト、それ以外は勝率0の結果で返す
 
     Returns:
         各ルールのバックテスト結果リスト（win_rate 降順）
@@ -128,6 +132,10 @@ def run_rule_backtest(
 
     df = _dp.add_technical_indicators(df)
     df = df.dropna(subset=["Close"])
+    if df.empty and raise_on_fetch_failure:
+        # 空の表は Buy 0件に落ち、有効ルールなしと見分けられない（#1588）
+        logger.error(f"終値が全部欠けている: {ticker}")
+        raise RuleBacktestDataError(f"終値が全部欠けている: {ticker}")
 
     logger.info(f"データ取得完了: {len(df)} 行")
 
@@ -177,6 +185,11 @@ def run_rule_backtest(
             )
         except Exception as exc:
             logger.error(f"  [{rule.name}] バックテスト失敗: {exc}", exc_info=True)
+            if raise_on_fetch_failure:
+                # 勝率0の結果にすると有効ルールなしに見え、前の行が消える（#1588）
+                raise RuleBacktestDataError(
+                    f"ルールの評価に失敗: {ticker} {rule.name}: {exc}"
+                ) from exc
             results.append(_empty_result(market, symbol, rule))
 
     results.sort(key=lambda r: (r["win_rate"], r["net_profit"]), reverse=True)
