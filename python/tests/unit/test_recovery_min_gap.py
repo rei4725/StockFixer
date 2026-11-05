@@ -152,7 +152,12 @@ def test_only_the_named_jobs_have_the_gap():
     gapped = {
         job_id for job_id, config in SCHEDULE_CONFIG.items() if "recovery_min_gap_minutes" in config
     }
-    assert gapped == {"monthly_multibagger", "weekly_rule_evaluation", "regime_leverage_weekly"}
+    assert gapped == {
+        "monthly_multibagger",
+        "weekly_rule_evaluation",
+        "regime_leverage_weekly",
+        "weekly_optimization",
+    }
 
 
 def test_monthly_multibagger_recovery_settings_are_unchanged():
@@ -171,13 +176,14 @@ def test_regime_leverage_weekly_recovery_settings_are_unchanged():
     assert config["recovery_min_gap_minutes"] == 240
 
 
-def test_weekly_optimization_recovery_settings_are_unchanged():
+def test_weekly_optimization_recovery_settings():
     from run_scheduler import SCHEDULE_CONFIG
 
     config = SCHEDULE_CONFIG["weekly_optimization"]
     assert config["long_recovery"] is True
+    assert config["max_executions_per_period"] == 2
     assert config["max_interrupted_reruns_per_period"] == 40
-    assert "recovery_min_gap_minutes" not in config
+    assert config["recovery_min_gap_minutes"] == 720
 
 
 def test_monthly_multibagger_keeps_attempts_through_a_short_outage(tmp_path):
@@ -274,3 +280,96 @@ def test_rule_evaluation_success_is_not_recovered(tmp_path):
         manager.run_job(RULE_EVALUATION, reason="scheduled")
 
     assert manager.should_recover(RULE_EVALUATION, now=SUNDAY_RUN + timedelta(hours=5)) is False
+
+
+OPTIMIZATION = "weekly_optimization"
+# 2026-11-04 は水曜（ISO 週 2026-W45）。定時は 01:00
+WEDNESDAY_RUN = datetime(2026, 11, 4, 1, 0, tzinfo=ZoneInfo("Asia/Tokyo"))
+
+
+def _production_manager(tmp_path, job_id: str) -> SchedulerQueueManager:
+    """本物の設定のまま、失敗で落ちるジョブのマネージャを返す。"""
+    from run_scheduler import SCHEDULE_CONFIG
+
+    config = dict(SCHEDULE_CONFIG[job_id])
+    config["func"] = MagicMock(side_effect=NonRetryableJobError("失敗が線を超えた"))
+    return SchedulerQueueManager({job_id: config}, state_file_path=str(tmp_path / "state.json"))
+
+
+def _failed_optimization(manager: SchedulerQueueManager, now: datetime) -> None:
+    with (
+        patch("src.orchestration.scheduler_queue.ping_heartbeat"),
+        patch.object(manager, "now", return_value=now),
+    ):
+        with pytest.raises(NonRetryableJobError):
+            manager.run_job(OPTIMIZATION, reason="scheduled")
+
+
+def _lost_run(
+    manager: SchedulerQueueManager, job_id: str, period_key: str, started: datetime
+) -> None:
+    """前の起動のプロセスで消えた回（終わりの記録の無い started）を足す。"""
+    manager._append_event(
+        {
+            "job_id": job_id,
+            "reason": "recovery",
+            "status": "started",
+            "period_key": period_key,
+            "run_id": f"lost-{started.isoformat()}",
+            "boot_id": "previous-boot",
+            "started_at": isoformat_utc(started),
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    "minutes, expected",
+    [
+        pytest.param(5, False, id="next-poll"),
+        pytest.param(719, False, id="just-before-the-gap-ends"),
+        pytest.param(720, True, id="gap-has-passed"),
+    ],
+)
+def test_weekly_optimization_waits_after_failed_run(tmp_path, minutes, expected):
+    manager = _production_manager(tmp_path, OPTIMIZATION)
+    # 定時の 30 分の遅れより後に終わった回で、間の判定だけを見る
+    failed = WEDNESDAY_RUN + timedelta(hours=2)
+    _failed_optimization(manager, failed)
+
+    now = failed + timedelta(minutes=minutes)
+    assert manager.should_recover(OPTIMIZATION, now=now) is expected
+
+
+def test_weekly_optimization_recovers_right_after_a_lost_run(tmp_path):
+    manager = _production_manager(tmp_path, OPTIMIZATION)
+    started = WEDNESDAY_RUN + timedelta(hours=2)
+    _lost_run(manager, OPTIMIZATION, "2026-W45", started)
+
+    assert manager.should_recover(OPTIMIZATION, now=started + timedelta(minutes=5)) is True
+
+
+def test_weekly_optimization_lost_run_does_not_restart_the_gap_of_a_failed_run(tmp_path):
+    manager = _production_manager(tmp_path, OPTIMIZATION)
+    _failed_optimization(manager, WEDNESDAY_RUN)
+    _lost_run(manager, OPTIMIZATION, "2026-W45", WEDNESDAY_RUN + timedelta(minutes=720))
+
+    now = WEDNESDAY_RUN + timedelta(minutes=725)
+    assert manager.should_recover(OPTIMIZATION, now=now) is True
+
+
+def test_weekly_optimization_lost_run_does_not_shorten_the_gap_of_a_failed_run(tmp_path):
+    manager = _production_manager(tmp_path, OPTIMIZATION)
+    _lost_run(manager, OPTIMIZATION, "2026-W45", WEDNESDAY_RUN)
+    failed = WEDNESDAY_RUN + timedelta(hours=2)
+    _failed_optimization(manager, failed)
+
+    assert manager.should_recover(OPTIMIZATION, now=failed + timedelta(minutes=719)) is False
+    assert manager.should_recover(OPTIMIZATION, now=failed + timedelta(minutes=720)) is True
+
+
+def test_rule_evaluation_recovers_after_a_lost_run_without_the_gap(tmp_path):
+    manager = _production_manager(tmp_path, RULE_EVALUATION)
+    _lost_run(manager, RULE_EVALUATION, "2026-W44", SUNDAY_RUN)
+
+    now = SUNDAY_RUN + timedelta(minutes=65)
+    assert manager.should_recover(RULE_EVALUATION, now=now) is True

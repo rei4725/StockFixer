@@ -261,6 +261,7 @@ def _job_listener(event):
 # 締め（recovery_until）のあるジョブには付けない。締めのポーリングが判定するので印は効かない。
 # recovery_min_gap_minutes: 同じ期間の前の回の終わりからこの分数の間は補完しない。回数の上限を
 # 短い障害の間に使い切らないため。欄の無いジョブは今までどおり間を空けない（#1607）。
+# rerun_if_interrupted のジョブは消えた回の続きをすぐ進めるので、失敗の回だけから数える（#1638）。
 SCHEDULE_CONFIG = {
     "daily_pipeline": {
         "func": job_daily_pipeline,
@@ -375,6 +376,9 @@ SCHEDULE_CONFIG = {
         "recovery_delay_minutes": 30,
         # 結果が空か失敗が線を超えた回の後に、同じ週の補完を1回通す（#1581）
         "max_executions_per_period": 2,
+        # 間が無いと、数時間の DB の障害の中で2回を使い切り、丸1週間の発注が古い閾値と SL/TP で動く。
+        # 失敗の回の12時間後に補完し、丸半日の障害まで受ける（#1638）
+        "recovery_min_gap_minutes": 720,
         "description": "毎週水曜 01:00 - 全銘柄バックテスト最適化",
         "rerun_if_interrupted": True,
         "max_interrupted_reruns_per_period": 40,
