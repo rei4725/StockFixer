@@ -32,6 +32,8 @@ _EXPECTED_KEYS = {
     "n_production",
     "n_challenger",
     "challenger_wins",
+    "challenger_prediction_std",
+    "challenger_constant",
     "fresh_challengers",
     "gate_evaluated",
     "gate_skipped_reason",
@@ -163,6 +165,27 @@ def test_record_when_challenger_loses(models_dir):
     assert record["gate_skipped_reason"] == "challenger_lost"
     assert record["eligible"] is None
     assert record["promoted"] is False
+
+
+def test_constant_challenger_is_recorded_apart_from_a_loss(models_dir):
+    """定数の challenger の週は、負けと分けて記録し、昇格ゲートへ進まない（#1602）。"""
+    shadow = {
+        **_shadow(wins=False),
+        "challenger_hit_rate": 0.61,
+        "challenger_prediction_std": 6e-17,
+        "challenger_constant": True,
+    }
+    mock_promote = MagicMock()
+    with ExitStack() as stack:
+        _run(stack, models_dir, shadow, mock_promote=mock_promote)
+
+    record = _read_record()
+    assert record["gate_skipped_reason"] == "challenger_constant"
+    assert record["challenger_constant"] is True
+    assert record["challenger_prediction_std"] == 6e-17
+    assert record["gate_evaluated"] is False
+    assert record["promoted"] is False
+    mock_promote.assert_not_called()
 
 
 def _no_challenger_rows(trained_at) -> dict:

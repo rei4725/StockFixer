@@ -47,6 +47,7 @@ from src.orchestration.jobs.stale_prediction_notice import notify_stale_predicti
 from src.orchestration.jobs.unavailable_gates import (
     _raise_if_fetch_mostly_unavailable,
     _raise_if_no_effective_rules,
+    _raise_if_order_market_predictions_missing,
     _raise_if_rule_signals_mostly_unavailable,
     _rule_signals_mostly_unavailable,
     order_market_predictions_mostly_missing,
@@ -164,10 +165,8 @@ def run_daily_pipeline():
     requested_models = list(UNIFIED_PREDICTION_MODEL_NAMES)
     loaded_models: list[str] = []
     output_rows: list = []
-    # 保存前に退避しておく前回ラン統計（B-1/B-2/B-3 の急変チェックが使う）。
-    # prediction_results は Delete-Insert のスナップショットテーブルなので、
-    # 保存後に「前回ラン」を探すと今回の保存で上書き済みで見つからない
-    # （毎日 compared_with_previous=False になる、C-1 対策）。
+    # 保存前に退避しておく前回ラン統計（B-1/B-2/B-3 の急変チェックが使う）。prediction_results は
+    # Delete-Insert なので、保存後に探すと上書き済みで見つからない（C-1 対策）。
     # 取得に失敗しても致命的ではない（急変チェックがスキップされるだけ）。
     previous_stats = None
     # 保存の途中や落ちた回で 8:50 の新規が出ないよう、保存し終えるまで印を消しておく（#1394）
@@ -250,6 +249,7 @@ def run_daily_pipeline():
     # 採点の JSON に業種の内訳を書き足す（NON_CRITICAL。[2/6] で作った材料を使う）
     append_accuracy_json_sectors(accuracy_report)
     daily_scoring_stage()
+    _raise_if_order_market_predictions_missing(market_totals, output_rows)  # 補完に乗せる（#1595）
 
     logger.info("=== 日次パイプライン完了 ===")
 
