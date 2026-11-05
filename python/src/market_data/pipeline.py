@@ -505,9 +505,11 @@ def run_batch_pipeline(
 
     from src.domain.types import BatchFailure, BatchResult
     from src.market_data.adapters.edinet_client import reset_edinet_stop
+    from src.market_data.macro_join import reset_macro_stale, take_macro_stale
 
     _TASK_TIMEOUT = 300
     reset_edinet_stop()  # EDINET の打ち切りは回の中だけ。毎回1回目から試す（#1426）
+    reset_macro_stale()  # 止まった列の控えも回の中だけ（#1634）
 
     def _fetch_task(task) -> dict:
         """データ取得＋特徴量生成のみ（DB書き込みなし）"""
@@ -580,6 +582,7 @@ def run_batch_pipeline(
                 failed.append(BatchFailure(market=_m, symbol=_s, error=str(e)))
 
     batch_result = BatchResult(succeeded=succeeded, failed=failed, skipped=skipped)
+    batch_result.macro_stale = take_macro_stale()
 
     if fetch_only:
         _log_pipeline_summary("データ取得（保存なし）", batch_result)
