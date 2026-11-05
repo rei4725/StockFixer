@@ -1,4 +1,5 @@
 import unittest
+from datetime import date
 from unittest.mock import patch
 
 import numpy as np
@@ -11,13 +12,14 @@ from src.screening.trend_screener import (
 )
 
 _N = 300  # 252日以上のデータを確保
+_TODAY = date(2026, 11, 4)  # 水曜。_make_df の足は既定でこの日に終わる
 
 
-def _make_df(closes, volume=1_000_000) -> pd.DataFrame:
+def _make_df(closes, volume=1_000_000, last_day=_TODAY) -> pd.DataFrame:
     """Close 系列から load_raw_ohlcv 風（Date index）DataFrame を作る。"""
     closes = np.asarray(closes, dtype=float)
     n = len(closes)
-    idx = pd.date_range("2024-01-01", periods=n, freq="B")
+    idx = pd.date_range(end=last_day, periods=n, freq="B")
     idx.name = "Date"
     return pd.DataFrame(
         {
@@ -31,9 +33,9 @@ def _make_df(closes, volume=1_000_000) -> pd.DataFrame:
     )
 
 
-def _uptrend(start=10.0, end=100.0, n=_N) -> pd.DataFrame:
+def _uptrend(start=10.0, end=100.0, n=_N, last_day=_TODAY) -> pd.DataFrame:
     """単調上昇（200日線上・上向き・高値圏・高相対強度）。"""
-    return _make_df(np.linspace(start, end, n))
+    return _make_df(np.linspace(start, end, n), last_day=last_day)
 
 
 def _downtrend(start=100.0, end=20.0, n=_N) -> pd.DataFrame:
@@ -60,11 +62,16 @@ def _patch_db(symbols, df_map):
     )
 
 
+def _screen(symbols, df_map, today=_TODAY, **kwargs):
+    """DB と今日の日付をモックしてスクリーンを流す。"""
+    p1, p2 = _patch_db(symbols, df_map)
+    with p1, p2, patch("src.screening.trend_screener._today", return_value=today):
+        return screen_trend_candidates(market="us", **kwargs)
+
+
 class TestScreenTrendCandidates(unittest.TestCase):
     def _run(self, symbols, df_map, **kwargs):
-        p1, p2 = _patch_db(symbols, df_map)
-        with p1, p2:
-            return screen_trend_candidates(market="us", **kwargs)
+        return _screen(symbols, df_map, **kwargs)
 
     def test_uptrend_symbol_is_selected(self):
         """上昇トレンド銘柄が候補に入る。"""
@@ -203,6 +210,94 @@ class TestScreenTrendCandidates(unittest.TestCase):
         df_map = {("us", "UP"): _uptrend(), ("us", "THIN"): _make_df(closes)}
         result = self._run(symbols, df_map, rel_strength_pct=0.0)
         self.assertEqual([c.symbol for c in result], ["UP"])
+
+
+class TestStaleSymbols(unittest.TestCase):
+    """最後の足が基準の日より線を超えて古い銘柄を母集団から外す（#1635）。"""
+
+    def _codes(self, df_map, **kwargs):
+        result = _screen(list(df_map), df_map, rel_strength_pct=0.0, **kwargs)
+        return [c.symbol for c in result]
+
+    def test_stale_symbol_is_dropped_and_counted_in_log(self):
+        """営業日で4日古い銘柄は候補に出ず、外した数がログに出る。"""
+        df_map = {
+            ("us", "UP"): _uptrend(),
+            ("us", "STOP"): _uptrend(end=300.0, last_day=date(2026, 10, 29)),
+        }
+        with self.assertLogs("src.screening.trend_screener", level="WARNING") as logs:
+            codes = self._codes(df_map)
+        self.assertEqual(codes, ["UP"])
+        output = " ".join(logs.output)
+        self.assertIn("外した: 1/2 銘柄", output)
+        self.assertIn("STOP", output)
+
+    def test_symbol_at_the_line_is_kept(self):
+        """営業日で3日古いだけの銘柄は外れない。"""
+        df_map = {("us", "LATE"): _uptrend(last_day=date(2026, 10, 30))}
+        self.assertEqual(self._codes(df_map), ["LATE"])
+
+    def test_weekend_is_not_counted(self):
+        """週末は数えない。日曜の回で火曜の足は3営業日の遅れである。"""
+        df_map = {("us", "LATE"): _uptrend(last_day=date(2026, 11, 3))}
+        self.assertEqual(self._codes(df_map, today=date(2026, 11, 8)), ["LATE"])
+
+    def test_us_holiday_is_not_counted(self):
+        """感謝祭をまたいだだけなら外れない（平日で数えると4日になる）。"""
+        df_map = {("us", "LATE"): _uptrend(last_day=date(2026, 11, 24))}
+        self.assertEqual(self._codes(df_map, today=date(2026, 11, 30)), ["LATE"])
+
+    def test_weekend_and_us_holiday_are_not_counted(self):
+        """週末と労働者の日を続けてまたいでも外れない（平日で数えると4日になる）。"""
+        df_map = {("us", "LATE"): _uptrend(last_day=date(2026, 9, 2))}
+        self.assertEqual(self._codes(df_map, today=date(2026, 9, 8)), ["LATE"])
+
+    def test_last_valid_close_decides_staleness(self):
+        """止まった後の足の終値が NaN なら、その足を新しい足として数えない。"""
+        closes = np.linspace(10.0, 100.0, _N)
+        closes[-4:] = np.nan
+        df_map = {("us", "UP"): _uptrend(), ("us", "NANTAIL"): _make_df(closes)}
+        self.assertEqual(self._codes(df_map), ["UP"])
+
+    def test_as_of_is_the_base_day(self):
+        """as_of を渡すと、今日ではなく as_of を基準に数える。"""
+        as_of = date(2026, 6, 1)
+        df_map = {
+            ("us", "LONG"): _uptrend(n=_N + 200),  # as_of より後の足は切り詰められる
+            ("us", "ENDS"): _uptrend(last_day=as_of),
+            ("us", "STOP"): _uptrend(last_day=date(2026, 5, 26)),
+        }
+        codes = self._codes(df_map, as_of=as_of.isoformat())
+        self.assertEqual(sorted(codes), ["ENDS", "LONG"])
+
+    def test_as_of_with_all_symbols_stale_returns_empty(self):
+        """as_of を渡す回は全銘柄が線より古くても例外にせず、該当なしとする。"""
+        df_map = {("us", "STOP"): _uptrend(last_day=date(2026, 5, 26))}
+        self.assertEqual(self._codes(df_map, as_of="2026-06-01"), [])
+
+    def test_all_symbols_stale_raises(self):
+        """as_of 無しで全銘柄が線より古い回は、成功にせず例外にする。"""
+        df_map = {
+            ("us", "A"): _uptrend(last_day=date(2026, 10, 1)),
+            ("us", "B"): _uptrend(last_day=date(2026, 10, 2)),
+        }
+        with self.assertRaises(ScreeningDataError):
+            self._codes(df_map)
+
+    def test_all_readable_symbols_stale_raises(self):
+        """読めない銘柄があっても、読めた銘柄の全部が線より古ければ例外にする。"""
+        symbols = [("us", "STOP"), ("us", "GONE")]
+        df_map = {("us", "STOP"): _uptrend(last_day=date(2026, 10, 1))}
+        with self.assertRaises(ScreeningDataError):
+            _screen(symbols, df_map, rel_strength_pct=0.0)
+
+    def test_fresh_symbol_failing_gates_does_not_raise(self):
+        """新しい足がゲートで落ちただけなら、取得は止まっておらず該当なしとする。"""
+        df_map = {
+            ("us", "STOP"): _uptrend(last_day=date(2026, 10, 1)),
+            ("us", "DOWN"): _downtrend(),
+        }
+        self.assertEqual(self._codes(df_map), [])
 
 
 class TestComputeMetricsInvalidCloses(unittest.TestCase):
