@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import pandas as pd
@@ -37,6 +38,15 @@ logger = get_logger(__name__)
 # 撤退を意味する PositionEvent.reason（end_of_data は「未撤退で系列末尾」を表す）
 _EXIT_REASONS = {"ma_break", "trail_stop", "thesis_break"}
 
+# 今回の取得に失敗した銘柄の前の行を、質ゲートに使ってよい長さ（as_of からの暦日）。
+# 決算は四半期ごとに出るので、最も長い四半期の 92 日までの行なら、取りこぼす決算は
+# おおむね1回分で済む。残りの 8 日は補完の回のずれの余裕である。
+# 毎月の回で取得が3回続けて落ちた行までが線の内に入り、4回目で外れる
+_FUNDAMENTALS_MAX_AGE_DAYS = 100
+
+# 今回の財務を取れず、前の行で判定した銘柄に候補の表で付ける印
+_PRIOR_ROW_MARK = " ※前の行で判定"
+
 
 @dataclass(frozen=True)
 class _FundamentalsRefresh:
@@ -46,16 +56,30 @@ class _FundamentalsRefresh:
         total: トレンド候補の数。
         failed: 今回の取得・保存ができなかった銘柄の数。
         missing: failed のうち、前の行も無く質ゲートが判定できない銘柄の数。
+        stale_symbols: failed のうち、前の行の as_of が線より古く質ゲートに渡さない銘柄。
+        prior_symbols: failed のうち、線の内の前の行で質ゲートに渡す銘柄。
     """
 
     total: int = 0
     failed: int = 0
     missing: int = 0
+    stale_symbols: frozenset[str] = frozenset()
+    prior_symbols: frozenset[str] = frozenset()
 
     @property
     def all_missing(self) -> bool:
         """候補の全部で財務が無く、質ゲートが1銘柄も判定できないとき真。"""
         return self.total > 0 and self.missing == self.total
+
+    @property
+    def all_failed(self) -> bool:
+        """候補の全部で今回の取得が落ちたとき真。前の行の有無は問わない。"""
+        return self.total > 0 and self.failed == self.total
+
+    @property
+    def all_unjudged(self) -> bool:
+        """行が無いか線より古いかで、候補の全部を質ゲートが判定できないとき真。"""
+        return self.total > 0 and self.missing + len(self.stale_symbols) == self.total
 
 
 def run_monthly_multibagger_screen(market: str = "us", top_n: int = 10) -> dict:
@@ -98,7 +122,9 @@ def run_monthly_multibagger_screen(market: str = "us", top_n: int = 10) -> dict:
         "screen_failed": screen_failed,
         "fundamentals_failed": refresh.failed,
         "fundamentals_missing": refresh.missing,
+        "fundamentals_stale": len(refresh.stale_symbols),
         "fundamentals_all_missing": refresh.all_missing,
+        "fundamentals_all_failed": refresh.all_failed,
         "position_actions": position_actions,
         "skipped_positions": skipped_positions,
         "close_failed": close_failed,
@@ -114,8 +140,9 @@ def raise_if_multibagger_failed(result: dict) -> None:
     同じ失敗と同じ知らせを重ねるだけなので NonRetryableJobError を投げ、補完の回に任せる。
 
     Raises:
-        NonRetryableJobError: スクリーンの失敗・候補の全部で財務が無い・判定できない保有が
-            ある・閉じられなかった EXIT がある・知らせの送信の失敗のどれかがあるとき。
+        NonRetryableJobError: スクリーンの失敗・候補の全部で財務が無い・候補の全部で財務の
+            取得が落ちた・判定できない保有がある・閉じられなかった EXIT がある・知らせの
+            送信の失敗のどれかがあるとき。
     """
     reasons = _failure_reasons(result)
     if reasons:
@@ -131,6 +158,8 @@ def _failure_reasons(result: dict) -> list[str]:
         reasons.append("スクリーンの失敗")
     if result["fundamentals_all_missing"]:
         reasons.append(f"候補の全部で財務が無い {result['fundamentals_missing']} 件")
+    elif result["fundamentals_all_failed"]:
+        reasons.append(f"候補の全部で財務の取得が落ちた {result['fundamentals_failed']} 件")
     if result["skipped_positions"]:
         reasons.append(f"判定できない保有 {len(result['skipped_positions'])} 件")
     if result["close_failed"]:
@@ -150,6 +179,7 @@ def _screen_new_candidates(
     """#433 の最終スクリーン（トレンド + 質ゲート）で新規候補を取得する。
 
     質ゲートは ``stock_fundamentals`` を読むだけなので、その前にトレンド候補の財務を更新する。
+    今回の取得に失敗し、前の行が線より古い銘柄は質ゲートに渡さない。
 
     Returns:
         (新規候補, スクリーンが例外で失敗したか, 財務の更新の結果)
@@ -157,7 +187,7 @@ def _screen_new_candidates(
     try:
         trend = screen_trend_candidates(market=market)
         refresh = _refresh_fundamentals(trend)
-        final = apply_quality_gate(trend)
+        final = apply_quality_gate([c for c in trend if c.symbol not in refresh.stale_symbols])
         return final[:top_n], False, refresh
     except Exception as e:
         logger.error("新規候補スクリーン失敗: %s", e, exc_info=True)
@@ -167,14 +197,39 @@ def _screen_new_candidates(
 def _refresh_fundamentals(trend: list[TrendCandidate]) -> _FundamentalsRefresh:
     """トレンド候補の財務を取得・保存する。1銘柄の失敗で残りの銘柄を止めない。"""
     failed = [c for c in trend if not _refresh_one_fundamental(c)]
-    missing = sum(1 for c in failed if load_fundamentals(c.market, c.symbol) is None)
+    rows = {c.symbol: load_fundamentals(c.market, c.symbol) for c in failed}
+    missing = sum(1 for row in rows.values() if row is None)
+    now = datetime.now(timezone.utc)
+    stale = frozenset(s for s, row in rows.items() if row is not None and _is_stale(row, now))
+    prior = frozenset(s for s, row in rows.items() if row is not None) - stale
     logger.info(
-        "財務更新完了: 成功=%d/%d 件, 判定できず=%d 件",
+        "財務更新完了: 成功=%d/%d 件, 判定できず=%d 件 (行なし=%d, 線より古い=%s), 前の行で判定=%s",
         len(trend) - len(failed),
         len(trend),
+        missing + len(stale),
         missing,
+        sorted(stale),
+        sorted(prior),
     )
-    return _FundamentalsRefresh(total=len(trend), failed=len(failed), missing=missing)
+    return _FundamentalsRefresh(
+        total=len(trend),
+        failed=len(failed),
+        missing=missing,
+        stale_symbols=stale,
+        prior_symbols=prior,
+    )
+
+
+def _is_stale(row: dict, now: datetime) -> bool:
+    """前の行の as_of が線より古いかを返す。
+
+    as_of が読めない行は線の内と確かめられないので、古い行として扱う。列は時差なしの
+    timestamp なので、時差の無い値は UTC として読む（線の長さに比べて時差は無視できる）。
+    """
+    as_of = pd.to_datetime(row.get("as_of"), utc=True, errors="coerce")
+    if pd.isna(as_of):
+        return True
+    return now - as_of > timedelta(days=_FUNDAMENTALS_MAX_AGE_DAYS)
 
 
 def _refresh_one_fundamental(candidate: TrendCandidate) -> bool:
@@ -304,8 +359,8 @@ def _format_message(
 
     判定できなかった保有は「判定できず」として載せ、開いた保有があるときは
     「保有なし」と書かない。スクリーンの失敗は「該当なし」と分けて書く。
-    候補の全部で財務が無いときも「該当なし」と書かず、判定できなかった数を書く。
-    財務を取れなかった銘柄があるときは、その数を添える。
+    候補の全部で財務が無いか線より古いときも「該当なし」と書かず、判定できなかった数を書く。
+    財務を取れなかった銘柄があるときは、その数を添え、前の行で判定した銘柄に表で印を付ける。
     """
     skipped = skipped or []
     refresh = refresh or _FundamentalsRefresh()
@@ -322,14 +377,17 @@ def _format_message(
                 f"{c.symbol:<8}{c.multibagger_score:>8.3f}{c.close:>10.2f}"
                 f"{_pct(c.revenue_cagr_3y):>8}{_pct(c.roe):>8}"
                 f"{symbol_name_suffix(market, c.symbol)}"
+                f"{_PRIOR_ROW_MARK if c.symbol in refresh.prior_symbols else ''}"
             )
         lines.append("```")
     elif refresh.all_missing:
         lines.append(f"⚠️ 財務が無く判定できず: {refresh.missing}/{refresh.total} 件")
-    else:
+    elif not refresh.all_unjudged:
         lines.append("該当なし")
     if refresh.failed and not refresh.all_missing:
         lines.append(f"⚠️ 財務を取れず: {refresh.failed}/{refresh.total} 件")
+    if refresh.stale_symbols:
+        lines.append(f"⚠️ 財務が古く判定できず: {len(refresh.stale_symbols)}/{refresh.total} 件")
 
     lines.append("")
     lines.append("【保有ポジション】")

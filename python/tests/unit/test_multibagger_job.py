@@ -1,6 +1,6 @@
 """月次 multibagger ジョブ + ポジション永続化の単体テスト（#434）"""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -337,6 +337,18 @@ _PASSING_INFO = {
 _FAILING_INFO = {**_PASSING_INFO, "returnOnEquity": 0.01}
 
 
+def _stored_row(age_days: int, **overrides) -> dict:
+    """stock_fundamentals の前の行。既定は質ゲートを通る値で、age_days 日前に取った形。"""
+    row = {
+        "as_of": datetime.now(timezone.utc) - timedelta(days=age_days),
+        "revenue_cagr_3y": 0.3,
+        "roe": 0.25,
+        "debt_to_equity": 50.0,
+        "market_cap": 5e9,
+    }
+    return {**row, **overrides}
+
+
 def _trend(symbol: str, score: float = 1.0) -> TrendCandidate:
     return TrendCandidate(
         market="us",
@@ -374,6 +386,7 @@ class _FundamentalsWorld:
     def __init__(self, monkeypatch, trend, infos: dict, stored=None):
         self.stored: dict[tuple[str, str], dict] = dict(stored or {})
         self.events: list[str] = []
+        self.gated: list[list[str]] = []
         real_gate = multibagger_job.apply_quality_gate
 
         def _upsert(record):
@@ -385,6 +398,7 @@ class _FundamentalsWorld:
 
         def _gate(candidates):
             self.events.append("gate")
+            self.gated.append([c.symbol for c in candidates])
             return real_gate(candidates)
 
         monkeypatch.setattr(multibagger_job, "screen_trend_candidates", lambda **_: trend)
@@ -498,7 +512,7 @@ def test_no_trend_candidates_still_says_no_match(tmp_positions, monkeypatch):
 
 def test_failed_fetch_with_old_row_is_judged_but_counted(tmp_positions, monkeypatch):
     """取得に失敗しても前の行があれば判定はでき、取れなかった数だけを載せる。"""
-    old_row = {"revenue_cagr_3y": 0.01, "roe": 0.01, "debt_to_equity": 50.0, "market_cap": 5e9}
+    old_row = _stored_row(30, revenue_cagr_3y=0.01, roe=0.01)
     _FundamentalsWorld(monkeypatch, [_trend("OLD")], {}, stored={("us", "OLD"): old_row})
     _patch_notify(monkeypatch)
 
@@ -509,6 +523,173 @@ def test_failed_fetch_with_old_row_is_judged_but_counted(tmp_positions, monkeypa
     message = payload["message"]
     assert "該当なし" in message
     assert "財務を取れず: 1/1 件" in message
+
+
+# ── 前の行の as_of と取得が全部落ちた回（#1644）─────────────────
+
+
+def _table_line(message: str, symbol: str) -> str:
+    """新規候補の表から symbol の行を返す。"""
+    return next(line for line in message.splitlines() if line.startswith(f"{symbol} "))
+
+
+def test_failed_fetch_with_stale_row_is_not_a_candidate(tmp_positions, monkeypatch):
+    """線より古い行は質ゲートを通る値でも候補に出ず、判定できない数として載る。"""
+    world = _FundamentalsWorld(
+        monkeypatch,
+        [_trend("OLD"), _trend("AAA", 0.5)],
+        {"AAA": _PASSING_INFO},
+        stored={("us", "OLD"): _stored_row(365)},
+    )
+    _patch_notify(monkeypatch)
+
+    payload = multibagger_job.run_monthly_multibagger_screen(market="us")
+
+    assert [c.symbol for c in payload["new_candidates"]] == ["AAA"]
+    assert world.gated == [["AAA"]]
+    assert payload["fundamentals_stale"] == 1
+    assert payload["fundamentals_failed"] == 1
+    message = payload["message"]
+    assert "財務が古く判定できず: 1/2 件" in message
+    assert "OLD" not in message
+    multibagger_job.raise_if_multibagger_failed(payload)
+
+
+def test_failed_fetch_with_recent_row_is_judged_and_marked(tmp_positions, monkeypatch):
+    """線の内の行は今までどおり判定し、今回取れなかった銘柄にだけ表で印を付ける。"""
+    _FundamentalsWorld(
+        monkeypatch,
+        [_trend("OLD"), _trend("AAA", 0.5)],
+        {"AAA": _PASSING_INFO},
+        stored={("us", "OLD"): _stored_row(30)},
+    )
+    _patch_notify(monkeypatch)
+
+    payload = multibagger_job.run_monthly_multibagger_screen(market="us")
+
+    assert {c.symbol for c in payload["new_candidates"]} == {"OLD", "AAA"}
+    assert payload["fundamentals_stale"] == 0
+    message = payload["message"]
+    assert "前の行で判定" in _table_line(message, "OLD")
+    assert "前の行で判定" not in _table_line(message, "AAA")
+    assert "財務を取れず: 1/2 件" in message
+    assert "財務が古く" not in message
+    multibagger_job.raise_if_multibagger_failed(payload)
+
+
+def test_fetched_candidates_have_no_mark(tmp_positions, monkeypatch):
+    _FundamentalsWorld(monkeypatch, [_trend("AAA")], {"AAA": _PASSING_INFO})
+    _patch_notify(monkeypatch)
+
+    payload = multibagger_job.run_monthly_multibagger_screen(market="us")
+
+    assert [c.symbol for c in payload["new_candidates"]] == ["AAA"]
+    assert "前の行で判定" not in payload["message"]
+
+
+@pytest.mark.parametrize("offset_days, stale", [(-1, False), (1, True)])
+def test_stale_line_is_the_max_age(tmp_positions, monkeypatch, offset_days, stale):
+    age_days = multibagger_job._FUNDAMENTALS_MAX_AGE_DAYS + offset_days
+    _FundamentalsWorld(
+        monkeypatch,
+        [_trend("OLD"), _trend("AAA", 0.5)],
+        {"AAA": _PASSING_INFO},
+        stored={("us", "OLD"): _stored_row(age_days)},
+    )
+    _patch_notify(monkeypatch)
+
+    payload = multibagger_job.run_monthly_multibagger_screen(market="us")
+
+    assert payload["fundamentals_stale"] == int(stale)
+    assert ("OLD" in {c.symbol for c in payload["new_candidates"]}) is not stale
+
+
+def test_as_of_without_timezone_is_read_as_utc(tmp_positions, monkeypatch):
+    """DB の列は時差なしの timestamp で、読むと時差の無い値で届く。"""
+    naive = pd.Timestamp(_stored_row(30)["as_of"]).tz_localize(None)
+    _FundamentalsWorld(
+        monkeypatch,
+        [_trend("OLD"), _trend("AAA", 0.5)],
+        {"AAA": _PASSING_INFO},
+        stored={("us", "OLD"): _stored_row(30, as_of=naive)},
+    )
+    _patch_notify(monkeypatch)
+
+    payload = multibagger_job.run_monthly_multibagger_screen(market="us")
+
+    assert payload["fundamentals_stale"] == 0
+    assert {c.symbol for c in payload["new_candidates"]} == {"OLD", "AAA"}
+
+
+@pytest.mark.parametrize("as_of", [None, pd.NaT])
+def test_row_without_as_of_is_treated_as_stale(tmp_positions, monkeypatch, as_of):
+    """いつの行か分からないものは、線の内と確かめられないので判定しない。"""
+    _FundamentalsWorld(
+        monkeypatch,
+        [_trend("OLD"), _trend("AAA", 0.5)],
+        {"AAA": _PASSING_INFO},
+        stored={("us", "OLD"): _stored_row(30, as_of=as_of)},
+    )
+    _patch_notify(monkeypatch)
+
+    payload = multibagger_job.run_monthly_multibagger_screen(market="us")
+
+    assert [c.symbol for c in payload["new_candidates"]] == ["AAA"]
+    assert payload["fundamentals_stale"] == 1
+
+
+def test_all_fetches_failed_with_old_rows_fails_the_run(tmp_positions, monkeypatch):
+    """全部で取得が落ちた回は、前の行で候補が出ても失敗にして補完に乗せる。"""
+    _FundamentalsWorld(
+        monkeypatch,
+        [_trend("AAA"), _trend("BBB", 0.5)],
+        {},
+        stored={("us", "AAA"): _stored_row(30), ("us", "BBB"): _stored_row(30)},
+    )
+    _patch_notify(monkeypatch)
+
+    payload = multibagger_job.run_monthly_multibagger_screen(market="us")
+
+    assert {c.symbol for c in payload["new_candidates"]} == {"AAA", "BBB"}
+    assert payload["fundamentals_missing"] == 0
+    with pytest.raises(NonRetryableJobError, match="候補の全部で財務の取得が落ちた 2 件"):
+        multibagger_job.raise_if_multibagger_failed(payload)
+
+
+def test_all_stale_rows_do_not_say_no_match(tmp_positions, monkeypatch):
+    """全部の行が線より古い回は「該当なし」と書かず、ジョブを失敗にする。"""
+    world = _FundamentalsWorld(
+        monkeypatch,
+        [_trend("AAA"), _trend("BBB", 0.5)],
+        {},
+        stored={("us", "AAA"): _stored_row(365), ("us", "BBB"): _stored_row(365)},
+    )
+    _patch_notify(monkeypatch)
+
+    payload = multibagger_job.run_monthly_multibagger_screen(market="us")
+
+    assert payload["new_candidates"] == []
+    assert world.gated == [[]]
+    message = payload["message"]
+    assert "該当なし" not in message
+    assert "財務が古く判定できず: 2/2 件" in message
+    with pytest.raises(NonRetryableJobError, match="候補の全部で財務の取得が落ちた 2 件"):
+        multibagger_job.raise_if_multibagger_failed(payload)
+
+
+def test_some_fetches_failed_with_old_row_is_not_a_failed_run(tmp_positions, monkeypatch):
+    _FundamentalsWorld(
+        monkeypatch,
+        [_trend("OLD"), _trend("AAA", 0.5)],
+        {"AAA": _PASSING_INFO},
+        stored={("us", "OLD"): _stored_row(30)},
+    )
+    _patch_notify(monkeypatch)
+
+    payload = multibagger_job.run_monthly_multibagger_screen(market="us")
+
+    assert payload["fundamentals_failed"] == 1
+    multibagger_job.raise_if_multibagger_failed(payload)
 
 
 # ── ジョブの成否と同じ月の補完（#1596）──────────────────────────
@@ -539,6 +720,12 @@ def _patch_all_fundamentals_missing(monkeypatch):
     _patch_notify(monkeypatch)
 
 
+def _patch_all_fetches_failed_with_old_rows(monkeypatch):
+    stored = {("us", "AAA"): _stored_row(30), ("us", "BBB"): _stored_row(30)}
+    _FundamentalsWorld(monkeypatch, [_trend("AAA"), _trend("BBB")], {}, stored=stored)
+    _patch_notify(monkeypatch)
+
+
 def _patch_skipped_position(monkeypatch):
     add_position("us", "AAPL", "2024-01-01", 100.0)
     _patch_screen(monkeypatch, [])
@@ -554,6 +741,7 @@ def _patch_send_false(monkeypatch):
 _FAILED_RUNS = [
     _patch_screen_failure,
     _patch_all_fundamentals_missing,
+    _patch_all_fetches_failed_with_old_rows,
     _patch_skipped_position,
     _patch_send_false,
 ]

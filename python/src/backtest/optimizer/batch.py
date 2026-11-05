@@ -21,15 +21,44 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
-def _last_optimized_date(market: str, symbol: str) -> date:
-    """最後に最適化した日を返す。記録が無い・日時が読めない銘柄は最も古い日とする。"""
+def _last_optimized_at(market: str, symbol: str) -> datetime:
+    """最後に最適化した日時を返す。記録が無い・日時が読めない銘柄は最も古い日時とする。"""
     existing = get_optimal_params(market, symbol)
     if not existing or not existing.get("timestamp"):
-        return date.min
+        return datetime.min
     try:
-        return datetime.fromisoformat(existing["timestamp"]).date()
+        return datetime.fromisoformat(existing["timestamp"]).replace(tzinfo=None)
     except (TypeError, ValueError):
-        return date.min
+        return datetime.min
+
+
+def _last_optimized_date(market: str, symbol: str) -> date:
+    """最後に最適化した日を返す。記録が無い・日時が読めない銘柄は最も古い日とする。"""
+    return _last_optimized_at(market, symbol).date()
+
+
+def count_optimization_backlog(tasks: list, skip_days: int) -> tuple[int, Optional[date]]:
+    """run_optimize_batch の skip_days で飛ばされない銘柄の数と、その中の最も古い最適化の日を返す。
+
+    記録の無い銘柄は数に入れ、最も古い日の比べには入れない（記録が1つも無ければ None）。
+    特徴量の無い銘柄（バッチは skipped で返す）も区別せず数えるので、数は上からの見込みである。
+
+    Raises:
+        OptimalParamsCorruptedError: 既存の結果が読めないとき
+    """
+    cutoff = datetime.now() - timedelta(days=skip_days)
+    remaining = 0
+    oldest: Optional[datetime] = None
+    for task in tasks:
+        market = getattr(task, "market", None) or task["market"]
+        symbol = getattr(task, "symbol", None) or task["symbol"]
+        last_optimized = _last_optimized_at(market, symbol)
+        if last_optimized > cutoff:
+            continue
+        remaining += 1
+        if last_optimized != datetime.min and (oldest is None or last_optimized < oldest):
+            oldest = last_optimized
+    return remaining, oldest.date() if oldest else None
 
 
 def _oldest_optimized_first(tasks: list) -> list:

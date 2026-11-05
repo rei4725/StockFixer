@@ -13,6 +13,7 @@ from src.orchestration.jobs.weekly_training import (  # noqa: F401  re-export（
     _challengers_trained_this_week,
     run_weekly_training,
 )
+from src.orchestration.scheduler_cap_notice import OPTIMIZATION_SKIP_DAYS
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -227,7 +228,7 @@ def run_weekly_optimization():
                 n_splits=5,
                 max_workers=3,
                 sort_by="sharpe_ratio",
-                skip_days=6,
+                skip_days=OPTIMIZATION_SKIP_DAYS,
             )
     except Exception as e:
         # 全体が落ちた回は失敗と知らせたうえで投げ直し、run_job に error と記録させる（#973）
