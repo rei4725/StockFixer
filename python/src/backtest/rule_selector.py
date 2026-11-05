@@ -16,6 +16,7 @@ from src.backtest.rules import ALL_RULES
 from src.utils.db.rule_results import (
     delete_rule_best,
     delete_rule_best_except,
+    load_held_symbols,
     load_rule_best_all,
     upsert_rule_best,
 )
@@ -76,7 +77,10 @@ def evaluate_all_symbols(
         {"evaluated": int, "effective": int, "skipped": int, "errors": int}
         skipped は有効ルールなしの銘柄の数、errors は値段の取得の失敗か終値の全欠けか、
         評価（ルール1つの例外と保存を含む）が例外で落ちた銘柄の数に、ウォッチリストから
-        外れた銘柄の行の削除の失敗（1回）を足したもの。errors の銘柄の行は消さない。
+        外れた銘柄の行の削除の失敗（1回）と保有の読み込みの失敗（1回）を足したもの。
+        errors の銘柄の行は消さない。保有を読めない回は、どの銘柄の行も消さない。
+        保有中（約定待ちの買いを含む）の銘柄の行は、有効ルールが無くても、ウォッチリストから
+        外れていても消さない。消すとルールの SELL の判定から外れる（#1566）。
     """
     target_symbols = symbols or _load_symbols(market)
     logger.info(f"ルール評価開始: {len(target_symbols)} 銘柄 ({market})")
@@ -85,6 +89,13 @@ def evaluate_all_symbols(
     effective = 0
     skipped = 0
     errors = 0
+
+    held_symbols: set[str] | None = None
+    try:
+        held_symbols = load_held_symbols()
+    except Exception as exc:
+        logger.error(f"保有の読み込みに失敗。この回は行を消さない: {exc}", exc_info=True)
+        errors += 1
 
     for i, symbol in enumerate(target_symbols, 1):
         logger.info(f"[{i}/{len(target_symbols)}] {market}/{symbol} 評価中...")
@@ -107,9 +118,13 @@ def evaluate_all_symbols(
 
             best = _select_best_rule(results)
             if best is None:
-                # 前の週の有効の行を残すと、基準を外れたルールで新規買いが出る（#1275）
-                delete_rule_best(market=market, symbol=symbol)
-                logger.info(f"  [{symbol}] 有効ルールなし → 前の行を消してスキップ")
+                if held_symbols is None or symbol in held_symbols:
+                    # 保有中は行が要る。保有中なのでこの行から新規買いは出ない（#1566）
+                    logger.info(f"  [{symbol}] 有効ルールなし → 保有中か不明なので行を残す")
+                else:
+                    # 前の週の有効の行を残すと、基準を外れたルールで新規買いが出る（#1275）
+                    delete_rule_best(market=market, symbol=symbol)
+                    logger.info(f"  [{symbol}] 有効ルールなし → 前の行を消してスキップ")
                 skipped += 1
                 continue
 
@@ -137,10 +152,13 @@ def evaluate_all_symbols(
             logger.error(f"  [{symbol}] 評価失敗: {exc}", exc_info=True)
             errors += 1
 
-    if symbols is None and target_symbols:
+    if symbols is None and target_symbols and held_symbols is not None:
         # 外れた銘柄の行を残すと、16:30 のルールの発注で新規買いが出続ける（#1294）
+        # 保有中の銘柄は外れていても残す（#1566）
         try:
-            delete_rule_best_except(market=market, keep_symbols=target_symbols)
+            delete_rule_best_except(
+                market=market, keep_symbols=[*target_symbols, *sorted(held_symbols)]
+            )
         except Exception as exc:
             logger.error(f"ウォッチリスト外の行の削除に失敗: {exc}", exc_info=True)
             errors += 1
