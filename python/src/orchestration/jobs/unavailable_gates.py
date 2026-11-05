@@ -1,4 +1,4 @@
-"""日次ジョブの「取れなかった銘柄が多すぎる」判定。
+"""ジョブの「取れなかった銘柄・失敗した銘柄が多すぎる」判定。
 
 daily.py からの責務分離（ファイル行数ガード対策）。
 """
@@ -141,6 +141,25 @@ def _raise_if_rule_signals_mostly_unavailable(batch: "RuleSignalBatch") -> None:
     if _rule_signals_mostly_unavailable(batch):
         raise RuntimeError(
             f"ルールシグナルを出せなかった銘柄が多すぎる: {unavailable} / 対象 {batch.total}"
+            f"（線 {DAILY_FETCH_MAX_UNAVAILABLE_RATIO:.0%}）"
+        )
+
+
+def raise_if_optimization_mostly_failed(total: int, failed: int) -> None:
+    """週の最適化の結果が空か、失敗が線を超えたら NonRetryableJobError を投げる（#1581）。
+
+    銘柄ごとの失敗は例外にならないため、大半の銘柄が失敗した週も success と記録され、
+    同じ週の補完が止まり、発注が古い閾値と SL/TP のまま動いた。total は結果の件数で、
+    skipped（その週に済んだ銘柄）も分母に残す。呼び出し元は完了の知らせの後に呼ぶ。
+    知らせは済んでいるのでやり直さず、同じ週の補完に任せる。線は日次の取得（#811）と同じ。
+    """
+    from config.settings import DAILY_FETCH_MAX_UNAVAILABLE_RATIO
+
+    if total <= 0:
+        raise NonRetryableJobError("週次バックテスト最適化の結果が空だった")
+    if failed / total > DAILY_FETCH_MAX_UNAVAILABLE_RATIO:
+        raise NonRetryableJobError(
+            f"週次バックテスト最適化で失敗した銘柄が多すぎる: {failed} / 結果 {total}"
             f"（線 {DAILY_FETCH_MAX_UNAVAILABLE_RATIO:.0%}）"
         )
 
