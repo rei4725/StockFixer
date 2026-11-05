@@ -25,6 +25,8 @@ _SHADOW_KEYS = (
     "n_production",
     "n_challenger",
     "challenger_wins",
+    "challenger_prediction_std",
+    "challenger_constant",
 )
 
 

@@ -226,6 +226,13 @@ def _run_weekly_training_locked():
             _handle_stage_error(PipelineStage.RECOVERABLE, "昇格ゲート評価", e)
             _notify_stage_failure("週次学習 [2/4] 昇格ゲート評価", e)
             record["gate_failed"] = True
+    elif shadow_results and shadow_results[0][2].get("challenger_constant"):
+        # 上がる割合を測っただけの負けなので、challenger_lost と分けて記録する（#1602）
+        logger.warning(
+            "[2/4] challenger の予想が全銘柄でほぼ同じ値のため昇格ゲートをスキップ: std=%s",
+            shadow_results[0][2].get("challenger_prediction_std"),
+        )
+        record["gate_skipped_reason"] = "challenger_constant"
     elif shadow_results and _shadow_metrics_missing(shadow_results[0][2]):
         _record_no_comparison(record, shadow_results[0][2])
     elif shadow_results:
