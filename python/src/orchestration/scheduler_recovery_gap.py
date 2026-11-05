@@ -3,6 +3,8 @@
 
 recovery_min_gap_minutes を持つジョブは、同じ期間の前の回の終わりからその分だけ補完しない。
 回数の上限を短い障害の間に使い切らないためである。欄の無いジョブは間を空けない。
+
+rerun_if_interrupted のジョブは、消えた回の続きをすぐ進めるので、失敗の回だけから間を数える（#1638）。
 """
 
 from __future__ import annotations
@@ -13,17 +15,25 @@ from typing import Any
 from src.utils.japan_time import parse_iso_datetime
 
 
-def _last_attempt_at(events: list[dict[str, Any]], job_id: str, period_key: str) -> datetime | None:
+def _last_attempt_at(
+    events: list[dict[str, Any]],
+    job_id: str,
+    period_key: str,
+    *,
+    include_started: bool,
+) -> datetime | None:
     """同じ期間の失敗の回の終わりと始めの記録のうち、いちばん新しい時刻を返す。
 
     前の起動のプロセスで消えた回には終わりの記録が無いので、始めの記録も見る。
+    include_started が False なら、失敗の回の終わりの記録だけを見る。
     """
+    statuses = {"started", "error"} if include_started else {"error"}
     latest: datetime | None = None
     for event in events:
         if event.get("job_id") != job_id or event.get("period_key") != period_key:
             continue
         status = event.get("status")
-        if status not in {"started", "error"}:
+        if status not in statuses:
             continue
         stamp = event.get("finished_at") if status == "error" else event.get("started_at")
         if not isinstance(stamp, str):
@@ -48,7 +58,12 @@ def is_within_recovery_gap(
     gap_minutes = config.get("recovery_min_gap_minutes")
     if gap_minutes is None:
         return False
-    last_attempt = _last_attempt_at(events, job_id, period_key)
+    last_attempt = _last_attempt_at(
+        events,
+        job_id,
+        period_key,
+        include_started=not config.get("rerun_if_interrupted", False),
+    )
     if last_attempt is None:
         return False
     return now < last_attempt + timedelta(minutes=gap_minutes)
