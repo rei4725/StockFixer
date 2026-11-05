@@ -1,6 +1,6 @@
 """月次 multibagger ジョブ + ポジション永続化の単体テスト（#434）"""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -622,10 +622,11 @@ def test_failed_runs_recover_on_other_days_of_the_month_up_to_three(
     assert manager.should_recover("monthly_multibagger", now=other_day) is True
 
     _failed_run(manager, other_day)
-    assert manager.should_recover("monthly_multibagger", now=other_day) is True
+    next_day = other_day + timedelta(days=1)
+    assert manager.should_recover("monthly_multibagger", now=next_day) is True
 
-    _failed_run(manager, other_day)
-    assert manager.should_recover("monthly_multibagger", now=other_day) is False
+    _failed_run(manager, next_day)
+    assert manager.should_recover("monthly_multibagger", now=next_day + timedelta(days=1)) is False
 
 
 def test_recovery_run_succeeds_after_failed_run(tmp_positions, tmp_path, monkeypatch):
