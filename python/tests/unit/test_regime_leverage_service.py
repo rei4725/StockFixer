@@ -556,7 +556,9 @@ class TestRegimeLeverageNaNGuard(unittest.TestCase):
             },
             index=idx,
         )
-        mock_port.get_forex_data.return_value = pd.DataFrame({"Close": [145.0]}, index=[idx[-1]])
+        # ドル円の足の日は固定した時計に合わせる。periods が短い SPY の足に合わせると古くなる(#1621)
+        fx_bar = pd.Timestamp("2025-12-30")
+        mock_port.get_forex_data.return_value = pd.DataFrame({"Close": [145.0]}, index=[fx_bar])
         return mock_port
 
     def _assert_raises_without_insert(self, snapshot, mock_port: MagicMock, pattern: str) -> None:

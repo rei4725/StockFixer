@@ -34,6 +34,9 @@ _RATE = 146.0
 _STOP_LOW = 440.0
 # 維持率 0.20 を割る安値(マージンコールが損切りより先)
 _MARGIN_CALL_LOW = 300.0
+# ここで見るのは SPY の足の遅れなので、ドル円の足はどの回の時計よりも新しい日に固定する
+# (SPY の足に合わせると、ドル円の遅れの確かめが先に投げる。#1621)
+_FRESH_FX_BAR = pd.Timestamp("2026-12-31")
 
 
 def _clock(moment: datetime) -> type[datetime]:
@@ -85,7 +88,7 @@ def _port(last_bar: str, closes: tuple = (500.0, 500.0), lows: dict | None = Non
         {"Open": prices, "High": prices + 2, "Low": low, "Close": prices, "Volume": 1_000_000},
         index=idx,
     )
-    port.get_forex_data.return_value = pd.DataFrame({"Close": [_RATE]}, index=[idx[-1]])
+    port.get_forex_data.return_value = pd.DataFrame({"Close": [_RATE]}, index=[_FRESH_FX_BAR])
     return port
 
 
