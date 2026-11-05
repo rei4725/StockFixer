@@ -41,7 +41,8 @@ def _raise_if_fetch_mostly_unavailable(
     jp は全体の約3割のため、jp が大きく欠けても全体の線に届かない（#1432）。
     線の下でも取得のエラーが1件以上あれば、件数と先頭の銘柄を1回知らせる（#1256）。
     毎日あるスキップ（足の止まった銘柄）は知らせに数えない。
-    相場の指標の列が止まった銘柄は、線の上なら止める文に原因を足し、線の下なら1回知らせる（#1634）。
+    相場の指標の列が止まった・欠けた銘柄は、線の上なら止める文に原因を足し、線の下なら1回知らせる
+    （#1634・#1642）。
     段差の足で外した銘柄は、線の下でも1件以上あれば1回知らせる（#1643）。
     """
     from config.settings import DAILY_FETCH_MAX_UNAVAILABLE_RATIO
@@ -53,11 +54,11 @@ def _raise_if_fetch_mostly_unavailable(
         raise RuntimeError(
             f"取得できなかった銘柄が多すぎる: スキップ {len(batch_result.skipped)}"
             f" + エラー {len(batch_result.failed)} / 対象 {total}"
-            f"（線 {DAILY_FETCH_MAX_UNAVAILABLE_RATIO:.0%}）{_macro_stale_cause(batch_result)}"
+            f"（線 {DAILY_FETCH_MAX_UNAVAILABLE_RATIO:.0%}）{_macro_skip_cause(batch_result)}"
         )
     _raise_if_order_market_mostly_unavailable(market_totals or {}, batch_result)
     _notify_fetch_errors(total, batch_result)
-    _notify_macro_stale(total, batch_result)
+    _notify_macro_skips(total, batch_result)
     _notify_price_step_skips(total, batch_result)
 
 
@@ -80,7 +81,7 @@ def _raise_if_order_market_mostly_unavailable(
         raise RuntimeError(
             f"{market} の取得できなかった銘柄が多すぎる: スキップ {n_skipped}"
             f" + エラー {n_failed} / {market} の対象 {market_total}"
-            f"（線 {DAILY_FETCH_MAX_UNAVAILABLE_RATIO:.0%}）{_macro_stale_cause(batch_result)}"
+            f"（線 {DAILY_FETCH_MAX_UNAVAILABLE_RATIO:.0%}）{_macro_skip_cause(batch_result)}"
         )
 
 
@@ -148,19 +149,39 @@ def _macro_stale_summary(batch_result: "BatchResult") -> str:
     )
 
 
-def _macro_stale_cause(batch_result: "BatchResult") -> str:
-    """線を超えた文の後ろに足す、原因の列の文を返す。止まった銘柄が無ければ空（#1634）。"""
-    summary = _macro_stale_summary(batch_result)
+def _macro_missing_summary(batch_result: "BatchResult") -> str:
+    """欠けた列と銘柄の数の文を返す。欠けた銘柄が無ければ空（#1642）。
+
+    欠けた列は決まった6列の中なので、止まった列の組と違って上限で切らない。
+    """
+    skips = batch_result.macro_missing
+    groups = Counter(col for skip in skips for col in skip.columns)
+    if not groups:
+        return ""
+    ranked = sorted(groups.items(), key=lambda item: (-item[1], item[0]))
+    parts = [f"{col}（欠けた、{n} 件）" for col, n in ranked]
+    return f"相場の指標の列が欠けて特徴量を作らなかった銘柄 {len(skips)} 件: {', '.join(parts)}"
+
+
+def _macro_skip_summary(batch_result: "BatchResult") -> str:
+    """止まった列と欠けた列の文をつないで返す。どちらも無ければ空（#1634・#1642）。"""
+    summaries = (_macro_stale_summary(batch_result), _macro_missing_summary(batch_result))
+    return "。".join(summary for summary in summaries if summary)
+
+
+def _macro_skip_cause(batch_result: "BatchResult") -> str:
+    """線を超えた文の後ろに足す、原因の列の文を返す。止まった・欠けた銘柄が無ければ空。"""
+    summary = _macro_skip_summary(batch_result)
     return f"。{summary}" if summary else ""
 
 
-def _notify_macro_stale(total: int, batch_result: "BatchResult") -> None:
-    """線の下でも列が止まった銘柄があれば、回に1通にまとめて知らせる（#1634）。
+def _notify_macro_skips(total: int, batch_result: "BatchResult") -> None:
+    """線の下でも列が止まった・欠けた銘柄があれば、回に1通にまとめて知らせる（#1634・#1642）。
 
     銘柄ごとの WARNING のログにしか出ないと、古い指標で銘柄が予想から落ちた朝に
     ログを読むまで原因が分からない。
     """
-    summary = _macro_stale_summary(batch_result)
+    summary = _macro_skip_summary(batch_result)
     if not summary:
         return
     message = f"{summary}（対象 {total}）"
