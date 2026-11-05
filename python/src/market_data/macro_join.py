@@ -4,16 +4,37 @@
 取得は呼び出し元（pipeline.py）が行い、ここは決まった列の確かめと結合だけを行う。
 """
 
+import threading
 from typing import Optional
 
 import pandas as pd
 
 from config.settings import STALE_BARS_MAX_WEEKDAYS
+from src.domain.types import MacroStaleSkip
 from src.market_data.loader import _CROSS_ASSET_TICKERS
 from src.market_data.macro_features import _ADDITIONAL_MACRO_TICKERS
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+# 回の中で列が止まった銘柄（#1634）。足の保存を任されていない銘柄は結果が None になり、
+# fetch_stock_data_with_features の戻りでは回の集計へ渡せないので、ここに控える
+_stale_skips: dict[tuple[str, str], MacroStaleSkip] = {}
+_stale_skips_lock = threading.Lock()
+
+
+def reset_macro_stale() -> None:
+    """回の初めに、前の回の控えを消す。"""
+    with _stale_skips_lock:
+        _stale_skips.clear()
+
+
+def take_macro_stale() -> list[MacroStaleSkip]:
+    """回の中で列が止まった銘柄を返し、控えを空にする。"""
+    with _stale_skips_lock:
+        skips = list(_stale_skips.values())
+        _stale_skips.clear()
+    return skips
 
 
 def missing_macro_columns(
@@ -83,6 +104,8 @@ def macro_columns_unusable(
         return True
     stale = stale_macro_columns(cross_asset, additional_macro, last_bar)
     if stale:
+        with _stale_skips_lock:
+            _stale_skips[(market, symbol)] = MacroStaleSkip(market, symbol, stale)
         # 止まった日の値が前方補完され、予想と発注の VIX に新しい日付の行として入る
         logger.warning(
             f"相場の指標の列が止まったため特徴量生成をスキップ: {market}/{symbol} "

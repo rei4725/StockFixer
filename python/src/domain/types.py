@@ -194,17 +194,31 @@ class BatchFailure:
 
 
 @dataclass
+class MacroStaleSkip:
+    """相場の指標の列が止まって特徴量を作らなかった1銘柄（#1634）。
+
+    columns: 止まった列の名前 → 最後の値の日（YYYY-MM-DD。値が1つも無い列は「なし」）
+    """
+
+    market: str
+    symbol: str
+    columns: dict[str, str]
+
+
+@dataclass
 class BatchResult:
     """run_parallel() の集約結果。
 
     succeeded: 正常完了（status=="success"）した結果オブジェクトのリスト
     failed:    例外・タイムアウト・status=="error" による失敗エントリのリスト
     skipped:   status=="skip" として返された結果オブジェクトのリスト
+    macro_stale: 相場の指標の列が止まって特徴量を作らなかった銘柄のリスト（#1634）
     """
 
     succeeded: list = field(default_factory=list)
     failed: list = field(default_factory=list)
     skipped: list = field(default_factory=list)
+    macro_stale: list[MacroStaleSkip] = field(default_factory=list)
 
 
 @dataclass
