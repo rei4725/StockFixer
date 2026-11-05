@@ -13,6 +13,7 @@ direction_match は向きだけで決まるため、予想がほとんど「上�
 - mean_abs_predicted_ratio / mean_abs_actual_ratio: 予想と実際の大きさの平均
 - rank_corr: predicted_ratio と actual_ratio の順位相関（Spearman）
 - abs_rank_corr: |predicted_ratio| と |actual_ratio| の順位相関（Spearman）
+- prediction_std: 同じ日の銘柄の間の予想の標準偏差の中央値（日の列が無ければ全行の標準偏差）
 """
 
 from __future__ import annotations
@@ -33,6 +34,7 @@ BASELINE_METRIC_KEYS: tuple[str, ...] = (
     "mean_abs_actual_ratio",
     "rank_corr",
     "abs_rank_corr",
+    "prediction_std",
 )
 
 
@@ -52,6 +54,20 @@ def _spearman(x: pd.Series, y: pd.Series) -> Optional[float]:
         return None
     val = rx.corr(ry)
     return float(val) if not pd.isna(val) else None
+
+
+def _prediction_std(pred: pd.Series, rows: pd.DataFrame, valid: pd.Series) -> Optional[float]:
+    """予想の標準偏差を返す。日の列があれば同じ日の中で測り、その中央値を返す。
+
+    日をまたいだ値の動きを「銘柄の間のばらつき」と取り違えないため。2行以上の日が無ければ None。
+    """
+    day_col = next((c for c in ("date", "predicted_at") if c in rows.columns), None)
+    if day_col is None:
+        stds = pd.Series([pred.std(ddof=1)])
+    else:
+        stds = pred.groupby(rows[day_col][valid].to_numpy()).std(ddof=1)
+    stds = stds.dropna()
+    return float(stds.median()) if not stds.empty else None
 
 
 def baseline_metrics(rows: pd.DataFrame) -> dict:
@@ -92,4 +108,5 @@ def baseline_metrics(rows: pd.DataFrame) -> dict:
         "mean_abs_actual_ratio": float(actual.abs().mean()),
         "rank_corr": _spearman(pred, actual),
         "abs_rank_corr": _spearman(pred.abs(), actual.abs()),
+        "prediction_std": _prediction_std(pred, rows, valid),
     }

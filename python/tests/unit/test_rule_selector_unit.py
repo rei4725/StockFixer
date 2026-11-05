@@ -11,6 +11,8 @@ from unittest.mock import MagicMock, patch
 
 import pandas as pd
 
+from src.utils.db._connection import _db_connection
+
 
 def _make_watchlist_file(market: str, symbols: list[str]) -> str:
     f = tempfile.NamedTemporaryFile(suffix=".json", delete=False, mode="w", encoding="utf-8")
@@ -81,6 +83,10 @@ class TestSelectBestRule(unittest.TestCase):
 class TestEvaluateAllSymbols(unittest.TestCase):
     def setUp(self):
         self.watchlist_path = _make_watchlist_file("jp", ["7203", "6758"])
+        # 保有の扱いは TestHeldSymbolKeepsRuleBest で見る。ほかのテストが残した保有に左右されない
+        held = patch("src.backtest.rule_selector.load_held_symbols", return_value=set())
+        held.start()
+        self.addCleanup(held.stop)
 
     def tearDown(self):
         os.unlink(self.watchlist_path)
@@ -558,6 +564,7 @@ class TestUnevaluableSymbolKeepsRuleBest(unittest.TestCase):
                 return_value=_port(frame),
             ),
             patch("src.backtest.rule_selector.ALL_RULES", rules),
+            patch("src.backtest.rule_selector.load_held_symbols", return_value=set()),
             patch("src.backtest.rule_selector.delete_rule_best") as delete,
             patch("src.backtest.rule_selector.upsert_rule_best") as upsert,
         ):
@@ -585,6 +592,131 @@ class TestUnevaluableSymbolKeepsRuleBest(unittest.TestCase):
         self.assertEqual(summary["skipped"], 1)
         delete.assert_called_once_with(market="jp", symbol="7203")
         upsert.assert_not_called()
+
+
+_LOSING = [_mock_result("golden_cross", 0.0, -5000)]
+
+
+class TestHeldSymbolKeepsRuleBest(unittest.TestCase):
+    """保有中の銘柄の行は消さず、ルールの SELL の判定に残す（#1566）。"""
+
+    HELD = "9991"
+    NOT_HELD = "9992"
+    OFF_HELD = "9993"
+    OFF_NOT_HELD = "9994"
+    ALL = (HELD, NOT_HELD, OFF_HELD, OFF_NOT_HELD)
+
+    def setUp(self) -> None:
+        from src.utils.db.rule_results import upsert_rule_best
+
+        self.watchlist_path = _make_watchlist_file("jp", [self.HELD, self.NOT_HELD])
+        self.addCleanup(os.unlink, self.watchlist_path)
+        self._clear_positions()
+        self.addCleanup(self._clear_positions)
+        for symbol in self.ALL:
+            upsert_rule_best(
+                market="jp",
+                symbol=symbol,
+                best_rule="golden_cross",
+                win_rate=0.7,
+                net_profit=10000.0,
+                num_trades=10,
+                profit_factor=1.5,
+                max_drawdown=-0.05,
+                backtest_start="2023-01-01",
+                backtest_end="2023-12-31",
+            )
+
+    def _clear_positions(self) -> None:
+        with _db_connection() as con:
+            for symbol in self.ALL:
+                con.execute("DELETE FROM paper_positions WHERE symbol = %s", [symbol])
+                con.execute("DELETE FROM paper_orders WHERE symbol = %s", [symbol])
+
+    def _hold(self, symbol: str) -> None:
+        with _db_connection() as con:
+            con.execute(
+                "INSERT INTO paper_positions (symbol, qty, avg_price) VALUES (%s, 100, 1000.0)",
+                [symbol],
+            )
+
+    def _order_pending_buy(self, symbol: str) -> None:
+        with _db_connection() as con:
+            con.execute(
+                "INSERT INTO paper_orders (order_id, symbol, side, qty, order_type)"
+                " VALUES (%s, %s, 1, 100, 1)",
+                [f"held-test-{symbol}", symbol],
+            )
+
+    def _evaluate(self, symbols: list[str] | None = None) -> dict[str, Any]:
+        from src.backtest.rule_selector import evaluate_all_symbols
+
+        with (
+            patch("src.backtest.rule_selector._WATCHLIST_PATH", self.watchlist_path),
+            patch("src.backtest.rule_selector.run_rule_backtest", return_value=_LOSING),
+        ):
+            return evaluate_all_symbols("jp", "2024-01-01", "2024-12-31", symbols=symbols)
+
+    def _rows(self) -> set[str]:
+        from src.utils.db.rule_results import load_effective_rules
+
+        return set(load_effective_rules("jp")["symbol"])
+
+    def test_no_valid_rule_keeps_row_only_while_held(self) -> None:
+        self._hold(self.HELD)
+        summary = self._evaluate()
+        rows = self._rows()
+        self.assertIn(self.HELD, rows)
+        self.assertNotIn(self.NOT_HELD, rows)
+        # 有効ルールなしの数えは保有でも同じで、失敗には数えない
+        self.assertEqual(summary["skipped"], 2)
+        self.assertEqual(summary["errors"], 0)
+
+    def test_off_watchlist_row_kept_only_while_held(self) -> None:
+        self._hold(self.OFF_HELD)
+        summary = self._evaluate()
+        rows = self._rows()
+        self.assertIn(self.OFF_HELD, rows)
+        self.assertNotIn(self.OFF_NOT_HELD, rows)
+        self.assertEqual(summary["errors"], 0)
+
+    def test_pending_buy_keeps_row_until_filled(self) -> None:
+        """金曜の 16:30 の買いは、日曜の評価のときまだ約定していない（3350 の形）。"""
+        self._order_pending_buy(self.HELD)
+        self._evaluate()
+        rows = self._rows()
+        self.assertIn(self.HELD, rows)
+        self.assertNotIn(self.NOT_HELD, rows)
+
+    def test_row_dropped_on_the_week_after_the_position_is_gone(self) -> None:
+        self._hold(self.HELD)
+        self._hold(self.OFF_HELD)
+        self._evaluate()
+        self.assertLessEqual({self.HELD, self.OFF_HELD}, self._rows())
+
+        self._clear_positions()
+        self._evaluate()
+        self.assertFalse({self.HELD, self.OFF_HELD} & self._rows())
+
+    def test_unreadable_positions_keep_rows_and_count_one_error(self) -> None:
+        with patch(
+            "src.backtest.rule_selector.load_held_symbols",
+            side_effect=RuntimeError("db error"),
+        ):
+            summary = self._evaluate()
+        self.assertLessEqual(set(self.ALL), self._rows())
+        self.assertEqual(summary["errors"], 1)
+        self.assertEqual(summary["evaluated"], 2)
+
+    def test_given_symbols_keep_held_row_and_drop_the_other(self) -> None:
+        """手で銘柄を渡した評価でも同じに扱い、渡していない銘柄の行には触らない。"""
+        self._hold(self.HELD)
+        summary = self._evaluate(symbols=[self.HELD, self.NOT_HELD])
+        rows = self._rows()
+        self.assertIn(self.HELD, rows)
+        self.assertNotIn(self.NOT_HELD, rows)
+        self.assertLessEqual({self.OFF_HELD, self.OFF_NOT_HELD}, rows)
+        self.assertEqual(summary["skipped"], 2)
 
 
 class TestRunRuleBacktestWithoutRaising(unittest.TestCase):

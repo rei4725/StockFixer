@@ -80,6 +80,19 @@ def coverable_short_qty(pos: Mapping[str, Any]) -> int:
     return int(pos.get("qty") or 0) - int(pos.get("pending_qty") or 0)
 
 
+def is_failed_short_row(pos: Mapping[str, Any]) -> bool:
+    """行の処理が落ちて、全部が約定待ちの形になった空売りなら True を返す（#1580・#1601）。
+
+    約定待ちだけの空売りは、現在値が NaN でも含み損益が 0.0（約定した分が無い）なので、
+    現在値ではなく含み損益の NaN で見分ける。
+    """
+    return (
+        int(pos.get("qty") or 0) > 0
+        and coverable_short_qty(pos) <= 0
+        and math.isnan(float(pos.get("unrealized_pnl") or 0.0))
+    )
+
+
 def count_short_positions(broker: Any) -> int:
     """保有の上限に数える空売りの建玉の数（qty > 0）を返す（#1146）。"""
     return sum(1 for p in read_short_positions(broker) if p.get("qty", 0) > 0)

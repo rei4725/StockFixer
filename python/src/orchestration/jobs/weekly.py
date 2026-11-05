@@ -4,6 +4,7 @@
 ウォッチリスト更新・DB メンテナンス・A/B 評価・ルール評価。
 """
 
+from src.orchestration.job_errors import NonRetryableJobError
 from src.orchestration.jobs.common import _is_first_week_of_month
 from src.orchestration.jobs.scoring_stage import weekly_rule_scoring_stage
 from src.orchestration.jobs.symbol_master_job import run_symbol_master_refresh
@@ -23,7 +24,14 @@ def run_weekly_report():
 
     直近の予測精度サマリーを集計し、Discord Webhook へ通知することで
     モデルの劣化を早期検知する。
+
+    本体の段か紙の週の成績が落ちた回も後の段を全部走らせ、最後に失敗にする（#1582）。
+
+    Raises:
+        NonRetryableJobError: 本体の段か紙の週の成績が失敗した回。すぐの呼び直しをせず、
+            error の記録で補完の1回に任せる
     """
+    failed_stages: list[str] = []
     logger.info("=== 週次レポート生成開始 ===")
     try:
         from datetime import datetime, timedelta
@@ -58,6 +66,8 @@ def run_weekly_report():
             week_start, horizon=1, model_name="production", raise_on_error=True
         )
         save_weekly_accuracy_snapshot(week_start, week_summary)
+        if week_summary.empty:
+            _notify_empty_week_accuracy(week_start)
         # 前週比較は今週分を含むスナップショットで行うため、保存の後に読む
         snapshots = analytics.weekly_accuracy_snapshots(n_weeks=4)
 
@@ -78,8 +88,9 @@ def run_weekly_report():
         )
         logger.info("=== 週次レポート送信完了 ===")
     except Exception as e:
-        # スナップショットと前週比較が欠けた週を知らせる。投げ直すとやり直しで
-        # 外れ原因分析と週の成績を2回走らせるため、知らせだけにする（#1007）
+        # スナップショットと前週比較が欠けた週を知らせ、後の段の後でジョブを失敗にする。
+        # ここで投げ直すと後の段が走らないため、段の名前だけ残す（#1007・#1582）
+        failed_stages.append("週のレポート本体")
         logger.error("週次レポート生成失敗: %s", e, exc_info=True)
         try:
             from src.reporting.discord.discord_utils import send_webhook_text
@@ -104,11 +115,39 @@ def run_weekly_report():
     except Exception as e:
         logger.error("外れ原因分析失敗: %s", e, exc_info=True)
 
-    run_weekly_paper_results()
+    if not run_weekly_paper_results():
+        failed_stages.append("紙の週の成績")
+
+    if failed_stages:
+        # 知らせは各段で済んでいる。やり直すと同じ段と同じ知らせを重ねるため NonRetryable にする。
+        # 補完の回は同じ週を上書きで書き直す（#1582）
+        raise NonRetryableJobError(f"週のレポートの段が失敗した: {'、'.join(failed_stages)}")
 
 
-def run_weekly_paper_results() -> None:
-    """紙の売買の週の成績を results/paper/YYYY-Www.json に書く（#812・非致命的）。"""
+def _notify_empty_week_accuracy(week_start: str) -> None:
+    """週の精度の記録が0行だった週を知らせる。送れなくてもレポートの段を止めない（#1582）。
+
+    読み込みは通っており、補完しても同じ0行を読むのでジョブの失敗にはしない。
+    """
+    logger.warning("週の精度の記録が0行: week_start=%s", week_start)
+    try:
+        from src.reporting.discord.discord_utils import send_webhook_text
+
+        send_webhook_text(
+            f"⚠️ 週の精度の記録が0行\n{week_start} の週は採点の行が無く、記録を保存していない"
+        )
+    except Exception as notify_error:
+        logger.error("週の精度の0行の通知失敗: %s", notify_error, exc_info=True)
+
+
+def run_weekly_paper_results() -> bool:
+    """紙の売買の週の成績を results/paper/YYYY-Www.json に書く（#812）。
+
+    例外は出さず、成否を返す。失敗の回のジョブの失敗は run_weekly_report が決める（#1582）。
+
+    Returns:
+        書き出しの処理が例外なく終わったら True、落ちたら False
+    """
     logger.info("紙の売買の週の成績の書き出し開始")
     try:
         import os
@@ -124,9 +163,10 @@ def run_weekly_paper_results() -> None:
             fetch_benchmark_returns,
             os.path.join(get_results_dir(), "paper"),
         )
+        return True
     except Exception as e:
-        # 週の成績が欠けた週を知らせる。投げ直すとやり直しで週のレポートを2回送るため、
-        # 知らせだけにする（#999）
+        # 週の成績が欠けた週を知らせ、成否を返す。ここで投げ直すとすぐの呼び直しで
+        # 週のレポートを2回送るため、失敗は呼び出し側が NonRetryable で扱う（#999・#1582）
         logger.error("紙の売買の週の成績の書き出し失敗: %s", e, exc_info=True)
         try:
             from src.reporting.discord.discord_utils import send_webhook_text
@@ -134,6 +174,7 @@ def run_weekly_paper_results() -> None:
             send_webhook_text(f"❌ 紙の売買の週の成績の書き出し失敗\n{str(e)[:1000] or '不明'}")
         except Exception as notify_error:
             logger.error("紙の売買の週の成績の失敗通知失敗: %s", notify_error, exc_info=True)
+        return False
 
 
 def run_weekly_optimization():
