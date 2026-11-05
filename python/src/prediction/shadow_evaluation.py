@@ -10,6 +10,7 @@
 2. 銘柄ごとに Sharpe Ratio（予測変化率ベース）と Hit Rate を計算する。
 3. 比較結果を experiment_runs テーブルに記録する（R-211 実験トラッキング連携）。
 4. 判定: 全体 Hit Rate / Sharpe が challenger > production かどうかを返す。
+   challenger の予想が全銘柄でほぼ同じ値なら勝ちにせず、負けと分けて印を付ける（#1602）。
 """
 
 from __future__ import annotations
@@ -23,11 +24,13 @@ from typing import Callable, Optional
 import numpy as np
 import pandas as pd
 
+from src.prediction.baseline_metrics import baseline_metrics
 from src.prediction.challenger_window import (
     CHALLENGER_LABEL,
     filter_comparable_challenger,
     filter_to_days,
 )
+from src.prediction.constant_prediction import is_constant_prediction
 from src.prediction.db import load_prediction_accuracy
 from src.utils.data_path_utils import get_models_subdir
 from src.utils.db.experiment import generate_run_id, save_experiment_run
@@ -118,6 +121,8 @@ def evaluate_shadow_models(
             challenger_hit_rate: float | None
             challenger_sharpe: float | None
             challenger_wins: bool  # True = challenger 切り替え推奨
+            challenger_prediction_std: float | None  # 同じ日の銘柄の間の予想の標準偏差（#1602）
+            challenger_constant: bool  # True = 全銘柄がほぼ同じ値。指標によらず勝ちにしない
             evaluated_at: str
             n_production: int
             n_challenger: int
@@ -184,7 +189,10 @@ def evaluate_shadow_models(
 
     hit_better = _better(chal_hit, prod_hit)
     sharpe_better = _better(chal_sharpe, prod_sharpe)
-    challenger_wins = hit_better and sharpe_better
+    # 定数の予想の的中率は上がる割合そのものなので、比べに勝たせない（#1602）
+    chal_std = baseline_metrics(df_chal)["prediction_std"]
+    chal_constant = is_constant_prediction(chal_std)
+    challenger_wins = hit_better and sharpe_better and not chal_constant
 
     evaluated_at = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -194,6 +202,8 @@ def evaluate_shadow_models(
         "challenger_hit_rate": chal_hit,
         "challenger_sharpe": chal_sharpe,
         "challenger_wins": challenger_wins,
+        "challenger_prediction_std": chal_std,
+        "challenger_constant": chal_constant,
         "evaluated_at": evaluated_at,
         "n_production": len(df_prod),
         "n_challenger": len(df_chal),
@@ -204,6 +214,7 @@ def evaluate_shadow_models(
         f"評価結果: production=hit_rate={prod_hit}, sharpe={prod_sharpe} / "
         f"challenger=hit_rate={chal_hit}, sharpe={chal_sharpe} / "
         f"challenger_wins={challenger_wins} / "
+        f"challenger_constant={chal_constant} std={chal_std} / "
         f"日数={window_info.get('window_days')} 件数=production {len(df_prod)}, "
         f"challenger {len(df_chal)}"
     )
@@ -232,6 +243,7 @@ def evaluate_shadow_models(
         n_samples=len(df_chal),
         challenger_wins=challenger_wins,
         role="challenger",
+        challenger_constant=chal_constant,
     )
 
     return result
@@ -253,6 +265,7 @@ def _record_ab_result(
     n_samples: int,
     challenger_wins: bool,
     role: str,
+    challenger_constant: bool = False,
 ) -> None:
     """A/B テスト評価結果を experiment_runs テーブルに保存する。"""
     run_id = generate_run_id()
@@ -260,6 +273,7 @@ def _record_ab_result(
         "role": role,
         "challenger_wins": challenger_wins,
         "sharpe_ratio": sharpe,
+        "challenger_constant": challenger_constant,
     }
     save_experiment_run(
         run_id=run_id,

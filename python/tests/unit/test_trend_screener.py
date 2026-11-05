@@ -4,7 +4,7 @@ from unittest.mock import patch
 import numpy as np
 import pandas as pd
 
-from src.screening.trend_screener import screen_trend_candidates
+from src.screening.trend_screener import ScreeningDataError, screen_trend_candidates
 
 _N = 300  # 252日以上のデータを確保
 
@@ -129,9 +129,31 @@ class TestScreenTrendCandidates(unittest.TestCase):
         scores = [c.score for c in result]
         self.assertEqual(scores, sorted(scores, reverse=True))
 
-    def test_empty_universe_returns_empty(self):
-        """空データでも例外を投げず空リストを返す。"""
-        result = self._run([], {})
+    def test_empty_universe_raises(self):
+        """対象が0銘柄の回は「該当なし」と分けて例外にする（#1596）。"""
+        with self.assertRaises(ScreeningDataError):
+            self._run([], {})
+
+    def test_no_symbol_for_market_raises(self):
+        """別の市場の銘柄しか無い回も対象0銘柄として例外にする。"""
+        with self.assertRaises(ScreeningDataError):
+            self._run([("jp", "7203")], {("jp", "7203"): _uptrend()})
+
+    def test_all_prices_unreadable_raises(self):
+        """全銘柄の値段が読めない回は「該当なし」と分けて例外にする（#1596）。"""
+        with self.assertRaises(ScreeningDataError):
+            self._run([("us", "A"), ("us", "B")], {})
+
+    def test_some_prices_unreadable_keeps_the_rest(self):
+        """一部の銘柄が読めない回は残りの銘柄で判定する。"""
+        symbols = [("us", "UP"), ("us", "GONE")]
+        result = self._run(symbols, {("us", "UP"): _uptrend()}, rel_strength_pct=0.0)
+        self.assertEqual([c.symbol for c in result], ["UP"])
+
+    def test_as_of_before_all_data_returns_empty(self):
+        """値段が読めて as_of より前の行が無いだけの回は、例外にせず該当なしとする。"""
+        symbols = [("us", "UP")]
+        result = self._run(symbols, {("us", "UP"): _uptrend()}, as_of="2000-01-01")
         self.assertEqual(result, [])
 
     def test_all_excluded_returns_empty(self):

@@ -7,6 +7,7 @@
 from src.orchestration.jobs.common import _is_first_week_of_month
 from src.orchestration.jobs.scoring_stage import weekly_rule_scoring_stage
 from src.orchestration.jobs.symbol_master_job import run_symbol_master_refresh
+from src.orchestration.jobs.unavailable_gates import raise_if_optimization_mostly_failed
 from src.orchestration.jobs.weekly_training import (  # noqa: F401  re-export（#1295）
     _challengers_trained_this_week,
     run_weekly_training,
@@ -144,6 +145,7 @@ def run_weekly_optimization():
     流れ:
         1. ウォッチリスト全銘柄のグリッドサーチ（並列数3）
         2. 最適パラメータを config/optimal_params.json に保存
+        3. 完了の知らせの後、結果が空か失敗が線を超えた回はジョブの失敗にする（#1581）
     """
     import os
 
@@ -215,6 +217,8 @@ def run_weekly_optimization():
         send_optimization_completion(success=success, failed=failed, skipped=skipped)
     except Exception as e:
         logger.error("週次最適化完了通知失敗: %s", e, exc_info=True)
+
+    raise_if_optimization_mostly_failed(total=len(results), failed=failed)
 
 
 def run_weekly_walk_forward_report():

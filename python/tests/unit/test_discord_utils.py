@@ -222,6 +222,57 @@ class TestSendOptimizationCompletion(unittest.TestCase):
         self.assertEqual(fields["✅ 成功"], "3 銘柄")
         self.assertEqual(fields["⏭️ スキップ"], "2 銘柄")
 
+    @patch(
+        "src.reporting.discord.webhook_sender._rate_limiter.check_and_record",
+        return_value=(True, None),
+    )
+    @patch("src.reporting.discord.webhook_sender._post_webhook")
+    def test_no_save_field_when_all_symbols_failed(self, mock_post, _mock_rl):
+        """1銘柄も成功しなかった回は何も保存していないので、保存先の欄を出さない（#1594）"""
+        mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
+
+        send_optimization_completion(success=0, failed=5)
+
+        embed = _embed_from_post(mock_post)
+        fields = _fields_map(embed)
+        self.assertEqual(fields["⚠️ 失敗"], "5 銘柄")
+        self.assertNotIn("💾 保存先", fields)
+        self.assertNotIn("保存しました", str(embed))
+
+    @patch(
+        "src.reporting.discord.webhook_sender._rate_limiter.check_and_record",
+        return_value=(True, None),
+    )
+    @patch("src.reporting.discord.webhook_sender._post_webhook")
+    def test_no_save_field_when_all_symbols_skipped(self, mock_post, _mock_rl):
+        """全銘柄がスキップの回も、この回は何も保存していない（#1594）"""
+        mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
+
+        send_optimization_completion(success=0, failed=0, skipped=4)
+
+        embed = _embed_from_post(mock_post)
+        fields = _fields_map(embed)
+        self.assertEqual(fields["⏭️ スキップ"], "4 銘柄")
+        self.assertNotIn("💾 保存先", fields)
+        self.assertNotIn("保存しました", str(embed))
+
+    @patch(
+        "src.reporting.discord.webhook_sender._rate_limiter.check_and_record",
+        return_value=(True, None),
+    )
+    @patch("src.reporting.discord.webhook_sender._post_webhook")
+    def test_save_field_shown_when_at_least_one_success(self, mock_post, _mock_rl):
+        """1銘柄でも成功した回は、失敗があっても今までどおり保存先の欄を出す（#1594）"""
+        mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
+
+        send_optimization_completion(success=1, failed=9, skipped=2)
+
+        fields = _fields_map(_embed_from_post(mock_post))
+        self.assertEqual(
+            fields["💾 保存先"],
+            "最適パラメータを `config/optimal_params.json` に保存しました",
+        )
+
 
 class TestSendOptimizationFailure(unittest.TestCase):
     @patch(
