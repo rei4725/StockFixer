@@ -45,6 +45,8 @@ _US_MARKET_TZ = ZoneInfo("America/New_York")
 _US_MARKET_CLOSE = time(16, 0)
 # ドル円の最後の足の、引けたはずの SPY の足の日からの遅れの許容(平日の数。#1621)
 _USDJPY_MAX_WEEKDAYS_BEHIND = 1
+# 日次の回で、足がこの営業日数だけ古いと投げる(1営業日の遅れは次の回に任せる。#1620)
+_DAILY_STALE_BUSINESS_DAYS = 2
 
 
 def _as_aware(dt: datetime) -> datetime:
@@ -297,6 +299,14 @@ def _last_bar_date(df: pd.DataFrame) -> date:
     return pd.Timestamp(df.index[-1]).date()
 
 
+def _us_business_days_behind(last_bar: date, expected_bar: date) -> int:
+    """last_bar の翌日から expected_bar までの米国の営業日の数を返す。"""
+    calendar_days = (expected_bar - last_bar).days
+    return sum(
+        is_us_business_day(last_bar + timedelta(days=n)) for n in range(1, calendar_days + 1)
+    )
+
+
 def select_unchecked_closed_bars(
     df: pd.DataFrame, last_checked_at: Optional[datetime], now: datetime
 ) -> pd.DataFrame:
@@ -421,7 +431,9 @@ def run_regime_leverage_daily_margin_check(
     未保有の場合はNoneを返す(何もしない)。保有中に当日安値(Low)がNaN(データ劣化時)の
     足があり、その手前の足で決済に当たらない場合はRuntimeErrorを送出する(損切り・
     マージンコールの判定が飛んだことをスケジューラーのリトライ・Discord通知に乗せるため。
-    #860・#1228)。引けたはずの足が届いていない回の noop は行を書かない(#1608)。
+    #860・#1228)。引けたはずの足が届いていない回の noop は行を書かない(#1608)。その足が
+    2営業日以上古い回は、判定の止まりに気づけるようRuntimeErrorを送出する(#1620)。手元の足で
+    決済に当たる回は、足が古くても決済を書く。
     """
     from config.settings import REGIME_LEVERAGE_SYMBOL
 
@@ -464,6 +476,14 @@ def run_regime_leverage_daily_margin_check(
     last_bar = _last_bar_date(bars)
     expected_bar = _latest_expected_bar_date(now)
     if last_bar < expected_bar:
+        # 1回の遅れは次の回が判定するが、足が止まると古い足の noop が続き、損切りとマージン
+        # コールの判定が黙って止まる。遅れが続いたら投げて知らせに乗せる(#1620)
+        behind = _us_business_days_behind(last_bar, expected_bar)
+        if behind >= _DAILY_STALE_BUSINESS_DAYS:
+            raise RuntimeError(
+                f"レジームレバレッジ戦略(日次): 足が{behind}営業日古いため判定を中止しました"
+                f"(last_bar={last_bar}, expected={expected_bar}, shares={snapshot.shares})"
+            )
         logger.warning(
             "レジームレバレッジ戦略(日次): 足が届いていないため判定の時刻を進めません"
             "(last_bar=%s, expected=%s)",

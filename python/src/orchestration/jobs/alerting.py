@@ -136,12 +136,22 @@ def evaluate_and_notify_alerts(
 
     例外は呼び出し元（daily.py の [6/6] ブロック）へそのまま伝播させる。
     NON_CRITICAL 分類・ログ出力は呼び出し元の責務。
+    条件が成立して送れなかった日も例外にして、[6/6] の失敗の知らせに載せる（#1609）。
     """
     from src.reporting.discord.webhook_sender import send_webhook_notification
-    from src.utils.alert_service import evaluate_alert_conditions, run_conditional_notification
+    from src.utils.alert_service import (
+        AlertDispatch,
+        evaluate_alert_conditions,
+        run_conditional_notification,
+    )
 
     alert_results = evaluate_alert_conditions(
         prediction_violation_ids=prediction_violation_ids,
         prediction_details=prediction_details,
     )
-    run_conditional_notification(results=alert_results, notifier=send_webhook_notification)
+    dispatch = run_conditional_notification(
+        results=alert_results, notifier=send_webhook_notification
+    )
+    if dispatch is AlertDispatch.FAILED:
+        rule_ids = ", ".join(r.rule_id for r in alert_results if r.triggered)
+        raise RuntimeError(f"運用アラートを送れなかった: {rule_ids}")

@@ -12,7 +12,7 @@ from typing import Callable, Optional
 from src.domain.ports import AlertLevel, NotificationPort
 from src.domain.types import SymbolTask
 from src.utils.data_path_utils import get_watchlist_path
-from src.utils.db import load_index_membership_symbols_as_of
+from src.utils.db import get_held_symbol_keys, load_index_membership_symbols_as_of
 from src.utils.logger import get_logger
 from src.watchlist.types import BatchFailure, BatchResult
 
@@ -22,7 +22,9 @@ logger = get_logger(__name__)
 DEFAULT_TASK_TIMEOUT = 300
 
 
-def load_target_symbols(as_of_date: Optional[str] = None) -> list[SymbolTask]:
+def load_target_symbols(
+    as_of_date: Optional[str] = None, include_held: bool = False
+) -> list[SymbolTask]:
     """
     config/watchlist.json から対象銘柄リストを読み込む
 
@@ -32,10 +34,28 @@ def load_target_symbols(as_of_date: Optional[str] = None) -> list[SymbolTask]:
     Args:
         as_of_date: YYYY-MM-DD。指定時は index_membership_history から
             指定日以前で最新の指数構成銘柄を読み込む。
+        include_held: True ならウォッチリストの外の保有と空売りの銘柄を足す。
+            本番の日次の取得だけが使う（週次の最適化・Walk-Forward・学習の対象を増やさない、#1615）
 
     Returns:
         list[SymbolTask]: SymbolTask(市場, 銘柄コード) のリスト
     """
+    tasks = _load_listed_symbols(as_of_date)
+    if not include_held:
+        return tasks
+    listed = {(str(t.market).lower(), str(t.symbol).upper()) for t in tasks}
+    held = [
+        SymbolTask(market=market, symbol=symbol)
+        for market, symbol in get_held_symbol_keys()
+        if (market, symbol) not in listed
+    ]
+    if held:
+        logger.info(f"ウォッチリストの外の保有 {len(held)} 銘柄を対象に足します")
+    return tasks + held
+
+
+def _load_listed_symbols(as_of_date: Optional[str]) -> list[SymbolTask]:
+    """as_of_date の指数構成銘柄か、watchlist.json の銘柄を読む"""
     if as_of_date:
         try:
             rows = load_index_membership_symbols_as_of(as_of_date)

@@ -427,7 +427,11 @@ SCHEDULE_CONFIG = {
         "hour": 2,
         "minute": 0,
         "recovery_delay_minutes": 60,
-        "max_executions_per_period": 1,
+        # 失敗の回は日曜のうちに1回だけ補完する。日曜が定時なので月曜へは持ち越さない（#1623）。
+        # 1銘柄だけ続けて落ちる週も補完が1回走り、数分の評価と知らせが1通増える。増えるのは上限の2回まで
+        "max_executions_per_period": 2,
+        # 取得の障害が明けるのを待つ。間が無いと定時の1時間後に同じ障害へ当たって2回目を使い切る
+        "recovery_min_gap_minutes": 240,
         "description": "毎週日曜 02:00 - 全銘柄ルールバックテスト評価",
         "rerun_if_interrupted": True,
     },

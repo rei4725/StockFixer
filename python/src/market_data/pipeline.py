@@ -35,7 +35,7 @@ from src.market_data.macro_features import (
     add_macro_derived_features,
     fetch_additional_macro_features,
 )
-from src.market_data.macro_join import join_macro_frame, missing_macro_columns
+from src.market_data.macro_join import join_macro_frame, macro_columns_unusable
 from src.market_data.quality_check import QualityCheckResult, price_step_issue, run_quality_checks
 from src.market_data.saver import save_raw_ohlcv
 from src.market_data.sentiment_features import add_sentiment_features, fetch_news_sentiment_with_llm
@@ -253,13 +253,8 @@ def fetch_stock_data_with_features(
     # 追加マクロ（R-201：S&P500 / ドルインデックス / 金先物）を取得する
     cross_asset = fetch_cross_asset_features(start_date, end_date)
     additional_macro = fetch_additional_macro_features(start_date, end_date)
-    # 一部の列だけ取れた銘柄は、欠けた列が予想の道で0に埋まるため特徴量を作らない（#1491）
-    missing_macro = missing_macro_columns(cross_asset, additional_macro)
-    if missing_macro:
-        logger.warning(
-            f"相場の指標の列が欠けたため特徴量生成をスキップ: {market}/{symbol} "
-            f"（欠けた列 {missing_macro}）"
-        )
+    # 欠けた列（#1491）や線より古い列（#1622）があれば特徴量を作らない
+    if macro_columns_unusable(cross_asset, additional_macro, df.index.max(), market, symbol):
         return _raw_only_result(market, symbol, raw_data_to_save)
     df = join_macro_frame(df, cross_asset, "クロスアセット特徴量", market, symbol)
     df = join_macro_frame(df, additional_macro, "追加マクロ特徴量", market, symbol)
