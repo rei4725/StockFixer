@@ -1,10 +1,11 @@
 """レジームレバレッジの判定が、まだ届いていない足を飛ばさないこと（#1608）
 
 週次は、引けたはずの足が無ければ判定せず投げて補完に乗せる。日次は、足が遅れた回の noop で
-判定の時刻を進めず、遅れて届いた足を次の回が判定する。
+判定の時刻を進めず、遅れて届いた足を次の回が判定する。足が2営業日以上古い回は投げて知らせに
+乗せる(#1620)。
 """
 
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
@@ -264,3 +265,105 @@ def test_daily_records_noop_after_market_holiday():
 
     assert decision.reason == "daily_noop"
     assert book.inserted == [decision]
+
+
+@pytest.mark.parametrize(
+    "last_bar, moment, expected",
+    [
+        # 水曜の回で火曜 11/3 が引けたはずなのに、金曜 10/30 の足のまま
+        ("2026-10-30", datetime(2026, 11, 4, 7, 30, tzinfo=_JST), "2026-11-03"),
+        # 週末をまたぐ: 火曜の回で月曜 11/2 が引けたはずなのに、木曜 10/29 の足のまま
+        ("2026-10-29", datetime(2026, 11, 3, 7, 30, tzinfo=_JST), "2026-11-02"),
+        # 休場をまたぐ: Labor Day 9/7 を数えず、金曜 9/4 と火曜 9/8 の2営業日が足りない
+        ("2026-09-03", datetime(2026, 9, 9, 7, 30, tzinfo=_JST), "2026-09-08"),
+    ],
+)
+def test_daily_raises_without_insert_when_bars_are_two_business_days_old(
+    last_bar, moment, expected
+):
+    """足が2営業日以上古い回は、noop の行を書かずに投げて知らせに乗せること(#1620)"""
+    book = _DailyBook(_holding(datetime(2026, 8, 1, 22, 30)))
+
+    with pytest.raises(RuntimeError, match=f"last_bar={last_bar}, expected={expected}"):
+        book.run(_port(last_bar), moment)
+
+    assert book.inserted == []
+
+
+def test_daily_raises_when_only_already_checked_bars_remain():
+    """足が止まり、前の回が判定した足しか残っていない回でも投げること(#1620)"""
+    # 月曜 11/2 07:30 JST の回で金曜 10/30 の足まで判定済み
+    book = _DailyBook(_holding(datetime(2026, 11, 1, 22, 30)))
+
+    with pytest.raises(RuntimeError, match="last_bar=2026-10-30"):
+        book.run(_port("2026-10-30"), datetime(2026, 11, 4, 7, 30, tzinfo=_JST))
+
+    assert book.inserted == []
+
+
+@pytest.mark.parametrize(
+    "last_bar, moment",
+    [
+        # 火曜の回で月曜 11/2 の足だけが遅れている(週末は数えない)
+        ("2026-10-30", datetime(2026, 11, 3, 7, 30, tzinfo=_JST)),
+        # 水曜の回で火曜 9/8 の足だけが遅れている(Labor Day 9/7 は数えない)
+        ("2026-09-04", datetime(2026, 9, 9, 7, 30, tzinfo=_JST)),
+    ],
+)
+def test_daily_one_business_day_late_returns_noop_without_insert(last_bar, moment):
+    """1営業日の遅れの回は、今までどおり投げず、行も書かないこと"""
+    book = _DailyBook(_holding(datetime(2026, 8, 1, 22, 30)))
+
+    decision = book.run(_port(last_bar), moment)
+
+    assert decision.reason == "daily_noop"
+    assert book.inserted == []
+
+
+@pytest.mark.parametrize(
+    "low, reason",
+    [(_STOP_LOW, "initial_stop"), (_MARGIN_CALL_LOW, "margin_call")],
+)
+def test_daily_exits_on_hand_bars_even_when_bars_are_old(low, reason):
+    """足が2営業日以上古くても、手元の足で決済に当たれば投げずに決済を書くこと"""
+    book = _DailyBook(_holding(datetime(2026, 10, 28, 22, 30)))
+
+    decision = book.run(
+        _port("2026-10-30", lows={"2026-10-29": low}),
+        datetime(2026, 11, 4, 7, 30, tzinfo=_JST),
+    )
+
+    assert decision.reason == reason
+    assert book.inserted == [decision]
+
+
+def test_daily_judges_stale_days_after_bars_arrive():
+    """投げた回は判定の時刻を進めず、足が届いた回が止まっていた間の安値を判定すること"""
+    # 月曜 11/2 07:30 JST の回で金曜 10/30 の足まで判定済み
+    book = _DailyBook(_holding(datetime(2026, 11, 1, 22, 30)))
+
+    with pytest.raises(RuntimeError):
+        book.run(_port("2026-10-30"), datetime(2026, 11, 4, 7, 30, tzinfo=_JST))
+
+    decision = book.run(
+        _port("2026-11-04", lows={"2026-11-02": _STOP_LOW}),
+        datetime(2026, 11, 5, 7, 30, tzinfo=_JST),
+    )
+    assert decision.reason == "initial_stop"
+    assert decision.spy_price_usd == _STOP_LOW
+
+
+def test_daily_unheld_returns_none_even_when_bars_are_old():
+    """未保有の回は、足を取りに行かず今までどおり None を返すこと"""
+    flat = replace(_holding(datetime(2026, 8, 1, 22, 30)), shares=0.0)
+    port = _port("2026-10-30")
+
+    with (
+        patch(f"{_SERVICE}.datetime", _clock(datetime(2026, 11, 4, 7, 30, tzinfo=_JST))),
+        patch(f"{_SERVICE}.get_latest_snapshot", return_value=flat),
+        patch(f"{_SERVICE}.insert_snapshot") as mock_insert,
+    ):
+        assert run_regime_leverage_daily_margin_check(port) is None
+
+    port.get_stock_data.assert_not_called()
+    mock_insert.assert_not_called()
