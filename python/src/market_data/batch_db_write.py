@@ -122,6 +122,7 @@ def write_batch_to_db(
         succeeded=succeeded,
         failed=failed + batch_result.failed,
         skipped=skipped,
+        macro_stale=batch_result.macro_stale,
     )
     log_pipeline_summary("データ更新", final_batch)
     return final_batch

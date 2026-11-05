@@ -3,6 +3,7 @@
 daily.py からの責務分離（ファイル行数ガード対策）。
 """
 
+from collections import Counter
 from typing import TYPE_CHECKING, Optional
 
 from src.orchestration.job_errors import NonRetryableJobError
@@ -17,6 +18,10 @@ logger = get_logger(__name__)
 
 # 取得のエラーの知らせに並べる銘柄の上限（#1256）
 _FETCH_ERROR_NOTICE_SYMBOL_LIMIT = 5
+
+# 止まった相場の指標の知らせに並べる「列と最後の日」の組の上限（#1634）。[1/6] の知らせは
+# Discord の欄に入るので長くしない。ふつうは止まった列ごとに1組で、列は6つである
+_MACRO_STALE_NOTICE_GROUP_LIMIT = 6
 
 # 8:50 の自動発注が注文を出す市場（#1432）
 _ORDER_MARKET = "jp"
@@ -35,6 +40,7 @@ def _raise_if_fetch_mostly_unavailable(
     jp は全体の約3割のため、jp が大きく欠けても全体の線に届かない（#1432）。
     線の下でも取得のエラーが1件以上あれば、件数と先頭の銘柄を1回知らせる（#1256）。
     毎日あるスキップ（足の止まった銘柄）は知らせに数えない。
+    相場の指標の列が止まった銘柄は、線の上なら止める文に原因を足し、線の下なら1回知らせる（#1634）。
     """
     from config.settings import DAILY_FETCH_MAX_UNAVAILABLE_RATIO
 
@@ -45,10 +51,11 @@ def _raise_if_fetch_mostly_unavailable(
         raise RuntimeError(
             f"取得できなかった銘柄が多すぎる: スキップ {len(batch_result.skipped)}"
             f" + エラー {len(batch_result.failed)} / 対象 {total}"
-            f"（線 {DAILY_FETCH_MAX_UNAVAILABLE_RATIO:.0%}）"
+            f"（線 {DAILY_FETCH_MAX_UNAVAILABLE_RATIO:.0%}）{_macro_stale_cause(batch_result)}"
         )
     _raise_if_order_market_mostly_unavailable(market_totals or {}, batch_result)
     _notify_fetch_errors(total, batch_result)
+    _notify_macro_stale(total, batch_result)
 
 
 def _raise_if_order_market_mostly_unavailable(
@@ -70,7 +77,7 @@ def _raise_if_order_market_mostly_unavailable(
         raise RuntimeError(
             f"{market} の取得できなかった銘柄が多すぎる: スキップ {n_skipped}"
             f" + エラー {n_failed} / {market} の対象 {market_total}"
-            f"（線 {DAILY_FETCH_MAX_UNAVAILABLE_RATIO:.0%}）"
+            f"（線 {DAILY_FETCH_MAX_UNAVAILABLE_RATIO:.0%}）{_macro_stale_cause(batch_result)}"
         )
 
 
@@ -115,6 +122,42 @@ def _notify_fetch_errors(total: int, batch_result: "BatchResult") -> None:
     message = f"取得のエラーが {len(names)} 件あった（対象 {total}）: {head}"
     logger.warning("[1/6] データ取得: %s", message)
     _notify_stage_failure("[1/6] データ取得の一部の銘柄", RuntimeError(message))
+
+
+def _macro_stale_summary(batch_result: "BatchResult") -> str:
+    """止まった列と最後の日と銘柄の数の文を返す。止まった銘柄が無ければ空（#1634）。"""
+    skips = batch_result.macro_stale
+    groups = Counter((col, day) for skip in skips for col, day in skip.columns.items())
+    if not groups:
+        return ""
+    limit = _MACRO_STALE_NOTICE_GROUP_LIMIT
+    ranked = sorted(groups.items(), key=lambda item: (-item[1], item[0]))
+    parts = [f"{col}（最後の日 {day}、{n} 件）" for (col, day), n in ranked[:limit]]
+    more = " ほか" if len(ranked) > limit else ""
+    return (
+        f"相場の指標の列が止まって特徴量を作らなかった銘柄 {len(skips)} 件: "
+        f"{', '.join(parts)}{more}"
+    )
+
+
+def _macro_stale_cause(batch_result: "BatchResult") -> str:
+    """線を超えた文の後ろに足す、原因の列の文を返す。止まった銘柄が無ければ空（#1634）。"""
+    summary = _macro_stale_summary(batch_result)
+    return f"。{summary}" if summary else ""
+
+
+def _notify_macro_stale(total: int, batch_result: "BatchResult") -> None:
+    """線の下でも列が止まった銘柄があれば、回に1通にまとめて知らせる（#1634）。
+
+    銘柄ごとの WARNING のログにしか出ないと、古い指標で銘柄が予想から落ちた朝に
+    ログを読むまで原因が分からない。
+    """
+    summary = _macro_stale_summary(batch_result)
+    if not summary:
+        return
+    message = f"{summary}（対象 {total}）"
+    logger.warning("[1/6] データ取得: %s", message)
+    _notify_stage_failure("[1/6] データ取得の相場の指標", RuntimeError(message))
 
 
 def _rule_signals_mostly_unavailable(batch: "RuleSignalBatch") -> bool:
