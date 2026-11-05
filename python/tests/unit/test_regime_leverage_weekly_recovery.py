@@ -4,7 +4,7 @@ import json
 import os
 import sys
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -150,6 +150,73 @@ def test_sunday_recovery_counts_in_same_week_and_stops_after_success(tmp_path):
     assert calls["n"] == 1
     assert manager.has_success(_JOB_ID, _WEEK_KEY) is True
     assert manager.should_recover(_JOB_ID, now=now) is False
+
+
+# 1回の失敗は約3分半で、補完のポーリングは5分おき（run_scheduler.py の設定のコメント）
+_FAILED_RUN = timedelta(seconds=210)
+_POLL = timedelta(minutes=5)
+
+
+def _outage_manager(tmp_path) -> SchedulerQueueManager:
+    """本番の設定のまま、回が必ず失敗するジョブにした manager を返す"""
+    from run_scheduler import SCHEDULE_CONFIG
+
+    config = {
+        _JOB_ID: {
+            **SCHEDULE_CONFIG[_JOB_ID],
+            "func": MagicMock(side_effect=RuntimeError("outage")),
+            "max_retries": 0,
+        }
+    }
+    return SchedulerQueueManager(config, state_file_path=str(tmp_path / "state.json"))
+
+
+def _failed_run(manager: SchedulerQueueManager, started: datetime, reason: str) -> datetime:
+    """started に始まり約3分半で失敗する回を記録し、終わりの時刻を返す"""
+    finished = started + _FAILED_RUN
+    with (
+        patch("src.orchestration.scheduler_queue.ping_heartbeat"),
+        patch.object(manager, "now", side_effect=[started, started, finished]),
+    ):
+        with pytest.raises(RuntimeError):
+            manager.run_job(_JOB_ID, reason=reason)
+    return finished
+
+
+def test_saturday_error_waits_for_gap_then_recovers_through_sunday(tmp_path):
+    """土曜の回の error の直後は補完せず、間を過ぎると補完し、日曜にも補完できること（#1624）"""
+    manager = _outage_manager(tmp_path)
+    scheduled = datetime(2026, 11, _SATURDAY, 6, 30, tzinfo=manager.tz)
+    finished = _failed_run(manager, scheduled, "scheduled")
+
+    assert manager.should_recover(_JOB_ID, now=finished + timedelta(minutes=30)) is False
+    assert manager.should_recover(_JOB_ID, now=finished + timedelta(minutes=239)) is False
+    assert manager.should_recover(_JOB_ID, now=finished + timedelta(minutes=240)) is True
+
+    sunday = datetime(2026, 11, _SUNDAY, 12, 0, tzinfo=manager.tz)
+    assert manager.should_recover(_JOB_ID, now=sunday) is True
+
+
+def test_outage_through_the_weekend_keeps_attempts_until_sunday_night(tmp_path):
+    """週末じゅう失敗しても、上限を土曜の朝に使い切らず日曜の夜まで補完が続くこと（#1624）"""
+    manager = _outage_manager(tmp_path)
+    scheduled = datetime(2026, 11, _SATURDAY, 6, 30, tzinfo=manager.tz)
+    next_monday = datetime(2026, 11, 9, 0, 0, tzinfo=manager.tz)
+
+    attempts = [scheduled]
+    _failed_run(manager, scheduled, "scheduled")
+    now = scheduled + _POLL
+    while now < next_monday:
+        if manager.should_recover(_JOB_ID, now=now):
+            attempts.append(now)
+            _failed_run(manager, now, "recovery")
+        now += _POLL
+
+    assert len(attempts) <= _limit()
+    assert attempts[-1] >= datetime(2026, 11, _SUNDAY, 20, 0, tzinfo=manager.tz)
+    assert all(
+        later - earlier >= timedelta(minutes=240) for earlier, later in zip(attempts, attempts[1:])
+    )
 
 
 class _SaturdayRun(datetime):

@@ -144,13 +144,15 @@ def test_job_without_gap_recovers_right_after_failed_run(tmp_path):
     assert manager.should_recover(JOB, now=finished + timedelta(minutes=5)) is True
 
 
-def test_only_monthly_multibagger_has_the_gap():
+def test_only_listed_jobs_have_the_gap():
     from run_scheduler import SCHEDULE_CONFIG
 
-    gapped = [
-        job_id for job_id, config in SCHEDULE_CONFIG.items() if "recovery_min_gap_minutes" in config
-    ]
-    assert gapped == ["monthly_multibagger"]
+    gapped = {
+        job_id: config["recovery_min_gap_minutes"]
+        for job_id, config in SCHEDULE_CONFIG.items()
+        if "recovery_min_gap_minutes" in config
+    }
+    assert gapped == {"monthly_multibagger": 720, "regime_leverage_weekly": 240}
 
 
 def test_weekly_optimization_recovery_settings_are_unchanged():
