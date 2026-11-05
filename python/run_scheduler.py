@@ -368,7 +368,8 @@ SCHEDULE_CONFIG = {
         "hour": 1,
         "minute": 0,
         "recovery_delay_minutes": 30,
-        "max_executions_per_period": 1,
+        # 結果が空か失敗が線を超えた回の後に、同じ週の補完を1回通す（#1581）
+        "max_executions_per_period": 2,
         "description": "毎週水曜 01:00 - 全銘柄バックテスト最適化",
         "rerun_if_interrupted": True,
         "max_interrupted_reruns_per_period": 40,

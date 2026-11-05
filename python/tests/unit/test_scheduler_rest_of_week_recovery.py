@@ -84,12 +84,13 @@ def test_week_at_limit_is_not_recovered_after_scheduled_day(tmp_path):
     from run_scheduler import SCHEDULE_CONFIG
 
     limit = SCHEDULE_CONFIG[_JOB_ID]["max_interrupted_reruns_per_period"]
-    events = [_interrupted(_WEEK_KEY, i) for i in range(limit + 1)]
+    max_executions = SCHEDULE_CONFIG[_JOB_ID]["max_executions_per_period"]
+    events = [_interrupted(_WEEK_KEY, i) for i in range(limit + max_executions)]
     manager = _manager(tmp_path, events)
 
     now = datetime(2026, 11, 5, 12, 0, tzinfo=manager.tz)
     assert manager.should_recover(_JOB_ID, now=now) is False
-    assert manager.get_execution_count(_JOB_ID, _WEEK_KEY) == 1
+    assert manager.get_execution_count(_JOB_ID, _WEEK_KEY) == max_executions
 
 
 @pytest.mark.parametrize("day, hour", [(2, 12), (3, 23)])
@@ -155,8 +156,8 @@ def test_iso_week_across_new_year_counts_as_one_week(tmp_path):
     assert manager._build_period_key(config, saturday) == "2026-W53"
     assert manager.should_recover(_JOB_ID, now=saturday) is True
 
-    limit = config["max_interrupted_reruns_per_period"]
-    events = [_interrupted("2026-W53", i) for i in range(limit + 1)]
+    limit = config["max_interrupted_reruns_per_period"] + config["max_executions_per_period"]
+    events = [_interrupted("2026-W53", i) for i in range(limit)]
     manager = _manager(tmp_path, events)
     assert manager.should_recover(_JOB_ID, now=saturday) is False
 
@@ -166,6 +167,7 @@ def test_limit_gives_enough_time_for_all_symbols(hours_between_boots):
     """起動の間隔が W44 の水曜の速さ（22回で18時間）でも、全銘柄の約29時間に届く回数であること"""
     from run_scheduler import SCHEDULE_CONFIG
 
+    # 回の上限の残りは失敗の回の補完の分なので、ここでは1回だけ数える（#1581）
     runs = 1 + SCHEDULE_CONFIG[_JOB_ID]["max_interrupted_reruns_per_period"]
 
     assert timedelta(hours=hours_between_boots) * runs > timedelta(hours=29)

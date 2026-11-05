@@ -24,11 +24,8 @@ from src.trading.brokers.paper.bar_timing import created_after_bar_close as _cre
 from src.trading.brokers.paper.bar_timing import parse_predicted_date as _parse_predicted_date
 from src.trading.brokers.paper.fill import apply_fill
 from src.trading.brokers.paper.fill import claim_pending as _claim_pending
-from src.trading.brokers.paper.pending_short import (
-    pending_in_row_units,
-    read_pending_shorts,
-    split_filled_short,
-)
+from src.trading.brokers.paper.pending_short import read_pending_shorts
+from src.trading.brokers.paper.position_rows import long_position_row, short_position_row
 from src.trading.position_valuation import (
     long_positions_unrealized_pnl,
     short_positions_unrealized_pnl,
@@ -438,6 +435,8 @@ class PaperBroker(BrokerBase):
             qty は約定待ちの SHORT（仮登録）を含む（保有の上限に数える, #1146）。pending_qty は
             その約定待ちの株数で、avg_short_price と unrealized_pnl は約定した分だけで出す（#1225）。
             現在値が評価できない銘柄は current_price と unrealized_pnl が NaN になる。
+            最初の SELECT の失敗は投げる（読めない日を0件にしない）。1行の処理の失敗は受け、
+            その銘柄は NaN で pending_qty を qty にして返す（#1580）。
         """
         with _db_connection() as con:
             rows = con.execute(
@@ -448,71 +447,21 @@ class PaperBroker(BrokerBase):
         if not rows:
             return []
 
-        results = []
-        for sym, raw_qty, raw_avg, updated_at in rows:
-            qty, avg_short, split_known = sa.adjust_short_position_for_splits(
-                self._market_data, sym, raw_qty, raw_avg, updated_at
-            )
-            orders = pending.get(str(sym))
-            splits = sa.fetch_splits(self._market_data, sym) if orders else None
-            pending_qty, filled_qty, avg_short = split_filled_short(
-                pending_in_row_units(orders, splits, updated_at), int(raw_qty), qty, avg_short
-            )
-            current_price = self._latest_close(sym)
-            if (
-                filled_qty > 0
-                and not split_known
-                and sa.looks_like_split_gap(avg_short, current_price)
-            ):
-                logger.warning(
-                    f"[paper] {sym}: 分割の記録が取れず、売り建ての単価と現在値の比が分割の比ほど違う"
-                )
-                current_price = math.nan
-            # 空売りの未実現損益: 売り単価 - 現在価格が正なら利益。約定待ちの分は評価しない
-            unrealized_pnl = (avg_short - current_price) * filled_qty if filled_qty > 0 else 0.0
-            results.append(
-                {
-                    "symbol": sym,
-                    "qty": qty,
-                    "pending_qty": pending_qty,
-                    "avg_short_price": avg_short,
-                    "current_price": current_price,
-                    "unrealized_pnl": unrealized_pnl,
-                }
-            )
-        return results
+        return [
+            short_position_row(self._market_data, self._latest_close, row, pending.get(str(row[0])))
+            for row in rows
+        ]
 
     def get_positions(self) -> list[dict[str, Any]]:
-        """保有ポジション一覧を返す（現在価格・含み損益つき。評価できない銘柄は NaN）"""
+        """保有ポジション一覧を返す（現在価格・含み損益つき。評価できない銘柄は NaN）
+
+        最初の SELECT の失敗は投げる（読めない日を0件にしない）。1行の処理の失敗は受ける（#1580）。
+        """
         with _db_connection() as con:
             rows = con.execute(
                 "SELECT symbol, qty, avg_price, updated_at FROM paper_positions WHERE qty > 0"
             ).fetchall()
-        if not rows:
-            return []
-
-        results = []
-        for sym, qty, avg, updated_at in rows:
-            qty, avg, split_known = sa.adjust_position_for_splits(
-                self._market_data, sym, qty, avg, updated_at
-            )
-            current_price = self._latest_close(sym)
-            if not split_known and sa.looks_like_split_gap(avg, current_price):
-                logger.warning(
-                    f"[paper] {sym}: 分割の記録が取れず、買値と現在値の比が分割の比ほど違う"
-                )
-                current_price = math.nan
-            unrealized_pnl = (current_price - avg) * qty
-            results.append(
-                {
-                    "symbol": sym,
-                    "qty": qty,
-                    "avg_price": avg,
-                    "current_price": current_price,
-                    "unrealized_pnl": unrealized_pnl,
-                }
-            )
-        return results
+        return [long_position_row(self._market_data, self._latest_close, row) for row in rows]
 
     def get_pending_buy_symbols(self) -> set[str]:
         """約定待ちの BUY がある銘柄コードを返す（get_positions は約定前の買いを含まない、#1137）"""
