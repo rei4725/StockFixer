@@ -9,7 +9,7 @@ import pandas as pd
 import pytest
 
 from src.orchestration.job_errors import NonRetryableJobError
-from src.orchestration.jobs.rule_evaluation import rule_evaluation_window
+from src.orchestration.jobs.rule_evaluation import finish_rule_evaluation, rule_evaluation_window
 from src.orchestration.jobs.weekly import run_weekly_rule_evaluation
 
 _EVAL = "src.backtest.rule_selector.evaluate_all_symbols"
@@ -50,6 +50,18 @@ def test_errors_raise_even_when_notify_fails() -> None:
     ):
         with pytest.raises(RuntimeError, match="1"):
             run_weekly_rule_evaluation()
+
+
+def test_zero_evaluated_notify_then_raise() -> None:
+    """評価が0銘柄の回は、知らせを送ってからジョブを失敗にする（#1588）。"""
+    calls: list[str] = []
+    notify = MagicMock(side_effect=lambda **_: _record(calls))
+    with patch(_NOTIFY, notify):
+        with pytest.raises(NonRetryableJobError, match="0"):
+            finish_rule_evaluation(_summary(0, 0, 0, 0), "jp")
+    assert calls == ["notify"]
+    assert notify.call_args.kwargs["evaluated"] == 0
+    assert notify.call_args.kwargs["errors"] == 0
 
 
 def _port(frame: pd.DataFrame) -> MagicMock:

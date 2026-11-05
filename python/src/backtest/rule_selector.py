@@ -74,9 +74,9 @@ def evaluate_all_symbols(
 
     Returns:
         {"evaluated": int, "effective": int, "skipped": int, "errors": int}
-        skipped は有効ルールなしの銘柄の数、errors は値段の取得の失敗か、
-        評価（保存を含む）が例外で落ちた銘柄の数に、ウォッチリストから外れた銘柄の
-        行の削除の失敗（1回）を足したもの。
+        skipped は有効ルールなしの銘柄の数、errors は値段の取得の失敗か終値の全欠けか、
+        評価（ルール1つの例外と保存を含む）が例外で落ちた銘柄の数に、ウォッチリストから
+        外れた銘柄の行の削除の失敗（1回）を足したもの。errors の銘柄の行は消さない。
     """
     target_symbols = symbols or _load_symbols(market)
     logger.info(f"ルール評価開始: {len(target_symbols)} 銘柄 ({market})")
@@ -99,7 +99,8 @@ def evaluate_all_symbols(
                 fee_rate=fee_rate,
                 slippage=slippage,
                 stop_loss_pct=stop_loss_pct,
-                # 取得の失敗を有効ルールなしと混ぜず、下の except で errors に数える（#1270）
+                # 評価できない銘柄を有効ルールなしと混ぜず、
+                # 下の except で errors に数えて前の行を残す（#1270・#1588）
                 raise_on_fetch_failure=True,
             )
             evaluated += 1
