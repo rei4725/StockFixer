@@ -464,6 +464,12 @@ _BACKTEST_PROMOTION_SPECS = {
     "failed": BACKTEST_PROMOTION_FAILED,
 }
 _FIELD_LIMIT = 1000  # Discord の field の値は 1024 字まで
+_BP_PATH_SKIP_LABELS = {
+    "no_base_price": "基準の値段が無い",
+    "stale_features": "特徴量が古い",
+    "live_none": "本番の予想が無い",
+    "production_none": "この道の予想が無い",
+}
 
 
 def _bp_num(v) -> str:
@@ -481,6 +487,25 @@ def _bp_metrics(m: dict | None) -> str:
         f" / 順位相関 {_bp_num(m.get('rank_corr'))} / 上げ率 {_bp_num(m.get('predicted_up_rate'))}"
         f" (n={m.get('n_baseline', 0)})"
     )
+
+
+def _bp_path_check(path: dict) -> str:
+    """道の一致の結果を、市場ごとの比べた件数と飛ばした理由ごとの件数つきの文にする。"""
+    lines = [
+        f"{'OK' if path.get('passed') else 'NG'}"
+        f"（{path.get('compared', 0)} 銘柄・最大差 {_bp_num(path.get('max_abs_diff'))}）"
+    ]
+    by_market = path.get("compared_by_market") or {}
+    if by_market:
+        lines.append(" / ".join(f"{m} {n}" for m, n in sorted(by_market.items())))
+    skipped = [
+        f"{_BP_PATH_SKIP_LABELS.get(reason, reason)} {n}"
+        for reason, n in (path.get("skipped_by_reason") or {}).items()
+        if n
+    ]
+    if skipped:
+        lines.append("飛ばし: " + " / ".join(skipped))
+    return "\n".join(lines)
 
 
 def send_backtest_promotion_result(result: dict) -> bool:
@@ -511,14 +536,7 @@ def send_backtest_promotion_result(result: dict) -> bool:
         wins = sum(1 for d in daily if isinstance(d.get("diff"), (int, float)) and d["diff"] > 0)
         path = evaluation.get("path_check") or {}
         fields.append(_bp_field("📈 日ごとの勝ち越し", f"{wins}/{len(daily)} 日", True))
-        fields.append(
-            _bp_field(
-                "🛣️ 道の一致",
-                f"{'OK' if path.get('passed') else 'NG'}"
-                f"（{path.get('compared', 0)} 銘柄・最大差 {_bp_num(path.get('max_abs_diff'))}）",
-                True,
-            )
-        )
+        fields.append(_bp_field("🛣️ 道の一致", _bp_path_check(path), True))
     reasons = (evaluation.get("decision") or {}).get("reasons") or []
     detail = "\n".join(reasons) or result.get("reason") or ""
     if result.get("error"):

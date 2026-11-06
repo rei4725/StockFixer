@@ -56,7 +56,12 @@ def _evaluation(won: bool = True, passed: bool = True) -> HoldoutEvaluation:
         candidate=dict(_CANDIDATE),
         production=dict(_PRODUCTION),
         daily=[{"date": "2026-10-06", "candidate": 0.05, "production": 0.02, "diff": 0.03}],
-        path_check={"compared": 50, "max_abs_diff": 0.0 if passed else 0.1, "passed": passed},
+        path_check={
+            "compared": 50,
+            "max_abs_diff": 0.0 if passed else 0.1,
+            "passed": passed,
+            "compared_by_market": {"jp": 25, "us": 25},
+        },
         recorded_reference={"n_matched": 0, "direction_agreement": None, "median_ratio_diff": None},
         decision=WinDecision(won=not reasons, reasons=reasons),
     )
@@ -409,6 +414,31 @@ def test_path_check_that_compared_nothing_is_failure_and_version_not_marked(env)
     assert st.load_state().last_evaluated_version == "previous0000"
     assert env["result"].call_args[0][0]["outcome"] == "failed"
     assert _read_json(result["result_path"])["evaluation"]["path_check"]["compared"] == 0
+
+
+def test_no_jp_compared_is_failure_without_swap_and_version_not_marked(env):
+    # us が通っていても、発注する市場の jp を確かめられなかった回は入れ替えず次の夜にやり直す
+    st.save_state(BacktestPromotionState(last_evaluated_version="previous0000"))
+    evaluation = _evaluation(won=True, passed=True)
+    evaluation.path_check = {
+        "compared": 25,
+        "max_abs_diff": 0.0,
+        "passed": False,
+        "compared_by_market": {"jp": 0, "us": 25},
+        "skipped_by_reason": {"live_none": 25},
+    }
+    env["evaluate"].return_value = evaluation
+
+    result = job.run_backtest_promotion()
+
+    assert result["outcome"] == "failed"
+    assert "jp" in result["reason"]
+    assert result["swapped"] is False
+    env["swap"].assert_not_called()
+    assert st.load_state().last_evaluated_version == "previous0000"
+    saved = _read_json(result["result_path"])["evaluation"]["path_check"]
+    assert saved["compared_by_market"] == {"jp": 0, "us": 25}
+    assert saved["skipped_by_reason"] == {"live_none": 25}
 
 
 def test_failure_is_not_recorded_as_loss_and_version_not_marked(env):
@@ -1034,6 +1064,37 @@ def test_result_notification_title_follows_outcome(outcome, word):
     if outcome != "failed":
         assert "MAE が小さくない" in text
     assert all(len(f["value"]) <= 1024 for f in fields)
+
+
+def test_result_notification_shows_path_check_by_market_and_skip_reason():
+    from src.reporting.discord import notifications_model as nm
+
+    result = {
+        "outcome": "failed",
+        "version": _VERSION,
+        "evaluation": {
+            "path_check": {
+                "compared": 25,
+                "max_abs_diff": 0.0,
+                "passed": False,
+                "compared_by_market": {"jp": 0, "us": 25},
+                "skipped_by_reason": {
+                    "no_base_price": 1,
+                    "stale_features": 2,
+                    "live_none": 0,
+                    "production_none": 3,
+                },
+            },
+        },
+    }
+    _, fields = _sent(MagicMock(return_value=True), nm.send_backtest_promotion_result, result)
+    value = next(f["value"] for f in fields if "道の一致" in f["name"])
+    assert "NG" in value
+    assert "jp 0 / us 25" in value
+    assert "基準の値段が無い 1" in value
+    assert "特徴量が古い 2" in value
+    assert "この道の予想が無い 3" in value
+    assert "本番の予想が無い" not in value
 
 
 def test_result_notification_for_skip_has_reason():

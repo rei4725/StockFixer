@@ -309,6 +309,7 @@ def predict_with_unified_model(
     lookback_days: int = 90,
     horizon: int = 1,
     on_stale: Optional[Callable[[str, str], None]] = None,
+    base_price: Optional[float] = None,
 ) -> Optional[PredictionResult]:
     """
     統合モデルを使用して1銘柄の予測を行う
@@ -320,6 +321,8 @@ def predict_with_unified_model(
         lookback_days: データ取得日数（未使用、互換性のため残す）
         horizon: 予測ホライズン（営業日）。1=翌日, 3=3日後, 5=5日後, 10=10日後。
         on_stale: 特徴量が古いため予想を出さなかったときに (market, symbol) で呼ぶ
+        base_price: 特徴量の最後の行の日の終値。夜間の道の一致の検査だけが渡す（#1675）。
+            渡すと yfinance を見ない。省略時は今までどおり yfinance から取る
 
     Returns:
         予測結果のDataFrame または None
@@ -366,7 +369,9 @@ def predict_with_unified_model(
 
     # 基準の値段は特徴量の最後の行の日の終値。足の日付が合わない・取れないときは
     # 1日ずれた値段で予想の値段を出さないよう、予想を出さない（#845）
-    current_price = _fetch_current_price(market, symbol, last_date)
+    current_price = (
+        base_price if base_price is not None else _fetch_current_price(market, symbol, last_date)
+    )
     if current_price is None:
         return None
 

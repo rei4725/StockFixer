@@ -753,7 +753,7 @@ def _recover_job(queue_manager, job_id: str, now) -> None:
         queue_manager.run_job(job_id, reason="recovery")
         return
 
-    # 週の最適化が回数の上限で補完をやめた週を知らせる。例外は返さない（#1647）
+    # 上限や締めで補完をやめた期間を知らせる。例外は返さない（#1647, #1674）
     from src.orchestration.scheduler_cap_notice import notify_recovery_cap
 
     notify_recovery_cap(queue_manager, job_id, now)

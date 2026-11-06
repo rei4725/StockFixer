@@ -266,8 +266,12 @@ def _train_and_evaluate(result: dict) -> HoldoutEvaluation:
 def _apply_evaluation(result: dict, evaluation: HoldoutEvaluation) -> None:
     result["evaluation"] = asdict(evaluation)
     if not evaluation.path_check.get("compared"):
-        # 本番の予想が1つも出ず（yfinance の止まりなど）道を確かめられなかった。食い違いではない
+        # 本番の予想が1つも出ず道を確かめられなかった。食い違いではない
         _end(result, FAILED, "道の一致の検査で比べられた銘柄が無い（本番の予想が出ない）")
+        return
+    if not (evaluation.path_check.get("compared_by_market") or {}).get("jp"):
+        # 発注する市場を確かめられなかった回は入れ替えず、版を記録せず次の夜にやり直す（#1675）
+        _end(result, FAILED, "道の一致の検査で jp の比べられた銘柄が無い（jp の予想が出ない）")
         return
     if not evaluation.path_check.get("passed"):
         outcome = NOT_COMPARABLE

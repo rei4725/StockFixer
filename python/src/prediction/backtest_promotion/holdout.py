@@ -39,6 +39,20 @@ logger = get_logger(__name__)
 _HORIZON = 1
 _PATH_CHECK_FAILED = "道の一致の検査に落ちた"
 _PATH_CHECK_NOTHING = "道の一致の検査で比べられた銘柄が無い（本番の予想が出ない）"
+_PATH_CHECK_NO_JP = "道の一致の検査で jp の比べられた銘柄が無い"
+# 発注する市場。ここを1銘柄も比べられなかった回は passed にしない（#1675）
+_PATH_CHECK_REQUIRED_MARKET = "jp"
+# 道の一致の検査で銘柄を飛ばした理由
+_PATH_SKIP_NO_BASE_PRICE = "no_base_price"
+_PATH_SKIP_STALE = "stale_features"
+_PATH_SKIP_LIVE_NONE = "live_none"
+_PATH_SKIP_PRODUCTION_NONE = "production_none"
+_PATH_SKIP_REASONS = (
+    _PATH_SKIP_NO_BASE_PRICE,
+    _PATH_SKIP_STALE,
+    _PATH_SKIP_LIVE_NONE,
+    _PATH_SKIP_PRODUCTION_NONE,
+)
 _DEGRADED_CANDIDATE = "候補のアンサンブルにモデルが欠けた行がある（{n} 行）"
 
 
@@ -211,7 +225,7 @@ def evaluate_holdout(
     cutoff_dates: list[pd.Timestamp],
     candidate_models: list[tuple[str, Any]],
     production_models: list[tuple[str, Any]],
-    live_predict: Callable[[str, str], Optional[PredictionResult]],
+    live_predict: Callable[..., Optional[PredictionResult]],
 ) -> HoldoutEvaluation:
     """取っておいた日について候補と production を比べ、勝ちを判定する。
 
@@ -219,7 +233,8 @@ def evaluate_holdout(
         cutoff_dates: 取っておく日（holdout_dates の結果。先頭が締め日）
         candidate_models: 候補の（重みを引く名前, モデルの実物）。名前は本番の名前にする
         production_models: production の（重みを引く名前, モデルの実物）
-        live_predict: 本番の予想の関数（market, symbol）。道の一致の検査に使う
+        live_predict: 本番の予想の関数（market, symbol, base_price=, on_stale=）。
+            道の一致の検査に使う
 
     Returns:
         HoldoutEvaluation
@@ -254,8 +269,8 @@ def evaluate_holdout(
     market_days: dict[str, set] = {}
     # 道の一致の検査は市場ごとに分けて取る（market, symbol の順だと jp だけになる）
     path_quotas = _path_check_quotas(universe)
-    path_sampled: dict[str, int] = {market: 0 for market in path_quotas}
     path_compared: dict[str, int] = {market: 0 for market in path_quotas}
+    path_skipped: dict[str, int] = {reason: 0 for reason in _PATH_SKIP_REASONS}
     cand_weights = _WeightsRecorder()
     prod_weights = _WeightsRecorder()
 
@@ -322,13 +337,17 @@ def evaluate_holdout(
                 }
             )
 
-        # 市場ごとに、割り当ての数まで（symbol の順に）道の一致を確かめる
-        if path_sampled[market] < path_quotas[market]:
-            path_sampled[market] += 1
-            diff = _path_diff(df, market, symbol, production_models, live_predict)
+        # 市場ごとに、比べられた銘柄が割り当ての数になるまで（symbol の順に）道の一致を確かめる。
+        # 飛ばした銘柄は割り当てを使わないので、先頭の銘柄が飛んでも次の銘柄へ進む
+        if path_compared[market] < path_quotas[market]:
+            diff, skip_reason = _path_diff(
+                df, closes.get(row_days.iloc[-1]), market, symbol, production_models, live_predict
+            )
             if diff is not None:
                 path_diffs.append(diff)
                 path_compared[market] += 1
+            elif skip_reason is not None:
+                path_skipped[skip_reason] += 1
 
     if not rows:
         raise ValueError("候補と production の予想がそろった行が無い")
@@ -339,11 +358,13 @@ def evaluate_holdout(
     daily = _daily(table, date_strs)
 
     max_abs_diff = max(path_diffs) if path_diffs else None
+    required_compared = path_compared.get(_PATH_CHECK_REQUIRED_MARKET, 0) > 0
     path_check = {
         "compared": len(path_diffs),
         "max_abs_diff": max_abs_diff,
-        "passed": bool(path_diffs) and max_abs_diff is not None and max_abs_diff <= PATH_CHECK_TOL,
+        "passed": required_compared and max_abs_diff is not None and max_abs_diff <= PATH_CHECK_TOL,
         "compared_by_market": path_compared,
+        "skipped_by_reason": path_skipped,
     }
 
     # 採点の行の見込みは市場ごとに（その市場で y のある日の数）×（その市場の銘柄の数）を足す。
@@ -366,8 +387,11 @@ def evaluate_holdout(
         reasons.append(_DEGRADED_CANDIDATE.format(n=degraded["candidate"]))
     if not path_diffs:
         reasons.append(_PATH_CHECK_NOTHING)
-    elif not path_check["passed"]:
-        reasons.append(_PATH_CHECK_FAILED)
+    else:
+        if not required_compared:
+            reasons.append(_PATH_CHECK_NO_JP)
+        if max_abs_diff is not None and max_abs_diff > PATH_CHECK_TOL:
+            reasons.append(_PATH_CHECK_FAILED)
     decision = WinDecision(won=not reasons, reasons=reasons)
 
     reference = _recorded_reference(
@@ -397,20 +421,34 @@ def evaluate_holdout(
 
 def _path_diff(
     df: pd.DataFrame,
+    base_price: Optional[float],
     market: str,
     symbol: str,
     production_models: list,
-    live_predict: Callable[[str, str], Optional[PredictionResult]],
-) -> Optional[float]:
-    """最後の行について、この道の production と本番の予想の diff_ratio の差の絶対値。
+    live_predict: Callable[..., Optional[PredictionResult]],
+) -> tuple[Optional[float], Optional[str]]:
+    """最後の行について、この道の production と本番の予想の diff_ratio の差の絶対値を出す。
 
+    基準の値段は market_data_raw の最後の行の日の終値を本番の予想へ渡す。yfinance の最後の足は
+    22:00 JST には特徴量の最後の行より新しいことがあり、それだと比べられない（#1675）。
     値段の出どころの違いを道の違いと取り違えないよう、この道にも本番の予想の基準の値段
-    （current_price）を渡す。本番が None か、この道で予想が出ない（モデルが無い・
-    全モデルが例外）なら None。
+    （current_price）を渡す。
+
+    Args:
+        df: その銘柄の特徴量
+        base_price: 最後の行の日の終値。無ければ比べない
+
+    Returns:
+        (差の絶対値, None)。比べられなければ (None, 飛ばした理由)
     """
-    live = live_predict(market, symbol)
+    if base_price is None:
+        return None, _PATH_SKIP_NO_BASE_PRICE
+    stale: list[str] = []
+    live = live_predict(
+        market, symbol, base_price=base_price, on_stale=lambda _m, s: stale.append(s)
+    )
     if live is None:
-        return None
+        return None, _PATH_SKIP_STALE if stale else _PATH_SKIP_LIVE_NONE
     outcome, failed = _production_outcome(
         feature_row(df, -1, market),
         float(live.current_price),
@@ -420,5 +458,5 @@ def _path_diff(
         weights_fn=load_model_weights,
     )
     if failed or outcome is None:
-        return None
-    return abs(float(live.diff_ratio) - outcome.diff_ratio)
+        return None, _PATH_SKIP_PRODUCTION_NONE
+    return abs(float(live.diff_ratio) - outcome.diff_ratio), None
