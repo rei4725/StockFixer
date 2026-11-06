@@ -1,4 +1,4 @@
-"""週の最適化で結果が空か失敗が線を超えた回をジョブの失敗にし、同じ週に補完する（#1581）"""
+"""週の最適化で結果が空か失敗が線を超えた回をジョブの失敗にし、同じ週に補完する（#1581・#1680）"""
 
 import json
 import os
@@ -22,6 +22,8 @@ _WEEK_KEY = "2026-W45"
 _SUCCESS = {"market": "jp", "symbol": "7203", "status": "success"}
 _SKIPPED = {"market": "jp", "symbol": "6758", "status": "skipped"}
 _ERROR = {"market": "jp", "symbol": "9984", "status": "error", "error": "x"}
+_US_SUCCESS = {"market": "us", "symbol": "AAPL", "status": "success"}
+_US_ERROR = {"market": "us", "symbol": "VYLR", "status": "error", "error": "x"}
 
 
 class _Mocks:
@@ -140,6 +142,112 @@ def test_success_or_skip_only_run_stays_success(tmp_path, mocks, results):
     assert _manager(tmp_path).run_job(_JOB_ID, reason="scheduled") is True
 
     assert [e["status"] for e in _finished(tmp_path)] == ["success"]
+
+
+@pytest.mark.parametrize(
+    "results, success, failed, skipped, message",
+    [
+        pytest.param(
+            [_SUCCESS, _ERROR, _ERROR] + [_US_SUCCESS] * 4,
+            5,
+            2,
+            0,
+            "jp の失敗した銘柄が多すぎる: 2 / jp の結果 3",
+            id="jp-over-line",
+        ),
+        pytest.param(
+            [_ERROR] * 249 + [_US_SUCCESS] * 535,
+            535,
+            249,
+            0,
+            "jp の失敗した銘柄が多すぎる: 249 / jp の結果 249",
+            id="production-size-all-jp-failed",
+        ),
+        pytest.param(
+            [_SKIPPED, _ERROR, _ERROR, _ERROR] + [_US_SUCCESS] * 4,
+            4,
+            3,
+            1,
+            "jp の失敗した銘柄が多すぎる: 3 / jp の結果 4",
+            id="jp-over-line-with-skip",
+        ),
+    ],
+)
+def test_jp_failures_over_line_are_error_after_notice(
+    tmp_path, mocks, results, success, failed, skipped, message
+):
+    """全体は線の下でも jp が線を超えた回は、知らせの後に投げ、error と記録し、補完に任せること"""
+    mocks.batch.return_value = results
+    manager = _manager(tmp_path)
+
+    with pytest.raises(NonRetryableJobError, match=message):
+        manager.run_job(_JOB_ID, reason="scheduled")
+
+    mocks.completion.assert_called_once_with(success=success, failed=failed, skipped=skipped)
+    mocks.batch.assert_called_once()
+    assert [e["status"] for e in _finished(tmp_path)] == ["error"]
+    mocks.heartbeat.assert_called_once_with(_JOB_ID, success=False)
+
+
+def test_jp_failed_run_is_recovered_in_same_week(tmp_path, mocks):
+    """jp の線で失敗した回の後に同じ週の補完が通り、その成功で止まること"""
+    mocks.batch.return_value = [_ERROR, _ERROR] + [_US_SUCCESS] * 3
+    first = _manager(tmp_path)
+    with pytest.raises(NonRetryableJobError):
+        first.run_job(_JOB_ID, reason="scheduled")
+
+    now = datetime(2026, 11, 5, 12, 0, tzinfo=first.tz)
+    manager = _manager(tmp_path, now)
+    assert manager.should_recover(_JOB_ID, now=now) is True
+
+    mocks.batch.return_value = [_SUCCESS, _SUCCESS] + [_US_SUCCESS] * 3
+    assert manager.run_job(_JOB_ID, reason="recovery") is True
+
+    assert [e["status"] for e in _finished(tmp_path)] == ["error", "success"]
+    assert manager.should_recover(_JOB_ID, now=now) is False
+
+
+@pytest.mark.parametrize(
+    "results",
+    [
+        pytest.param(
+            [_SUCCESS] * 3 + [_ERROR, _US_SUCCESS, _US_ERROR, _US_ERROR],
+            id="us-failures-only-under-overall-line",
+        ),
+        pytest.param([_SUCCESS, _ERROR, _US_SUCCESS, _US_SUCCESS], id="jp-exactly-on-line"),
+        pytest.param(
+            [_SKIPPED, _SKIPPED, _ERROR, _ERROR, _US_SUCCESS], id="jp-skip-in-denominator"
+        ),
+        pytest.param([_US_SUCCESS, _US_SUCCESS, _US_ERROR], id="no-jp-results"),
+        pytest.param([_SKIPPED, _SKIPPED, _US_SUCCESS, _US_ERROR], id="all-jp-skipped"),
+    ],
+)
+def test_jp_under_line_stays_success(tmp_path, mocks, results):
+    """jp が線以下か jp の失敗の数えようが無い回は、全体の線の下なら success のままであること"""
+    mocks.batch.return_value = results
+
+    assert _manager(tmp_path).run_job(_JOB_ID, reason="scheduled") is True
+
+    assert [e["status"] for e in _finished(tmp_path)] == ["success"]
+
+
+@pytest.mark.parametrize(
+    "results, total, failed",
+    [
+        pytest.param([_US_ERROR, _US_ERROR, _US_SUCCESS], 3, 2, id="us-only"),
+        pytest.param([_ERROR, _ERROR, _US_ERROR], 3, 3, id="jp-and-overall-over-line"),
+    ],
+)
+def test_overall_line_message_is_unchanged(tmp_path, mocks, results, total, failed):
+    """全体の線を超えた回は、jp の線より先に今までの全体の文で投げること"""
+    mocks.batch.return_value = results
+
+    with pytest.raises(NonRetryableJobError) as raised:
+        _manager(tmp_path).run_job(_JOB_ID, reason="scheduled")
+
+    assert str(raised.value) == (
+        f"週次バックテスト最適化で失敗した銘柄が多すぎる: {failed} / 結果 {total}（線 50%）"
+    )
 
 
 def test_failed_run_is_recovered_in_same_week_and_success_stops_it(tmp_path, mocks):
