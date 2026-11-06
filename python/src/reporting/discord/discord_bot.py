@@ -6,11 +6,14 @@ from discord.utils import escape_markdown
 from dotenv import load_dotenv
 
 from config.env_source import dotenv_path
+from config.feature_flags import flags
 from src.domain.types import PredictionResult
 from src.reporting.discord.discord_formatters import (
+    PREDICTED_CHANGE_HIDDEN_NOTE,
     build_prediction_list,
     convert_df_for_discord,
     get_market_emoji,
+    hide_predicted_columns,
 )
 from src.reporting.discord.discord_text import DISCORD_TEXT_LIMIT, split_text_chunks
 from src.reporting.ports import get_analytics_query, get_prediction_result_repository
@@ -91,11 +94,18 @@ def build_signal_lines(
     lines = [
         f"=== {market.upper()} / {symbol_label(market, symbol)} ===",
         f"現在値  : {current_disp}",
-        f"予想終値: {pred_disp}",
-        f"予想変化率: {change_pct}",
-        f"シグナル : {signal}",
-        f"使用モデル: {model_count}モデルの平均",
     ]
+    if flags.SHOW_PREDICTED_CHANGE:
+        lines.extend(
+            [
+                f"予想終値: {pred_disp}",
+                f"予想変化率: {change_pct}",
+                f"シグナル : {signal}",
+            ]
+        )
+    else:
+        lines.append(PREDICTED_CHANGE_HIDDEN_NOTE)
+    lines.append(f"使用モデル: {model_count}モデルの平均")
     if shap_result:
         lines.append("")
         lines.append(f"[SHAP 寄与度 Top5 - 方向:{shap_result['direction']}]")
@@ -121,7 +131,8 @@ def build_scheduler_status_lines(statuses: list[SchedulerJobStatus]) -> list[str
 def build_prediction_table_text(results: list[PredictionResult]) -> str:
     if not results:
         return ""
-    return convert_df_for_discord(PredictionResult.to_dataframe(results)).to_string(index=False)
+    df = convert_df_for_discord(PredictionResult.to_dataframe(results))
+    return hide_predicted_columns(df).to_string(index=False)
 
 
 def build_prediction_list_message(market: str, label: str, results: list[PredictionResult]) -> str:
@@ -134,7 +145,10 @@ def build_prediction_list_message(market: str, label: str, results: list[Predict
         return ""
     emoji = get_market_emoji(market)
     header = f"{emoji} **{market.upper()} {label}**"
-    return "\n".join([header, *build_prediction_list(results, max_n=10)])
+    lines = [header, *build_prediction_list(results, max_n=10)]
+    if not flags.SHOW_PREDICTED_CHANGE:
+        lines.append(PREDICTED_CHANGE_HIDDEN_NOTE)
+    return "\n".join(lines)
 
 
 def get_top10_diff_stocks_message(market: str, rank_type: str, predicted_at: str = None) -> str:
@@ -184,7 +198,7 @@ def build_watchlist_prediction_text(view: WatchlistPredictionView) -> str:
     if not view.is_success:
         return view.error_message or "[エラー] 監視対象予測処理に失敗しました"
     df = convert_df_for_discord(WatchlistPredictionRow.to_dataframe(view.rows))
-    return df.to_string(index=False)
+    return hide_predicted_columns(df).to_string(index=False)
 
 
 async def handle_watchnext_command(message):

@@ -7,8 +7,13 @@ Webhookを使用したDiscord通知機能
 import logging
 from typing import Optional
 
+from config.feature_flags import flags
 from src.domain.ports import PredictionResultRepository
-from src.reporting.discord.discord_formatters import build_prediction_list, get_market_emoji
+from src.reporting.discord.discord_formatters import (
+    PREDICTED_CHANGE_HIDDEN_NOTE,
+    build_prediction_list,
+    get_market_emoji,
+)
 from src.reporting.discord.discord_notification_specs import (
     COLOR_INFO,
     DAILY_PIPELINE_COMPLETION,
@@ -70,6 +75,9 @@ from src.utils.japan_time import format_jst, format_jst_from_iso
 
 logger = logging.getLogger(__name__)
 
+RULE_TRACK_RECORD_HORIZON = "5"
+RULE_TRACK_RECORD_MIN_N = 30
+
 
 def send_daily_pipeline_completion(
     data_count: Optional[int] = None,
@@ -120,16 +128,18 @@ def _send_prediction_snapshot(snapshot, ts_label: str) -> None:
     """1マーケット分の予測（上位/下位）をリスト型 embed で送信する。"""
     parts: list[str] = []
     if snapshot.top_results:
-        parts.append("📈 **上位（予想上昇）**")
+        parts.append("📈 **上位**")
         parts.extend(build_prediction_list(snapshot.top_results, max_n=10))
     if snapshot.worst_results:
         if parts:
             parts.append("")
-        parts.append("📉 **下位（予想下落）**")
+        parts.append("📉 **下位**")
         parts.extend(build_prediction_list(snapshot.worst_results, max_n=10))
 
     if not parts:
         return
+    if not flags.SHOW_PREDICTED_CHANGE:
+        parts.extend(["", PREDICTED_CHANGE_HIDDEN_NOTE])
 
     emoji = get_market_emoji(snapshot.market)
     title = f"{emoji} {snapshot.market.upper()} 予測 — {ts_label}"
@@ -462,14 +472,42 @@ def send_rule_evaluation_completion(
     return send_webhook_text("\n".join(lines))
 
 
+def _rule_track_record_text(track_record: dict, rule: str, direction: str) -> str:
+    """ルールの実績（rule_accuracy の全期間の5日先）を1行に入る字に整える。"""
+    stats = track_record.get(rule, {}).get(direction, {}).get(RULE_TRACK_RECORD_HORIZON, {})
+    n = stats.get("n") or 0
+    edge = stats.get("edge")
+    if n == 0 or edge is None:
+        return "実績なし"
+    if n < RULE_TRACK_RECORD_MIN_N:
+        return f"実績不足 n={n}"
+    mean_return = stats.get("mean_signed_return")
+    return_text = "" if mean_return is None else f" 平均{mean_return * 100:+.1f}%"
+    return f"実績{edge * 100:+.1f}pt{return_text} n={n}"
+
+
+def _rule_signal_line(signal: dict, market: str, direction: str, track_record: dict) -> str:
+    price_str = f"{signal['price']:,.0f}円" if signal.get("price") else "---"
+    record = _rule_track_record_text(track_record, signal["rule"], direction)
+    return (
+        f"  • `{signal['symbol']}`{symbol_name_suffix(market, signal['symbol'])} "
+        f"[{signal['rule']}]  価格={price_str}  {record}  BT勝率={signal['win_rate']:.1%}"
+    )
+
+
 def send_rule_daily_signals(
     signals: list[dict],
     market: str,
     buy_orders: int,
     sell_orders: int,
     total: int,
+    track_record: Optional[dict] = None,
 ) -> bool:
-    """ルールベース日次シグナル通知を Discord に送信する。total は対象の銘柄数（#1571）。"""
+    """ルールベース日次シグナル通知を Discord に送信する。total は対象の銘柄数（#1571）。
+
+    track_record はルールごとの実績（load_rule_track_record の返り値）。
+    """
+    track_record = track_record or {}
     now = format_jst(fmt="%Y/%m/%d %H:%M JST")
     buy_signals = [s for s in signals if s["signal"] == 1]
     sell_signals = [s for s in signals if s["signal"] == -1]
@@ -484,21 +522,19 @@ def send_rule_daily_signals(
     if buy_signals:
         lines.append("**BUY シグナル:**")
         for s in buy_signals:
-            price_str = f"{s['price']:,.0f}円" if s.get("price") else "---"
-            lines.append(
-                f"  • `{s['symbol']}`{symbol_name_suffix(market, s['symbol'])} [{s['rule']}]  "
-                f"価格={price_str}  勝率={s['win_rate']:.1%}"
-            )
+            lines.append(_rule_signal_line(s, market, "buy", track_record))
 
     if sell_signals:
         lines.append("")
         lines.append("**SELL シグナル:**")
         for s in sell_signals:
-            price_str = f"{s['price']:,.0f}円" if s.get("price") else "---"
-            lines.append(
-                f"  • `{s['symbol']}`{symbol_name_suffix(market, s['symbol'])} [{s['rule']}]  "
-                f"価格={price_str}  勝率={s['win_rate']:.1%}"
-            )
+            lines.append(_rule_signal_line(s, market, "sell", track_record))
+
+    if buy_signals or sell_signals:
+        lines.append("")
+        lines.append(
+            "実績: 本番のシグナルの5日後の的中率と基準の差（pt）と平均の損益。BT: バックテスト"
+        )
 
     if total <= 0:
         lines.append("❌ 有効ルールが0銘柄のため判定できず（保有の SELL も判定していない）")

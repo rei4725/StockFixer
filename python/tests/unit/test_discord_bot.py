@@ -4,6 +4,7 @@ import asyncio
 import unittest
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
+from config.feature_flags import flags
 from src.prediction.types import PredictionResult
 from src.reporting.discord.discord_bot import (
     TOP10_LABEL,
@@ -31,6 +32,7 @@ class TestDiscordBotHelpers(unittest.TestCase):
         self.assertEqual(determine_signal_label(-0.01), "⬇️ Sell")
         self.assertEqual(determine_signal_label(0.001), "⏺️ Hold")
 
+    @patch.object(flags, "SHOW_PREDICTED_CHANGE", True)
     def test_build_signal_lines_includes_shap_section(self):
         lines = build_signal_lines(
             market="jp",
@@ -53,6 +55,7 @@ class TestDiscordBotHelpers(unittest.TestCase):
         self.assertIn("[SHAP 寄与度 Top5 - 方向:up]", message)
         self.assertIn("close_lag_1", message)
 
+    @patch.object(flags, "SHOW_PREDICTED_CHANGE", True)
     def test_build_prediction_table_text_formats_prediction_results(self):
         table_text = build_prediction_table_text(
             [

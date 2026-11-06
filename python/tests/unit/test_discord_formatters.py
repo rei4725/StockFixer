@@ -2,8 +2,11 @@
 
 import unittest
 from dataclasses import dataclass
+from unittest.mock import patch
 
 import pandas as pd
+
+from config.feature_flags import flags
 
 
 @dataclass
@@ -41,6 +44,7 @@ class TestFormatPrice(unittest.TestCase):
 
 
 class TestBuildPredictionList(unittest.TestCase):
+    @patch.object(flags, "SHOW_PREDICTED_CHANGE", True)
     def test_emoji_symbol_and_change(self):
         from src.reporting.discord.discord_formatters import build_prediction_list
 
