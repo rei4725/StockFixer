@@ -80,6 +80,21 @@ def _get_pending_buy_symbols(broker: BrokerBase) -> set[str]:
         raise
 
 
+def _get_rule_buy_symbols_placed_today(broker: BrokerBase) -> set[str]:
+    """今日のルールの回が出した約定待ちの BUY の銘柄コードを返す。読む関数が無い Broker は空（#1660）
+
+    読めない日の扱いは _get_pending_buy_symbols と同じで、例外は上へ出す。
+    """
+    reader = getattr(broker, "get_rule_buy_symbols_placed_today", None)
+    if reader is None:
+        return set()
+    try:
+        return {str(s).replace(".T", "") for s in reader()}
+    except Exception:
+        logger.error("[exec] 今日のルールの回の BUY を読めない（新規は止める）", exc_info=True)
+        raise
+
+
 def _load_exit_model(market: str) -> ExitModel | None:
     """
     保存済みの ExitModel を models/ から読み込む。

@@ -472,6 +472,25 @@ class PaperBroker(BrokerBase):
             ).fetchall()
         return {str(sym).replace(".T", "") for (sym,) in rows}
 
+    def get_rule_buy_symbols_placed_today(self) -> set[str]:
+        """今日の 16:30 のルールの回が出した約定待ちの BUY の銘柄コードを返す（#1660）
+
+        ルールの道は予想に紐づかないので predicted_at が空で、出た時刻は今日の引けの後になる。
+        8:50 の道の注文（predicted_at を持つ・引けの前）と前の日より前の残りは入らない。
+        """
+        with _db_connection() as con:
+            rows = con.execute(
+                "SELECT symbol, created_at FROM paper_orders "
+                "WHERE status='pending' AND side=%s AND predicted_at IS NULL",
+                [int(OrderSide.BUY)],
+            ).fetchall()
+        today = _today_jst()
+        return {
+            str(sym).replace(".T", "")
+            for (sym, created_at) in rows
+            if _created_after_bar_close(created_at, today)
+        }
+
     def get_pnl_summary(self) -> dict[str, Any]:
         """
         損益サマリーを返す。

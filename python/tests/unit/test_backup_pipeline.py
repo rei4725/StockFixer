@@ -11,7 +11,10 @@
 
 import os
 import subprocess
+from datetime import datetime
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from src.orchestration.backup_pipeline import _prune_old_backups, _run_pg_dump, run_db_backup
 
@@ -202,6 +205,85 @@ class TestRunDbBackup:
         assert sorted(os.listdir(backup_root)) == good[1:] + [this_run]
         for name in good[1:]:
             assert (backup_root / name / "stockfixer.dump").read_bytes() == b"x" * 2048
+
+    def test_dump_is_written_under_temporary_name_while_pg_dump_runs(self, tmp_path):
+        seen = {}
+
+        def _fake_pg_dump(cmd, **kwargs):
+            written_path = cmd[cmd.index("-f") + 1]
+            with open(written_path, "wb") as f:
+                f.write(b"x" * 1024)
+            final_path = os.path.join(os.path.dirname(written_path), "stockfixer.dump")
+            seen["final_exists_while_writing"] = os.path.exists(final_path)
+            return _fake_completed_process(0)
+
+        with (
+            patch(
+                "src.orchestration.backup_pipeline.get_backup_dir",
+                return_value=str(tmp_path / "backups"),
+            ),
+            patch("src.orchestration.backup_pipeline.subprocess.run", side_effect=_fake_pg_dump),
+            patch(
+                "src.orchestration.backup_pipeline.get_database_url",
+                return_value="postgresql://u:p@h:5432/db",
+            ),
+        ):
+            result = run_db_backup()
+
+        assert seen["final_exists_while_writing"] is False
+        assert result["error"] is None
+        assert os.listdir(os.path.dirname(result["backup_path"])) == ["stockfixer.dump"]
+        assert os.path.basename(result["backup_path"]) == "stockfixer.dump"
+        assert result["size_mb"] == 1024 / (1024 * 1024)
+
+    def test_success_removes_folder_of_vanished_run_and_keeps_five_good_generations(self, tmp_path):
+        backup_root = tmp_path / "backups"
+        good = [
+            "20260101_000000",
+            "20260103_000000",
+            "20260105_000000",
+            "20260107_000000",
+            "20260109_000000",
+        ]
+        for name in good:
+            _write_good_backup(backup_root / name)
+
+        def _vanish(url, dest):
+            open(dest, "wb").write(b"partial")
+            raise _ProcessVanished
+
+        with (
+            patch(
+                "src.orchestration.backup_pipeline.get_backup_dir", return_value=str(backup_root)
+            ),
+            patch(
+                "src.orchestration.backup_pipeline.get_database_url",
+                return_value="postgresql://u:p@h:5432/db",
+            ),
+            patch("src.orchestration.backup_pipeline.datetime") as mock_datetime,
+        ):
+            mock_datetime.now.return_value = datetime(2026, 1, 10)
+            with patch("src.orchestration.backup_pipeline._run_pg_dump", side_effect=_vanish):
+                with pytest.raises(_ProcessVanished):
+                    run_db_backup()
+
+            vanished_folder = backup_root / "20260110_000000"
+            assert os.listdir(vanished_folder) == ["stockfixer.dump.partial"]
+
+            mock_datetime.now.return_value = datetime(2026, 1, 11)
+            with patch(
+                "src.orchestration.backup_pipeline._run_pg_dump",
+                side_effect=lambda url, dest: open(dest, "wb").write(b"x" * 2048),
+            ):
+                result = run_db_backup()
+
+        assert result["error"] is None
+        assert result["pruned_count"] == 2
+        assert sorted(os.listdir(backup_root)) == good[1:] + ["20260111_000000"]
+
+
+class _ProcessVanished(BaseException):
+    """プロセスごと消えた回を表す（except Exception の掃除を通らない）。"""
 
 
 def _write_good_backup(folder):
