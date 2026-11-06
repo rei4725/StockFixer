@@ -3,6 +3,7 @@
 
 予想は本番と同じ芯（ensemble_diff_ratio）と同じ行の作り方（feature_row）で出し、
 物差しは両方の予想がそろった行だけで baseline_metrics() から出す。
+発注する市場（jp）は全市場の線とは別に、比べられた行と行のある銘柄の数を線と比べる（#1693）。
 最新の日については、本番の予想の関数とこの道の production の予想が一致するかを確かめる
 （道の一致の検査）。prediction_accuracy に記録された production の予想との突き合わせは
 参考として書くだけで、合否には使わない。
@@ -16,6 +17,7 @@ import pandas as pd
 
 from src.prediction.backtest_promotion.judge import (
     HOLDOUT_TRADING_DAYS,
+    MIN_COVERAGE,
     PATH_CHECK_SAMPLE,
     PATH_CHECK_TOL,
     judge_win,
@@ -54,6 +56,15 @@ _PATH_SKIP_REASONS = (
     _PATH_SKIP_PRODUCTION_NONE,
 )
 _DEGRADED_CANDIDATE = "候補のアンサンブルにモデルが欠けた行がある（{n} 行）"
+_REQUIRED_NO_SYMBOLS = f"発注する市場 {_PATH_CHECK_REQUIRED_MARKET} の銘柄が無い"
+_REQUIRED_ROWS_SHORT = (
+    f"発注する市場 {_PATH_CHECK_REQUIRED_MARKET} の比べられた行が足りない"
+    "（{n} 行、見込み {expected} 行、必要 {need:g} 以上）"
+)
+_REQUIRED_SYMBOLS_SHORT = (
+    f"発注する市場 {_PATH_CHECK_REQUIRED_MARKET} の行のある銘柄が足りない"
+    "（{n} 銘柄、全 {universe} 銘柄、必要 {need:g} 以上）"
+)
 
 
 def holdout_dates(feature_dates: pd.Series, n: int = HOLDOUT_TRADING_DAYS) -> list[pd.Timestamp]:
@@ -221,6 +232,71 @@ def _daily(rows: pd.DataFrame, dates: list[str]) -> list[dict]:
     return daily
 
 
+def _both_metrics(rows: pd.DataFrame) -> tuple[dict, dict]:
+    """同じ行での候補と production の baseline_metrics()。"""
+    return (
+        baseline_metrics(rows.rename(columns={"candidate_ratio": "predicted_ratio"})),
+        baseline_metrics(rows.rename(columns={"production_ratio": "predicted_ratio"})),
+    )
+
+
+def _market_summaries(
+    table: pd.DataFrame,
+    universe: list[tuple[str, str]],
+    market_symbols: dict[str, int],
+    market_days: dict[str, set],
+) -> dict[str, dict]:
+    """universe の市場ごとの、行の見込みと、比べられた行の数と物差し。
+
+    行のある銘柄が1つも無い市場も書く（その市場が丸ごと欠けた回を結果から読めるようにする）。
+    採点の行の見込みは（その市場で y のある日の数）×（行のある銘柄の数）。日は jp と us を
+    合わせたものなので、全部の日 × 全部の銘柄だと休場日の分だけ足りなくなる。
+    """
+    summaries: dict[str, dict] = {}
+    for market in sorted({m for m, _ in universe}):
+        n_symbols = market_symbols.get(market, 0)
+        n_dates = len(market_days.get(market, ()))
+        candidate, production = _both_metrics(table[table["market"] == market])
+        summaries[market] = {
+            "n_universe_symbols": sum(1 for m, _ in universe if m == market),
+            "n_symbols": n_symbols,
+            "n_dates": n_dates,
+            "expected_rows": n_dates * n_symbols,
+            "n_compared": min(candidate["n_baseline"], production["n_baseline"]),
+            "candidate": candidate,
+            "production": production,
+        }
+    return summaries
+
+
+def _required_market_reasons(markets: dict[str, dict]) -> list[str]:
+    """発注する市場の行か銘柄が線に届かないときの、勝ちにしない理由を返す。
+
+    銘柄の分母は universe の銘柄の数。行の見込みは行の無い銘柄を飛ばした後の数なので、
+    銘柄がごっそり欠けると一緒に縮み、行の線だけでは止まらない。
+    universe に発注する市場が無い回は、道の一致の検査（#1675）と同じく勝ちにしない。
+    """
+    summary = markets.get(_PATH_CHECK_REQUIRED_MARKET)
+    if summary is None:
+        return [_REQUIRED_NO_SYMBOLS]
+    reasons: list[str] = []
+    need_rows = summary["expected_rows"] * MIN_COVERAGE
+    if summary["n_compared"] < need_rows:
+        reasons.append(
+            _REQUIRED_ROWS_SHORT.format(
+                n=summary["n_compared"], expected=summary["expected_rows"], need=need_rows
+            )
+        )
+    need_symbols = summary["n_universe_symbols"] * MIN_COVERAGE
+    if summary["n_symbols"] < need_symbols:
+        reasons.append(
+            _REQUIRED_SYMBOLS_SHORT.format(
+                n=summary["n_symbols"], universe=summary["n_universe_symbols"], need=need_symbols
+            )
+        )
+    return reasons
+
+
 def evaluate_holdout(
     cutoff_dates: list[pd.Timestamp],
     candidate_models: list[tuple[str, Any]],
@@ -353,8 +429,7 @@ def evaluate_holdout(
         raise ValueError("候補と production の予想がそろった行が無い")
 
     table = pd.DataFrame(rows)
-    candidate = baseline_metrics(table.rename(columns={"candidate_ratio": "predicted_ratio"}))
-    production = baseline_metrics(table.rename(columns={"production_ratio": "predicted_ratio"}))
+    candidate, production = _both_metrics(table)
     daily = _daily(table, date_strs)
 
     max_abs_diff = max(path_diffs) if path_diffs else None
@@ -367,16 +442,7 @@ def evaluate_holdout(
         "skipped_by_reason": path_skipped,
     }
 
-    # 採点の行の見込みは市場ごとに（その市場で y のある日の数）×（その市場の銘柄の数）を足す。
-    # 日は jp と us を合わせたものなので、全部の日 × 全部の銘柄だと休場日の分だけ足りなくなる
-    markets = {
-        market: {
-            "n_symbols": market_symbols[market],
-            "n_dates": len(market_days[market]),
-            "expected_rows": len(market_days[market]) * market_symbols[market],
-        }
-        for market in sorted(market_symbols)
-    }
+    markets = _market_summaries(table, universe, market_symbols, market_days)
     expected_rows = sum(m["expected_rows"] for m in markets.values())
 
     # 物差しの無い日は勝ちに数えず、日数には入れる
@@ -392,6 +458,7 @@ def evaluate_holdout(
             reasons.append(_PATH_CHECK_NO_JP)
         if max_abs_diff is not None and max_abs_diff > PATH_CHECK_TOL:
             reasons.append(_PATH_CHECK_FAILED)
+    reasons.extend(_required_market_reasons(markets))
     decision = WinDecision(won=not reasons, reasons=reasons)
 
     reference = _recorded_reference(
