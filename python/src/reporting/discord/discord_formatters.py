@@ -7,6 +7,7 @@ from typing import Any, Sequence
 import numpy as np
 import pandas as pd
 
+from config.feature_flags import flags
 from src.utils.db.symbol_master import symbol_display_name, symbol_name_suffix
 
 MARKET_EMOJI = {
@@ -18,6 +19,11 @@ MARKET_EMOJI = {
 # シグナル判定のしきい値（変化率）。determine_signal_label と揃える。
 SIGNAL_BUY_THRESHOLD = 0.005
 SIGNAL_SELL_THRESHOLD = -0.005
+
+PREDICTED_CHANGE_HIDDEN_NOTE = (
+    "ℹ️ 並びはモデルの順番の参考。銘柄を選ぶ腕が確かめられるまで、予想の値は出していない"
+)
+_PREDICTED_COLUMNS = ("予想終値", "予想変化率", "予想±")
 
 
 def signal_emoji(diff_ratio: float | None) -> str:
@@ -51,18 +57,30 @@ def build_prediction_list(results: Sequence[Any], max_n: int = 10) -> list[str]:
     1 銘柄 1 行に収める。
 
     例: `` 1`` ⬆️ **7203** トヨタ自動車  2,500 → 2,530  (+1.2%)
+    SHOW_PREDICTED_CHANGE が false の間は順番と現在値だけを出す。
+    例: `` 1`` **7203** トヨタ自動車  2,500
     """
     lines: list[str] = []
     for i, r in enumerate(list(results)[:max_n], start=1):
-        ratio = getattr(r, "diff_ratio", None)
-        emoji = signal_emoji(ratio)
         cur = format_price(getattr(r, "current_price", None))
-        pred = format_price(getattr(r, "avg_pred_price", None))
-        pct = f"{ratio * 100:+.1f}%" if ratio is not None else "—"
         symbol = getattr(r, "symbol", "?")
         name = symbol_name_suffix(getattr(r, "market", None), symbol)
+        if not flags.SHOW_PREDICTED_CHANGE:
+            lines.append(f"`{i:>2}` **{symbol}**{name}  {cur}")
+            continue
+        ratio = getattr(r, "diff_ratio", None)
+        emoji = signal_emoji(ratio)
+        pred = format_price(getattr(r, "avg_pred_price", None))
+        pct = f"{ratio * 100:+.1f}%" if ratio is not None else "—"
         lines.append(f"`{i:>2}` {emoji} **{symbol}**{name}  {cur} → {pred}  ({pct})")
     return lines
+
+
+def hide_predicted_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """SHOW_PREDICTED_CHANGE が false の間、整形済みの表から予想の値の列を外す。"""
+    if flags.SHOW_PREDICTED_CHANGE:
+        return df
+    return df.drop(columns=[column for column in _PREDICTED_COLUMNS if column in df.columns])
 
 
 def normalize_market_code(market: str) -> str:

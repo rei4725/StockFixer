@@ -580,6 +580,7 @@ def run_daily_rule_signals() -> None:
 
     try:
         from src.reporting.discord.discord_utils import send_rule_daily_signals
+        from src.scoring.rule_report import load_rule_track_record
 
         send_rule_daily_signals(
             signals=signals,
@@ -587,6 +588,7 @@ def run_daily_rule_signals() -> None:
             buy_orders=trade_stats["buy_orders"],
             sell_orders=trade_stats["sell_orders"],
             total=batch.total,
+            track_record=load_rule_track_record(market),
         )
     except Exception as e:
         logger.error("ルールシグナル通知失敗: %s", e, exc_info=True)

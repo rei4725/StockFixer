@@ -415,6 +415,21 @@ def write_rule_accuracy(report: dict, as_of: date, output_dir: Path | None = Non
     return _write_json(report, _out_dir(output_dir) / f"{as_of.isoformat()}.json")
 
 
+def load_rule_track_record(market: str, output_dir: Path | None = None) -> dict[str, Any]:
+    """最新の rule_accuracy の全期間の窓から、ルールごとの実績を返す。読めなければ空。"""
+    files = sorted(_out_dir(output_dir).glob("????-??-??.json"))
+    if not files:
+        return {}
+    try:
+        report = json.loads(files[-1].read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        logger.warning("rule_accuracy を読めなかった: %s", files[-1], exc_info=True)
+        return {}
+    if report.get("market") != market:
+        return {}
+    return report.get("windows", {}).get("all", {}).get("rules", {})
+
+
 def run_daily_scoring(market: str = "jp", as_of: date | None = None) -> Path:
     """全期間を採点し直し、rule_signal_outcomes と rule_accuracy の JSON を書く。"""
     as_of = as_of or (now_utc() + _JST_OFFSET).date()

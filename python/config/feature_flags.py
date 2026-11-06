@@ -26,6 +26,11 @@ class FeatureFlags(BaseSettings):
         case_sensitive=True,
     )
 
+    # ---------- Discord の予想の値の表示 ----------
+    # production の予想は銘柄を選ぶ腕が確かめられていない（順位相関がほぼ 0、|予想| は実際の
+    # 約3倍、99% が「上がる」）。true に戻すまで、予想の終値・変化率・向きを Discord に出さない
+    SHOW_PREDICTED_CHANGE: bool = Field(default=False)
+
     # ---------- ショートサイド（R-215） ----------
     ENABLE_SHORT_SIDE: bool = Field(default=False)
 
