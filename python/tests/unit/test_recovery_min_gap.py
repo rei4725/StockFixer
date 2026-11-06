@@ -157,6 +157,7 @@ def test_only_the_named_jobs_have_the_gap():
         "weekly_rule_evaluation",
         "regime_leverage_weekly",
         "weekly_optimization",
+        "daily_rule_signals",
     }
 
 

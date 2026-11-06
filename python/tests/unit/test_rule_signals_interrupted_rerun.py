@@ -1,7 +1,8 @@
 """16:30 のルールの発注の、前の起動で消えた回の補完（#1652）
 
-デプロイの起き直しで消えた回を同じ日のうちに1回だけ流し直す。流し直しは、消えた回が出した
-約定待ちの BUY と SELL を飛ばし、まだ出していない注文だけを出す。
+デプロイの起き直しで消えた回を、間を待たずに同じ日のうちに流し直す。流し直しは、消えた回が出した
+約定待ちの BUY と SELL を飛ばし、まだ出していない注文だけを出す。失敗の回の補完は
+test_rule_signals_failed_recovery.py にある（#1676）。
 """
 
 import json
@@ -81,8 +82,8 @@ def test_interrupted_run_is_not_recovered_on_the_next_day(tmp_path):
     assert manager.get_missed_past_periods(_JOB_ID, now=next_morning) == []
 
 
-def test_recovery_stops_after_two_consecutive_interruptions(tmp_path):
-    """消えた回の後の補完は1回までで、2回続けて消えたら止まること（C-014）"""
+def test_recovery_stops_after_three_consecutive_interruptions(tmp_path):
+    """消えた回の許しは1回までで、上限2回と合わせて3回続けて消えたら止まること（C-014・#1676）"""
     state_path = tmp_path / "state.json"
     calls = {"n": 0}
     snapshot: dict[str, bytes] = {}
@@ -107,11 +108,11 @@ def test_recovery_stops_after_two_consecutive_interruptions(tmp_path):
         manager.run_job(_JOB_ID, reason="recovery")
         state_path.write_bytes(snapshot["state"])
 
-    assert calls["n"] == 2
+    assert calls["n"] == 3
 
 
-def test_failed_run_is_not_called_again(tmp_path):
-    """例外で失敗した回は、同じ回の中でも補完でも呼び直さないこと（#836・#1075）"""
+def test_failed_run_is_not_called_again_before_the_gap(tmp_path):
+    """例外で失敗した回は、同じ回の中でも間が明けるまでも呼び直さないこと（#836・#1075・#1676）"""
     state_path = tmp_path / "state.json"
     func = MagicMock(side_effect=RuntimeError("注文の失敗"))
     manager = SchedulerQueueManager(_config(func), state_file_path=str(state_path))
