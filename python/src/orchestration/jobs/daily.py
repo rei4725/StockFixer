@@ -582,7 +582,8 @@ def run_daily_rule_signals() -> None:
     notify_rule_signals(signals, market, trade_stats, batch.total)
 
     # 注文の失敗は知らせを送った後にジョブの失敗にする（#1075）。run_scheduler の
-    # daily_rule_signals は max_retries: 0 のため、失敗にしても発注は呼び直されない。
+    # daily_rule_signals は max_retries: 0 のため、同じ回の中では呼び直されない。
+    # 間を空けた同じ日の補完は1回動き、出した約定待ちを飛ばして落ちた注文だけ出す（#1676）。
     errors = trade_stats.get("errors", 0)
     if errors > 0:
         logger.error("日次ルールシグナルで注文の失敗が %d 件あった", errors)

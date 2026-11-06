@@ -31,7 +31,7 @@ def _started(period_key: str = _DAY, boot_id: str = "old-boot") -> dict:
         "period_key": period_key,
         "run_id": "run-1",
         "boot_id": boot_id,
-        "started_at": "2026-10-27T23:50:00+00:00",
+        "started_at": f"{period_key}T00:50:00+00:00",
     }
 
 

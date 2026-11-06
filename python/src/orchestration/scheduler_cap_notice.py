@@ -1,5 +1,6 @@
 """
-補完をやめた期間の知らせ。週次ジョブの回数の上限（#1647, #1666）と自動発注の締め（#1674）
+補完をやめた期間の知らせ。週次ジョブの回数の上限（#1647, #1666）と自動発注の締め（#1674）、
+止まったまま日をまたいだ営業日の発注の回（#1679）
 
 should_recover は上限や締めで False を返すだけで、その期間の分が抜けたまま動くことに
 気づけない。補完のポーリングが、成功の無いまま補完をやめた期間を見つけたら、何が抜けたかを
@@ -8,6 +9,11 @@ should_recover は上限や締めで False を返すだけで、その期間の�
 送った印は状態ファイルの events に残す。results/ の下にあり、再起動とデプロイをまたいで残る。
 印の status は回数・間隔・成功のどの判定にも数えない。
 送れなかった回は印を残さず、次のポーリングで送り直す。
+
+前の日の発注の回は、前の日へ補完しない（#825）ので、当日の判定には現れない。直近の
+営業日を見て、成功も知らせも無い日をジョブごとに1通にまとめる。回はやり直さない。
+失敗の回の日も含める。error_notifier の知らせは失敗そのものを伝えるが、その日の足の判定が
+抜けたままになることは伝えないため。本文の行で「動かなかった」と「失敗した」を分ける。
 """
 
 from __future__ import annotations
@@ -23,7 +29,7 @@ from src.orchestration.scheduler_cutoff import (
     is_past_recovery_until,
     scheduled_datetime_for_recovery,
 )
-from src.utils.japan_time import isoformat_utc, to_jst
+from src.utils.japan_time import isoformat_utc, parse_iso_datetime, to_jst
 
 if TYPE_CHECKING:
     from src.orchestration.scheduler_queue import SchedulerQueueManager
@@ -37,6 +43,10 @@ CAP_NOTICE_STATUS = "cap_notice_sent"
 
 # 全銘柄にかかる時間の目安（run_scheduler の SCHEDULE_CONFIG の説明と同じ、#1534）
 _FULL_RUN_HOURS = 29
+
+# 抜けた日を見る東証の営業日の数。events は1日およそ90件で上限の5000件は約55日分あり、
+# 大型連休や年末年始をまたいでも保持の範囲に収まる
+_PAST_DAY_RANGE = 5
 
 
 def _period_without_success(
@@ -103,6 +113,66 @@ def _missed_day(manager: SchedulerQueueManager, job_id: str, now: datetime) -> s
     if not _reached_cap(manager, job_id, period_key) and not is_past_recovery_until(config, now):
         return None
     return period_key
+
+
+def _business_days_before(today: date, count: int) -> list[date]:
+    """today より前の東証の営業日を、古い順に count 日返す。"""
+    days: list[date] = []
+    day = today
+    while len(days) < count:
+        day -= timedelta(days=1)
+        if is_jp_business_day(day):
+            days.append(day)
+    return days[::-1]
+
+
+def _oldest_event_day(manager: SchedulerQueueManager) -> date | None:
+    """状態ファイルに残る最も古い記録の日（JST）を返す。記録が無ければ None。
+
+    events は古い順に並び、上限を超えた頭から消える。
+    """
+    for event in manager._state.get("events", []):
+        stamp = event.get("finished_at") or event.get("started_at") or event.get("timestamp")
+        if stamp:
+            return to_jst(parse_iso_datetime(stamp)).date()
+    return None
+
+
+def _past_days_without_success(
+    manager: SchedulerQueueManager, job_id: str, now: datetime
+) -> list[str]:
+    """当日より前の営業日のうち、成功も知らせも無い日を古い順に返す。
+
+    抜けが無ければ今日のうちは状態ファイルを読み直さない。前の日の結果は後から増えないため。
+    """
+    today = to_jst(now).date()
+    scan_key = (job_id, today.isoformat())
+    if scan_key in manager._past_days_scanned:
+        return []
+    with manager._lock:
+        if job_id in manager._in_progress_jobs:
+            return []
+    if not manager._reload_state_for_recovery():
+        return []
+
+    # 最も古い記録の日は頭が消えているかもしれないので、その次の日から読む。
+    # 保持していない日を「成功が無い」と読まない
+    oldest = _oldest_event_day(manager)
+    if oldest is None:
+        return []
+    days = [
+        day.isoformat() for day in _business_days_before(today, _PAST_DAY_RANGE) if day > oldest
+    ]
+    missed = [
+        day
+        for day in days
+        if (job_id, day) not in manager._cap_notices_sent
+        and not manager.has_success(job_id, day)
+        and not _period_events(manager, job_id, day, CAP_NOTICE_STATUS)
+    ]
+    if not missed:
+        manager._past_days_scanned.add(scan_key)
+    return missed
 
 
 def _period_events(
@@ -172,6 +242,27 @@ def _auto_order_detail() -> str:
     )
 
 
+_PAST_DAY_DETAIL = (
+    "その日の足の SL/TP・売りシグナル・新規買いは判定されていないかもしれない\n"
+    "失敗した日と途中で消えた日は、途中までの注文が出ていることがある。保有を確かめること"
+)
+
+
+def _auto_order_past_detail() -> str:
+    return (
+        "この日の回はやり直さない。次に動くのは次の営業日の 8:50 の定時の回である\n"
+        f"{_PAST_DAY_DETAIL}"
+    )
+
+
+def _rule_signals_past_detail() -> str:
+    return (
+        "この日の回はやり直さない。次に動くのは次の営業日の 16:30 の定時の回である\n"
+        "ルールの判定は最後の足だけを見るので、抜けた日の足の判定は次の回でも拾われない\n"
+        f"{_PAST_DAY_DETAIL}"
+    )
+
+
 class _CapNotice(NamedTuple):
     """知らせの題に入れるジョブの名前と、何が古いままかの本文を作る関数"""
 
@@ -193,6 +284,13 @@ _MISSED_DAY_NOTICES = {
 }
 
 
+# 前の日へ補完しないので、抜けた日の分が次の回で拾われない発注のジョブ（#1679）
+_PAST_DAY_NOTICES = {
+    "daily_auto_order": _CapNotice("自動発注", _auto_order_past_detail),
+    "daily_rule_signals": _CapNotice("ルールシグナルの発注", _rule_signals_past_detail),
+}
+
+
 def _build_message(manager: SchedulerQueueManager, job_id: str, period_key: str) -> str:
     if job_id in _MISSED_DAY_NOTICES:
         notice = _MISSED_DAY_NOTICES[job_id]
@@ -205,6 +303,28 @@ def _build_message(manager: SchedulerQueueManager, job_id: str, period_key: str)
     return (
         f"⚠️ {notice.title}{headline}（{period_key}）\n"
         f"開始 {started} 回・失敗 {failed} 回で、成功の回が無い\n"
+        f"{notice.detail()}"
+    )
+
+
+def _past_day_line(manager: SchedulerQueueManager, job_id: str, day: str) -> str:
+    started = len(_period_events(manager, job_id, day, "started"))
+    failed = len(_period_events(manager, job_id, day, "error"))
+    if not started:
+        outcome = "動かなかった"
+    elif failed:
+        outcome = "失敗した"
+    else:
+        outcome = "途中で消えた"
+    return f"- {day}: {outcome}（開始 {started} 回・失敗 {failed} 回）"
+
+
+def _build_past_days_message(manager: SchedulerQueueManager, job_id: str, days: list[str]) -> str:
+    notice = _PAST_DAY_NOTICES[job_id]
+    lines = "\n".join(_past_day_line(manager, job_id, day) for day in days)
+    return (
+        f"⚠️ {notice.title}の回の成功が無いまま過ぎた営業日がある（{len(days)} 日）\n"
+        f"{lines}\n"
         f"{notice.detail()}"
     )
 
@@ -233,14 +353,12 @@ def _record_sent(
     )
 
 
-def notify_recovery_cap(manager: SchedulerQueueManager, job_id: str, now: datetime) -> None:
-    """補完をやめた期間を知らせる。何が落ちても補完のポーリングへ例外を返さない。"""
-    if job_id in _CAP_NOTICES:
-        find_period = _capped_period
-    elif job_id in _MISSED_DAY_NOTICES:
-        find_period = _missed_day
-    else:
-        return
+def _notify_period(
+    manager: SchedulerQueueManager,
+    job_id: str,
+    now: datetime,
+    find_period: Callable[[SchedulerQueueManager, str, datetime], str | None],
+) -> None:
     try:
         period_key = find_period(manager, job_id, now)
         if period_key is None:
@@ -253,3 +371,31 @@ def notify_recovery_cap(manager: SchedulerQueueManager, job_id: str, now: dateti
             logger.error(f"上限の知らせを送れなかった（次のポーリングで送り直す）: {job_id}")
     except Exception:
         logger.error(f"上限の知らせに失敗（次のポーリングへ進む）: {job_id}", exc_info=True)
+
+
+def _notify_past_days(manager: SchedulerQueueManager, job_id: str, now: datetime) -> None:
+    try:
+        days = _past_days_without_success(manager, job_id, now)
+        if not days:
+            return
+        message = _build_past_days_message(manager, job_id, days)
+        logger.warning(f"発注の回が抜けた日: job_id={job_id} days={days}")
+        if _send(message):
+            # 途中の日の印が書けなくても、同じ起動の間は残りの日を送り直さない
+            manager._cap_notices_sent.update((job_id, day) for day in days)
+            for day in days:
+                _record_sent(manager, job_id, day, now)
+        else:
+            logger.error(f"抜けた日の知らせを送れなかった（次のポーリングで送り直す）: {job_id}")
+    except Exception:
+        logger.error(f"抜けた日の知らせに失敗（次のポーリングへ進む）: {job_id}", exc_info=True)
+
+
+def notify_recovery_cap(manager: SchedulerQueueManager, job_id: str, now: datetime) -> None:
+    """補完をやめた期間と抜けた前の日を知らせる。何が落ちても補完のポーリングへ例外を返さない。"""
+    if job_id in _CAP_NOTICES:
+        _notify_period(manager, job_id, now, _capped_period)
+    elif job_id in _MISSED_DAY_NOTICES:
+        _notify_period(manager, job_id, now, _missed_day)
+    if job_id in _PAST_DAY_NOTICES:
+        _notify_past_days(manager, job_id, now)
