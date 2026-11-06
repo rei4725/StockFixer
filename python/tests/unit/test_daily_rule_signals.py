@@ -242,13 +242,15 @@ class TestRunDailyRuleSignalsNoEffectiveRules(unittest.TestCase):
 
 class TestDailyRuleSignalsScheduleIsNotRetried(unittest.TestCase):
     def test_daily_rule_signals_has_no_retry(self):
-        """ジョブを失敗にしても発注を出し直さないよう、呼び直しを付けない（#836・#1075）。"""
+        """同じ回の中では呼び直しを付けない（#836・#1075）。"""
         import run_scheduler
 
         config = run_scheduler.SCHEDULE_CONFIG["daily_rule_signals"]
         self.assertEqual(config["max_retries"], 0)
-        self.assertEqual(config["max_executions_per_period"], 1)
-        # 例外で失敗した回は呼び直さないが、プロセスごと消えた回は補完する（#1652）
+        # 失敗の回は間を空けて1回だけ補完する（#1676）
+        self.assertEqual(config["max_executions_per_period"], 2)
+        self.assertEqual(config["recovery_min_gap_minutes"], 240)
+        # プロセスごと消えた回は補完する（#1652）
         self.assertTrue(config["rerun_if_interrupted"])
 
 
