@@ -5,6 +5,7 @@ recovery_min_gap_minutes を持つジョブは、同じ期間の前の回の終�
 回数の上限を短い障害の間に使い切らないためである。欄の無いジョブは間を空けない。
 
 rerun_if_interrupted のジョブは、消えた回の続きをすぐ進めるので、失敗の回だけから間を数える（#1638）。
+ロックを待ち切って落ちた回（skip_recovery_gap の印）は、待ちの間に間が空いたので数えない（#1682）。
 """
 
 from __future__ import annotations
@@ -26,11 +27,15 @@ def _last_attempt_at(
 
     前の起動のプロセスで消えた回には終わりの記録が無いので、始めの記録も見る。
     include_started が False なら、失敗の回の終わりの記録だけを見る。
+    skip_recovery_gap の印のある回は、始めの記録も終わりの記録も見ない。
     """
     statuses = {"started", "error"} if include_started else {"error"}
+    skipped_runs = {event.get("run_id") for event in events if event.get("skip_recovery_gap")}
     latest: datetime | None = None
     for event in events:
         if event.get("job_id") != job_id or event.get("period_key") != period_key:
+            continue
+        if event.get("run_id") in skipped_runs:
             continue
         status = event.get("status")
         if status not in statuses:

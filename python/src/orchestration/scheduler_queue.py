@@ -26,7 +26,7 @@ from zoneinfo import ZoneInfo
 from filelock import FileLock
 
 from config.settings import settings
-from src.orchestration.job_errors import NonRetryableJobError
+from src.orchestration.job_errors import LockWaitExpiredJobError, NonRetryableJobError
 from src.orchestration.scheduler_cutoff import (
     is_past_recovery_until,
     scheduled_datetime_for_recovery,
@@ -179,6 +179,7 @@ class SchedulerQueueManager:
             # （SystemExit・KeyboardInterrupt）で止まった回を success と記録しない（#955）
             status = "error"
             error_message = None
+            skip_recovery_gap = False
             run_id = uuid.uuid4().hex
 
             # プロセスごと落ちて finally が走らなくても回数に数えるため、始める前に記録する
@@ -210,6 +211,7 @@ class SchedulerQueueManager:
             return True
         except Exception as exc:
             error_message = str(exc)
+            skip_recovery_gap = isinstance(exc, LockWaitExpiredJobError)
             raise
         except BaseException as exc:
             # KeyboardInterrupt は str が空になるため、型の名前を添える
@@ -255,6 +257,7 @@ class SchedulerQueueManager:
                         "finished_at": isoformat_utc(finished_at),
                         "duration_seconds": duration_seconds,
                         "error": error_message,
+                        **({"skip_recovery_gap": True} if skip_recovery_gap else {}),
                     }
                 )
             except Exception:

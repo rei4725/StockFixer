@@ -10,3 +10,10 @@ class NonRetryableJobError(RuntimeError):
     ジョブが自分の内で知らせを送ってから投げる失敗に使う。リトライすると同じ処理と
     同じ知らせが max_retries 回繰り返される（週次ルール評価の 4 通の重複）。
     """
+
+
+class LockWaitExpiredJobError(NonRetryableJobError):
+    """ロックを待ち切って落ちた失敗。この回からは recovery_min_gap_minutes を数えない。
+
+    待ちの間に間はもう空いていて、障害の明けを待つ理由も無い（#1682）。
+    """

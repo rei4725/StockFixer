@@ -158,6 +158,7 @@ def test_only_the_named_jobs_have_the_gap():
         "regime_leverage_weekly",
         "weekly_optimization",
         "daily_rule_signals",
+        "weekly_model_training",
     }
 
 
@@ -374,3 +375,123 @@ def test_rule_evaluation_recovers_after_a_lost_run_without_the_gap(tmp_path):
 
     now = SUNDAY_RUN + timedelta(minutes=65)
     assert manager.should_recover(RULE_EVALUATION, now=now) is True
+
+
+TRAINING = "weekly_model_training"
+# 2026-11-03 は火曜（ISO 週 2026-W45）。定時は 01:00
+TUESDAY_RUN = datetime(2026, 11, 3, 1, 0, tzinfo=ZoneInfo("Asia/Tokyo"))
+# 定時の 15 分の遅れより後に終わった回で、間の判定だけを見る（#1682）
+TRAINING_FAILED = TUESDAY_RUN + timedelta(minutes=20)
+
+
+def _failed_training(
+    manager: SchedulerQueueManager, now: datetime, reason: str = "scheduled"
+) -> None:
+    with (
+        patch("src.orchestration.scheduler_queue.ping_heartbeat"),
+        patch.object(manager, "now", return_value=now),
+    ):
+        with pytest.raises(NonRetryableJobError):
+            manager.run_job(TRAINING, reason=reason)
+
+
+def test_weekly_training_recovery_settings():
+    from run_scheduler import SCHEDULE_CONFIG
+
+    config = SCHEDULE_CONFIG[TRAINING]
+    assert config["max_executions_per_period"] == 2
+    assert config["recovery_min_gap_minutes"] == 240
+    assert "rerun_if_interrupted" not in config
+    assert "recover_rest_of_week" not in config
+
+
+@pytest.mark.parametrize(
+    "minutes, expected",
+    [
+        pytest.param(5, False, id="next-poll"),
+        pytest.param(239, False, id="just-before-the-gap-ends"),
+        pytest.param(240, True, id="gap-has-passed"),
+    ],
+)
+def test_weekly_training_waits_after_failed_run(tmp_path, minutes, expected):
+    manager = _production_manager(tmp_path, TRAINING)
+    _failed_training(manager, TRAINING_FAILED)
+
+    now = TRAINING_FAILED + timedelta(minutes=minutes)
+    assert manager.should_recover(TRAINING, now=now) is expected
+
+
+def test_weekly_training_keeps_the_second_attempt_through_a_short_outage(tmp_path):
+    manager = _production_manager(tmp_path, TRAINING)
+    _failed_training(manager, TRAINING_FAILED)
+    assert manager.should_recover(TRAINING, now=TRAINING_FAILED + timedelta(minutes=30)) is False
+
+    recovery_at = TRAINING_FAILED + timedelta(minutes=240)
+    assert manager.should_recover(TRAINING, now=recovery_at) is True
+    _failed_training(manager, recovery_at, reason="recovery")
+
+    assert manager.should_recover(TRAINING, now=recovery_at + timedelta(minutes=240)) is False
+    assert manager.get_execution_count(TRAINING, "2026-W45") == 2
+
+
+def test_weekly_training_does_not_recover_on_wednesday(tmp_path):
+    manager = _production_manager(tmp_path, TRAINING)
+    _failed_training(manager, TRAINING_FAILED)
+
+    assert manager.should_recover(TRAINING, now=TRAINING_FAILED + timedelta(days=1)) is False
+
+
+def test_weekly_training_waits_the_gap_after_a_lost_run(tmp_path):
+    manager = _production_manager(tmp_path, TRAINING)
+    _lost_run(manager, TRAINING, "2026-W45", TUESDAY_RUN)
+
+    assert manager.should_recover(TRAINING, now=TUESDAY_RUN + timedelta(minutes=20)) is False
+    assert manager.should_recover(TRAINING, now=TUESDAY_RUN + timedelta(minutes=239)) is False
+    assert manager.should_recover(TRAINING, now=TUESDAY_RUN + timedelta(minutes=240)) is True
+
+
+def _lock_expired_run(
+    manager: SchedulerQueueManager, job_id: str, started: datetime, finished: datetime
+) -> None:
+    """ロックを待ち切って落ちた回を1回通す。"""
+    from src.orchestration.job_errors import LockWaitExpiredJobError
+
+    manager.schedule_config[job_id]["func"] = MagicMock(
+        side_effect=LockWaitExpiredJobError("ロックが取れない")
+    )
+    with (
+        patch("src.orchestration.scheduler_queue.ping_heartbeat"),
+        patch.object(manager, "now", side_effect=[started, started, finished]),
+    ):
+        with pytest.raises(NonRetryableJobError):
+            manager.run_job(job_id, reason="recovery")
+
+
+def test_weekly_training_recovers_right_after_the_lock_wait_expired(tmp_path):
+    manager = _production_manager(tmp_path, TRAINING)
+    expired = TUESDAY_RUN + timedelta(hours=3)
+    _lock_expired_run(manager, TRAINING, TUESDAY_RUN, expired)
+
+    assert manager.should_recover(TRAINING, now=expired + timedelta(minutes=5)) is True
+
+
+def test_weekly_training_stops_after_the_second_lock_wait_expired(tmp_path):
+    manager = _production_manager(tmp_path, TRAINING)
+    expired = TUESDAY_RUN + timedelta(hours=3)
+    _lock_expired_run(manager, TRAINING, TUESDAY_RUN, expired)
+    second = expired + timedelta(minutes=5)
+    _lock_expired_run(manager, TRAINING, second, second + timedelta(hours=3))
+
+    assert manager.should_recover(TRAINING, now=second + timedelta(hours=4)) is False
+    assert manager.get_execution_count(TRAINING, "2026-W45") == 2
+
+
+def test_failed_run_keeps_its_gap_after_a_lock_expired_run(tmp_path):
+    manager = _manager(tmp_path, recovery_min_gap_minutes=120)
+    failed = datetime(2026, 11, 1, 5, 0, tzinfo=manager.tz)
+    _failed_run(manager, failed)
+    expired = failed + timedelta(minutes=60)
+    _lock_expired_run(manager, JOB, expired, expired)
+
+    assert manager.should_recover(JOB, now=failed + timedelta(minutes=119)) is False
+    assert manager.should_recover(JOB, now=failed + timedelta(minutes=120)) is True
