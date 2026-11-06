@@ -12,6 +12,7 @@ import pandas as pd
 from sklearn.inspection import permutation_importance
 
 from config.settings import (
+    DAILY_FETCH_MAX_UNAVAILABLE_RATIO,
     EARNINGS_MASK_WINDOW_DAYS,
     FEATURE_SELECTION_DROP_RATIO,
     FEATURE_SELECTION_MIN_FEATURES,
@@ -134,6 +135,8 @@ def _compute_and_save_unified_feature_selection(model, X: pd.DataFrame, y: pd.Se
 
 
 _CORPORATE_ACTION_LAG_PREFIXES = ("Dividends_lag", "Stock_Splits_lag", "Capital_Gains_lag")
+# 発注する市場。ここの行が線を超えて落ちた表では学習しない（#1686）
+_ORDER_MARKET = "jp"
 
 
 def _warn_dropped_rows(valid: pd.Series, market: pd.Series, symbol: pd.Series) -> None:
@@ -153,6 +156,28 @@ def _warn_dropped_rows(valid: pd.Series, market: pd.Series, symbol: pd.Series) -
         ", ".join(all_dropped[:20]),
         dropped_per_market,
     )
+
+
+def _raise_if_order_market_mostly_dropped(valid: pd.Series, market: pd.Series) -> None:
+    """発注する市場の行が線を超えて NaN で落ちる表なら投げる（#1686）。
+
+    全市場を合わせた割合では、全体の約3割の jp が全部落ちても気づけない。
+    線は日次の取得（#811）と同じ DAILY_FETCH_MAX_UNAVAILABLE_RATIO を使う。
+    その市場の入力の行が0件の表は判定しない。
+
+    Raises:
+        RuntimeError: 落ちた行の割合が線を超えたとき
+    """
+    in_market = market == _ORDER_MARKET
+    n_total = int(in_market.sum())
+    if n_total == 0:
+        return
+    n_dropped = int((in_market & ~valid).sum())
+    if n_dropped / n_total > DAILY_FETCH_MAX_UNAVAILABLE_RATIO:
+        raise RuntimeError(
+            f"統合の学習で {_ORDER_MARKET} の行が NaN で落ちすぎたため学習しません: "
+            f"{n_dropped}/{n_total}行（線 {DAILY_FETCH_MAX_UNAVAILABLE_RATIO:.0%}）"
+        )
 
 
 def drop_rows_reaching_cutoff(df: pd.DataFrame, cutoff: pd.Timestamp) -> pd.DataFrame:
@@ -296,7 +321,8 @@ def train_unified_model(
         save_selection: False のとき、特徴量選択の結果を保存しない。
 
     Raises:
-        RuntimeError: 学習に使うデータが空のとき（読み込みの失敗を含む）
+        RuntimeError: 学習に使うデータが空のとき（読み込みの失敗を含む）、
+            発注する市場の行が線を超えて NaN で落ちたとき
         ValueError: horizon が 1 以外のときに train_end_date を渡したとき
     """
     from src.prediction.manager import ModelManager
@@ -319,6 +345,9 @@ def train_unified_model(
                 raise RuntimeError("締め日より前の行が無いため学習できません")
         logger.info("2. 特徴量準備中...")
         X, y = prepare_unified_features(df, apply_saved_exclusions=apply_saved_exclusions)
+        if "market" in df.columns:
+            kept = pd.Series(df.index.isin(X.index), index=df.index)
+            _raise_if_order_market_mostly_dropped(kept, df["market"])
         dates = df["date"].loc[X.index] if "date" in df.columns else None
         # 全銘柄の表は X の写しを作った後は要らない。学習の間まで持つと 8GB の上限に近づく（#807）
         del df
@@ -421,6 +450,7 @@ def _load_all_ohlcv_for_unified(horizon: int) -> Tuple[pd.DataFrame, pd.Series]:
 
     valid = X.notna().all(axis=1) & y.notna()
     _warn_dropped_rows(valid, keys["market"], keys["symbol"])
+    _raise_if_order_market_mostly_dropped(valid, keys["market"])
     # 検証を直近の日付の行にするため、日付を index にして返す（#1363。銘柄をまたいで重なる）
     dates = pd.DatetimeIndex(pd.to_datetime(all_X[0].index.append([x.index for x in all_X[1:]])))
     X, y = X[valid].copy(), y[valid].copy()
