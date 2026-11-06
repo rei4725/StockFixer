@@ -5,6 +5,7 @@ DB の読み込みはすべて差し替える。候補は特徴量 feat_a をそ
 production はその逆を言う。
 """
 
+from dataclasses import asdict
 from typing import Optional
 from unittest.mock import MagicMock
 
@@ -352,7 +353,8 @@ def test_expected_rows_follow_each_markets_dates(monkeypatch):
     _patch(monkeypatch, extra={("jp", "1111"): jp})
     ev = evaluate_holdout(_dates(), _models(1.0), _models(-1.0), _live_matching())
     assert ev.candidate["n_baseline"] == 31
-    assert ev.markets == {
+    keys = ("n_symbols", "n_dates", "expected_rows")
+    assert {m: {k: v[k] for k in keys} for m, v in ev.markets.items()} == {
         "jp": {"n_symbols": 1, "n_dates": 11, "expected_rows": 11},
         "us": {"n_symbols": 1, "n_dates": 20, "expected_rows": 20},
     }
@@ -538,3 +540,116 @@ def test_path_skip_reasons_are_counted(monkeypatch):
     )
     assert ev.path_check["compared_by_market"] == {"jp": 0, "us": 1}
     assert ev.path_check["passed"] is False
+
+
+def _live_by_market():
+    """銘柄が増えても、jp は 1111、us は AAA と同じ値を返す本番の予想。"""
+    live = _live_matching()
+
+    def _live(market: str, _symbol: str, **_kwargs) -> Optional[PredictionResult]:
+        return live("jp", "1111") if market == "jp" else live("us", "AAA")
+
+    return _live
+
+
+def _patch_prices_missing(monkeypatch, market: str, missing: list) -> None:
+    def _load(m, _s, start_date=None):
+        df = _ohlcv()
+        return df[~df.index.isin(missing)] if m == market else df
+
+    monkeypatch.setattr(holdout, "load_raw_ohlcv", _load)
+
+
+def _delisted() -> pd.DataFrame:
+    return _features(0).assign(date=pd.bdate_range("2025-01-01", periods=len(DAYS)))
+
+
+def _no_features() -> pd.DataFrame:
+    return pd.DataFrame()
+
+
+def test_jp_rows_short_blocks_win_even_if_total_is_over_the_line(monkeypatch):
+    # jp 2 銘柄は 10 日ずつ欠ける（20 / 40 行）。us 4 銘柄はそろう（80 行）。
+    # 全市場は 100 / 120 行で線（96）を越えるが、jp は線（32）に届かない
+    extra = {("jp", "2222"): _features(0)}
+    extra.update({("us", s): _features(1) for s in ("BBB", "CCC", "DDD")})
+    _patch(monkeypatch, extra=extra)
+    _patch_prices_missing(monkeypatch, "jp", _dates()[:10])
+    ev = evaluate_holdout(_dates(), _models(1.0), _models(-1.0), _live_by_market())
+    assert ev.candidate["n_baseline"] == 100
+    assert ev.expected_rows == 120
+    assert ev.path_check["passed"] is True
+    assert ev.decision.won is False, "全市場の線を越えても jp の線で止める"
+    assert ev.markets["jp"]["expected_rows"] == 40
+    assert ev.markets["jp"]["n_compared"] == 20
+    assert "発注する市場 jp の比べられた行が足りない（20 行、見込み 40 行、必要 32 以上）" in (
+        ev.decision.reasons
+    )
+
+
+@pytest.mark.parametrize("gone", [_delisted, _no_features], ids=["行が無い", "特徴量が無い"])
+def test_jp_symbols_without_rows_block_win_though_expected_rows_shrink(monkeypatch, gone):
+    # jp の 5 銘柄のうち 4 銘柄が飛ばされ、見込みも一緒に縮むので行の線では止まらない
+    _patch(monkeypatch, extra={("jp", s): gone() for s in ("2222", "3333", "4444", "5555")})
+    ev = evaluate_holdout(_dates(), _models(1.0), _models(-1.0), _live_by_market())
+    assert ev.decision.won is False, "飛ばした銘柄で分母が縮んでも止める"
+    assert ev.markets["jp"]["expected_rows"] == ev.markets["jp"]["n_compared"] == 20
+    assert ev.markets["jp"]["n_symbols"] == 1
+    assert ev.markets["jp"]["n_universe_symbols"] == 5
+    assert "発注する市場 jp の行のある銘柄が足りない（1 銘柄、全 5 銘柄、必要 4 以上）" in (
+        ev.decision.reasons
+    )
+
+
+def test_jp_at_the_line_still_wins(monkeypatch):
+    # jp の行は 16 / 20、行のある銘柄は 4 / 5 で、どちらも線の上
+    extra = {("jp", s): _features(0) for s in ("2222", "3333", "4444")}
+    extra[("jp", "5555")] = _delisted()
+    _patch(monkeypatch, extra=extra)
+    _patch_prices_missing(monkeypatch, "jp", _dates()[:4])
+    ev = evaluate_holdout(_dates(), _models(1.0), _models(-1.0), _live_by_market())
+    assert ev.decision.won is True, ev.decision.reasons
+    assert ev.markets["jp"]["n_compared"] == 4 * 16
+    assert ev.markets["jp"]["expected_rows"] == 4 * 20
+
+
+def test_loss_with_jp_over_the_line_has_no_jp_reason(monkeypatch):
+    _patch(monkeypatch)
+    ev = evaluate_holdout(_dates(), _models(-1.0), _models(-1.0), _live_matching())
+    assert ev.decision.won is False
+    assert not any("発注する市場" in r for r in ev.decision.reasons)
+
+
+def test_all_jp_symbols_without_rows_is_written_and_blocks_win(monkeypatch):
+    _patch(monkeypatch, extra={("jp", "1111"): _delisted()})
+    ev = evaluate_holdout(_dates(), _models(1.0), _models(-1.0), _live_by_market())
+    assert ev.decision.won is False
+    assert ev.markets["jp"]["n_symbols"] == ev.markets["jp"]["n_compared"] == 0
+    assert ev.markets["jp"]["n_universe_symbols"] == 1
+    assert ev.markets["jp"]["candidate"]["n_baseline"] == 0
+    assert "発注する市場 jp の行のある銘柄が足りない（0 銘柄、全 1 銘柄、必要 0.8 以上）" in (
+        ev.decision.reasons
+    )
+
+
+def test_no_jp_in_universe_does_not_win(monkeypatch):
+    # 道の一致の検査と同じく、発注する市場を確かめられない回は勝ちにしない
+    _patch(monkeypatch)
+    monkeypatch.setattr(holdout, "get_all_symbols", lambda: [("us", "AAA")])
+    ev = evaluate_holdout(_dates(), _models(1.0), _models(-1.0), _live_matching())
+    assert ev.decision.won is False
+    assert "jp" not in ev.markets
+    assert "発注する市場 jp の銘柄が無い" in ev.decision.reasons
+    assert "道の一致の検査で jp の比べられた銘柄が無い" in ev.decision.reasons
+
+
+def test_markets_carry_each_markets_rows_and_metrics(monkeypatch):
+    _patch(monkeypatch)
+    _patch_prices_missing(monkeypatch, "jp", _dates()[:2])
+    ev = evaluate_holdout(_dates(), _models(1.0), _models(-1.0), _live_matching())
+    jp = asdict(ev)["markets"]["jp"]
+    assert jp["n_compared"] == 18
+    assert jp["candidate"]["n_baseline"] == jp["production"]["n_baseline"] == 18
+    assert jp["candidate"]["rank_corr"] > jp["production"]["rank_corr"]
+    assert ev.markets["us"]["n_compared"] == 20
+    assert ev.candidate["n_baseline"] == 38
