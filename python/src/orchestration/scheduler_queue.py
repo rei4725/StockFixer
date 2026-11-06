@@ -77,6 +77,7 @@ class SchedulerQueueManager:
         self._warned_interrupted_run_ids: set[str] = set()
         self._error_notifier = error_notifier
         self._cap_notices_sent: set[tuple[str, str]] = set()  # scheduler_cap_notice が使う
+        self._past_days_scanned: set[tuple[str, str]] = set()  # 同上。読み直しを1日1回にする
         # 同じプロセスのスレッドの間（定時のジョブと補完のポーリング）を _lock で、
         # プロセスの間（手での即時実行）を _file_lock で守る。取る順は必ず _lock が先
         self._lock = threading.Lock()

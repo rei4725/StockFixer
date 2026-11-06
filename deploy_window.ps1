@@ -11,11 +11,14 @@
 
 # 窓。時刻は JST（このマシンのローカル時刻）。Daily が無い窓は平日（月〜金）だけ。
 # 日をまたぐ窓は 24:00 までと 00:00 からの2つに分ける（$hm は "23:59" まで）
+# Day がある窓はその曜日だけ。Daily の窓の明けに溜まったデプロイが長いジョブの開始に
+# 重ならないよう、木曜 01:00 の Walk-Forward レポート（1〜2時間。補完は1回まで）を窓に入れる
 $DeployBlackoutWindows = @(
     @{ Start = "08:30"; End = "10:00"; Name = "8:50 の自動発注と 9:05 の約定・9:55 までのやり直し" },
     @{ Start = "16:10"; End = "16:50"; Name = "16:30 のルールの発注" },
     @{ Start = "21:40"; End = "24:00"; Name = "22:00 のバックテストの仮の入れ替え"; Daily = $true },
-    @{ Start = "00:00"; End = "01:00"; Name = "22:00 のバックテストの仮の入れ替え"; Daily = $true }
+    @{ Start = "00:00"; End = "01:00"; Name = "22:00 のバックテストの仮の入れ替え"; Daily = $true },
+    @{ Start = "01:00"; End = "04:00"; Name = "木曜 01:00 の Walk-Forward レポート"; Day = [DayOfWeek]::Thursday }
 )
 
 # $now が窓の中なら窓の名前を、外なら $null を返す（Start を含み End を含まない）
@@ -24,6 +27,9 @@ function Get-DeployBlackout([datetime]$now) {
     $hm = $now.ToString("HH:mm")
     foreach ($w in $DeployBlackoutWindows) {
         if ($weekend -and -not $w.Daily) {
+            continue
+        }
+        if ($null -ne $w.Day -and $now.DayOfWeek -ne $w.Day) {
             continue
         }
         if ($hm -ge $w.Start -and $hm -lt $w.End) {
