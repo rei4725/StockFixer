@@ -1,11 +1,12 @@
 """月次 multibagger ジョブ + ポジション永続化の単体テスト（#434）"""
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
 
+from config.settings import STALE_BARS_MAX_WEEKDAYS
 from src.domain.types import PositionEvent, TrendCandidate
 from src.market_data import fundamentals
 from src.orchestration import multibagger_job
@@ -16,6 +17,15 @@ from src.screening import quality_gate
 from src.screening.positions import add_position, close_position, list_positions, update_position
 from src.screening.trend_screener import ScreeningDataError
 from src.screening.types import MultibaggerCandidate
+
+# 足の鮮度を測る今日（水曜。前の4営業日はどれも米国の取引所が開いている）
+_TODAY = date(2026, 11, 4)
+
+
+@pytest.fixture(autouse=True)
+def fixed_today(monkeypatch):
+    """足の鮮度の線を、テストを流す日に左右されないようにする。"""
+    monkeypatch.setattr(multibagger_job, "_today", lambda: _TODAY)
 
 
 @pytest.fixture
@@ -45,8 +55,23 @@ def _candidate(symbol: str, score: float = 0.9) -> MultibaggerCandidate:
     )
 
 
-def _prices() -> pd.DataFrame:
-    return pd.DataFrame({"date": ["2024-01-01", "2024-02-01"], "Close": [100.0, 150.0]})
+def _raw_bars(closes: list[float], last_day: date | pd.Timestamp = _TODAY) -> pd.DataFrame:
+    """load_raw_ohlcv と同じ形（index が Date、列が Open ほか）の足を作る。"""
+    index = pd.bdate_range(end=pd.Timestamp(last_day), periods=len(closes), name="Date")
+    close = pd.Series(closes, index=index, dtype=float)
+    return pd.DataFrame(
+        {"Open": close, "High": close, "Low": close, "Close": close, "Volume": 1000},
+        index=index,
+    )
+
+
+def _bar_day(bars: pd.DataFrame, position: int) -> str:
+    """足の日付を、台帳の entry_date と同じ YYYY-MM-DD の文字列で返す。"""
+    return bars.index[position].strftime("%Y-%m-%d")
+
+
+def _patch_raw_bars(monkeypatch, bars: pd.DataFrame | None):
+    monkeypatch.setattr(multibagger_job, "load_raw_ohlcv", lambda *_: bars)
 
 
 def _patch_screen(monkeypatch, candidates):
@@ -55,7 +80,7 @@ def _patch_screen(monkeypatch, candidates):
 
 
 def _patch_prices(monkeypatch):
-    monkeypatch.setattr(multibagger_job, "load_stock_features", lambda *_: _prices())
+    _patch_raw_bars(monkeypatch, _raw_bars([100.0, 150.0]))
 
 
 def _patch_sim(monkeypatch, events):
@@ -207,13 +232,15 @@ def test_discord_failure_does_not_crash(tmp_positions, monkeypatch):
 def test_missing_prices_reports_skipped_not_no_holdings(tmp_positions, monkeypatch):
     add_position("us", "AAPL", "2024-01-01", 100.0)
     _patch_screen(monkeypatch, [])
-    monkeypatch.setattr(multibagger_job, "load_stock_features", lambda *_: None)
+    _patch_raw_bars(monkeypatch, None)
     _patch_notify(monkeypatch)
 
     payload = multibagger_job.run_monthly_multibagger_screen(market="us")
 
     assert payload["position_actions"] == []
-    assert [s["symbol"] for s in payload["skipped_positions"]] == ["AAPL"]
+    assert payload["skipped_positions"] == [
+        {"market": "us", "symbol": "AAPL", "reason": "no_prices"}
+    ]
     message = payload["message"]
     assert "保有なし" not in message
     assert "判定できず" in message
@@ -264,6 +291,116 @@ def test_no_open_positions_still_says_no_holdings(tmp_positions, monkeypatch):
     assert payload["skipped_positions"] == []
     assert "保有なし" in payload["message"]
     assert "判定できず" not in payload["message"]
+
+
+# ── 生の足で判定する保有と、止まった足（#1656）─────────────────
+
+
+def _run_with_bars(monkeypatch, bars: pd.DataFrame, entry_date: str) -> dict:
+    """本物の simulate_position に足を通して、月次の回を1回走らせる。"""
+    add_position("us", "AAPL", entry_date, 100.0)
+    _patch_screen(monkeypatch, [])
+    _patch_raw_bars(monkeypatch, bars)
+    _patch_notify(monkeypatch)
+    return multibagger_job.run_monthly_multibagger_screen(market="us")
+
+
+def test_raw_bars_judge_a_position_as_hold(tmp_positions, monkeypatch):
+    bars = _raw_bars([100.0, 105.0, 110.0])
+
+    payload = _run_with_bars(monkeypatch, bars, _bar_day(bars, 0))
+
+    assert payload["skipped_positions"] == []
+    action = payload["position_actions"][0]
+    assert (action["action"], action["reason"]) == ("HOLD", "hold")
+    assert action["multiple"] == pytest.approx(1.1)
+    assert action["price"] == pytest.approx(110.0)
+    assert [p.symbol for p in list_positions(status="open")] == ["AAPL"]
+    multibagger_job.raise_if_multibagger_failed(payload)
+
+
+def test_raw_bars_judge_a_position_as_exit(tmp_positions, monkeypatch):
+    bars = _raw_bars([100.0, 100.0, 130.0, 60.0])
+
+    payload = _run_with_bars(monkeypatch, bars, _bar_day(bars, 1))
+
+    action = payload["position_actions"][0]
+    assert (action["action"], action["reason"]) == ("EXIT", "trail_stop")
+    assert action["price"] == pytest.approx(60.0)
+    assert list_positions(status="open") == []
+    assert [p.last_reason for p in list_positions(status="closed")] == ["trail_stop"]
+
+
+def test_ma_break_uses_bars_before_the_entry(tmp_positions, monkeypatch):
+    """長期 MA は買う前の足からも作るので、買った直後の MA 割れも撤退になる。"""
+    bars = _raw_bars([100.0] * 200 + [101.0, 99.0])
+
+    payload = _run_with_bars(monkeypatch, bars, _bar_day(bars, -2))
+
+    action = payload["position_actions"][0]
+    assert (action["action"], action["reason"]) == ("EXIT", "ma_break")
+
+
+def test_stale_bars_are_skipped_and_fail_the_run(tmp_positions, monkeypatch):
+    """止まった足は、撤退の値段でも判定せず、判定できない保有として知らせて失敗にする。"""
+    bars = _raw_bars([100.0, 130.0, 60.0], last_day=date(2026, 10, 1))
+
+    payload = _run_with_bars(monkeypatch, bars, _bar_day(bars, 0))
+
+    assert payload["position_actions"] == []
+    assert payload["skipped_positions"] == [
+        {"market": "us", "symbol": "AAPL", "reason": "stale_prices"}
+    ]
+    message = payload["message"]
+    assert "判定できず: 1 件" in message
+    assert "stale_prices" in message
+    assert "保有なし" not in message
+    opened = list_positions(status="open")
+    assert [p.symbol for p in opened] == ["AAPL"]
+    assert opened[0].last_action == "entry"
+    with pytest.raises(NonRetryableJobError, match="判定できない保有 1 件"):
+        multibagger_job.raise_if_multibagger_failed(payload)
+
+
+@pytest.mark.parametrize("offset_days, stale", [(0, False), (1, True)])
+def test_stale_line_counts_business_days(tmp_positions, monkeypatch, offset_days, stale):
+    behind = STALE_BARS_MAX_WEEKDAYS + offset_days
+    last_day = pd.Timestamp(_TODAY) - pd.offsets.BDay(behind)
+    bars = _raw_bars([100.0, 105.0, 110.0], last_day=last_day)
+
+    payload = _run_with_bars(monkeypatch, bars, _bar_day(bars, 0))
+
+    assert len(payload["skipped_positions"]) == int(stale)
+    assert len(payload["position_actions"]) == int(not stale)
+
+
+def test_stale_line_skips_market_holidays(tmp_positions, monkeypatch):
+    """足の無い休場の日は古さに数えない。感謝祭 11/26 をまたぐと営業日は3日になる。"""
+    monkeypatch.setattr(multibagger_job, "_today", lambda: date(2026, 11, 30))
+    bars = _raw_bars([100.0, 105.0, 110.0], last_day=date(2026, 11, 24))
+
+    payload = _run_with_bars(monkeypatch, bars, _bar_day(bars, 0))
+
+    assert payload["skipped_positions"] == []
+    assert payload["position_actions"][0]["action"] == "HOLD"
+
+
+def test_freshness_is_measured_on_valid_closes(tmp_positions, monkeypatch):
+    """最後の足の終値が欠けていれば、判定に使える足の日付で古さを測る。"""
+    closes = [100.0, 105.0, 110.0] + [float("nan")] * (STALE_BARS_MAX_WEEKDAYS + 1)
+    bars = _raw_bars(closes)
+
+    payload = _run_with_bars(monkeypatch, bars, _bar_day(bars, 0))
+
+    assert [s["reason"] for s in payload["skipped_positions"]] == ["stale_prices"]
+
+
+def test_bars_without_a_valid_close_are_no_prices(tmp_positions, monkeypatch):
+    bars = _raw_bars([float("nan"), 0.0])
+
+    payload = _run_with_bars(monkeypatch, bars, _bar_day(bars, 0))
+
+    assert [s["reason"] for s in payload["skipped_positions"]] == ["no_prices"]
 
 
 # ── 読めない台帳（#885）──────────────────────────────────────
@@ -729,7 +866,7 @@ def _patch_all_fetches_failed_with_old_rows(monkeypatch):
 def _patch_skipped_position(monkeypatch):
     add_position("us", "AAPL", "2024-01-01", 100.0)
     _patch_screen(monkeypatch, [])
-    monkeypatch.setattr(multibagger_job, "load_stock_features", lambda *_: None)
+    _patch_raw_bars(monkeypatch, None)
     _patch_notify(monkeypatch)
 
 

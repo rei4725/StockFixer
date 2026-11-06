@@ -54,7 +54,7 @@ def _drop_invalid_closes(df: pd.DataFrame) -> pd.DataFrame:
     return df[close.gt(0) & close.lt(math.inf)]
 
 
-def _last_valid_bar_day(df: Optional[pd.DataFrame]) -> Optional[date]:
+def last_valid_bar_day(df: Optional[pd.DataFrame]) -> Optional[date]:
     """終値が有効な足のうち最後の足の日付を返す。そのような足が無ければ None を返す。
 
     指標は終値が有効な足だけで計算するため、鮮度も同じ足で見る。
@@ -73,7 +73,7 @@ def _is_open_day(day: date, market: str) -> bool:
     return is_jp_business_day(day) if market == "jp" else is_us_business_day(day)
 
 
-def _business_days_behind(last_bar: date, base_day: date, market: str) -> int:
+def business_days_behind(last_bar: date, base_day: date, market: str) -> int:
     """最後の足の翌日から基準の日までの営業日の数を返す。"""
     days = pd.date_range(last_bar + timedelta(days=1), base_day)
     return sum(1 for day in days if _is_open_day(day.date(), market))
@@ -205,10 +205,10 @@ def screen_trend_candidates(
         if df is not None:
             loaded += 1
         df = _truncate_as_of(df, as_of)
-        last_bar = _last_valid_bar_day(df)
+        last_bar = last_valid_bar_day(df)
         if last_bar is None:
             continue
-        if _business_days_behind(last_bar, base_day, m) > STALE_BARS_MAX_WEEKDAYS:
+        if business_days_behind(last_bar, base_day, m) > STALE_BARS_MAX_WEEKDAYS:
             stale.append(symbol)
             continue
         fresh += 1
