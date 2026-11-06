@@ -4,7 +4,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from src.market_data.adapters.edinet_client import EdinetClient, _to_edinet_sec_code
+from src.market_data.adapters.edinet_client import (
+    EdinetClient,
+    _to_edinet_sec_code,
+    reset_edinet_stop,
+)
 
 
 class TestToEdinetSecCode(unittest.TestCase):
@@ -90,6 +94,7 @@ class TestEdinetClientFetchDay(unittest.TestCase):
     def test_target_doc_types_all_accepted(self, mock_get):
         """取得対象の全書類種別コードが正しく受け入れられる"""
         for doc_type in ("120", "130", "140", "160", "350"):
+            reset_edinet_stop()
             mock_get.return_value = self._mock_response(
                 [
                     {
@@ -230,13 +235,11 @@ _AUTH_FAILED_BODY = {
 }
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def _fresh_stop():
-    from src.market_data.adapters import edinet_client
-
-    edinet_client.reset_edinet_stop()
+    reset_edinet_stop()
     yield
-    edinet_client.reset_edinet_stop()
+    reset_edinet_stop()
 
 
 def test_auth_failure_warns_once_and_stops_remaining_symbols(monkeypatch, _fresh_stop):
@@ -287,7 +290,7 @@ def test_batch_pipeline_resets_stop_at_start(monkeypatch, _fresh_stop):
 
 
 def test_success_body_with_status_code_200_keeps_titles(monkeypatch, _fresh_stop):
-    """成功の応答では今までどおり全日を取得し、値も同じ"""
+    """成功の応答では全日を取得し、値も同じ。同じ回の2度目は取り直さない（#1692）"""
     from src.market_data.adapters import edinet_client
 
     monkeypatch.setenv("EDINET_API_KEY", "dummy-valid-key")
@@ -311,7 +314,7 @@ def test_success_body_with_status_code_200_keeps_titles(monkeypatch, _fresh_stop
     expected = {"2024-01-01": ["有価証券報告書"], "2024-01-02": ["有価証券報告書"]}
     assert first == expected
     assert second == expected
-    assert mock_get.call_count == 4
+    assert mock_get.call_count == 2
 
 
 if __name__ == "__main__":
