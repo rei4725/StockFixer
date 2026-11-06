@@ -302,6 +302,10 @@ SCHEDULE_CONFIG = {
         "minute": 0,
         "recovery_delay_minutes": 15,
         "max_executions_per_period": 2,
+        # 間が無いと、DB の障害の回は2分ほどで落ちるので約25分の障害で2回を使い切り、紙の週の成績と
+        # 週の精度の記録がその週だけ欠ける（翌週の回は抜けた週を書かない）。失敗の回の4時間後なら
+        # 06:00 台に補完し、07:30 の日次の道の前に終わる（#1689）
+        "recovery_min_gap_minutes": 240,
         "description": "毎週木曜 02:00 - パフォーマンスレポート送信",
         "rerun_if_interrupted": True,
     },
