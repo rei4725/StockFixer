@@ -981,6 +981,7 @@ def test_weekly_training_lock_timeout_is_error_and_recovers_same_day(
     statuses = _saved_statuses(tmp_path)
     assert "retry" not in statuses
     assert statuses[-1] == "error"
+    # 間（recovery_min_gap_minutes）の中でも、ロック切れの回の補完は待たない（#1682）
     assert manager.should_recover(job_id, now=now) is True
 
 
