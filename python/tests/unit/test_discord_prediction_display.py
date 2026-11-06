@@ -8,6 +8,7 @@ import pandas as pd
 import pytest
 
 from config.feature_flags import flags
+from src.orchestration.jobs.rule_signal_notify import notify_rule_signals
 from src.reporting.discord.discord_bot import (
     build_prediction_list_message,
     build_prediction_table_text,
@@ -177,3 +178,23 @@ class TestLoadRuleTrackRecord:
     def test_broken_file_is_empty(self, tmp_path):
         (tmp_path / "2026-11-06.json").write_text("{", encoding="utf-8")
         assert load_rule_track_record("jp", tmp_path) == {}
+
+
+class TestNotifyRuleSignals:
+    STATS = {"buy_orders": 1, "sell_orders": 0}
+
+    def test_passes_track_record_to_the_notice(self):
+        with (
+            patch("src.scoring.rule_report.load_rule_track_record", return_value={"r": {}}),
+            patch("src.reporting.discord.discord_utils.send_rule_daily_signals") as sent,
+        ):
+            notify_rule_signals([], "jp", self.STATS, 100)
+        assert sent.call_args.kwargs["track_record"] == {"r": {}}
+        assert sent.call_args.kwargs["total"] == 100
+
+    def test_notice_failure_does_not_stop_the_job(self):
+        with patch(
+            "src.reporting.discord.discord_utils.send_rule_daily_signals",
+            side_effect=RuntimeError("webhook"),
+        ):
+            notify_rule_signals([], "jp", self.STATS, 100)

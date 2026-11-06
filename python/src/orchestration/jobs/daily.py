@@ -38,6 +38,7 @@ from src.orchestration.jobs.prediction_saved_marker import (
     mark_prediction_saved,
     read_prediction_saved_day,
 )
+from src.orchestration.jobs.rule_signal_notify import notify_rule_signals
 from src.orchestration.jobs.scoring_stage import (
     daily_scoring_stage,
     log_rule_signal_versions_stage,
@@ -578,20 +579,7 @@ def run_daily_rule_signals() -> None:
         logger.error("日次ルールシグナル失敗: %s", e, exc_info=True)
         raise
 
-    try:
-        from src.reporting.discord.discord_utils import send_rule_daily_signals
-        from src.scoring.rule_report import load_rule_track_record
-
-        send_rule_daily_signals(
-            signals=signals,
-            market=market,
-            buy_orders=trade_stats["buy_orders"],
-            sell_orders=trade_stats["sell_orders"],
-            total=batch.total,
-            track_record=load_rule_track_record(market),
-        )
-    except Exception as e:
-        logger.error("ルールシグナル通知失敗: %s", e, exc_info=True)
+    notify_rule_signals(signals, market, trade_stats, batch.total)
 
     # 注文の失敗は知らせを送った後にジョブの失敗にする（#1075）。run_scheduler の
     # daily_rule_signals は max_retries: 0 のため、失敗にしても発注は呼び直されない。
