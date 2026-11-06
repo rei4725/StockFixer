@@ -2,6 +2,9 @@
 PostgreSQL 定期バックアップパイプライン (NF-602)
 
 pg_dump（カスタムフォーマット）でタイムスタンプ付きファイルへ出力し、最大5世代を保持する。
+
+pg_dump は一時の名前へ書かせ、正常に終わった後に本番の名前へ置き換える。プロセスごと消えた回の
+書きかけは一時の名前のまま残り、世代に数えられず、次の成功の回に失敗の跡として消える。
 """
 
 import os
@@ -18,6 +21,7 @@ logger = get_logger(__name__)
 
 MAX_GENERATIONS = 5
 _PG_DUMP_TIMEOUT_SECONDS = 300
+_PARTIAL_SUFFIX = ".partial"
 
 
 def get_backup_dir() -> str:
@@ -30,8 +34,9 @@ def run_db_backup() -> dict:
     PostgreSQL バックアップを実行する。
 
     手順:
-        1. pg_dump（カスタムフォーマット, -Fc）でタイムスタンプ付きファイルへ出力
-        2. 5世代超過分を古い順に削除
+        1. pg_dump（カスタムフォーマット, -Fc）でタイムスタンプ付きフォルダの一時の名前へ出力
+        2. 正常に終わった後に stockfixer.dump へ置き換える
+        3. 5世代超過分を古い順に削除
 
     Returns:
         dict: backup_path, size_mb, elapsed_seconds, pruned_count, error
@@ -40,6 +45,7 @@ def run_db_backup() -> dict:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_dest_dir = os.path.join(backup_root, timestamp)
     backup_dest_path = os.path.join(backup_dest_dir, "stockfixer.dump")
+    partial_path = backup_dest_path + _PARTIAL_SUFFIX
 
     start = time.monotonic()
     error_msg = None
@@ -50,8 +56,9 @@ def run_db_backup() -> dict:
 
     try:
         os.makedirs(backup_dest_dir, exist_ok=True)
-        logger.info("バックアップ: pg_dump 開始 → %s", backup_dest_path)
-        _run_pg_dump(get_database_url(), backup_dest_path)
+        logger.info("バックアップ: pg_dump 開始 → %s", partial_path)
+        _run_pg_dump(get_database_url(), partial_path)
+        os.replace(partial_path, backup_dest_path)
         size_mb = os.path.getsize(backup_dest_path) / (1024 * 1024)
         logger.info("バックアップ: pg_dump 完了 (%.2f MB)", size_mb)
 
