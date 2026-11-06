@@ -23,6 +23,11 @@ _WALK_FORWARD = "weekly_walk_forward_report"
 # 本番の W43 の学習（火曜）と W45 のレポート（木曜）の消え方に、回の時刻を合わせる
 _TRAINING_NOW = datetime(2026, 10, 20, 2, 0, tzinfo=_JST)
 _WALK_FORWARD_NOW = datetime(2026, 11, 5, 3, 0, tzinfo=_JST)
+_WEEK_STARTED_AT = {
+    "2026-W36": "2026-09-01T16:00:00+00:00",
+    "2026-W43": "2026-10-19T16:00:00+00:00",
+    "2026-W45": "2026-11-04T16:00:00+00:00",
+}
 _WEEKS = [
     pytest.param(_TRAINING, "2026-W43", _TRAINING_NOW, id="training"),
     pytest.param(_WALK_FORWARD, "2026-W45", _WALK_FORWARD_NOW, id="walk_forward"),
@@ -37,6 +42,7 @@ def _config(job_id: str) -> dict:
 
 
 def _interrupted(job_id: str, period_key: str, count: int) -> list[dict]:
+    # 記録はその週から始まる。前の週は状態ファイルの外で、補完の日が尽きた週に読まない（#1683）
     return [
         {
             "job_id": job_id,
@@ -45,7 +51,7 @@ def _interrupted(job_id: str, period_key: str, count: int) -> list[dict]:
             "period_key": period_key,
             "run_id": f"run-{index}",
             "boot_id": f"old-boot-{index}",
-            "started_at": "2026-10-19T16:00:00+00:00",
+            "started_at": _WEEK_STARTED_AT[period_key],
         }
         for index in range(count)
     ]
