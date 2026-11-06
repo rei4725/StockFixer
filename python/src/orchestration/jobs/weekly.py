@@ -187,7 +187,8 @@ def run_weekly_optimization():
     流れ:
         1. ウォッチリスト全銘柄のグリッドサーチ（並列数3）
         2. 最適パラメータを config/optimal_params.json に保存
-        3. 完了の知らせの後、結果が空か失敗が線を超えた回はジョブの失敗にする（#1581）
+        3. 完了の知らせの後、結果が空か、全体か jp の失敗が線を超えた回はジョブの失敗にする
+           （#1581・#1680）
     """
     import os
 
@@ -260,7 +261,7 @@ def run_weekly_optimization():
     except Exception as e:
         logger.error("週次最適化完了通知失敗: %s", e, exc_info=True)
 
-    raise_if_optimization_mostly_failed(total=len(results), failed=failed)
+    raise_if_optimization_mostly_failed(results)
 
 
 def run_weekly_walk_forward_report():

@@ -4,7 +4,7 @@ daily.py からの責務分離（ファイル行数ガード対策）。
 """
 
 from collections import Counter
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from src.market_data.batch_db_write import has_price_step
 from src.orchestration.job_errors import NonRetryableJobError
@@ -251,21 +251,53 @@ def _raise_if_rule_signals_mostly_unavailable(batch: "RuleSignalBatch") -> None:
         )
 
 
-def raise_if_optimization_mostly_failed(total: int, failed: int) -> None:
+def _count_optimization_failed(results: list[dict[str, Any]]) -> int:
+    """最適化の結果のうち、success でも skipped でもない行の数を返す（#973）。"""
+    return sum(1 for r in results if r.get("status") not in ("success", "skipped"))
+
+
+def raise_if_optimization_mostly_failed(results: list[dict[str, Any]]) -> None:
     """週の最適化の結果が空か、失敗が線を超えたら NonRetryableJobError を投げる（#1581）。
 
     銘柄ごとの失敗は例外にならないため、大半の銘柄が失敗した週も success と記録され、
-    同じ週の補完が止まり、発注が古い閾値と SL/TP のまま動いた。total は結果の件数で、
-    skipped（その週に済んだ銘柄）も分母に残す。呼び出し元は完了の知らせの後に呼ぶ。
-    知らせは済んでいるのでやり直さず、同じ週の補完に任せる。線は日次の取得（#811）と同じ。
+    同じ週の補完が止まり、発注が古い閾値と SL/TP のまま動いた。分母は結果の件数で、
+    skipped（その週に済んだ銘柄）も分母に残す。全体の割合に加えて、8:50 が発注する市場（jp）の
+    銘柄だけの割合も同じ線で見る。jp は全体の約3割のため、jp の全部が失敗しても全体の線に
+    届かない（#1680）。呼び出し元は完了の知らせの後に呼ぶ。知らせは済んでいるのでやり直さず、
+    同じ週の補完に任せる。線は日次の取得（#811）と同じ。
     """
     from config.settings import DAILY_FETCH_MAX_UNAVAILABLE_RATIO
 
+    total = len(results)
     if total <= 0:
         raise NonRetryableJobError("週次バックテスト最適化の結果が空だった")
+    failed = _count_optimization_failed(results)
     if failed / total > DAILY_FETCH_MAX_UNAVAILABLE_RATIO:
         raise NonRetryableJobError(
             f"週次バックテスト最適化で失敗した銘柄が多すぎる: {failed} / 結果 {total}"
+            f"（線 {DAILY_FETCH_MAX_UNAVAILABLE_RATIO:.0%}）"
+        )
+    _raise_if_order_market_optimization_mostly_failed(results)
+
+
+def _raise_if_order_market_optimization_mostly_failed(results: list[dict[str, Any]]) -> None:
+    """発注する市場の銘柄だけの失敗が線を超えたら NonRetryableJobError を投げる（#1680）。
+
+    jp の結果が0件の週は見ない。取得と予想の線と同じで、同じ対象で補完しても jp の結果は出ない。
+    全部 skipped の週は、全体の線と同じく skipped を分母に残し、失敗0件として通す。
+    """
+    from config.settings import DAILY_FETCH_MAX_UNAVAILABLE_RATIO
+
+    market = _ORDER_MARKET
+    market_results = [r for r in results if r.get("market") == market]
+    market_total = len(market_results)
+    if market_total <= 0:
+        return
+    market_failed = _count_optimization_failed(market_results)
+    if market_failed / market_total > DAILY_FETCH_MAX_UNAVAILABLE_RATIO:
+        raise NonRetryableJobError(
+            f"週次バックテスト最適化で {market} の失敗した銘柄が多すぎる: "
+            f"{market_failed} / {market} の結果 {market_total}"
             f"（線 {DAILY_FETCH_MAX_UNAVAILABLE_RATIO:.0%}）"
         )
 
