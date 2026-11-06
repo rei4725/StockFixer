@@ -21,7 +21,9 @@ class MarketDataPort(Protocol):
 
     def fetch_cross_asset_features(self, start: str, end: str) -> Optional[pd.DataFrame]: ...
 
-    def get_earnings_dates(self, market: str, symbol: str) -> pd.DatetimeIndex: ...
+    def get_earnings_dates(
+        self, market: str, symbol: str, raise_on_error: bool = False
+    ) -> pd.DatetimeIndex: ...
 
     def add_earnings_flag(
         self,

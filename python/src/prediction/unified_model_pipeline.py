@@ -28,8 +28,42 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+# 決算日の取得に失敗した銘柄の割合の線。超えた回は学習しない（#1700）。
+# 上限に当たれば列の後ろの銘柄がまとめて欠けるので、それを止め、短い瞬断では止めない値にする。
+# 788銘柄なら 39 銘柄（1銘柄約 0.5 秒で 20 秒ほどの瞬断）までは続け、40 銘柄で止める。
+_EARNINGS_FETCH_MAX_FAILED_RATIO = 0.05
+
+
+def _check_earnings_fetch_failures(failed: list[str], n_symbols: int) -> None:
+    """決算日の取得に失敗した銘柄の数を WARNING に出し、線を超えていたら投げる（#1700）。
+
+    Raises:
+        RuntimeError: 失敗した銘柄の割合が線を超えたとき
+    """
+    if not failed:
+        return
+    logger.warning(
+        "統合の学習で決算日の取得に失敗した銘柄: %d/%d (%s)。決算の前後の行を除かずに学習に入る",
+        len(failed),
+        n_symbols,
+        ", ".join(failed[:20]),
+    )
+    if len(failed) / n_symbols > _EARNINGS_FETCH_MAX_FAILED_RATIO:
+        raise RuntimeError(
+            "決算日の取得に失敗した銘柄が多すぎるため学習しません: "
+            f"{len(failed)}/{n_symbols}銘柄（線 {_EARNINGS_FETCH_MAX_FAILED_RATIO:.0%}）"
+        )
+
 
 def _mask_earnings_rows_for_unified(df: pd.DataFrame) -> pd.DataFrame:
+    """決算の前後の行を銘柄ごとに除く。
+
+    取得に失敗した銘柄は除く日が無いまま残し、数を WARNING に出す。空の応答（ETF など
+    決算日の無い銘柄）は失敗に数えない。
+
+    Raises:
+        RuntimeError: 取得に失敗した銘柄の割合が線を超えたとき
+    """
     if (
         df.empty
         or "date" not in df.columns
@@ -40,12 +74,17 @@ def _mask_earnings_rows_for_unified(df: pd.DataFrame) -> pd.DataFrame:
 
     masked_frames: list[pd.DataFrame] = []
     removed_count = 0
+    failed_symbols: list[str] = []
     for (market, symbol), group in df.groupby(["market", "symbol"], sort=False):
         work = group.copy()
         date_index = pd.DatetimeIndex(pd.to_datetime(work["date"], errors="coerce"))
         work.index = date_index
         _mds = get_market_data_port()
-        earnings_dates = _mds.get_earnings_dates(str(market), str(symbol))
+        try:
+            earnings_dates = _mds.get_earnings_dates(str(market), str(symbol), raise_on_error=True)
+        except Exception:  # 例外の中身は loader が銘柄ごとに WARNING に出している
+            failed_symbols.append(f"{market}/{symbol}")
+            earnings_dates = pd.DatetimeIndex([])
         work = _mds.add_earnings_flag(
             work, earnings_dates, lookaround_days=EARNINGS_MASK_WINDOW_DAYS
         )
@@ -55,6 +94,7 @@ def _mask_earnings_rows_for_unified(df: pd.DataFrame) -> pd.DataFrame:
         work["date"] = work.index
         masked_frames.append(work.drop(columns=["earnings_flag"], errors="ignore"))
 
+    _check_earnings_fetch_failures(failed_symbols, len(masked_frames))
     if removed_count > 0:
         logger.info(f"統合学習用に決算近傍データを除外: {removed_count}行")
     return pd.concat(masked_frames, ignore_index=True) if masked_frames else df.iloc[0:0].copy()
@@ -69,6 +109,9 @@ def load_all_stock_data(data_dir: str = None) -> pd.DataFrame:
 
     Returns:
         pd.DataFrame: 全銘柄の結合データ（market, symbol列付き）
+
+    Raises:
+        RuntimeError: 決算日の取得に失敗した銘柄の割合が線を超えたとき
     """
     df = load_all_stock_features()
     if df.empty:
@@ -322,7 +365,8 @@ def train_unified_model(
 
     Raises:
         RuntimeError: 学習に使うデータが空のとき（読み込みの失敗を含む）、
-            発注する市場の行が線を超えて NaN で落ちたとき
+            発注する市場の行が線を超えて NaN で落ちたとき、
+            決算日の取得に失敗した銘柄の割合が線を超えたとき
         ValueError: horizon が 1 以外のときに train_end_date を渡したとき
     """
     from src.prediction.manager import ModelManager

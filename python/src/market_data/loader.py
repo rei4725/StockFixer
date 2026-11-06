@@ -12,8 +12,17 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
-def get_earnings_dates(market: str, symbol: str, limit: int = 12) -> pd.DatetimeIndex:
-    """yfinance から決算日一覧を取得して返す。取得失敗時は空配列。"""
+def get_earnings_dates(
+    market: str, symbol: str, limit: int = 12, raise_on_error: bool = False
+) -> pd.DatetimeIndex:
+    """yfinance から決算日一覧を取得して返す。取得失敗時は空配列。
+
+    Args:
+        market: マーケット識別子 (例: "us", "jp")
+        symbol: 銘柄シンボル
+        limit: 取得する決算日の数
+        raise_on_error: True なら取得の例外を空配列にせず投げ、決算日が無いことと分ける（#1700）
+    """
     ticker = get_ticker(market, symbol)
     try:
         ticker_obj = yf.Ticker(ticker)
@@ -34,6 +43,8 @@ def get_earnings_dates(market: str, symbol: str, limit: int = 12) -> pd.Datetime
         return pd.DatetimeIndex(dates)
     except Exception as exc:
         logger.warning(f"決算日取得失敗 [{market}/{symbol}]: {exc}", exc_info=True)
+        if raise_on_error:
+            raise
         return pd.DatetimeIndex([])
 
 

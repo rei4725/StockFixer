@@ -25,10 +25,12 @@ class PredictionMarketDataAdapter:
 
         return fetch_cross_asset_features(start, end)
 
-    def get_earnings_dates(self, market: str, symbol: str) -> pd.DatetimeIndex:
+    def get_earnings_dates(
+        self, market: str, symbol: str, raise_on_error: bool = False
+    ) -> pd.DatetimeIndex:
         from src.market_data.loader import get_earnings_dates
 
-        return get_earnings_dates(market, symbol)
+        return get_earnings_dates(market, symbol, raise_on_error=raise_on_error)
 
     def add_earnings_flag(
         self,
