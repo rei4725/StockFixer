@@ -159,6 +159,7 @@ def test_only_the_named_jobs_have_the_gap():
         "weekly_optimization",
         "daily_rule_signals",
         "weekly_model_training",
+        "weekly_report",
     }
 
 
@@ -448,6 +449,77 @@ def test_weekly_training_waits_the_gap_after_a_lost_run(tmp_path):
     assert manager.should_recover(TRAINING, now=TUESDAY_RUN + timedelta(minutes=20)) is False
     assert manager.should_recover(TRAINING, now=TUESDAY_RUN + timedelta(minutes=239)) is False
     assert manager.should_recover(TRAINING, now=TUESDAY_RUN + timedelta(minutes=240)) is True
+
+
+REPORT = "weekly_report"
+# 2026-11-05 は木曜（ISO 週 2026-W45）。定時は 02:00
+THURSDAY_RUN = datetime(2026, 11, 5, 2, 0, tzinfo=ZoneInfo("Asia/Tokyo"))
+# 定時の 15 分の遅れより後に終わった回で、間の判定だけを見る（#1689）
+REPORT_FAILED = THURSDAY_RUN + timedelta(minutes=20)
+
+
+def _failed_report(
+    manager: SchedulerQueueManager, now: datetime, reason: str = "scheduled"
+) -> None:
+    with (
+        patch("src.orchestration.scheduler_queue.ping_heartbeat"),
+        patch.object(manager, "now", return_value=now),
+    ):
+        with pytest.raises(NonRetryableJobError):
+            manager.run_job(REPORT, reason=reason)
+
+
+def test_weekly_report_recovery_settings():
+    from run_scheduler import SCHEDULE_CONFIG
+
+    config = SCHEDULE_CONFIG[REPORT]
+    assert config["max_executions_per_period"] == 2
+    assert config["recovery_min_gap_minutes"] == 240
+    assert config["rerun_if_interrupted"] is True
+    assert "recover_rest_of_week" not in config
+
+
+@pytest.mark.parametrize(
+    "minutes, expected",
+    [
+        pytest.param(5, False, id="next-poll"),
+        pytest.param(239, False, id="just-before-the-gap-ends"),
+        pytest.param(240, True, id="gap-has-passed"),
+    ],
+)
+def test_weekly_report_waits_after_failed_run(tmp_path, minutes, expected):
+    manager = _production_manager(tmp_path, REPORT)
+    _failed_report(manager, REPORT_FAILED)
+
+    now = REPORT_FAILED + timedelta(minutes=minutes)
+    assert manager.should_recover(REPORT, now=now) is expected
+
+
+def test_weekly_report_keeps_the_second_attempt_through_a_short_outage(tmp_path):
+    manager = _production_manager(tmp_path, REPORT)
+    _failed_report(manager, REPORT_FAILED)
+    assert manager.should_recover(REPORT, now=REPORT_FAILED + timedelta(minutes=5)) is False
+
+    recovery_at = REPORT_FAILED + timedelta(minutes=240)
+    assert manager.should_recover(REPORT, now=recovery_at) is True
+    _failed_report(manager, recovery_at, reason="recovery")
+
+    assert manager.should_recover(REPORT, now=recovery_at + timedelta(minutes=240)) is False
+    assert manager.get_execution_count(REPORT, "2026-W45") == 2
+
+
+def test_weekly_report_does_not_recover_on_friday(tmp_path):
+    manager = _production_manager(tmp_path, REPORT)
+    _failed_report(manager, REPORT_FAILED)
+
+    assert manager.should_recover(REPORT, now=REPORT_FAILED + timedelta(days=1)) is False
+
+
+def test_weekly_report_recovers_right_after_a_lost_run(tmp_path):
+    manager = _production_manager(tmp_path, REPORT)
+    _lost_run(manager, REPORT, "2026-W45", THURSDAY_RUN)
+
+    assert manager.should_recover(REPORT, now=THURSDAY_RUN + timedelta(minutes=15)) is True
 
 
 def _lock_expired_run(

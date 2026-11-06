@@ -1,7 +1,7 @@
 """週のレポートのジョブが失敗の回を error と記録して補完を通すことのテスト（#1582）"""
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
@@ -17,6 +17,8 @@ _JOB_ID = "weekly_report"
 _PERIOD = "2026-W43"
 # 木曜 02:00 の定時と recovery_delay_minutes の 15 分を過ぎた時刻
 _AFTER_DELAY = datetime(2026, 10, 22, 2, 20, tzinfo=ZoneInfo("Asia/Tokyo"))
+# 本番の recovery_min_gap_minutes の 240 分
+_GAP = timedelta(minutes=240)
 _WEEK_DF = pd.DataFrame(
     [
         {
@@ -146,14 +148,16 @@ def test_both_failures_are_named_in_the_error(tmp_path):
 
 
 def test_failed_run_is_recovered_once(tmp_path):
-    """失敗の回の後は補完が1回通り、2回目も失敗なら補完しない"""
+    """失敗の回の後は間を過ぎて補完が1回通り、2回目も失敗なら補完しない（#1689）"""
     job = _manager(tmp_path)
-    _run(job, paper_error=RuntimeError("書けない"))
-    assert job.manager.should_recover(_JOB_ID, now=_AFTER_DELAY) is True
+    with patch.object(job.manager, "now", return_value=_AFTER_DELAY):
+        _run(job, paper_error=RuntimeError("書けない"))
+    assert job.manager.should_recover(_JOB_ID, now=_AFTER_DELAY + _GAP) is True
 
-    second = _run(job, paper_error=RuntimeError("書けない"))
+    with patch.object(job.manager, "now", return_value=_AFTER_DELAY + _GAP):
+        second = _run(job, paper_error=RuntimeError("書けない"))
     assert second.raised is not None
-    assert job.manager.should_recover(_JOB_ID, now=_AFTER_DELAY) is False
+    assert job.manager.should_recover(_JOB_ID, now=_AFTER_DELAY + 2 * _GAP) is False
 
 
 def test_recovery_success_ends_recovery(tmp_path):
