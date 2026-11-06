@@ -287,6 +287,10 @@ SCHEDULE_CONFIG = {
         "minute": 0,
         "recovery_delay_minutes": 15,
         "max_executions_per_period": 2,
+        # 間が無いと、1回の失敗が5〜6分なので約30分の障害で2回を使い切り、火曜のうちの補完も無くなる。
+        # 失敗の回の4時間後なら 05:00 台に補完し、07:30 の日次の道の前に終わる。ロックを待ち切って
+        # 落ちた回はもう3時間空いたので間を数えず、補完が 8:50 の発注の近くへずれないようにする（#1682）
+        "recovery_min_gap_minutes": 240,
         "description": "毎週火曜 01:00 - 統合モデル再学習 + 精度チェック",
     },
     "weekly_report": {
