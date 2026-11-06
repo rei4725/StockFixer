@@ -15,20 +15,25 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 import pandas as pd
 
+from config.settings import STALE_BARS_MAX_WEEKDAYS
 from src.domain.types import PositionEvent, TrendCandidate
 from src.market_data.fundamentals import fetch_fundamentals
 from src.orchestration.job_errors import NonRetryableJobError
 from src.screening.hold_engine import simulate_position
 from src.screening.positions import close_position, list_positions, update_position
 from src.screening.quality_gate import apply_quality_gate
-from src.screening.trend_screener import screen_trend_candidates
+from src.screening.trend_screener import (
+    business_days_behind,
+    last_valid_bar_day,
+    screen_trend_candidates,
+)
 from src.screening.types import MultibaggerCandidate, Position
-from src.utils.db.stock_features import load_stock_features
+from src.utils.db.market_data import load_raw_ohlcv
 from src.utils.db.stock_fundamentals import load_fundamentals, upsert_fundamentals
 from src.utils.db.symbol_master import symbol_name_suffix
 from src.utils.logger import get_logger
@@ -170,7 +175,7 @@ def _failure_reasons(result: dict) -> list[str]:
 
 
 class _PositionSkipped(Exception):
-    """保有の判定ができなかったこと（価格データなし・イベントなし）を表す。"""
+    """保有の判定ができなかったこと（価格データなし・足が古い・イベントなし）を表す。"""
 
 
 def _screen_new_candidates(
@@ -271,6 +276,43 @@ def _evaluate_positions(market: str) -> tuple[list[dict], list[dict]]:
     return actions, skipped
 
 
+def _today() -> date:
+    """足の鮮度の基準の日（UTC の今日）を返す。"""
+    return datetime.now(timezone.utc).date()
+
+
+def _load_position_prices(pos: Position) -> pd.DataFrame:
+    """保有の判定に使う足を market_data_raw から読み、date と Close の表にして返す。
+
+    stock_features は生の Close を持たない。date は entry_date と比べるので同じ
+    YYYY-MM-DD の文字列にする。最後の有効な足がトレンド・スクリーナーと同じ線より古ければ、
+    止まった日の終値で判定しない。
+
+    Raises:
+        _PositionSkipped: 有効な足が無いか、最後の足が線より古いとき。
+    """
+    raw = load_raw_ohlcv(pos.market, pos.symbol)
+    last_bar = last_valid_bar_day(raw)
+    if raw is None or last_bar is None:
+        logger.warning("価格データなし（判定スキップ）: %s/%s", pos.market, pos.symbol)
+        raise _PositionSkipped("no_prices")
+
+    behind = business_days_behind(last_bar, _today(), pos.market)
+    if behind > STALE_BARS_MAX_WEEKDAYS:
+        logger.warning(
+            "足が止まった保有（判定スキップ）: %s/%s 最後の足 %s、営業日で %d日 > %d日 古い",
+            pos.market,
+            pos.symbol,
+            last_bar,
+            behind,
+            STALE_BARS_MAX_WEEKDAYS,
+        )
+        raise _PositionSkipped("stale_prices")
+
+    dates = pd.DatetimeIndex(raw.index).strftime("%Y-%m-%d")
+    return pd.DataFrame({"date": dates, "Close": raw["Close"].to_numpy()})
+
+
 def _evaluate_one_position(pos: Position) -> dict:
     """1 ポジションを最新価格まで保有シミュレートし、アクションを確定する。
 
@@ -278,12 +320,9 @@ def _evaluate_one_position(pos: Position) -> dict:
     _close_exited_positions が閉じる（閉じた保有は次の回の判定に出ないため）。
 
     Raises:
-        _PositionSkipped: 価格データまたは保有イベントが無く判定できないとき。
+        _PositionSkipped: 価格データが無いか古いか、保有イベントが無く判定できないとき。
     """
-    prices = load_stock_features(pos.market, pos.symbol)
-    if prices is None or "date" not in prices.columns or "Close" not in prices.columns:
-        logger.warning("価格データなし（判定スキップ）: %s/%s", pos.market, pos.symbol)
-        raise _PositionSkipped("no_prices")
+    prices = _load_position_prices(pos)
 
     events = simulate_position(prices, pos.entry_date)
     if not events:

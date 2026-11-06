@@ -25,7 +25,10 @@ from src.trading.execution.gate_record import (
     save_rule_gate_record,
 )
 from src.trading.execution.pending import _load_pending_exits, _log_pending_skips
-from src.trading.execution.selection import _get_pending_buy_symbols
+from src.trading.execution.selection import (
+    _get_pending_buy_symbols,
+    _get_rule_buy_symbols_placed_today,
+)
 from src.trading.position_valuation import count_short_positions, short_held_codes
 from src.trading.risk_manager import RiskManager
 from src.utils.data_path_utils import get_ticker
@@ -135,9 +138,12 @@ def execute_rule_paper_trades(
     # 新規買いにだけ使う手順が落ちたら、新規は止め保有の SELL だけ出してから、
     # 同じ例外を投げ直してジョブを失敗にする（#1221。8:50 の道の #1179 と同じ形）
     buy_step_error: Exception | None = None
+    buy_orders_this_run = 0
     try:
         held_or_pending |= _get_pending_buy_symbols(broker)
         position_count = len(held_or_pending)
+        # 消えた回の流し直しでも1日の新規買いが上限に収まるよう、今日の回の分から数える（#1660）
+        buy_orders_this_run = len(_get_rule_buy_symbols_placed_today(broker))
 
         # ML 経路（execution.run_daily_orders）と同等のリスク制御を適用する。
         # R-307: DD 基準値を発注前に更新し、当日発注可否ゲート（日次損失・連続損失・
@@ -197,7 +203,6 @@ def execute_rule_paper_trades(
         buy_step_error = exc
         record.new_buy_step_error = repr(exc)
         sector_allowed = set()
-    buy_orders_this_run = 0
     # 朝の約定で据え置かれた SELL がある銘柄には2本目を出さない（#1169。8:50 の道と同じ確かめ）
     pending = _load_pending_exits(broker)
     pending_skipped: list[str] = []

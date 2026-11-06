@@ -197,7 +197,11 @@ def predict_all_unified(
     Returns:
         list[PredictionResult]: 各銘柄の予測結果
     """
-    from src.prediction.predict_unified import predict_with_unified_model, preload_models
+    from src.prediction.predict_unified import (
+        collect_base_price_skips,
+        predict_with_unified_model,
+        preload_models,
+    )
     from src.prediction.types import UNIFIED_PREDICTION_MODEL_NAMES
 
     # daily.py の requested_models と同じ定数を参照する（I-4 対策）。
@@ -228,8 +232,8 @@ def predict_all_unified(
     output_rows: list[PredictionResult] = []
     logger.info(f"並列予測開始（統合モデル）: {len(all_keys)}銘柄, ワーカー数: {max_workers}")
 
-    # クリップと0埋めの数を回の終わりにログに出す（#1318）
-    with collect_prediction_run_stats("unified"):
+    # クリップと0埋めの数を回の終わりにログに出す（#1318）。基準の値段の飛ばしは門の文に使う（#1662）
+    with collect_prediction_run_stats("unified"), collect_base_price_skips():
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {executor.submit(wrapper, task): task for task in all_keys}
             for future in as_completed(futures):

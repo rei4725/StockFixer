@@ -9,6 +9,11 @@ from typing import TYPE_CHECKING, Optional
 from src.market_data.batch_db_write import has_price_step
 from src.orchestration.job_errors import NonRetryableJobError
 from src.orchestration.jobs.common import _notify_stage_failure
+from src.prediction.predict_unified import (
+    BASE_PRICE_DATE_MISMATCH,
+    BasePriceSkip,
+    base_price_skips,
+)
 from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
@@ -23,6 +28,10 @@ _FETCH_ERROR_NOTICE_SYMBOL_LIMIT = 5
 # 止まった相場の指標の知らせに並べる「列と最後の日」の組の上限（#1634）。[1/6] の知らせは
 # Discord の欄に入るので長くしない。ふつうは止まった列ごとに1組で、列は6つである
 _MACRO_STALE_NOTICE_GROUP_LIMIT = 6
+
+# 基準の値段の知らせに並べる「足の日と特徴量の日」の組の上限（#1662）。[3/6] の知らせも
+# Discord の欄に入るので長くしない
+_BASE_PRICE_DATE_NOTICE_GROUP_LIMIT = 3
 
 # 8:50 の自動発注が注文を出す市場（#1432）
 _ORDER_MARKET = "jp"
@@ -92,9 +101,11 @@ def order_market_predictions_mostly_missing(
 
     [3/6] は基準の値段が取れない銘柄などを黙って飛ばすため、[1/6] の線の後でも jp の
     予想が大きく欠けうる。呼び出し元は True のとき保存の印を立てず、8:50 の新規を止める。
+    線の下でも基準の値段で飛ばした jp の銘柄があれば、回に1通にまとめて知らせる（#1662）。
     """
     gap = _order_market_prediction_gap(market_totals, output_rows)
     if gap is None:
+        _notify_base_price_skips(market_totals)
         return False
     message = f"{gap}。予想は保存したが、今日の新規は止める"
     logger.warning("[3/6] 予測 (production): %s", message)
@@ -287,7 +298,59 @@ def _order_market_prediction_gap(market_totals: dict[str, int], output_rows: lis
         return None
     return (
         f"{market} の予想の出なかった銘柄が多すぎる: {n_missing} / {market} の対象 {market_total}"
-        f"（線 {DAILY_FETCH_MAX_UNAVAILABLE_RATIO:.0%}）"
+        f"（線 {DAILY_FETCH_MAX_UNAVAILABLE_RATIO:.0%}）{_base_price_skip_cause(market)}"
+    )
+
+
+def _base_price_date_detail(skips: list[BasePriceSkip]) -> str:
+    """足の日付の不一致の、足の日と特徴量の日の組と件数の括弧書きを返す（#1662）。"""
+    groups = Counter(
+        (skip.bar_day, skip.feature_day)
+        for skip in skips
+        if skip.reason == BASE_PRICE_DATE_MISMATCH
+    )
+    limit = _BASE_PRICE_DATE_NOTICE_GROUP_LIMIT
+    ranked = sorted(groups.items(), key=lambda item: (-item[1], item[0]))
+    parts = [
+        f"足の日 {bar}・特徴量の日 {feature} が {n} 件" for (bar, feature), n in ranked[:limit]
+    ]
+    more = " ほか" if len(ranked) > limit else ""
+    return f"（{', '.join(parts)}{more}）"
+
+
+def _base_price_skip_summary(market: str) -> str:
+    """基準の値段で飛ばした銘柄の理由ごとの件数の文を返す。飛ばしが無ければ空（#1662）。"""
+    skips = [skip for skip in base_price_skips() if skip.market == market]
+    if not skips:
+        return ""
+    ranked = sorted(Counter(skip.reason for skip in skips).items(), key=lambda i: (-i[1], i[0]))
+    parts = [
+        f"{reason} {n} 件"
+        + (_base_price_date_detail(skips) if reason == BASE_PRICE_DATE_MISMATCH else "")
+        for reason, n in ranked
+    ]
+    return f"基準の値段が取れず飛ばした {market} の銘柄 {len(skips)} 件: {', '.join(parts)}"
+
+
+def _base_price_skip_cause(market: str) -> str:
+    """線を超えた文の後ろに足す、基準の値段の飛ばしの文を返す。飛ばしが無ければ空（#1662）。"""
+    summary = _base_price_skip_summary(market)
+    return f"。{summary}" if summary else ""
+
+
+def _notify_base_price_skips(market_totals: dict[str, int]) -> None:
+    """線の下でも基準の値段で飛ばした jp の銘柄があれば、回に1通にまとめて知らせる（#1662）。
+
+    銘柄ごとの WARNING のログにしか出ないと、jp の予想が欠けた朝の原因が 8:50 までに分からない。
+    """
+    market = _ORDER_MARKET
+    summary = _base_price_skip_summary(market)
+    if not summary:
+        return
+    message = f"{summary}（{market} の対象 {market_totals.get(market, 0)}）"
+    logger.warning("[3/6] 予測 (production): %s", message)
+    _notify_stage_failure(
+        f"[3/6] 予測 (production) の {market} の基準の値段", RuntimeError(message)
     )
 
 
