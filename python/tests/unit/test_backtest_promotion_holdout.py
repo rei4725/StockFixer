@@ -6,11 +6,13 @@ production はその逆を言う。
 """
 
 from typing import Optional
+from unittest.mock import MagicMock
 
 import numpy as np
 import pandas as pd
 import pytest
 
+from src.prediction import predict_unified
 from src.prediction.backtest_promotion import holdout
 from src.prediction.backtest_promotion.holdout import (
     evaluate_holdout,
@@ -105,7 +107,7 @@ def _models(scale: float, raise_on: Optional[set] = None):
 def _live_matching(offset: float = 0.0):
     """production（-feat_a）と同じ値に offset を足した本番の予想を返す"""
 
-    def _live(market: str, symbol: str) -> Optional[PredictionResult]:
+    def _live(market: str, symbol: str, **_kwargs) -> Optional[PredictionResult]:
         j = SYMBOLS.index((market, symbol))
         diff = -_features(j)["feat_a"].iloc[-1] + offset
         return PredictionResult(
@@ -212,7 +214,7 @@ def test_path_check_failure_blocks_win(monkeypatch):
 
 def test_path_check_ignores_live_none(monkeypatch):
     _patch(monkeypatch)
-    ev = evaluate_holdout(_dates(), _models(1.0), _models(-1.0), lambda m, s: None)
+    ev = evaluate_holdout(_dates(), _models(1.0), _models(-1.0), lambda m, s, **kw: None)
     assert ev.path_check["compared"] == 0
     assert ev.path_check["passed"] is False
     assert ev.decision.won is False
@@ -293,7 +295,7 @@ def test_path_check_uses_live_price(monkeypatch):
     _patch(monkeypatch, atr=0.5, weights_calls=calls)
     prod = _models(-1.0)
 
-    def _live(market: str, symbol: str) -> Optional[PredictionResult]:
+    def _live(market: str, symbol: str, **_kwargs) -> Optional[PredictionResult]:
         row = feature_row(_features(SYMBOLS.index((market, symbol)), 0.5), -1, market)
         out = real_ensemble(row, 101.0, market, symbol, 1, prod, weights_fn=lambda *a: [0.5, 0.5])
         at_db_price = real_ensemble(
@@ -366,7 +368,7 @@ def test_path_check_samples_each_market(monkeypatch):
     asked: list = []
     live = _live_matching()
 
-    def _live(market: str, symbol: str) -> Optional[PredictionResult]:
+    def _live(market: str, symbol: str, **_kwargs) -> Optional[PredictionResult]:
         asked.append((market, symbol))
         return live(market, symbol) if (market, symbol) in SYMBOLS else None
 
@@ -382,3 +384,157 @@ def test_path_check_quotas_split_evenly_in_market_order(monkeypatch):
     assert holdout._path_check_quotas(universe) == {"jp": 2, "us": 1}
     monkeypatch.setattr(holdout, "PATH_CHECK_SAMPLE", 50)
     assert holdout._path_check_quotas(universe) == {"jp": 25, "us": 25}
+
+
+def _path_skips(**counts: int) -> dict:
+    return {
+        "no_base_price": 0,
+        "stale_features": 0,
+        "live_none": 0,
+        "production_none": 0,
+        **counts,
+    }
+
+
+def _live_through_real_path(monkeypatch, prod: list, history: pd.DataFrame):
+    """本番の予想の関数を、yfinance の足だけ差し替えて通す。"""
+    by_name = dict(prod)
+    frames = {key: _features(j) for j, key in enumerate(SYMBOLS)}
+    ticker = MagicMock()
+    ticker.history.return_value = history
+    monkeypatch.setattr(predict_unified.yf, "Ticker", MagicMock(return_value=ticker))
+    monkeypatch.setattr(predict_unified, "get_service_url", lambda: None)
+    monkeypatch.setattr(predict_unified, "get_ticker", lambda m, s: s)
+    monkeypatch.setattr(predict_unified, "get_cached_model", by_name.get)
+    monkeypatch.setattr(predict_unified, "load_model_weights", lambda m, s, n: [0.5, 0.5])
+    monkeypatch.setattr(predict_unified, "load_feature_data", lambda m, s: frames[(m, s)].copy())
+    monkeypatch.setattr(predict_unified, "count_weekdays_behind", lambda *a, **kw: 1)
+    return predict_unified.predict_with_unified_model
+
+
+NEWER_BAR = pd.DataFrame(
+    {"Close": [999.0]}, index=pd.DatetimeIndex([DAYS[-1] + pd.Timedelta(days=1)])
+)
+
+
+@pytest.mark.parametrize(
+    "history",
+    [NEWER_BAR, pd.DataFrame()],
+    ids=["営業日の22時で足が特徴量より新しい", "休場日で足が無い"],
+)
+def test_path_check_compares_jp_without_relying_on_the_last_bar(monkeypatch, history):
+    _patch(monkeypatch)
+    prod = _models(-1.0)
+    live = _live_through_real_path(monkeypatch, prod, history)
+    ev = evaluate_holdout(_dates(), _models(1.0), prod, live)
+    assert ev.path_check["compared_by_market"] == {"jp": 1, "us": 1}
+    assert ev.path_check["max_abs_diff"] <= PATH_CHECK_TOL
+    assert ev.path_check["passed"] is True
+    assert ev.path_check["skipped_by_reason"] == _path_skips()
+    assert ev.decision.won is True, ev.decision.reasons
+
+
+def test_daily_path_with_the_same_bar_still_skips(monkeypatch):
+    # 引数を渡さない日次の呼び方は、足の日付の判定（#845）で今までどおり飛ばす
+    live = _live_through_real_path(monkeypatch, _models(-1.0), NEWER_BAR)
+    assert live("jp", "1111") is None
+
+
+def test_path_check_gives_the_close_of_the_last_feature_row(monkeypatch):
+    _patch(monkeypatch)
+    prices: list = []
+    live = _live_matching()
+
+    def _live(market: str, symbol: str, **kwargs) -> Optional[PredictionResult]:
+        prices.append(kwargs["base_price"])
+        return live(market, symbol)
+
+    ev = evaluate_holdout(_dates(), _models(1.0), _models(-1.0), _live)
+    assert prices == [100.0, 100.0]
+    assert ev.path_check["passed"] is True
+
+
+def test_no_jp_compared_is_not_passed_even_if_us_matches(monkeypatch):
+    _patch(monkeypatch)
+    live = _live_matching()
+
+    def _live(market: str, symbol: str, **_kwargs) -> Optional[PredictionResult]:
+        return None if market == "jp" else live(market, symbol)
+
+    ev = evaluate_holdout(_dates(), _models(1.0), _models(-1.0), _live)
+    assert ev.path_check["compared_by_market"] == {"jp": 0, "us": 1}
+    assert ev.path_check["max_abs_diff"] <= PATH_CHECK_TOL
+    assert ev.path_check["passed"] is False
+    assert ev.path_check["skipped_by_reason"] == _path_skips(live_none=1)
+    assert ev.decision.won is False
+    assert "道の一致の検査で jp の比べられた銘柄が無い" in ev.decision.reasons
+    assert "道の一致の検査に落ちた" not in ev.decision.reasons
+
+
+def test_no_us_compared_still_passes(monkeypatch):
+    # 発注するのは jp なので、us の 0 件は passed の条件に入れない
+    _patch(monkeypatch)
+    live = _live_matching()
+
+    def _live(market: str, symbol: str, **_kwargs) -> Optional[PredictionResult]:
+        return None if market == "us" else live(market, symbol)
+
+    ev = evaluate_holdout(_dates(), _models(1.0), _models(-1.0), _live)
+    assert ev.path_check["compared_by_market"] == {"jp": 1, "us": 0}
+    assert ev.path_check["passed"] is True
+
+
+def test_skipped_symbols_do_not_use_up_the_quota(monkeypatch):
+    # 先頭の jp が飛んでも、割り当ては比べられた銘柄で数えるので次の jp へ進む
+    _patch(monkeypatch, extra={("jp", "2222"): _features(0)})
+    monkeypatch.setattr(holdout, "PATH_CHECK_SAMPLE", 2)
+    live = _live_matching()
+    asked: list = []
+
+    def _live(market: str, symbol: str, **_kwargs) -> Optional[PredictionResult]:
+        asked.append((market, symbol))
+        if symbol == "1111":
+            return None
+        return live("jp", "1111") if market == "jp" else live(market, symbol)
+
+    ev = evaluate_holdout(_dates(), _models(1.0), _models(-1.0), _live)
+    assert asked == [("jp", "1111"), ("jp", "2222"), ("us", "AAA")]
+    assert ev.path_check["compared_by_market"] == {"jp": 1, "us": 1}
+    assert ev.path_check["skipped_by_reason"] == _path_skips(live_none=1)
+    assert ev.path_check["passed"] is True
+
+
+def test_path_skip_reasons_are_counted(monkeypatch):
+    # 1111 は最後の行の日の終値が無い、2222 は特徴量が古い、3333 は本番の予想が無い、
+    # 4444 はこの道の予想が無い
+    extra = {("jp", s): _features(0) for s in ("2222", "3333", "4444")}
+    _patch(monkeypatch, extra=extra)
+    monkeypatch.setattr(
+        holdout,
+        "load_raw_ohlcv",
+        lambda m, s, start_date=None: _ohlcv(DAYS[-1] if s == "1111" else None),
+    )
+    live = _live_matching()
+
+    def _live(market, symbol, on_stale=None, **_kwargs) -> Optional[PredictionResult]:
+        if symbol == "2222":
+            on_stale(market, symbol)
+            return None
+        if symbol == "3333":
+            return None
+        return live("jp", "1111") if market == "jp" else live(market, symbol)
+
+    real = holdout._production_outcome
+
+    def _outcome(latest_X, price, market, symbol, models, weights_fn):
+        if symbol == "4444" and weights_fn is holdout.load_model_weights:
+            return None, True
+        return real(latest_X, price, market, symbol, models, weights_fn)
+
+    monkeypatch.setattr(holdout, "_production_outcome", _outcome)
+    ev = evaluate_holdout(_dates(), _models(1.0), _models(-1.0), _live)
+    assert ev.path_check["skipped_by_reason"] == _path_skips(
+        no_base_price=1, stale_features=1, live_none=1, production_none=1
+    )
+    assert ev.path_check["compared_by_market"] == {"jp": 0, "us": 1}
+    assert ev.path_check["passed"] is False

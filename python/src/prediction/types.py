@@ -124,7 +124,8 @@ class HoldoutEvaluation:
         candidate: 候補の baseline_metrics()（両方の予想がそろった行だけ）
         production: production の baseline_metrics()（同じ行）
         daily: 日ごとの date・candidate・production・diff（hit_rate_minus_majority）
-        path_check: 道の一致の検査の compared・max_abs_diff・passed・compared_by_market
+        path_check: 道の一致の検査の compared・max_abs_diff・passed・compared_by_market・
+            skipped_by_reason（飛ばした銘柄の理由ごとの数）
         recorded_reference: prediction_accuracy の production の記録との突き合わせ（参考のみ）
         decision: 勝ちの判定
         degraded_rows: モデルが欠けて予想した行の数（candidate・production）
