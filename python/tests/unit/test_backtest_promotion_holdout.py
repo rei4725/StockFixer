@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from src.domain import jp_market_holidays
 from src.prediction import predict_unified
 from src.prediction.backtest_promotion import holdout
 from src.prediction.backtest_promotion.holdout import (
@@ -346,11 +347,13 @@ def test_degraded_candidate_on_row_production_failed_still_blocks_win(monkeypatc
 
 def test_expected_rows_follow_each_markets_dates(monkeypatch):
     # jp だけ 9 日休場（行が無い）。日は jp と us を合わせた 20 日なので、
-    # 20 日 × 2 銘柄 = 40 の 80%（32）だと jp の休場だけで負ける。市場ごとに数えれば勝てる
+    # 20 日 × 2 銘柄 = 40 の 80%（32）だと jp の休場だけで負ける。市場ごとに数えれば勝てる。
+    # 本物の表にこの長さの休場は無いので、9 日を休場として差し替える（#1699 の日の線を越える）
     holiday = set(_dates()[3:12])
     jp = _features(0)
     jp = jp[~jp["date"].isin(holiday)].reset_index(drop=True)
     _patch(monkeypatch, extra={("jp", "1111"): jp})
+    monkeypatch.setattr(holdout, "is_jp_business_day", lambda d: pd.Timestamp(d) not in holiday)
     ev = evaluate_holdout(_dates(), _models(1.0), _models(-1.0), _live_matching())
     assert ev.candidate["n_baseline"] == 31
     keys = ("n_symbols", "n_dates", "expected_rows")
@@ -653,3 +656,103 @@ def test_markets_carry_each_markets_rows_and_metrics(monkeypatch):
     assert jp["candidate"]["rank_corr"] > jp["production"]["rank_corr"]
     assert ev.markets["us"]["n_compared"] == 20
     assert ev.candidate["n_baseline"] == 38
+
+
+# _dates() の 20 日のうち 10/12 と 11/3 が東証の休場で、営業日は 18 日
+JP_HOLIDAYS = [pd.Timestamp("2026-10-12"), pd.Timestamp("2026-11-03")]
+JP_OPEN_DAYS = [d for d in _dates() if d not in JP_HOLIDAYS]
+
+
+def _jp_without(missing: list) -> pd.DataFrame:
+    jp = _features(0)
+    return jp[~jp["date"].isin(missing)].reset_index(drop=True)
+
+
+def _patch_jp_tail_missing(monkeypatch):
+    """jp の全銘柄で後ろ 15 日の行を消す。本番の予想は jp の残った最後の行に合わせて返す。"""
+    jp = _jp_without(list(DAYS[-16:]))
+    _patch(monkeypatch, extra={("jp", "1111"): jp, ("jp", "2222"): jp})
+    us_live = _live_matching()
+
+    def _live(market: str, symbol: str, **_kwargs) -> Optional[PredictionResult]:
+        if market == "us":
+            return us_live(market, symbol)
+        diff = -float(jp["feat_a"].iloc[-1])
+        return PredictionResult(
+            market=market,
+            symbol=symbol,
+            current_price=100.0,
+            avg_pred_price=100.0 * (1 + diff),
+            diff_ratio=diff,
+            model_count=2,
+        )
+
+    return _live
+
+
+def test_jp_tail_days_missing_block_win_though_expected_rows_shrink(monkeypatch):
+    # jp の見込みも 5 日 × 2 銘柄へ縮むので、行の線でも銘柄の線でも止まらない。
+    # 残る 5 日のうち 10/12 は休場なので、行のある営業日は 4 日
+    live = _patch_jp_tail_missing(monkeypatch)
+    ev = evaluate_holdout(_dates(), _models(1.0), _models(-1.0), live)
+    assert ev.path_check["passed"] is True
+    assert ev.markets["jp"]["n_dates"] == 5
+    assert ev.markets["jp"]["expected_rows"] == ev.markets["jp"]["n_compared"] == 10
+    assert ev.decision.won is False, "jp の後ろの日を比べていない回は勝ちにしない"
+    assert ev.decision.reasons == [
+        "発注する市場 jp の行のある営業日が足りない（4 日、東証の営業日 18 日、必要 14.4 以上）"
+    ]
+
+
+def test_jp_missing_only_holidays_still_wins(monkeypatch):
+    # 本番の前の JSON の形（jp 18 日・us 20 日）。休場だけの差では勝ち負けが変わらない
+    _patch(monkeypatch, extra={("jp", "1111"): _jp_without(JP_HOLIDAYS)})
+    ev = evaluate_holdout(_dates(), _models(1.0), _models(-1.0), _live_matching())
+    assert ev.markets["jp"]["n_dates"] == 18
+    assert ev.markets["us"]["n_dates"] == 20
+    assert ev.decision.won is True, ev.decision.reasons
+
+
+def test_jp_missing_only_holidays_still_loses_when_candidate_is_worse(monkeypatch):
+    _patch(monkeypatch, extra={("jp", "1111"): _jp_without(JP_HOLIDAYS)})
+    ev = evaluate_holdout(_dates(), _models(-1.0), _models(-1.0), _live_matching())
+    assert ev.decision.won is False
+    assert not any("発注する市場" in r for r in ev.decision.reasons)
+
+
+@pytest.mark.parametrize("n_kept, won", [(15, True), (14, False)], ids=["線の上", "線の下"])
+def test_jp_day_line_is_min_coverage_of_tse_open_days(monkeypatch, n_kept, won):
+    # 営業日 18 日の 80% は 14.4 日。古い方の営業日と休場の日の行を消す
+    missing = JP_HOLIDAYS + JP_OPEN_DAYS[: len(JP_OPEN_DAYS) - n_kept]
+    _patch(monkeypatch, extra={("jp", "1111"): _jp_without(missing)})
+    ev = evaluate_holdout(_dates(), _models(1.0), _models(-1.0), _live_matching())
+    assert ev.markets["jp"]["n_dates"] == n_kept
+    assert ev.decision.won is won, ev.decision.reasons
+
+
+def test_jp_rows_on_holidays_do_not_count_as_open_days(monkeypatch):
+    # 10/12 と 11/3 に行があっても営業日には数えず、行のある営業日は 14 日で線の下
+    _patch(monkeypatch, extra={("jp", "1111"): _jp_without(JP_OPEN_DAYS[:4])})
+    ev = evaluate_holdout(_dates(), _models(1.0), _models(-1.0), _live_matching())
+    assert ev.markets["jp"]["n_dates"] == 16
+    assert ev.decision.won is False
+
+
+def test_markets_carry_tse_open_days_for_jp_only(monkeypatch):
+    _patch(monkeypatch, extra={("jp", "1111"): _jp_without(JP_HOLIDAYS)})
+    ev = evaluate_holdout(_dates(), _models(1.0), _models(-1.0), _live_matching())
+    markets = asdict(ev)["markets"]
+    assert markets["jp"]["n_business_dates"] == 18
+    assert markets["jp"]["n_business_dates_with_rows"] == 18
+    assert "n_business_dates" not in markets["us"]
+
+
+def test_year_missing_from_holiday_table_counts_weekdays_and_does_not_pass(monkeypatch):
+    # 表が切れた年は平日を全部営業日に数える（分母が大きくなる側なので、候補を黙って通さない）
+    live = _patch_jp_tail_missing(monkeypatch)
+    monkeypatch.setattr(jp_market_holidays, "_HOLIDAYS_BY_YEAR", {})
+    ev = evaluate_holdout(_dates(), _models(1.0), _models(-1.0), live)
+    assert ev.markets["jp"]["n_business_dates"] == 20
+    assert ev.decision.reasons == [
+        "発注する市場 jp の行のある営業日が足りない（5 日、東証の営業日 20 日、必要 16 以上）"
+    ]

@@ -4,6 +4,7 @@
 予想は本番と同じ芯（ensemble_diff_ratio）と同じ行の作り方（feature_row）で出し、
 物差しは両方の予想がそろった行だけで baseline_metrics() から出す。
 発注する市場（jp）は全市場の線とは別に、比べられた行と行のある銘柄の数を線と比べる（#1693）。
+行のある日の数も、東証の営業日の数を分母にして線と比べる（#1699）。
 最新の日については、本番の予想の関数とこの道の production の予想が一致するかを確かめる
 （道の一致の検査）。prediction_accuracy に記録された production の予想との突き合わせは
 参考として書くだけで、合否には使わない。
@@ -15,6 +16,7 @@ from typing import Any, Callable, Optional
 
 import pandas as pd
 
+from src.domain.jp_market_holidays import is_jp_business_day
 from src.prediction.backtest_promotion.judge import (
     HOLDOUT_TRADING_DAYS,
     MIN_COVERAGE,
@@ -64,6 +66,10 @@ _REQUIRED_ROWS_SHORT = (
 _REQUIRED_SYMBOLS_SHORT = (
     f"発注する市場 {_PATH_CHECK_REQUIRED_MARKET} の行のある銘柄が足りない"
     "（{n} 銘柄、全 {universe} 銘柄、必要 {need:g} 以上）"
+)
+_REQUIRED_DAYS_SHORT = (
+    f"発注する市場 {_PATH_CHECK_REQUIRED_MARKET} の行のある営業日が足りない"
+    "（{n} 日、東証の営業日 {business} 日、必要 {need:g} 以上）"
 )
 
 
@@ -245,12 +251,15 @@ def _market_summaries(
     universe: list[tuple[str, str]],
     market_symbols: dict[str, int],
     market_days: dict[str, set],
+    days: list[pd.Timestamp],
 ) -> dict[str, dict]:
     """universe の市場ごとの、行の見込みと、比べられた行の数と物差し。
 
     行のある銘柄が1つも無い市場も書く（その市場が丸ごと欠けた回を結果から読めるようにする）。
     採点の行の見込みは（その市場で y のある日の数）×（行のある銘柄の数）。日は jp と us を
     合わせたものなので、全部の日 × 全部の銘柄だと休場日の分だけ足りなくなる。
+    発注する市場には、取っておいた日のうちの東証の営業日の数と、そのうち行のある日の数も書く。
+    表に無い年は平日を全部営業日に数えるので、分母が大きくなる側に倒れる。
     """
     summaries: dict[str, dict] = {}
     for market in sorted({m for m, _ in universe}):
@@ -266,14 +275,21 @@ def _market_summaries(
             "candidate": candidate,
             "production": production,
         }
+    if _PATH_CHECK_REQUIRED_MARKET in summaries:
+        business_days = {day for day in days if is_jp_business_day(day.date())}
+        rows_days = market_days.get(_PATH_CHECK_REQUIRED_MARKET, set())
+        summaries[_PATH_CHECK_REQUIRED_MARKET].update(
+            n_business_dates=len(business_days),
+            n_business_dates_with_rows=len(business_days & rows_days),
+        )
     return summaries
 
 
 def _required_market_reasons(markets: dict[str, dict]) -> list[str]:
-    """発注する市場の行か銘柄が線に届かないときの、勝ちにしない理由を返す。
+    """発注する市場の行か銘柄か日が線に届かないときの、勝ちにしない理由を返す。
 
-    銘柄の分母は universe の銘柄の数。行の見込みは行の無い銘柄を飛ばした後の数なので、
-    銘柄がごっそり欠けると一緒に縮み、行の線だけでは止まらない。
+    銘柄の分母は universe の銘柄の数、日の分母は東証の営業日の数。行の見込みは行のある銘柄と
+    日から数えるので、銘柄や日がごっそり欠けると一緒に縮み、行の線だけでは止まらない。
     universe に発注する市場が無い回は、道の一致の検査（#1675）と同じく勝ちにしない。
     """
     summary = markets.get(_PATH_CHECK_REQUIRED_MARKET)
@@ -292,6 +308,15 @@ def _required_market_reasons(markets: dict[str, dict]) -> list[str]:
         reasons.append(
             _REQUIRED_SYMBOLS_SHORT.format(
                 n=summary["n_symbols"], universe=summary["n_universe_symbols"], need=need_symbols
+            )
+        )
+    need_days = summary["n_business_dates"] * MIN_COVERAGE
+    if summary["n_business_dates_with_rows"] < need_days:
+        reasons.append(
+            _REQUIRED_DAYS_SHORT.format(
+                n=summary["n_business_dates_with_rows"],
+                business=summary["n_business_dates"],
+                need=need_days,
             )
         )
     return reasons
@@ -442,7 +467,7 @@ def evaluate_holdout(
         "skipped_by_reason": path_skipped,
     }
 
-    markets = _market_summaries(table, universe, market_symbols, market_days)
+    markets = _market_summaries(table, universe, market_symbols, market_days, days)
     expected_rows = sum(m["expected_rows"] for m in markets.values())
 
     # 物差しの無い日は勝ちに数えず、日数には入れる
