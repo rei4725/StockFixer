@@ -13,10 +13,13 @@ API ドキュメント: https://disclosure2.edinet-fsa.go.jp/weee0020.aspx
   - 未設定でも基本アクセスは可能（レートリミットが厳しい場合がある）。
   - HTTP 200 でも本文の StatusCode が成功でない（キーが無い・認証の失敗）ときは、
     WARNING を1回出し、reset_edinet_stop() が呼ばれるまで（その回の残りの銘柄で）取得しない。
+  - 1日分の一覧はどの銘柄でも同じなので、reset_edinet_stop() が呼ばれるまで日ごとに1度だけ取り、
+    銘柄の間で使い回す（#1692）。取得に失敗した日は持ち回らず、次の銘柄が取り直す。
 """
 
 import os
 import threading
+from dataclasses import dataclass, field
 from datetime import date as _date
 from datetime import timedelta
 from typing import Optional
@@ -47,12 +50,33 @@ _DEFAULT_MAX_DAYS = 30
 _stop_lock = threading.Lock()
 _stopped = False
 
+# 1日分の一覧を証券コードごとのタイトルにしたもの。対象の書類種別だけを持つ
+_DayTitles = dict[str, list[str]]
+
+
+@dataclass
+class _DaySlot:
+    """1日分の一覧の置き場。lock は同じ日の取得だけを順番にし、別の日は止めない。"""
+
+    lock: threading.Lock = field(default_factory=threading.Lock)
+    titles: Optional[_DayTitles] = None
+
+
+# 日付 -> 置き場。_stop_lock で守る。回の始めに打ち切りと一緒に捨てる（#1692）
+_day_slots: dict[str, _DaySlot] = {}
+
 
 def reset_edinet_stop() -> None:
-    """取得の打ち切りを戻す。バッチの回の始めに呼び、次の回はまた1回目から試す。"""
-    global _stopped
+    """打ち切りを戻し、持ち回りの一覧を捨てる。バッチの回の始めに呼び、次の回は取り直す。"""
+    global _stopped, _day_slots
     with _stop_lock:
         _stopped = False
+        _day_slots = {}
+
+
+def _day_slot(date_str: str) -> _DaySlot:
+    with _stop_lock:
+        return _day_slots.setdefault(date_str, _DaySlot())
 
 
 def _is_stopped() -> bool:
@@ -157,6 +181,25 @@ class EdinetClient:
 
     def _fetch_day(self, date_str: str, sec_code: str) -> list[str]:
         """1日分の EDINET 書類一覧から指定銘柄のタイトルを抽出する。"""
+        return list(self._day_titles(date_str).get(sec_code, []))
+
+    def _day_titles(self, date_str: str) -> _DayTitles:
+        """1日分の一覧を返す。同じ日を並列で取らないよう、その日の lock の中で1度だけ取る。"""
+        slot = _day_slot(date_str)
+        with slot.lock:
+            if slot.titles is not None:
+                return slot.titles
+            # 待っている間に打ち切りが立ったら、取りに行かない
+            if _is_stopped():
+                return {}
+            titles = self._request_day(date_str)
+            if titles is None:
+                return {}
+            slot.titles = titles
+            return titles
+
+    def _request_day(self, date_str: str) -> Optional[_DayTitles]:
+        """1日分の一覧を API から取る。持ち回ってはいけない応答（失敗）では None を返す。"""
         params: dict[str, str] = {"date": date_str, "type": "2"}
         if self._api_key:
             params["Subscription-Key"] = self._api_key
@@ -168,28 +211,29 @@ class EdinetClient:
                 timeout=self._timeout,
             )
             if resp.status_code == 404:
-                return []
+                return {}
             resp.raise_for_status()
             data = resp.json()
         except requests.exceptions.RequestException as e:
             logger.debug("EDINET API リクエストエラー (%s): %s", date_str, e)
-            return []
+            return None
         except Exception as e:
             logger.warning("EDINET API 予期しないエラー (%s): %s", date_str, e)
-            return []
+            return None
 
         if _stop_on_status(date_str, data, bool(self._api_key)):
-            return []
+            return None
 
-        results = data.get("results", [])
-        titles: list[str] = []
+        results = data.get("results")
+        if results is None:
+            return None
+
+        titles: _DayTitles = {}
         for doc in results:
-            if doc.get("secCode", "") != sec_code:
-                continue
             if doc.get("docTypeCode", "") not in _TARGET_DOC_TYPES:
                 continue
             desc = doc.get("docDescription") or doc.get("filerName") or ""
             if desc:
-                titles.append(desc)
+                titles.setdefault(doc.get("secCode", ""), []).append(desc)
 
         return titles
