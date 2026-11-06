@@ -296,10 +296,17 @@ class TestRecoveryJudgementIsUnchanged:
 
 
 class TestOtherJobs:
-    @pytest.mark.parametrize(
-        "job_id", ["daily_settle_orders", "daily_horizon_exit", "weekly_optimization"]
-    )
+    @pytest.mark.parametrize("job_id", ["daily_settle_orders", "daily_horizon_exit"])
     def test_past_days_of_other_jobs_are_not_told(self, tmp_path, job_id):
+        manager = _manager(tmp_path, job_id, _HISTORY)
+        with patch(_SEND, return_value=True) as send:
+            notify_recovery_cap(manager, job_id, _at(23))
+
+        send.assert_not_called()
+
+    def test_past_days_of_a_weekly_job_are_not_told(self, tmp_path):
+        # 週次ジョブの抜けは週の知らせで出る（#1683）。営業日の知らせには乗らない
+        job_id = "weekly_optimization"
         manager = _manager(tmp_path, job_id, _HISTORY)
         with (
             patch(_SEND, return_value=True) as send,
@@ -309,4 +316,5 @@ class TestOtherJobs:
         ):
             notify_recovery_cap(manager, job_id, _at(23))
 
-        send.assert_not_called()
+        for call in send.call_args_list:
+            assert "営業日" not in call.args[0]
