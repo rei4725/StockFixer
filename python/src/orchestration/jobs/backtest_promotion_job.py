@@ -23,6 +23,7 @@ from src.orchestration.jobs.common import _local_now
 from src.prediction.backtest_promotion import (
     CANDIDATE_NAMES,
     CODE_VERSION_SCOPE,
+    MIN_COVERAGE,
     SWAP_PRODUCTION_NAMES,
     WATCH_TRADING_DAYS,
     evaluate_holdout,
@@ -44,11 +45,13 @@ from src.prediction.types import BacktestPromotionState, HoldoutEvaluation
 from src.prediction.unified_model_pipeline import load_unified_model, train_unified_model
 from src.utils.japan_time import JAPAN_TIMEZONE, now_jst
 from src.utils.logger import get_logger
+from src.watchlist.batch_runner import load_target_symbols
 
 logger = get_logger(__name__)
 
 _MODEL_TYPES = ["XGBoostModel", "LightGBMModel"]
 _LOCK_TIMEOUT_S = 3 * 3600
+_WATCH_MARKET = "jp"  # 見張りの採点済みの日を決める市場（発注する市場）
 
 WON = "won"
 LOST = "lost"
@@ -337,17 +340,55 @@ def _scored_rows_since_swap(watch: dict) -> pd.DataFrame:
     return rows.assign(_day=times[keep].map(lambda t: t.strftime("%Y-%m-%d")))
 
 
+def _split_watch_days(rows: pd.DataFrame, need_symbols: float) -> tuple[list[str], list[str]]:
+    """行のある日を、jp の銘柄の数が線に届く日と届かない日に分ける（どちらも日付の順）。
+
+    同じ日の同じ銘柄の行は1銘柄に数える。
+    """
+    if rows.empty:
+        return [], []
+    jp_rows = rows[rows["market"] == _WATCH_MARKET]
+    symbols_by_day = jp_rows.groupby("_day")["symbol"].nunique()
+    counted: list[str] = []
+    skipped: list[str] = []
+    for day in sorted(rows["_day"].unique()):
+        (counted if symbols_by_day.get(day, 0) >= need_symbols else skipped).append(day)
+    return counted, skipped
+
+
 def _check_watch(state: BacktestPromotionState, result: dict) -> None:
-    """採点済みの日が5日たまっていれば1回だけ判定し、見張りを消す。たまっていなければ何もしない。"""
+    """採点済みの日が5日たまっていれば1回だけ判定し、見張りを消す。たまっていなければ何もしない。
+
+    採点済みの日は、jp の採点の行のある銘柄がウォッチリストの jp の MIN_COVERAGE 以上の日だけである。
+    jp の採点がそろわない日で見張りを終わらせないため、足りない日は実測にも入れない（#1706）。
+    分母は行から作らない。ウォッチリストが読めない回は例外のまま _run_locked の失敗の道に乗る。
+    """
     watch = state.watch
     assert watch is not None
-    rows = _scored_rows_since_swap(watch)
-    days = sorted(rows["_day"].unique()) if not rows.empty else []
-    verdict: dict = {"version": watch.get("version"), "scored_days": len(days), "judged": False}
+    verdict: dict = {"version": watch.get("version"), "scored_days": 0, "judged": False}
     result["watch"] = verdict
+    n_universe = len({t.symbol for t in load_target_symbols() if t.market == _WATCH_MARKET})
+    if n_universe == 0:
+        verdict["note"] = f"ウォッチリストに {_WATCH_MARKET} の銘柄が無いため判定しない"
+        logger.error("仮の入れ替えの見張り: %s", verdict["note"])
+        return
+
+    need_symbols = n_universe * MIN_COVERAGE
+    rows = _scored_rows_since_swap(watch)
+    days, skipped_days = _split_watch_days(rows, need_symbols)
+    verdict.update(
+        scored_days=len(days),
+        skipped_days=skipped_days,
+        n_universe_symbols=n_universe,
+        need_symbols=need_symbols,
+    )
     if len(days) < WATCH_TRADING_DAYS:
         logger.info(
-            "仮の入れ替えの見張り: 採点済み %d 日（%d 日で判定）", len(days), WATCH_TRADING_DAYS
+            "仮の入れ替えの見張り: 採点済み %d 日（%d 日で判定）、飛ばした日 %s（jp の銘柄が %g 未満）",
+            len(days),
+            WATCH_TRADING_DAYS,
+            skipped_days,
+            need_symbols,
         )
         return
 
@@ -374,9 +415,11 @@ def _check_watch(state: BacktestPromotionState, result: dict) -> None:
     state.watch = None
     save_state(state)
     logger.info(
-        "仮の入れ替えの見張りを終えた: rolled_back=%s triggered=%s",
+        "仮の入れ替えの見張りを終えた: rolled_back=%s triggered=%s 採点済み %d 日 飛ばした日 %s",
         verdict["rolled_back"],
         decision.triggered,
+        len(days),
+        skipped_days,
     )
 
 
