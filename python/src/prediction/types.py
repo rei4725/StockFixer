@@ -138,6 +138,10 @@ class HoldoutEvaluation:
         weights: 使った重みのまとめ（candidate・production ごとに calls・distinct・名前ごとの mean）
         required_market_shortfalls: 発注する市場の行・銘柄・営業日が線に届かなかった理由
             （decision.reasons の一部。空でなければ比べ足りない回で、負けでなく失敗にする）
+        vote_dates: 日ごとの勝ち越しの票に数えた日（jp の銘柄が線に届いた日、YYYY-MM-DD）
+        vote_skipped: 票から外した日の date・reason（jp_holiday か jp_symbols_short）・
+            n_jp_symbols（その日の jp の比べられた銘柄の数）
+        vote_need_symbols: 票に数える日に要る jp の銘柄の数（ウォッチリストの数 × MIN_COVERAGE）
     """
 
     cutoff: str
@@ -155,6 +159,9 @@ class HoldoutEvaluation:
     skipped_rows: dict = field(default_factory=dict)
     weights: dict = field(default_factory=dict)
     required_market_shortfalls: list[str] = field(default_factory=list)
+    vote_dates: list[str] = field(default_factory=list)
+    vote_skipped: list[dict] = field(default_factory=list)
+    vote_need_symbols: float = 0.0
 
 
 @dataclass
