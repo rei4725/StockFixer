@@ -123,7 +123,9 @@ class HoldoutEvaluation:
         markets: universe の市場ごとの n_universe_symbols・n_symbols・n_dates（y のある日の数）・
             expected_rows・n_compared（比べられた行の数）・candidate・production（その市場の物差し）。
             jp にはさらに n_business_dates（取っておいた日のうちの東証の営業日の数）と
-            n_business_dates_with_rows（そのうち y のある日の数）
+            n_business_dates_with_rows（そのうち y のある日の数）、銘柄の線の分母
+            n_watchlist_symbols（ウォッチリストの銘柄の数）と分子 n_watchlist_symbols_with_rows
+            （そのうち y のある銘柄の数）。読めない回は両方 None で、線は universe の数で判定する
         candidate: 候補の baseline_metrics()（両方の予想がそろった行だけ）
         production: production の baseline_metrics()（同じ行）
         daily: 日ごとの date・candidate・production・diff（hit_rate_minus_majority）
