@@ -21,15 +21,15 @@ _EARNINGS_DAY = _DATES[15]
 _OLD_BYTES = b"production model"
 
 
-def _table(n_symbols: int) -> pd.DataFrame:
-    """1銘柄 _N_ROWS 行の jp の銘柄を n_symbols 本並べた表。"""
+def _table(n_symbols: int, market: str = "jp", prefix: str = "S") -> pd.DataFrame:
+    """1銘柄 _N_ROWS 行の銘柄を n_symbols 本並べた表。"""
     rng = np.random.default_rng(0)
     frames = []
     for i in range(n_symbols):
         frame = pd.DataFrame(
             {
-                "market": "jp",
-                "symbol": f"S{i:03d}",
+                "market": market,
+                "symbol": f"{prefix}{i:03d}",
                 "date": _DATES,
                 "f1": rng.normal(size=_N_ROWS),
             }
@@ -37,6 +37,11 @@ def _table(n_symbols: int) -> pd.DataFrame:
         frame["y"] = frame["f1"] * 0.01
         frames.append(frame)
     return pd.concat(frames, ignore_index=True)
+
+
+def _mixed_table(n_jp: int, n_us: int) -> pd.DataFrame:
+    """jp の銘柄（S000〜）と us の銘柄（U000〜）を並べた表。"""
+    return pd.concat([_table(n_jp), _table(n_us, "us", "U")], ignore_index=True)
 
 
 def _port(failed: Iterable[str] = (), no_dates: Iterable[str] = ()) -> MagicMock:
@@ -161,6 +166,76 @@ def test_failures_exactly_on_line_do_not_stop(monkeypatch: pytest.MonkeyPatch) -
 def test_line_stops_a_rate_limit_but_not_a_short_blip_at_production_size() -> None:
     """今の本番の 788 銘柄で、39 銘柄までは止めず 40 銘柄で止める線である。"""
     assert 39 / 788 <= ump._EARNINGS_FETCH_MAX_FAILED_RATIO < 40 / 788
+
+
+def test_raises_without_saving_when_only_jp_crosses_line(small_training, tmp_path: Path) -> None:
+    """全市場では線の内でも、jp だけで線を超えたら投げ、モデルを保存しない（#1705）。"""
+    small_training(_mixed_table(10, 50), _port(failed=["S000", "S001"]))
+    saved = _saved_model(tmp_path)
+    model = MagicMock()
+
+    with (
+        patch.object(ModelManager, "create_model", return_value=model),
+        pytest.raises(RuntimeError, match="jp .*2/10"),
+    ):
+        _train(tmp_path)
+
+    model.save_model.assert_not_called()
+    assert saved.read_bytes() == _OLD_BYTES
+
+
+def test_jp_line_at_production_size() -> None:
+    """本番の 792 銘柄（jp 249）で、全部 jp の失敗は 12 銘柄まで通り 13 銘柄で止まる（#1705）。"""
+    jp_failed = [f"jp/S{i:03d}" for i in range(13)]
+
+    ump._check_earnings_fetch_failures(jp_failed[:12], 792, 249)
+    with pytest.raises(RuntimeError, match="13/249"):
+        ump._check_earnings_fetch_failures(jp_failed, 792, 249)
+
+
+def test_warns_and_keeps_training_when_all_and_jp_are_within_line(
+    small_training, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """全市場でも jp でも線の内なら、WARNING を出して学習を続ける（#1705）。"""
+    small_training(_mixed_table(25, 15), _port(failed=["S000"]))
+    saved = _saved_model(tmp_path)
+
+    with caplog.at_level(logging.WARNING, logger=ump.__name__):
+        _train(tmp_path)
+
+    assert saved.read_bytes() != _OLD_BYTES
+    assert any("決算日の取得に失敗した銘柄: 1/40" in r.getMessage() for r in caplog.records)
+
+
+def test_jp_exactly_on_line_does_not_stop(monkeypatch: pytest.MonkeyPatch) -> None:
+    """jp の割合が線ちょうどなら止めない（線を超えたときだけ止める）。"""
+    monkeypatch.setattr(ump, "get_market_data_port", lambda: _port(failed=["S000"]))
+
+    masked = ump._mask_earnings_rows_for_unified(_mixed_table(20, 20))
+
+    assert masked["symbol"].nunique() == 40
+
+
+def test_table_without_jp_does_not_stop_on_jp_line(small_training, tmp_path: Path) -> None:
+    """jp の銘柄が無い表では、jp の線を見ずに学習を続ける（#1705）。"""
+    small_training(_table(25, "us", "U"), _port(failed=["U003"]))
+    saved = _saved_model(tmp_path)
+
+    _train(tmp_path)
+
+    assert saved.read_bytes() != _OLD_BYTES
+
+
+def test_us_only_failures_within_all_market_line_keep_training(
+    small_training, tmp_path: Path
+) -> None:
+    """us の失敗だけなら、us の中で 5% を超えても全市場が線の内なら学習を続ける（#1705）。"""
+    small_training(_mixed_table(30, 10), _port(failed=["U000"]))
+    saved = _saved_model(tmp_path)
+
+    _train(tmp_path)
+
+    assert saved.read_bytes() != _OLD_BYTES
 
 
 def test_empty_responses_are_not_failures(

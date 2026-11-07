@@ -32,13 +32,19 @@ logger = get_logger(__name__)
 # 上限に当たれば列の後ろの銘柄がまとめて欠けるので、それを止め、短い瞬断では止めない値にする。
 # 788銘柄なら 39 銘柄（1銘柄約 0.5 秒で 20 秒ほどの瞬断）までは続け、40 銘柄で止める。
 _EARNINGS_FETCH_MAX_FAILED_RATIO = 0.05
+# 発注する市場。この市場の行の欠けは、全市場の割合とは別に見る（#1686, #1705）
+_ORDER_MARKET = "jp"
 
 
-def _check_earnings_fetch_failures(failed: list[str], n_symbols: int) -> None:
+def _check_earnings_fetch_failures(failed: list[str], n_symbols: int, n_order_symbols: int) -> None:
     """決算日の取得に失敗した銘柄の数を WARNING に出し、線を超えていたら投げる（#1700）。
 
+    全市場の割合では全体の約3割の jp の欠けに気づけないので、発注する市場の銘柄だけの
+    割合も同じ線で見る（#1705）。その市場の銘柄が入力に無い表は、この線では判定しない。
+    failed は market/symbol の文字で、分母はどちらも入力の表の銘柄の数である。
+
     Raises:
-        RuntimeError: 失敗した銘柄の割合が線を超えたとき
+        RuntimeError: 全市場か発注する市場で、失敗した銘柄の割合が線を超えたとき
     """
     if not failed:
         return
@@ -52,6 +58,12 @@ def _check_earnings_fetch_failures(failed: list[str], n_symbols: int) -> None:
         raise RuntimeError(
             "決算日の取得に失敗した銘柄が多すぎるため学習しません: "
             f"{len(failed)}/{n_symbols}銘柄（線 {_EARNINGS_FETCH_MAX_FAILED_RATIO:.0%}）"
+        )
+    n_order_failed = sum(name.startswith(f"{_ORDER_MARKET}/") for name in failed)
+    if n_order_symbols and n_order_failed / n_order_symbols > _EARNINGS_FETCH_MAX_FAILED_RATIO:
+        raise RuntimeError(
+            f"{_ORDER_MARKET} の決算日の取得に失敗した銘柄が多すぎるため学習しません: "
+            f"{n_order_failed}/{n_order_symbols}銘柄（線 {_EARNINGS_FETCH_MAX_FAILED_RATIO:.0%}）"
         )
 
 
@@ -94,7 +106,8 @@ def _mask_earnings_rows_for_unified(df: pd.DataFrame) -> pd.DataFrame:
         work["date"] = work.index
         masked_frames.append(work.drop(columns=["earnings_flag"], errors="ignore"))
 
-    _check_earnings_fetch_failures(failed_symbols, len(masked_frames))
+    n_order_symbols = df.loc[df["market"] == _ORDER_MARKET, "symbol"].nunique()
+    _check_earnings_fetch_failures(failed_symbols, len(masked_frames), n_order_symbols)
     if removed_count > 0:
         logger.info(f"統合学習用に決算近傍データを除外: {removed_count}行")
     return pd.concat(masked_frames, ignore_index=True) if masked_frames else df.iloc[0:0].copy()
@@ -178,8 +191,6 @@ def _compute_and_save_unified_feature_selection(model, X: pd.DataFrame, y: pd.Se
 
 
 _CORPORATE_ACTION_LAG_PREFIXES = ("Dividends_lag", "Stock_Splits_lag", "Capital_Gains_lag")
-# 発注する市場。ここの行が線を超えて落ちた表では学習しない（#1686）
-_ORDER_MARKET = "jp"
 
 
 def _warn_dropped_rows(valid: pd.Series, market: pd.Series, symbol: pd.Series) -> None:
