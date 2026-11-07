@@ -15,6 +15,7 @@ import pandas as pd
 import pytest
 from filelock import Timeout
 
+from src.domain.types import SymbolTask
 from src.orchestration.job_errors import NonRetryableJobError
 from src.orchestration.jobs import backtest_promotion_job as job
 from src.orchestration.scheduler_queue import SchedulerQueueManager
@@ -43,6 +44,12 @@ _PRODUCTION = {
     "rank_corr": 0.05,
     "predicted_up_rate": 0.99,
 }
+
+
+def _targets(n_jp: int, n_us: int = 3) -> list[SymbolTask]:
+    """ウォッチリストの読み出しの差し替え。本物の config/watchlist.json を読まない。"""
+    jp = [SymbolTask(market="jp", symbol=f"{i:04d}") for i in range(n_jp)]
+    return jp + [SymbolTask(market="us", symbol=f"US{i}") for i in range(n_us)]
 
 
 def _evaluation(won: bool = True, passed: bool = True) -> HoldoutEvaluation:
@@ -89,6 +96,7 @@ def env(tmp_path, monkeypatch):
         "swap": MagicMock(return_value=True),
         "rollback": MagicMock(return_value=True),
         "accuracy": MagicMock(return_value=pd.DataFrame()),
+        "targets": MagicMock(return_value=_targets(2)),
     }
     monkeypatch.setattr(job, "prediction_code_version", lambda: _VERSION)
     monkeypatch.setattr(job, "latest_holdout_dates", lambda: list(_DATES))
@@ -96,6 +104,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(job, "load_unified_model", lambda name: f"model:{name}")
     monkeypatch.setattr(job, "evaluate_holdout", mocks["evaluate"])
     monkeypatch.setattr(job, "load_prediction_accuracy", mocks["accuracy"])
+    monkeypatch.setattr(job, "load_target_symbols", mocks["targets"])
     nm = "src.reporting.discord.notifications_model"
     monkeypatch.setattr(f"{nm}.send_backtest_promotion_result", mocks["result"])
     monkeypatch.setattr(f"{nm}.send_backtest_promotion_swap", mocks["swap"])
@@ -791,6 +800,133 @@ def test_watch_error_keeps_watch_and_fails(env):
     assert st.load_state().watch is not None
     env["result"].assert_called_once()
     env["train"].assert_not_called()
+
+
+def _day_rows(day: str, market: str, symbols: list[str]) -> list[dict]:
+    """predicted_at が day（YYYYMMDD）の朝の、採点済みの行。"""
+    return [
+        {
+            "market": market,
+            "symbol": symbol,
+            "predicted_at": f"{day}_073000",
+            "predicted_ratio": 0.01 * (i + 1),
+            "actual_ratio": 0.02 - 0.01 * i,
+        }
+        for i, symbol in enumerate(symbols)
+    ]
+
+
+_JP_FOUR = ["0000", "0001", "0002", "0003"]
+
+
+def test_watch_keeps_waiting_when_a_day_has_no_jp_rows(env):
+    _swapped_env(env)
+    env["targets"].return_value = _targets(4)
+    rows = []
+    for day in ("20261002", "20261004", "20261005", "20261006"):
+        rows += _day_rows(day, "jp", _JP_FOUR)
+    rows += _day_rows("20261003", "us", ["AAPL", "MSFT", "NVDA", "AMZN"])
+    env["accuracy"].return_value = pd.DataFrame(rows)
+
+    result = job.run_backtest_promotion()
+
+    watch = result["watch"]
+    assert watch["judged"] is False
+    assert watch["scored_days"] == 4
+    assert watch["skipped_days"] == ["2026-10-03"]
+    assert st.load_state().watch is not None
+    env["rollback"].assert_not_called()
+
+
+def test_watch_judges_on_five_days_without_the_skipped_day(env, monkeypatch):
+    _swapped_env(env)
+    env["targets"].return_value = _targets(4)
+    spy = MagicMock(wraps=job.baseline_metrics)
+    monkeypatch.setattr(job, "baseline_metrics", spy)
+    rows = _day_rows("20261003", "us", ["AAPL", "MSFT"]) + _day_rows("20261003", "jp", ["0000"])
+    for day in ("20261002", "20261004", "20261005", "20261006", "20261007"):
+        rows += _day_rows(day, "jp", _JP_FOUR)
+    env["accuracy"].return_value = pd.DataFrame(rows)
+
+    result = job.run_backtest_promotion()
+
+    watch = result["watch"]
+    assert watch["judged"] is True
+    assert watch["scored_days"] == 5
+    assert watch["days"] == ["2026-10-02", "2026-10-04", "2026-10-05", "2026-10-06", "2026-10-07"]
+    assert watch["skipped_days"] == ["2026-10-03"]
+    measured = spy.call_args[0][0]
+    assert len(measured) == 5 * len(_JP_FOUR)
+    assert "2026-10-03" not in set(measured["_day"])
+    assert st.load_state().watch is None
+
+
+@pytest.mark.parametrize(
+    "symbols,counted",
+    [
+        (["0000", "0001", "0002", "0003"], True),
+        (["0000", "0001", "0002"], False),
+        (["0000", "0001", "0002", "0002"], False),
+    ],
+    ids=["線ちょうど", "線の下", "同じ銘柄の2行は1銘柄"],
+)
+def test_watch_day_counts_only_at_the_jp_symbol_line(env, symbols, counted):
+    # 全 5 銘柄の 8 割で、線は 4 銘柄
+    _swapped_env(env)
+    env["targets"].return_value = _targets(5)
+    env["accuracy"].return_value = pd.DataFrame(_day_rows("20261002", "jp", symbols))
+
+    watch = job.run_backtest_promotion()["watch"]
+
+    assert watch["scored_days"] == (1 if counted else 0)
+    assert watch["skipped_days"] == ([] if counted else ["2026-10-02"])
+    assert watch["judged"] is False
+
+
+def test_watch_day_does_not_count_us_rows_or_us_symbols_toward_the_jp_line(env):
+    _swapped_env(env)
+    env["targets"].return_value = _targets(5, n_us=500)
+    rows = _day_rows("20261002", "jp", ["0000", "0001", "0002"])
+    rows += _day_rows("20261002", "us", ["0003", "0004", "AAPL"])
+    env["accuracy"].return_value = pd.DataFrame(rows)
+
+    watch = job.run_backtest_promotion()["watch"]
+
+    assert watch["scored_days"] == 0
+    assert watch["skipped_days"] == ["2026-10-02"]
+
+
+def test_watch_is_not_judged_without_jp_symbols_in_the_watchlist(env):
+    backups = _swapped_env(env)
+    env["targets"].return_value = _targets(0)
+    env["accuracy"].return_value = _scored_rows(
+        5, [0.01, 0.02, 0.03, 0.04], [0.02, 0.01, -0.01, -0.02]
+    )
+
+    result = job.run_backtest_promotion()
+
+    assert result["watch"]["judged"] is False
+    assert result["watch"]["scored_days"] == 0
+    assert "jp" in result["watch"]["note"]
+    assert st.load_state().watch["backups"] == backups
+    env["rollback"].assert_not_called()
+
+
+def test_watch_stays_when_the_watchlist_cannot_be_read(env):
+    _swapped_env(env)
+    env["targets"].side_effect = OSError("watchlist が読めない")
+    env["accuracy"].return_value = _scored_rows(
+        5, [0.01, 0.02, 0.03, 0.04], [0.02, 0.01, -0.01, -0.02]
+    )
+
+    result = job.run_backtest_promotion()
+
+    assert result["outcome"] == "failed"
+    assert "watchlist が読めない" in result["error"]
+    assert result["watch"]["judged"] is False
+    assert st.load_state().watch is not None
+    env["rollback"].assert_not_called()
+    env["result"].assert_called_once()
 
 
 def test_dry_run_does_not_judge_watch(env):
