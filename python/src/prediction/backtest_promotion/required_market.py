@@ -10,6 +10,7 @@ import json
 from typing import Optional
 
 from src.prediction.backtest_promotion.judge import MIN_COVERAGE
+from src.prediction.constant_prediction import CONSTANT_PREDICTION_STD, is_constant_prediction
 from src.utils.data_path_utils import get_watchlist_path
 from src.utils.logger import get_logger
 
@@ -31,6 +32,26 @@ _REQUIRED_DAYS_SHORT = (
     f"発注する市場 {REQUIRED_MARKET} の行のある営業日が足りない"
     "（{n} 日、東証の営業日 {business} 日、必要 {need:g} 以上）"
 )
+_REQUIRED_CONSTANT = (
+    f"発注する市場 {REQUIRED_MARKET} の中で候補の予想が銘柄の間でほぼ同じ値"
+    "（jp の日ごとの標準偏差 {std}、線 {line}）"
+)
+
+
+def required_market_constant_reason(markets: dict[str, dict]) -> Optional[str]:
+    """発注する市場の中の日ごとの予想の標準偏差が線より小さいときの、勝ちにしない理由を返す。
+
+    全市場を混ぜた日ごとの標準偏差（#1602）は、jp の中で同じ値でも us と値がずれれば線を
+    越える（#1718）。jp の行が無い回は required_market_reasons が止め、2行以上の jp の日が
+    無く標準偏差が出ない回（None）はばらつきを測れないので理由にしない。
+    """
+    summary = markets.get(REQUIRED_MARKET)
+    if summary is None:
+        return None
+    std = summary["candidate"].get("prediction_std")
+    if not is_constant_prediction(std):
+        return None
+    return _REQUIRED_CONSTANT.format(std=std, line=CONSTANT_PREDICTION_STD)
 
 
 def load_watchlist_symbols(market: str) -> Optional[set[str]]:
