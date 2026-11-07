@@ -15,7 +15,7 @@ import pytest
 
 from src.domain import jp_market_holidays
 from src.prediction import predict_unified
-from src.prediction.backtest_promotion import holdout
+from src.prediction.backtest_promotion import holdout, required_market
 from src.prediction.backtest_promotion.holdout import (
     evaluate_holdout,
     holdout_dates,
@@ -79,6 +79,12 @@ def _patch(
     frames = {s: _features(j, atr) for j, s in enumerate(SYMBOLS)}
     frames.update(extra or {})
     monkeypatch.setattr(holdout, "get_all_symbols", lambda: sorted(frames))
+    # 本物の config/watchlist.json を読まない。既定は表の jp の銘柄と同じ並びにする
+    monkeypatch.setattr(
+        holdout,
+        "load_watchlist_symbols",
+        lambda market: {s for m, s in frames if m == market},
+    )
     monkeypatch.setattr(
         holdout, "load_stock_features", lambda m, s, raise_on_error=False: frames[(m, s)].copy()
     )
@@ -652,6 +658,136 @@ def test_no_jp_in_universe_does_not_win(monkeypatch):
     assert "jp" not in ev.markets
     assert "発注する市場 jp の銘柄が無い" in ev.decision.reasons
     assert "道の一致の検査で jp の比べられた銘柄が無い" in ev.decision.reasons
+
+
+def _patch_watchlist(monkeypatch, symbols: set):
+    monkeypatch.setattr(holdout, "load_watchlist_symbols", lambda market: set(symbols))
+
+
+def _jp_frames(n: int) -> dict:
+    """1111 に続けて、行のそろった jp の銘柄を足して n 銘柄にする（_patch の extra に渡す）。"""
+    return {("jp", str(2000 + i)): _features(0) for i in range(n - 1)}
+
+
+def _jp_keys(frames: dict) -> set:
+    return {s for m, s in frames if m == "jp"}
+
+
+def test_jp_symbols_gone_from_table_block_win_by_watchlist_denominator(monkeypatch):
+    # 段差で jp の行が消え、表の jp は 130 銘柄の全部に行がある。今の分母は 130 で 130 / 130 になる
+    frames = _patch(monkeypatch, extra=_jp_frames(130))
+    gone = {str(5000 + i) for i in range(120)}
+    _patch_watchlist(monkeypatch, _jp_keys(frames) | gone)
+    ev = evaluate_holdout(_dates(), _models(1.0), _models(-1.0), _live_by_market())
+    reason = "発注する市場 jp の行のある銘柄が足りない（130 銘柄、全 250 銘柄、必要 200 以上）"
+    assert ev.decision.won is False, "表から消えた銘柄の分だけ分母が縮んでも止める"
+    assert reason in ev.decision.reasons
+    assert ev.required_market_shortfalls == [reason]
+    assert ev.markets["jp"]["n_universe_symbols"] == ev.markets["jp"]["n_symbols"] == 130
+
+
+@pytest.mark.parametrize("n_rows, won", [(200, True), (199, False)], ids=["線の上", "線の下"])
+def test_jp_watchlist_line_is_min_coverage_of_watchlist(monkeypatch, n_rows, won):
+    frames = _patch(monkeypatch, extra=_jp_frames(n_rows))
+    gone = {str(5000 + i) for i in range(250 - n_rows)}
+    _patch_watchlist(monkeypatch, _jp_keys(frames) | gone)
+    ev = evaluate_holdout(_dates(), _models(1.0), _models(-1.0), _live_by_market())
+    assert ev.decision.won is won, ev.decision.reasons
+    assert bool(ev.required_market_shortfalls) is not won
+
+
+def test_jp_over_watchlist_line_keeps_candidate_loss_without_jp_reason(monkeypatch):
+    frames = _patch(monkeypatch, extra=_jp_frames(5))
+    _patch_watchlist(monkeypatch, _jp_keys(frames))
+    ev = evaluate_holdout(_dates(), _models(-1.0), _models(-1.0), _live_by_market())
+    assert ev.decision.won is False
+    assert ev.required_market_shortfalls == []
+
+
+def test_delisted_jp_symbol_only_in_table_is_not_counted(monkeypatch):
+    # ウォッチリストの 5 銘柄のうち行があるのは 1 銘柄。表にだけある廃止の 3 銘柄を足すと 4 / 5 に
+    # 見えるが、分子に数えないので 1 / 5 で止める
+    extra = {("jp", s): _features(0) for s in ("8001", "8002", "8003")}
+    _patch(monkeypatch, extra=extra)
+    _patch_watchlist(monkeypatch, {"1111", "2222", "3333", "4444", "5555"})
+    ev = evaluate_holdout(_dates(), _models(1.0), _models(-1.0), _live_by_market())
+    assert ev.markets["jp"]["n_watchlist_symbols_with_rows"] == 1
+    assert ev.markets["jp"]["n_symbols"] == 4, "行の見込みの銘柄の数は変えない"
+    assert ev.required_market_shortfalls == [
+        "発注する市場 jp の行のある銘柄が足りない（1 銘柄、全 5 銘柄、必要 4 以上）"
+    ]
+
+
+def test_watchlist_symbol_without_rows_in_table_is_not_counted(monkeypatch):
+    # 表に銘柄はあるが取っておいた日の行が無い銘柄は、行のある銘柄に数えない
+    _patch(monkeypatch, extra={("jp", s): _delisted() for s in ("2222", "3333", "4444")})
+    _patch_watchlist(monkeypatch, {"1111", "2222", "3333", "4444"})
+    ev = evaluate_holdout(_dates(), _models(1.0), _models(-1.0), _live_by_market())
+    assert ev.markets["jp"]["n_watchlist_symbols_with_rows"] == 1
+    assert ev.decision.won is False
+
+
+@pytest.mark.parametrize("empty", [None, set()], ids=["読めない", "空"])
+def test_unreadable_watchlist_falls_back_to_universe_with_warning(monkeypatch, caplog, empty):
+    # 表の jp 5 銘柄のうち行があるのは 4 銘柄。今の universe の数で判定して勝ちのまま
+    extra = {("jp", s): _features(0) for s in ("2222", "3333", "4444")}
+    extra[("jp", "5555")] = _delisted()
+    _patch(monkeypatch, extra=extra)
+    monkeypatch.setattr(holdout, "load_watchlist_symbols", lambda market: empty)
+    with caplog.at_level("WARNING", logger=holdout.__name__):
+        ev = evaluate_holdout(_dates(), _models(1.0), _models(-1.0), _live_by_market())
+    assert ev.decision.won is True, ev.decision.reasons
+    assert ev.markets["jp"]["n_watchlist_symbols"] is None
+    assert ev.markets["jp"]["n_watchlist_symbols_with_rows"] is None
+    assert "universe の銘柄の数で判定する" in caplog.text
+
+
+def test_unreadable_watchlist_still_blocks_short_universe(monkeypatch):
+    _patch(monkeypatch, extra={("jp", s): _delisted() for s in ("2222", "3333", "4444", "5555")})
+    monkeypatch.setattr(holdout, "load_watchlist_symbols", lambda market: None)
+    ev = evaluate_holdout(_dates(), _models(1.0), _models(-1.0), _live_by_market())
+    assert ev.required_market_shortfalls == [
+        "発注する市場 jp の行のある銘柄が足りない（1 銘柄、全 5 銘柄、必要 4 以上）"
+    ]
+
+
+def test_watchlist_denominator_is_written_to_result_json(monkeypatch):
+    frames = _patch(monkeypatch)
+    _patch_watchlist(monkeypatch, _jp_keys(frames) | {"2222"})
+    ev = evaluate_holdout(_dates(), _models(1.0), _models(-1.0), _live_by_market())
+    jp = asdict(ev)["markets"]["jp"]
+    assert jp["n_watchlist_symbols"] == 2
+    assert jp["n_watchlist_symbols_with_rows"] == 1
+    assert "n_watchlist_symbols" not in asdict(ev)["markets"]["us"]
+
+
+def test_load_watchlist_symbols_reads_market_and_normalizes(monkeypatch, tmp_path):
+    path = tmp_path / "watchlist.json"
+    path.write_text('{"us": ["aaa"], "jp": ["1111", "1111", "130a"]}', encoding="utf-8")
+    monkeypatch.setattr(required_market, "get_watchlist_path", lambda: str(path))
+    assert required_market.load_watchlist_symbols("jp") == {"1111", "130A"}
+
+
+@pytest.mark.parametrize(
+    "content",
+    ["{壊れた", "[]", '{"jp": 1}'],
+    ids=["JSON でない", "辞書でない", "市場が並びでない"],
+)
+def test_load_watchlist_symbols_returns_none_when_unreadable(
+    monkeypatch, tmp_path, caplog, content
+):
+    path = tmp_path / "watchlist.json"
+    path.write_text(content, encoding="utf-8")
+    monkeypatch.setattr(required_market, "get_watchlist_path", lambda: str(path))
+    with caplog.at_level("WARNING", logger=required_market.__name__):
+        assert required_market.load_watchlist_symbols("jp") is None
+    assert "ウォッチリスト" in caplog.text
+
+
+def test_load_watchlist_symbols_returns_none_when_file_is_missing(monkeypatch, tmp_path):
+    path = tmp_path / "absent.json"
+    monkeypatch.setattr(required_market, "get_watchlist_path", lambda: str(path))
+    assert required_market.load_watchlist_symbols("jp") is None
 
 
 def test_markets_carry_each_markets_rows_and_metrics(monkeypatch):
