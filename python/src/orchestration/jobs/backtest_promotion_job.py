@@ -381,6 +381,7 @@ def _check_watch(state: BacktestPromotionState, result: dict) -> None:
         skipped_days=skipped_days,
         n_universe_symbols=n_universe,
         need_symbols=need_symbols,
+        need_days=WATCH_TRADING_DAYS,
     )
     if len(days) < WATCH_TRADING_DAYS:
         logger.info(
@@ -390,6 +391,7 @@ def _check_watch(state: BacktestPromotionState, result: dict) -> None:
             skipped_days,
             need_symbols,
         )
+        _notify_skipped_days(state, result)
         return
 
     # 入れ替えの後の、最初の5日だけで測る
@@ -421,6 +423,38 @@ def _check_watch(state: BacktestPromotionState, result: dict) -> None:
         len(days),
         skipped_days,
     )
+
+
+def _notify_skipped_days(state: BacktestPromotionState, result: dict) -> None:
+    """飛ばした日が WATCH_TRADING_DAYS に届いたら、見張りごとに1回だけ Discord に知らせる（#1713）。
+
+    送れた回だけ見張りに印（skipped_days_notified）を付けて保存し、次の夜から重ねて出さない。
+    送れない回・印を保存できない回はログに残すだけで、見張りと判定には触らない（次の夜にもう一度送る）。
+    """
+    from src.reporting.discord import notifications_backtest_watch as nw
+
+    watch = state.watch
+    verdict = result["watch"]
+    if watch is None or watch.get("skipped_days_notified"):
+        return
+    if len(verdict["skipped_days"]) < WATCH_TRADING_DAYS:
+        return
+    try:
+        sent = nw.send_backtest_promotion_watch_waiting(result)
+    except Exception:
+        logger.error("仮の入れ替えの見張りの、飛ばした日の通知に失敗", exc_info=True)
+        return
+    if not sent:
+        logger.error("仮の入れ替えの見張りの、飛ばした日の通知を送れなかった")
+        return
+    watch["skipped_days_notified"] = True
+    verdict["skipped_days_notified"] = True
+    try:
+        save_state(state)
+    except Exception:
+        logger.error(
+            "飛ばした日の通知の印を保存できなかった（次の夜にもう一度送る）", exc_info=True
+        )
 
 
 # ---------------------------------------------------------------------------

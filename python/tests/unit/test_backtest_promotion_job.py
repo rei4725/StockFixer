@@ -95,6 +95,7 @@ def env(tmp_path, monkeypatch):
         "result": MagicMock(return_value=True),
         "swap": MagicMock(return_value=True),
         "rollback": MagicMock(return_value=True),
+        "waiting": MagicMock(return_value=True),
         "accuracy": MagicMock(return_value=pd.DataFrame()),
         "targets": MagicMock(return_value=_targets(2)),
     }
@@ -109,6 +110,10 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(f"{nm}.send_backtest_promotion_result", mocks["result"])
     monkeypatch.setattr(f"{nm}.send_backtest_promotion_swap", mocks["swap"])
     monkeypatch.setattr(f"{nm}.send_backtest_promotion_rollback", mocks["rollback"])
+    monkeypatch.setattr(
+        "src.reporting.discord.notifications_backtest_watch.send_backtest_promotion_watch_waiting",
+        mocks["waiting"],
+    )
     mocks["unified"] = unified
     mocks["results"] = results / "backtest_promotion"
     # 既定では stock_features は今の版で作り直し済み
@@ -894,6 +899,127 @@ def test_watch_day_does_not_count_us_rows_or_us_symbols_toward_the_jp_line(env):
 
     assert watch["scored_days"] == 0
     assert watch["skipped_days"] == ["2026-10-02"]
+
+
+def _skipped_day_rows(n_skipped: int, n_counted: int = 0) -> pd.DataFrame:
+    """jp が1銘柄だけの日（線 4 銘柄の 8 割の下）を n_skipped 日、4 銘柄の日を n_counted 日。"""
+    rows = []
+    for i in range(n_skipped + n_counted):
+        day = (pd.Timestamp("2026-10-02") + pd.Timedelta(days=i)).strftime("%Y%m%d")
+        rows += _day_rows(day, "jp", ["0000"] if i < n_skipped else _JP_FOUR)
+    return pd.DataFrame(rows)
+
+
+def test_watch_notifies_once_when_skipped_days_reach_the_line(env):
+    _swapped_env(env)
+    env["targets"].return_value = _targets(4)
+    env["accuracy"].return_value = _skipped_day_rows(5, n_counted=2)
+
+    result = job.run_backtest_promotion()
+
+    watch = result["watch"]
+    assert watch["judged"] is False
+    assert watch["scored_days"] == 2
+    assert len(watch["skipped_days"]) == 5
+    assert watch["skipped_days_notified"] is True
+    env["waiting"].assert_called_once()
+    assert env["waiting"].call_args[0][0]["watch"]["skipped_days"] == watch["skipped_days"]
+    state_watch = st.load_state().watch
+    assert state_watch is not None
+    assert state_watch["skipped_days_notified"] is True
+    env["rollback"].assert_not_called()
+    assert result["outcome"] == "skipped"
+
+
+def test_watch_does_not_repeat_the_skipped_days_notice_on_the_next_night(env):
+    _swapped_env(env)
+    env["targets"].return_value = _targets(4)
+    env["accuracy"].return_value = _skipped_day_rows(5)
+    job.run_backtest_promotion()
+
+    env["accuracy"].return_value = _skipped_day_rows(6)
+    result = job.run_backtest_promotion()
+
+    env["waiting"].assert_called_once()
+    assert len(result["watch"]["skipped_days"]) == 6
+    assert st.load_state().watch is not None
+
+
+def test_watch_does_not_notify_below_the_skipped_days_line(env):
+    _swapped_env(env)
+    env["targets"].return_value = _targets(4)
+    env["accuracy"].return_value = _skipped_day_rows(4, n_counted=4)
+
+    result = job.run_backtest_promotion()
+
+    env["waiting"].assert_not_called()
+    assert "skipped_days_notified" not in result["watch"]
+    assert "skipped_days_notified" not in st.load_state().watch
+
+
+@pytest.mark.parametrize(
+    "send",
+    [MagicMock(side_effect=RuntimeError("Discord に届かない")), MagicMock(return_value=False)],
+    ids=["例外", "False"],
+)
+def test_watch_stays_and_judgement_is_unchanged_when_the_notice_fails(env, send):
+    backups = _swapped_env(env)
+    env["targets"].return_value = _targets(4)
+    env["accuracy"].return_value = _skipped_day_rows(5, n_counted=4)
+    env["waiting"].side_effect = send.side_effect
+    env["waiting"].return_value = send.return_value
+
+    result = job.run_backtest_promotion()
+
+    env["waiting"].assert_called_once()
+    assert result["outcome"] == "skipped"
+    assert result["watch"]["judged"] is False
+    assert result["watch"]["scored_days"] == 4
+    state_watch = st.load_state().watch
+    assert state_watch["backups"] == backups
+    # 送れなかった回は印を付けず、次の夜にもう一度知らせる
+    assert "skipped_days_notified" not in state_watch
+    env["rollback"].assert_not_called()
+
+
+def test_watch_still_judges_after_the_skipped_days_notice(env):
+    _swapped_env(env)
+    env["targets"].return_value = _targets(4)
+    env["accuracy"].return_value = _skipped_day_rows(5, n_counted=4)
+    job.run_backtest_promotion()
+
+    env["accuracy"].return_value = _skipped_day_rows(5, n_counted=5)
+    result = job.run_backtest_promotion()
+
+    assert result["watch"]["judged"] is True
+    assert st.load_state().watch is None
+    env["waiting"].assert_called_once()
+
+
+def test_watch_waiting_notice_shows_skipped_and_counted_days():
+    from src.reporting.discord.notifications_backtest_watch import (
+        send_backtest_promotion_watch_waiting,
+    )
+
+    result = {
+        "watch": {
+            "version": "oldver000000",
+            "scored_days": 2,
+            "need_days": 5,
+            "skipped_days": ["2026-10-02", "2026-10-03", "2026-10-04", "2026-10-05", "2026-10-06"],
+            "need_symbols": 3.2,
+            "n_universe_symbols": 4,
+        }
+    }
+    target = "src.reporting.discord.notifications_backtest_watch.send_status_fields"
+    with patch(target, MagicMock(return_value=True)) as send:
+        assert send_backtest_promotion_watch_waiting(result) is True
+    spec, fields = send.call_args[0][:2]
+    assert "待っている" in spec.title
+    values = {f["name"]: f["value"] for f in fields}
+    assert values["✅ 数えた日"].startswith("2 日")
+    assert values["⏭️ 飛ばした日"] == "5 日"
+    assert "2026-10-06" in values["📅 飛ばした日の一覧"]
 
 
 def test_watch_is_not_judged_without_jp_symbols_in_the_watchlist(env):

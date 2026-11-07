@@ -63,6 +63,9 @@ BACKTEST_PROMOTION_ROLLBACK = NotificationSpec("⏪ バックテスト: 見張�
 BACKTEST_PROMOTION_WATCH_KEPT = NotificationSpec(
     "ℹ️ バックテスト: 見張りを終えた（戻さない）", COLOR_INFO
 )
+BACKTEST_PROMOTION_WATCH_WAITING = NotificationSpec(
+    "⚠️ バックテスト: 見張りが判定を待っている（飛ばした日が多い）", COLOR_WARNING
+)
 
 
 def get_daily_order_spec(*, trading_stopped: bool) -> NotificationSpec:
