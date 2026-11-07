@@ -1,12 +1,13 @@
 """ルールシグナルと価格予想の採点を日次・週次の道につなぐ段（NON_CRITICAL）。
 
 どの段も例外を外に出さない。失敗しても本体の道を止めない。
+失敗は Discord へ知らせる（週の rule_best は毎週上書きされ、後から写せない。#1632）。
 daily.py / weekly.py からの責務分離（ファイル行数ガード対策）。
 """
 
 from datetime import date
 
-from src.orchestration.jobs.common import _handle_stage_error
+from src.orchestration.jobs.common import _handle_stage_error, _notify_stage_failure
 from src.orchestration.types import PipelineStage
 from src.utils.logger import get_logger
 
@@ -28,6 +29,7 @@ def snapshot_predictions_stage() -> None:
         logger.info("%s 完了: %s 行", SNAPSHOT_STAGE, added)
     except Exception as e:
         _handle_stage_error(PipelineStage.NON_CRITICAL, SNAPSHOT_STAGE, e)
+        _notify_stage_failure(SNAPSHOT_STAGE, e)
 
 
 def daily_scoring_stage() -> None:
@@ -39,6 +41,7 @@ def daily_scoring_stage() -> None:
         logger.info("%s 完了: %s", DAILY_SCORING_STAGE, path)
     except Exception as e:
         _handle_stage_error(PipelineStage.NON_CRITICAL, DAILY_SCORING_STAGE, e)
+        _notify_stage_failure(DAILY_SCORING_STAGE, e)
 
 
 def log_rule_signal_versions_stage(signal_date: date, market: str) -> None:
@@ -51,6 +54,7 @@ def log_rule_signal_versions_stage(signal_date: date, market: str) -> None:
         logger.info("%s 完了: %s 行", VERSIONS_STAGE, added)
     except Exception as e:
         _handle_stage_error(PipelineStage.NON_CRITICAL, VERSIONS_STAGE, e)
+        _notify_stage_failure(VERSIONS_STAGE, e)
 
 
 def weekly_rule_scoring_stage(market: str, evaluated_on: date) -> None:
@@ -65,3 +69,4 @@ def weekly_rule_scoring_stage(market: str, evaluated_on: date) -> None:
         logger.info("%s 完了: %s", WEEKLY_STAGE, path)
     except Exception as e:
         _handle_stage_error(PipelineStage.NON_CRITICAL, WEEKLY_STAGE, e)
+        _notify_stage_failure(WEEKLY_STAGE, e)
