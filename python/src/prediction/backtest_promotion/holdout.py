@@ -6,6 +6,7 @@
 発注する市場（jp）は全市場の線とは別に、比べられた行と行のある銘柄の数を線と比べる（#1693）。
 銘柄の分母はウォッチリストの jp の銘柄の数で、段差で表から消えた銘柄の分も縮まない（#1701）。
 行のある日の数も、東証の営業日の数を分母にして線と比べる（#1699）。
+日ごとの勝ち越しの票は、jp の銘柄が線に届いた日だけで数える（#1714、daily_vote）。
 最新の日については、本番の予想の関数とこの道の production の予想が一致するかを確かめる
 （道の一致の検査）。prediction_accuracy に記録された production の予想との突き合わせは
 参考として書くだけで、合否には使わない。
@@ -18,6 +19,7 @@ from typing import Any, Callable, Optional
 import pandas as pd
 
 from src.domain.jp_market_holidays import is_jp_business_day
+from src.prediction.backtest_promotion.daily_vote import split_vote_days, vote_need_symbols
 from src.prediction.backtest_promotion.judge import (
     HOLDOUT_TRADING_DAYS,
     PATH_CHECK_SAMPLE,
@@ -445,8 +447,16 @@ def evaluate_holdout(
     )
     expected_rows = sum(m["expected_rows"] for m in markets.values())
 
-    # 物差しの無い日は勝ちに数えず、日数には入れる
-    daily_diff = [0.0 if d["diff"] is None else float(d["diff"]) for d in daily]
+    # 票は jp の銘柄が線に届いた日だけで数える（#1714）。日ごとの物差しは全市場の行のまま。
+    # 票に数える日のうち物差しの無い日は勝ちに数えず、日数には入れる
+    need_symbols = vote_need_symbols(
+        markets.get(_PATH_CHECK_REQUIRED_MARKET, {}).get("n_universe_symbols", 0), watchlist
+    )
+    vote_dates, vote_skipped = split_vote_days(table, date_strs, need_symbols, watchlist)
+    vote_set = set(vote_dates)
+    daily_diff = [
+        0.0 if d["diff"] is None else float(d["diff"]) for d in daily if d["date"] in vote_set
+    ]
     decision = judge_win(candidate, production, daily_diff, expected_rows)
     reasons = list(decision.reasons)
     if degraded["candidate"]:
@@ -485,6 +495,9 @@ def evaluate_holdout(
         skipped_rows=skipped,
         weights={"candidate": cand_weights.summary(), "production": prod_weights.summary()},
         required_market_shortfalls=required_shortfalls,
+        vote_dates=vote_dates,
+        vote_skipped=vote_skipped,
+        vote_need_symbols=need_symbols,
     )
 
 
