@@ -901,3 +901,79 @@ def test_year_missing_from_holiday_table_counts_weekdays_and_does_not_pass(monke
     assert ev.decision.reasons == [
         "発注する市場 jp の行のある営業日が足りない（5 日、東証の営業日 20 日、必要 16 以上）"
     ]
+
+
+def _capture_daily_diff(monkeypatch) -> list:
+    """judge_win に渡った daily_diff を集める（票の分母を見る）。"""
+    seen: list = []
+    real = holdout.judge_win
+
+    def _judge(candidate, production, daily_diff, expected_rows):
+        seen.append(list(daily_diff))
+        return real(candidate, production, daily_diff, expected_rows)
+
+    monkeypatch.setattr(holdout, "judge_win", _judge)
+    return seen
+
+
+def test_vote_counts_only_jp_open_days_when_holdout_has_jp_holidays(monkeypatch):
+    # 20 日のうち 10/12 と 11/3 は東証の休場で jp の行が無い（us だけの日）。票は 18 日で数える
+    _patch(monkeypatch, extra={("jp", "1111"): _jp_without(JP_HOLIDAYS)})
+    seen = _capture_daily_diff(monkeypatch)
+    ev = evaluate_holdout(_dates(), _models(1.0), _models(-1.0), _live_matching())
+    assert len(seen) == 1
+    assert len(seen[0]) == 18
+    result = asdict(ev)
+    assert result["vote_dates"] == [d.strftime("%Y-%m-%d") for d in JP_OPEN_DAYS]
+    assert [s["date"] for s in result["vote_skipped"]] == ["2026-10-12", "2026-11-03"]
+    assert {s["reason"] for s in result["vote_skipped"]} == {"jp_holiday"}
+    assert all(s["n_jp_symbols"] == 0 for s in result["vote_skipped"])
+    assert len(ev.daily) == 20, "日ごとの物差しは取っておいた20日の全部を書く"
+    assert ev.decision.won is True, ev.decision.reasons
+
+
+def _patch_jp_prices_missing_for(monkeypatch, symbols: set, missing: list) -> None:
+    def _load(m, s, start_date=None):
+        df = _ohlcv()
+        return df[~df.index.isin(missing)] if m == "jp" and s in symbols else df
+
+    monkeypatch.setattr(holdout, "load_raw_ohlcv", _load)
+
+
+def test_vote_skips_open_days_where_jp_symbols_are_under_the_line(monkeypatch):
+    # jp 5 銘柄のうち 4 銘柄は 2 日だけ値段が無く、その日の jp は 1 銘柄（線は 4 銘柄）
+    frames = _patch(monkeypatch, extra=_jp_frames(5))
+    _patch_watchlist(monkeypatch, _jp_keys(frames))
+    short_days = JP_OPEN_DAYS[5:7]
+    _patch_jp_prices_missing_for(monkeypatch, _jp_keys(frames) - {"1111"}, short_days)
+    seen = _capture_daily_diff(monkeypatch)
+    ev = evaluate_holdout(_dates(), _models(1.0), _models(-1.0), _live_by_market())
+    assert len(seen[0]) == 18
+    assert ev.vote_dates == [d.strftime("%Y-%m-%d") for d in _dates() if d not in short_days]
+    assert ev.vote_skipped == [
+        {"date": d.strftime("%Y-%m-%d"), "reason": "jp_symbols_short", "n_jp_symbols": 1}
+        for d in short_days
+    ]
+    assert ev.vote_need_symbols == 4
+
+
+def test_vote_jp_symbol_count_uses_watchlist_symbols_only(monkeypatch):
+    # 表にだけある廃止の jp 3 銘柄は、日ごとの jp の銘柄に数えない。分母はウォッチリストの 2 銘柄
+    extra = {("jp", s): _features(0) for s in ("8001", "8002", "8003")}
+    extra[("jp", "2222")] = _features(0)
+    _patch(monkeypatch, extra=extra)
+    _patch_watchlist(monkeypatch, {"1111", "2222"})
+    short_days = _dates()[:1]
+    _patch_jp_prices_missing_for(monkeypatch, {"2222"}, short_days)
+    ev = evaluate_holdout(_dates(), _models(1.0), _models(-1.0), _live_by_market())
+    assert ev.vote_need_symbols == pytest.approx(1.6)
+    assert [s["date"] for s in ev.vote_skipped] == ["2026-10-07"]
+    assert ev.vote_skipped[0]["n_jp_symbols"] == 1
+
+
+def test_vote_change_keeps_overall_metrics(monkeypatch):
+    # 票から外した日の行も、全体の物差しには残す
+    _patch(monkeypatch, extra={("jp", "1111"): _jp_without(JP_HOLIDAYS)})
+    ev = evaluate_holdout(_dates(), _models(1.0), _models(-1.0), _live_matching())
+    assert ev.candidate["n_baseline"] == ev.production["n_baseline"] == 38
+    assert ev.expected_rows == 38

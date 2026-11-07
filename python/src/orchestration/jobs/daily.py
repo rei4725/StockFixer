@@ -31,7 +31,10 @@ from src.orchestration.jobs.common import (
     is_today_jst,
 )
 from src.orchestration.jobs.drift_check import run_daily_drift_check
-from src.orchestration.jobs.features_marker import current_code_version, record_features_version
+from src.orchestration.jobs.features_marker import (
+    current_code_version,
+    record_features_version_if_covered,
+)
 from src.orchestration.jobs.prediction_errors import notify_prediction_errors
 from src.orchestration.jobs.prediction_saved_marker import (
     clear_prediction_saved_marker,
@@ -101,7 +104,10 @@ def run_daily_pipeline():
         batch_result = run_batch_pipeline(tasks, notification_port=DiscordNotificationAdapter())
         market_totals = Counter(str(getattr(t, "market", "")) for t in tasks)
         _raise_if_fetch_mostly_unavailable(len(tasks), batch_result, market_totals)
-        record_features_version(features_version)  # 失敗しても投げない
+        # 作れなかった銘柄が 1 - MIN_COVERAGE を超えた回は書かない。失敗しても投げない（#1710）
+        record_features_version_if_covered(
+            features_version, len(tasks), batch_result, market_totals
+        )
         logger.info("[1/6] データ取得完了")
     except Exception as e:
         if _handle_stage_error(
