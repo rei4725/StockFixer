@@ -618,7 +618,7 @@ def test_jp_symbols_without_rows_block_win_though_expected_rows_shrink(monkeypat
 
 def test_jp_at_the_line_still_wins(monkeypatch):
     # jp の行は 16 / 20、行のある銘柄は 4 / 5 で、どちらも線の上
-    extra = {("jp", s): _features(0) for s in ("2222", "3333", "4444")}
+    extra = {("jp", s): _spread(_features(0), k) for k, s in enumerate(("2222", "3333", "4444"), 1)}
     extra[("jp", "5555")] = _delisted()
     _patch(monkeypatch, extra=extra)
     _patch_prices_missing(monkeypatch, "jp", _dates()[:4])
@@ -664,9 +664,21 @@ def _patch_watchlist(monkeypatch, symbols: set):
     monkeypatch.setattr(holdout, "load_watchlist_symbols", lambda market: set(symbols))
 
 
+def _spread(df: pd.DataFrame, k: int) -> pd.DataFrame:
+    """最後の行より前の feat_a と y を 1e-3 * k ずらす（jp の銘柄の間に予想のばらつきを作る）。
+
+    最後の行は道の一致の検査に使うので変えない。
+    """
+    out = df.copy()
+    head = out.index[:-1]
+    out.loc[head, "feat_a"] += 1e-3 * k
+    out.loc[head, "y"] += 1e-3 * k
+    return out
+
+
 def _jp_frames(n: int) -> dict:
     """1111 に続けて、行のそろった jp の銘柄を足して n 銘柄にする（_patch の extra に渡す）。"""
-    return {("jp", str(2000 + i)): _features(0) for i in range(n - 1)}
+    return {("jp", str(2000 + i)): _spread(_features(0), i + 1) for i in range(n - 1)}
 
 
 def _jp_keys(frames: dict) -> set:
@@ -730,7 +742,7 @@ def test_watchlist_symbol_without_rows_in_table_is_not_counted(monkeypatch):
 @pytest.mark.parametrize("empty", [None, set()], ids=["読めない", "空"])
 def test_unreadable_watchlist_falls_back_to_universe_with_warning(monkeypatch, caplog, empty):
     # 表の jp 5 銘柄のうち行があるのは 4 銘柄。今の universe の数で判定して勝ちのまま
-    extra = {("jp", s): _features(0) for s in ("2222", "3333", "4444")}
+    extra = {("jp", s): _spread(_features(0), k) for k, s in enumerate(("2222", "3333", "4444"), 1)}
     extra[("jp", "5555")] = _delisted()
     _patch(monkeypatch, extra=extra)
     monkeypatch.setattr(holdout, "load_watchlist_symbols", lambda market: empty)
@@ -815,7 +827,7 @@ def _jp_without(missing: list) -> pd.DataFrame:
 def _patch_jp_tail_missing(monkeypatch):
     """jp の全銘柄で後ろ 15 日の行を消す。本番の予想は jp の残った最後の行に合わせて返す。"""
     jp = _jp_without(list(DAYS[-16:]))
-    _patch(monkeypatch, extra={("jp", "1111"): jp, ("jp", "2222"): jp})
+    _patch(monkeypatch, extra={("jp", "1111"): jp, ("jp", "2222"): _spread(jp, 1)})
     us_live = _live_matching()
 
     def _live(market: str, symbol: str, **_kwargs) -> Optional[PredictionResult]:
@@ -977,3 +989,29 @@ def test_vote_change_keeps_overall_metrics(monkeypatch):
     ev = evaluate_holdout(_dates(), _models(1.0), _models(-1.0), _live_matching())
     assert ev.candidate["n_baseline"] == ev.production["n_baseline"] == 38
     assert ev.expected_rows == 38
+
+
+def test_jp_constant_candidate_cannot_win_though_mixed_std_is_over_the_line(monkeypatch):
+    # jp の 5 銘柄はどの日も同じ値、us は jp と違う値。全市場を混ぜた日ごとの標準偏差は
+    # 線を越えるが、jp の中ではばらつきが無いので勝ちにしない（#1718）
+    extra = {("jp", str(2000 + i)): _features(0) for i in range(4)}
+    frames = _patch(monkeypatch, extra=extra)
+    _patch_watchlist(monkeypatch, _jp_keys(frames))
+    ev = evaluate_holdout(_dates(), _models(1.0), _models(-1.0), _live_by_market())
+    assert ev.candidate["prediction_std"] > 1e-4, "全市場の確かめは通る"
+    assert ev.markets["jp"]["candidate"]["prediction_std"] == 0.0
+    assert ev.decision.won is False
+    jp_reasons = [r for r in ev.decision.reasons if "発注する市場 jp の中で" in r]
+    assert len(jp_reasons) == 1, ev.decision.reasons
+    assert "ほぼ同じ値" in jp_reasons[0]
+    assert not any(r.startswith("候補の予想が全銘柄で") for r in ev.decision.reasons)
+
+
+@pytest.mark.parametrize(
+    "markets",
+    [{}, {"jp": {"candidate": {"prediction_std": None}}}],
+    ids=["jp が無い", "jp の標準偏差が出ない"],
+)
+def test_jp_constant_reason_is_none_without_jp_std(markets):
+    # jp が無い回は required_market_reasons が止め、標準偏差が出ない回は測れないので理由にしない
+    assert required_market.required_market_constant_reason(markets) is None

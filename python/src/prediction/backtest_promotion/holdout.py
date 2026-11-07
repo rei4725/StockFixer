@@ -7,6 +7,7 @@
 銘柄の分母はウォッチリストの jp の銘柄の数で、段差で表から消えた銘柄の分も縮まない（#1701）。
 行のある日の数も、東証の営業日の数を分母にして線と比べる（#1699）。
 日ごとの勝ち越しの票は、jp の銘柄が線に届いた日だけで数える（#1714、daily_vote）。
+定数の予想の確かめは、全市場の物差しに加えて jp の中の日ごとの標準偏差でも行う（#1718）。
 最新の日については、本番の予想の関数とこの道の production の予想が一致するかを確かめる
 （道の一致の検査）。prediction_accuracy に記録された production の予想との突き合わせは
 参考として書くだけで、合否には使わない。
@@ -29,6 +30,7 @@ from src.prediction.backtest_promotion.judge import (
 from src.prediction.backtest_promotion.required_market import (
     REQUIRED_MARKET,
     load_watchlist_symbols,
+    required_market_constant_reason,
     required_market_reasons,
 )
 from src.prediction.baseline_metrics import baseline_metrics
@@ -470,6 +472,10 @@ def evaluate_holdout(
             reasons.append(_PATH_CHECK_FAILED)
     required_shortfalls = required_market_reasons(markets)
     reasons.extend(required_shortfalls)
+    # 定数の予想は全市場に加えて jp の中でも確かめる（#1718）
+    required_constant = required_market_constant_reason(markets)
+    if required_constant is not None:
+        reasons.append(required_constant)
     decision = WinDecision(won=not reasons, reasons=reasons)
 
     reference = _recorded_reference(
