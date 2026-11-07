@@ -483,7 +483,8 @@ def evaluate_holdout(
             reasons.append(_PATH_CHECK_NO_JP)
         if max_abs_diff is not None and max_abs_diff > PATH_CHECK_TOL:
             reasons.append(_PATH_CHECK_FAILED)
-    reasons.extend(_required_market_reasons(markets))
+    required_shortfalls = _required_market_reasons(markets)
+    reasons.extend(required_shortfalls)
     decision = WinDecision(won=not reasons, reasons=reasons)
 
     reference = _recorded_reference(
@@ -508,6 +509,7 @@ def evaluate_holdout(
         degraded_rows=degraded,
         skipped_rows=skipped,
         weights={"candidate": cand_weights.summary(), "production": prod_weights.summary()},
+        required_market_shortfalls=required_shortfalls,
     )
 
 

@@ -134,6 +134,8 @@ class HoldoutEvaluation:
         degraded_rows: モデルが欠けて予想した行の数（candidate・production）
         skipped_rows: 飛ばした行の数（理由ごと）
         weights: 使った重みのまとめ（candidate・production ごとに calls・distinct・名前ごとの mean）
+        required_market_shortfalls: 発注する市場の行・銘柄・営業日が線に届かなかった理由
+            （decision.reasons の一部。空でなければ比べ足りない回で、負けでなく失敗にする）
     """
 
     cutoff: str
@@ -150,6 +152,7 @@ class HoldoutEvaluation:
     degraded_rows: dict = field(default_factory=dict)
     skipped_rows: dict = field(default_factory=dict)
     weights: dict = field(default_factory=dict)
+    required_market_shortfalls: list[str] = field(default_factory=list)
 
 
 @dataclass

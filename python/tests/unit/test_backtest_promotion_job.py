@@ -441,6 +441,84 @@ def test_no_jp_compared_is_failure_without_swap_and_version_not_marked(env):
     assert saved["skipped_by_reason"] == {"live_none": 25}
 
 
+_JP_SHORTFALLS = [
+    "発注する市場 jp の比べられた行が足りない（20 行、見込み 40 行、必要 32 以上）",
+    "発注する市場 jp の行のある銘柄が足りない（1 銘柄、全 5 銘柄、必要 4 以上）",
+    "発注する市場 jp の行のある営業日が足りない（4 日、東証の営業日 18 日、必要 14.4 以上）",
+]
+
+
+def _jp_short_evaluation(shortfall: str, won: bool = True, passed: bool = True):
+    """jp の線に落ちた評価。勝ちにならないので decision は負けの形にする。"""
+    evaluation = _evaluation(won=won, passed=passed)
+    evaluation.required_market_shortfalls = [shortfall]
+    evaluation.decision = WinDecision(won=False, reasons=evaluation.decision.reasons + [shortfall])
+    return evaluation
+
+
+@pytest.mark.parametrize("shortfall", _JP_SHORTFALLS, ids=["行", "銘柄", "営業日"])
+def test_jp_line_shortfall_is_failure_and_version_not_marked(env, shortfall):
+    # jp のデータが欠けた夜は比べていないので、負けと記録せず次の夜に比べ直す
+    st.save_state(BacktestPromotionState(last_evaluated_version="previous0000"))
+    env["evaluate"].return_value = _jp_short_evaluation(shortfall)
+
+    result = job.run_backtest_promotion()
+
+    assert result["outcome"] == "failed"
+    assert result["reason"] == shortfall
+    assert result["swapped"] is False
+    env["swap"].assert_not_called()
+    assert st.load_state().last_evaluated_version == "previous0000"
+    assert env["result"].call_args[0][0]["outcome"] == "failed"
+    saved = _read_json(result["result_path"])["evaluation"]
+    assert saved["required_market_shortfalls"] == [shortfall]
+
+
+def test_jp_line_shortfall_is_failure_even_if_the_ruler_also_lost(env):
+    # 物差しの負けは jp が欠けたままの行で出た数字なので、版を記録する理由にしない
+    st.save_state(BacktestPromotionState(last_evaluated_version="previous0000"))
+    env["evaluate"].return_value = _jp_short_evaluation(_JP_SHORTFALLS[0], won=False)
+
+    result = job.run_backtest_promotion()
+
+    assert result["outcome"] == "failed"
+    assert "MAE が production より小さくない" in result["reason"]
+    assert st.load_state().last_evaluated_version == "previous0000"
+
+
+def test_jp_line_shortfall_is_compared_again_the_next_night(env):
+    env["evaluate"].return_value = _jp_short_evaluation(_JP_SHORTFALLS[0])
+    assert job.run_backtest_promotion()["outcome"] == "failed"
+
+    env["evaluate"].return_value = _evaluation(won=True)
+    result = job.run_backtest_promotion()
+
+    assert result["outcome"] == "won"
+    assert result["swapped"] is True
+    assert st.load_state().last_evaluated_version == _VERSION
+
+
+def test_path_check_failure_stays_not_comparable_with_jp_line_shortfall(env):
+    env["evaluate"].return_value = _jp_short_evaluation(_JP_SHORTFALLS[0], passed=False)
+
+    result = job.run_backtest_promotion()
+
+    assert result["outcome"] == "not_comparable"
+    assert st.load_state().last_evaluated_version == _VERSION
+
+
+def test_loss_over_the_jp_line_stays_lost_whatever_the_reason_says(env):
+    # 見分けるのは欄であり、文の中身ではない。全市場の線に落ちた回もここに入る
+    evaluation = _evaluation(won=False)
+    evaluation.decision = WinDecision(won=False, reasons=_JP_SHORTFALLS[:1])
+    env["evaluate"].return_value = evaluation
+
+    result = job.run_backtest_promotion()
+
+    assert result["outcome"] == "lost"
+    assert st.load_state().last_evaluated_version == _VERSION
+
+
 def test_failure_is_not_recorded_as_loss_and_version_not_marked(env):
     st.save_state(BacktestPromotionState(last_evaluated_version="previous0000"))
     env["train"].side_effect = RuntimeError("stock_features が空")
