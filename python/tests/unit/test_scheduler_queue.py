@@ -348,6 +348,42 @@ def test_get_missed_past_periods_backfills_daily_pipeline_in_schedule_config(tmp
     assert "2026-03-02" in missed
 
 
+def test_get_missed_past_periods_empty_after_today_success(tmp_path):
+    """当日分が success の後は、前日分を補完の対象に返さない（#1719）"""
+    manager = SchedulerQueueManager(_build_config({}), state_file_path=str(tmp_path / "state.json"))
+    manager.run_job("daily_pipeline", reason="scheduled", period_key="2026-03-03")
+
+    # 2026-03-03 (火) 20:00 → 前日 2026-03-02 (月) 分は無いが、当日分が済んでいる
+    now = datetime(2026, 3, 3, 20, 0, tzinfo=manager.tz)
+    assert manager.get_missed_past_periods("daily_pipeline", lookback_days=2, now=now) == []
+
+
+def test_get_missed_past_periods_newer_backfill_covers_older_day(tmp_path):
+    """2日続けて抜けたら新しい1日分だけを返し、その success の後は古い日を返さない（#1719）"""
+    manager = SchedulerQueueManager(_build_config({}), state_file_path=str(tmp_path / "state.json"))
+
+    # 2026-03-04 (水) 08:00 → 03-03 (火) と 03-02 (月) が抜けている
+    now = datetime(2026, 3, 4, 8, 0, tzinfo=manager.tz)
+    assert manager.get_missed_past_periods("daily_pipeline", lookback_days=2, now=now) == [
+        "2026-03-03"
+    ]
+
+    manager.run_job("daily_pipeline", reason="recovery_backfill", period_key="2026-03-03")
+    assert manager.get_missed_past_periods("daily_pipeline", lookback_days=2, now=now) == []
+
+
+def test_get_missed_past_periods_older_success_does_not_cover_newer_day(tmp_path):
+    """当日の定時より前の起動で前日分に success が無ければ、今までどおり前日分を返す"""
+    manager = SchedulerQueueManager(_build_config({}), state_file_path=str(tmp_path / "state.json"))
+    manager.run_job("daily_pipeline", reason="scheduled", period_key="2026-02-27")
+
+    # 2026-03-03 (火) 08:00 は定時 19:00 の前。前日 03-02 (月) の success は無い
+    now = datetime(2026, 3, 3, 8, 0, tzinfo=manager.tz)
+    assert manager.get_missed_past_periods("daily_pipeline", lookback_days=2, now=now) == [
+        "2026-03-02"
+    ]
+
+
 def test_get_missed_past_periods_empty_without_backfill_flag(tmp_path):
     """backfill の印が無い daily ジョブは前日分を補完しない（既定で安全な側）"""
     config = _build_config({})

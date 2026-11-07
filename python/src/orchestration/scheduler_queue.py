@@ -27,6 +27,7 @@ from filelock import FileLock
 
 from config.settings import settings
 from src.orchestration.job_errors import LockWaitExpiredJobError, NonRetryableJobError
+from src.orchestration.scheduler_backfill_cover import has_success_since
 from src.orchestration.scheduler_cutoff import (
     is_past_recovery_until,
     scheduled_datetime_for_recovery,
@@ -344,6 +345,7 @@ class SchedulerQueueManager:
         対象は設定に ``backfill: True`` を持つジョブだけ。印の無いジョブ（発注・約定など
         その日の相場にしか意味の無いジョブ）は、当日分と別の鍵で同じ日に二度動かないよう
         前日分を補完しない（#825）。
+        後の日の success で覆われた期間は返さず、返すのも抜けた最も新しい1日にとどめる（#1719）。
         """
         if job_id not in self.schedule_config:
             return []
@@ -365,11 +367,12 @@ class SchedulerQueueManager:
             if not self._is_scheduled_day(config, past_dt):
                 continue
             past_period_key = self._build_period_key(config, past_dt)
-            if self.has_success(job_id, past_period_key):
+            if has_success_since(self._state.get("events", []), job_id, past_period_key):
                 continue
             if self.get_execution_count(job_id, past_period_key) >= max_executions:
                 continue
             missed.append(past_period_key)
+            break
 
         return missed
 
