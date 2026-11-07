@@ -121,7 +121,9 @@ class HoldoutEvaluation:
         n_symbols: 取っておいた期間に y の入った行を持つ (market, symbol) の数
         expected_rows: 採点の行の見込み（markets の expected_rows の合計。覆う割合の分母）
         markets: universe の市場ごとの n_universe_symbols・n_symbols・n_dates（y のある日の数）・
-            expected_rows・n_compared（比べられた行の数）・candidate・production（その市場の物差し）
+            expected_rows・n_compared（比べられた行の数）・candidate・production（その市場の物差し）。
+            jp にはさらに n_business_dates（取っておいた日のうちの東証の営業日の数）と
+            n_business_dates_with_rows（そのうち y のある日の数）
         candidate: 候補の baseline_metrics()（両方の予想がそろった行だけ）
         production: production の baseline_metrics()（同じ行）
         daily: 日ごとの date・candidate・production・diff（hit_rate_minus_majority）
