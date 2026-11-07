@@ -142,8 +142,9 @@ def _notify_empty_week_accuracy(week_start: str) -> None:
 
 
 def run_weekly_paper_results() -> bool:
-    """紙の売買の週の成績を results/paper/YYYY-Www.json に書く（#812）。
+    """紙の売買の週の成績を results/paper/YYYY-Www.json に書き、前の3週を見直す（#812・#1695）。
 
+    見直しても欠けが残る週は Discord へ知らせるが、この回の成否には入れない。
     例外は出さず、成否を返す。失敗の回のジョブの失敗は run_weekly_report が決める（#1582）。
 
     Returns:
@@ -154,6 +155,7 @@ def run_weekly_paper_results() -> bool:
         import os
 
         from src.backtest.metrics import fetch_benchmark_returns
+        from src.reporting.discord.discord_utils import send_webhook_text
         from src.trading.paper_equity import write_paper_weekly_results
         from src.utils import japan_time
         from src.utils.data_path_utils import get_results_dir
@@ -163,6 +165,7 @@ def run_weekly_paper_results() -> bool:
             japan_time.now_jst().date(),
             fetch_benchmark_returns,
             os.path.join(get_results_dir(), "paper"),
+            notify=send_webhook_text,
         )
         return True
     except Exception as e:
