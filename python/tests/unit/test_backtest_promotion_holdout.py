@@ -588,6 +588,9 @@ def test_jp_rows_short_blocks_win_even_if_total_is_over_the_line(monkeypatch):
     assert "発注する市場 jp の比べられた行が足りない（20 行、見込み 40 行、必要 32 以上）" in (
         ev.decision.reasons
     )
+    assert ev.required_market_shortfalls == [
+        "発注する市場 jp の比べられた行が足りない（20 行、見込み 40 行、必要 32 以上）"
+    ]
 
 
 @pytest.mark.parametrize("gone", [_delisted, _no_features], ids=["行が無い", "特徴量が無い"])
@@ -602,6 +605,9 @@ def test_jp_symbols_without_rows_block_win_though_expected_rows_shrink(monkeypat
     assert "発注する市場 jp の行のある銘柄が足りない（1 銘柄、全 5 銘柄、必要 4 以上）" in (
         ev.decision.reasons
     )
+    assert ev.required_market_shortfalls == [
+        "発注する市場 jp の行のある銘柄が足りない（1 銘柄、全 5 銘柄、必要 4 以上）"
+    ]
 
 
 def test_jp_at_the_line_still_wins(monkeypatch):
@@ -614,6 +620,7 @@ def test_jp_at_the_line_still_wins(monkeypatch):
     assert ev.decision.won is True, ev.decision.reasons
     assert ev.markets["jp"]["n_compared"] == 4 * 16
     assert ev.markets["jp"]["expected_rows"] == 4 * 20
+    assert ev.required_market_shortfalls == []
 
 
 def test_loss_with_jp_over_the_line_has_no_jp_reason(monkeypatch):
@@ -621,6 +628,7 @@ def test_loss_with_jp_over_the_line_has_no_jp_reason(monkeypatch):
     ev = evaluate_holdout(_dates(), _models(-1.0), _models(-1.0), _live_matching())
     assert ev.decision.won is False
     assert not any("発注する市場" in r for r in ev.decision.reasons)
+    assert ev.required_market_shortfalls == []
 
 
 def test_all_jp_symbols_without_rows_is_written_and_blocks_win(monkeypatch):
@@ -702,6 +710,7 @@ def test_jp_tail_days_missing_block_win_though_expected_rows_shrink(monkeypatch)
     assert ev.decision.reasons == [
         "発注する市場 jp の行のある営業日が足りない（4 日、東証の営業日 18 日、必要 14.4 以上）"
     ]
+    assert ev.required_market_shortfalls == ev.decision.reasons
 
 
 def test_jp_missing_only_holidays_still_wins(monkeypatch):

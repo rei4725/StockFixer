@@ -275,6 +275,9 @@ def _apply_evaluation(result: dict, evaluation: HoldoutEvaluation) -> None:
         return
     if not evaluation.path_check.get("passed"):
         outcome = NOT_COMPARABLE
+    elif evaluation.required_market_shortfalls:
+        # 発注する市場の行か銘柄か日が線の下の回は負けと記録せず、版を残さず次の夜に比べ直す（#1698）
+        outcome = FAILED
     elif evaluation.decision.won:
         outcome = WON
     else:
