@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import unittest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -21,6 +21,7 @@ from src.reporting.kpi import (
 from src.reporting.monthly import (
     _load_latest_wf_summary,
     _load_monthly_kpis,
+    _load_window_accuracy,
     _mean_metric,
     run_monthly_report,
     save_monthly_report_to_file,
@@ -132,6 +133,39 @@ class TestComputeHitRate(unittest.TestCase):
         result = _compute_hit_rate(df, days=30)
         # old_dateは30日超のため除外 → recent_date の True のみ → 1.0
         self.assertAlmostEqual(result, 1.0)
+
+    def test_filters_by_predicted_at_not_rescored_checked_at(self):
+        """採点し直しで checked_at だけ今になった古い予想を、月次の窓に入れない（#1725）。"""
+        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+        recent = (now_utc - timedelta(days=2)).strftime("%Y%m%d_%H%M%S")
+        old = (now_utc - timedelta(days=40)).strftime("%Y%m%d_%H%M%S")
+        df = pd.DataFrame(
+            {
+                "direction_match": [True, False],
+                "predicted_at": [recent, old],
+                "checked_at": [datetime.now(), datetime.now()],
+            }
+        )
+        self.assertAlmostEqual(_compute_hit_rate(df, days=30), 1.0)
+
+    def test_window_edge_uses_jst_date_of_predicted_at(self):
+        """predicted_at は UTC。JST の日付で窓の端を切る（週の記録と同じ。#1229）。"""
+        jst_today = (datetime.now(timezone.utc) + timedelta(hours=9)).date()
+        start = jst_today - timedelta(days=30)
+        # 窓の初日の JST 00:30 は、UTC では前の日の 15:30
+        inside = datetime.combine(start, datetime.min.time()) - timedelta(hours=8, minutes=30)
+        # 窓の前の日の JST 23:30 は、UTC では同じ日の 14:30
+        outside = datetime.combine(start, datetime.min.time()) - timedelta(hours=9, minutes=30)
+        df = pd.DataFrame(
+            {
+                "direction_match": [True, False],
+                "predicted_at": [
+                    inside.strftime("%Y%m%d_%H%M%S"),
+                    outside.strftime("%Y%m%d_%H%M%S"),
+                ],
+            }
+        )
+        self.assertAlmostEqual(_compute_hit_rate(df, days=30), 1.0)
 
     def test_does_not_mutate_callers_dataframe(self):
         """checked_at の型変換は内部コピーに対して行い、渡された DataFrame を書き換えない。"""
@@ -298,6 +332,39 @@ class TestLoadMonthlyKpis(unittest.TestCase):
         analytics = _LimitedAccuracy(accuracy=pd.DataFrame(rows))
         kpi = _load_monthly_kpis(analytics)
         self.assertAlmostEqual(kpi.hit_rate, 5000 / 8000)
+
+    def test_reload_is_decided_by_predicted_at(self):
+        """predicted_at が窓の中の行は、checked_at が無くても上限 5000 を超えて読む（#1725）。"""
+        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+        rows = [
+            {
+                "predicted_at": (now_utc - timedelta(minutes=5 * i)).strftime("%Y%m%d_%H%M%S"),
+                "direction_match": i < 5000,
+            }
+            for i in range(8000)
+        ]
+        analytics = _LimitedAccuracy(accuracy=pd.DataFrame(rows))
+        df = _load_window_accuracy(analytics)
+        self.assertEqual(len(df), 8000)
+        self.assertAlmostEqual(_compute_hit_rate(df), 5000 / 8000)
+
+    def test_reload_stops_when_oldest_predicted_at_is_outside_window(self):
+        """checked_at が全部今でも、最も古い predicted_at が窓の外なら読み直さない（#1725）。"""
+        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+        rows = []
+        for i in range(12000):
+            age = timedelta(minutes=5 * i) if i < 8000 else timedelta(days=_REPORT_DAYS + 5)
+            rows.append(
+                {
+                    "predicted_at": (now_utc - age).strftime("%Y%m%d_%H%M%S"),
+                    "checked_at": datetime.now(),
+                    "direction_match": i < 5000,
+                }
+            )
+        analytics = _LimitedAccuracy(accuracy=pd.DataFrame(rows))
+        _load_window_accuracy(analytics)
+        limits = [kw["limit"] for name, kw in analytics.calls if name == "prediction_accuracy"]
+        self.assertEqual(limits, [5000, 10000])
 
     def test_accuracy_failure_propagates(self):
         """精度の取得失敗は握りつぶさず呼び出し元へ伝播させる（従来挙動）。"""
