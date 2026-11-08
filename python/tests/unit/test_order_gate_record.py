@@ -327,18 +327,41 @@ class TestOrderGateRecord(unittest.TestCase):
         return caught.exception, broker
 
     def test_sl_tp_step_error_is_recorded_before_same_raise(self):
-        """_check_sl_tp_exits が投げる朝は entry_error とゲートの判定を書き、同じ例外で落ちる（#1548）"""
+        """_check_sl_tp_exits が投げる朝も予想の売りは出し、記録を書いて同じ例外で落ちる（#1548・#1731）"""
         error = RuntimeError("sl tp down")
         failing = patch("src.trading.execution.runner._check_sl_tp_exits", side_effect=error)
         caught, broker = self._run_failing(failing)
         self.assertIs(caught, error)
-        self.assertEqual(self._sent(broker), [])
+        self.assertEqual(self._sent(broker), [("9000", OrderSide.SELL)])
         record = self._read()
         self.assertEqual(record["entry_error"], repr(error))
         self.assertIsNone(record["token_error"])
         self.assertFalse(record["trading_stopped"])
         self.assertEqual(record["daily_loss"], 1_000.0)
-        self.assertEqual(record["sell_orders"], 0)
+        self.assertEqual(record["sell_orders"], 1)
+        self.assertEqual(record["buy_orders"], 0)
+
+    def test_short_read_error_keeps_sl_tp_and_signal_sells(self):
+        """空売りを読めない朝も、SL/TP の売りと予想の売りを出し、新規は出さずに同じ例外で落ちる（#1731）"""
+        stop = {"symbol": "8000", "qty": 100, "avg_price": 2000.0, "current_price": 1000.0}
+        broker = _make_broker(positions=(stop, _HELD))
+        error = RuntimeError("short read down")
+        broker.get_short_positions.side_effect = error
+        sl_risk = MagicMock()
+        sl_risk.return_value.check_sl_tp.side_effect = lambda avg, cur, **kw: (
+            avg > cur * 1.5,
+            False,
+            "SL",
+        )
+        sl_line = patch("src.trading.execution.sl_tp.RiskManager", sl_risk)
+        caught, _ = self._run_failing(sl_line, broker=broker)
+        self.assertIs(caught, error)
+        self.assertEqual(self._sent(broker), [("8000", OrderSide.SELL), ("9000", OrderSide.SELL)])
+        record = self._read()
+        self.assertEqual(record["entry_error"], repr(error))
+        self.assertEqual(record["sell_orders"], 2)
+        self.assertEqual(record["buy_orders"], 0)
+        self.assertEqual(record["short_orders"], 0)
 
     def test_short_read_in_sl_tp_error_is_recorded(self):
         """SL/TP の中の空売りの読み込みの例外（#1451）は投げたまま、記録を書く（#1548）"""
