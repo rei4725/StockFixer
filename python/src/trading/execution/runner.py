@@ -171,10 +171,16 @@ def run_order_steps(
     )
 
     # --- SL/TP チェック: 含み損益が閾値を超えたポジションを強制クローズ ---
-    sl_tp_triggered = _check_sl_tp_exits(broker, market, mode, market_data, stats, trade_diff_sink)
+    sl_tp_error: Exception | None = None  # 落ちても予想の売りまで出し、新規の前に投げ直す（#1731）
+    try:
+        sl_tp_triggered = _check_sl_tp_exits(
+            broker, market, mode, market_data, stats, trade_diff_sink
+        )
+    except Exception as exc:  # 出した SL/TP の売りの2本目は、約定待ちの確かめで止める（#1117）
+        logger.error("[exec] SL/TP の手順が落ちた。新規は止め予想の売りは出す", exc_info=True)
+        sl_tp_triggered, sl_tp_error = set(), exc
 
-    # --- 決済シグナル: 保有株で売りシグナルが出ているものを先にクローズ ---
-    # ML エグジットモデルが利用可能な場合、モデルのシグナルも売り判定に加える
+    # --- 決済シグナル: 保有株で売りシグナル・ML エグジットのシグナルが出ているものを先にクローズ ---
     exit_model = _load_exit_model(market)
     held_predictions = predictions[predictions["symbol"].isin(held_symbols)]
     ml_exit_symbols: set[str] = (
@@ -190,16 +196,14 @@ def run_order_steps(
         )
     ]
     sell_positions: list[dict] | None = None
-    # 前の回の約定待ちの決済がある銘柄には2本目を出さない（#1117）
-    pending = _load_pending_exits(broker)
+    pending = _load_pending_exits(broker)  # 約定待ちの決済がある銘柄には2本目を出さない（#1117）
     pending_skipped: list[str] = []
     for _, row in sell_signals.iterrows():
         symbol = row["symbol"]
         if pending.has(symbol, OrderSide.SELL):
             pending_skipped.append(symbol)
             continue
-        # 予測変動量が閾値未満 → 発注スキップ（R-214）
-        if abs(float(row.get("diff_ratio") or 0.0)) < MIN_CHANGE_RATIO:
+        if abs(float(row.get("diff_ratio") or 0.0)) < MIN_CHANGE_RATIO:  # 変動が小さい（R-214）
             logger.info(
                 "[exec] %s: diff_ratio=%.3f%% < min_change=%.3f%% → スキップ",
                 symbol,
@@ -257,6 +261,8 @@ def run_order_steps(
             logger.error(f"[exec] 売り注文エラー ({symbol}): {e}", exc_info=True)
             stats["errors"] += 1
     _log_pending_skips("売りシグナル", pending_skipped)
+    if sl_tp_error is not None:
+        raise sl_tp_error  # 新規（買い・ショート）は出さない（#1281・#1548 と同じ形）
 
     # 空売りの保有（約定待ちの SHORT の仮登録を含む）。新規買いの候補から外す（#1348）
     short_positions = read_short_positions(broker)
@@ -279,9 +285,8 @@ def run_order_steps(
         )
         buy_signals = predictions.iloc[0:0]  # 空 DataFrame
 
-    # 1ラン内で増える建玉数を追跡し、ラン途中でも MAX_POSITIONS を超えないようにする。
-    # （ゲートはラン開始時の一度きりで、head(MAX_ORDERS_PER_RUN) だけでは保有上限を
-    #   最大 MAX_ORDERS_PER_RUN-1 件超過しうるため）。空売りの保有も数える（#1146）
+    # 1ラン内で増える建玉数を数え、ラン途中でも MAX_POSITIONS を超えないようにする（ゲートは
+    # ラン開始時の一度きりで、head だけでは上限を超えうるため）。空売りの保有も数える（#1146）
     position_count = len(held_or_pending) + len(short_held_symbols)
 
     for _, row in buy_signals.iterrows():
@@ -293,8 +298,7 @@ def run_order_steps(
             stats["skipped"] += 1
             continue
 
-        # 予測変動量が閾値未満 → 発注スキップ（R-214）
-        if abs(float(row.get("diff_ratio") or 0.0)) < MIN_CHANGE_RATIO:
+        if abs(float(row.get("diff_ratio") or 0.0)) < MIN_CHANGE_RATIO:  # 変動が小さい（R-214）
             logger.info(
                 "[exec] %s: diff_ratio=%.3f%% < min_change=%.3f%% → スキップ",
                 symbol,
@@ -576,11 +580,10 @@ def run_order_steps(
     if mode == "live":
         _sync_live_execution_diffs(broker, trade_diff_sink)
     # 発注サマリーを保存（R-214）
-    _run_id = str(uuid.uuid4())[:12]
     try:
         order_run_sink.save(
             OrderRunSummary(
-                run_id=_run_id,
+                run_id=str(uuid.uuid4())[:12],
                 market=market,
                 mode=mode,
                 buy_orders=stats["buy_orders"],
