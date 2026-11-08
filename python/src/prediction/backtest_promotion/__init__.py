@@ -17,6 +17,7 @@ from src.prediction.backtest_promotion.judge import (
     judge_rollback,
     judge_win,
 )
+from src.prediction.backtest_promotion.old_production import measure_old_production
 from src.prediction.backtest_promotion.state import (
     CANDIDATE_NAMES,
     CODE_VERSION_SCOPE,
@@ -55,6 +56,7 @@ __all__ = [
     "latest_holdout_dates",
     "load_features_version",
     "load_state",
+    "measure_old_production",
     "prediction_code_version",
     "restore_backups",
     "results_dir",

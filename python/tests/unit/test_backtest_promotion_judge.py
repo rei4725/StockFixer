@@ -96,6 +96,21 @@ def test_rollback_none_is_conservative():
     assert d.triggered and d.old_is_better is False and d.rollback is False
 
 
+def test_rollback_compares_old_with_the_new_model_on_the_same_rows():
+    # 新しいモデルの5日の全行は当たりに届く。同じ行の新しいモデルは旧 production より良い
+    new_same = {"hit_rate_minus_majority": 0.0, "rank_corr": 0.05}
+    old_same = {"hit_rate_minus_majority": -0.01, "rank_corr": 0.1}
+    d = judge_rollback(LIVE, BT_CAND, old_same, new_same)
+    assert d.triggered and d.old_is_better is False and d.rollback is False
+    d = judge_rollback(LIVE, BT_CAND, {"hit_rate_minus_majority": 0.01, "rank_corr": 0.1}, new_same)
+    assert d.old_is_better is True and d.rollback is True
+
+
+def test_rollback_without_old_production_on_the_same_window_never_rolls_back():
+    d = judge_rollback(LIVE, BT_CAND, None, None)
+    assert d.triggered and d.old_is_better is False and d.rollback is False
+
+
 def test_rollback_none_live_rank_corr_is_treated_as_zero():
     live = {"hit_rate_minus_majority": 0.0, "rank_corr": None, "predicted_up_rate": 1.0}
     d = judge_rollback(live, BT_CAND, {"hit_rate_minus_majority": 0.01, "rank_corr": 0.02})

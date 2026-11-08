@@ -90,20 +90,25 @@ def judge_win(
 def judge_rollback(
     live: dict,
     backtest_candidate: dict,
-    backtest_old_production: dict,
+    old_same_window: Optional[dict],
+    new_same_window: Optional[dict] = None,
 ) -> RollbackDecision:
     """入れ替え後の実測（採点済み5営業日）から、戻すかを判定する。
 
-    見張りの条件のどれかに当たり、かつ旧 production のバックテストの
-    hit_rate_minus_majority と rank_corr がどちらも新 production の実測を上回るときだけ戻す。
+    見張りの条件のどれかに当たり、かつ同じ5日・同じ行の旧 production の
+    hit_rate_minus_majority と rank_corr がどちらも、同じ行の新 production を上回るときだけ戻す（#1729）。
+    取っておいた20日の旧 production の数字とは比べない（窓が違うと相場の向きで上下が決まる）。
     実測の rank_corr が None のときは 0.0 として扱う（予想が一定で順位が付かない場合を通さない）。
     それ以外の実測の値が None の条件は当たりにしない（判断材料が無いまま戻さない）。
-    旧 production 側か実測側の値が None なら old_is_better は False。
+    旧 production を測れない（old_same_window が None）か、どちらかの値が None なら
+    old_is_better は False（戻さない）。
 
     Args:
-        live: 新 production の実測の baseline_metrics()
+        live: 新 production の実測（5日の全行）の baseline_metrics()。見張りの条件に使う
         backtest_candidate: バックテストで測った候補（今の production）の物差し
-        backtest_old_production: バックテストで測った旧 production の物差し
+        old_same_window: 同じ5日・同じ行の旧 production の baseline_metrics()。測れなければ None
+        new_same_window: old_same_window と同じ行の新 production の baseline_metrics()。
+            None なら live を使う
     """
     triggered: list[str] = []
 
@@ -128,14 +133,20 @@ def judge_rollback(
     if up_rate is not None and (up_rate > UP_RATE_HIGH or up_rate < UP_RATE_LOW):
         triggered.append(f"上がる予想の割合が偏っている（{up_rate}）")
 
-    old_hit = _get(backtest_old_production, "hit_rate_minus_majority")
-    old_rc = _get(backtest_old_production, "rank_corr")
+    new = live if new_same_window is None else new_same_window
+    new_hit = _get(new, "hit_rate_minus_majority")
+    new_rc = _get(new, "rank_corr")
+    if new_rc is None:
+        new_rc = 0.0  # 実測と同じく、順位が付かないのは 0 とする
+    old = old_same_window or {}
+    old_hit = _get(old, "hit_rate_minus_majority")
+    old_rc = _get(old, "rank_corr")
     old_is_better = (
         old_hit is not None
         and old_rc is not None
-        and live_hit is not None
-        and old_hit > live_hit
-        and old_rc > live_rc
+        and new_hit is not None
+        and old_hit > new_hit
+        and old_rc > new_rc
     )
 
     return RollbackDecision(

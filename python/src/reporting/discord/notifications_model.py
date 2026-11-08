@@ -575,11 +575,16 @@ def send_backtest_promotion_rollback(result: dict) -> bool:
     )
     triggered = "\n".join(watch.get("triggered") or []) or "当たらなかった"
     if watch.get("triggered") and not watch.get("rolled_back"):
-        triggered += "\n→ 戻す先のバックテストも良くないため戻さない"
+        triggered += f"\n→ {watch.get('note') or '戻さない'}"
+    old = watch.get("old_production") or {}
     fields = [
         _bp_field("🕐 時刻", format_jst(fmt=DISCORD_DATETIME_FORMAT), True),
         _bp_field("🔖 入れ替えた版", f"`{watch.get('version') or '-'}`", True),
         _bp_field("📊 実測（最初の5日）", _bp_metrics(watch.get("live"))),
+        _bp_field(
+            f"📊 同じ5日の旧 production（{watch.get('compared_rows', 0)} 行）",
+            _bp_metrics(old.get("old")) if old.get("old") else old.get("reason") or "-",
+        ),
         _bp_field("🚨 見張りの条件", triggered),
     ]
     if watch.get("rolled_back"):

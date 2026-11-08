@@ -52,6 +52,25 @@ def _targets(n_jp: int, n_us: int = 3) -> list[SymbolTask]:
     return jp + [SymbolTask(market="us", symbol=f"US{i}") for i in range(n_us)]
 
 
+def _old_measure(
+    old_hit: float | None,
+    old_rc: float | None,
+    reason: str | None = None,
+    n_compared: int = 20,
+) -> dict:
+    """measure_old_production の結果の差し替え。new は同じ行の新しいモデルの物差し。"""
+    measured = reason is None
+    return {
+        "n_watch_rows": 20,
+        "n_compared": n_compared,
+        "need_rows": 16.0,
+        "old": {"hit_rate_minus_majority": old_hit, "rank_corr": old_rc} if measured else None,
+        "new": {"hit_rate_minus_majority": 0.0, "rank_corr": -0.4} if measured else None,
+        "reason": reason,
+        "skipped": {},
+    }
+
+
 def _evaluation(won: bool = True, passed: bool = True) -> HoldoutEvaluation:
     reasons = [] if won else ["MAE が production より小さくない"]
     if not passed:
@@ -98,6 +117,8 @@ def env(tmp_path, monkeypatch):
         "waiting": MagicMock(return_value=True),
         "accuracy": MagicMock(return_value=pd.DataFrame()),
         "targets": MagicMock(return_value=_targets(2)),
+        # 同じ5日の旧 production の物差し。既定は旧 production のほうが良い
+        "old_production": MagicMock(return_value=_old_measure(0.1, 0.5)),
     }
     monkeypatch.setattr(job, "prediction_code_version", lambda: _VERSION)
     monkeypatch.setattr(job, "latest_holdout_dates", lambda: list(_DATES))
@@ -106,6 +127,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(job, "evaluate_holdout", mocks["evaluate"])
     monkeypatch.setattr(job, "load_prediction_accuracy", mocks["accuracy"])
     monkeypatch.setattr(job, "load_target_symbols", mocks["targets"])
+    monkeypatch.setattr(job, "measure_old_production", mocks["old_production"])
     nm = "src.reporting.discord.notifications_model"
     monkeypatch.setattr(f"{nm}.send_backtest_promotion_result", mocks["result"])
     monkeypatch.setattr(f"{nm}.send_backtest_promotion_swap", mocks["swap"])
@@ -731,9 +753,7 @@ def test_watch_rolls_back_and_records_version(env):
 
 def test_watch_triggered_but_old_worse_keeps_model_and_notifies(env):
     backups = _swapped_env(env)
-    state = st.load_state()
-    state.watch["backtest_old_production"] = {"hit_rate_minus_majority": -0.5, "rank_corr": -0.9}
-    st.save_state(state)
+    env["old_production"].return_value = _old_measure(-0.5, -0.9)
     env["accuracy"].return_value = _scored_rows(
         5, [0.01, 0.02, 0.03, 0.04], [0.02, 0.01, -0.01, -0.02]
     )
@@ -754,6 +774,73 @@ def test_watch_triggered_but_old_worse_keeps_model_and_notifies(env):
     assert all(os.path.exists(p) for p in backups)
     env["rollback"].assert_called_once()
     assert len(_result_files(env)) == 1
+
+
+_TRIGGERING = ([0.01, 0.02, 0.03, 0.04], [0.02, 0.01, -0.01, -0.02])
+
+
+def test_watch_keeps_new_model_when_old_is_worse_on_the_same_five_days(env):
+    """取っておいた20日の旧 production が良くても、同じ5日の旧 production が悪ければ戻さない。"""
+    backups = _swapped_env(env)
+    # 取っておいた20日の旧 production は新しいモデルの5日より良い（直す前はこれで戻した）
+    assert st.load_state().watch["backtest_old_production"]["hit_rate_minus_majority"] == 0.02
+    env["old_production"].return_value = _old_measure(-0.2, -0.6)
+    env["accuracy"].return_value = _scored_rows(5, *_TRIGGERING)
+
+    watch = job.run_backtest_promotion()["watch"]
+
+    assert watch["judged"] is True
+    assert watch["triggered"]
+    assert watch["old_is_better"] is False
+    assert watch["rolled_back"] is False
+    assert (env["unified"] / "UnifiedStockXGBoost.joblib").read_bytes() == (
+        b"new UnifiedStockXGBoost"
+    )
+    assert st.load_state().rolled_back_versions == []
+    assert watch["old_production"]["old"]["hit_rate_minus_majority"] == -0.2
+    assert watch["compared_rows"] == 20
+    # 旧 production の写しと、同じ5日の行を渡す
+    called_backups, called_rows = env["old_production"].call_args[0]
+    assert called_backups == backups
+    assert len(called_rows) == 5 * 4
+
+
+def test_watch_rolls_back_when_old_is_better_on_the_same_five_days(env):
+    _swapped_env(env)
+    env["old_production"].return_value = _old_measure(0.05, 0.3)
+    env["accuracy"].return_value = _scored_rows(5, *_TRIGGERING)
+
+    watch = job.run_backtest_promotion()["watch"]
+
+    assert watch["old_is_better"] is True
+    assert watch["rolled_back"] is True
+    assert watch["compared_rows"] == 20
+    assert (env["unified"] / "UnifiedStockXGBoost.joblib").read_bytes() == (
+        b"old UnifiedStockXGBoost"
+    )
+    assert "oldver000000" in st.load_state().rolled_back_versions
+
+
+def test_watch_does_not_roll_back_when_old_production_cannot_be_measured(env):
+    _swapped_env(env)
+    env["old_production"].return_value = _old_measure(
+        None, None, reason="旧 production の写しが読めない", n_compared=0
+    )
+    env["accuracy"].return_value = _scored_rows(5, *_TRIGGERING)
+
+    watch = job.run_backtest_promotion()["watch"]
+
+    assert watch["judged"] is True
+    assert watch["triggered"]
+    assert watch["rolled_back"] is False
+    assert watch["compared_rows"] == 0
+    assert "旧 production の写しが読めない" in watch["note"]
+    assert (env["unified"] / "UnifiedStockXGBoost.joblib").read_bytes() == (
+        b"new UnifiedStockXGBoost"
+    )
+    state = st.load_state()
+    assert state.watch is None
+    assert state.rolled_back_versions == []
 
 
 def test_watch_rollback_then_state_save_failure_keeps_rollback_in_result(env, monkeypatch):
