@@ -81,10 +81,10 @@ class TestShadowEvaluationReadsWholeWindow(unittest.TestCase):
         self.assertAlmostEqual(result["challenger_hit_rate"], 3 / _N_DAYS)
 
     def test_promotion_gate_uses_whole_window(self):
-        from src.prediction.promotion_gate import _compute_hit_rate, _compute_slippage
+        from src.prediction.promotion_gate import _compute_hit_rate, _compute_prediction_mae
 
         hit = _compute_hit_rate("challenger", horizon=1)
-        slip = _compute_slippage("challenger", horizon=1)
+        slip = _compute_prediction_mae("challenger", horizon=1)
 
         self.assertAlmostEqual(hit, 3 / _N_DAYS)
         self.assertAlmostEqual(slip, 0.04 * (_N_DAYS - 3) / _N_DAYS)
