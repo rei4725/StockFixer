@@ -34,6 +34,15 @@ def _make_accuracy_df() -> pd.DataFrame:
     )
 
 
+def _mae_by_name(shadow_mae: float, current_mae: float = 0.02):
+    """shadow 側の名前には shadow_mae、current 側には current_mae を返す差し替え。"""
+
+    def _fake(name, horizon, window=None):
+        return shadow_mae if name in ("shadow", "challenger") else current_mae
+
+    return _fake
+
+
 class TestWfMean(unittest.TestCase):
     def test_returns_mean_for_model_name_column(self):
         from src.prediction.promotion_gate import _wf_mean
@@ -116,33 +125,95 @@ class TestComputeHitRate(unittest.TestCase):
         self.assertAlmostEqual(result, 1.0, places=5)
 
 
-class TestComputeSlippage(unittest.TestCase):
-    def test_returns_slippage(self):
-        from src.prediction.promotion_gate import _compute_slippage
+class TestComputePredictionMae(unittest.TestCase):
+    def test_returns_mae(self):
+        from src.prediction.promotion_gate import _compute_prediction_mae
 
         df = _make_accuracy_df()
         with patch("src.prediction.promotion_gate.load_prediction_accuracy", return_value=df):
-            result = _compute_slippage("shadow", horizon=1)
-        self.assertIsNotNone(result)
-        self.assertGreaterEqual(result, 0.0)
+            result = _compute_prediction_mae("shadow", horizon=1)
+        self.assertAlmostEqual(result, (0.0 + 0.005 + 0.005 + 0.005) / 4)
 
     def test_returns_none_when_empty(self):
-        from src.prediction.promotion_gate import _compute_slippage
+        from src.prediction.promotion_gate import _compute_prediction_mae
 
         with patch(
             "src.prediction.promotion_gate.load_prediction_accuracy",
             return_value=pd.DataFrame(),
         ):
-            result = _compute_slippage("shadow", horizon=1)
+            result = _compute_prediction_mae("shadow", horizon=1)
         self.assertIsNone(result)
 
     def test_returns_none_when_missing_columns(self):
-        from src.prediction.promotion_gate import _compute_slippage
+        from src.prediction.promotion_gate import _compute_prediction_mae
 
         df = pd.DataFrame({"model_name": ["shadow"], "direction_match": [1]})
         with patch("src.prediction.promotion_gate.load_prediction_accuracy", return_value=df):
-            result = _compute_slippage("shadow", horizon=1)
+            result = _compute_prediction_mae("shadow", horizon=1)
         self.assertIsNone(result)
+
+
+def _mae_df(model_name: str, mae: float, n: int = 4) -> pd.DataFrame:
+    """予想 0・実際 mae の行（予想の MAE がちょうど mae になる）。"""
+    return pd.DataFrame(
+        {
+            "direction_match": [1] * n,
+            "predicted_ratio": [0.0] * n,
+            "actual_ratio": [mae] * n,
+            "model_name": [model_name] * n,
+        }
+    )
+
+
+class TestPredictionMaeVsCurrent(unittest.TestCase):
+    """基準5は shadow の予想の MAE を同じ窓の current の MAE と比べる（#1727）。"""
+
+    def _run(self, frames: dict[str, pd.DataFrame]):
+        from src.prediction.promotion_gate import evaluate_promotion
+
+        wf_df = pd.DataFrame(
+            {
+                "model_name": ["shadow", "current"],
+                "total_return": [0.06, 0.04],
+                "max_drawdown": [-0.08, -0.12],
+                "sharpe_ratio": [0.7, 0.6],
+            }
+        )
+        with (
+            patch(
+                "src.prediction.promotion_gate._load_latest_wf_summary",
+                return_value=(wf_df, "wf_summary_20261108.csv"),
+            ),
+            patch(
+                "src.prediction.promotion_gate._load_model_window",
+                side_effect=lambda name, horizon, window=None: frames.get(name, pd.DataFrame()),
+            ),
+            patch("src.prediction.promotion_gate._collect_run_ids", return_value=[]),
+        ):
+            return evaluate_promotion("shadow", "current")
+
+    def test_passes_when_shadow_mae_below_current_even_above_two_percent(self):
+        result = self._run({"shadow": _mae_df("shadow", 0.05), "current": _mae_df("current", 0.06)})
+        crit = result.criteria["slippage"]
+        self.assertTrue(crit["passed"])
+        self.assertAlmostEqual(crit["shadow"], 0.05)
+        self.assertAlmostEqual(crit["current"], 0.06)
+
+    def test_fails_when_shadow_mae_above_current_even_below_two_percent(self):
+        result = self._run(
+            {"shadow": _mae_df("shadow", 0.016), "current": _mae_df("current", 0.012)}
+        )
+        crit = result.criteria["slippage"]
+        self.assertFalse(crit["passed"])
+        self.assertAlmostEqual(crit["shadow"], 0.016)
+        self.assertAlmostEqual(crit["current"], 0.012)
+        self.assertIn("slippage", result.reason)
+
+    def test_fails_when_current_rows_missing(self):
+        result = self._run({"shadow": _mae_df("shadow", 0.01)})
+        crit = result.criteria["slippage"]
+        self.assertFalse(crit["passed"])
+        self.assertIsNone(crit["current"])
 
 
 class TestCollectRunIds(unittest.TestCase):
@@ -184,7 +255,10 @@ class TestEvaluatePromotion(unittest.TestCase):
                 return_value=(wf_df, "wf_summary_20240101.csv"),
             ),
             patch("src.prediction.promotion_gate._compute_hit_rate", return_value=hit_rate),
-            patch("src.prediction.promotion_gate._compute_slippage", return_value=slippage),
+            patch(
+                "src.prediction.promotion_gate._compute_prediction_mae",
+                side_effect=_mae_by_name(slippage),
+            ),
             patch("src.prediction.promotion_gate._collect_run_ids", return_value=run_ids),
         ]
 
@@ -255,7 +329,10 @@ class TestEvaluatePromotion(unittest.TestCase):
                 return_value=(None, None),
             ),
             patch("src.prediction.promotion_gate._compute_hit_rate", return_value=0.6),
-            patch("src.prediction.promotion_gate._compute_slippage", return_value=0.01),
+            patch(
+                "src.prediction.promotion_gate._compute_prediction_mae",
+                side_effect=_mae_by_name(0.01),
+            ),
             patch("src.prediction.promotion_gate._collect_run_ids", return_value=[]),
         ):
             result = evaluate_promotion("shadow", "current")
@@ -317,7 +394,10 @@ class TestEvaluatePromotionWithoutModelName(unittest.TestCase):
                 "src.prediction.promotion_gate._compute_hit_rate",
                 side_effect=lambda name, horizon: rates[name],
             ),
-            patch("src.prediction.promotion_gate._compute_slippage", return_value=slippage),
+            patch(
+                "src.prediction.promotion_gate._compute_prediction_mae",
+                side_effect=_mae_by_name(slippage),
+            ),
             patch("src.prediction.promotion_gate._collect_run_ids", return_value=[]),
         ):
             from src.prediction.promotion_gate import evaluate_promotion
@@ -429,7 +509,10 @@ class TestSchedulerAutoPromotion(unittest.TestCase):
                 "src.prediction.promotion_gate._compute_hit_rate",
                 return_value=0.6 if eligible else 0.3,
             ),
-            patch("src.prediction.promotion_gate._compute_slippage", return_value=0.01),
+            patch(
+                "src.prediction.promotion_gate._compute_prediction_mae",
+                side_effect=_mae_by_name(0.01),
+            ),
             patch("src.prediction.promotion_gate._collect_run_ids", return_value=[]),
         ]
 

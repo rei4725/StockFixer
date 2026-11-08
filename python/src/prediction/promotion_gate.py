@@ -9,7 +9,8 @@ shadow モデルの Walk-Forward 成績が current モデルを上回った場�
     2. MDD:        |shadow_mdd| < |current_mdd|（ドローダウン改善）
     3. Sharpe:     shadow >= current * 0.95（Sharpe は 5% 劣化まで許容）
     4. Hit Rate:   shadow >= 0.50（最低ライン）
-    5. slippage 乖離: shadow の avg_abs_diff_ratio < 0.02（2% 以内）
+    5. 予想の MAE:  shadow の |predicted_ratio - actual_ratio| の平均が、同じ窓の
+                    current の MAE 以下（criteria のキーは互換のため "slippage"。#1727）
     6. 予想のばらつき: shadow の予想が全銘柄でほぼ同じ値でないこと（#1602）
 
 WF の要約に model_name の列が無いときは 1〜3 を比べられないとして判定から外し、
@@ -66,9 +67,6 @@ _SHARPE_TOLERANCE = 0.05  # 5% 劣化まで許容
 # Hit Rate: shadow の方向正解率が _HIT_RATE_FLOOR 以上
 _HIT_RATE_FLOOR = 0.50
 
-# Slippage 乖離: avg_abs_diff_ratio が _SLIPPAGE_THRESHOLD 未満
-_SLIPPAGE_THRESHOLD = 0.02  # 2%
-
 
 # ---------------------------------------------------------------------------
 # 戻り値型
@@ -95,7 +93,7 @@ class PromotionResult:
               "sharpe":      {"shadow": float, "current": float,
                                "threshold": float, "passed": bool},
               "hit_rate":    {"shadow": float, "floor": float, "passed": bool},
-              "slippage":    {"shadow": float, "threshold": float, "passed": bool},
+              "slippage":    {"shadow": float, "current": float, "passed": bool},
               "prediction_spread": {"shadow": float, "threshold": float, "passed": bool},
             }
         reason: 判定理由のサマリー文（1 行）
@@ -197,13 +195,14 @@ def _compute_hit_rate(
     return float(df["direction_match"].astype(float).mean())
 
 
-def _compute_slippage(model_name: str, horizon: int) -> Optional[float]:
-    """prediction_accuracy テーブルから avg_abs_diff_ratio を近似計算する。
+def _compute_prediction_mae(
+    model_name: str, horizon: int, window: Optional[ChallengerWindow] = None
+) -> Optional[float]:
+    """prediction_accuracy テーブルから予想の MAE（|predicted_ratio - actual_ratio| の平均）を返す。
 
-    prediction_accuracy には price 差分の絶対値を集計した列はないため、
-    predicted_ratio と actual_ratio の絶対乖離の平均を代用する。
+    window を渡すと、その challenger の窓の日に絞って測る（#1727）。
     """
-    df = _load_model_window(model_name, horizon)
+    df = _load_model_window(model_name, horizon, window)
     if df.empty:
         return None
     if "model_name" in df.columns:
@@ -258,8 +257,9 @@ def evaluate_promotion(
     eligible から外し、代わりに shadow の Hit Rate が current 以上であることを
     求める（#1269）。
 
-    Hit Rate と Slippage は prediction_accuracy テーブルの shadow モデルの
-    直近 DEFAULT_EVALUATION_DAYS 日分の全部の行から取得する。
+    Hit Rate と予想の MAE は prediction_accuracy テーブルの shadow モデルの
+    直近 DEFAULT_EVALUATION_DAYS 日分の全部の行から取得する。予想の MAE は
+    current も同じ窓で測り、shadow が current 以下なら合格とする（#1727）。
 
     Args:
         shadow_model_name: 評価対象の shadow モデル名
@@ -304,7 +304,8 @@ def evaluate_promotion(
     window = _challenger_window(shadow_model_name, horizon)
     paired: dict = {"window": window} if window is not None else {}
     shadow_hit_rate = _compute_hit_rate(shadow_model_name, horizon)
-    shadow_slippage = _compute_slippage(shadow_model_name, horizon)
+    shadow_mae = _compute_prediction_mae(shadow_model_name, horizon)
+    current_mae = _compute_prediction_mae(current_model_name, horizon, **paired)
     current_hit_rate = (
         _compute_hit_rate(current_model_name, horizon, **paired) if wf_not_comparable else None
     )
@@ -383,14 +384,13 @@ def evaluate_promotion(
     if window is not None:
         criteria_hit_rate.update(window.as_dict())
 
-    # 5. Slippage 乖離（avg_abs_diff_ratio < 0.02）
-    if shadow_slippage is not None:
-        slippage_passed = shadow_slippage < _SLIPPAGE_THRESHOLD
-    else:
-        slippage_passed = False
+    # 5. 予想の MAE（shadow <= 同じ窓の current。どちらかを測れなければ不合格。#1727）
+    slippage_passed = (
+        shadow_mae is not None and current_mae is not None and shadow_mae <= current_mae
+    )
     criteria_slippage: dict = {
-        "shadow": shadow_slippage,
-        "threshold": _SLIPPAGE_THRESHOLD,
+        "shadow": shadow_mae,
+        "current": current_mae,
         "passed": slippage_passed,
     }
 
@@ -466,6 +466,7 @@ def evaluate_promotion(
         f"昇格ゲート判定: eligible={eligible} reason={reason} "
         f"net_return={net_return_passed} mdd={mdd_passed} "
         f"sharpe={sharpe_passed} hit_rate={hit_rate_passed} slippage={slippage_passed} "
+        f"mae shadow={shadow_mae} current={current_mae} "
         f"prediction_spread={spread_passed} 窓={window.as_dict() if window is not None else None}"
     )
     return result
