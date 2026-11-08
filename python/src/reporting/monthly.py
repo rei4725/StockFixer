@@ -11,7 +11,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -19,7 +19,13 @@ import pandas as pd
 
 from src.domain.ports import AnalyticsQuery
 from src.reporting.drift_thresholds import load_drift_thresholds
-from src.reporting.kpi import _REPORT_DAYS, MonthlyKPI, get_monthly_kpis
+from src.reporting.kpi import (
+    _REPORT_DAYS,
+    MonthlyKPI,
+    get_monthly_kpis,
+    predicted_jst_date,
+    window_start_jst,
+)
 from src.reporting.types import MonthlyReportSummary
 from src.utils.data_path_utils import get_results_dir
 from src.utils.logger import get_logger
@@ -74,19 +80,20 @@ def _count_success_symbols(df: pd.DataFrame) -> Optional[int]:
 
 
 def _load_window_accuracy(analytics: AnalyticsQuery, days: int = _REPORT_DAYS) -> pd.DataFrame:
-    """checked_at が直近 days 日の採点を、行数の上限で落とさずに取得する。
+    """predicted_at（JST の日付）が直近 days 日の採点を、行数の上限で落とさずに取得する。
 
     prediction_accuracy は predicted_at 降順の先頭 limit 行だけを返す。取得した行が
-    上限ちょうどで、しかも最も古い checked_at がまだ窓の中なら、窓の古い側が
+    上限ちょうどで、しかも最も古い predicted_at がまだ窓の中なら、窓の古い側が
     切れているので上限を倍にして読み直す。窓での絞り込みは kpi.py に任せる。
+    checked_at は採点し直しのたびに今に書き換わるため、判定に使わない（#1725）。
     """
-    cutoff = datetime.now() - timedelta(days=days)
+    cutoff = window_start_jst(days)
     limit = _ACCURACY_PAGE_ROWS
     while True:
         df = analytics.prediction_accuracy(horizon=1, limit=limit, raise_on_error=True)
-        if len(df) < limit or "checked_at" not in df.columns:
+        if len(df) < limit or "predicted_at" not in df.columns:
             return df
-        oldest = pd.to_datetime(df["checked_at"], errors="coerce").min()
+        oldest = predicted_jst_date(df["predicted_at"]).min()
         if pd.isna(oldest) or oldest < cutoff:
             return df
         limit *= 2
