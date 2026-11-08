@@ -171,7 +171,7 @@ class RollbackDecision:
     Attributes:
         rollback: 戻すとき True（triggered があり、かつ old_is_better）
         triggered: 当たった見張りの条件（日本語）
-        old_is_better: 旧 production のバックテストが新 production の実測を両方で上回るか
+        old_is_better: 同じ5日・同じ行の旧 production が新 production を両方で上回るか
     """
 
     rollback: bool

@@ -2,7 +2,7 @@
 
 予想のコードの版が前回の評価から変わり、stock_features もその版で作り直された夜に、
 取っておいた直近の期間を外して候補を学習し、その期間で今の production と比べる。勝てば候補を本番の名前で置き、5営業日見張る。
-見張りで悪ければ、戻す先のほうが良いときだけ写しから戻す。
+見張りで悪ければ、同じ5日の行で旧 production（写し）のほうが良いときだけ写しから戻す。
 
 全体を統合モデルのロックの中で動かし、週次の学習と同時に動かない。
 結果は results/backtest_promotion/YYYYMMDD_HHMMSS.json に書き、Discord へ知らせる。
@@ -31,6 +31,7 @@ from src.prediction.backtest_promotion import (
     latest_holdout_dates,
     load_features_version,
     load_state,
+    measure_old_production,
     prediction_code_version,
     restore_backups,
     results_dir,
@@ -396,24 +397,35 @@ def _check_watch(state: BacktestPromotionState, result: dict) -> None:
 
     # 入れ替えの後の、最初の5日だけで測る
     first_days = set(days[:WATCH_TRADING_DAYS])
-    live = baseline_metrics(rows[rows["_day"].isin(first_days)])
-    decision = judge_rollback(live, watch["backtest_candidate"], watch["backtest_old_production"])
+    first_rows = rows[rows["_day"].isin(first_days)]
+    live = baseline_metrics(first_rows)
+    # 旧 production は取っておいた20日でなく、同じ5日・同じ行で予想させて比べる（#1729）
+    old = measure_old_production(watch.get("backups", []), first_rows)
+    decision = judge_rollback(live, watch["backtest_candidate"], old["old"], old["new"])
     verdict.update(
         judged=True,
         days=sorted(first_days),
         live=live,
+        old_production=old,
+        compared_rows=old["n_compared"],
         triggered=decision.triggered,
         old_is_better=decision.old_is_better,
         rolled_back=False,
         backups=watch.get("backups", []),
     )
+    if old["reason"] is not None:
+        logger.warning("仮の入れ替えの見張り: 同じ5日の旧 production を測れない: %s", old["reason"])
     if decision.rollback:
         restore_backups(watch["backups"])
         verdict["rolled_back"] = True
         if watch["version"] not in state.rolled_back_versions:
             state.rolled_back_versions.append(watch["version"])
+    elif decision.triggered and old["reason"] is not None:
+        verdict["note"] = (
+            f"見張りに当たったが、同じ5日の旧 production を測れないため戻さない: {old['reason']}"
+        )
     elif decision.triggered:
-        verdict["note"] = "見張りに当たったが戻す先も悪いため戻さない"
+        verdict["note"] = "見張りに当たったが、同じ5日の旧 production も良くないため戻さない"
     state.watch = None
     save_state(state)
     logger.info(
