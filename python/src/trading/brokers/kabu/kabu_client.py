@@ -7,6 +7,7 @@ APIパスワードは環境変数 KABU_API_PASSWORD から取得する。
 公式仕様書: https://kabucom.github.io/kabusapi/reference/
 """
 
+import math
 import os
 from datetime import datetime, timedelta
 from typing import Any
@@ -22,6 +23,53 @@ _BASE_URL = "http://localhost:18080/kabusapi"
 _TOKEN_TTL_SECONDS = 3600  # トークン有効期間（1時間）
 _TOKEN_REFRESH_BUFFER_SECONDS = 300  # 期限5分前に事前更新
 _TOKEN_MAX_RETRIES = 2  # 1回リトライ（初回 + 1回）
+
+
+def _number(value: Any) -> float | None:
+    """数として読める値を float で返す。null・数でない値・NaN は None を返す。"""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return None
+    return None if math.isnan(num) else num
+
+
+def _position_row(item: dict[str, Any]) -> dict[str, Any]:
+    """/positions の1行を保有の辞書に写す（#1010）。
+
+    欄が null のときは .get の既定値が効かず None になるため、ここで数に直す。
+    現在値が null なら評価額 Valuation ÷ 株数で埋め、埋められなければ NaN にする
+    （紙の道と同じく position_valuation が時価0として数え、SL/TP は飛ばす）。
+    """
+    symbol = item.get("Symbol", "")
+    qty_num = _number(item.get("LeavesQty", 0))
+    if qty_num is None:
+        logger.warning(f"[kabu] {symbol}: 建玉の株数 LeavesQty が読めず 0 として扱う")
+        qty_num = 0.0
+    qty = int(qty_num)
+
+    avg_price = _number(item.get("Price", 0.0))
+    if avg_price is None:
+        logger.warning(f"[kabu] {symbol}: 建玉の取得単価 Price が読めず NaN として扱う")
+        avg_price = math.nan
+
+    current_price = _number(item.get("CurrentPrice", 0.0))
+    if current_price is None:
+        valuation = _number(item.get("Valuation"))
+        if valuation is not None and qty > 0:
+            current_price = valuation / qty
+        else:
+            logger.warning(f"[kabu] {symbol}: 建玉の現在値 CurrentPrice が読めず NaN として扱う")
+            current_price = math.nan
+
+    return {
+        "symbol": symbol,
+        "qty": qty,
+        "avg_price": avg_price,
+        "current_price": current_price,
+    }
 
 
 class KabuBroker(BrokerBase):
@@ -172,15 +220,7 @@ class KabuBroker(BrokerBase):
         )
         resp.raise_for_status()
         raw = resp.json() or []
-        return [
-            {
-                "symbol": item.get("Symbol", ""),
-                "qty": item.get("LeavesQty", 0),
-                "avg_price": item.get("Price", 0.0),
-                "current_price": item.get("CurrentPrice", 0.0),
-            }
-            for item in raw
-        ]
+        return [_position_row(item) for item in raw]
 
     def get_balance(self) -> float:
         """現金余力（円）を返す"""
