@@ -28,6 +28,7 @@ from src.trading.execution.selection import (
     _get_pending_buy_symbols,
     _get_rule_buy_symbols_placed_today,
 )
+from src.trading.position_size_reason import ZERO_QTY_BUDGET_CAP, zero_qty_skip_key
 from src.trading.position_valuation import count_short_positions, short_held_codes
 from src.trading.risk_manager import RiskManager
 from src.utils.data_path_utils import get_ticker
@@ -250,12 +251,23 @@ def execute_rule_paper_trades(
                 # 残高連動のハーフ Kelly 基準で株数を算出（残高不足時は 0 株 → スキップ）。
                 # initial_budget_per_trade は 1 銘柄あたりの投資上限として併用する（保守側）。
                 qty = risk.calc_position_size(symbol, price)
+                sized_qty = qty
                 if price > 0 and initial_budget_per_trade > 0:
                     budget_cap = (int(initial_budget_per_trade / price) // lot) * lot
                     qty = min(qty, budget_cap)
                 if qty <= 0:
-                    logger.info("[rule] %s: 発注株数 0（残高不足 or サイズ上限）→ スキップ", symbol)
-                    skip_reasons["zero_qty"] += 1
+                    # 株数0の理由を分けて数える（#1748）
+                    if sized_qty > 0:
+                        zero_key = ZERO_QTY_BUDGET_CAP
+                        zero_text = (
+                            f"1銘柄の予算の上限 予算={initial_budget_per_trade:.0f} "
+                            f"1単元の代金={price * lot:.0f} 算出株数={sized_qty}"
+                        )
+                    else:
+                        zero_key = zero_qty_skip_key(risk.zero_reason)
+                        zero_text = str(risk.zero_reason)
+                    logger.info("[rule] %s: 発注株数 0 → スキップ（%s）", symbol, zero_text)
+                    skip_reasons[zero_key] += 1
                     skipped += 1
                     continue
                 sector = candidate_sectors[str(symbol)]
