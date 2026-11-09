@@ -122,3 +122,13 @@ def exit_expired_positions() -> list[str]:
 
     logger.info("[horizon_exit] ホライズン決済完了: %d 件", len(exited))
     return failed
+
+
+def run_daily_horizon_exit() -> None:
+    """毎営業日 9:00: 休場日は注文を出さず、8:50 の回の漏れの決済を行う（#1529）。"""
+    # daily がこのモジュールを読むので、循環を避けて呼ぶ時に読む
+    from src.orchestration.jobs.common import _skip_if_jp_market_closed
+    from src.orchestration.jobs.daily import run_horizon_exit_check
+
+    if not _skip_if_jp_market_closed("ホライズン決済"):
+        run_horizon_exit_check()

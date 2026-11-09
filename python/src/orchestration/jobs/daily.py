@@ -35,6 +35,7 @@ from src.orchestration.jobs.features_marker import (
     current_code_version,
     record_features_version_if_covered,
 )
+from src.orchestration.jobs.horizon_exit import run_daily_horizon_exit  # noqa: F401 (re-export)
 from src.orchestration.jobs.prediction_errors import notify_prediction_errors
 from src.orchestration.jobs.prediction_saved_marker import (
     clear_prediction_saved_marker,
@@ -379,12 +380,6 @@ def run_daily_auto_order():
 
 # 8:50 の自動発注と 9:00 のホライズン決済のジョブが同時に判定して二重に決済しないため（#1321）
 _HORIZON_EXIT_LOCK = threading.Lock()
-
-
-def run_daily_horizon_exit() -> None:
-    """毎営業日 9:00: 休場日は注文を出さず、8:50 の回の漏れの決済を行う（#1529）。"""
-    if not _skip_if_jp_market_closed("ホライズン決済"):
-        run_horizon_exit_check()
 
 
 def run_horizon_exit_check() -> None:
