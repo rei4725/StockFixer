@@ -7,6 +7,7 @@ APIパスワードは環境変数 KABU_API_PASSWORD から取得する。
 公式仕様書: https://kabucom.github.io/kabusapi/reference/
 """
 
+import math
 import os
 from datetime import datetime, timedelta
 from typing import Any
@@ -24,6 +25,71 @@ _TOKEN_REFRESH_BUFFER_SECONDS = 300  # 期限5分前に事前更新
 _TOKEN_MAX_RETRIES = 2  # 1回リトライ（初回 + 1回）
 _REC_TYPE_EXECUTION = 8  # /orders の Details の RecType: 8 = 約定
 _STATE_DONE = 5  # /orders の State: 5 = 終了（全部約定・取消・失効）
+
+# RequestSendOrder の値（kabu_STATION_API.yaml）
+# Side: "1" = 売、"2" = 買。OrderSide の数とは逆なので、明示の表で写す。
+_CASH_SIDE: dict[OrderSide, str] = {
+    OrderSide.BUY: "2",
+    OrderSide.SELL: "1",
+}
+# DelivType: 現物買は 2 = お預り金、現物売は 0 = 指定なし
+_CASH_DELIV_TYPE: dict[OrderSide, int] = {
+    OrderSide.BUY: 2,
+    OrderSide.SELL: 0,
+}
+# FundType: 現物買は 02 = 保護、現物売は半角スペース2つが指定必須
+_CASH_FUND_TYPE: dict[OrderSide, str] = {
+    OrderSide.BUY: "02",
+    OrderSide.SELL: "  ",
+}
+_ACCOUNT_TYPE_SPECIFIC = 4  # AccountType: 2 = 一般、4 = 特定、12 = 法人
+
+
+def _number(value: Any) -> float | None:
+    """数として読める値を float で返す。null・数でない値・NaN は None を返す。"""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return None
+    return None if math.isnan(num) else num
+
+
+def _position_row(item: dict[str, Any]) -> dict[str, Any]:
+    """/positions の1行を保有の辞書に写す（#1010）。
+
+    欄が null のときは .get の既定値が効かず None になるため、ここで数に直す。
+    現在値が null なら評価額 Valuation ÷ 株数で埋め、埋められなければ NaN にする
+    （紙の道と同じく position_valuation が時価0として数え、SL/TP は飛ばす）。
+    """
+    symbol = item.get("Symbol", "")
+    qty_num = _number(item.get("LeavesQty", 0))
+    if qty_num is None:
+        logger.warning(f"[kabu] {symbol}: 建玉の株数 LeavesQty が読めず 0 として扱う")
+        qty_num = 0.0
+    qty = int(qty_num)
+
+    avg_price = _number(item.get("Price", 0.0))
+    if avg_price is None:
+        logger.warning(f"[kabu] {symbol}: 建玉の取得単価 Price が読めず NaN として扱う")
+        avg_price = math.nan
+
+    current_price = _number(item.get("CurrentPrice", 0.0))
+    if current_price is None:
+        valuation = _number(item.get("Valuation"))
+        if valuation is not None and qty > 0:
+            current_price = valuation / qty
+        else:
+            logger.warning(f"[kabu] {symbol}: 建玉の現在値 CurrentPrice が読めず NaN として扱う")
+            current_price = math.nan
+
+    return {
+        "symbol": symbol,
+        "qty": qty,
+        "avg_price": avg_price,
+        "current_price": current_price,
+    }
 
 
 class KabuBroker(BrokerBase):
@@ -113,17 +179,25 @@ class KabuBroker(BrokerBase):
 
         Returns:
             {"order_id": str, "status": str, "message": str}
+
+        Raises:
+            BrokerError: SHORT / SHORT_COVER など現物の口で送れない side のとき（送らない）
         """
+        if side not in _CASH_SIDE:
+            raise BrokerError(
+                f"[kabu] 現物の口では {side.name} の注文を送れません: symbol={symbol}"
+            )
         token = self.get_token()
         body = {
             "Password": os.environ.get("KABU_TRADE_PASSWORD", ""),
             "Symbol": symbol.replace(".T", ""),
             "Exchange": 1,  # 1 = 東証
             "SecurityType": 1,  # 1 = 株式
-            "Side": str(int(side)),
+            "Side": _CASH_SIDE[side],
             "CashMargin": 1,  # 1 = 現物
-            "DelivType": 2,  # 2 = お預り金
-            "FundType": "AA",  # AA = 特定預り
+            "DelivType": _CASH_DELIV_TYPE[side],
+            "FundType": _CASH_FUND_TYPE[side],
+            "AccountType": _ACCOUNT_TYPE_SPECIFIC,
             "Qty": qty,
             "FrontOrderType": int(order_type),
             "Price": price if order_type == OrderType.LIMIT else 0,
@@ -174,15 +248,7 @@ class KabuBroker(BrokerBase):
         )
         resp.raise_for_status()
         raw = resp.json() or []
-        return [
-            {
-                "symbol": item.get("Symbol", ""),
-                "qty": item.get("LeavesQty", 0),
-                "avg_price": item.get("Price", 0.0),
-                "current_price": item.get("CurrentPrice", 0.0),
-            }
-            for item in raw
-        ]
+        return [_position_row(item) for item in raw]
 
     def get_balance(self) -> float:
         """現金余力（円）を返す"""
