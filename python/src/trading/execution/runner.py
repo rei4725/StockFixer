@@ -96,14 +96,15 @@ def run_order_steps(
 
     record = _recorder(_record_order, stats)  # 記録の失敗でも注文は出たものとして数える (#1104)
     try:
+        broker.check_order_ready()  # パスワードの欠けは回の始めに1回だけ確かめる（#1757）
         broker.get_token()
     except BrokerError as e:
-        logger.error("[exec] トークン取得失敗。本日の発注をスキップします: %s", e, exc_info=True)
+        logger.error("[exec] トークン・設定の不備。本日の発注をスキップ: %s", e, exc_info=True)
         stats["errors"] += 1  # SL/TP も止まる日をジョブの失敗にする（#1523）
         if notifier is not None:
             notifier.send_alert(
-                "kabu API トークンエラー",
-                f"トークン取得に失敗したため本日の発注をスキップします。\n{e}",
+                "kabu API トークン・設定エラー",
+                f"トークン取得か注文の設定の確かめに失敗したため本日の発注をスキップします。\n{e}",
                 level=AlertLevel.ERROR,
             )
         return finish_order_run(stats, market=market, mode=mode, token_error=e)  # #1533

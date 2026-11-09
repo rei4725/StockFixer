@@ -161,11 +161,7 @@ class KabuBroker(BrokerBase):
         if self._token and datetime.now() < self._token_expires_at - buffer:
             return self._token
 
-        if not self._api_password:
-            raise EnvironmentError(
-                "KABU_API_PASSWORD が設定されていません。"
-                "環境変数を設定するか KabuBroker(api_password=...) で渡してください。"
-            )
+        self._require_api_password()
 
         last_exc: Exception | None = None
         for attempt in range(_TOKEN_MAX_RETRIES):
@@ -192,6 +188,22 @@ class KabuBroker(BrokerBase):
         raise BrokerError(
             f"kabu STATION® API トークン取得に失敗しました ({_TOKEN_MAX_RETRIES}回試行): {last_exc}"
         ) from last_exc
+
+    def _require_api_password(self) -> None:
+        """API パスワードが未設定・空なら、取引パスワードと同じく BrokerError で止める（#1757）。"""
+        if not self._api_password:
+            raise BrokerError(
+                "KABU_API_PASSWORD が設定されていません。"
+                "環境変数を設定するか KabuBroker(api_password=...) で渡してください。"
+            )
+
+    def check_order_ready(self) -> None:
+        """発注の回の始めに、取引パスワードと API パスワードの欠けを HTTP を送らずに確かめる（#1757）。
+
+        欠けていれば BrokerError を出す。runner はそれを受けて知らせを1通出し、その回の発注を止める。
+        """
+        self._require_trade_password()
+        self._require_api_password()
 
     # ------------------------------------------------------------------
     # 注文
