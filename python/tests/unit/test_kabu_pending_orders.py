@@ -54,6 +54,7 @@ def _resp(raw):
 def _kabu_broker(positions=None):
     broker = KabuBroker(api_password="pw")
     broker.get_token = MagicMock(return_value="tok")  # type: ignore[method-assign]
+    broker.check_order_ready = MagicMock(return_value=None)  # type: ignore[method-assign]
     broker.get_positions = MagicMock(return_value=positions or [])  # type: ignore[method-assign]
     broker.get_balance = MagicMock(return_value=1_000_000.0)  # type: ignore[method-assign]
     broker.send_order = MagicMock(  # type: ignore[method-assign]
