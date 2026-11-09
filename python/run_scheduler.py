@@ -72,9 +72,9 @@ def job_daily_auto_order():
 
 def job_daily_horizon_exit():
     """毎営業日 9:00 - 期限を過ぎたペーパーの保有のホライズン決済（8:50 の回の漏れを補う）"""
-    from src.orchestration.scheduler import run_horizon_exit_check
+    from src.orchestration.scheduler import run_daily_horizon_exit
 
-    run_horizon_exit_check()
+    run_daily_horizon_exit()
 
 
 def job_daily_settle_orders():

@@ -381,6 +381,12 @@ def run_daily_auto_order():
 _HORIZON_EXIT_LOCK = threading.Lock()
 
 
+def run_daily_horizon_exit() -> None:
+    """毎営業日 9:00: 休場日は注文を出さず、8:50 の回の漏れの決済を行う（#1529）。"""
+    if not _skip_if_jp_market_closed("ホライズン決済"):
+        run_horizon_exit_check()
+
+
 def run_horizon_exit_check() -> None:
     """
     毎営業日実行: target_exit_date を過ぎたペーパーポジションを成行で強制決済する。

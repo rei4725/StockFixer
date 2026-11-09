@@ -20,6 +20,7 @@ from src.orchestration.jobs.daily import (
     run_daily_auto_order,
     run_daily_backup,
     run_daily_drift_check,
+    run_daily_horizon_exit,
     run_daily_paper_trade_report,
     run_daily_pipeline,
     run_daily_rule_signals,
@@ -67,6 +68,7 @@ __all__ = [
     # daily
     "run_daily_pipeline",
     "run_daily_auto_order",
+    "run_daily_horizon_exit",
     "run_horizon_exit_check",
     "run_daily_settle_orders",
     "run_daily_paper_trade_report",
