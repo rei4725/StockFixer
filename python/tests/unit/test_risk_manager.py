@@ -279,7 +279,8 @@ class TestRiskManagerPersistence(unittest.TestCase):
         self.assertIsInstance(params[2], datetime)
         self.assertEqual(params[3], MAX_CONSECUTIVE_LOSSES)
 
-    def test_missing_trade_pnl_returns_zero_for_non_paper_broker(self):
+    def test_missing_trade_pnl_returns_none_for_non_paper_broker(self):
+        """数える元が無いときは 0 でなく None（分からない）を返し、ゲートが止める側に倒す（#995）"""
         broker = _make_broker()
         broker.broker_name = "live"
         risk = RiskManager(broker)
@@ -294,7 +295,7 @@ class TestRiskManagerPersistence(unittest.TestCase):
         with patch("src.trading.risk_manager._db_connection", new=mock_db):
             daily_loss = risk._get_daily_realized_loss()
 
-        self.assertEqual(daily_loss, 0.0)
+        self.assertIsNone(daily_loss)
         query, params = mock_con.execute.call_args[0]
         self.assertIn("information_schema.tables", query)
         self.assertEqual(params, ["trade_pnl"])
