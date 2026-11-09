@@ -57,6 +57,8 @@ def _sync_live_execution_diffs(broker: BrokerBase, trade_diff_sink: TradeDiffSin
 
     get_orders の price は注文の値段なので使わず、fill_price（約定の明細から
     数量で加重した約定値）を書く。未約定・取消で約定の無い注文は書かない (#952)。
+    発注の直後と約定の後に何度も呼ばれるので、行にもう実口座の約定値 real_price が
+    あれば書き直さず、約定値を1回だけ書く (#1758)。
     """
     for order in broker.get_orders():
         order_id = str(order.get("order_id") or "")
@@ -73,13 +75,13 @@ def _sync_live_execution_diffs(broker: BrokerBase, trade_diff_sink: TradeDiffSin
         with db_connection() as con:
             row = con.execute(
                 """
-                SELECT market, symbol, predicted_at, side, signal_price
+                SELECT market, symbol, predicted_at, side, signal_price, real_price
                 FROM paper_real_diff
                 WHERE real_order_id = %s
                 """,
                 [order_id],
             ).fetchone()
-        if row is None:
+        if row is None or row[5] is not None:
             continue
 
         trade_diff_sink.record(

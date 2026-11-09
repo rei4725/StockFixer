@@ -346,11 +346,14 @@ class KabuBroker(BrokerBase):
         filled は注文が終了（State 5）し、約定の数量が 1 以上のとき True (#952)。
         """
         token = self.get_token()
-        resp = httpx.get(
-            f"{_BASE_URL}/orders",
-            headers={"X-API-KEY": token},
-            params={"product": 0, "details": True},
-            timeout=self._timeout,
+        resp = request_with_rate_limit_retry(
+            lambda: httpx.get(
+                f"{_BASE_URL}/orders",
+                headers={"X-API-KEY": token},
+                params={"product": 0, "details": True},
+                timeout=self._timeout,
+            ),
+            "orders details",
         )
         resp.raise_for_status()
         raw = resp.json() or []
