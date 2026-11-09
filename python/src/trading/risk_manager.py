@@ -13,7 +13,7 @@ OrderExecutionPipeline が注文を送信する前にゲートチェックを行
 
 import os
 from datetime import date, datetime, timezone
-from typing import Any, Optional
+from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -40,14 +40,17 @@ from config.trading_policy import (  # noqa: F401  # R-307/R-219 でポジショ
 from src.domain.exceptions import RiskError  # noqa: F401  # 後方互換のため re-export
 from src.domain.trading_rules import get_lot_size
 from src.trading.brokers.base import BrokerBase, OrderSide
-from src.trading.consecutive_losses import (
-    count_leading_losses,
-    recent_paper_closed_pnls,
-    recent_trade_pnl_closed_pnls,
-)
+from src.trading.consecutive_losses import count_leading_losses, recent_paper_closed_pnls
 from src.trading.daily_loss_window import daily_loss_window_start
 from src.trading.position_valuation import broker_positions_value, count_short_positions
 from src.trading.sl_tp_params import positive_pct_param
+from src.trading.trade_pnl_source import (
+    CONSECUTIVE_LOSS_SOURCE_UNAVAILABLE,
+    DAILY_LOSS_SOURCE_UNAVAILABLE,
+    source_unavailable_status,
+    trade_pnl_consecutive_losses,
+    trade_pnl_daily_loss,
+)
 from src.trading.types import TradingGateStatus
 from src.trading.vix_run_cache import VixRunCache
 from src.utils.db._connection import _db_connection
@@ -259,10 +262,14 @@ class RiskManager:
         positions = self._broker.get_positions()
         n_positions = len(positions) + count_short_positions(self._broker)
         daily_loss_limit = self._resolve_daily_loss_limit(balance)
-        daily_loss = 0.0
+        daily_loss: Optional[float] = 0.0
 
         if daily_loss_limit is not None:
             daily_loss = self._get_daily_realized_loss()
+        if daily_loss is None:  # 数える元が無い・読めない（#995）
+            return source_unavailable_status(
+                DAILY_LOSS_SOURCE_UNAVAILABLE, 0.0, daily_loss_limit, 0, n_positions
+            )
 
         # ルール 1: 当日損失上限
         if daily_loss_limit is not None and daily_loss >= daily_loss_limit:
@@ -285,6 +292,10 @@ class RiskManager:
 
         # ルール 3: 連続損失
         consecutive = self._get_consecutive_losses()
+        if consecutive is None:
+            return source_unavailable_status(
+                CONSECUTIVE_LOSS_SOURCE_UNAVAILABLE, daily_loss, daily_loss_limit, 0, n_positions
+            )
         if consecutive >= MAX_CONSECUTIVE_LOSSES:
             reason = f"連続損失 {consecutive} 回 >= {MAX_CONSECUTIVE_LOSSES} 回"
             logger.warning(f"[risk] {reason} → 当日取引停止")
@@ -481,18 +492,6 @@ class RiskManager:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _table_exists(con: Any, table_name: str) -> bool:
-        row = con.execute(
-            """
-            SELECT COUNT(*)
-            FROM information_schema.tables
-            WHERE table_name = %s
-            """,
-            [table_name],
-        ).fetchone()
-        return bool(row and row[0])
-
-    @staticmethod
     def _resolve_daily_loss_rate() -> float | None:
         if os.getenv(DISABLE_DAILY_LOSS_GUARD_ENV, "").strip().lower() in {
             "1",
@@ -530,7 +529,7 @@ class RiskManager:
             return None
         return balance * rate
 
-    def _get_daily_realized_loss(self) -> float:
+    def _get_daily_realized_loss(self) -> Optional[float]:
         """前の営業日（JST）の 0:00 から今までの確定損失合計（プラスが損失）を返す（#941）"""
         with _db_connection() as con:
             if self._broker.broker_name == "paper":
@@ -548,40 +547,17 @@ class RiskManager:
                 ).fetchone()
                 return abs(float(row[0])) if row else 0.0
 
-            if not self._table_exists(con, "trade_pnl"):
-                logger.warning(
-                    f"[risk] trade_pnl テーブル未作成のため日次損失を 0 として扱います: broker={self._broker.broker_name}"
-                )
-                return 0.0
+            # 紙以外は数える元が無い・読めないとき None（#995）
+            return trade_pnl_daily_loss(con, self._broker.broker_name, daily_loss_window_start())
 
-            row = con.execute(
-                """
-                SELECT COALESCE(SUM(realized_pnl), 0.0)
-                FROM trade_pnl
-                WHERE closed_at >= %s
-                  AND broker = %s
-                  AND realized_pnl < 0
-                """,
-                [daily_loss_window_start(), self._broker.broker_name],
-            ).fetchone()
-            return abs(float(row[0])) if row else 0.0
-
-    def _get_consecutive_losses(self) -> int:
+    def _get_consecutive_losses(self) -> Optional[int]:
         """日次損失と同じ区切りからの決済の、直近の連続損失回数を返す（#1311）"""
         window_start = daily_loss_window_start()
         with _db_connection() as con:
             if self._broker.broker_name == "paper":
                 rows = recent_paper_closed_pnls(con, window_start, MAX_CONSECUTIVE_LOSSES)
-            else:
-                if not self._table_exists(con, "trade_pnl"):
-                    message = (
-                        "[risk] trade_pnl テーブル未作成のため連続損失を 0 として扱います: "
-                        f"broker={self._broker.broker_name}"
-                    )
-                    logger.warning(message)
-                    return 0
-
-                rows = recent_trade_pnl_closed_pnls(
-                    con, self._broker.broker_name, window_start, MAX_CONSECUTIVE_LOSSES
-                )
-            return count_leading_losses(rows)
+                return count_leading_losses(rows)
+            # 紙以外は数える元が無い・読めないとき None（#995）
+            return trade_pnl_consecutive_losses(
+                con, self._broker.broker_name, window_start, MAX_CONSECUTIVE_LOSSES
+            )
