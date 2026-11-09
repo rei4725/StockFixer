@@ -35,6 +35,7 @@ from src.orchestration.jobs.features_marker import (
     current_code_version,
     record_features_version_if_covered,
 )
+from src.orchestration.jobs.horizon_exit import run_daily_horizon_exit  # noqa: F401 (re-export)
 from src.orchestration.jobs.prediction_errors import notify_prediction_errors
 from src.orchestration.jobs.prediction_saved_marker import (
     clear_prediction_saved_marker,

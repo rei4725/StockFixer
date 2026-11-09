@@ -9,6 +9,7 @@ import os
 import unittest
 from datetime import date, datetime, timedelta
 from unittest.mock import MagicMock, patch
+from zoneinfo import ZoneInfo
 
 from src.orchestration.scheduler_queue import SchedulerQueueManager
 from src.trading.brokers.base import OrderSide
@@ -17,6 +18,10 @@ from src.utils.db._connection import _db_connection
 _JOB_ID = "daily_horizon_exit"
 _BROKER_PATCH = "src.trading.brokers.paper.paper_broker.PaperBroker"
 _DB_PATCH = "src.utils.db._connection._db_connection"
+_EXIT_PATCH = "src.orchestration.jobs.horizon_exit.exit_expired_positions"
+_JST = ZoneInfo("Asia/Tokyo")
+_HOLIDAY = datetime(2026, 11, 23, 9, 0, tzinfo=_JST)  # 勤労感謝の日（月）
+_BUSINESS_DAY = datetime(2026, 11, 4, 9, 0, tzinfo=_JST)
 
 
 def _write_started(state_path, job_id: str, period_key: str) -> None:
@@ -59,14 +64,6 @@ class TestHorizonExitJobConfig(unittest.TestCase):
 
         self.assertFalse(SCHEDULE_CONFIG["daily_auto_order"].get("rerun_if_interrupted", False))
 
-    def test_job_calls_horizon_exit_check(self):
-        import run_scheduler
-
-        with patch("src.orchestration.scheduler.run_horizon_exit_check") as check:
-            run_scheduler.SCHEDULE_CONFIG[_JOB_ID]["func"]()
-
-        check.assert_called_once_with()
-
 
 def test_interrupted_run_is_recovered_until_cutoff(tmp_path):
     """前の起動で消えた回を、同じ朝の 9:30 の締めまで補完してよいと返す"""
@@ -81,6 +78,32 @@ def test_interrupted_run_is_recovered_until_cutoff(tmp_path):
     assert manager.should_recover(_JOB_ID, now=before_cutoff) is True
     at_cutoff = datetime(2026, 10, 28, 9, 30, tzinfo=manager.tz)
     assert manager.should_recover(_JOB_ID, now=at_cutoff) is False
+
+
+class TestHorizonExitJobSkipsJpHoliday(unittest.TestCase):
+    """東証の休場日の 9:00 のジョブは、8:50 の回と同じく決済の注文を出さない（#1529）"""
+
+    def _run_job(self, now: datetime) -> MagicMock:
+        from run_scheduler import SCHEDULE_CONFIG
+
+        from src.orchestration.jobs import common
+
+        with (
+            patch.dict(os.environ, {"AUTO_TRADE_MODE": "paper"}),
+            patch.object(common, "now_jst", return_value=now),
+            patch(_EXIT_PATCH, return_value=[]) as exit_positions,
+        ):
+            SCHEDULE_CONFIG[_JOB_ID]["func"]()
+        return exit_positions
+
+    def test_holiday_does_not_exit_positions(self):
+        with self.assertLogs("src.orchestration.jobs.common", level="INFO") as logs:
+            self._run_job(_HOLIDAY).assert_not_called()
+
+        self.assertTrue(any("休場日" in line for line in logs.output))
+
+    def test_business_day_exits_positions(self):
+        self._run_job(_BUSINESS_DAY).assert_called_once_with()
 
 
 class TestHorizonExitJobOrders(unittest.TestCase):
@@ -102,7 +125,13 @@ class TestHorizonExitJobOrders(unittest.TestCase):
     def _run_job(self) -> MagicMock:
         from run_scheduler import SCHEDULE_CONFIG
 
-        with patch(_BROKER_PATCH) as mock_broker_cls:
+        from src.orchestration.jobs import common
+
+        # テストを流す日が休場日でもジョブが飛ばないよう、営業日に固定する
+        with (
+            patch.object(common, "now_jst", return_value=_BUSINESS_DAY),
+            patch(_BROKER_PATCH) as mock_broker_cls,
+        ):
             broker = MagicMock()
             broker.get_positions.return_value = [{"symbol": "8766", "qty": 100}]
             mock_broker_cls.return_value = broker
