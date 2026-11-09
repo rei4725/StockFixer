@@ -45,6 +45,27 @@ def zero_size_reason(
     return f"{REASON_SCALED} base_qty={base_qty} lot={lot} {shrunk}".rstrip()
 
 
+ZERO_QTY_BUDGET_CAP = "zero_qty_budget_cap"
+_ZERO_QTY_KEYS = (
+    (REASON_PRICE, "zero_qty_price"),
+    (REASON_KELLY, "zero_qty_kelly"),
+    (REASON_UNDER_LOT, "zero_qty_under_lot"),
+    (REASON_SCALED, "zero_qty_scaled"),
+)
+
+
+def zero_qty_skip_key(reason: object) -> str:
+    """calc_position_size が 0 を返した理由から、記録の skip_reasons の鍵を返す（#1748）。
+
+    理由が分からないとき（None・知らない文）は従来の zero_qty を返す。
+    """
+    if isinstance(reason, str):
+        for prefix, key in _ZERO_QTY_KEYS:
+            if reason.startswith(prefix):
+                return key
+    return "zero_qty"
+
+
 def note_zero_size(symbol: str, reason: str) -> str:
     """理由を INFO で出して、そのまま返す。"""
     logger.info(f"[risk] {symbol}: 発注株数 0 の理由 {reason}")
