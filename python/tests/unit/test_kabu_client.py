@@ -292,6 +292,11 @@ class TestKabuBrokerGetPositions(unittest.TestCase):
 class TestKabuBrokerCancelOrder(unittest.TestCase):
     """KabuBroker.cancel_order のテスト"""
 
+    def setUp(self):
+        env_patch = patch.dict("os.environ", {"KABU_TRADE_PASSWORD": "dummy-trade-pw"})
+        env_patch.start()
+        self.addCleanup(env_patch.stop)
+
     def _make_broker(self):
         from src.trading.brokers.kabu.kabu_client import KabuBroker
 
@@ -350,6 +355,11 @@ class TestKabuBrokerCancelOrder(unittest.TestCase):
 
 class TestKabuBrokerSendOrder(unittest.TestCase):
     """KabuBroker.send_order のテスト"""
+
+    def setUp(self):
+        env_patch = patch.dict("os.environ", {"KABU_TRADE_PASSWORD": "dummy-trade-pw"})
+        env_patch.start()
+        self.addCleanup(env_patch.stop)
 
     def _make_broker(self):
         from src.trading.brokers.kabu.kabu_client import KabuBroker

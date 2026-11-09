@@ -91,6 +91,16 @@ class KabuBroker(BrokerBase):
     # 注文
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _require_trade_password() -> str:
+        """取引パスワードを返す。未設定・空なら送る前に BrokerError で止める。"""
+        password = os.environ.get("KABU_TRADE_PASSWORD", "")
+        if not password:
+            raise BrokerError(
+                "KABU_TRADE_PASSWORD が設定されていません。空のまま注文・取消は送りません。"
+            )
+        return password
+
     def send_order(
         self,
         symbol: str,
@@ -112,9 +122,10 @@ class KabuBroker(BrokerBase):
         Returns:
             {"order_id": str, "status": str, "message": str}
         """
+        trade_password = self._require_trade_password()
         token = self.get_token()
         body = {
-            "Password": os.environ.get("KABU_TRADE_PASSWORD", ""),
+            "Password": trade_password,
             "Symbol": symbol.replace(".T", ""),
             "Exchange": 1,  # 1 = 東証
             "SecurityType": 1,  # 1 = 株式
@@ -142,10 +153,11 @@ class KabuBroker(BrokerBase):
 
     def cancel_order(self, order_id: str) -> dict[str, Any]:
         """注文をキャンセルする"""
+        trade_password = self._require_trade_password()
         token = self.get_token()
         body = {
             "OrderId": order_id,
-            "Password": os.environ.get("KABU_TRADE_PASSWORD", ""),
+            "Password": trade_password,
         }
         resp = httpx.put(
             f"{_BASE_URL}/cancelorder",
