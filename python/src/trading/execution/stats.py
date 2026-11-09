@@ -9,6 +9,7 @@ class OrderExecutionStats(TypedDict):
     short_orders: int
     skipped: int
     skipped_min_change: int
+    skip_reasons: dict[str, int]  # skipped の理由ごとの数。和は skipped と一致する（#1765）
     errors: int
     trading_stopped: bool
     stop_reason: str | None
@@ -36,6 +37,7 @@ def _new_stats() -> OrderExecutionStats:
         "short_orders": 0,
         "skipped": 0,
         "skipped_min_change": 0,
+        "skip_reasons": {},
         "errors": 0,
         "trading_stopped": False,
         "stop_reason": None,
@@ -54,3 +56,21 @@ def _new_stats() -> OrderExecutionStats:
         "threshold_scale": None,
         "order_record_written": False,
     }
+
+
+_MIN_CHANGE_KEYS = ("min_change", "sell_min_change")
+
+
+def count_skip(stats: OrderExecutionStats, reason: str) -> None:
+    """飛ばした候補を skipped と理由ごとの skip_reasons に1つ数える（#1765）。
+
+    鍵は 16:30 の記録（RuleGateRecord）とそろえる。max_positions は保有上限、min_change は
+    変動の小ささ（R-214）、sell_min_change は売りシグナルの変動の小ささ、no_price は現在値なし、
+    low_confidence は確信度の見送り（R-308）、株数0は zero_qty_skip_key の鍵（#1748）。
+    変動の小ささは従来どおり skipped_min_change にも数える。
+    """
+    stats["skipped"] += 1
+    reasons = stats["skip_reasons"]
+    reasons[reason] = reasons.get(reason, 0) + 1
+    if reason in _MIN_CHANGE_KEYS:
+        stats["skipped_min_change"] += 1
