@@ -4,7 +4,7 @@ waitress>=3.0.2
 urllib3>=2.8.0
 tabulate==0.10.0
 python-dotenv==1.2.4
-yfinance==1.7.0
+yfinance==1.8.0
 scikit-learn==1.9.1
 scipy>=1.18.1
 lightgbm==4.7.0
