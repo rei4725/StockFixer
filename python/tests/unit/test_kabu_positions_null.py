@@ -2,15 +2,11 @@
 
 import logging
 import math
-import sys
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
-if "httpx" not in sys.modules:
-    sys.modules["httpx"] = MagicMock()
-
-import src.trading.brokers.kabu.kabu_client  # noqa: F401,E402
-from src.trading.position_valuation import positions_market_value  # noqa: E402
+import src.trading.brokers.kabu.kabu_client  # noqa: F401
+from src.trading.position_valuation import positions_market_value
 
 _GET = "src.trading.brokers.kabu.kabu_client.httpx.get"
 
