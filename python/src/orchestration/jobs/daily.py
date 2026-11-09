@@ -36,6 +36,7 @@ from src.orchestration.jobs.features_marker import (
     record_features_version_if_covered,
 )
 from src.orchestration.jobs.horizon_exit import run_daily_horizon_exit  # noqa: F401 (re-export)
+from src.orchestration.jobs.live_fill_sync import sync_live_fills_after_fill
 from src.orchestration.jobs.prediction_errors import notify_prediction_errors
 from src.orchestration.jobs.prediction_saved_marker import (
     clear_prediction_saved_marker,
@@ -419,8 +420,7 @@ def run_daily_settle_orders(notify_when_none: bool = True) -> int:
 
     mode = os.environ.get("AUTO_TRADE_MODE", "paper")
     if mode == "live":
-        logger.info("live モードのため settle スキップ")
-        return 0
+        return sync_live_fills_after_fill("settle")  # 寄りの後の約定値 (#1758)
 
     from src.infrastructure.persistence.trade_diff_repository import PostgresTradeDiffSink
     from src.infrastructure.yfinance_market_data_adapter import YFinanceMarketDataAdapter
@@ -455,7 +455,7 @@ def run_daily_paper_trade_report():
 
     mode = os.environ.get("AUTO_TRADE_MODE", "paper")
     if mode == "live":
-        logger.info("live モードのためペーパートレードレポートをスキップ")
+        sync_live_fills_after_fill("ペーパートレードレポート")  # 引けの後の約定値 (#1758)
         return
 
     logger.info("=== ペーパートレード損益レポート送信開始 ===")

@@ -95,6 +95,7 @@ def _run_sync(orders):
         "2026-11-09T08:00:00",
         1,
         1000.0,
+        None,
     )
     cm = MagicMock()
     cm.__enter__.return_value = con
