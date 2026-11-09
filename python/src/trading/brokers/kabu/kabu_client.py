@@ -14,6 +14,7 @@ from typing import Any
 import httpx
 
 from src.trading.brokers.base import BrokerBase, BrokerError, OrderSide, OrderType
+from src.trading.brokers.kabu.rate_limit import request_with_rate_limit_retry
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -128,11 +129,14 @@ class KabuBroker(BrokerBase):
             "ExpireDay": 0,  # 0 = 当日有効
         }
         logger.info(f"[kabu] 注文送信: symbol={symbol} side={side.name} qty={qty} price={price}")
-        resp = httpx.post(
-            f"{_BASE_URL}/sendorder",
-            headers={"X-API-KEY": token},
-            json=body,
-            timeout=self._timeout,
+        resp = request_with_rate_limit_retry(
+            lambda: httpx.post(
+                f"{_BASE_URL}/sendorder",
+                headers={"X-API-KEY": token},
+                json=body,
+                timeout=self._timeout,
+            ),
+            f"sendorder symbol={symbol}",
         )
         resp.raise_for_status()
         data = resp.json()
@@ -164,11 +168,14 @@ class KabuBroker(BrokerBase):
     def get_positions(self) -> list[dict[str, Any]]:
         """保有ポジション一覧を返す"""
         token = self.get_token()
-        resp = httpx.get(
-            f"{_BASE_URL}/positions",
-            headers={"X-API-KEY": token},
-            params={"product": 0},  # 0 = 全商品
-            timeout=self._timeout,
+        resp = request_with_rate_limit_retry(
+            lambda: httpx.get(
+                f"{_BASE_URL}/positions",
+                headers={"X-API-KEY": token},
+                params={"product": 0},  # 0 = 全商品
+                timeout=self._timeout,
+            ),
+            "positions",
         )
         resp.raise_for_status()
         raw = resp.json() or []
@@ -185,10 +192,13 @@ class KabuBroker(BrokerBase):
     def get_balance(self) -> float:
         """現金余力（円）を返す"""
         token = self.get_token()
-        resp = httpx.get(
-            f"{_BASE_URL}/wallet/cash",
-            headers={"X-API-KEY": token},
-            timeout=self._timeout,
+        resp = request_with_rate_limit_retry(
+            lambda: httpx.get(
+                f"{_BASE_URL}/wallet/cash",
+                headers={"X-API-KEY": token},
+                timeout=self._timeout,
+            ),
+            "wallet/cash",
         )
         resp.raise_for_status()
         return float(resp.json().get("StockAccountWallet", 0.0))
