@@ -36,6 +36,7 @@ from src.orchestration.scheduler_cutoff import (
 from src.orchestration.scheduler_interrupted import (
     MAX_FORGIVEN_INTERRUPTIONS_PER_PERIOD,
     count_executions,
+    interrupted_recovery_label,
 )
 from src.orchestration.scheduler_recovery_gap import is_within_recovery_gap
 from src.utils.data_path_utils import ensure_dir, get_results_dir
@@ -461,7 +462,8 @@ class SchedulerQueueManager:
             rerun_if_interrupted=rerun_if_interrupted,
             max_forgiven=max_forgiven,
         )
-        recovery_label = f"あり（1期間に{max_forgiven}回まで）" if rerun_if_interrupted else "なし"
+        cap = config.get("max_executions_per_period", 1)
+        recovery_label = interrupted_recovery_label(rerun_if_interrupted, max_forgiven, cap)
         for run_id in result.interrupted_run_ids:
             if run_id in self._warned_interrupted_run_ids:
                 continue
