@@ -42,6 +42,7 @@ from src.domain.trading_rules import get_lot_size
 from src.trading.brokers.base import BrokerBase, OrderSide
 from src.trading.consecutive_losses import count_leading_losses, recent_paper_closed_pnls
 from src.trading.daily_loss_window import daily_loss_window_start
+from src.trading.position_size_reason import REASON_PRICE, note_zero_size, zero_size_reason
 from src.trading.position_valuation import broker_positions_value, count_short_positions
 from src.trading.sl_tp_params import positive_pct_param
 from src.trading.trade_pnl_source import (
@@ -171,6 +172,8 @@ class RiskManager:
         self._market = market
         self.stop_loss_pct: Optional[float] = None
         self.take_profit_pct: Optional[float] = None
+        # 直前の calc_position_size が 0 を返した理由（#1734）
+        self.zero_reason: Optional[str] = None
         # 総資産と VIX は発注ループ中に銘柄ごとに参照されるため、インスタンス単位でキャッシュする
         self._total_equity_cache: Optional[float] = None
         self._vix_cache = VixRunCache(lambda: fetch_latest_vix())  # 日付が変われば読み直す
@@ -377,6 +380,7 @@ class RiskManager:
             avg_loss = self.kelly_avg_loss
 
         balance = self._broker.get_balance()
+        self.zero_reason = None
 
         if avg_win == 0.0 or avg_loss == 0.0:
             logger.warning(
@@ -406,9 +410,10 @@ class RiskManager:
         invest_amount = min(invest_amount, max_amount)
 
         if price <= 0:
+            self.zero_reason = note_zero_size(symbol, REASON_PRICE)
             return 0
 
-        qty = int(invest_amount / price)
+        qty = base_qty = int(invest_amount / price)
 
         # モデル信頼度によるポジション縮小
         confidence_ratio = max(0.0, min(confidence_ratio, 1.0))
@@ -437,6 +442,10 @@ class RiskManager:
         # 市場別の最低売買単位に丸める（日本株=100株単位、米国株=1株。市場不明時は100株）
         lot = get_lot_size(self._market)
         qty = (qty // lot) * lot
+        if qty == 0:
+            scales = {"confidence": confidence_ratio, "dd": dd_scale, "vix": vix_scale}
+            reason = zero_size_reason(kelly, invest_amount, price, base_qty, lot, scales)
+            self.zero_reason = note_zero_size(symbol, reason)
 
         logger.debug(
             f"[risk] {symbol}: balance={balance:.0f} kelly={kelly:.3f} "

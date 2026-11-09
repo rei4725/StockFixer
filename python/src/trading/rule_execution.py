@@ -14,7 +14,6 @@ from config.settings import (
     MAX_SECTOR_POSITIONS,
 )
 from src.domain.ports import TradeDiffSink
-from src.domain.sector_cap import filter_by_sector_cap
 from src.domain.trading_rules import get_lot_size
 from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
 from src.trading.brokers.paper.paper_broker import PaperBroker
@@ -134,6 +133,8 @@ def execute_rule_paper_trades(
         logger.warning("[rule] 呼び出し元の指定で新規買いを停止し、保有の決済だけ出す")
     buys_allowed = False
     sector_allowed: set[str] = set()
+    candidate_sectors: dict[str, str] = {}
+    sector_counts: Counter[str] = Counter()
     position_count = len(held_symbols)
     # 新規買いにだけ使う手順が落ちたら、新規は止め保有の SELL だけ出してから、
     # 同じ例外を投げ直してジョブを失敗にする（#1221。8:50 の道の #1179 と同じ形）
@@ -182,13 +183,14 @@ def execute_rule_paper_trades(
             enc = getattr(corr_gate, "enc", None)
             record.enc = float(enc) if isinstance(enc, (int, float)) else None
             if corr_gate.is_allowed:
-                selected = filter_by_sector_cap(
-                    buy_candidates,
-                    max_sector_positions=MAX_SECTOR_POSITIONS,
-                    sector_getter=lambda it: get_symbol_sector(market, str(it["symbol"])),
-                    initial_counts=Counter(get_symbol_sector(market, s) for s in held_codes),
-                )
-                sector_allowed = {str(it["symbol"]) for it in selected}
+                # 業種の照会はこの手順の中で済ませ、枠は発注した銘柄だけに数える（#1610）。
+                # 株数0で飛ばす候補が枠を使って、後ろの買える候補を落とさないようにする
+                candidate_sectors = {
+                    str(it["symbol"]): get_symbol_sector(market, str(it["symbol"]))
+                    for it in buy_candidates
+                }
+                sector_counts = Counter(get_symbol_sector(market, s) for s in held_codes)
+                sector_allowed = set(candidate_sectors)
             else:
                 logger.warning(
                     "[rule] 相関ゲート不合格のため新規買いを停止: %s",
@@ -224,9 +226,8 @@ def execute_rule_paper_trades(
                     skipped += 1
                     continue
                 if symbol not in sector_allowed:
-                    logger.info("[rule] %s: 相関ゲートか同一業種の上限で新規買いスキップ", symbol)
-                    corr_blocked = record.correlation_gate_allowed is False
-                    skip_reasons["correlation_gate" if corr_blocked else "sector_cap"] += 1
+                    logger.info("[rule] %s: 相関ゲート不合格のため新規買いスキップ", symbol)
+                    skip_reasons["correlation_gate"] += 1
                     skipped += 1
                     continue
                 if position_count >= MAX_POSITIONS:
@@ -257,6 +258,12 @@ def execute_rule_paper_trades(
                     skip_reasons["zero_qty"] += 1
                     skipped += 1
                     continue
+                sector = candidate_sectors[str(symbol)]
+                if 0 < MAX_SECTOR_POSITIONS <= sector_counts[sector]:
+                    logger.info("[rule] %s: 同一業種の上限で新規買いスキップ", symbol)
+                    skip_reasons["sector_cap"] += 1
+                    skipped += 1
+                    continue
 
                 ticker = get_ticker(market, symbol)
                 broker.send_order(
@@ -268,6 +275,7 @@ def execute_rule_paper_trades(
                 buy_orders += 1
                 buy_orders_this_run += 1
                 position_count += 1
+                sector_counts[sector] += 1
                 logger.info(f"  BUY 注文: {symbol}  {qty}株  現在値={price:.0f}円")
 
             elif signal == -1 and symbol in held_symbols:
