@@ -35,6 +35,7 @@ from src.domain.trading_rules import get_lot_size
 from src.domain.types import OrderRunSummary
 from src.trading.brokers.base import BrokerBase, BrokerError, OrderSide
 from src.trading.correlation_risk import evaluate_correlation_gate
+from src.trading.position_size_reason import zero_qty_skip_key
 from src.trading.position_valuation import coverable_short_qty, read_short_positions
 from src.trading.risk_manager import RiskManager
 from src.trading.signal_generator import apply_multi_horizon_score_column
@@ -63,7 +64,7 @@ from .selection import (
     _load_exit_model,
 )
 from .sl_tp import _check_sl_tp_exits, _sl_tp_exits_only
-from .stats import OrderExecutionStats
+from .stats import OrderExecutionStats, count_skip
 
 logger = get_logger(__name__)
 
@@ -210,8 +211,7 @@ def run_order_steps(
                 float(row.get("diff_ratio") or 0) * 100,
                 MIN_CHANGE_RATIO * 100,
             )
-            stats["skipped_min_change"] += 1
-            stats["skipped"] += 1
+            count_skip(stats, "sell_min_change")
             continue
         try:
             # 保有全数を成行売り。保有の一覧は銘柄によらず同じなので1回だけ読む（#1095）
@@ -295,7 +295,7 @@ def run_order_steps(
 
         if position_count >= MAX_POSITIONS:
             logger.info("[exec] 保有上限 %d 到達のため以降の新規買いをスキップ", MAX_POSITIONS)
-            stats["skipped"] += 1
+            count_skip(stats, "max_positions")
             continue
 
         if abs(float(row.get("diff_ratio") or 0.0)) < MIN_CHANGE_RATIO:  # 変動が小さい（R-214）
@@ -305,13 +305,12 @@ def run_order_steps(
                 float(row.get("diff_ratio") or 0) * 100,
                 MIN_CHANGE_RATIO * 100,
             )
-            stats["skipped_min_change"] += 1
-            stats["skipped"] += 1
+            count_skip(stats, "min_change")
             continue
 
         if current_price <= 0:
             logger.warning(f"[exec] {symbol}: 現在値が取得できないためスキップ")
-            stats["skipped"] += 1
+            count_skip(stats, "no_price")
             continue
 
         confidence = float(row.get("confidence_ratio") or 1.0)
@@ -323,7 +322,7 @@ def run_order_steps(
                 confidence,
                 _SPLIT_LOW_CONFIDENCE,
             )
-            stats["skipped"] += 1
+            count_skip(stats, "low_confidence")
             continue
 
         try:
@@ -340,7 +339,7 @@ def run_order_steps(
             )
             if qty <= 0:
                 logger.info(f"[exec] {symbol}: 発注株数 0 → スキップ（{risk.zero_reason}）")
-                stats["skipped"] += 1
+                count_skip(stats, zero_qty_skip_key(risk.zero_reason))
                 continue
 
             if split_ratio < 1.0:
@@ -472,7 +471,7 @@ def run_order_steps(
 
             if position_count >= MAX_POSITIONS:
                 logger.info("[exec] 保有上限 %d 到達で新規ショートをスキップ", MAX_POSITIONS)
-                stats["skipped"] += 1
+                count_skip(stats, "max_positions")
                 continue
 
             if abs(float(row.get("diff_ratio") or 0.0)) < MIN_CHANGE_RATIO:
@@ -482,13 +481,12 @@ def run_order_steps(
                     float(row.get("diff_ratio") or 0) * 100,
                     MIN_CHANGE_RATIO * 100,
                 )
-                stats["skipped_min_change"] += 1
-                stats["skipped"] += 1
+                count_skip(stats, "min_change")
                 continue
 
             if current_price <= 0:
                 logger.warning(f"[exec] {symbol}: 現在値が取得できないためショートスキップ")
-                stats["skipped"] += 1
+                count_skip(stats, "no_price")
                 continue
 
             confidence = float(row.get("confidence_ratio") or 1.0)
@@ -500,7 +498,7 @@ def run_order_steps(
                     confidence,
                     _SPLIT_LOW_CONFIDENCE,
                 )
-                stats["skipped"] += 1
+                count_skip(stats, "low_confidence")
                 continue
 
             try:
@@ -517,7 +515,7 @@ def run_order_steps(
                 )
                 if qty <= 0:
                     logger.info(f"[exec] {symbol}: 発注株数 0 → ショートせず（{risk.zero_reason}）")
-                    stats["skipped"] += 1
+                    count_skip(stats, zero_qty_skip_key(risk.zero_reason))
                     continue
 
                 if short_split_ratio < 1.0:

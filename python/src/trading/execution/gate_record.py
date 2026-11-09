@@ -2,7 +2,8 @@
 
 置き場: 8:50 は results/orders/<JST の日付>.json、16:30 のルールの道は
 results/orders/rule/<JST の日付>.json（8:50 の記録を上書きしない。同じ道のやり直しは上書きする）。
-ゲートの判定はそのまま写す。8:50 の記録には SL/TP を評価できなかった保有の銘柄と数も写す（#1516）。
+ゲートの判定はそのまま写す。skipped の理由ごとの数 skip_reasons も写す（#1765）。
+8:50 の記録には SL/TP を評価できなかった保有の銘柄と数も写す（#1516）。
 売りの判定に使える予想が無かった保有の銘柄と数も写し、判定をしなかった日は null にする（#1530）。
 16:30 の記録にはシグナルを出せなかった銘柄と、そのうち保有中の銘柄の一覧と数も写す（#1520）。
 その日のルールの判定の対象に入らなかった保有の一覧と数も写す（#1527）。
@@ -96,6 +97,8 @@ def save_order_gate_record(
         }
         for key in _GATE_KEYS:
             payload[key] = stats.get(key)
+        # skipped の理由ごとの数（#1765）。鍵は 16:30 の RuleGateRecord とそろえる
+        payload["skip_reasons"] = dict(stats.get("skip_reasons") or {})
         # SL/TP を評価できずに飛ばした保有（#1516）。判定はせず stats を写すだけ
         unevaluable = list(stats.get("sl_tp_unevaluable_symbols") or [])
         payload["sl_tp_unevaluable_symbols"] = unevaluable
