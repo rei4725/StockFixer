@@ -20,6 +20,12 @@ _SLEEP = "src.trading.brokers.kabu.rate_limit._sleep"
 _URL = "http://localhost:18080/kabusapi/sendorder"
 
 
+@pytest.fixture(autouse=True)
+def _trade_password(monkeypatch: pytest.MonkeyPatch) -> None:
+    """注文の前の取引パスワードの確かめ (#1009) を通すため、偽の値を入れる。"""
+    monkeypatch.setenv("KABU_TRADE_PASSWORD", "dummy-trade-pw")
+
+
 def _resp(status: int, body: object = None) -> httpx.Response:
     return httpx.Response(status, json=body or {}, request=httpx.Request("POST", _URL))
 

@@ -82,7 +82,7 @@ class TestRuleSectorCapCountsOnlyPlacedBuys(unittest.TestCase):
             symbol="1003.T", side=OrderSide.BUY, qty=200, order_type=OrderType.MARKET
         )
         self.assertEqual(result["buy_orders"], 1)
-        self.assertEqual(saved[0].skip_reasons, {"zero_qty": 2})
+        self.assertEqual(saved[0].skip_reasons, {"zero_qty_budget_cap": 2})
 
     def test_three_buyable_candidates_only_first_two_and_third_is_sector_cap(self):
         broker = _broker([])
