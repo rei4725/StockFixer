@@ -26,6 +26,9 @@ _TOKEN_REFRESH_BUFFER_SECONDS = 300  # 期限5分前に事前更新
 _TOKEN_MAX_RETRIES = 2  # 1回リトライ（初回 + 1回）
 _REC_TYPE_EXECUTION = 8  # /orders の Details の RecType: 8 = 約定
 _STATE_DONE = 5  # /orders の State: 5 = 終了（全部約定・取消・失効）
+# /orders の State の 1〜4 は終わっていない注文（1 = 待機、2 = 処理中、3 = 処理済で
+# 約定待ち・一部約定、4 = 訂正取消送信中）。値の意味は仕様書の記憶による推測（#1521）
+_PRODUCT_CASH = 1  # /orders の product: 0 = すべて、1 = 現物
 
 # RequestSendOrder の値（kabu_STATION_API.yaml）
 # Side: "1" = 売、"2" = 買。OrderSide の数とは逆なので、明示の表で写す。
@@ -305,6 +308,53 @@ class KabuBroker(BrokerBase):
                 }
             )
         return orders
+
+    def get_pending_buy_symbols(self) -> set[str]:
+        """当日の終わっていない現物の買いの銘柄コードを返す（#1521）。
+
+        読めないときは例外を上へ出す（0件と取り違えると重ね買いになる。#1465）。
+        """
+        return self._working_cash_symbols(OrderSide.BUY)
+
+    def get_pending_sell_symbols(self) -> set[str]:
+        """当日の終わっていない現物の売りの銘柄コードを返す（#1521）。読めないときは例外を出す。"""
+        return self._working_cash_symbols(OrderSide.SELL)
+
+    def _working_cash_symbols(self, side: OrderSide) -> set[str]:
+        """/orders の現物の注文のうち、side が合い終了（State 5）でないものの銘柄を返す。"""
+        token = self.get_token()
+        resp = request_with_rate_limit_retry(
+            lambda: httpx.get(
+                f"{_BASE_URL}/orders",
+                headers={"X-API-KEY": token},
+                params={"product": _PRODUCT_CASH},
+                timeout=self._timeout,
+            ),
+            "orders",
+        )
+        resp.raise_for_status()
+        want_side = _CASH_SIDE[side]
+        symbols: set[str] = set()
+        for item in resp.json() or []:
+            if str(item.get("Side", "")) != want_side or not _is_working(item):
+                continue
+            symbol = str(item.get("Symbol") or "").replace(".T", "")
+            if symbol:
+                symbols.add(symbol)
+        return symbols
+
+
+def _is_working(item: dict[str, Any]) -> bool:
+    """注文が終わっていなければ True。State が読めない注文は終わっていないとして数える。"""
+    state = _number(item.get("State"))
+    if state is None:
+        logger.warning(
+            "[kabu] 注文 %s の State が読めず、約定待ちとして数える: %r",
+            item.get("ID", ""),
+            item.get("State"),
+        )
+        return True
+    return int(state) != _STATE_DONE
 
 
 def _execution_fill(details: Any) -> tuple[float | None, int]:

@@ -26,10 +26,23 @@ class PendingExits:
 
 
 def _load_pending_exits(broker: BrokerBase) -> PendingExits:
-    """paper_orders から約定待ちの決済の銘柄を読む。paper 以外のブローカーは空を返す。"""
-    if broker.broker_name != "paper":
+    """約定待ちの決済の銘柄を読む。
+
+    紙は paper_orders から読む。ほかの Broker は get_pending_sell_symbols を持てば
+    それで約定待ちの SELL を読み（#1521）、持たなければ空を返す。読めないときは
+    紙と同じく重ねの確かめなしで続け、決済は出す。
+    """
+    if broker.broker_name == "paper":
+        return _read_pending_exits()
+    reader = getattr(broker, "get_pending_sell_symbols", None)
+    if reader is None:
         return PendingExits()
-    return _read_pending_exits()
+    try:
+        sells = frozenset(str(s).replace(".T", "") for s in reader())
+    except Exception:
+        logger.error("[exec] 約定待ちの決済を読めない（重ねの確かめなしで続ける）", exc_info=True)
+        return PendingExits()
+    return PendingExits(sells=sells)
 
 
 def _read_pending_exits() -> PendingExits:
