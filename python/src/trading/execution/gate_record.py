@@ -119,6 +119,11 @@ class RuleGateRecord:
 
     risk_gate_allowed・correlation_gate_allowed は判定しなかったとき None。
     skip_reasons は skipped に数えた銘柄の理由ごとの数で、シグナルの無い銘柄は no_signal に分ける。
+    株数0の新規買いは理由で分ける（#1748）。zero_qty_budget_cap は calc_position_size が
+    0 でない株数を出したのに 1銘柄の予算の上限（initial_budget_per_trade）で 0 になったもの。
+    calc_position_size が 0 を返したものは risk.zero_reason で分け、zero_qty_price は価格<=0、
+    zero_qty_kelly は Kelly 比率<=0、zero_qty_under_lot は投資額が1単元に届かない、
+    zero_qty_scaled は縮小（confidence・dd・vix）で単元を割ったもの。理由が分からないものは zero_qty。
     """
 
     market: str
