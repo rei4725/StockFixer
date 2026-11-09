@@ -22,6 +22,8 @@ _BASE_URL = "http://localhost:18080/kabusapi"
 _TOKEN_TTL_SECONDS = 3600  # トークン有効期間（1時間）
 _TOKEN_REFRESH_BUFFER_SECONDS = 300  # 期限5分前に事前更新
 _TOKEN_MAX_RETRIES = 2  # 1回リトライ（初回 + 1回）
+_REC_TYPE_EXECUTION = 8  # /orders の Details の RecType: 8 = 約定
+_STATE_DONE = 5  # /orders の State: 5 = 終了（全部約定・取消・失効）
 
 
 class KabuBroker(BrokerBase):
@@ -194,7 +196,12 @@ class KabuBroker(BrokerBase):
         return float(resp.json().get("StockAccountWallet", 0.0))
 
     def get_orders(self) -> list[dict[str, Any]]:
-        """当日の注文一覧を返す"""
+        """当日の注文一覧を返す。
+
+        price は注文の値段（成行は 0）のまま。fill_price は Details の約定の行
+        （RecType 8）の値段を数量で加重した平均で、約定の行が無ければ None。
+        filled は注文が終了（State 5）し、約定の数量が 1 以上のとき True (#952)。
+        """
         token = self.get_token()
         resp = httpx.get(
             f"{_BASE_URL}/orders",
@@ -204,14 +211,42 @@ class KabuBroker(BrokerBase):
         )
         resp.raise_for_status()
         raw = resp.json() or []
-        return [
-            {
-                "order_id": item.get("ID", ""),
-                "symbol": item.get("Symbol", ""),
-                "side": item.get("Side", ""),
-                "qty": item.get("OrderQty", 0),
-                "price": item.get("Price", 0.0),
-                "status": item.get("State", ""),
-            }
-            for item in raw
-        ]
+        orders: list[dict[str, Any]] = []
+        for item in raw:
+            fill_price, filled_qty = _execution_fill(item.get("Details"))
+            state = item.get("State", "")
+            orders.append(
+                {
+                    "order_id": item.get("ID", ""),
+                    "symbol": item.get("Symbol", ""),
+                    "side": item.get("Side", ""),
+                    "qty": item.get("OrderQty", 0),
+                    "price": item.get("Price", 0.0),
+                    "status": state,
+                    "fill_price": fill_price,
+                    "filled_qty": filled_qty,
+                    "filled": state == _STATE_DONE and filled_qty > 0,
+                }
+            )
+        return orders
+
+
+def _execution_fill(details: Any) -> tuple[float | None, int]:
+    """Details の約定の行から、数量で加重した約定値と約定の数量を返す。"""
+    total_qty = 0
+    total_amount = 0.0
+    for row in details or []:
+        if not isinstance(row, dict) or row.get("RecType") != _REC_TYPE_EXECUTION:
+            continue
+        try:
+            price = float(row.get("Price") or 0.0)
+            qty = int(float(row.get("Qty") or 0))
+        except (TypeError, ValueError):
+            continue
+        if price <= 0 or qty <= 0:
+            continue
+        total_qty += qty
+        total_amount += price * qty
+    if total_qty <= 0:
+        return None, 0
+    return total_amount / total_qty, total_qty
