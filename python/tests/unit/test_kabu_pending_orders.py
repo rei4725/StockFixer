@@ -4,24 +4,20 @@ kabu の /orders の応答の State は 1〜4 が終わっていない注文、5
 取消・失効・発注エラー）。Side は "2" が買、"1" が売。
 """
 
-import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
-if "httpx" not in sys.modules:
-    sys.modules["httpx"] = MagicMock()
+import pandas as pd
+import pytest
+from tests.unit.test_order_corr_gate_pending import _CORR_OK, _row
+from tests.unit.test_order_corr_gate_pending import _run as _run_with_exits
+from tests.unit.test_order_execution_pipeline import _make_predictions
+from tests.unit.test_pending_buys_in_caps import _run, _unique_sector
 
-import pandas as pd  # noqa: E402
-import pytest  # noqa: E402
-from tests.unit.test_order_corr_gate_pending import _CORR_OK, _row  # noqa: E402
-from tests.unit.test_order_corr_gate_pending import _run as _run_with_exits  # noqa: E402
-from tests.unit.test_order_execution_pipeline import _make_predictions  # noqa: E402
-from tests.unit.test_pending_buys_in_caps import _run, _unique_sector  # noqa: E402
-
-from config.settings import MAX_POSITIONS  # noqa: E402
-from src.trading.brokers.base import OrderSide  # noqa: E402
-from src.trading.brokers.kabu.kabu_client import KabuBroker  # noqa: E402
-from src.trading.execution.pending import _load_pending_exits  # noqa: E402
+from config.settings import MAX_POSITIONS
+from src.trading.brokers.base import OrderSide
+from src.trading.brokers.kabu.kabu_client import KabuBroker
+from src.trading.execution.pending import _load_pending_exits
 
 _GET = "src.trading.brokers.kabu.kabu_client.httpx.get"
 

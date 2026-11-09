@@ -1,13 +1,8 @@
 """Unit tests for kabu_client.py"""
 
-import sys
 import unittest
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
-
-# httpx はオプション依存: テスト環境でインストールされていない場合はモックを設定
-if "httpx" not in sys.modules:
-    sys.modules["httpx"] = MagicMock()
 
 # Python 3.13+ の patch() は pkgutil.resolve_name を使うため、
 # サブパッケージをあらかじめインポートして属性として解決可能にする
@@ -375,7 +370,7 @@ class TestKabuBrokerSendOrder(unittest.TestCase):
         from src.trading.brokers.base import OrderSide
 
         mock_response = MagicMock()
-        mock_response.json.return_value = {"OrderId": "OID-001"}
+        mock_response.json.return_value = {"Result": 0, "OrderId": "OID-001"}
         mock_response.raise_for_status = MagicMock()
         mock_post.return_value = mock_response
 
@@ -392,7 +387,7 @@ class TestKabuBrokerSendOrder(unittest.TestCase):
         from src.trading.brokers.base import OrderSide
 
         mock_response = MagicMock()
-        mock_response.json.return_value = {"OrderId": "OID-002"}
+        mock_response.json.return_value = {"Result": 0, "OrderId": "OID-002"}
         mock_response.raise_for_status = MagicMock()
         mock_post.return_value = mock_response
 
@@ -404,7 +399,7 @@ class TestKabuBrokerSendOrder(unittest.TestCase):
 
     def _sent_body(self, mock_post, side):
         mock_response = MagicMock()
-        mock_response.json.return_value = {"OrderId": "OID-003"}
+        mock_response.json.return_value = {"Result": 0, "OrderId": "OID-003"}
         mock_response.raise_for_status = MagicMock()
         mock_post.return_value = mock_response
 
