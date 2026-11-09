@@ -44,6 +44,9 @@ _CASH_FUND_TYPE: dict[OrderSide, str] = {
     OrderSide.SELL: "  ",
 }
 _ACCOUNT_TYPE_SPECIFIC = 4  # AccountType: 2 = 一般、4 = 特定、12 = 法人
+# /positions の product: 0 = 全て、1 = 現物、2 = 信用、3 = 先物、4 = OP
+_PRODUCT_CASH = 1
+_POSITION_SIDE_BUY = "2"  # /positions の Side: "1" = 売、"2" = 買
 
 
 def _number(value: Any) -> float | None:
@@ -55,6 +58,25 @@ def _number(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return None if math.isnan(num) else num
+
+
+def _is_cash_long(item: Any) -> bool:
+    """/positions の1行が現物の買い持ちなら True を返す（#1000）。
+
+    システムは現物の買いしか建てないため、信用の建玉（MarginTradeType のある行）と
+    売りの行（Side "1"）は SL/TP・売りシグナル・保有の上限に入れない。
+    Side が無い行は、product で現物に絞った返りとして買い持ちとみなす。
+    """
+    if not isinstance(item, dict):
+        return False
+    if item.get("MarginTradeType") not in (None, 0, ""):
+        logger.info(f"[kabu] {item.get('Symbol', '')}: 信用の建玉は保有に数えない")
+        return False
+    side = item.get("Side")
+    if side is not None and str(side) != _POSITION_SIDE_BUY:
+        logger.info(f"[kabu] {item.get('Symbol', '')}: 売りの建玉は保有に数えない")
+        return False
+    return True
 
 
 def _position_row(item: dict[str, Any]) -> dict[str, Any]:
@@ -260,14 +282,14 @@ class KabuBroker(BrokerBase):
             lambda: httpx.get(
                 f"{_BASE_URL}/positions",
                 headers={"X-API-KEY": token},
-                params={"product": 0},  # 0 = 全商品
+                params={"product": _PRODUCT_CASH},
                 timeout=self._timeout,
             ),
             "positions",
         )
         resp.raise_for_status()
         raw = resp.json() or []
-        return [_position_row(item) for item in raw]
+        return [_position_row(item) for item in raw if _is_cash_long(item)]
 
     def get_balance(self) -> float:
         """現金余力（円）を返す"""
