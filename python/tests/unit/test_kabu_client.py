@@ -1,13 +1,8 @@
 """Unit tests for kabu_client.py"""
 
-import sys
 import unittest
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
-
-# httpx はオプション依存: テスト環境でインストールされていない場合はモックを設定
-if "httpx" not in sys.modules:
-    sys.modules["httpx"] = MagicMock()
 
 # Python 3.13+ の patch() は pkgutil.resolve_name を使うため、
 # サブパッケージをあらかじめインポートして属性として解決可能にする

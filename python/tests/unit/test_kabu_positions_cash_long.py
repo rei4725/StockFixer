@@ -1,17 +1,13 @@
 """KabuBroker.get_positions は現物の買い持ちだけを返す（#1000）"""
 
-import sys
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
-if "httpx" not in sys.modules:
-    sys.modules["httpx"] = MagicMock()
-
-import src.trading.brokers.kabu.kabu_client  # noqa: F401,E402
-from src.infrastructure.in_memory import InMemoryTradeDiffSink  # noqa: E402
-from src.trading.brokers.base import OrderSide  # noqa: E402
-from src.trading.execution import _check_sl_tp_exits  # noqa: E402
-from src.trading.execution.selection import _get_held_symbols  # noqa: E402
+import src.trading.brokers.kabu.kabu_client  # noqa: F401
+from src.infrastructure.in_memory import InMemoryTradeDiffSink
+from src.trading.brokers.base import OrderSide
+from src.trading.execution import _check_sl_tp_exits
+from src.trading.execution.selection import _get_held_symbols
 
 _GET = "src.trading.brokers.kabu.kabu_client.httpx.get"
 

@@ -4,15 +4,11 @@ kabu の /orders の応答の Details のうち RecType 8 が約定の行で、P
 その約定の値段と数量。State 5 が終了。
 """
 
-import sys
 from unittest.mock import MagicMock, patch
 
-if "httpx" not in sys.modules:
-    sys.modules["httpx"] = MagicMock()
-
-import src.trading.brokers.kabu.kabu_client  # noqa: F401,E402
-from src.trading.brokers.kabu.kabu_client import KabuBroker  # noqa: E402
-from src.trading.execution.recording import _sync_live_execution_diffs  # noqa: E402
+import src.trading.brokers.kabu.kabu_client  # noqa: F401
+from src.trading.brokers.kabu.kabu_client import KabuBroker
+from src.trading.execution.recording import _sync_live_execution_diffs
 
 
 def _broker_with_orders(raw):
