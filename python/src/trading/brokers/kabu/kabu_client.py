@@ -7,6 +7,7 @@ APIパスワードは環境変数 KABU_API_PASSWORD から取得する。
 公式仕様書: https://kabucom.github.io/kabusapi/reference/
 """
 
+import math
 import os
 from datetime import datetime, timedelta
 from typing import Any
@@ -14,6 +15,7 @@ from typing import Any
 import httpx
 
 from src.trading.brokers.base import BrokerBase, BrokerError, OrderSide, OrderType
+from src.trading.brokers.kabu.rate_limit import request_with_rate_limit_retry
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -22,6 +24,8 @@ _BASE_URL = "http://localhost:18080/kabusapi"
 _TOKEN_TTL_SECONDS = 3600  # トークン有効期間（1時間）
 _TOKEN_REFRESH_BUFFER_SECONDS = 300  # 期限5分前に事前更新
 _TOKEN_MAX_RETRIES = 2  # 1回リトライ（初回 + 1回）
+_REC_TYPE_EXECUTION = 8  # /orders の Details の RecType: 8 = 約定
+_STATE_DONE = 5  # /orders の State: 5 = 終了（全部約定・取消・失効）
 
 # RequestSendOrder の値（kabu_STATION_API.yaml）
 # Side: "1" = 売、"2" = 買。OrderSide の数とは逆なので、明示の表で写す。
@@ -40,6 +44,53 @@ _CASH_FUND_TYPE: dict[OrderSide, str] = {
     OrderSide.SELL: "  ",
 }
 _ACCOUNT_TYPE_SPECIFIC = 4  # AccountType: 2 = 一般、4 = 特定、12 = 法人
+
+
+def _number(value: Any) -> float | None:
+    """数として読める値を float で返す。null・数でない値・NaN は None を返す。"""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return None
+    return None if math.isnan(num) else num
+
+
+def _position_row(item: dict[str, Any]) -> dict[str, Any]:
+    """/positions の1行を保有の辞書に写す（#1010）。
+
+    欄が null のときは .get の既定値が効かず None になるため、ここで数に直す。
+    現在値が null なら評価額 Valuation ÷ 株数で埋め、埋められなければ NaN にする
+    （紙の道と同じく position_valuation が時価0として数え、SL/TP は飛ばす）。
+    """
+    symbol = item.get("Symbol", "")
+    qty_num = _number(item.get("LeavesQty", 0))
+    if qty_num is None:
+        logger.warning(f"[kabu] {symbol}: 建玉の株数 LeavesQty が読めず 0 として扱う")
+        qty_num = 0.0
+    qty = int(qty_num)
+
+    avg_price = _number(item.get("Price", 0.0))
+    if avg_price is None:
+        logger.warning(f"[kabu] {symbol}: 建玉の取得単価 Price が読めず NaN として扱う")
+        avg_price = math.nan
+
+    current_price = _number(item.get("CurrentPrice", 0.0))
+    if current_price is None:
+        valuation = _number(item.get("Valuation"))
+        if valuation is not None and qty > 0:
+            current_price = valuation / qty
+        else:
+            logger.warning(f"[kabu] {symbol}: 建玉の現在値 CurrentPrice が読めず NaN として扱う")
+            current_price = math.nan
+
+    return {
+        "symbol": symbol,
+        "qty": qty,
+        "avg_price": avg_price,
+        "current_price": current_price,
+    }
 
 
 class KabuBroker(BrokerBase):
@@ -154,11 +205,14 @@ class KabuBroker(BrokerBase):
             "ExpireDay": 0,  # 0 = 当日有効
         }
         logger.info(f"[kabu] 注文送信: symbol={symbol} side={side.name} qty={qty} price={price}")
-        resp = httpx.post(
-            f"{_BASE_URL}/sendorder",
-            headers={"X-API-KEY": token},
-            json=body,
-            timeout=self._timeout,
+        resp = request_with_rate_limit_retry(
+            lambda: httpx.post(
+                f"{_BASE_URL}/sendorder",
+                headers={"X-API-KEY": token},
+                json=body,
+                timeout=self._timeout,
+            ),
+            f"sendorder symbol={symbol}",
         )
         resp.raise_for_status()
         data = resp.json()
@@ -190,37 +244,40 @@ class KabuBroker(BrokerBase):
     def get_positions(self) -> list[dict[str, Any]]:
         """保有ポジション一覧を返す"""
         token = self.get_token()
-        resp = httpx.get(
-            f"{_BASE_URL}/positions",
-            headers={"X-API-KEY": token},
-            params={"product": 0},  # 0 = 全商品
-            timeout=self._timeout,
+        resp = request_with_rate_limit_retry(
+            lambda: httpx.get(
+                f"{_BASE_URL}/positions",
+                headers={"X-API-KEY": token},
+                params={"product": 0},  # 0 = 全商品
+                timeout=self._timeout,
+            ),
+            "positions",
         )
         resp.raise_for_status()
         raw = resp.json() or []
-        return [
-            {
-                "symbol": item.get("Symbol", ""),
-                "qty": item.get("LeavesQty", 0),
-                "avg_price": item.get("Price", 0.0),
-                "current_price": item.get("CurrentPrice", 0.0),
-            }
-            for item in raw
-        ]
+        return [_position_row(item) for item in raw]
 
     def get_balance(self) -> float:
         """現金余力（円）を返す"""
         token = self.get_token()
-        resp = httpx.get(
-            f"{_BASE_URL}/wallet/cash",
-            headers={"X-API-KEY": token},
-            timeout=self._timeout,
+        resp = request_with_rate_limit_retry(
+            lambda: httpx.get(
+                f"{_BASE_URL}/wallet/cash",
+                headers={"X-API-KEY": token},
+                timeout=self._timeout,
+            ),
+            "wallet/cash",
         )
         resp.raise_for_status()
         return float(resp.json().get("StockAccountWallet", 0.0))
 
     def get_orders(self) -> list[dict[str, Any]]:
-        """当日の注文一覧を返す"""
+        """当日の注文一覧を返す。
+
+        price は注文の値段（成行は 0）のまま。fill_price は Details の約定の行
+        （RecType 8）の値段を数量で加重した平均で、約定の行が無ければ None。
+        filled は注文が終了（State 5）し、約定の数量が 1 以上のとき True (#952)。
+        """
         token = self.get_token()
         resp = httpx.get(
             f"{_BASE_URL}/orders",
@@ -230,14 +287,42 @@ class KabuBroker(BrokerBase):
         )
         resp.raise_for_status()
         raw = resp.json() or []
-        return [
-            {
-                "order_id": item.get("ID", ""),
-                "symbol": item.get("Symbol", ""),
-                "side": item.get("Side", ""),
-                "qty": item.get("OrderQty", 0),
-                "price": item.get("Price", 0.0),
-                "status": item.get("State", ""),
-            }
-            for item in raw
-        ]
+        orders: list[dict[str, Any]] = []
+        for item in raw:
+            fill_price, filled_qty = _execution_fill(item.get("Details"))
+            state = item.get("State", "")
+            orders.append(
+                {
+                    "order_id": item.get("ID", ""),
+                    "symbol": item.get("Symbol", ""),
+                    "side": item.get("Side", ""),
+                    "qty": item.get("OrderQty", 0),
+                    "price": item.get("Price", 0.0),
+                    "status": state,
+                    "fill_price": fill_price,
+                    "filled_qty": filled_qty,
+                    "filled": state == _STATE_DONE and filled_qty > 0,
+                }
+            )
+        return orders
+
+
+def _execution_fill(details: Any) -> tuple[float | None, int]:
+    """Details の約定の行から、数量で加重した約定値と約定の数量を返す。"""
+    total_qty = 0
+    total_amount = 0.0
+    for row in details or []:
+        if not isinstance(row, dict) or row.get("RecType") != _REC_TYPE_EXECUTION:
+            continue
+        try:
+            price = float(row.get("Price") or 0.0)
+            qty = int(float(row.get("Qty") or 0))
+        except (TypeError, ValueError):
+            continue
+        if price <= 0 or qty <= 0:
+            continue
+        total_qty += qty
+        total_amount += price * qty
+    if total_qty <= 0:
+        return None, 0
+    return total_amount / total_qty, total_qty
