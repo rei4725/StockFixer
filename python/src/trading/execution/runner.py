@@ -339,7 +339,7 @@ def run_order_steps(
                 confidence_ratio=confidence,
             )
             if qty <= 0:
-                logger.info(f"[exec] {symbol}: 発注株数 0 → スキップ（残高不足or上限）")
+                logger.info(f"[exec] {symbol}: 発注株数 0 → スキップ（{risk.zero_reason}）")
                 stats["skipped"] += 1
                 continue
 
@@ -516,7 +516,7 @@ def run_order_steps(
                     confidence_ratio=confidence,
                 )
                 if qty <= 0:
-                    logger.info(f"[exec] {symbol}: 発注株数 0 → ショートスキップ（残高不足or上限）")
+                    logger.info(f"[exec] {symbol}: 発注株数 0 → ショートせず（{risk.zero_reason}）")
                     stats["skipped"] += 1
                     continue
 
