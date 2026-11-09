@@ -76,7 +76,7 @@ class TestTradePasswordSet(unittest.TestCase):
     @patch("src.trading.brokers.kabu.kabu_client.httpx.post")
     def test_send_order_body_unchanged(self, mock_post):
         resp = MagicMock()
-        resp.json.return_value = {"OrderId": "OID-1"}
+        resp.json.return_value = {"Result": 0, "OrderId": "OID-1"}
         mock_post.return_value = resp
 
         with patch.dict(os.environ, {_ENV_NAME: _DUMMY}):

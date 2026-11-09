@@ -370,7 +370,7 @@ class TestKabuBrokerSendOrder(unittest.TestCase):
         from src.trading.brokers.base import OrderSide
 
         mock_response = MagicMock()
-        mock_response.json.return_value = {"OrderId": "OID-001"}
+        mock_response.json.return_value = {"Result": 0, "OrderId": "OID-001"}
         mock_response.raise_for_status = MagicMock()
         mock_post.return_value = mock_response
 
@@ -387,7 +387,7 @@ class TestKabuBrokerSendOrder(unittest.TestCase):
         from src.trading.brokers.base import OrderSide
 
         mock_response = MagicMock()
-        mock_response.json.return_value = {"OrderId": "OID-002"}
+        mock_response.json.return_value = {"Result": 0, "OrderId": "OID-002"}
         mock_response.raise_for_status = MagicMock()
         mock_post.return_value = mock_response
 
@@ -399,7 +399,7 @@ class TestKabuBrokerSendOrder(unittest.TestCase):
 
     def _sent_body(self, mock_post, side):
         mock_response = MagicMock()
-        mock_response.json.return_value = {"OrderId": "OID-003"}
+        mock_response.json.return_value = {"Result": 0, "OrderId": "OID-003"}
         mock_response.raise_for_status = MagicMock()
         mock_post.return_value = mock_response
 

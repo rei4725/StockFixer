@@ -28,7 +28,11 @@ _REC_TYPE_EXECUTION = 8  # /orders の Details の RecType: 8 = 約定
 _STATE_DONE = 5  # /orders の State: 5 = 終了（全部約定・取消・失効）
 # /orders の State の 1〜4 は終わっていない注文（1 = 待機、2 = 処理中、3 = 処理済で
 # 約定待ち・一部約定、4 = 訂正取消送信中）。値の意味は仕様書の記憶による推測（#1521）
-_PRODUCT_CASH = 1  # /orders の product: 0 = すべて、1 = 現物
+# /orders・/positions の product: 0 = すべて、1 = 現物、2 = 信用、3 = 先物、4 = OP
+_PRODUCT_CASH = 1
+# sendorder・cancelorder の応答の Result: 0 = 成功、それ以外は断り（#951）。
+# 0 以外の個々の値の意味は仕様書で確かめていない（推測）。
+_RESULT_OK = 0
 
 # RequestSendOrder の値（kabu_STATION_API.yaml）
 # Side: "1" = 売、"2" = 買。OrderSide の数とは逆なので、明示の表で写す。
@@ -47,8 +51,6 @@ _CASH_FUND_TYPE: dict[OrderSide, str] = {
     OrderSide.SELL: "  ",
 }
 _ACCOUNT_TYPE_SPECIFIC = 4  # AccountType: 2 = 一般、4 = 特定、12 = 法人
-# /positions の product: 0 = 全て、1 = 現物、2 = 信用、3 = 先物、4 = OP
-_PRODUCT_CASH = 1
 _POSITION_SIDE_BUY = "2"  # /positions の Side: "1" = 売、"2" = 買
 
 
@@ -80,6 +82,16 @@ def _is_cash_long(item: Any) -> bool:
         logger.info(f"[kabu] {item.get('Symbol', '')}: 売りの建玉は保有に数えない")
         return False
     return True
+
+
+def _check_result(data: Any, action: str) -> dict[str, Any]:
+    """sendorder・cancelorder の応答の Result が 0 でなければ BrokerError を出す（#951）。
+
+    Result が無い・数でない応答も、受け付けられたとは言えないため断りとして扱う。
+    """
+    if not isinstance(data, dict) or _number(data.get("Result")) != _RESULT_OK:
+        raise BrokerError(f"[kabu] {action} が断られました: {data!r}")
+    return data
 
 
 def _position_row(item: dict[str, Any]) -> dict[str, Any]:
@@ -217,7 +229,8 @@ class KabuBroker(BrokerBase):
             {"order_id": str, "status": str, "message": str}
 
         Raises:
-            BrokerError: SHORT / SHORT_COVER など現物の口で送れない side のとき（送らない）
+            BrokerError: SHORT / SHORT_COVER など現物の口で送れない side のとき（送らない）。
+                応答の Result が 0 でないとき、OrderId が空のとき（#951）
         """
         if side not in _CASH_SIDE:
             raise BrokerError(
@@ -251,8 +264,12 @@ class KabuBroker(BrokerBase):
             f"sendorder symbol={symbol}",
         )
         resp.raise_for_status()
-        data = resp.json()
-        order_id = data.get("OrderId", "")
+        data = _check_result(resp.json(), f"注文 symbol={symbol}")
+        order_id = str(data.get("OrderId") or "")
+        if not order_id:
+            raise BrokerError(
+                f"[kabu] 注文 symbol={symbol} の応答に OrderId がありません: {data!r}"
+            )
         logger.info(f"[kabu] 注文受付: order_id={order_id}")
         return {"order_id": order_id, "status": "accepted", "message": str(data)}
 
@@ -271,8 +288,9 @@ class KabuBroker(BrokerBase):
             timeout=self._timeout,
         )
         resp.raise_for_status()
+        data = _check_result(resp.json(), f"取消 order_id={order_id}")
         logger.info(f"[kabu] 注文キャンセル: order_id={order_id}")
-        return {"order_id": order_id, "status": "cancelled", "message": str(resp.json())}
+        return {"order_id": order_id, "status": "cancelled", "message": str(data)}
 
     # ------------------------------------------------------------------
     # 照会
