@@ -463,7 +463,7 @@ class SchedulerQueueManager:
             max_forgiven=max_forgiven,
         )
         cap = config.get("max_executions_per_period", 1)
-        recovery_label = interrupted_recovery_label(rerun_if_interrupted, max_forgiven, cap)
+        recovery_label = interrupted_recovery_label(rerun_if_interrupted, max_forgiven, cap, result)
         for run_id in result.interrupted_run_ids:
             if run_id in self._warned_interrupted_run_ids:
                 continue
