@@ -54,7 +54,11 @@ from src.trading.execution.pending import _load_pending_exits
 from src.trading.execution.recording import _recorder
 from src.trading.execution.selection import _get_pending_buy_symbols
 from src.trading.execution.stats import OrderExecutionStats
-from src.trading.position_valuation import count_short_positions, short_held_codes
+from src.trading.position_valuation import (
+    count_short_positions,
+    sellable_long_qty,
+    short_held_codes,
+)
 from src.trading.risk_manager import RiskManager
 from src.trading.signal_generator import apply_multi_horizon_score_column
 from src.utils.logger import get_logger
@@ -243,16 +247,18 @@ def _handle_place_order(
     else:
         positions = broker.get_positions()
         pos = next((p for p in positions if p["symbol"].replace(".T", "") == symbol), None)
-        if pos is None or pos.get("qty", 0) <= 0:
+        # 返済の注文で拘束された hold_qty は売りに出さない。8:50 の道・SL/TP と同じ数（#1784）
+        sellable = sellable_long_qty(pos) if pos is not None else 0
+        if sellable <= 0:
             stats["skipped"] += 1
-            return {"status": "skipped", "reason": f"{symbol} の保有ポジションなし"}
+            return {"status": "skipped", "reason": f"{symbol} の売れる保有なし"}
         # 紙の SELL は約定まで保有を減らさないため、同じ回・前の回の約定待ちを見て2本目を出さない（#1170）
         if _load_pending_exits(broker).has(symbol, OrderSide.SELL):
             msg = f"{symbol} は約定待ちの SELL があるためスキップ"
             logger.info("[claude_agent] %s", msg)
             stats["skipped"] += 1
             return {"status": "skipped", "reason": msg}
-        qty = pos["qty"]
+        qty = sellable
 
     try:
         order_type, order_price, order_reason, order_session = _choose_order_params(
