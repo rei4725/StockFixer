@@ -18,6 +18,7 @@ should_recover は上限や締めで False を返すだけで、その期間の�
 週次ジョブは、補完の日が尽きた週も見る（#1683）。止まっていて回数が上限の下のまま週の補完が
 動かなくなった週は、上限の知らせに現れないため。補完の最後の日が次の ISO 週の頭の日になる
 ジョブがあるので、見る週は今の週と前の週とする。保持していない週は「回が無い」と読まない。
+頭が消えていない状態ファイルが、その週の消えた回の記録から始まるときは読む（#1773）。
 """
 
 from __future__ import annotations
@@ -51,6 +52,10 @@ _FULL_RUN_HOURS = 29
 # 抜けた日を見る東証の営業日の数。events は1日およそ90件で上限の5000件は約55日分あり、
 # 大型連休や年末年始をまたいでも保持の範囲に収まる
 _PAST_DAY_RANGE = 5
+
+# 状態ファイルの events の上限（scheduler_queue の _append_event_locked と同じ）。
+# これに届いた状態ファイルは頭が消えているかもしれない
+_MAX_EVENTS = 5000
 
 
 def _period_without_success(
@@ -116,6 +121,25 @@ def _week_recovery_ended(
     return today > _monday_of(week) + timedelta(days=last_weekday)
 
 
+def _week_retained(
+    manager: SchedulerQueueManager, job_id: str, period_key: str, week: datetime, oldest: date
+) -> bool:
+    """week の週の記録を状態ファイルが保持していれば True。
+
+    最も古い記録の日は頭が消えているかもしれないので、週の頭からの記録が残る週だけを読み、
+    保持していない週を「回が無い」と読まない。ただし頭が一度も消えておらず、最も古い記録が
+    このジョブのその週の回そのものなら、その週の回はすべて残っている。状態ファイルが
+    消えた回から始まった週も、補完の日が尽きたら知らせる（#1773）。
+    """
+    if _monday_of(week) > oldest:
+        return True
+    events = manager._state.get("events", [])
+    if len(events) >= _MAX_EVENTS or not events:
+        return False
+    first = events[0]
+    return bool(first.get("job_id") == job_id and first.get("period_key") == period_key)
+
+
 def _ended_week(manager: SchedulerQueueManager, job_id: str, now: datetime) -> str | None:
     """補完の日が尽き、成功も知らせも無い週のうち古い方を返す。回数は問わない。
 
@@ -136,15 +160,15 @@ def _ended_week(manager: SchedulerQueueManager, job_id: str, now: datetime) -> s
     if not manager._reload_state_for_recovery():
         return None
 
-    # 最も古い記録の日は頭が消えているかもしれない。週の頭からの記録が残る週だけを読み、
-    # 保持していない週を「回が無い」と読まない
     oldest = _oldest_event_day(manager)
     if oldest is None:
         return None
     for week in (local_now - timedelta(days=7), local_now):
-        if _monday_of(week) <= oldest or not _week_recovery_ended(manager, config, week, today):
+        if not _week_recovery_ended(manager, config, week, today):
             continue
         period_key = manager._build_period_key(config, week)
+        if not _week_retained(manager, job_id, period_key, week, oldest):
+            continue
         if _still_unreported(manager, job_id, period_key):
             return period_key
     manager._past_days_scanned.add(scan_key)
