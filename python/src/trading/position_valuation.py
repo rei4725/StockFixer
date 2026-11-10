@@ -80,6 +80,15 @@ def coverable_short_qty(pos: Mapping[str, Any]) -> int:
     return int(pos.get("qty") or 0) - int(pos.get("pending_qty") or 0)
 
 
+def sellable_long_qty(pos: Mapping[str, Any]) -> int:
+    """買い持ちを売りに出してよい株数（qty から返済の注文で拘束された hold_qty を引く、#1764）。
+
+    kabu の LeavesQty は注文中の HoldQty を含むため、そのまま売ると証券会社にはねられる。
+    hold_qty の欄が無い保有（紙のブローカー）は qty をそのまま売る。
+    """
+    return max(0, int(pos.get("qty") or 0) - int(pos.get("hold_qty") or 0))
+
+
 def is_failed_short_row(pos: Mapping[str, Any]) -> bool:
     """行の処理が落ちて、全部が約定待ちの形になった空売りなら True を返す（#1580・#1601）。
 

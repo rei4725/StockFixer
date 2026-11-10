@@ -6,7 +6,11 @@ from typing import Any
 from config.settings import DEFAULT_STOP_LOSS_PCT
 from src.domain.ports import MarketDataPort, TradeDiffSink
 from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
-from src.trading.position_valuation import coverable_short_qty, is_failed_short_row
+from src.trading.position_valuation import (
+    coverable_short_qty,
+    is_failed_short_row,
+    sellable_long_qty,
+)
 from src.trading.risk_manager import RiskManager
 from src.trading.types import TradingGateStatus
 from src.utils.logger import get_logger
@@ -76,7 +80,8 @@ def _check_sl_tp_exits(
         symbol = str(pos.get("symbol", "")).replace(".T", "")
         try:
             # 空売りは約定待ちの SHORT（仮登録）の分を返済しない（#1225）
-            qty = coverable_short_qty(pos) if is_short else int(pos.get("qty") or 0)
+            # 買い持ちは返済の注文で拘束された分を売らない（#1764）
+            qty = coverable_short_qty(pos) if is_short else sellable_long_qty(pos)
             avg_price = float(pos.get("avg_short_price" if is_short else "avg_price") or 0.0)
             current_price = float(pos.get("current_price") or 0.0)
             if is_short and is_failed_short_row(pos):
