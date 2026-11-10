@@ -79,13 +79,25 @@ def count_executions(
 
 
 def interrupted_recovery_label(
-    rerun_if_interrupted: bool, max_forgiven: int, max_executions: int
+    rerun_if_interrupted: bool,
+    max_forgiven: int,
+    max_executions: int,
+    counted: ExecutionCount,
 ) -> str:
     """消えた回の警告に書く、補完のされ方。
 
     rerun_if_interrupted の無いジョブも、消えた回を上限に数えたうえで残りの回で補完する。
     「なし」とだけ書くと、やり直さないと読めるため、上限に数えることを書く（#1769）。
+    counted は数えたあとの回数とその期間の消えた回。回数が上限に届いていれば
+    補完しないので、補完すると書かない（#1777）。判定は should_recover が行う。
     """
+    if counted.count >= max_executions:
+        if rerun_if_interrupted and len(counted.interrupted_run_ids) > max_forgiven:
+            return (
+                f"なし（数えない枠の{max_forgiven}回を超えた消えた回を数え、"
+                f"上限の{max_executions}回に届いたので補完しない）"
+            )
+        return f"なし（上限の{max_executions}回に届いたので補完しない）"
     if rerun_if_interrupted:
         return f"あり（1期間に{max_forgiven}回まで）"
     return f"上限の{max_executions}回に数えて補完（#1769）"
