@@ -22,6 +22,9 @@ from src.domain.sentiment_sources import any_sentiment_source_configured, is_sen
 from src.prediction.constant_prediction import check_unified_training
 from src.prediction.db import load_excluded_features, save_feature_selection
 from src.prediction.ports import get_market_data_port
+from src.prediction.unified_split import is_trial_model as _is_trial_model
+from src.prediction.unified_split import sort_by_date as _sort_by_date
+from src.prediction.unified_split import split_train_val_by_date as _split_train_val_by_date
 from src.utils.data_path_utils import ensure_dir, get_models_dir
 from src.utils.db import load_all_stock_features
 from src.utils.logger import get_logger
@@ -313,44 +316,6 @@ def prepare_unified_features(
     return X, y
 
 
-def _sort_by_date(
-    X: pd.DataFrame, y: pd.Series, dates: Optional[pd.Series]
-) -> Tuple[pd.DataFrame, pd.Series, Optional[pd.Series]]:
-    """行を日付の順に並べ（同じ日付の中は今の並び）、index を振り直す（#1363）。
-
-    元の表は market・symbol 順に並ぶため、行の並びのまま末尾を検証にすると、
-    末尾の銘柄の全期間が検証になり、その銘柄を学習しない。日付の分からない行は先頭に置く。
-    dates が無いときは今の並びのままにする。
-    """
-    if dates is None:
-        return X, y, None
-    day = pd.Series(pd.to_datetime(pd.Series(dates).to_numpy(), errors="coerce"))
-    order = day.sort_values(kind="stable", na_position="first").index.to_numpy()
-    X = X.iloc[order].reset_index(drop=True)
-    y = y.iloc[order].reset_index(drop=True)
-    return X, y, day.iloc[order].reset_index(drop=True)
-
-
-def _split_train_val_by_date(
-    X: pd.DataFrame, y: pd.Series, day: Optional[pd.Series]
-) -> Tuple[pd.DataFrame, pd.Series, Optional[list]]:
-    """日付の順の X を、直近のおよそ 20%（最低 500 行）を検証に、それより前を学習に分ける。
-
-    切れ目は日付の境にそろえ、同じ日付の行が学習と検証にまたがらないようにする
-    （切れ目の日付の行はすべて検証に入る）。学習が 1000 行に満たなければ分けない。
-    日付が無いときは、行の並びのまま末尾を検証にする（今までの分け方）。
-    """
-    n_val = max(int(len(X) * 0.2), 500)
-    n_train = len(X) - n_val
-    if day is not None and 0 < n_train < len(X) and pd.notna(day.iloc[n_train]):
-        n_nat = int(day.isna().sum())
-        n_train = n_nat + int(day.iloc[n_nat:].searchsorted(day.iloc[n_train], side="left"))
-    if n_train < 1000:
-        return X, y, None
-    X_val, y_val = X.iloc[n_train:], y.iloc[n_train:]
-    return X.iloc[:n_train], y.iloc[:n_train], [(X_val, y_val)]
-
-
 def train_unified_model(
     model_type: str = "XGBoostModel",
     model_name: str = "UnifiedStockModel",
@@ -427,7 +392,11 @@ def train_unified_model(
     logger.info(f"3. モデル学習中 ({model_type})...")
     mm = ModelManager(model_dir=save_dir)
     model = mm.create_model(model_type, model_name)
-    model.train(X_train_u, y_train_u, eval_set=train_eval_set)
+    # challenger と夜間の候補は early stopping を使わず、決めた本数の木をすべて学ぶ。
+    # 日付で切った検証では最初の木で止まり、予想がほぼ定数になる（#1774）。
+    # 検証の行は学習の確かめにだけ使う。本番の名前の学習は今までどおり。
+    fit_eval_set = None if _is_trial_model(model_name) else train_eval_set
+    model.train(X_train_u, y_train_u, eval_set=fit_eval_set)
     if save_selection:
         _compute_and_save_unified_feature_selection(model, X, y)
 
