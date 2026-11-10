@@ -19,7 +19,6 @@ from config.settings import (
     CORRELATION_ENC_THRESHOLD,
     CORRELATION_WINDOW_DAYS,
     ENABLE_SHORT_SIDE,
-    MAX_ORDERS_PER_RUN,
     MAX_POSITIONS,
     MIN_CHANGE_RATIO,
 )
@@ -56,12 +55,13 @@ from .params import (
 from .pending import _load_pending_exits, _log_pending_skips
 from .recording import _record_order, _recorder, _sync_live_execution_diffs
 from .selection import (
-    _apply_buy_sector_limit,
+    _cap_per_run,
     _compute_ml_exit_signals,
     _determine_entry_horizon,
     _get_held_symbols,
     _get_pending_buy_symbols,
     _load_exit_model,
+    _select_buy_signals,
 )
 from .sl_tp import _check_sl_tp_exits, _sl_tp_exits_only
 from .stats import OrderExecutionStats, count_skip
@@ -276,9 +276,7 @@ def run_order_steps(
             & (~predictions["symbol"].isin(short_held_symbols))
             & (predictions["multi_horizon_score"] >= predictions["effective_buy_threshold"])
         ]
-        buy_signals = _apply_buy_sector_limit(
-            buy_candidates, held_symbols=held_or_pending, market=market
-        ).head(MAX_ORDERS_PER_RUN)
+        buy_signals = _select_buy_signals(buy_candidates, held_or_pending, market, stats)
     else:
         logger.warning(
             "[exec] リスク・相関ゲートにより新規買いをスキップ: %s",
@@ -462,9 +460,7 @@ def run_order_steps(
             & (~predictions["symbol"].isin(short_held_symbols))
             & (predictions["multi_horizon_score"] <= predictions["effective_sell_threshold"])
         ].sort_values("multi_horizon_score", kind="stable")
-        short_entry_candidates = short_entry_candidates.head(
-            MAX_ORDERS_PER_RUN if gate_status.is_allowed else 0
-        )
+        short_entry_candidates = _cap_per_run(short_entry_candidates, stats, gate_status.is_allowed)
 
         for _, row in short_entry_candidates.iterrows():
             symbol = row["symbol"]

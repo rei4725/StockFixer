@@ -119,7 +119,7 @@ class TestOrderSkipReasons(unittest.TestCase):
                 side_effect=lambda market, symbol: f"UNKNOWN:{market}:{symbol}",
             ),
             patch("src.trading.execution.runner.MAX_POSITIONS", max_positions),
-            patch("src.trading.execution.runner.MAX_ORDERS_PER_RUN", 20),
+            patch("src.trading.execution.selection.MAX_ORDERS_PER_RUN", 20),
             patch("src.trading.execution.runner.ENABLE_SHORT_SIDE", short_side),
             patch("src.trading.execution.gate_record.now_jst", return_value=_NOW),
         ]
