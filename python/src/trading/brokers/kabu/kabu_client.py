@@ -108,6 +108,13 @@ def _position_row(item: dict[str, Any]) -> dict[str, Any]:
         qty_num = 0.0
     qty = int(qty_num)
 
+    # HoldQty は保有のうち返済の注文で拘束された数量。qty は保有の上限と時価に使うため
+    # 引かずに別の欄に置き、売る数は position_valuation.sellable_long_qty で決める（#1764）
+    hold_num = _number(item.get("HoldQty", 0))
+    if hold_num is None:
+        logger.warning(f"[kabu] {symbol}: 建玉の拘束数量 HoldQty が読めず 0 として扱う")
+        hold_num = 0.0
+
     avg_price = _number(item.get("Price", 0.0))
     if avg_price is None:
         logger.warning(f"[kabu] {symbol}: 建玉の取得単価 Price が読めず NaN として扱う")
@@ -125,6 +132,7 @@ def _position_row(item: dict[str, Any]) -> dict[str, Any]:
     return {
         "symbol": symbol,
         "qty": qty,
+        "hold_qty": int(hold_num),
         "avg_price": avg_price,
         "current_price": current_price,
     }

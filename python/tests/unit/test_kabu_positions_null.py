@@ -82,6 +82,7 @@ def test_numbers_unchanged_without_null():
     assert pos == {
         "symbol": "9984",
         "qty": 200,
+        "hold_qty": 0,
         "avg_price": 5000.0,
         "current_price": 5200.0,
     }

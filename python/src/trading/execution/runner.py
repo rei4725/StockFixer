@@ -35,7 +35,11 @@ from src.domain.types import OrderRunSummary
 from src.trading.brokers.base import BrokerBase, BrokerError, OrderSide
 from src.trading.correlation_risk import evaluate_correlation_gate
 from src.trading.position_size_reason import zero_qty_skip_key
-from src.trading.position_valuation import coverable_short_qty, read_short_positions
+from src.trading.position_valuation import (
+    coverable_short_qty,
+    read_short_positions,
+    sellable_long_qty,
+)
 from src.trading.risk_manager import RiskManager
 from src.trading.signal_generator import apply_multi_horizon_score_column
 from src.utils.logger import get_logger
@@ -219,9 +223,10 @@ def run_order_steps(
             if sell_positions is None:
                 sell_positions = broker.get_positions()
             pos = next((p for p in sell_positions if p["symbol"].replace(".T", "") == symbol), None)
-            if pos is None or pos["qty"] <= 0:
+            # 返済の注文で拘束された分は売らない（#1764）
+            qty = sellable_long_qty(pos) if pos is not None else 0
+            if qty <= 0:
                 continue
-            qty = pos["qty"]
             order_type, order_price, order_reason, order_session = _choose_order_params(
                 market=str(row["market"]),
                 symbol=symbol,
