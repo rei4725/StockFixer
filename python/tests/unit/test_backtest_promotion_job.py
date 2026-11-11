@@ -15,6 +15,7 @@ import pandas as pd
 import pytest
 from filelock import Timeout
 
+from src.domain.types import SymbolTask
 from src.orchestration.job_errors import NonRetryableJobError
 from src.orchestration.jobs import backtest_promotion_job as job
 from src.orchestration.scheduler_queue import SchedulerQueueManager
@@ -45,6 +46,31 @@ _PRODUCTION = {
 }
 
 
+def _targets(n_jp: int, n_us: int = 3) -> list[SymbolTask]:
+    """ウォッチリストの読み出しの差し替え。本物の config/watchlist.json を読まない。"""
+    jp = [SymbolTask(market="jp", symbol=f"{i:04d}") for i in range(n_jp)]
+    return jp + [SymbolTask(market="us", symbol=f"US{i}") for i in range(n_us)]
+
+
+def _old_measure(
+    old_hit: float | None,
+    old_rc: float | None,
+    reason: str | None = None,
+    n_compared: int = 20,
+) -> dict:
+    """measure_old_production の結果の差し替え。new は同じ行の新しいモデルの物差し。"""
+    measured = reason is None
+    return {
+        "n_watch_rows": 20,
+        "n_compared": n_compared,
+        "need_rows": 16.0,
+        "old": {"hit_rate_minus_majority": old_hit, "rank_corr": old_rc} if measured else None,
+        "new": {"hit_rate_minus_majority": 0.0, "rank_corr": -0.4} if measured else None,
+        "reason": reason,
+        "skipped": {},
+    }
+
+
 def _evaluation(won: bool = True, passed: bool = True) -> HoldoutEvaluation:
     reasons = [] if won else ["MAE が production より小さくない"]
     if not passed:
@@ -56,7 +82,12 @@ def _evaluation(won: bool = True, passed: bool = True) -> HoldoutEvaluation:
         candidate=dict(_CANDIDATE),
         production=dict(_PRODUCTION),
         daily=[{"date": "2026-10-06", "candidate": 0.05, "production": 0.02, "diff": 0.03}],
-        path_check={"compared": 50, "max_abs_diff": 0.0 if passed else 0.1, "passed": passed},
+        path_check={
+            "compared": 50,
+            "max_abs_diff": 0.0 if passed else 0.1,
+            "passed": passed,
+            "compared_by_market": {"jp": 25, "us": 25},
+        },
         recorded_reference={"n_matched": 0, "direction_agreement": None, "median_ratio_diff": None},
         decision=WinDecision(won=not reasons, reasons=reasons),
     )
@@ -83,7 +114,11 @@ def env(tmp_path, monkeypatch):
         "result": MagicMock(return_value=True),
         "swap": MagicMock(return_value=True),
         "rollback": MagicMock(return_value=True),
+        "waiting": MagicMock(return_value=True),
         "accuracy": MagicMock(return_value=pd.DataFrame()),
+        "targets": MagicMock(return_value=_targets(2)),
+        # 同じ5日の旧 production の物差し。既定は旧 production のほうが良い
+        "old_production": MagicMock(return_value=_old_measure(0.1, 0.5)),
     }
     monkeypatch.setattr(job, "prediction_code_version", lambda: _VERSION)
     monkeypatch.setattr(job, "latest_holdout_dates", lambda: list(_DATES))
@@ -91,10 +126,16 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(job, "load_unified_model", lambda name: f"model:{name}")
     monkeypatch.setattr(job, "evaluate_holdout", mocks["evaluate"])
     monkeypatch.setattr(job, "load_prediction_accuracy", mocks["accuracy"])
+    monkeypatch.setattr(job, "load_target_symbols", mocks["targets"])
+    monkeypatch.setattr(job, "measure_old_production", mocks["old_production"])
     nm = "src.reporting.discord.notifications_model"
     monkeypatch.setattr(f"{nm}.send_backtest_promotion_result", mocks["result"])
     monkeypatch.setattr(f"{nm}.send_backtest_promotion_swap", mocks["swap"])
     monkeypatch.setattr(f"{nm}.send_backtest_promotion_rollback", mocks["rollback"])
+    monkeypatch.setattr(
+        "src.reporting.discord.notifications_backtest_watch.send_backtest_promotion_watch_waiting",
+        mocks["waiting"],
+    )
     mocks["unified"] = unified
     mocks["results"] = results / "backtest_promotion"
     # 既定では stock_features は今の版で作り直し済み
@@ -411,6 +452,109 @@ def test_path_check_that_compared_nothing_is_failure_and_version_not_marked(env)
     assert _read_json(result["result_path"])["evaluation"]["path_check"]["compared"] == 0
 
 
+def test_no_jp_compared_is_failure_without_swap_and_version_not_marked(env):
+    # us が通っていても、発注する市場の jp を確かめられなかった回は入れ替えず次の夜にやり直す
+    st.save_state(BacktestPromotionState(last_evaluated_version="previous0000"))
+    evaluation = _evaluation(won=True, passed=True)
+    evaluation.path_check = {
+        "compared": 25,
+        "max_abs_diff": 0.0,
+        "passed": False,
+        "compared_by_market": {"jp": 0, "us": 25},
+        "skipped_by_reason": {"live_none": 25},
+    }
+    env["evaluate"].return_value = evaluation
+
+    result = job.run_backtest_promotion()
+
+    assert result["outcome"] == "failed"
+    assert "jp" in result["reason"]
+    assert result["swapped"] is False
+    env["swap"].assert_not_called()
+    assert st.load_state().last_evaluated_version == "previous0000"
+    saved = _read_json(result["result_path"])["evaluation"]["path_check"]
+    assert saved["compared_by_market"] == {"jp": 0, "us": 25}
+    assert saved["skipped_by_reason"] == {"live_none": 25}
+
+
+_JP_SHORTFALLS = [
+    "発注する市場 jp の比べられた行が足りない（20 行、見込み 40 行、必要 32 以上）",
+    "発注する市場 jp の行のある銘柄が足りない（1 銘柄、全 5 銘柄、必要 4 以上）",
+    "発注する市場 jp の行のある営業日が足りない（4 日、東証の営業日 18 日、必要 14.4 以上）",
+]
+
+
+def _jp_short_evaluation(shortfall: str, won: bool = True, passed: bool = True):
+    """jp の線に落ちた評価。勝ちにならないので decision は負けの形にする。"""
+    evaluation = _evaluation(won=won, passed=passed)
+    evaluation.required_market_shortfalls = [shortfall]
+    evaluation.decision = WinDecision(won=False, reasons=evaluation.decision.reasons + [shortfall])
+    return evaluation
+
+
+@pytest.mark.parametrize("shortfall", _JP_SHORTFALLS, ids=["行", "銘柄", "営業日"])
+def test_jp_line_shortfall_is_failure_and_version_not_marked(env, shortfall):
+    # jp のデータが欠けた夜は比べていないので、負けと記録せず次の夜に比べ直す
+    st.save_state(BacktestPromotionState(last_evaluated_version="previous0000"))
+    env["evaluate"].return_value = _jp_short_evaluation(shortfall)
+
+    result = job.run_backtest_promotion()
+
+    assert result["outcome"] == "failed"
+    assert result["reason"] == shortfall
+    assert result["swapped"] is False
+    env["swap"].assert_not_called()
+    assert st.load_state().last_evaluated_version == "previous0000"
+    assert env["result"].call_args[0][0]["outcome"] == "failed"
+    saved = _read_json(result["result_path"])["evaluation"]
+    assert saved["required_market_shortfalls"] == [shortfall]
+
+
+def test_jp_line_shortfall_is_failure_even_if_the_ruler_also_lost(env):
+    # 物差しの負けは jp が欠けたままの行で出た数字なので、版を記録する理由にしない
+    st.save_state(BacktestPromotionState(last_evaluated_version="previous0000"))
+    env["evaluate"].return_value = _jp_short_evaluation(_JP_SHORTFALLS[0], won=False)
+
+    result = job.run_backtest_promotion()
+
+    assert result["outcome"] == "failed"
+    assert "MAE が production より小さくない" in result["reason"]
+    assert st.load_state().last_evaluated_version == "previous0000"
+
+
+def test_jp_line_shortfall_is_compared_again_the_next_night(env):
+    env["evaluate"].return_value = _jp_short_evaluation(_JP_SHORTFALLS[0])
+    assert job.run_backtest_promotion()["outcome"] == "failed"
+
+    env["evaluate"].return_value = _evaluation(won=True)
+    result = job.run_backtest_promotion()
+
+    assert result["outcome"] == "won"
+    assert result["swapped"] is True
+    assert st.load_state().last_evaluated_version == _VERSION
+
+
+def test_path_check_failure_stays_not_comparable_with_jp_line_shortfall(env):
+    env["evaluate"].return_value = _jp_short_evaluation(_JP_SHORTFALLS[0], passed=False)
+
+    result = job.run_backtest_promotion()
+
+    assert result["outcome"] == "not_comparable"
+    assert st.load_state().last_evaluated_version == _VERSION
+
+
+def test_loss_over_the_jp_line_stays_lost_whatever_the_reason_says(env):
+    # 見分けるのは欄であり、文の中身ではない。全市場の線に落ちた回もここに入る
+    evaluation = _evaluation(won=False)
+    evaluation.decision = WinDecision(won=False, reasons=_JP_SHORTFALLS[:1])
+    env["evaluate"].return_value = evaluation
+
+    result = job.run_backtest_promotion()
+
+    assert result["outcome"] == "lost"
+    assert st.load_state().last_evaluated_version == _VERSION
+
+
 def test_failure_is_not_recorded_as_loss_and_version_not_marked(env):
     st.save_state(BacktestPromotionState(last_evaluated_version="previous0000"))
     env["train"].side_effect = RuntimeError("stock_features が空")
@@ -609,9 +753,7 @@ def test_watch_rolls_back_and_records_version(env):
 
 def test_watch_triggered_but_old_worse_keeps_model_and_notifies(env):
     backups = _swapped_env(env)
-    state = st.load_state()
-    state.watch["backtest_old_production"] = {"hit_rate_minus_majority": -0.5, "rank_corr": -0.9}
-    st.save_state(state)
+    env["old_production"].return_value = _old_measure(-0.5, -0.9)
     env["accuracy"].return_value = _scored_rows(
         5, [0.01, 0.02, 0.03, 0.04], [0.02, 0.01, -0.01, -0.02]
     )
@@ -632,6 +774,73 @@ def test_watch_triggered_but_old_worse_keeps_model_and_notifies(env):
     assert all(os.path.exists(p) for p in backups)
     env["rollback"].assert_called_once()
     assert len(_result_files(env)) == 1
+
+
+_TRIGGERING = ([0.01, 0.02, 0.03, 0.04], [0.02, 0.01, -0.01, -0.02])
+
+
+def test_watch_keeps_new_model_when_old_is_worse_on_the_same_five_days(env):
+    """取っておいた20日の旧 production が良くても、同じ5日の旧 production が悪ければ戻さない。"""
+    backups = _swapped_env(env)
+    # 取っておいた20日の旧 production は新しいモデルの5日より良い（直す前はこれで戻した）
+    assert st.load_state().watch["backtest_old_production"]["hit_rate_minus_majority"] == 0.02
+    env["old_production"].return_value = _old_measure(-0.2, -0.6)
+    env["accuracy"].return_value = _scored_rows(5, *_TRIGGERING)
+
+    watch = job.run_backtest_promotion()["watch"]
+
+    assert watch["judged"] is True
+    assert watch["triggered"]
+    assert watch["old_is_better"] is False
+    assert watch["rolled_back"] is False
+    assert (env["unified"] / "UnifiedStockXGBoost.joblib").read_bytes() == (
+        b"new UnifiedStockXGBoost"
+    )
+    assert st.load_state().rolled_back_versions == []
+    assert watch["old_production"]["old"]["hit_rate_minus_majority"] == -0.2
+    assert watch["compared_rows"] == 20
+    # 旧 production の写しと、同じ5日の行を渡す
+    called_backups, called_rows = env["old_production"].call_args[0]
+    assert called_backups == backups
+    assert len(called_rows) == 5 * 4
+
+
+def test_watch_rolls_back_when_old_is_better_on_the_same_five_days(env):
+    _swapped_env(env)
+    env["old_production"].return_value = _old_measure(0.05, 0.3)
+    env["accuracy"].return_value = _scored_rows(5, *_TRIGGERING)
+
+    watch = job.run_backtest_promotion()["watch"]
+
+    assert watch["old_is_better"] is True
+    assert watch["rolled_back"] is True
+    assert watch["compared_rows"] == 20
+    assert (env["unified"] / "UnifiedStockXGBoost.joblib").read_bytes() == (
+        b"old UnifiedStockXGBoost"
+    )
+    assert "oldver000000" in st.load_state().rolled_back_versions
+
+
+def test_watch_does_not_roll_back_when_old_production_cannot_be_measured(env):
+    _swapped_env(env)
+    env["old_production"].return_value = _old_measure(
+        None, None, reason="旧 production の写しが読めない", n_compared=0
+    )
+    env["accuracy"].return_value = _scored_rows(5, *_TRIGGERING)
+
+    watch = job.run_backtest_promotion()["watch"]
+
+    assert watch["judged"] is True
+    assert watch["triggered"]
+    assert watch["rolled_back"] is False
+    assert watch["compared_rows"] == 0
+    assert "旧 production の写しが読めない" in watch["note"]
+    assert (env["unified"] / "UnifiedStockXGBoost.joblib").read_bytes() == (
+        b"new UnifiedStockXGBoost"
+    )
+    state = st.load_state()
+    assert state.watch is None
+    assert state.rolled_back_versions == []
 
 
 def test_watch_rollback_then_state_save_failure_keeps_rollback_in_result(env, monkeypatch):
@@ -683,6 +892,254 @@ def test_watch_error_keeps_watch_and_fails(env):
     assert st.load_state().watch is not None
     env["result"].assert_called_once()
     env["train"].assert_not_called()
+
+
+def _day_rows(day: str, market: str, symbols: list[str]) -> list[dict]:
+    """predicted_at が day（YYYYMMDD）の朝の、採点済みの行。"""
+    return [
+        {
+            "market": market,
+            "symbol": symbol,
+            "predicted_at": f"{day}_073000",
+            "predicted_ratio": 0.01 * (i + 1),
+            "actual_ratio": 0.02 - 0.01 * i,
+        }
+        for i, symbol in enumerate(symbols)
+    ]
+
+
+_JP_FOUR = ["0000", "0001", "0002", "0003"]
+
+
+def test_watch_keeps_waiting_when_a_day_has_no_jp_rows(env):
+    _swapped_env(env)
+    env["targets"].return_value = _targets(4)
+    rows = []
+    for day in ("20261002", "20261004", "20261005", "20261006"):
+        rows += _day_rows(day, "jp", _JP_FOUR)
+    rows += _day_rows("20261003", "us", ["AAPL", "MSFT", "NVDA", "AMZN"])
+    env["accuracy"].return_value = pd.DataFrame(rows)
+
+    result = job.run_backtest_promotion()
+
+    watch = result["watch"]
+    assert watch["judged"] is False
+    assert watch["scored_days"] == 4
+    assert watch["skipped_days"] == ["2026-10-03"]
+    assert st.load_state().watch is not None
+    env["rollback"].assert_not_called()
+
+
+def test_watch_judges_on_five_days_without_the_skipped_day(env, monkeypatch):
+    _swapped_env(env)
+    env["targets"].return_value = _targets(4)
+    spy = MagicMock(wraps=job.baseline_metrics)
+    monkeypatch.setattr(job, "baseline_metrics", spy)
+    rows = _day_rows("20261003", "us", ["AAPL", "MSFT"]) + _day_rows("20261003", "jp", ["0000"])
+    for day in ("20261002", "20261004", "20261005", "20261006", "20261007"):
+        rows += _day_rows(day, "jp", _JP_FOUR)
+    env["accuracy"].return_value = pd.DataFrame(rows)
+
+    result = job.run_backtest_promotion()
+
+    watch = result["watch"]
+    assert watch["judged"] is True
+    assert watch["scored_days"] == 5
+    assert watch["days"] == ["2026-10-02", "2026-10-04", "2026-10-05", "2026-10-06", "2026-10-07"]
+    assert watch["skipped_days"] == ["2026-10-03"]
+    measured = spy.call_args[0][0]
+    assert len(measured) == 5 * len(_JP_FOUR)
+    assert "2026-10-03" not in set(measured["_day"])
+    assert st.load_state().watch is None
+
+
+@pytest.mark.parametrize(
+    "symbols,counted",
+    [
+        (["0000", "0001", "0002", "0003"], True),
+        (["0000", "0001", "0002"], False),
+        (["0000", "0001", "0002", "0002"], False),
+    ],
+    ids=["線ちょうど", "線の下", "同じ銘柄の2行は1銘柄"],
+)
+def test_watch_day_counts_only_at_the_jp_symbol_line(env, symbols, counted):
+    # 全 5 銘柄の 8 割で、線は 4 銘柄
+    _swapped_env(env)
+    env["targets"].return_value = _targets(5)
+    env["accuracy"].return_value = pd.DataFrame(_day_rows("20261002", "jp", symbols))
+
+    watch = job.run_backtest_promotion()["watch"]
+
+    assert watch["scored_days"] == (1 if counted else 0)
+    assert watch["skipped_days"] == ([] if counted else ["2026-10-02"])
+    assert watch["judged"] is False
+
+
+def test_watch_day_does_not_count_us_rows_or_us_symbols_toward_the_jp_line(env):
+    _swapped_env(env)
+    env["targets"].return_value = _targets(5, n_us=500)
+    rows = _day_rows("20261002", "jp", ["0000", "0001", "0002"])
+    rows += _day_rows("20261002", "us", ["0003", "0004", "AAPL"])
+    env["accuracy"].return_value = pd.DataFrame(rows)
+
+    watch = job.run_backtest_promotion()["watch"]
+
+    assert watch["scored_days"] == 0
+    assert watch["skipped_days"] == ["2026-10-02"]
+
+
+def _skipped_day_rows(n_skipped: int, n_counted: int = 0) -> pd.DataFrame:
+    """jp が1銘柄だけの日（線 4 銘柄の 8 割の下）を n_skipped 日、4 銘柄の日を n_counted 日。"""
+    rows = []
+    for i in range(n_skipped + n_counted):
+        day = (pd.Timestamp("2026-10-02") + pd.Timedelta(days=i)).strftime("%Y%m%d")
+        rows += _day_rows(day, "jp", ["0000"] if i < n_skipped else _JP_FOUR)
+    return pd.DataFrame(rows)
+
+
+def test_watch_notifies_once_when_skipped_days_reach_the_line(env):
+    _swapped_env(env)
+    env["targets"].return_value = _targets(4)
+    env["accuracy"].return_value = _skipped_day_rows(5, n_counted=2)
+
+    result = job.run_backtest_promotion()
+
+    watch = result["watch"]
+    assert watch["judged"] is False
+    assert watch["scored_days"] == 2
+    assert len(watch["skipped_days"]) == 5
+    assert watch["skipped_days_notified"] is True
+    env["waiting"].assert_called_once()
+    assert env["waiting"].call_args[0][0]["watch"]["skipped_days"] == watch["skipped_days"]
+    state_watch = st.load_state().watch
+    assert state_watch is not None
+    assert state_watch["skipped_days_notified"] is True
+    env["rollback"].assert_not_called()
+    assert result["outcome"] == "skipped"
+
+
+def test_watch_does_not_repeat_the_skipped_days_notice_on_the_next_night(env):
+    _swapped_env(env)
+    env["targets"].return_value = _targets(4)
+    env["accuracy"].return_value = _skipped_day_rows(5)
+    job.run_backtest_promotion()
+
+    env["accuracy"].return_value = _skipped_day_rows(6)
+    result = job.run_backtest_promotion()
+
+    env["waiting"].assert_called_once()
+    assert len(result["watch"]["skipped_days"]) == 6
+    assert st.load_state().watch is not None
+
+
+def test_watch_does_not_notify_below_the_skipped_days_line(env):
+    _swapped_env(env)
+    env["targets"].return_value = _targets(4)
+    env["accuracy"].return_value = _skipped_day_rows(4, n_counted=4)
+
+    result = job.run_backtest_promotion()
+
+    env["waiting"].assert_not_called()
+    assert "skipped_days_notified" not in result["watch"]
+    assert "skipped_days_notified" not in st.load_state().watch
+
+
+@pytest.mark.parametrize(
+    "send",
+    [MagicMock(side_effect=RuntimeError("Discord に届かない")), MagicMock(return_value=False)],
+    ids=["例外", "False"],
+)
+def test_watch_stays_and_judgement_is_unchanged_when_the_notice_fails(env, send):
+    backups = _swapped_env(env)
+    env["targets"].return_value = _targets(4)
+    env["accuracy"].return_value = _skipped_day_rows(5, n_counted=4)
+    env["waiting"].side_effect = send.side_effect
+    env["waiting"].return_value = send.return_value
+
+    result = job.run_backtest_promotion()
+
+    env["waiting"].assert_called_once()
+    assert result["outcome"] == "skipped"
+    assert result["watch"]["judged"] is False
+    assert result["watch"]["scored_days"] == 4
+    state_watch = st.load_state().watch
+    assert state_watch["backups"] == backups
+    # 送れなかった回は印を付けず、次の夜にもう一度知らせる
+    assert "skipped_days_notified" not in state_watch
+    env["rollback"].assert_not_called()
+
+
+def test_watch_still_judges_after_the_skipped_days_notice(env):
+    _swapped_env(env)
+    env["targets"].return_value = _targets(4)
+    env["accuracy"].return_value = _skipped_day_rows(5, n_counted=4)
+    job.run_backtest_promotion()
+
+    env["accuracy"].return_value = _skipped_day_rows(5, n_counted=5)
+    result = job.run_backtest_promotion()
+
+    assert result["watch"]["judged"] is True
+    assert st.load_state().watch is None
+    env["waiting"].assert_called_once()
+
+
+def test_watch_waiting_notice_shows_skipped_and_counted_days():
+    from src.reporting.discord.notifications_backtest_watch import (
+        send_backtest_promotion_watch_waiting,
+    )
+
+    result = {
+        "watch": {
+            "version": "oldver000000",
+            "scored_days": 2,
+            "need_days": 5,
+            "skipped_days": ["2026-10-02", "2026-10-03", "2026-10-04", "2026-10-05", "2026-10-06"],
+            "need_symbols": 3.2,
+            "n_universe_symbols": 4,
+        }
+    }
+    target = "src.reporting.discord.notifications_backtest_watch.send_status_fields"
+    with patch(target, MagicMock(return_value=True)) as send:
+        assert send_backtest_promotion_watch_waiting(result) is True
+    spec, fields = send.call_args[0][:2]
+    assert "待っている" in spec.title
+    values = {f["name"]: f["value"] for f in fields}
+    assert values["✅ 数えた日"].startswith("2 日")
+    assert values["⏭️ 飛ばした日"] == "5 日"
+    assert "2026-10-06" in values["📅 飛ばした日の一覧"]
+
+
+def test_watch_is_not_judged_without_jp_symbols_in_the_watchlist(env):
+    backups = _swapped_env(env)
+    env["targets"].return_value = _targets(0)
+    env["accuracy"].return_value = _scored_rows(
+        5, [0.01, 0.02, 0.03, 0.04], [0.02, 0.01, -0.01, -0.02]
+    )
+
+    result = job.run_backtest_promotion()
+
+    assert result["watch"]["judged"] is False
+    assert result["watch"]["scored_days"] == 0
+    assert "jp" in result["watch"]["note"]
+    assert st.load_state().watch["backups"] == backups
+    env["rollback"].assert_not_called()
+
+
+def test_watch_stays_when_the_watchlist_cannot_be_read(env):
+    _swapped_env(env)
+    env["targets"].side_effect = OSError("watchlist が読めない")
+    env["accuracy"].return_value = _scored_rows(
+        5, [0.01, 0.02, 0.03, 0.04], [0.02, 0.01, -0.01, -0.02]
+    )
+
+    result = job.run_backtest_promotion()
+
+    assert result["outcome"] == "failed"
+    assert "watchlist が読めない" in result["error"]
+    assert result["watch"]["judged"] is False
+    assert st.load_state().watch is not None
+    env["rollback"].assert_not_called()
+    env["result"].assert_called_once()
 
 
 def test_dry_run_does_not_judge_watch(env):
@@ -951,6 +1408,7 @@ def test_weekly_training_lock_timeout_is_error_and_recovers_same_day(
     statuses = _saved_statuses(tmp_path)
     assert "retry" not in statuses
     assert statuses[-1] == "error"
+    # 間（recovery_min_gap_minutes）の中でも、ロック切れの回の補完は待たない（#1682）
     assert manager.should_recover(job_id, now=now) is True
 
 
@@ -1034,6 +1492,37 @@ def test_result_notification_title_follows_outcome(outcome, word):
     if outcome != "failed":
         assert "MAE が小さくない" in text
     assert all(len(f["value"]) <= 1024 for f in fields)
+
+
+def test_result_notification_shows_path_check_by_market_and_skip_reason():
+    from src.reporting.discord import notifications_model as nm
+
+    result = {
+        "outcome": "failed",
+        "version": _VERSION,
+        "evaluation": {
+            "path_check": {
+                "compared": 25,
+                "max_abs_diff": 0.0,
+                "passed": False,
+                "compared_by_market": {"jp": 0, "us": 25},
+                "skipped_by_reason": {
+                    "no_base_price": 1,
+                    "stale_features": 2,
+                    "live_none": 0,
+                    "production_none": 3,
+                },
+            },
+        },
+    }
+    _, fields = _sent(MagicMock(return_value=True), nm.send_backtest_promotion_result, result)
+    value = next(f["value"] for f in fields if "道の一致" in f["name"])
+    assert "NG" in value
+    assert "jp 0 / us 25" in value
+    assert "基準の値段が無い 1" in value
+    assert "特徴量が古い 2" in value
+    assert "この道の予想が無い 3" in value
+    assert "本番の予想が無い" not in value
 
 
 def test_result_notification_for_skip_has_reason():

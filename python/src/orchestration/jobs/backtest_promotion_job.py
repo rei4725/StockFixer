@@ -2,7 +2,7 @@
 
 予想のコードの版が前回の評価から変わり、stock_features もその版で作り直された夜に、
 取っておいた直近の期間を外して候補を学習し、その期間で今の production と比べる。勝てば候補を本番の名前で置き、5営業日見張る。
-見張りで悪ければ、戻す先のほうが良いときだけ写しから戻す。
+見張りで悪ければ、同じ5日の行で旧 production（写し）のほうが良いときだけ写しから戻す。
 
 全体を統合モデルのロックの中で動かし、週次の学習と同時に動かない。
 結果は results/backtest_promotion/YYYYMMDD_HHMMSS.json に書き、Discord へ知らせる。
@@ -23,6 +23,7 @@ from src.orchestration.jobs.common import _local_now
 from src.prediction.backtest_promotion import (
     CANDIDATE_NAMES,
     CODE_VERSION_SCOPE,
+    MIN_COVERAGE,
     SWAP_PRODUCTION_NAMES,
     WATCH_TRADING_DAYS,
     evaluate_holdout,
@@ -30,6 +31,7 @@ from src.prediction.backtest_promotion import (
     latest_holdout_dates,
     load_features_version,
     load_state,
+    measure_old_production,
     prediction_code_version,
     restore_backups,
     results_dir,
@@ -44,11 +46,13 @@ from src.prediction.types import BacktestPromotionState, HoldoutEvaluation
 from src.prediction.unified_model_pipeline import load_unified_model, train_unified_model
 from src.utils.japan_time import JAPAN_TIMEZONE, now_jst
 from src.utils.logger import get_logger
+from src.watchlist.batch_runner import load_target_symbols
 
 logger = get_logger(__name__)
 
 _MODEL_TYPES = ["XGBoostModel", "LightGBMModel"]
 _LOCK_TIMEOUT_S = 3 * 3600
+_WATCH_MARKET = "jp"  # 見張りの採点済みの日を決める市場（発注する市場）
 
 WON = "won"
 LOST = "lost"
@@ -266,11 +270,18 @@ def _train_and_evaluate(result: dict) -> HoldoutEvaluation:
 def _apply_evaluation(result: dict, evaluation: HoldoutEvaluation) -> None:
     result["evaluation"] = asdict(evaluation)
     if not evaluation.path_check.get("compared"):
-        # 本番の予想が1つも出ず（yfinance の止まりなど）道を確かめられなかった。食い違いではない
+        # 本番の予想が1つも出ず道を確かめられなかった。食い違いではない
         _end(result, FAILED, "道の一致の検査で比べられた銘柄が無い（本番の予想が出ない）")
+        return
+    if not (evaluation.path_check.get("compared_by_market") or {}).get("jp"):
+        # 発注する市場を確かめられなかった回は入れ替えず、版を記録せず次の夜にやり直す（#1675）
+        _end(result, FAILED, "道の一致の検査で jp の比べられた銘柄が無い（jp の予想が出ない）")
         return
     if not evaluation.path_check.get("passed"):
         outcome = NOT_COMPARABLE
+    elif evaluation.required_market_shortfalls:
+        # 発注する市場の行か銘柄か日が線の下の回は負けと記録せず、版を残さず次の夜に比べ直す（#1698）
+        outcome = FAILED
     elif evaluation.decision.won:
         outcome = WON
     else:
@@ -330,47 +341,132 @@ def _scored_rows_since_swap(watch: dict) -> pd.DataFrame:
     return rows.assign(_day=times[keep].map(lambda t: t.strftime("%Y-%m-%d")))
 
 
+def _split_watch_days(rows: pd.DataFrame, need_symbols: float) -> tuple[list[str], list[str]]:
+    """行のある日を、jp の銘柄の数が線に届く日と届かない日に分ける（どちらも日付の順）。
+
+    同じ日の同じ銘柄の行は1銘柄に数える。
+    """
+    if rows.empty:
+        return [], []
+    jp_rows = rows[rows["market"] == _WATCH_MARKET]
+    symbols_by_day = jp_rows.groupby("_day")["symbol"].nunique()
+    counted: list[str] = []
+    skipped: list[str] = []
+    for day in sorted(rows["_day"].unique()):
+        (counted if symbols_by_day.get(day, 0) >= need_symbols else skipped).append(day)
+    return counted, skipped
+
+
 def _check_watch(state: BacktestPromotionState, result: dict) -> None:
-    """採点済みの日が5日たまっていれば1回だけ判定し、見張りを消す。たまっていなければ何もしない。"""
+    """採点済みの日が5日たまっていれば1回だけ判定し、見張りを消す。たまっていなければ何もしない。
+
+    採点済みの日は、jp の採点の行のある銘柄がウォッチリストの jp の MIN_COVERAGE 以上の日だけである。
+    jp の採点がそろわない日で見張りを終わらせないため、足りない日は実測にも入れない（#1706）。
+    分母は行から作らない。ウォッチリストが読めない回は例外のまま _run_locked の失敗の道に乗る。
+    """
     watch = state.watch
     assert watch is not None
-    rows = _scored_rows_since_swap(watch)
-    days = sorted(rows["_day"].unique()) if not rows.empty else []
-    verdict: dict = {"version": watch.get("version"), "scored_days": len(days), "judged": False}
+    verdict: dict = {"version": watch.get("version"), "scored_days": 0, "judged": False}
     result["watch"] = verdict
+    n_universe = len({t.symbol for t in load_target_symbols() if t.market == _WATCH_MARKET})
+    if n_universe == 0:
+        verdict["note"] = f"ウォッチリストに {_WATCH_MARKET} の銘柄が無いため判定しない"
+        logger.error("仮の入れ替えの見張り: %s", verdict["note"])
+        return
+
+    need_symbols = n_universe * MIN_COVERAGE
+    rows = _scored_rows_since_swap(watch)
+    days, skipped_days = _split_watch_days(rows, need_symbols)
+    verdict.update(
+        scored_days=len(days),
+        skipped_days=skipped_days,
+        n_universe_symbols=n_universe,
+        need_symbols=need_symbols,
+        need_days=WATCH_TRADING_DAYS,
+    )
     if len(days) < WATCH_TRADING_DAYS:
         logger.info(
-            "仮の入れ替えの見張り: 採点済み %d 日（%d 日で判定）", len(days), WATCH_TRADING_DAYS
+            "仮の入れ替えの見張り: 採点済み %d 日（%d 日で判定）、飛ばした日 %s（jp の銘柄が %g 未満）",
+            len(days),
+            WATCH_TRADING_DAYS,
+            skipped_days,
+            need_symbols,
         )
+        _notify_skipped_days(state, result)
         return
 
     # 入れ替えの後の、最初の5日だけで測る
     first_days = set(days[:WATCH_TRADING_DAYS])
-    live = baseline_metrics(rows[rows["_day"].isin(first_days)])
-    decision = judge_rollback(live, watch["backtest_candidate"], watch["backtest_old_production"])
+    first_rows = rows[rows["_day"].isin(first_days)]
+    live = baseline_metrics(first_rows)
+    # 旧 production は取っておいた20日でなく、同じ5日・同じ行で予想させて比べる（#1729）
+    old = measure_old_production(watch.get("backups", []), first_rows)
+    decision = judge_rollback(live, watch["backtest_candidate"], old["old"], old["new"])
     verdict.update(
         judged=True,
         days=sorted(first_days),
         live=live,
+        old_production=old,
+        compared_rows=old["n_compared"],
         triggered=decision.triggered,
         old_is_better=decision.old_is_better,
         rolled_back=False,
         backups=watch.get("backups", []),
     )
+    if old["reason"] is not None:
+        logger.warning("仮の入れ替えの見張り: 同じ5日の旧 production を測れない: %s", old["reason"])
     if decision.rollback:
         restore_backups(watch["backups"])
         verdict["rolled_back"] = True
         if watch["version"] not in state.rolled_back_versions:
             state.rolled_back_versions.append(watch["version"])
+    elif decision.triggered and old["reason"] is not None:
+        verdict["note"] = (
+            f"見張りに当たったが、同じ5日の旧 production を測れないため戻さない: {old['reason']}"
+        )
     elif decision.triggered:
-        verdict["note"] = "見張りに当たったが戻す先も悪いため戻さない"
+        verdict["note"] = "見張りに当たったが、同じ5日の旧 production も良くないため戻さない"
     state.watch = None
     save_state(state)
     logger.info(
-        "仮の入れ替えの見張りを終えた: rolled_back=%s triggered=%s",
+        "仮の入れ替えの見張りを終えた: rolled_back=%s triggered=%s 採点済み %d 日 飛ばした日 %s",
         verdict["rolled_back"],
         decision.triggered,
+        len(days),
+        skipped_days,
     )
+
+
+def _notify_skipped_days(state: BacktestPromotionState, result: dict) -> None:
+    """飛ばした日が WATCH_TRADING_DAYS に届いたら、見張りごとに1回だけ Discord に知らせる（#1713）。
+
+    送れた回だけ見張りに印（skipped_days_notified）を付けて保存し、次の夜から重ねて出さない。
+    送れない回・印を保存できない回はログに残すだけで、見張りと判定には触らない（次の夜にもう一度送る）。
+    """
+    from src.reporting.discord import notifications_backtest_watch as nw
+
+    watch = state.watch
+    verdict = result["watch"]
+    if watch is None or watch.get("skipped_days_notified"):
+        return
+    if len(verdict["skipped_days"]) < WATCH_TRADING_DAYS:
+        return
+    try:
+        sent = nw.send_backtest_promotion_watch_waiting(result)
+    except Exception:
+        logger.error("仮の入れ替えの見張りの、飛ばした日の通知に失敗", exc_info=True)
+        return
+    if not sent:
+        logger.error("仮の入れ替えの見張りの、飛ばした日の通知を送れなかった")
+        return
+    watch["skipped_days_notified"] = True
+    verdict["skipped_days_notified"] = True
+    try:
+        save_state(state)
+    except Exception:
+        logger.error(
+            "飛ばした日の通知の印を保存できなかった（次の夜にもう一度送る）", exc_info=True
+        )
 
 
 # ---------------------------------------------------------------------------

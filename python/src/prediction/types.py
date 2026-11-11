@@ -120,16 +120,28 @@ class HoldoutEvaluation:
         dates: 取っておいた日（YYYY-MM-DD、古い順）
         n_symbols: 取っておいた期間に y の入った行を持つ (market, symbol) の数
         expected_rows: 採点の行の見込み（markets の expected_rows の合計。覆う割合の分母）
-        markets: 市場ごとの n_symbols・n_dates（y のある日の数）・expected_rows
+        markets: universe の市場ごとの n_universe_symbols・n_symbols・n_dates（y のある日の数）・
+            expected_rows・n_compared（比べられた行の数）・candidate・production（その市場の物差し）。
+            jp にはさらに n_business_dates（取っておいた日のうちの東証の営業日の数）と
+            n_business_dates_with_rows（そのうち y のある日の数）、銘柄の線の分母
+            n_watchlist_symbols（ウォッチリストの銘柄の数）と分子 n_watchlist_symbols_with_rows
+            （そのうち y のある銘柄の数）。読めない回は両方 None で、線は universe の数で判定する
         candidate: 候補の baseline_metrics()（両方の予想がそろった行だけ）
         production: production の baseline_metrics()（同じ行）
         daily: 日ごとの date・candidate・production・diff（hit_rate_minus_majority）
-        path_check: 道の一致の検査の compared・max_abs_diff・passed・compared_by_market
+        path_check: 道の一致の検査の compared・max_abs_diff・passed・compared_by_market・
+            skipped_by_reason（飛ばした銘柄の理由ごとの数）
         recorded_reference: prediction_accuracy の production の記録との突き合わせ（参考のみ）
         decision: 勝ちの判定
         degraded_rows: モデルが欠けて予想した行の数（candidate・production）
         skipped_rows: 飛ばした行の数（理由ごと）
         weights: 使った重みのまとめ（candidate・production ごとに calls・distinct・名前ごとの mean）
+        required_market_shortfalls: 発注する市場の行・銘柄・営業日が線に届かなかった理由
+            （decision.reasons の一部。空でなければ比べ足りない回で、負けでなく失敗にする）
+        vote_dates: 日ごとの勝ち越しの票に数えた日（jp の銘柄が線に届いた日、YYYY-MM-DD）
+        vote_skipped: 票から外した日の date・reason（jp_holiday か jp_symbols_short）・
+            n_jp_symbols（その日の jp の比べられた銘柄の数）
+        vote_need_symbols: 票に数える日に要る jp の銘柄の数（ウォッチリストの数 × MIN_COVERAGE）
     """
 
     cutoff: str
@@ -146,6 +158,10 @@ class HoldoutEvaluation:
     degraded_rows: dict = field(default_factory=dict)
     skipped_rows: dict = field(default_factory=dict)
     weights: dict = field(default_factory=dict)
+    required_market_shortfalls: list[str] = field(default_factory=list)
+    vote_dates: list[str] = field(default_factory=list)
+    vote_skipped: list[dict] = field(default_factory=list)
+    vote_need_symbols: float = 0.0
 
 
 @dataclass
@@ -155,7 +171,7 @@ class RollbackDecision:
     Attributes:
         rollback: 戻すとき True（triggered があり、かつ old_is_better）
         triggered: 当たった見張りの条件（日本語）
-        old_is_better: 旧 production のバックテストが新 production の実測を両方で上回るか
+        old_is_better: 同じ5日・同じ行の旧 production が新 production を両方で上回るか
     """
 
     rollback: bool

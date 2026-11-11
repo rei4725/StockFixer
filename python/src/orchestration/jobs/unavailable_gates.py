@@ -4,11 +4,16 @@ daily.py からの責務分離（ファイル行数ガード対策）。
 """
 
 from collections import Counter
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from src.market_data.batch_db_write import has_price_step
 from src.orchestration.job_errors import NonRetryableJobError
 from src.orchestration.jobs.common import _notify_stage_failure
+from src.prediction.predict_unified import (
+    BASE_PRICE_DATE_MISMATCH,
+    BasePriceSkip,
+    base_price_skips,
+)
 from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
@@ -23,6 +28,10 @@ _FETCH_ERROR_NOTICE_SYMBOL_LIMIT = 5
 # 止まった相場の指標の知らせに並べる「列と最後の日」の組の上限（#1634）。[1/6] の知らせは
 # Discord の欄に入るので長くしない。ふつうは止まった列ごとに1組で、列は6つである
 _MACRO_STALE_NOTICE_GROUP_LIMIT = 6
+
+# 基準の値段の知らせに並べる「足の日と特徴量の日」の組の上限（#1662）。[3/6] の知らせも
+# Discord の欄に入るので長くしない
+_BASE_PRICE_DATE_NOTICE_GROUP_LIMIT = 3
 
 # 8:50 の自動発注が注文を出す市場（#1432）
 _ORDER_MARKET = "jp"
@@ -41,7 +50,8 @@ def _raise_if_fetch_mostly_unavailable(
     jp は全体の約3割のため、jp が大きく欠けても全体の線に届かない（#1432）。
     線の下でも取得のエラーが1件以上あれば、件数と先頭の銘柄を1回知らせる（#1256）。
     毎日あるスキップ（足の止まった銘柄）は知らせに数えない。
-    相場の指標の列が止まった銘柄は、線の上なら止める文に原因を足し、線の下なら1回知らせる（#1634）。
+    相場の指標の列が止まった・欠けた銘柄は、線の上なら止める文に原因を足し、線の下なら1回知らせる
+    （#1634・#1642）。
     段差の足で外した銘柄は、線の下でも1件以上あれば1回知らせる（#1643）。
     """
     from config.settings import DAILY_FETCH_MAX_UNAVAILABLE_RATIO
@@ -53,11 +63,11 @@ def _raise_if_fetch_mostly_unavailable(
         raise RuntimeError(
             f"取得できなかった銘柄が多すぎる: スキップ {len(batch_result.skipped)}"
             f" + エラー {len(batch_result.failed)} / 対象 {total}"
-            f"（線 {DAILY_FETCH_MAX_UNAVAILABLE_RATIO:.0%}）{_macro_stale_cause(batch_result)}"
+            f"（線 {DAILY_FETCH_MAX_UNAVAILABLE_RATIO:.0%}）{_macro_skip_cause(batch_result)}"
         )
     _raise_if_order_market_mostly_unavailable(market_totals or {}, batch_result)
     _notify_fetch_errors(total, batch_result)
-    _notify_macro_stale(total, batch_result)
+    _notify_macro_skips(total, batch_result)
     _notify_price_step_skips(total, batch_result)
 
 
@@ -80,7 +90,7 @@ def _raise_if_order_market_mostly_unavailable(
         raise RuntimeError(
             f"{market} の取得できなかった銘柄が多すぎる: スキップ {n_skipped}"
             f" + エラー {n_failed} / {market} の対象 {market_total}"
-            f"（線 {DAILY_FETCH_MAX_UNAVAILABLE_RATIO:.0%}）{_macro_stale_cause(batch_result)}"
+            f"（線 {DAILY_FETCH_MAX_UNAVAILABLE_RATIO:.0%}）{_macro_skip_cause(batch_result)}"
         )
 
 
@@ -91,9 +101,11 @@ def order_market_predictions_mostly_missing(
 
     [3/6] は基準の値段が取れない銘柄などを黙って飛ばすため、[1/6] の線の後でも jp の
     予想が大きく欠けうる。呼び出し元は True のとき保存の印を立てず、8:50 の新規を止める。
+    線の下でも基準の値段で飛ばした jp の銘柄があれば、回に1通にまとめて知らせる（#1662）。
     """
     gap = _order_market_prediction_gap(market_totals, output_rows)
     if gap is None:
+        _notify_base_price_skips(market_totals)
         return False
     message = f"{gap}。予想は保存したが、今日の新規は止める"
     logger.warning("[3/6] 予測 (production): %s", message)
@@ -148,19 +160,39 @@ def _macro_stale_summary(batch_result: "BatchResult") -> str:
     )
 
 
-def _macro_stale_cause(batch_result: "BatchResult") -> str:
-    """線を超えた文の後ろに足す、原因の列の文を返す。止まった銘柄が無ければ空（#1634）。"""
-    summary = _macro_stale_summary(batch_result)
+def _macro_missing_summary(batch_result: "BatchResult") -> str:
+    """欠けた列と銘柄の数の文を返す。欠けた銘柄が無ければ空（#1642）。
+
+    欠けた列は決まった6列の中なので、止まった列の組と違って上限で切らない。
+    """
+    skips = batch_result.macro_missing
+    groups = Counter(col for skip in skips for col in skip.columns)
+    if not groups:
+        return ""
+    ranked = sorted(groups.items(), key=lambda item: (-item[1], item[0]))
+    parts = [f"{col}（欠けた、{n} 件）" for col, n in ranked]
+    return f"相場の指標の列が欠けて特徴量を作らなかった銘柄 {len(skips)} 件: {', '.join(parts)}"
+
+
+def _macro_skip_summary(batch_result: "BatchResult") -> str:
+    """止まった列と欠けた列の文をつないで返す。どちらも無ければ空（#1634・#1642）。"""
+    summaries = (_macro_stale_summary(batch_result), _macro_missing_summary(batch_result))
+    return "。".join(summary for summary in summaries if summary)
+
+
+def _macro_skip_cause(batch_result: "BatchResult") -> str:
+    """線を超えた文の後ろに足す、原因の列の文を返す。止まった・欠けた銘柄が無ければ空。"""
+    summary = _macro_skip_summary(batch_result)
     return f"。{summary}" if summary else ""
 
 
-def _notify_macro_stale(total: int, batch_result: "BatchResult") -> None:
-    """線の下でも列が止まった銘柄があれば、回に1通にまとめて知らせる（#1634）。
+def _notify_macro_skips(total: int, batch_result: "BatchResult") -> None:
+    """線の下でも列が止まった・欠けた銘柄があれば、回に1通にまとめて知らせる（#1634・#1642）。
 
     銘柄ごとの WARNING のログにしか出ないと、古い指標で銘柄が予想から落ちた朝に
     ログを読むまで原因が分からない。
     """
-    summary = _macro_stale_summary(batch_result)
+    summary = _macro_skip_summary(batch_result)
     if not summary:
         return
     message = f"{summary}（対象 {total}）"
@@ -219,21 +251,53 @@ def _raise_if_rule_signals_mostly_unavailable(batch: "RuleSignalBatch") -> None:
         )
 
 
-def raise_if_optimization_mostly_failed(total: int, failed: int) -> None:
+def _count_optimization_failed(results: list[dict[str, Any]]) -> int:
+    """最適化の結果のうち、success でも skipped でもない行の数を返す（#973）。"""
+    return sum(1 for r in results if r.get("status") not in ("success", "skipped"))
+
+
+def raise_if_optimization_mostly_failed(results: list[dict[str, Any]]) -> None:
     """週の最適化の結果が空か、失敗が線を超えたら NonRetryableJobError を投げる（#1581）。
 
     銘柄ごとの失敗は例外にならないため、大半の銘柄が失敗した週も success と記録され、
-    同じ週の補完が止まり、発注が古い閾値と SL/TP のまま動いた。total は結果の件数で、
-    skipped（その週に済んだ銘柄）も分母に残す。呼び出し元は完了の知らせの後に呼ぶ。
-    知らせは済んでいるのでやり直さず、同じ週の補完に任せる。線は日次の取得（#811）と同じ。
+    同じ週の補完が止まり、発注が古い閾値と SL/TP のまま動いた。分母は結果の件数で、
+    skipped（その週に済んだ銘柄）も分母に残す。全体の割合に加えて、8:50 が発注する市場（jp）の
+    銘柄だけの割合も同じ線で見る。jp は全体の約3割のため、jp の全部が失敗しても全体の線に
+    届かない（#1680）。呼び出し元は完了の知らせの後に呼ぶ。知らせは済んでいるのでやり直さず、
+    同じ週の補完に任せる。線は日次の取得（#811）と同じ。
     """
     from config.settings import DAILY_FETCH_MAX_UNAVAILABLE_RATIO
 
+    total = len(results)
     if total <= 0:
         raise NonRetryableJobError("週次バックテスト最適化の結果が空だった")
+    failed = _count_optimization_failed(results)
     if failed / total > DAILY_FETCH_MAX_UNAVAILABLE_RATIO:
         raise NonRetryableJobError(
             f"週次バックテスト最適化で失敗した銘柄が多すぎる: {failed} / 結果 {total}"
+            f"（線 {DAILY_FETCH_MAX_UNAVAILABLE_RATIO:.0%}）"
+        )
+    _raise_if_order_market_optimization_mostly_failed(results)
+
+
+def _raise_if_order_market_optimization_mostly_failed(results: list[dict[str, Any]]) -> None:
+    """発注する市場の銘柄だけの失敗が線を超えたら NonRetryableJobError を投げる（#1680）。
+
+    jp の結果が0件の週は見ない。取得と予想の線と同じで、同じ対象で補完しても jp の結果は出ない。
+    全部 skipped の週は、全体の線と同じく skipped を分母に残し、失敗0件として通す。
+    """
+    from config.settings import DAILY_FETCH_MAX_UNAVAILABLE_RATIO
+
+    market = _ORDER_MARKET
+    market_results = [r for r in results if r.get("market") == market]
+    market_total = len(market_results)
+    if market_total <= 0:
+        return
+    market_failed = _count_optimization_failed(market_results)
+    if market_failed / market_total > DAILY_FETCH_MAX_UNAVAILABLE_RATIO:
+        raise NonRetryableJobError(
+            f"週次バックテスト最適化で {market} の失敗した銘柄が多すぎる: "
+            f"{market_failed} / {market} の結果 {market_total}"
             f"（線 {DAILY_FETCH_MAX_UNAVAILABLE_RATIO:.0%}）"
         )
 
@@ -242,8 +306,9 @@ def _raise_if_no_effective_rules(batch: "RuleSignalBatch") -> None:
     """対象が0銘柄の日に NonRetryableJobError を投げる（#1571）。
 
     有効ルールの表が空の日は保有の SELL が1件も判定されないのに、取れなかった銘柄も
-    注文の失敗も0件のため成功で終わる。呼び出し元は記録と知らせの後に呼ぶ。やり直しても
-    表は空のままで同じ知らせが重なるだけなので、リトライはさせない。
+    注文の失敗も0件のため成功で終わる。呼び出し元は記録と知らせの後に呼ぶ。同じ回の中で
+    やり直しても表は空のままで同じ知らせが重なるだけなので、リトライはさせない。
+    間を空けた同じ日の補完は1回動くので、表が空のままなら知らせは1通増える（#1676）。
     """
     if batch.total > 0:
         return
@@ -266,7 +331,59 @@ def _order_market_prediction_gap(market_totals: dict[str, int], output_rows: lis
         return None
     return (
         f"{market} の予想の出なかった銘柄が多すぎる: {n_missing} / {market} の対象 {market_total}"
-        f"（線 {DAILY_FETCH_MAX_UNAVAILABLE_RATIO:.0%}）"
+        f"（線 {DAILY_FETCH_MAX_UNAVAILABLE_RATIO:.0%}）{_base_price_skip_cause(market)}"
+    )
+
+
+def _base_price_date_detail(skips: list[BasePriceSkip]) -> str:
+    """足の日付の不一致の、足の日と特徴量の日の組と件数の括弧書きを返す（#1662）。"""
+    groups = Counter(
+        (skip.bar_day, skip.feature_day)
+        for skip in skips
+        if skip.reason == BASE_PRICE_DATE_MISMATCH
+    )
+    limit = _BASE_PRICE_DATE_NOTICE_GROUP_LIMIT
+    ranked = sorted(groups.items(), key=lambda item: (-item[1], item[0]))
+    parts = [
+        f"足の日 {bar}・特徴量の日 {feature} が {n} 件" for (bar, feature), n in ranked[:limit]
+    ]
+    more = " ほか" if len(ranked) > limit else ""
+    return f"（{', '.join(parts)}{more}）"
+
+
+def _base_price_skip_summary(market: str) -> str:
+    """基準の値段で飛ばした銘柄の理由ごとの件数の文を返す。飛ばしが無ければ空（#1662）。"""
+    skips = [skip for skip in base_price_skips() if skip.market == market]
+    if not skips:
+        return ""
+    ranked = sorted(Counter(skip.reason for skip in skips).items(), key=lambda i: (-i[1], i[0]))
+    parts = [
+        f"{reason} {n} 件"
+        + (_base_price_date_detail(skips) if reason == BASE_PRICE_DATE_MISMATCH else "")
+        for reason, n in ranked
+    ]
+    return f"基準の値段が取れず飛ばした {market} の銘柄 {len(skips)} 件: {', '.join(parts)}"
+
+
+def _base_price_skip_cause(market: str) -> str:
+    """線を超えた文の後ろに足す、基準の値段の飛ばしの文を返す。飛ばしが無ければ空（#1662）。"""
+    summary = _base_price_skip_summary(market)
+    return f"。{summary}" if summary else ""
+
+
+def _notify_base_price_skips(market_totals: dict[str, int]) -> None:
+    """線の下でも基準の値段で飛ばした jp の銘柄があれば、回に1通にまとめて知らせる（#1662）。
+
+    銘柄ごとの WARNING のログにしか出ないと、jp の予想が欠けた朝の原因が 8:50 までに分からない。
+    """
+    market = _ORDER_MARKET
+    summary = _base_price_skip_summary(market)
+    if not summary:
+        return
+    message = f"{summary}（{market} の対象 {market_totals.get(market, 0)}）"
+    logger.warning("[3/6] 予測 (production): %s", message)
+    _notify_stage_failure(
+        f"[3/6] 予測 (production) の {market} の基準の値段", RuntimeError(message)
     )
 
 

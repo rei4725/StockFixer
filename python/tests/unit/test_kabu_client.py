@@ -1,13 +1,8 @@
 """Unit tests for kabu_client.py"""
 
-import sys
 import unittest
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
-
-# httpx はオプション依存: テスト環境でインストールされていない場合はモックを設定
-if "httpx" not in sys.modules:
-    sys.modules["httpx"] = MagicMock()
 
 # Python 3.13+ の patch() は pkgutil.resolve_name を使うため、
 # サブパッケージをあらかじめインポートして属性として解決可能にする
@@ -292,6 +287,11 @@ class TestKabuBrokerGetPositions(unittest.TestCase):
 class TestKabuBrokerCancelOrder(unittest.TestCase):
     """KabuBroker.cancel_order のテスト"""
 
+    def setUp(self):
+        env_patch = patch.dict("os.environ", {"KABU_TRADE_PASSWORD": "dummy-trade-pw"})
+        env_patch.start()
+        self.addCleanup(env_patch.stop)
+
     def _make_broker(self):
         from src.trading.brokers.kabu.kabu_client import KabuBroker
 
@@ -351,6 +351,11 @@ class TestKabuBrokerCancelOrder(unittest.TestCase):
 class TestKabuBrokerSendOrder(unittest.TestCase):
     """KabuBroker.send_order のテスト"""
 
+    def setUp(self):
+        env_patch = patch.dict("os.environ", {"KABU_TRADE_PASSWORD": "dummy-trade-pw"})
+        env_patch.start()
+        self.addCleanup(env_patch.stop)
+
     def _make_broker(self):
         from src.trading.brokers.kabu.kabu_client import KabuBroker
 
@@ -365,7 +370,7 @@ class TestKabuBrokerSendOrder(unittest.TestCase):
         from src.trading.brokers.base import OrderSide
 
         mock_response = MagicMock()
-        mock_response.json.return_value = {"OrderId": "OID-001"}
+        mock_response.json.return_value = {"Result": 0, "OrderId": "OID-001"}
         mock_response.raise_for_status = MagicMock()
         mock_post.return_value = mock_response
 
@@ -382,7 +387,7 @@ class TestKabuBrokerSendOrder(unittest.TestCase):
         from src.trading.brokers.base import OrderSide
 
         mock_response = MagicMock()
-        mock_response.json.return_value = {"OrderId": "OID-002"}
+        mock_response.json.return_value = {"Result": 0, "OrderId": "OID-002"}
         mock_response.raise_for_status = MagicMock()
         mock_post.return_value = mock_response
 
@@ -391,6 +396,53 @@ class TestKabuBrokerSendOrder(unittest.TestCase):
 
         call_args = mock_post.call_args
         self.assertIn("sendorder", call_args[0][0])
+
+    def _sent_body(self, mock_post, side):
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"Result": 0, "OrderId": "OID-003"}
+        mock_response.raise_for_status = MagicMock()
+        mock_post.return_value = mock_response
+
+        broker = self._make_broker()
+        broker.send_order("7203.T", side, 100)
+        return mock_post.call_args.kwargs["json"]
+
+    @patch("src.trading.brokers.kabu.kabu_client.httpx.post")
+    def test_buy_body_matches_spec(self, mock_post):
+        """BUY は Side=2（買）・DelivType=2・FundType=02・AccountType=4 で送ること"""
+        from src.trading.brokers.base import OrderSide
+
+        body = self._sent_body(mock_post, OrderSide.BUY)
+        self.assertEqual(body["Side"], "2")
+        self.assertEqual(body["CashMargin"], 1)
+        self.assertEqual(body["DelivType"], 2)
+        self.assertEqual(body["FundType"], "02")
+        self.assertEqual(body["AccountType"], 4)
+        self.assertEqual(body["Symbol"], "7203")
+
+    @patch("src.trading.brokers.kabu.kabu_client.httpx.post")
+    def test_sell_body_matches_spec(self, mock_post):
+        """SELL は Side=1（売）・DelivType=0・FundType=半角スペース2つ・AccountType=4 で送ること"""
+        from src.trading.brokers.base import OrderSide
+
+        body = self._sent_body(mock_post, OrderSide.SELL)
+        self.assertEqual(body["Side"], "1")
+        self.assertEqual(body["CashMargin"], 1)
+        self.assertEqual(body["DelivType"], 0)
+        self.assertEqual(body["FundType"], "  ")
+        self.assertEqual(body["AccountType"], 4)
+
+    @patch("src.trading.brokers.kabu.kabu_client.httpx.post")
+    def test_short_sides_raise_without_sending(self, mock_post):
+        """SHORT・SHORT_COVER は注文を送らずに BrokerError になること"""
+        from src.trading.brokers.base import BrokerError, OrderSide
+
+        broker = self._make_broker()
+        for side in (OrderSide.SHORT, OrderSide.SHORT_COVER):
+            with self.subTest(side=side.name):
+                with self.assertRaises(BrokerError):
+                    broker.send_order("7203", side, 100)
+        mock_post.assert_not_called()
 
 
 if __name__ == "__main__":

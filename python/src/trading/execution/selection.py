@@ -6,7 +6,7 @@ from typing import Iterable
 
 import pandas as pd
 
-from config.settings import MAX_SECTOR_POSITIONS
+from config.settings import MAX_ORDERS_PER_RUN, MAX_SECTOR_POSITIONS
 from src.domain.sector_cap import filter_by_sector_cap
 from src.domain.trading_rules import ML_EXIT_PROB_THRESHOLD as _ML_EXIT_PROB_THRESHOLD
 from src.trading.brokers.base import BrokerBase
@@ -14,7 +14,49 @@ from src.trading.models.exit_model import ExitModel
 from src.utils.logger import get_logger
 from src.utils.sector_constraints import get_symbol_sector
 
+from .stats import OrderExecutionStats, count_skip
+
 logger = get_logger(__name__)
+
+
+def _count_dropped(stats: OrderExecutionStats, n_dropped: int, reason: str, label: str) -> None:
+    """落とした候補を reason の鍵で skipped と skip_reasons に数え、件数をログに出す（#1770）。"""
+    if n_dropped <= 0:
+        return
+    logger.info("[exec] %s で候補 %d 件を落とした（%s）", label, n_dropped, reason)
+    for _ in range(n_dropped):
+        count_skip(stats, reason)
+
+
+def _cap_per_run(
+    candidates: pd.DataFrame, stats: OrderExecutionStats, allowed: bool = True
+) -> pd.DataFrame:
+    """1回の発注の上限（MAX_ORDERS_PER_RUN）で先頭から切り、落とした候補を数える（#1770）。
+
+    鍵は 16:30 の RuleGateRecord とそろえて max_orders_per_run。allowed が偽（リスクのゲートで
+    新規を止めた回）は 0 件を返し、上限で落としたとは数えない。
+    """
+    if not allowed:
+        return candidates.head(0)
+    kept = candidates.head(MAX_ORDERS_PER_RUN)
+    _count_dropped(stats, len(candidates) - len(kept), "max_orders_per_run", "1回の発注の上限")
+    return kept
+
+
+def _select_buy_signals(
+    candidates: pd.DataFrame,
+    held_symbols: Iterable[str],
+    market: str,
+    stats: OrderExecutionStats,
+) -> pd.DataFrame:
+    """新規買いの候補に業種の上限と1回の発注の上限を当てる。選び方と順は変えない（#1770）。
+
+    業種の上限で落とした候補は sector_cap、head で落とした候補は max_orders_per_run に数える
+    （鍵は 16:30 の RuleGateRecord とそろえる）。
+    """
+    limited = _apply_buy_sector_limit(candidates, held_symbols=held_symbols, market=market)
+    _count_dropped(stats, len(candidates) - len(limited), "sector_cap", "業種の上限")
+    return _cap_per_run(limited, stats)
 
 
 def _apply_buy_sector_limit(
@@ -77,6 +119,21 @@ def _get_pending_buy_symbols(broker: BrokerBase) -> set[str]:
         return {str(s).replace(".T", "") for s in reader()}
     except Exception:
         logger.error("[exec] 約定待ちの BUY を読めない（新規は止める）", exc_info=True)
+        raise
+
+
+def _get_rule_buy_symbols_placed_today(broker: BrokerBase) -> set[str]:
+    """今日のルールの回が出した約定待ちの BUY の銘柄コードを返す。読む関数が無い Broker は空（#1660）
+
+    読めない日の扱いは _get_pending_buy_symbols と同じで、例外は上へ出す。
+    """
+    reader = getattr(broker, "get_rule_buy_symbols_placed_today", None)
+    if reader is None:
+        return set()
+    try:
+        return {str(s).replace(".T", "") for s in reader()}
+    except Exception:
+        logger.error("[exec] 今日のルールの回の BUY を読めない（新規は止める）", exc_info=True)
         raise
 
 

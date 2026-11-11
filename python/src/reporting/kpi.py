@@ -19,6 +19,7 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 _REPORT_DAYS = 30
+_JST_OFFSET = timedelta(hours=9)
 
 _EMPTY_DIFF: dict = {
     "tracked_count": 0,
@@ -54,7 +55,8 @@ def get_monthly_kpis(
 
     入力はすべて入口が AnalyticsQuery から取得して渡す（自分では読みに行かない）。
     accuracy_df は窓の中の採点をすべて含む prediction_accuracy(horizon=1) の戻り値
-    （model_name 列があれば production の行だけで hit_rate を出す）、
+    （model_name 列があれば production の行だけで、predicted_at 列があればその JST の日付が
+    窓の中の行だけで hit_rate を出す）、
     drift_df は drift_summary(horizon=1, recent_n=days) の戻り値を想定する。
     drift_thresholds は入口が読んだドリフト判定の設定値（省略時は既定値）。
 
@@ -90,13 +92,33 @@ def _compute_hit_rate(accuracy_df: pd.DataFrame, days: int = _REPORT_DAYS) -> Op
     # challenger の影の予想の採点を本番の的中率に混ぜない（#1090）
     if "model_name" in df.columns:
         df = df[df["model_name"] == "production"]
-    if "checked_at" in df.columns:
+    if "predicted_at" in df.columns:
+        # checked_at は採点し直しのたびに今に書き換わり、古い予想も窓に入るため使わない（#1725）
+        df = df[predicted_jst_date(df["predicted_at"]) >= window_start_jst(days)]
+    elif "checked_at" in df.columns:
         df["checked_at"] = pd.to_datetime(df["checked_at"], errors="coerce")
         cutoff = datetime.now() - timedelta(days=days)
         df = df[df["checked_at"] >= cutoff]
     if df.empty:
         return None
     return float(df["direction_match"].astype(float).mean())
+
+
+def predicted_jst_date(predicted_at: pd.Series) -> pd.Series:
+    """predicted_at（UTC の 'YYYYMMDD_HHMMSS'）を JST の日付（0時の Timestamp）にする。
+
+    週の記録（prediction.db.accuracy.jst_day、#1229）と同じく、UTC に9時間を足した日付で
+    切る。時刻が読めない行は NaT になり、窓との比べでは窓の外に倒れる。
+    """
+    digits = predicted_at.astype(str).str.replace(r"[^0-9]", "", regex=True)
+    utc = pd.to_datetime(digits.str[:14], format="%Y%m%d%H%M%S", errors="coerce")
+    return (utc + _JST_OFFSET).dt.normalize()
+
+
+def window_start_jst(days: int = _REPORT_DAYS) -> pd.Timestamp:
+    """月次の窓の初日（JST の今日から days 日前の 0時）を返す。"""
+    jst_now = datetime.now(timezone.utc).replace(tzinfo=None) + _JST_OFFSET
+    return pd.Timestamp(jst_now.date()) - pd.Timedelta(days=days)
 
 
 def _compute_drift_count(

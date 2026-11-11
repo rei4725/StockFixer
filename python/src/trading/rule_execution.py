@@ -14,7 +14,6 @@ from config.settings import (
     MAX_SECTOR_POSITIONS,
 )
 from src.domain.ports import TradeDiffSink
-from src.domain.sector_cap import filter_by_sector_cap
 from src.domain.trading_rules import get_lot_size
 from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
 from src.trading.brokers.paper.paper_broker import PaperBroker
@@ -25,7 +24,11 @@ from src.trading.execution.gate_record import (
     save_rule_gate_record,
 )
 from src.trading.execution.pending import _load_pending_exits, _log_pending_skips
-from src.trading.execution.selection import _get_pending_buy_symbols
+from src.trading.execution.selection import (
+    _get_pending_buy_symbols,
+    _get_rule_buy_symbols_placed_today,
+)
+from src.trading.position_size_reason import ZERO_QTY_BUDGET_CAP, zero_qty_skip_key
 from src.trading.position_valuation import count_short_positions, short_held_codes
 from src.trading.risk_manager import RiskManager
 from src.utils.data_path_utils import get_ticker
@@ -131,13 +134,18 @@ def execute_rule_paper_trades(
         logger.warning("[rule] 呼び出し元の指定で新規買いを停止し、保有の決済だけ出す")
     buys_allowed = False
     sector_allowed: set[str] = set()
+    candidate_sectors: dict[str, str] = {}
+    sector_counts: Counter[str] = Counter()
     position_count = len(held_symbols)
     # 新規買いにだけ使う手順が落ちたら、新規は止め保有の SELL だけ出してから、
     # 同じ例外を投げ直してジョブを失敗にする（#1221。8:50 の道の #1179 と同じ形）
     buy_step_error: Exception | None = None
+    buy_orders_this_run = 0
     try:
         held_or_pending |= _get_pending_buy_symbols(broker)
         position_count = len(held_or_pending)
+        # 消えた回の流し直しでも1日の新規買いが上限に収まるよう、今日の回の分から数える（#1660）
+        buy_orders_this_run = len(_get_rule_buy_symbols_placed_today(broker))
 
         # ML 経路（execution.run_daily_orders）と同等のリスク制御を適用する。
         # R-307: DD 基準値を発注前に更新し、当日発注可否ゲート（日次損失・連続損失・
@@ -176,13 +184,14 @@ def execute_rule_paper_trades(
             enc = getattr(corr_gate, "enc", None)
             record.enc = float(enc) if isinstance(enc, (int, float)) else None
             if corr_gate.is_allowed:
-                selected = filter_by_sector_cap(
-                    buy_candidates,
-                    max_sector_positions=MAX_SECTOR_POSITIONS,
-                    sector_getter=lambda it: get_symbol_sector(market, str(it["symbol"])),
-                    initial_counts=Counter(get_symbol_sector(market, s) for s in held_codes),
-                )
-                sector_allowed = {str(it["symbol"]) for it in selected}
+                # 業種の照会はこの手順の中で済ませ、枠は発注した銘柄だけに数える（#1610）。
+                # 株数0で飛ばす候補が枠を使って、後ろの買える候補を落とさないようにする
+                candidate_sectors = {
+                    str(it["symbol"]): get_symbol_sector(market, str(it["symbol"]))
+                    for it in buy_candidates
+                }
+                sector_counts = Counter(get_symbol_sector(market, s) for s in held_codes)
+                sector_allowed = set(candidate_sectors)
             else:
                 logger.warning(
                     "[rule] 相関ゲート不合格のため新規買いを停止: %s",
@@ -197,7 +206,6 @@ def execute_rule_paper_trades(
         buy_step_error = exc
         record.new_buy_step_error = repr(exc)
         sector_allowed = set()
-    buy_orders_this_run = 0
     # 朝の約定で据え置かれた SELL がある銘柄には2本目を出さない（#1169。8:50 の道と同じ確かめ）
     pending = _load_pending_exits(broker)
     pending_skipped: list[str] = []
@@ -219,9 +227,8 @@ def execute_rule_paper_trades(
                     skipped += 1
                     continue
                 if symbol not in sector_allowed:
-                    logger.info("[rule] %s: 相関ゲートか同一業種の上限で新規買いスキップ", symbol)
-                    corr_blocked = record.correlation_gate_allowed is False
-                    skip_reasons["correlation_gate" if corr_blocked else "sector_cap"] += 1
+                    logger.info("[rule] %s: 相関ゲート不合格のため新規買いスキップ", symbol)
+                    skip_reasons["correlation_gate"] += 1
                     skipped += 1
                     continue
                 if position_count >= MAX_POSITIONS:
@@ -244,12 +251,29 @@ def execute_rule_paper_trades(
                 # 残高連動のハーフ Kelly 基準で株数を算出（残高不足時は 0 株 → スキップ）。
                 # initial_budget_per_trade は 1 銘柄あたりの投資上限として併用する（保守側）。
                 qty = risk.calc_position_size(symbol, price)
+                sized_qty = qty
                 if price > 0 and initial_budget_per_trade > 0:
                     budget_cap = (int(initial_budget_per_trade / price) // lot) * lot
                     qty = min(qty, budget_cap)
                 if qty <= 0:
-                    logger.info("[rule] %s: 発注株数 0（残高不足 or サイズ上限）→ スキップ", symbol)
-                    skip_reasons["zero_qty"] += 1
+                    # 株数0の理由を分けて数える（#1748）
+                    if sized_qty > 0:
+                        zero_key = ZERO_QTY_BUDGET_CAP
+                        zero_text = (
+                            f"1銘柄の予算の上限 予算={initial_budget_per_trade:.0f} "
+                            f"1単元の代金={price * lot:.0f} 算出株数={sized_qty}"
+                        )
+                    else:
+                        zero_key = zero_qty_skip_key(risk.zero_reason)
+                        zero_text = str(risk.zero_reason)
+                    logger.info("[rule] %s: 発注株数 0 → スキップ（%s）", symbol, zero_text)
+                    skip_reasons[zero_key] += 1
+                    skipped += 1
+                    continue
+                sector = candidate_sectors[str(symbol)]
+                if 0 < MAX_SECTOR_POSITIONS <= sector_counts[sector]:
+                    logger.info("[rule] %s: 同一業種の上限で新規買いスキップ", symbol)
+                    skip_reasons["sector_cap"] += 1
                     skipped += 1
                     continue
 
@@ -263,6 +287,7 @@ def execute_rule_paper_trades(
                 buy_orders += 1
                 buy_orders_this_run += 1
                 position_count += 1
+                sector_counts[sector] += 1
                 logger.info(f"  BUY 注文: {symbol}  {qty}株  現在値={price:.0f}円")
 
             elif signal == -1 and symbol in held_symbols:

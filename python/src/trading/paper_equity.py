@@ -11,8 +11,6 @@ paper_orders（status='filled'）を時系列に適用して現金残高と保�
 
 from __future__ import annotations
 
-import json
-import os
 from datetime import date, datetime, timedelta
 from typing import Any, Callable, Optional
 
@@ -21,6 +19,12 @@ import yfinance as yf
 
 from config.settings import PAPER_INITIAL_BALANCE
 from src.trading.brokers.base import OrderSide
+from src.trading.paper_weekly_backfill import (
+    Notify,
+    backfill_previous_weeks,
+    week_name,
+    write_week_file,
+)
 from src.utils.data_path_utils import get_ticker
 from src.utils.db import load_raw_ohlcv
 from src.utils.db._connection import _db_connection
@@ -101,18 +105,17 @@ def _default_split_loader(market: str, symbol: str) -> Optional[pd.Series]:
     return splits
 
 
-def _split_factors(
-    splits: Optional[pd.Series], end: pd.Timestamp
-) -> Callable[[pd.Timestamp], float]:
-    """約定の日 -> その日より後で end までの分割の比の積、を返す関数を作る。
+def _split_factors(splits: Optional[pd.Series]) -> Callable[[pd.Timestamp], float]:
+    """約定の日 -> その日より後の分割の比の積、を返す関数を作る。
 
     raw の終値は分割があると全期間を調整し直してあるため（#817）、分割より前の約定の
     株数をこの積の倍に、値段を積で割ると、終値と同じ水準になる（#899）。
+    評価の最後の日より後の分割も終値に入っているため数える（前の週の計算し直し。#1695）。
     """
     if splits is None or splits.empty:
         return lambda day: 1.0
     ratios = pd.to_numeric(splits, errors="coerce")
-    ratios = ratios[(ratios > 0) & (ratios.index <= end)]
+    ratios = ratios[ratios > 0]
 
     def factor(day: pd.Timestamp) -> float:
         return float(ratios[ratios.index > day].prod())
@@ -194,7 +197,7 @@ def _build_equity_with_fallbacks(
             key = (str(row["market"]), str(row["symbol"]))
             if key not in split_factors:
                 splits = split_loader(*key) if split_loader is not None else None
-                split_factors[key] = _split_factors(splits, index[-1])
+                split_factors[key] = _split_factors(splits)
             factor = split_factors[key](fill_day)
             bucket = qty_events.setdefault(key, {})
             bucket[day] = bucket.get(day, 0.0) + _QTY_SIGN[side] * int(row["qty"]) * factor
@@ -332,7 +335,6 @@ def compute_weekly_results(
     week_end = day - pd.Timedelta(days=(day.weekday() - 4) % 7 or 7)
     week_start = week_end - pd.Timedelta(days=4)
     base_day = week_start - pd.offsets.BDay(1)
-    iso = week_end.isocalendar()
 
     work = orders.copy()
     if not work.empty:
@@ -393,7 +395,7 @@ def compute_weekly_results(
         }
 
     return {
-        "week": f"{iso[0]}-W{iso[1]:02d}",
+        "week": week_name(week_end),
         "start": week_start.date().isoformat(),
         "end": week_end.date().isoformat(),
         "markets": markets,
@@ -404,27 +406,35 @@ def write_paper_weekly_results(
     as_of: date,
     benchmark_fetcher: BenchmarkFetcher,
     output_dir: str,
+    notify: Optional[Notify] = None,
 ) -> Optional[str]:
     """紙の売買の週の成績を output_dir/YYYY-Www.json に書き、そのパスを返す。
 
+    書いた後に前の3週を見直す（#1695）。見直しの失敗はこの関数の外へ出さない。
     約定が1件もない場合は書かずに None を返す。
+
+    Args:
+        as_of: 日本時間の日付。直前に終わった週を対象にする
+        benchmark_fetcher: ベンチマークの騰落率の取得
+        output_dir: 週のファイルの置き場
+        notify: 見直しても欠けが残る週の知らせを送り、送れたかを返す関数
     """
     orders = _load_filled_orders()
     if orders.empty:
         logger.info("約定済みペーパー注文がないため週の成績は書かない")
         return None
 
-    result = compute_weekly_results(
-        orders,
-        _default_price_loader,
-        float(PAPER_INITIAL_BALANCE),
-        as_of,
-        benchmark_fetcher,
-        split_loader=_default_split_loader,
-    )
-    os.makedirs(output_dir, exist_ok=True)
-    path = os.path.join(output_dir, f"{result['week']}.json")
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(result, f, ensure_ascii=False, indent=2)
-    logger.info("紙の売買の週の成績を書いた: %s", path)
+    def compute_week(day: date) -> dict[str, Any]:
+        return compute_weekly_results(
+            orders,
+            _default_price_loader,
+            float(PAPER_INITIAL_BALANCE),
+            day,
+            benchmark_fetcher,
+            split_loader=_default_split_loader,
+        )
+
+    result = compute_week(as_of)
+    path = write_week_file(output_dir, result)
+    backfill_previous_weeks(date.fromisoformat(result["end"]), compute_week, output_dir, notify)
     return path

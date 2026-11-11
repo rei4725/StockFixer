@@ -54,6 +54,12 @@ _HOLIDAYS_BY_YEAR: dict[int, frozenset[date]] = {
 }
 
 
+def missing_jp_holiday_table_year(day: date) -> int | None:
+    """表の最後の年の 10/1 以降なら、足すべき次の年を返す。まだ早ければ None。"""
+    last_year = max(_HOLIDAYS_BY_YEAR)
+    return last_year + 1 if day >= date(last_year, 10, 1) else None
+
+
 def is_jp_market_holiday(day: date) -> bool:
     """土日以外で東証が休む日なら True。表に無い年は False（土日だけを除く）。"""
     return day in _HOLIDAYS_BY_YEAR.get(day.year, frozenset())

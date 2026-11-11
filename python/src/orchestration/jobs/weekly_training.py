@@ -3,7 +3,7 @@
 weekly.py から分けた（#1295）。weekly.py から re-export している。
 """
 
-from src.orchestration.job_errors import NonRetryableJobError
+from src.orchestration.job_errors import LockWaitExpiredJobError
 from src.orchestration.jobs.common import _handle_stage_error, _notify_stage_failure
 from src.orchestration.types import PipelineStage
 from src.utils.logger import get_logger
@@ -88,6 +88,8 @@ def run_weekly_training():
     全体を統合モデルのロックの中で動かし、バックテストによる仮の入れ替えの夜間ジョブと
     同時に動かない。ロックが取れなければ Discord へ知らせ、ロックなしでは学習しない。
     そのときはジョブを失敗にして同じ日の補完に乗せる。同じ回の中では待ち直さない（#1564）。
+    補完の間も数えない。01:00 の回が 04:00 に落ちて間を待つと、補完が 8:50 の発注の近くへ
+    ずれるため（#1682）。
     """
     from filelock import Timeout
 
@@ -99,7 +101,7 @@ def run_weekly_training():
     except Timeout as e:
         logger.error("週次学習: 統合モデルのロックが取れないため学習しない: %s", e)
         _notify_stage_failure("週次学習 統合モデルのロック（学習しなかった）", e)
-        raise NonRetryableJobError(f"週次学習: 統合モデルのロックが取れない: {e}") from e
+        raise LockWaitExpiredJobError(f"週次学習: 統合モデルのロックが取れない: {e}") from e
     try:
         _run_weekly_training_locked()
     finally:

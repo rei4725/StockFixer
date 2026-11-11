@@ -31,13 +31,19 @@ from src.orchestration.jobs.common import (
     is_today_jst,
 )
 from src.orchestration.jobs.drift_check import run_daily_drift_check
-from src.orchestration.jobs.features_marker import current_code_version, record_features_version
+from src.orchestration.jobs.features_marker import (
+    current_code_version,
+    record_features_version_if_covered,
+)
+from src.orchestration.jobs.horizon_exit import run_daily_horizon_exit  # noqa: F401 (re-export)
+from src.orchestration.jobs.live_fill_sync import sync_live_fills_after_fill
 from src.orchestration.jobs.prediction_errors import notify_prediction_errors
 from src.orchestration.jobs.prediction_saved_marker import (
     clear_prediction_saved_marker,
     mark_prediction_saved,
     read_prediction_saved_day,
 )
+from src.orchestration.jobs.rule_signal_notify import notify_rule_signals
 from src.orchestration.jobs.scoring_stage import (
     daily_scoring_stage,
     log_rule_signal_versions_stage,
@@ -100,7 +106,10 @@ def run_daily_pipeline():
         batch_result = run_batch_pipeline(tasks, notification_port=DiscordNotificationAdapter())
         market_totals = Counter(str(getattr(t, "market", "")) for t in tasks)
         _raise_if_fetch_mostly_unavailable(len(tasks), batch_result, market_totals)
-        record_features_version(features_version)  # 失敗しても投げない
+        # 作れなかった銘柄が 1 - MIN_COVERAGE を超えた回は書かない。失敗しても投げない（#1710）
+        record_features_version_if_covered(
+            features_version, len(tasks), batch_result, market_totals
+        )
         logger.info("[1/6] データ取得完了")
     except Exception as e:
         if _handle_stage_error(
@@ -411,8 +420,7 @@ def run_daily_settle_orders(notify_when_none: bool = True) -> int:
 
     mode = os.environ.get("AUTO_TRADE_MODE", "paper")
     if mode == "live":
-        logger.info("live モードのため settle スキップ")
-        return 0
+        return sync_live_fills_after_fill("settle")  # 寄りの後の約定値 (#1758)
 
     from src.infrastructure.persistence.trade_diff_repository import PostgresTradeDiffSink
     from src.infrastructure.yfinance_market_data_adapter import YFinanceMarketDataAdapter
@@ -447,7 +455,7 @@ def run_daily_paper_trade_report():
 
     mode = os.environ.get("AUTO_TRADE_MODE", "paper")
     if mode == "live":
-        logger.info("live モードのためペーパートレードレポートをスキップ")
+        sync_live_fills_after_fill("ペーパートレードレポート")  # 引けの後の約定値 (#1758)
         return
 
     logger.info("=== ペーパートレード損益レポート送信開始 ===")
@@ -578,21 +586,11 @@ def run_daily_rule_signals() -> None:
         logger.error("日次ルールシグナル失敗: %s", e, exc_info=True)
         raise
 
-    try:
-        from src.reporting.discord.discord_utils import send_rule_daily_signals
-
-        send_rule_daily_signals(
-            signals=signals,
-            market=market,
-            buy_orders=trade_stats["buy_orders"],
-            sell_orders=trade_stats["sell_orders"],
-            total=batch.total,
-        )
-    except Exception as e:
-        logger.error("ルールシグナル通知失敗: %s", e, exc_info=True)
+    notify_rule_signals(signals, market, trade_stats, batch.total)
 
     # 注文の失敗は知らせを送った後にジョブの失敗にする（#1075）。run_scheduler の
-    # daily_rule_signals は max_retries: 0 のため、失敗にしても発注は呼び直されない。
+    # daily_rule_signals は max_retries: 0 のため、同じ回の中では呼び直されない。
+    # 間を空けた同じ日の補完は1回動き、出した約定待ちを飛ばして落ちた注文だけ出す（#1676）。
     errors = trade_stats.get("errors", 0)
     if errors > 0:
         logger.error("日次ルールシグナルで注文の失敗が %d 件あった", errors)

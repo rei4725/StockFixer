@@ -416,17 +416,29 @@ def migrate_table(src_con: duckdb.DuckDBPyConnection, table: str, columns: list[
     NULLの古いレコードが残っている（それ以降の全バッチでは常に埋まっている）。
     本番切り替え時にこの古いレコードだけ除外することを確認済みのため、この
     テーブルに限り `WHERE model_version IS NOT NULL` を付与する。
+
+    `dd_state` は移行 0008 で Postgres 側に NOT NULL の `broker_name` が足されたが、
+    ATTACH 経由の INSERT は COPY で並びに無い列にも NULL を送り Postgres の既定値が
+    当たらないため、移行元に `broker_name` が無いときは 'paper' を明示して写し、
+    移行元にあるときはその値をそのまま写す。
     """
     if table == "stock_features":
         _ensure_stock_features_target_columns(src_con)
 
-    col_list = ", ".join(f'"{c}"' for c in columns)
+    target_cols = list(columns)
+    select_exprs = [f'"{c}"' for c in columns]
     where_clause = ""
     if table == "prediction_results":
         where_clause = ' WHERE "model_version" IS NOT NULL'
+    if table == "dd_state" and "broker_name" not in target_cols:
+        target_cols.append("broker_name")
+        has_broker = "broker_name" in _get_dynamic_columns(src_con, table)
+        select_exprs.append('"broker_name"' if has_broker else "'paper'")
+    col_list = ", ".join(f'"{c}"' for c in target_cols)
+    select_list = ", ".join(select_exprs)
     src_con.execute(f'TRUNCATE TABLE pg."{table}"')
     src_con.execute(
-        f'INSERT INTO pg."{table}" ({col_list}) SELECT {col_list} FROM "{table}"{where_clause}'
+        f'INSERT INTO pg."{table}" ({col_list}) SELECT {select_list} FROM "{table}"{where_clause}'
     )
     row = src_con.execute(f'SELECT COUNT(*) FROM pg."{table}"').fetchone()
     count = int(row[0]) if row else 0

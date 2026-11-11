@@ -40,9 +40,10 @@ def _rows(count: int):
 class _FakePredictionTable:
     """prediction_results（Delete-Insert）の production の回の代わり。"""
 
-    def __init__(self, predicted_at: str, rows: list):
+    def __init__(self, predicted_at: str, rows: list, clock=datetime.now):
         self.predicted_at = predicted_at
         self.rows = rows
+        self.clock = clock
         self.stats_reads: list[str] = []
 
     def latest_timestamp(self, model_version=None):
@@ -56,8 +57,29 @@ class _FakePredictionTable:
 
     def save_today(self, rows, *args, **kwargs):
         """[3/6] の保存: production の回を今日の予想に置き換える。"""
-        self.predicted_at = _stamp(datetime.now())
+        self.predicted_at = _stamp(self.clock())
         self.rows = list(rows)
+
+
+def _assert_written_between(table: _FakePredictionTable, before: str, after: str) -> None:
+    """道の前と後の時刻の間に書かれたこと（今日の回で上書きされたこと）を確かめる。
+
+    秒まで今の時刻と等しいかで比べると、道が秒の境目をまたいだときに1秒ずれて落ちる（#1721）。
+    %Y%m%d_%H%M%S は桁が揃っているので、文字列の大小が時刻の前後と一致する。
+    """
+    assert before <= table.predicted_at <= after
+
+
+class _TickingClock:
+    """呼ばれるたびに1秒進む時計。道の中と後で秒がずれるときの代わり。"""
+
+    def __init__(self, start: datetime):
+        self.now = start
+
+    def __call__(self) -> datetime:
+        current = self.now
+        self.now = current + timedelta(seconds=1)
+        return current
 
 
 @pytest.fixture(autouse=True)
@@ -132,13 +154,14 @@ def test_does_not_compare_with_today_run(caplog):
     )
 
 
-def test_retry_after_notify_failure_still_fires_b1():
-    """[5/6] で落ちて頭から呼び直しても、2回目も前の日の回と比べて B-1 を出す。"""
-    table = _FakePredictionTable(_stamp(datetime.now() - timedelta(days=1)), _rows(705))
+def _retry_after_notify_failure_still_fires_b1(clock) -> None:
+    table = _FakePredictionTable(_stamp(clock() - timedelta(days=1)), _rows(705), clock=clock)
 
+    before = _stamp(clock())
     with pytest.raises(RuntimeError):
         _run_pipeline(table, _rows(100), notify_side_effect=RuntimeError("Discord 400"))
-    assert table.predicted_at == _stamp(datetime.now())
+    after = _stamp(clock())
+    _assert_written_between(table, before, after)
 
     # scheduler_queue の同じ回の中のやり直しと同じく、頭から呼び直す
     violation_ids, details = _run_pipeline(table, _rows(100))
@@ -147,3 +170,23 @@ def test_retry_after_notify_failure_still_fires_b1():
     assert violation_ids.count("B-1") == 1
     b1 = next(v for v in details["violations"] if v["id"] == "B-1")
     assert "705" in b1["description"]
+
+
+def test_retry_after_notify_failure_still_fires_b1():
+    """[5/6] で落ちて頭から呼び直しても、2回目も前の日の回と比べて B-1 を出す。"""
+    _retry_after_notify_failure_still_fires_b1(datetime.now)
+
+
+def test_retry_after_notify_failure_passes_across_second_boundary():
+    """道の中で書いた時刻と道の後の時刻が秒の境目でずれても、上書きの確かめは通る（#1721）。"""
+    start = datetime.now().replace(microsecond=999_999)
+    _retry_after_notify_failure_still_fires_b1(_TickingClock(start))
+
+
+def test_written_between_fails_when_previous_day_remains():
+    """1回目の後に predicted_at が前の日のままなら、上書きの確かめは落ちる。"""
+    now = datetime.now()
+    table = _FakePredictionTable(_stamp(now - timedelta(days=1)), _rows(705))
+
+    with pytest.raises(AssertionError):
+        _assert_written_between(table, _stamp(now), _stamp(now + timedelta(seconds=1)))

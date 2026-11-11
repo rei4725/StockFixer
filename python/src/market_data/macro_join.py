@@ -10,31 +10,35 @@ from typing import Optional
 import pandas as pd
 
 from config.settings import STALE_BARS_MAX_WEEKDAYS
-from src.domain.types import MacroStaleSkip
+from src.domain.types import MacroMissingSkip, MacroStaleSkip
 from src.market_data.loader import _CROSS_ASSET_TICKERS
 from src.market_data.macro_features import _ADDITIONAL_MACRO_TICKERS
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-# 回の中で列が止まった銘柄（#1634）。足の保存を任されていない銘柄は結果が None になり、
-# fetch_stock_data_with_features の戻りでは回の集計へ渡せないので、ここに控える
+# 回の中で列が止まった銘柄（#1634）と欠けた銘柄（#1642）。足の保存を任されていない銘柄は結果が
+# None になり、fetch_stock_data_with_features の戻りでは回の集計へ渡せないので、ここに控える
 _stale_skips: dict[tuple[str, str], MacroStaleSkip] = {}
-_stale_skips_lock = threading.Lock()
+_missing_skips: dict[tuple[str, str], MacroMissingSkip] = {}
+_skips_lock = threading.Lock()
 
 
-def reset_macro_stale() -> None:
+def reset_macro_skips() -> None:
     """回の初めに、前の回の控えを消す。"""
-    with _stale_skips_lock:
+    with _skips_lock:
         _stale_skips.clear()
+        _missing_skips.clear()
 
 
-def take_macro_stale() -> list[MacroStaleSkip]:
-    """回の中で列が止まった銘柄を返し、控えを空にする。"""
-    with _stale_skips_lock:
-        skips = list(_stale_skips.values())
+def take_macro_skips() -> tuple[list[MacroStaleSkip], list[MacroMissingSkip]]:
+    """回の中で列が止まった銘柄と欠けた銘柄を返し、控えを空にする。"""
+    with _skips_lock:
+        stale = list(_stale_skips.values())
+        missing = list(_missing_skips.values())
         _stale_skips.clear()
-    return skips
+        _missing_skips.clear()
+    return stale, missing
 
 
 def missing_macro_columns(
@@ -96,6 +100,8 @@ def macro_columns_unusable(
     """欠けた列か止まった列があれば WARNING を出して True を返す（#1491・#1499・#1622）。"""
     missing = missing_macro_columns(cross_asset, additional_macro)
     if missing:
+        with _skips_lock:
+            _missing_skips[(market, symbol)] = MacroMissingSkip(market, symbol, missing)
         # 一部の列だけ取れた銘柄は、欠けた列が予想の道で0に埋まる
         logger.warning(
             f"相場の指標の列が欠けたため特徴量生成をスキップ: {market}/{symbol} "
@@ -104,7 +110,7 @@ def macro_columns_unusable(
         return True
     stale = stale_macro_columns(cross_asset, additional_macro, last_bar)
     if stale:
-        with _stale_skips_lock:
+        with _skips_lock:
             _stale_skips[(market, symbol)] = MacroStaleSkip(market, symbol, stale)
         # 止まった日の値が前方補完され、予想と発注の VIX に新しい日付の行として入る
         logger.warning(

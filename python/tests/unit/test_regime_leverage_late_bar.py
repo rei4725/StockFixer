@@ -6,7 +6,7 @@
 """
 
 from dataclasses import asdict, replace
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
@@ -15,6 +15,7 @@ import pandas as pd
 import pytest
 
 from src.trading.regime_leverage_strategy.service import (
+    _missing_business_days,
     run_regime_leverage_daily_margin_check,
     run_regime_leverage_weekly_check,
 )
@@ -496,6 +497,13 @@ def test_daily_exits_on_hand_bars_even_when_middle_bar_is_missing(low_day):
             ("2026-04-03",),
             datetime(2026, 4, 7, 7, 30, tzinfo=_JST),
         ),
+        # 臨時の休場 2025-01-09(木曜): 水曜 1/8 の足の次が金曜 1/10 の足(#1651)
+        (
+            datetime(2025, 1, 7, 22, 30),
+            "2025-01-10",
+            ("2025-01-09",),
+            datetime(2025, 1, 11, 7, 30, tzinfo=_JST),
+        ),
     ],
 )
 def test_daily_does_not_count_weekend_or_market_holiday_as_missing(
@@ -508,3 +516,13 @@ def test_daily_does_not_count_weekend_or_market_holiday_as_missing(
 
     assert decision.reason == "daily_noop"
     assert book.inserted == [decision]
+
+
+def test_missing_business_days_skips_special_closure():
+    """臨時の休場の日は足が無くても欠けに数えず、他の日の欠けは今までどおり数えること(#1651)"""
+    since = datetime(2025, 1, 7, 22, 30, tzinfo=timezone.utc)
+    last_bar = date(2025, 1, 14)
+    index = pd.to_datetime(["2025-01-08", "2025-01-10", "2025-01-14"])
+    bars = pd.DataFrame({"close": [1.0, 1.0, 1.0]}, index=index)
+
+    assert _missing_business_days(bars, since, last_bar) == [date(2025, 1, 13)]

@@ -72,9 +72,9 @@ def job_daily_auto_order():
 
 def job_daily_horizon_exit():
     """毎営業日 9:00 - 期限を過ぎたペーパーの保有のホライズン決済（8:50 の回の漏れを補う）"""
-    from src.orchestration.scheduler import run_horizon_exit_check
+    from src.orchestration.scheduler import run_daily_horizon_exit
 
-    run_horizon_exit_check()
+    run_daily_horizon_exit()
 
 
 def job_daily_settle_orders():
@@ -248,9 +248,12 @@ def _job_listener(event):
 # 定時の回も、遅れてその時刻を過ぎて走り出したら飛ばす（#1298）。
 # max_retries: 0 のジョブは、落ちても同じ回の中で頭から呼び直さない。発注のジョブは、やり直しの回が
 # 前の回の出した注文を知らずに同じ注文を出し直すため、これを付ける（#836）。
+# 8:50 の発注は失敗の回も補完しない。16:30 のルールの発注だけは、約定待ちの BUY と SELL を飛ばし
+# 二重にならないため、上限と recovery_min_gap_minutes で失敗の回を1回だけ補完する（#1676）。
 # rerun_if_interrupted: True のジョブは、前の起動のプロセスで消えた回（デプロイの起き直しなど）を
-# 1期間に1回まで回数に数えずに補完する。発注のジョブと週の学習（#807）には付けない（#946）。
+# 1期間に1回まで回数に数えずに補完する。ほかの発注のジョブと週の学習（#807）には付けない（#946）。
 # ホライズン決済は約定待ちの決済を飛ばし二重にならないため、発注のジョブでも付ける（#1321）。
+# 16:30 のルールの発注も、約定待ちの BUY と SELL を飛ばし二重にならないため付ける（#1652）。
 # max_interrupted_reruns_per_period: その補完の1回までを、そのジョブだけ増やす。週の最適化は
 # 全銘柄に約29時間かかりデプロイの起き直しで週に何度も消え、済んだ銘柄を飛ばして続きから進むため（#1522）。
 # 上限の40は、起動が1時間に1回ほどの週でも全銘柄の約29時間に届く数である（#1534）。
@@ -284,6 +287,10 @@ SCHEDULE_CONFIG = {
         "minute": 0,
         "recovery_delay_minutes": 15,
         "max_executions_per_period": 2,
+        # 間が無いと、1回の失敗が5〜6分なので約30分の障害で2回を使い切り、火曜のうちの補完も無くなる。
+        # 失敗の回の4時間後なら 05:00 台に補完し、07:30 の日次の道の前に終わる。ロックを待ち切って
+        # 落ちた回はもう3時間空いたので間を数えず、補完が 8:50 の発注の近くへずれないようにする（#1682）
+        "recovery_min_gap_minutes": 240,
         "description": "毎週火曜 01:00 - 統合モデル再学習 + 精度チェック",
     },
     "weekly_report": {
@@ -295,6 +302,10 @@ SCHEDULE_CONFIG = {
         "minute": 0,
         "recovery_delay_minutes": 15,
         "max_executions_per_period": 2,
+        # 間が無いと、DB の障害の回は2分ほどで落ちるので約25分の障害で2回を使い切り、紙の週の成績と
+        # 週の精度の記録がその週だけ欠ける（翌週の回は抜けた週を書かない）。失敗の回の4時間後なら
+        # 06:00 台に補完し、07:30 の日次の道の前に終わる（#1689）
+        "recovery_min_gap_minutes": 240,
         "description": "毎週木曜 02:00 - パフォーマンスレポート送信",
         "rerun_if_interrupted": True,
     },
@@ -454,6 +465,10 @@ SCHEDULE_CONFIG = {
         "description": "毎週日曜 13:00 - 値動きに合わせた量と損切りの線の比べ",
         "rerun_if_interrupted": True,
     },
+    # 16:30 の回がデプロイの起き直しなどで消えたら、同じ日のうちに1回だけ流し直す。その日の足の保有の
+    # SELL を判定しないまま進めないため。消えた回の出した約定待ちの BUY と SELL は飛ばす（#1652）
+    # 失敗で終わった回も同じ理由で、間を空けて同じ日に1回だけ補完する。同じ回の中では呼び直さず、
+    # 間は短い障害が明けるのを待つ。補完の回も失敗したら、その日はもう補完しない（#1676）
     "daily_rule_signals": {
         "func": job_daily_rule_signals,
         "trigger": "cron",
@@ -462,9 +477,11 @@ SCHEDULE_CONFIG = {
         "hour": 16,
         "minute": 30,
         "recovery_delay_minutes": 10,
-        "max_executions_per_period": 1,
+        "max_executions_per_period": 2,
         "max_retries": 0,
+        "recovery_min_gap_minutes": 240,
         "description": "毎営業日 16:30 - ルールシグナル生成 + ペーパートレード発注",
+        "rerun_if_interrupted": True,
     },
     "daily_account_shadow_report": {
         "func": job_daily_account_shadow_report,
@@ -744,7 +761,7 @@ def _recover_job(queue_manager, job_id: str, now) -> None:
         queue_manager.run_job(job_id, reason="recovery")
         return
 
-    # 週の最適化が回数の上限で補完をやめた週を知らせる。例外は返さない（#1647）
+    # 上限や締めで補完をやめた期間を知らせる。例外は返さない（#1647, #1674）
     from src.orchestration.scheduler_cap_notice import notify_recovery_cap
 
     notify_recovery_cap(queue_manager, job_id, now)

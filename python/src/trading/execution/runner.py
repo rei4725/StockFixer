@@ -19,7 +19,6 @@ from config.settings import (
     CORRELATION_ENC_THRESHOLD,
     CORRELATION_WINDOW_DAYS,
     ENABLE_SHORT_SIDE,
-    MAX_ORDERS_PER_RUN,
     MAX_POSITIONS,
     MIN_CHANGE_RATIO,
 )
@@ -35,7 +34,12 @@ from src.domain.trading_rules import get_lot_size
 from src.domain.types import OrderRunSummary
 from src.trading.brokers.base import BrokerBase, BrokerError, OrderSide
 from src.trading.correlation_risk import evaluate_correlation_gate
-from src.trading.position_valuation import coverable_short_qty, read_short_positions
+from src.trading.position_size_reason import zero_qty_skip_key
+from src.trading.position_valuation import (
+    coverable_short_qty,
+    read_short_positions,
+    sellable_long_qty,
+)
 from src.trading.risk_manager import RiskManager
 from src.trading.signal_generator import apply_multi_horizon_score_column
 from src.utils.logger import get_logger
@@ -55,15 +59,16 @@ from .params import (
 from .pending import _load_pending_exits, _log_pending_skips
 from .recording import _record_order, _recorder, _sync_live_execution_diffs
 from .selection import (
-    _apply_buy_sector_limit,
+    _cap_per_run,
     _compute_ml_exit_signals,
     _determine_entry_horizon,
     _get_held_symbols,
     _get_pending_buy_symbols,
     _load_exit_model,
+    _select_buy_signals,
 )
 from .sl_tp import _check_sl_tp_exits, _sl_tp_exits_only
-from .stats import OrderExecutionStats
+from .stats import OrderExecutionStats, count_skip
 
 logger = get_logger(__name__)
 
@@ -95,14 +100,15 @@ def run_order_steps(
 
     record = _recorder(_record_order, stats)  # 記録の失敗でも注文は出たものとして数える (#1104)
     try:
+        broker.check_order_ready()  # パスワードの欠けは回の始めに1回だけ確かめる（#1757）
         broker.get_token()
     except BrokerError as e:
-        logger.error("[exec] トークン取得失敗。本日の発注をスキップします: %s", e, exc_info=True)
+        logger.error("[exec] トークン・設定の不備。本日の発注をスキップ: %s", e, exc_info=True)
         stats["errors"] += 1  # SL/TP も止まる日をジョブの失敗にする（#1523）
         if notifier is not None:
             notifier.send_alert(
-                "kabu API トークンエラー",
-                f"トークン取得に失敗したため本日の発注をスキップします。\n{e}",
+                "kabu API トークン・設定エラー",
+                f"トークン取得か注文の設定の確かめに失敗したため本日の発注をスキップします。\n{e}",
                 level=AlertLevel.ERROR,
             )
         return finish_order_run(stats, market=market, mode=mode, token_error=e)  # #1533
@@ -171,10 +177,16 @@ def run_order_steps(
     )
 
     # --- SL/TP チェック: 含み損益が閾値を超えたポジションを強制クローズ ---
-    sl_tp_triggered = _check_sl_tp_exits(broker, market, mode, market_data, stats, trade_diff_sink)
+    sl_tp_error: Exception | None = None  # 落ちても予想の売りまで出し、新規の前に投げ直す（#1731）
+    try:
+        sl_tp_triggered = _check_sl_tp_exits(
+            broker, market, mode, market_data, stats, trade_diff_sink
+        )
+    except Exception as exc:  # 出した SL/TP の売りの2本目は、約定待ちの確かめで止める（#1117）
+        logger.error("[exec] SL/TP の手順が落ちた。新規は止め予想の売りは出す", exc_info=True)
+        sl_tp_triggered, sl_tp_error = set(), exc
 
-    # --- 決済シグナル: 保有株で売りシグナルが出ているものを先にクローズ ---
-    # ML エグジットモデルが利用可能な場合、モデルのシグナルも売り判定に加える
+    # --- 決済シグナル: 保有株で売りシグナル・ML エグジットのシグナルが出ているものを先にクローズ ---
     exit_model = _load_exit_model(market)
     held_predictions = predictions[predictions["symbol"].isin(held_symbols)]
     ml_exit_symbols: set[str] = (
@@ -190,33 +202,31 @@ def run_order_steps(
         )
     ]
     sell_positions: list[dict] | None = None
-    # 前の回の約定待ちの決済がある銘柄には2本目を出さない（#1117）
-    pending = _load_pending_exits(broker)
+    pending = _load_pending_exits(broker)  # 約定待ちの決済がある銘柄には2本目を出さない（#1117）
     pending_skipped: list[str] = []
     for _, row in sell_signals.iterrows():
         symbol = row["symbol"]
         if pending.has(symbol, OrderSide.SELL):
             pending_skipped.append(symbol)
             continue
-        # 予測変動量が閾値未満 → 発注スキップ（R-214）
-        if abs(float(row.get("diff_ratio") or 0.0)) < MIN_CHANGE_RATIO:
+        if abs(float(row.get("diff_ratio") or 0.0)) < MIN_CHANGE_RATIO:  # 変動が小さい（R-214）
             logger.info(
                 "[exec] %s: diff_ratio=%.3f%% < min_change=%.3f%% → スキップ",
                 symbol,
                 float(row.get("diff_ratio") or 0) * 100,
                 MIN_CHANGE_RATIO * 100,
             )
-            stats["skipped_min_change"] += 1
-            stats["skipped"] += 1
+            count_skip(stats, "sell_min_change")
             continue
         try:
             # 保有全数を成行売り。保有の一覧は銘柄によらず同じなので1回だけ読む（#1095）
             if sell_positions is None:
                 sell_positions = broker.get_positions()
             pos = next((p for p in sell_positions if p["symbol"].replace(".T", "") == symbol), None)
-            if pos is None or pos["qty"] <= 0:
+            # 返済の注文で拘束された分は売らない（#1764）
+            qty = sellable_long_qty(pos) if pos is not None else 0
+            if qty <= 0:
                 continue
-            qty = pos["qty"]
             order_type, order_price, order_reason, order_session = _choose_order_params(
                 market=str(row["market"]),
                 symbol=symbol,
@@ -257,6 +267,8 @@ def run_order_steps(
             logger.error(f"[exec] 売り注文エラー ({symbol}): {e}", exc_info=True)
             stats["errors"] += 1
     _log_pending_skips("売りシグナル", pending_skipped)
+    if sl_tp_error is not None:
+        raise sl_tp_error  # 新規（買い・ショート）は出さない（#1281・#1548 と同じ形）
 
     # 空売りの保有（約定待ちの SHORT の仮登録を含む）。新規買いの候補から外す（#1348）
     short_positions = read_short_positions(broker)
@@ -269,9 +281,7 @@ def run_order_steps(
             & (~predictions["symbol"].isin(short_held_symbols))
             & (predictions["multi_horizon_score"] >= predictions["effective_buy_threshold"])
         ]
-        buy_signals = _apply_buy_sector_limit(
-            buy_candidates, held_symbols=held_or_pending, market=market
-        ).head(MAX_ORDERS_PER_RUN)
+        buy_signals = _select_buy_signals(buy_candidates, held_or_pending, market, stats)
     else:
         logger.warning(
             "[exec] リスク・相関ゲートにより新規買いをスキップ: %s",
@@ -279,9 +289,8 @@ def run_order_steps(
         )
         buy_signals = predictions.iloc[0:0]  # 空 DataFrame
 
-    # 1ラン内で増える建玉数を追跡し、ラン途中でも MAX_POSITIONS を超えないようにする。
-    # （ゲートはラン開始時の一度きりで、head(MAX_ORDERS_PER_RUN) だけでは保有上限を
-    #   最大 MAX_ORDERS_PER_RUN-1 件超過しうるため）。空売りの保有も数える（#1146）
+    # 1ラン内で増える建玉数を数え、ラン途中でも MAX_POSITIONS を超えないようにする（ゲートは
+    # ラン開始時の一度きりで、head だけでは上限を超えうるため）。空売りの保有も数える（#1146）
     position_count = len(held_or_pending) + len(short_held_symbols)
 
     for _, row in buy_signals.iterrows():
@@ -290,24 +299,22 @@ def run_order_steps(
 
         if position_count >= MAX_POSITIONS:
             logger.info("[exec] 保有上限 %d 到達のため以降の新規買いをスキップ", MAX_POSITIONS)
-            stats["skipped"] += 1
+            count_skip(stats, "max_positions")
             continue
 
-        # 予測変動量が閾値未満 → 発注スキップ（R-214）
-        if abs(float(row.get("diff_ratio") or 0.0)) < MIN_CHANGE_RATIO:
+        if abs(float(row.get("diff_ratio") or 0.0)) < MIN_CHANGE_RATIO:  # 変動が小さい（R-214）
             logger.info(
                 "[exec] %s: diff_ratio=%.3f%% < min_change=%.3f%% → スキップ",
                 symbol,
                 float(row.get("diff_ratio") or 0) * 100,
                 MIN_CHANGE_RATIO * 100,
             )
-            stats["skipped_min_change"] += 1
-            stats["skipped"] += 1
+            count_skip(stats, "min_change")
             continue
 
         if current_price <= 0:
             logger.warning(f"[exec] {symbol}: 現在値が取得できないためスキップ")
-            stats["skipped"] += 1
+            count_skip(stats, "no_price")
             continue
 
         confidence = float(row.get("confidence_ratio") or 1.0)
@@ -319,7 +326,7 @@ def run_order_steps(
                 confidence,
                 _SPLIT_LOW_CONFIDENCE,
             )
-            stats["skipped"] += 1
+            count_skip(stats, "low_confidence")
             continue
 
         try:
@@ -335,8 +342,8 @@ def run_order_steps(
                 confidence_ratio=confidence,
             )
             if qty <= 0:
-                logger.info(f"[exec] {symbol}: 発注株数 0 → スキップ（残高不足or上限）")
-                stats["skipped"] += 1
+                logger.info(f"[exec] {symbol}: 発注株数 0 → スキップ（{risk.zero_reason}）")
+                count_skip(stats, zero_qty_skip_key(risk.zero_reason))
                 continue
 
             if split_ratio < 1.0:
@@ -458,9 +465,7 @@ def run_order_steps(
             & (~predictions["symbol"].isin(short_held_symbols))
             & (predictions["multi_horizon_score"] <= predictions["effective_sell_threshold"])
         ].sort_values("multi_horizon_score", kind="stable")
-        short_entry_candidates = short_entry_candidates.head(
-            MAX_ORDERS_PER_RUN if gate_status.is_allowed else 0
-        )
+        short_entry_candidates = _cap_per_run(short_entry_candidates, stats, gate_status.is_allowed)
 
         for _, row in short_entry_candidates.iterrows():
             symbol = row["symbol"]
@@ -468,7 +473,7 @@ def run_order_steps(
 
             if position_count >= MAX_POSITIONS:
                 logger.info("[exec] 保有上限 %d 到達で新規ショートをスキップ", MAX_POSITIONS)
-                stats["skipped"] += 1
+                count_skip(stats, "max_positions")
                 continue
 
             if abs(float(row.get("diff_ratio") or 0.0)) < MIN_CHANGE_RATIO:
@@ -478,13 +483,12 @@ def run_order_steps(
                     float(row.get("diff_ratio") or 0) * 100,
                     MIN_CHANGE_RATIO * 100,
                 )
-                stats["skipped_min_change"] += 1
-                stats["skipped"] += 1
+                count_skip(stats, "min_change")
                 continue
 
             if current_price <= 0:
                 logger.warning(f"[exec] {symbol}: 現在値が取得できないためショートスキップ")
-                stats["skipped"] += 1
+                count_skip(stats, "no_price")
                 continue
 
             confidence = float(row.get("confidence_ratio") or 1.0)
@@ -496,7 +500,7 @@ def run_order_steps(
                     confidence,
                     _SPLIT_LOW_CONFIDENCE,
                 )
-                stats["skipped"] += 1
+                count_skip(stats, "low_confidence")
                 continue
 
             try:
@@ -512,8 +516,8 @@ def run_order_steps(
                     confidence_ratio=confidence,
                 )
                 if qty <= 0:
-                    logger.info(f"[exec] {symbol}: 発注株数 0 → ショートスキップ（残高不足or上限）")
-                    stats["skipped"] += 1
+                    logger.info(f"[exec] {symbol}: 発注株数 0 → ショートせず（{risk.zero_reason}）")
+                    count_skip(stats, zero_qty_skip_key(risk.zero_reason))
                     continue
 
                 if short_split_ratio < 1.0:
@@ -576,11 +580,10 @@ def run_order_steps(
     if mode == "live":
         _sync_live_execution_diffs(broker, trade_diff_sink)
     # 発注サマリーを保存（R-214）
-    _run_id = str(uuid.uuid4())[:12]
     try:
         order_run_sink.save(
             OrderRunSummary(
-                run_id=_run_id,
+                run_id=str(uuid.uuid4())[:12],
                 market=market,
                 mode=mode,
                 buy_orders=stats["buy_orders"],

@@ -12,6 +12,7 @@ import pandas as pd
 from sklearn.inspection import permutation_importance
 
 from config.settings import (
+    DAILY_FETCH_MAX_UNAVAILABLE_RATIO,
     EARNINGS_MASK_WINDOW_DAYS,
     FEATURE_SELECTION_DROP_RATIO,
     FEATURE_SELECTION_MIN_FEATURES,
@@ -21,14 +22,63 @@ from src.domain.sentiment_sources import any_sentiment_source_configured, is_sen
 from src.prediction.constant_prediction import check_unified_training
 from src.prediction.db import load_excluded_features, save_feature_selection
 from src.prediction.ports import get_market_data_port
+from src.prediction.unified_split import is_trial_model as _is_trial_model
+from src.prediction.unified_split import sort_by_date as _sort_by_date
+from src.prediction.unified_split import split_train_val_by_date as _split_train_val_by_date
 from src.utils.data_path_utils import ensure_dir, get_models_dir
 from src.utils.db import load_all_stock_features
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+# 決算日の取得に失敗した銘柄の割合の線。超えた回は学習しない（#1700）。
+# 上限に当たれば列の後ろの銘柄がまとめて欠けるので、それを止め、短い瞬断では止めない値にする。
+# 788銘柄なら 39 銘柄（1銘柄約 0.5 秒で 20 秒ほどの瞬断）までは続け、40 銘柄で止める。
+_EARNINGS_FETCH_MAX_FAILED_RATIO = 0.05
+# 発注する市場。この市場の行の欠けは、全市場の割合とは別に見る（#1686, #1705）
+_ORDER_MARKET = "jp"
+
+
+def _check_earnings_fetch_failures(failed: list[str], n_symbols: int, n_order_symbols: int) -> None:
+    """決算日の取得に失敗した銘柄の数を WARNING に出し、線を超えていたら投げる（#1700）。
+
+    全市場の割合では全体の約3割の jp の欠けに気づけないので、発注する市場の銘柄だけの
+    割合も同じ線で見る（#1705）。その市場の銘柄が入力に無い表は、この線では判定しない。
+    failed は market/symbol の文字で、分母はどちらも入力の表の銘柄の数である。
+
+    Raises:
+        RuntimeError: 全市場か発注する市場で、失敗した銘柄の割合が線を超えたとき
+    """
+    if not failed:
+        return
+    logger.warning(
+        "統合の学習で決算日の取得に失敗した銘柄: %d/%d (%s)。決算の前後の行を除かずに学習に入る",
+        len(failed),
+        n_symbols,
+        ", ".join(failed[:20]),
+    )
+    if len(failed) / n_symbols > _EARNINGS_FETCH_MAX_FAILED_RATIO:
+        raise RuntimeError(
+            "決算日の取得に失敗した銘柄が多すぎるため学習しません: "
+            f"{len(failed)}/{n_symbols}銘柄（線 {_EARNINGS_FETCH_MAX_FAILED_RATIO:.0%}）"
+        )
+    n_order_failed = sum(name.startswith(f"{_ORDER_MARKET}/") for name in failed)
+    if n_order_symbols and n_order_failed / n_order_symbols > _EARNINGS_FETCH_MAX_FAILED_RATIO:
+        raise RuntimeError(
+            f"{_ORDER_MARKET} の決算日の取得に失敗した銘柄が多すぎるため学習しません: "
+            f"{n_order_failed}/{n_order_symbols}銘柄（線 {_EARNINGS_FETCH_MAX_FAILED_RATIO:.0%}）"
+        )
+
 
 def _mask_earnings_rows_for_unified(df: pd.DataFrame) -> pd.DataFrame:
+    """決算の前後の行を銘柄ごとに除く。
+
+    取得に失敗した銘柄は除く日が無いまま残し、数を WARNING に出す。空の応答（ETF など
+    決算日の無い銘柄）は失敗に数えない。
+
+    Raises:
+        RuntimeError: 取得に失敗した銘柄の割合が線を超えたとき
+    """
     if (
         df.empty
         or "date" not in df.columns
@@ -39,12 +89,17 @@ def _mask_earnings_rows_for_unified(df: pd.DataFrame) -> pd.DataFrame:
 
     masked_frames: list[pd.DataFrame] = []
     removed_count = 0
+    failed_symbols: list[str] = []
     for (market, symbol), group in df.groupby(["market", "symbol"], sort=False):
         work = group.copy()
         date_index = pd.DatetimeIndex(pd.to_datetime(work["date"], errors="coerce"))
         work.index = date_index
         _mds = get_market_data_port()
-        earnings_dates = _mds.get_earnings_dates(str(market), str(symbol))
+        try:
+            earnings_dates = _mds.get_earnings_dates(str(market), str(symbol), raise_on_error=True)
+        except Exception:  # 例外の中身は loader が銘柄ごとに WARNING に出している
+            failed_symbols.append(f"{market}/{symbol}")
+            earnings_dates = pd.DatetimeIndex([])
         work = _mds.add_earnings_flag(
             work, earnings_dates, lookaround_days=EARNINGS_MASK_WINDOW_DAYS
         )
@@ -54,6 +109,8 @@ def _mask_earnings_rows_for_unified(df: pd.DataFrame) -> pd.DataFrame:
         work["date"] = work.index
         masked_frames.append(work.drop(columns=["earnings_flag"], errors="ignore"))
 
+    n_order_symbols = df.loc[df["market"] == _ORDER_MARKET, "symbol"].nunique()
+    _check_earnings_fetch_failures(failed_symbols, len(masked_frames), n_order_symbols)
     if removed_count > 0:
         logger.info(f"統合学習用に決算近傍データを除外: {removed_count}行")
     return pd.concat(masked_frames, ignore_index=True) if masked_frames else df.iloc[0:0].copy()
@@ -68,6 +125,9 @@ def load_all_stock_data(data_dir: str = None) -> pd.DataFrame:
 
     Returns:
         pd.DataFrame: 全銘柄の結合データ（market, symbol列付き）
+
+    Raises:
+        RuntimeError: 決算日の取得に失敗した銘柄の割合が線を超えたとき
     """
     df = load_all_stock_features()
     if df.empty:
@@ -155,6 +215,28 @@ def _warn_dropped_rows(valid: pd.Series, market: pd.Series, symbol: pd.Series) -
     )
 
 
+def _raise_if_order_market_mostly_dropped(valid: pd.Series, market: pd.Series) -> None:
+    """発注する市場の行が線を超えて NaN で落ちる表なら投げる（#1686）。
+
+    全市場を合わせた割合では、全体の約3割の jp が全部落ちても気づけない。
+    線は日次の取得（#811）と同じ DAILY_FETCH_MAX_UNAVAILABLE_RATIO を使う。
+    その市場の入力の行が0件の表は判定しない。
+
+    Raises:
+        RuntimeError: 落ちた行の割合が線を超えたとき
+    """
+    in_market = market == _ORDER_MARKET
+    n_total = int(in_market.sum())
+    if n_total == 0:
+        return
+    n_dropped = int((in_market & ~valid).sum())
+    if n_dropped / n_total > DAILY_FETCH_MAX_UNAVAILABLE_RATIO:
+        raise RuntimeError(
+            f"統合の学習で {_ORDER_MARKET} の行が NaN で落ちすぎたため学習しません: "
+            f"{n_dropped}/{n_total}行（線 {DAILY_FETCH_MAX_UNAVAILABLE_RATIO:.0%}）"
+        )
+
+
 def drop_rows_reaching_cutoff(df: pd.DataFrame, cutoff: pd.Timestamp) -> pd.DataFrame:
     """y が締め日以降の終値に届く行を落とす（学習に締め日以降の値を漏らさないため）。
 
@@ -234,44 +316,6 @@ def prepare_unified_features(
     return X, y
 
 
-def _sort_by_date(
-    X: pd.DataFrame, y: pd.Series, dates: Optional[pd.Series]
-) -> Tuple[pd.DataFrame, pd.Series, Optional[pd.Series]]:
-    """行を日付の順に並べ（同じ日付の中は今の並び）、index を振り直す（#1363）。
-
-    元の表は market・symbol 順に並ぶため、行の並びのまま末尾を検証にすると、
-    末尾の銘柄の全期間が検証になり、その銘柄を学習しない。日付の分からない行は先頭に置く。
-    dates が無いときは今の並びのままにする。
-    """
-    if dates is None:
-        return X, y, None
-    day = pd.Series(pd.to_datetime(pd.Series(dates).to_numpy(), errors="coerce"))
-    order = day.sort_values(kind="stable", na_position="first").index.to_numpy()
-    X = X.iloc[order].reset_index(drop=True)
-    y = y.iloc[order].reset_index(drop=True)
-    return X, y, day.iloc[order].reset_index(drop=True)
-
-
-def _split_train_val_by_date(
-    X: pd.DataFrame, y: pd.Series, day: Optional[pd.Series]
-) -> Tuple[pd.DataFrame, pd.Series, Optional[list]]:
-    """日付の順の X を、直近のおよそ 20%（最低 500 行）を検証に、それより前を学習に分ける。
-
-    切れ目は日付の境にそろえ、同じ日付の行が学習と検証にまたがらないようにする
-    （切れ目の日付の行はすべて検証に入る）。学習が 1000 行に満たなければ分けない。
-    日付が無いときは、行の並びのまま末尾を検証にする（今までの分け方）。
-    """
-    n_val = max(int(len(X) * 0.2), 500)
-    n_train = len(X) - n_val
-    if day is not None and 0 < n_train < len(X) and pd.notna(day.iloc[n_train]):
-        n_nat = int(day.isna().sum())
-        n_train = n_nat + int(day.iloc[n_nat:].searchsorted(day.iloc[n_train], side="left"))
-    if n_train < 1000:
-        return X, y, None
-    X_val, y_val = X.iloc[n_train:], y.iloc[n_train:]
-    return X.iloc[:n_train], y.iloc[:n_train], [(X_val, y_val)]
-
-
 def train_unified_model(
     model_type: str = "XGBoostModel",
     model_name: str = "UnifiedStockModel",
@@ -296,7 +340,9 @@ def train_unified_model(
         save_selection: False のとき、特徴量選択の結果を保存しない。
 
     Raises:
-        RuntimeError: 学習に使うデータが空のとき（読み込みの失敗を含む）
+        RuntimeError: 学習に使うデータが空のとき（読み込みの失敗を含む）、
+            発注する市場の行が線を超えて NaN で落ちたとき、
+            決算日の取得に失敗した銘柄の割合が線を超えたとき
         ValueError: horizon が 1 以外のときに train_end_date を渡したとき
     """
     from src.prediction.manager import ModelManager
@@ -319,6 +365,9 @@ def train_unified_model(
                 raise RuntimeError("締め日より前の行が無いため学習できません")
         logger.info("2. 特徴量準備中...")
         X, y = prepare_unified_features(df, apply_saved_exclusions=apply_saved_exclusions)
+        if "market" in df.columns:
+            kept = pd.Series(df.index.isin(X.index), index=df.index)
+            _raise_if_order_market_mostly_dropped(kept, df["market"])
         dates = df["date"].loc[X.index] if "date" in df.columns else None
         # 全銘柄の表は X の写しを作った後は要らない。学習の間まで持つと 8GB の上限に近づく（#807）
         del df
@@ -343,7 +392,11 @@ def train_unified_model(
     logger.info(f"3. モデル学習中 ({model_type})...")
     mm = ModelManager(model_dir=save_dir)
     model = mm.create_model(model_type, model_name)
-    model.train(X_train_u, y_train_u, eval_set=train_eval_set)
+    # challenger と夜間の候補は early stopping を使わず、決めた本数の木をすべて学ぶ。
+    # 日付で切った検証では最初の木で止まり、予想がほぼ定数になる（#1774）。
+    # 検証の行は学習の確かめにだけ使う。本番の名前の学習は今までどおり。
+    fit_eval_set = None if _is_trial_model(model_name) else train_eval_set
+    model.train(X_train_u, y_train_u, eval_set=fit_eval_set)
     if save_selection:
         _compute_and_save_unified_feature_selection(model, X, y)
 
@@ -421,6 +474,7 @@ def _load_all_ohlcv_for_unified(horizon: int) -> Tuple[pd.DataFrame, pd.Series]:
 
     valid = X.notna().all(axis=1) & y.notna()
     _warn_dropped_rows(valid, keys["market"], keys["symbol"])
+    _raise_if_order_market_mostly_dropped(valid, keys["market"])
     # 検証を直近の日付の行にするため、日付を index にして返す（#1363。銘柄をまたいで重なる）
     dates = pd.DatetimeIndex(pd.to_datetime(all_X[0].index.append([x.index for x in all_X[1:]])))
     X, y = X[valid].copy(), y[valid].copy()

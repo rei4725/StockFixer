@@ -7,10 +7,12 @@
 import logging
 import os
 import warnings
+from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from functools import partial
-from threading import Lock
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from threading import Event, Lock
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
 import pandas as pd
 import yfinance as yf
@@ -44,6 +46,57 @@ logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 # モデルキャッシュ（スレッドセーフ）。モデル名 → (ファイルの更新時刻, モデル)
 _model_cache: Dict[str, Tuple[Optional[float], Any]] = {}
 _model_cache_lock = Lock()
+
+# 基準の値段を取れなかった理由（知らせと止める文にこの語で出る。#1662）
+BASE_PRICE_FETCH_ERROR = "取得の例外"
+BASE_PRICE_NO_BARS = "足が空"
+BASE_PRICE_DATE_MISMATCH = "足の日付の不一致"
+BASE_PRICE_CLOSE_MISSING = "終値の欠け"
+
+
+@dataclass(frozen=True)
+class BasePriceSkip:
+    """基準の値段が取れず予想を出さなかった銘柄。日付は足の日付の不一致のときだけ持つ"""
+
+    market: str
+    symbol: str
+    reason: str
+    bar_day: str = ""
+    feature_day: str = ""
+
+
+# 回の中で基準の値段が取れなかった銘柄（#1662）。飛ばした銘柄は戻りが None で回の集計へ
+# 渡せないので、ここに控える。challenger などほかの道と混ぜないよう、
+# collect_base_price_skips() で囲んだ間だけ控える。予想はスレッドで並べて走るので
+# 印はスレッドをまたいで共有する
+_base_price_skips: Dict[Tuple[str, str], BasePriceSkip] = {}
+_base_price_skips_lock = Lock()
+_collecting_base_price_skips = Event()
+
+
+@contextmanager
+def collect_base_price_skips() -> Iterator[None]:
+    """前の回の控えを消し、囲んだ間の基準の値段の飛ばしを控える。"""
+    with _base_price_skips_lock:
+        _base_price_skips.clear()
+    _collecting_base_price_skips.set()
+    try:
+        yield
+    finally:
+        _collecting_base_price_skips.clear()
+
+
+def base_price_skips() -> List[BasePriceSkip]:
+    """今の回の控えを返す。[3/6] の門と道の終わりの門が読むので、読んでも消さない。"""
+    with _base_price_skips_lock:
+        return list(_base_price_skips.values())
+
+
+def _note_base_price_skip(skip: BasePriceSkip) -> None:
+    """控えている回なら、飛ばした銘柄を控える。"""
+    with _base_price_skips_lock:
+        if _collecting_base_price_skips.is_set():
+            _base_price_skips[(skip.market, skip.symbol)] = skip
 
 
 def load_feature_data(market: str, symbol: str) -> Optional[pd.DataFrame]:
@@ -212,10 +265,12 @@ def _fetch_current_price(
             symbol,
             exc_info=True,
         )
+        _note_base_price_skip(BasePriceSkip(market, symbol, BASE_PRICE_FETCH_ERROR))
         return None
 
     if hist is None or hist.empty or "Close" not in hist.columns:
         logger.warning("現在価格が空のため予想をスキップ: market=%s symbol=%s", market, symbol)
+        _note_base_price_skip(BasePriceSkip(market, symbol, BASE_PRICE_NO_BARS))
         return None
 
     bar_date = _last_bar_date(hist)
@@ -224,19 +279,25 @@ def _fetch_current_price(
             feature_date = feature_date.tz_localize(None)
         feature_day = feature_date.normalize()
         if bar_date != feature_day:
+            bar_text = bar_date.strftime("%Y-%m-%d")
+            feature_text = feature_day.strftime("%Y-%m-%d")
             logger.warning(
                 "現在価格の足の日付が特徴量と合わないため予想をスキップ: market=%s symbol=%s "
                 "足の日付=%s 特徴量の最後の行の日付=%s",
                 market,
                 symbol,
-                bar_date.strftime("%Y-%m-%d"),
-                feature_day.strftime("%Y-%m-%d"),
+                bar_text,
+                feature_text,
+            )
+            _note_base_price_skip(
+                BasePriceSkip(market, symbol, BASE_PRICE_DATE_MISMATCH, bar_text, feature_text)
             )
             return None
 
     close = hist["Close"].iloc[-1]
     if pd.isna(close):
         logger.warning("現在価格が欠損のため予想をスキップ: market=%s symbol=%s", market, symbol)
+        _note_base_price_skip(BasePriceSkip(market, symbol, BASE_PRICE_CLOSE_MISSING))
         return None
     return float(close)
 
@@ -248,6 +309,7 @@ def predict_with_unified_model(
     lookback_days: int = 90,
     horizon: int = 1,
     on_stale: Optional[Callable[[str, str], None]] = None,
+    base_price: Optional[float] = None,
 ) -> Optional[PredictionResult]:
     """
     統合モデルを使用して1銘柄の予測を行う
@@ -259,6 +321,8 @@ def predict_with_unified_model(
         lookback_days: データ取得日数（未使用、互換性のため残す）
         horizon: 予測ホライズン（営業日）。1=翌日, 3=3日後, 5=5日後, 10=10日後。
         on_stale: 特徴量が古いため予想を出さなかったときに (market, symbol) で呼ぶ
+        base_price: 特徴量の最後の行の日の終値。夜間の道の一致の検査だけが渡す（#1675）。
+            渡すと yfinance を見ない。省略時は今までどおり yfinance から取る
 
     Returns:
         予測結果のDataFrame または None
@@ -305,7 +369,9 @@ def predict_with_unified_model(
 
     # 基準の値段は特徴量の最後の行の日の終値。足の日付が合わない・取れないときは
     # 1日ずれた値段で予想の値段を出さないよう、予想を出さない（#845）
-    current_price = _fetch_current_price(market, symbol, last_date)
+    current_price = (
+        base_price if base_price is not None else _fetch_current_price(market, symbol, last_date)
+    )
     if current_price is None:
         return None
 

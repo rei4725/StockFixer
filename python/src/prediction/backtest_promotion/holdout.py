@@ -3,6 +3,11 @@
 
 予想は本番と同じ芯（ensemble_diff_ratio）と同じ行の作り方（feature_row）で出し、
 物差しは両方の予想がそろった行だけで baseline_metrics() から出す。
+発注する市場（jp）は全市場の線とは別に、比べられた行と行のある銘柄の数を線と比べる（#1693）。
+銘柄の分母はウォッチリストの jp の銘柄の数で、段差で表から消えた銘柄の分も縮まない（#1701）。
+行のある日の数も、東証の営業日の数を分母にして線と比べる（#1699）。
+日ごとの勝ち越しの票は、jp の銘柄が線に届いた日だけで数える（#1714、daily_vote）。
+定数の予想の確かめは、全市場の物差しに加えて jp の中の日ごとの標準偏差でも行う（#1718）。
 最新の日については、本番の予想の関数とこの道の production の予想が一致するかを確かめる
 （道の一致の検査）。prediction_accuracy に記録された production の予想との突き合わせは
 参考として書くだけで、合否には使わない。
@@ -14,11 +19,19 @@ from typing import Any, Callable, Optional
 
 import pandas as pd
 
+from src.domain.jp_market_holidays import is_jp_business_day
+from src.prediction.backtest_promotion.daily_vote import split_vote_days, vote_need_symbols
 from src.prediction.backtest_promotion.judge import (
     HOLDOUT_TRADING_DAYS,
     PATH_CHECK_SAMPLE,
     PATH_CHECK_TOL,
     judge_win,
+)
+from src.prediction.backtest_promotion.required_market import (
+    REQUIRED_MARKET,
+    load_watchlist_symbols,
+    required_market_constant_reason,
+    required_market_reasons,
 )
 from src.prediction.baseline_metrics import baseline_metrics
 from src.prediction.db import load_model_weights, load_prediction_accuracy
@@ -39,6 +52,20 @@ logger = get_logger(__name__)
 _HORIZON = 1
 _PATH_CHECK_FAILED = "道の一致の検査に落ちた"
 _PATH_CHECK_NOTHING = "道の一致の検査で比べられた銘柄が無い（本番の予想が出ない）"
+_PATH_CHECK_NO_JP = "道の一致の検査で jp の比べられた銘柄が無い"
+# 発注する市場。ここを1銘柄も比べられなかった回は passed にしない（#1675）
+_PATH_CHECK_REQUIRED_MARKET = REQUIRED_MARKET
+# 道の一致の検査で銘柄を飛ばした理由
+_PATH_SKIP_NO_BASE_PRICE = "no_base_price"
+_PATH_SKIP_STALE = "stale_features"
+_PATH_SKIP_LIVE_NONE = "live_none"
+_PATH_SKIP_PRODUCTION_NONE = "production_none"
+_PATH_SKIP_REASONS = (
+    _PATH_SKIP_NO_BASE_PRICE,
+    _PATH_SKIP_STALE,
+    _PATH_SKIP_LIVE_NONE,
+    _PATH_SKIP_PRODUCTION_NONE,
+)
 _DEGRADED_CANDIDATE = "候補のアンサンブルにモデルが欠けた行がある（{n} 行）"
 
 
@@ -207,11 +234,66 @@ def _daily(rows: pd.DataFrame, dates: list[str]) -> list[dict]:
     return daily
 
 
+def _both_metrics(rows: pd.DataFrame) -> tuple[dict, dict]:
+    """同じ行での候補と production の baseline_metrics()。"""
+    return (
+        baseline_metrics(rows.rename(columns={"candidate_ratio": "predicted_ratio"})),
+        baseline_metrics(rows.rename(columns={"production_ratio": "predicted_ratio"})),
+    )
+
+
+def _market_summaries(
+    table: pd.DataFrame,
+    universe: list[tuple[str, str]],
+    market_symbols: dict[str, int],
+    market_days: dict[str, set],
+    days: list[pd.Timestamp],
+    watchlist: Optional[set[str]],
+    required_with_rows: set[str],
+) -> dict[str, dict]:
+    """universe の市場ごとの、行の見込みと、比べられた行の数と物差し。
+
+    行のある銘柄が1つも無い市場も書く（その市場が丸ごと欠けた回を結果から読めるようにする）。
+    採点の行の見込みは（その市場で y のある日の数）×（行のある銘柄の数）。日は jp と us を
+    合わせたものなので、全部の日 × 全部の銘柄だと休場日の分だけ足りなくなる。
+    発注する市場には、取っておいた日のうちの東証の営業日の数と、そのうち行のある日の数も書く。
+    表に無い年は平日を全部営業日に数えるので、分母が大きくなる側に倒れる。
+    発注する市場にはウォッチリストの銘柄の数と、そのうち行のある銘柄の数も書く。
+    watchlist が空か None のときは None を書き、銘柄の線は universe の数で判定する。
+    """
+    summaries: dict[str, dict] = {}
+    for market in sorted({m for m, _ in universe}):
+        n_symbols = market_symbols.get(market, 0)
+        n_dates = len(market_days.get(market, ()))
+        candidate, production = _both_metrics(table[table["market"] == market])
+        summaries[market] = {
+            "n_universe_symbols": sum(1 for m, _ in universe if m == market),
+            "n_symbols": n_symbols,
+            "n_dates": n_dates,
+            "expected_rows": n_dates * n_symbols,
+            "n_compared": min(candidate["n_baseline"], production["n_baseline"]),
+            "candidate": candidate,
+            "production": production,
+        }
+    if _PATH_CHECK_REQUIRED_MARKET in summaries:
+        business_days = {day for day in days if is_jp_business_day(day.date())}
+        rows_days = market_days.get(_PATH_CHECK_REQUIRED_MARKET, set())
+        summaries[_PATH_CHECK_REQUIRED_MARKET].update(
+            n_business_dates=len(business_days),
+            n_business_dates_with_rows=len(business_days & rows_days),
+            n_watchlist_symbols=len(watchlist) if watchlist else None,
+            n_watchlist_symbols_with_rows=(
+                len(watchlist & required_with_rows) if watchlist else None
+            ),
+        )
+    return summaries
+
+
 def evaluate_holdout(
     cutoff_dates: list[pd.Timestamp],
     candidate_models: list[tuple[str, Any]],
     production_models: list[tuple[str, Any]],
-    live_predict: Callable[[str, str], Optional[PredictionResult]],
+    live_predict: Callable[..., Optional[PredictionResult]],
 ) -> HoldoutEvaluation:
     """取っておいた日について候補と production を比べ、勝ちを判定する。
 
@@ -219,7 +301,8 @@ def evaluate_holdout(
         cutoff_dates: 取っておく日（holdout_dates の結果。先頭が締め日）
         candidate_models: 候補の（重みを引く名前, モデルの実物）。名前は本番の名前にする
         production_models: production の（重みを引く名前, モデルの実物）
-        live_predict: 本番の予想の関数（market, symbol）。道の一致の検査に使う
+        live_predict: 本番の予想の関数（market, symbol, base_price=, on_stale=）。
+            道の一致の検査に使う
 
     Returns:
         HoldoutEvaluation
@@ -240,6 +323,12 @@ def evaluate_holdout(
     universe = sorted(get_all_symbols())
     if not universe:
         raise ValueError("stock_features に銘柄が無い")
+    watchlist = load_watchlist_symbols(_PATH_CHECK_REQUIRED_MARKET)
+    if not watchlist:
+        logger.warning(
+            "ウォッチリストの %s の銘柄が読めないか空なので、universe の銘柄の数で判定する",
+            _PATH_CHECK_REQUIRED_MARKET,
+        )
 
     n_cand_models = len(candidate_models)
     n_prod_models = len(production_models)
@@ -252,10 +341,12 @@ def evaluate_holdout(
     # 市場ごとの、y の埋まった行がある銘柄の数と日（休場日の違いで日数が市場ごとに違う）
     market_symbols: dict[str, int] = {}
     market_days: dict[str, set] = {}
+    # 発注する市場の行のある銘柄（ウォッチリストとの積を銘柄の線の分子にする）
+    required_with_rows: set[str] = set()
     # 道の一致の検査は市場ごとに分けて取る（market, symbol の順だと jp だけになる）
     path_quotas = _path_check_quotas(universe)
-    path_sampled: dict[str, int] = {market: 0 for market in path_quotas}
     path_compared: dict[str, int] = {market: 0 for market in path_quotas}
+    path_skipped: dict[str, int] = {reason: 0 for reason in _PATH_SKIP_REASONS}
     cand_weights = _WeightsRecorder()
     prod_weights = _WeightsRecorder()
 
@@ -278,6 +369,8 @@ def evaluate_holdout(
         n_symbols += 1
         market_symbols[market] = market_symbols.get(market, 0) + 1
         market_days.setdefault(market, set()).update(day for day, _ in target_positions)
+        if market == _PATH_CHECK_REQUIRED_MARKET:
+            required_with_rows.add(str(symbol).upper())
         for day, pos in target_positions:
             actual = df["y"].iloc[pos]
             price = closes.get(day)
@@ -322,52 +415,67 @@ def evaluate_holdout(
                 }
             )
 
-        # 市場ごとに、割り当ての数まで（symbol の順に）道の一致を確かめる
-        if path_sampled[market] < path_quotas[market]:
-            path_sampled[market] += 1
-            diff = _path_diff(df, market, symbol, production_models, live_predict)
+        # 市場ごとに、比べられた銘柄が割り当ての数になるまで（symbol の順に）道の一致を確かめる。
+        # 飛ばした銘柄は割り当てを使わないので、先頭の銘柄が飛んでも次の銘柄へ進む
+        if path_compared[market] < path_quotas[market]:
+            diff, skip_reason = _path_diff(
+                df, closes.get(row_days.iloc[-1]), market, symbol, production_models, live_predict
+            )
             if diff is not None:
                 path_diffs.append(diff)
                 path_compared[market] += 1
+            elif skip_reason is not None:
+                path_skipped[skip_reason] += 1
 
     if not rows:
         raise ValueError("候補と production の予想がそろった行が無い")
 
     table = pd.DataFrame(rows)
-    candidate = baseline_metrics(table.rename(columns={"candidate_ratio": "predicted_ratio"}))
-    production = baseline_metrics(table.rename(columns={"production_ratio": "predicted_ratio"}))
+    candidate, production = _both_metrics(table)
     daily = _daily(table, date_strs)
 
     max_abs_diff = max(path_diffs) if path_diffs else None
+    required_compared = path_compared.get(_PATH_CHECK_REQUIRED_MARKET, 0) > 0
     path_check = {
         "compared": len(path_diffs),
         "max_abs_diff": max_abs_diff,
-        "passed": bool(path_diffs) and max_abs_diff is not None and max_abs_diff <= PATH_CHECK_TOL,
+        "passed": required_compared and max_abs_diff is not None and max_abs_diff <= PATH_CHECK_TOL,
         "compared_by_market": path_compared,
+        "skipped_by_reason": path_skipped,
     }
 
-    # 採点の行の見込みは市場ごとに（その市場で y のある日の数）×（その市場の銘柄の数）を足す。
-    # 日は jp と us を合わせたものなので、全部の日 × 全部の銘柄だと休場日の分だけ足りなくなる
-    markets = {
-        market: {
-            "n_symbols": market_symbols[market],
-            "n_dates": len(market_days[market]),
-            "expected_rows": len(market_days[market]) * market_symbols[market],
-        }
-        for market in sorted(market_symbols)
-    }
+    markets = _market_summaries(
+        table, universe, market_symbols, market_days, days, watchlist, required_with_rows
+    )
     expected_rows = sum(m["expected_rows"] for m in markets.values())
 
-    # 物差しの無い日は勝ちに数えず、日数には入れる
-    daily_diff = [0.0 if d["diff"] is None else float(d["diff"]) for d in daily]
+    # 票は jp の銘柄が線に届いた日だけで数える（#1714）。日ごとの物差しは全市場の行のまま。
+    # 票に数える日のうち物差しの無い日は勝ちに数えず、日数には入れる
+    need_symbols = vote_need_symbols(
+        markets.get(_PATH_CHECK_REQUIRED_MARKET, {}).get("n_universe_symbols", 0), watchlist
+    )
+    vote_dates, vote_skipped = split_vote_days(table, date_strs, need_symbols, watchlist)
+    vote_set = set(vote_dates)
+    daily_diff = [
+        0.0 if d["diff"] is None else float(d["diff"]) for d in daily if d["date"] in vote_set
+    ]
     decision = judge_win(candidate, production, daily_diff, expected_rows)
     reasons = list(decision.reasons)
     if degraded["candidate"]:
         reasons.append(_DEGRADED_CANDIDATE.format(n=degraded["candidate"]))
     if not path_diffs:
         reasons.append(_PATH_CHECK_NOTHING)
-    elif not path_check["passed"]:
-        reasons.append(_PATH_CHECK_FAILED)
+    else:
+        if not required_compared:
+            reasons.append(_PATH_CHECK_NO_JP)
+        if max_abs_diff is not None and max_abs_diff > PATH_CHECK_TOL:
+            reasons.append(_PATH_CHECK_FAILED)
+    required_shortfalls = required_market_reasons(markets)
+    reasons.extend(required_shortfalls)
+    # 定数の予想は全市場に加えて jp の中でも確かめる（#1718）
+    required_constant = required_market_constant_reason(markets)
+    if required_constant is not None:
+        reasons.append(required_constant)
     decision = WinDecision(won=not reasons, reasons=reasons)
 
     reference = _recorded_reference(
@@ -392,25 +500,43 @@ def evaluate_holdout(
         degraded_rows=degraded,
         skipped_rows=skipped,
         weights={"candidate": cand_weights.summary(), "production": prod_weights.summary()},
+        required_market_shortfalls=required_shortfalls,
+        vote_dates=vote_dates,
+        vote_skipped=vote_skipped,
+        vote_need_symbols=need_symbols,
     )
 
 
 def _path_diff(
     df: pd.DataFrame,
+    base_price: Optional[float],
     market: str,
     symbol: str,
     production_models: list,
-    live_predict: Callable[[str, str], Optional[PredictionResult]],
-) -> Optional[float]:
-    """最後の行について、この道の production と本番の予想の diff_ratio の差の絶対値。
+    live_predict: Callable[..., Optional[PredictionResult]],
+) -> tuple[Optional[float], Optional[str]]:
+    """最後の行について、この道の production と本番の予想の diff_ratio の差の絶対値を出す。
 
+    基準の値段は market_data_raw の最後の行の日の終値を本番の予想へ渡す。yfinance の最後の足は
+    22:00 JST には特徴量の最後の行より新しいことがあり、それだと比べられない（#1675）。
     値段の出どころの違いを道の違いと取り違えないよう、この道にも本番の予想の基準の値段
-    （current_price）を渡す。本番が None か、この道で予想が出ない（モデルが無い・
-    全モデルが例外）なら None。
+    （current_price）を渡す。
+
+    Args:
+        df: その銘柄の特徴量
+        base_price: 最後の行の日の終値。無ければ比べない
+
+    Returns:
+        (差の絶対値, None)。比べられなければ (None, 飛ばした理由)
     """
-    live = live_predict(market, symbol)
+    if base_price is None:
+        return None, _PATH_SKIP_NO_BASE_PRICE
+    stale: list[str] = []
+    live = live_predict(
+        market, symbol, base_price=base_price, on_stale=lambda _m, s: stale.append(s)
+    )
     if live is None:
-        return None
+        return None, _PATH_SKIP_STALE if stale else _PATH_SKIP_LIVE_NONE
     outcome, failed = _production_outcome(
         feature_row(df, -1, market),
         float(live.current_price),
@@ -420,5 +546,5 @@ def _path_diff(
         weights_fn=load_model_weights,
     )
     if failed or outcome is None:
-        return None
-    return abs(float(live.diff_ratio) - outcome.diff_ratio)
+        return None, _PATH_SKIP_PRODUCTION_NONE
+    return abs(float(live.diff_ratio) - outcome.diff_ratio), None
