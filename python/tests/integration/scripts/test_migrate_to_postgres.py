@@ -12,7 +12,7 @@
 import duckdb
 import psycopg
 import pytest
-from scripts.migrate_to_postgres import _get_dynamic_columns, migrate_table
+from scripts.migrate_to_postgres import _TABLES, _get_dynamic_columns, migrate_table
 
 from src.utils.data_path_utils import get_database_url
 
@@ -334,6 +334,57 @@ def test_migrate_table_dd_state_without_broker_name_lands_as_paper(
     src_con = attached_src_con_dd_state
 
     count = migrate_table(src_con, "dd_state", ["id", "peak_balance"])
+
+    rows = src_con.execute(
+        'SELECT "id", "peak_balance", "broker_name" FROM pg."dd_state"'
+    ).fetchall()
+    assert count == 1
+    assert rows == [(1, 500.0, "paper")]
+
+
+@pytest.fixture
+def attached_src_con_dd_state_with_broker(tmp_path):
+    """broker_name の列を持つ DuckDB の dd_state（Broker ごとに2行）を持つ接続。"""
+    db_path = str(tmp_path / "sample_dd_state_broker.duckdb")
+    con = duckdb.connect(db_path)
+    con.execute(
+        "CREATE TABLE dd_state (id INTEGER PRIMARY KEY, peak_balance DOUBLE, broker_name VARCHAR)"
+    )
+    con.execute("INSERT INTO dd_state VALUES (1, 500.0, 'paper'), (2, 800.0, 'other_broker')")
+    con.close()
+
+    src_con = duckdb.connect(db_path, read_only=True)
+    src_con.execute("INSTALL postgres")
+    src_con.execute("LOAD postgres")
+    src_con.execute(f"ATTACH '{get_database_url()}' AS pg (TYPE POSTGRES, READ_ONLY FALSE)")
+    try:
+        yield src_con
+    finally:
+        src_con.execute('TRUNCATE TABLE pg."dd_state"')
+        src_con.close()
+
+
+def test_migrate_table_dd_state_with_broker_name_keeps_source_value(
+    attached_src_con_dd_state_with_broker, _isolate_db
+):
+    """移行元の dd_state に broker_name があるときは、main と同じ列の指定でも
+    その値をそのまま写し、paper で上書きしない。"""
+    src_con = attached_src_con_dd_state_with_broker
+
+    count = migrate_table(src_con, "dd_state", _TABLES["dd_state"])
+
+    rows = src_con.execute(
+        'SELECT "id", "peak_balance", "broker_name" FROM pg."dd_state" ORDER BY "id"'
+    ).fetchall()
+    assert count == 2
+    assert rows == [(1, 500.0, "paper"), (2, 800.0, "other_broker")]
+
+
+def test_migrate_table_dd_state_uses_main_column_definition(attached_src_con_dd_state, _isolate_db):
+    """main が渡す _TABLES の dd_state の列の定義でも止まらず、paper の行になる。"""
+    src_con = attached_src_con_dd_state
+
+    count = migrate_table(src_con, "dd_state", _TABLES["dd_state"])
 
     rows = src_con.execute(
         'SELECT "id", "peak_balance", "broker_name" FROM pg."dd_state"'
