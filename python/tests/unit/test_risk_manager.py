@@ -1174,5 +1174,110 @@ class TestTotalEquityBasedDrawdown(unittest.TestCase):
         self.assertAlmostEqual(update_calls[0][0][1][0], 795_000.0)
 
 
+class _FakeDdStateCon:
+    """broker_name ごとの dd_state を辞書で持つ偽の接続（#1787）"""
+
+    def __init__(self, rows: dict[str, float] | None = None) -> None:
+        self.rows: dict[str, float] = dict(rows or {})
+        self._last: tuple | None = None
+
+    def execute(self, sql: str, params: list | None = None) -> "_FakeDdStateCon":
+        params = params or []
+        if sql.lstrip().startswith("SELECT"):
+            (broker_name,) = params
+            peak = self.rows.get(broker_name)
+            self._last = None if peak is None else (peak,)
+        elif sql.lstrip().startswith("INSERT"):
+            broker_name, peak = params
+            self.rows.setdefault(broker_name, peak)
+        elif sql.lstrip().startswith("UPDATE"):
+            peak, broker_name = params
+            self.rows[broker_name] = peak
+        return self
+
+    def fetchone(self) -> tuple | None:
+        return self._last
+
+
+class TestDdStatePerBroker(unittest.TestCase):
+    """DD の基準を Broker ごとに分けて持つ（#1787）"""
+
+    def _risk(self, broker_name: str, balance: float) -> RiskManager:
+        broker = _make_broker(balance=balance)
+        broker.broker_name = broker_name
+        broker.get_short_positions.return_value = []
+        return RiskManager(broker)
+
+    def _db(self, con: _FakeDdStateCon):
+        @contextmanager
+        def fake_db():
+            yield con
+
+        return patch("src.trading.risk_manager._db_connection", new=fake_db)
+
+    def test_brokers_do_not_overwrite_each_others_peak(self):
+        con = _FakeDdStateCon()
+        with self._db(con):
+            self._risk("paper", 1_000_000.0).update_peak_balance()
+            self._risk("kabu", 300_000.0).update_peak_balance()
+            self._risk("kabu", 350_000.0).update_peak_balance()
+            self._risk("paper", 900_000.0).update_peak_balance()
+        self.assertEqual(con.rows, {"paper": 1_000_000.0, "kabu": 350_000.0})
+
+    def test_dd_ratio_uses_own_broker_peak_only(self):
+        con = _FakeDdStateCon({"paper": 1_000_000.0, "kabu": 300_000.0})
+        with self._db(con):
+            kabu_dd = self._risk("kabu", 270_000.0).get_current_dd_ratio()
+            paper_dd = self._risk("paper", 900_000.0).get_current_dd_ratio()
+        self.assertAlmostEqual(kabu_dd, 0.1)
+        self.assertAlmostEqual(paper_dd, 0.1)
+
+    def test_paper_dd_unchanged_after_migration(self):
+        """移行で id = 1 の peak が paper の行になり、紙の DD は直す前と同じ値になる"""
+        old_peak = 1_000_000.0
+        # 直す前: (peak - 総資産) / peak = (1,000,000 - 800,000) / 1,000,000
+        expected = (old_peak - 800_000.0) / old_peak
+        con = _FakeDdStateCon({"paper": old_peak})
+        with self._db(con):
+            dd = self._risk("paper", 800_000.0).get_current_dd_ratio()
+        self.assertAlmostEqual(dd, expected)
+
+    def test_no_peak_for_new_broker_means_zero_dd(self):
+        con = _FakeDdStateCon({"paper": 1_000_000.0})
+        with self._db(con):
+            dd = self._risk("kabu", 100_000.0).get_current_dd_ratio()
+        self.assertAlmostEqual(dd, 0.0)
+
+
+class TestDdStateMigration(unittest.TestCase):
+    """dd_state を Broker ごとに分ける移行の SQL（#1787）"""
+
+    def _sql(self) -> str:
+        from pathlib import Path
+
+        import src.utils.db.migration_runner as runner
+
+        path = Path(runner.__file__).parent / "migrations" / "0008_dd_state_per_broker_postgres.sql"
+        return path.read_text(encoding="utf-8")
+
+    def test_existing_row_becomes_paper(self):
+        sql = self._sql()
+        self.assertIn("SET broker_name = 'paper' WHERE broker_name IS NULL AND id = 1", sql)
+
+    def test_migration_is_rerunnable(self):
+        sql = self._sql()
+        self.assertIn("ADD COLUMN IF NOT EXISTS broker_name", sql)
+        self.assertIn("CREATE UNIQUE INDEX IF NOT EXISTS", sql)
+        self.assertIn("CREATE SEQUENCE IF NOT EXISTS", sql)
+
+    def test_broker_name_defaults_to_paper(self):
+        """broker_name を書かない今までの書き手の行は paper の行になる"""
+        sql = self._sql()
+        self.assertIn("ALTER COLUMN broker_name SET DEFAULT 'paper'", sql)
+        # 既定値を付けても NOT NULL と一意の索引は残す
+        self.assertIn("ALTER COLUMN broker_name SET NOT NULL", sql)
+        self.assertIn("uq_dd_state_broker_name ON dd_state (broker_name)", sql)
+
+
 if __name__ == "__main__":
     unittest.main()

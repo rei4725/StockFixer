@@ -65,6 +65,7 @@ DISABLE_DAILY_LOSS_GUARD_ENV = "DISABLE_DAILY_LOSS_GUARD"
 
 VIX_TICKER = "^VIX"
 VIX_STALE_BUSINESS_DAYS = 5  # 返す VIX の日付がこれより古い営業日数なら WARNING（#823）
+_SELECT_PEAK_SQL = "SELECT peak_balance FROM dd_state WHERE broker_name = %s"
 
 
 def _fetch_raw_vix_close() -> Optional[tuple[float, date]]:
@@ -477,20 +478,29 @@ class RiskManager:
     def update_peak_balance(self) -> None:
         """総資産が過去最高値を超えた場合に peak_balance を更新する。
         run_daily_orders の先頭で呼び出すこと。
+        基準は Broker ごと（broker_name）に分けて持つ（#1787）。
         """
         current = self.get_total_equity()
+        name = self._broker.broker_name
         with _db_connection() as con:
-            row = con.execute("SELECT peak_balance FROM dd_state WHERE id = 1").fetchone()
+            row = con.execute(_SELECT_PEAK_SQL, [name]).fetchone()
             if row is None:
-                con.execute("INSERT INTO dd_state (id, peak_balance) VALUES (1, %s)", [current])
+                con.execute(
+                    "INSERT INTO dd_state (broker_name, peak_balance) VALUES (%s, %s)"
+                    " ON CONFLICT (broker_name) DO NOTHING",
+                    [name, current],
+                )
             elif current > float(row[0]):
-                con.execute("UPDATE dd_state SET peak_balance = %s WHERE id = 1", [current])
+                con.execute(
+                    "UPDATE dd_state SET peak_balance = %s WHERE broker_name = %s",
+                    [current, name],
+                )
 
     def get_current_dd_ratio(self) -> float:
-        """現在のドローダウン率（peak_balance と総資産の差分比）を返す。"""
+        """自分の Broker の peak_balance と総資産の差分比で、DD 率を返す（#1787）。"""
         current = self.get_total_equity()
         with _db_connection() as con:
-            row = con.execute("SELECT peak_balance FROM dd_state WHERE id = 1").fetchone()
+            row = con.execute(_SELECT_PEAK_SQL, [self._broker.broker_name]).fetchone()
         if row is None or float(row[0]) <= 0:
             return 0.0
         peak = float(row[0])
