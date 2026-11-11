@@ -387,7 +387,9 @@ class TestOrderGateRecord(unittest.TestCase):
     def test_sector_limit_error_after_sells_records_sell_count(self):
         """売りの後に業種の上限の手順が投げる朝も、出した売りの数が入る（#1548）"""
         error = RuntimeError("sector down")
-        failing = patch("src.trading.execution.runner._apply_buy_sector_limit", side_effect=error)
+        failing = patch(
+            "src.trading.execution.selection._apply_buy_sector_limit", side_effect=error
+        )
         caught, broker = self._run_failing(failing)
         self.assertIs(caught, error)
         self.assertEqual(self._sent(broker), [("9000", OrderSide.SELL)])

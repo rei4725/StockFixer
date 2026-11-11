@@ -211,6 +211,44 @@ class TestHandlePlaceOrder(unittest.TestCase):
         "src.trading.claude_agent._choose_order_params",
         return_value=(OrderType.MARKET, 0.0, "market", "open"),
     )
+    def test_sell_excludes_hold_qty(self, _choose, _record):
+        # #1784: 実口座の保有は返済の注文で拘束された hold_qty を引いた数だけ売る
+        self.broker.get_positions.return_value = [
+            {
+                "symbol": "7200",
+                "qty": 300,
+                "hold_qty": 100,
+                "avg_price": 990.0,
+                "current_price": 1000.0,
+            }
+        ]
+        result = self._call("7200", "sell")
+        self.assertEqual(result["status"], "placed")
+        self.assertEqual(self.broker.send_order.call_args[0][2], 200)
+        self.assertEqual(_record.call_args.kwargs.get("qty"), 200)
+
+    def test_sell_skipped_when_all_qty_held(self):
+        # #1784: 全数が返済の注文に拘束されていれば注文を出さない
+        self.broker.get_positions.return_value = [
+            {
+                "symbol": "7200",
+                "qty": 200,
+                "hold_qty": 200,
+                "avg_price": 990.0,
+                "current_price": 1000.0,
+            }
+        ]
+        stats = {"buy_orders": 0, "sell_orders": 0, "skipped": 0, "errors": 0}
+        result = self._call("7200", "sell", stats)
+        self.assertEqual(result["status"], "skipped")
+        self.broker.send_order.assert_not_called()
+        self.assertEqual(stats["skipped"], 1)
+
+    @patch("src.trading.claude_agent._record_order")
+    @patch(
+        "src.trading.claude_agent._choose_order_params",
+        return_value=(OrderType.MARKET, 0.0, "market", "open"),
+    )
     @patch("src.trading.execution.pending.db_connection")
     def test_sell_does_not_read_paper_orders(self, mock_db, _choose, _record):
         # #1205: sell の約定待ちの確認は setUp の差し替えを通り、DB に繋がない

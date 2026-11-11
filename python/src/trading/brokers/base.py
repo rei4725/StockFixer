@@ -36,6 +36,12 @@ class BrokerBase(ABC):
     def get_token(self) -> str:
         """認証トークンを取得・更新して返す"""
 
+    def check_order_ready(self) -> None:
+        """発注の回の始めに、注文に要る設定の欠けを確かめる（#1757）。
+
+        欠けていれば BrokerError を出す。確かめる設定の無い Broker 実装では何もしない。
+        """
+
     @abstractmethod
     def send_order(
         self,

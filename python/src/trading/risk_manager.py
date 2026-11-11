@@ -13,7 +13,7 @@ OrderExecutionPipeline が注文を送信する前にゲートチェックを行
 
 import os
 from datetime import date, datetime, timezone
-from typing import Any, Optional
+from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -40,14 +40,18 @@ from config.trading_policy import (  # noqa: F401  # R-307/R-219 でポジショ
 from src.domain.exceptions import RiskError  # noqa: F401  # 後方互換のため re-export
 from src.domain.trading_rules import get_lot_size
 from src.trading.brokers.base import BrokerBase, OrderSide
-from src.trading.consecutive_losses import (
-    count_leading_losses,
-    recent_paper_closed_pnls,
-    recent_trade_pnl_closed_pnls,
-)
+from src.trading.consecutive_losses import count_leading_losses, recent_paper_closed_pnls
 from src.trading.daily_loss_window import daily_loss_window_start
+from src.trading.position_size_reason import REASON_PRICE, note_zero_size, zero_size_reason
 from src.trading.position_valuation import broker_positions_value, count_short_positions
 from src.trading.sl_tp_params import positive_pct_param
+from src.trading.trade_pnl_source import (
+    CONSECUTIVE_LOSS_SOURCE_UNAVAILABLE,
+    DAILY_LOSS_SOURCE_UNAVAILABLE,
+    source_unavailable_status,
+    trade_pnl_consecutive_losses,
+    trade_pnl_daily_loss,
+)
 from src.trading.types import TradingGateStatus
 from src.trading.vix_run_cache import VixRunCache
 from src.utils.db._connection import _db_connection
@@ -61,6 +65,7 @@ DISABLE_DAILY_LOSS_GUARD_ENV = "DISABLE_DAILY_LOSS_GUARD"
 
 VIX_TICKER = "^VIX"
 VIX_STALE_BUSINESS_DAYS = 5  # 返す VIX の日付がこれより古い営業日数なら WARNING（#823）
+_SELECT_PEAK_SQL = "SELECT peak_balance FROM dd_state WHERE broker_name = %s"
 
 
 def _fetch_raw_vix_close() -> Optional[tuple[float, date]]:
@@ -168,6 +173,8 @@ class RiskManager:
         self._market = market
         self.stop_loss_pct: Optional[float] = None
         self.take_profit_pct: Optional[float] = None
+        # 直前の calc_position_size が 0 を返した理由（#1734）
+        self.zero_reason: Optional[str] = None
         # 総資産と VIX は発注ループ中に銘柄ごとに参照されるため、インスタンス単位でキャッシュする
         self._total_equity_cache: Optional[float] = None
         self._vix_cache = VixRunCache(lambda: fetch_latest_vix())  # 日付が変われば読み直す
@@ -259,10 +266,14 @@ class RiskManager:
         positions = self._broker.get_positions()
         n_positions = len(positions) + count_short_positions(self._broker)
         daily_loss_limit = self._resolve_daily_loss_limit(balance)
-        daily_loss = 0.0
+        daily_loss: Optional[float] = 0.0
 
         if daily_loss_limit is not None:
             daily_loss = self._get_daily_realized_loss()
+        if daily_loss is None:  # 数える元が無い・読めない（#995）
+            return source_unavailable_status(
+                DAILY_LOSS_SOURCE_UNAVAILABLE, 0.0, daily_loss_limit, 0, n_positions
+            )
 
         # ルール 1: 当日損失上限
         if daily_loss_limit is not None and daily_loss >= daily_loss_limit:
@@ -285,6 +296,10 @@ class RiskManager:
 
         # ルール 3: 連続損失
         consecutive = self._get_consecutive_losses()
+        if consecutive is None:
+            return source_unavailable_status(
+                CONSECUTIVE_LOSS_SOURCE_UNAVAILABLE, daily_loss, daily_loss_limit, 0, n_positions
+            )
         if consecutive >= MAX_CONSECUTIVE_LOSSES:
             reason = f"連続損失 {consecutive} 回 >= {MAX_CONSECUTIVE_LOSSES} 回"
             logger.warning(f"[risk] {reason} → 当日取引停止")
@@ -366,6 +381,7 @@ class RiskManager:
             avg_loss = self.kelly_avg_loss
 
         balance = self._broker.get_balance()
+        self.zero_reason = None
 
         if avg_win == 0.0 or avg_loss == 0.0:
             logger.warning(
@@ -395,9 +411,10 @@ class RiskManager:
         invest_amount = min(invest_amount, max_amount)
 
         if price <= 0:
+            self.zero_reason = note_zero_size(symbol, REASON_PRICE)
             return 0
 
-        qty = int(invest_amount / price)
+        qty = base_qty = int(invest_amount / price)
 
         # モデル信頼度によるポジション縮小
         confidence_ratio = max(0.0, min(confidence_ratio, 1.0))
@@ -426,6 +443,10 @@ class RiskManager:
         # 市場別の最低売買単位に丸める（日本株=100株単位、米国株=1株。市場不明時は100株）
         lot = get_lot_size(self._market)
         qty = (qty // lot) * lot
+        if qty == 0:
+            scales = {"confidence": confidence_ratio, "dd": dd_scale, "vix": vix_scale}
+            reason = zero_size_reason(kelly, invest_amount, price, base_qty, lot, scales)
+            self.zero_reason = note_zero_size(symbol, reason)
 
         logger.debug(
             f"[risk] {symbol}: balance={balance:.0f} kelly={kelly:.3f} "
@@ -457,20 +478,29 @@ class RiskManager:
     def update_peak_balance(self) -> None:
         """総資産が過去最高値を超えた場合に peak_balance を更新する。
         run_daily_orders の先頭で呼び出すこと。
+        基準は Broker ごと（broker_name）に分けて持つ（#1787）。
         """
         current = self.get_total_equity()
+        name = self._broker.broker_name
         with _db_connection() as con:
-            row = con.execute("SELECT peak_balance FROM dd_state WHERE id = 1").fetchone()
+            row = con.execute(_SELECT_PEAK_SQL, [name]).fetchone()
             if row is None:
-                con.execute("INSERT INTO dd_state (id, peak_balance) VALUES (1, %s)", [current])
+                con.execute(
+                    "INSERT INTO dd_state (broker_name, peak_balance) VALUES (%s, %s)"
+                    " ON CONFLICT (broker_name) DO NOTHING",
+                    [name, current],
+                )
             elif current > float(row[0]):
-                con.execute("UPDATE dd_state SET peak_balance = %s WHERE id = 1", [current])
+                con.execute(
+                    "UPDATE dd_state SET peak_balance = %s WHERE broker_name = %s",
+                    [current, name],
+                )
 
     def get_current_dd_ratio(self) -> float:
-        """現在のドローダウン率（peak_balance と総資産の差分比）を返す。"""
+        """自分の Broker の peak_balance と総資産の差分比で、DD 率を返す（#1787）。"""
         current = self.get_total_equity()
         with _db_connection() as con:
-            row = con.execute("SELECT peak_balance FROM dd_state WHERE id = 1").fetchone()
+            row = con.execute(_SELECT_PEAK_SQL, [self._broker.broker_name]).fetchone()
         if row is None or float(row[0]) <= 0:
             return 0.0
         peak = float(row[0])
@@ -479,18 +509,6 @@ class RiskManager:
     # ------------------------------------------------------------------
     # 内部ヘルパー
     # ------------------------------------------------------------------
-
-    @staticmethod
-    def _table_exists(con: Any, table_name: str) -> bool:
-        row = con.execute(
-            """
-            SELECT COUNT(*)
-            FROM information_schema.tables
-            WHERE table_name = %s
-            """,
-            [table_name],
-        ).fetchone()
-        return bool(row and row[0])
 
     @staticmethod
     def _resolve_daily_loss_rate() -> float | None:
@@ -530,7 +548,7 @@ class RiskManager:
             return None
         return balance * rate
 
-    def _get_daily_realized_loss(self) -> float:
+    def _get_daily_realized_loss(self) -> Optional[float]:
         """前の営業日（JST）の 0:00 から今までの確定損失合計（プラスが損失）を返す（#941）"""
         with _db_connection() as con:
             if self._broker.broker_name == "paper":
@@ -548,40 +566,17 @@ class RiskManager:
                 ).fetchone()
                 return abs(float(row[0])) if row else 0.0
 
-            if not self._table_exists(con, "trade_pnl"):
-                logger.warning(
-                    f"[risk] trade_pnl テーブル未作成のため日次損失を 0 として扱います: broker={self._broker.broker_name}"
-                )
-                return 0.0
+            # 紙以外は数える元が無い・読めないとき None（#995）
+            return trade_pnl_daily_loss(con, self._broker.broker_name, daily_loss_window_start())
 
-            row = con.execute(
-                """
-                SELECT COALESCE(SUM(realized_pnl), 0.0)
-                FROM trade_pnl
-                WHERE closed_at >= %s
-                  AND broker = %s
-                  AND realized_pnl < 0
-                """,
-                [daily_loss_window_start(), self._broker.broker_name],
-            ).fetchone()
-            return abs(float(row[0])) if row else 0.0
-
-    def _get_consecutive_losses(self) -> int:
+    def _get_consecutive_losses(self) -> Optional[int]:
         """日次損失と同じ区切りからの決済の、直近の連続損失回数を返す（#1311）"""
         window_start = daily_loss_window_start()
         with _db_connection() as con:
             if self._broker.broker_name == "paper":
                 rows = recent_paper_closed_pnls(con, window_start, MAX_CONSECUTIVE_LOSSES)
-            else:
-                if not self._table_exists(con, "trade_pnl"):
-                    message = (
-                        "[risk] trade_pnl テーブル未作成のため連続損失を 0 として扱います: "
-                        f"broker={self._broker.broker_name}"
-                    )
-                    logger.warning(message)
-                    return 0
-
-                rows = recent_trade_pnl_closed_pnls(
-                    con, self._broker.broker_name, window_start, MAX_CONSECUTIVE_LOSSES
-                )
-            return count_leading_losses(rows)
+                return count_leading_losses(rows)
+            # 紙以外は数える元が無い・読めないとき None（#995）
+            return trade_pnl_consecutive_losses(
+                con, self._broker.broker_name, window_start, MAX_CONSECUTIVE_LOSSES
+            )
