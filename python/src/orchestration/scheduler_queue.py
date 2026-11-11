@@ -27,7 +27,6 @@ from filelock import FileLock
 
 from config.settings import settings
 from src.orchestration.job_errors import LockWaitExpiredJobError, NonRetryableJobError
-from src.orchestration.scheduler_backfill_cover import has_success_since
 from src.orchestration.scheduler_cutoff import (
     is_past_recovery_until,
     scheduled_datetime_for_recovery,
@@ -35,24 +34,22 @@ from src.orchestration.scheduler_cutoff import (
 )
 from src.orchestration.scheduler_interrupted import (
     MAX_FORGIVEN_INTERRUPTIONS_PER_PERIOD,
+    ExecutionCount,
+    PeriodCalendar,
     count_executions,
+    interrupted_recovery_label,
+    is_backfill_daily,
+    latest_missed_past_period,
+    period_still_recoverable,
+    warn_interrupted_runs,
 )
 from src.orchestration.scheduler_recovery_gap import is_within_recovery_gap
+from src.orchestration.scheduler_weekdays import parse_day_of_week
 from src.utils.data_path_utils import ensure_dir, get_results_dir
 from src.utils.heartbeat import ping_heartbeat
 from src.utils.japan_time import isoformat_utc
 
 logger = logging.getLogger("scheduler")
-
-_WEEKDAY_MAP = {
-    "mon": 0,
-    "tue": 1,
-    "wed": 2,
-    "thu": 3,
-    "fri": 4,
-    "sat": 5,
-    "sun": 6,
-}
 
 
 class SchedulerQueueManager:
@@ -351,30 +348,18 @@ class SchedulerQueueManager:
             return []
 
         config = self.schedule_config[job_id]
-        if config.get("period", "daily") != "daily":
+        if not is_backfill_daily(config) or not self._reload_state_for_recovery():
             return []
-        if not config.get("backfill", False):
-            return []
-        if not self._reload_state_for_recovery():
-            return []
-
-        now = now or self.now()
-        missed: list[str] = []
-        max_executions = config.get("max_executions_per_period", 1)
-
-        for days_back in range(1, lookback_days + 1):
-            past_dt = now - timedelta(days=days_back)
-            if not self._is_scheduled_day(config, past_dt):
-                continue
-            past_period_key = self._build_period_key(config, past_dt)
-            if has_success_since(self._state.get("events", []), job_id, past_period_key):
-                continue
-            if self.get_execution_count(job_id, past_period_key) >= max_executions:
-                continue
-            missed.append(past_period_key)
-            break
-
-        return missed
+        at = now or self.now()
+        missed = latest_missed_past_period(
+            config,
+            self._state.get("events", []),
+            job_id,
+            at,
+            lookback_days,
+            self._calendar(config, lambda key: self.get_execution_count(job_id, key, at)),
+        )
+        return [missed] if missed else []
 
     def should_recover(self, job_id: str, now: datetime | None = None) -> bool:
         """補完実行すべきか判定する。"""
@@ -420,7 +405,7 @@ class SchedulerQueueManager:
         if self.has_success(job_id, period_key):
             return False
 
-        current_count = self.get_execution_count(job_id, period_key)
+        current_count = self.get_execution_count(job_id, period_key, now)
         max_executions = config.get("max_executions_per_period", 1)
         if current_count >= max_executions:
             return False
@@ -440,38 +425,62 @@ class SchedulerQueueManager:
                 return True
         return False
 
-    def get_execution_count(self, job_id: str, period_key: str) -> int:
+    def get_execution_count(self, job_id: str, period_key: str, now: datetime | None = None) -> int:
         """success・error の記録に、終わりの記録が無い started（途中で落ちた実行）を足して数える。
 
         設定に ``rerun_if_interrupted: True`` を持つジョブは、前の起動のプロセスで消えた回を
         1期間に1回まで数えない（#946）。``max_interrupted_reruns_per_period`` で
-        その回数を増やせる（#1522）。
+        その回数を増やせる（#1522）。消えた回の警告の補完の対象は now から見て書く（#1783）。
         """
         config = self.schedule_config.get(job_id, {})
-        rerun_if_interrupted = bool(config.get("rerun_if_interrupted", False))
-        max_forgiven = config.get(
-            "max_interrupted_reruns_per_period", MAX_FORGIVEN_INTERRUPTIONS_PER_PERIOD
+        result = self._count(job_id, config, period_key)
+        new_ids = [
+            r for r in result.interrupted_run_ids if r not in self._warned_interrupted_run_ids
+        ]
+        if not new_ids:
+            return result.count
+        self._warned_interrupted_run_ids.update(new_ids)
+        recoverable = period_still_recoverable(
+            config,
+            self._state.get("events", []),
+            job_id,
+            period_key,
+            now or self.now(),
+            # 前日分の回数は警告を出さずに数える（この関数へ戻らない）
+            self._calendar(config, lambda key: self._count(job_id, config, key).count),
         )
-        result = count_executions(
+        label = interrupted_recovery_label(
+            bool(config.get("rerun_if_interrupted", False)),
+            config.get("max_interrupted_reruns_per_period", MAX_FORGIVEN_INTERRUPTIONS_PER_PERIOD),
+            config.get("max_executions_per_period", 1),
+            result,
+            recoverable,
+        )
+        warn_interrupted_runs(job_id, period_key, new_ids, label)
+        return result.count
+
+    def _count(self, job_id: str, config: dict[str, Any], period_key: str) -> ExecutionCount:
+        """回数を数える。消えた回の警告は出さない。"""
+        return count_executions(
             self._state.get("events", []),
             job_id,
             period_key,
             boot_id=self._boot_id,
             booted_at=self._booted_at,
-            rerun_if_interrupted=rerun_if_interrupted,
-            max_forgiven=max_forgiven,
+            rerun_if_interrupted=bool(config.get("rerun_if_interrupted", False)),
+            max_forgiven=config.get(
+                "max_interrupted_reruns_per_period", MAX_FORGIVEN_INTERRUPTIONS_PER_PERIOD
+            ),
         )
-        recovery_label = f"あり（1期間に{max_forgiven}回まで）" if rerun_if_interrupted else "なし"
-        for run_id in result.interrupted_run_ids:
-            if run_id in self._warned_interrupted_run_ids:
-                continue
-            self._warned_interrupted_run_ids.add(run_id)
-            logger.warning(
-                f"前の起動のプロセスで消えた回を見つけました: job_id={job_id} "
-                f"period_key={period_key} run_id={run_id} "
-                f"補完の対象={recovery_label}"
-            )
-        return result.count
+
+    def _calendar(self, config: dict[str, Any], count_at: Callable[[str], int]) -> PeriodCalendar:
+        """期間の判定の関数に渡す、このジョブの曜日・期間の鍵・回数の数え方。"""
+        return PeriodCalendar(
+            weekdays=self._parse_day_of_week(config.get("day_of_week", "*")),
+            is_scheduled_day=lambda moment: self._is_scheduled_day(config, moment),
+            period_key_at=lambda moment: self._build_period_key(config, moment),
+            count_at=count_at,
+        )
 
     def _build_period_key(self, config: dict[str, Any], now: datetime) -> str:
         period_type = config.get("period", "daily")
@@ -490,28 +499,7 @@ class SchedulerQueueManager:
         return now.weekday() in valid_weekdays
 
     def _parse_day_of_week(self, expr: str) -> set[int]:
-        expr = (expr or "").strip().lower()
-        if not expr or expr == "*":
-            return set()
-
-        weekdays: set[int] = set()
-        for token in [part.strip() for part in expr.split(",") if part.strip()]:
-            if "-" in token:
-                start_text, end_text = token.split("-", 1)
-                start = _WEEKDAY_MAP.get(start_text)
-                end = _WEEKDAY_MAP.get(end_text)
-                if start is None or end is None:
-                    continue
-                if start <= end:
-                    weekdays.update(range(start, end + 1))
-                else:
-                    weekdays.update(range(start, 7))
-                    weekdays.update(range(0, end + 1))
-            else:
-                value = _WEEKDAY_MAP.get(token)
-                if value is not None:
-                    weekdays.add(value)
-        return weekdays
+        return parse_day_of_week(expr)
 
     def _reload_state_for_recovery(self) -> bool:
         """補完の判定の前に読み直す。補完してよい履歴が手元にあれば True。"""

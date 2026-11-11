@@ -28,6 +28,9 @@ class BrokerPort(ABC):
     def get_token(self) -> str:
         """認証トークンを取得・更新して返す"""
 
+    def check_order_ready(self) -> None:
+        """発注の回の始めに注文に要る設定の欠けを確かめる。既定は何もしない（#1757）"""
+
     @abstractmethod
     def send_order(
         self,
