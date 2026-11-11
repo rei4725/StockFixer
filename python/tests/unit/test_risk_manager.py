@@ -1270,6 +1270,14 @@ class TestDdStateMigration(unittest.TestCase):
         self.assertIn("CREATE UNIQUE INDEX IF NOT EXISTS", sql)
         self.assertIn("CREATE SEQUENCE IF NOT EXISTS", sql)
 
+    def test_broker_name_defaults_to_paper(self):
+        """broker_name を書かない今までの書き手の行は paper の行になる"""
+        sql = self._sql()
+        self.assertIn("ALTER COLUMN broker_name SET DEFAULT 'paper'", sql)
+        # 既定値を付けても NOT NULL と一意の索引は残す
+        self.assertIn("ALTER COLUMN broker_name SET NOT NULL", sql)
+        self.assertIn("uq_dd_state_broker_name ON dd_state (broker_name)", sql)
+
 
 if __name__ == "__main__":
     unittest.main()

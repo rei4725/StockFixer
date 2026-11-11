@@ -300,3 +300,43 @@ def test_migrate_table_adds_missing_dynamic_column_to_postgres_target(
     # DATEソースはTIMESTAMPカラムへ着地するため、時刻部分は0時0分になる
     assert str(row[7]).startswith("2020-06-01")
     assert row[8] == "Technology"
+
+
+@pytest.fixture
+def attached_src_con_dd_state(tmp_path):
+    """broker_name の無い DuckDB の dd_state（id と peak_balance だけ）を持つ接続。
+
+    移行 0008 の後の Postgres の dd_state には NOT NULL の broker_name があるが、
+    既定値 'paper' で埋まることを確かめるために使う（#1787）。
+    """
+    db_path = str(tmp_path / "sample_dd_state.duckdb")
+    con = duckdb.connect(db_path)
+    con.execute("CREATE TABLE dd_state (id INTEGER PRIMARY KEY, peak_balance DOUBLE)")
+    con.execute("INSERT INTO dd_state VALUES (1, 500.0)")
+    con.close()
+
+    src_con = duckdb.connect(db_path, read_only=True)
+    src_con.execute("INSTALL postgres")
+    src_con.execute("LOAD postgres")
+    src_con.execute(f"ATTACH '{get_database_url()}' AS pg (TYPE POSTGRES, READ_ONLY FALSE)")
+    try:
+        yield src_con
+    finally:
+        src_con.execute('TRUNCATE TABLE pg."dd_state"')
+        src_con.close()
+
+
+def test_migrate_table_dd_state_without_broker_name_lands_as_paper(
+    attached_src_con_dd_state, _isolate_db
+):
+    """id と peak_balance だけを写す dd_state の道が、移行 0008 の後も止まらず、
+    写した行が paper の行になる。"""
+    src_con = attached_src_con_dd_state
+
+    count = migrate_table(src_con, "dd_state", ["id", "peak_balance"])
+
+    rows = src_con.execute(
+        'SELECT "id", "peak_balance", "broker_name" FROM pg."dd_state"'
+    ).fetchall()
+    assert count == 1
+    assert rows == [(1, 500.0, "paper")]

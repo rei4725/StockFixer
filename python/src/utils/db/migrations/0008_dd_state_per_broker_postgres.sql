@@ -5,6 +5,8 @@ ALTER TABLE dd_state ADD COLUMN IF NOT EXISTS broker_name VARCHAR;
 UPDATE dd_state SET broker_name = 'paper' WHERE broker_name IS NULL AND id = 1;
 UPDATE dd_state SET broker_name = 'legacy_' || id WHERE broker_name IS NULL;
 ALTER TABLE dd_state ALTER COLUMN broker_name SET NOT NULL;
+-- broker_name を書かない今までの書き手（id と peak_balance だけを入れる移し替えの道など）の行は紙の行にする。
+ALTER TABLE dd_state ALTER COLUMN broker_name SET DEFAULT 'paper';
 CREATE UNIQUE INDEX IF NOT EXISTS uq_dd_state_broker_name ON dd_state (broker_name);
 CREATE SEQUENCE IF NOT EXISTS dd_state_id_seq OWNED BY dd_state.id;
 SELECT setval('dd_state_id_seq', COALESCE((SELECT MAX(id) FROM dd_state), 0) + 1, false);
