@@ -20,6 +20,9 @@ logger = get_logger(__name__)
 # 対象の週の前に見る週の数
 WEEKS_TO_REVIEW = 3
 
+# 超過の騰落率の計算の印。これの無い週のファイルは、見る範囲に限らず全部を計算し直す（#1792）
+EXCESS_BASIS = "exposure_scaled"
+
 ComputeWeek = Callable[[date], dict[str, Any]]
 Notify = Callable[[str], bool]
 
@@ -72,13 +75,27 @@ def _week_defects(result: dict[str, Any]) -> dict[tuple[str, str], str]:
     return defects
 
 
+def _is_old_basis(result: dict[str, Any]) -> bool:
+    """超過の騰落率が今の計算の印で書かれていない市場があれば True。"""
+    return any(
+        not isinstance(values, dict) or values.get("excess_basis") != EXCESS_BASIS
+        for values in result["markets"].values()
+    )
+
+
+def _week_end_of(week: str) -> date:
+    """ISO 週の名前（YYYY-Www）からその週の金曜を返す。"""
+    year, number = week.split("-W")
+    return date.fromisocalendar(int(year), int(number), 5)
+
+
 def _review_week(
     week: str, week_end: date, compute_week: ComputeWeek, output_dir: str
 ) -> Optional[str]:
     """1つの週を見て、要れば計算し直して書く。欠けが残れば理由を返す。"""
     path = os.path.join(output_dir, f"{week}.json")
     current = _read_week_file(path)
-    if current is not None and not _week_defects(current):
+    if current is not None and not _week_defects(current) and not _is_old_basis(current):
         return None
 
     # 土曜を as_of にすると、直前に終わった週はその金曜の週になる
@@ -104,11 +121,20 @@ def _review_weeks(
         return checked, remaining
 
     oldest = min(names)
+    weeks: dict[str, date] = {}
     for back in range(WEEKS_TO_REVIEW, 0, -1):
         week_end = target_week_end - timedelta(weeks=back)
         week = week_name(week_end)
-        if week < oldest:
-            continue
+        if week >= oldest:
+            weeks[week] = week_end
+    # 前の計算の印のファイルは、見る範囲の外の週も計算し直す（#1792）
+    target = week_name(target_week_end)
+    for week in names:
+        if week < target and week not in weeks:
+            current = _read_week_file(os.path.join(output_dir, f"{week}.json"))
+            if current is not None and _is_old_basis(current):
+                weeks[week] = _week_end_of(week)
+    for week, week_end in sorted(weeks.items()):
         checked.append(week)
         try:
             reason = _review_week(week, week_end, compute_week, output_dir)
