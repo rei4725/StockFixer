@@ -128,6 +128,7 @@ def test_report_shape_and_keys() -> None:
         "n_excluded_split",
         "windows",
         "backtest_gap",
+        "backtest_gap_combined",
         "top_symbols",
     ):
         assert key in report
@@ -241,7 +242,23 @@ def test_prediction_history_empty_h5_zero() -> None:
 
 def test_backtest_gap_approx_flag() -> None:
     report, _ = build_rule_accuracy("jp", AS_OF, loaders=_loaders())
-    gap = report["backtest_gap"]
+    side = report["backtest_gap"]
+    assert set(side) == {"rsi", "bollinger"}
+    assert set(side["rsi"]) == {"buy", "sell"}
+    assert set(side["rsi"]["buy"]) == {
+        "backtest_win_rate",
+        "live_hit_rate_h5",
+        "n_h5",
+        "n_unmatched",
+        "approx",
+        "baseline_rate",
+        "edge",
+    }
+    assert side["rsi"]["buy"]["approx"] is True and side["rsi"]["sell"]["approx"] is True
+    # bollinger は買いだけ。売りの側は数が無く、approx は立つ
+    assert side["bollinger"]["sell"]["n_h5"] == 0
+    assert side["bollinger"]["sell"]["approx"] is True
+    gap = report["backtest_gap_combined"]
     assert set(gap) == {"rsi", "bollinger"}
     assert gap["rsi"]["approx"] is True
     assert set(gap["rsi"]) == {
@@ -264,11 +281,17 @@ def test_backtest_gap_uses_history_when_covered() -> None:
         ]
     )
     report, _ = build_rule_accuracy("jp", AS_OF, loaders=_loaders(best_history=hist))
-    gap = report["backtest_gap"]["bollinger"]
+    gap = report["backtest_gap_combined"]["bollinger"]
     assert gap["approx"] is False
     # 10-01 より前のシグナルは 0.9、以後は 0.8 が当たるので、その間の値になる
     assert 0.8 < gap["backtest_win_rate"] < 0.9
-    assert report["backtest_gap"]["rsi"]["approx"] is True
+    assert report["backtest_gap_combined"]["rsi"]["approx"] is True
+    # 向きごとの当て方も同じ（bollinger は買いだけ）
+    buy = report["backtest_gap"]["bollinger"]["buy"]
+    assert buy["approx"] is False
+    assert buy["backtest_win_rate"] == gap["backtest_win_rate"]
+    assert buy["n_h5"] == gap["n_h5"]
+    assert report["backtest_gap"]["rsi"]["buy"]["approx"] is True
 
 
 def test_backtest_gap_counts_unmatched() -> None:
@@ -280,13 +303,86 @@ def test_backtest_gap_counts_unmatched() -> None:
         ]
     )
     report, rows = build_rule_accuracy("jp", AS_OF, loaders=_loaders(best_history=hist))
-    gap = report["backtest_gap"]["bollinger"]
+    gap = report["backtest_gap_combined"]["bollinger"]
     n_sept = len(_bdays("2026-09-01", "2026-09-30"))
     n_all = int(((rows["rule_name"] == "bollinger") & (rows["horizon"] == 5)).sum())
     assert gap["n_unmatched"] == n_sept
     assert gap["n_h5"] == n_all - n_sept
     assert abs(gap["backtest_win_rate"] - 0.8) < 1e-9
-    assert report["backtest_gap"]["rsi"]["n_unmatched"] == 0
+    assert report["backtest_gap_combined"]["rsi"]["n_unmatched"] == 0
+    # 向きごとの n_unmatched（bollinger のシグナルは買いだけ）
+    side = report["backtest_gap"]["bollinger"]
+    assert side["buy"]["n_unmatched"] == n_sept
+    assert side["sell"]["n_unmatched"] == 0
+    assert side["buy"]["n_h5"] == n_all - n_sept
+    assert abs(side["buy"]["backtest_win_rate"] - 0.8) < 1e-9
+    assert report["backtest_gap"]["rsi"]["buy"]["n_unmatched"] == 0
+
+
+def _side_loaders() -> ScoringLoaders:
+    """brk のルールが A に買い1件（当たり）と売り3件（外れ）を出す。A の評価は brk。"""
+    cols = ["signal_date", "market", "symbol", "rule_name", "signal", "price", "app_version"]
+    sig = pd.DataFrame(
+        [
+            (date(2026, 10, 1), "jp", "A", "brk", 1, 100.0, None),
+            (date(2026, 10, 2), "jp", "A", "brk", -1, 100.0, None),
+            (date(2026, 10, 5), "jp", "A", "brk", -1, 100.0, None),
+            (date(2026, 10, 6), "jp", "A", "brk", -1, 100.0, None),
+        ],
+        columns=cols,
+    )
+    best = pd.DataFrame(
+        {
+            "market": ["jp"],
+            "symbol": ["A"],
+            "best_rule": ["brk"],
+            "win_rate": [0.7],
+            "num_trades": [10],
+        }
+    )
+    base = _loaders(best_history=_best_history([(date(2026, 9, 1), "A", "brk", 0.7)]))
+    return ScoringLoaders(
+        bars=base.bars,
+        rule_signals=lambda market, start: sig,
+        prediction_h1=base.prediction_h1,
+        prediction_history=base.prediction_history,
+        rule_best=lambda market: best,
+        rule_best_history=base.rule_best_history,
+        rule_outcomes_scored=base.rule_outcomes_scored,
+    )
+
+
+def test_backtest_gap_split_by_side() -> None:
+    report, _ = build_rule_accuracy("jp", AS_OF, loaders=_side_loaders())
+    gap = report["backtest_gap"]["brk"]
+    assert set(gap) == {"buy", "sell"}
+    buy, sell = gap["buy"], gap["sell"]
+    assert buy["live_hit_rate_h5"] == 1.0
+    assert buy["n_h5"] == 1
+    assert abs(buy["backtest_win_rate"] - 0.7) < 1e-9
+    assert sell["n_h5"] == 3
+    assert sell["live_hit_rate_h5"] == 0.0
+    # 往復の勝率は買いの取引だけなので、売りの側には並べない
+    assert sell["backtest_win_rate"] is None
+    for side in (buy, sell):
+        assert side["n_unmatched"] == 0
+        assert side["approx"] is False
+    # 今までの向きをまとめた値は backtest_gap_combined に残る
+    comb = report["backtest_gap_combined"]["brk"]
+    assert comb["n_h5"] == 4
+    assert abs(comb["live_hit_rate_h5"] - 0.25) < 1e-9
+    assert abs(comb["backtest_win_rate"] - 0.7) < 1e-9
+
+
+def test_backtest_gap_side_has_baseline_and_edge() -> None:
+    report, _ = build_rule_accuracy("jp", AS_OF, loaders=_side_loaders())
+    buy = report["backtest_gap"]["brk"]["buy"]
+    sell = report["backtest_gap"]["brk"]["sell"]
+    # その日の上がった割合は A・B・C のうち A だけで 1/3、下がった割合は B だけで 1/3
+    assert abs(buy["baseline_rate"] - 1 / 3) < 1e-9
+    assert abs(buy["edge"] - 2 / 3) < 1e-9
+    assert abs(sell["baseline_rate"] - 1 / 3) < 1e-9
+    assert abs(sell["edge"] - (-1 / 3)) < 1e-9
 
 
 def test_rerun_same_output() -> None:

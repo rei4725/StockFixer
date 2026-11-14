@@ -238,20 +238,14 @@ def _window(
     }
 
 
-def _backtest_gap(
-    rule_scored: pd.DataFrame, best_history: pd.DataFrame, best_now: pd.DataFrame
-) -> dict[str, Any]:
-    """ルールごとに、選んだときのバックテストの勝率と、錨の5日の的中率を並べる。
+def _gap_matches(
+    h5: pd.DataFrame, best_history: pd.DataFrame, best_now: pd.DataFrame
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """5日のシグナルに評価を当て、(評価のルールが合う行, 合わない行) を返す。
 
     シグナルの日以前で一番新しい rule_best_history の評価を当てる。その銘柄に評価が
     まだ無いシグナルは今の rule_best_by_symbol を当て、approx を立てる。
-    評価のルールがシグナルのルールと違う行は、勝率が無いので数えない（その数を
-    n_unmatched に出す）。
     """
-    h5 = rule_scored[rule_scored["horizon"] == ANCHOR_HORIZON]
-    rules = sorted(h5["key"].unique())
-    if h5.empty:
-        return {}
     left = h5.assign(day=_day(h5["date"])).sort_values("day")
     if best_history.empty:
         m = left.assign(evaluated_on=pd.NaT, best_rule=None, win_rate=np.nan)
@@ -275,20 +269,62 @@ def _backtest_gap(
         m.loc[approx, "best_rule"] = fb.loc[approx, "best_rule"]
         m.loc[approx, "win_rate"] = fb.loc[approx, "win_rate"]
     m = m.assign(approx=approx)
-    unmatched = m[m["best_rule"].notna() & (m["best_rule"] != m["key"])]["key"].value_counts()
-    m = m[(m["best_rule"] == m["key"]) & m["win_rate"].notna()]
-    out: dict[str, Any] = {}
-    for r in rules:
-        sub = m[m["key"] == r]
-        n = int(len(sub))
-        out[r] = {
-            "backtest_win_rate": _num(sub["win_rate"].astype(float).mean()) if n else None,
-            "live_hit_rate_h5": float(sub["hit"].astype(float).mean()) if n else None,
-            "n_h5": n,
-            "n_unmatched": int(unmatched.get(r, 0)),
-            "approx": bool(sub["approx"].any()) if n else True,
-        }
+    unmatched = m[m["best_rule"].notna() & (m["best_rule"] != m["key"])]
+    matched = m[(m["best_rule"] == m["key"]) & m["win_rate"].notna()]
+    return matched, unmatched
+
+
+def _gap_entry(sub: pd.DataFrame, n_unmatched: int) -> dict[str, Any]:
+    n = int(len(sub))
+    return {
+        "backtest_win_rate": _num(sub["win_rate"].astype(float).mean()) if n else None,
+        "live_hit_rate_h5": float(sub["hit"].astype(float).mean()) if n else None,
+        "n_h5": n,
+        "n_unmatched": int(n_unmatched),
+        "approx": bool(sub["approx"].any()) if n else True,
+    }
+
+
+def _gap_side(sub: pd.DataFrame, n_unmatched: int, side: str) -> dict[str, Any]:
+    """1つの向きの並べ。往復の勝率は買いの取引だけなので、売りの側は null にする。"""
+    out = _gap_entry(sub, n_unmatched)
+    if side != "buy":
+        out["backtest_win_rate"] = None
+    base = _num(pd.to_numeric(sub["baseline"], errors="coerce").mean()) if len(sub) else None
+    hit = out["live_hit_rate_h5"]
+    out["baseline_rate"] = base
+    out["edge"] = None if base is None or hit is None else hit - base
     return out
+
+
+def _backtest_gap(
+    rule_scored: pd.DataFrame, best_history: pd.DataFrame, best_now: pd.DataFrame
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """ルールごとに、選んだときのバックテストの勝率と、錨の5日の的中率を並べる。
+
+    (向きごとの並べ, 向きをまとめた並べ) を返す。向きごとの並べは buy・sell の鍵を持ち、
+    同じ向きの baseline_rate と edge を足す。backtest_win_rate は買いの往復の勝率なので
+    buy の側だけに並べる。向きをまとめた並べは前の backtest_gap と同じ中身である。
+    評価のルールがシグナルのルールと違う行は、勝率が無いので数えない（その数を
+    n_unmatched に出す）。
+    """
+    h5 = rule_scored[rule_scored["horizon"] == ANCHOR_HORIZON]
+    rules = sorted(h5["key"].unique())
+    if h5.empty:
+        return {}, {}
+    matched, unmatched = _gap_matches(h5, best_history, best_now)
+    n_un = unmatched["key"].value_counts()
+    n_un_side = unmatched.groupby(["key", "direction"]).size()
+    by_side: dict[str, Any] = {}
+    combined: dict[str, Any] = {}
+    for r in rules:
+        sub = matched[matched["key"] == r]
+        combined[r] = _gap_entry(sub, int(n_un.get(r, 0)))
+        by_side[r] = {
+            name: _gap_side(sub[sub["direction"] == d], int(n_un_side.get((r, d), 0)), name)
+            for name, d in _DIRECTIONS
+        }
+    return by_side, combined
 
 
 def _top_symbols(rule_scored: pd.DataFrame) -> list[dict[str, Any]]:
@@ -341,6 +377,9 @@ def build_rule_accuracy(
         scored, _n = _score(preds[preds["horizon_of_claim"] == h], fwd)
         pred_frames.append(scored.assign(claim=h))
     pred_scored = pd.concat(pred_frames, ignore_index=True)
+    gap, gap_combined = _backtest_gap(
+        rule_scored, ld.rule_best_history(market), ld.rule_best(market)
+    )
 
     report: dict[str, Any] = {
         "date": as_of.isoformat(),
@@ -353,9 +392,8 @@ def build_rule_accuracy(
             "28d": _window(rule_scored, pred_scored, rules, as_of - timedelta(days=WINDOW_DAYS)),
             "all": _window(rule_scored, pred_scored, rules, SINCE),
         },
-        "backtest_gap": _backtest_gap(
-            rule_scored, ld.rule_best_history(market), ld.rule_best(market)
-        ),
+        "backtest_gap": gap,
+        "backtest_gap_combined": gap_combined,
         "top_symbols": _top_symbols(rule_scored),
     }
     return report, _outcome_rows(rule_scored, signals, market)
