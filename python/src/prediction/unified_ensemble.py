@@ -190,7 +190,8 @@ def _run_ensemble(
             ) from last_model_error
         return None
 
-    # model_metrics の directional_accuracy をソフトマックス重みでアンサンブル（R-202）
+    # 重みでアンサンブルする。本番の load_model_weights は統合モデルの名前では
+    # DB に行が無いため等分を返す（R-202 の重みは効いていない、#1806）
     weights = weights_fn(market, symbol, succeeded_model_names)
     avg_pred_price = float(sum(p * w for p, w in zip(pred_prices, weights)))
     diff_ratio_raw = (avg_pred_price - current_price) / current_price

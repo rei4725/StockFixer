@@ -1,10 +1,37 @@
 """model_metrics テーブル: モデル精度指標の保存とアンサンブル重み算出。"""
 
+import threading
+
 from src.prediction.types import TrainingMetrics
 from src.utils.db._connection import _db_connection
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+# 統合モデルの名前（UnifiedStockXGBoost・UnifiedStockLightGBM と _{h}d つき）の頭。
+# 統合モデルの学習は model_metrics に書かず、prediction_accuracy の model_name は
+# production・challenger・unified だけなので、この名前で引いても当たらない（#1806）。
+_UNIFIED_MODEL_PREFIX = "UnifiedStock"
+
+# 等分を INFO で出したモデル名の組（プロセスで1回だけ出す。銘柄ごとには出さない）
+_EQUAL_WEIGHTS_LOGGED: set[tuple[str, ...]] = set()
+_EQUAL_WEIGHTS_LOCK = threading.Lock()
+
+
+def _unified_equal_weights(model_names: list[str]) -> list[float]:
+    """統合モデルの重みを等分で返し、その名前の組で初めてのときだけ INFO を出す。"""
+    key = tuple(model_names)
+    with _EQUAL_WEIGHTS_LOCK:
+        first = key not in _EQUAL_WEIGHTS_LOGGED
+        _EQUAL_WEIGHTS_LOGGED.add(key)
+    if first:
+        logger.info(
+            "統合モデルのアンサンブルの重みは等分（DB に部品のモデルごとの誤差が無いため）: "
+            "models=%s",
+            ",".join(model_names),
+        )
+    n = len(model_names)
+    return [1.0 / n] * n
 
 
 def save_model_metrics(
@@ -62,7 +89,8 @@ def load_model_weights(
     model_metrics テーブルからモデルごとの最新 directional_accuracy を取得し、
     ソフトマックス正規化した重みリストを返す。
 
-    データが不足している場合は均等重みを返す。
+    データが不足している場合は均等重みを返す。統合モデル（名前が UnifiedStock で
+    始まる）は、どちらの表にも行が無いので、問い合わせを流さずに等分を返す（#1806）。
 
     Args:
         market: マーケット識別子
@@ -73,6 +101,9 @@ def load_model_weights(
         len(model_names) と同じ長さのfloatリスト（合計1.0）
     """
     import math
+
+    if model_names and all(name.startswith(_UNIFIED_MODEL_PREFIX) for name in model_names):
+        return _unified_equal_weights(model_names)
 
     n = len(model_names)
     equal_weights = [1.0 / n] * n
