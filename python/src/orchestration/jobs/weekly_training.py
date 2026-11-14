@@ -3,6 +3,8 @@
 weekly.py から分けた（#1295）。weekly.py から re-export している。
 """
 
+from typing import Optional
+
 from src.orchestration.job_errors import LockWaitExpiredJobError
 from src.orchestration.jobs.common import _handle_stage_error, _notify_stage_failure
 from src.orchestration.types import PipelineStage
@@ -60,6 +62,28 @@ def _save_shadow_record(record: dict) -> None:
 def _shadow_metrics_missing(result: dict) -> bool:
     """影の比べの指標に欠けがあり、勝ち負けを決められなかった週なら True を返す（#1589）。"""
     return any(result[key] is None for key in _SHADOW_METRIC_KEYS)
+
+
+def _earlier_compared_record(fresh_challengers: list[str]) -> Optional[dict]:
+    """同じ週の前の回が影の比べを済ませた記録を返す。引き継がないなら None（#1798）。
+
+    今の回の窓は、この週の学習（challenger の学習し直し）か昇格で今の時刻になり空になる。
+    そのときだけ、指標が4つとも揃った前の回の記録を返す。
+    """
+    try:
+        from src.prediction.shadow_record import load_weekly_shadow_record
+
+        earlier = load_weekly_shadow_record()
+    except Exception as e:
+        _handle_stage_error(PipelineStage.NON_CRITICAL, "前の回の影の比べの記録の読み込み", e)
+        return None
+    if earlier is None or not earlier.get("shadow_evaluated") or earlier.get("shadow_failed"):
+        return None
+    if any(earlier.get(key) is None for key in _SHADOW_METRIC_KEYS):
+        return None
+    if not fresh_challengers and not earlier.get("promoted"):
+        return None
+    return earlier
 
 
 def _record_no_comparison(record: dict, result: dict) -> None:
@@ -146,7 +170,11 @@ def _run_weekly_training_locked():
         evaluate_shadow_models,
         promote_unified_challenger,
     )
-    from src.prediction.shadow_record import apply_shadow_result, new_weekly_shadow_record
+    from src.prediction.shadow_record import (
+        apply_shadow_result,
+        carry_over_weekly_shadow_record,
+        new_weekly_shadow_record,
+    )
     from src.prediction.unified_model_pipeline import train_unified_model
 
     # 影の比べと昇格の結果を毎週1本の JSON に残す（#1503）
@@ -236,7 +264,19 @@ def _run_weekly_training_locked():
         )
         record["gate_skipped_reason"] = "challenger_constant"
     elif shadow_results and _shadow_metrics_missing(shadow_results[0][2]):
-        _record_no_comparison(record, shadow_results[0][2])
+        earlier = _earlier_compared_record(fresh_challengers)
+        if earlier is None:
+            _record_no_comparison(record, shadow_results[0][2])
+        else:
+            # やり直しの空の窓で、前の回の比べ・昇格ゲート・昇格の事実を消さない（#1798）
+            logger.warning(
+                "[2/4] 同じ週のやり直しで窓が空のため、前の回の影の比べの記録を残す"
+                " promoted=%s gate_skipped_reason=%s fresh=%s",
+                earlier.get("promoted"),
+                earlier.get("gate_skipped_reason"),
+                fresh_challengers,
+            )
+            record = carry_over_weekly_shadow_record(earlier)
     elif shadow_results:
         logger.info("[2/4] challenger_wins=False のため昇格ゲートをスキップ")
         record["gate_skipped_reason"] = "challenger_lost"

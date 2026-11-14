@@ -80,3 +80,34 @@ def save_weekly_shadow_record(
 
     logger.info("影の比べの記録を保存: %s", dest)
     return str(dest)
+
+
+def load_weekly_shadow_record(
+    now: Optional[datetime] = None, results_dir: Optional[str] = None
+) -> Optional[dict[str, Any]]:
+    """now の ISO 週の記録を読む。無いか読めなければ None を返す（#1798）。"""
+    now = now or datetime.now(timezone.utc)
+    path = weekly_shadow_record_path(now, results_dir)
+    if not path.exists():
+        return None
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        logger.warning("同じ週の前の回の影の比べの記録を読めない: %s", path, exc_info=True)
+        return None
+    return loaded if isinstance(loaded, dict) else None
+
+
+def carry_over_weekly_shadow_record(
+    earlier: dict[str, Any], now: Optional[datetime] = None
+) -> dict[str, Any]:
+    """同じ週の前の回の記録を、やり直しの数と最後の回の時刻を足して引き継ぐ（#1798）。
+
+    compared_at は前の回が影の比べを済ませた時刻（その回の written_at）である。
+    """
+    now = now or datetime.now(timezone.utc)
+    record = {k: v for k, v in earlier.items() if k not in ("week", "written_at")}
+    record["compared_at"] = earlier.get("compared_at") or earlier.get("written_at")
+    record["retry_count"] = int(earlier.get("retry_count") or 0) + 1
+    record["last_run_at"] = now.isoformat()
+    return record
