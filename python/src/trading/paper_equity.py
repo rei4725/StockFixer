@@ -24,7 +24,7 @@ from src.trading.paper_weekly_backfill import (
     Notify,
     backfill_previous_weeks,
     week_name,
-    write_week_file,
+    write_week_file_unless_worse,
 )
 from src.utils.data_path_utils import get_ticker
 from src.utils.db import load_raw_ohlcv
@@ -459,6 +459,7 @@ def write_paper_weekly_results(
 ) -> Optional[str]:
     """紙の売買の週の成績を output_dir/YYYY-Www.json に書き、そのパスを返す。
 
+    今のファイルより欠けが増えるときは書かずに元のまま残す（#1804）。
     書いた後に前の3週を見直す（#1695）。見直しの失敗はこの関数の外へ出さない。
     約定が1件もない場合は書かずに None を返す。
 
@@ -484,6 +485,6 @@ def write_paper_weekly_results(
         )
 
     result = compute_week(as_of)
-    path = write_week_file(output_dir, result)
+    path, _ = write_week_file_unless_worse(output_dir, result)
     backfill_previous_weeks(date.fromisoformat(result["end"]), compute_week, output_dir, notify)
     return path
