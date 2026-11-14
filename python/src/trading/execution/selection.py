@@ -49,14 +49,44 @@ def _select_buy_signals(
     market: str,
     stats: OrderExecutionStats,
 ) -> pd.DataFrame:
-    """新規買いの候補に業種の上限と1回の発注の上限を当てる。選び方と順は変えない（#1770）。
+    """新規買いの候補を multi_horizon_score の降順に並べ、業種の列を付けて全部を返す。
 
-    業種の上限で落とした候補は sector_cap、head で落とした候補は max_orders_per_run に数える
-    （鍵は 16:30 の RuleGateRecord とそろえる）。
+    業種の上限と1回の発注の上限は、発注した銘柄だけを数えて回す側で当てる（#1759。
+    16:30 の #1610 と同じ形）。held_symbols と stats は呼び出しの形を保つために受け取る。
     """
-    limited = _apply_buy_sector_limit(candidates, held_symbols=held_symbols, market=market)
-    _count_dropped(stats, len(candidates) - len(limited), "sector_cap", "業種の上限")
-    return _cap_per_run(limited, stats)
+    del held_symbols, stats
+    if candidates.empty:
+        return candidates.copy()
+    score_col = (
+        "multi_horizon_score" if "multi_horizon_score" in candidates.columns else "diff_ratio"
+    )
+    ordered = candidates.sort_values(score_col, ascending=False).copy()
+    ordered["sector"] = [
+        get_symbol_sector(str(m), str(s)) for m, s in zip(ordered["market"], ordered["symbol"])
+    ]
+    return ordered
+
+
+def _held_sector_counts(held_symbols: Iterable[str], market: str) -> Counter[str]:
+    """保有と約定待ちの銘柄の業種の数を返す（#908・#1137）。"""
+    return Counter(get_symbol_sector(market, s) for s in sorted(held_symbols))
+
+
+def _sector_has_room(sector: str, sector_counts: Counter[str]) -> bool:
+    """この回に発注した数を含む業種の数で、もう1件建ててよいかを返す（#1759）。"""
+    return bool(
+        filter_by_sector_cap(
+            [sector],
+            max_sector_positions=MAX_SECTOR_POSITIONS,
+            sector_getter=lambda s: s,
+            initial_counts=sector_counts,
+        )
+    )
+
+
+def _orders_cap_reached(sent: int) -> bool:
+    """この回に発注した数が1回の発注の上限（MAX_ORDERS_PER_RUN）に届いたかを返す（#1759）。"""
+    return sent >= MAX_ORDERS_PER_RUN
 
 
 def _apply_buy_sector_limit(

@@ -14,6 +14,7 @@ DuckDB の最新予測結果を読み込み、RiskManager のゲートチェッ�
 """
 
 import uuid
+from collections import Counter
 
 from config.settings import (
     CORRELATION_ENC_THRESHOLD,
@@ -34,7 +35,6 @@ from src.domain.trading_rules import get_lot_size
 from src.domain.types import OrderRunSummary
 from src.trading.brokers.base import BrokerBase, BrokerError, OrderSide
 from src.trading.correlation_risk import evaluate_correlation_gate
-from src.trading.position_size_reason import zero_qty_skip_key
 from src.trading.position_valuation import (
     coverable_short_qty,
     read_short_positions,
@@ -44,26 +44,22 @@ from src.trading.risk_manager import RiskManager
 from src.trading.signal_generator import apply_multi_horizon_score_column
 from src.utils.logger import get_logger
 
+from .entries import place_new_buys, place_new_shorts
 from .entry_gates import _block_entries, _evaluate_entry_gate
 from .freshness import _block_new_if_stale, _note_no_predictions
 from .gate_record import finish_order_run, held_without_prediction
 from .params import (
-    _SPLIT_LOW_CONFIDENCE,
-    _apply_split_qty,
     _attach_dynamic_thresholds,
     _block_new_if_params_unreadable,
-    _calc_split_ratio,
     _choose_order_params,
-    _resolve_kelly_params,
 )
 from .pending import _load_pending_exits, _log_pending_skips
 from .recording import _record_order, _recorder, _sync_live_execution_diffs
 from .selection import (
-    _cap_per_run,
     _compute_ml_exit_signals,
-    _determine_entry_horizon,
     _get_held_symbols,
     _get_pending_buy_symbols,
+    _held_sector_counts,
     _load_exit_model,
     _select_buy_signals,
 )
@@ -293,112 +289,23 @@ def run_order_steps(
     # ラン開始時の一度きりで、head だけでは上限を超えうるため）。空売りの保有も数える（#1146）
     position_count = len(held_or_pending) + len(short_held_symbols)
 
-    for _, row in buy_signals.iterrows():
-        symbol = row["symbol"]
-        current_price = float(row.get("current_price") or 0)
-
-        if position_count >= MAX_POSITIONS:
-            logger.info("[exec] 保有上限 %d 到達のため以降の新規買いをスキップ", MAX_POSITIONS)
-            count_skip(stats, "max_positions")
-            continue
-
-        if abs(float(row.get("diff_ratio") or 0.0)) < MIN_CHANGE_RATIO:  # 変動が小さい（R-214）
-            logger.info(
-                "[exec] %s: diff_ratio=%.3f%% < min_change=%.3f%% → スキップ",
-                symbol,
-                float(row.get("diff_ratio") or 0) * 100,
-                MIN_CHANGE_RATIO * 100,
-            )
-            count_skip(stats, "min_change")
-            continue
-
-        if current_price <= 0:
-            logger.warning(f"[exec] {symbol}: 現在値が取得できないためスキップ")
-            count_skip(stats, "no_price")
-            continue
-
-        confidence = float(row.get("confidence_ratio") or 1.0)
-        split_ratio = _calc_split_ratio(confidence)
-        if split_ratio == 0.0:
-            logger.info(
-                "[exec] %s: confidence_ratio=%.3f < %.2f → 見送り (R-308)",
-                symbol,
-                confidence,
-                _SPLIT_LOW_CONFIDENCE,
-            )
-            count_skip(stats, "low_confidence")
-            continue
-
-        try:
-            kelly_win_rate, kelly_avg_win, kelly_avg_loss = _resolve_kelly_params(
-                str(row["market"]), symbol
-            )
-            qty = risk.calc_position_size(
-                symbol,
-                current_price,
-                win_rate=kelly_win_rate,
-                avg_win=kelly_avg_win,
-                avg_loss=kelly_avg_loss,
-                confidence_ratio=confidence,
-            )
-            if qty <= 0:
-                logger.info(f"[exec] {symbol}: 発注株数 0 → スキップ（{risk.zero_reason}）")
-                count_skip(stats, zero_qty_skip_key(risk.zero_reason))
-                continue
-
-            if split_ratio < 1.0:
-                qty = _apply_split_qty(qty, split_ratio, lot=lot)
-                logger.info(
-                    "[exec] %s: confidence_ratio=%.3f → %.0f%%発注 %d株 (R-308)",
-                    symbol,
-                    confidence,
-                    split_ratio * 100,
-                    qty,
-                )
-
-            order_type, order_price, order_reason, order_session = _choose_order_params(
-                market=str(row["market"]),
-                symbol=symbol,
-                side=OrderSide.BUY,
-                current_price=current_price,
-                market_data=market_data,
-            )
-            result = broker.send_order(
-                symbol,
-                OrderSide.BUY,
-                qty,
-                price=order_price,
-                order_type=order_type,
-            )
-            record(
-                market=str(row["market"]),
-                predicted_at=str(row["predicted_at"]),
-                symbol=symbol,
-                side=OrderSide.BUY,
-                qty=qty,
-                signal_price=current_price,
-                order_price=order_price,
-                order_type=order_type,
-                order_result=result,
-                broker=broker,
-                mode=mode,
-                order_session=order_session,
-                split_ratio=split_ratio,
-                horizon=_determine_entry_horizon(row),
-                trade_diff_sink=trade_diff_sink,
-            )
-            logger.info(
-                f"[exec] 買い発注: {symbol} {qty}株 @ {order_type.name}({order_reason}) "
-                f"(1d変化率={row['diff_ratio']:.3%}, 統合スコア={row['multi_horizon_score']:.3%}, "
-                f"閾値={row['effective_buy_threshold']:.3%}, sector={row.get('sector', 'N/A')}, "
-                f"split={split_ratio:.0%})"
-            )
-            stats["buy_orders"] += 1
-            stats["total_turnover"] += current_price * qty
-            position_count += 1
-        except Exception as e:
-            logger.error(f"[exec] 買い注文エラー ({symbol}): {e}", exc_info=True)
-            stats["errors"] += 1
+    position_count = place_new_buys(
+        buy_signals,
+        broker=broker,
+        risk=risk,
+        lot=lot,
+        stats=stats,
+        record=record,
+        mode=mode,
+        market_data=market_data,
+        trade_diff_sink=trade_diff_sink,
+        position_count=position_count,
+        max_positions=MAX_POSITIONS,
+        choose_params=_choose_order_params,
+        sector_counts=(
+            _held_sector_counts(held_or_pending, market) if len(buy_signals) else Counter()
+        ),
+    )
 
     # --- ショートサイド処理（R-215）: ENABLE_SHORT_SIDE=True かつ PaperBroker のみ ---
     if ENABLE_SHORT_SIDE and broker.broker_name == "paper":
@@ -465,113 +372,23 @@ def run_order_steps(
             & (~predictions["symbol"].isin(short_held_symbols))
             & (predictions["multi_horizon_score"] <= predictions["effective_sell_threshold"])
         ].sort_values("multi_horizon_score", kind="stable")
-        short_entry_candidates = _cap_per_run(short_entry_candidates, stats, gate_status.is_allowed)
+        if not gate_status.is_allowed:  # 上限は建てた数で数える（#1759）
+            short_entry_candidates = short_entry_candidates.head(0)
 
-        for _, row in short_entry_candidates.iterrows():
-            symbol = row["symbol"]
-            current_price = float(row.get("current_price") or 0)
-
-            if position_count >= MAX_POSITIONS:
-                logger.info("[exec] 保有上限 %d 到達で新規ショートをスキップ", MAX_POSITIONS)
-                count_skip(stats, "max_positions")
-                continue
-
-            if abs(float(row.get("diff_ratio") or 0.0)) < MIN_CHANGE_RATIO:
-                logger.info(
-                    "[exec] %s: diff_ratio=%.3f%% < min_change=%.3f%% → ショートスキップ",
-                    symbol,
-                    float(row.get("diff_ratio") or 0) * 100,
-                    MIN_CHANGE_RATIO * 100,
-                )
-                count_skip(stats, "min_change")
-                continue
-
-            if current_price <= 0:
-                logger.warning(f"[exec] {symbol}: 現在値が取得できないためショートスキップ")
-                count_skip(stats, "no_price")
-                continue
-
-            confidence = float(row.get("confidence_ratio") or 1.0)
-            short_split_ratio = _calc_split_ratio(confidence)
-            if short_split_ratio == 0.0:
-                logger.info(
-                    "[exec] %s: confidence_ratio=%.3f < %.2f → ショート見送り (R-308)",
-                    symbol,
-                    confidence,
-                    _SPLIT_LOW_CONFIDENCE,
-                )
-                count_skip(stats, "low_confidence")
-                continue
-
-            try:
-                kelly_win_rate, kelly_avg_win, kelly_avg_loss = _resolve_kelly_params(
-                    str(row["market"]), symbol
-                )
-                qty = risk.calc_position_size(
-                    symbol,
-                    current_price,
-                    win_rate=kelly_win_rate,
-                    avg_win=kelly_avg_win,
-                    avg_loss=kelly_avg_loss,
-                    confidence_ratio=confidence,
-                )
-                if qty <= 0:
-                    logger.info(f"[exec] {symbol}: 発注株数 0 → ショートせず（{risk.zero_reason}）")
-                    count_skip(stats, zero_qty_skip_key(risk.zero_reason))
-                    continue
-
-                if short_split_ratio < 1.0:
-                    qty = _apply_split_qty(qty, short_split_ratio, lot=lot)
-                    logger.info(
-                        "[exec] %s: confidence_ratio=%.3f → %.0f%%ショート発注 %d株 (R-308)",
-                        symbol,
-                        confidence,
-                        short_split_ratio * 100,
-                        qty,
-                    )
-
-                order_type, order_price, order_reason, order_session = _choose_order_params(
-                    market=str(row["market"]),
-                    symbol=symbol,
-                    side=OrderSide.SHORT,
-                    current_price=current_price,
-                    market_data=market_data,
-                )
-                result = broker.send_order(
-                    symbol,
-                    OrderSide.SHORT,
-                    qty,
-                    price=order_price,
-                    order_type=order_type,
-                )
-                record(
-                    market=str(row["market"]),
-                    predicted_at=str(row["predicted_at"]),
-                    symbol=symbol,
-                    side=OrderSide.SHORT,
-                    qty=qty,
-                    signal_price=current_price,
-                    order_price=order_price,
-                    order_type=order_type,
-                    order_result=result,
-                    broker=broker,
-                    mode=mode,
-                    order_session=order_session,
-                    split_ratio=short_split_ratio,
-                    horizon=_determine_entry_horizon(row),
-                    trade_diff_sink=trade_diff_sink,
-                )
-                logger.info(
-                    f"[exec] ショート発注: {symbol} {qty}株 @ {order_type.name}({order_reason}) "
-                    f"(1d変化率={row['diff_ratio']:.3%}, 統合スコア={row['multi_horizon_score']:.3%}, "
-                    f"閾値={row['effective_sell_threshold']:.3%}, split={short_split_ratio:.0%})"
-                )
-                stats["short_orders"] += 1
-                stats["total_turnover"] += current_price * qty
-                position_count += 1
-            except Exception as e:
-                logger.error(f"[exec] ショート注文エラー ({symbol}): {e}", exc_info=True)
-                stats["errors"] += 1
+        position_count = place_new_shorts(
+            short_entry_candidates,
+            broker=broker,
+            risk=risk,
+            lot=lot,
+            stats=stats,
+            record=record,
+            mode=mode,
+            market_data=market_data,
+            trade_diff_sink=trade_diff_sink,
+            position_count=position_count,
+            max_positions=MAX_POSITIONS,
+            choose_params=_choose_order_params,
+        )
 
     logger.info(
         f"=== 自動発注完了: 買い={stats['buy_orders']} 売り={stats['sell_orders']} "
