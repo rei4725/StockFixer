@@ -14,6 +14,7 @@ DuckDB の最新予測結果を読み込み、RiskManager のゲートチェッ�
 """
 
 import uuid
+from collections import Counter
 
 from config.settings import (
     CORRELATION_ENC_THRESHOLD,
@@ -55,10 +56,10 @@ from .params import (
 from .pending import _load_pending_exits, _log_pending_skips
 from .recording import _record_order, _recorder, _sync_live_execution_diffs
 from .selection import (
-    _cap_per_run,
     _compute_ml_exit_signals,
     _get_held_symbols,
     _get_pending_buy_symbols,
+    _held_sector_counts,
     _load_exit_model,
     _select_buy_signals,
 )
@@ -301,6 +302,9 @@ def run_order_steps(
         position_count=position_count,
         max_positions=MAX_POSITIONS,
         choose_params=_choose_order_params,
+        sector_counts=(
+            _held_sector_counts(held_or_pending, market) if len(buy_signals) else Counter()
+        ),
     )
 
     # --- ショートサイド処理（R-215）: ENABLE_SHORT_SIDE=True かつ PaperBroker のみ ---
@@ -368,7 +372,8 @@ def run_order_steps(
             & (~predictions["symbol"].isin(short_held_symbols))
             & (predictions["multi_horizon_score"] <= predictions["effective_sell_threshold"])
         ].sort_values("multi_horizon_score", kind="stable")
-        short_entry_candidates = _cap_per_run(short_entry_candidates, stats, gate_status.is_allowed)
+        if not gate_status.is_allowed:  # 上限は建てた数で数える（#1759）
+            short_entry_candidates = short_entry_candidates.head(0)
 
         position_count = place_new_shorts(
             short_entry_candidates,

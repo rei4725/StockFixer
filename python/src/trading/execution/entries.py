@@ -3,6 +3,7 @@
 発注の値の決め方（choose_params）と保有の上限（max_positions）は呼び出し側から受け取る。
 """
 
+from collections import Counter
 from typing import Callable
 
 import pandas as pd
@@ -20,7 +21,7 @@ from .params import (
     _calc_split_ratio,
     _resolve_kelly_params,
 )
-from .selection import _determine_entry_horizon
+from .selection import _determine_entry_horizon, _orders_cap_reached, _sector_has_room
 from .stats import OrderExecutionStats, count_skip
 
 # runner.py から分けた手順なので、ログの名前は runner のままにする（ログを見る側を変えない）
@@ -41,8 +42,14 @@ def place_new_buys(
     position_count: int,
     max_positions: int,
     choose_params: Callable[..., tuple],
+    sector_counts: Counter[str],
 ) -> int:
-    """新規買いの候補を並びのまま回して発注し、発注後の建玉数を返す。"""
+    """新規買いの候補を並びのまま回して発注し、発注後の建玉数を返す。
+
+    1回の発注の上限と業種の枠は、発注した銘柄だけに数える（#1759）。sector_counts は
+    保有と約定待ちの業種の数から始め、発注するたびに足す。
+    """
+    sent = 0
     for _, row in buy_signals.iterrows():
         symbol = row["symbol"]
         current_price = float(row.get("current_price") or 0)
@@ -50,6 +57,11 @@ def place_new_buys(
         if position_count >= max_positions:
             logger.info("[exec] 保有上限 %d 到達のため以降の新規買いをスキップ", max_positions)
             count_skip(stats, "max_positions")
+            continue
+
+        if _orders_cap_reached(sent):
+            logger.info("[exec] %s: 1回の発注の上限に届いたため新規買いをスキップ", symbol)
+            count_skip(stats, "max_orders_per_run")
             continue
 
         if abs(float(row.get("diff_ratio") or 0.0)) < MIN_CHANGE_RATIO:  # 変動が小さい（R-214）
@@ -106,6 +118,12 @@ def place_new_buys(
                     qty,
                 )
 
+            sector = str(row.get("sector", ""))
+            if not _sector_has_room(sector, sector_counts):
+                logger.info("[exec] %s: 同一業種の上限で新規買いをスキップ", symbol)
+                count_skip(stats, "sector_cap")
+                continue
+
             order_type, order_price, order_reason, order_session = choose_params(
                 market=str(row["market"]),
                 symbol=symbol,
@@ -146,6 +164,8 @@ def place_new_buys(
             stats["buy_orders"] += 1
             stats["total_turnover"] += current_price * qty
             position_count += 1
+            sent += 1
+            sector_counts[sector] += 1
         except Exception as e:
             logger.error(f"[exec] 買い注文エラー ({symbol}): {e}", exc_info=True)
             stats["errors"] += 1
@@ -167,7 +187,11 @@ def place_new_shorts(
     max_positions: int,
     choose_params: Callable[..., tuple],
 ) -> int:
-    """空売りの新規の候補を並びのまま回して発注し、発注後の建玉数を返す。"""
+    """空売りの新規の候補を並びのまま回して発注し、発注後の建玉数を返す。
+
+    1回の発注の上限は、建てた数で数える（#1759）。
+    """
+    sent = 0
     for _, row in short_entry_candidates.iterrows():
         symbol = row["symbol"]
         current_price = float(row.get("current_price") or 0)
@@ -175,6 +199,11 @@ def place_new_shorts(
         if position_count >= max_positions:
             logger.info("[exec] 保有上限 %d 到達で新規ショートをスキップ", max_positions)
             count_skip(stats, "max_positions")
+            continue
+
+        if _orders_cap_reached(sent):
+            logger.info("[exec] %s: 1回の発注の上限に届いたため新規ショートをスキップ", symbol)
+            count_skip(stats, "max_orders_per_run")
             continue
 
         if abs(float(row.get("diff_ratio") or 0.0)) < MIN_CHANGE_RATIO:
@@ -270,6 +299,7 @@ def place_new_shorts(
             stats["short_orders"] += 1
             stats["total_turnover"] += current_price * qty
             position_count += 1
+            sent += 1
         except Exception as e:
             logger.error(f"[exec] ショート注文エラー ({symbol}): {e}", exc_info=True)
             stats["errors"] += 1
