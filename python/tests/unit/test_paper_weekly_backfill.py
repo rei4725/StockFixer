@@ -131,6 +131,52 @@ class TestRewrite(_Base):
         self.assertIsNotNone(_read(self.tmp, "2026-W43")["markets"]["jp"]["excess_return"])
 
 
+class TestTargetWeek(_Base):
+    """対象の週の書き込みにも、欠けが増えるなら元のまま残す守りがあること（#1804）"""
+
+    _TARGET = "2026-W44"
+
+    def test_retry_with_failed_benchmark_keeps_excess(self):
+        """補完の回のベンチマークの取得の失敗で、取れていた超過の騰落率を null にしないこと"""
+        write_paper_weekly_results(_AS_OF, _fetcher, self.tmp)
+        before = _read(self.tmp, self._TARGET)
+        for values in before["markets"].values():
+            self.assertIsInstance(values["excess_return"], float)
+
+        with self.assertLogs("src.trading.paper_weekly_backfill", level="WARNING") as logs:
+            path = write_paper_weekly_results(_AS_OF, _failing_fetcher, self.tmp)
+
+        self.assertEqual(path, os.path.join(self.tmp, f"{self._TARGET}.json"))
+        self.assertEqual(_read(self.tmp, self._TARGET), before)
+        self.assertTrue(any(self._TARGET in line for line in logs.output))
+
+    def test_missing_target_file_is_written(self):
+        write_paper_weekly_results(_AS_OF, _failing_fetcher, self.tmp)
+
+        jp = _read(self.tmp, self._TARGET)["markets"]["jp"]
+        self.assertIsNone(jp["excess_return"])
+
+    def test_same_defects_are_written(self):
+        write_paper_weekly_results(_AS_OF, _failing_fetcher, self.tmp)
+        path = os.path.join(self.tmp, f"{self._TARGET}.json")
+        stale = _read(self.tmp, self._TARGET)
+        stale["markets"]["jp"]["weekly_return"] = 0.999
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(stale, f)
+
+        write_paper_weekly_results(_AS_OF, _failing_fetcher, self.tmp)
+
+        self.assertNotEqual(_read(self.tmp, self._TARGET)["markets"]["jp"]["weekly_return"], 0.999)
+
+    def test_fewer_defects_are_written(self):
+        write_paper_weekly_results(_AS_OF, _failing_fetcher, self.tmp)
+
+        write_paper_weekly_results(_AS_OF, _fetcher, self.tmp)
+
+        for values in _read(self.tmp, self._TARGET)["markets"].values():
+            self.assertIsInstance(values["excess_return"], float)
+
+
 class TestScope(_Base):
     """見る週の範囲"""
 
