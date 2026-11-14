@@ -14,6 +14,7 @@ direction_match は向きだけで決まるため、予想がほとんど「上�
 - rank_corr: predicted_ratio と actual_ratio の順位相関（Spearman）
 - abs_rank_corr: |predicted_ratio| と |actual_ratio| の順位相関（Spearman）
 - prediction_std: 同じ日の銘柄の間の予想の標準偏差の中央値（日の列が無ければ全行の標準偏差）
+- daily_rank_corr: 同じ日の銘柄の間の rank_corr の平均（日の列が無ければ None、#1796）
 """
 
 from __future__ import annotations
@@ -35,6 +36,7 @@ BASELINE_METRIC_KEYS: tuple[str, ...] = (
     "rank_corr",
     "abs_rank_corr",
     "prediction_std",
+    "daily_rank_corr",
 )
 
 
@@ -56,12 +58,37 @@ def _spearman(x: pd.Series, y: pd.Series) -> Optional[float]:
     return float(val) if not pd.isna(val) else None
 
 
+def _day_col(rows: pd.DataFrame) -> Optional[str]:
+    """日の列の名前（date を先に見る）。無ければ None。"""
+    return next((c for c in ("date", "predicted_at") if c in rows.columns), None)
+
+
+def _daily_rank_corr(
+    pred: pd.Series, actual: pd.Series, rows: pd.DataFrame, valid: pd.Series
+) -> Optional[float]:
+    """日ごとの銘柄の間の Spearman の平均を返す（#1796）。
+
+    日の水準の差を銘柄の並べの腕と取り違えないため。銘柄が2つより少ない日と、その日の予想か
+    実際が定数の日は数えない。日の列が無いか、数えられる日が無ければ None。
+    """
+    day_col = _day_col(rows)
+    if day_col is None:
+        return None
+    days = rows[day_col][valid].to_numpy()
+    corrs = []
+    for _, idx in pred.groupby(days).groups.items():
+        corr = _spearman(pred.loc[idx], actual.loc[idx])
+        if corr is not None:
+            corrs.append(corr)
+    return float(sum(corrs) / len(corrs)) if corrs else None
+
+
 def _prediction_std(pred: pd.Series, rows: pd.DataFrame, valid: pd.Series) -> Optional[float]:
     """予想の標準偏差を返す。日の列があれば同じ日の中で測り、その中央値を返す。
 
     日をまたいだ値の動きを「銘柄の間のばらつき」と取り違えないため。2行以上の日が無ければ None。
     """
-    day_col = next((c for c in ("date", "predicted_at") if c in rows.columns), None)
+    day_col = _day_col(rows)
     if day_col is None:
         stds = pd.Series([pred.std(ddof=1)])
     else:
@@ -109,4 +136,5 @@ def baseline_metrics(rows: pd.DataFrame) -> dict:
         "rank_corr": _spearman(pred, actual),
         "abs_rank_corr": _spearman(pred.abs(), actual.abs()),
         "prediction_std": _prediction_std(pred, rows, valid),
+        "daily_rank_corr": _daily_rank_corr(pred, actual, rows, valid),
     }
