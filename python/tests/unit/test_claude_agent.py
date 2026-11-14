@@ -176,6 +176,70 @@ class TestHandlePlaceOrder(unittest.TestCase):
         self.assertEqual(_record.call_args.kwargs.get("horizon"), 5)
 
     @patch("src.trading.claude_agent._record_order")
+    @patch("src.trading.claude_agent._get_held_symbols", return_value=set())
+    @patch("src.trading.claude_agent._resolve_kelly_params", return_value=(0.55, 0.015, 0.008))
+    @patch(
+        "src.trading.claude_agent._choose_order_params",
+        return_value=(OrderType.MARKET, 0.0, "market", "open"),
+    )
+    def test_buy_low_confidence_skipped_r308(self, _choose, _kelly, _held, _record):
+        # #1791: 8:50 の道と同じく confidence_ratio < 0.5 の新規買いは見送る（R-308）
+        self.predictions.loc[self.predictions["symbol"] == "7200", "confidence_ratio"] = 0.4
+        stats = {"buy_orders": 0, "sell_orders": 0, "skipped": 0, "errors": 0}
+
+        result = self._call("7200", "buy", stats=stats)
+
+        self.assertEqual(result["status"], "skipped")
+        self.assertIn("R-308", result["reason"])
+        self.assertIn("0.400", result["reason"])
+        self.broker.send_order.assert_not_called()
+        _record.assert_not_called()
+        self.assertEqual(stats["skipped"], 1)
+        self.assertEqual(stats["buy_orders"], 0)
+
+    @patch("src.trading.claude_agent._record_order")
+    @patch("src.trading.claude_agent._get_held_symbols", return_value=set())
+    @patch("src.trading.claude_agent._resolve_kelly_params", return_value=(0.55, 0.015, 0.008))
+    @patch(
+        "src.trading.claude_agent._choose_order_params",
+        return_value=(OrderType.MARKET, 0.0, "market", "open"),
+    )
+    def test_buy_mid_confidence_halves_qty_r308(self, _choose, _kelly, _held, _record):
+        # #1791: 0.5 <= confidence_ratio < 0.8 は 8:50 の道と同じ _apply_split_qty の株数にする
+        from src.domain.trading_rules import get_lot_size
+        from src.trading.execution import _apply_split_qty
+
+        self.predictions.loc[self.predictions["symbol"] == "7200", "confidence_ratio"] = 0.6
+        self.risk.calc_position_size.return_value = 400
+        expected = _apply_split_qty(400, 0.5, lot=get_lot_size("jp"))
+
+        result = self._call("7200", "buy")
+
+        self.assertEqual(result["status"], "placed")
+        self.assertEqual(expected, 200)
+        self.assertEqual(result["qty"], expected)
+        self.assertEqual(self.broker.send_order.call_args[0][2], expected)
+        self.assertEqual(_record.call_args.kwargs.get("qty"), expected)
+        self.assertEqual(_record.call_args.kwargs.get("split_ratio"), 0.5)
+
+    @patch("src.trading.claude_agent._record_order")
+    @patch("src.trading.claude_agent._get_held_symbols", return_value=set())
+    @patch("src.trading.claude_agent._resolve_kelly_params", return_value=(0.55, 0.015, 0.008))
+    @patch(
+        "src.trading.claude_agent._choose_order_params",
+        return_value=(OrderType.MARKET, 0.0, "market", "open"),
+    )
+    def test_buy_high_confidence_keeps_full_qty_r308(self, _choose, _kelly, _held, _record):
+        # #1791: confidence_ratio >= 0.8 は calc_position_size の株数のまま
+        self.risk.calc_position_size.return_value = 400
+
+        result = self._call("7200", "buy")
+
+        self.assertEqual(result["qty"], 400)
+        self.assertEqual(self.broker.send_order.call_args[0][2], 400)
+        self.assertEqual(_record.call_args.kwargs.get("split_ratio"), 1.0)
+
+    @patch("src.trading.claude_agent._record_order")
     @patch(
         "src.trading.claude_agent._choose_order_params",
         return_value=(OrderType.MARKET, 0.0, "market", "open"),
