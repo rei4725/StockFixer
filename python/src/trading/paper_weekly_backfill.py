@@ -75,6 +75,22 @@ def _week_defects(result: dict[str, Any]) -> dict[tuple[str, str], str]:
     return defects
 
 
+def write_week_file_unless_worse(
+    output_dir: str, result: dict[str, Any]
+) -> tuple[str, dict[str, Any]]:
+    """欠けが今のファイルより増えないときだけ週の成績を書き、パスと残った中身を返す。
+
+    取れていた値を、取得の失敗の回の null で消さない（#1695・#1804）。今のファイルが
+    無いか読めないとき、新しい結果の欠けが今のファイルの欠けと同じか少ないときは書く。
+    """
+    path = os.path.join(output_dir, f"{result['week']}.json")
+    current = _read_week_file(path)
+    if current is not None and not _week_defects(result).keys() <= _week_defects(current).keys():
+        logger.warning("紙の週の成績の書き直しで欠けが増えるため元のまま残す: %s", result["week"])
+        return path, current
+    return write_week_file(output_dir, result), result
+
+
 def _is_old_basis(result: dict[str, Any]) -> bool:
     """超過の騰落率が今の計算の印で書かれていない市場があれば True。"""
     return any(
@@ -100,14 +116,8 @@ def _review_week(
 
     # 土曜を as_of にすると、直前に終わった週はその金曜の週になる
     result = compute_week(week_end + timedelta(days=1))
-    defects = _week_defects(result)
-    if current is not None and not defects.keys() <= _week_defects(current).keys():
-        # 取れていた値を、取得の失敗の回の null で消さない
-        logger.warning("紙の週の成績の書き直しで欠けが増えるため元のまま残す: %s", week)
-        defects = _week_defects(current)
-    else:
-        write_week_file(output_dir, result)
-    return "、".join(defects.values()) or None
+    _, kept = write_week_file_unless_worse(output_dir, result)
+    return "、".join(_week_defects(kept).values()) or None
 
 
 def _review_weeks(
