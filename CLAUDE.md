@@ -6,6 +6,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **StockFixer** is a Python-based algorithmic stock trading system that fetches market data (yfinance), computes technical indicators, trains ML models (XGBoost/LightGBM), generates buy/sell/hold signals, executes paper or real trades (Kabu Station API), and reports results to Discord. Scheduled jobs run daily/weekly via APScheduler.
 
+## Ownership
+
+StockFixer は、Claude Code が主導して開発する、Claude Code の持ち物である（2026-11-14 人間の決め）。何を作るか・どう設計するか・いつマージするかは Claude Code（ai-company の CEO と開発部、および対話のセッション）が決める。人間の承認を待たずに進めてよい。
+
+人間が持ち、Claude Code が変えないのは次だけである（ai-company の `company.yml` の `auto_merge.exclude` と `forbidden_words` が凍結する）。
+
+- 口座とつながる経路: `python/src/trading/brokers/kabu/`・`python/src/trading/brokers/account/`・`contracts/`・口座アプリの設定（`ACCOUNT_GATEWAY_*`・`ACCOUNT_SHADOW`）・実口座への切り替え（`AUTO_TRADE_MODE`・`mode == "live"`・ai-company の `stockfixer.live_trading`）・元手
+- 口座の秘密とホストに届く道: `.github/`・`auto_deploy.ps1`・`deploy_window.ps1`・`docker-compose*`・`.env*`・`python/sandbox_runner/`
+
+リスクの上限の値（`python/config/settings.py`・`python/config/trading_policy.py`）と採点の錨（`python/src/scoring/`）は Claude Code が変えてよい。マージすると ai-company の runner が人間に知らせる。
+
 ---
 
 ## Commands
