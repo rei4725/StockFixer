@@ -20,6 +20,7 @@ import yfinance as yf
 from config.settings import PAPER_INITIAL_BALANCE
 from src.trading.brokers.base import OrderSide
 from src.trading.paper_weekly_backfill import (
+    EXCESS_BASIS,
     Notify,
     backfill_previous_weeks,
     week_name,
@@ -156,7 +157,22 @@ def _build_equity_with_fallbacks(
     split_loader: Optional[SplitLoader] = None,
 ) -> tuple[pd.Series, dict[tuple[str, str], pd.DatetimeIndex], list[tuple[str, str]]]:
     """評価額 Series と、約定の値段で評価した (market, symbol) ごとの日付と、
-    最後の日に保有しているのにその日以降の終値が無い (market, symbol) を返す。
+    最後の日に保有しているのにその日以降の終値が無い (market, symbol) を返す。"""
+    equity, _, fallbacks, missing = _build_equity_parts(
+        orders, price_loader, initial_balance, index, split_loader
+    )
+    return equity, fallbacks, missing
+
+
+def _build_equity_parts(
+    orders: pd.DataFrame,
+    price_loader: Callable[[str, str], Optional[pd.Series]],
+    initial_balance: float,
+    index: pd.DatetimeIndex,
+    split_loader: Optional[SplitLoader] = None,
+) -> tuple[pd.Series, pd.Series, dict[tuple[str, str], pd.DatetimeIndex], list[tuple[str, str]]]:
+    """評価額 Series、保有の時価の絶対値の合計 Series（#1792）、約定の値段で評価した
+    (market, symbol) ごとの日付、最後の日に終値が無い保有の (market, symbol) を返す。
 
     保有日の値段は、その日までの最後の終値（過去の方向にだけ埋めた値）で評価する。
     終値が1つも分からない保有日は、0円にせず、その日までの最後の約定の値段で評価する（#850）。
@@ -164,7 +180,7 @@ def _build_equity_with_fallbacks(
     現金は株数×値段で変わらないため直さない。
     """
     if index.empty:
-        return pd.Series(dtype=float), {}, []
+        return pd.Series(dtype=float), pd.Series(dtype=float), {}, []
 
     work = orders.copy()
     work["filled_at"] = pd.to_datetime(work["filled_at"]).dt.tz_localize(None).dt.normalize()
@@ -206,6 +222,7 @@ def _build_equity_with_fallbacks(
     cash_delta = pd.Series(cash_events, dtype=float).reindex(index, fill_value=0.0)
     cash = initial_balance + cash_delta.cumsum()
     equity = cash.copy()
+    gross = pd.Series(0.0, index=index)
     fallbacks: dict[tuple[str, str], pd.DatetimeIndex] = {}
     missing_last_close: list[tuple[str, str]] = []
 
@@ -237,9 +254,26 @@ def _build_equity_with_fallbacks(
                 symbol,
                 int(missing.sum()),
             )
-        equity += (holdings * aligned).where(held, 0.0)
+        value = (holdings * aligned).where(held, 0.0)
+        equity += value
+        gross += value.abs()
 
-    return equity, fallbacks, missing_last_close
+    return equity, gross, fallbacks, missing_last_close
+
+
+def _weekly_exposure(
+    equity: pd.Series, gross: pd.Series, base_day: pd.Timestamp, week_end: pd.Timestamp
+) -> Optional[float]:
+    """週の各営業日の前日の引けの、保有の時価の絶対値の合計 ÷ 評価額 の平均を返す（#1792）。
+
+    月曜の前日は前週の最終営業日。評価額が 0 以下の日は数えず、数える日が無ければ None。
+    """
+    days = (equity.index >= base_day) & (equity.index < week_end)
+    value = equity[days]
+    valid = value > 0
+    if not valid.any():
+        return None
+    return float((gross[days][valid] / value[valid]).mean())
 
 
 def get_paper_equity_curve(days: int = 180) -> pd.Series:
@@ -329,6 +363,8 @@ def compute_weekly_results(
         valued_at_fill_price は、週の中に終値が分からず約定の値段で評価した日がある銘柄。
         missing_week_end_close は、週の終わりに保有しているのに金曜以降の終値がまだ無い銘柄で、
         1つでもあれば partial_week を true にする（週の終わりの評価が古い終値のままの部分の週）
+        exposure は週の投資比率、excess_return は weekly_return − exposure × benchmark_return、
+        excess_return_unscaled は全額のベンチマークとの差、excess_basis は計算の印（#1792）
     """
     day = pd.Timestamp(as_of)
     # 直前の金曜（as_of が金曜なら1週前）
@@ -345,6 +381,7 @@ def compute_weekly_results(
         market_orders = work[work["market"] == market] if not work.empty else work
         fills = 0
         weekly_return: Optional[float] = 0.0
+        exposure: Optional[float] = 0.0
         valued_at_fill_price: list[str] = []
         missing_week_end_close: list[str] = []
         if not market_orders.empty:
@@ -352,9 +389,10 @@ def compute_weekly_results(
             fills = int(in_week.sum())
             first_fill = market_orders["filled_at"].min()
             index = pd.bdate_range(start=min(first_fill, base_day), end=week_end)
-            equity, fallbacks, missing = _build_equity_with_fallbacks(
+            equity, gross, fallbacks, missing = _build_equity_parts(
                 market_orders, price_loader, initial_balance, index, split_loader
             )
+            exposure = _weekly_exposure(equity, gross, base_day, week_end)
             valued_at_fill_price = sorted(
                 symbol
                 for (_, symbol), days in fallbacks.items()
@@ -378,16 +416,27 @@ def compute_weekly_results(
             base_day,
             (week_end + pd.Timedelta(days=1)).date().isoformat(),
         )
-        excess_return = (
+        excess_unscaled = (
             None
             if weekly_return is None or benchmark_return is None
             else weekly_return - benchmark_return
+        )
+        # 現金の分はベンチマークに乗らないため、投資比率の分だけのベンチマークと比べる（#1792）
+        excess_return = (
+            None
+            if weekly_return is None or benchmark_return is None or exposure is None
+            else weekly_return - exposure * benchmark_return
         )
         markets[market] = {
             "weekly_return": None if weekly_return is None else round(weekly_return, 6),
             "benchmark_ticker": ticker,
             "benchmark_return": benchmark_return,
             "excess_return": None if excess_return is None else round(excess_return, 6),
+            "excess_return_unscaled": (
+                None if excess_unscaled is None else round(excess_unscaled, 6)
+            ),
+            "exposure": None if exposure is None else round(exposure, 6),
+            "excess_basis": EXCESS_BASIS,
             "fills": fills,
             "valued_at_fill_price": valued_at_fill_price,
             "partial_week": bool(missing_week_end_close),

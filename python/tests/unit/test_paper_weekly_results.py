@@ -55,14 +55,18 @@ class TestComputeWeeklyResults(unittest.TestCase):
         # 前週末の評価額 1,000,000 → 今週末 1,000,000 + 1,500 株 × 10 円 = 1,015,000
         self.assertAlmostEqual(jp["weekly_return"], 0.015)
         self.assertAlmostEqual(jp["benchmark_return"], 0.02)
-        self.assertAlmostEqual(jp["excess_return"], -0.005)
+        self.assertAlmostEqual(jp["excess_return_unscaled"], -0.005)
+        # 投資比率は前日の引けで 0.1・0.1・0.15・0.15・0.15 の平均 0.13（#1792）
+        self.assertAlmostEqual(jp["exposure"], 0.13)
+        self.assertAlmostEqual(jp["excess_return"], 0.015 - 0.13 * 0.02)
         self.assertEqual(jp["fills"], 1)
         self.assertEqual(jp["benchmark_ticker"], "1306.T")
 
         us = result["markets"]["us"]
         self.assertAlmostEqual(us["weekly_return"], 0.0)
         self.assertAlmostEqual(us["benchmark_return"], -0.01)
-        self.assertAlmostEqual(us["excess_return"], 0.01)
+        self.assertAlmostEqual(us["excess_return_unscaled"], 0.01)
+        self.assertEqual(us["excess_return"], 0.0)
         self.assertEqual(us["fills"], 0)
         self.assertEqual(us["benchmark_ticker"], "^GSPC")
 
@@ -146,7 +150,7 @@ class TestComputeWeeklyResults(unittest.TestCase):
         jp = result["markets"]["jp"]
         # 7203 の +10,000 だけ。9999 は約定の 100 円で評価し、代金 100,000 を損に数えない
         self.assertAlmostEqual(jp["weekly_return"], 0.01)
-        self.assertAlmostEqual(jp["excess_return"], -0.01)
+        self.assertAlmostEqual(jp["excess_return_unscaled"], -0.01)
         self.assertEqual(jp["valued_at_fill_price"], ["9999"])
         self.assertEqual(result["markets"]["us"]["valued_at_fill_price"], [])
 
@@ -270,8 +274,13 @@ class TestBenchmarkNullReason(unittest.TestCase):
         )
         jp = result["markets"]["jp"]
         self.assertAlmostEqual(jp["benchmark_return"], 0.04)
-        self.assertAlmostEqual(jp["excess_return"], jp["weekly_return"] - jp["benchmark_return"])
-        self.assertAlmostEqual(jp["excess_return"], -0.03)
+        self.assertAlmostEqual(
+            jp["excess_return_unscaled"], jp["weekly_return"] - jp["benchmark_return"]
+        )
+        self.assertAlmostEqual(jp["excess_return_unscaled"], -0.03)
+        self.assertAlmostEqual(
+            jp["excess_return"], jp["weekly_return"] - jp["exposure"] * jp["benchmark_return"]
+        )
 
     @patch("yfinance.download", return_value=pd.DataFrame())
     def test_empty_download_warns_and_gives_null(self, _mock_download):
