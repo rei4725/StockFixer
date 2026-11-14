@@ -24,10 +24,10 @@ from config.settings import (
     CLAUDE_TRADER_MAX_TOKENS,
     CLAUDE_TRADER_MODEL,
     CLAUDE_TRADER_THINKING_BUDGET,
-    MAX_ORDERS_PER_RUN,
     MIN_CHANGE_RATIO,
 )
 from src.domain.ports import MarketDataPort, PredictionResultRepository, TradeDiffSink
+from src.domain.trading_rules import get_lot_size
 from src.trading.brokers.base import BrokerBase, BrokerError, OrderSide
 from src.trading.claude_buy_blocks import (
     _PARAMS_UNREADABLE_REASON,
@@ -42,6 +42,7 @@ from src.trading.claude_state_tools import (
     _handle_get_risk_status,
 )
 from src.trading.claude_tools import TOOLS as _TOOLS
+from src.trading.claude_tools import build_system_prompt
 from src.trading.execution import (
     _attach_dynamic_thresholds,
     _choose_order_params,
@@ -50,6 +51,7 @@ from src.trading.execution import (
     _record_order,
     _resolve_kelly_params,
 )
+from src.trading.execution.params import _SPLIT_LOW_CONFIDENCE, _apply_split_qty, _calc_split_ratio
 from src.trading.execution.pending import _load_pending_exits
 from src.trading.execution.recording import _recorder
 from src.trading.execution.selection import _get_pending_buy_symbols
@@ -226,10 +228,21 @@ def _handle_place_order(
             state = "既に保有中" if symbol in held else "空売り中"
             return {"status": "skipped", "reason": f"{symbol} は{state}"}
 
+        # 8:50 の道と同じく確信度で見送り・半分にする（R-308、#1791）
+        confidence = float(row.get("confidence_ratio") or 1.0)
+        split_ratio = _calc_split_ratio(confidence)
+        if split_ratio == 0.0:
+            msg = (
+                f"{symbol}: confidence_ratio={confidence:.3f} < "
+                f"{_SPLIT_LOW_CONFIDENCE:.2f} のため見送り (R-308)"
+            )
+            logger.info("[claude_agent] %s", msg)
+            stats["skipped"] += 1
+            return {"status": "skipped", "reason": msg}
+
         kelly_win_rate, kelly_avg_win, kelly_avg_loss = _resolve_kelly_params(
             str(row["market"]), symbol
         )
-        confidence = float(row.get("confidence_ratio") or 1.0)
         qty = risk.calc_position_size(
             symbol,
             current_price,
@@ -244,7 +257,17 @@ def _handle_place_order(
                 "status": "skipped",
                 "reason": f"{symbol}: ポジションサイズ 0（残高不足or上限）",
             }
+        if split_ratio < 1.0:
+            qty = _apply_split_qty(qty, split_ratio, lot=get_lot_size(market))
+            logger.info(
+                "[claude_agent] %s: confidence_ratio=%.3f → %.0f%%発注 %d株 (R-308)",
+                symbol,
+                confidence,
+                split_ratio * 100,
+                qty,
+            )
     else:
+        split_ratio = 1.0
         positions = broker.get_positions()
         pos = next((p for p in positions if p["symbol"].replace(".T", "") == symbol), None)
         # 返済の注文で拘束された hold_qty は売りに出さない。8:50 の道・SL/TP と同じ数（#1784）
@@ -287,6 +310,7 @@ def _handle_place_order(
             trade_diff_sink=trade_diff_sink,
             # 期限の無い保有を残さない。8:50 の道と同じく新規の買いにだけ渡す（#1543）
             horizon=_determine_entry_horizon(row) if side == OrderSide.BUY else None,
+            split_ratio=split_ratio,
         )
         if side == OrderSide.BUY:
             stats["buy_orders"] += 1
@@ -452,28 +476,7 @@ def run_claude_trader(
         gate_notice += f"\n## 予想の鮮度\n{stale_reason}。保有の sell だけを判断すること。\n"
 
     # システムプロンプト
-    system_prompt = f"""あなたは株式トレードの判断を行う AI エージェントです。
-
-## 役割
-tool を使って当日の予測・ポジション・残高・リスク状態を収集し、
-buy/sell/hold の判断を行い、発注を実行してください。
-
-## 制約（厳守）
-- is_allowed=false のときは新規の buy をしない（保有の sell は可）
-- 1セッションの最大発注数: {MAX_ORDERS_PER_RUN} 件
-- 既に保有中の銘柄に追加買いしない
-- 確信のない銘柄は hold（見送り）を選択する
-- place_order の reasoning には判断根拠を必ず記述する
-
-## 推奨フロー
-1. get_risk_status で発注可否を確認
-2. get_predictions でシグナル候補を取得
-3. get_balance / get_positions で資金状況を把握
-4. 各候補を評価して place_order を呼ぶ（または見送る）
-5. 全判断が終わったらセッションを終了する
-{gate_notice}
-market: {market}, mode: {mode}
-"""
+    system_prompt = build_system_prompt(gate_notice, market, mode)
 
     client = anthropic.Anthropic()
     messages: list[dict[str, Any]] = [
