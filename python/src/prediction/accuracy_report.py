@@ -38,6 +38,8 @@ ACCURACY_REPORT_HORIZONS: tuple[int, ...] = (1,)
 WINDOW_DAYS = 28
 TOP_MISSES_N = 10
 UNKNOWN_SECTOR = "UNKNOWN"
+# 予想の動きの大きさの内訳（by_magnitude）の分位の数
+MAGNITUDE_BINS = 5
 
 # run_accuracy_check と同じ件数だけスナップショットを読む
 _SNAPSHOT_LIMIT = 5000
@@ -91,7 +93,7 @@ def _four_week_summary(rows: pd.DataFrame) -> dict:
     """4週の窓の行を通した平均と、日ごとの的中率の平均を返す（日は予想の基準の日）。"""
     summary = _summary(rows)
     if rows.empty:
-        summary.update({"n_days": 0, "daily_direction_accuracy_mean": None})
+        summary.update({"n_days": 0, "daily_direction_accuracy_mean": None, "by_market": {}})
         return summary
     days = _base_days(rows)
     daily = rows.dropna(subset=["direction_match"]).groupby(days)["direction_match"]
@@ -102,6 +104,7 @@ def _four_week_summary(rows: pd.DataFrame) -> dict:
             "daily_direction_accuracy_mean": (
                 float(daily_rates.mean()) if len(daily_rates) else None
             ),
+            "by_market": _breakdown(rows, rows["market"]),
         }
     )
     return summary
@@ -112,6 +115,22 @@ def _breakdown(rows: pd.DataFrame, keys: pd.Series) -> dict:
     if rows.empty:
         return {}
     return {str(key): _summary(group) for key, group in rows.groupby(keys, sort=True)}
+
+
+def _magnitude_breakdown(rows: pd.DataFrame) -> dict:
+    """|predicted_ratio| の五分位（q1 が小さい側）ごとの件数・的中率・平均の誤差を返す（#1813）。
+
+    予想の値の読めない行は数えない。読める行が MAGNITUDE_BINS 件より少ない日は
+    五分位を切れないので空にする。同じ値は行の順で分け、各分位の件数をそろえる。
+    """
+    magnitude = pd.to_numeric(rows["predicted_ratio"], errors="coerce").abs().dropna()
+    if len(magnitude) < MAGNITUDE_BINS:
+        return {}
+    ranks = magnitude.rank(method="first")
+    labels = [f"q{i + 1}" for i in range(MAGNITUDE_BINS)]
+    bins = pd.qcut(ranks, MAGNITUDE_BINS, labels=labels)
+    scored = rows.loc[magnitude.index]
+    return {str(label): _summary(scored[bins == label]) for label in labels}  # 小さい順に並べる
 
 
 def _top_misses(rows: pd.DataFrame, top_n: int) -> list[dict]:
@@ -178,6 +197,7 @@ def build_horizon_report(
             "four_week": _four_week_summary(window),
             "top_misses": _top_misses(today, top_n),
             "by_market": _breakdown(today, today["market"]),
+            "by_magnitude": _magnitude_breakdown(today),
             "by_sector": (
                 _sector_breakdown(today_rows, sector_getter) if sector_getter is not None else {}
             ),
