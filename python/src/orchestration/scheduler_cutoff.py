@@ -40,7 +40,12 @@ def scheduled_datetime_for_recovery(
       基準はその週の定時の曜日の時刻とする（#1534）
     - monthly は設定の day の日とそれ以後の同じ月に補完を考え、基準はその day の日の時刻とする
     - ほかのジョブは定時の曜日だけ補完を考え、基準はその日の時刻とする
+
+    tz を持つ now は JST に直してから曜日・日・定時を作る（is_past_recovery_until と揃える、
+    #1844）。tz の無い now は今までどおりそのまま使う。
     """
+    if now.tzinfo is not None:
+        now = now.astimezone(_JST)
     scheduled = now
     if weekdays and config.get("period") == "weekly" and config.get("recover_rest_of_week", False):
         days_after_scheduled = now.weekday() - min(weekdays)
