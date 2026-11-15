@@ -654,7 +654,7 @@ class TestHandlePlaceOrder(unittest.TestCase):
 
 class TestHandleGetPredictions(unittest.TestCase):
     @patch.object(_PREDICTIONS, "get_latest_by_market")
-    @patch("src.trading.claude_agent._get_held_symbols", return_value={"7200"})
+    @patch("src.trading.claude_prediction_tools._get_held_symbols", return_value={"7200"})
     def test_returns_buy_and_sell_candidates(self, _held, _load):
         df = _make_predictions_df(n=4)
         # _attach_dynamic_thresholds と apply_multi_horizon_score_column の結果を模倣
@@ -667,8 +667,10 @@ class TestHandleGetPredictions(unittest.TestCase):
 
         broker = _make_broker()
 
-        with patch("src.trading.claude_agent._attach_dynamic_thresholds", return_value=df), patch(
-            "src.trading.claude_agent.apply_multi_horizon_score_column", return_value=df
+        with patch(
+            "src.trading.claude_prediction_tools._attach_dynamic_thresholds", return_value=df
+        ), patch(
+            "src.trading.claude_prediction_tools.apply_multi_horizon_score_column", return_value=df
         ):
             from src.trading.claude_agent import _handle_get_predictions
 
@@ -682,7 +684,7 @@ class TestHandleGetPredictions(unittest.TestCase):
         self.assertNotIn("7200", buy_symbols)
 
     @patch.object(_PREDICTIONS, "get_latest_by_market")
-    @patch("src.trading.claude_agent._get_held_symbols", return_value={"7200"})
+    @patch("src.trading.claude_prediction_tools._get_held_symbols", return_value={"7200"})
     def test_unreadable_params_empty_buy_candidates(self, _held, _load):
         df = _make_predictions_df(n=4)
         df["multi_horizon_score"] = [-0.02, 0.02, 0.03, 0.04]
@@ -692,8 +694,10 @@ class TestHandleGetPredictions(unittest.TestCase):
         df["optimal_params_unreadable"] = True
         _load.return_value = df
 
-        with patch("src.trading.claude_agent._attach_dynamic_thresholds", return_value=df), patch(
-            "src.trading.claude_agent.apply_multi_horizon_score_column", return_value=df
+        with patch(
+            "src.trading.claude_prediction_tools._attach_dynamic_thresholds", return_value=df
+        ), patch(
+            "src.trading.claude_prediction_tools.apply_multi_horizon_score_column", return_value=df
         ):
             from src.trading.claude_agent import _handle_get_predictions
 
