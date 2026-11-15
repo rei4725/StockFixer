@@ -110,7 +110,7 @@ class TestDailyPipelineInvariantWiring(unittest.TestCase):
                 return_value=loaded_models,
             ),
             predict_patch,
-            patch("src.prediction.prediction_pipeline.output_top_worst_results"),
+            patch("src.prediction.prediction_pipeline.output_top_worst_results") as save_mock,
             timestamp_patch,
             patch(
                 "src.prediction.db.prediction_results.load_run_stats_at",
@@ -152,6 +152,7 @@ class TestDailyPipelineInvariantWiring(unittest.TestCase):
             from src.orchestration.jobs.daily import run_daily_pipeline
 
             run_daily_pipeline()
+            captured["save"] = save_mock
 
         return captured.get("results")
 
@@ -270,6 +271,35 @@ class TestDailyPipelineInvariantWiring(unittest.TestCase):
         self.assertIn("100", b1["description"])
         self.assertTrue(rule.triggered)
         self.assertIs(self._captured["notifier"], send_webhook_notification)
+
+    def test_same_direction_reaches_notification_without_stopping_orders(self):
+        """全銘柄が上げの予想（#1814）は A-4 として通知に届き、
+        予想の保存と 8:50 の発注の印は止めない。"""
+        rows = _rows(100, model_count=2)
+        for row in rows:
+            row.diff_ratio = abs(row.diff_ratio) + 0.0001
+        marker_patch = patch("src.orchestration.jobs.daily.mark_prediction_saved")
+        marker = marker_patch.start()
+        self.addCleanup(marker_patch.stop)
+        missing_patch = patch(
+            "src.orchestration.jobs.daily.order_market_predictions_mostly_missing",
+            return_value=False,
+        )
+        missing_patch.start()
+        self.addCleanup(missing_patch.stop)
+
+        results = self._run_pipeline(
+            output_rows=rows,
+            loaded_models=["UnifiedStockXGBoost", "UnifiedStockLightGBM"],
+            previous_raw=None,
+        )
+
+        rule = next(r for r in results if r.rule_id == "NF-303-5")
+        self.assertTrue(rule.triggered)
+        self.assertIn("A-4", rule.details["violation_ids"])
+        self.assertIs(self._captured["notifier"], send_webhook_notification)
+        self._captured["save"].assert_called_once()
+        marker.assert_called_once_with()
 
     def test_prediction_stage_failure_propagates_without_notifying(self):
         """[2/5] が CRITICAL 失敗した場合は例外が伝播し、通知段まで到達しない。
