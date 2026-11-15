@@ -148,7 +148,7 @@ class TestSequentialDropsStepFeatures(unittest.TestCase):
             patch(f"{_P}.fetch_stock_data_with_features", return_value=result),
             patch(f"{_P}._notify_quality_issues"),
             patch(f"{_P}.delete_stock_features") as mock_delete,
-            patch(f"{_P}.upsert_stock_features") as mock_upsert,
+            patch("src.market_data.feature_save.upsert_stock_features") as mock_upsert,
         ):
             save_stock_data_with_features("jp", "5706")
         mock_delete.assert_called_once_with("jp", "5706")
