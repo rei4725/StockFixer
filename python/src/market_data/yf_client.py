@@ -52,6 +52,18 @@ _memory_cache: dict[str, tuple[pd.DataFrame, float]] = {}
 _cache_lock = threading.Lock()
 _no_cache: bool = False
 
+# 壊れた・古い pkl を読んだときに出る例外。捨てて取り直してよい（#1821）
+_DISK_CACHE_READ_ERRORS: tuple[type[Exception], ...] = (
+    OSError,
+    EOFError,
+    pickle.UnpicklingError,
+    AttributeError,
+    ImportError,
+    IndexError,
+    TypeError,
+    ValueError,
+)
+
 
 def set_no_cache(flag: bool = True) -> None:
     """キャッシュを無効化/有効化する（--no-cache フラグ対応）。"""
@@ -69,8 +81,8 @@ def clear_cache() -> None:
         for f in cache_dir.glob("*.pkl"):
             try:
                 f.unlink()
-            except Exception:
-                pass
+            except OSError:
+                logger.debug("[yf_cache] キャッシュを消せないので飛ばす path=%s", f, exc_info=True)
 
 
 def _cache_key(ticker: str, start: str | None, end: str | None, interval: str) -> str:
@@ -86,8 +98,10 @@ def _cache_ttl(end: str | None) -> float:
         today = pd.Timestamp.now().normalize()
         if end_dt < today:
             return _TTL_LONG
-    except Exception:
-        pass
+    except (TypeError, ValueError, OverflowError):
+        logger.debug(
+            "[yf_cache] end を日付として読めないので短い TTL にする end=%r", end, exc_info=True
+        )
     return _TTL_SHORT
 
 
@@ -121,8 +135,15 @@ def _cache_get(key: str) -> pd.DataFrame | None:
                 logger.debug("[yf_cache] disk hit key=%s", key)
                 return df
             path.unlink(missing_ok=True)
+        except _DISK_CACHE_READ_ERRORS:
+            logger.debug(
+                "[yf_cache] ディスクキャッシュを読めないので取り直す key=%s", key, exc_info=True
+            )
         except Exception:
-            pass
+            # 想定外の失敗でもデータの取得は止めない（今までの動きを保つ）
+            logger.warning(
+                "[yf_cache] ディスクキャッシュの読み込みで想定外の失敗 key=%s", key, exc_info=True
+            )
     return None
 
 

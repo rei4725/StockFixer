@@ -7,6 +7,7 @@ DuckDB にキャッシュして API 呼び出しを最小化する。
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any, Optional, Union
 
 import pandas as pd
@@ -145,27 +146,28 @@ def _extract_calendar_dates(
             if key not in cal:
                 continue
             v = cal[key]
-            candidates = v if isinstance(v, (list, tuple)) else [v]
-            for d in candidates:
-                try:
-                    ts = pd.Timestamp(d)
-                    if not pd.isna(ts):
-                        dates.add(ts.normalize())
-                except Exception:
-                    pass
+            _add_dates(v if isinstance(v, (list, tuple)) else [v], dates)
     elif isinstance(cal, pd.DataFrame):
         for key in ("Earnings Date", "earnings_date"):
             if key not in cal.index:
                 continue
             v = cal.loc[key]
-            vals = list(v.values) if hasattr(v, "values") else [v]
-            for d in vals:
-                try:
-                    ts = pd.Timestamp(d)
-                    if not pd.isna(ts):
-                        dates.add(ts.normalize())
-                except Exception:
-                    pass
+            _add_dates(list(v.values) if hasattr(v, "values") else [v], dates)
+
+
+def _add_dates(values: Iterable[Any], dates: set[pd.Timestamp]) -> None:
+    """values の各値を日付として読み、NaT を除いて正規化した日を dates に足す。
+
+    読めない値は飛ばして debug ログを出し、残りの値を読み続ける（#1821）。
+    """
+    for d in values:
+        try:
+            ts = pd.Timestamp(d)
+        except (TypeError, ValueError, OverflowError):
+            logger.debug("決算日の値を読めないので飛ばす: %r", d, exc_info=True)
+            continue
+        if not pd.isna(ts):
+            dates.add(ts.normalize())
 
 
 def _save_event_dates(market: str, symbol: str, dates: pd.DatetimeIndex) -> None:

@@ -72,6 +72,36 @@ class TestExtractCalendarDates(unittest.TestCase):
         # 有効な日付のみ追加される
         self.assertIn(pd.Timestamp("2024-01-01"), dates)
 
+    def test_invalid_value_in_dict_logs_and_keeps_others(self):
+        """dict の枝で読めない値が混じっても他の日付が集まり、debug ログが出る（#1821）"""
+        dates: set = set()
+        cal = {"Earnings Date": [pd.Timestamp("2024-01-31"), "not-a-date", [1, 2], "2024-04-30"]}
+        with patch("src.market_data.event_calendar.logger") as mock_logger:
+            _extract_calendar_dates(cal, dates)
+        self.assertEqual(dates, {pd.Timestamp("2024-01-31"), pd.Timestamp("2024-04-30")})
+        self.assertEqual(mock_logger.debug.call_count, 2)
+
+    def test_invalid_value_in_dataframe_logs_and_keeps_others(self):
+        """DataFrame の枝で読めない値が混じっても他の日付が集まり、debug ログが出る（#1821）"""
+        dates: set = set()
+        cal = pd.DataFrame(
+            {"A": [pd.Timestamp("2024-05-01"), 1], "B": ["bad-date", 2]},
+            index=["Earnings Date", "Other"],
+        )
+        with patch("src.market_data.event_calendar.logger") as mock_logger:
+            _extract_calendar_dates(cal, dates)
+        self.assertEqual(dates, {pd.Timestamp("2024-05-01")})
+        self.assertEqual(mock_logger.debug.call_count, 1)
+
+    def test_valid_input_dates_unchanged(self):
+        """正しい入力では NaT を除いた日付を正規化して集める（#1821）"""
+        dates: set = set()
+        cal = {"Earnings Date": [pd.Timestamp("2024-01-31 15:30"), None, pd.NaT]}
+        with patch("src.market_data.event_calendar.logger") as mock_logger:
+            _extract_calendar_dates(cal, dates)
+        self.assertEqual(dates, {pd.Timestamp("2024-01-31")})
+        mock_logger.debug.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # is_near_event

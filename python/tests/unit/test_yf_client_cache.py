@@ -232,5 +232,41 @@ class TestCacheTestBaseTeardown(unittest.TestCase):
         self.assertTrue(outer_pkl.exists())
 
 
+class TestCacheFailureLogging(_CacheTestBase):
+    """キャッシュの失敗は続けたうえで debug ログを出す（#1821）"""
+
+    def test_cache_ttl_unparsable_end_logs_and_returns_short(self):
+        from src.market_data import yf_client
+
+        with patch("src.market_data.yf_client.logger") as mock_logger:
+            ttl = yf_client._cache_ttl("not-a-date")
+        self.assertEqual(ttl, yf_client._TTL_SHORT)
+        mock_logger.debug.assert_called_once()
+
+    def test_corrupt_disk_cache_logs_and_returns_none(self):
+        from src.market_data import yf_client
+
+        key = yf_client._cache_key("AAPL", "2024-01-01", "2024-02-01", "1d")
+        yf_client._get_cache_path(key).write_bytes(b"not a pickle")
+        with patch("src.market_data.yf_client.logger") as mock_logger:
+            result = yf_client._cache_get(key)
+        self.assertIsNone(result)
+        mock_logger.debug.assert_called_once()
+
+    def test_clear_cache_unlink_failure_logs_and_continues(self):
+        from src.market_data import yf_client
+
+        cache_dir = Path(self.tmp_dir) / "yf_cache"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        (cache_dir / "a.pkl").write_bytes(b"x")
+        (cache_dir / "b.pkl").write_bytes(b"x")
+        with (
+            patch("pathlib.Path.unlink", side_effect=PermissionError("locked")),
+            patch("src.market_data.yf_client.logger") as mock_logger,
+        ):
+            yf_client.clear_cache()
+        self.assertEqual(mock_logger.debug.call_count, 2)
+
+
 if __name__ == "__main__":
     unittest.main()
