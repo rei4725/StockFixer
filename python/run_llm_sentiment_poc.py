@@ -14,7 +14,7 @@ import sys
 
 sys.path.insert(0, "src")
 
-from src.market_data.adapters.llm_sentiment import OllamaClient  # noqa: E402
+from src.utils.ollama_client import OllamaClient  # noqa: E402
 
 
 def main() -> None:

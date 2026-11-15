@@ -288,8 +288,8 @@ DDDフェーズ4完了により、共有型は各 BC の `types.py` に分散配
 - 全銘柄のデータを結合して統合モデルを学習・保存
 - `train_unified_models_batch()`: バッチで統合モデルを学習
 
-#### `prediction/models/base.py`
-- AI モデルの抽象基底クラス
+#### `utils/ml_base.py`（`BaseModel`）
+- AI モデルの抽象基底クラス（`prediction/models/` の各モデルが継承する）
 - `train()`, `predict()`, `save_model()`, `load_model()` の共通インターフェースを定義
 
 #### `prediction/predict_unified.py`
