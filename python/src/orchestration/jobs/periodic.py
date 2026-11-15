@@ -57,6 +57,7 @@ def run_monthly_report_job() -> None:
     """
     from config.settings import DRIFT_ALERT_THRESHOLD, DRIFT_ALERT_WEEKS
     from src.infrastructure.persistence.analytics_query import PostgresAnalyticsQuery
+    from src.prediction.baseline_metrics import baseline_metrics
     from src.prediction.drift_monitor import check_weekly_hit_rate_drift
     from src.reporting.discord.discord_utils import send_monthly_report_notification
     from src.reporting.monthly import run_monthly_report, save_monthly_report_to_file
@@ -69,7 +70,10 @@ def run_monthly_report_job() -> None:
         analytics = PostgresAnalyticsQuery()
         summary = run_monthly_report(analytics=analytics)
         report_path = save_monthly_report_to_file(
-            summary, drift_checker=_drift_checker, analytics=analytics
+            summary,
+            drift_checker=_drift_checker,
+            analytics=analytics,
+            baseline_fn=baseline_metrics,
         )
         logger.info("=== 月次レポート保存完了: %s ===", report_path)
     except Exception as e:
