@@ -43,7 +43,7 @@ def _run(market, symbol, caplog, pageview_df=None, end_date="2026-10-21"):
         patch("src.market_data.pipeline.drop_unclosed_bars", side_effect=lambda df, _m: df),
         patch("src.market_data.pipeline.fetch_news_sentiment_with_llm", return_value=None),
         patch("src.market_data.pipeline.fetch_pageview_features", return_value=pageview_df),
-        patch("src.market_data.pipeline.upsert_stock_features") as mock_upsert,
+        patch("src.market_data.feature_save.upsert_stock_features") as mock_upsert,
         caplog.at_level("WARNING"),
     ):
         result = fetch_stock_data_with_features(
