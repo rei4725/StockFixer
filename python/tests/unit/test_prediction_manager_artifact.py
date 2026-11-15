@@ -10,7 +10,7 @@ import joblib
 import pandas as pd
 
 from src.prediction.manager import ModelManager, _compute_feature_hash, _get_git_sha
-from src.prediction.models.base import BaseModel
+from src.utils.ml_base import BaseModel
 
 
 class _MockModel(BaseModel):

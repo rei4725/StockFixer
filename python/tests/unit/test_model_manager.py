@@ -15,7 +15,7 @@ sys.modules["src.prediction.models.lightgbm"] = MagicMock()
 
 # モック後にModelManagerをインポート
 from src.prediction.manager import ModelManager  # noqa: E402
-from src.prediction.models.base import BaseModel  # noqa: E402
+from src.utils.ml_base import BaseModel  # noqa: E402
 
 
 # BaseModelのモッククラス
