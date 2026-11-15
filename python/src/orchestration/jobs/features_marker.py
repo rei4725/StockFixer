@@ -3,6 +3,7 @@
 日次の道は印を書けなくても止めない。
 """
 
+from fractions import Fraction
 from typing import TYPE_CHECKING
 
 from src.utils.logger import get_logger
@@ -46,25 +47,26 @@ def _coverage_gap(
     """作れなかった銘柄の割合が全体か jp で 1 - MIN_COVERAGE を超えたら件数の文を返す。
 
     数え方は取得の線（unavailable_gates）と同じスキップ+エラーで、分母も同じ対象の数。
+    比べは分数で行い、ちょうど線の上（例: 2/10）は超えない側にする（#1843）。
     """
     from src.orchestration.jobs.unavailable_gates import _skipped_market
     from src.prediction.backtest_promotion.judge import MIN_COVERAGE
 
-    line = 1 - MIN_COVERAGE
+    line = 1 - Fraction(str(MIN_COVERAGE))
     n_skipped = len(batch_result.skipped)
     n_failed = len(batch_result.failed)
-    if total > 0 and (n_skipped + n_failed) / total > line:
-        return f"スキップ {n_skipped} + エラー {n_failed} / 対象 {total}（線 {line:.0%}）"
+    if total > 0 and Fraction(n_skipped + n_failed, total) > line:
+        return f"スキップ {n_skipped} + エラー {n_failed} / 対象 {total}（線 {float(line):.0%}）"
     market = _ORDER_MARKET
     market_total = market_totals.get(market, 0)
     if market_total <= 0:
         return None
     m_skipped = sum(1 for s in batch_result.skipped if _skipped_market(s) == market)
     m_failed = sum(1 for f in batch_result.failed if f.market == market)
-    if (m_skipped + m_failed) / market_total > line:
+    if Fraction(m_skipped + m_failed, market_total) > line:
         return (
             f"{market} のスキップ {m_skipped} + エラー {m_failed}"
-            f" / {market} の対象 {market_total}（線 {line:.0%}）"
+            f" / {market} の対象 {market_total}（線 {float(line):.0%}）"
         )
     return None
 

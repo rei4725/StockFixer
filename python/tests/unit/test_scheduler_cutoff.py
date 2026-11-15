@@ -156,6 +156,66 @@ def test_monthly_respects_weekdays():
     )
 
 
+# --- scheduled_datetime_for_recovery に UTC の時刻を渡す（#1844） ---
+
+
+@pytest.mark.parametrize(
+    "config, now, weekdays, expected",
+    [
+        # UTC 03-02 月曜 23:30 は JST 03-03 火曜 08:30。火曜の定時は 03-03 08:50 JST
+        (
+            {"hour": 8, "minute": 50},
+            datetime(2026, 3, 2, 23, 30, tzinfo=timezone.utc),
+            {1},
+            datetime(2026, 3, 3, 8, 50, tzinfo=_JST),
+        ),
+        # UTC 03-03 火曜 16:00 は JST 03-04 水曜 01:00。火曜だけのジョブは補完を考えない
+        (
+            {"hour": 8, "minute": 50},
+            datetime(2026, 3, 3, 16, 0, tzinfo=timezone.utc),
+            {1},
+            None,
+        ),
+        # 週次の残りの週: UTC 03-08 日曜 15:30 は JST 03-09 月曜で、水曜より前の新しい週
+        (
+            _WEEKLY_REST,
+            datetime(2026, 3, 8, 15, 30, tzinfo=timezone.utc),
+            {2},
+            None,
+        ),
+        # 週次の残りの週: UTC 03-03 火曜 21:00 は JST 03-04 水曜 06:00
+        (
+            _WEEKLY_REST,
+            datetime(2026, 3, 3, 21, 0, tzinfo=timezone.utc),
+            {2},
+            datetime(2026, 3, 4, 6, 0, tzinfo=_JST),
+        ),
+        # 月次: UTC 03-14 15:00 は JST 03-15 00:00 で、day の当日
+        (
+            {"hour": 7, "minute": 0, "period": "monthly", "day": 15},
+            datetime(2026, 3, 14, 15, 0, tzinfo=timezone.utc),
+            set(),
+            datetime(2026, 3, 15, 7, 0, tzinfo=_JST),
+        ),
+    ],
+)
+def test_utc_now_gives_same_scheduled_time_as_jst(config, now, weekdays, expected):
+    result = scheduled_datetime_for_recovery(config, now, weekdays)
+    assert result == expected
+    if expected is not None:
+        # 返す定時は JST の壁時計の時と分を持つ
+        assert (result.hour, result.minute) == (expected.hour, expected.minute)
+        assert scheduled_datetime_for_recovery(config, now.astimezone(_JST), weekdays) == result
+
+
+def test_naive_now_is_used_as_is():
+    # tz の無い時刻は今までどおりそのまま使う（プロセスの時計の解釈に頼らない）
+    now = datetime(2026, 3, 3, 9, 0)
+    assert scheduled_datetime_for_recovery({"hour": 8, "minute": 50}, now, {1}) == datetime(
+        2026, 3, 3, 8, 50
+    )
+
+
 # --- warn_scheduled_start_past_cutoff ---
 
 
