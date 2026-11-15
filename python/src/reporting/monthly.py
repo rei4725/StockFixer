@@ -26,6 +26,7 @@ from src.reporting.kpi import (
     predicted_jst_date,
     window_start_jst,
 )
+from src.reporting.monthly_market_baseline import BaselineFn, market_baseline_lines
 from src.reporting.types import MonthlyReportSummary
 from src.utils.data_path_utils import get_results_dir
 from src.utils.logger import get_logger
@@ -99,9 +100,12 @@ def _load_window_accuracy(analytics: AnalyticsQuery, days: int = _REPORT_DAYS) -
         limit *= 2
 
 
-def _load_monthly_kpis(analytics: AnalyticsQuery) -> MonthlyKPI:
+def _load_monthly_kpis(
+    analytics: AnalyticsQuery, accuracy_df: Optional[pd.DataFrame] = None
+) -> MonthlyKPI:
     """AnalyticsQuery から補助 KPI の材料を取得し、kpi.get_monthly_kpis で集約する。
 
+    accuracy_df は読み込み済みの窓（_load_window_accuracy の戻り値）。省略時はここで読む。
     diff_summary の取得失敗だけは握りつぶして None（＝データなし）として扱う。
     精度・ドリフトの取得失敗は空の表にせず呼び出し元へ伝播させ、
     「データなし・ドリフト0件」のレポートを保存しない（#1306）。
@@ -113,7 +117,7 @@ def _load_monthly_kpis(analytics: AnalyticsQuery) -> MonthlyKPI:
         diff_summary = None
     return get_monthly_kpis(
         diff_summary=diff_summary,
-        accuracy_df=_load_window_accuracy(analytics),
+        accuracy_df=_load_window_accuracy(analytics) if accuracy_df is None else accuracy_df,
         drift_df=analytics.drift_summary(horizon=1, recent_n=_REPORT_DAYS, raise_on_error=True),
         drift_thresholds=load_drift_thresholds(),
     )
@@ -186,6 +190,7 @@ def save_monthly_report_to_file(
     drift_checker: Optional[Callable[[], Any]] = None,
     *,
     analytics: AnalyticsQuery,
+    baseline_fn: Optional[BaselineFn] = None,
 ) -> str:
     """
     月次KPIサマリーを Markdown ファイルとして保存する（R-203）。
@@ -196,6 +201,7 @@ def save_monthly_report_to_file(
         summary: run_monthly_report() が返す MonthlyReportSummary
         drift_checker: 週次 Hit Rate ドリフト検査を実行するコールバック（省略可）
         analytics: paper/real 乖離・予測精度・ドリフトの読み取りポート
+        baseline_fn: 基準の物差し（prediction.baseline_metrics）。合成ルートが渡す（#1816）
 
     Returns:
         保存先ファイルパス
@@ -211,7 +217,8 @@ def save_monthly_report_to_file(
         return f"{val:.2f}" if val is not None else "N/A"
 
     # paper/real 乖離サマリー・ドリフト集計
-    _kpi = _load_monthly_kpis(analytics)
+    accuracy_df = _load_window_accuracy(analytics)
+    _kpi = _load_monthly_kpis(analytics, accuracy_df)
     diff = _kpi.diff_summary
     drift_count = _kpi.drift_count
     # 件数が0のときの平均はアダプタが 0.0 で補った値なので、計測値として出さない
@@ -274,6 +281,7 @@ def save_monthly_report_to_file(
         f"| 集計銘柄数 | {summary.symbol_count or 'N/A'} |",
         f"| WF スナップショット | {summary.wf_snapshot_file or 'N/A'} |",
         "",
+        *market_baseline_lines(accuracy_df, baseline_fn),
         *weekly_lines,
         "## paper/real 乖離（直近30日）",
         "",
