@@ -16,13 +16,14 @@ import pandas as pd
 from config.data import MAX_DATA_WORKERS
 from config.settings import SENTIMENT_LOOKBACK_DAYS, STALE_BARS_MAX_WEEKDAYS
 from src.domain.jp_market_holidays import is_jp_business_day
-from src.domain.ports import AlertLevel, NotificationPort
+from src.domain.ports import NotificationPort
 from src.market_data.adapters.wikipedia_pageviews import resolve_article
 from src.market_data.bar_close import drop_unclosed_bars
 from src.market_data.base import DataSourceBase
 from src.market_data.batch_db_write import has_price_step
 from src.market_data.batch_db_write import log_pipeline_summary as _log_pipeline_summary
 from src.market_data.batch_db_write import write_batch_to_db
+from src.market_data.feature_save import _notify_quality_issues, save_features_to_db
 from src.market_data.loader import (
     fetch_cross_asset_features,
     get_raw_ohlcv_from_db,
@@ -56,8 +57,7 @@ from src.market_data.wikipedia_features import (
     pageviews_stale,
 )
 from src.utils.data_path_utils import get_ticker, normalize_col
-from src.utils.db import delete_stock_features, upsert_stock_features
-from src.utils.db.symbol_master import symbol_name_suffix
+from src.utils.db import delete_stock_features
 from src.utils.logger import get_logger
 
 from src.market_data.latest_feature_row import (  # noqa: F401  # isort: skip
@@ -391,64 +391,6 @@ def _count_weekdays_behind(db_latest_date: pd.Timestamp, end_date: str, market: 
     if market == "jp":
         return sum(1 for day in days if is_jp_business_day(day.date()))
     return len(days)
-
-
-def save_features_to_db(
-    market: str,
-    symbol: str,
-    data,
-    quality_result: QualityCheckResult = None,
-    notification_port: "NotificationPort | None" = None,
-) -> None:
-    """
-    特徴量DataFrameをDBに保存する（逐次実行用）。
-
-    Args:
-        market: マーケット識別子
-        symbol: 銘柄シンボル
-        data: 特徴量DataFrame
-        quality_result: データ品質チェック結果（Noneの場合はスキップ）
-        notification_port: 通知ポート（Noneの場合は Discord 通知なし）
-    """
-    upsert_stock_features(market, symbol, data)
-    logger.info(f"DB保存完了: {market}_{symbol}")
-    if quality_result is not None and quality_result.issues:
-        _notify_quality_issues(market, symbol, quality_result, notification_port)
-
-
-def _notify_quality_issues(
-    market: str,
-    symbol: str,
-    quality_result: QualityCheckResult,
-    notification_port: "NotificationPort | None" = None,
-) -> None:
-    """品質チェック結果をDBに記録し、通知が必要なものを notification_port 経由で送る。"""
-    from src.utils.db.quality_log import insert_quality_log
-
-    issues_dicts = [
-        {"check": i.check, "level": i.level, "detail": i.detail} for i in quality_result.issues
-    ]
-    try:
-        insert_quality_log(market, symbol, issues_dicts)
-    except Exception as e:
-        logger.error(f"品質ログ記録エラー: {e}", exc_info=True)
-
-    # エラーまたは上場廃止疑い（zero_volume）のみ Discord 通知
-    notify_issues = [
-        i for i in quality_result.issues if i.level == "error" or i.check == "zero_volume"
-    ]
-    if not notify_issues or notification_port is None:
-        return
-
-    level = (
-        AlertLevel.ERROR if any(i.level == "error" for i in notify_issues) else AlertLevel.WARNING
-    )
-    title = f"[データ品質] {market}/{symbol}{symbol_name_suffix(market, symbol)}"
-    message = "\n".join(f"・{i.detail}" for i in notify_issues)
-    try:
-        notification_port.send_alert(title=title, message=message, level=level)
-    except Exception as e:
-        logger.error(f"品質チェック Discord通知エラー: {e}", exc_info=True)
 
 
 def save_stock_data_with_features(

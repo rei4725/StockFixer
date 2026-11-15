@@ -107,7 +107,7 @@ class TestExplainPredictionShap(unittest.TestCase):
     def test_returns_none_when_shap_not_installed(self):
         import builtins
 
-        from src.prediction.predict_single import explain_prediction_shap
+        from src.prediction.shap_explain import explain_prediction_shap
 
         original_import = builtins.__import__
 
@@ -121,12 +121,12 @@ class TestExplainPredictionShap(unittest.TestCase):
         self.assertIsNone(result)
 
     def test_returns_none_when_model_not_found(self):
-        from src.prediction.predict_single import explain_prediction_shap
+        from src.prediction.shap_explain import explain_prediction_shap
 
         mock_shap = MagicMock()
 
         with (
-            patch("src.prediction.predict_single.get_models_subdir", return_value="/nonexistent"),
+            patch("src.prediction.shap_explain.get_models_subdir", return_value="/nonexistent"),
             patch.dict("sys.modules", {"shap": mock_shap}),
         ):
             result = explain_prediction_shap("jp", "7203")
@@ -250,7 +250,7 @@ class TestExplainPredictionShapBody(unittest.TestCase):
 
         import numpy as np
 
-        from src.prediction.predict_single import explain_prediction_shap
+        from src.prediction.shap_explain import explain_prediction_shap
 
         df = _make_df()
 
@@ -286,10 +286,10 @@ class TestExplainPredictionShapBody(unittest.TestCase):
             mock_port.create_basic_lag_features.return_value = (X_df, pd.Series())
             with (
                 patch.dict("sys.modules", {"shap": mock_shap}),
-                patch("src.prediction.predict_single.get_models_subdir", return_value=tmpdir),
-                patch("src.prediction.predict_single.get_market_data_port", return_value=mock_port),
-                patch("src.prediction.predict_single.ModelManager", return_value=mock_mm),
-                patch("src.prediction.predict_single.normalize_col", side_effect=lambda x: x),
+                patch("src.prediction.shap_explain.get_models_subdir", return_value=tmpdir),
+                patch("src.prediction.shap_explain.get_market_data_port", return_value=mock_port),
+                patch("src.prediction.shap_explain.ModelManager", return_value=mock_mm),
+                patch("src.prediction.shap_explain.normalize_col", side_effect=lambda x: x),
             ):
                 result = explain_prediction_shap("jp", "7203")
 
@@ -300,7 +300,7 @@ class TestExplainPredictionShapBody(unittest.TestCase):
     def test_returns_none_when_data_empty(self):
         import tempfile
 
-        from src.prediction.predict_single import explain_prediction_shap
+        from src.prediction.shap_explain import explain_prediction_shap
 
         mock_shap = MagicMock()
 
@@ -313,8 +313,8 @@ class TestExplainPredictionShapBody(unittest.TestCase):
             mock_port.get_stock_data.return_value = pd.DataFrame()
             with (
                 patch.dict("sys.modules", {"shap": mock_shap}),
-                patch("src.prediction.predict_single.get_models_subdir", return_value=tmpdir),
-                patch("src.prediction.predict_single.get_market_data_port", return_value=mock_port),
+                patch("src.prediction.shap_explain.get_models_subdir", return_value=tmpdir),
+                patch("src.prediction.shap_explain.get_market_data_port", return_value=mock_port),
             ):
                 result = explain_prediction_shap("jp", "7203")
 
@@ -398,7 +398,7 @@ class TestPredictUsesLatestRow(unittest.TestCase):
         self.assertEqual(captured[0].index[-1], df.index[-2])
 
     def test_explain_prediction_shap_uses_last_day_row(self):
-        from src.prediction.predict_single import explain_prediction_shap
+        from src.prediction.shap_explain import explain_prediction_shap
 
         df = _make_df()
         captured: list = []
@@ -414,13 +414,13 @@ class TestPredictUsesLatestRow(unittest.TestCase):
                 f.write(b"dummy")
             with (
                 patch.dict("sys.modules", {"shap": mock_shap}),
-                patch("src.prediction.predict_single.get_models_subdir", return_value=tmpdir),
+                patch("src.prediction.shap_explain.get_models_subdir", return_value=tmpdir),
                 patch(
-                    "src.prediction.predict_single.get_market_data_port",
+                    "src.prediction.shap_explain.get_market_data_port",
                     return_value=_make_real_lag_port(df),
                 ),
-                patch("src.prediction.predict_single.ModelManager", return_value=mock_mm),
-                patch("src.prediction.predict_single.normalize_col", side_effect=lambda x: x),
+                patch("src.prediction.shap_explain.ModelManager", return_value=mock_mm),
+                patch("src.prediction.shap_explain.normalize_col", side_effect=lambda x: x),
             ):
                 result = explain_prediction_shap("jp", "7203", horizon=3)
 

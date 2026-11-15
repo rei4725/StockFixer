@@ -50,7 +50,8 @@ from src.orchestration.jobs.weekly import (
 from src.orchestration.port_wiring import wire_ports
 from src.orchestration.types import PipelineStage
 from src.prediction.manager import ModelManager
-from src.prediction.predict_single import explain_prediction_shap, predict_single_stock
+from src.prediction.predict_single import predict_single_stock
+from src.prediction.shap_explain import explain_prediction_shap
 from src.reporting.query_service import register_prediction_fns
 from src.utils.logger import get_logger
 

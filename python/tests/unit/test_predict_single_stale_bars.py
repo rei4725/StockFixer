@@ -114,7 +114,7 @@ class TestPredictSingleStockStaleBars(unittest.TestCase):
 
 class TestExplainPredictionShapStaleBars(unittest.TestCase):
     def _explain(self, df: pd.DataFrame):
-        from src.prediction.predict_single import explain_prediction_shap
+        from src.prediction.shap_explain import explain_prediction_shap
 
         mock_mm = _make_mm()
         mock_shap = MagicMock()
@@ -126,13 +126,13 @@ class TestExplainPredictionShapStaleBars(unittest.TestCase):
                 f.write(b"dummy")
             with (
                 patch.dict("sys.modules", {"shap": mock_shap}),
-                patch("src.prediction.predict_single.get_models_subdir", return_value=tmpdir),
+                patch("src.prediction.shap_explain.get_models_subdir", return_value=tmpdir),
                 patch(
-                    "src.prediction.predict_single.get_market_data_port",
+                    "src.prediction.shap_explain.get_market_data_port",
                     return_value=_make_port(df),
                 ),
-                patch("src.prediction.predict_single.ModelManager", return_value=mock_mm),
-                patch("src.prediction.predict_single.normalize_col", side_effect=lambda x: x),
+                patch("src.prediction.shap_explain.ModelManager", return_value=mock_mm),
+                patch("src.prediction.shap_explain.normalize_col", side_effect=lambda x: x),
             ):
                 return explain_prediction_shap("jp", "5202")
 
