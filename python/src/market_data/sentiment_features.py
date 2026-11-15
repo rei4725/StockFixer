@@ -164,7 +164,7 @@ def _build_score_fn(use_llm: bool) -> Callable[[list[str]], float]:
     if not use_llm:
         return _score_titles
 
-    from src.market_data.adapters.llm_sentiment import OllamaClient  # noqa: PLC0415
+    from src.utils.ollama_client import OllamaClient  # noqa: PLC0415
 
     client = OllamaClient()
     if not client.is_available:

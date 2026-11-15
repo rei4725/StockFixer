@@ -214,7 +214,7 @@ class TestFetchNewsSentimentWithLlm(unittest.TestCase):
         self.assertIsNone(result)
 
     @patch("src.market_data.sentiment_features._fetch_news_articles")
-    @patch("src.market_data.adapters.llm_sentiment.OllamaClient")
+    @patch("src.utils.ollama_client.OllamaClient")
     def test_uses_llm_when_available(self, mock_client_cls, mock_fetch):
         """Ollama が接続可能なとき LLM スコアが使われる"""
         mock_fetch.return_value = {"2024-01-02": ["Apple surges on record earnings"]}
@@ -232,7 +232,7 @@ class TestFetchNewsSentimentWithLlm(unittest.TestCase):
         mock_client.score.assert_called_once()
 
     @patch("src.market_data.sentiment_features._fetch_news_articles")
-    @patch("src.market_data.adapters.llm_sentiment.OllamaClient")
+    @patch("src.utils.ollama_client.OllamaClient")
     def test_falls_back_to_keywords_when_ollama_unavailable(self, mock_client_cls, mock_fetch):
         """Ollama が接続できないときキーワードマッチにフォールバックする"""
         mock_fetch.return_value = {
@@ -252,7 +252,7 @@ class TestFetchNewsSentimentWithLlm(unittest.TestCase):
         mock_client.score.assert_not_called()
 
     @patch("src.market_data.sentiment_features._fetch_news_articles")
-    @patch("src.market_data.adapters.llm_sentiment.OllamaClient")
+    @patch("src.utils.ollama_client.OllamaClient")
     def test_falls_back_to_keywords_when_llm_returns_none(self, mock_client_cls, mock_fetch):
         """LLM が None を返した場合（タイムアウト等）にキーワードマッチで補完する"""
         mock_fetch.return_value = {"2024-01-02": ["Market crash and decline continues"]}
@@ -270,7 +270,7 @@ class TestFetchNewsSentimentWithLlm(unittest.TestCase):
         self.assertLess(result["sentiment_score"].iloc[0], 0.0)
 
     @patch("src.market_data.sentiment_features._fetch_news_articles")
-    @patch("src.market_data.adapters.llm_sentiment.OllamaClient")
+    @patch("src.utils.ollama_client.OllamaClient")
     def test_score_clamped_to_valid_range(self, mock_client_cls, mock_fetch):
         """LLM スコアが -1.0〜1.0 の範囲に収まる"""
         mock_fetch.return_value = {"2024-01-02": ["some news"]}
@@ -288,7 +288,7 @@ class TestFetchNewsSentimentWithLlm(unittest.TestCase):
         self.assertLessEqual(score, 1.0)
 
     @patch("src.market_data.sentiment_features._fetch_news_articles")
-    @patch("src.market_data.adapters.llm_sentiment.OllamaClient")
+    @patch("src.utils.ollama_client.OllamaClient")
     def test_multiple_dates_scored_independently(self, mock_client_cls, mock_fetch):
         """複数日のニュースが日付別に独立してスコアリングされる"""
         mock_fetch.return_value = {
@@ -321,7 +321,7 @@ class TestFetchNewsSentimentWithLlmJp(unittest.TestCase):
         mock_fetch_jp.assert_called_once_with("7203", "2024-01-01", "2024-01-31")
 
     @patch("src.market_data.sentiment_features._fetch_jp_disclosure_titles")
-    @patch("src.market_data.adapters.llm_sentiment.OllamaClient")
+    @patch("src.utils.ollama_client.OllamaClient")
     def test_jp_market_uses_edinet_titles(self, mock_client_cls, mock_fetch_jp):
         """JP 市場では EDINET 開示タイトルが LLM スコアリングに使われる"""
         mock_fetch_jp.return_value = {"2024-01-02": ["上方修正のお知らせ"]}
@@ -348,7 +348,7 @@ class TestFetchNewsSentimentWithLlmJp(unittest.TestCase):
         mock_fetch_us.assert_called_once()
 
     @patch("src.market_data.sentiment_features._fetch_jp_disclosure_titles")
-    @patch("src.market_data.adapters.llm_sentiment.OllamaClient")
+    @patch("src.utils.ollama_client.OllamaClient")
     def test_jp_market_falls_back_to_keywords_when_ollama_unavailable(
         self, mock_client_cls, mock_fetch_jp
     ):

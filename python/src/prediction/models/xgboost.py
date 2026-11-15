@@ -5,8 +5,8 @@ import xgboost as xgb
 from sklearn.exceptions import NotFittedError
 from sklearn.utils.validation import check_is_fitted
 
-from src.prediction.models.base import BaseModel
 from src.utils.logger import get_logger
+from src.utils.ml_base import BaseModel
 
 logger = get_logger(__name__)
 
