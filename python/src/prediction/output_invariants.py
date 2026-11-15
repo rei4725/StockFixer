@@ -25,6 +25,11 @@ logger = get_logger(__name__)
 # A-2: model_count が期待値未満の銘柄が占める割合。これ以上で違反。
 DEGRADED_SYMBOL_RATIO_THRESHOLD = 0.5
 
+# A-4: 市場ごとに同じ符号の予想が占める割合。これ以上で違反（#1814）。
+SAME_DIRECTION_RATIO_THRESHOLD = 0.95
+# A-4 を見る市場の銘柄数の下限。少ない銘柄では片側に寄るのが偶然でも起きるため。
+SAME_DIRECTION_MIN_SYMBOLS = 20
+
 # B-1: 予測銘柄数の減少率。これ以上で違反（増加は鳴らさない）。
 SYMBOL_COUNT_DROP_THRESHOLD = 0.2
 
@@ -188,6 +193,41 @@ def _check_absolute(
                 )
             )
 
+    violations.extend(_check_same_direction(output_rows))
+    return violations
+
+
+def _check_same_direction(output_rows: Sequence[PredictionResult]) -> list[InvariantViolation]:
+    """A-4: 市場ごとに、上げか下げの片方の予想が大半を占めた形を見る。
+
+    B-3 はばらつき 0 しか見ないため、値はばらつくが全銘柄が同じ向きの形
+    （11-13 に上げ 99%）を見落とす。0 の予想はどちらの向きにも数えない。
+    """
+    by_market: dict[str, list[float]] = {}
+    for r in output_rows:
+        by_market.setdefault(r.market, []).append(r.diff_ratio)
+
+    violations: list[InvariantViolation] = []
+    for market in sorted(by_market):
+        ratios = by_market[market]
+        total = len(ratios)
+        if total < SAME_DIRECTION_MIN_SYMBOLS:
+            continue
+        up = sum(1 for d in ratios if d > 0)
+        down = sum(1 for d in ratios if d < 0)
+        majority, label = (up, "上げ") if up >= down else (down, "下げ")
+        ratio = majority / total
+        if ratio >= SAME_DIRECTION_RATIO_THRESHOLD:
+            violations.append(
+                InvariantViolation(
+                    violation_id="A-4",
+                    description=(
+                        f"{market} の予想が同じ向きに偏った: {majority}/{total} 銘柄が{label}"
+                    ),
+                    observed=ratio,
+                    threshold=SAME_DIRECTION_RATIO_THRESHOLD,
+                )
+            )
     return violations
 
 

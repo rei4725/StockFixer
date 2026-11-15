@@ -8,12 +8,12 @@ import joblib
 import pandas as pd
 
 from src.domain.ports import AlertLevel, NotificationPort
-from src.prediction.models.base import BaseModel
 from src.prediction.models.lightgbm import LightGBMModel
 from src.prediction.models.transformer_model import TransformerModel
 from src.prediction.models.xgboost import XGBoostModel
 from src.utils.data_path_utils import ensure_dir, get_models_dir, get_models_subdir
 from src.utils.logger import get_logger
+from src.utils.ml_base import BaseModel
 
 logger = get_logger(__name__)
 

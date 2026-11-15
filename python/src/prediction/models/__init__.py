@@ -1,9 +1,9 @@
 from enum import Enum
 
-from src.prediction.models.base import BaseModel
 from src.prediction.models.lightgbm import LightGBMModel
 from src.prediction.models.transformer_model import TransformerModel
 from src.prediction.models.xgboost import XGBoostModel
+from src.utils.ml_base import BaseModel
 
 
 class ModelType(str, Enum):

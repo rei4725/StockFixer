@@ -281,8 +281,11 @@ class TestMonthlyReportJobCompositionRoot(unittest.TestCase):
                 symbol_count=None,
             )
 
-        def _fake_save_monthly_report_to_file(summary, drift_checker=None, *, analytics):
+        def _fake_save_monthly_report_to_file(
+            summary, drift_checker=None, *, analytics, baseline_fn=None
+        ):
             captured["save_monthly_report_to_file_analytics"] = analytics
+            captured["baseline_fn"] = baseline_fn
             return "results/monthly/2026-09_report.md"
 
         with patch(
@@ -303,6 +306,10 @@ class TestMonthlyReportJobCompositionRoot(unittest.TestCase):
         self.assertIsInstance(analytics_for_run, PostgresAnalyticsQuery)
         self.assertIsInstance(analytics_for_save, PostgresAnalyticsQuery)
         self.assertIs(analytics_for_run, analytics_for_save)
+        # 月報の市場別の節は prediction の物差しを合成ルートから受け取る（#1816）
+        from src.prediction.baseline_metrics import baseline_metrics
+
+        self.assertIs(captured.get("baseline_fn"), baseline_metrics)
 
 
 class TestRunHorizonExitCheckCompositionRoot(unittest.TestCase):
