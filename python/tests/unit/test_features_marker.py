@@ -77,21 +77,21 @@ _GAP_CASES = [
         {"jp": 10},
         True,
     ),
-    # ちょうど線の上（2/10）。line = 1 - 0.8 は浮動小数で 0.19999999999999996 になり、
-    # 0.2 > line が真のため、今のコードは文を返す（印を書かない）。今の動きを固定する（#1835）
+    # ちょうど線の上（2/10）は線の内として書く側（#1843）。前は line = 1 - 0.8 が浮動小数で
+    # 0.19999999999999996 になり、0.2 > line が真のため線の上も書かなかった（#1835 で固定していた）
     (
         "全体のちょうど線の上",
         10,
         _batch(skipped=_skips("us", 1, as_dict=True), failed=_fails("us", 1)),
         {"us": 10},
-        True,
+        False,
     ),
     (
         "jp のちょうど線の上",
         100,
         _batch(skipped=_skips("jp", 1, as_dict=False), failed=_fails("jp", 1)),
         {"jp": 10, "us": 90},
-        True,
+        False,
     ),
 ]
 
@@ -128,6 +128,24 @@ def save_spy(monkeypatch) -> MagicMock:
 def test_if_covered_writes_once_inside_line(save_spy):
     batch = _batch(skipped=_skips("jp", 1, as_dict=True), failed=_fails("us", 1))
     fm.record_features_version_if_covered("v1", 100, batch, {"jp": 10, "us": 90})
+    save_spy.assert_called_once_with("v1")
+
+
+@pytest.mark.parametrize(
+    "total,batch,market_totals",
+    [
+        (10, _batch(skipped=_skips("us", 1, as_dict=True), failed=_fails("us", 1)), {"us": 10}),
+        (
+            100,
+            _batch(skipped=_skips("jp", 1, as_dict=False), failed=_fails("jp", 1)),
+            {"jp": 10, "us": 90},
+        ),
+    ],
+    ids=["全体のちょうど線の上", "jp のちょうど線の上"],
+)
+def test_if_covered_writes_on_exact_line(save_spy, total, batch, market_totals):
+    """ちょうど 20% の回は線を超えていないので印を書く（#1843）。"""
+    fm.record_features_version_if_covered("v1", total, batch, market_totals)
     save_spy.assert_called_once_with("v1")
 
 
