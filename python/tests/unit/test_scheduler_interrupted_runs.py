@@ -246,7 +246,7 @@ def test_weekly_optimization_stops_after_limit_of_interruptions(tmp_path):
 
 
 def test_only_weekly_optimization_has_more_interrupted_reruns(tmp_path):
-    """ほかのジョブは消えた回の補完が1回までのままであること（#1522）"""
+    """続きから進む週の2つのほかは、消えた回の補完が1回までのままであること（#1522・#1931）"""
     from run_scheduler import SCHEDULE_CONFIG
 
     raised = [
@@ -254,17 +254,17 @@ def test_only_weekly_optimization_has_more_interrupted_reruns(tmp_path):
         for job_id, config in SCHEDULE_CONFIG.items()
         if "max_interrupted_reruns_per_period" in config
     ]
-    assert raised == ["weekly_optimization"]
+    assert raised == ["weekly_optimization", "weekly_walk_forward_report"]
 
     state_path = tmp_path / "state.json"
-    _write_started(state_path, "weekly_walk_forward_report", "2026-W45", "run-a", "boot-a")
-    _write_started(state_path, "weekly_walk_forward_report", "2026-W45", "run-b", "boot-b")
+    _write_started(state_path, "weekly_db_maintenance", "2026-W45", "run-a", "boot-a")
+    _write_started(state_path, "weekly_db_maintenance", "2026-W45", "run-b", "boot-b")
     manager = SchedulerQueueManager(SCHEDULE_CONFIG, state_file_path=str(state_path))
 
-    # 2026-11-05 は木曜。01:00 + 30分を過ぎた時刻
-    now = datetime(2026, 11, 5, 2, 0, tzinfo=manager.tz)
-    assert manager.should_recover("weekly_walk_forward_report", now=now) is False
-    assert manager.get_execution_count("weekly_walk_forward_report", "2026-W45") == 1
+    # 2026-11-07 は土曜。03:00 + 30分を過ぎた時刻
+    now = datetime(2026, 11, 7, 4, 0, tzinfo=manager.tz)
+    assert manager.should_recover("weekly_db_maintenance", now=now) is False
+    assert manager.get_execution_count("weekly_db_maintenance", "2026-W45") == 1
 
 
 def test_run_in_progress_in_same_process_is_not_recovered(tmp_path):

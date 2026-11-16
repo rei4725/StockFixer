@@ -36,9 +36,12 @@ def _lost_run(job_id: str, period_key: str, index: int, started_at: str) -> dict
     }
 
 
-def _manager(tmp_path: Path, job_id: str, events: list[dict]) -> SchedulerQueueManager:
+def _manager(
+    tmp_path: Path, job_id: str, events: list[dict], **overrides: object
+) -> SchedulerQueueManager:
     config = dict(run_scheduler.SCHEDULE_CONFIG[job_id])
     config["func"] = MagicMock()
+    config.update(overrides)
     state_path = tmp_path / "state.json"
     state_path.write_text(json.dumps({"events": events}), encoding="utf-8")
     return SchedulerQueueManager({job_id: config}, state_file_path=str(state_path))
@@ -71,7 +74,8 @@ def test_rerun_job_beyond_forgiven_says_not_recovered(tmp_path, caplog):
         _lost_run(_WF, period_key, 0, "2026-11-04T16:00:00+00:00"),
         _lost_run(_WF, period_key, 1, "2026-11-04T17:00:00+00:00"),
     ]
-    manager = _manager(tmp_path, _WF, events)
+    # W45 の当時の数えない枠1で確かめる。今の枠は #1931 で増えた
+    manager = _manager(tmp_path, _WF, events, max_interrupted_reruns_per_period=1)
     now = datetime(2026, 11, 5, 15, 18, tzinfo=_JST)
 
     with caplog.at_level(logging.WARNING, logger="scheduler"):
@@ -90,7 +94,7 @@ def test_rerun_job_beyond_forgiven_says_not_recovered(tmp_path, caplog):
 def test_rerun_job_within_forgiven_still_says_recovered(tmp_path, caplog):
     period_key = "2026-W45"
     events = [_lost_run(_WF, period_key, 0, "2026-11-04T16:00:00+00:00")]
-    manager = _manager(tmp_path, _WF, events)
+    manager = _manager(tmp_path, _WF, events, max_interrupted_reruns_per_period=1)
     now = datetime(2026, 11, 5, 15, 18, tzinfo=_JST)
 
     with caplog.at_level(logging.WARNING, logger="scheduler"):
