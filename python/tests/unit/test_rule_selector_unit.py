@@ -723,8 +723,8 @@ class TestHeldSymbolKeepsRuleBest(_HeldRowsCase):
         self.assertEqual(summary["skipped"], 2)
 
 
-class TestHeldRowIsSellOnly(_HeldRowsCase):
-    """保有中だからと残した行は売りだけにし、その行から新規買いを出さない（#1797）。"""
+class _HeldSellOnlyCase(_HeldRowsCase):
+    """売りだけの印と、その行からのシグナルと発注を確かめる土台（#1797・#1801）。"""
 
     def _sell_only(self) -> dict[str, bool]:
         from src.utils.db.rule_results import load_effective_rules
@@ -782,6 +782,10 @@ class TestHeldRowIsSellOnly(_HeldRowsCase):
         ):
             evaluate_all_symbols("jp", "2024-01-01", "2024-12-31")
 
+
+class TestHeldRowIsSellOnly(_HeldSellOnlyCase):
+    """保有中だからと残した行は売りだけにし、その行から新規買いを出さない（#1797）。"""
+
     def test_no_valid_rule_held_row_is_sell_only_and_buy_day_places_no_order(self) -> None:
         self._hold(self.HELD)
         self._evaluate()
@@ -836,6 +840,93 @@ class TestHeldRowIsSellOnly(_HeldRowsCase):
         self.assertIn((self.HELD, 1), [(s["symbol"], s["signal"]) for s in signals])
         result, _ = self._execute([s for s in signals if s["symbol"] == self.HELD], positions=[])
         self.assertEqual(result["buy_orders"], 1)
+
+
+# win_rate の順（run_rule_backtest の並び）。どれも有効ルールの線に届かない
+_LOSING_RANKED = [
+    _mock_result("bollinger_band", 0.45, -1000),
+    _mock_result("golden_cross", 0.3, -5000),
+]
+
+
+class TestHeldSymbolWithoutRowGetsSellOnlyRow(_HeldSellOnlyCase):
+    """行の無い保有中の銘柄に、その回の先頭のルールで売りだけの行を作る（#1801、3350 の形）。"""
+
+    def setUp(self) -> None:
+        from src.utils.db.rule_results import delete_rule_best
+
+        super().setUp()
+        delete_rule_best(market="jp", symbol=self.HELD)
+        delete_rule_best(market="jp", symbol=self.NOT_HELD)
+
+    def _row(self, symbol: str) -> dict[str, Any]:
+        from src.utils.db.rule_results import load_effective_rules
+
+        df = load_effective_rules("jp")
+        rows = df[df["symbol"] == symbol]
+        self.assertEqual(len(rows), 1)
+        return dict(rows.iloc[0])
+
+    def test_held_symbol_without_row_gets_sell_only_row_and_sells(self) -> None:
+        self._hold(self.HELD)
+        summary = self._evaluate_with_results(_LOSING_RANKED)
+        row = self._row(self.HELD)
+        self.assertEqual(row["best_rule"], "bollinger_band")
+        self.assertTrue(bool(row["sell_only"]))
+        self.assertAlmostEqual(float(row["win_rate"]), 0.45)
+        self.assertEqual(int(row["num_trades"]), 10)
+        self.assertNotIn(self.NOT_HELD, self._rows())
+        self.assertEqual(summary["skipped"], 2)
+        self.assertEqual(summary["errors"], 0)
+
+        signals = self._signals((-1, 1100.0))
+        self.assertEqual([(s["symbol"], s["signal"]) for s in signals], [(self.HELD, -1)])
+        result, broker = self._execute(signals, positions=[{"symbol": self.HELD, "qty": 100}])
+        self.assertEqual(result["sell_orders"], 1)
+        self.assertEqual(broker.send_order.call_args.kwargs["side"].name, "SELL")
+
+    def test_created_row_places_no_new_buy(self) -> None:
+        self._hold(self.HELD)
+        self._evaluate_with_results(_LOSING_RANKED)
+        self._clear_positions()
+        signals = self._signals((1, 1000.0))
+        self.assertEqual([(s["symbol"], s["signal"]) for s in signals], [(self.HELD, 0)])
+        result, broker = self._execute(signals, positions=[])
+        self.assertEqual(result["buy_orders"], 0)
+        broker.send_order.assert_not_called()
+
+    def test_existing_held_row_keeps_its_rule(self) -> None:
+        """行がある保有中の銘柄は、今までどおり前のルールのまま印だけ立てる（#1797）。"""
+        self._hold(self.OFF_HELD)
+        self._evaluate_with_results(_LOSING_RANKED, symbols=[self.OFF_HELD])
+        row = self._row(self.OFF_HELD)
+        self.assertEqual(row["best_rule"], "golden_cross")
+        self.assertAlmostEqual(float(row["win_rate"]), 0.7)
+        self.assertTrue(bool(row["sell_only"]))
+
+    def test_empty_results_create_no_row(self) -> None:
+        self._hold(self.HELD)
+        self._evaluate_with_results([])
+        self.assertNotIn(self.HELD, self._rows())
+
+    def test_unreadable_positions_create_no_row(self) -> None:
+        with patch(
+            "src.backtest.rule_selector.load_held_symbols",
+            side_effect=RuntimeError("db error"),
+        ):
+            self._evaluate_with_results(_LOSING_RANKED)
+        self.assertFalse({self.HELD, self.NOT_HELD} & self._rows())
+
+    def _evaluate_with_results(
+        self, results: list[dict[str, Any]], symbols: list[str] | None = None
+    ) -> dict[str, Any]:
+        from src.backtest.rule_selector import evaluate_all_symbols
+
+        with (
+            patch("src.backtest.rule_selector._WATCHLIST_PATH", self.watchlist_path),
+            patch("src.backtest.rule_selector.run_rule_backtest", return_value=results),
+        ):
+            return evaluate_all_symbols("jp", "2024-01-01", "2024-12-31", symbols=symbols)
 
 
 class TestRunRuleBacktestWithoutRaising(unittest.TestCase):
