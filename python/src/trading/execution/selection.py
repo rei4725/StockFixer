@@ -52,9 +52,16 @@ def _select_buy_signals(
     """新規買いの候補に業種の上限と1回の発注の上限を当てる。選び方と順は変えない（#1770）。
 
     業種の上限で落とした候補は sector_cap、head で落とした候補は max_orders_per_run に数える
-    （鍵は 16:30 の RuleGateRecord とそろえる）。
+    （鍵は 16:30 の RuleGateRecord とそろえる）。業種の上限で落とした候補の業種ごとの数は
+    sector_cap_by_sector に足す（#1908）。
     """
-    limited = _apply_buy_sector_limit(candidates, held_symbols=held_symbols, market=market)
+    dropped_by_sector = stats.setdefault("sector_cap_by_sector", {})
+    limited = _apply_buy_sector_limit(
+        candidates,
+        held_symbols=held_symbols,
+        market=market,
+        dropped_by_sector=dropped_by_sector,
+    )
     _count_dropped(stats, len(candidates) - len(limited), "sector_cap", "業種の上限")
     return _cap_per_run(limited, stats)
 
@@ -64,10 +71,13 @@ def _apply_buy_sector_limit(
     max_sector_positions: int = MAX_SECTOR_POSITIONS,
     held_symbols: Iterable[str] = (),
     market: str = "jp",
+    dropped_by_sector: dict[str, int] | None = None,
 ) -> pd.DataFrame:
     """買い候補に同一セクター上限を適用する。
 
     held_symbols を渡すと、保有中の銘柄の業種の数と候補の数の和で上限を判定する（#908）。
+    dropped_by_sector を渡すと、上限で落とした候補の業種ごとの数を足す。業種は判定で
+    引いたものを使い、引き直さない（#1908）。
     """
     if predictions.empty or max_sector_positions <= 0:
         return predictions.copy()
@@ -92,6 +102,12 @@ def _apply_buy_sector_limit(
         sector_getter=_sector_getter,
         initial_counts=held_sector_counts,
     )
+    if dropped_by_sector is not None:
+        kept_ids = {id(item) for item in selected_rows}
+        for item in ordered_rows:
+            if id(item) not in kept_ids:
+                sector = sector_cache[item[0]]
+                dropped_by_sector[sector] = dropped_by_sector.get(sector, 0) + 1
     if not selected_rows:
         return predictions.iloc[0:0].copy()
 
