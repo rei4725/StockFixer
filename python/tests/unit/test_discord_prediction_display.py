@@ -43,8 +43,10 @@ def _record(rule="bollinger_band", direction="buy", **stats):
 
 def _sent_rule_text(signals, track_record=None):
     with (
-        patch("src.reporting.discord.discord_utils.send_webhook_text", return_value=True) as sent,
-        patch("src.reporting.discord.discord_utils.symbol_name_suffix", return_value=""),
+        patch(
+            "src.reporting.discord.notifications_rule.send_webhook_text", return_value=True
+        ) as sent,
+        patch("src.reporting.discord.notifications_rule.symbol_name_suffix", return_value=""),
     ):
         send_rule_daily_signals(signals, "jp", 1, 0, 100, track_record=track_record)
     return sent.call_args.args[0]

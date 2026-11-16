@@ -11,6 +11,7 @@ from src.reporting.paper_roundtrips import (
     load_paper_roundtrip_orders,
     summarize_roundtrips,
 )
+from src.trading.paper_equity import _default_split_loader
 from src.utils.db import get_readonly_connection
 from src.utils.logger import get_logger
 
@@ -23,7 +24,7 @@ def main() -> None:
         orders = load_paper_roundtrip_orders(con)
     finally:
         con.close()
-    trips, open_lots, unmatched = build_roundtrips(orders)
+    trips, open_lots, unmatched = build_roundtrips(orders, split_loader=_default_split_loader)
     summary = summarize_roundtrips(trips)
 
     print("\n=== 紙の往復 道別 ===")
