@@ -99,6 +99,8 @@ def save_order_gate_record(
             payload[key] = stats.get(key)
         # skipped の理由ごとの数（#1765）。鍵は 16:30 の RuleGateRecord とそろえる
         payload["skip_reasons"] = dict(stats.get("skip_reasons") or {})
+        # 業種の上限で落とした候補の業種ごとの数（#1908）。和は skip_reasons の sector_cap
+        payload["sector_cap_by_sector"] = dict(stats.get("sector_cap_by_sector") or {})
         # SL/TP を評価できずに飛ばした保有（#1516）。判定はせず stats を写すだけ
         unevaluable = list(stats.get("sl_tp_unevaluable_symbols") or [])
         payload["sl_tp_unevaluable_symbols"] = unevaluable
