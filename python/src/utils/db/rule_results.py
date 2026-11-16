@@ -143,6 +143,54 @@ def mark_rule_best_sell_only(market: str, symbol: str) -> None:
         )
 
 
+def insert_rule_best_sell_only_if_missing(
+    market: str,
+    symbol: str,
+    best_rule: str,
+    win_rate: float,
+    net_profit: float,
+    num_trades: int,
+    profit_factor: float | None,
+    max_drawdown: float,
+    backtest_start: str,
+    backtest_end: str,
+) -> bool:
+    """行が無いときだけ、売りだけの印を立てた行を足す（行の無い保有中の銘柄用、#1801）。
+
+    行があれば何もしない（前のルールのまま。印は mark_rule_best_sell_only で立てる）。
+    足したら True を返す。
+    """
+    ensure_rule_tables()
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    with _db_connection() as con:
+        cur = con.execute(
+            """
+            INSERT INTO rule_best_by_symbol
+                (market, symbol, best_rule, win_rate, net_profit, num_trades,
+                 profit_factor, max_drawdown, backtest_start, backtest_end, evaluated_at,
+                 sell_only)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE)
+            ON CONFLICT (market, symbol) DO NOTHING
+            """,
+            [
+                market,
+                symbol,
+                best_rule,
+                win_rate,
+                net_profit,
+                num_trades,
+                profit_factor,
+                max_drawdown,
+                backtest_start,
+                backtest_end,
+                now,
+            ],
+        )
+        return cur.rowcount > 0
+
+
 def mark_rule_best_sell_only_except(market: str, keep_symbols: list[str]) -> None:
     """keep_symbols に無い銘柄の行に売りだけの印を立てる（ウォッチリストの外の行用、#1797）。
 
@@ -219,15 +267,18 @@ def load_effective_rules(
     min_win_rate: float = 0.5,
     min_net_profit: float = 0.0,
 ) -> pd.DataFrame:
-    """判定基準を満たす銘柄と最優秀ルールを返す。"""
+    """判定基準を満たす銘柄と最優秀ルールに、売りだけの印の立った行を足して返す。
+
+    売りだけの行は基準を外れていても返す（保有の SELL の判定に要る。#1801）。
+    その行からは新規買いを出さないので、新規買いの基準は変わらない（#1797）。
+    """
     ensure_rule_tables()
     with _db_connection() as con:
         return pd.read_sql(
             """
             SELECT * FROM rule_best_by_symbol
             WHERE market = %s
-              AND win_rate  >= %s
-              AND net_profit > %s
+              AND (sell_only OR (win_rate >= %s AND net_profit > %s))
             ORDER BY win_rate DESC, net_profit DESC
             """,
             con,

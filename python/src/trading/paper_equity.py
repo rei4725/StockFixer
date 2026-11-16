@@ -12,13 +12,20 @@ paper_orders（status='filled'）を時系列に適用して現金残高と保�
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Sequence
 
 import pandas as pd
 import yfinance as yf
 
 from config.settings import PAPER_INITIAL_BALANCE
 from src.trading.brokers.base import OrderSide
+from src.trading.paper_cash_events import (
+    Deposit,
+    add_deposits_to_cash,
+    deposits_between,
+    first_deposit_day,
+    load_cash_events,
+)
 from src.trading.paper_weekly_backfill import (
     EXCESS_BASIS,
     Notify,
@@ -170,6 +177,7 @@ def _build_equity_parts(
     initial_balance: float,
     index: pd.DatetimeIndex,
     split_loader: Optional[SplitLoader] = None,
+    deposits: Sequence[Deposit] = (),
 ) -> tuple[pd.Series, pd.Series, dict[tuple[str, str], pd.DatetimeIndex], list[tuple[str, str]]]:
     """評価額 Series、保有の時価の絶対値の合計 Series（#1792）、約定の値段で評価した
     (market, symbol) ごとの日付、最後の日に終値が無い保有の (market, symbol) を返す。
@@ -219,6 +227,7 @@ def _build_equity_parts(
             bucket[day] = bucket.get(day, 0.0) + _QTY_SIGN[side] * int(row["qty"]) * factor
             fill_price_events.setdefault(key, {})[day] = float(row["fill_price"]) / factor
 
+    add_deposits_to_cash(cash_events, deposits, index)
     cash_delta = pd.Series(cash_events, dtype=float).reindex(index, fill_value=0.0)
     cash = initial_balance + cash_delta.cumsum()
     equity = cash.copy()
@@ -349,6 +358,7 @@ def compute_weekly_results(
     as_of: date,
     benchmark_fetcher: BenchmarkFetcher,
     split_loader: Optional[SplitLoader] = None,
+    deposits: Sequence[Deposit] = (),
 ) -> dict[str, Any]:
     """as_of より前に終わった直近の ISO 週（月〜金）の、市場ごとの紙の売買の成績を返す（純粋ロジック）。
 
@@ -390,7 +400,7 @@ def compute_weekly_results(
             first_fill = market_orders["filled_at"].min()
             index = pd.bdate_range(start=min(first_fill, base_day), end=week_end)
             equity, gross, fallbacks, missing = _build_equity_parts(
-                market_orders, price_loader, initial_balance, index, split_loader
+                market_orders, price_loader, initial_balance, index, split_loader, deposits
             )
             exposure = _weekly_exposure(equity, gross, base_day, week_end)
             valued_at_fill_price = sorted(
@@ -406,7 +416,10 @@ def compute_weekly_results(
                     market,
                     missing_week_end_close,
                 )
-            base_value = float(equity.loc[base_day])
+            # 週の中の入金は利益に数えないよう基準の評価額に足す（#1877）
+            base_value = float(equity.loc[base_day]) + deposits_between(
+                deposits, base_day, week_end
+            )
             end_value = float(equity.loc[week_end])
             weekly_return = end_value / base_value - 1 if base_value else None
 
@@ -447,6 +460,8 @@ def compute_weekly_results(
         "week": week_name(week_end),
         "start": week_start.date().isoformat(),
         "end": week_end.date().isoformat(),
+        # 元手に週の終わりまでの入金を足した額（#1877）
+        "initial_balance": float(initial_balance) + deposits_between(deposits, None, week_end),
         "markets": markets,
     }
 
@@ -473,6 +488,8 @@ def write_paper_weekly_results(
     if orders.empty:
         logger.info("約定済みペーパー注文がないため週の成績は書かない")
         return None
+    deposits = load_cash_events()
+    switch_day = first_deposit_day(deposits)
 
     def compute_week(day: date) -> dict[str, Any]:
         return compute_weekly_results(
@@ -482,9 +499,16 @@ def write_paper_weekly_results(
             day,
             benchmark_fetcher,
             split_loader=_default_split_loader,
+            deposits=deposits,
         )
 
     result = compute_week(as_of)
     path, _ = write_week_file_unless_worse(output_dir, result)
-    backfill_previous_weeks(date.fromisoformat(result["end"]), compute_week, output_dir, notify)
+    backfill_previous_weeks(
+        date.fromisoformat(result["end"]),
+        compute_week,
+        output_dir,
+        notify,
+        frozen_before=None if switch_day is None else switch_day.date(),
+    )
     return path

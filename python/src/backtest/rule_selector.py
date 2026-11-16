@@ -16,6 +16,7 @@ from src.backtest.rules import ALL_RULES
 from src.utils.db.rule_results import (
     delete_rule_best,
     delete_rule_best_except,
+    insert_rule_best_sell_only_if_missing,
     load_held_symbols,
     load_rule_best_all,
     mark_rule_best_sell_only,
@@ -52,6 +53,33 @@ def _select_best_rule(results: list[dict[str, Any]]) -> dict[str, Any] | None:
     return max(valid, key=lambda r: (r["win_rate"], r["net_profit"]))
 
 
+def _insert_sell_only_row(
+    market: str,
+    symbol: str,
+    results: list[dict[str, Any]],
+    backtest_start: str,
+    backtest_end: str,
+) -> None:
+    """行が無ければ、その回の結果の先頭（win_rate の順）のルールで売りだけの行を足す（#1801）。
+
+    値はその回の評価のまま書く。行があれば触らない（印は呼び元が立てる）。
+    """
+    top = max(results, key=lambda r: (r["win_rate"], r["net_profit"]))
+    if insert_rule_best_sell_only_if_missing(
+        market=market,
+        symbol=symbol,
+        best_rule=top["rule"],
+        win_rate=top["win_rate"],
+        net_profit=top["net_profit"],
+        num_trades=top["num_trades"],
+        profit_factor=top.get("profit_factor"),
+        max_drawdown=top.get("max_drawdown", 0.0),
+        backtest_start=backtest_start,
+        backtest_end=backtest_end,
+    ):
+        logger.info(f"  [{symbol}] 保有中で行が無い → {top['rule']} で売りだけの行を作る")
+
+
 def evaluate_all_symbols(
     market: str,
     backtest_start: str,
@@ -85,6 +113,8 @@ def evaluate_all_symbols(
         外れていても消さない。消すとルールの SELL の判定から外れる（#1566）。
         そうして残した行（保有を読めない回の有効ルールなし・ウォッチリストの外の行を含む）には
         売りだけの印を立て、新規買いを出さない。有効ルールが選ばれた行は印を下ろす（#1797）。
+        保有中で有効ルールが無く行も無い銘柄には、その回の結果の先頭のルールで売りだけの行を
+        作り、ルールの SELL の判定に戻す（#1801）。結果が空か保有を読めない回は作らない。
     """
     target_symbols = symbols or _load_symbols(market)
     logger.info(f"ルール評価開始: {len(target_symbols)} 銘柄 ({market})")
@@ -122,6 +152,10 @@ def evaluate_all_symbols(
 
             best = _select_best_rule(results)
             if best is None:
+                if held_symbols is not None and symbol in held_symbols and results:
+                    # 行が消えたまま保有中の銘柄は、ルールの SELL の判定に戻すため、
+                    # その回の先頭のルールで売りだけの行を作る（#1801、3350 の形）
+                    _insert_sell_only_row(market, symbol, results, backtest_start, backtest_end)
                 if held_symbols is None or symbol in held_symbols:
                     # 保有中は SELL の判定に行が要る（#1566）。手放した後の週の残りに
                     # 基準を外れたルールで新規買いが出ないよう、売りだけの印を立てる（#1797）

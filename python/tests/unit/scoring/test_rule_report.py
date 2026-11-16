@@ -250,6 +250,7 @@ def test_backtest_gap_approx_flag() -> None:
         "live_hit_rate_h5",
         "n_h5",
         "n_unmatched",
+        "n_sell_only",
         "approx",
         "baseline_rate",
         "edge",
@@ -266,6 +267,7 @@ def test_backtest_gap_approx_flag() -> None:
         "live_hit_rate_h5",
         "n_h5",
         "n_unmatched",
+        "n_sell_only",
         "approx",
     }
     assert gap["rsi"]["n_unmatched"] == 0 and gap["bollinger"]["n_unmatched"] == 0

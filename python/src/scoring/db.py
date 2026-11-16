@@ -69,9 +69,13 @@ CREATE TABLE IF NOT EXISTS rule_best_history (
     best_rule    VARCHAR NOT NULL,
     win_rate     DOUBLE PRECISION,
     num_trades   INTEGER,
+    sell_only    BOOLEAN NOT NULL DEFAULT FALSE,
     PRIMARY KEY (evaluated_on, market, symbol)
 )
 """,
+    # 売りだけの印（#1889）。今ある表は migrations の 0011 でも足す。前の行は FALSE で読む
+    "ALTER TABLE rule_best_history"
+    " ADD COLUMN IF NOT EXISTS sell_only BOOLEAN NOT NULL DEFAULT FALSE",
 )
 
 
@@ -229,20 +233,24 @@ def snapshot_predictions(app_version: str | None) -> int:
 
 
 def snapshot_rule_best(evaluated_on: date, market: str) -> int:
-    """rule_best_by_symbol をその評価日の履歴へ写す（同じ日は上書き）。"""
+    """rule_best_by_symbol をその評価日の履歴へ写す（同じ日は上書き）。
+
+    売りだけの印（sell_only）も写す。印の立った行は、その週に選ばれたルールではない。
+    """
     ensure_rule_tables()
     ensure_scoring_tables()
     with _db_connection() as con:
         cur = con.execute(
             """
             INSERT INTO rule_best_history
-                (evaluated_on, market, symbol, best_rule, win_rate, num_trades)
-            SELECT %s, market, symbol, best_rule, win_rate, num_trades
+                (evaluated_on, market, symbol, best_rule, win_rate, num_trades, sell_only)
+            SELECT %s, market, symbol, best_rule, win_rate, num_trades, sell_only
             FROM rule_best_by_symbol WHERE market = %s
             ON CONFLICT (evaluated_on, market, symbol) DO UPDATE SET
                 best_rule = EXCLUDED.best_rule,
                 win_rate = EXCLUDED.win_rate,
-                num_trades = EXCLUDED.num_trades
+                num_trades = EXCLUDED.num_trades,
+                sell_only = EXCLUDED.sell_only
             """,
             [evaluated_on, market],
         )
