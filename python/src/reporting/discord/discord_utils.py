@@ -5,7 +5,7 @@ Webhookを使用したDiscord通知機能
 """
 
 import logging
-from typing import Optional
+from typing import Optional, Sequence
 
 from config.feature_flags import flags
 from src.domain.ports import PredictionResultRepository
@@ -58,6 +58,7 @@ from src.reporting.discord.notifications_report import (  # noqa: F401  # re-exp
     send_weekly_report,
     send_weekly_training_completion,
 )
+from src.reporting.discord.trade_details import TradeLine, safe_trade_detail_field
 from src.reporting.discord.webhook_sender import (  # noqa: F401  # re-export + ドメイン関数の送信基盤
     _get_webhook_url,
     _post_webhook,
@@ -174,6 +175,7 @@ def send_daily_order_completion(
     daily_loss_limit: Optional[float] = None,
     errors: int = 0,
     sl_tp_unevaluable_symbols: Optional[list[str]] = None,
+    details: Optional[Sequence[TradeLine]] = None,
 ) -> bool:
     """
     自動発注完了通知を Discord Webhook に送信する。
@@ -188,6 +190,7 @@ def send_daily_order_completion(
         daily_loss_limit: 当日損失上限額
         errors: 例外で出せなかった注文の数（SL/TP の売りを含む）
         sl_tp_unevaluable_symbols: 現在値が取れず SL/TP を評価できなかった保有の銘柄
+        details: 出した注文の1件ごとの明細（#1876）。作れなければ件数だけで出す
 
     Returns:
         成功時 True、失敗時 False
@@ -200,6 +203,9 @@ def send_daily_order_completion(
         {"name": "🔴 売り注文", "value": f"{sell_orders:,} 件", "inline": True},
         {"name": "⚠️ 注文エラー", "value": f"{errors:,} 件", "inline": True},
     ]
+    detail_field = safe_trade_detail_field(details)
+    if detail_field:
+        fields.append(detail_field)
     if sl_tp_unevaluable_symbols:
         # 損失の止めが判定されなかった保有を平常に見せない（#1296）
         fields.append(
@@ -229,12 +235,15 @@ def send_daily_order_completion(
     return send_status_fields(spec, fields)
 
 
-def send_daily_settle_completion(settled_count: int) -> bool:
+def send_daily_settle_completion(
+    settled_count: int, details: Optional[Sequence[TradeLine]] = None
+) -> bool:
     """
     ペーパートレード約定処理完了通知を Discord Webhook に送信する。
 
     Args:
         settled_count: 約定処理した注文数
+        details: 約定の1件ごとの明細（#1876）。作れなければ件数だけで出す
 
     Returns:
         成功時 True、失敗時 False
@@ -243,6 +252,9 @@ def send_daily_settle_completion(settled_count: int) -> bool:
         {"name": "🕐 時刻", "value": format_jst(fmt=DISCORD_DATETIME_FORMAT), "inline": True},
         {"name": "📊 約定件数", "value": f"{settled_count:,} 件", "inline": True},
     ]
+    detail_field = safe_trade_detail_field(details)
+    if detail_field:
+        fields.append(detail_field)
     return send_status_fields(DAILY_SETTLE_COMPLETION, fields)
 
 

@@ -292,7 +292,9 @@ class TestPromoteChallengerToProduction(unittest.TestCase):
     def test_skips_when_no_challenger_files(self):
         from src.prediction.shadow_evaluation import promote_challenger_to_production
 
-        with patch("src.prediction.shadow_evaluation.get_models_subdir", return_value=self.tmpdir):
+        with patch(
+            "src.prediction.symbol_model_promotion.get_models_subdir", return_value=self.tmpdir
+        ):
             result = promote_challenger_to_production("jp", "7203")
 
         self.assertEqual(len(result["skipped"]), 2)
@@ -305,7 +307,9 @@ class TestPromoteChallengerToProduction(unittest.TestCase):
             with open(os.path.join(self.tmpdir, f"{name}.joblib"), "wb") as f:
                 f.write(b"dummy")
 
-        with patch("src.prediction.shadow_evaluation.get_models_subdir", return_value=self.tmpdir):
+        with patch(
+            "src.prediction.symbol_model_promotion.get_models_subdir", return_value=self.tmpdir
+        ):
             result = promote_challenger_to_production("jp", "7203", dry_run=True)
 
         self.assertEqual(result["dry_run"], True)
