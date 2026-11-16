@@ -15,7 +15,7 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable, Optional
 
 import pandas as pd
 
@@ -28,8 +28,10 @@ _RULE_HOUR_UTC = 7
 _BUY = 1
 _SELL = 2
 
+SplitLoader = Callable[[str, str], Optional[pd.Series]]
+
 PAPER_ROUNDTRIP_ORDERS_SQL = """
-    SELECT order_id, symbol, side, qty, COALESCE(fill_price, price) AS fill_price,
+    SELECT order_id, market, symbol, side, qty, COALESCE(fill_price, price) AS fill_price,
            created_at, filled_at, realized_pnl
     FROM paper_orders
     WHERE status = 'filled' AND side IN (%s, %s) AND qty > 0
@@ -127,13 +129,41 @@ def count_phantom_sells(orders: pd.DataFrame) -> int:
     return int(sells["realized_pnl"].isna().sum())
 
 
+def _split_factors(splits: Optional[pd.Series]) -> Callable[[pd.Timestamp], float]:
+    """約定の時刻 -> その時刻より後の分割の比の積、を返す関数を作る
+
+    trading/paper_equity._split_factors と同じ決まり（BC をまたいで import しないため
+    同じ形でここに置く）。分割より前の約定の株数を積の倍に、値段を積で割ると今の水準になる。
+    """
+    if splits is None or splits.empty:
+        return lambda day: 1.0
+    ratios = pd.to_numeric(splits, errors="coerce")
+    ratios = ratios[ratios > 0]
+
+    def factor(day: pd.Timestamp) -> float:
+        return float(ratios[ratios.index > day].prod())
+
+    return factor
+
+
+def _naive_utc(value: Any) -> pd.Timestamp:
+    ts = pd.Timestamp(value)
+    if ts.tzinfo is not None:
+        ts = ts.tz_convert("UTC").tz_localize(None)
+    return ts
+
+
 def build_roundtrips(
     orders: pd.DataFrame,
+    split_loader: Optional[SplitLoader] = None,
 ) -> tuple[list[RoundTrip], list[OpenLot], dict[str, int]]:
     """約定した買いと売りを銘柄ごとに FIFO で組む
 
     戻り値は（往復、開いたままの買い、買いの残りを超えた売りの株数の銘柄別）。
     realized_pnl の列があり、その値が空の売りは株数を動かさなかった売りとして飛ばす。
+    split_loader（(market, symbol) -> 分割の比の Series か None）と market の列があれば、
+    約定の株数を約定より後の分割の比の積の倍に、値段を積で割って今の水準に直してから組む
+    （紙のブローカーは分割で保有を直し、分割後の売りはその株数で約定するため）。
     """
     trips: list[RoundTrip] = []
     unmatched: dict[str, int] = {}
@@ -143,11 +173,21 @@ def build_roundtrips(
     df = orders.copy()
     df["when_at"] = df["filled_at"].where(df["filled_at"].notna(), df["created_at"])
     df = df.sort_values(["when_at", "created_at", "order_id"], kind="stable")
+    use_splits = split_loader is not None and "market" in df.columns
+    factors: dict[tuple[str, str], Callable[[pd.Timestamp], float]] = {}
     for row in df.itertuples(index=False):
         symbol = str(row.symbol)
         qty = int(row.qty)
         price = float(row.fill_price)
         when = _ts(row.when_at)
+        if use_splits and split_loader is not None:
+            key = (str(row.market), symbol)
+            if key not in factors:
+                factors[key] = _split_factors(split_loader(*key))
+            factor = factors[key](_naive_utc(row.when_at))
+            if factor != 1.0:
+                qty = int(round(qty * factor))
+                price = price / factor
         queue = lots.setdefault(symbol, deque())
         if int(row.side) == _BUY:
             route = classify_route(_ts(row.created_at))
