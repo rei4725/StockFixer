@@ -18,6 +18,8 @@ from src.utils.db.rule_results import (
     delete_rule_best_except,
     load_held_symbols,
     load_rule_best_all,
+    mark_rule_best_sell_only,
+    mark_rule_best_sell_only_except,
     upsert_rule_best,
 )
 from src.utils.logger import get_logger
@@ -81,6 +83,8 @@ def evaluate_all_symbols(
         errors の銘柄の行は消さない。保有を読めない回は、どの銘柄の行も消さない。
         保有中（約定待ちの買いを含む）の銘柄の行は、有効ルールが無くても、ウォッチリストから
         外れていても消さない。消すとルールの SELL の判定から外れる（#1566）。
+        そうして残した行（保有を読めない回の有効ルールなし・ウォッチリストの外の行を含む）には
+        売りだけの印を立て、新規買いを出さない。有効ルールが選ばれた行は印を下ろす（#1797）。
     """
     target_symbols = symbols or _load_symbols(market)
     logger.info(f"ルール評価開始: {len(target_symbols)} 銘柄 ({market})")
@@ -119,8 +123,12 @@ def evaluate_all_symbols(
             best = _select_best_rule(results)
             if best is None:
                 if held_symbols is None or symbol in held_symbols:
-                    # 保有中は行が要る。保有中なのでこの行から新規買いは出ない（#1566）
-                    logger.info(f"  [{symbol}] 有効ルールなし → 保有中か不明なので行を残す")
+                    # 保有中は SELL の判定に行が要る（#1566）。手放した後の週の残りに
+                    # 基準を外れたルールで新規買いが出ないよう、売りだけの印を立てる（#1797）
+                    mark_rule_best_sell_only(market=market, symbol=symbol)
+                    logger.info(
+                        f"  [{symbol}] 有効ルールなし → 保有中か不明なので行を売りだけで残す"
+                    )
                 else:
                     # 前の週の有効の行を残すと、基準を外れたルールで新規買いが出る（#1275）
                     delete_rule_best(market=market, symbol=symbol)
@@ -152,13 +160,16 @@ def evaluate_all_symbols(
             logger.error(f"  [{symbol}] 評価失敗: {exc}", exc_info=True)
             errors += 1
 
-    if symbols is None and target_symbols and held_symbols is not None:
+    if symbols is None and target_symbols:
         # 外れた銘柄の行を残すと、16:30 のルールの発注で新規買いが出続ける（#1294）
-        # 保有中の銘柄は外れていても残す（#1566）
+        # 保有中の銘柄は外れていても残し（#1566）、売りだけの印を立てる（#1797）。
+        # 保有を読めない回は消さず、印だけ立てる
         try:
-            delete_rule_best_except(
-                market=market, keep_symbols=[*target_symbols, *sorted(held_symbols)]
-            )
+            if held_symbols is not None:
+                delete_rule_best_except(
+                    market=market, keep_symbols=[*target_symbols, *sorted(held_symbols)]
+                )
+            mark_rule_best_sell_only_except(market=market, keep_symbols=target_symbols)
         except Exception as exc:
             logger.error(f"ウォッチリスト外の行の削除に失敗: {exc}", exc_info=True)
             errors += 1

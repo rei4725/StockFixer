@@ -2,6 +2,18 @@
 
 from typing import TypedDict
 
+from src.trading.brokers.base import OrderSide, OrderType
+
+
+class OrderDetail(TypedDict):
+    """出した注文の1件（自動発注の知らせの明細、#1876）。price は指値。成行は is_market"""
+
+    symbol: str
+    side: int
+    qty: int
+    price: float
+    is_market: bool
+
 
 class OrderExecutionStats(TypedDict):
     buy_orders: int
@@ -27,6 +39,7 @@ class OrderExecutionStats(TypedDict):
     stale_prediction_reason: str | None
     threshold_scale: float | None
     order_record_written: bool  # その回の記録を書きに行ったか。二重に書かない（#1548）
+    order_details: list[OrderDetail]  # 出した注文の明細（#1876）
 
 
 def _new_stats() -> OrderExecutionStats:
@@ -55,7 +68,37 @@ def _new_stats() -> OrderExecutionStats:
         "stale_prediction_reason": None,
         "threshold_scale": None,
         "order_record_written": False,
+        "order_details": [],
     }
+
+
+def note_order(
+    stats: OrderExecutionStats,
+    symbol: str,
+    side: OrderSide,
+    qty: int,
+    order_type: OrderType,
+    order_price: float,
+) -> None:
+    """出した注文を向きの件数に1つ数え、知らせの明細に1件足す（#1876）
+
+    BUY は buy_orders、SELL は sell_orders、SHORT・SHORT_COVER は short_orders に数える。
+    """
+    if side == OrderSide.BUY:
+        stats["buy_orders"] += 1
+    elif side == OrderSide.SELL:
+        stats["sell_orders"] += 1
+    else:
+        stats["short_orders"] += 1
+    stats.setdefault("order_details", []).append(
+        {
+            "symbol": str(symbol),
+            "side": int(side),
+            "qty": int(qty),
+            "price": float(order_price or 0.0),
+            "is_market": order_type == OrderType.MARKET,
+        }
+    )
 
 
 _MIN_CHANGE_KEYS = ("min_change", "sell_min_change")
