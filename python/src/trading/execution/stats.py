@@ -22,6 +22,8 @@ class OrderExecutionStats(TypedDict):
     skipped: int
     skipped_min_change: int
     skip_reasons: dict[str, int]  # skipped の理由ごとの数。和は skipped と一致する（#1765）
+    # 業種の上限で落とした新規買いの候補の業種ごとの数。和は skip_reasons の sector_cap（#1908）
+    sector_cap_by_sector: dict[str, int]
     errors: int
     trading_stopped: bool
     stop_reason: str | None
@@ -51,6 +53,7 @@ def _new_stats() -> OrderExecutionStats:
         "skipped": 0,
         "skipped_min_change": 0,
         "skip_reasons": {},
+        "sector_cap_by_sector": {},
         "errors": 0,
         "trading_stopped": False,
         "stop_reason": None,

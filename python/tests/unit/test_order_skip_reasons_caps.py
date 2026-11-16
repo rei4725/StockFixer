@@ -116,6 +116,9 @@ class TestOrderSkipReasonsCaps(unittest.TestCase):
         self.assertEqual(stats["skip_reasons"], expected)
         self.assertEqual(record["skipped"], 4)
         self.assertEqual(sum(record["skip_reasons"].values()), record["skipped"])
+        # 業種の上限で落とした2件は SAME の業種（#1908）
+        self.assertEqual(record["sector_cap_by_sector"], {"SAME": 2})
+        self.assertEqual(stats["sector_cap_by_sector"], {"SAME": 2})
         self.assertEqual(
             sent,
             [(s, OrderSide.BUY, 100) for s in ("3001", "3002", "3003", "1001", "1002")],
