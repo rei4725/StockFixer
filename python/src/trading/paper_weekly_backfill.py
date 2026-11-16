@@ -121,7 +121,10 @@ def _review_week(
 
 
 def _review_weeks(
-    target_week_end: date, compute_week: ComputeWeek, output_dir: str
+    target_week_end: date,
+    compute_week: ComputeWeek,
+    output_dir: str,
+    frozen_before: Optional[date] = None,
 ) -> tuple[list[str], dict[str, str]]:
     """対象の週の前の週を見て、見た週の名前と、欠けが残る週の理由を返す。"""
     names = [name[:-5] for name in os.listdir(output_dir) if _WEEK_FILE.match(name)]
@@ -145,6 +148,9 @@ def _review_weeks(
             if current is not None and _is_old_basis(current):
                 weeks[week] = _week_end_of(week)
     for week, week_end in sorted(weeks.items()):
+        if frozen_before is not None and week_end < frozen_before:
+            # 元手の切り替えより前の週は、その時の元手で書いたまま残す（#1877）
+            continue
         checked.append(week)
         try:
             reason = _review_week(week, week_end, compute_week, output_dir)
@@ -200,10 +206,12 @@ def backfill_previous_weeks(
     compute_week: ComputeWeek,
     output_dir: str,
     notify: Optional[Notify] = None,
+    frozen_before: Optional[date] = None,
 ) -> None:
     """対象の週の前の週を見直す。例外は出さない（対象の週の書き出しの成否を変えない）。
 
-    今ある一番古いファイルより前の週は作らない。
+    今ある一番古いファイルより前の週は作らない。金曜が frozen_before（元手の切り替えの日）
+    より前の週は、計算し直さず、ファイルも書き直さない（#1877）。
 
     Args:
         target_week_end: 対象の週の金曜
@@ -212,7 +220,7 @@ def backfill_previous_weeks(
         notify: 知らせの文を送り、送れたかを返す関数。None なら知らせない
     """
     try:
-        checked, remaining = _review_weeks(target_week_end, compute_week, output_dir)
+        checked, remaining = _review_weeks(target_week_end, compute_week, output_dir, frozen_before)
         _notify_remaining(checked, remaining, output_dir, notify)
     except Exception:
         logger.error("紙の週の成績の前の週の見直し失敗", exc_info=True)
