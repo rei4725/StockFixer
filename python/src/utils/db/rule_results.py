@@ -37,9 +37,16 @@ CREATE TABLE IF NOT EXISTS rule_best_by_symbol (
     backtest_start   DATE      NOT NULL,
     backtest_end     DATE      NOT NULL,
     evaluated_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    sell_only        BOOLEAN   NOT NULL DEFAULT FALSE,
     PRIMARY KEY (market, symbol)
 )
 """
+
+# 保有中だからと残した行の売りだけの印（#1797）。今ある表は migrations の 0009 でも足す
+_DDL_BEST_SELL_ONLY = (
+    "ALTER TABLE rule_best_by_symbol"
+    " ADD COLUMN IF NOT EXISTS sell_only BOOLEAN NOT NULL DEFAULT FALSE"
+)
 
 _DDL_DAILY_SIGNALS = """
 CREATE TABLE IF NOT EXISTS rule_daily_signals (
@@ -58,6 +65,7 @@ CREATE TABLE IF NOT EXISTS rule_daily_signals (
 def ensure_rule_tables() -> None:
     with _db_connection() as con:
         con.execute(_DDL_BEST_BY_SYMBOL)
+        con.execute(_DDL_BEST_SELL_ONLY)
         con.execute(_DDL_DAILY_SIGNALS)
 
 
@@ -91,8 +99,9 @@ def upsert_rule_best(
             """
             INSERT INTO rule_best_by_symbol
                 (market, symbol, best_rule, win_rate, net_profit, num_trades,
-                 profit_factor, max_drawdown, backtest_start, backtest_end, evaluated_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 profit_factor, max_drawdown, backtest_start, backtest_end, evaluated_at,
+                 sell_only)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE)
             """,
             [
                 market,
@@ -117,6 +126,37 @@ def delete_rule_best(market: str, symbol: str) -> None:
         con.execute(
             "DELETE FROM rule_best_by_symbol WHERE market = %s AND symbol = %s",
             [market, symbol],
+        )
+
+
+def mark_rule_best_sell_only(market: str, symbol: str) -> None:
+    """1銘柄分の行に売りだけの印を立てる（有効ルールが無いが保有中で残す行用、#1797）。
+
+    印の立った行からは新規買いを出さず、保有の SELL だけを出す。
+    有効ルールが選ばれて upsert_rule_best で書き直すと印は下りる。
+    """
+    ensure_rule_tables()
+    with _db_connection() as con:
+        con.execute(
+            "UPDATE rule_best_by_symbol SET sell_only = TRUE WHERE market = %s AND symbol = %s",
+            [market, symbol],
+        )
+
+
+def mark_rule_best_sell_only_except(market: str, keep_symbols: list[str]) -> None:
+    """keep_symbols に無い銘柄の行に売りだけの印を立てる（ウォッチリストの外の行用、#1797）。
+
+    keep_symbols が空なら何もしない（ウォッチリストの読み違いで全行に印を立てないため）。
+    """
+    if not keep_symbols:
+        return
+    ensure_rule_tables()
+    placeholders = ", ".join(["%s"] * len(keep_symbols))
+    with _db_connection() as con:
+        con.execute(
+            "UPDATE rule_best_by_symbol SET sell_only = TRUE"  # nosec B608 - only "%s"
+            f" WHERE market = %s AND symbol NOT IN ({placeholders})",
+            [market, *keep_symbols],
         )
 
 
