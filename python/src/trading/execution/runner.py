@@ -68,7 +68,7 @@ from .selection import (
     _select_buy_signals,
 )
 from .sl_tp import _check_sl_tp_exits, _sl_tp_exits_only
-from .stats import OrderExecutionStats, count_skip
+from .stats import OrderExecutionStats, count_skip, note_order
 
 logger = get_logger(__name__)
 
@@ -261,7 +261,7 @@ def run_order_steps(
                 f"(1d変化率={row['diff_ratio']:.3%}, 統合スコア={row['multi_horizon_score']:.3%}, "
                 f"閾値={row['effective_sell_threshold']:.3%})"
             )
-            stats["sell_orders"] += 1
+            note_order(stats, symbol, OrderSide.SELL, qty, order_type, order_price)
             stats["total_turnover"] += float(row.get("current_price") or 0.0) * qty
         except Exception as e:
             logger.error(f"[exec] 売り注文エラー ({symbol}): {e}", exc_info=True)
@@ -393,7 +393,7 @@ def run_order_steps(
                 f"閾値={row['effective_buy_threshold']:.3%}, sector={row.get('sector', 'N/A')}, "
                 f"split={split_ratio:.0%})"
             )
-            stats["buy_orders"] += 1
+            note_order(stats, symbol, OrderSide.BUY, qty, order_type, order_price)
             stats["total_turnover"] += current_price * qty
             position_count += 1
         except Exception as e:
@@ -452,7 +452,7 @@ def run_order_steps(
                     f"[exec] SHORT_COVER発注: {symbol} {qty}株 @ {order_type.name}({order_reason}) "
                     f"(統合スコア={row['multi_horizon_score']:.3%})"
                 )
-                stats["short_orders"] += 1
+                note_order(stats, symbol, OrderSide.SHORT_COVER, qty, order_type, order_price)
                 stats["total_turnover"] += current_price * qty
             except Exception as e:
                 logger.error(f"[exec] SHORT_COVER注文エラー ({symbol}): {e}", exc_info=True)
@@ -566,7 +566,7 @@ def run_order_steps(
                     f"(1d変化率={row['diff_ratio']:.3%}, 統合スコア={row['multi_horizon_score']:.3%}, "
                     f"閾値={row['effective_sell_threshold']:.3%}, split={short_split_ratio:.0%})"
                 )
-                stats["short_orders"] += 1
+                note_order(stats, symbol, OrderSide.SHORT, qty, order_type, order_price)
                 stats["total_turnover"] += current_price * qty
                 position_count += 1
             except Exception as e:

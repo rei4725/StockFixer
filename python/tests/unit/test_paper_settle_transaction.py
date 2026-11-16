@@ -198,7 +198,7 @@ def test_daily_settle_returns_error_count_and_notifies():
         mock_broker_cls.return_value.settle_pending_orders.return_value = []
         mock_broker_cls.return_value.last_settle_errors = 2
         assert daily.run_daily_settle_orders() == 2
-    mock_done.assert_called_once_with(settled_count=0)
+    mock_done.assert_called_once_with(settled_count=0, details=None)
     mock_notify.assert_called_once()
     assert "2 件" in mock_notify.call_args.args[1]
 
