@@ -131,6 +131,38 @@ def _split_factors(splits: Optional[pd.Series]) -> Callable[[pd.Timestamp], floa
     return factor
 
 
+def _capped_qty(
+    side: int,
+    qty: int,
+    factor: float,
+    key: tuple[str, str],
+    long_qty: dict[tuple[str, str], float],
+) -> float:
+    """約定の株数を、SELL なら持ち分までで切って返し、買いの持ち分を数え直す（#1899）。
+
+    replay_paper_cash・brokers/paper/fill.py と同じ決まり。持ち分を超える分は現金にも
+    保有にも入れない。SELL 以外は株数をそのまま返す。持ち分は、paper_broker が分割で
+    持ち分を直すのに合わせ、分割の比で直した株数（factor 倍）で数える（#899）。
+    """
+    held = long_qty.get(key, 0.0)
+    if side == int(OrderSide.BUY):
+        long_qty[key] = held + qty * factor
+        return float(qty)
+    if side == int(OrderSide.SELL):
+        sell = min(float(qty), round(held / factor, 6))
+        if sell < qty:
+            logger.warning(
+                "持ち分を超える SELL を持ち分までで評価: %s/%s (%d 株のうち %s 株)",
+                key[0],
+                key[1],
+                qty,
+                sell,
+            )
+        long_qty[key] = round(held - sell * factor, 6)
+        return sell
+    return float(qty)
+
+
 def build_equity_series(
     orders: pd.DataFrame,
     price_loader: Callable[[str, str], Optional[pd.Series]],
@@ -191,13 +223,17 @@ def _build_equity_parts(
         return pd.Series(dtype=float), pd.Series(dtype=float), {}, []
 
     work = orders.copy()
-    work["filled_at"] = pd.to_datetime(work["filled_at"]).dt.tz_localize(None).dt.normalize()
+    work["filled_at"] = pd.to_datetime(work["filled_at"]).dt.tz_localize(None)
+    # 持ち分で SELL を切るため、日に丸める前の時刻の順にたどる（#1899）
+    work = work.sort_values("filled_at", kind="stable")
+    work["filled_at"] = work["filled_at"].dt.normalize()
 
     # 日次の現金増減と銘柄別数量増減を dict に集計してから Series 化する
     cash_events: dict[pd.Timestamp, float] = {}
     qty_events: dict[tuple[str, str], dict[pd.Timestamp, float]] = {}
     fill_price_events: dict[tuple[str, str], dict[pd.Timestamp, float]] = {}
     split_factors: dict[tuple[str, str], Callable[[pd.Timestamp], float]] = {}
+    long_qty: dict[tuple[str, str], float] = {}
 
     for _, row in work.iterrows():
         side = int(row["side"])
@@ -214,18 +250,20 @@ def _build_equity_parts(
             continue
         day = index[pos]
 
-        amount = float(row["fill_price"]) * int(row["qty"])
-        cash_events[day] = cash_events.get(day, 0.0) + _CASH_SIGN.get(side, 0) * amount
+        if side not in _QTY_SIGN:
+            continue
+        key = (str(row["market"]), str(row["symbol"]))
+        if key not in split_factors:
+            splits = split_loader(*key) if split_loader is not None else None
+            split_factors[key] = _split_factors(splits)
+        factor = split_factors[key](fill_day)
+        qty = _capped_qty(side, int(row["qty"]), factor, key, long_qty)
+        amount = float(row["fill_price"]) * qty
+        cash_events[day] = cash_events.get(day, 0.0) + _CASH_SIGN[side] * amount
 
-        if side in _QTY_SIGN:
-            key = (str(row["market"]), str(row["symbol"]))
-            if key not in split_factors:
-                splits = split_loader(*key) if split_loader is not None else None
-                split_factors[key] = _split_factors(splits)
-            factor = split_factors[key](fill_day)
-            bucket = qty_events.setdefault(key, {})
-            bucket[day] = bucket.get(day, 0.0) + _QTY_SIGN[side] * int(row["qty"]) * factor
-            fill_price_events.setdefault(key, {})[day] = float(row["fill_price"]) / factor
+        bucket = qty_events.setdefault(key, {})
+        bucket[day] = bucket.get(day, 0.0) + _QTY_SIGN[side] * qty * factor
+        fill_price_events.setdefault(key, {})[day] = float(row["fill_price"]) / factor
 
     add_deposits_to_cash(cash_events, deposits, index)
     cash_delta = pd.Series(cash_events, dtype=float).reindex(index, fill_value=0.0)
