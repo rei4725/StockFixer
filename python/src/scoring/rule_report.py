@@ -238,19 +238,28 @@ def _window(
     }
 
 
+def _sell_only(df: pd.DataFrame) -> pd.Series:
+    """売りだけの印（#1889）。列の無い古い行と値の無い行は印なし（選ばれたルール）と読む。"""
+    if "sell_only" not in df.columns:
+        return pd.Series(False, index=df.index)
+    return df["sell_only"].eq(True)
+
+
 def _gap_matches(
     h5: pd.DataFrame, best_history: pd.DataFrame, best_now: pd.DataFrame
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """5日のシグナルに評価を当て、(評価のルールが合う行, 合わない行) を返す。
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """5日のシグナルに評価を当て、(評価のルールが合う行, 合わない行, 売りだけの行) を返す。
 
     シグナルの日以前で一番新しい rule_best_history の評価を当てる。その銘柄に評価が
-    まだ無いシグナルは今の rule_best_by_symbol を当て、approx を立てる。
+    まだ無いシグナルは今の rule_best_by_symbol を当て、approx を立てる。当てた評価が
+    売りだけ（その週に選ばれたルールでない）のシグナルは、合う行にも合わない行にも入れない。
     """
     left = h5.assign(day=_day(h5["date"])).sort_values("day")
     if best_history.empty:
-        m = left.assign(evaluated_on=pd.NaT, best_rule=None, win_rate=np.nan)
+        m = left.assign(evaluated_on=pd.NaT, best_rule=None, win_rate=np.nan, sell_only=False)
     else:
         hist = best_history[["evaluated_on", "symbol", "best_rule", "win_rate"]].copy()
+        hist["sell_only"] = _sell_only(best_history)
         hist["evaluated_on"] = _day(hist["evaluated_on"])
         hist["symbol"] = hist["symbol"].astype(str)
         m = pd.merge_asof(
@@ -264,30 +273,35 @@ def _gap_matches(
     approx = m["evaluated_on"].isna()
     if not best_now.empty:
         now = best_now[["symbol", "best_rule", "win_rate"]].copy()
+        now["sell_only"] = _sell_only(best_now)
         now["symbol"] = now["symbol"].astype(str)
         fb = m[["symbol"]].merge(now, on="symbol", how="left").set_index(m.index)
         m.loc[approx, "best_rule"] = fb.loc[approx, "best_rule"]
         m.loc[approx, "win_rate"] = fb.loc[approx, "win_rate"]
+        m.loc[approx, "sell_only"] = fb.loc[approx, "sell_only"]
     m = m.assign(approx=approx)
-    unmatched = m[m["best_rule"].notna() & (m["best_rule"] != m["key"])]
-    matched = m[(m["best_rule"] == m["key"]) & m["win_rate"].notna()]
-    return matched, unmatched
+    sell_only = _sell_only(m)
+    rest = m[~sell_only]
+    unmatched = rest[rest["best_rule"].notna() & (rest["best_rule"] != rest["key"])]
+    matched = rest[(rest["best_rule"] == rest["key"]) & rest["win_rate"].notna()]
+    return matched, unmatched, m[sell_only]
 
 
-def _gap_entry(sub: pd.DataFrame, n_unmatched: int) -> dict[str, Any]:
+def _gap_entry(sub: pd.DataFrame, n_unmatched: int, n_sell_only: int) -> dict[str, Any]:
     n = int(len(sub))
     return {
         "backtest_win_rate": _num(sub["win_rate"].astype(float).mean()) if n else None,
         "live_hit_rate_h5": float(sub["hit"].astype(float).mean()) if n else None,
         "n_h5": n,
         "n_unmatched": int(n_unmatched),
+        "n_sell_only": int(n_sell_only),
         "approx": bool(sub["approx"].any()) if n else True,
     }
 
 
-def _gap_side(sub: pd.DataFrame, n_unmatched: int, side: str) -> dict[str, Any]:
+def _gap_side(sub: pd.DataFrame, n_unmatched: int, n_sell_only: int, side: str) -> dict[str, Any]:
     """1つの向きの並べ。往復の勝率は買いの取引だけなので、売りの側は null にする。"""
-    out = _gap_entry(sub, n_unmatched)
+    out = _gap_entry(sub, n_unmatched, n_sell_only)
     if side != "buy":
         out["backtest_win_rate"] = None
     base = _num(pd.to_numeric(sub["baseline"], errors="coerce").mean()) if len(sub) else None
@@ -306,22 +320,30 @@ def _backtest_gap(
     同じ向きの baseline_rate と edge を足す。backtest_win_rate は買いの往復の勝率なので
     buy の側だけに並べる。向きをまとめた並べは前の backtest_gap と同じ中身である。
     評価のルールがシグナルのルールと違う行は、勝率が無いので数えない（その数を
-    n_unmatched に出す）。
+    n_unmatched に出す）。当てた評価が売りだけの行は、選ばれたルールの勝率でないので
+    数えない（その数を n_sell_only に出す。#1889）。
     """
     h5 = rule_scored[rule_scored["horizon"] == ANCHOR_HORIZON]
     rules = sorted(h5["key"].unique())
     if h5.empty:
         return {}, {}
-    matched, unmatched = _gap_matches(h5, best_history, best_now)
+    matched, unmatched, sell_only = _gap_matches(h5, best_history, best_now)
     n_un = unmatched["key"].value_counts()
     n_un_side = unmatched.groupby(["key", "direction"]).size()
+    n_so = sell_only["key"].value_counts()
+    n_so_side = sell_only.groupby(["key", "direction"]).size()
     by_side: dict[str, Any] = {}
     combined: dict[str, Any] = {}
     for r in rules:
         sub = matched[matched["key"] == r]
-        combined[r] = _gap_entry(sub, int(n_un.get(r, 0)))
+        combined[r] = _gap_entry(sub, int(n_un.get(r, 0)), int(n_so.get(r, 0)))
         by_side[r] = {
-            name: _gap_side(sub[sub["direction"] == d], int(n_un_side.get((r, d), 0)), name)
+            name: _gap_side(
+                sub[sub["direction"] == d],
+                int(n_un_side.get((r, d), 0)),
+                int(n_so_side.get((r, d), 0)),
+                name,
+            )
             for name, d in _DIRECTIONS
         }
     return by_side, combined
@@ -491,7 +513,10 @@ def run_daily_scoring(market: str = "jp", as_of: date | None = None) -> Path:
 
 
 def _rule_best_diff(history: pd.DataFrame, week_end: date) -> dict[str, Any]:
-    """week_end 以前で一番新しい評価と、その前の評価の、銘柄ごとのルールの出入り。"""
+    """week_end 以前で一番新しい評価と、その前の評価の、銘柄ごとのルールの出入り。
+
+    売りだけの行（保有中だからと残した行など）は、その週に選ばれたルールに数えない（#1889）。
+    """
     out: dict[str, Any] = {
         "evaluated_on": None,
         "previous_evaluated_on": None,
@@ -505,6 +530,7 @@ def _rule_best_diff(history: pd.DataFrame, week_end: date) -> dict[str, Any]:
     days = sorted(d for d in h["evaluated_on"].unique() if d <= week_end)
     if not days:
         return out
+    h = h[~_sell_only(h)]
     out["evaluated_on"] = days[-1].isoformat()
     cur = {
         str(s): str(r)
