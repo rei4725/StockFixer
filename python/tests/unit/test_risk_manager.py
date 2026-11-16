@@ -925,33 +925,56 @@ class TestCalcPositionSizeVixScale(unittest.TestCase):
         risk = RiskManager(broker)
         return risk
 
+    @staticmethod
+    def _fake_db(row):
+        con = MagicMock()
+        con.execute.return_value.fetchone.return_value = row
+
+        @contextmanager
+        def fake_db():
+            yield con
+
+        return fake_db
+
+    def _qty_with_db_vix(self, vix_value, vix_target="src.trading.vix_fetch._db_connection"):
+        """偽の DB の vix_close_lag1 を fetch_latest_vix に読ませて株数を出す（#1860）。
+
+        ^VIX は取れない形にして lag1 の道を通し、DD の読みは peak 無し（DD 0）にする。
+        VIX は1回の発注（インスタンス）の中で使い回すため、毎回作り直す（#1046）。
+        """
+        from datetime import date
+
+        vix_db = self._fake_db((vix_value, date.today()))
+        unread_db = self._fake_db(None)
+        with (
+            patch("yfinance.Ticker", side_effect=RuntimeError("network down")),
+            patch("src.trading.vix_fetch._db_connection", new=unread_db),
+            patch("src.trading.risk_manager._db_connection", new=self._fake_db(None)),
+            patch(vix_target, new=vix_db),
+        ):
+            return self._make_risk().calc_position_size("AAPL", price=100.0)
+
+    def test_vix_on_risk_manager_db_is_not_read(self):
+        """VIX を risk_manager の DB に置いても読まれず、高低で株数が変わらない（#1860）。
+
+        上のテストが vix_fetch の DB の VIX を読んで縮むことの裏づけ。
+        """
+        target = "src.trading.risk_manager._db_connection"
+        qty_normal = self._qty_with_db_vix(15.0, vix_target=target)
+        qty_spike = self._qty_with_db_vix(50.0, vix_target=target)
+
+        self.assertEqual(qty_spike, qty_normal)
+
     def test_high_vix_reduces_position_size(self):
-        from contextlib import contextmanager
+        from src.trading.risk_manager import VIX_POSITION_SCALE
 
-        risk = self._make_risk()
+        qty_normal = self._qty_with_db_vix(15.0)
+        qty_spike = self._qty_with_db_vix(50.0)
 
-        mock_con_normal = MagicMock()
-        mock_con_normal.execute.return_value.fetchone.return_value = None
-
-        mock_con_spike = MagicMock()
-        mock_con_spike.execute.return_value.fetchone.return_value = (50.0, "2026-10-22")
-
-        @contextmanager
-        def db_no_vix():
-            yield mock_con_normal
-
-        @contextmanager
-        def db_high_vix():
-            yield mock_con_spike
-
-        with patch("src.trading.risk_manager._db_connection", new=db_no_vix):
-            qty_normal = risk.calc_position_size("AAPL", price=100.0)
-
-        # VIX は1回の発注（インスタンス）の中で使い回すため、別の回として作り直す（#1046）
-        with patch("src.trading.risk_manager._db_connection", new=db_high_vix):
-            qty_spike = self._make_risk().calc_position_size("AAPL", price=100.0)
-
-        self.assertGreaterEqual(qty_normal, qty_spike)
+        # VIX が分からないときの縮小なら両方が同じく縮み、ここで落ちる
+        self.assertGreater(qty_normal, 0)
+        self.assertLess(qty_spike, qty_normal)
+        self.assertEqual(qty_spike, int(qty_normal * VIX_POSITION_SCALE))
 
 
 # ---------------------------------------------------------------------------
