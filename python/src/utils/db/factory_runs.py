@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 
@@ -149,6 +150,61 @@ def load_factory_specs() -> list[tuple[str, str]]:
     with _db_connection() as con:
         rows = con.execute("SELECT market, spec_json FROM factory_runs").fetchall()
     return [(r[0], r[1]) for r in rows]
+
+
+@dataclass(frozen=True)
+class FactoryRunRecord:
+    """factory_runs の1行のうち、評価の結果とゲートの理由を読み返す分（#1907）。"""
+
+    hypothesis_hash: str
+    market: str
+    evaluated_at: datetime
+    gate_passed: bool
+    gate_reasons: Optional[str]
+    portfolio_sharpe_ratio: Optional[float]
+    dsr: Optional[float]
+    num_trades: Optional[int]
+    portfolio_max_drawdown: Optional[float]
+
+
+def load_factory_runs(
+    market: Optional[str] = None, since: Optional[datetime] = None
+) -> list[FactoryRunRecord]:
+    """評価の結果とゲートの理由を evaluated_at の順に返す（読むだけ。#1907）。
+
+    market を渡すとその市場だけ、since を渡すと evaluated_at がそれ以後の行だけを返す。
+    """
+    ensure_factory_tables()
+    conditions: list[str] = []
+    params: list[object] = []
+    if market is not None:
+        conditions.append("market = %s")
+        params.append(market)
+    if since is not None:
+        conditions.append("evaluated_at >= %s")
+        params.append(since)
+    where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
+    sql = (
+        "SELECT hypothesis_hash, market, evaluated_at, gate_passed, gate_reasons, "
+        "portfolio_sharpe_ratio, dsr, num_trades, portfolio_max_drawdown "
+        "FROM factory_runs" + where + " ORDER BY evaluated_at, market, hypothesis_hash"
+    )
+    with _db_connection() as con:
+        rows = con.execute(sql, params).fetchall()
+    return [
+        FactoryRunRecord(
+            hypothesis_hash=r[0],
+            market=r[1],
+            evaluated_at=r[2],
+            gate_passed=bool(r[3]),
+            gate_reasons=r[4],
+            portfolio_sharpe_ratio=r[5],
+            dsr=r[6],
+            num_trades=r[7],
+            portfolio_max_drawdown=r[8],
+        )
+        for r in rows
+    ]
 
 
 def count_factory_runs() -> int:
