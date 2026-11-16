@@ -742,7 +742,7 @@ class TestPromoteChallengerToProduction(unittest.TestCase):
             joblib.dump({"model": "dummy"}, os.path.join(model_dir, f"{name}.joblib"))
 
         with patch(
-            "src.prediction.shadow_evaluation.get_models_subdir",
+            "src.prediction.symbol_model_promotion.get_models_subdir",
             return_value=model_dir,
         ):
             from src.prediction.shadow_evaluation import promote_challenger_to_production
@@ -768,7 +768,7 @@ class TestPromoteChallengerToProduction(unittest.TestCase):
         joblib.dump({"model": "dummy"}, os.path.join(model_dir, "ChallengerLightGBMModel.joblib"))
 
         with patch(
-            "src.prediction.shadow_evaluation.get_models_subdir",
+            "src.prediction.symbol_model_promotion.get_models_subdir",
             return_value=model_dir,
         ):
             from src.prediction.shadow_evaluation import promote_challenger_to_production
@@ -787,7 +787,7 @@ class TestPromoteChallengerToProduction(unittest.TestCase):
         # ファイルを作らない
 
         with patch(
-            "src.prediction.shadow_evaluation.get_models_subdir",
+            "src.prediction.symbol_model_promotion.get_models_subdir",
             return_value=model_dir,
         ):
             from src.prediction.shadow_evaluation import promote_challenger_to_production
