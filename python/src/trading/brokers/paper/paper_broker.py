@@ -384,6 +384,7 @@ class PaperBroker(BrokerBase):
                     {
                         "order_id": order_id,
                         "symbol": symbol,
+                        "side": int(side),  # 約定の知らせの明細に使う（#1876）
                         "fill_price": fill_price,
                         "qty": qty,
                     }

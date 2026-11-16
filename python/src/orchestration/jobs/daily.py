@@ -338,6 +338,7 @@ def run_daily_auto_order():
 
     # Discord 完了通知
     try:
+        from src.orchestration.jobs.trade_lines import order_trade_lines
         from src.reporting.discord.discord_utils import send_daily_order_completion
 
         send_daily_order_completion(
@@ -350,6 +351,7 @@ def run_daily_auto_order():
             daily_loss_limit=stats.get("daily_loss_limit"),
             errors=stats.get("errors", 0),
             sl_tp_unevaluable_symbols=stats.get("sl_tp_unevaluable_symbols"),
+            details=order_trade_lines(stats),
         )
     except Exception as e:
         logger.error("自動発注完了通知失敗: %s", e, exc_info=True)
@@ -440,7 +442,7 @@ def run_daily_settle_orders(notify_when_none: bool = True) -> int:
     from src.orchestration.jobs.settle_notify import notify_settle_result
 
     # 例外で約定できなかった件数を返す（締めの知らせで当日の行の無さと分ける #1088）
-    return notify_settle_result(len(settled), broker.last_settle_errors, notify_when_none)
+    return notify_settle_result(len(settled), broker.last_settle_errors, notify_when_none, settled)
 
 
 def run_daily_paper_trade_report():

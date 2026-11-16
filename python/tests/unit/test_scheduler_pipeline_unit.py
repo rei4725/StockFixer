@@ -82,6 +82,7 @@ class TestRunDailyAutoOrder(unittest.TestCase):
             daily_loss_limit=20_000.0,
             errors=0,
             sl_tp_unevaluable_symbols=None,
+            details=None,
         )
 
     @patch("src.reporting.discord.discord_utils.send_daily_order_completion")
