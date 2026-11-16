@@ -597,8 +597,8 @@ class TestUnevaluableSymbolKeepsRuleBest(unittest.TestCase):
 _LOSING = [_mock_result("golden_cross", 0.0, -5000)]
 
 
-class TestHeldSymbolKeepsRuleBest(unittest.TestCase):
-    """保有中の銘柄の行は消さず、ルールの SELL の判定に残す（#1566）。"""
+class _HeldRowsCase(unittest.TestCase):
+    """保有中の銘柄と rule_best の行を用意する土台（#1566・#1797）。"""
 
     HELD = "9991"
     NOT_HELD = "9992"
@@ -662,6 +662,10 @@ class TestHeldSymbolKeepsRuleBest(unittest.TestCase):
 
         return set(load_effective_rules("jp")["symbol"])
 
+
+class TestHeldSymbolKeepsRuleBest(_HeldRowsCase):
+    """保有中の銘柄の行は消さず、ルールの SELL の判定に残す（#1566）。"""
+
     def test_no_valid_rule_keeps_row_only_while_held(self) -> None:
         self._hold(self.HELD)
         summary = self._evaluate()
@@ -717,6 +721,121 @@ class TestHeldSymbolKeepsRuleBest(unittest.TestCase):
         self.assertNotIn(self.NOT_HELD, rows)
         self.assertLessEqual({self.OFF_HELD, self.OFF_NOT_HELD}, rows)
         self.assertEqual(summary["skipped"], 2)
+
+
+class TestHeldRowIsSellOnly(_HeldRowsCase):
+    """保有中だからと残した行は売りだけにし、その行から新規買いを出さない（#1797）。"""
+
+    def _sell_only(self) -> dict[str, bool]:
+        from src.utils.db.rule_results import load_effective_rules
+
+        df = load_effective_rules("jp")
+        df = df[df["symbol"].isin(self.ALL)]
+        return {str(r["symbol"]): bool(r["sell_only"]) for _, r in df.iterrows()}
+
+    def _signals(self, today: tuple[int, float]) -> list[dict[str, Any]]:
+        from src.rule_engine.pipeline import generate_rule_signals
+
+        with (
+            patch("src.rule_engine.pipeline._get_today_signal", return_value=today),
+            patch("src.rule_engine.pipeline.upsert_rule_signal"),
+        ):
+            batch = generate_rule_signals("jp", market_data_port=MagicMock())
+        return [s for s in batch.signals if s["symbol"] in self.ALL]
+
+    def _execute(
+        self, signals: list[dict[str, Any]], positions: list[dict[str, Any]]
+    ) -> tuple[dict[str, Any], MagicMock]:
+        from src.infrastructure.in_memory import InMemoryTradeDiffSink
+        from src.trading.rule_execution import execute_rule_paper_trades
+        from src.trading.types import CorrelationGateResult
+
+        broker = MagicMock()
+        broker.get_positions.return_value = positions
+        risk = MagicMock()
+        risk.evaluate_trading_gate.return_value = MagicMock(is_allowed=True, reason="test")
+        risk.calc_position_size.return_value = 100
+        corr = CorrelationGateResult(
+            is_allowed=True, enc=1.0, enc_threshold=2.0, avg_correlation=0.0, n_symbols=0
+        )
+        with (
+            patch("src.trading.rule_execution.PaperBroker", return_value=broker),
+            patch("src.trading.rule_execution.RiskManager", return_value=risk),
+            patch("src.trading.rule_execution.evaluate_correlation_gate", return_value=corr),
+            patch(
+                "src.trading.rule_execution.get_symbol_sector",
+                side_effect=lambda market, symbol: f"sec-{symbol}",
+            ),
+            patch("src.trading.rule_execution.get_ticker", side_effect=lambda m, s: f"{s}.T"),
+        ):
+            result = execute_rule_paper_trades(
+                signals, "jp", trade_diff_sink=InMemoryTradeDiffSink()
+            )
+        return result, broker
+
+    def _evaluate_with(self, results: list[dict[str, Any]]) -> None:
+        from src.backtest.rule_selector import evaluate_all_symbols
+
+        with (
+            patch("src.backtest.rule_selector._WATCHLIST_PATH", self.watchlist_path),
+            patch("src.backtest.rule_selector.run_rule_backtest", return_value=results),
+        ):
+            evaluate_all_symbols("jp", "2024-01-01", "2024-12-31")
+
+    def test_no_valid_rule_held_row_is_sell_only_and_buy_day_places_no_order(self) -> None:
+        self._hold(self.HELD)
+        self._evaluate()
+        self.assertEqual(self._sell_only(), {self.HELD: True})
+
+        # 週の途中で手放した後の BUY の日
+        self._clear_positions()
+        signals = self._signals((1, 1000.0))
+        self.assertEqual([(s["symbol"], s["signal"]) for s in signals], [(self.HELD, 0)])
+        result, broker = self._execute(signals, positions=[])
+        self.assertEqual(result["buy_orders"], 0)
+        broker.send_order.assert_not_called()
+
+    def test_sell_only_row_still_sells_the_position(self) -> None:
+        self._hold(self.HELD)
+        self._evaluate()
+        signals = self._signals((-1, 1100.0))
+        self.assertEqual([(s["symbol"], s["signal"]) for s in signals], [(self.HELD, -1)])
+        result, broker = self._execute(signals, positions=[{"symbol": self.HELD, "qty": 100}])
+        self.assertEqual(result["sell_orders"], 1)
+        self.assertEqual(broker.send_order.call_args.kwargs["side"].name, "SELL")
+
+    def test_off_watchlist_held_row_is_sell_only(self) -> None:
+        self._hold(self.OFF_HELD)
+        self._evaluate_with([_mock_result("rsi_contrarian", 0.65, 50000)])
+        self.assertEqual(
+            self._sell_only(), {self.HELD: False, self.NOT_HELD: False, self.OFF_HELD: True}
+        )
+        signals = self._signals((1, 1000.0))
+        by_symbol = {s["symbol"]: s["signal"] for s in signals}
+        self.assertEqual(by_symbol, {self.HELD: 1, self.NOT_HELD: 1, self.OFF_HELD: 0})
+
+    def test_unreadable_positions_mark_rows_without_valid_rule(self) -> None:
+        with patch(
+            "src.backtest.rule_selector.load_held_symbols",
+            side_effect=RuntimeError("db error"),
+        ):
+            self._evaluate()
+        flags = self._sell_only()
+        self.assertTrue(flags[self.HELD])
+        self.assertTrue(flags[self.NOT_HELD])
+
+    def test_flag_is_lowered_when_a_valid_rule_is_chosen_next_week(self) -> None:
+        self._hold(self.HELD)
+        self._evaluate()
+        self.assertTrue(self._sell_only()[self.HELD])
+
+        self._evaluate_with([_mock_result("rsi_contrarian", 0.65, 50000)])
+        self.assertFalse(self._sell_only()[self.HELD])
+        self._clear_positions()
+        signals = self._signals((1, 1000.0))
+        self.assertIn((self.HELD, 1), [(s["symbol"], s["signal"]) for s in signals])
+        result, _ = self._execute([s for s in signals if s["symbol"] == self.HELD], positions=[])
+        self.assertEqual(result["buy_orders"], 1)
 
 
 class TestRunRuleBacktestWithoutRaising(unittest.TestCase):

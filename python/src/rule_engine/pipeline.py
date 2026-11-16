@@ -72,6 +72,12 @@ def _count_weekdays_behind(last_bar: date, signal_date: date, market: str = "us"
     return sum(1 for day in days if _is_open_day(day.date(), market))
 
 
+def _is_sell_only(row: pd.Series) -> bool:
+    """rule_best_by_symbol の行に売りだけの印が立っていれば True（#1797）。列が無ければ False。"""
+    value = row.get("sell_only")
+    return bool(value) if value is not None and pd.notna(value) else False
+
+
 def _get_today_signal(
     market: str,
     symbol: str,
@@ -158,6 +164,7 @@ def generate_rule_signals(
 
     データ不足・未知のルール・足の停止・例外の銘柄は HOLD として保存せず、
     unavailable に入れる。total は対象の銘柄数。
+    売りだけの印の立った行（#1797）の BUY は、ルールの判定のまま保存し、返す signals では HOLD にする。
     """
     if market_data_port is None:
         raise ValueError(
@@ -187,7 +194,12 @@ def generate_rule_signals(
                 unavailable.append(UnavailableRuleSymbol(symbol, rule_name, "シグナルなし"))
                 continue
             signal, price = today
+            # 記録はルールの判定のまま残す（ルールの採点の材料を変えない）
             upsert_rule_signal(signal_date, market, symbol, rule_name, signal, price)
+            if signal == 1 and _is_sell_only(row):
+                # 保有中だからと残した行からは新規買いを出さない。SELL はそのまま出す（#1797）
+                logger.info(f"  {symbol}: 売りだけの行のため BUY を HOLD にする")
+                signal = 0
 
             label = {1: "BUY", -1: "SELL", 0: "HOLD"}.get(signal, "HOLD")
             results.append(
