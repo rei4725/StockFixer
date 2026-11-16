@@ -128,6 +128,7 @@ class TestOldFilesAreRecomputed(unittest.TestCase):
             "_load_filled_orders": {"return_value": _BACKFILL_ORDERS},
             "_default_price_loader": {"side_effect": _rising_loader},
             "_default_split_loader": {"return_value": None},
+            "load_cash_events": {"return_value": []},
         }.items():
             patcher = patch.object(paper_equity, name, **kwargs)
             patcher.start()
