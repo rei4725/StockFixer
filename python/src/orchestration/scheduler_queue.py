@@ -15,7 +15,6 @@ import json
 import logging
 import os
 import random
-import tempfile
 import threading
 import time
 import uuid
@@ -44,6 +43,11 @@ from src.orchestration.scheduler_interrupted import (
     warn_interrupted_runs,
 )
 from src.orchestration.scheduler_recovery_gap import is_within_recovery_gap
+from src.orchestration.scheduler_state_file import (
+    quarantine_state_file,
+    read_state_file,
+    write_state_file,
+)
 from src.orchestration.scheduler_weekdays import parse_day_of_week
 from src.utils.data_path_utils import ensure_dir, get_results_dir
 from src.utils.heartbeat import ping_heartbeat
@@ -509,27 +513,12 @@ class SchedulerQueueManager:
 
     def _reload_state(self) -> bool:
         """状態ファイルを読み直す（ロックの内で呼ぶ）。読めなければ手元の記録を残して False。"""
-        if not os.path.exists(self.state_file_path):
-            self._state = {"events": []}
-            return True
-
-        try:
-            with open(self.state_file_path, "r", encoding="utf-8") as file:
-                state = json.load(file)
-        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-            self._quarantine_state_file(str(exc))
+        result = read_state_file(self.state_file_path)
+        if result.corrupt_detail is not None:
+            self._quarantine_state_file(result.corrupt_detail)
+        if result.state is None:
             return False
-        except OSError:
-            logger.error("スケジューラ状態ファイル読込失敗", exc_info=True)
-            return False
-
-        if not isinstance(state, dict):
-            self._quarantine_state_file(f"最上位が dict ではない: {type(state).__name__}")
-            return False
-        events = state.get("events")
-        if not isinstance(events, list):
-            state["events"] = []
-        self._state = state
+        self._state = result.state
         return True
 
     def _quarantine_state_file(self, detail: str) -> None:
@@ -538,38 +527,11 @@ class SchedulerQueueManager:
         空の履歴で続けると、済んだ日次のジョブ（発注を含む）を補完でやり直すため。
         """
         self._state_corrupted = True
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-        quarantine_path = f"{self.state_file_path}.corrupt-{stamp}"
-        try:
-            os.replace(self.state_file_path, quarantine_path)
-        except OSError:
-            logger.error(
-                f"壊れたスケジューラ状態ファイルの退避に失敗: {self.state_file_path}",
-                exc_info=True,
-            )
-            return
-        logger.error(
-            "スケジューラ状態ファイルが読めないため退避し、補完実行を止めます"
-            f"（定時のジョブは続けます）: {detail} 退避先={quarantine_path}"
-        )
+        quarantine_state_file(self.state_file_path, detail)
 
     def _save_state(self) -> None:
         """一時ファイルに書いてから置き換える（ロックの内で呼ぶ）。"""
-        state_dir = os.path.dirname(os.path.abspath(self.state_file_path))
-        ensure_dir(state_dir)
-        fd, tmp_path = tempfile.mkstemp(
-            dir=state_dir, prefix=f"{os.path.basename(self.state_file_path)}.", suffix=".tmp"
-        )
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as file:
-                json.dump(self._state, file, ensure_ascii=False, indent=2)
-                file.flush()
-                os.fsync(file.fileno())
-            os.replace(tmp_path, self.state_file_path)
-        except BaseException:
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
-            raise
+        write_state_file(self.state_file_path, self._state)
 
     def _append_event(self, event: dict[str, Any]) -> None:
         with self._lock, self._file_lock:

@@ -675,7 +675,7 @@ class TestFetchLatestVix(unittest.TestCase):
         def mock_db():
             yield mock_con
 
-        with patch("src.trading.risk_manager._db_connection", new=mock_db):
+        with patch("src.trading.vix_fetch._db_connection", new=mock_db):
             vix = fetch_latest_vix()
 
         self.assertAlmostEqual(vix, 28.5)
@@ -692,7 +692,7 @@ class TestFetchLatestVix(unittest.TestCase):
         def mock_db():
             yield mock_con
 
-        with patch("src.trading.risk_manager._db_connection", new=mock_db):
+        with patch("src.trading.vix_fetch._db_connection", new=mock_db):
             vix = fetch_latest_vix()
 
         self.assertIsNone(vix)
@@ -707,7 +707,7 @@ class TestFetchLatestVix(unittest.TestCase):
             raise RuntimeError("DB接続失敗")
             yield  # noqa: unreachable
 
-        with patch("src.trading.risk_manager._db_connection", new=mock_db_error):
+        with patch("src.trading.vix_fetch._db_connection", new=mock_db_error):
             vix = fetch_latest_vix()
 
         self.assertIsNone(vix)
@@ -729,7 +729,7 @@ class TestFetchLatestVix(unittest.TestCase):
         def mock_db():
             yield mock_con
 
-        with patch("src.trading.risk_manager._db_connection", new=mock_db):
+        with patch("src.trading.vix_fetch._db_connection", new=mock_db):
             fetch_latest_vix()
 
         executed_sql = mock_con.execute.call_args[0][0]
@@ -787,7 +787,7 @@ class TestFetchLatestVixUsesLatestClose(unittest.TestCase):
         with (
             patch("yfinance.Ticker", return_value=ticker),
             patch(
-                "src.trading.risk_manager._db_connection",
+                "src.trading.vix_fetch._db_connection",
                 new=self._lag1_db(20.0, today - timedelta(days=1)),
             ),
         ):
@@ -804,7 +804,7 @@ class TestFetchLatestVixUsesLatestClose(unittest.TestCase):
         with (
             patch("yfinance.Ticker", side_effect=RuntimeError("network down")),
             patch(
-                "src.trading.risk_manager._db_connection",
+                "src.trading.vix_fetch._db_connection",
                 new=self._lag1_db(35.0, date.today()),
             ),
             self.assertLogs("src.trading.risk_manager", level="WARNING") as logs,
@@ -892,7 +892,7 @@ class TestFetchLatestVixUsesLatestClose(unittest.TestCase):
 
         with (
             patch("yfinance.Ticker", side_effect=RuntimeError("network down")),
-            patch("src.trading.risk_manager._db_connection", new=self._lag1_db_none()),
+            patch("src.trading.vix_fetch._db_connection", new=self._lag1_db_none()),
             self.assertLogs("src.trading.risk_manager", level="WARNING") as logs,
         ):
             vix = fetch_latest_vix()
