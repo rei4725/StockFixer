@@ -216,7 +216,9 @@ class TestRunDailyRuleSignalsNoEffectiveRules(unittest.TestCase):
         webhook = MagicMock(return_value=True)
         with self.assertRaises(NonRetryableJobError):
             self._run(
-                RuleSignalBatch(), "src.reporting.discord.discord_utils.send_webhook_text", webhook
+                RuleSignalBatch(),
+                "src.reporting.discord.notifications_rule.send_webhook_text",
+                webhook,
             )
         webhook.assert_called_once()
         body = webhook.call_args.args[0]
@@ -232,7 +234,9 @@ class TestRunDailyRuleSignalsNoEffectiveRules(unittest.TestCase):
             total=2,
         )
         webhook = MagicMock(return_value=True)
-        execute = self._run(batch, "src.reporting.discord.discord_utils.send_webhook_text", webhook)
+        execute = self._run(
+            batch, "src.reporting.discord.notifications_rule.send_webhook_text", webhook
+        )
         execute.assert_called_once()
         webhook.assert_called_once()
         body = webhook.call_args.args[0]

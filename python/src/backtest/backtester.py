@@ -249,40 +249,14 @@ class Backtester:
             if self.execution_lag == 0 and position > 0 and position_price > 0:
                 change_from_entry = (price - position_price) / position_price
 
+                # 損切りを先に見て、当たらなければ利確を見る
+                exit_action: Optional[str] = None
                 if position_stop_pct is not None and change_from_entry <= -position_stop_pct:
-                    proceeds = self.execution.sell_proceeds(position, price, vol)
-                    proceeds_gross = position * price
-                    cash += proceeds
-                    cash_gross += proceeds_gross
-                    trade_log.append(
-                        {
-                            "date": date,
-                            "action": "stop_loss",
-                            "price": price,
-                            "qty": position,
-                            "cash": cash,
-                            "cash_gross": cash_gross,
-                        }
-                    )
-                    position = 0
-                    position_price = 0.0
-                    equity_records.append(
-                        mark_to_market(
-                            self.execution,
-                            date,
-                            cash,
-                            cash_gross,
-                            position,
-                            price,
-                            short_position,
-                            short_price,
-                            short_entry_vol,
-                            exec_vol,
-                        )
-                    )
-                    continue
+                    exit_action = "stop_loss"
+                elif self.take_profit_pct is not None and change_from_entry >= self.take_profit_pct:
+                    exit_action = "take_profit"
 
-                if self.take_profit_pct is not None and change_from_entry >= self.take_profit_pct:
+                if exit_action is not None:
                     proceeds = self.execution.sell_proceeds(position, price, vol)
                     proceeds_gross = position * price
                     cash += proceeds
@@ -290,7 +264,7 @@ class Backtester:
                     trade_log.append(
                         {
                             "date": date,
-                            "action": "take_profit",
+                            "action": exit_action,
                             "price": price,
                             "qty": position,
                             "cash": cash,
