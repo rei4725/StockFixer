@@ -34,7 +34,6 @@ from src.domain.trading_rules import get_lot_size
 from src.domain.types import OrderRunSummary
 from src.trading.brokers.base import BrokerBase, BrokerError, OrderSide
 from src.trading.correlation_risk import evaluate_correlation_gate
-from src.trading.position_size_reason import zero_qty_skip_key
 from src.trading.position_valuation import (
     coverable_short_qty,
     read_short_positions,
@@ -45,16 +44,15 @@ from src.trading.signal_generator import apply_multi_horizon_score_column
 from src.utils.logger import get_logger
 
 from .entry_gates import _block_entries, _evaluate_entry_gate
+from .entry_sizing import _sized_entry_qty, _skip_small_change
 from .freshness import _block_new_if_stale, _note_no_predictions
 from .gate_record import finish_order_run, held_without_prediction
 from .params import (
     _SPLIT_LOW_CONFIDENCE,
-    _apply_split_qty,
     _attach_dynamic_thresholds,
     _block_new_if_params_unreadable,
     _calc_split_ratio,
     _choose_order_params,
-    _resolve_kelly_params,
 )
 from .pending import _load_pending_exits, _log_pending_skips
 from .recording import _record_order, _recorder, _sync_live_execution_diffs
@@ -209,14 +207,7 @@ def run_order_steps(
         if pending.has(symbol, OrderSide.SELL):
             pending_skipped.append(symbol)
             continue
-        if abs(float(row.get("diff_ratio") or 0.0)) < MIN_CHANGE_RATIO:  # 変動が小さい（R-214）
-            logger.info(
-                "[exec] %s: diff_ratio=%.3f%% < min_change=%.3f%% → スキップ",
-                symbol,
-                float(row.get("diff_ratio") or 0) * 100,
-                MIN_CHANGE_RATIO * 100,
-            )
-            count_skip(stats, "sell_min_change")
+        if _skip_small_change(row, symbol, stats, "sell_min_change", "スキップ"):
             continue
         try:
             # 保有全数を成行売り。保有の一覧は銘柄によらず同じなので1回だけ読む（#1095）
@@ -302,14 +293,7 @@ def run_order_steps(
             count_skip(stats, "max_positions")
             continue
 
-        if abs(float(row.get("diff_ratio") or 0.0)) < MIN_CHANGE_RATIO:  # 変動が小さい（R-214）
-            logger.info(
-                "[exec] %s: diff_ratio=%.3f%% < min_change=%.3f%% → スキップ",
-                symbol,
-                float(row.get("diff_ratio") or 0) * 100,
-                MIN_CHANGE_RATIO * 100,
-            )
-            count_skip(stats, "min_change")
+        if _skip_small_change(row, symbol, stats, "min_change", "スキップ"):
             continue
 
         if current_price <= 0:
@@ -330,32 +314,12 @@ def run_order_steps(
             continue
 
         try:
-            kelly_win_rate, kelly_avg_win, kelly_avg_loss = _resolve_kelly_params(
-                str(row["market"]), symbol
-            )
-            qty = risk.calc_position_size(
-                symbol,
-                current_price,
-                win_rate=kelly_win_rate,
-                avg_win=kelly_avg_win,
-                avg_loss=kelly_avg_loss,
-                confidence_ratio=confidence,
+            words = ("スキップ", "発注")
+            qty = _sized_entry_qty(
+                risk, row, symbol, current_price, confidence, split_ratio, lot, stats, words
             )
             if qty <= 0:
-                logger.info(f"[exec] {symbol}: 発注株数 0 → スキップ（{risk.zero_reason}）")
-                count_skip(stats, zero_qty_skip_key(risk.zero_reason))
                 continue
-
-            if split_ratio < 1.0:
-                qty = _apply_split_qty(qty, split_ratio, lot=lot)
-                logger.info(
-                    "[exec] %s: confidence_ratio=%.3f → %.0f%%発注 %d株 (R-308)",
-                    symbol,
-                    confidence,
-                    split_ratio * 100,
-                    qty,
-                )
-
             order_type, order_price, order_reason, order_session = _choose_order_params(
                 market=str(row["market"]),
                 symbol=symbol,
@@ -476,14 +440,7 @@ def run_order_steps(
                 count_skip(stats, "max_positions")
                 continue
 
-            if abs(float(row.get("diff_ratio") or 0.0)) < MIN_CHANGE_RATIO:
-                logger.info(
-                    "[exec] %s: diff_ratio=%.3f%% < min_change=%.3f%% → ショートスキップ",
-                    symbol,
-                    float(row.get("diff_ratio") or 0) * 100,
-                    MIN_CHANGE_RATIO * 100,
-                )
-                count_skip(stats, "min_change")
+            if _skip_small_change(row, symbol, stats, "min_change", "ショートスキップ"):
                 continue
 
             if current_price <= 0:
@@ -504,32 +461,20 @@ def run_order_steps(
                 continue
 
             try:
-                kelly_win_rate, kelly_avg_win, kelly_avg_loss = _resolve_kelly_params(
-                    str(row["market"]), symbol
-                )
-                qty = risk.calc_position_size(
+                words = ("ショートせず", "ショート発注")
+                qty = _sized_entry_qty(
+                    risk,
+                    row,
                     symbol,
                     current_price,
-                    win_rate=kelly_win_rate,
-                    avg_win=kelly_avg_win,
-                    avg_loss=kelly_avg_loss,
-                    confidence_ratio=confidence,
+                    confidence,
+                    short_split_ratio,
+                    lot,
+                    stats,
+                    words,
                 )
                 if qty <= 0:
-                    logger.info(f"[exec] {symbol}: 発注株数 0 → ショートせず（{risk.zero_reason}）")
-                    count_skip(stats, zero_qty_skip_key(risk.zero_reason))
                     continue
-
-                if short_split_ratio < 1.0:
-                    qty = _apply_split_qty(qty, short_split_ratio, lot=lot)
-                    logger.info(
-                        "[exec] %s: confidence_ratio=%.3f → %.0f%%ショート発注 %d株 (R-308)",
-                        symbol,
-                        confidence,
-                        short_split_ratio * 100,
-                        qty,
-                    )
-
                 order_type, order_price, order_reason, order_session = _choose_order_params(
                     market=str(row["market"]),
                     symbol=symbol,
