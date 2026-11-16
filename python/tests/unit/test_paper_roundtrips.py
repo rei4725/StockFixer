@@ -134,6 +134,63 @@ def test_load_paper_roundtrip_orders_reads_filled_buys_and_sells():
     assert params == [1, 2]
 
 
+_SPLIT_COLUMNS = [
+    "order_id",
+    "market",
+    "symbol",
+    "side",
+    "qty",
+    "fill_price",
+    "created_at",
+    "filled_at",
+]
+
+
+def _split_orders() -> pd.DataFrame:
+    # 分割の前に 100 株を 1,000 円で買い、2分割（2026-09-10）の後に 200 株を 500 円で売る
+    rows = [
+        ("b1", "jp", "S", 1, 100, 1000.0, datetime(2026, 9, 1, 23, 50), datetime(2026, 9, 2)),
+        ("s1", "jp", "S", 2, 200, 500.0, datetime(2026, 9, 15, 7, 30), datetime(2026, 9, 16)),
+    ]
+    return pd.DataFrame(rows, columns=_SPLIT_COLUMNS)
+
+
+def _splits(market, symbol):
+    if symbol != "S":
+        return None
+    return pd.Series([2.0], index=pd.DatetimeIndex([pd.Timestamp("2026-09-10")]))
+
+
+def test_split_between_buy_and_sell_is_adjusted_to_current_level():
+    calls = []
+
+    def loader(market, symbol):
+        calls.append((market, symbol))
+        return _splits(market, symbol)
+
+    trips, open_lots, unmatched = build_roundtrips(_split_orders(), split_loader=loader)
+    assert [(t.qty, t.entry_price, t.exit_price, t.pnl) for t in trips] == [
+        (200, 500.0, 500.0, 0.0)
+    ]
+    assert open_lots == [] and unmatched == {}
+    assert calls == [("jp", "S")]
+
+
+def test_split_unknown_symbol_keeps_raw_values():
+    # 分割の記録が取れない銘柄は生の値で組む（今までと同じ）
+    trips, _, unmatched = build_roundtrips(_split_orders(), split_loader=lambda m, s: None)
+    assert [(t.qty, t.pnl) for t in trips] == [(100, -50000.0)]
+    assert unmatched == {"S": 100}
+
+
+def test_split_loader_does_not_change_orders_without_splits():
+    df = _orders()
+    df.insert(1, "market", "jp")
+    base = build_roundtrips(df)
+    with_loader = build_roundtrips(df, split_loader=_splits)
+    assert with_loader == base
+
+
 def test_empty_orders():
     trips, open_lots, _ = build_roundtrips(pd.DataFrame(columns=_orders().columns))
     assert trips == [] and open_lots == []
