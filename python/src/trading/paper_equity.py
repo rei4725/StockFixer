@@ -21,6 +21,8 @@ from config.settings import PAPER_INITIAL_BALANCE
 from src.trading.brokers.base import OrderSide
 from src.trading.paper_cash_events import (
     Deposit,
+    SplitLoader,
+    _split_factors,
     add_deposits_to_cash,
     deposits_between,
     first_deposit_day,
@@ -61,7 +63,6 @@ WEEKLY_BENCHMARKS = {"jp": "1306.T", "us": "^GSPC"}
 _BENCHMARK_LOOKBACK_BDAYS = 10
 
 BenchmarkFetcher = Callable[[str, str, str], dict[str, Any]]
-SplitLoader = Callable[[str, str], Optional[pd.Series]]
 
 
 def _load_filled_orders() -> pd.DataFrame:
@@ -111,24 +112,6 @@ def _default_split_loader(market: str, symbol: str) -> Optional[pd.Series]:
         idx = idx.tz_localize(None)
     splits.index = idx.normalize()
     return splits
-
-
-def _split_factors(splits: Optional[pd.Series]) -> Callable[[pd.Timestamp], float]:
-    """約定の日 -> その日より後の分割の比の積、を返す関数を作る。
-
-    raw の終値は分割があると全期間を調整し直してあるため（#817）、分割より前の約定の
-    株数をこの積の倍に、値段を積で割ると、終値と同じ水準になる（#899）。
-    評価の最後の日より後の分割も終値に入っているため数える（前の週の計算し直し。#1695）。
-    """
-    if splits is None or splits.empty:
-        return lambda day: 1.0
-    ratios = pd.to_numeric(splits, errors="coerce")
-    ratios = ratios[ratios > 0]
-
-    def factor(day: pd.Timestamp) -> float:
-        return float(ratios[ratios.index > day].prod())
-
-    return factor
 
 
 def _capped_qty(
