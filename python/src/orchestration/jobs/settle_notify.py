@@ -3,19 +3,29 @@
 完了の知らせとは別に、例外で約定できなかった注文の件数を、当日の行が無い据え置きと分けて知らせる。
 """
 
+from typing import Any, Mapping, Optional, Sequence
+
 from src.orchestration.job_errors import NonRetryableJobError
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 
-def notify_settle_result(settled_count: int, error_count: int, notify_when_none: bool) -> int:
-    """約定の完了と例外の件数を知らせ、例外の件数を返す"""
+def notify_settle_result(
+    settled_count: int,
+    error_count: int,
+    notify_when_none: bool,
+    settled: Optional[Sequence[Mapping[str, Any]]] = None,
+) -> int:
+    """約定の完了と例外の件数を知らせ、例外の件数を返す。settled があれば明細も出す（#1876）"""
     try:
+        from src.orchestration.jobs.trade_lines import safe_settled_trade_lines
         from src.reporting.discord.discord_utils import send_daily_settle_completion
 
         if settled_count or notify_when_none:  # Discord 完了通知。やり直しの0件の回は出さない #1047
-            send_daily_settle_completion(settled_count=settled_count)
+            send_daily_settle_completion(
+                settled_count=settled_count, details=safe_settled_trade_lines(settled)
+            )
     except Exception as e:
         logger.error("約定処理完了通知失敗: %s", e, exc_info=True)
 

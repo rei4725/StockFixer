@@ -18,7 +18,7 @@ from src.utils.optimal_params_loader import OptimalParamsUnreadableError
 
 from .pending import _load_pending_exits, _log_pending_skips
 from .recording import _record_order, _recorder
-from .stats import OrderExecutionStats
+from .stats import OrderExecutionStats, note_order
 
 logger = get_logger(__name__)
 
@@ -152,10 +152,7 @@ def _check_sl_tp_exits(
                 current_price,
                 reason,
             )
-            if is_short:
-                stats["short_orders"] += 1
-            else:
-                stats["sell_orders"] += 1
+            note_order(stats, symbol, side, qty, order_type, order_price)
             stats["total_turnover"] += current_price * qty
             triggered.add(symbol)
         except Exception:
