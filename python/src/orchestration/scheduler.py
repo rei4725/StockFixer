@@ -15,12 +15,11 @@ from src.orchestration.jobs.backtest_promotion_job import (
     raise_if_backtest_promotion_failed,
     run_backtest_promotion,
 )
+from src.orchestration.jobs.backup_job import run_daily_backup
 from src.orchestration.jobs.common import _handle_stage_error, _is_first_week_of_month
 from src.orchestration.jobs.daily import (
     run_daily_auto_order,
-    run_daily_backup,
     run_daily_drift_check,
-    run_daily_horizon_exit,
     run_daily_paper_trade_report,
     run_daily_pipeline,
     run_daily_rule_signals,
@@ -28,6 +27,7 @@ from src.orchestration.jobs.daily import (
     run_horizon_exit_check,
     run_pre_close_alert,
 )
+from src.orchestration.jobs.horizon_exit import run_daily_horizon_exit
 from src.orchestration.jobs.periodic import (
     run_allocation_rebalance_job,
     run_monthly_report_job,
