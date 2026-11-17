@@ -15,6 +15,15 @@ import pandas as pd
 
 from src.backtest.execution import default_slippage_for
 from src.backtest.pipeline import run_backtest_walk_forward
+from src.backtest.walk_forward_progress import (
+    append_partial_row,
+    done_keys,
+    load_partial_rows,
+    partial_path,
+    remove_other_weeks,
+    start_partial,
+    week_key_at,
+)
 from src.utils.data_path_utils import ensure_dir, get_results_dir
 from src.utils.db.experiment import generate_run_id, save_experiment_run
 from src.utils.logger import get_logger
@@ -229,6 +238,15 @@ def _to_markdown_summary(comparison_df: pd.DataFrame, previous_path: Optional[Pa
     return "\n".join(lines)
 
 
+def _record_row(rows: list[dict[str, Any]], progress_path: Path, row: dict[str, Any]) -> None:
+    """結果の行を溜め、途中のファイルにも書き足す（#1931）。"""
+    rows.append(row)
+    try:
+        append_partial_row(progress_path, row)
+    except Exception as exc:
+        logger.error(f"[WF] 途中のファイルへの書き足し失敗: {progress_path}: {exc}", exc_info=True)
+
+
 def run_walk_forward_comparison_report(
     tasks: list,
     model_type: str = "XGBoostModel",
@@ -259,12 +277,37 @@ def run_walk_forward_comparison_report(
         ensure_dir(str(Path(get_results_dir()) / "backtest" / "walk_forward_reports"))
     )
 
-    rows: list[dict[str, Any]] = []
-    failed = 0
+    # 同じ週の消えた回の済んだ銘柄を飛ばし、続きから進める（#1931）
+    run_params: dict[str, Any] = {
+        "model_type": model_type,
+        "source": source,
+        "n_splits": n_splits,
+        "threshold": threshold,
+        "initial_cash": initial_cash,
+        "fee_rate": fee_rate,
+        "slippage": slippage,
+        "ensemble": ensemble,
+    }
+    week_key = week_key_at()
+    remove_other_weeks(report_dir, week_key)
+    progress_path = partial_path(report_dir, week_key)
+    target_keys = {(str(t.market), str(t.symbol)) for t in targets}
+    rows: list[dict[str, Any]] = [
+        r
+        for r in load_partial_rows(progress_path, run_params)
+        if (str(r.get("market")), str(r.get("symbol"))) in target_keys
+    ]
+    finished = done_keys(rows)
+    failed = sum(1 for r in rows if r.get("error") is not None)
+    if rows:
+        logger.info(f"[WF] 途中のファイルから続ける: {progress_path.name} 済み={len(rows)}")
+    start_partial(progress_path, run_params, rows)
 
     for task in targets:
         market = task.market
         symbol = task.symbol
+        if (str(market), str(symbol)) in finished:
+            continue
         logger.info(f"[WF] 実行開始: {market}/{symbol}")
         try:
             _, _, wf_df = run_backtest_walk_forward(
@@ -282,12 +325,16 @@ def run_walk_forward_comparison_report(
             )
             if wf_df is None or wf_df.empty:
                 failed += 1
-                rows.append({"market": market, "symbol": symbol, "error": "wf_df is empty"})
+                _record_row(
+                    rows,
+                    progress_path,
+                    {"market": market, "symbol": symbol, "error": "wf_df is empty"},
+                )
                 logger.warning(f"[WF] 空結果: {market}/{symbol}")
                 continue
 
             summary = _summarize_wf_result(wf_df, market=market, symbol=symbol)
-            rows.append(summary)
+            _record_row(rows, progress_path, summary)
             # 実験記録（R-211）: WF実行ごとにパフォーマンスを記録する
             save_experiment_run(
                 run_id=generate_run_id(),
@@ -312,7 +359,9 @@ def run_walk_forward_comparison_report(
             logger.info(f"[WF] 実行完了: {market}/{symbol}")
         except Exception as exc:
             failed += 1
-            rows.append({"market": market, "symbol": symbol, "error": str(exc)})
+            _record_row(
+                rows, progress_path, {"market": market, "symbol": symbol, "error": str(exc)}
+            )
             logger.error(f"[WF] 実行失敗: {market}/{symbol}: {exc}", exc_info=True)
 
     current_df = pd.DataFrame(rows)
@@ -334,6 +383,8 @@ def run_walk_forward_comparison_report(
     markdown = _to_markdown_summary(comparison_df, previous_path)
     markdown_path = report_dir / f"wf_comparison_{ts}.md"
     markdown_path.write_text(markdown, encoding="utf-8")
+    # 全部済んだ週の途中のファイルは消す。wf_summary が済んだ記録になる（#1931）
+    progress_path.unlink(missing_ok=True)
 
     err_col = current_df.get("error")
     success = len(current_df[err_col.isna()]) if err_col is not None else len(current_df)
