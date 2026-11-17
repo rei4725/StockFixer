@@ -12,7 +12,7 @@ from src.reporting.discord.notifications_drift import (
     send_drift_alert,
     send_drift_retrain_notification,
 )
-from src.reporting.discord.notifications_model import send_feature_suggestion_notification
+from src.reporting.discord.notifications_features import send_feature_suggestion_notification
 
 _CONTENT_LIMIT = 2000
 _DESCRIPTION_LIMIT = 4096
