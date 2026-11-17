@@ -7,6 +7,7 @@ import math
 import pytest
 
 from src.reporting.rule_accuracy_trend import (
+    build_rule_accuracy_summary_trend,
     build_rule_accuracy_trend,
     filter_rule_trend,
     format_rule_trend_markdown,
@@ -155,3 +156,136 @@ def test_empty_dir_gives_empty_table(tmp_path):
     df = load_rule_accuracy_trend(str(tmp_path))
     assert df.empty
     assert format_rule_trend_markdown(df) == "データなし"
+
+
+# --- overall と predictions の節（#1959） ---
+
+_NULL = {"n": 0, "hit_rate": None, "baseline_rate": None, "edge": None, "mean_signed_return": None}
+
+
+def _summary_report(day, market="jp"):
+    """手で作った overall と predictions の節を持つ1日の JSON。"""
+    return {
+        "_file_date": day,
+        "market": market,
+        "windows": {
+            "28d": {
+                "rules": {"R-001": _rule(_stats(10, 0.6, 0.5, 0.01))},
+                "overall": {
+                    "buy": {
+                        "1": {
+                            "n": 40,
+                            "hit_rate": 0.55,
+                            "baseline_rate": 0.5,
+                            "edge": 0.05,
+                            "mean_signed_return": 0.002,
+                        },
+                        "5": dict(_NULL),
+                    },
+                    "sell": {
+                        "1": {
+                            "n": 8,
+                            "hit_rate": 0.5,
+                            "baseline_rate": 0.5,
+                            "edge": 0.0,
+                            "mean_signed_return": 0.0,
+                        },
+                    },
+                },
+                "predictions": {
+                    "production": {
+                        "h1_claim": {
+                            "1": {
+                                "n": 4311,
+                                "hit_rate": 0.5115,
+                                "baseline_rate": 0.51,
+                                "edge": 0.0015,
+                                "mean_signed_return": 0.0003,
+                            },
+                        },
+                        "h5_claim": {"5": dict(_NULL)},
+                    },
+                    "challenger": {
+                        "h1_claim": {
+                            "5": {
+                                "n": 2239,
+                                "hit_rate": 0.5239,
+                                "baseline_rate": 0.52,
+                                "edge": 0.0039,
+                                "mean_signed_return": -0.0011,
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    }
+
+
+def _one(df, rule, direction, horizon):
+    out = filter_rule_trend(df, rule=rule, window="28d", horizon=horizon, direction=direction)
+    assert len(out) == 1
+    return out.iloc[0]
+
+
+def test_summary_rows_carry_overall_and_prediction_values():
+    df = build_rule_accuracy_summary_trend([_summary_report("2026-11-17")])
+    assert list(df.columns) == list(build_rule_accuracy_trend([]).columns)
+    # overall 3行（buy 1・buy 5・sell 1）、予想 3行（production h1 1・h5 5、challenger h1 5）
+    assert len(df) == 6
+    assert "R-001" not in set(df["rule"])
+    assert set(df["rule"]) == {"overall", "prediction:production", "prediction:challenger"}
+
+    buy1 = _one(df, "overall", "buy", "1")
+    assert (buy1["date"], buy1["market"]) == ("2026-11-17", "jp")
+    assert buy1["n"] == 40.0
+    assert buy1["hit_rate"] == pytest.approx(0.55)
+    assert buy1["baseline_rate"] == pytest.approx(0.5)
+    assert buy1["edge"] == pytest.approx(0.05)
+    assert buy1["mean_signed_return"] == pytest.approx(0.002)
+
+    prod = _one(df, "prediction:production", "h1_claim", "1")
+    assert prod["n"] == 4311.0
+    assert prod["hit_rate"] == pytest.approx(0.5115)
+    assert prod["baseline_rate"] == pytest.approx(0.51)
+    assert prod["edge"] == pytest.approx(0.0015)
+    assert prod["mean_signed_return"] == pytest.approx(0.0003)
+
+    chal = _one(df, "prediction:challenger", "h1_claim", "5")
+    assert chal["n"] == 2239.0
+    assert chal["edge"] == pytest.approx(0.0039)
+    assert chal["mean_signed_return"] == pytest.approx(-0.0011)
+
+
+def test_summary_null_is_nan_and_zero_stays_zero():
+    df = build_rule_accuracy_summary_trend([_summary_report("2026-11-17")])
+    for rule, direction, horizon in (
+        ("overall", "buy", "5"),
+        ("prediction:production", "h5_claim", "5"),
+    ):
+        row = _one(df, rule, direction, horizon)
+        assert row["n"] == 0.0
+        for metric in ("hit_rate", "baseline_rate", "edge", "mean_signed_return"):
+            assert math.isnan(row[metric])
+    sell1 = _one(df, "overall", "sell", "1")
+    assert sell1["edge"] == 0.0
+    assert sell1["mean_signed_return"] == 0.0
+
+
+def test_summary_skips_old_json_without_sections_and_other_market():
+    old = {
+        "_file_date": "2026-11-05",
+        "market": "jp",
+        "windows": {"28d": {"rules": {"R-001": _rule(_stats(10, 0.6, 0.5, 0.01))}}},
+    }
+    other = _summary_report("2026-11-18", market="us")
+    df = build_rule_accuracy_summary_trend([old, _summary_report("2026-11-17"), other], "jp")
+    assert set(df["date"]) == {"2026-11-17"}
+    assert set(df["market"]) == {"jp"}
+    assert len(df) == 6
+    assert build_rule_accuracy_summary_trend([old]).empty
+
+
+def test_default_table_does_not_include_summary_rows():
+    df = build_rule_accuracy_trend([_summary_report("2026-11-17")])
+    assert set(df["rule"]) == {"R-001"}

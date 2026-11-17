@@ -8,6 +8,7 @@ n・hit_rate・baseline_rate・edge・mean_signed_return を1行にした表を�
 - 読むのは accuracy_dir の直下の YYYY-MM-DD.json だけ（weekly/ の下は読まない）
 - 値が null の組は NaN のまま残し、0 とは分ける（表では空で出す）
 - 読めないファイル・形の違う JSON は警告を出して飛ばす。market は列で分ける
+- 各窓の overall と predictions の節は build_rule_accuracy_summary_trend で同じ列の表にする（#1959）
 """
 
 import glob
@@ -15,7 +16,7 @@ import json
 import math
 import os
 import re
-from typing import Any
+from typing import Any, Callable
 
 import pandas as pd
 
@@ -23,6 +24,8 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+OVERALL_RULE = "overall"
+PREDICTION_RULE_PREFIX = "prediction:"
 RULE_METRICS: tuple[str, ...] = (
     "hit_rate",
     "baseline_rate",
@@ -80,7 +83,31 @@ def _rule_rows(base: dict[str, Any], rule: str, by_direction: Any) -> list[dict]
     return rows
 
 
-def _report_rows(report: dict, market: str | None) -> list[dict]:
+def _section_rule_rows(base: dict[str, Any], section: dict) -> list[dict]:
+    rules = section.get("rules")
+    if not isinstance(rules, dict):
+        return []
+    rows: list[dict] = []
+    for rule, by_direction in rules.items():
+        rows.extend(_rule_rows(base, rule, by_direction))
+    return rows
+
+
+def _section_summary_rows(base: dict[str, Any], section: dict) -> list[dict]:
+    """overall は rule=overall・direction=buy/sell、予想は rule=prediction:<model>・direction=claim。"""
+    rows = _rule_rows(base, OVERALL_RULE, section.get("overall"))
+    predictions = section.get("predictions")
+    if isinstance(predictions, dict):
+        for model, by_claim in predictions.items():
+            rows.extend(_rule_rows(base, f"{PREDICTION_RULE_PREFIX}{model}", by_claim))
+    return rows
+
+
+def _report_rows(
+    report: dict,
+    market: str | None,
+    section_rows: Callable[[dict[str, Any], dict], list[dict]] = _section_rule_rows,
+) -> list[dict]:
     day = str(report.get("_file_date", ""))
     report_market = report.get("market")
     if not isinstance(report_market, str):
@@ -100,12 +127,18 @@ def _report_rows(report: dict, market: str | None) -> list[dict]:
         return []
     rows: list[dict] = []
     for window, section in windows.items():
-        if not isinstance(section, dict) or not isinstance(section.get("rules"), dict):
+        if not isinstance(section, dict):
             continue
         base = {"date": day, "market": report_market, "window": str(window)}
-        for rule, by_direction in section["rules"].items():
-            rows.extend(_rule_rows(base, rule, by_direction))
+        rows.extend(section_rows(base, section))
     return rows
+
+
+def _to_frame(rows: list[dict]) -> pd.DataFrame:
+    df = pd.DataFrame(rows, columns=_COLUMNS)
+    for column in ["n"] + list(RULE_METRICS):
+        df[column] = pd.to_numeric(df[column], errors="coerce").astype(float)
+    return df.sort_values(_KEY_COLUMNS, kind="stable").reset_index(drop=True)
 
 
 def build_rule_accuracy_trend(reports: list[dict], market: str | None = None) -> pd.DataFrame:
@@ -113,11 +146,20 @@ def build_rule_accuracy_trend(reports: list[dict], market: str | None = None) ->
 
     market を渡すと、その市場の JSON だけを使い、違う市場の JSON は警告を出して飛ばす。
     """
-    rows = [row for report in reports for row in _report_rows(report, market)]
-    df = pd.DataFrame(rows, columns=_COLUMNS)
-    for column in ["n"] + list(RULE_METRICS):
-        df[column] = pd.to_numeric(df[column], errors="coerce").astype(float)
-    return df.sort_values(_KEY_COLUMNS, kind="stable").reset_index(drop=True)
+    return _to_frame([row for report in reports for row in _report_rows(report, market)])
+
+
+def build_rule_accuracy_summary_trend(
+    reports: list[dict], market: str | None = None
+) -> pd.DataFrame:
+    """各窓の overall と predictions の節を、build_rule_accuracy_trend と同じ列の表にする（#1959）。
+
+    overall は rule="overall"・direction=buy/sell、予想は rule="prediction:<model>"・
+    direction=h1_claim/h5_claim の行になる。節の無い古い JSON は行を作らない。
+    """
+    return _to_frame(
+        [row for report in reports for row in _report_rows(report, market, _section_summary_rows)]
+    )
 
 
 def filter_rule_trend(
