@@ -160,6 +160,7 @@ def test_only_the_named_jobs_have_the_gap():
         "daily_rule_signals",
         "weekly_model_training",
         "weekly_report",
+        "morning_market_view_judge",
     }
 
 
