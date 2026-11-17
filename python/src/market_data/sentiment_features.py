@@ -120,25 +120,6 @@ def _records_to_sentiment_df(
 # ---------------------------------------------------------------------------
 
 
-def fetch_news_sentiment(
-    symbol: str,
-    start_date: str,
-    end_date: str,
-) -> Optional[pd.DataFrame]:
-    """NewsAPI v2 + キーワードマッチでセンチメントスコアを取得する。
-
-    後方互換用。新規呼び出しは fetch_news_sentiment_with_llm を推奨。
-
-    Returns:
-        DatetimeIndex を持つ DataFrame (列: sentiment_score, news_count)。
-        取得不可の場合は None。
-    """
-    records = _fetch_news_articles(symbol, start_date, end_date)
-    if records is None:
-        return None
-    return _records_to_sentiment_df(records, _score_titles)
-
-
 def _fetch_jp_disclosure_titles(
     symbol: str,
     start_date: str,
