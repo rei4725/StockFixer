@@ -64,6 +64,16 @@ _DISK_CACHE_READ_ERRORS: tuple[type[Exception], ...] = (
     ValueError,
 )
 
+# pkl を書けないときに出る例外（ディスクの満杯・権限・pickle できない値）。
+# 書けなくてもメモリのキャッシュで続けてよい（#1969）
+_DISK_CACHE_WRITE_ERRORS: tuple[type[Exception], ...] = (
+    OSError,
+    pickle.PicklingError,
+    AttributeError,
+    TypeError,
+    ValueError,
+)
+
 
 def set_no_cache(flag: bool = True) -> None:
     """キャッシュを無効化/有効化する（--no-cache フラグ対応）。"""
@@ -155,8 +165,15 @@ def _cache_set(key: str, df: pd.DataFrame, ttl: float) -> None:
     try:
         with open(path, "wb") as fh:
             pickle.dump((df, expiry), fh)
+    except _DISK_CACHE_WRITE_ERRORS:
+        logger.debug(
+            "[yf_cache] ディスクキャッシュを書けないのでメモリだけに置く key=%s", key, exc_info=True
+        )
     except Exception:
-        pass  # ディスクキャッシュはベストエフォート
+        # 想定外の失敗でもデータの取得は止めない（今までの動きを保つ）
+        logger.warning(
+            "[yf_cache] ディスクキャッシュの書き込みで想定外の失敗 key=%s", key, exc_info=True
+        )
 
 
 # ---------------------------------------------------------------------------
