@@ -398,7 +398,6 @@ def save_stock_data_with_features(
     symbol: str,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    out_dir: Optional[str] = None,  # 後方互換のため残置（未使用）
 ):
     """
     指定した市場・シンボル・期間の株価データを取得し、特徴量生成後、DBに保存する。
@@ -408,7 +407,6 @@ def save_stock_data_with_features(
         symbol: 銘柄シンボル (例: "AAPL", "7203")
         start_date: 開始日 (省略時は取得可能な最古日)
         end_date: 終了日 (省略時は現在日)
-        out_dir: 後方互換のため残置（未使用）
     """
     result = fetch_stock_data_with_features(market, symbol, start_date, end_date)
     if result is None:
