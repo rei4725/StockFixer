@@ -89,7 +89,6 @@ StockFixer/
     │   │   ├── unified_model_pipeline.py# 統合モデル学習
     │   │   ├── prediction_pipeline.py   # 全銘柄予測・Top10/Worst10 集計
     │   │   ├── predict_unified.py       # 統合モデルによる予測実行
-    │   │   ├── rule_signal_pipeline.py  # ルールベース売買シグナルパイプライン
     │   │   └── models/
     │   │       └── base.py              # モデル抽象基底クラス
     │   │
