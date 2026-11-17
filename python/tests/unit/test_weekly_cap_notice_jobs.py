@@ -41,6 +41,17 @@ def _config(job_id: str) -> dict:
     return {job_id: config}
 
 
+def _lost_runs_to_cap(job_id: str) -> int:
+    """消えた回だけで上限に届く数。数えない枠（#1931 で Walk-Forward は15）の分を足す。"""
+    config = run_scheduler.SCHEDULE_CONFIG[job_id]
+    forgiven = (
+        int(config.get("max_interrupted_reruns_per_period", 1))
+        if config.get("rerun_if_interrupted")
+        else 0
+    )
+    return forgiven + int(config["max_executions_per_period"])
+
+
 def _interrupted(job_id: str, period_key: str, count: int) -> list[dict]:
     # 記録はその週から始まる。前の週は状態ファイルの外で、補完の日が尽きた週に読まない（#1683）
     return [
@@ -83,7 +94,8 @@ def _manager(
 class TestCapReached:
     @pytest.mark.parametrize(("job_id", "period_key", "now"), _WEEKS)
     def test_two_lost_runs_notify_once(self, tmp_path, job_id, period_key, now):
-        manager = _manager(tmp_path, job_id, _interrupted(job_id, period_key, 2))
+        lost = _lost_runs_to_cap(job_id)
+        manager = _manager(tmp_path, job_id, _interrupted(job_id, period_key, lost))
         assert manager.should_recover(job_id, now=now) is False
 
         with patch(_SEND, return_value=True) as send:
@@ -96,7 +108,7 @@ class TestCapReached:
         send.assert_called_once()
         text = send.call_args.args[0]
         assert period_key in text
-        assert "開始 2 回" in text
+        assert f"開始 {lost} 回" in text
 
     def test_training_message_says_what_stays_old(self, tmp_path):
         manager = _manager(tmp_path, _TRAINING, _interrupted(_TRAINING, "2026-W43", 2))
@@ -109,7 +121,8 @@ class TestCapReached:
             assert word in text
 
     def test_walk_forward_message_says_what_stays_old(self, tmp_path):
-        manager = _manager(tmp_path, _WALK_FORWARD, _interrupted(_WALK_FORWARD, "2026-W45", 2))
+        lost = _lost_runs_to_cap(_WALK_FORWARD)
+        manager = _manager(tmp_path, _WALK_FORWARD, _interrupted(_WALK_FORWARD, "2026-W45", lost))
         with patch(_SEND, return_value=True) as send:
             run_scheduler._recover_job(manager, _WALK_FORWARD, _WALK_FORWARD_NOW)
 
@@ -119,7 +132,9 @@ class TestCapReached:
 
     @pytest.mark.parametrize(("job_id", "period_key", "now"), _WEEKS)
     def test_message_has_no_optimization_backlog(self, tmp_path, job_id, period_key, now):
-        manager = _manager(tmp_path, job_id, _interrupted(job_id, period_key, 2))
+        manager = _manager(
+            tmp_path, job_id, _interrupted(job_id, period_key, _lost_runs_to_cap(job_id))
+        )
         with (
             patch(_SEND, return_value=True) as send,
             patch(_TASKS, side_effect=AssertionError("残りの銘柄を数えない")) as tasks,
@@ -135,7 +150,9 @@ class TestCapReached:
     @pytest.mark.parametrize(("job_id", "period_key", "now"), _WEEKS)
     def test_lost_run_seen_the_next_day_still_notifies(self, tmp_path, job_id, period_key, now):
         # 定時の曜日をまたいで消え、起き直しが翌日の回も、その週のうちに知らせる
-        manager = _manager(tmp_path, job_id, _interrupted(job_id, period_key, 2))
+        manager = _manager(
+            tmp_path, job_id, _interrupted(job_id, period_key, _lost_runs_to_cap(job_id))
+        )
         with patch(_SEND, return_value=True) as send:
             run_scheduler._recover_job(manager, job_id, now + timedelta(days=1))
 
@@ -145,7 +162,9 @@ class TestCapReached:
     def test_notice_record_does_not_change_the_recovery_judgement(
         self, tmp_path, job_id, period_key, now
     ):
-        manager = _manager(tmp_path, job_id, _interrupted(job_id, period_key, 2))
+        manager = _manager(
+            tmp_path, job_id, _interrupted(job_id, period_key, _lost_runs_to_cap(job_id))
+        )
         count_before = manager.get_execution_count(job_id, period_key)
         with patch(_SEND, return_value=True):
             run_scheduler._recover_job(manager, job_id, now)
@@ -158,7 +177,9 @@ class TestCapReached:
 class TestNoNotice:
     @pytest.mark.parametrize(("job_id", "period_key", "now"), _WEEKS)
     def test_week_with_success(self, tmp_path, job_id, period_key, now):
-        events = _interrupted(job_id, period_key, 2) + [_success(job_id, period_key)]
+        events = _interrupted(job_id, period_key, _lost_runs_to_cap(job_id)) + [
+            _success(job_id, period_key)
+        ]
         manager = _manager(tmp_path, job_id, events)
         with patch(_SEND, return_value=True) as send:
             run_scheduler._recover_job(manager, job_id, now)
@@ -179,7 +200,9 @@ class TestNoNotice:
     @pytest.mark.parametrize(("job_id", "period_key", "now"), _WEEKS)
     def test_before_the_scheduled_time(self, tmp_path, job_id, period_key, now):
         before = now.replace(hour=0, minute=30)
-        manager = _manager(tmp_path, job_id, _interrupted(job_id, period_key, 2))
+        manager = _manager(
+            tmp_path, job_id, _interrupted(job_id, period_key, _lost_runs_to_cap(job_id))
+        )
         with patch(_SEND, return_value=True) as send:
             run_scheduler._recover_job(manager, job_id, before)
 
@@ -187,7 +210,9 @@ class TestNoNotice:
 
     @pytest.mark.parametrize(("job_id", "period_key", "now"), _WEEKS)
     def test_day_before_the_scheduled_day(self, tmp_path, job_id, period_key, now):
-        manager = _manager(tmp_path, job_id, _interrupted(job_id, period_key, 2))
+        manager = _manager(
+            tmp_path, job_id, _interrupted(job_id, period_key, _lost_runs_to_cap(job_id))
+        )
         with patch(_SEND, return_value=True) as send:
             run_scheduler._recover_job(manager, job_id, now - timedelta(days=1))
 
