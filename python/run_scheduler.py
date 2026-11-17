@@ -261,6 +261,8 @@ def _job_listener(event):
 # 上限が残っていれば補完する。定時の曜日より前の日は補完しない。全銘柄が1週のうちに終わるため（#1534）。
 # long_recovery: True のジョブは、補完を専用のポーリング（recovery_long_job_poller）で判定する。
 # 補完が日をまたいで戻らなくても、締めの無いほかのジョブの補完をふさがないため（#1542）。
+# 週の Walk-Forward レポートも、続きからの補完が数時間かかり、木曜の日次の道と 16:30 のルールの
+# 発注の補完をふさがないため付ける（#1943）。
 # 締め（recovery_until）のあるジョブには付けない。締めのポーリングが判定するので印は効かない。
 # recovery_min_gap_minutes: 同じ期間の前の回の終わりからこの分数の間は補完しない。回数の上限を
 # 短い障害の間に使い切らないため。欄の無いジョブは今までどおり間を空けない（#1607）。
@@ -410,6 +412,7 @@ SCHEDULE_CONFIG = {
         # 全銘柄に約6時間かかり、3時間の見送りの窓に収まらず起き直しで消える。済んだ銘柄を飛ばして
         # 続きから進めるので、起き直しが30分に1回でも6時間に届く数にする（#1931）
         "max_interrupted_reruns_per_period": 15,
+        "long_recovery": True,
     },
     "daily_drift_check": {
         "func": job_daily_drift_check,
@@ -704,7 +707,7 @@ def _register_jobs(scheduler, queue_manager):
     )
     logger.info("ジョブ登録: recovery_cutoff_poller - 1分間隔で締めのあるジョブを補完")
 
-    # long_recovery のジョブ（週の最適化）は、戻るまで日をまたぐ補完で recovery_poller をふさがないよう
+    # long_recovery のジョブ（週の最適化と WF のレポート）は、戻るまで日をまたぐ補完で recovery_poller をふさがないよう
     # 別のスレッドで判定する。締めの無いほかのジョブの補完を止めないため（#1542）
     scheduler.add_job(
         lambda: _poll_recovery_jobs(queue_manager, with_cutoff=False, long_recovery=True),
