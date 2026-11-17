@@ -59,6 +59,13 @@ def record_view_outcome(day: date, actual_change_pct: float) -> bool:
     return True
 
 
+def delete_view_record(day: date) -> None:
+    """その日の行を消す。告知を送れなかった日を記録に残さないため（#1875 段3）。"""
+    with db_connection() as con:
+        con.execute("DELETE FROM morning_view_log WHERE day = %s", [day])
+    logger.info("morning_view_log 削除: %s（告知を送れなかった）", day)
+
+
 def load_view_records() -> list[ViewRecord]:
     """全行を日の順に ViewRecord の並びで返す。"""
     with db_connection() as con:
