@@ -210,3 +210,180 @@ def test_does_not_write_files(orders_dir):
     load_order_gate_trend(str(orders_dir))
     after = sorted(p.relative_to(orders_dir) for p in orders_dir.rglob("*"))
     assert before == after
+
+
+# 足す前の表の列（#1958 の前）。足した列はこの後ろに並ぶ
+_BEFORE_COLUMNS = [
+    "date",
+    "route",
+    "market",
+    "mode",
+    "buy_orders",
+    "sell_orders",
+    "short_orders",
+    "skipped",
+    "errors",
+    "trading_stopped",
+    "correlation_blocked",
+    "allow_new_buys",
+    "entry_error",
+    "token_error",
+    "new_buy_step_error",
+    "held_without_prediction_count",
+    "sl_tp_unevaluable_count",
+    "unjudged_held_count",
+    "unavailable_held_count",
+    "skip_daily_loss",
+    "skip_max_orders_per_run",
+    "skip_no_signal",
+    "skip_sector_cap",
+    "skip_sell_not_held",
+]
+_GATE_COLUMNS = [
+    "enc",
+    "avg_correlation",
+    "daily_loss",
+    "daily_loss_limit",
+    "threshold_scale",
+    "skipped_min_change",
+    "unavailable_count",
+    "risk_gate_allowed",
+    "correlation_gate_allowed",
+    "reason_code",
+    "stale_prediction_reason",
+]
+_MORNING_GATE = {
+    "reason_code": "daily_loss_limit",
+    "daily_loss": 10800.0,
+    "daily_loss_limit": 195448.8,
+    "enc": 2.225,
+    "avg_correlation": 0.266,
+    "stale_prediction_reason": None,
+    "threshold_scale": 0.5,
+    "skipped_min_change": 3,
+}
+_RULE_GATE = {
+    "risk_gate_allowed": True,
+    "risk_gate_reason_code": "ok",
+    "correlation_gate_allowed": False,
+    "enc": 2.242,
+    "unavailable_count": 4,
+}
+
+
+def _gate_records():
+    return [
+        _morning("2026-11-12", route=ROUTE_MORNING, **_MORNING_GATE),
+        _rule("2026-11-12", route=ROUTE_RULE, **_RULE_GATE),
+        # 11-13: 8:50 は値が null の記録、16:30 はゲートの鍵の無い記録
+        _morning(
+            "2026-11-13",
+            route=ROUTE_MORNING,
+            skip_reasons={"daily_loss": 5},
+            reason_code=None,
+            daily_loss=None,
+            daily_loss_limit=None,
+            enc=None,
+            avg_correlation=None,
+            stale_prediction_reason="stale",
+            threshold_scale=None,
+            skipped_min_change=None,
+        ),
+        _rule("2026-11-13", route=ROUTE_RULE, unavailable_count=None),
+    ]
+
+
+def _without_gate_keys(record):
+    gate_keys = set(_MORNING_GATE) | set(_RULE_GATE)
+    return {k: v for k, v in record.items() if k not in gate_keys}
+
+
+def test_before_columns_keep_order_and_values():
+    records = _gate_records()
+    df = build_order_gate_trend(records)
+    assert list(df.columns) == _BEFORE_COLUMNS + _GATE_COLUMNS
+    before = build_order_gate_trend([_without_gate_keys(r) for r in records])
+    pd.testing.assert_frame_equal(df[_BEFORE_COLUMNS], before[_BEFORE_COLUMNS])
+    assert list(zip(df["date"], df["route"])) == [
+        ("2026-11-12", ROUTE_MORNING),
+        ("2026-11-12", ROUTE_RULE),
+        ("2026-11-13", ROUTE_MORNING),
+        ("2026-11-13", ROUTE_RULE),
+    ]
+
+
+def test_gate_columns_by_route():
+    df = build_order_gate_trend(_gate_records())
+    morning = _at(df, "2026-11-12", ROUTE_MORNING)
+    assert morning["enc"] == pytest.approx(2.225)
+    assert morning["avg_correlation"] == pytest.approx(0.266)
+    assert morning["daily_loss"] == pytest.approx(10800.0)
+    assert morning["daily_loss_limit"] == pytest.approx(195448.8)
+    assert morning["threshold_scale"] == pytest.approx(0.5)
+    assert morning["skipped_min_change"] == 3
+    assert morning["reason_code"] == "daily_loss_limit"
+    assert not morning["stale_prediction_reason"]
+    # 16:30 だけにある鍵は 8:50 の行で欠け
+    for key in ("unavailable_count", "risk_gate_allowed", "correlation_gate_allowed"):
+        assert pd.isna(morning[key])
+
+    rule = _at(df, "2026-11-12", ROUTE_RULE)
+    assert rule["enc"] == pytest.approx(2.242)
+    assert rule["unavailable_count"] == 4
+    assert rule["risk_gate_allowed"]
+    assert not rule["correlation_gate_allowed"]
+    assert rule["reason_code"] == "ok"
+    # 8:50 だけにある鍵は 16:30 の行で欠け
+    for key in (
+        "avg_correlation",
+        "daily_loss",
+        "daily_loss_limit",
+        "threshold_scale",
+        "skipped_min_change",
+        "stale_prediction_reason",
+    ):
+        assert pd.isna(rule[key])
+
+    assert str(df["enc"].dtype) == "Float64"
+    assert str(df["skipped_min_change"].dtype) == "Int64"
+    assert str(df["risk_gate_allowed"].dtype) == "boolean"
+
+
+def test_gate_null_and_missing_stay_apart_from_zero():
+    records = _gate_records()
+    records.append(
+        _morning("2026-11-14", route=ROUTE_MORNING, daily_loss=0.0, skipped_min_change=0, enc=0.0)
+    )
+    df = build_order_gate_trend(records)
+    null_morning = _at(df, "2026-11-13", ROUTE_MORNING)
+    for key in (
+        "enc",
+        "avg_correlation",
+        "daily_loss",
+        "daily_loss_limit",
+        "threshold_scale",
+        "skipped_min_change",
+        "reason_code",
+    ):
+        assert pd.isna(null_morning[key])
+    assert null_morning["stale_prediction_reason"]
+    missing_rule = _at(df, "2026-11-13", ROUTE_RULE)
+    for key in (
+        "enc",
+        "unavailable_count",
+        "risk_gate_allowed",
+        "correlation_gate_allowed",
+        "reason_code",
+    ):
+        assert pd.isna(missing_rule[key])
+    zero_morning = _at(df, "2026-11-14", ROUTE_MORNING)
+    assert zero_morning["daily_loss"] == 0
+    assert zero_morning["skipped_min_change"] == 0
+    assert zero_morning["enc"] == 0
+    # 鍵の無い記録の stale_prediction_reason は欠け
+    assert pd.isna(zero_morning["stale_prediction_reason"])
+
+    csv_lines = format_order_gate_csv(df).splitlines()
+    column = csv_lines[0].split(",").index("daily_loss")
+    assert csv_lines[3].split(",")[column] == "null"
+    assert csv_lines[5].split(",")[column] == "0.0"

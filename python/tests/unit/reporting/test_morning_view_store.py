@@ -92,6 +92,15 @@ def test_record_outcome_without_announcement_makes_no_row(con):
     assert con.execute("SELECT COUNT(*) FROM morning_view_log").fetchone()[0] == 0
 
 
+def test_delete_removes_only_that_day(con):
+    store.save_view_record(ViewRecord(date(2026, 11, 17), "up", "fallback", "up", None))
+    store.save_view_record(ViewRecord(date(2026, 11, 18), "down", "fallback", "down", None))
+    store.delete_view_record(date(2026, 11, 18))
+    assert store.load_view_records() == [
+        ViewRecord(date(2026, 11, 17), "up", "fallback", "up", None)
+    ]
+
+
 def test_loaded_records_feed_tally(con):
     # 手で数えた答え:
     # 11-10 up/claude/futures up,  +1.0 → 実際 up: 目線 勝, いつも上げ 勝, 先物 勝
