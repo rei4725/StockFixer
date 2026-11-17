@@ -278,6 +278,9 @@ def _job_listener(event):
 # 週の Walk-Forward レポートも、続きからの補完が数時間かかり、木曜の日次の道と 16:30 のルールの
 # 発注の補完をふさがないため付ける（#1943）。
 # 締め（recovery_until）のあるジョブには付けない。締めのポーリングが判定するので印は効かない。
+# side_recovery: True のジョブは、補完を脇のポーリング（recovery_side_job_poller）で判定する。
+# 10〜30分かかる補完で日次の道の補完をふさがず、週の最適化の約29時間の補完の後ろにも並ばないため。
+# 前日分の補完の窓（2日）を、長い補完の待ちで過ぎないようにする（#1957）。締めのあるジョブには付けない。
 # recovery_min_gap_minutes: 同じ期間の前の回の終わりからこの分数の間は補完しない。回数の上限を
 # 短い障害の間に使い切らないため。欄の無いジョブは今までどおり間を空けない（#1607）。
 # rerun_if_interrupted のジョブは消えた回の続きをすぐ進めるので、失敗の回だけから数える（#1638）。
@@ -607,6 +610,7 @@ SCHEDULE_CONFIG = {
         "max_executions_per_period": 1,
         "description": "毎日 05:00 - 戦略ファクトリー夜間バッチ（jp/us 日替わり、#369）",
         "backfill": True,
+        "side_recovery": True,
     },
     "nightly_backtest_promotion": {
         "func": job_nightly_backtest_promotion,
@@ -727,7 +731,9 @@ def _register_jobs(scheduler, queue_manager):
     logger.info("ジョブ登録: scheduler_alive_ping - 5分間隔で生存を通知")
 
     scheduler.add_job(
-        lambda: _poll_recovery_jobs(queue_manager, with_cutoff=False, long_recovery=False),
+        lambda: _poll_recovery_jobs(
+            queue_manager, with_cutoff=False, long_recovery=False, side_recovery=False
+        ),
         trigger="interval",
         minutes=5,
         id="recovery_poller",
@@ -753,7 +759,9 @@ def _register_jobs(scheduler, queue_manager):
     # long_recovery のジョブ（週の最適化と WF のレポート）は、戻るまで日をまたぐ補完で recovery_poller をふさがないよう
     # 別のスレッドで判定する。締めの無いほかのジョブの補完を止めないため（#1542）
     scheduler.add_job(
-        lambda: _poll_recovery_jobs(queue_manager, with_cutoff=False, long_recovery=True),
+        lambda: _poll_recovery_jobs(
+            queue_manager, with_cutoff=False, long_recovery=True, side_recovery=False
+        ),
         trigger="interval",
         minutes=5,
         id="recovery_long_job_poller",
@@ -763,6 +771,19 @@ def _register_jobs(scheduler, queue_manager):
     )
     logger.info("ジョブ登録: recovery_long_job_poller - 5分間隔で長い補完のジョブを補完")
 
+    # side_recovery のジョブ（戦略ファクトリー）は、10〜30分の補完で日次の道の補完を遅らせず、
+    # 週の最適化の長い補完の後ろで前日分の窓を過ぎないよう、どちらとも別のスレッドで判定する（#1957）
+    scheduler.add_job(
+        lambda: _poll_recovery_jobs(queue_manager, with_cutoff=False, side_recovery=True),
+        trigger="interval",
+        minutes=5,
+        id="recovery_side_job_poller",
+        name="脇の補完のジョブの未実行補完ポーリング",
+        coalesce=True,
+        max_instances=1,
+    )
+    logger.info("ジョブ登録: recovery_side_job_poller - 5分間隔で脇の補完のジョブを補完")
+
 
 def _ping_scheduler_alive() -> None:
     """スケジューラの生存を外部死活監視へ通知する"""
@@ -770,13 +791,16 @@ def _ping_scheduler_alive() -> None:
 
 
 def _poll_recovery_jobs(
-    queue_manager, with_cutoff: bool | None = None, long_recovery: bool | None = None
+    queue_manager,
+    with_cutoff: bool | None = None,
+    long_recovery: bool | None = None,
+    side_recovery: bool | None = None,
 ):
     """所定時刻を過ぎても未実行のジョブを補完実行する（前日分も含む）
 
     with_cutoff が True なら締め（recovery_until）のあるジョブだけ、False なら締めの無いジョブだけ、
-    None なら両方を見る。long_recovery も同じで、True なら長い補完の印のあるジョブだけ、False なら
-    印の無いジョブだけを見る。同じジョブは1つのポーリングだけが判定する（#1410, #1542）。
+    None なら両方を見る。long_recovery と side_recovery も同じで、True なら印のあるジョブだけ、False
+    なら印の無いジョブだけを見る。同じジョブは1つのポーリングだけが判定する（#1410, #1542, #1957）。
     """
     # 締め（recovery_until）を持つジョブを先に回す。締めの無い長い補完（日次の道など）の後ろで
     # 自動発注の補完が締めを過ぎて飛ばされないため（#1395）。sorted は安定なので同じ組の中は今の順のまま。
@@ -790,6 +814,8 @@ def _poll_recovery_jobs(
         if with_cutoff is not None and has_cutoff != with_cutoff:
             continue
         if long_recovery is not None and config.get("long_recovery", False) != long_recovery:
+            continue
+        if side_recovery is not None and config.get("side_recovery", False) != side_recovery:
             continue
 
         # 1つのジョブが落ちても後のジョブ（発注・約定）の補完を同じ回で進める（#1186）。
