@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from src.prediction import unified_feature_selection as ufs
 from src.prediction import unified_model_pipeline as ump
 from src.prediction.manager import ModelManager
 
@@ -67,7 +68,7 @@ def _setup(monkeypatch, df, calls):
     monkeypatch.setattr(ump, "load_all_stock_data", lambda data_dir=None: df.copy())
     monkeypatch.setattr(ump, "load_excluded_features", lambda *a, **k: set())
     monkeypatch.setattr(
-        ump, "save_feature_selection", lambda *a, **k: calls["save_selection"].append(a)
+        ufs, "save_feature_selection", lambda *a, **k: calls["save_selection"].append(a)
     )
     monkeypatch.setattr(ump, "any_sentiment_source_configured", lambda markets: True)
 
@@ -172,7 +173,7 @@ def test_save_selection_default_still_saves(monkeypatch, tmp_path):
     cutoff = pd.Timestamp("2026-10-01")
     calls = {"save_selection": [], "split_max": [], "models": []}
     _setup(monkeypatch, _make_frame(cutoff), calls)
-    monkeypatch.setattr(ump, "FEATURE_SELECTION_MIN_FEATURES", 1)
+    monkeypatch.setattr(ufs, "FEATURE_SELECTION_MIN_FEATURES", 1)
     ump.train_unified_model(model_name="d", save_dir=str(tmp_path), train_end_date=cutoff)
     assert len(calls["save_selection"]) == 1
 
