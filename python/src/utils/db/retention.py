@@ -8,7 +8,7 @@
 | shap_values | market, symbol, model_name | trained_at | MAX(trained_at) のみ参照 |
 | feature_selection_log | market, symbol, model_name | trained_at | MAX(trained_at) のみ参照 |
 | model_metrics | market, symbol, model_name | trained_at | 最新 trained_at のみ参照（load_model_weights） |
-| data_quality_log | market, symbol, check_name | checked_at | 書き込み専用（読み出しなし） |
+| data_quality_log | market, symbol, check_name | checked_at | 流れの表が保持期間内を読むだけ（#1951） |
 
 ただし「保持日数より古い＝全削除」では、長期間更新されていないグループの最新行まで
 消えて読み出しが壊れる。そこで **各グループの最新時刻は常に残し**、それ以外で保持日数
