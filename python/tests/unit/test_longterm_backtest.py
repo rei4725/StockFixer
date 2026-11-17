@@ -10,9 +10,10 @@ from unittest.mock import patch
 import numpy as np
 import pandas as pd
 
-from src.backtest import longterm_backtest as lb
 from src.backtest.longterm import engine as lb_engine
 from src.backtest.longterm import prices as lb_prices
+from src.backtest.longterm.config import LongtermBacktestConfig
+from src.backtest.longterm.reporting import build_conclusion
 from src.backtest.screening_port import set_backtest_screening_port
 from src.domain.types import TrendCandidate
 
@@ -157,13 +158,14 @@ def _run(symbols, screen=None, call_log=None, **kwargs):
         "fetch_benchmark_returns",
         return_value={"ticker": "^GSPC", "total_return": 0.5, "start": "", "end": ""},
     ):
-        return lb.run_longterm_backtest(
+        cfg = LongtermBacktestConfig.build(
             market="us",
             start=_ENTRY_DATE,
             end=_END,
             rescreen_freq="quarterly",
             **kwargs,
         )
+        return lb_engine.run_longterm_backtest(cfg)
 
 
 class TestLongtermBacktest(unittest.TestCase):
@@ -258,9 +260,10 @@ class TestLongtermBacktest(unittest.TestCase):
             "fetch_benchmark_returns",
             return_value={"ticker": "1306.T", "total_return": 0.5, "start": "", "end": ""},
         ) as fetch:
-            equity, _, _ = lb.run_longterm_backtest(
+            cfg = LongtermBacktestConfig.build(
                 market="jp", start=_ENTRY_DATE, end=_END, max_positions=10
             )
+            equity, _, _ = lb_engine.run_longterm_backtest(cfg)
         last_day = equity["date"].iloc[-1]
         self.assertEqual(last_day, _END)
         expected_end = (pd.Timestamp(last_day) + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
@@ -277,9 +280,8 @@ class TestLongtermBacktest(unittest.TestCase):
             "fetch_benchmark_returns",
             return_value={"ticker": "^GSPC", "total_return": None},
         ):
-            equity, metrics, trades = lb.run_longterm_backtest(
-                market="us", start=_ENTRY_DATE, end=_END
-            )
+            cfg = LongtermBacktestConfig.build(market="us", start=_ENTRY_DATE, end=_END)
+            equity, metrics, trades = lb_engine.run_longterm_backtest(cfg)
         self.assertTrue(equity.empty)
         self.assertTrue(trades.empty)
         self.assertEqual(metrics["num_trades"], 0)
@@ -288,10 +290,10 @@ class TestLongtermBacktest(unittest.TestCase):
     def test_conclusion_contains_survivorship_note(self):
         """結論文に生存者バイアスの注意書きが含まれる。"""
         _, metrics, _ = _run(["MID", "HIGH"], max_positions=10)
-        cfg = lb.LongtermBacktestConfig.build(
+        cfg = LongtermBacktestConfig.build(
             market="us", start=_ENTRY_DATE, end=_END, rescreen_freq="quarterly", max_positions=10
         )
-        text = lb.build_conclusion(metrics, cfg)
+        text = build_conclusion(metrics, cfg)
         self.assertIn("生存者バイアス", text)
         self.assertIn("到達", text)
 
