@@ -268,5 +268,71 @@ class TestCacheFailureLogging(_CacheTestBase):
         self.assertEqual(mock_logger.debug.call_count, 2)
 
 
+class TestCacheSetFailureLogging(_CacheTestBase):
+    """ディスクキャッシュを書けなくても投げず、メモリに残してログを出す（#1969）"""
+
+    _KEY = "AAPL|2024-01-01|2024-02-01|1d"
+
+    def _assert_in_memory(self, df: pd.DataFrame) -> None:
+        from src.market_data import yf_client
+
+        with yf_client._cache_lock:
+            entry = yf_client._memory_cache.get(self._KEY)
+        self.assertIsNotNone(entry)
+        pd.testing.assert_frame_equal(entry[0], df)
+
+    def test_open_oserror_logs_debug_and_keeps_memory(self):
+        from src.market_data import yf_client
+
+        df = _make_df()
+        with (
+            patch(
+                "src.market_data.yf_client.open",
+                side_effect=PermissionError("denied"),
+                create=True,
+            ),
+            patch("src.market_data.yf_client.logger") as mock_logger,
+        ):
+            result = yf_client._cache_set(self._KEY, df, 60.0)
+        self.assertIsNone(result)
+        self._assert_in_memory(df)
+        mock_logger.debug.assert_called_once()
+        mock_logger.warning.assert_not_called()
+
+    def test_pickle_error_logs_debug_and_keeps_memory(self):
+        import pickle
+
+        from src.market_data import yf_client
+
+        df = _make_df()
+        with (
+            patch(
+                "src.market_data.yf_client.pickle.dump",
+                side_effect=pickle.PicklingError("cannot pickle"),
+            ),
+            patch("src.market_data.yf_client.logger") as mock_logger,
+        ):
+            yf_client._cache_set(self._KEY, df, 60.0)
+        self._assert_in_memory(df)
+        mock_logger.debug.assert_called_once()
+        mock_logger.warning.assert_not_called()
+
+    def test_unexpected_error_logs_warning_with_exc_info(self):
+        from src.market_data import yf_client
+
+        df = _make_df()
+        with (
+            patch(
+                "src.market_data.yf_client.pickle.dump",
+                side_effect=RuntimeError("unexpected"),
+            ),
+            patch("src.market_data.yf_client.logger") as mock_logger,
+        ):
+            yf_client._cache_set(self._KEY, df, 60.0)
+        self._assert_in_memory(df)
+        mock_logger.warning.assert_called_once()
+        self.assertTrue(mock_logger.warning.call_args.kwargs.get("exc_info"))
+
+
 if __name__ == "__main__":
     unittest.main()
