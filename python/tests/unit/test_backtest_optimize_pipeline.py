@@ -459,7 +459,10 @@ class TestRunOptimizeBatch(unittest.TestCase):
             )
 
         by_symbol = {r["symbol"]: r for r in results}
-        self.assertEqual(by_symbol["VYLR"], {"market": "us", "symbol": "VYLR", "status": "skipped"})
+        self.assertEqual(
+            by_symbol["VYLR"],
+            {"market": "us", "symbol": "VYLR", "status": "skipped", "reason": "no_features"},
+        )
         self.assertEqual(by_symbol["AAPL"], {"market": "us", "symbol": "AAPL", "status": "success"})
         self.assertEqual([c.kwargs["symbol"] for c in mock_run.call_args_list], ["AAPL"])
         mock_save.assert_called_once_with(good_df, "us", "AAPL")
@@ -467,6 +470,63 @@ class TestRunOptimizeBatch(unittest.TestCase):
         self.assertEqual(self.mock_features.call_count, 2)
         vylr_logs = [r for r in logs.records if "us/VYLR" in r.getMessage()]
         self.assertEqual([r.levelname for r in vylr_logs], ["WARNING"])
+
+    @patch("src.backtest.optimizer.batch.save_optimal_params_json")
+    @patch("src.backtest.optimizer.batch.save_optimization_results")
+    @patch("src.backtest.optimizer.batch.run_optimization")
+    @patch("src.backtest.optimizer.batch.get_optimal_params")
+    def test_skip_reasons_in_summary_and_completion_line(
+        self, mock_get, mock_run, mock_save, mock_json
+    ):
+        """最適化済みと特徴量なしのスキップを理由で分け、完了の行の末尾に内訳を書くこと（#1980）"""
+        from datetime import datetime
+
+        from src.backtest.optimizer import run_optimize_batch
+        from src.domain.types import SymbolTask
+
+        good_df = pd.DataFrame({"threshold": [0.02], "sharpe_ratio": [1.5]})
+        mock_get.side_effect = lambda m, s: (
+            {"timestamp": datetime.now().isoformat()} if s in ("7203", "9984") else None
+        )
+        self.mock_features.side_effect = lambda market, symbol, **kwargs: (
+            None if symbol == "VYLR" else pd.DataFrame({"y": [0.01]})
+        )
+        mock_run.return_value = good_df
+        mock_save.return_value = "/tmp/results.csv"
+        mock_json.return_value = "/tmp/params.json"
+
+        with self.assertLogs("src.backtest.optimizer.batch", level="INFO") as logs:
+            results = run_optimize_batch(
+                [
+                    SymbolTask(market="jp", symbol="7203"),
+                    SymbolTask(market="jp", symbol="9984"),
+                    SymbolTask(market="us", symbol="VYLR"),
+                    SymbolTask(market="us", symbol="AAPL"),
+                ],
+                model_type="XGBoostModel",
+                max_workers=1,
+                skip_days=7,
+            )
+
+        by_symbol = {r["symbol"]: r for r in results}
+        self.assertEqual(by_symbol["7203"]["reason"], "recent")
+        self.assertEqual(by_symbol["9984"]["reason"], "recent")
+        self.assertEqual(by_symbol["VYLR"]["reason"], "no_features")
+        self.assertEqual(by_symbol["AAPL"], {"market": "us", "symbol": "AAPL", "status": "success"})
+        messages = [r.getMessage() for r in logs.records]
+        done = [m for m in messages if m.startswith("全銘柄最適化バッチ完了: 成功=")]
+        self.assertEqual(
+            done,
+            [
+                "全銘柄最適化バッチ完了: 成功=1 / スキップ=3 / エラー=0"
+                "（うち最適化済み=2・特徴量なし=1）"
+            ],
+        )
+        self.assertIn("全銘柄最適化バッチの特徴量なしの銘柄: us/VYLR", messages)
+        self.assertGreater(
+            messages.index("全銘柄最適化バッチの特徴量なしの銘柄: us/VYLR"),
+            messages.index(done[0]),
+        )
 
     @patch("src.backtest.optimizer.batch.run_optimization")
     def test_feature_check_failure_counts_as_error(self, mock_run):
@@ -714,7 +774,10 @@ class TestRunOptimizeBatch(unittest.TestCase):
             by_symbol["9984"],
             {"market": "jp", "symbol": "9984", "status": "error", "error": "最適化エラー"},
         )
-        self.assertEqual(by_symbol["6758"], {"market": "jp", "symbol": "6758", "status": "skipped"})
+        self.assertEqual(
+            by_symbol["6758"],
+            {"market": "jp", "symbol": "6758", "status": "skipped", "reason": "recent"},
+        )
         mock_save.assert_called_once_with(df_a, "jp", "7203")
         mock_json.assert_called_once_with(df_a, "jp", "7203", sort_by="total_return")
 
