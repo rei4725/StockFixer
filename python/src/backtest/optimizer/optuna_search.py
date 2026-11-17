@@ -58,6 +58,8 @@ def run_optuna_optimization(
 
     # max_drawdown は負の小数（0 に近いほど良い）なので maximize 側に置く
     _minimize = sort_by in {"cost_impact_return", "cost_impact_cash"}
+    # 落ちた試行の数と最初の例外（毎試行は出さず、最適化の後に1行だけ出す）
+    failures: Dict[str, Any] = {"count": 0, "first": None}
 
     def _objective(trial: "optuna.Trial") -> float:
         threshold = trial.suggest_float("threshold", 0.0, 0.02, step=0.001)
@@ -96,7 +98,10 @@ def run_optuna_optimization(
                     .tolist(),
                 )
             return -val if _minimize else val
-        except Exception:
+        except Exception as exc:
+            failures["count"] += 1
+            if failures["first"] is None:
+                failures["first"] = f"{type(exc).__name__}: {exc}"
             return float("-inf") if not _minimize else float("inf")
 
     study = optuna.create_study(
@@ -105,6 +110,15 @@ def run_optuna_optimization(
     )
     logger.info(f"[{market}/{symbol}] Optuna最適化開始: n_trials={n_trials}")
     study.optimize(_objective, n_trials=n_trials, show_progress_bar=False)
+    if failures["count"] > 0:
+        logger.warning(
+            "[%s/%s] Optuna の落ちた試行: %d/%d 最初の例外=%s",
+            market,
+            symbol,
+            failures["count"],
+            n_trials,
+            failures["first"],
+        )
     logger.info(f"[{market}/{symbol}] Optuna最適化完了: best_value={study.best_value:.4f}")
 
     # 選択バイアス補正: 最良戦略を「完了試行数」で多重比較補正した DSR を算出する。

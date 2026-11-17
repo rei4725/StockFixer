@@ -1154,6 +1154,31 @@ class TestOptunaDSRGuard(unittest.TestCase):
             float(best["cost_impact_return"]), float(result["cost_impact_return"].min())
         )
 
+    @patch("src.backtest.optimizer.optuna_search.run_backtest_walk_forward")
+    def test_failed_trials_are_counted_in_one_warning(self, mock_wf):
+        """落ちた試行は戻り値を変えず、最適化の後に WARNING 1行で数と最初の例外が出る（#1945）。"""
+        from src.backtest.optimizer import run_optuna_optimization
+
+        mock_wf.side_effect = [
+            RuntimeError("fold が空"),
+            (None, None, self._make_wf_df()),
+            (None, None, self._make_wf_df()),
+        ]
+
+        with self.assertLogs("src.backtest.optimizer.optuna_search", level="WARNING") as cm:
+            result = run_optuna_optimization(market="jp", symbol="7203", n_trials=3)
+
+        # 戻り値は直す前と同じ: 落ちた試行も -inf の行として残る
+        self.assertEqual(len(result), 3)
+        self.assertEqual(sorted(result["sharpe_ratio"].tolist()), [float("-inf"), 1.5, 1.5])
+        self.assertEqual(sorted(result["num_trades"].tolist()), [0, 50, 50])
+
+        failed_lines = [m for m in cm.output if "落ちた試行" in m]
+        self.assertEqual(len(failed_lines), 1)
+        self.assertIn("1/3", failed_lines[0])
+        self.assertIn("RuntimeError", failed_lines[0])
+        self.assertIn("fold が空", failed_lines[0])
+
 
 class TestSaveOptimalParamsDSR(unittest.TestCase):
     """save_optimal_params_json が DSR を JSON metrics に記録することの検証。"""
