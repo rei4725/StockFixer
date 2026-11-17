@@ -119,6 +119,20 @@ def test_rollback_none_live_rank_corr_is_treated_as_zero():
     assert d.rollback is False and d.old_is_better is False
 
 
+def test_rollback_triggers_on_jittered_constant_live_predictions():
+    """揺れだけの定数の新 production の実測は、順位相関0以下の見張りに当たる（#1967）。"""
+    rows = pd.DataFrame(
+        {
+            "date": ["2026-11-10"] * 4 + ["2026-11-11"] * 4,
+            "predicted_ratio": [0.003 + i * 1e-16 for i in range(4)] * 2,
+            "actual_ratio": [-0.02, -0.01, 0.01, 0.03, -0.03, 0.0, 0.02, 0.04],
+        }
+    )
+    live = baseline_metrics(rows)
+    d = judge_rollback(live, BT_CAND, OLD_BETTER)
+    assert any("実測の順位相関が0以下" in t for t in d.triggered)
+
+
 def test_win_loses_on_rank_corr_not_above_production_or_tied_hit():
     prod = {**PROD, "rank_corr": 0.08}
     assert judge_win(GOOD, prod, [0.01] * 20, 1000).won is False  # 0 < 0.05 <= 0.08

@@ -99,6 +99,41 @@ def test_daily_rank_corr_is_none_without_day_column():
     assert m["daily_rank_corr"] is None
 
 
+def _jittered_constant_rows():
+    """銘柄ごとに 1e-16 の桁だけ違う定数の予想（揺れの順は実際の順と同じ）の2日分の表（#1967）。"""
+    jitter = [i * 1e-16 for i in range(4)]
+    return pd.DataFrame(
+        {
+            "date": ["2026-11-10"] * 4 + ["2026-11-11"] * 4,
+            "predicted_ratio": [0.003 + j for j in jitter] * 2,
+            "actual_ratio": [-0.02, -0.01, 0.01, 0.03, -0.03, 0.0, 0.02, 0.04],
+        }
+    )
+
+
+def test_jittered_constant_predictions_have_no_rank_corr():
+    """揺れだけの定数の予想は、3つの順位相関がどれも None になる（#1967）。"""
+    m = baseline_metrics(_jittered_constant_rows())
+    assert m["prediction_std"] is not None and m["prediction_std"] < 1e-4
+    assert m["rank_corr"] is None
+    assert m["abs_rank_corr"] is None
+    assert m["daily_rank_corr"] is None
+
+
+def test_daily_rank_corr_skips_only_jittered_constant_days():
+    """揺れだけの定数の日は数えず、ばらつきのある日だけの Spearman を平均する（#1967）。"""
+    rows = pd.DataFrame(
+        {
+            "date": ["d1"] * 4 + ["d2"] * 4,
+            "predicted_ratio": [0.003, 0.003 + 1e-16, 0.003 + 2e-16, 0.003 + 3e-16]
+            + [0.04, 0.02, 0.03, 0.01],
+            "actual_ratio": [-0.02, -0.01, 0.01, 0.03] + [0.03, 0.02, 0.04, 0.01],
+        }
+    )
+    # d1 は定数で数えない。d2 は [4,2,3,1] 対 [3,2,4,1] → 0.8
+    assert baseline_metrics(rows)["daily_rank_corr"] == pytest.approx(0.8)
+
+
 @pytest.mark.parametrize("rows", [None, pd.DataFrame(), pd.DataFrame({"x": [1]})])
 def test_empty_rows(rows):
     m = baseline_metrics(rows)

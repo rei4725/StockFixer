@@ -192,17 +192,21 @@ def _holdout_rows(candidate_noise: float) -> tuple[dict, dict]:
 
 
 def test_constant_candidate_cannot_win_the_nightly_swap():
-    """的中率・順位相関・MAE で production を上回っても、定数の候補は勝ちにならない。"""
+    """的中率・MAE で production を上回っても、定数の候補は勝ちにならない。
+
+    揺れだけの定数の予想の順位相関は None になる（#1967）ので、順位相関でも負ける。
+    """
     cand, prod = _holdout_rows(_NOISE)
     assert cand["hit_rate_minus_majority"] > prod["hit_rate_minus_majority"]
-    assert cand["rank_corr"] > max(prod["rank_corr"], 0)
+    assert cand["rank_corr"] is None
     assert cand["mae"] < prod["mae"]
 
     decision = judge_win(cand, prod, [0.01] * 20, _N_ROWS)
 
     assert decision.won is False
-    assert len(decision.reasons) == 1
-    assert "ほぼ同じ値" in decision.reasons[0]
+    assert len(decision.reasons) == 2
+    assert any("順位相関" in r for r in decision.reasons)
+    assert any("ほぼ同じ値" in r for r in decision.reasons)
 
 
 def test_varied_candidate_judged_as_before():
