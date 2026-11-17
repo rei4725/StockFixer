@@ -67,6 +67,53 @@ _FOMC_MONTH_DAY: list[tuple[int, int]] = [
 ]
 
 
+def _fetch_close_columns(
+    tickers: dict[str, str], start_date: str, end_date: str
+) -> Optional[pd.DataFrame]:
+    """ティッカーごとの終値を列名を付けて横に並べる（#1988）。
+
+    fetch_cross_asset_features（loader.py）と fetch_additional_macro_features が共に使う。
+    取れなかったティッカーは列ごと飛ばし、例外の理由は WARNING で1行残す。
+
+    Args:
+        tickers:    列名 → ティッカー
+        start_date: 取得開始日（YYYY-MM-DD）
+        end_date:   取得終了日（YYYY-MM-DD、当日を含めるため1日延ばして取る）
+
+    Returns:
+        日付で並べた終値の表。全部取れなければ None
+    """
+    from src.market_data import yf_client
+
+    frames: list[pd.Series] = []
+    for col_name, ticker in tickers.items():
+        try:
+            end_date_extended = (pd.to_datetime(end_date) + timedelta(days=1)).strftime("%Y-%m-%d")
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                hist = yf_client.ticker_history(ticker, start=start_date, end=end_date_extended)
+            if hist is None or hist.empty or "Close" not in hist.columns:
+                logger.debug("マクロ終値の取得スキップ [%s]: データなし", ticker)
+                continue
+            close = hist["Close"]
+            if isinstance(close, pd.DataFrame):
+                close = close.iloc[:, 0]
+            close = close.rename(col_name)
+            # タイムゾーン除去
+            close.index = pd.DatetimeIndex(close.index).tz_localize(None)
+            frames.append(close)
+        except Exception as exc:
+            logger.warning("マクロ終値の取得に失敗 [%s]: %s: %s", ticker, type(exc).__name__, exc)
+            logger.debug("マクロ終値の取得スキップ [%s]", ticker, exc_info=True)
+
+    if not frames:
+        return None
+
+    result = pd.concat(frames, axis=1, sort=False)
+    result.sort_index(inplace=True)
+    return result
+
+
 def fetch_additional_macro_features(start_date: str, end_date: str) -> Optional[pd.DataFrame]:
     """
     S&P500 / ドルインデックス / 金先物を yfinance から取得する。
@@ -81,34 +128,9 @@ def fetch_additional_macro_features(start_date: str, end_date: str) -> Optional[
         カラム: sp500_close, dxy_close, gold_close（取得できたもの）
         全部失敗時は None
     """
-    from src.market_data import yf_client
-
-    frames: list[pd.Series] = []
-    end_date_extended = (pd.to_datetime(end_date) + timedelta(days=1)).strftime("%Y-%m-%d")
-
-    for col_name, ticker in _ADDITIONAL_MACRO_TICKERS.items():
-        try:
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                hist = yf_client.ticker_history(ticker, start=start_date, end=end_date_extended)
-            if hist is None or hist.empty or "Close" not in hist.columns:
-                logger.debug("追加マクロ取得スキップ [%s]: データなし", ticker)
-                continue
-            close = hist["Close"]
-            if isinstance(close, pd.DataFrame):
-                close = close.iloc[:, 0]
-            close = close.rename(col_name)
-            close.index = pd.DatetimeIndex(close.index).tz_localize(None)
-            frames.append(close)
-        except Exception:
-            logger.debug("追加マクロ取得スキップ [%s]", ticker, exc_info=True)
-
-    if not frames:
-        return None
-
-    result = pd.concat(frames, axis=1, sort=False)
-    result.sort_index(inplace=True)
-    return result
+    # 不正な終了日は、これまでどおりティッカーの取得の前に投げる
+    pd.to_datetime(end_date)
+    return _fetch_close_columns(_ADDITIONAL_MACRO_TICKERS, start_date, end_date)
 
 
 def add_macro_derived_features(df: pd.DataFrame) -> pd.DataFrame:
