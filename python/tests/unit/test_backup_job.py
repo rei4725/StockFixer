@@ -4,7 +4,8 @@ from unittest.mock import patch
 
 import pytest
 
-from src.orchestration.jobs import backup_job, daily
+from src.orchestration import scheduler
+from src.orchestration.jobs import backup_job, horizon_exit
 
 
 def _result(error=None):
@@ -17,8 +18,9 @@ def _result(error=None):
     }
 
 
-def test_daily_re_exports_run_daily_backup():
-    assert daily.run_daily_backup is backup_job.run_daily_backup
+def test_scheduler_exports_run_daily_backup_and_horizon_exit():
+    assert scheduler.run_daily_backup is backup_job.run_daily_backup
+    assert scheduler.run_daily_horizon_exit is horizon_exit.run_daily_horizon_exit
 
 
 def test_run_daily_backup_notifies_on_success():

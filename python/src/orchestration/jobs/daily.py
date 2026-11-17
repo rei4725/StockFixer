@@ -22,7 +22,6 @@ from src.orchestration.jobs.alerting import (
     evaluate_output_invariants_stage,
     fetch_previous_run_stats,
 )
-from src.orchestration.jobs.backup_job import run_daily_backup  # noqa: F401 (re-export)
 from src.orchestration.jobs.challenger_shadow import run_challenger_shadow_stage
 from src.orchestration.jobs.common import (
     _handle_stage_error,
@@ -35,7 +34,6 @@ from src.orchestration.jobs.features_marker import (
     current_code_version,
     record_features_version_if_covered,
 )
-from src.orchestration.jobs.horizon_exit import run_daily_horizon_exit  # noqa: F401 (re-export)
 from src.orchestration.jobs.live_fill_sync import sync_live_fills_after_fill
 from src.orchestration.jobs.prediction_errors import notify_prediction_errors
 from src.orchestration.jobs.prediction_saved_marker import (
