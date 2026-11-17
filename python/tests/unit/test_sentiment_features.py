@@ -9,7 +9,6 @@ from src.market_data.sentiment_features import (
     _records_to_sentiment_df,
     _score_titles,
     add_sentiment_features,
-    fetch_news_sentiment,
     fetch_news_sentiment_with_llm,
 )
 
@@ -131,15 +130,21 @@ class TestFetchNewsArticles(unittest.TestCase):
         self.assertIsNone(result)
 
     @patch("src.market_data.sentiment_features._fetch_news_articles")
-    def test_fetch_news_sentiment_returns_none_when_no_articles(self, mock_fetch):
+    @patch("src.utils.ollama_client.OllamaClient")
+    def test_keyword_sentiment_returns_none_when_no_articles(self, mock_client_cls, mock_fetch):
+        """LLM を使わない（Ollama 未接続の）道で、記事が無ければ None を返すこと"""
+        mock_client_cls.return_value.is_available = False
         mock_fetch.return_value = None
-        result = fetch_news_sentiment("AAPL", "2024-01-01", "2024-01-31")
+        result = fetch_news_sentiment_with_llm("AAPL", "2024-01-01", "2024-01-31")
         self.assertIsNone(result)
 
     @patch("src.market_data.sentiment_features._fetch_news_articles")
-    def test_fetch_news_sentiment_returns_df_when_articles_exist(self, mock_fetch):
+    @patch("src.utils.ollama_client.OllamaClient")
+    def test_keyword_sentiment_returns_df_when_articles_exist(self, mock_client_cls, mock_fetch):
+        """LLM を使わない（Ollama 未接続の）道で、記事があれば DataFrame を返すこと"""
+        mock_client_cls.return_value.is_available = False
         mock_fetch.return_value = {"2024-01-02": ["Apple stock surges on record revenue"]}
-        result = fetch_news_sentiment("AAPL", "2024-01-01", "2024-01-31")
+        result = fetch_news_sentiment_with_llm("AAPL", "2024-01-01", "2024-01-31")
         self.assertIsNotNone(result)
         assert result is not None
         self.assertIn("sentiment_score", result.columns)
