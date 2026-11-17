@@ -10,6 +10,11 @@
 - 値が null の数・鍵の無い数は欠け（pd.NA）にし、0 と分ける。skip_reasons の中で鍵の無い理由は
   その日その理由で飛ばした銘柄が無かったので 0、skip_reasons そのものが無い記録は欠けにする
 - entry_error・token_error・new_buy_step_error は有無（True/False）に直す。鍵の無い記録は欠け
+- ゲートの値（enc・avg_correlation・daily_loss・daily_loss_limit・threshold_scale・
+  skipped_min_change・unavailable_count・risk_gate_allowed・correlation_gate_allowed）を列にする（#1958）。
+  理由の列 reason_code は 8:50 の reason_code と 16:30 の risk_gate_reason_code をそろえ、
+  stale_prediction_reason は有無にする。片方の道にしか無い鍵は他方の行で欠け。
+  これらの列は足す前の列の並びを変えないよう、表の右端に置く
 - 読めないファイル・形の違う JSON は警告を出して飛ばす
 """
 
@@ -49,6 +54,32 @@ HELD_COLUMNS: tuple[str, ...] = (
     "sl_tp_unevaluable_count",
     "unjudged_held_count",
     "unavailable_held_count",
+)
+# ゲートの値の列（#1958）。足す前の列の並びを変えないよう、skip_<理由> の列の後ろに置く
+GATE_FLOAT_COLUMNS: tuple[str, ...] = (
+    "enc",
+    "avg_correlation",
+    "daily_loss",
+    "daily_loss_limit",
+    "threshold_scale",
+)
+GATE_COUNT_COLUMNS: tuple[str, ...] = (
+    "skipped_min_change",
+    "unavailable_count",
+)
+GATE_FLAG_COLUMNS: tuple[str, ...] = (
+    "risk_gate_allowed",
+    "correlation_gate_allowed",
+)
+REASON_CODE_COLUMN = "reason_code"
+STALE_COLUMN = "stale_prediction_reason"
+# 理由の列は道ごとに読む鍵が違う。8:50 は reason_code、16:30 は risk_gate_reason_code
+_REASON_CODE_KEYS = {ROUTE_MORNING: "reason_code", ROUTE_RULE: "risk_gate_reason_code"}
+_GATE_COLUMNS = (
+    list(GATE_FLOAT_COLUMNS)
+    + list(GATE_COUNT_COLUMNS)
+    + list(GATE_FLAG_COLUMNS)
+    + [REASON_CODE_COLUMN, STALE_COLUMN]
 )
 SKIP_PREFIX = "skip_"
 _KEY_COLUMNS = ["date", "route"]
@@ -96,6 +127,16 @@ def _count(value: Any) -> Any:
     return int(value)
 
 
+def _number(value: Any) -> Any:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return pd.NA
+    return float(value)
+
+
+def _text(value: Any) -> Any:
+    return value if isinstance(value, str) else pd.NA
+
+
 def _flag(record: dict, key: str) -> Any:
     value = record.get(key)
     return value if isinstance(value, bool) else pd.NA
@@ -123,6 +164,21 @@ def _row(record: dict) -> dict:
     return row
 
 
+def _gate_row(record: dict) -> dict:
+    """ゲートの値の列（#1958）。道に無い鍵・null は欠け。stale_prediction_reason は有無にする。"""
+    row: dict[str, Any] = {}
+    for key in GATE_FLOAT_COLUMNS:
+        row[key] = _number(record.get(key))
+    for key in GATE_COUNT_COLUMNS:
+        row[key] = _count(record.get(key))
+    for key in GATE_FLAG_COLUMNS:
+        row[key] = _flag(record, key)
+    reason_key = _REASON_CODE_KEYS.get(record["route"])
+    row[REASON_CODE_COLUMN] = pd.NA if reason_key is None else _text(record.get(reason_key))
+    row[STALE_COLUMN] = _has_error(record, STALE_COLUMN)
+    return row
+
+
 def _skip_reasons(record: dict) -> dict[str, int] | None:
     reasons = record.get("skip_reasons")
     if not isinstance(reasons, dict):
@@ -139,19 +195,29 @@ def build_order_gate_trend(records: list[dict]) -> pd.DataFrame:
     """日・道ごとに1行の表を返す。skip_reasons は理由ごとに skip_<理由> の列にする。"""
     rows: list[dict] = []
     reasons_by_row: list[dict[str, int] | None] = []
+    gate_rows: list[dict] = []
     for record in records:
         rows.append(_row(record))
         reasons_by_row.append(_skip_reasons(record))
+        gate_rows.append(_gate_row(record))
     reason_keys = sorted({k for reasons in reasons_by_row if reasons for k in reasons})
-    for row, reasons in zip(rows, reasons_by_row):
+    for row, reasons, gate in zip(rows, reasons_by_row, gate_rows):
         for key in reason_keys:
             row[SKIP_PREFIX + key] = pd.NA if reasons is None else reasons.get(key, 0)
-    columns = _BASE_COLUMNS + [SKIP_PREFIX + k for k in reason_keys]
+        row.update(gate)
+    columns = _BASE_COLUMNS + [SKIP_PREFIX + k for k in reason_keys] + _GATE_COLUMNS
     df = pd.DataFrame(rows, columns=columns)
     for column in list(COUNT_COLUMNS + HELD_COLUMNS) + [SKIP_PREFIX + k for k in reason_keys]:
         df[column] = df[column].astype("Int64")
     for column in FLAG_COLUMNS + ERROR_COLUMNS:
         df[column] = df[column].astype("boolean")
+    for column in GATE_FLOAT_COLUMNS:
+        df[column] = df[column].astype("Float64")
+    for column in GATE_COUNT_COLUMNS:
+        df[column] = df[column].astype("Int64")
+    for column in GATE_FLAG_COLUMNS + (STALE_COLUMN,):
+        df[column] = df[column].astype("boolean")
+    df[REASON_CODE_COLUMN] = df[REASON_CODE_COLUMN].astype("string")
     return df.sort_values(_KEY_COLUMNS, kind="stable").reset_index(drop=True)
 
 
