@@ -407,6 +407,9 @@ SCHEDULE_CONFIG = {
         "max_executions_per_period": 1,
         "description": "毎週木曜 01:00 - Walk-Forward 比較レポート生成",
         "rerun_if_interrupted": True,
+        # 全銘柄に約6時間かかり、3時間の見送りの窓に収まらず起き直しで消える。済んだ銘柄を飛ばして
+        # 続きから進めるので、起き直しが30分に1回でも6時間に届く数にする（#1931）
+        "max_interrupted_reruns_per_period": 15,
     },
     "daily_drift_check": {
         "func": job_daily_drift_check,
