@@ -15,6 +15,7 @@ import src.utils.db as db_module
 from src.prediction.db import (
     load_drift_summary,
     load_excluded_features,
+    load_feature_exclusion_candidates,
     load_latest_prediction_timestamp,
     load_latest_predictions_by_market,
     load_prediction_accuracy,
@@ -396,6 +397,131 @@ class TestFeatureSelection(_TmpDbTestCase):
         excluded = load_excluded_features("us", "AAPL")
 
         self.assertEqual(excluded, [])
+
+
+def _selection_df(
+    features: list[str],
+    is_excluded: list[bool],
+    protected_by_shap: list[bool] | None = None,
+) -> pd.DataFrame:
+    n = len(features)
+    return pd.DataFrame(
+        {
+            "feature": features,
+            "importance_mean": [0.01 * (n - i) for i in range(n)],
+            "importance_std": [0.01] * n,
+            "importance_rank": list(range(1, n + 1)),
+            "is_excluded": is_excluded,
+            "protected_by_shap": protected_by_shap or [False] * n,
+        }
+    )
+
+
+class TestLoadExcludedFeaturesAnyModel(_TmpDbTestCase):
+    """require_all_models=False（どれかのモデルが除外）の枝（#1991）。
+
+    2つのモデルは同じ trained_at で保存する。どの trained_at の行を読むかは確かめない。
+    """
+
+    _TRAINED_AT = "20260405_120000"
+
+    def _save_disagreeing(self, market: str, symbol: str) -> None:
+        # f2 は XGB だけが除外、f3 は両方が除外、f1 はどちらも残す
+        save_feature_selection(
+            market,
+            symbol,
+            "StockXGBoostModel",
+            self._TRAINED_AT,
+            _selection_df(["f1", "f2", "f3"], [False, True, True]),
+        )
+        save_feature_selection(
+            market,
+            symbol,
+            "StockLightGBMModel",
+            self._TRAINED_AT,
+            _selection_df(["f1", "f2", "f3"], [False, False, True]),
+        )
+
+    def test_unified_call_returns_feature_excluded_by_any_model(self):
+        """unified_model_pipeline と同じ引数で、片方のモデルだけが除外した特徴量も返る"""
+        self._save_disagreeing("unified", "all")
+
+        excluded = load_excluded_features("unified", "all", require_all_models=False)
+
+        self.assertEqual(excluded, ["f2", "f3"])
+
+    def test_default_all_does_not_return_disagreeing_feature(self):
+        """既定（全モデルが除外）では、モデルで食い違う特徴量は返らない"""
+        self._save_disagreeing("unified", "all")
+
+        self.assertEqual(load_excluded_features("unified", "all"), ["f3"])
+        self.assertEqual(load_excluded_features("unified", "all", require_all_models=True), ["f3"])
+
+    def test_shap_protected_feature_is_not_returned_by_any(self):
+        """SHAP で守られた行が1つでもあれば、any でも返らない"""
+        save_feature_selection(
+            "unified",
+            "all",
+            "StockXGBoostModel",
+            self._TRAINED_AT,
+            _selection_df(["f1", "f2"], [True, True], [False, True]),
+        )
+        save_feature_selection(
+            "unified",
+            "all",
+            "StockLightGBMModel",
+            self._TRAINED_AT,
+            _selection_df(["f1", "f2"], [False, True], [False, False]),
+        )
+
+        excluded = load_excluded_features("unified", "all", require_all_models=False)
+
+        self.assertEqual(excluded, ["f1"])
+
+    def test_returns_empty_when_no_rows(self):
+        self.assertEqual(load_excluded_features("unified", "all", require_all_models=False), [])
+
+
+class TestLoadFeatureExclusionCandidates(_TmpDbTestCase):
+    """load_feature_exclusion_candidates のテスト（#1991）"""
+
+    def _save_both_models(self, trained_at: str, df: pd.DataFrame) -> None:
+        for model_name in ("StockXGBoostModel", "StockLightGBMModel"):
+            save_feature_selection("us", "AAPL", model_name, trained_at, df)
+
+    def test_returns_only_excluded_unprotected_rows_of_latest_run(self):
+        """最新の trained_at の is_excluded かつ SHAP で守られていない行だけが返る"""
+        self._save_both_models(
+            "20260401_120000",
+            _selection_df(["old_f"], [True]),
+        )
+        self._save_both_models(
+            "20260405_120000",
+            _selection_df(
+                ["f1", "f2", "f3", "f4"],
+                [False, True, True, True],
+                [False, False, True, False],
+            ),
+        )
+
+        df = load_feature_exclusion_candidates("us", "AAPL")
+
+        self.assertEqual(list(df.columns), ["feature", "importance_mean", "importance_rank"])
+        self.assertEqual(sorted(df["feature"].tolist()), ["f2", "f4"])
+        by_feature = df.set_index("feature")
+        self.assertAlmostEqual(float(by_feature.loc["f2", "importance_mean"]), 0.03)
+        self.assertEqual(int(by_feature.loc["f2", "importance_rank"]), 2)
+        self.assertAlmostEqual(float(by_feature.loc["f4", "importance_mean"]), 0.01)
+        self.assertEqual(int(by_feature.loc["f4", "importance_rank"]), 4)
+
+    def test_returns_empty_when_no_rows(self):
+        df = load_feature_exclusion_candidates("us", "AAPL")
+        self.assertIsInstance(df, pd.DataFrame)
+        self.assertTrue(df.empty)
+
+    def test_returns_empty_when_latest_run_has_no_candidates(self):
+        self._save_both_models("20260405_120000", _selection_df(["f1"], [False]))
+        self.assertTrue(load_feature_exclusion_candidates("us", "AAPL").empty)
 
 
 class TestSaveModelMetrics(_TmpDbTestCase):
