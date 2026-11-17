@@ -144,7 +144,7 @@ def test_plain_job_recovered_while_weekly_optimization_recovery_runs():
 
 
 def test_each_scheduled_job_is_judged_by_one_poller_only():
-    """本番の設定の自動のジョブは、どれも1つのポーリングだけが判定し、週の最適化は専用のポーリングで判定すること"""
+    """本番の設定の自動のジョブは、どれも1つのポーリングだけが判定し、週の最適化と WF は専用のポーリングで判定すること"""
     import run_scheduler
 
     qm = MagicMock()
@@ -166,8 +166,9 @@ def test_each_scheduled_job_is_judged_by_one_poller_only():
         if config.get("auto_schedule", True)
     ]
     assert sorted(seen) == sorted(expected)
-    assert ["weekly_optimization"] in judged.values()
+    assert ["weekly_optimization", "weekly_walk_forward_report"] in judged.values()
     assert "weekly_optimization" not in judged["recovery_poller"]
+    assert "weekly_walk_forward_report" not in judged["recovery_poller"]
 
 
 def test_cutoff_job_is_not_judged_by_long_poller():
@@ -199,3 +200,68 @@ def test_cutoff_job_is_not_judged_by_long_poller():
                 judged[poller_id] = True
 
     assert list(judged) == ["recovery_cutoff_poller"]
+
+
+def _judged_ids(qm, **kwargs) -> list:
+    """_poll_recovery_jobs が判定したジョブの id を順に返す"""
+    import run_scheduler
+
+    qm.should_recover.reset_mock()
+    run_scheduler._poll_recovery_jobs(qm, **kwargs)
+    return [c.args[0] for c in qm.should_recover.call_args_list]
+
+
+def test_walk_forward_report_is_judged_by_long_poller_only():
+    """週の Walk-Forward レポートは長い補完の印を持ち、長い補完のポーリングだけが判定すること（#1943）"""
+    import run_scheduler
+
+    assert run_scheduler.SCHEDULE_CONFIG["weekly_walk_forward_report"].get("long_recovery") is True
+
+    qm = MagicMock()
+    qm.should_recover.return_value = False
+    qm.get_missed_past_periods.return_value = []
+
+    plain = _judged_ids(qm, with_cutoff=False, long_recovery=False)
+    long_ = _judged_ids(qm, with_cutoff=False, long_recovery=True)
+
+    assert "weekly_walk_forward_report" not in plain
+    assert long_ == ["weekly_optimization", "weekly_walk_forward_report"]
+
+
+def test_daily_pipeline_recovered_while_walk_forward_recovery_runs():
+    """本番の設定で、WF の補完が戻らない間も recovery_poller が日次の道を補完すること（#1943）"""
+    import run_scheduler
+
+    config = {
+        job_id: dict(run_scheduler.SCHEDULE_CONFIG[job_id])
+        for job_id in ("daily_pipeline", "weekly_walk_forward_report")
+    }
+    release = threading.Event()
+    qm, started, ran = _blocking_queue_manager("weekly_walk_forward_report", release)
+    original = qm.should_recover.side_effect
+
+    # 日次の道は、WF の補完が走り出した後に補完の時刻を迎える
+    def _should_recover(job_id, now):
+        if job_id == "daily_pipeline" and not started.is_set():
+            return False
+        return original(job_id, now)
+
+    qm.should_recover.side_effect = _should_recover
+    jobs = _interval_jobs(config, qm)
+    threads: dict = {}
+
+    with (
+        patch.object(run_scheduler, "SCHEDULE_CONFIG", config),
+        patch.object(run_scheduler, "ping_heartbeat"),
+    ):
+        try:
+            _tick(jobs, threads)
+            assert started.wait(timeout=_WAIT)
+            _tick(jobs, threads)
+            ran_while_blocked = list(ran)
+        finally:
+            release.set()
+            for t in threads.values():
+                t.join(timeout=_WAIT)
+
+    assert ran_while_blocked == ["weekly_walk_forward_report", "daily_pipeline"]
