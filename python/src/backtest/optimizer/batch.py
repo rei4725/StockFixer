@@ -175,7 +175,12 @@ def run_optimize_batch(
                             f"（最終最適化: {last_optimized.strftime('%Y-%m-%d %H:%M')}"
                             f", {skip_days}日以内）"
                         )
-                        return {"market": market, "symbol": symbol, "status": "skipped"}
+                        return {
+                            "market": market,
+                            "symbol": symbol,
+                            "status": "skipped",
+                            "reason": "recent",
+                        }
                 except ValueError:
                     pass  # timestamp パース失敗時は通常実行
 
@@ -186,7 +191,12 @@ def run_optimize_batch(
                 features = load_stock_features(market, symbol, raise_on_error=True)
                 if features is None or features.empty:
                     logger.warning(f"[{market}/{symbol}] スキップ（stock_features にデータなし）")
-                    return {"market": market, "symbol": symbol, "status": "skipped"}
+                    return {
+                        "market": market,
+                        "symbol": symbol,
+                        "status": "skipped",
+                        "reason": "no_features",
+                    }
 
             result_df = run_optimization(
                 market=market,
@@ -219,14 +229,24 @@ def run_optimize_batch(
     success_count = 0
     error_count = 0
     skip_count = 0
+    # スキップの内訳（#1980）。数え方は変えず、完了の行の末尾に書き足すだけ
+    recent_count = 0
+    no_feature_symbols: list[str] = []
 
     def _save_result(res: dict[str, Any]) -> None:
-        nonlocal success_count, error_count, skip_count
+        nonlocal success_count, error_count, skip_count, recent_count
         market = res["market"]
         symbol = res["symbol"]
         if res["status"] == "skipped":
-            summary.append({"market": market, "symbol": symbol, "status": "skipped"})
+            reason = res.get("reason")
+            summary.append(
+                {"market": market, "symbol": symbol, "status": "skipped", "reason": reason}
+            )
             skip_count += 1
+            if reason == "no_features":
+                no_feature_symbols.append(f"{market}/{symbol}")
+            else:
+                recent_count += 1
             return
         if res["status"] != "success":
             logger.error(f"[{market}/{symbol}] スキップ（最適化失敗）: {res.get('error')}")
@@ -270,7 +290,11 @@ def run_optimize_batch(
 
     logger.info(
         f"全銘柄最適化バッチ完了: 成功={success_count} / スキップ={skip_count} / エラー={error_count}"
+        f"（うち最適化済み={recent_count}・特徴量なし={len(no_feature_symbols)}）"
     )
+    if no_feature_symbols:
+        # 銘柄ごとの WARNING は上で出しているので、まとめの行は完了の行と同じ INFO にする
+        logger.info(f"全銘柄最適化バッチの特徴量なしの銘柄: {', '.join(no_feature_symbols)}")
     return summary
 
 
