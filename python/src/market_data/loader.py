@@ -5,6 +5,7 @@ import pandas as pd
 import yfinance as yf
 
 import src.market_data.yf_client as yf_client
+from src.market_data.macro_features import _fetch_close_columns
 from src.utils.data_path_utils import get_ticker
 from src.utils.db import load_raw_ohlcv, load_stock_features
 from src.utils.logger import get_logger
@@ -334,34 +335,4 @@ def fetch_cross_asset_features(start_date: str, end_date: str) -> "Optional[pd.D
         カラム: vix_close, usdjpy_close, tnx_close（取得できたもの）
         全部失敗時は None
     """
-    import warnings
-
-    frames: list[pd.Series] = []
-    for col_name, ticker in _CROSS_ASSET_TICKERS.items():
-        try:
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                hist = yf_client.ticker_history(
-                    ticker,
-                    start=start_date,
-                    end=(pd.to_datetime(end_date) + timedelta(days=1)).strftime("%Y-%m-%d"),
-                )
-            if hist is None or hist.empty or "Close" not in hist.columns:
-                continue
-            close = hist["Close"]
-            if isinstance(close, pd.DataFrame):
-                close = close.iloc[:, 0]
-            close = close.rename(col_name)
-            # タイムゾーン除去
-            close.index = pd.DatetimeIndex(close.index).tz_localize(None)
-            frames.append(close)
-        except Exception:
-            logger.debug("クロスアセット取得スキップ [%s]", ticker, exc_info=True)
-            continue
-
-    if not frames:
-        return None
-
-    result = pd.concat(frames, axis=1, sort=False)
-    result.sort_index(inplace=True)
-    return result
+    return _fetch_close_columns(_CROSS_ASSET_TICKERS, start_date, end_date)
