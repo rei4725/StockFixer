@@ -92,6 +92,20 @@ def job_daily_settle_orders_retry():
     run_daily_settle_retry()
 
 
+def job_morning_market_view():
+    """東証の営業日 08:30 - 朝の目線の告知（MORNING_MARKET_VIEW_ENABLED に従う、#1875）"""
+    from src.orchestration.jobs.morning_view_job import run_morning_view_announce
+
+    run_morning_view_announce()
+
+
+def job_morning_market_view_judge():
+    """東証の営業日 15:45 - 朝の目線の答え合わせ（MORNING_MARKET_VIEW_ENABLED に従う、#1875）"""
+    from src.orchestration.jobs.morning_view_job import run_morning_view_judge
+
+    run_morning_view_judge()
+
+
 def job_daily_paper_trade_report():
     """毎営業日 15:30 - ペーパートレードポジション・損益レポートを Discord に送信"""
     from src.orchestration.scheduler import run_daily_paper_trade_report
@@ -309,6 +323,35 @@ SCHEDULE_CONFIG = {
         # 06:00 台に補完し、07:30 の日次の道の前に終わる（#1689）
         "recovery_min_gap_minutes": 240,
         "description": "毎週木曜 02:00 - パフォーマンスレポート送信",
+        "rerun_if_interrupted": True,
+    },
+    # 朝の目線の告知。休場の日はジョブの中で飛ばす。締めは 8:50 の発注より前の 08:45 で、
+    # 遅れた回は出さない。送れなかった日は記録を消し、同じ日に出し直さない（#1875）
+    "morning_market_view": {
+        "func": job_morning_market_view,
+        "trigger": "cron",
+        "period": "daily",
+        "day_of_week": "mon-fri",
+        "hour": 8,
+        "minute": 30,
+        "recovery_delay_minutes": 5,
+        "recovery_until": (8, 45),
+        "max_executions_per_period": 1,
+        "max_retries": 0,
+        "description": "毎営業日 08:30 - 朝の目線の告知",
+    },
+    # 告知した日の日経平均の終値比を書き足す。終値がまだ無い回は失敗で終え、同じ日のうちに補完する
+    "morning_market_view_judge": {
+        "func": job_morning_market_view_judge,
+        "trigger": "cron",
+        "period": "daily",
+        "day_of_week": "mon-fri",
+        "hour": 15,
+        "minute": 45,
+        "recovery_delay_minutes": 10,
+        "max_executions_per_period": 3,
+        "recovery_min_gap_minutes": 60,
+        "description": "毎営業日 15:45 - 朝の目線の答え合わせ",
         "rerun_if_interrupted": True,
     },
     "daily_auto_order": {
