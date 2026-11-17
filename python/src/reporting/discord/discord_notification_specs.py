@@ -46,6 +46,7 @@ DB_BACKUP_COMPLETION = NotificationSpec("✅ DB バックアップ完了", COLOR
 DB_BACKUP_ERROR = NotificationSpec("❌ DB バックアップ失敗", COLOR_ERROR)
 MONTHLY_REPORT_COMPLETION = NotificationSpec("📊 月次レポート生成完了", COLOR_INFO)
 PRE_CLOSE_ALERT = NotificationSpec("📋 引け前ポジション再評価", COLOR_INFO)
+MORNING_MARKET_VIEW = NotificationSpec("🌅 朝の目線（日本株）", COLOR_INFO)
 SHADOW_EVALUATION_CHALLENGER_WINS = NotificationSpec(
     "🏆 A/Bテスト: Challenger 昇格候補", COLOR_WARNING
 )
