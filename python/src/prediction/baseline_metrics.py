@@ -13,6 +13,7 @@ direction_match は向きだけで決まるため、予想がほとんど「上�
 - mean_abs_predicted_ratio / mean_abs_actual_ratio: 予想と実際の大きさの平均
 - rank_corr: predicted_ratio と actual_ratio の順位相関（Spearman）
 - abs_rank_corr: |predicted_ratio| と |actual_ratio| の順位相関（Spearman）
+  （順位相関は、予想の標準偏差が CONSTANT_PREDICTION_STD より小さいと None、#1967）
 - prediction_std: 同じ日の銘柄の間の予想の標準偏差の中央値（日の列が無ければ全行の標準偏差）
 - daily_rank_corr: 同じ日の銘柄の間の rank_corr の平均（日の列が無ければ None、#1796）
 """
@@ -22,6 +23,8 @@ from __future__ import annotations
 from typing import Optional
 
 import pandas as pd
+
+from src.prediction.constant_prediction import is_constant_prediction
 
 BASELINE_METRIC_KEYS: tuple[str, ...] = (
     "n_baseline",
@@ -47,8 +50,14 @@ def _empty_metrics() -> dict:
 
 
 def _spearman(x: pd.Series, y: pd.Series) -> Optional[float]:
-    """順位の Pearson 相関を返す（scipy を使わない）。値が1種類しかなければ None。"""
+    """順位の Pearson 相関を返す（scipy を使わない）。値が1種類しかなければ None。
+
+    x は予想の側。標準偏差が CONSTANT_PREDICTION_STD より小さければ定数と見なし None を返す。
+    定数のモデルでも浮動小数の丸めで 1e-16 の桁の揺れが残り、順位が付いてしまうため（#1967）。
+    """
     if len(x) < 2:
+        return None
+    if is_constant_prediction(float(x.std(ddof=1))):
         return None
     rx = x.rank(method="average")
     ry = y.rank(method="average")
@@ -69,7 +78,7 @@ def _daily_rank_corr(
     """日ごとの銘柄の間の Spearman の平均を返す（#1796）。
 
     日の水準の差を銘柄の並べの腕と取り違えないため。銘柄が2つより少ない日と、その日の予想か
-    実際が定数の日は数えない。日の列が無いか、数えられる日が無ければ None。
+    実際が定数の日（予想は標準偏差が CONSTANT_PREDICTION_STD より小さい日、#1967）は数えない。日の列が無いか、数えられる日が無ければ None。
     """
     day_col = _day_col(rows)
     if day_col is None:
