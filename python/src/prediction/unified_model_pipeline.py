@@ -5,23 +5,16 @@
 """
 
 import os
-from datetime import datetime
 from typing import Optional, Tuple
 
 import pandas as pd
-from sklearn.inspection import permutation_importance
 
-from config.settings import (
-    DAILY_FETCH_MAX_UNAVAILABLE_RATIO,
-    EARNINGS_MASK_WINDOW_DAYS,
-    FEATURE_SELECTION_DROP_RATIO,
-    FEATURE_SELECTION_MIN_FEATURES,
-    PERMUTATION_IMPORTANCE_REPEATS,
-)
+from config.settings import DAILY_FETCH_MAX_UNAVAILABLE_RATIO, EARNINGS_MASK_WINDOW_DAYS
 from src.domain.sentiment_sources import any_sentiment_source_configured, is_sentiment_feature
 from src.prediction.constant_prediction import check_unified_training
-from src.prediction.db import load_excluded_features, save_feature_selection
+from src.prediction.db import load_excluded_features
 from src.prediction.ports import get_market_data_port
+from src.prediction.unified_feature_selection import _compute_and_save_unified_feature_selection
 from src.prediction.unified_split import is_trial_model as _is_trial_model
 from src.prediction.unified_split import sort_by_date as _sort_by_date
 from src.prediction.unified_split import split_train_val_by_date as _split_train_val_by_date
@@ -148,49 +141,6 @@ def _apply_unified_feature_exclusions(X: pd.DataFrame) -> pd.DataFrame:
 
     remaining = [col for col in X.columns if col not in excluded]
     return X[remaining].copy() if remaining else X
-
-
-def _compute_and_save_unified_feature_selection(model, X: pd.DataFrame, y: pd.Series) -> None:
-    if X.empty or len(X.columns) <= FEATURE_SELECTION_MIN_FEATURES:
-        return
-
-    sample_size = min(len(X), 200)
-    X_eval = X.tail(sample_size)
-    y_eval = y.reindex(X_eval.index)
-    result = permutation_importance(
-        model.model,
-        X_eval,
-        y_eval,
-        n_repeats=PERMUTATION_IMPORTANCE_REPEATS,
-        random_state=42,
-        scoring="neg_mean_squared_error",
-    )
-    selection_df = (
-        pd.DataFrame(
-            {
-                "feature": X_eval.columns.tolist(),
-                "importance_mean": result.importances_mean,
-                "importance_std": result.importances_std,
-            }
-        )
-        .sort_values(["importance_mean", "feature"], ascending=[False, True])
-        .reset_index(drop=True)
-    )
-    selection_df["importance_rank"] = range(1, len(selection_df) + 1)
-    max_exclusions = max(0, len(selection_df) - FEATURE_SELECTION_MIN_FEATURES)
-    exclude_count = min(int(len(selection_df) * FEATURE_SELECTION_DROP_RATIO), max_exclusions)
-    excluded = (
-        set(selection_df.tail(exclude_count)["feature"].tolist()) if exclude_count > 0 else set()
-    )
-    selection_df["is_excluded"] = selection_df["feature"].isin(excluded)
-    selection_df["protected_by_shap"] = False
-    save_feature_selection(
-        "unified",
-        "all",
-        model.model_name,
-        datetime.now().strftime("%Y%m%d_%H%M%S"),
-        selection_df,
-    )
 
 
 _CORPORATE_ACTION_LAG_PREFIXES = ("Dividends_lag", "Stock_Splits_lag", "Capital_Gains_lag")
