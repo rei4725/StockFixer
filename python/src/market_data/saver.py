@@ -83,7 +83,6 @@ def save_raw_stock_data(
     symbol: str,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    out_dir: str = None,  # 後方互換のため残置（未使用）
 ) -> Optional[pd.DataFrame]:
     """
     指定した市場・シンボル・期間の生の株価データを取得し、DBに保存する。
@@ -94,7 +93,6 @@ def save_raw_stock_data(
         symbol: 銘柄シンボル (例: "AAPL", "7203")
         start_date: 開始日 (省略時は取得可能な最古日)
         end_date: 終了日 (省略時は現在日)
-        out_dir: 後方互換のため残置（未使用）
 
     Returns:
         保存したDataFrame、または取得失敗時はNone
