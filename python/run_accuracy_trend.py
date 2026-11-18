@@ -2,7 +2,9 @@
 採点の JSON の流れの表を出すスクリプト（#1815。CLI ラッパー）
 
 results/accuracy の日ごとの JSON を読み、日・モデル・ホライズン・市場ごとの的中率と
-基準と rank_corr と predicted_up_rate の表と N 日の移動平均を CSV か Markdown で出す。
+基準と rank_corr と predicted_up_rate と予想と実際の大きさと予想の散らばり
+（mean_abs_predicted_ratio・mean_abs_actual_ratio・prediction_std、#2009）の表と
+N 日の移動平均を CSV か Markdown で出す。
 読むだけで、DB にもファイルにも書かない（--output を渡したときだけそのファイルに書く）。
 """
 

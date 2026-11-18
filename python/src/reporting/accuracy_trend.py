@@ -4,6 +4,8 @@
 ファイルを1つずつ開くしかなかった。ここでは読むだけで、日・モデル・ホライズン・市場ごとの
 物差しの表と、N 日の移動平均を作る。本番のジョブには組み込まない。
 
+- 物差しは的中率・基準・rank_corr・predicted_up_rate の後ろに、予想と実際の大きさと
+  予想の散らばり（mean_abs_predicted_ratio・mean_abs_actual_ratio・prediction_std、#2009）
 - 市場の ALL はその日のモデル・ホライズンの全体の値、それ以外は by_market の値
 - 欠けた日（ファイルが無い日）は行を作らない。移動平均は、その組の行（値のある日）の
   直近 N 行で取り、値の無い（None・キーの無い古い JSON の）日は平均から外す
@@ -28,6 +30,10 @@ TREND_METRICS: tuple[str, ...] = (
     "hit_rate_minus_majority",
     "rank_corr",
     "predicted_up_rate",
+    # 予想の大きさと散らばり（#2009）。鍵があるのは 2026-11-06 以後のファイルだけ
+    "mean_abs_predicted_ratio",
+    "mean_abs_actual_ratio",
+    "prediction_std",
 )
 ALL_MARKETS = "ALL"
 _KEY_COLUMNS = ["date", "model", "horizon", "market"]
