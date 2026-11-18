@@ -31,9 +31,6 @@ from src.prediction.challenger_window import (
 )
 from src.prediction.constant_prediction import is_constant_prediction
 from src.prediction.db import load_prediction_accuracy
-from src.prediction.symbol_model_promotion import (  # noqa: F401 (re-export)
-    promote_challenger_to_production,
-)
 from src.utils.db.experiment import generate_run_id, save_experiment_run
 from src.utils.logger import get_logger
 

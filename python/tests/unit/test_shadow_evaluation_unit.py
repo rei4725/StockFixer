@@ -290,7 +290,7 @@ class TestPromoteChallengerToProduction(unittest.TestCase):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_skips_when_no_challenger_files(self):
-        from src.prediction.shadow_evaluation import promote_challenger_to_production
+        from src.prediction.symbol_model_promotion import promote_challenger_to_production
 
         with patch(
             "src.prediction.symbol_model_promotion.get_models_subdir", return_value=self.tmpdir
@@ -301,7 +301,7 @@ class TestPromoteChallengerToProduction(unittest.TestCase):
         self.assertEqual(len(result["promoted"]), 0)
 
     def test_dry_run_logs_but_does_not_copy(self):
-        from src.prediction.shadow_evaluation import promote_challenger_to_production
+        from src.prediction.symbol_model_promotion import promote_challenger_to_production
 
         for name in ["ChallengerXGBoostModel", "ChallengerLightGBMModel"]:
             with open(os.path.join(self.tmpdir, f"{name}.joblib"), "wb") as f:

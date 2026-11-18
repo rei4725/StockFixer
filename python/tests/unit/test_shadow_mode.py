@@ -745,7 +745,7 @@ class TestPromoteChallengerToProduction(unittest.TestCase):
             "src.prediction.symbol_model_promotion.get_models_subdir",
             return_value=model_dir,
         ):
-            from src.prediction.shadow_evaluation import promote_challenger_to_production
+            from src.prediction.symbol_model_promotion import promote_challenger_to_production
 
             result = promote_challenger_to_production("us", "AAPL")
 
@@ -771,7 +771,7 @@ class TestPromoteChallengerToProduction(unittest.TestCase):
             "src.prediction.symbol_model_promotion.get_models_subdir",
             return_value=model_dir,
         ):
-            from src.prediction.shadow_evaluation import promote_challenger_to_production
+            from src.prediction.symbol_model_promotion import promote_challenger_to_production
 
             result = promote_challenger_to_production("us", "AAPL", dry_run=True)
 
@@ -790,7 +790,7 @@ class TestPromoteChallengerToProduction(unittest.TestCase):
             "src.prediction.symbol_model_promotion.get_models_subdir",
             return_value=model_dir,
         ):
-            from src.prediction.shadow_evaluation import promote_challenger_to_production
+            from src.prediction.symbol_model_promotion import promote_challenger_to_production
 
             result = promote_challenger_to_production("us", "AAPL")
 
