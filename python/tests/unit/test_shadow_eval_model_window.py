@@ -11,6 +11,8 @@ import pandas as pd
 from src.utils.db._bulk import bulk_insert
 from src.utils.db._connection import _db_connection
 
+# 銘柄は 0000〜0699。ほかの影の比べのテスト（1000〜・2000〜・3000〜）と
+# prediction_accuracy の鍵が重ならないようにしておく（#2022）
 _N_SYMBOLS = 700
 _N_DAYS = 20
 _COLUMNS = [
