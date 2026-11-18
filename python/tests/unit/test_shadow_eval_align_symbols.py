@@ -15,6 +15,7 @@ from src.utils.db._connection import _db_connection
 
 _N_SYMBOLS = 50
 _N_MISSING = 10
+_SYMBOL_BASE = 2000
 _COLUMNS = [
     "market",
     "symbol",
@@ -30,7 +31,8 @@ _BOUNDARY = datetime(2026, 10, 1, 0, 0, tzinfo=timezone.utc)
 
 
 def _symbols(n: int) -> list[str]:
-    return [f"{i:04d}" for i in range(n)]
+    # ほかの影の比べのテストと prediction_accuracy の鍵が重ならない銘柄にする（#2022）
+    return [f"{_SYMBOL_BASE + i:04d}" for i in range(n)]
 
 
 def _rows(model_name: str, symbols: list[str]) -> pd.DataFrame:

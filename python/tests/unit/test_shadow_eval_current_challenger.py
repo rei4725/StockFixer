@@ -14,6 +14,8 @@ from src.utils.db._bulk import bulk_insert
 from src.utils.db._connection import _db_connection
 
 _N_SYMBOLS = 50
+# ほかの影の比べのテストと prediction_accuracy の鍵が重ならない銘柄にする（#2022）
+_SYMBOL_BASE = 1000
 _N_DAYS = 20
 _N_NEW = 4
 _COLUMNS = [
@@ -37,7 +39,7 @@ def _rows(model_name: str, hits: list[bool]) -> pd.DataFrame:
             pd.DataFrame(
                 {
                     "market": "jp",
-                    "symbol": [f"{n:04d}" for n in range(_N_SYMBOLS)],
+                    "symbol": [f"{_SYMBOL_BASE + n:04d}" for n in range(_N_SYMBOLS)],
                     "model_name": model_name,
                     "predicted_at": day.strftime("%Y%m%d_224500"),
                     "horizon": 1,
