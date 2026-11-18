@@ -16,7 +16,8 @@ def test_daily_pipeline_writes_marker_after_successful_rebuild():
     mocks = _run_daily_pipeline(_batch(783, 0, 1), total=784)
 
     assert mocks["raised"] is None
-    assert st.load_features_version() == st.prediction_code_version()
+    # 印は特徴量の中身を決めるコードの版（#2014）
+    assert st.load_features_version() == st.features_code_version()
 
 
 def test_daily_pipeline_keeps_marker_when_rebuild_fails():

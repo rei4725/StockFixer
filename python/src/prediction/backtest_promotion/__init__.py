@@ -21,9 +21,11 @@ from src.prediction.backtest_promotion.old_production import measure_old_product
 from src.prediction.backtest_promotion.state import (
     CANDIDATE_NAMES,
     CODE_VERSION_SCOPE,
+    FEATURES_CODE_SCOPE,
     SWAP_PRODUCTION_NAMES,
     clear_watch,
     copy_with_backup,
+    features_code_version,
     load_features_version,
     load_state,
     prediction_code_version,
@@ -38,6 +40,7 @@ from src.prediction.backtest_promotion.state import (
 __all__ = [
     "CANDIDATE_NAMES",
     "CODE_VERSION_SCOPE",
+    "FEATURES_CODE_SCOPE",
     "HOLDOUT_TRADING_DAYS",
     "MIN_COVERAGE",
     "PATH_CHECK_SAMPLE",
@@ -50,6 +53,7 @@ __all__ = [
     "clear_watch",
     "copy_with_backup",
     "evaluate_holdout",
+    "features_code_version",
     "holdout_dates",
     "judge_rollback",
     "judge_win",

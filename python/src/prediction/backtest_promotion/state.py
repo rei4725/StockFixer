@@ -33,6 +33,10 @@ SWAP_PRODUCTION_NAMES = ["UnifiedStockXGBoost", "UnifiedStockLightGBM"]
 _PYTHON_DIR = Path(__file__).resolve().parents[3]
 # 予想のコードの版に入れるコードの置き場（python/ からの相対。フォルダか .py のファイル）
 CODE_VERSION_SCOPE = ["src/prediction", "src/market_data", "config/settings.py"]
+# 特徴量の版に入れるコードの置き場。stock_features の中身を決めるのは日次の道 [1/6] の
+# market_data（取得・指標・保存）と settings の値だけで、src/prediction は読むだけである。
+# 予想の版の範囲の一部にし、特徴量の版が変われば予想の版も必ず変わるようにする（#2014）
+FEATURES_CODE_SCOPE = ["src/market_data", "config/settings.py"]
 
 _LOCK_FILE_NAME = ".unified_models.lock"
 # 同じパスのロックは1つの FileLock を使い回す（同じプロセスの入れ子で詰まらないように）
@@ -89,6 +93,7 @@ def load_state() -> BacktestPromotionState:
         last_evaluated_version=data.get("last_evaluated_version"),
         rolled_back_versions=list(data.get("rolled_back_versions") or []),
         watch=data.get("watch"),
+        stale_features_skips=int(data.get("stale_features_skips") or 0),
     )
 
 
@@ -139,11 +144,28 @@ def load_features_version() -> str | None:
 def prediction_code_version() -> str:
     """予想に関わるコード（CODE_VERSION_SCOPE の .py）のハッシュの先頭12桁。
 
+    この版が前に比べた版から変わった夜に、仮の入れ替えの評価をし直す。
+    """
+    return _code_version(CODE_VERSION_SCOPE)
+
+
+def features_code_version() -> str:
+    """stock_features の中身を決めるコード（FEATURES_CODE_SCOPE の .py）のハッシュの先頭12桁。
+
+    日次の道はこの版で特徴量の版の印を書き、夜間の仮の入れ替えはこの版と印を比べて
+    特徴量が今のコードで作り直されたかを見る（#2014）。
+    """
+    return _code_version(FEATURES_CODE_SCOPE)
+
+
+def _code_version(scope: list[str]) -> str:
+    """scope の .py のハッシュの先頭12桁。
+
     相対パスの順に、パスと中身を sha256 に入れる。__pycache__ は除く。
     改行は LF にそろえる（チェックアウトの違いで版が変わらないように）。
     """
     files = []
-    for rel in CODE_VERSION_SCOPE:
+    for rel in scope:
         base = _PYTHON_DIR / rel
         if base.is_file():
             files.append((base.relative_to(_PYTHON_DIR).as_posix(), base))
