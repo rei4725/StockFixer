@@ -315,7 +315,7 @@ class TestRunBacktestSingle:
     @patch("src.backtest.pipeline.runner.load_features")
     @patch("src.backtest.pipeline.runner.get_model_manager")
     @patch("src.backtest.backtester.Backtester")
-    @patch("src.trading.signal_generator.SignalGenerator")
+    @patch("src.utils.signal_generator.SignalGenerator")
     def test_run_backtest_single_returns_metrics(self, mock_sg, mock_bt, mock_get_mm, mock_lf):
         """基本フローでメトリクス辞書が返ること"""
         n = 20
@@ -350,12 +350,15 @@ class TestRunBacktestSingle:
         mock_mm.create_model.assert_called_once()
         mock_mm.train_model.assert_called_once()
         mock_bt_instance.simulate_trading.assert_called_once()
+        # patch が runner.py の SignalGenerator の呼び出しに届くこと（#2016）
+        mock_sg.assert_called_once_with(market="jp", symbol="7203")
+        assert mock_bt.call_args.kwargs["signal_generator"] is mock_sg.return_value
 
     @patch("src.backtest.pipeline.runner.load_features")
     @patch("src.backtest.pipeline.runner._ensemble_predict")
     @patch("src.backtest.pipeline.runner.get_model_manager")
     @patch("src.backtest.backtester.Backtester")
-    @patch("src.trading.signal_generator.SignalGenerator")
+    @patch("src.utils.signal_generator.SignalGenerator")
     def test_run_backtest_single_ensemble_mode(
         self, mock_sg, mock_bt, mock_get_mm, mock_ep, mock_lf
     ):
@@ -391,7 +394,7 @@ class TestRunBacktestSingle:
     @patch("src.backtest.pipeline.runner.load_features")
     @patch("src.backtest.pipeline.runner.get_model_manager")
     @patch("src.backtest.backtester.Backtester")
-    @patch("src.trading.signal_generator.SignalGenerator")
+    @patch("src.utils.signal_generator.SignalGenerator")
     def test_exclude_sentiment_removes_sentiment_columns(
         self, mock_sg, mock_bt, mock_get_mm, mock_lf
     ):
@@ -433,7 +436,7 @@ class TestRunBacktestSingle:
     @patch("src.backtest.pipeline.runner.load_features")
     @patch("src.backtest.pipeline.runner.get_model_manager")
     @patch("src.backtest.backtester.Backtester")
-    @patch("src.trading.signal_generator.SignalGenerator")
+    @patch("src.utils.signal_generator.SignalGenerator")
     def test_include_sentiment_keeps_sentiment_columns(
         self, mock_sg, mock_bt, mock_get_mm, mock_lf
     ):
@@ -908,7 +911,7 @@ class TestRunBacktestWalkForward(unittest.TestCase):
     """run_backtest_walk_forward のテスト（未カバー行 382-415）"""
 
     @patch("src.backtest.pipeline.runner.get_model_manager")
-    @patch("src.trading.signal_generator.SignalGenerator")
+    @patch("src.utils.signal_generator.SignalGenerator")
     @patch("src.backtest.walk_forward.WalkForwardValidator")
     def test_returns_walk_forward_results(self, mock_wfv_cls, mock_sg, mock_get_mm):
         """WalkForwardValidator の実行結果が (None, None, wf_df) として返ること"""
@@ -930,7 +933,7 @@ class TestRunBacktestWalkForward(unittest.TestCase):
         mock_wfv_cls.return_value.run.assert_called_once()
 
     @patch("src.backtest.pipeline.runner.get_model_manager")
-    @patch("src.trading.signal_generator.SignalGenerator")
+    @patch("src.utils.signal_generator.SignalGenerator")
     @patch("src.backtest.walk_forward.WalkForwardValidator")
     def test_ensemble_skips_create_model(self, mock_wfv_cls, mock_sg, mock_get_mm):
         """ensemble=True の場合は create_model が呼ばれないこと"""
@@ -943,7 +946,7 @@ class TestRunBacktestWalkForward(unittest.TestCase):
         mock_get_mm.return_value.create_model.assert_not_called()
 
     @patch("src.backtest.pipeline.runner.get_model_manager")
-    @patch("src.trading.signal_generator.SignalGenerator")
+    @patch("src.utils.signal_generator.SignalGenerator")
     @patch("src.backtest.walk_forward.WalkForwardValidator")
     def test_non_ensemble_calls_create_model(self, mock_wfv_cls, mock_sg, mock_get_mm):
         """ensemble=False の場合は create_model が呼ばれること"""
@@ -956,7 +959,7 @@ class TestRunBacktestWalkForward(unittest.TestCase):
         mock_get_mm.return_value.create_model.assert_called_once()
 
     @patch("src.backtest.pipeline.runner.get_model_manager")
-    @patch("src.trading.signal_generator.SignalGenerator")
+    @patch("src.utils.signal_generator.SignalGenerator")
     @patch("src.backtest.walk_forward.WalkForwardValidator")
     def test_lightgbm_model_type(self, mock_wfv_cls, mock_sg, mock_get_mm):
         """LightGBMModel 指定でも正常動作すること"""
