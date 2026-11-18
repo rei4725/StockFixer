@@ -129,6 +129,9 @@ class RuleGateRecord:
     calc_position_size が 0 を返したものは risk.zero_reason で分け、zero_qty_price は価格<=0、
     zero_qty_kelly は Kelly 比率<=0、zero_qty_under_lot は投資額が1単元に届かない、
     zero_qty_scaled は縮小（confidence・dd・vix）で単元を割ったもの。理由が分からないものは zero_qty。
+    zero_qty_symbols は株数0で飛ばした新規買いの銘柄ごとの行（symbol・reason は skip_reasons の鍵・
+    price・lot_cost は price×lot・sized_qty は calc_position_size の株数・budget は
+    initial_budget_per_trade）で、記録の zero_qty_count はその数（#1997）。
     """
 
     market: str
@@ -145,6 +148,22 @@ class RuleGateRecord:
     sell_orders: int = 0
     skipped: int = 0
     errors: int = 0
+    zero_qty_symbols: list[dict[str, Any]] = field(default_factory=list)
+
+    def add_zero_qty(
+        self, symbol: str, reason: str, *, price: float, lot: int, sized_qty: int, budget: float
+    ) -> None:
+        """株数0で飛ばした新規買いを1行足す（#1997）。判定と数には使わない。"""
+        self.zero_qty_symbols.append(
+            {
+                "symbol": symbol,
+                "reason": reason,
+                "price": float(price),
+                "lot_cost": float(price * lot),
+                "sized_qty": int(sized_qty),
+                "budget": float(budget),
+            }
+        )
 
 
 class UnavailableSymbol(Protocol):
@@ -179,6 +198,7 @@ def save_rule_gate_record(
         day = now.date().isoformat()
         dest = Path(get_results_dir()) / "orders" / "rule" / f"{day}.json"
         payload: dict[str, Any] = {"date": day, "written_at": now.isoformat(), **asdict(record)}
+        payload["zero_qty_count"] = len(record.zero_qty_symbols)
         rows = [
             {"symbol": u.symbol, "rule": u.rule, "reason": u.reason} for u in unavailable_symbols
         ]
