@@ -116,7 +116,7 @@ class TestMultiHorizonOneHorizonRaises(unittest.TestCase):
     @patch(f"{_MOD}.predict_with_unified_model")
     def test_failed_horizon_is_left_empty(self, mock_predict, _preload, mock_symbols):
         """3d だけ全モデルが例外でも銘柄の行は残り、3d だけが欠ける"""
-        from src.prediction.prediction_pipeline import predict_all_unified_multi_horizon
+        from src.prediction.multi_horizon import predict_all_unified_multi_horizon
 
         mock_symbols.return_value = [("jp", "7203")]
 
