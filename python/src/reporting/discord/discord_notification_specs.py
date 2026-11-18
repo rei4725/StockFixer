@@ -67,6 +67,9 @@ BACKTEST_PROMOTION_WATCH_KEPT = NotificationSpec(
 BACKTEST_PROMOTION_WATCH_WAITING = NotificationSpec(
     "⚠️ バックテスト: 見張りが判定を待っている（飛ばした日が多い）", COLOR_WARNING
 )
+BACKTEST_PROMOTION_STALE_FEATURES = NotificationSpec(
+    "⚠️ バックテスト: 仮の入れ替えが特徴量の待ちで続けて飛んでいる", COLOR_WARNING
+)
 
 
 def get_daily_order_spec(*, trading_stopped: bool) -> NotificationSpec:
