@@ -402,6 +402,47 @@ def test_code_version_includes_settings(tmp_path, monkeypatch):
     assert "config/settings.py" in st.CODE_VERSION_SCOPE
 
 
+def test_features_code_version_ignores_prediction_code(tmp_path, monkeypatch):
+    """特徴量の版は stock_features の中身を決めるコードだけで作る（#2014）"""
+    root = tmp_path / "python"
+    for rel in [
+        "src/prediction/a.py",
+        "src/market_data/c.py",
+        "config/settings.py",
+        "src/reporting/d.py",
+    ]:
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text(f"# {rel}\n", encoding="utf-8")
+    monkeypatch.setattr(st, "_PYTHON_DIR", root)
+    base = st.features_code_version()
+    assert len(base) == 12
+
+    # 特徴量に関わらないコードは特徴量の版を変えない（予想の版は変わる）
+    pred_before = st.prediction_code_version()
+    (root / "src/prediction/a.py").write_text("changed\n", encoding="utf-8")
+    (root / "src/reporting/d.py").write_text("changed\n", encoding="utf-8")
+    assert st.features_code_version() == base
+    assert st.prediction_code_version() != pred_before
+
+    (root / "src/market_data/c.py").write_text("changed\n", encoding="utf-8")
+    after_md = st.features_code_version()
+    assert after_md != base
+
+    (root / "config/settings.py").write_text("changed\n", encoding="utf-8")
+    assert st.features_code_version() != after_md
+
+
+def test_features_scope_is_inside_prediction_scope():
+    """特徴量の版が変われば予想の版も必ず変わる（範囲が予想の版の範囲に含まれる）"""
+    assert set(st.FEATURES_CODE_SCOPE) <= set(st.CODE_VERSION_SCOPE)
+    assert all((st._PYTHON_DIR / rel).exists() for rel in st.FEATURES_CODE_SCOPE)
+
+
+def test_state_round_trips_stale_features_skips():
+    st.save_state(BacktestPromotionState(stale_features_skips=3))
+    assert st.load_state().stale_features_skips == 3
+
+
 def test_code_version_uses_module_location():
     """既定の置き場は python/ （CWD ではない）"""
     assert (st._PYTHON_DIR / "src" / "prediction" / "backtest_promotion" / "state.py").exists()

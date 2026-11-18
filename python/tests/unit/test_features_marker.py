@@ -195,7 +195,9 @@ def test_record_features_version_none_does_not_save(save_spy):
 
 
 def test_current_code_version_returns_version(monkeypatch):
-    monkeypatch.setattr(f"{_PKG}.prediction_code_version", lambda: "abc123")
+    # 印は特徴量の中身を決めるコードの版で書く（予想の版ではない、#2014）
+    monkeypatch.setattr(f"{_PKG}.features_code_version", lambda: "abc123", raising=False)
+    monkeypatch.setattr(f"{_PKG}.prediction_code_version", lambda: "pred00000000")
     assert fm.current_code_version() == "abc123"
 
 
@@ -203,5 +205,5 @@ def test_current_code_version_returns_none_on_error(monkeypatch):
     def _boom():
         raise RuntimeError("no git")
 
-    monkeypatch.setattr(f"{_PKG}.prediction_code_version", _boom)
+    monkeypatch.setattr(f"{_PKG}.features_code_version", _boom, raising=False)
     assert fm.current_code_version() is None

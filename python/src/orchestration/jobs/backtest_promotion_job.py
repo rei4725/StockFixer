@@ -23,10 +23,12 @@ from src.orchestration.jobs.common import _local_now
 from src.prediction.backtest_promotion import (
     CANDIDATE_NAMES,
     CODE_VERSION_SCOPE,
+    FEATURES_CODE_SCOPE,
     MIN_COVERAGE,
     SWAP_PRODUCTION_NAMES,
     WATCH_TRADING_DAYS,
     evaluate_holdout,
+    features_code_version,
     judge_rollback,
     latest_holdout_dates,
     load_features_version,
@@ -59,6 +61,10 @@ LOST = "lost"
 NOT_COMPARABLE = "not_comparable"
 FAILED = "failed"
 SKIPPED = "skipped"
+
+STALE_FEATURES_REASON = "特徴量がまだ今のコードで作り直されていない"
+# 特徴量の待ちで続けて飛んだ夜がこの数に届いたら WARNING と知らせを出す（#2014）
+STALE_FEATURES_ALERT_NIGHTS = 2
 
 
 def run_backtest_promotion(force: bool = False, dry_run: bool = False) -> dict:
@@ -122,6 +128,9 @@ def _new_result(started: datetime, force: bool, dry_run: bool) -> dict:
         "version": None,
         "version_scope": list(CODE_VERSION_SCOPE),
         "features_version": None,
+        "features_code_version": None,
+        "features_scope": list(FEATURES_CODE_SCOPE),
+        "stale_features_nights": None,
         "force": force,
         "dry_run": dry_run,
         "outcome": SKIPPED,
@@ -183,12 +192,18 @@ def _run_locked(result: dict, force: bool, dry_run: bool) -> None:
     if not force and version in state.rolled_back_versions:
         _end(result, SKIPPED, "この版の候補は前に戻した")
         return
-    # stock_features は日次の道（平日 07:30）でしか作り直さない。昼に入れた版を古いコードの
-    # 特徴量で比べて「比べた」にしないよう、印が今の版になるまで待つ（版は記録しない）
+    # stock_features は日次の道（平日 07:30）でしか作り直さない。昼に入れた特徴量のコードを
+    # 古いコードの特徴量で比べて「比べた」にしないよう、印が今の特徴量の版になるまで待つ
+    # （版は記録しない）。特徴量に関わらない直しでは待たない（#2014）
     result["features_version"] = load_features_version()
-    if not force and result["features_version"] != version:
-        _end(result, SKIPPED, "特徴量がまだ今のコードで作り直されていない")
+    result["features_code_version"] = features_code_version()
+    if not force and result["features_version"] != result["features_code_version"]:
+        _end(result, SKIPPED, STALE_FEATURES_REASON)
+        _count_stale_features(state, result)
         return
+    if state.stale_features_skips:
+        state.stale_features_skips = 0
+        save_state(state)
 
     # 3〜6. 学習・評価・入れ替え・版の記録。ここで落ちたら版は記録しない（次の夜にやり直す）
     try:
@@ -210,6 +225,31 @@ def _run_locked(result: dict, force: bool, dry_run: bool) -> None:
         if result["swapped"]:
             # 入れ替えた後に見張りを保存できなかった。見張りの無い候補を本番に残さない
             _undo_swap(result)
+
+
+def _count_stale_features(state: BacktestPromotionState, result: dict) -> None:
+    """特徴量の待ちで飛んだ夜を数え、STALE_FEATURES_ALERT_NIGHTS 晩続いたら WARNING と知らせ。
+
+    数えた夜は state.json に残す。知らせを送れなくてもジョブは落とさない（#2014）。
+    """
+    from src.reporting.discord import notifications_backtest_watch as nw
+
+    state.stale_features_skips += 1
+    result["stale_features_nights"] = state.stale_features_skips
+    save_state(state)
+    if state.stale_features_skips < STALE_FEATURES_ALERT_NIGHTS:
+        return
+    logger.warning(
+        "仮の入れ替えが特徴量の待ちで %d 晩続けて飛んだ（特徴量の印 %s・今の特徴量の版 %s・予想の版 %s）",
+        state.stale_features_skips,
+        result["features_version"],
+        result["features_code_version"],
+        result["version"],
+    )
+    try:
+        nw.send_backtest_promotion_stale_features(result)
+    except Exception:
+        logger.error("仮の入れ替えの、特徴量の待ちの通知に失敗", exc_info=True)
 
 
 def _undo_swap(result: dict) -> None:

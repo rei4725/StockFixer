@@ -18,13 +18,17 @@ _ORDER_MARKET = "jp"
 
 
 def current_code_version() -> str | None:
-    """予想のコードの版。出せなければ None（日次の道は止めない）。"""
-    from src.prediction.backtest_promotion import prediction_code_version
+    """stock_features の中身を決めるコードの版。出せなければ None（日次の道は止めない）。
+
+    予想の版（src/prediction も含む）ではなく特徴量の版で印を書く。特徴量に関わらない
+    直しのデプロイで、夜間の仮の入れ替えが特徴量の待ちで飛ばないようにする（#2014）。
+    """
+    from src.prediction.backtest_promotion import features_code_version
 
     try:
-        return prediction_code_version()
+        return features_code_version()
     except Exception:
-        logger.error("予想のコードの版を出せなかった（特徴量の版の印は書かない）", exc_info=True)
+        logger.error("特徴量のコードの版を出せなかった（特徴量の版の印は書かない）", exc_info=True)
         return None
 
 

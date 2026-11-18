@@ -189,11 +189,14 @@ class BacktestPromotionState:
         watch: 入れ替えたあとの見張り。無ければ None。
             version・swapped_at（JST の ISO）・swap_date（YYYY-MM-DD）・
             backups（戻せる写しのパス）・backtest_candidate・backtest_old_production を持つ
+        stale_features_skips: 「特徴量がまだ今のコードで作り直されていない」で続けて飛んだ夜の数。
+            特徴量の待ちを越えた夜に 0 に戻す（#2014）
     """
 
     last_evaluated_version: Optional[str] = None
     rolled_back_versions: list[str] = field(default_factory=list)
     watch: Optional[dict] = None
+    stale_features_skips: int = 0
 
 
 @dataclass
