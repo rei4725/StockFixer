@@ -15,6 +15,8 @@ API ドキュメント: https://disclosure2.edinet-fsa.go.jp/weee0020.aspx
     WARNING を1回出し、reset_edinet_stop() が呼ばれるまで（その回の残りの銘柄で）取得しない。
   - 1日分の一覧はどの銘柄でも同じなので、reset_edinet_stop() が呼ばれるまで日ごとに1度だけ取り、
     銘柄の間で使い回す（#1692）。取得に失敗した日は持ち回らず、次の銘柄が取り直す。
+  - 429・5xx・タイムアウトなどの取得の失敗は、日ごとに回の中で1回 WARNING に出す。
+    失敗した日は開示なしと分けて failed_days に残し、銘柄ごとに日の数を WARNING に出す（#1999）。
 """
 
 import os
@@ -60,6 +62,7 @@ class _DaySlot:
 
     lock: threading.Lock = field(default_factory=threading.Lock)
     titles: Optional[_DayTitles] = None
+    warned: bool = False  # この日の取得の失敗を回の中で WARNING に出したか（#1999）
 
 
 # 日付 -> 置き場。_stop_lock で守る。回の始めに打ち切りと一緒に捨てる（#1692）
@@ -77,6 +80,25 @@ def reset_edinet_stop() -> None:
 def _day_slot(date_str: str) -> _DaySlot:
     with _stop_lock:
         return _day_slots.setdefault(date_str, _DaySlot())
+
+
+def _warn_request_error_once(date_str: str, error: requests.exceptions.RequestException) -> None:
+    """取得の失敗を、同じ日について回の中で1回だけ WARNING に出す。"""
+    slot = _day_slot(date_str)
+    with _stop_lock:
+        first = not slot.warned
+        slot.warned = True
+    if not first:
+        return
+    response = getattr(error, "response", None)
+    status = getattr(response, "status_code", None) if response is not None else None
+    reason = f"HTTP {status}" if status is not None else type(error).__name__
+    logger.warning(
+        "EDINET API リクエストエラーのため、この日の一覧を取れない (date=%s, 理由=%s: %s)",
+        date_str,
+        reason,
+        error,
+    )
 
 
 def _is_stopped() -> bool:
@@ -133,6 +155,8 @@ class EdinetClient:
     ) -> None:
         self._api_key = api_key or os.environ.get("EDINET_API_KEY", "")
         self._timeout = timeout
+        # 直近の fetch_document_titles で取得に失敗した日。開示の無い日とは分ける（#1999）
+        self.failed_days: list[str] = []
 
     def fetch_document_titles(
         self,
@@ -153,8 +177,9 @@ class EdinetClient:
 
         Returns:
             {date_str: [doc_title, ...]} 形式の辞書。
-            開示なし・取得失敗の場合は None。
+            開示なし・取得失敗の場合は None。取得に失敗した日は failed_days に残る。
         """
+        self.failed_days = []
         sec_code = _to_edinet_sec_code(symbol)
 
         try:
@@ -177,24 +202,39 @@ class EdinetClient:
                 records[current.isoformat()] = titles
             current += timedelta(days=1)
 
+        if self.failed_days:
+            logger.warning(
+                "EDINET: %s の開示を %d 日分取れなかった (期間 %s〜%s)。開示なしとは別",
+                symbol,
+                len(self.failed_days),
+                effective_start.isoformat(),
+                end.isoformat(),
+            )
         return records if records else None
 
     def _fetch_day(self, date_str: str, sec_code: str) -> list[str]:
-        """1日分の EDINET 書類一覧から指定銘柄のタイトルを抽出する。"""
-        return list(self._day_titles(date_str).get(sec_code, []))
+        """1日分の EDINET 書類一覧から指定銘柄のタイトルを抽出する。失敗の日は failed_days に残す。"""
+        day = self._day_titles(date_str)
+        if day is None:
+            self.failed_days.append(date_str)
+            return []
+        return list(day.get(sec_code, []))
 
-    def _day_titles(self, date_str: str) -> _DayTitles:
-        """1日分の一覧を返す。同じ日を並列で取らないよう、その日の lock の中で1度だけ取る。"""
+    def _day_titles(self, date_str: str) -> Optional[_DayTitles]:
+        """1日分の一覧を返す。取れなかった日は None。
+
+        同じ日を並列で取らないよう、その日の lock の中で1度だけ取る。
+        """
         slot = _day_slot(date_str)
         with slot.lock:
             if slot.titles is not None:
                 return slot.titles
             # 待っている間に打ち切りが立ったら、取りに行かない
             if _is_stopped():
-                return {}
+                return None
             titles = self._request_day(date_str)
             if titles is None:
-                return {}
+                return None
             slot.titles = titles
             return titles
 
@@ -215,7 +255,7 @@ class EdinetClient:
             resp.raise_for_status()
             data = resp.json()
         except requests.exceptions.RequestException as e:
-            logger.debug("EDINET API リクエストエラー (%s): %s", date_str, e)
+            _warn_request_error_once(date_str, e)
             return None
         except Exception as e:
             logger.warning("EDINET API 予期しないエラー (%s): %s", date_str, e)
