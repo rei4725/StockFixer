@@ -10,6 +10,8 @@
 - 欠けた日（ファイルが無い日）は行を作らない。移動平均は、その組の行（値のある日）の
   直近 N 行で取り、値の無い（None・キーの無い古い JSON の）日は平均から外す
 - 読めないファイル・形の違う JSON は警告を出して飛ばす
+- 4週の窓（各欄の four_week とその by_market、#2013）は別の表（build_four_week_trend）にする。
+  four_week の無い古い JSON・空の窓は値を空にした行を残す
 """
 
 import glob
@@ -39,6 +41,12 @@ ALL_MARKETS = "ALL"
 _KEY_COLUMNS = ["date", "model", "horizon", "market"]
 _GROUP_COLUMNS = ["model", "horizon", "market"]
 _BASE_COLUMNS = _KEY_COLUMNS + ["n_scored"] + list(TREND_METRICS)
+# 4週の窓（four_week、#2013）の表の列。鍵の無い欄（古い JSON・by_market の n_days など）は空
+FOUR_WEEK_METRICS: tuple[str, ...] = TREND_METRICS + (
+    "n_days",
+    "daily_direction_accuracy_mean",
+)
+_FOUR_WEEK_COLUMNS = _KEY_COLUMNS + ["n_scored"] + list(FOUR_WEEK_METRICS)
 
 
 def load_accuracy_reports(accuracy_dir: str) -> list[dict]:
@@ -109,6 +117,64 @@ def build_accuracy_trend(reports: list[dict]) -> pd.DataFrame:
     for column in ["n_scored"] + list(TREND_METRICS):
         df[column] = pd.to_numeric(df[column], errors="coerce").astype(float)
     return df.reset_index(drop=True)
+
+
+def _four_week_row(day: str, model: str, horizon: str, market: str, window: dict) -> dict:
+    row: dict[str, Any] = {
+        "date": day,
+        "model": model,
+        "horizon": horizon,
+        "market": market,
+        "n_scored": _number(window.get("n_scored")),
+    }
+    for metric in FOUR_WEEK_METRICS:
+        row[metric] = _number(window.get(metric))
+    return row
+
+
+def _four_week_report_rows(report: dict) -> list[dict]:
+    day = str(report.get("date", ""))
+    models = report.get("models")
+    if not isinstance(models, dict):
+        logger.warning("採点の JSON %s に models が無いため飛ばす", day)
+        return []
+    rows: list[dict] = []
+    for model, by_horizon in models.items():
+        if not isinstance(by_horizon, dict):
+            continue
+        for horizon, section in by_horizon.items():
+            if not isinstance(section, dict):
+                continue
+            window = section.get("four_week")
+            # four_week の無い古い JSON は、値を空にした ALL の行を残す
+            window = window if isinstance(window, dict) else {}
+            rows.append(_four_week_row(day, str(model), str(horizon), ALL_MARKETS, window))
+            by_market = window.get("by_market")
+            if not isinstance(by_market, dict):
+                continue
+            for market, market_window in sorted(by_market.items()):
+                if isinstance(market_window, dict):
+                    rows.append(
+                        _four_week_row(day, str(model), str(horizon), str(market), market_window)
+                    )
+    return rows
+
+
+def build_four_week_trend(reports: list[dict]) -> pd.DataFrame:
+    """各欄の four_week（4週の窓）を、日・モデル・ホライズン・市場ごとの行にした表を返す（#2013）。
+
+    列は n_scored と FOUR_WEEK_METRICS。by_market の行に無い鍵（n_days など）は空にする。
+    """
+    rows = [row for report in reports for row in _four_week_report_rows(report)]
+    df = pd.DataFrame(rows, columns=_FOUR_WEEK_COLUMNS)
+    for column in ["n_scored"] + list(FOUR_WEEK_METRICS):
+        df[column] = pd.to_numeric(df[column], errors="coerce").astype(float)
+    return df.reset_index(drop=True)
+
+
+def load_four_week_trend(accuracy_dir: str) -> pd.DataFrame:
+    """accuracy_dir の JSON を読み、4週の窓の表を返す（#2013）。"""
+    return build_four_week_trend(load_accuracy_reports(accuracy_dir))
 
 
 def add_moving_average(df: pd.DataFrame, window: int) -> pd.DataFrame:
