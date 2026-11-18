@@ -29,7 +29,7 @@ from src.utils.data_path_utils import get_models_dir
 from src.utils.db import get_active_symbols
 from src.utils.df_to_string import df_to_pretty_string
 from src.utils.logger import get_logger
-from src.utils.optimal_params_loader import optimal_params_read_path
+from src.utils.optimal_params_loader import hold_read_lock, optimal_params_read_path
 from src.utils.run_context import new_run_context
 
 # yfinanceの警告を抑制
@@ -112,12 +112,13 @@ def get_optimal_params(market: str, symbol: str) -> dict:
     # 発注の読む側と同じ置き場（週の最適化の結果があればそれ、無ければ初めの値）（#1081）
     json_path = optimal_params_read_path()
 
-    if not json_path.exists():
-        return {}
-
     try:
-        with open(json_path, "r", encoding="utf-8") as f:
-            all_params = json.load(f)
+        # 週の最適化の置き換えの一瞬を読まないよう、書き手と同じロックの内で開く（#2007）
+        with hold_read_lock(json_path):
+            if not json_path.exists():
+                return {}
+            with open(json_path, "r", encoding="utf-8") as f:
+                all_params = json.load(f)
         key = f"{market}_{symbol}"
         params = all_params.get(key, {})
         if params:

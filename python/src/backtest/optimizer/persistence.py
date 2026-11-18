@@ -361,9 +361,17 @@ def get_optimal_params(
         # 発注の読む側と同じ置き場（最適化の結果があればそれ、無ければ初めの値）
         json_path = str(optimal_params_loader.optimal_params_read_path())
 
-    if not os.path.exists(json_path):
-        return None
+    # 週の最適化の置き換えの一瞬を読まないよう、書き手と同じロックの内で開く（#2007）
+    with optimal_params_loader.hold_read_lock(json_path):
+        if not os.path.exists(json_path):
+            return None
+        all_params = _load_params_for_read(json_path)
+    key = f"{market}_{symbol}"
+    return dict(all_params[key]) if key in all_params else None
 
+
+def _load_params_for_read(json_path: str) -> Dict[str, Any]:
+    """在る JSON を読む。読めない・最上位が dict でなければ OptimalParamsCorruptedError。"""
     try:
         with open(json_path, "r", encoding="utf-8") as f:
             all_params = json.load(f)
@@ -376,5 +384,4 @@ def get_optimal_params(
         detail = f"最上位が dict ではない: {type(all_params).__name__}"
         logger.error(f"最適パラメータJSONが壊れています: {json_path} {detail}")
         raise OptimalParamsCorruptedError(f"最適パラメータJSONが壊れています: {json_path} {detail}")
-    key = f"{market}_{symbol}"
-    return dict(all_params[key]) if key in all_params else None
+    return all_params
