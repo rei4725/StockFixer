@@ -1,114 +1,92 @@
 {
-  "hash": "7c0cd41e562aa09f14bcb79c853c65e7dc310c643aade06f311878e5ced4065f",
+  "hash": "12d47d43ddc1c0edb7a8d1eab4858945335d4ee41532d4c2151efa362da106b2",
   "data": {
     "trade_log": [
       {
         "date": "2024-01-02",
         "action": "buy",
-        "price": 99.842825,
-        "qty": 10000,
-        "cash": 74.111894
-      },
-      {
-        "date": "2024-01-05",
-        "action": "sell",
-        "price": 100.437392,
-        "qty": 10000,
-        "cash": 1002941.471307
-      },
-      {
-        "date": "2024-01-09",
-        "action": "buy",
-        "price": 103.35497,
-        "qty": 9689,
-        "cash": 33.059833
-      },
-      {
-        "date": "2024-01-11",
-        "action": "sell",
-        "price": 103.015114,
-        "qty": 9689,
-        "cash": 996649.33305
-      },
-      {
-        "date": "2024-01-16",
-        "action": "buy",
-        "price": 103.996992,
-        "qty": 9569,
-        "cash": 9.39346
+        "price": 102.0,
+        "qty": 9700,
+        "cash": 9115.9
       },
       {
         "date": "2024-01-19",
         "action": "sell",
-        "price": 105.620754,
-        "qty": 9569,
-        "cash": 1009178.364178
+        "price": 106.0,
+        "qty": 9700,
+        "cash": 1035773.6
       },
       {
         "date": "2024-01-23",
         "action": "buy",
-        "price": 104.756775,
-        "qty": 9619,
-        "cash": 11.458201
+        "price": 106.0,
+        "qty": 9700,
+        "cash": 6031.3
       },
       {
         "date": "2024-01-25",
         "action": "sell",
-        "price": 104.326911,
-        "qty": 9619,
-        "cash": 1002026.736227
+        "price": 104.0,
+        "qty": 9700,
+        "cash": 1013318.1
       },
       {
         "date": "2024-01-30",
         "action": "buy",
-        "price": 105.294253,
-        "qty": 9502,
-        "cash": 19.989912
+        "price": 107.0,
+        "qty": 9400,
+        "cash": 6009.4
       },
       {
         "date": "2024-02-02",
         "action": "sell",
-        "price": 109.817375,
-        "qty": 9502,
-        "cash": 1041939.459867
+        "price": 109.0,
+        "qty": 9400,
+        "cash": 1029072.5
       },
       {
         "date": "2024-02-06",
         "action": "buy",
-        "price": 108.476359,
-        "qty": 9590,
-        "cash": 90.740487
+        "price": 110.0,
+        "qty": 9300,
+        "cash": 4538.0
       },
       {
-        "date": "2024-02-08",
-        "action": "sell",
-        "price": 105.300809,
-        "qty": 9590,
-        "cash": 1008410.744101
+        "date": "2024-02-09",
+        "action": "final_sell",
+        "price": 107.096649,
+        "qty": 9300,
+        "cash": 999042.838175
       }
     ],
     "metrics": {
-      "final_cash": 1008410.74,
-      "total_return": 0.008411,
-      "num_trades": 6,
+      "final_cash": 999042.84,
+      "total_return": -0.000957,
+      "num_trades": 4,
       "win_rate": 0.5,
-      "profit_factor": 1.7017,
-      "sharpe_ratio": 1.4009,
-      "sharpe_per_trade": 0.182031,
-      "max_drawdown": -0.040419,
-      "avg_position_fraction": 0.999961,
-      "min_position_fraction": 0.999913,
-      "max_position_fraction": 0.999991,
-      "avg_position_value": 1007238.58,
+      "profit_factor": 0.9818,
+      "sharpe_ratio": -0.0468,
+      "sharpe_per_trade": -0.007652,
+      "max_drawdown": -0.050139,
+      "avg_position_fraction": 0.99368,
+      "min_position_fraction": 0.990884,
+      "max_position_fraction": 0.99559,
+      "avg_position_value": 1011600.0,
       "atr_fallback_trades": 0,
-      "avg_win": 0.021509,
-      "avg_loss": 0.012222,
-      "gross_final_cash": 1026580.91,
-      "gross_total_return": 0.026581,
-      "gross_sharpe_ratio": 1.4009,
-      "gross_max_drawdown": -0.03837,
-      "cost_impact_cash": 18170.17,
-      "cost_impact_return": 0.01817,
+      "avg_win": 0.02591,
+      "avg_loss": 0.025597,
+      "trade_returns": [
+        0.03615686274509825,
+        0.01566355140186941,
+        -0.021839622641509206,
+        -0.029354508138219368
+      ],
+      "gross_final_cash": 1011198.84,
+      "gross_total_return": 0.011199,
+      "gross_sharpe_ratio": 0.548,
+      "gross_max_drawdown": -0.041307,
+      "cost_impact_cash": 12156.0,
+      "cost_impact_return": 0.012156,
       "short_return": 0.0,
       "short_num_trades": 0
     }
