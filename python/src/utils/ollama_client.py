@@ -53,9 +53,22 @@ class OllamaClient:
             return False
         try:
             resp = requests.get(f"{self._base_url}/api/tags", timeout=5)
-            return resp.status_code == 200
-        except Exception:
+        except Exception as e:
+            logger.warning(
+                "Ollama 疎通確認失敗: url=%s %s: %s",
+                self._base_url,
+                type(e).__name__,
+                e,
+            )
             return False
+        if resp.status_code != 200:
+            logger.warning(
+                "Ollama 疎通確認で200以外の応答: url=%s status=%s",
+                self._base_url,
+                resp.status_code,
+            )
+            return False
+        return True
 
     def score(self, texts: list[str]) -> Optional[float]:
         """テキストリストのセンチメントスコアを返す。
