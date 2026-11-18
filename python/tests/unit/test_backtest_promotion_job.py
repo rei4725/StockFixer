@@ -119,8 +119,11 @@ def env(tmp_path, monkeypatch):
         "targets": MagicMock(return_value=_targets(2)),
         # 同じ5日の旧 production の物差し。既定は旧 production のほうが良い
         "old_production": MagicMock(return_value=_old_measure(0.1, 0.5)),
+        "stale": MagicMock(return_value=True),
     }
     monkeypatch.setattr(job, "prediction_code_version", lambda: _VERSION)
+    # 特徴量の中身を決めるコードの版（#2014）。既定では予想の版と同じ値にする
+    monkeypatch.setattr(job, "features_code_version", lambda: _VERSION, raising=False)
     monkeypatch.setattr(job, "latest_holdout_dates", lambda: list(_DATES))
     monkeypatch.setattr(job, "train_unified_model", mocks["train"])
     monkeypatch.setattr(job, "load_unified_model", lambda name: f"model:{name}")
@@ -135,6 +138,11 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "src.reporting.discord.notifications_backtest_watch.send_backtest_promotion_watch_waiting",
         mocks["waiting"],
+    )
+    monkeypatch.setattr(
+        "src.reporting.discord.notifications_backtest_watch.send_backtest_promotion_stale_features",
+        mocks["stale"],
+        raising=False,
     )
     mocks["unified"] = unified
     mocks["results"] = results / "backtest_promotion"
@@ -251,6 +259,80 @@ def test_force_evaluates_with_stale_features(env):
 
     assert result["outcome"] == "won"
     env["train"].assert_called()
+
+
+def test_non_feature_code_change_does_not_skip(env, monkeypatch):
+    """特徴量に関わらないコードだけが変わった版は、朝の印と特徴量の版が合えば比べる（#2014）"""
+    monkeypatch.setattr(job, "features_code_version", lambda: "feat00000000", raising=False)
+    st.save_features_version("feat00000000")
+
+    result = job.run_backtest_promotion()
+
+    assert result["outcome"] == "won"
+    assert result["version"] == _VERSION
+    assert result["features_version"] == "feat00000000"
+    assert st.load_state().last_evaluated_version == _VERSION
+    env["train"].assert_called()
+
+
+def test_feature_code_change_still_waits_for_rebuild(env, monkeypatch):
+    """特徴量のコードが変わった版は、今までどおり朝の作り直しを待って飛ぶ（#2014）"""
+    monkeypatch.setattr(job, "features_code_version", lambda: "featnew00000", raising=False)
+    st.save_features_version("featold00000")
+
+    result = job.run_backtest_promotion()
+
+    assert result["outcome"] == "skipped"
+    assert result["reason"] == "特徴量がまだ今のコードで作り直されていない"
+    assert st.load_state().last_evaluated_version is None
+    env["train"].assert_not_called()
+
+
+def test_stale_features_two_nights_warns_and_notifies(env, caplog):
+    """特徴量の待ちで2晩続けて飛んだら WARNING と知らせを出す。1晩目は出さない（#2014）"""
+    st.save_features_version("oldcode00000")
+
+    with caplog.at_level("WARNING"):
+        first = job.run_backtest_promotion()
+    assert first["outcome"] == "skipped"
+    assert first.get("stale_features_nights") == 1
+    env["stale"].assert_not_called()
+    assert not [r for r in caplog.records if "続けて飛んだ" in r.getMessage()]
+
+    with caplog.at_level("WARNING"):
+        second = job.run_backtest_promotion()
+    assert second["outcome"] == "skipped"
+    assert second["stale_features_nights"] == 2
+    env["stale"].assert_called_once()
+    warned = [r for r in caplog.records if "続けて飛んだ" in r.getMessage()]
+    assert len(warned) == 1 and warned[0].levelname == "WARNING"
+    # 評価の結果の知らせは出さない（比べていない）
+    env["result"].assert_not_called()
+
+
+def test_stale_features_count_resets_after_features_catch_up(env):
+    """印が今の版に追いついて比べた夜に、続けて飛んだ数を0に戻す（#2014）"""
+    st.save_features_version("oldcode00000")
+    job.run_backtest_promotion()
+    job.run_backtest_promotion()
+    assert st.load_state().stale_features_skips == 2
+
+    st.save_features_version(_VERSION)
+    result = job.run_backtest_promotion()
+
+    assert result["outcome"] == "won"
+    assert st.load_state().stale_features_skips == 0
+
+
+def test_stale_features_notify_failure_does_not_fail_job(env):
+    st.save_features_version("oldcode00000")
+    env["stale"].side_effect = RuntimeError("discord down")
+
+    job.run_backtest_promotion()
+    result = job.run_backtest_promotion()
+
+    assert result["outcome"] == "skipped"
+    assert result["stale_features_nights"] == 2
 
 
 def test_result_records_code_version_scope(env):
@@ -1081,6 +1163,30 @@ def test_watch_still_judges_after_the_skipped_days_notice(env):
     assert result["watch"]["judged"] is True
     assert st.load_state().watch is None
     env["waiting"].assert_called_once()
+
+
+def test_stale_features_notice_shows_nights_and_versions():
+    from src.reporting.discord.notifications_backtest_watch import (
+        send_backtest_promotion_stale_features,
+    )
+
+    result = {
+        "stale_features_nights": 3,
+        "features_version": "featold00000",
+        "features_code_version": "featnew00000",
+        "version": _VERSION,
+        "features_scope": ["src/market_data", "config/settings.py"],
+    }
+    target = "src.reporting.discord.notifications_backtest_watch.send_status_fields"
+    with patch(target, MagicMock(return_value=True)) as send:
+        assert send_backtest_promotion_stale_features(result) is True
+    spec, fields = send.call_args[0][:2]
+    assert "特徴量の待ち" in spec.title
+    values = {f["name"]: f["value"] for f in fields}
+    assert values["🌙 続けて飛んだ夜"] == "3 晩"
+    assert "featold00000" in values["🔖 特徴量の印"]
+    assert "featnew00000" in values["🧩 今の特徴量の版"]
+    assert "src/market_data" in values["📂 特徴量の版の範囲"]
 
 
 def test_watch_waiting_notice_shows_skipped_and_counted_days():

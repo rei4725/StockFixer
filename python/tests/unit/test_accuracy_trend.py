@@ -226,3 +226,84 @@ def test_markdown_has_header_and_rows(accuracy_dir):
     assert len(lines) == 2 + len(df)
     assert "| 2026-11-05 | production | 1 | ALL |" in text
     assert "0.6500" in text
+
+
+def _four_week(n, acc, diff, n_days, by_market=None):
+    return {
+        "n_scored": n,
+        "direction_accuracy": acc,
+        "majority_baseline_accuracy": 0.5,
+        "hit_rate_minus_majority": diff,
+        "rank_corr": 0.05,
+        "predicted_up_rate": 0.6,
+        "n_days": n_days,
+        "daily_direction_accuracy_mean": acc,
+        "by_market": by_market or {},
+    }
+
+
+def test_four_week_rows_per_day_model_market(tmp_path):
+    """four_week と four_week.by_market から日・モデル・ホライズン・市場ごとの4週の行を作る（#2013）。"""
+    from src.reporting.accuracy_trend import FOUR_WEEK_METRICS, build_four_week_trend
+
+    jp = _four_week(60, 0.52, 0.02, None)
+    us = _four_week(40, 0.48, -0.03, None)
+    first = _section(0.5, 0.5, 0.0, 0.1, 0.8)
+    first["four_week"] = _four_week(100, 0.5, -0.01, 18, {"jp": jp, "us": us})
+    second = _section(0.6, 0.5, 0.1, 0.1, 0.8)
+    second["four_week"] = _four_week(120, 0.51, 0.01, 19, {"jp": jp})
+    _write(tmp_path, "2026-11-17", {"production": {"1": first}})
+    _write(tmp_path, "2026-11-18", {"production": {"1": second}})
+
+    df = build_four_week_trend(load_accuracy_reports(str(tmp_path)))
+
+    assert "n_days" in FOUR_WEEK_METRICS
+    assert "hit_rate_minus_majority" in FOUR_WEEK_METRICS
+    assert list(df.columns) == ["date", "model", "horizon", "market", "n_scored"] + list(
+        FOUR_WEEK_METRICS
+    )
+    keys = list(zip(df["date"], df["market"]))
+    assert keys == [
+        ("2026-11-17", "ALL"),
+        ("2026-11-17", "jp"),
+        ("2026-11-17", "us"),
+        ("2026-11-18", "ALL"),
+        ("2026-11-18", "jp"),
+    ]
+    all_rows = df[df["market"] == "ALL"]
+    assert all_rows["hit_rate_minus_majority"].tolist() == pytest.approx([-0.01, 0.01])
+    assert all_rows["n_days"].tolist() == [18.0, 19.0]
+    assert all_rows["n_scored"].tolist() == [100.0, 120.0]
+    us_row = df[df["market"] == "us"].iloc[0]
+    assert us_row["hit_rate_minus_majority"] == pytest.approx(-0.03)
+    assert pd.isna(us_row["n_days"])
+
+
+def test_four_week_old_json_and_empty_window(tmp_path):
+    """four_week の無い古い JSON と空の窓は値を空にして行を残し、壊れた JSON は飛ばす（#2013）。"""
+    from src.reporting.accuracy_trend import FOUR_WEEK_METRICS, build_four_week_trend
+
+    old = _section(0.5, 0.5, 0.0, 0.1, 0.8)
+    del old["four_week"]
+    empty = _section(0.5, 0.5, 0.0, 0.1, 0.8)
+    empty["four_week"] = {
+        "n_scored": 0,
+        "direction_accuracy": None,
+        "n_days": 0,
+        "daily_direction_accuracy_mean": None,
+        "by_market": {},
+    }
+    _write(tmp_path, "2026-10-01", {"production": {"1": old}})
+    _write(tmp_path, "2026-10-02", {"production": {"1": empty}})
+    (tmp_path / "2026-10-03.json").write_text("{broken", encoding="utf-8")
+
+    df = build_four_week_trend(load_accuracy_reports(str(tmp_path)))
+
+    assert df["date"].tolist() == ["2026-10-01", "2026-10-02"]
+    first = df.iloc[0]
+    assert all(pd.isna(first[c]) for c in ["n_scored"] + list(FOUR_WEEK_METRICS))
+    second = df.iloc[1]
+    assert second["n_scored"] == 0.0
+    assert second["n_days"] == 0.0
+    assert pd.isna(second["hit_rate_minus_majority"])
+    assert build_four_week_trend([]).empty

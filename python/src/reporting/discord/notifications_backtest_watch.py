@@ -5,7 +5,10 @@ notifications_model.py が 600 行に近いため、別のモジュールに置�
 
 from __future__ import annotations
 
-from src.reporting.discord.discord_notification_specs import BACKTEST_PROMOTION_WATCH_WAITING
+from src.reporting.discord.discord_notification_specs import (
+    BACKTEST_PROMOTION_STALE_FEATURES,
+    BACKTEST_PROMOTION_WATCH_WAITING,
+)
 from src.reporting.discord.discord_text import DISCORD_DATETIME_FORMAT
 from src.reporting.discord.webhook_sender import send_status_fields
 from src.utils.japan_time import format_jst
@@ -43,3 +46,24 @@ def send_backtest_promotion_watch_waiting(result: dict) -> bool:
         "jp の取得か採点が止まっていないかを確かめる。この知らせは見張りごとに1回だけ出す。"
     )
     return send_status_fields(BACKTEST_PROMOTION_WATCH_WAITING, fields, description=description)
+
+
+def send_backtest_promotion_stale_features(result: dict) -> bool:
+    """仮の入れ替えが「特徴量がまだ今のコードで作り直されていない」で続けて飛んだことを送る（#2014）。
+
+    Args:
+        result: run_backtest_promotion() の戻り値。stale_features_nights に続けて飛んだ夜の数
+    """
+    fields = [
+        _field("🕐 時刻", format_jst(fmt=DISCORD_DATETIME_FORMAT), True),
+        _field("🌙 続けて飛んだ夜", f"{result.get('stale_features_nights')} 晩", True),
+        _field("🔖 特徴量の印", f"`{result.get('features_version') or '-'}`", True),
+        _field("🧩 今の特徴量の版", f"`{result.get('features_code_version') or '-'}`", True),
+        _field("📦 予想の版", f"`{result.get('version') or '-'}`", True),
+        _field("📂 特徴量の版の範囲", ", ".join(result.get("features_scope") or [])),
+    ]
+    description = (
+        "朝の日次の道が特徴量の版の印を今の版で書けていない。"
+        "[1/6] のデータ取得が止まっていないか、作れなかった銘柄が線を超えていないかを確かめる。"
+    )
+    return send_status_fields(BACKTEST_PROMOTION_STALE_FEATURES, fields, description=description)

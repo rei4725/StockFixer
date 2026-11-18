@@ -5,6 +5,7 @@ results/accuracy の日ごとの JSON を読み、日・モデル・ホライズ
 基準と rank_corr と predicted_up_rate と予想と実際の大きさと予想の散らばり
 （mean_abs_predicted_ratio・mean_abs_actual_ratio・prediction_std、#2009）の表と
 N 日の移動平均を CSV か Markdown で出す。
+--four-week を付けると、各欄の four_week（4週の窓）とその by_market の表を出す（#2013）。
 読むだけで、DB にもファイルにも書かない（--output を渡したときだけそのファイルに書く）。
 """
 
@@ -12,7 +13,11 @@ import argparse
 import os
 import sys
 
-from src.reporting.accuracy_trend import format_trend_markdown, load_accuracy_trend
+from src.reporting.accuracy_trend import (
+    format_trend_markdown,
+    load_accuracy_trend,
+    load_four_week_trend,
+)
 from src.utils.data_path_utils import get_results_dir
 from src.utils.logger import get_logger
 
@@ -31,6 +36,11 @@ def parse_args():
     parser.add_argument("--model", type=str, default=None, help="このモデルの行だけ出す")
     parser.add_argument("--market", type=str, default=None, help="この市場の行だけ出す（ALL 可）")
     parser.add_argument("--tail", type=int, default=None, help="組ごとの直近 N 日だけ出す")
+    parser.add_argument(
+        "--four-week",
+        action="store_true",
+        help="各欄の four_week（4週の窓）の表を出す（--window は使わない）",
+    )
     parser.add_argument("--format", choices=["csv", "markdown"], default="markdown")
     parser.add_argument("--output", type=str, default=None, help="書き出す先（省略時は標準出力）")
     return parser.parse_args()
@@ -39,7 +49,10 @@ def parse_args():
 def main():
     args = parse_args()
     accuracy_dir = args.dir or os.path.join(get_results_dir(), "accuracy")
-    df = load_accuracy_trend(accuracy_dir, window=args.window)
+    if args.four_week:
+        df = load_four_week_trend(accuracy_dir)
+    else:
+        df = load_accuracy_trend(accuracy_dir, window=args.window)
     if args.model:
         df = df[df["model"] == args.model]
     if args.market:
