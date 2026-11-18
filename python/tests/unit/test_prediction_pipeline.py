@@ -370,7 +370,7 @@ class TestPredictAllUnifiedMultiHorizon(unittest.TestCase):
     @patch("src.prediction.predict_unified.predict_with_unified_model")
     def test_multi_horizon_returns_results(self, mock_predict, mock_preload, mock_symbols):
         """複数ホライズン（[1, 7]）で予測結果リストが返ること"""
-        from src.prediction.prediction_pipeline import predict_all_unified_multi_horizon
+        from src.prediction.multi_horizon import predict_all_unified_multi_horizon
         from src.prediction.types import PredictionResult
 
         mock_symbols.return_value = [("jp", "7203")]
@@ -398,7 +398,7 @@ class TestPredictAllUnifiedMultiHorizon(unittest.TestCase):
     @patch("src.prediction.predict_unified.preload_models")
     def test_empty_symbols_returns_empty(self, mock_preload, mock_symbols):
         """銘柄リストが空の場合は空リストが返ること"""
-        from src.prediction.prediction_pipeline import predict_all_unified_multi_horizon
+        from src.prediction.multi_horizon import predict_all_unified_multi_horizon
 
         mock_symbols.return_value = []
         mock_preload.return_value = None
@@ -411,7 +411,7 @@ class TestPredictAllUnifiedMultiHorizon(unittest.TestCase):
     @patch("src.prediction.predict_unified.predict_with_unified_model")
     def test_single_horizon_works(self, mock_predict, mock_preload, mock_symbols):
         """ホライズンが1つだけでも正常動作すること"""
-        from src.prediction.prediction_pipeline import predict_all_unified_multi_horizon
+        from src.prediction.multi_horizon import predict_all_unified_multi_horizon
         from src.prediction.types import PredictionResult
 
         mock_symbols.return_value = [("us", "AAPL")]
@@ -436,7 +436,7 @@ class TestPredictAllUnifiedMultiHorizon(unittest.TestCase):
     @patch("src.prediction.predict_unified.predict_with_unified_model")
     def test_exception_skips_symbol(self, mock_predict, mock_preload, mock_symbols):
         """予測中に例外が発生した銘柄はスキップされること"""
-        from src.prediction.prediction_pipeline import predict_all_unified_multi_horizon
+        from src.prediction.multi_horizon import predict_all_unified_multi_horizon
 
         mock_symbols.return_value = [("jp", "7203")]
         mock_preload.return_value = None

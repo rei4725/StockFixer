@@ -1,8 +1,8 @@
 """
 統合モデルの多ホライズン予測
 
-prediction_pipeline.py から分けた（ファイルの行数の上限のため）。prediction_pipeline から
-re-export しているので、今までの import はそのまま使える。
+prediction_pipeline.py から分けた（ファイルの行数の上限のため）。この関数の置き場は
+このモジュールだけで、読み手は src.prediction.multi_horizon から import する。
 """
 
 from collections.abc import Callable
