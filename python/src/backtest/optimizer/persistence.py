@@ -238,7 +238,7 @@ def save_optimal_params_json(
     ensure_dir(os.path.dirname(json_path))
 
     # 別のプロセス（手での実行とスケジューラ）が足した銘柄を消さないよう、ロックの内で読み直してから足す
-    with FileLock(f"{json_path}.lock"):
+    with FileLock(optimal_params_loader.optimal_params_lock_path(json_path)):
         if os.path.exists(json_path):
             all_params = _load_params_for_update(json_path)
         else:

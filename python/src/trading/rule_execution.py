@@ -268,6 +268,14 @@ def execute_rule_paper_trades(
                         zero_text = str(risk.zero_reason)
                     logger.info("[rule] %s: 発注株数 0 → スキップ（%s）", symbol, zero_text)
                     skip_reasons[zero_key] += 1
+                    record.add_zero_qty(
+                        str(symbol),
+                        zero_key,
+                        price=price,
+                        lot=lot,
+                        sized_qty=sized_qty,
+                        budget=initial_budget_per_trade,
+                    )
                     skipped += 1
                     continue
                 sector = candidate_sectors[str(symbol)]

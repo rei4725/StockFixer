@@ -8,9 +8,7 @@ from __future__ import annotations
 
 from enum import Enum
 
-from src.utils.scheduler_types import SchedulerJobStatus  # noqa: F401  # re-export
-
-__all__ = ["PipelineStage", "SchedulerJobStatus"]
+__all__ = ["PipelineStage"]
 
 
 class PipelineStage(Enum):

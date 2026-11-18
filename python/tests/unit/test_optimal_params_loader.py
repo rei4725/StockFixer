@@ -106,5 +106,122 @@ class TestGetOptimalParams(unittest.TestCase):
                             get_optimal_params("jp", "7203")
 
 
+class TestReadDuringWeeklySave(unittest.TestCase):
+    """週の最適化の置き換えの一瞬に、読み手が無いと見て落ちないこと（#1996）。"""
+
+    def setUp(self):
+        import tempfile
+
+        self._dir = tempfile.TemporaryDirectory()
+        root = Path(self._dir.name)
+        self.results_dir = root / "results"
+        self.results_dir.mkdir()
+        self.results_path = self.results_dir / "optimal_params.json"
+        self.seed_path = root / "config" / "optimal_params.json"
+        self.seed_path.parent.mkdir()
+        self.seed_path.write_text(json.dumps({"jp_7203": {"threshold": 0.99}}), encoding="utf-8")
+        self.results_path.write_text(json.dumps({"jp_7203": {"threshold": 0.01}}), encoding="utf-8")
+        self._patches = [
+            patch.dict("os.environ", {"STOCKFIXER_RESULTS_DIR": str(self.results_dir)}),
+            patch("src.utils.optimal_params_loader.OPTIMAL_PARAMS_PATH", self.seed_path),
+        ]
+        for p in self._patches:
+            p.start()
+
+    def tearDown(self):
+        for p in reversed(self._patches):
+            p.stop()
+        self._dir.cleanup()
+
+    def test_waits_for_writer_lock_and_returns_new_content(self):
+        """書き手がロックを持って置き換えている最中は、待ってから新しい中身を返す"""
+        import threading
+        import time
+
+        from filelock import FileLock
+
+        from src.utils.optimal_params_loader import get_optimal_params
+
+        results: dict = {}
+        with FileLock(f"{self.results_path}.lock"):
+            # 置き換えの一瞬（古いファイルは無く、新しいファイルはまだ無い）を模す
+            self.results_path.unlink()
+            reader = threading.Thread(
+                target=lambda: results.update(value=get_optimal_params("jp", "7203"))
+            )
+            reader.start()
+            time.sleep(0.3)
+            self.results_path.write_text(
+                json.dumps({"jp_7203": {"threshold": 0.02}}), encoding="utf-8"
+            )
+        reader.join(timeout=10)
+
+        self.assertFalse(reader.is_alive())
+        self.assertEqual(results["value"], {"threshold": 0.02})
+
+    def test_does_not_fall_back_to_seed_when_results_vanish_for_an_instant(self):
+        """一度在った results/ が一瞬無く見えても、config/ の初めの値を返さない"""
+        from src.utils.optimal_params_loader import get_optimal_params
+
+        self.assertEqual(get_optimal_params("jp", "7203"), {"threshold": 0.01})
+
+        real_exists = Path.exists
+        calls = {"n": 0}
+
+        def flaky_exists(path_self, *args, **kwargs):
+            if path_self == self.results_path and calls["n"] == 0:
+                calls["n"] += 1
+                return False
+            return real_exists(path_self, *args, **kwargs)
+
+        with patch.object(Path, "exists", flaky_exists):
+            result = get_optimal_params("jp", "7203")
+
+        self.assertEqual(calls["n"], 1)
+        self.assertEqual(result, {"threshold": 0.01})
+
+    def test_raises_instead_of_seed_when_results_stay_missing(self):
+        """一度在った results/ が待っても無いままなら、初めの値にせず例外を投げる"""
+        from src.utils.optimal_params_loader import (
+            OptimalParamsUnreadableError,
+            get_optimal_params,
+        )
+
+        self.assertEqual(get_optimal_params("jp", "7203"), {"threshold": 0.01})
+        self.results_path.unlink()
+
+        with patch("src.utils.optimal_params_loader._VANISHED_RETRY_WAIT_SEC", 0.0):
+            with self.assertLogs("src.utils.optimal_params_loader", level="ERROR"):
+                with self.assertRaises(OptimalParamsUnreadableError):
+                    get_optimal_params("jp", "7203")
+
+    def test_raises_when_lock_wait_times_out(self):
+        """ロックを待ちきれないときは、例外を投げる（既定の閾値で黙って進めない）"""
+        import threading
+
+        from filelock import FileLock
+
+        from src.utils.optimal_params_loader import (
+            OptimalParamsUnreadableError,
+            get_optimal_params,
+        )
+
+        errors: dict = {}
+
+        def read() -> None:
+            try:
+                get_optimal_params("jp", "7203")
+            except OptimalParamsUnreadableError as e:
+                errors["e"] = e
+
+        with patch("src.utils.optimal_params_loader._LOCK_TIMEOUT_SEC", 0.2):
+            with FileLock(f"{self.results_path}.lock"):
+                reader = threading.Thread(target=read)
+                reader.start()
+                reader.join(timeout=10)
+
+        self.assertIn("e", errors)
+
+
 if __name__ == "__main__":
     unittest.main()
