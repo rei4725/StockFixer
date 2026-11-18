@@ -18,6 +18,10 @@ from src.utils.db._bulk import bulk_insert
 from src.utils.db._connection import _db_connection
 
 _N_SYMBOLS = 50
+# 同じ日・同じ model_name の行を prediction_accuracy に書くほかの影の比べのテストと
+# 鍵が重ならない銘柄にする。並べた pytest で別の worker と主キーを取り合い、
+# 書く順（challenger と production）が逆のテストとデッドロックした（#2022）
+_SYMBOL_BASE = 3000
 _N_DAYS = 20
 _N_CHALLENGER_DAYS = 8
 _N_AFTER_CHANGE = 3
@@ -44,7 +48,7 @@ def _rows(model_name: str, hits: list[bool], time_of_day: str = "224500") -> pd.
             pd.DataFrame(
                 {
                     "market": "jp",
-                    "symbol": [f"{n:04d}" for n in range(_N_SYMBOLS)],
+                    "symbol": [f"{_SYMBOL_BASE + n:04d}" for n in range(_N_SYMBOLS)],
                     "model_name": model_name,
                     "predicted_at": day.strftime(f"%Y%m%d_{time_of_day}"),
                     "horizon": 1,
