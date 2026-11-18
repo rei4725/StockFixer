@@ -159,34 +159,3 @@ def filter_event_signals(
                 break
 
     return result
-
-
-if __name__ == "__main__":
-    # テスト用のダミーデータ
-    dates = pd.to_datetime(pd.date_range(start="2023-01-01", periods=100, freq="D"))
-    dummy_data = pd.DataFrame(
-        {
-            "Open": 100 + (np.random.rand(100) - 0.5).cumsum(),
-            "High": 101 + (np.random.rand(100) - 0.5).cumsum(),
-            "Low": 99 + (np.random.rand(100) - 0.5).cumsum(),
-            "Close": 100 + (np.random.rand(100) - 0.5).cumsum(),
-            "Volume": np.random.randint(1000, 5000, 100),
-            "RSI": np.random.uniform(20, 80, 100),
-        },
-        index=dates,
-    )
-
-    # ダミーの予測結果 (株価変化率を想定)
-    dummy_prediction = pd.Series(np.random.uniform(-0.01, 0.01, 100), index=dates)
-    # ローリングSTD（直近20日）
-    dummy_rolling_std = dummy_prediction.rolling(20).std()
-    generator = SignalGenerator()
-    signals_fixed = generator.generate_signal(dummy_data, dummy_prediction)
-    signals_dynamic = generator.generate_signal(
-        dummy_data, dummy_prediction, rolling_std=dummy_rolling_std
-    )
-
-    print("固定閾値シグナル:")
-    print(signals_fixed.value_counts())
-    print("\n動的閾値シグナル:")
-    print(signals_dynamic.value_counts())

@@ -102,7 +102,7 @@ class TestRunBacktestSingleTestPeriod:
     @patch("src.backtest.pipeline.runner.load_features")
     @patch("src.backtest.pipeline.runner.get_model_manager")
     @patch("src.backtest.backtester.Backtester")
-    @patch("src.trading.signal_generator.SignalGenerator")
+    @patch("src.utils.signal_generator.SignalGenerator")
     def test_metrics_include_test_period(self, mock_sg, mock_bt, mock_get_mm, mock_lf):
         """metrics に検証期間（test_df の最初と最後の日付）が入る"""
         n = 20
