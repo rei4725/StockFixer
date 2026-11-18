@@ -1,6 +1,6 @@
 """日次バックアップジョブ。
 
-daily.py からの責務分離（ファイル行数ガード対策）。daily.py から re-export する。
+daily.py からの責務分離（ファイル行数ガード対策）。
 """
 
 from src.utils.logger import get_logger
