@@ -9,6 +9,8 @@ SignalGenerator / RiskManager から参照する。
 import json
 import threading
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Optional, Set
 
@@ -106,6 +108,33 @@ def optimal_params_read_path() -> Path:
         if _was_seen(results_path) or results_path.exists():
             return results_path
         return OPTIMAL_PARAMS_PATH
+
+
+@contextmanager
+def hold_read_lock(path: Any) -> Iterator[None]:
+    """置き場を決めた後に自分で開く読み手が、書き手と同じロックを持つ間だけ開く（#2007）。
+
+    初めの値（書き手がいない）とフォルダが無い置き場はロックしない。
+    待ちきれないときは optimal_params_read_path と同じく、ロックの外で読ませる。
+    """
+    target = Path(path)
+    if target == OPTIMAL_PARAMS_PATH or not target.parent.is_dir():
+        yield
+        return
+    lock = FileLock(optimal_params_lock_path(target), timeout=_LOCK_TIMEOUT_SEC)
+    try:
+        lock.acquire()
+    except Timeout:
+        logger.error(
+            f"optimal_params.json のロックを {_LOCK_TIMEOUT_SEC} 秒待ちきれないため"
+            f"ロックの外で読みます: {target}"
+        )
+        yield
+        return
+    try:
+        yield
+    finally:
+        lock.release()
 
 
 def get_optimal_params(market: str, symbol: str) -> Optional[dict]:
