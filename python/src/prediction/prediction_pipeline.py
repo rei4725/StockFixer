@@ -20,7 +20,6 @@ import pandas as pd
 
 from config.data import MAX_PREDICTION_WORKERS
 from src.prediction.db import save_prediction_results
-from src.prediction.multi_horizon import predict_all_unified_multi_horizon  # noqa: F401
 from src.prediction.predict_single import predict_single_stock
 from src.prediction.prediction_run_stats import collect_prediction_run_stats
 from src.prediction.types import INDIVIDUAL_MODEL_VERSION, PredictionResult
