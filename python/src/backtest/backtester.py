@@ -5,6 +5,7 @@ import pandas as pd
 from src.backtest.data_port import get_backtest_data_port
 from src.backtest.execution import ExecutionModel, TradingCosts, lot_size_for
 from src.backtest.execution_inputs import build_execution_inputs
+from src.backtest.final_liquidation import liquidate_at_end
 from src.backtest.limit_fill import LimitFillModel
 from src.backtest.mark_to_market import build_equity_curves, mark_to_market
 from src.backtest.metrics import compute_cost_comparison_metrics
@@ -431,57 +432,22 @@ class Backtester:
                 )
             )
 
-        # 最終日に未決済ポジションを強制決済。execution_lag > 0 では最後の足の出来高を
-        # 先読みしないよう、前の足までの平均出来高（mark-to-market と同じ値）を使う（#1347）
-        final_vol = float(exec_avg_vol.iloc[-1]) if len(exec_avg_vol) else 0.0
-        if position > 0:
-            price = df.iloc[-1][close_col]
-            proceeds = self.execution.sell_proceeds(position, price, final_vol)
-            proceeds_gross = position * price
-            cash += proceeds
-            cash_gross += proceeds_gross
-            trade_log.append(
-                {
-                    "date": df.index[-1],
-                    "action": "final_sell",
-                    "price": price,
-                    "qty": position,
-                    "cash": cash,
-                    "cash_gross": cash_gross,
-                }
-            )
-            position = 0
-
-        # 最終日に未決済ショートを強制返済
-        if self.enable_short and short_position > 0:
-            price = df.iloc[-1][close_col]
-            # エントリー売り: short_price * qty * (1 - fee - slip)（エントリー時点の出来高）
-            # カバー買い: price * qty * (1 + fee + slip)
-            net_pnl = self.execution.sell_proceeds(
-                short_position, short_price, short_entry_vol
-            ) - self.execution.buy_cost(short_position, price, final_vol)
-            pnl = (short_price - price) * short_position
-            cash += net_pnl
-            cash_gross += pnl
-            short_trade_log.append(
-                {
-                    "entry_price": short_price,
-                    "exit_price": price,
-                    "qty": short_position,
-                    "pnl": net_pnl,
-                }
-            )
-            trade_log.append(
-                {
-                    "date": df.index[-1],
-                    "action": "final_short_cover",
-                    "price": price,
-                    "qty": short_position,
-                    "cash": cash,
-                    "cash_gross": cash_gross,
-                }
-            )
-            short_position = 0
+        # 最終日に残ったロングとショートを強制決済する（実装: final_liquidation.py）
+        cash, cash_gross = liquidate_at_end(
+            self.execution,
+            df,
+            close_col,
+            exec_avg_vol,
+            self.enable_short,
+            cash,
+            cash_gross,
+            position,
+            short_position,
+            short_price,
+            short_entry_vol,
+            trade_log,
+            short_trade_log,
+        )
 
         result_df = pd.DataFrame(trade_log)
         equity_net, equity_gross = build_equity_curves(equity_records)
