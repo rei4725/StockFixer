@@ -119,6 +119,92 @@ def test_old_json_without_keys_does_not_fail(tmp_path):
         assert pd.isna(row[f"{metric}_ma3"])
 
 
+_MAGNITUDE_METRICS = ("mean_abs_predicted_ratio", "mean_abs_actual_ratio", "prediction_std")
+_LEGACY_COLUMNS = [
+    "date",
+    "model",
+    "horizon",
+    "market",
+    "n_scored",
+    "direction_accuracy",
+    "majority_baseline_accuracy",
+    "hit_rate_minus_majority",
+    "rank_corr",
+    "predicted_up_rate",
+]
+
+
+def _magnitude(section, pred, actual, std):
+    section = dict(section)
+    section["mean_abs_predicted_ratio"] = pred
+    section["mean_abs_actual_ratio"] = actual
+    section["prediction_std"] = std
+    return section
+
+
+def test_magnitude_metrics_after_legacy_columns(accuracy_dir):
+    df = build_accuracy_trend(load_accuracy_reports(str(accuracy_dir)))
+
+    # 既存の5つの物差しと n_scored の列の順は変えず、3つは後ろに足す
+    assert list(df.columns) == _LEGACY_COLUMNS + list(_MAGNITUDE_METRICS)
+    assert tuple(TREND_METRICS[-3:]) == _MAGNITUDE_METRICS
+
+
+def test_magnitude_metrics_values_and_moving_average(tmp_path):
+    # 11-05 は鍵の無い古い日、11-06 と 11-07 は鍵のある日
+    _write(tmp_path, "2026-11-05", {"production": {"1": _section(0.6, 0.5, 0.1, 0.2, 0.5)}})
+    jp = _magnitude(_section(0.6, 0.5, 0.1, 0.2, 0.7), 0.05, 0.02, 0.01)
+    _write(
+        tmp_path,
+        "2026-11-06",
+        {
+            "production": {
+                "1": _magnitude(
+                    _section(0.5, 0.5, 0.0, 0.1, 0.8, {"jp": jp}), 0.0655, 0.0176, 0.0183
+                )
+            },
+            "challenger": {
+                "1": _magnitude(_section(0.4, 0.5, -0.1, 0.0, 0.9), 0.0067, 0.0176, 0.0020)
+            },
+        },
+    )
+    _write(
+        tmp_path,
+        "2026-11-07",
+        {
+            "production": {
+                "1": _magnitude(_section(0.7, 0.6, 0.1, 0.3, 0.6), 0.0645, 0.0180, 0.0170)
+            }
+        },
+    )
+
+    df = load_accuracy_trend(str(tmp_path), window=2)
+    prod = df[(df["model"] == "production") & (df["market"] == "ALL")].reset_index(drop=True)
+
+    assert list(prod["date"]) == ["2026-11-05", "2026-11-06", "2026-11-07"]
+    for metric in _MAGNITUDE_METRICS:
+        assert pd.isna(prod.loc[0, metric])
+        assert pd.isna(prod.loc[0, f"{metric}_ma2"])
+    assert list(prod["mean_abs_predicted_ratio"][1:]) == pytest.approx([0.0655, 0.0645])
+    assert list(prod["mean_abs_actual_ratio"][1:]) == pytest.approx([0.0176, 0.0180])
+    assert list(prod["prediction_std"][1:]) == pytest.approx([0.0183, 0.0170])
+    # 鍵の無い日は移動平均から外す
+    assert list(prod["mean_abs_predicted_ratio_ma2"][1:]) == pytest.approx([0.0655, 0.065])
+    assert list(prod["mean_abs_actual_ratio_ma2"][1:]) == pytest.approx([0.0176, 0.0178])
+    assert list(prod["prediction_std_ma2"][1:]) == pytest.approx([0.0183, 0.01765])
+    # 既存の物差しの値は変わらない
+    assert list(prod["direction_accuracy"]) == pytest.approx([0.6, 0.5, 0.7])
+    assert list(prod["direction_accuracy_ma2"]) == pytest.approx([0.6, 0.55, 0.6])
+
+    jp_row = df[(df["model"] == "production") & (df["market"] == "jp")].iloc[0]
+    assert jp_row["mean_abs_predicted_ratio"] == pytest.approx(0.05)
+    assert jp_row["mean_abs_actual_ratio"] == pytest.approx(0.02)
+    assert jp_row["prediction_std"] == pytest.approx(0.01)
+    chal = df[df["model"] == "challenger"].iloc[0]
+    assert chal["mean_abs_predicted_ratio_ma2"] == pytest.approx(0.0067)
+    assert chal["prediction_std_ma2"] == pytest.approx(0.0020)
+
+
 def test_missing_dir_and_empty(tmp_path):
     df = load_accuracy_trend(str(tmp_path / "none"), window=5)
     assert df.empty
