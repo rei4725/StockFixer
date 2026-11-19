@@ -18,6 +18,7 @@ from filelock import Timeout
 from src.domain.types import SymbolTask
 from src.orchestration.job_errors import NonRetryableJobError
 from src.orchestration.jobs import backtest_promotion_job as job
+from src.orchestration.jobs import backtest_promotion_watch as pw
 from src.orchestration.scheduler_queue import SchedulerQueueManager
 from src.prediction.backtest_promotion import state as st
 from src.prediction.types import BacktestPromotionState, HoldoutEvaluation, WinDecision
@@ -128,9 +129,9 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(job, "train_unified_model", mocks["train"])
     monkeypatch.setattr(job, "load_unified_model", lambda name: f"model:{name}")
     monkeypatch.setattr(job, "evaluate_holdout", mocks["evaluate"])
-    monkeypatch.setattr(job, "load_prediction_accuracy", mocks["accuracy"])
-    monkeypatch.setattr(job, "load_target_symbols", mocks["targets"])
-    monkeypatch.setattr(job, "measure_old_production", mocks["old_production"])
+    monkeypatch.setattr(pw, "load_prediction_accuracy", mocks["accuracy"])
+    monkeypatch.setattr(pw, "load_target_symbols", mocks["targets"])
+    monkeypatch.setattr(pw, "measure_old_production", mocks["old_production"])
     nm = "src.reporting.discord.notifications_model"
     monkeypatch.setattr(f"{nm}.send_backtest_promotion_result", mocks["result"])
     monkeypatch.setattr(f"{nm}.send_backtest_promotion_swap", mocks["swap"])
@@ -930,7 +931,7 @@ def test_watch_rollback_then_state_save_failure_keeps_rollback_in_result(env, mo
     env["accuracy"].return_value = _scored_rows(
         5, [0.01, 0.02, 0.03, 0.04], [0.02, 0.01, -0.01, -0.02]
     )
-    monkeypatch.setattr(job, "save_state", MagicMock(side_effect=OSError("state を書けない")))
+    monkeypatch.setattr(pw, "save_state", MagicMock(side_effect=OSError("state を書けない")))
 
     result = job.run_backtest_promotion()
 
@@ -1015,8 +1016,8 @@ def test_watch_keeps_waiting_when_a_day_has_no_jp_rows(env):
 def test_watch_judges_on_five_days_without_the_skipped_day(env, monkeypatch):
     _swapped_env(env)
     env["targets"].return_value = _targets(4)
-    spy = MagicMock(wraps=job.baseline_metrics)
-    monkeypatch.setattr(job, "baseline_metrics", spy)
+    spy = MagicMock(wraps=pw.baseline_metrics)
+    monkeypatch.setattr(pw, "baseline_metrics", spy)
     rows = _day_rows("20261003", "us", ["AAPL", "MSFT"]) + _day_rows("20261003", "jp", ["0000"])
     for day in ("20261002", "20261004", "20261005", "20261006", "20261007"):
         rows += _day_rows(day, "jp", _JP_FOUR)
