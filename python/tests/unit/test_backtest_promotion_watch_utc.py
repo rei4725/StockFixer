@@ -11,7 +11,7 @@ from unittest.mock import patch
 import pandas as pd
 import pytest
 
-from src.orchestration.jobs import backtest_promotion_job as job
+from src.orchestration.jobs import backtest_promotion_watch as job
 
 _UTC_NOW = datetime(2026, 10, 2, 0, 0, tzinfo=timezone.utc)
 _JST_NOW = datetime(2026, 10, 2, 9, 0, tzinfo=timezone(timedelta(hours=9)))
