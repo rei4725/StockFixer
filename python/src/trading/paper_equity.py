@@ -152,6 +152,7 @@ def build_equity_series(
     initial_balance: float,
     index: pd.DatetimeIndex,
     split_loader: Optional[SplitLoader] = None,
+    deposits: Sequence[Deposit] = (),
 ) -> pd.Series:
     """約定履歴と価格ローダーから日次エクイティ系列を構成する（純粋ロジック）。
 
@@ -161,12 +162,13 @@ def build_equity_series(
         initial_balance: 初期資金
         index: 評価日付の DatetimeIndex（昇順・正規化済み）
         split_loader: (market, symbol) -> 分割の比の Series（無ければ None）。None なら直さない
+        deposits: 入金の (日, 額)。その日から現金に足す（#2036）
 
     Returns:
         index に沿った評価額 Series
     """
     equity, _, _ = _build_equity_with_fallbacks(
-        orders, price_loader, initial_balance, index, split_loader
+        orders, price_loader, initial_balance, index, split_loader, deposits
     )
     return equity
 
@@ -177,11 +179,12 @@ def _build_equity_with_fallbacks(
     initial_balance: float,
     index: pd.DatetimeIndex,
     split_loader: Optional[SplitLoader] = None,
+    deposits: Sequence[Deposit] = (),
 ) -> tuple[pd.Series, dict[tuple[str, str], pd.DatetimeIndex], list[tuple[str, str]]]:
     """評価額 Series と、約定の値段で評価した (market, symbol) ごとの日付と、
     最後の日に保有しているのにその日以降の終値が無い (market, symbol) を返す。"""
     equity, _, fallbacks, missing = _build_equity_parts(
-        orders, price_loader, initial_balance, index, split_loader
+        orders, price_loader, initial_balance, index, split_loader, deposits
     )
     return equity, fallbacks, missing
 
@@ -331,6 +334,7 @@ def get_paper_equity_curve(days: int = 180) -> pd.Series:
         float(PAPER_INITIAL_BALANCE),
         index,
         split_loader=_default_split_loader,
+        deposits=load_cash_events(),
     )
 
 
