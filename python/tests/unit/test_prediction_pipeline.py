@@ -795,6 +795,78 @@ class TestRunAccuracyCheckAdditional(unittest.TestCase):
         self.assertIn("0件 採点", done[0])
         self.assertIn("分割の比が合わない=1", done[0])
 
+    @patch("src.prediction.db.load_drift_summary")
+    @patch("src.prediction.db.save_prediction_accuracy")
+    @patch("src.utils.db.load_raw_ohlcv")
+    @patch("src.prediction.db.load_prediction_results")
+    def test_pending_split_step_marks_row_out_of_aggregation(
+        self, mock_load, mock_ohlcv, mock_save, mock_drift
+    ):
+        """記録待ちの分割の段差をまたぐ行は、実績を空にして集計から外す（#2035 の jp/6861）"""
+        import pandas as pd
+
+        from src.prediction.prediction_pipeline import run_accuracy_check
+
+        mock_load.return_value = pd.DataFrame(
+            {
+                "market": ["jp"],
+                "symbol": ["6861"],
+                "predicted_at": ["20261117_225223"],
+                "avg_pred_price": [74128.3],
+                "current_price": [72510.0],
+            }
+        )
+        # 1:5 の分割の記録が届く前で、raw の足は分割前のまま。翌日の足だけ分割後の値段
+        mock_ohlcv.return_value = pd.DataFrame(
+            {"Close": [72510.0, 14722.0]},
+            index=pd.DatetimeIndex(pd.to_datetime(["2026-11-17", "2026-11-18"]), name="Date"),
+        )
+        mock_drift.return_value = pd.DataFrame()
+
+        with self.assertLogs("src.prediction.prediction_pipeline", level="INFO") as cm:
+            run_accuracy_check(horizon=1)
+
+        row = mock_save.call_args[0][0][0]
+        self.assertIsNone(row["actual_ratio"])
+        self.assertIsNone(row["direction_match"])
+        self.assertIsNone(row["actual_price"])
+        done = [m for m in cm.output if "精度チェック完了" in m]
+        self.assertIn("記録待ちの分割の段差=1", done[0])
+
+    @patch("src.prediction.db.load_drift_summary")
+    @patch("src.prediction.db.save_prediction_accuracy")
+    @patch("src.utils.db.load_raw_ohlcv")
+    @patch("src.prediction.db.load_prediction_results")
+    def test_rescores_with_adjusted_bars_after_split_record_arrives(
+        self, mock_load, mock_ohlcv, mock_save, mock_drift
+    ):
+        """分割の記録が届き raw の足が調整し直された後は、同じ行を調整した足で採点し直す"""
+        import pandas as pd
+
+        from src.prediction.prediction_pipeline import run_accuracy_check
+
+        mock_load.return_value = pd.DataFrame(
+            {
+                "market": ["jp"],
+                "symbol": ["6861"],
+                "predicted_at": ["20261117_225223"],
+                "avg_pred_price": [74128.3],
+                "current_price": [72510.0],
+            }
+        )
+        mock_ohlcv.return_value = pd.DataFrame(
+            {"Close": [14502.0, 14722.0]},
+            index=pd.DatetimeIndex(pd.to_datetime(["2026-11-17", "2026-11-18"]), name="Date"),
+        )
+        mock_drift.return_value = pd.DataFrame()
+
+        run_accuracy_check(horizon=1)
+
+        row = mock_save.call_args[0][0][0]
+        self.assertAlmostEqual(row["actual_ratio"], 14722.0 / 14502.0 - 1.0)
+        self.assertFalse(row["direction_match"] is None)
+        self.assertEqual(row["actual_price"], 14722.0)
+
     def _score_one(self, market, predicted_at, mock_load, mock_ohlcv, mock_save, mock_drift):
         """10/20〜10/23 の足で1行を採点し、保存した行を返す"""
         import pandas as pd
