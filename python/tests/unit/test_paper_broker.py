@@ -813,11 +813,24 @@ class TestPaperBrokerGetPnlSummary(unittest.TestCase):
         self.assertIsNone(result["started_at"])
 
     def test_get_pnl_summary_contains_balance(self):
-        result = self.broker.get_pnl_summary()
+        # 入金の無い口座では元手のまま（#2036）。テストの DB は移行 0010 の入金の行を持つため差し替える
+        with patch("src.trading.brokers.paper.paper_broker.load_cash_events", return_value=[]):
+            result = self.broker.get_pnl_summary()
         self.assertAlmostEqual(result["balance"], 1000000.0)
         from config.settings import PAPER_INITIAL_BALANCE
 
         self.assertAlmostEqual(result["initial_balance"], PAPER_INITIAL_BALANCE)
+
+    def test_get_pnl_summary_initial_balance_includes_deposit(self):
+        """入金の行が1つある口座では元手と入金の和（#2036）"""
+        from config.settings import PAPER_INITIAL_BALANCE
+
+        deposits = [(pd.Timestamp("2026-11-16"), 9_000_000.0)]
+        with patch(
+            "src.trading.brokers.paper.paper_broker.load_cash_events", return_value=deposits
+        ):
+            result = self.broker.get_pnl_summary()
+        self.assertAlmostEqual(result["initial_balance"], PAPER_INITIAL_BALANCE + 9_000_000.0)
 
     def test_get_pnl_summary_required_keys(self):
         result = self.broker.get_pnl_summary()
