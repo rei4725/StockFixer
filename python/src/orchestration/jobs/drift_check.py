@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 
 from src.orchestration.jobs.alert_streaks import record_drift_warn_streak
 from src.orchestration.jobs.common import _drift_check_lock, skip_if_running
+from src.orchestration.jobs.drift_record import DriftCheckRecord, write_drift_check_record
 from src.reporting.drift_thresholds import load_drift_thresholds, select_drifted_symbols
 from src.reporting.kpi import drop_stale_symbols
 from src.utils.logger import get_logger
@@ -131,9 +132,20 @@ def run_daily_drift_check():
         warn,
     )
     record_drift_warn_streak(warn, share, len(triggered), selection.n_evaluated)
+    # その日の判定を results/drift_check に1日1件残す（#2050）。判定・再学習には効かない
+    day_record = DriftCheckRecord(
+        n_evaluated=int(selection.n_evaluated),
+        n_triggered=len(triggered),
+        triggered_share=float(share),
+        warn_share=float(thresholds.warn_share),
+        warn=bool(warn),
+        mae_threshold=float(mae_threshold),
+        hit_rate_threshold=float(hit_rate_threshold),
+    )
 
     if triggered.empty:
         logger.info("ドリフトチェック: 閾値超過銘柄なし")
+        write_drift_check_record(day_record)
         return
 
     columns = ["market", "symbol", "mean_abs_error", "direction_accuracy"]
@@ -202,6 +214,10 @@ def run_daily_drift_check():
     logger.info(
         "=== 日次ドリフトチェック完了: 再学習=%s/%s 件 ===", success_count, len(triggered_list)
     )
+    day_record.fresh_skipped = len(fresh_skipped)
+    day_record.retrain_targets = len(triggered_list)
+    day_record.retrain_success = success_count
+    write_drift_check_record(day_record)
 
     # 特徴量除外提案通知（再学習成功銘柄の最新 Permutation Importance を通知）
     if retrained_symbols:
