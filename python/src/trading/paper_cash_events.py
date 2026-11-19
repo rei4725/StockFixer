@@ -97,6 +97,36 @@ def add_deposits_to_cash(
         cash_events[key] = cash_events.get(key, 0.0) + float(amount)
 
 
+def time_weighted_equity(equity: pd.Series, deposits: Sequence[Deposit]) -> pd.Series:
+    """評価額の流れから入金の段差を外し、日々の騰落だけをつないだ系列を返す（#2039）。
+
+    入金の日（評価額の流れと同じく直近の評価日に丸める）の騰落を
+    (その日の評価額 − 入金) ÷ 前の日の評価額 とし、その日より後の値を同じ比で縮める
+    （時間で重みを付けた指数）。最初の日より前の入金は最初の値に入っているため外さない。
+    入金が無ければ equity をそのまま返す。equity 自身は書き換えない。
+    """
+    if equity.empty or not deposits:
+        return equity
+    index = pd.DatetimeIndex(equity.index)
+    by_day: dict[pd.Timestamp, float] = {}
+    add_deposits_to_cash(by_day, deposits, index)
+    scale = pd.Series(1.0, index=equity.index)
+    for day, amount in sorted(by_day.items()):
+        if day == index[0] or not amount:
+            continue
+        value = float(equity.loc[day])
+        if not (value > 0 and value - amount > 0):
+            logger.warning(
+                "入金の日の評価額が入金より大きくないため段差を外さない: %s (%s, %s)",
+                day.date(),
+                value,
+                amount,
+            )
+            continue
+        scale[index >= day] *= (value - amount) / value
+    return equity * scale
+
+
 def _factor_for(
     factors: dict[str, Callable[[pd.Timestamp], float]],
     key: str,
