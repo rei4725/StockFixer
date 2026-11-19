@@ -113,6 +113,7 @@ def steps_near_split_records(
     取り直した足は yfinance が調整し直した1本の系列なので、残る段差は調整し損ねた分割か
     本当の値動きかのどちらか。近い日（SPLIT_RECORD_NEAR_WEEKDAYS 営業日以内）に分割の
     記録があるか、比が記録された分割の比に近い段差だけを分割の残りとする。
+    記録が無くても、最新の足に近く比が単純な分割の比に近い段差は記録待ちの分割とする（#2031）。
     Stock Splits の列が無ければ見分けられないため、段差をすべて返す（今までどおり外す）。
     """
     if not steps:
@@ -123,6 +124,7 @@ def steps_near_split_records(
     splits = splits[splits > 0]
     split_days = _day_index(splits.index).values.astype("datetime64[D]")
     split_ratios = [float(v) for v in splits]
+    latest_day = _day_index(full_data.index).max().to_datetime64().astype("datetime64[D]")
     kept = []
     for day, ratio in steps:
         step_day = np.datetime64(day, "D")
@@ -135,9 +137,26 @@ def steps_near_split_records(
             min(abs(ratio * s - 1.0), abs(ratio / s - 1.0)) <= SPLIT_RATIO_TOLERANCE
             for s in split_ratios
         )
-        if near_day or near_ratio:
+        if near_day or near_ratio or _pending_split(step_day, ratio, latest_day):
             kept.append((day, ratio))
     return kept
+
+
+def _pending_split(step_day: np.datetime64, ratio: float, latest_day: np.datetime64) -> bool:
+    """
+    記録がまだ無い分割・併合とみなす段差か（#2031）。
+
+    yfinance は分割の記録と過去の足の調整を数日遅れて入れることがある。比が単純な分割・併合の比
+    （1/n か n、n=2〜10）に SPLIT_RATIO_TOLERANCE の内で近く、段差の日が最新の足から
+    SPLIT_RECORD_NEAR_WEEKDAYS 営業日以内なら、記録待ちの分割とする。それを過ぎても記録が
+    来なければ本当の値動きとする。
+    """
+    if abs(int(np.busday_count(step_day, latest_day))) > SPLIT_RECORD_NEAR_WEEKDAYS:
+        return False
+    return any(
+        min(abs(ratio * n - 1.0), abs(ratio / n - 1.0)) <= SPLIT_RATIO_TOLERANCE
+        for n in range(2, 11)
+    )
 
 
 def split_residual_steps(
