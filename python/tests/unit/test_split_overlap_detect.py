@@ -219,6 +219,30 @@ class TestStepsNearSplitRecords(unittest.TestCase):
         steps = [("2023-01-31", 0.469)]
         self.assertEqual(steps_near_split_records(steps, _make_ohlcv()), steps)
 
+    def test_recent_simple_ratio_step_without_record_is_pending_split(self):
+        """記録が無くても、比が 1/5 に近く最新の足から 5 営業日以内の段差は記録待ちの分割として残す（#2031）"""
+        bars = _with_actions(_make_ohlcv())  # 最新の足は 2023-03-07
+        steps = [("2023-03-06", 0.203)]
+        self.assertEqual(steps_near_split_records(steps, bars), steps)
+
+    def test_recent_simple_reverse_ratio_step_without_record_is_pending_split(self):
+        """併合（比 n）に近い段差も、最新の足から 5 営業日以内なら記録待ちとして残す（#2031）"""
+        bars = _with_actions(_make_ohlcv())
+        steps = [("2023-03-01", 1.98)]
+        self.assertEqual(steps_near_split_records(steps, bars), steps)
+
+    def test_old_simple_ratio_step_without_record_drops_step(self):
+        """比が 1/5 に近くても、最新の足から 5 営業日を過ぎて記録が来ない段差は本当の値動きとする（#2031）"""
+        bars = _with_actions(_make_ohlcv())
+        steps = [("2023-02-20", 0.203)]
+        self.assertEqual(steps_near_split_records(steps, bars), [])
+
+    def test_recent_step_far_from_simple_ratio_drops_step(self):
+        """最新の足に近くても、比が単純な分割の比から離れた段差（0.43）は本当の値動きとする（#2031）"""
+        bars = _with_actions(_make_ohlcv())
+        steps = [("2023-03-06", 0.43)]
+        self.assertEqual(steps_near_split_records(steps, bars), [])
+
 
 class TestStepQualityLogInBatch(unittest.TestCase):
     def test_skipped_symbol_with_step_is_recorded_in_quality_log(self):
