@@ -19,6 +19,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from config.data import MAX_PREDICTION_WORKERS
+from src.domain.split_steps import pending_split_steps
 from src.prediction.db import save_prediction_results
 from src.prediction.predict_single import predict_single_stock
 from src.prediction.prediction_run_stats import collect_prediction_run_stats
@@ -428,6 +429,7 @@ def run_accuracy_check(
         "足なし": 0,
         "まだデータなし": 0,
         "分割の比が合わない": 0,
+        "記録待ちの分割の段差": 0,
     }
     # まだデータなしで飛ばした行の値を数件だけ残し、日付の比べが合わない原因の切り分けに使う
     no_future_samples: list[str] = []
@@ -496,7 +498,33 @@ def run_accuracy_check(
                 current_price = current_price * scale
                 predicted_price = predicted_price * scale
 
-        actual_price = float(ohlcv.loc[future_dates[horizon - 1], "Close"])
+        actual_day = future_dates[horizon - 1]
+        # 基準の足から実績の足までに記録待ちの分割の段差があれば、実績を空にして保存し直し、
+        # 前の回に保存した偽の外れを集計から外す（集計は direction_match が NULL の行を数えない）。
+        # 記録が届き raw の足が調整し直されると、段差が消えて上の分割の直しで採点し直される（#2035）
+        if len(base_dates) > 0 and pending_split_steps(
+            ohlcv.loc[base_dates[-1] : actual_day], ohlcv.index[-1]
+        ):
+            skipped["記録待ちの分割の段差"] += 1
+            new_rows.append(
+                {
+                    "market": market,
+                    "symbol": symbol,
+                    "model_name": model_name,
+                    "predicted_at": predicted_at_str,
+                    "horizon": horizon,
+                    "predicted_price": predicted_price,
+                    "actual_price": None,
+                    "predicted_ratio": (
+                        (predicted_price - current_price) / current_price if current_price else None
+                    ),
+                    "actual_ratio": None,
+                    "direction_match": None,
+                }
+            )
+            continue
+
+        actual_price = float(ohlcv.loc[actual_day, "Close"])
         predicted_ratio = (
             (predicted_price - current_price) / current_price if current_price else None
         )
