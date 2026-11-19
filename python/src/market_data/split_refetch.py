@@ -22,16 +22,17 @@ from src.domain.split_steps import (  # noqa: F401  段差の判定は domain �
     PRICE_STEP_MIN_RATIO,
     SPLIT_RATIO_TOLERANCE,
     SPLIT_RECORD_NEAR_WEEKDAYS,
-)
-from src.domain.split_steps import day_index as _day_index
-from src.domain.split_steps import (  # noqa: F401  段差の判定は domain から再輸出する
+    day_index,
     find_price_steps,
+    is_pending_split,
 )
-from src.domain.split_steps import is_pending_split as _pending_split
 from src.market_data.base import DataSourceBase
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+_day_index = day_index
+_pending_split = is_pending_split
 
 # 差分を取るときに重ねる DB の直近の足の本数
 OVERLAP_BARS = 5
