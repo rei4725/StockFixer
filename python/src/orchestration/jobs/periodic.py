@@ -3,7 +3,7 @@
 月次 KPI レポートと戦略ファクトリー夜間バッチ。
 """
 
-from typing import Optional
+from typing import Optional, Sequence
 
 import pandas as pd
 
@@ -25,19 +25,22 @@ def _build_monthly_equity_series(
     paper_equity: pd.Series,
     allocation_equity: pd.Series,
     benchmark: Optional[pd.Series],
+    deposits: Sequence[tuple[pd.Timestamp, float]] = (),
 ) -> dict[str, pd.Series]:
     """月次損益曲線チャート用の系列 dict を組み立てる。
 
     各系列は運用開始日が異なるため、正規化は開始来推移として扱い、ラベルに
     開始日を明記して読者が誤って絶対水準を比較しないようにする。
     データ点数が少ない系列（運用開始直後）はノイズとして除外する。
+    Paper Trading の線は入金の段差を外した時間加重の系列にする（#2039）。
 
     前提: paper_equity は呼び出し元（run_monthly_report_job）で
     len(equity.dropna()) >= _MIN_EQUITY_POINTS を確認済みであること。
     """
-    series: dict[str, pd.Series] = {
-        _label_with_start_date("Paper Trading", paper_equity): paper_equity
-    }
+    from src.trading.paper_cash_events import time_weighted_equity
+
+    paper_line = time_weighted_equity(paper_equity, deposits)
+    series: dict[str, pd.Series] = {_label_with_start_date("Paper Trading", paper_line): paper_line}
     if allocation_equity is not None and len(allocation_equity.dropna()) >= _MIN_EQUITY_POINTS:
         series[_label_with_start_date("Allocation Bot", allocation_equity)] = allocation_equity
     if benchmark is not None and len(benchmark.dropna()) >= _MIN_EQUITY_POINTS:
@@ -104,6 +107,7 @@ def run_monthly_report_job() -> None:
         from src.reporting.discord.discord_utils import send_webhook_file
         from src.reporting.equity_chart import build_equity_chart
         from src.trading.allocation_strategy.equity import get_allocation_equity_curve
+        from src.trading.paper_cash_events import load_cash_events
         from src.trading.paper_equity import get_paper_equity_curve
         from src.utils.data_path_utils import get_results_dir
 
@@ -132,7 +136,10 @@ def run_monthly_report_job() -> None:
             chart_dir = os.path.join(get_results_dir(), "monthly")
             os.makedirs(chart_dir, exist_ok=True)
             chart_path = os.path.join(chart_dir, f"{summary.target_month}_equity.png")
-            series = _build_monthly_equity_series(equity, allocation_equity, benchmark)
+            # 評価額は入金を含むため、図の線は入金の段差を外す（#2039）
+            series = _build_monthly_equity_series(
+                equity, allocation_equity, benchmark, deposits=load_cash_events()
+            )
             build_equity_chart(
                 series, chart_path, title="Paper Trading vs Allocation Bot vs S&P 500"
             )

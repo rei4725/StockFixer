@@ -40,6 +40,60 @@ class TestBuildMonthlyEquitySeries(unittest.TestCase):
         )
         self.assertIn("S&P 500 (since 2026-01-05)", result)
 
+    @staticmethod
+    def _paper(result):
+        return next(v for k, v in result.items() if k.startswith("Paper Trading"))
+
+    def test_paper_line_does_not_jump_on_deposit_day(self):
+        """入金の日に 900 万円の段差を作らず、値動きの分だけ動く（#2039）"""
+        idx = pd.bdate_range("2026-11-12", periods=6)
+        # 11/17 に 900 万円の入金。入金の日は値動きで +1%、その後は横ばい
+        equity = pd.Series(
+            [1_000_000.0, 1_000_000.0, 1_000_000.0, 10_010_000.0, 10_010_000.0, 10_010_000.0],
+            index=idx,
+        )
+        deposits = [(pd.Timestamp("2026-11-17"), 9_000_000.0)]
+        paper = self._paper(
+            _build_monthly_equity_series(equity, pd.Series(dtype=float), None, deposits=deposits)
+        )
+        self.assertAlmostEqual(paper.iloc[2], 1_000_000.0)
+        self.assertAlmostEqual(paper.iloc[3] / paper.iloc[2], 1.01)
+        self.assertAlmostEqual(paper.iloc[-1], 1_010_000.0)
+        # 評価額そのものは書き換えない
+        self.assertEqual(equity.iloc[-1], 10_010_000.0)
+
+    def test_deposit_on_holiday_is_taken_on_next_business_day(self):
+        """入金の日が休みなら、評価額の流れと同じく次の評価日に丸める"""
+        idx = pd.bdate_range("2026-11-12", periods=5)
+        equity = pd.Series(
+            [1_000_000.0, 1_000_000.0, 10_000_000.0, 10_000_000.0, 10_000_000.0], index=idx
+        )
+        deposits = [(pd.Timestamp("2026-11-15"), 9_000_000.0)]  # 日曜
+        paper = self._paper(
+            _build_monthly_equity_series(equity, pd.Series(dtype=float), None, deposits=deposits)
+        )
+        self.assertTrue((paper == 1_000_000.0).all())
+
+    def test_deposit_before_window_is_not_removed(self):
+        """窓より前の入金は最初の値に入っているため、段差にならず割り引かない"""
+        equity = _series(value=10_000_000.0)
+        deposits = [(pd.Timestamp("2025-12-01"), 9_000_000.0)]
+        paper = self._paper(
+            _build_monthly_equity_series(equity, pd.Series(dtype=float), None, deposits=deposits)
+        )
+        pd.testing.assert_series_equal(paper, equity)
+
+    def test_paper_line_unchanged_without_deposits(self):
+        equity = pd.Series(
+            [100.0, 101.0, 99.5, 102.0, 103.0], index=pd.bdate_range("2026-01-05", periods=5)
+        )
+        paper = self._paper(_build_monthly_equity_series(equity, pd.Series(dtype=float), None))
+        pd.testing.assert_series_equal(paper, equity)
+        paper = self._paper(
+            _build_monthly_equity_series(equity, pd.Series(dtype=float), None, deposits=[])
+        )
+        pd.testing.assert_series_equal(paper, equity)
+
 
 class TestRunRegimeLeverageWeeklyJob(unittest.TestCase):
     @patch("src.trading.regime_leverage_strategy.service.run_regime_leverage_weekly_check")
