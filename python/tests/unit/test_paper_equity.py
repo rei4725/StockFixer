@@ -312,6 +312,56 @@ class TestGetPaperEquityCurve(unittest.TestCase):
         result = get_paper_equity_curve()
         self.assertTrue(result.empty)
 
+    @patch("src.trading.paper_equity.build_equity_series")
+    @patch("src.trading.paper_equity.load_cash_events")
+    @patch("src.trading.paper_equity._load_filled_orders")
+    def test_passes_deposits_to_equity_series(self, mock_load, mock_cash, mock_build):
+        """紙の口座の入金を評価額の流れに渡す（#2036）"""
+        mock_load.return_value = _orders(
+            [("jp", "7203", 1, 100, 100.0, pd.Timestamp("2026-11-02"))]
+        )
+        deposits = [(pd.Timestamp("2026-11-16"), 9_000_000.0)]
+        mock_cash.return_value = deposits
+        mock_build.return_value = pd.Series(dtype=float)
+
+        get_paper_equity_curve()
+
+        self.assertEqual(mock_build.call_args.kwargs["deposits"], deposits)
+
+
+class TestBuildEquitySeriesDeposits(unittest.TestCase):
+    """build_equity_series に入金を渡したときのテスト（#2036）"""
+
+    def test_deposit_raises_equity_from_its_day_and_keeps_cash_non_negative(self):
+        idx = _index()
+        deposit = 9_000_000.0
+        # 入金の次の日に、元手 100 万円を超える 200 万円を買う
+        orders = _orders([("jp", "7203", 1, 20_000, 100.0, idx[4])])
+        deposits = [(idx[3], deposit)]
+
+        with_deposit = build_equity_series(
+            orders, _flat_price_loader(100.0), _INITIAL, idx, deposits=deposits
+        )
+        without = build_equity_series(orders, _flat_price_loader(100.0), _INITIAL, idx)
+
+        # 入金の前は同じ、入金の日から入金の分だけ高い
+        for i in range(3):
+            self.assertAlmostEqual(with_deposit.iloc[i], without.iloc[i])
+        for i in range(3, len(idx)):
+            self.assertAlmostEqual(with_deposit.iloc[i] - without.iloc[i], deposit)
+        # 買いの後の現金 = 評価額 − 保有の時価（20,000 株 × 100 円）が負にならない
+        holdings_value = 20_000 * 100.0
+        for i in range(4, len(idx)):
+            self.assertGreaterEqual(with_deposit.iloc[i] - holdings_value, 0.0)
+        self.assertAlmostEqual(with_deposit.iloc[-1] - holdings_value, 8_000_000.0)
+
+    def test_no_deposits_keeps_current_values(self):
+        idx = _index()
+        orders = _orders([("jp", "7203", 1, 100, 100.0, idx[1])])
+        a = build_equity_series(orders, _flat_price_loader(100.0), _INITIAL, idx)
+        b = build_equity_series(orders, _flat_price_loader(100.0), _INITIAL, idx, deposits=())
+        pd.testing.assert_series_equal(a, b)
+
 
 class TestBuildEquityChart(unittest.TestCase):
     """build_equity_chart のテスト"""

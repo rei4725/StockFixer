@@ -14,6 +14,8 @@ import uuid
 from datetime import date
 from typing import Any
 
+import pandas as pd
+
 from config.settings import PAPER_INITIAL_BALANCE
 from src.domain.ports import MarketDataPort, TradeDiffSink
 from src.domain.types import TradeDiffRecord
@@ -32,6 +34,7 @@ from src.trading.brokers.paper.short_registration import (
 from src.trading.brokers.paper.short_registration import (
     undo_short_registration as _undo_short_registration,
 )
+from src.trading.paper_cash_events import deposits_between, load_cash_events
 from src.trading.position_valuation import (
     long_positions_unrealized_pnl,
     short_positions_unrealized_pnl,
@@ -454,7 +457,7 @@ class PaperBroker(BrokerBase):
                 "unrealized_pnl": float,    # 含み損益合計
                 "total_pnl": float,         # 通算損益
                 "balance": float,           # 現在残高
-                "initial_balance": float,   # 初期残高
+                "initial_balance": float,   # 元手と入金の和
                 "trade_count": int,         # 約定済み売り取引数
                 "started_at": str | None,   # 最初の約定日時
             }
@@ -483,12 +486,14 @@ class PaperBroker(BrokerBase):
         unrealized_pnl += short_positions_unrealized_pnl(self.get_short_positions(), logger)
 
         balance = self.get_balance()
+        # 元手に入金を足す。入金は利益に数えず、通算の率の分母に入れる（#2036）
+        deposited = deposits_between(load_cash_events(), None, pd.Timestamp.max)
         return {
             "realized_pnl": realized_pnl,
             "unrealized_pnl": unrealized_pnl,
             "total_pnl": realized_pnl + unrealized_pnl,
             "balance": balance,
-            "initial_balance": _INITIAL_BALANCE,
+            "initial_balance": float(_INITIAL_BALANCE) + deposited,
             "trade_count": trade_count,
             "started_at": started_at,
         }
