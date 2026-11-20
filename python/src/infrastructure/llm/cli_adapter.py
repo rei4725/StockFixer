@@ -33,6 +33,49 @@ def _strip_fences(text: str) -> str:
     return _FENCE_RE.sub("", text).strip()
 
 
+def run_cli_stream(
+    prompt: str,
+    *,
+    system: str,
+    model: str,
+    allowed_tools: str,
+    binary: str = "claude",
+    timeout_seconds: int = 300,
+) -> list[str]:
+    """`claude -p` を stream-json で起動し、出力の行を返す（朝の目線、#1956）。
+
+    道具は allowed_tools に書いたものだけ許す。ほかの呼び出し（ClaudeCliAdapter）の
+    道具の扱いは変えない。
+    """
+    cmd = [
+        binary,
+        "-p",
+        prompt,
+        "--append-system-prompt",
+        system,
+        "--model",
+        model,
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--tools",
+        allowed_tools,
+        "--allowedTools",
+        allowed_tools,
+        "--setting-sources",
+        "",
+    ]
+    proc = subprocess.run(  # nosec B603 B607
+        cmd,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=timeout_seconds,
+        check=True,
+    )
+    return proc.stdout.splitlines()
+
+
 class ClaudeCliAdapter(TextReviewPort):
     """`claude -p` を subprocess 起動する TextReviewPort 実装。"""
 
