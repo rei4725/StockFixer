@@ -6,6 +6,8 @@
 
 - 列は記録の欄に、challenger と production の的中率の差（hit_rate_diff）と、
   challenger_wins が false の週・challenger_constant が true の週の続いた数を足す
+- 右端に、影の比べとゲートの成否・今週の challenger の数・shadow_error の頭・
+  勝ちの決め方（daily_rank_corr と win_rule）の列を足す（#2061）
 - 欄の無い古い週はその列を空にする。続いた数は、その欄の値が条件に合う週だけを数え、
   合わない週と欄の無い週で 0 に戻る
 - 読めないファイル・形の違う JSON は警告を出して飛ばす
@@ -60,6 +62,30 @@ SHADOW_COLUMNS: list[str] = [
     "retry_count",
 ]
 
+# 影の比べとゲートの成否・今週の challenger の数・失敗の文の頭・勝ちの決め方（#2061）。
+# 今の列の並びを変えないよう、右端に足す
+STATUS_FLAG_COLUMNS: tuple[str, ...] = (
+    "shadow_evaluated",
+    "shadow_failed",
+    "gate_evaluated",
+    "gate_failed",
+)
+FRESH_COUNT = "fresh_challenger_count"
+SHADOW_ERROR = "shadow_error"
+SHADOW_ERROR_HEAD = 120
+RANK_NUMBER_COLUMNS: tuple[str, ...] = (
+    "production_daily_rank_corr",
+    "challenger_daily_rank_corr",
+)
+WIN_RULE = "win_rule"
+SHADOW_COLUMNS += [
+    *STATUS_FLAG_COLUMNS,
+    FRESH_COUNT,
+    SHADOW_ERROR,
+    *RANK_NUMBER_COLUMNS,
+    WIN_RULE,
+]
+
 
 def load_shadow_records(shadow_dir: str) -> list[dict]:
     """shadow_dir の YYYY-Www.json を週の順に読む（読めないものは飛ばす）。"""
@@ -105,6 +131,15 @@ def _row(record: dict) -> dict:
     production = row["production_hit_rate"]
     challenger = row["challenger_hit_rate"]
     row[DIFF_COLUMN] = None if production is None or challenger is None else challenger - production
+    for column in STATUS_FLAG_COLUMNS:
+        row[column] = _flag(record.get(column))
+    fresh = record.get("fresh_challengers")
+    row[FRESH_COUNT] = float(len(fresh)) if isinstance(fresh, list) else None
+    error = _text(record.get(SHADOW_ERROR))
+    row[SHADOW_ERROR] = None if error is None else error[:SHADOW_ERROR_HEAD]
+    for column in RANK_NUMBER_COLUMNS:
+        row[column] = _number(record.get(column))
+    row[WIN_RULE] = _text(record.get(WIN_RULE))
     return row
 
 
@@ -127,12 +162,16 @@ def build_shadow_trend(records: list[dict]) -> pd.DataFrame:
         row[NOT_WIN_STREAK] = not_win
         row[CONSTANT_STREAK] = constant
     df = pd.DataFrame(rows, columns=SHADOW_COLUMNS)
-    for column in list(NUMBER_COLUMNS) + [DIFF_COLUMN]:
+    for column in [*NUMBER_COLUMNS, DIFF_COLUMN, FRESH_COUNT, *RANK_NUMBER_COLUMNS]:
         df[column] = pd.to_numeric(df[column], errors="coerce").astype(float)
     for column in (NOT_WIN_STREAK, CONSTANT_STREAK):
         df[column] = df[column].astype(int)
     for column in list(FLAG_COLUMNS) + list(TEXT_COLUMNS):
         df[column] = df[column].astype(object)
+    # 文字の列は pandas が空を NaN にするため、足した列は空を None にそろえる
+    for column in [*STATUS_FLAG_COLUMNS, SHADOW_ERROR, WIN_RULE]:
+        values = df[column].astype(object)
+        df[column] = values.where(values.notna(), None)
     return df.reset_index(drop=True)
 
 
