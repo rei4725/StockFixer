@@ -204,6 +204,58 @@ def test_prediction_date_is_prev_bar() -> None:
     assert set(out["horizon_of_claim"]) == {1}
 
 
+def _px_nov() -> pd.DataFrame:
+    """A の足: 2026-11-18・19・20（金）・23（月）。"""
+    days = [date(2026, 11, 18), date(2026, 11, 19), date(2026, 11, 20), date(2026, 11, 23)]
+    return pd.DataFrame({"symbol": ["A"] * 4, "date": days, "px": [100.0] * 4})
+
+
+def _h1_at(predicted_at: list[str]) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "symbol": ["A"] * len(predicted_at),
+            "model_name": ["production"] * len(predicted_at),
+            "predicted_at": predicted_at,
+            "predicted_ratio": [0.01] * len(predicted_at),
+        }
+    )
+
+
+def test_prediction_after_close_uses_same_day_bar() -> None:
+    # UTC 2026-11-20 07:00 = JST 16:00、引けの後なので 11-20 の足を基準にする（#2066）
+    out = prediction_signals(_h1_at(["20261120_070000"]), pd.DataFrame(), _px_nov(), "jp")
+    assert list(out["date"]) == [date(2026, 11, 20)]
+
+
+def test_prediction_morning_run_keeps_prev_bar() -> None:
+    # UTC 2026-11-19 22:30 = JST 11-20 07:30、引けの前なので今までどおり 11-19 の足
+    out = prediction_signals(_h1_at(["20261119_223000"]), pd.DataFrame(), _px_nov(), "jp")
+    assert list(out["date"]) == [date(2026, 11, 19)]
+
+
+def test_prediction_date_matches_base_bar_date() -> None:
+    # _base_bar_date(predicted_at, "jp") の日を書き下したもの（scoring から prediction は読まない）
+    expected = {
+        "20261119_062959": date(2026, 11, 18),  # JST 15:29:59、引けの前で前の日の足
+        "20261119_063000": date(2026, 11, 19),  # JST 15:30 ちょうどは引けの後
+        "20261119_150000": date(2026, 11, 19),  # JST 11-20 00:00、引けの前で前の日の足
+        "20261120_143000": date(2026, 11, 20),  # JST 23:30、引けの後
+        "20261121_070000": date(2026, 11, 20),  # JST 土曜 16:00、土曜の足は無く 11-20
+        "20261122_223000": date(2026, 11, 20),  # JST 月曜 07:30、日曜以前の最後の足は 11-20
+    }
+    for pa, want in expected.items():
+        out = prediction_signals(_h1_at([pa]), pd.DataFrame(), _px_nov(), "jp")
+        assert list(out["date"]) == [want], pa
+
+
+def test_prediction_after_close_does_not_push_out_morning_run() -> None:
+    # 朝の回（11-19 の足）と引けの後の回（11-20 の足）は別の足に付き、互いに押しのけない
+    out = prediction_signals(
+        _h1_at(["20261119_223000", "20261120_070000"]), pd.DataFrame(), _px_nov(), "jp"
+    )
+    assert list(out["date"]) == [date(2026, 11, 19), date(2026, 11, 20)]
+
+
 def test_prediction_signals_drop_zero_and_nan() -> None:
     px = pd.DataFrame({"symbol": ["A"], "date": [date(2026, 11, 4)], "px": [100.0]})
     h1 = pd.DataFrame(
