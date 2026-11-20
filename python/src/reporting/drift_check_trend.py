@@ -11,8 +11,10 @@
 
 import glob
 import json
+import math
 import os
 import re
+from typing import Any
 
 import pandas as pd
 
@@ -69,3 +71,31 @@ def build_drift_check_trend(rows: list[dict]) -> pd.DataFrame:
 def load_drift_check_trend(record_dir: str) -> pd.DataFrame:
     """record_dir の記録を読み、日ごとの表を返す。"""
     return build_drift_check_trend(load_drift_check_records(record_dir))
+
+
+def _cell(value: Any) -> str:
+    if value is None or value is pd.NA:
+        return "null"
+    if isinstance(value, float):
+        # 欠けのある数の列は float になり、欠けは NaN で来る
+        return "null" if math.isnan(value) else f"{value:.4g}"
+    return str(value)
+
+
+def format_drift_check_markdown(df: pd.DataFrame) -> str:
+    """表を Markdown の表の文字列にする（欠けは null。行が無ければ「データなし」）。"""
+    if df.empty:
+        return "データなし"
+    columns = [str(c) for c in df.columns]
+    lines = [
+        "| " + " | ".join(columns) + " |",
+        "| " + " | ".join("---" for _ in columns) + " |",
+    ]
+    for values in df.itertuples(index=False):
+        lines.append("| " + " | ".join(_cell(v) for v in values) + " |")
+    return "\n".join(lines)
+
+
+def format_drift_check_csv(df: pd.DataFrame) -> str:
+    """表を CSV の文字列にする（欠けは null と書き、False・0 と分ける）。"""
+    return df.to_csv(index=False, na_rep="null")
