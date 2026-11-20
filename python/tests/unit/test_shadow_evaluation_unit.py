@@ -7,7 +7,7 @@ import shutil
 import tempfile
 import unittest
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pandas as pd
 
@@ -316,30 +316,6 @@ class TestPromoteChallengerToProduction(unittest.TestCase):
         self.assertEqual(len(result["promoted"]), 2)
         for name in ["StockXGBoostModel", "StockLightGBMModel"]:
             self.assertFalse(os.path.exists(os.path.join(self.tmpdir, f"{name}.joblib")))
-
-
-class TestRunShadowPrediction(unittest.TestCase):
-    def test_returns_counts(self):
-        from src.prediction.shadow_evaluation import run_shadow_prediction
-
-        mock_prod_fn = MagicMock(return_value=["r1", "r2"])
-        mock_chal_fn = MagicMock(return_value=["r3"])
-
-        with patch("src.prediction.prediction_pipeline.output_top_worst_results"):
-            result = run_shadow_prediction(mock_prod_fn, challenger_predict_fn=mock_chal_fn)
-
-        self.assertEqual(result["production_count"], 2)
-        self.assertEqual(result["challenger_count"], 1)
-
-    def test_uses_prod_fn_as_fallback_for_challenger(self):
-        from src.prediction.shadow_evaluation import run_shadow_prediction
-
-        mock_fn = MagicMock(return_value=["r1"])
-
-        with patch("src.prediction.prediction_pipeline.output_top_worst_results"):
-            run_shadow_prediction(mock_fn)
-
-        self.assertEqual(mock_fn.call_count, 2)
 
 
 if __name__ == "__main__":

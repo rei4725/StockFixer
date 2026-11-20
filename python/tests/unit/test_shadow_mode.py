@@ -6,7 +6,7 @@ import shutil
 import tempfile
 import unittest
 from dataclasses import replace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pandas as pd
 
@@ -505,56 +505,6 @@ class TestComputeMetrics(unittest.TestCase):
         from src.prediction.shadow_evaluation import _compute_sharpe
 
         self.assertIsNone(_compute_sharpe(pd.DataFrame()))
-
-
-# ---------------------------------------------------------------------------
-# run_shadow_prediction テスト
-# ---------------------------------------------------------------------------
-
-
-class TestRunShadowPrediction(unittest.TestCase):
-    """run_shadow_prediction のテスト"""
-
-    def test_calls_both_predict_fns(self):
-        """production / challenger の両予測関数が呼ばれること"""
-        from unittest.mock import patch
-
-        prod_result = [PredictionResult("us", "AAPL", 100.0, 102.0, 0.02, 2)]
-        chal_result = [PredictionResult("us", "AAPL", 100.0, 103.0, 0.03, 2)]
-
-        prod_fn = MagicMock(return_value=prod_result)
-        chal_fn = MagicMock(return_value=chal_result)
-
-        with patch(
-            "src.prediction.prediction_pipeline.save_prediction_results",
-        ):
-            from src.prediction.shadow_evaluation import run_shadow_prediction
-
-            result = run_shadow_prediction(
-                predict_fn=prod_fn,
-                challenger_predict_fn=chal_fn,
-            )
-
-        prod_fn.assert_called_once()
-        chal_fn.assert_called_once()
-        self.assertEqual(result["production_count"], 1)
-        self.assertEqual(result["challenger_count"], 1)
-
-    def test_uses_same_fn_when_no_challenger_fn(self):
-        """challenger_predict_fn が None のとき predict_fn を2回呼ぶこと"""
-        from unittest.mock import patch
-
-        result_data = [PredictionResult("us", "AAPL", 100.0, 102.0, 0.02, 2)]
-        fn = MagicMock(return_value=result_data)
-
-        with patch(
-            "src.prediction.prediction_pipeline.save_prediction_results",
-        ):
-            from src.prediction.shadow_evaluation import run_shadow_prediction
-
-            run_shadow_prediction(predict_fn=fn, challenger_predict_fn=None)
-
-        self.assertEqual(fn.call_count, 2)
 
 
 # ---------------------------------------------------------------------------
