@@ -174,3 +174,46 @@ def test_empty_dir_gives_no_data(tmp_path):
     df = load_paper_weekly_trend(str(tmp_path))
     assert df.empty
     assert format_paper_weekly_markdown(df) == "データなし"
+
+
+def test_count_columns_for_fill_price_and_missing_close(tmp_path):
+    """約定の値段で評価した銘柄・週末の終値の無い銘柄の数を右端の2列に出す（#2062）。"""
+    filled = _new_market(0.01, 0.0, 0.01, 0.01, 0.4, partial=True)
+    filled["valued_at_fill_price"] = ["7203", "9984"]
+    filled["missing_week_end_close"] = ["6758"]
+    legacy = _old_market(0.02, 0.01, 0.01)
+    del legacy["valued_at_fill_price"]
+    del legacy["missing_week_end_close"]
+    _write(tmp_path / "2026-W44.json", "2026-W44", "2026-10-26", "2026-10-30", {"jp": legacy})
+    _write(
+        tmp_path / "2026-W45.json",
+        "2026-W45",
+        "2026-11-02",
+        "2026-11-06",
+        {"jp": _new_market(0.03, 0.02, 0.02, 0.01, 0.5)},
+    )
+    _write(tmp_path / "2026-W46.json", "2026-W46", "2026-11-09", "2026-11-13", {"jp": filled})
+
+    df = load_paper_weekly_trend(str(tmp_path))
+    assert list(df.columns[-2:]) == [
+        "valued_at_fill_price_count",
+        "missing_week_end_close_count",
+    ]
+    assert list(df.columns[-4:-2]) == [CUM_WEEKLY_COLUMN, CUM_EXCESS_COLUMN]
+    legacy_row, empty_row, filled_row = (df.iloc[i] for i in range(3))
+    assert math.isnan(legacy_row["valued_at_fill_price_count"])
+    assert math.isnan(legacy_row["missing_week_end_close_count"])
+    assert empty_row["valued_at_fill_price_count"] == 0
+    assert empty_row["missing_week_end_close_count"] == 0
+    assert filled_row["valued_at_fill_price_count"] == 2
+    assert filled_row["missing_week_end_close_count"] == 1
+
+    markdown = format_paper_weekly_markdown(df)
+    columns = [c.strip() for c in markdown.splitlines()[0].strip("|").split("|")]
+    legacy_line = [line for line in markdown.splitlines() if "2026-W44" in line][0]
+    cells = [c.strip() for c in legacy_line.strip("|").split("|")]
+    assert cells[columns.index("valued_at_fill_price_count")] == ""
+    assert cells[columns.index("missing_week_end_close_count")] == ""
+    filled_line = [line for line in markdown.splitlines() if "2026-W46" in line][0]
+    cells = [c.strip() for c in filled_line.strip("|").split("|")]
+    assert cells[columns.index("valued_at_fill_price_count")] == "2.000000"
