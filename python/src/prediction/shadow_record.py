@@ -29,6 +29,14 @@ _SHADOW_KEYS = (
     "challenger_constant",
 )
 
+# 勝ちの条件に使う順位相関と、条件の版（#1985）。比べる行があった週の結果にだけあるので、
+# 結果に載っているときだけ写す。win_rule で物差しを変えた前後の週を見分ける
+_RANK_KEYS = (
+    "production_daily_rank_corr",
+    "challenger_daily_rank_corr",
+    "win_rule",
+)
+
 
 def new_weekly_shadow_record(days: int) -> dict[str, Any]:
     """欄をすべて持つ空の記録を返す。days は影の比べの読む日数。"""
@@ -55,6 +63,9 @@ def apply_shadow_result(record: dict[str, Any], result: dict) -> None:
     record["shadow_evaluated"] = True
     for key in _SHADOW_KEYS:
         record[key] = result.get(key)
+    for key in _RANK_KEYS:
+        if key in result:
+            record[key] = result[key]
 
 
 def weekly_shadow_record_path(now: datetime, results_dir: Optional[str] = None) -> Path:
