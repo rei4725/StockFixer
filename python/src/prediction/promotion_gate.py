@@ -8,7 +8,9 @@ shadow モデルの Walk-Forward 成績が current モデルを上回った場�
     1. Net Return: shadow > current（Walk-Forward fold 平均）
     2. MDD:        |shadow_mdd| < |current_mdd|（ドローダウン改善）
     3. Sharpe:     shadow >= current * 0.95（Sharpe は 5% 劣化まで許容）
-    4. Hit Rate:   shadow >= 0.50（最低ライン）
+    4. Hit Rate:   shadow の hit_rate_minus_majority（的中率 - 常に多い方の的中率）が
+                    同じ窓の current 以上（#1985。測れないときは前の線 shadow >= 0.50）。
+                    criteria には両モデルの daily_rank_corr も並べる
     5. 予想の MAE:  shadow の |predicted_ratio - actual_ratio| の平均が、同じ窓の
                     current の MAE 以下（criteria のキーは互換のため "slippage"。#1727）
     6. 予想のばらつき: shadow の予想が全銘柄でほぼ同じ値でないこと（#1602）
@@ -92,7 +94,10 @@ class PromotionResult:
               "mdd":         {"shadow": float, "current": float, "passed": bool},
               "sharpe":      {"shadow": float, "current": float,
                                "threshold": float, "passed": bool},
-              "hit_rate":    {"shadow": float, "floor": float, "passed": bool},
+              "hit_rate":    {"shadow": float, "rule": str, "threshold" | "floor": float,
+                               "shadow_minus_majority": float, "current_minus_majority": float,
+                               "shadow_daily_rank_corr": float,
+                               "current_daily_rank_corr": float, "passed": bool},
               "slippage":    {"shadow": float, "current": float, "passed": bool},
               "prediction_spread": {"shadow": float, "threshold": float, "passed": bool},
             }
@@ -224,6 +229,50 @@ def _compute_baseline_metrics(
     if not df.empty and "model_name" in df.columns:
         df = df[df["model_name"] == model_name]
     return baseline_metrics(df)
+
+
+def _hit_rate_criterion(
+    shadow_hit_rate: Optional[float],
+    current_hit_rate: Optional[float],
+    baseline_shadow: dict,
+    baseline_current: dict,
+    wf_not_comparable: bool,
+) -> dict:
+    """基準4の criteria を返す（#1985）。
+
+    的中率は上がる割合で動くので、絶対の線ではなく「常に多い方を言った場合の的中率との差」
+    （hit_rate_minus_majority）が同じ窓の current 以上かで判定する。両モデルの日ごとの順位相関
+    （daily_rank_corr）も並べる（判定には使わない。影の比べの勝ちの条件で見ている）。
+    どちらかの差を測れないとき（予想と実際の変化率の列が無いなど）は、前の判定
+    （的中率 >= 0.50、WF を比べられないときは current 以上も）に戻す。
+    """
+    shadow_edge = baseline_shadow.get("hit_rate_minus_majority")
+    current_edge = baseline_current.get("hit_rate_minus_majority")
+    criterion: dict = {"shadow": shadow_hit_rate}
+    if shadow_hit_rate is None:
+        passed = False
+    elif shadow_edge is not None and current_edge is not None:
+        criterion["rule"] = "hit_rate_minus_majority"
+        criterion["threshold"] = current_edge
+        passed = shadow_edge >= current_edge
+    else:
+        criterion["rule"] = "floor"
+        criterion["floor"] = _HIT_RATE_FLOOR
+        passed = shadow_hit_rate >= _HIT_RATE_FLOOR
+        if wf_not_comparable:
+            passed = passed and current_hit_rate is not None and shadow_hit_rate >= current_hit_rate
+    criterion.update(
+        {
+            "shadow_minus_majority": shadow_edge,
+            "current_minus_majority": current_edge,
+            "shadow_daily_rank_corr": baseline_shadow.get("daily_rank_corr"),
+            "current_daily_rank_corr": baseline_current.get("daily_rank_corr"),
+            "passed": passed,
+        }
+    )
+    if wf_not_comparable:
+        criterion["current"] = current_hit_rate
+    return criterion
 
 
 def _collect_run_ids(shadow_model: str, current_model: str) -> list[str]:
@@ -363,24 +412,12 @@ def evaluate_promotion(
         for c in (criteria_net_return, criteria_mdd, criteria_sharpe):
             c["note"] = note
 
-    # 4. Hit Rate（方向正解率 >= 0.50。WF を比べられないときは current 以上も求める）
-    if shadow_hit_rate is not None:
-        hit_rate_passed = shadow_hit_rate >= _HIT_RATE_FLOOR
-        if wf_not_comparable:
-            hit_rate_passed = (
-                hit_rate_passed
-                and current_hit_rate is not None
-                and shadow_hit_rate >= current_hit_rate
-            )
-    else:
-        hit_rate_passed = False
-    criteria_hit_rate: dict = {
-        "shadow": shadow_hit_rate,
-        "floor": _HIT_RATE_FLOOR,
-        "passed": hit_rate_passed,
-    }
-    if wf_not_comparable:
-        criteria_hit_rate["current"] = current_hit_rate
+    # 4. Hit Rate（常に多い方との差が同じ窓の current 以上。#1985）
+    baseline_shadow = _compute_baseline_metrics(shadow_model_name, horizon)
+    criteria_hit_rate = _hit_rate_criterion(
+        shadow_hit_rate, current_hit_rate, baseline_shadow, baseline_current, wf_not_comparable
+    )
+    hit_rate_passed = criteria_hit_rate["passed"]
     if window is not None:
         criteria_hit_rate.update(window.as_dict())
 
@@ -395,7 +432,6 @@ def evaluate_promotion(
     }
 
     # 6. 予想のばらつき（行が無く測れないときは 4・5 が落ちるので判定から外す）
-    baseline_shadow = _compute_baseline_metrics(shadow_model_name, horizon)
     shadow_std = baseline_shadow.get("prediction_std")
     spread_passed = None if shadow_std is None else not is_constant_prediction(shadow_std)
     criteria_spread: dict = {

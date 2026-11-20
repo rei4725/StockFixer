@@ -9,7 +9,12 @@
    直近 evaluation_days 営業日分の予測精度データを取得する。
 2. 銘柄ごとに Sharpe Ratio（予測変化率ベース）と Hit Rate を計算する。
 3. 比較結果を experiment_runs テーブルに記録する（R-211 実験トラッキング連携）。
-4. 判定: 全体 Hit Rate / Sharpe が challenger > production かどうかを返す。
+4. 判定: 同じ窓・同じ銘柄の日ごとの順位相関（daily_rank_corr）が challenger > production で、
+   全体 Hit Rate / Sharpe が challenger >= production かどうかを返す（#1985）。
+   challenger の順位相関が None（定数の予想・行なし）なら勝ちにしない。production の None も
+   勝ちにしないが、production が日ごとに定数のときだけは並べの腕が無いとして 0 と比べる。
+   銘柄が1つの比べは順位相関を測れないので、前の条件（Hit Rate と Sharpe の両方で上回る）で決める。
+   使った条件の名前を win_rule に返す。
    challenger の予想が全銘柄でほぼ同じ値なら勝ちにせず、負けと分けて印を付ける（#1602）。
 """
 
@@ -38,6 +43,12 @@ logger = get_logger(__name__)
 
 # デフォルト評価期間（営業日数）
 DEFAULT_EVALUATION_DAYS = 20
+
+# 勝ちの条件の版。週の記録に書き、物差しを変えた前後の週を見分ける（#1985）。
+# 前の版 "hit_rate_and_sharpe_better" は、Hit Rate と Sharpe の両方で上回れば勝ちだった
+SHADOW_WIN_RULE = "daily_rank_corr_better_hit_sharpe_not_worse"
+# 銘柄が1つの比べ（symbol を絞った評価など）は順位相関を測れないので、前の条件で決める
+SINGLE_SYMBOL_WIN_RULE = "hit_rate_and_sharpe_better"
 
 
 # ---------------------------------------------------------------------------
@@ -81,6 +92,29 @@ def _compute_sharpe(df: pd.DataFrame) -> Optional[float]:
     return float(mean_ret / std_ret)
 
 
+def _better(chal_val: Optional[float], prod_val: Optional[float]) -> bool:
+    if chal_val is None or prod_val is None:
+        return False
+    return chal_val > prod_val
+
+
+def _not_worse(chal_val: Optional[float], prod_val: Optional[float]) -> bool:
+    if chal_val is None or prod_val is None:
+        return False
+    return chal_val >= prod_val
+
+
+def _single_symbol(*frames: pd.DataFrame) -> bool:
+    """どの表も (market, symbol) が1つ以下なら True（銘柄の間の順位相関を測れない比べ）。"""
+    for df in frames:
+        keys = [c for c in ("market", "symbol") if c in df.columns]
+        if df.empty:
+            continue
+        if not keys or len(df[keys].drop_duplicates()) > 1:
+            return False
+    return True
+
+
 # ---------------------------------------------------------------------------
 # 評価メイン関数
 # ---------------------------------------------------------------------------
@@ -118,6 +152,9 @@ def evaluate_shadow_models(
             production_sharpe: float | None
             challenger_hit_rate: float | None
             challenger_sharpe: float | None
+            production_daily_rank_corr: float | None  # 同じ日の銘柄の間の順位相関の平均
+            challenger_daily_rank_corr: float | None
+            win_rule: str  # 勝ちの条件の版（SHADOW_WIN_RULE）
             challenger_wins: bool  # True = challenger 切り替え推奨
             challenger_prediction_std: float | None  # 同じ日の銘柄の間の予想の標準偏差（#1602）
             challenger_constant: bool  # True = 全銘柄がほぼ同じ値。指標によらず勝ちにしない
@@ -179,26 +216,52 @@ def evaluate_shadow_models(
     chal_hit = _compute_hit_rate(df_chal)
     chal_sharpe = _compute_sharpe(df_chal)
 
-    # 判定: Hit Rate と Sharpe の両方で challenger が上回れば切り替え推奨
-    def _better(chal_val, prod_val) -> bool:
-        if chal_val is None or prod_val is None:
-            return False
-        return chal_val > prod_val
-
-    hit_better = _better(chal_hit, prod_hit)
-    sharpe_better = _better(chal_sharpe, prod_sharpe)
+    chal_base = baseline_metrics(df_chal)
+    prod_base = baseline_metrics(df_prod)
+    prod_rank_corr = prod_base["daily_rank_corr"]
+    chal_rank_corr = chal_base["daily_rank_corr"]
+    win_rule = SINGLE_SYMBOL_WIN_RULE if _single_symbol(df_prod, df_chal) else SHADOW_WIN_RULE
+    if win_rule == SHADOW_WIN_RULE:
+        # 向きの的中率と符号の Sharpe は、両方が「上がる」ばかりだと窓の相場の向きでそろって
+        # 動く。劣らないことだけを求め、勝ちは同じ窓・同じ銘柄の日ごとの順位相関で決める（#1985）。
+        # 日ごとに定数の production は並べの腕が無いので順位相関を 0 と比べ、
+        # 行が無い・日の列が無いなど測れない None は勝ちにしない
+        prod_rank_for_compare = (
+            0.0
+            if prod_rank_corr is None and is_constant_prediction(prod_base["prediction_std"])
+            else prod_rank_corr
+        )
+        metric_wins = (
+            _not_worse(chal_hit, prod_hit)
+            and _not_worse(chal_sharpe, prod_sharpe)
+            and _better(chal_rank_corr, prod_rank_for_compare)
+        )
+    else:
+        # 銘柄が1つの比べでは銘柄の間の並べを測れないので、前の条件で決める
+        metric_wins = _better(chal_hit, prod_hit) and _better(chal_sharpe, prod_sharpe)
     # 定数の予想の的中率は上がる割合そのものなので、比べに勝たせない（#1602）
-    chal_std = baseline_metrics(df_chal)["prediction_std"]
+    chal_std = chal_base["prediction_std"]
     chal_constant = is_constant_prediction(chal_std)
-    challenger_wins = hit_better and sharpe_better and not chal_constant
+    challenger_wins = metric_wins and not chal_constant
 
     evaluated_at = datetime.now().strftime("%Y%m%d_%H%M%S")
 
+    # 順位相関と勝ちの条件の版は、比べる行があるときだけ載せる（週の記録の欄は常にある）
+    rank_info: dict = (
+        {
+            "production_daily_rank_corr": prod_rank_corr,
+            "challenger_daily_rank_corr": chal_rank_corr,
+            "win_rule": win_rule,
+        }
+        if not (df_prod.empty and df_chal.empty)
+        else {}
+    )
     result = {
         "production_hit_rate": prod_hit,
         "production_sharpe": prod_sharpe,
         "challenger_hit_rate": chal_hit,
         "challenger_sharpe": chal_sharpe,
+        **rank_info,
         "challenger_wins": challenger_wins,
         "challenger_prediction_std": chal_std,
         "challenger_constant": chal_constant,
@@ -211,6 +274,7 @@ def evaluate_shadow_models(
     logger.info(
         f"評価結果: production=hit_rate={prod_hit}, sharpe={prod_sharpe} / "
         f"challenger=hit_rate={chal_hit}, sharpe={chal_sharpe} / "
+        f"daily_rank_corr=production {prod_rank_corr}, challenger {chal_rank_corr} / "
         f"challenger_wins={challenger_wins} / "
         f"challenger_constant={chal_constant} std={chal_std} / "
         f"日数={window_info.get('window_days')} 件数=production {len(df_prod)}, "
