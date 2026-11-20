@@ -53,6 +53,9 @@ class FeatureFlags(BaseSettings):
     # ---------- 朝 8:30 の目線の告知（reporting/morning_view.py、#1875） ----------
     # 東証の営業日の朝に、上げ／下げの目線と夜の動き・当たり率を Discord に出す。初めから有効
     MORNING_MARKET_VIEW_ENABLED: bool = Field(default=True)
+    # 目線・理由・ニュースを Claude の CLI（WebSearch つき）で足す道（#1956 段4）。
+    # 既定は切った側で、数字と先物の向きだけ（source=fallback）の告知になる
+    MORNING_VIEW_CLAUDE_ENABLED: bool = Field(default=False)
 
     # ---------- Claude バックテスト批判レビュー（backtest/critical_review.py） ----------
     # Claude にバックテスト方法論・設定を批判的レビューさせ、欠陥を Issue 草案 JSON 化する。
