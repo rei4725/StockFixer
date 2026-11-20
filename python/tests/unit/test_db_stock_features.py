@@ -5,6 +5,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest.mock import MagicMock
 
 import numpy as np
 import pandas as pd
@@ -12,6 +13,7 @@ import pandas as pd
 import src.utils.data_path_utils as path_utils
 import src.utils.db as db_module
 from src.utils.db.stock_features import (
+    _ensure_columns,
     delete_stock_features,
     get_all_symbols,
     load_all_stock_features,
@@ -257,6 +259,32 @@ class TestGetAllSymbols(_TmpDbTestCase):
 
         result = get_all_symbols()
         self.assertEqual(result, sorted(result))
+
+
+class TestEnsureColumnsAlterFailure(unittest.TestCase):
+    """ALTER の失敗は捨てるが、warning と例外の情報をログに残すこと（#2076）"""
+
+    def test_alter_failure_logs_warning_with_exc_info(self):
+        con = MagicMock()
+
+        def _execute(sql, *args, **kwargs):
+            if sql.startswith("ALTER"):
+                raise RuntimeError("permission denied for table stock_features")
+            return MagicMock(fetchall=MagicMock(return_value=[]))
+
+        con.execute.side_effect = _execute
+        df = pd.DataFrame({"new_feat": [1.0, 2.0]})
+
+        with self.assertLogs("src.utils.db.stock_features", level="WARNING") as cm:
+            _ensure_columns(con, df)
+
+        self.assertEqual(len(cm.records), 1)
+        record = cm.records[0]
+        self.assertEqual(record.levelname, "WARNING")
+        self.assertIn("new_feat", record.getMessage())
+        self.assertIn("DOUBLE PRECISION", record.getMessage())
+        self.assertIsNotNone(record.exc_info)
+        self.assertIsInstance(record.exc_info[1], RuntimeError)
 
 
 if __name__ == "__main__":
