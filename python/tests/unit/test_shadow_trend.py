@@ -10,6 +10,7 @@ from src.reporting.shadow_trend import (
     DIFF_COLUMN,
     NOT_WIN_STREAK,
     SHADOW_COLUMNS,
+    SHADOW_ERROR_HEAD,
     build_shadow_trend,
     format_shadow_markdown,
     load_shadow_records,
@@ -139,3 +140,129 @@ def test_markdown_leaves_missing_cells_blank(shadow_dir):
     assert w42[1].strip() == ""
     assert "challenger_constant" in lines[-1]
     assert "1.18e-16" in lines[-1]
+
+
+_OLD_COLUMNS = [
+    "week",
+    "written_at",
+    "window_days",
+    "production_hit_rate",
+    "challenger_hit_rate",
+    "hit_rate_diff",
+    "production_sharpe",
+    "challenger_sharpe",
+    "n_production",
+    "n_challenger",
+    "challenger_wins",
+    "challenger_not_win_streak",
+    "challenger_prediction_std",
+    "challenger_constant",
+    "challenger_constant_streak",
+    "gate_skipped_reason",
+    "promoted",
+    "retry_count",
+]
+_NEW_COLUMNS = [
+    "shadow_evaluated",
+    "shadow_failed",
+    "gate_evaluated",
+    "gate_failed",
+    "fresh_challenger_count",
+    "shadow_error",
+    "production_daily_rank_corr",
+    "challenger_daily_rank_corr",
+    "win_rule",
+]
+
+
+@pytest.fixture
+def status_dir(tmp_path):
+    # 新しい欄のそろった週、欄の無い古い週、影の比べが長い文で落ちた週（#2061）
+    full = _full("2026-W46", 0.4, 0.3, False, True, "challenger_constant")
+    full.update(
+        {
+            "shadow_evaluated": True,
+            "shadow_failed": False,
+            "shadow_error": None,
+            "fresh_challengers": ["lightgbm", "xgboost"],
+            "gate_evaluated": False,
+            "gate_failed": False,
+            "production_daily_rank_corr": 0.05,
+            "challenger_daily_rank_corr": -0.01,
+            "win_rule": "daily_rank_corr_v1",
+        }
+    )
+    _write(tmp_path, "2026-W46", full)
+    _write(tmp_path, "2026-W45", _full("2026-W45", 0.4, 0.3, False, False))
+    _write(
+        tmp_path,
+        "2026-W47",
+        {
+            "week": "2026-W47",
+            "shadow_evaluated": False,
+            "shadow_failed": True,
+            "shadow_error": "E" * 500,
+            "fresh_challengers": [],
+            "gate_evaluated": False,
+            "gate_failed": True,
+            "gate_skipped_reason": "shadow_failed",
+        },
+    )
+    return tmp_path
+
+
+def test_new_columns_are_appended_after_old_order():
+    assert SHADOW_COLUMNS[: len(_OLD_COLUMNS)] == _OLD_COLUMNS
+    assert SHADOW_COLUMNS[len(_OLD_COLUMNS) :] == _NEW_COLUMNS
+
+
+def test_status_columns_of_full_week(status_dir):
+    df = load_shadow_trend(str(status_dir))
+    assert list(df.columns) == SHADOW_COLUMNS
+    row = df[df["week"] == "2026-W46"].iloc[0]
+    assert row["shadow_evaluated"] is True
+    assert row["shadow_failed"] is False
+    assert row["gate_evaluated"] is False
+    assert row["gate_failed"] is False
+    assert row["fresh_challenger_count"] == 2
+    assert row["shadow_error"] is None
+    assert row["production_daily_rank_corr"] == pytest.approx(0.05)
+    assert row["challenger_daily_rank_corr"] == pytest.approx(-0.01)
+    assert row["win_rule"] == "daily_rank_corr_v1"
+    assert row["gate_skipped_reason"] == "challenger_constant"
+
+
+def test_status_columns_empty_for_old_week(status_dir):
+    row = load_shadow_trend(str(status_dir)).iloc[0]
+    assert row["week"] == "2026-W45"
+    for column in ("shadow_evaluated", "shadow_failed", "gate_evaluated", "gate_failed"):
+        assert row[column] is None
+    assert math.isnan(row["fresh_challenger_count"])
+    assert row["shadow_error"] is None
+    assert math.isnan(row["production_daily_rank_corr"])
+    assert math.isnan(row["challenger_daily_rank_corr"])
+    assert row["win_rule"] is None
+
+
+def test_long_shadow_error_is_cut(status_dir):
+    row = load_shadow_trend(str(status_dir)).iloc[-1]
+    assert row["shadow_failed"] is True
+    assert row["gate_failed"] is True
+    assert row["fresh_challenger_count"] == 0
+    assert row["shadow_error"] == "E" * SHADOW_ERROR_HEAD
+    assert SHADOW_ERROR_HEAD == 120
+
+
+def test_wrong_types_of_status_fields_are_empty():
+    record = {
+        "week": "2026-W46",
+        "shadow_failed": "yes",
+        "fresh_challengers": "lightgbm",
+        "shadow_error": 3,
+        "challenger_daily_rank_corr": True,
+    }
+    row = build_shadow_trend([record]).iloc[0]
+    assert row["shadow_failed"] is None
+    assert math.isnan(row["fresh_challenger_count"])
+    assert row["shadow_error"] is None
+    assert math.isnan(row["challenger_daily_rank_corr"])
