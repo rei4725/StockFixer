@@ -7,20 +7,14 @@
 次の回の差分取得で取り直される。
 """
 
-from datetime import datetime, time, timezone
-from zoneinfo import ZoneInfo
+from datetime import datetime, timezone
 
 import pandas as pd
 
+from src.domain.market_close import MARKET_CLOSE as _MARKET_CLOSE
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
-
-# 市場ごとの (タイムゾーン, 引けの時刻)。jp は東証 15:30 JST、us は米国東部 16:00
-_MARKET_CLOSE = {
-    "jp": (ZoneInfo("Asia/Tokyo"), time(15, 30)),
-    "us": (ZoneInfo("America/New_York"), time(16, 0)),
-}
 
 
 def _utcnow() -> datetime:
