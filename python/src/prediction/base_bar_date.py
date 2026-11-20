@@ -6,17 +6,13 @@ prediction_pipeline.py の精度チェックと、採点の基準の日を使う
 
 import math
 from datetime import datetime, time, timedelta, timezone
-from zoneinfo import ZoneInfo
+
+from src.domain.market_close import MARKET_CLOSE as _MARKET_CLOSE
 
 # 保存した現在値と raw の基準の終値の比がこの幅に収まれば、分割による調整の違いは無いとみなす
 _SPLIT_GAP_TOLERANCE = 1.3
 # 比を分割の比（0.5 刻み）に丸めたときに許す、丸めとの相対の差
 _SPLIT_RATIO_TOLERANCE = 0.1
-# 市場ごとの (タイムゾーン, 引けの時刻)。jp は東証 15:30 JST、us は米国東部 16:00
-_MARKET_CLOSE = {
-    "jp": (ZoneInfo("Asia/Tokyo"), time(15, 30)),
-    "us": (ZoneInfo("America/New_York"), time(16, 0)),
-}
 
 
 def _split_adjust_scale(current_price: float, base_close: float) -> float | None:
