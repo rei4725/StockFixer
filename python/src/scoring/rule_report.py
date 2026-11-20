@@ -22,6 +22,9 @@ import pandas as pd
 
 from src.scoring import db
 from src.scoring.anchor import ANCHOR_HORIZON, HORIZONS, forward_returns, price_frame, score_signals
+from src.scoring.predicted_at import base_day as _base_day
+from src.scoring.predicted_at import day_key as _day
+from src.scoring.predicted_at import parse_predicted_at as _parse_predicted_at
 from src.scoring.version import read_app_version
 from src.utils.data_path_utils import ensure_dir, get_results_dir
 from src.utils.japan_time import isoformat_utc, now_utc
@@ -64,25 +67,13 @@ def _to_date(s: pd.Series) -> pd.Series:
     return pd.to_datetime(s).dt.date
 
 
-def _day(s: pd.Series) -> pd.Series:
-    """merge_asof の鍵にする日時（分解能をそろえる。pandas は入力ごとに単位が変わる）。"""
-    return pd.to_datetime(s).astype("datetime64[ns]")
-
-
-def _parse_predicted_at(s: pd.Series) -> pd.Series:
-    """YYYYMMDD_HHMMSS（UTC）を UTC の時刻にする。読めなければ ISO 8601 として読む。"""
-    text = s.astype(str)
-    ts = pd.to_datetime(text, format="%Y%m%d_%H%M%S", errors="coerce", utc=True)
-    rest = ts.isna()
-    if rest.any():
-        ts[rest] = pd.to_datetime(text[rest], format="ISO8601", errors="coerce", utc=True)
-    return ts
-
-
-def prediction_signals(h1: pd.DataFrame, history: pd.DataFrame, px: pd.DataFrame) -> pd.DataFrame:
+def prediction_signals(
+    h1: pd.DataFrame, history: pd.DataFrame, px: pd.DataFrame, market: str = "jp"
+) -> pd.DataFrame:
     """予想を [date, symbol, key, direction, horizon_of_claim] のシグナルにする。
 
-    date は predicted_at の JST の日付より前で一番新しい、その銘柄の足の日。
+    date は predicted_at に引けていた最後の日（_base_day）以前で一番新しい、その銘柄の足の日。
+    予想の側の採点の基準の日（prediction/base_bar_date.py の _base_bar_date）と同じ日になる。
     1日の予想は predicted_ratio、5日の予想は diff_ratio_5d の符号。0 と NaN は捨てる。
     """
     frames = []
@@ -119,22 +110,18 @@ def prediction_signals(h1: pd.DataFrame, history: pd.DataFrame, px: pd.DataFrame
     claims = claims.assign(direction=np.sign(value))
     claims = claims[claims["direction"].notna() & (claims["direction"] != 0)]
     ts = _parse_predicted_at(claims["predicted_at"])
-    claims = claims.assign(
-        ts=ts,
-        jst_day=_day(pd.to_datetime((ts + _JST_OFFSET).dt.strftime("%Y-%m-%d"), errors="coerce")),
-    ).dropna(subset=["jst_day"])
+    claims = claims.assign(ts=ts, base_day=_base_day(ts, market)).dropna(subset=["base_day"])
     if claims.empty:
         return empty
     bars = px[["symbol", "date"]].drop_duplicates()
     bars = bars.assign(bar_day=_day(bars["date"])).sort_values("bar_day")
     m = pd.merge_asof(
-        claims.sort_values("jst_day"),
+        claims.sort_values("base_day"),
         bars[["symbol", "bar_day"]],
-        left_on="jst_day",
+        left_on="base_day",
         right_on="bar_day",
         by="symbol",
         direction="backward",
-        allow_exact_matches=False,
     ).dropna(subset=["bar_day"])
     # 同じ足に同じ版の予想が複数あれば、最後の予想を使う
     m = m.sort_values("ts").drop_duplicates(
@@ -391,7 +378,7 @@ def build_rule_accuracy(
     rules = sorted(signals["key"].unique())
 
     preds = prediction_signals(
-        ld.prediction_h1(market, SINCE), ld.prediction_history(market, SINCE), px
+        ld.prediction_h1(market, SINCE), ld.prediction_history(market, SINCE), px, market
     )
     preds = preds[(preds["date"] >= SINCE) & (preds["date"] <= as_of)]
     pred_frames = []
