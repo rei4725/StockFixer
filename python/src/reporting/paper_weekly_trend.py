@@ -10,6 +10,8 @@
   古い週は印なし）が違う週をまたがないよう、市場と印の組ごとに分けて取る
 - 値の無い（None の）週は累計に掛けず、その行の累計の欄は空にする
 - 読めないファイル・形の違う JSON は警告を出して飛ばす
+- 右端に、約定の値段で評価した銘柄と週末の終値の無い銘柄の数を置く（#2062）。
+  鍵の無い古い週は空にし、累計の計算には使わない
 """
 
 import glob
@@ -41,6 +43,11 @@ _BASE_COLUMNS = (
 CUM_WEEKLY_COLUMN = "cum_weekly_return"
 CUM_EXCESS_COLUMN = "cum_excess_return"
 _NO_BASIS = "__no_basis__"
+# 表の右端に置く銘柄の数の列（#2062）。書く側の並びの長さで、鍵の無い古い週は空
+COUNT_COLUMNS: dict[str, str] = {
+    "valued_at_fill_price_count": "valued_at_fill_price",
+    "missing_week_end_close_count": "missing_week_end_close",
+}
 
 
 def load_paper_weekly_reports(paper_dir: str) -> list[dict]:
@@ -86,6 +93,9 @@ def _row(report: dict, market: str, section: dict) -> dict:
     }
     for metric in RETURN_METRICS:
         row[metric] = _number(section.get(metric))
+    for column, key in COUNT_COLUMNS.items():
+        symbols = section.get(key)
+        row[column] = float(len(symbols)) if isinstance(symbols, list) else None
     return row
 
 
@@ -110,15 +120,23 @@ def _compound(values: pd.Series) -> pd.Series:
 def build_paper_weekly_trend(reports: list[dict]) -> pd.DataFrame:
     """週・市場ごとの成績の表に、週の騰落率と超過の騰落率の複利の累計の列を足して返す。"""
     rows = [row for report in reports for row in _report_rows(report)]
+    counts = pd.DataFrame(rows, columns=list(COUNT_COLUMNS))
     df = pd.DataFrame(rows, columns=_BASE_COLUMNS)
     for column in list(RETURN_METRICS) + ["fills"]:
         df[column] = pd.to_numeric(df[column], errors="coerce").astype(float)
-    df = df.sort_values(["week", "market"], kind="stable").reset_index(drop=True)
+    for column in COUNT_COLUMNS:
+        counts[column] = pd.to_numeric(counts[column], errors="coerce").astype(float)
+    order = df.sort_values(["week", "market"], kind="stable").index
+    df = df.loc[order].reset_index(drop=True)
+    counts = counts.loc[order].reset_index(drop=True)
     df[CUM_WEEKLY_COLUMN] = df.groupby("market", sort=False)["weekly_return"].transform(_compound)
     basis_key = df["excess_basis"].fillna(_NO_BASIS)
     df[CUM_EXCESS_COLUMN] = df.groupby([df["market"], basis_key], sort=False)[
         "excess_return"
     ].transform(_compound)
+    # 銘柄の数は累計の後ろ（右端）に置き、累計の計算には使わない（#2062）
+    for column in COUNT_COLUMNS:
+        df[column] = counts[column]
     return df
 
 
