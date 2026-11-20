@@ -1,7 +1,8 @@
 """朝 8:30 の目線の告知と 15:45 の答え合わせのジョブ（#1875 段3）。
 
-段3は数字と先物の向きの目線だけ（source=fallback）を出す。目線の出どころは
-pick_claude_view の 1 か所で選び、段4で Claude の結果をここから差し込む。
+目線の出どころは pick_claude_view の 1 か所で選ぶ。段4（#1956）で、旗
+MORNING_VIEW_CLAUDE_ENABLED が立つ日は Claude の CLI（WebSearch つき）の結果を差し込み、
+切った日・失敗の日・数字と食い違う日は数字と先物の向きだけ（source=fallback）にする。
 告知は保存してから送り、送れなかった日は記録を消す。告知の無い日は答え合わせしない。
 """
 
@@ -25,6 +26,7 @@ from src.reporting.morning_view import (
     choose_view,
     futures_view,
 )
+from src.reporting.morning_view_claude import SYSTEM_PROMPT, ask_claude_view
 from src.utils.japan_time import now_jst, to_jst
 from src.utils.logger import get_logger
 
@@ -33,8 +35,11 @@ logger = get_logger(__name__)
 N225_SYMBOL = "^N225"
 MORNING_SYMBOLS: tuple[str, ...] = tuple(INDEX_LABELS)
 
-# 値動きから Claude の目線を求める道。段3は持たず、段4でここへ渡す
+# 値動きから Claude の目線を求める道（段4）。ニュースは道具が返した URL のものだけ入る
 ClaudeViewSource = Callable[[Sequence[IndexMove]], ClaudeView | None]
+
+CLAUDE_MODEL = "sonnet"
+CLAUDE_TOOLS = "WebSearch,WebFetch"
 
 
 @dataclass(frozen=True)
@@ -47,6 +52,23 @@ def _enabled() -> bool:
     from config.feature_flags import flags
 
     return bool(flags.MORNING_MARKET_VIEW_ENABLED)
+
+
+def claude_ask() -> ClaudeViewSource | None:
+    """旗が立っていれば Claude の CLI の道を返す。切っていれば None（fallback だけ）。"""
+    from config.feature_flags import flags
+
+    if not flags.MORNING_VIEW_CLAUDE_ENABLED:
+        return None
+
+    def _run(prompt: str) -> list[str]:
+        from src.infrastructure.llm.cli_adapter import run_cli_stream
+
+        return run_cli_stream(
+            prompt, system=SYSTEM_PROMPT, model=CLAUDE_MODEL, allowed_tools=CLAUDE_TOOLS
+        )
+
+    return lambda moves: ask_claude_view(moves, run=_run)
 
 
 def _today(now: datetime | None) -> date:
@@ -83,7 +105,8 @@ def build_announcement(
     futures = by_symbol.get(FUTURES_SYMBOL)
     fut_view = futures_view(futures.last, prev_close) if futures is not None else view
     past = [r for r in records if r.day < day]
-    text = build_morning_text(moves, prev_close, claude, past, set())
+    verified = {n.url for n in claude.news} if claude is not None else set()
+    text = build_morning_text(moves, prev_close, claude, past, verified)
     return MorningAnnouncement(ViewRecord(day, view, source, fut_view, None), text)
 
 
@@ -108,7 +131,7 @@ def run_morning_view_announce(now: datetime | None = None) -> None:
         len(quotes),
         ",".join(missing) if missing else "なし",
     )
-    announcement = build_announcement(day, quotes, records)
+    announcement = build_announcement(day, quotes, records, claude_ask())
     if announcement is None:
         logger.info("朝の目線: 日経平均が取れず %s の告知を飛ばした", day)
         return
