@@ -355,64 +355,6 @@ def _record_ab_result(
 
 
 # ---------------------------------------------------------------------------
-# 便利関数: shadow モード予測を実行して両バージョン保存
-# ---------------------------------------------------------------------------
-
-
-def run_shadow_prediction(
-    predict_fn,
-    production_version: str = "production",
-    challenger_version: str = "challenger",
-    challenger_predict_fn=None,
-    mode: str = "unified",
-) -> dict:
-    """
-    production / challenger 両モデルを並行実行し、それぞれ DB に保存する。
-
-    prediction_pipeline の predict_all_* 関数を受け取って実行し、
-    output_top_worst_results をシャドーモードで呼び出す。
-
-    Args:
-        predict_fn: 本番モデルの予測関数（引数なし callable → list[PredictionResult]）
-        production_version: 本番バージョンラベル
-        challenger_version: チャレンジャーバージョンラベル
-        challenger_predict_fn: チャレンジャーモデルの予測関数
-                               （None なら predict_fn を流用し版を変えて保存）
-        mode: output_top_worst_results の mode 引数
-
-    Returns:
-        dict: production_count, challenger_count
-    """
-    from src.prediction.prediction_pipeline import output_top_worst_results
-
-    logger.info(f"シャドー予測開始: {production_version} / {challenger_version}")
-
-    # 本番予測
-    prod_results = predict_fn()
-    output_top_worst_results(
-        prod_results,
-        mode=mode,
-        shadow_mode=True,
-        model_version=production_version,
-    )
-
-    # チャレンジャー予測
-    chal_fn = challenger_predict_fn if challenger_predict_fn is not None else predict_fn
-    chal_results = chal_fn()
-    output_top_worst_results(
-        chal_results,
-        mode=mode,
-        shadow_mode=True,
-        model_version=challenger_version,
-    )
-
-    return {
-        "production_count": len(prod_results),
-        "challenger_count": len(chal_results),
-    }
-
-
-# ---------------------------------------------------------------------------
 # Unified モデル専用: Challenger 予測・昇格フロー
 # ---------------------------------------------------------------------------
 
