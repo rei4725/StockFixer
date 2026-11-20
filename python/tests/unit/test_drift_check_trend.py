@@ -1,11 +1,17 @@
 """results/drift_check の記録を日ごとに1行の表にする読み手のテスト（#2050）。"""
 
 import json
+import sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from src.orchestration.jobs.drift_record import DriftCheckRecord, write_drift_check_record
-from src.reporting.drift_check_trend import TREND_COLUMNS, load_drift_check_trend
+from src.reporting.drift_check_trend import (
+    TREND_COLUMNS,
+    format_drift_check_csv,
+    format_drift_check_markdown,
+    load_drift_check_trend,
+)
 
 
 def _write(tmp_path, day: int, n_triggered: int, retrain: int) -> None:
@@ -62,3 +68,42 @@ def test_missing_keys_are_empty_and_empty_dir_gives_empty_table(tmp_path):
 
     assert df.loc[0, "n_evaluated"] == 700
     assert df.loc[0, "retrain_success"] is None or df["retrain_success"].isna().all()
+
+
+def test_format_markdown_and_csv_write_null_for_missing(tmp_path):
+    """Markdown と CSV に出し、欠けは null、行が無ければ「データなし」になる。"""
+    assert format_drift_check_markdown(load_drift_check_trend(str(tmp_path))) == "データなし"
+    _write(tmp_path, 18, 34, 11)
+    (tmp_path / "2026-11-19.json").write_text(json.dumps({"n_evaluated": 700}), encoding="utf-8")
+    df = load_drift_check_trend(str(tmp_path))
+
+    lines = format_drift_check_markdown(df).splitlines()
+    assert lines[0] == "| " + " | ".join(TREND_COLUMNS) + " |"
+    assert len(lines) == 4
+    assert lines[2].startswith("| 2026-11-18 | 781 | 34 |")
+    assert lines[3].startswith("| 2026-11-19 | 700 | null |")
+
+    csv_lines = format_drift_check_csv(df).splitlines()
+    assert csv_lines[0] == ",".join(TREND_COLUMNS)
+    assert csv_lines[2].startswith("2026-11-19,700,null,")
+
+
+def test_cli_markdown_and_csv(tmp_path, monkeypatch, capsys):
+    """CLI は置き場の JSON を読み、Markdown を標準出力に、CSV を --output に出す。"""
+    import run_drift_check_trend as cli
+
+    _write(tmp_path, 17, 32, 17)
+    _write(tmp_path, 18, 34, 11)
+    monkeypatch.setattr(sys, "argv", ["run_drift_check_trend.py", "--dir", str(tmp_path)])
+    cli.main()
+    text = capsys.readouterr().out
+    assert "| 2026-11-17 |" in text and "| 2026-11-18 |" in text
+
+    out = tmp_path / "out.csv"
+    argv = ["run_drift_check_trend.py", "--dir", str(tmp_path), "--tail", "1"]
+    argv += ["--format", "csv", "--output", str(out)]
+    monkeypatch.setattr(sys, "argv", argv)
+    cli.main()
+    lines = out.read_text(encoding="utf-8").splitlines()
+    assert lines[0] == ",".join(TREND_COLUMNS)
+    assert len(lines) == 2 and lines[1].startswith("2026-11-18,")
