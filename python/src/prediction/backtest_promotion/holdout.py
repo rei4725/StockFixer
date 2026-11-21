@@ -33,10 +33,9 @@ from src.prediction.backtest_promotion.required_market import (
     required_market_constant_reason,
     required_market_reasons,
 )
+from src.prediction.base_bar_date import _base_bar_date
 from src.prediction.baseline_metrics import baseline_metrics
 from src.prediction.db import load_model_weights, load_prediction_accuracy
-from src.prediction.predict_unified import ensemble_diff_ratio, feature_row
-from src.prediction.prediction_pipeline import _base_bar_date
 from src.prediction.types import (
     UNIFIED_PREDICTION_MODEL_NAMES,
     EnsembleOutcome,
@@ -44,6 +43,7 @@ from src.prediction.types import (
     PredictionResult,
     WinDecision,
 )
+from src.prediction.unified_ensemble import ensemble_diff_ratio, feature_row
 from src.utils.db import get_all_symbols, get_target_dates, load_raw_ohlcv, load_stock_features
 from src.utils.logger import get_logger
 

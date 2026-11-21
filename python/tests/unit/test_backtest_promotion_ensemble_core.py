@@ -11,8 +11,9 @@ import pandas as pd
 import pytest
 
 from src.prediction import predict_unified
-from src.prediction.predict_unified import ensemble_diff_ratio, predict_with_unified_model
+from src.prediction.predict_unified import predict_with_unified_model
 from src.prediction.types import EnsembleOutcome
+from src.prediction.unified_ensemble import ensemble_diff_ratio
 
 
 def _features() -> pd.DataFrame:
