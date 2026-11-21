@@ -193,15 +193,16 @@ def _check_absolute(
                 )
             )
 
-    violations.extend(_check_same_direction(output_rows))
+    violations.extend(check_same_direction(output_rows))
     return violations
 
 
-def _check_same_direction(output_rows: Sequence[PredictionResult]) -> list[InvariantViolation]:
+def check_same_direction(output_rows: Sequence[PredictionResult]) -> list[InvariantViolation]:
     """A-4: 市場ごとに、上げか下げの片方の予想が大半を占めた形を見る。
 
     B-3 はばらつき 0 しか見ないため、値はばらつくが全銘柄が同じ向きの形
     （11-13 に上げ 99%）を見落とす。0 の予想はどちらの向きにも数えない。
+    challenger の影の予想の段も同じ線で見る（#2080）。
     """
     by_market: dict[str, list[float]] = {}
     for r in output_rows:
