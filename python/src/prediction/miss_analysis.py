@@ -10,8 +10,8 @@ from dataclasses import dataclass
 
 import pandas as pd
 
+from src.prediction.base_bar_date import _base_bar_date
 from src.prediction.db import load_shap_latest
-from src.prediction.prediction_pipeline import _base_bar_date
 from src.utils.db.stock_features import load_stock_features
 from src.utils.logger import get_logger
 
