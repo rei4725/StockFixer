@@ -66,7 +66,9 @@ def _ensure_columns(con: psycopg.Connection, df: pd.DataFrame) -> None:
                     f'ALTER TABLE stock_features ADD COLUMN IF NOT EXISTS "{col}" {sql_type}'
                 )
             except Exception:
-                logger.debug(f"カラム追加スキップ（既存）: {col}")
+                logger.warning(
+                    "stock_features の列の追加に失敗: %s %s", col, sql_type, exc_info=True
+                )
 
 
 def upsert_stock_features(market: str, symbol: str, df: pd.DataFrame) -> None:
