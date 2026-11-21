@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 
 from src.market_data import technical
-from src.prediction.predict_unified import resolve_expected_features
+from src.prediction.unified_ensemble import resolve_expected_features
 
 _SENTIMENT_PREFIXES = ("sentiment_", "news_count")
 
