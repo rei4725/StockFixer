@@ -22,7 +22,8 @@ from src.utils.japan_time import to_jst
 WAIT_NEXT_DAILY_RUN = "wait_next_daily_run"
 DAILY_RUN_WITHOUT_MARKER = "daily_run_without_marker"
 
-# 日次の道の時刻（run_scheduler.py の daily_pipeline の hour・minute と同じ）
+# 日次の道の時刻（run_scheduler.py の daily_pipeline の hour・minute と同じ）。
+# 揃っていることは tests/unit/test_daily_run_time_matches_schedule.py が確かめる（#2088）
 DAILY_RUN_TIME = time(7, 30)
 # 次の予定を探す日数の上限（年末年始の休場が続いても届く長さ）
 _MAX_LOOKAHEAD_DAYS = 31
