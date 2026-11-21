@@ -27,12 +27,7 @@ from src.prediction.prediction_run_stats import (
 )
 from src.prediction.remote_client import get_service_url, predict_via_service
 from src.prediction.types import PredictionResult
-from src.prediction.unified_ensemble import (  # noqa: F401 (re-export)
-    _run_ensemble,
-    ensemble_diff_ratio,
-    feature_row,
-    resolve_expected_features,
-)
+from src.prediction.unified_ensemble import _run_ensemble, feature_row
 from src.utils.data_path_utils import get_models_dir, get_ticker
 from src.utils.db import get_active_symbols, load_stock_features
 from src.utils.logger import get_logger

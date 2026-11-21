@@ -22,9 +22,9 @@ from src.prediction.backtest_promotion.holdout import (
     latest_holdout_dates,
 )
 from src.prediction.backtest_promotion.judge import PATH_CHECK_TOL
-from src.prediction.predict_unified import ensemble_diff_ratio as real_ensemble
-from src.prediction.predict_unified import feature_row
 from src.prediction.types import HoldoutEvaluation, PredictionResult
+from src.prediction.unified_ensemble import ensemble_diff_ratio as real_ensemble
+from src.prediction.unified_ensemble import feature_row
 
 NAMES = ["UnifiedStockXGBoost", "UnifiedStockLightGBM"]
 SYMBOLS = [("jp", "1111"), ("us", "AAA")]

@@ -24,9 +24,9 @@ from typing import Callable, Iterable
 
 import pandas as pd
 
+from src.prediction.base_bar_date import _base_bar_date
 from src.prediction.baseline_metrics import baseline_metrics
 from src.prediction.challenger_window import CHALLENGER_LABEL, filter_current_challenger
-from src.prediction.prediction_pipeline import _base_bar_date
 from src.utils.data_path_utils import ensure_dir, get_results_dir
 from src.utils.japan_time import isoformat_utc, now_jst
 from src.utils.logger import get_logger

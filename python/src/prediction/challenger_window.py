@@ -23,7 +23,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from src.prediction.prediction_pipeline import _base_bar_date
+from src.prediction.base_bar_date import _base_bar_date
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
