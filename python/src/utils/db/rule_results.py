@@ -90,7 +90,8 @@ def upsert_rule_best(
     from datetime import datetime, timezone
 
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-    with _db_connection() as con:
+    # 消すと書くを1つのトランザクションにし、INSERT が落ちたら前の行を残す（#2078）
+    with _db_connection() as con, con.transaction():
         con.execute(
             "DELETE FROM rule_best_by_symbol WHERE market = %s AND symbol = %s",
             [market, symbol],
@@ -303,7 +304,8 @@ def upsert_rule_signal(
     from datetime import datetime, timezone
 
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-    with _db_connection() as con:
+    # 消すと書くを1つのトランザクションにし、INSERT が落ちたら前の行を残す（#2078）
+    with _db_connection() as con, con.transaction():
         con.execute(
             "DELETE FROM rule_daily_signals WHERE signal_date = %s AND market = %s AND symbol = %s",
             [str(signal_date), market, symbol],
