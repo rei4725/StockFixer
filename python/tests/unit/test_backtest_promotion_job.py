@@ -10,6 +10,7 @@ import os
 from contextlib import ExitStack
 from datetime import datetime
 from unittest.mock import MagicMock, patch
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import pytest
@@ -289,9 +290,89 @@ def test_feature_code_change_still_waits_for_rebuild(env, monkeypatch):
     env["train"].assert_not_called()
 
 
-def test_stale_features_two_nights_warns_and_notifies(env, caplog):
+_JST = ZoneInfo("Asia/Tokyo")
+
+
+def _write_marker(version: str, written_at: datetime) -> None:
+    """特徴量の版の印を、書いた時刻を決めて置く（#2086）。"""
+    path = st._features_version_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"version": version, "written_at": written_at.isoformat()}), encoding="utf-8"
+    )
+
+
+def _night(monkeypatch, year: int, month: int, day: int) -> None:
+    """夜間のジョブの今を、その日の 22:00 JST にする。"""
+    monkeypatch.setattr(job, "now_jst", lambda: datetime(year, month, day, 22, 0, tzinfo=_JST))
+
+
+@pytest.fixture
+def stale_after_daily_run(env, monkeypatch):
+    """印が古いまま、印の後に平日の日次の道が走った状態（日次の道が印を書けなかった、#2086）。"""
+    _write_marker("oldcode00000", datetime(2026, 11, 16, 7, 39, tzinfo=_JST))
+    _night(monkeypatch, 2026, 11, 17)
+    return env
+
+
+def test_weekend_and_holiday_wait_for_next_daily_run_is_not_alerted(env, monkeypatch):
+    """金曜の朝に印を書き金曜の昼に特徴量のコードが変わった。週末と祝日の夜は (b) にしない（#2086）"""
+    monkeypatch.setattr(job, "features_code_version", lambda: "featnew00000", raising=False)
+    _write_marker("featold00000", datetime(2026, 11, 20, 7, 39, tzinfo=_JST))
+
+    # 金曜・土曜・日曜・月曜（勤労感謝の日）の夜
+    results = []
+    notices = []
+    for day in (20, 21, 22, 23):
+        _night(monkeypatch, 2026, 11, day)
+        results.append(job.run_backtest_promotion())
+        notices.append(env["stale"].call_count)
+    assert notices == [0, 0, 0, 0]
+    for result in results:
+        assert result["outcome"] == "skipped"
+        assert result["reason"] == "特徴量がまだ今のコードで作り直されていない"
+        assert result.get("stale_features_cause") == "wait_next_daily_run"
+        assert result.get("next_daily_run") == "2026-11-24T07:30:00+09:00"
+    assert st.load_state().stale_features_skips == 0
+    assert st.load_state().last_evaluated_version is None
+    env["train"].assert_not_called()
+
+
+def test_daily_run_without_marker_two_nights_alerts_as_failure(env, monkeypatch):
+    """週明けの日次の道が走ったのに印を書けない晩が2晩続くと (b) の知らせを出す（#2086）"""
+    monkeypatch.setattr(job, "features_code_version", lambda: "featnew00000", raising=False)
+    _write_marker("featold00000", datetime(2026, 11, 20, 7, 39, tzinfo=_JST))
+
+    _night(monkeypatch, 2026, 11, 24)
+    first = job.run_backtest_promotion()
+    assert first["stale_features_cause"] == "daily_run_without_marker"
+    assert first["stale_features_nights"] == 1
+    env["stale"].assert_not_called()
+
+    _night(monkeypatch, 2026, 11, 25)
+    second = job.run_backtest_promotion()
+    assert second["stale_features_cause"] == "daily_run_without_marker"
+    assert second["stale_features_nights"] == 2
+    env["stale"].assert_called_once()
+
+
+def test_wait_night_resets_failure_count(env, monkeypatch):
+    """印が書かれた後の待ちの夜は、前の (b) の晩の数を0に戻す（#2086）"""
+    st.save_state(BacktestPromotionState(stale_features_skips=1))
+    monkeypatch.setattr(job, "features_code_version", lambda: "featnew00000", raising=False)
+    _write_marker("featold00000", datetime(2026, 11, 20, 7, 39, tzinfo=_JST))
+    _night(monkeypatch, 2026, 11, 20)
+
+    result = job.run_backtest_promotion()
+
+    assert result["stale_features_cause"] == "wait_next_daily_run"
+    assert st.load_state().stale_features_skips == 0
+    env["stale"].assert_not_called()
+
+
+def test_stale_features_two_nights_warns_and_notifies(stale_after_daily_run, caplog):
     """特徴量の待ちで2晩続けて飛んだら WARNING と知らせを出す。1晩目は出さない（#2014）"""
-    st.save_features_version("oldcode00000")
+    env = stale_after_daily_run
 
     with caplog.at_level("WARNING"):
         first = job.run_backtest_promotion()
@@ -311,9 +392,8 @@ def test_stale_features_two_nights_warns_and_notifies(env, caplog):
     env["result"].assert_not_called()
 
 
-def test_stale_features_count_resets_after_features_catch_up(env):
+def test_stale_features_count_resets_after_features_catch_up(stale_after_daily_run):
     """印が今の版に追いついて比べた夜に、続けて飛んだ数を0に戻す（#2014）"""
-    st.save_features_version("oldcode00000")
     job.run_backtest_promotion()
     job.run_backtest_promotion()
     assert st.load_state().stale_features_skips == 2
@@ -325,8 +405,8 @@ def test_stale_features_count_resets_after_features_catch_up(env):
     assert st.load_state().stale_features_skips == 0
 
 
-def test_stale_features_notify_failure_does_not_fail_job(env):
-    st.save_features_version("oldcode00000")
+def test_stale_features_notify_failure_does_not_fail_job(stale_after_daily_run):
+    env = stale_after_daily_run
     env["stale"].side_effect = RuntimeError("discord down")
 
     job.run_backtest_promotion()
@@ -1188,6 +1268,8 @@ def test_stale_features_notice_shows_nights_and_versions():
     assert "featold00000" in values["🔖 特徴量の印"]
     assert "featnew00000" in values["🧩 今の特徴量の版"]
     assert "src/market_data" in values["📂 特徴量の版の範囲"]
+    # (b) の原因だけを故障として案内する（#2086）
+    assert "日次の道が走ったのに" in send.call_args.kwargs["description"]
 
 
 def test_watch_waiting_notice_shows_skipped_and_counted_days():

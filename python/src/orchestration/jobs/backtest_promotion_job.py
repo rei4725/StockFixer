@@ -20,6 +20,7 @@ from filelock import Timeout
 
 from src.orchestration.job_errors import NonRetryableJobError
 from src.orchestration.jobs.backtest_promotion_watch import _check_watch
+from src.orchestration.jobs.features_wait import WAIT_NEXT_DAILY_RUN, classify_features_wait
 from src.prediction.backtest_promotion import (
     CANDIDATE_NAMES,
     CODE_VERSION_SCOPE,
@@ -29,6 +30,7 @@ from src.prediction.backtest_promotion import (
     features_code_version,
     latest_holdout_dates,
     load_features_version,
+    load_features_written_at,
     load_state,
     prediction_code_version,
     restore_backups,
@@ -123,6 +125,8 @@ def _new_result(started: datetime, force: bool, dry_run: bool) -> dict:
         "features_code_version": None,
         "features_scope": list(FEATURES_CODE_SCOPE),
         "stale_features_nights": None,
+        "stale_features_cause": None,
+        "next_daily_run": None,
         "force": force,
         "dry_run": dry_run,
         "outcome": SKIPPED,
@@ -191,7 +195,13 @@ def _run_locked(result: dict, force: bool, dry_run: bool) -> None:
     result["features_code_version"] = features_code_version()
     if not force and result["features_version"] != result["features_code_version"]:
         _end(result, SKIPPED, STALE_FEATURES_REASON)
-        _count_stale_features(state, result)
+        wait = classify_features_wait(load_features_written_at(), now_jst())
+        result["stale_features_cause"] = wait.cause
+        result["next_daily_run"] = wait.next_daily_run.isoformat()
+        if wait.cause == WAIT_NEXT_DAILY_RUN:
+            _log_waiting_next_daily_run(state, result)
+        else:
+            _count_stale_features(state, result)
         return
     if state.stale_features_skips:
         state.stale_features_skips = 0
@@ -219,8 +229,26 @@ def _run_locked(result: dict, force: bool, dry_run: bool) -> None:
             _undo_swap(result)
 
 
+def _log_waiting_next_daily_run(state: BacktestPromotionState, result: dict) -> None:
+    """印の後に特徴量のコードが変わり、次の日次の道を待つだけの夜。INFO だけ残し晩に数えない。
+
+    印を書いた後に日次の道の時刻が来ていないので、前に数えた晩は続いていない（#2086）。
+    """
+    if state.stale_features_skips:
+        state.stale_features_skips = 0
+        save_state(state)
+    result["stale_features_nights"] = 0
+    logger.info(
+        "仮の入れ替えは特徴量の待ち: 印の後に特徴量のコードが変わり、次の日次の道 %s を待つ"
+        "（特徴量の印 %s・今の特徴量の版 %s）",
+        result["next_daily_run"],
+        result["features_version"],
+        result["features_code_version"],
+    )
+
+
 def _count_stale_features(state: BacktestPromotionState, result: dict) -> None:
-    """特徴量の待ちで飛んだ夜を数え、STALE_FEATURES_ALERT_NIGHTS 晩続いたら WARNING と知らせ。
+    """日次の道が走ったのに印を書けなかった夜を数え、線の晩に届いたら WARNING と知らせ。
 
     数えた夜は state.json に残す。知らせを送れなくてもジョブは落とさない（#2014）。
     """
@@ -232,7 +260,8 @@ def _count_stale_features(state: BacktestPromotionState, result: dict) -> None:
     if state.stale_features_skips < STALE_FEATURES_ALERT_NIGHTS:
         return
     logger.warning(
-        "仮の入れ替えが特徴量の待ちで %d 晩続けて飛んだ（特徴量の印 %s・今の特徴量の版 %s・予想の版 %s）",
+        "仮の入れ替えが特徴量の待ちで %d 晩続けて飛んだ。日次の道が走ったのに印を書けていない"
+        "（特徴量の印 %s・今の特徴量の版 %s・予想の版 %s）",
         state.stale_features_skips,
         result["features_version"],
         result["features_code_version"],
