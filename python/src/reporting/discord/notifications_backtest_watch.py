@@ -61,9 +61,12 @@ def send_backtest_promotion_stale_features(result: dict) -> bool:
         _field("🧩 今の特徴量の版", f"`{result.get('features_code_version') or '-'}`", True),
         _field("📦 予想の版", f"`{result.get('version') or '-'}`", True),
         _field("📂 特徴量の版の範囲", ", ".join(result.get("features_scope") or [])),
+        _field("⏰ 次の日次の道", result.get("next_daily_run") or "-", True),
     ]
+    # 印の後に日次の道の時刻を過ぎた夜だけを数えるので、この知らせは (b) の原因だけを指す（#2086）
     description = (
-        "朝の日次の道が特徴量の版の印を今の版で書けていない。"
+        "日次の道が走ったのに、特徴量の版の印を今の版で書けていない"
+        "（印の後のコードの変更で次の日次の道を待つだけの夜は数えていない）。"
         "[1/6] のデータ取得が止まっていないか、作れなかった銘柄が線を超えていないかを確かめる。"
     )
     return send_status_fields(BACKTEST_PROMOTION_STALE_FEATURES, fields, description=description)

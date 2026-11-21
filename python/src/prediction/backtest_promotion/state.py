@@ -15,6 +15,7 @@ import re
 import shutil
 import tempfile
 from dataclasses import asdict
+from datetime import datetime
 from pathlib import Path
 
 from filelock import FileLock
@@ -134,6 +135,21 @@ def load_features_version() -> str | None:
         data = json.load(f)
     version = data.get("version") if isinstance(data, dict) else None
     return None if version is None else str(version)
+
+
+def load_features_written_at() -> datetime | None:
+    """特徴量の版の印を書いた時刻。印が無い・時刻が読めなければ None（#2086）。"""
+    path = _features_version_path()
+    if not path.exists():
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        written_at = data.get("written_at") if isinstance(data, dict) else None
+        return None if written_at is None else datetime.fromisoformat(str(written_at))
+    except (OSError, ValueError):
+        logger.error("特徴量の版の印の時刻を読めなかった", exc_info=True)
+        return None
 
 
 # ---------------------------------------------------------------------------
