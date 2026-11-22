@@ -37,19 +37,5 @@ class TestExceptionHierarchy(unittest.TestCase):
         self.assertEqual(str(err), "optimal_params.json バリデーション失敗")
 
 
-class TestRiskErrorReexport(unittest.TestCase):
-    """risk_manager モジュール経由でも RiskError が取得できること（後方互換）"""
-
-    def test_risk_error_importable_from_risk_manager(self):
-        from src.trading.risk_manager import RiskError as RiskErrorFromManager
-
-        self.assertIs(RiskErrorFromManager, RiskError)
-
-    def test_risk_error_is_same_class(self):
-        from src.trading.risk_manager import RiskError as RiskErrorFromManager
-
-        self.assertTrue(issubclass(RiskErrorFromManager, StockFixerError))
-
-
 if __name__ == "__main__":
     unittest.main()

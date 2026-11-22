@@ -22,17 +22,15 @@ from config.settings import (
     MAX_POSITION_RATE,
     MAX_POSITIONS,
 )
-from config.trading_policy import (  # noqa: F401  # R-307/R-219 でポジションキャップ・DD制御に使用予定
+from config.trading_policy import (
     DEFAULT_AVG_LOSS,
     DEFAULT_AVG_WIN,
     DEFAULT_WIN_RATE,
-    HIGH_CONFIDENCE_POSITION_CAP,
     KELLY_REGIME_MULTIPLIERS,
     MAX_ACCEPTABLE_DRAWDOWN,
     VIX_POSITION_SCALE,
     VIX_SPIKE_THRESHOLD,
 )
-from src.domain.exceptions import RiskError  # noqa: F401  # 後方互換のため re-export
 from src.domain.trading_rules import get_lot_size
 from src.trading.brokers.base import BrokerBase, OrderSide
 from src.trading.consecutive_losses import count_leading_losses, recent_paper_closed_pnls
