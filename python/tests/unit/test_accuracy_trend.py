@@ -145,9 +145,10 @@ def _magnitude(section, pred, actual, std):
 def test_magnitude_metrics_after_legacy_columns(accuracy_dir):
     df = build_accuracy_trend(load_accuracy_reports(str(accuracy_dir)))
 
-    # 既存の5つの物差しと n_scored の列の順は変えず、3つは後ろに足す
-    assert list(df.columns) == _LEGACY_COLUMNS + list(_MAGNITUDE_METRICS)
-    assert tuple(TREND_METRICS[-3:]) == _MAGNITUDE_METRICS
+    # 既存の5つの物差しと n_scored の列の順は変えず、大きさの3つはその後ろに並ぶ
+    legacy_and_magnitude = _LEGACY_COLUMNS + list(_MAGNITUDE_METRICS)
+    assert list(df.columns[: len(legacy_and_magnitude)]) == legacy_and_magnitude
+    assert tuple(TREND_METRICS[5:8]) == _MAGNITUDE_METRICS
 
 
 def test_magnitude_metrics_values_and_moving_average(tmp_path):
@@ -203,6 +204,117 @@ def test_magnitude_metrics_values_and_moving_average(tmp_path):
     chal = df[df["model"] == "challenger"].iloc[0]
     assert chal["mean_abs_predicted_ratio_ma2"] == pytest.approx(0.0067)
     assert chal["prediction_std_ma2"] == pytest.approx(0.0020)
+
+
+_RANK_METRICS = ("actual_up_rate", "abs_rank_corr", "daily_rank_corr")
+
+
+def _rank(section, up, abs_corr, daily_corr):
+    section = dict(section)
+    section["actual_up_rate"] = up
+    section["abs_rank_corr"] = abs_corr
+    section["daily_rank_corr"] = daily_corr
+    return section
+
+
+def _rank_dir(tmp_path):
+    # 11-15 は鍵の無い古い日、11-16 と 11-17 は鍵のある日（#2102）
+    old = _section(0.6, 0.5, 0.1, 0.2, 0.5)
+    old["four_week"] = _four_week(100, 0.5, 0.0, 18)
+    _write(tmp_path, "2026-11-15", {"production": {"1": old}})
+    jp = _rank(_section(0.6, 0.5, 0.1, 0.2, 0.7), 0.30, 0.11, 0.0242)
+    first = _rank(_section(0.5, 0.5, 0.0, 0.1, 0.8, {"jp": jp}), 0.248, 0.05, 0.0040)
+    first["four_week"] = _rank(
+        _four_week(
+            200,
+            0.51,
+            0.01,
+            19,
+            {"jp": _rank(_four_week(120, 0.52, 0.02, None), 0.40, 0.09, 0.0242)},
+        ),
+        0.45,
+        0.07,
+        0.0170,
+    )
+    chal = _rank(_section(0.4, 0.5, -0.1, 0.0, 0.9), 0.248, 0.02, -0.0007)
+    _write(tmp_path, "2026-11-16", {"production": {"1": first}, "challenger": {"1": chal}})
+    second = _rank(_section(0.7, 0.6, 0.1, 0.3, 0.6), 0.60, 0.03, 0.0100)
+    _write(tmp_path, "2026-11-17", {"production": {"1": second}})
+    return tmp_path
+
+
+def test_rank_metrics_after_existing_columns():
+    # 既存の8つの物差しは先頭にそのまま並び、3つはその後ろに足す（#2102）
+    assert TREND_METRICS[:5] == tuple(_LEGACY_COLUMNS[5:])
+    assert TREND_METRICS[5:8] == _MAGNITUDE_METRICS
+    assert TREND_METRICS[8:] == _RANK_METRICS
+
+
+def test_rank_metrics_values_and_moving_average(tmp_path):
+    df = load_accuracy_trend(str(_rank_dir(tmp_path)), window=2)
+    prod = df[(df["model"] == "production") & (df["market"] == "ALL")].reset_index(drop=True)
+
+    assert list(prod["date"]) == ["2026-11-15", "2026-11-16", "2026-11-17"]
+    for metric in _RANK_METRICS:
+        assert pd.isna(prod.loc[0, metric])
+        assert pd.isna(prod.loc[0, f"{metric}_ma2"])
+    assert list(prod["actual_up_rate"][1:]) == pytest.approx([0.248, 0.60])
+    assert list(prod["abs_rank_corr"][1:]) == pytest.approx([0.05, 0.03])
+    assert list(prod["daily_rank_corr"][1:]) == pytest.approx([0.0040, 0.0100])
+    # 鍵の無い日は移動平均から外す
+    assert list(prod["actual_up_rate_ma2"][1:]) == pytest.approx([0.248, 0.424])
+    assert list(prod["abs_rank_corr_ma2"][1:]) == pytest.approx([0.05, 0.04])
+    assert list(prod["daily_rank_corr_ma2"][1:]) == pytest.approx([0.0040, 0.0070])
+    # 既存の物差しの値は変わらない
+    assert list(prod["direction_accuracy"]) == pytest.approx([0.6, 0.5, 0.7])
+    assert list(prod["rank_corr_ma2"]) == pytest.approx([0.2, 0.15, 0.2])
+
+    jp_row = df[(df["model"] == "production") & (df["market"] == "jp")].iloc[0]
+    assert jp_row["actual_up_rate"] == pytest.approx(0.30)
+    assert jp_row["abs_rank_corr"] == pytest.approx(0.11)
+    assert jp_row["daily_rank_corr"] == pytest.approx(0.0242)
+    chal_row = df[df["model"] == "challenger"].iloc[0]
+    assert chal_row["daily_rank_corr"] == pytest.approx(-0.0007)
+    assert chal_row["daily_rank_corr_ma2"] == pytest.approx(-0.0007)
+
+
+def test_rank_metrics_keep_existing_columns(tmp_path):
+    # 同じ JSON で、既存の列と値は3つの鍵の有無で変わらない
+    base = _section(0.5, 0.5, 0.0, 0.1, 0.8, {"jp": _section(0.6, 0.5, 0.1, 0.2, 0.7)})
+    plain_dir = tmp_path / "plain"
+    rank_dir = tmp_path / "rank"
+    plain_dir.mkdir()
+    rank_dir.mkdir()
+    _write(plain_dir, "2026-11-16", {"production": {"1": base}})
+    _write(rank_dir, "2026-11-16", {"production": {"1": _rank(base, 0.3, 0.1, 0.01)}})
+
+    existing = _LEGACY_COLUMNS + list(_MAGNITUDE_METRICS)
+    plain = load_accuracy_trend(str(plain_dir), window=2)
+    ranked = load_accuracy_trend(str(rank_dir), window=2)
+    assert list(ranked.columns[: len(existing)]) == existing
+    pd.testing.assert_frame_equal(plain[existing], ranked[existing])
+
+
+def test_four_week_rank_metrics(tmp_path):
+    from src.reporting.accuracy_trend import FOUR_WEEK_METRICS, build_four_week_trend
+
+    df = build_four_week_trend(load_accuracy_reports(str(_rank_dir(tmp_path))))
+
+    for metric in _RANK_METRICS:
+        assert metric in FOUR_WEEK_METRICS
+    prod = df[df["model"] == "production"]
+    old = prod[(prod["date"] == "2026-11-15") & (prod["market"] == "ALL")].iloc[0]
+    for metric in _RANK_METRICS:
+        assert pd.isna(old[metric])
+    assert old["n_days"] == 18.0
+    row = prod[(prod["date"] == "2026-11-16") & (prod["market"] == "ALL")].iloc[0]
+    assert row["actual_up_rate"] == pytest.approx(0.45)
+    assert row["abs_rank_corr"] == pytest.approx(0.07)
+    assert row["daily_rank_corr"] == pytest.approx(0.0170)
+    assert row["n_days"] == 19.0
+    jp_row = prod[(prod["date"] == "2026-11-16") & (prod["market"] == "jp")].iloc[0]
+    assert jp_row["daily_rank_corr"] == pytest.approx(0.0242)
+    assert jp_row["actual_up_rate"] == pytest.approx(0.40)
 
 
 def test_missing_dir_and_empty(tmp_path):

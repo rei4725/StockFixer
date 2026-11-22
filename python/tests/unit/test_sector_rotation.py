@@ -17,7 +17,7 @@ class TestGetRegimeSectorWeight(unittest.TestCase):
     """get_regime_sector_weight のテスト"""
 
     def setUp(self):
-        from src.trading.signal_generator import get_regime_sector_weight
+        from src.domain.regime_weights import get_regime_sector_weight
 
         self.fn = get_regime_sector_weight
 
@@ -60,26 +60,26 @@ class TestRegimeSectorWeightsConstants(unittest.TestCase):
     """REGIME_SECTOR_WEIGHTS 定数のテスト"""
 
     def test_bull_and_bear_keys_exist(self):
-        from src.trading.signal_generator import REGIME_SECTOR_WEIGHTS
+        from src.domain.regime_weights import REGIME_SECTOR_WEIGHTS
 
         self.assertIn("bull", REGIME_SECTOR_WEIGHTS)
         self.assertIn("bear", REGIME_SECTOR_WEIGHTS)
         self.assertIn("range", REGIME_SECTOR_WEIGHTS)
 
     def test_bull_has_momentum_sectors(self):
-        from src.trading.signal_generator import REGIME_SECTOR_WEIGHTS
+        from src.domain.regime_weights import REGIME_SECTOR_WEIGHTS
 
         self.assertIn("Technology", REGIME_SECTOR_WEIGHTS["bull"])
         self.assertIn("Consumer Cyclical", REGIME_SECTOR_WEIGHTS["bull"])
 
     def test_bear_has_defensive_sectors(self):
-        from src.trading.signal_generator import REGIME_SECTOR_WEIGHTS
+        from src.domain.regime_weights import REGIME_SECTOR_WEIGHTS
 
         self.assertIn("Healthcare", REGIME_SECTOR_WEIGHTS["bear"])
         self.assertIn("Utilities", REGIME_SECTOR_WEIGHTS["bear"])
 
     def test_range_is_empty_dict(self):
-        from src.trading.signal_generator import REGIME_SECTOR_WEIGHTS
+        from src.domain.regime_weights import REGIME_SECTOR_WEIGHTS
 
         self.assertEqual(REGIME_SECTOR_WEIGHTS["range"], {})
 
