@@ -11,7 +11,7 @@ kabu STATION® API が利用できない環境（APIキー未取得・テスト�
 
 import math
 import uuid
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
 import pandas as pd
@@ -21,8 +21,10 @@ from src.domain.ports import MarketDataPort, TradeDiffSink
 from src.domain.types import TradeDiffRecord
 from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
 from src.trading.brokers.paper import split_adjust as sa
+from src.trading.brokers.paper.bar_timing import bar_closed as _bar_closed
 from src.trading.brokers.paper.bar_timing import bar_date_jst as _bar_date_jst
 from src.trading.brokers.paper.bar_timing import created_after_bar_close as _created_after_bar_close
+from src.trading.brokers.paper.bar_timing import held_limit_bar_position as _held_limit_bar_position
 from src.trading.brokers.paper.bar_timing import parse_predicted_date as _parse_predicted_date
 from src.trading.brokers.paper.fill import apply_fill
 from src.trading.brokers.paper.fill import claim_pending as _claim_pending
@@ -53,6 +55,11 @@ _PRICE_MAX_AGE_DAYS = 7
 def _today_jst() -> date:
     """約定のジョブを回した日（JST）。テストで差し替える"""
     return now_jst().date()
+
+
+def _now_jst() -> datetime:
+    """約定のジョブを回した時刻（JST、tz つき）。足が引けたかの判定に使う。テストで差し替える"""
+    return now_jst()
 
 
 class PaperBroker(BrokerBase):
@@ -213,7 +220,20 @@ class PaperBroker(BrokerBase):
                 # 据え置いて次回リトライさせる（当日の値を見ていないので指値の失効も判断しない）。
                 signal_date = _parse_predicted_date(predicted_at)
                 bar_date = _bar_date_jst(hist.index[-1])
-                if signal_date is not None and bar_date <= signal_date:
+                today = _today_jst()
+                is_limit = order_type_val != int(OrderType.MARKET)
+                # 場中の足で据え置いた指値は、次の回で前の日の引けた足で判定する（#2108）
+                held_pos = None
+                if is_limit and market != "us":
+                    held_pos = _held_limit_bar_position(
+                        hist, signal_date, created_at, today, _now_jst()
+                    )
+                if held_pos is not None:
+                    bar_date = _bar_date_jst(hist.index[held_pos])
+                    logger.info(
+                        f"[paper] {symbol}: 据え置いた指値を引けた足（足={bar_date}）で判定する"
+                    )
+                elif signal_date is not None and bar_date <= signal_date:
                     logger.warning(
                         f"[paper] {symbol}: 当日の行が未取得（最後の行={bar_date} "
                         f"シグナル日={signal_date}）のため約定スキップ（pending 据え置き）"
@@ -221,8 +241,7 @@ class PaperBroker(BrokerBase):
                     continue
                 # predicted_at を持たない注文（SL/TP・ルール・期限の手じまい）と、何日か据え置かれた
                 # 注文も、今日（JST）の行でだけ約定させる。東証の休みの日は最後の行が前の営業日になる（#805）
-                today = _today_jst()
-                if bar_date < today:
+                elif bar_date < today:
                     logger.warning(
                         f"[paper] {symbol}: 今日の行が未取得（最後の行={bar_date} "
                         f"今日={today}）のため約定スキップ（pending 据え置き）"
@@ -230,14 +249,14 @@ class PaperBroker(BrokerBase):
                     continue
                 # 引けの後に出た注文（遅れた 9:05 の約定が 16:30 のルールの発注の後に走ったときなど）を、
                 # 注文より前の始値で約定させない。翌営業日の足で約定させる。us は東証の引けで区切らない
-                if market != "us" and _created_after_bar_close(created_at, bar_date):
+                elif market != "us" and _created_after_bar_close(created_at, bar_date):
                     logger.warning(
                         f"[paper] {symbol}: 注文が足の日の引けの後（created_at={created_at}、"
                         f"足={bar_date}）のため約定スキップ（pending 据え置き）"
                     )
                     continue
 
-                today_row = hist.iloc[-1]
+                today_row = hist.iloc[-1 if held_pos is None else held_pos]
                 open_price = float(today_row["Open"])
                 high_price = float(today_row["High"])
                 low_price = float(today_row["Low"])
@@ -268,6 +287,13 @@ class PaperBroker(BrokerBase):
                         fill_price = max(limit_price, open_price)
                     elif side == int(OrderSide.SHORT_COVER) and low_price <= limit_price:
                         fill_price = min(limit_price, open_price)
+                    elif market != "us" and not _bar_closed(bar_date, _now_jst()):
+                        # 場中の足は寄りから数分の値動きしか持たない。引けた足で判定する（#2108）
+                        logger.info(
+                            f"[paper] {symbol}: 指値未達（場中の足={bar_date}）、"
+                            "引けた足で判定するため pending 据え置き"
+                        )
+                        continue
                     else:
                         logger.info(f"[paper] {symbol}: 指値未達、失効")
                         with _db_connection() as con, con.transaction():
