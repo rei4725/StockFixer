@@ -64,6 +64,47 @@ def get_last_daily_check_at() -> Optional[datetime]:
     return executed_at
 
 
+def load_regime_leverage_log(
+    since: Optional[datetime] = None,
+) -> list[RegimeLeverageSnapshot]:
+    """regime_leverage_log の行を id の順に返す（読むだけ。#2094）。
+
+    since を渡すと executed_at がそれ以後の行だけを返す。
+    """
+    sql = """
+        SELECT id, executed_at, action, reason, spy_price_usd, usdjpy_rate, shares,
+               entry_date, entry_price_jpy, entry_commission_jpy, equity_at_entry_jpy,
+               stop_price_jpy, equity_now_jpy, maintenance_ratio
+        FROM regime_leverage_log
+        """
+    params: list[object] = []
+    if since is not None:
+        sql += " WHERE executed_at >= %s"
+        params.append(since)
+    sql += " ORDER BY id"
+    with _db_connection() as con:
+        rows = con.execute(sql, params).fetchall()
+    return [
+        RegimeLeverageSnapshot(
+            id=r[0],
+            executed_at=r[1],
+            action=r[2],
+            reason=r[3],
+            spy_price_usd=r[4],
+            usdjpy_rate=r[5],
+            shares=r[6],
+            entry_date=r[7],
+            entry_price_jpy=r[8],
+            entry_commission_jpy=r[9],
+            equity_at_entry_jpy=r[10],
+            stop_price_jpy=r[11],
+            equity_now_jpy=r[12],
+            maintenance_ratio=r[13],
+        )
+        for r in rows
+    ]
+
+
 def insert_snapshot(decision: RegimeLeverageDecision) -> None:
     """新しい状態行を追記する。"""
     with _db_connection() as con:
