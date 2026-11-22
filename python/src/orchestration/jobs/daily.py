@@ -22,6 +22,10 @@ from src.orchestration.jobs.alerting import (
     evaluate_output_invariants_stage,
     fetch_previous_run_stats,
 )
+from src.orchestration.jobs.auto_order_notify import (
+    notify_auto_order_completion,
+    notify_correlation_blocked,
+)
 from src.orchestration.jobs.challenger_shadow import run_challenger_shadow_stage
 from src.orchestration.jobs.common import (
     _handle_stage_error,
@@ -334,42 +338,9 @@ def run_daily_auto_order():
         raise
     record_loss_limit_streak(stats)  # NF-303-2 の連続回数（#934）
 
-    # Discord 完了通知
-    try:
-        from src.orchestration.jobs.trade_lines import order_trade_lines
-        from src.reporting.discord.discord_utils import send_daily_order_completion
-
-        send_daily_order_completion(
-            buy_orders=stats["buy_orders"],
-            sell_orders=stats["sell_orders"],
-            mode=mode,
-            trading_stopped=stats.get("trading_stopped", False),
-            stop_reason=stats.get("stop_reason"),
-            daily_loss=stats.get("daily_loss"),
-            daily_loss_limit=stats.get("daily_loss_limit"),
-            errors=stats.get("errors", 0),
-            sl_tp_unevaluable_symbols=stats.get("sl_tp_unevaluable_symbols"),
-            details=order_trade_lines(stats),
-        )
-    except Exception as e:
-        logger.error("自動発注完了通知失敗: %s", e, exc_info=True)
+    notify_auto_order_completion(stats, mode)  # Discord 完了通知
     notify_stale_prediction(stats)
-
-    # 相関リスク警告通知
-    if stats.get("correlation_blocked"):
-        try:
-            from config.settings import CORRELATION_ENC_THRESHOLD
-            from src.reporting.discord.discord_utils import send_correlation_alert
-
-            send_correlation_alert(
-                enc=stats.get("enc", 0.0),
-                enc_threshold=CORRELATION_ENC_THRESHOLD,
-                avg_correlation=stats.get("avg_correlation", 0.0),
-                n_symbols=stats.get("n_held_symbols", 0),
-                symbols=stats.get("held_symbols_list", []),
-            )
-        except Exception as e:
-            logger.error("相関リスク警告通知失敗: %s", e, exc_info=True)
+    notify_correlation_blocked(stats)  # 相関リスク警告通知
 
     if horizon_exit_error is not None:
         raise horizon_exit_error
