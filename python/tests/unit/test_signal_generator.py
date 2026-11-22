@@ -6,7 +6,7 @@ import unittest.mock
 import numpy as np
 import pandas as pd
 
-import src.trading.signal_generator as signal_generator_module
+import src.utils.signal_generator as signal_generator_module
 from src.trading.signal_generator import (
     apply_multi_horizon_score_column,
     compute_multi_horizon_score,
