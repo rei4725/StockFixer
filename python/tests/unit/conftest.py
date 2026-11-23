@@ -346,6 +346,25 @@ def _isolate_results_dir(monkeypatch, tmp_path_factory):
     monkeypatch.setenv("STOCKFIXER_RESULTS_DIR", str(results_dir))
 
 
+# ============================================
+# モデルの置き場を一時フォルダへ（unit テスト全体に適用）
+# ============================================
+
+
+@pytest.fixture(autouse=True)
+def _isolate_models_dir(monkeypatch, tmp_path_factory):
+    """get_models_dir() をテストごとの空の一時フォルダに向ける（#2133）。
+
+    自動デプロイはホストの checkout で unit テストを流し、そこの models/ は本番の
+    モデルそのものである。本番の入れ替えでテストが落ちず、テストの保存が本番の
+    モデルを上書きしないよう、models/ を読み書きする道を全部ここへ逃がす。
+    """
+    # テスト自身の tmp_path の中身を数えるテストがあるので、別の一時フォルダに置く
+    models_dir = tmp_path_factory.mktemp("models_root") / "models"
+    models_dir.mkdir()
+    monkeypatch.setenv("STOCKFIXER_MODELS_DIR", str(models_dir))
+
+
 @pytest.fixture(autouse=True)
 def _stub_scoring_stages(monkeypatch):
     """日次・週次の道に足した採点の段（DB と results/ を触る）を、道のテストで空にする。
