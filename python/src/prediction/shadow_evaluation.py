@@ -31,6 +31,7 @@ import pandas as pd
 from src.prediction.baseline_metrics import baseline_metrics
 from src.prediction.challenger_window import (
     CHALLENGER_LABEL,
+    _day_series,
     filter_comparable_challenger,
     filter_to_days,
 )
@@ -45,8 +46,10 @@ logger = get_logger(__name__)
 DEFAULT_EVALUATION_DAYS = 20
 
 # 勝ちの条件の版。週の記録に書き、物差しを変えた前後の週を見分ける（#1985）。
-# 前の版 "hit_rate_and_sharpe_better" は、Hit Rate と Sharpe の両方で上回れば勝ちだった
-SHADOW_WIN_RULE = "daily_rank_corr_better_hit_sharpe_not_worse"
+# 前の版 "hit_rate_and_sharpe_better" は、Hit Rate と Sharpe の両方で上回れば勝ちだった。
+# 次の版 "daily_rank_corr_better_hit_sharpe_not_worse" は、順位相関を市場と取引日でなく
+# 予想の回（predicted_at）ごとに束ねていた（#2072）
+SHADOW_WIN_RULE = "market_day_rank_corr_better_hit_sharpe_not_worse"
 # 銘柄が1つの比べ（symbol を絞った評価など）は順位相関を測れないので、前の条件で決める
 SINGLE_SYMBOL_WIN_RULE = "hit_rate_and_sharpe_better"
 
@@ -115,6 +118,20 @@ def _single_symbol(*frames: pd.DataFrame) -> bool:
     return True
 
 
+def _with_market_day(df: pd.DataFrame) -> pd.DataFrame:
+    """日ごとの物差しの束ねの鍵（市場と取引日）を date の列に付けた写しを返す（#2072）。
+
+    1回の予想は jp と us を同じ predicted_at で書くので、回の時刻で束ねると市場の間の水準の差を
+    銘柄の並べの腕と取り違える。取引日の決め方は影の比べの窓（challenger_window）と同じ。
+    """
+    if df.empty or "predicted_at" not in df.columns:
+        return df
+    days = _day_series(df)
+    if "market" in df.columns:
+        days = df["market"].astype(str) + ":" + days
+    return df.assign(date=days)
+
+
 # ---------------------------------------------------------------------------
 # 評価メイン関数
 # ---------------------------------------------------------------------------
@@ -152,11 +169,11 @@ def evaluate_shadow_models(
             production_sharpe: float | None
             challenger_hit_rate: float | None
             challenger_sharpe: float | None
-            production_daily_rank_corr: float | None  # 同じ日の銘柄の間の順位相関の平均
+            production_daily_rank_corr: float | None  # 同じ市場・取引日の銘柄の間の順位相関の平均
             challenger_daily_rank_corr: float | None
             win_rule: str  # 勝ちの条件の版（SHADOW_WIN_RULE）
             challenger_wins: bool  # True = challenger 切り替え推奨
-            challenger_prediction_std: float | None  # 同じ日の銘柄の間の予想の標準偏差（#1602）
+            challenger_prediction_std: float | None  # 同じ市場・取引日の予想の標準偏差（#1602）
             challenger_constant: bool  # True = 全銘柄がほぼ同じ値。指標によらず勝ちにしない
             evaluated_at: str
             n_production: int
@@ -216,8 +233,8 @@ def evaluate_shadow_models(
     chal_hit = _compute_hit_rate(df_chal)
     chal_sharpe = _compute_sharpe(df_chal)
 
-    chal_base = baseline_metrics(df_chal)
-    prod_base = baseline_metrics(df_prod)
+    chal_base = baseline_metrics(_with_market_day(df_chal))
+    prod_base = baseline_metrics(_with_market_day(df_prod))
     prod_rank_corr = prod_base["daily_rank_corr"]
     chal_rank_corr = chal_base["daily_rank_corr"]
     win_rule = SINGLE_SYMBOL_WIN_RULE if _single_symbol(df_prod, df_chal) else SHADOW_WIN_RULE
