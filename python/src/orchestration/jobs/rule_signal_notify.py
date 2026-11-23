@@ -21,6 +21,7 @@ def notify_rule_signals(signals: list, market: str, trade_stats: dict, total: in
             sell_orders=trade_stats["sell_orders"],
             total=total,
             track_record=load_rule_track_record(market),
+            skip_reasons=trade_stats.get("skip_reasons"),
         )
     except Exception as e:
         logger.error("ルールシグナル通知失敗: %s", e, exc_info=True)

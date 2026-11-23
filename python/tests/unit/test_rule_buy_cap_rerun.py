@@ -153,7 +153,13 @@ class TestDailyRuleBuyCapOnRerun:
 
         result, skip_reasons = _run(self._broker(), signals)
 
-        assert result == {"buy_orders": 0, "sell_orders": 1, "skipped": 6, "errors": 0}
+        assert result == {
+            "buy_orders": 0,
+            "sell_orders": 1,
+            "skipped": 6,
+            "errors": 0,
+            "skip_reasons": {"already_held": 5, "max_orders_per_run": 1},
+        }
         assert skip_reasons["max_orders_per_run"] == 1
 
     @pytest.mark.parametrize(

@@ -37,6 +37,15 @@ def _rule_signal_line(signal: dict, market: str, direction: str, track_record: d
     )
 
 
+def _skip_reasons_line(skip_reasons: Optional[dict[str, int]]) -> str:
+    """no_signal を除いた発注しなかった理由を、数の多い順の1行にする。無ければ空の字。"""
+    items = [(k, n) for k, n in (skip_reasons or {}).items() if k != "no_signal" and n > 0]
+    if not items:
+        return ""
+    items.sort(key=lambda kv: -kv[1])
+    return "発注しなかった: " + " / ".join(f"{k}={n}" for k, n in items)
+
+
 def send_rule_daily_signals(
     signals: list[dict],
     market: str,
@@ -44,10 +53,12 @@ def send_rule_daily_signals(
     sell_orders: int,
     total: int,
     track_record: Optional[dict] = None,
+    skip_reasons: Optional[dict[str, int]] = None,
 ) -> bool:
     """ルールベース日次シグナル通知を Discord に送信する。total は対象の銘柄数（#1571）。
 
     track_record はルールごとの実績（load_rule_track_record の返り値）。
+    skip_reasons は発注しなかった理由ごとの数（execute_rule_paper_trades の返り値。#2114）。
     """
     track_record = track_record or {}
     now = format_jst(fmt="%Y/%m/%d %H:%M JST")
@@ -58,8 +69,11 @@ def send_rule_daily_signals(
         f"**[ルールシグナル] {now}  ({market})**",
         f"BUY候補: {len(buy_signals)}銘柄  |  SELL候補: {len(sell_signals)}銘柄",
         f"ペーパー発注: BUY={buy_orders}  SELL={sell_orders}",
-        "",
     ]
+    skip_line = _skip_reasons_line(skip_reasons)
+    if skip_line:
+        lines.append(skip_line)
+    lines.append("")
 
     if buy_signals:
         lines.append("**BUY シグナル:**")
