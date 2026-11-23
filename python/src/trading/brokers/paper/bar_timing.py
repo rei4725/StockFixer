@@ -51,3 +51,43 @@ def created_after_bar_close(created_at: Any, bar_date: date) -> bool:
         ts = ts.tz_localize("UTC")
     created_jst = ts.tz_convert(_JST)
     return created_jst.date() == bar_date and created_jst.time() >= _JP_CLOSE
+
+
+def _created_date_jst(created_at: Any) -> date:
+    ts = pd.Timestamp(created_at)
+    if ts.tzinfo is None:
+        ts = ts.tz_localize("UTC")
+    return ts.tz_convert(_JST).date()
+
+
+def bar_closed(bar_date: date, now: datetime) -> bool:
+    """足の日の東証の引け（15:30 JST）を now（tz つき）が過ぎ、足が1日の値動きを持つか（#2108）"""
+    close_at = pd.Timestamp(datetime.combine(bar_date, _JP_CLOSE)).tz_localize(_JST)
+    return pd.Timestamp(now) >= close_at
+
+
+def held_limit_bar_position(
+    hist: pd.DataFrame,
+    signal_date: date | None,
+    created_at: Any,
+    today: date,
+    now: datetime,
+) -> int | None:
+    """場中の足で据え置いた指値を判定する、今日より前の引けた足の位置（#2108）
+
+    注文が有効な日（シグナルの日より後・注文を出した日以後・注文が引けの後に出ていない）の
+    うち最も早い足が、今日より前で引けていればその位置を返す。無ければ None（今日の行で判定する）。
+    """
+    if created_at is None:
+        return None
+    created_date = _created_date_jst(created_at)
+    for pos in range(len(hist)):
+        day = bar_date_jst(hist.index[pos])
+        if signal_date is not None and day <= signal_date:
+            continue
+        if day < created_date or created_after_bar_close(created_at, day):
+            continue
+        if day < today and bar_closed(day, now):
+            return pos
+        return None
+    return None
