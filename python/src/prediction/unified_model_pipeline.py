@@ -7,6 +7,7 @@
 import os
 from typing import Optional, Tuple
 
+import numpy as np
 import pandas as pd
 
 from config.settings import DAILY_FETCH_MAX_UNAVAILABLE_RATIO, EARNINGS_MASK_WINDOW_DAYS
@@ -15,6 +16,7 @@ from src.prediction.constant_prediction import check_unified_training
 from src.prediction.db import load_excluded_features
 from src.prediction.ports import get_market_data_port
 from src.prediction.unified_feature_selection import _compute_and_save_unified_feature_selection
+from src.prediction.unified_frame import rows_without_nan, select_rows_and_columns
 from src.prediction.unified_split import is_trial_model as _is_trial_model
 from src.prediction.unified_split import sort_by_date as _sort_by_date
 from src.prediction.unified_split import split_train_val_by_date as _split_train_val_by_date
@@ -80,13 +82,15 @@ def _mask_earnings_rows_for_unified(df: pd.DataFrame) -> pd.DataFrame:
     ):
         return df
 
-    masked_frames: list[pd.DataFrame] = []
+    # 全列の表を銘柄ごとに写してつなぐと写しが4枚重なるので、残す行を決めてから1度で選ぶ（#2134）
+    keys = df[["market", "symbol", "date"]].reset_index(drop=True)
+    kept_rows: list[np.ndarray] = []
+    kept_dates: list[pd.DatetimeIndex] = []
     removed_count = 0
     failed_symbols: list[str] = []
-    for (market, symbol), group in df.groupby(["market", "symbol"], sort=False):
+    for (market, symbol), group in keys.groupby(["market", "symbol"], sort=False):
         work = group.copy()
-        date_index = pd.DatetimeIndex(pd.to_datetime(work["date"], errors="coerce"))
-        work.index = date_index
+        work.index = pd.DatetimeIndex(pd.to_datetime(work["date"], errors="coerce"))
         _mds = get_market_data_port()
         try:
             earnings_dates = _mds.get_earnings_dates(str(market), str(symbol), raise_on_error=True)
@@ -96,17 +100,21 @@ def _mask_earnings_rows_for_unified(df: pd.DataFrame) -> pd.DataFrame:
         work = _mds.add_earnings_flag(
             work, earnings_dates, lookaround_days=EARNINGS_MASK_WINDOW_DAYS
         )
-        before = len(work)
-        work = work[work["earnings_flag"] == 0].copy()
-        removed_count += before - len(work)
-        work["date"] = work.index
-        masked_frames.append(work.drop(columns=["earnings_flag"], errors="ignore"))
+        keep = (work["earnings_flag"] == 0).to_numpy()
+        removed_count += int((~keep).sum())
+        kept_rows.append(group.index.to_numpy()[keep])
+        kept_dates.append(pd.DatetimeIndex(work.index[keep]))
 
     n_order_symbols = df.loc[df["market"] == _ORDER_MARKET, "symbol"].nunique()
-    _check_earnings_fetch_failures(failed_symbols, len(masked_frames), n_order_symbols)
+    _check_earnings_fetch_failures(failed_symbols, len(kept_rows), n_order_symbols)
     if removed_count > 0:
         logger.info(f"統合学習用に決算近傍データを除外: {removed_count}行")
-    return pd.concat(masked_frames, ignore_index=True) if masked_frames else df.iloc[0:0].copy()
+    if not kept_rows:
+        return df.iloc[0:0].copy()
+    masked = df.iloc[np.concatenate(kept_rows)]
+    masked.index = pd.RangeIndex(len(masked))
+    masked["date"] = kept_dates[0].append(kept_dates[1:])
+    return masked
 
 
 def load_all_stock_data(data_dir: str = None) -> pd.DataFrame:
@@ -134,13 +142,17 @@ def load_all_stock_data(data_dir: str = None) -> pd.DataFrame:
     return _mask_earnings_rows_for_unified(df)
 
 
-def _apply_unified_feature_exclusions(X: pd.DataFrame) -> pd.DataFrame:
+def _columns_after_unified_exclusions(columns: list) -> list:
+    """保存済みの除外特徴量を除いた列。全部が除外なら元の列のまま返す。"""
     excluded = load_excluded_features("unified", "all", require_all_models=False)
     if not excluded:
-        return X
+        return columns
+    return [col for col in columns if col not in excluded] or columns
 
-    remaining = [col for col in X.columns if col not in excluded]
-    return X[remaining].copy() if remaining else X
+
+def _apply_unified_feature_exclusions(X: pd.DataFrame) -> pd.DataFrame:
+    remaining = _columns_after_unified_exclusions(list(X.columns))
+    return X[remaining] if len(remaining) < len(X.columns) else X
 
 
 _CORPORATE_ACTION_LAG_PREFIXES = ("Dividends_lag", "Stock_Splits_lag", "Capital_Gains_lag")
@@ -238,32 +250,33 @@ def prepare_unified_features(
             for c in df.columns
             if c not in exclude_cols and not pd.api.types.is_datetime64_any_dtype(df[c])
         ]
-        X = df[feature_cols]
     else:
         # y列がない場合は作成（翌日終値）
         raise ValueError("y列がデータに含まれていません。特徴量生成済みのCSVを使用してください。")
 
+    # df は呼び手が持ったままなので、X の写しは列と行を決めた後に1枚だけ作る（#2134）
+
     # 配当・分割のラグの列は特徴量にしない。取得の道で有り無しが変わっていたため、
     # 表には銘柄によって全行 NULL のまま残っている（#816）
-    X = X.drop(columns=[c for c in X.columns if str(c).startswith(_CORPORATE_ACTION_LAG_PREFIXES)])
+    feature_cols = [
+        c for c in feature_cols if not str(c).startswith(_CORPORATE_ACTION_LAG_PREFIXES)
+    ]
 
     # 取得元のキー（us: NEWSAPI_KEY, jp: EDINET_API_KEY）がどの市場にも無いときは、
     # 値が一度も入らないセンチメントの列を特徴量にしない（#1417）
     markets = df["market"].dropna().unique() if "market" in df.columns else []
     if not any_sentiment_source_configured(markets):
-        X = X.drop(columns=[c for c in X.columns if is_sentiment_feature(c)])
+        feature_cols = [c for c in feature_cols if not is_sentiment_feature(c)]
 
-    # NaNを除去
-    valid_idx = X.notna().all(axis=1) & y.notna()
+    # NaNを除去。落とす行は、保存済みの除外を当てる前の列で決める
+    valid_idx = rows_without_nan(df, feature_cols) & y.notna()
     if "market" in df.columns and "symbol" in df.columns:
         _warn_dropped_rows(valid_idx, df["market"], df["symbol"])
-    X = X[valid_idx]
-    y = y[valid_idx]
 
     if apply_saved_exclusions:
-        X = _apply_unified_feature_exclusions(X)
+        feature_cols = _columns_after_unified_exclusions(feature_cols)
 
-    return X, y
+    return select_rows_and_columns(df, valid_idx, feature_cols), y[valid_idx]
 
 
 def train_unified_model(
@@ -329,9 +342,9 @@ def train_unified_model(
             raise RuntimeError("OHLCV から特徴量を作れなかったため学習できません")
         # 日付は X の index で受け取る（_load_all_ohlcv_for_unified）
         dates = pd.Series(X.index) if isinstance(X.index, pd.DatetimeIndex) else None
-
-    if apply_saved_exclusions:
-        X = _apply_unified_feature_exclusions(X)
+        # horizon=1 は prepare_unified_features が当て終えている
+        if apply_saved_exclusions:
+            X = _apply_unified_feature_exclusions(X)
     X, y, day = _sort_by_date(X, y, dates)
 
     logger.info(f"特徴量数: {len(X.columns)}, サンプル数: {len(X)}")
