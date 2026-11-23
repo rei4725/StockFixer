@@ -16,6 +16,7 @@ import numpy as np
 
 from src.domain.ports import AlertLevel
 from src.prediction import ports
+from src.prediction.training_record import UnifiedTrainingRecord, write_training_record
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -63,7 +64,7 @@ def _notify_constant_model(model_name: str, detail: str) -> None:
 
 
 def check_unified_training(model: Any, eval_set: Optional[list]) -> None:
-    """学習を終えたモデルの数字をログに書き、定数のモデルなら知らせる。
+    """学習を終えたモデルの数字をログと results に書き、定数のモデルなら知らせる。
 
     検証の行が無い回（学習が 1000 行に満たない回）は val_pred_std を None と書き、知らせない。
 
@@ -77,10 +78,12 @@ def check_unified_training(model: Any, eval_set: Optional[list]) -> None:
         trees = _tree_count(estimator)
         val_rows = 0
         val_std: Optional[float] = None
+        val_pred: Optional[np.ndarray] = None
         if eval_set:
             X_val = eval_set[0][0]
             val_rows = len(X_val)
-            val_std = float(np.std(np.asarray(model.predict(X_val), dtype=float)))
+            val_pred = np.asarray(model.predict(X_val), dtype=float)
+            val_std = float(np.std(val_pred))
     except Exception:
         logger.error("統合モデルの学習の確かめに失敗: model=%s", model.model_name, exc_info=True)
         return
@@ -91,3 +94,15 @@ def check_unified_training(model: Any, eval_set: Optional[list]) -> None:
     logger.info("統合モデルの学習の確かめ: model=%s %s", model.model_name, detail)
     if is_constant_prediction(val_std):
         _notify_constant_model(model.model_name, detail)
+    write_training_record(
+        UnifiedTrainingRecord(
+            model_name=model.model_name,
+            best_iteration=best_iteration,
+            trees=trees,
+            val_rows=val_rows,
+            val_pred_std=val_std,
+            is_constant=None if val_std is None else is_constant_prediction(val_std),
+        ),
+        val_pred=val_pred,
+        val_actual=eval_set[0][1] if eval_set else None,
+    )
