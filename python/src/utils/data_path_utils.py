@@ -31,7 +31,14 @@ def get_data_subdir(market: str, symbol: str) -> str:
 
 # ===== モデル関連パス =====
 def get_models_dir() -> str:
-    """モデル保存用ディレクトリの絶対パスを返す"""
+    """モデル保存用ディレクトリの絶対パスを返す（環境変数 STOCKFIXER_MODELS_DIR 優先）。
+
+    tests/unit の conftest がこの環境変数を一時フォルダに向け、テストが本番の
+    models/ を読み書きしないようにする（#2133）。
+    """
+    override = os.environ.get("STOCKFIXER_MODELS_DIR")
+    if override:
+        return override
     return os.path.join(_PYTHON_ROOT, "models")
 
 
