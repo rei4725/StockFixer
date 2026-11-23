@@ -40,8 +40,27 @@ class TestDataPathUtils(unittest.TestCase):
         self.assertTrue(path.endswith(os.path.join("data", "us_AAPL")))
 
     def test_get_models_dir_under_python_root(self):
-        """get_models_dir が python_root/models を返すことを確認"""
-        self.assertEqual(get_models_dir(), os.path.join(get_python_root(), "models"))
+        """環境変数が無ければ get_models_dir が python_root/models を返すことを確認"""
+        with patch.dict(os.environ):
+            os.environ.pop("STOCKFIXER_MODELS_DIR", None)
+            self.assertEqual(get_models_dir(), os.path.join(get_python_root(), "models"))
+
+    def test_get_models_dir_env_override(self):
+        """STOCKFIXER_MODELS_DIR があればその値を返すことを確認（#2133）"""
+        with patch.dict(os.environ, {"STOCKFIXER_MODELS_DIR": "/tmp/sf_models"}):
+            self.assertEqual(get_models_dir(), "/tmp/sf_models")
+            self.assertEqual(
+                get_models_subdir("jp", "7203"), os.path.join("/tmp/sf_models", "jp_7203")
+            )
+
+    def test_get_models_dir_is_temporary_in_unit_tests(self):
+        """unit テストの get_models_dir が、本物の models でなく空の一時フォルダを指すことを確認（#2133）"""
+        models_dir = os.path.realpath(get_models_dir())
+        python_root = os.path.realpath(get_python_root())
+        self.assertNotEqual(models_dir, os.path.join(python_root, "models"))
+        self.assertEqual(os.environ["STOCKFIXER_MODELS_DIR"], get_models_dir())
+        self.assertTrue(os.path.isdir(models_dir))
+        self.assertEqual(os.listdir(models_dir), [])
 
     def test_get_models_subdir_format(self):
         """get_models_subdir が {market}_{symbol} 形式のサブディレクトリを返すことを確認"""
