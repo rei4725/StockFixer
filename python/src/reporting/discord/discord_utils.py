@@ -178,6 +178,8 @@ def send_daily_order_completion(
     errors: int = 0,
     sl_tp_unevaluable_symbols: Optional[list[str]] = None,
     details: Optional[Sequence[TradeLine]] = None,
+    skipped: int = 0,
+    skip_reasons: Optional[dict[str, int]] = None,
 ) -> bool:
     """
     自動発注完了通知を Discord Webhook に送信する。
@@ -193,6 +195,8 @@ def send_daily_order_completion(
         errors: 例外で出せなかった注文の数（SL/TP の売りを含む）
         sl_tp_unevaluable_symbols: 現在値が取れず SL/TP を評価できなかった保有の銘柄
         details: 出した注文の1件ごとの明細（#1876）。作れなければ件数だけで出す
+        skipped: 飛ばした候補の数（#2113）。0 なら理由ごとの数の和を使う
+        skip_reasons: 飛ばした理由ごとの数（#2113）。無い・空なら欄を出さない
 
     Returns:
         成功時 True、失敗時 False
@@ -215,6 +219,17 @@ def send_daily_order_completion(
                 "name": "⚠️ SL/TP 評価できず",
                 "value": f"{len(sl_tp_unevaluable_symbols):,} 件: "
                 + ", ".join(symbol_label("jp", s) for s in sl_tp_unevaluable_symbols),
+                "inline": False,
+            }
+        )
+    if skip_reasons:
+        # 買い0件の日に、止まった理由を知らせだけで見分けられるようにする（#2113）
+        ranked = sorted(skip_reasons.items(), key=lambda kv: kv[1], reverse=True)
+        total = skipped or sum(skip_reasons.values())
+        fields.append(
+            {
+                "name": "⏭️ 飛ばした候補",
+                "value": f"{total:,} 件: " + " / ".join(f"{k}={v:,}" for k, v in ranked),
                 "inline": False,
             }
         )

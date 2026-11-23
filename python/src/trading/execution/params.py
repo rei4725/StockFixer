@@ -1,6 +1,7 @@
 """発注パラメータ算出: 動的閾値・Kelly 入力・分割比率・注文種別判定。"""
 
 from dataclasses import replace
+from datetime import datetime, timezone
 
 import pandas as pd
 
@@ -12,6 +13,7 @@ from config.settings import (
     LIMIT_ORDER_SPREAD_PROXY_THRESHOLD,
 )
 from src.domain.limit_order_rules import plan_limit_order
+from src.domain.market_close import MARKET_CLOSE as _MARKET_CLOSE
 from src.domain.ports import MarketDataPort
 from src.domain.trading_rules import THRESHOLD_SCALE_MAX as _THRESHOLD_SCALE_MAX
 from src.domain.trading_rules import THRESHOLD_SCALE_MIN as _THRESHOLD_SCALE_MIN
@@ -125,13 +127,43 @@ def _attach_dynamic_thresholds(predictions: pd.DataFrame) -> pd.DataFrame:
     return enriched
 
 
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _drop_unclosed_rows(hist: pd.DataFrame, market: str) -> pd.DataFrame:
+    """市場の引けより前なら、その市場の今日以降の足を落とす（#2112）。
+
+    9:00 以後の補完の回では最後の行が寄りから数分の場中の足になり、平均出来高と
+    値幅を下げる。バックテストは約定の日を含まない前の足で判定するのでそろえる。
+    """
+    if hist.empty or market not in _MARKET_CLOSE:
+        return hist
+    tz, close_time = _MARKET_CLOSE[market]
+    local_now = _utcnow().astimezone(tz)
+    if local_now.time() >= close_time:
+        return hist
+    try:
+        index = pd.DatetimeIndex(pd.to_datetime(hist.index))
+    except (TypeError, ValueError):
+        return hist
+    if index.tz is not None:
+        index = index.tz_localize(None)
+    unclosed = index.normalize() >= pd.Timestamp(local_now.date())
+    return hist[~unclosed]
+
+
 def _load_execution_metrics(
     market: str, symbol: str, market_data: MarketDataPort | None
 ) -> tuple[float | None, float | None]:
     if market_data is None:
         return None, None
     ticker = get_ticker(market, symbol)
-    hist = market_data.get_ohlcv(ticker, period=f"{LIMIT_ORDER_LOOKBACK_DAYS + 2}d")
+    # 今日の場中の足を落としても前の足が5本残るよう、週末を挟む分だけ広く取る（#2112）
+    hist = market_data.get_ohlcv(ticker, period=f"{LIMIT_ORDER_LOOKBACK_DAYS + 5}d")
+    if hist.empty:
+        return None, None
+    hist = _drop_unclosed_rows(hist, market)
     if hist.empty:
         return None, None
 
