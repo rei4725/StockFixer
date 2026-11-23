@@ -107,6 +107,77 @@ class TestSendDailyOrderCompletion(unittest.TestCase):
         self.assertEqual(fields["⛔ 停止理由"], "日次損失上限に到達")
         self.assertEqual(fields["💰 当日損失"], "25,000 円 / 上限: 20,000 円")
 
+    _BASE_FIELD_NAMES = ["🕐 時刻", "⚙️ モード", "🟢 買い注文", "🔴 売り注文", "⚠️ 注文エラー"]
+
+    @patch(
+        "src.reporting.discord.webhook_sender._rate_limiter.check_and_record",
+        return_value=(True, None),
+    )
+    @patch("src.reporting.discord.webhook_sender._post_webhook")
+    def test_no_skip_reasons_keeps_fields(self, mock_post, _mock_rl):
+        """skip_reasons を渡さない・空のときは、欄が直す前と同じ（#2113）"""
+        mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
+
+        for kwargs in ({}, {"skipped": 0, "skip_reasons": {}}, {"skip_reasons": None}):
+            mock_post.reset_mock()
+            result = send_daily_order_completion(
+                buy_orders=2, sell_orders=1, mode="paper", **kwargs
+            )
+            self.assertTrue(result)
+            embed = _embed_from_post(mock_post)
+            self.assertEqual([f["name"] for f in embed["fields"]], self._BASE_FIELD_NAMES)
+            fields = _fields_map(embed)
+            self.assertEqual(fields["🟢 買い注文"], "2 件")
+            self.assertEqual(fields["🔴 売り注文"], "1 件")
+            self.assertEqual(fields["⚠️ 注文エラー"], "0 件")
+
+    @patch(
+        "src.reporting.discord.webhook_sender._rate_limiter.check_and_record",
+        return_value=(True, None),
+    )
+    @patch("src.reporting.discord.webhook_sender._post_webhook")
+    def test_skip_reasons_field_sorted_by_count(self, mock_post, _mock_rl):
+        """飛ばした候補の合計と理由ごとの数を、数の多い順に出す（#2113）"""
+        mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
+
+        result = send_daily_order_completion(
+            buy_orders=0,
+            sell_orders=0,
+            mode="paper",
+            skipped=230,
+            skip_reasons={"max_orders_per_run": 22, "sector_cap": 208},
+        )
+
+        self.assertTrue(result)
+        embed = _embed_from_post(mock_post)
+        names = [f["name"] for f in embed["fields"]]
+        self.assertEqual(names, self._BASE_FIELD_NAMES + ["⏭️ 飛ばした候補"])
+        fields = _fields_map(embed)
+        self.assertEqual(
+            fields["⏭️ 飛ばした候補"], "230 件: sector_cap=208 / max_orders_per_run=22"
+        )
+        self.assertEqual(fields["🟢 買い注文"], "0 件")
+
+    @patch(
+        "src.reporting.discord.webhook_sender._rate_limiter.check_and_record",
+        return_value=(True, None),
+    )
+    @patch("src.reporting.discord.webhook_sender._post_webhook")
+    def test_skip_reasons_total_from_reasons_when_skipped_missing(self, mock_post, _mock_rl):
+        """skipped を渡さないときは、理由ごとの数の和を合計にする（#2113）"""
+        mock_post.return_value = MagicMock(raise_for_status=MagicMock(return_value=None))
+
+        send_daily_order_completion(
+            buy_orders=0,
+            sell_orders=0,
+            skip_reasons={"sector_cap": 208, "max_orders_per_run": 22},
+        )
+
+        fields = _fields_map(_embed_from_post(mock_post))
+        self.assertEqual(
+            fields["⏭️ 飛ばした候補"], "230 件: sector_cap=208 / max_orders_per_run=22"
+        )
+
 
 class TestSendDailyPipelineError(unittest.TestCase):
     @patch(
