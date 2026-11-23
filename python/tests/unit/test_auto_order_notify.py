@@ -32,6 +32,8 @@ class TestNotifyAutoOrderCompletion:
             daily_loss_limit=None,
             errors=0,
             sl_tp_unevaluable_symbols=None,
+            skipped=0,
+            skip_reasons=None,
             details=["line"],
         )
 
@@ -45,10 +47,14 @@ class TestNotifyAutoOrderCompletion:
             "daily_loss_limit": 200.0,
             "errors": 4,
             "sl_tp_unevaluable_symbols": ["7203"],
+            "skipped": 230,
+            "skip_reasons": {"sector_cap": 208, "max_orders_per_run": 22},
         }
         with patch(_COMPLETION) as send, patch(_TRADE_LINES, return_value=[]):
             notify_auto_order_completion(stats, "paper")
         kwargs = send.call_args.kwargs
+        assert kwargs["skipped"] == 230
+        assert kwargs["skip_reasons"] == {"sector_cap": 208, "max_orders_per_run": 22}
         assert kwargs["trading_stopped"] is True
         assert kwargs["stop_reason"] == "loss"
         assert kwargs["daily_loss"] == -100.0

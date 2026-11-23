@@ -24,6 +24,8 @@ def notify_auto_order_completion(stats, mode) -> None:
             daily_loss_limit=stats.get("daily_loss_limit"),
             errors=stats.get("errors", 0),
             sl_tp_unevaluable_symbols=stats.get("sl_tp_unevaluable_symbols"),
+            skipped=stats.get("skipped", 0),
+            skip_reasons=stats.get("skip_reasons"),
             details=order_trade_lines(stats),
         )
     except Exception as e:
