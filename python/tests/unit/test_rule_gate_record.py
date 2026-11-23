@@ -285,7 +285,9 @@ class TestRuleGateRecord(unittest.TestCase):
         with self.assertLogs("src.trading.execution.gate_record", level="ERROR"):
             result_ng, broker_ng = self._run(_ALLOWED, _CORR_OK, extra=(failing,))
         self.assertEqual(result_ng, result_ok)
-        self.assertEqual(set(result_ng), {"buy_orders", "sell_orders", "skipped", "errors"})
+        self.assertEqual(
+            set(result_ng), {"buy_orders", "sell_orders", "skipped", "errors", "skip_reasons"}
+        )
         self.assertEqual(self._sent(broker_ng), self._sent(broker_ok))
 
     def test_not_recorded_unless_asked(self):

@@ -218,6 +218,7 @@ class TestRerunOfInterruptedOrders:
             ("3000", buy),
             ("4000", buy),
         ]
+        result.pop("skip_reasons")
         assert result == {"buy_orders": 1, "sell_orders": 1, "skipped": 2, "errors": 0}
 
     def test_rerun_after_all_orders_were_placed_adds_nothing(self):
@@ -232,4 +233,5 @@ class TestRerunOfInterruptedOrders:
         result = self._run(self._broker(), signals)
 
         assert self._pending_orders() == placed
+        result.pop("skip_reasons")
         assert result == {"buy_orders": 0, "sell_orders": 0, "skipped": 2, "errors": 0}
