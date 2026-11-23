@@ -63,7 +63,7 @@ def execute_rule_paper_trades(
     allow_new_buys: bool = True,
     record_gate: bool = False,
     unavailable_symbols: Sequence[UnavailableSymbol] = (),
-) -> dict[str, int]:
+) -> dict[str, Any]:
     """
     シグナルに基づきペーパートレードを実行する。
 
@@ -89,8 +89,10 @@ def execute_rule_paper_trades(
             入らない銘柄は、判定の対象に入らなかった保有として記録に写す（#1527）
 
     Returns:
-        {"buy_orders": int, "sell_orders": int, "skipped": int, "errors": int}
+        {"buy_orders": int, "sell_orders": int, "skipped": int, "errors": int,
+        "skip_reasons": dict[str, int]}
         errors は注文（株数の計算を含む）が例外で落ちた銘柄の数で、skipped に含めない。
+        skip_reasons は skipped の理由ごとの数で、和は skipped と同じ（#2114）。
     """
     if broker is None:
         broker = PaperBroker(
@@ -357,4 +359,6 @@ def execute_rule_paper_trades(
         "sell_orders": sell_orders,
         "skipped": skipped,
         "errors": errors,
+        # 知らせに理由ごとの数を出すため、記録と同じ数を返す（#2114）
+        "skip_reasons": dict(skip_reasons),
     }
