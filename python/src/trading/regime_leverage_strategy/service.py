@@ -20,6 +20,7 @@ from config.settings import (
     REGIME_LEVERAGE_RATIO,
     REGIME_LEVERAGE_SLIPPAGE_PCT,
 )
+from src.domain.market_close import MARKET_CLOSE
 from src.domain.ports import MarketDataPort
 from src.domain.us_market_holidays import is_us_business_day
 from src.trading.regime_leverage_strategy.indicators import build_weekly_frame
@@ -41,8 +42,9 @@ _COMMISSION_PCT_USD = 0.0033
 _COMMISSION_CAP_USD = 16.5
 
 _JST = ZoneInfo("Asia/Tokyo")
-_US_MARKET_TZ = ZoneInfo("America/New_York")
-_US_MARKET_CLOSE = time(16, 0)
+# 米国の引けのタイムゾーンと時刻は表から読む（#2121）
+_US_MARKET_TZ: ZoneInfo = MARKET_CLOSE["us"][0]
+_US_MARKET_CLOSE: time = MARKET_CLOSE["us"][1]
 # ドル円の最後の足の、引けたはずの SPY の足の日からの遅れの許容(平日の数。#1621)
 _USDJPY_MAX_WEEKDAYS_BEHIND = 1
 # 日次の回で、足がこの営業日数だけ古いと投げる(1営業日の遅れは次の回に任せる。#1620)
