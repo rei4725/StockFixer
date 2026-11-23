@@ -1041,6 +1041,81 @@ class TestDailyCheckStopsAtFirstMissingBar(unittest.TestCase):
             self._run({"2026-07-16": np.nan})
 
 
+class TestInitialStopFillsAtOpenWhenGapped(unittest.TestCase):
+    """寄りが損切りの線を割った日の初期損切りは、線でなく始値で約定したとみなす(#2138)。
+    損切りの線は65,000円・ドル円146円(約445.2ドル)、2026-07-15 の足を判定する。"""
+
+    _DAY = pd.Timestamp("2026-07-15")
+    _LOGGER = "src.trading.regime_leverage_strategy.service"
+
+    def _run(self, low: float, open_usd=None, drop_open: bool = False):
+        from src.trading.regime_leverage_strategy.service import (
+            run_regime_leverage_daily_margin_check,
+        )
+
+        port = _daily_port("2026-07-15", {"2026-07-15": low})
+        df = port.get_stock_data.return_value
+        if drop_open:
+            port.get_stock_data.return_value = df.drop(columns=["Open"])
+        else:
+            df.loc[self._DAY, "Open"] = open_usd
+        snap = _holding_snapshot(
+            executed_at=datetime(2026, 7, 14, 22, 30), action="noop", reason="daily_noop"
+        )
+        with patch(f"{self._LOGGER}.get_latest_snapshot", return_value=snap), patch(
+            f"{self._LOGGER}.insert_snapshot"
+        ) as mock_insert, patch(
+            f"{self._LOGGER}.datetime",
+            _fixed_datetime(datetime(2026, 7, 16, 7, 30, tzinfo=_JST)),
+        ):
+            decision = run_regime_leverage_daily_margin_check(port)
+        mock_insert.assert_called_once_with(decision)
+        return decision
+
+    def _assert_exit_at(self, decision, reason: str, price_jpy: float) -> None:
+        self.assertEqual(decision.action, "exit")
+        self.assertEqual(decision.reason, reason)
+        # 2026-01-02 から 2026-07-16 までの保有日数は195日、スリッページは0.1%
+        interest = 72500.0 * 27 * 0.030 / 365 * 195
+        expected = 1_000_000.0 + (price_jpy * 0.999 - 72500.0) * 27 - interest
+        self.assertAlmostEqual(decision.equity_now_jpy, expected, places=2)
+
+    def test_open_below_stop_fills_at_open(self):
+        # 始値 442 * 146 = 64,532円 < 線 65,000円
+        decision = self._run(low=440.0, open_usd=442.0)
+        self._assert_exit_at(decision, "initial_stop", 64532.0)
+        self.assertEqual(decision.spy_price_usd, 440.0)
+
+    def test_open_above_stop_fills_at_stop_without_warning(self):
+        with self.assertNoLogs(self._LOGGER, level="WARNING"):
+            decision = self._run(low=440.0, open_usd=450.0)
+        self._assert_exit_at(decision, "initial_stop", 65000.0)
+
+    def test_invalid_open_fills_at_stop_with_warning(self):
+        for open_usd in (np.nan, 0.0, -1.0):
+            with self.subTest(open_usd=open_usd):
+                with self.assertLogs(self._LOGGER, level="WARNING") as logs:
+                    decision = self._run(low=440.0, open_usd=open_usd)
+                self._assert_exit_at(decision, "initial_stop", 65000.0)
+                self.assertIn("始値", logs.output[0])
+
+    def test_missing_open_column_fills_at_stop_with_warning(self):
+        with self.assertLogs(self._LOGGER, level="WARNING") as logs:
+            decision = self._run(low=440.0, drop_open=True)
+        self._assert_exit_at(decision, "initial_stop", 65000.0)
+        self.assertIn("始値", logs.output[0])
+
+    def test_margin_call_still_fills_at_low(self):
+        # 安値 300 * 146 = 43,800円。始値が線より下でも、マージンコールは安値で決済する
+        decision = self._run(low=300.0, open_usd=442.0)
+        self._assert_exit_at(decision, "margin_call", 43800.0)
+
+    def test_invalid_open_does_not_warn_without_exit(self):
+        with self.assertNoLogs(self._LOGGER, level="WARNING"):
+            decision = self._run(low=498.0, open_usd=np.nan)
+        self.assertEqual(decision.reason, "daily_noop")
+
+
 def _weekly_port(prices: pd.Series, missing_day: str, columns: list) -> MagicMock:
     df = pd.DataFrame(
         {"Open": prices, "High": prices + 2, "Low": prices - 2, "Close": prices},

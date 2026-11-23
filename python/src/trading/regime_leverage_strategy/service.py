@@ -221,14 +221,33 @@ def decide_weekly_exit(
     )
 
 
+def _initial_stop_fill_price_jpy(
+    stop_price_jpy: float, day_open_usd: Optional[float], usdjpy_rate: float
+) -> float:
+    """初期損切りの約定の値段(スリッページの前)を返す。始値が損切りの線より下なら始値、
+    始値が無い・NaN・0以下なら線の値段にして WARNING を出す(決済は止めない。#2138)。
+    """
+    if day_open_usd is None or pd.isna(day_open_usd) or day_open_usd <= 0:
+        logger.warning(
+            "レジームレバレッジ戦略(日次): 始値が無いか不正のため、損切りの線の値段で決済します"
+            "(day_open_usd=%s, stop_price_jpy=%s)",
+            day_open_usd,
+            stop_price_jpy,
+        )
+        return stop_price_jpy
+    return min(stop_price_jpy, day_open_usd * usdjpy_rate)
+
+
 def decide_daily_check(
     snapshot: RegimeLeverageSnapshot,
     day_low_usd: float,
     usdjpy_rate: float,
     now: datetime,
+    day_open_usd: Optional[float] = None,
 ) -> RegimeLeverageDecision:
     """保有中の日次判定: マージンコール→初期損切りの優先順位で当日安値ベースに判定する
-    (バックテストのrun_levered_regimeと同じ優先順位)。
+    (バックテストのrun_levered_regimeと同じ優先順位)。初期損切りの決済の値段は、寄りが
+    損切りの線を割った日は始値にする(線の値段では売れないため。#2138)。
     """
     day_low_jpy = day_low_usd * usdjpy_rate
     equity_at_low = compute_equity_now(snapshot, day_low_jpy, now)
@@ -247,7 +266,10 @@ def decide_daily_check(
         )
 
     if snapshot.stop_price_jpy is not None and day_low_jpy <= snapshot.stop_price_jpy:
-        exit_price_jpy = snapshot.stop_price_jpy * (1 - REGIME_LEVERAGE_SLIPPAGE_PCT)
+        fill_price_jpy = _initial_stop_fill_price_jpy(
+            snapshot.stop_price_jpy, day_open_usd, usdjpy_rate
+        )
+        exit_price_jpy = fill_price_jpy * (1 - REGIME_LEVERAGE_SLIPPAGE_PCT)
         exit_equity = compute_equity_now(snapshot, exit_price_jpy, now)
         return _closed_position_decision(
             reason="initial_stop",
@@ -480,13 +502,17 @@ def run_regime_leverage_daily_margin_check(
     last_bar = _last_bar_date(bars)
     missing = _missing_business_days(df, last_checked_at, last_bar) if last_checked_at else []
     day_lows_usd = [float(low) for low in bars["Low"]]
-    for low in day_lows_usd:
+    # 始値は決済の値段だけに使う。欠けても判定は止めない(#2138)
+    day_opens_usd: list[Optional[float]] = [None] * len(day_lows_usd)
+    if "Open" in bars.columns:
+        day_opens_usd = [float(open_usd) for open_usd in bars["Open"]]
+    for low, open_usd in zip(day_lows_usd, day_opens_usd):
         if pd.isna(low):
             raise RuntimeError(
                 "レジームレバレッジ戦略(日次): 保有中に当日安値(Low)がNaNのため判定を中止しました"
                 f"(shares={snapshot.shares})"
             )
-        decision = decide_daily_check(snapshot, low, usdjpy_rate, now)
+        decision = decide_daily_check(snapshot, low, usdjpy_rate, now, open_usd)
         if decision.action == "exit":
             if missing:
                 logger.warning(
