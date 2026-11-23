@@ -5,13 +5,15 @@ from typing import Any
 
 import pandas as pd
 
+from src.domain.market_close import MARKET_CLOSE
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-_JST = "Asia/Tokyo"
-# 東証の引け（JST）。これより後に出た注文は、その日の足で約定させない（#1312）
-_JP_CLOSE = time(15, 30)
+# 東証のタイムゾーンと引け（JST）。表から読む（#2121）。
+# 引けより後に出た注文は、その日の足で約定させない（#1312）
+_JST: str = MARKET_CLOSE["jp"][0].key
+_JP_CLOSE: time = MARKET_CLOSE["jp"][1]
 
 
 def parse_predicted_date(predicted_at: Any) -> date | None:
