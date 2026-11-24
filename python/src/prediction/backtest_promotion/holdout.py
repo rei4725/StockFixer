@@ -7,6 +7,7 @@
 銘柄の分母はウォッチリストの jp の銘柄の数で、段差で表から消えた銘柄の分も縮まない（#1701）。
 行のある日の数も、東証の営業日の数を分母にして線と比べる（#1699）。
 日ごとの勝ち越しの票は、jp の銘柄が線に届いた日だけで数える（#1714、daily_vote）。
+全体の daily_rank_corr と prediction_std は市場と取引日ごとに束ねる（2.88.0 までは日ごと。#2157）。
 定数の予想の確かめは、全市場の物差しに加えて jp の中の日ごとの標準偏差でも行う（#1718）。
 最新の日については、本番の予想の関数とこの道の production の予想が一致するかを確かめる
 （道の一致の検査）。prediction_accuracy に記録された production の予想との突き合わせは
@@ -242,6 +243,15 @@ def _both_metrics(rows: pd.DataFrame) -> tuple[dict, dict]:
     )
 
 
+def _with_market_day(rows: pd.DataFrame) -> pd.DataFrame:
+    """日の鍵（date）を「市場:取引日」にした写しを返す（#2157）。
+
+    日だけで束ねると、jp と us の水準の差を銘柄の並べの腕とばらつきに数える。影の比べ（#2072）と
+    採点の JSON（#2141）と同じ鍵で、全体の daily_rank_corr と prediction_std だけに効く。
+    """
+    return rows.assign(date=rows["market"].astype(str) + ":" + rows["date"])
+
+
 def _market_summaries(
     table: pd.DataFrame,
     universe: list[tuple[str, str]],
@@ -431,7 +441,7 @@ def evaluate_holdout(
         raise ValueError("候補と production の予想がそろった行が無い")
 
     table = pd.DataFrame(rows)
-    candidate, production = _both_metrics(table)
+    candidate, production = _both_metrics(_with_market_day(table))
     daily = _daily(table, date_strs)
 
     max_abs_diff = max(path_diffs) if path_diffs else None

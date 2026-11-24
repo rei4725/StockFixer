@@ -116,7 +116,7 @@ def _live_matching(offset: float = 0.0):
     """production（-feat_a）と同じ値に offset を足した本番の予想を返す"""
 
     def _live(market: str, symbol: str, **_kwargs) -> Optional[PredictionResult]:
-        j = SYMBOLS.index((market, symbol))
+        j = [m for m, _ in SYMBOLS].index(market)  # 足した銘柄も最後の行は市場ごとに同じ
         diff = -_features(j)["feat_a"].iloc[-1] + offset
         return PredictionResult(
             market=market,
@@ -152,15 +152,32 @@ def test_latest_holdout_dates_reads_target_dates(monkeypatch):
     assert latest_holdout_dates(20) == _dates()
 
 
+def _spread(df: pd.DataFrame, k: int) -> pd.DataFrame:
+    """最後の行より前の feat_a と y を 1e-3 * k ずらす（市場の中の銘柄の間に並びとばらつきを作る）。
+
+    最後の行は道の一致の検査に使うので変えない。
+    """
+    out = df.copy()
+    head = out.index[:-1]
+    out.loc[head, "feat_a"] += 1e-3 * k
+    out.loc[head, "y"] += 1e-3 * k
+    return out
+
+
+def _us_pair() -> dict:
+    """us を2銘柄にする（1市場1銘柄では市場の中の順位相関が出ず、勝てない。#2157）。"""
+    return {("us", "BBB"): _spread(_features(1), 1)}
+
+
 def test_candidate_wins_when_better_and_path_matches(monkeypatch):
-    _patch(monkeypatch)
+    _patch(monkeypatch, extra=_us_pair())
     ev = evaluate_holdout(_dates(), _models(1.0), _models(-1.0), _live_matching())
     assert isinstance(ev, HoldoutEvaluation)
     assert ev.cutoff == "2026-10-07"
     assert ev.dates[0] == "2026-10-07" and len(ev.dates) == 20
-    assert ev.n_symbols == 2
-    assert ev.candidate["n_baseline"] == ev.production["n_baseline"] == 40
-    assert ev.path_check["compared"] == 2
+    assert ev.n_symbols == 3
+    assert ev.candidate["n_baseline"] == ev.production["n_baseline"] == 60
+    assert ev.path_check["compared"] == 3
     assert ev.path_check["passed"] is True
     assert len(ev.daily) == 20
     assert all(d["diff"] > 0 for d in ev.daily)
@@ -291,9 +308,10 @@ def test_recorded_reference_compares_recorded_production(monkeypatch):
 def test_symbol_without_rows_in_window_is_not_counted(monkeypatch):
     # 上場廃止で取っておいた期間に行の無い銘柄は n_symbols と expected_rows に入れない
     delisted = _features(0).assign(date=pd.bdate_range("2025-01-01", periods=len(DAYS)))
-    _patch(monkeypatch, extra={("us", "ZZZ"): delisted})
+    _patch(monkeypatch, extra={("us", "ZZZ"): delisted, **_us_pair()})
     ev = evaluate_holdout(_dates(), _models(1.0), _models(-1.0), _live_matching())
-    assert ev.n_symbols == 2
+    assert ev.n_symbols == 3
+    assert ev.expected_rows == 60
     assert ev.decision.won is True, ev.decision.reasons
 
 
@@ -353,21 +371,21 @@ def test_degraded_candidate_on_row_production_failed_still_blocks_win(monkeypatc
 
 def test_expected_rows_follow_each_markets_dates(monkeypatch):
     # jp だけ 9 日休場（行が無い）。日は jp と us を合わせた 20 日なので、
-    # 20 日 × 2 銘柄 = 40 の 80%（32）だと jp の休場だけで負ける。市場ごとに数えれば勝てる。
+    # 20 日 × 3 銘柄 = 60 の 80%（48）だと jp の休場だけで負ける。市場ごとに数えれば勝てる。
     # 本物の表にこの長さの休場は無いので、9 日を休場として差し替える（#1699 の日の線を越える）
     holiday = set(_dates()[3:12])
     jp = _features(0)
     jp = jp[~jp["date"].isin(holiday)].reset_index(drop=True)
-    _patch(monkeypatch, extra={("jp", "1111"): jp})
+    _patch(monkeypatch, extra={("jp", "1111"): jp, ("jp", "2222"): _spread(jp, 1)})
     monkeypatch.setattr(holdout, "is_jp_business_day", lambda d: pd.Timestamp(d) not in holiday)
     ev = evaluate_holdout(_dates(), _models(1.0), _models(-1.0), _live_matching())
-    assert ev.candidate["n_baseline"] == 31
+    assert ev.candidate["n_baseline"] == 42
     keys = ("n_symbols", "n_dates", "expected_rows")
     assert {m: {k: v[k] for k in keys} for m, v in ev.markets.items()} == {
-        "jp": {"n_symbols": 1, "n_dates": 11, "expected_rows": 11},
+        "jp": {"n_symbols": 2, "n_dates": 11, "expected_rows": 22},
         "us": {"n_symbols": 1, "n_dates": 20, "expected_rows": 20},
     }
-    assert ev.expected_rows == 31
+    assert ev.expected_rows == 42
     assert ev.decision.won is True, ev.decision.reasons
 
 
@@ -410,7 +428,7 @@ def _path_skips(**counts: int) -> dict:
 def _live_through_real_path(monkeypatch, prod: list, history: pd.DataFrame):
     """本番の予想の関数を、yfinance の足だけ差し替えて通す。"""
     by_name = dict(prod)
-    frames = {key: _features(j) for j, key in enumerate(SYMBOLS)}
+    frames = {key: _features(j) for j, key in enumerate(SYMBOLS)} | _us_pair()
     ticker = MagicMock()
     ticker.history.return_value = history
     monkeypatch.setattr(predict_unified.yf, "Ticker", MagicMock(return_value=ticker))
@@ -434,11 +452,11 @@ NEWER_BAR = pd.DataFrame(
     ids=["営業日の22時で足が特徴量より新しい", "休場日で足が無い"],
 )
 def test_path_check_compares_jp_without_relying_on_the_last_bar(monkeypatch, history):
-    _patch(monkeypatch)
+    _patch(monkeypatch, extra=_us_pair())
     prod = _models(-1.0)
     live = _live_through_real_path(monkeypatch, prod, history)
     ev = evaluate_holdout(_dates(), _models(1.0), prod, live)
-    assert ev.path_check["compared_by_market"] == {"jp": 1, "us": 1}
+    assert ev.path_check["compared_by_market"] == {"jp": 1, "us": 2}
     assert ev.path_check["max_abs_diff"] <= PATH_CHECK_TOL
     assert ev.path_check["passed"] is True
     assert ev.path_check["skipped_by_reason"] == _path_skips()
@@ -664,18 +682,6 @@ def _patch_watchlist(monkeypatch, symbols: set):
     monkeypatch.setattr(holdout, "load_watchlist_symbols", lambda market: set(symbols))
 
 
-def _spread(df: pd.DataFrame, k: int) -> pd.DataFrame:
-    """最後の行より前の feat_a と y を 1e-3 * k ずらす（jp の銘柄の間に予想のばらつきを作る）。
-
-    最後の行は道の一致の検査に使うので変えない。
-    """
-    out = df.copy()
-    head = out.index[:-1]
-    out.loc[head, "feat_a"] += 1e-3 * k
-    out.loc[head, "y"] += 1e-3 * k
-    return out
-
-
 def _jp_frames(n: int) -> dict:
     """1111 に続けて、行のそろった jp の銘柄を足して n 銘柄にする（_patch の extra に渡す）。"""
     return {("jp", str(2000 + i)): _spread(_features(0), i + 1) for i in range(n - 1)}
@@ -863,7 +869,7 @@ def test_jp_tail_days_missing_block_win_though_expected_rows_shrink(monkeypatch)
 
 def test_jp_missing_only_holidays_still_wins(monkeypatch):
     # 本番の前の JSON の形（jp 18 日・us 20 日）。休場だけの差では勝ち負けが変わらない
-    _patch(monkeypatch, extra={("jp", "1111"): _jp_without(JP_HOLIDAYS)})
+    _patch(monkeypatch, extra={("jp", "1111"): _jp_without(JP_HOLIDAYS), **_us_pair()})
     ev = evaluate_holdout(_dates(), _models(1.0), _models(-1.0), _live_matching())
     assert ev.markets["jp"]["n_dates"] == 18
     assert ev.markets["us"]["n_dates"] == 20
@@ -881,7 +887,7 @@ def test_jp_missing_only_holidays_still_loses_when_candidate_is_worse(monkeypatc
 def test_jp_day_line_is_min_coverage_of_tse_open_days(monkeypatch, n_kept, won):
     # 営業日 18 日の 80% は 14.4 日。古い方の営業日と休場の日の行を消す
     missing = JP_HOLIDAYS + JP_OPEN_DAYS[: len(JP_OPEN_DAYS) - n_kept]
-    _patch(monkeypatch, extra={("jp", "1111"): _jp_without(missing)})
+    _patch(monkeypatch, extra={("jp", "1111"): _jp_without(missing), **_us_pair()})
     ev = evaluate_holdout(_dates(), _models(1.0), _models(-1.0), _live_matching())
     assert ev.markets["jp"]["n_dates"] == n_kept
     assert ev.decision.won is won, ev.decision.reasons
@@ -930,7 +936,7 @@ def _capture_daily_diff(monkeypatch) -> list:
 
 def test_vote_counts_only_jp_open_days_when_holdout_has_jp_holidays(monkeypatch):
     # 20 日のうち 10/12 と 11/3 は東証の休場で jp の行が無い（us だけの日）。票は 18 日で数える
-    _patch(monkeypatch, extra={("jp", "1111"): _jp_without(JP_HOLIDAYS)})
+    _patch(monkeypatch, extra={("jp", "1111"): _jp_without(JP_HOLIDAYS), **_us_pair()})
     seen = _capture_daily_diff(monkeypatch)
     ev = evaluate_holdout(_dates(), _models(1.0), _models(-1.0), _live_matching())
     assert len(seen) == 1
@@ -991,11 +997,40 @@ def test_vote_change_keeps_overall_metrics(monkeypatch):
     assert ev.expected_rows == 38
 
 
-def test_jp_constant_candidate_cannot_win_though_mixed_std_is_over_the_line(monkeypatch):
-    # jp の 5 銘柄はどの日も同じ値、us は jp と違う値。全市場を混ぜた日ごとの標準偏差は
+def _reversed_in_market(level: float, k: int) -> pd.DataFrame:
+    """市場の水準 level は当たり、市場の中の並べ（k）は逆を言う特徴量。"""
+    df = _features(0)
+    df.loc[df["y"].notna(), "y"] = level + 1e-3 * k
+    return df.assign(feat_a=level - 1e-3 * k)
+
+
+def test_market_level_gap_is_not_counted_as_ranking_skill(monkeypatch):
+    # jp と us は水準だけが違い、市場の中の並べは逆。日だけで束ねると水準の差で正になる（#2157）
+    symbols = {"jp": ("1111", "2222", "3333"), "us": ("AAA", "BBB", "CCC")}
+    levels = {"jp": 0.02, "us": -0.02}
+    extra = {
+        (m, s): _reversed_in_market(levels[m], k)
+        for m, names in symbols.items()
+        for k, s in enumerate(names)
+    }
+    _patch(monkeypatch, extra=extra)
+    ev = evaluate_holdout(_dates(), _models(1.0), _models(-1.0), _live_by_market())
+    assert ev.candidate["rank_corr"] > 0 > ev.production["rank_corr"], "束ねた値は候補が上"
+    assert ev.candidate["daily_rank_corr"] == pytest.approx(-1.0)
+    assert ev.markets["jp"]["candidate"]["daily_rank_corr"] == pytest.approx(-1.0)
+    # 標準偏差も市場の中で測る（水準の差 0.04 を銘柄の間のばらつきに数えない）
+    assert ev.candidate["prediction_std"] == pytest.approx(1e-3)
+    # 日ごとの票の日は市場を付けない
+    assert [d["date"] for d in ev.daily] == ev.dates
+    assert set(ev.vote_dates) <= set(ev.dates)
+    assert any("daily_rank_corr" in r for r in ev.decision.reasons)
+
+
+def test_jp_constant_candidate_cannot_win_though_overall_std_is_over_the_line(monkeypatch):
+    # jp の 5 銘柄はどの日も同じ値、us の 2 銘柄はばらつく。市場と取引日ごとの標準偏差の中央値は
     # 線を越えるが、jp の中ではばらつきが無いので勝ちにしない（#1718）
     extra = {("jp", str(2000 + i)): _features(0) for i in range(4)}
-    frames = _patch(monkeypatch, extra=extra)
+    frames = _patch(monkeypatch, extra={**extra, **_us_pair()})
     _patch_watchlist(monkeypatch, _jp_keys(frames))
     ev = evaluate_holdout(_dates(), _models(1.0), _models(-1.0), _live_by_market())
     assert ev.candidate["prediction_std"] > 1e-4, "全市場の確かめは通る"
