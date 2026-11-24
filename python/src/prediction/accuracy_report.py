@@ -10,6 +10,7 @@
 prediction_accuracy の行を (market, symbol, predicted_at) で突き合わせたものとする。採点が 0 件の日も件数 0 で書く。
 challenger の欄は、今日と4週のどちらも今の challenger の版の境（challenger_window）より後の
 predicted_at の行だけで数え、境の時刻を version_since に書く（#1341）。
+2.87.5 から daily_rank_corr と prediction_std は市場と取引日ごとに束ねる（前は predicted_at ごと。#2141）。
 
 設計: ai-company docs/superpowers/specs/2026-10-15-prediction-ops-design.md（土台の2）
 """
@@ -219,9 +220,16 @@ _ACCURACY_COLUMNS = [
 
 
 def _with_abs_error(rows: pd.DataFrame) -> pd.DataFrame:
+    """外れ（abs_error）と、日ごとの物差しの束ねの鍵（date、市場:取引日）を付けた写しを返す。
+
+    1回の予想は jp と us を同じ predicted_at で書くので、回の時刻で束ねると市場の間の水準の差を
+    銘柄の並べの腕と取り違える（#2141）。影の比べ（shadow_evaluation、#2072）と同じ束ね方。
+    """
     if rows is None or rows.empty:
         rows = pd.DataFrame(columns=_ACCURACY_COLUMNS)
     rows = rows.copy()
+    # 0件の表は列の型が str と object に割れて足せないので、行ごとに作る
+    rows["date"] = [f"{m}:{d}" for m, d in zip(rows["market"], _base_days(rows))]
     rows["abs_error"] = (
         pd.to_numeric(rows["predicted_ratio"], errors="coerce")
         - pd.to_numeric(rows["actual_ratio"], errors="coerce")
