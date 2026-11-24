@@ -83,6 +83,18 @@ class TestUpsertRawOhlcv(_TmpDbTestCase):
         self.assertIsNotNone(df)
         self.assertEqual(len(df), 2)
 
+    def test_upsert_overwrites_same_day_values(self):
+        """同じ日の足を保存し直すと、値が上書きされること（途中の足の直し #2140）"""
+        rows = self._make_rows(n=2)
+        upsert_raw_ohlcv(rows)
+        fixed = {**rows[0], "close": 222.5, "volume": 99999}
+        upsert_raw_ohlcv([fixed])
+
+        df = load_raw_ohlcv("us", "AAPL")
+        self.assertEqual(len(df), 2)
+        self.assertEqual(df.iloc[0]["Close"], 222.5)
+        self.assertEqual(df.iloc[0]["Volume"], 99999)
+
     def test_adj_close_defaults_to_none(self):
         """adj_close を省略しても保存が成功すること"""
         rows = self._make_rows(n=1)

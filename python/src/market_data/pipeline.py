@@ -44,9 +44,14 @@ from src.market_data.split_refetch import (
     bars_after,
     bars_from,
     find_price_steps,
+    log_bar_repairs,
     overlap_close_mismatch,
     overlap_fetch_start,
+    partial_bar_repairs,
+    record_bar_repairs,
     refetch_full_history,
+    replace_bars,
+    reset_bar_repairs,
     split_residual_steps,
     stock_split_ratios,
 )
@@ -132,6 +137,8 @@ def fetch_stock_data_with_features(
             # 引けていない当日の足は保存せず、次の回の差分で取り直す（#890）
             fresh_data = drop_unclosed_bars(fresh_data, market)
             mismatch = overlap_close_mismatch(df, fresh_data)
+            # DB に残った途中の足を直す足（#2140）。全期間を取り直すときは使わない
+            repairs = partial_bar_repairs(df, fresh_data)
             fresh_data = bars_after(fresh_data, db_latest_date)
             split_ratios = stock_split_ratios(fresh_data)
             if split_ratios or mismatch is not None:
@@ -158,18 +165,12 @@ def fetch_stock_data_with_features(
                 # 窓より前まで広げた足は全部保存し、特徴量は今までどおり窓の中で作る（#1392）
                 df = bars_from(fresh_data, start_date)
                 full_fetched = True
+            # 差分のみ保存（全件再保存より効率的）。分割のときは全期間を上書きする
+            bars_to_save = fresh_data
             if fresh_data is not None and not fresh_data.empty:
                 if not full_fetched:
                     df = merge_market_data(df, fresh_data)
                     logger.info(f"差分マージ完了: {len(fresh_data)}行追加")
-                if defer_raw_save:
-                    raw_data_to_save = fresh_data
-                else:
-                    try:
-                        # 差分のみ保存（全件再保存より効率的）。分割のときは全期間を上書きする
-                        save_raw_ohlcv(market, symbol, fresh_data)
-                    except Exception as e:
-                        logger.error(f"Raw OHLCV保存エラー（処理継続）: {e}", exc_info=True)
             else:
                 stale_weekdays = _count_weekdays_behind(db_latest_date, end_date, market)
                 if stale_weekdays > STALE_BARS_MAX_WEEKDAYS:
@@ -182,6 +183,13 @@ def fetch_stock_data_with_features(
                     )
                     return None
                 logger.warning("差分データなし（営業日外の可能性）")
+            if not full_fetched and not repairs.empty:
+                # 足が止まった銘柄の見張りの後で直す（直す足だけでは見張りを通さない）
+                df = replace_bars(df, repairs)
+                bars_to_save = pd.concat([repairs, fresh_data])
+                record_bar_repairs(market, symbol, repairs)
+            if bars_to_save is not None and not bars_to_save.empty:
+                raw_data_to_save = _save_or_defer_raw(market, symbol, bars_to_save, defer_raw_save)
         else:
             # DB内無データ：フル取得
             logger.info(
@@ -450,6 +458,7 @@ def run_batch_pipeline(
     _TASK_TIMEOUT = 300
     reset_edinet_stop()  # EDINET の打ち切りは回の中だけ。毎回1回目から試す（#1426）
     reset_macro_skips()  # 止まった列と欠けた列の控えも回の中だけ（#1634・#1642）
+    reset_bar_repairs()  # 直した足の控えも回の中だけ（#2140）
 
     def _fetch_task(task) -> dict:
         """データ取得＋特徴量生成のみ（DB書き込みなし）"""
@@ -523,6 +532,7 @@ def run_batch_pipeline(
 
     batch_result = BatchResult(succeeded=succeeded, failed=failed, skipped=skipped)
     batch_result.macro_stale, batch_result.macro_missing = take_macro_skips()
+    log_bar_repairs()
 
     if fetch_only:
         _log_pipeline_summary("データ取得（保存なし）", batch_result)
