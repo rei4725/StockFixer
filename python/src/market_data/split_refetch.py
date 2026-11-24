@@ -10,9 +10,13 @@ yfinance は分割の前の足も調整し直して返すが、DB の古い足�
 前日比が極端な足が残り、その近くに分割の記録がある銘柄は予想から外す
 （記録の無い段差は本当の値動きとみなす。#1492）。
 取り直しは取得の窓より前の DB の足も含める（#1392）。
+
+重ねて取った足は、DB に残った途中の足（出来高が本当よりずっと少ない足）を直すのにも使う（#2140）。
 """
 
-from typing import Callable, List, Optional, Tuple
+import threading
+from collections import Counter
+from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -39,6 +43,16 @@ OVERLAP_BARS = 5
 # 重なる足の終値の比（yfinance / DB）がこれを超えて 1 からずれたら調整し直されたとみなす。
 # 配当の調整による小さなずれはこの中に収まる
 OVERLAP_CLOSE_TOLERANCE = 0.03
+# 重なる足の出来高の比（yfinance / DB）がこれ以上なら、DB の足を途中の足とみなす（#2140）。
+# 引け後のふつうの訂正（数％）には当たらず、出来高が本当の 15% の途中の足（約 6.7 倍）には当たる。
+# 当たり過ぎると直近の数本だけが配当の調整後の値になるため、線は余裕を持たせて 2 倍
+# （DB の出来高が本当の半分以下）に置く。終値は配当の調整で動くので判定に使わない
+PARTIAL_BAR_VOLUME_RATIO = 2.0
+_PRICE_COLUMNS = ("Open", "High", "Low", "Close")
+
+# この回で直した足の日（market, symbol ごと）。取得は並列なので lock で守る
+_repaired_days: Dict[Tuple[str, str], List[str]] = {}
+_repairs_lock = threading.Lock()
 
 
 def stock_split_ratios(fresh_data: Optional[pd.DataFrame]) -> list:
@@ -88,6 +102,73 @@ def overlap_close_mismatch(
     if abs(worst - 1.0) <= tolerance:
         return None
     return float(worst)
+
+
+def partial_bar_repairs(
+    db_bars: pd.DataFrame,
+    fresh_data: Optional[pd.DataFrame],
+    min_ratio: float = PARTIAL_BAR_VOLUME_RATIO,
+) -> pd.DataFrame:
+    """
+    DB の側が途中の足とみなす日の、取り直した足を返す（#2140）。無ければ空の表。
+
+    取り直した出来高が DB の出来高の min_ratio 倍以上の日だけを返す。取り直した足の
+    出来高が欠け・0、四本値が欠けている日と、どちらかに同じ日が2行ある日は返さない。
+    """
+    needed = [*_PRICE_COLUMNS, "Volume"]
+    if fresh_data is None or fresh_data.empty:
+        return pd.DataFrame()
+    if any(c not in db_bars.columns or c not in fresh_data.columns for c in needed):
+        return fresh_data.iloc[:0]
+    db_days, fresh_days = _day_index(db_bars.index), _day_index(fresh_data.index)
+    db_volume = pd.Series(
+        pd.to_numeric(db_bars["Volume"], errors="coerce").to_numpy(dtype=float), index=db_days
+    )
+    db_volume = db_volume[~db_days.duplicated(keep=False)].reindex(fresh_days).to_numpy()
+    volume = pd.to_numeric(fresh_data["Volume"], errors="coerce").to_numpy(dtype=float)
+    has_prices = fresh_data[list(_PRICE_COLUMNS)].notna().all(axis=1).to_numpy()
+    # 欠け（NaN）との比べは False になり、新しい日（DB に無い）と欠けた出来高はここで外れる
+    partial = (volume > 0) & (volume >= db_volume * min_ratio)
+    return fresh_data[partial & has_prices & ~fresh_days.duplicated(keep=False)]
+
+
+def replace_bars(db_bars: pd.DataFrame, repairs: pd.DataFrame) -> pd.DataFrame:
+    """
+    db_bars の同じ日の行を repairs の行に置き換える。
+
+    merge_market_data は重なる日で DB の行を残すため、その後に置き換える。
+    """
+    kept = db_bars[~_day_index(db_bars.index).isin(_day_index(repairs.index))]
+    rows = repairs.reindex(columns=db_bars.columns)
+    rows.index = _day_index(repairs.index).tz_localize(pd.DatetimeIndex(db_bars.index).tz)
+    merged = pd.concat([kept, rows]) if not kept.empty else rows
+    merged.index.name = db_bars.index.name
+    return merged.sort_index()
+
+
+def record_bar_repairs(market: str, symbol: str, repairs: pd.DataFrame) -> None:
+    """直した足の日を、回のまとめのログのために控える（銘柄ごとのログは出さない）。"""
+    days = [str(d) for d in _day_index(repairs.index).strftime("%Y-%m-%d")]
+    with _repairs_lock:
+        _repaired_days[(market, symbol)] = days
+
+
+def reset_bar_repairs() -> None:
+    """直した足の控えを空にする（回の初めに呼ぶ）。"""
+    with _repairs_lock:
+        _repaired_days.clear()
+
+
+def log_bar_repairs() -> None:
+    """控えた銘柄の数と日付ごとの数を1行の INFO で出し、控えを空にする。無ければ出さない。"""
+    with _repairs_lock:
+        repaired = dict(_repaired_days)
+        _repaired_days.clear()
+    if not repaired:
+        return
+    counts = Counter(day for days in repaired.values() for day in days)
+    detail = "、".join(f"{day}: {n}" for day, n in sorted(counts.items()))
+    logger.info(f"途中の足を取り直した足で直す: {len(repaired)}銘柄（日付ごとの銘柄の数 {detail}）")
 
 
 def steps_near_split_records(
