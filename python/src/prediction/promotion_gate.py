@@ -50,6 +50,7 @@ from src.prediction.shadow_evaluation import DEFAULT_EVALUATION_DAYS
 from src.utils.data_path_utils import get_results_dir
 from src.utils.db.experiment import load_experiment_runs
 from src.utils.logger import get_logger
+from src.utils.wf_summary import load_latest_wf_summary
 
 logger = get_logger(__name__)
 
@@ -126,19 +127,7 @@ class PromotionResult:
 
 def _load_latest_wf_summary() -> tuple[Optional[pd.DataFrame], Optional[str]]:
     """最新の Walk-Forward サマリー CSV を (DataFrame, ファイル名) で返す。"""
-    report_dir = Path(get_results_dir()) / "backtest" / "walk_forward_reports"
-    candidates = sorted(report_dir.glob("wf_summary_*.csv"), reverse=True)
-    if not candidates:
-        logger.warning("Walk-Forward レポート CSV が見つかりません")
-        return None, None
-    path = candidates[0]
-    try:
-        df = pd.read_csv(path)
-        logger.info(f"WF サマリー読み込み: {path.name} ({len(df)} 銘柄)")
-        return df, path.name
-    except Exception as e:
-        logger.error(f"WF サマリー読み込み失敗: {e}", exc_info=True)
-        return None, None
+    return load_latest_wf_summary(Path(get_results_dir()) / "backtest" / "walk_forward_reports")
 
 
 def _wf_mean(df: pd.DataFrame, model_name: str, col: str) -> Optional[float]:
