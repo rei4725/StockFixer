@@ -50,6 +50,7 @@ ALLOWED_UTILS_MODULES: dict[str, str] = {
     "scheduler_types.py": "スケジューラーの共有型",
     "sector_constraints.py": _LATER,
     "signal_generator.py": _LATER,
+    "wf_summary.py": "Walk-Forward サマリー CSV の読み込み（prediction と reporting が共に使う）",
 }
 TEMPORARY_SHIMS: dict[str, str] = {}
 
