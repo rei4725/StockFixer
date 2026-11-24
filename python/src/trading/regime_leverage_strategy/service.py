@@ -420,6 +420,10 @@ def run_regime_leverage_weekly_check(
     最後の足が引けたはずの米国の営業日より古い回も、同じ理由で判定せず、DBにも書かずに
     RuntimeErrorを送出する(足が届いていない回を前の足で判定して成功で終えると、補完に
     乗らない。#1608)。金曜が休場の週は木曜の足がその週の最後の足なので失敗にしない。
+
+    最後の足の出来高が極端に少ない(途中の足とみなす)回も、判定せず、DBにも書かずに
+    RuntimeErrorを送出する。終値は引けの値に直りうるので、日次の損切りと違って転換の決済に
+    当たる回でも書かず、補完の回が取り直した終値で判定する(#2149)。
     """
     from config.settings import REGIME_LEVERAGE_SYMBOL
 
@@ -443,6 +447,12 @@ def run_regime_leverage_weekly_check(
         raise RuntimeError(
             "レジームレバレッジ戦略(週次): 引けたはずの足が届いていないため判定を中止しました"
             f"(last_bar={last_bar}, expected={expected_bar})"
+        )
+    volume_ratio = partial_bar_volume_ratio(df, df.index[-1])
+    if volume_ratio is not None:
+        raise RuntimeError(
+            "レジームレバレッジ戦略(週次): 最後の足の出来高が少なく途中の足とみなすため判定を"
+            f"中止しました(last_bar={last_bar}, volume_ratio={volume_ratio:.3f})"
         )
 
     if snapshot is None or snapshot.shares <= 0:
