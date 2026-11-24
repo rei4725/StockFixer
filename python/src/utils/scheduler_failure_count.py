@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
-import json
 import os
+
+from src.utils.scheduler_state_read import (
+    SCHEDULER_STATE_FILE_NAME,
+    SchedulerStateUnreadableError,
+    read_scheduler_state,
+)
+
+__all__ = ["SchedulerStateUnreadableError"]
 
 # スケジューラ日次パイプラインのジョブID
 _DAILY_PIPELINE_JOB_ID = "daily_pipeline"
-
-
-class SchedulerStateUnreadableError(Exception):
-    """スケジューラ状態ファイルが在るのに読めない（#924）。"""
 
 
 def _count_consecutive_pipeline_failures(state_file_path: str | None = None) -> int:
@@ -23,25 +26,11 @@ def _count_consecutive_pipeline_failures(state_file_path: str | None = None) -> 
     if state_file_path is None:
         from src.utils.data_path_utils import get_results_dir
 
-        state_file_path = os.path.join(get_results_dir(), "scheduler_queue_state.json")
+        state_file_path = os.path.join(get_results_dir(), SCHEDULER_STATE_FILE_NAME)
 
-    if not os.path.exists(state_file_path):
-        quarantined = _find_quarantined_state(state_file_path)
-        if quarantined:
-            raise SchedulerStateUnreadableError(
-                f"状態ファイルが退避されたまま本体が無い: {quarantined}"
-            )
+    state = read_scheduler_state(state_file_path)
+    if state is None:
         return 0
-
-    try:
-        with open(state_file_path, "r", encoding="utf-8") as fh:
-            state = json.load(fh)
-    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
-        raise SchedulerStateUnreadableError(f"状態ファイルが読めない: {exc}") from exc
-    if not isinstance(state, dict):
-        raise SchedulerStateUnreadableError(
-            f"状態ファイルが読めない: 最上位が dict ではない: {type(state).__name__}"
-        )
 
     events = [
         e
@@ -58,14 +47,3 @@ def _count_consecutive_pipeline_failures(state_file_path: str | None = None) -> 
             break
 
     return consecutive
-
-
-def _find_quarantined_state(state_file_path: str) -> str | None:
-    """state_file_path の隣に退避された状態ファイル（.corrupt-*）の最新の名前を返す。"""
-    state_dir = os.path.dirname(os.path.abspath(state_file_path))
-    prefix = f"{os.path.basename(state_file_path)}.corrupt-"
-    try:
-        names = [name for name in os.listdir(state_dir) if name.startswith(prefix)]
-    except OSError:
-        return None
-    return max(names) if names else None

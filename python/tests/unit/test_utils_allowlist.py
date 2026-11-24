@@ -47,6 +47,7 @@ ALLOWED_UTILS_MODULES: dict[str, str] = {
     "retry_helper.py": "リトライ",
     "run_context.py": "run_id の受け渡し",
     "scheduler_failure_count.py": "alert_service の部品（スケジューラ状態ファイルの読み取り）",
+    "scheduler_state_read.py": "スケジューラ状態ファイルの読み（health_check と scheduler_failure_count が共に使う）",
     "scheduler_types.py": "スケジューラーの共有型",
     "sector_constraints.py": _LATER,
     "signal_generator.py": _LATER,

@@ -6,13 +6,17 @@ api（/health）と orchestration（日次の道）の両方から使うため�
 - 日次の道は鮮度を見ない。日次の道が走っていること自体がスケジューラの生存の証のため
 """
 
-import json
 import os
 from datetime import datetime, timezone
 from typing import Any
 
 from src.utils.data_path_utils import get_results_dir
 from src.utils.logger import get_logger
+from src.utils.scheduler_state_read import (
+    SCHEDULER_STATE_FILE_NAME,
+    SchedulerStateUnreadableError,
+    read_scheduler_state,
+)
 
 # 一番頻繁に success を残すジョブ strategy_promotion_check（毎日、2時間ごと）の間隔に、
 # 補完の待ち（recovery_delay_minutes の30分）と走る時間の余裕を足した3時間。
@@ -24,8 +28,6 @@ SCHEDULER_STALE_SECS = 3 * 60 * 60  # 3時間
 # Docker HEALTHCHECK の HTTP タイムアウト（8秒）内に必ず応答を返せるよう、
 # 既定の 30 秒ではなく短い値でプール接続待ちを打ち切る（#550）。
 DB_CHECK_LOCK_TIMEOUT = 2.0
-
-_STATE_FILE_NAME = "scheduler_queue_state.json"
 
 logger = get_logger(__name__)
 
@@ -69,10 +71,6 @@ def query_last_prediction_at(con: Any) -> str | None:
         return None
 
 
-class SchedulerStateUnreadableError(Exception):
-    """スケジューラ状態ファイルが在るのに読めない（#924）。"""
-
-
 def load_scheduler_last_runs(results_dir: str) -> dict[str, str | None]:
     """スケジューラ状態ファイルから各ジョブの最終成功実行時刻を返す。
 
@@ -80,24 +78,9 @@ def load_scheduler_last_runs(results_dir: str) -> dict[str, str | None]:
     壊れて退避された跡（.corrupt-*）だけが残っているときは
     SchedulerStateUnreadableError を投げる（履歴なし＝正常と黙らないため、#924）。
     """
-    state_path = os.path.join(results_dir, _STATE_FILE_NAME)
-    if not os.path.exists(state_path):
-        quarantined = find_quarantined_state(results_dir)
-        if quarantined:
-            raise SchedulerStateUnreadableError(
-                f"状態ファイルが退避されたまま本体が無い: {quarantined}"
-            )
+    state = read_scheduler_state(os.path.join(results_dir, SCHEDULER_STATE_FILE_NAME))
+    if state is None:
         return {}
-
-    try:
-        with open(state_path, "r", encoding="utf-8") as f:
-            state = json.load(f)
-    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
-        raise SchedulerStateUnreadableError(f"状態ファイルが読めない: {exc}") from exc
-    if not isinstance(state, dict):
-        raise SchedulerStateUnreadableError(
-            f"状態ファイルが読めない: 最上位が dict ではない: {type(state).__name__}"
-        )
 
     latest: dict[str, str | None] = {}
     for event in state.get("events", []):
@@ -110,19 +93,6 @@ def load_scheduler_last_runs(results_dir: str) -> dict[str, str | None]:
                 latest[job_id] = finished_at
 
     return latest
-
-
-def find_quarantined_state(results_dir: str) -> str | None:
-    """退避された状態ファイル（scheduler_queue_state.json.corrupt-*）の最新の名前を返す。"""
-    try:
-        names = [
-            name
-            for name in os.listdir(results_dir)
-            if name.startswith(f"{_STATE_FILE_NAME}.corrupt-")
-        ]
-    except OSError:
-        return None
-    return max(names) if names else None
 
 
 def is_scheduler_stale(
