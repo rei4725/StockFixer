@@ -37,6 +37,10 @@ def judge_win(
 ) -> WinDecision:
     """候補が production に勝ったかを判定する。
 
+    順位相関の条件は daily_rank_corr（同じ市場・取引日の銘柄の並べの平均）で見る。2.88.0 までは
+    市場と日を混ぜて束ねた rank_corr で見ていて、水準の差を並べの腕に数えていた（#2157）。
+    rank_corr は記録に残るだけで、ここでは読まない。
+
     Args:
         candidate: 候補の baseline_metrics()
         production: production の baseline_metrics()
@@ -66,11 +70,12 @@ def judge_win(
     if c_mae is None or p_mae is None or not c_mae < p_mae:
         reasons.append(f"MAE が production より小さくない（候補 {c_mae}、production {p_mae}）")
 
-    c_rc = _get(candidate, "rank_corr")
-    p_rc = _get(production, "rank_corr")
+    c_rc = _get(candidate, "daily_rank_corr")
+    p_rc = _get(production, "daily_rank_corr")
     if c_rc is None or p_rc is None or not (c_rc > p_rc and c_rc > 0):
         reasons.append(
-            f"順位相関が production を上回り0より大きい、を満たさない（候補 {c_rc}、production {p_rc}）"
+            "順位相関（daily_rank_corr）が production を上回り0より大きい、を満たさない"
+            f"（候補 {c_rc}、production {p_rc}）"
         )
 
     wins = sum(1 for d in daily_diff if d > 0)
