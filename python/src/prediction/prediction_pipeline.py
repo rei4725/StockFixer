@@ -18,7 +18,11 @@ import pandas as pd
 
 from config.data import MAX_PREDICTION_WORKERS
 from src.domain.split_steps import pending_split_steps
-from src.prediction.base_bar_date import _base_bar_date, _split_adjust_scale
+from src.prediction.base_bar_date import (
+    _actual_ratio_and_match,
+    _base_bar_date,
+    _split_adjust_scale,
+)
 from src.prediction.db import save_prediction_results
 from src.prediction.predict_single import predict_single_stock
 from src.prediction.prediction_run_stats import collect_prediction_run_stats
@@ -472,11 +476,8 @@ def run_accuracy_check(
         predicted_ratio = (
             (predicted_price - current_price) / current_price if current_price else None
         )
-        actual_ratio = (actual_price - current_price) / current_price if current_price else None
-        direction_match = (
-            (predicted_ratio >= 0) == (actual_ratio >= 0)
-            if predicted_ratio is not None and actual_ratio is not None
-            else None
+        actual_ratio, direction_match = _actual_ratio_and_match(
+            current_price, predicted_ratio, actual_price
         )
 
         new_rows.append(

@@ -37,6 +37,19 @@ def _split_adjust_scale(current_price: float, base_close: float) -> float | None
     return split_ratio if gap > 1 else 1 / split_ratio
 
 
+def _actual_ratio_and_match(
+    current_price: float, predicted_ratio: float | None, actual_price: float
+) -> tuple[float | None, bool | None]:
+    """実績の変化率と、予想の方向が当たったかを返す（採点と付け直しが同じ式を使う）。"""
+    actual_ratio = (actual_price - current_price) / current_price if current_price else None
+    direction_match = (
+        (predicted_ratio >= 0) == (actual_ratio >= 0)
+        if predicted_ratio is not None and actual_ratio is not None
+        else None
+    )
+    return actual_ratio, direction_match
+
+
 def _base_bar_date(predicted_at_str: str, market: str) -> datetime:
     """
     予想の時刻（UTC の YYYYMMDD_HHMMSS）に引けていた最後の足の日を返す。

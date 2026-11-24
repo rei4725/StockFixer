@@ -13,6 +13,7 @@ from src.orchestration.jobs.accuracy_json import (
     production_already_predicted_today,
     write_accuracy_json_without_sectors,
 )
+from src.orchestration.jobs.accuracy_rescore import rescore_accuracy_stage
 from src.orchestration.jobs.alert_streaks import (
     record_health_degraded_streak,
     record_loss_limit_streak,
@@ -157,6 +158,8 @@ def run_daily_pipeline():
         # challenger の採点も 3 の保存の後にやり直せないため知らせる（#1152）
         _handle_stage_error(PipelineStage.NON_CRITICAL, "[2/6] 予測精度チェック (challenger)", e)
         _notify_stage_failure("[2/6] 予測精度チェック (challenger)", e)
+
+    rescore_accuracy_stage()  # 足が直った直近の採点の行を付け直す（#2155）
 
     # 採点の JSON も 3 の保存の前に業種なしで書き、業種は道の最後で書き足す（#843）
     if not rerun:
