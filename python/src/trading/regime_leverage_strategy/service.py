@@ -24,6 +24,7 @@ from src.domain.market_close import MARKET_CLOSE
 from src.domain.ports import MarketDataPort
 from src.domain.us_market_holidays import is_us_business_day
 from src.trading.regime_leverage_strategy.indicators import build_weekly_frame
+from src.trading.regime_leverage_strategy.partial_bar import partial_bar_volume_ratio
 from src.trading.regime_leverage_strategy.repository import (
     get_last_daily_check_at,
     get_latest_snapshot,
@@ -471,7 +472,8 @@ def run_regime_leverage_daily_margin_check(
     #860・#1228)。引けたはずの足が届いていない回の noop は行を書かない(#1608)。その足が
     2営業日以上古い回は、判定の止まりに気づけるようRuntimeErrorを送出する(#1620)。前の回の後の
     営業日の足が、後の足より手前で丸ごと欠けた回も、欠けた日の安値を判定しないまま進まないよう
-    行を書かずRuntimeErrorを送出する(#1633)。手元の足で決済に当たる回は、足が古くても、途中の
+    行を書かずRuntimeErrorを送出する(#1633)。最後の足の出来高が極端に少ない(途中の足とみなす)
+    回の noop も、行を書かずWARNINGを出す(#2144)。手元の足で決済に当たる回は、足が古くても、途中の
     足が欠けていても決済を書く。
     """
     from config.settings import REGIME_LEVERAGE_SYMBOL
@@ -546,6 +548,17 @@ def run_regime_leverage_daily_margin_check(
             "(last_bar=%s, expected=%s)",
             last_bar,
             expected_bar,
+        )
+        return decision
+    # 途中の足の安値で行を書くと、後で安値が直っても判定しない。行を書かなければ、次の回が
+    # 取り直した値で判定する(後ろに新しい足が届けば、その足で判定の時刻が進む。#2144)
+    volume_ratio = partial_bar_volume_ratio(df, bars.index[-1])
+    if volume_ratio is not None:
+        logger.warning(
+            "レジームレバレッジ戦略(日次): 最後の足の出来高が少なく途中の足とみなすため、判定の"
+            "時刻を進めません(last_bar=%s, volume_ratio=%.3f)",
+            last_bar,
+            volume_ratio,
         )
         return decision
     insert_snapshot(decision)
