@@ -235,6 +235,14 @@ def _rule_signals_mostly_unavailable(batch: "RuleSignalBatch") -> bool:
     return len(batch.unavailable) / batch.total > DAILY_FETCH_MAX_UNAVAILABLE_RATIO
 
 
+def _rule_unavailable_cause(batch: "RuleSignalBatch") -> str:
+    """線を超えた文の後ろに足す、理由ごとの件数の文を返す。多い順、同数は理由の名前の順（#2173）。"""
+    groups = Counter(u.reason for u in batch.unavailable)
+    ranked = sorted(groups.items(), key=lambda item: (-item[1], item[0]))
+    parts = [f"{reason} {n} 件" for reason, n in ranked]
+    return f"。理由: {', '.join(parts)}" if parts else ""
+
+
 def _raise_if_rule_signals_mostly_unavailable(batch: "RuleSignalBatch") -> None:
     """シグナルを出せなかった銘柄が対象の線を超えたら RuntimeError を投げる（#822）。
 
@@ -247,7 +255,7 @@ def _raise_if_rule_signals_mostly_unavailable(batch: "RuleSignalBatch") -> None:
     if _rule_signals_mostly_unavailable(batch):
         raise RuntimeError(
             f"ルールシグナルを出せなかった銘柄が多すぎる: {unavailable} / 対象 {batch.total}"
-            f"（線 {DAILY_FETCH_MAX_UNAVAILABLE_RATIO:.0%}）"
+            f"（線 {DAILY_FETCH_MAX_UNAVAILABLE_RATIO:.0%}）{_rule_unavailable_cause(batch)}"
         )
 
 
