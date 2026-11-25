@@ -7,22 +7,19 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
 from src.backtest.data_port import get_backtest_data_port
-from src.utils.data_path_utils import get_ticker
+from src.utils.data_path_utils import get_ticker, get_watchlist_path
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-_WATCHLIST_PATH = Path(__file__).parent.parent.parent.parent / "config" / "watchlist.json"
-
 
 def _load_watchlist_symbols(market: str) -> list[str]:
-    with open(_WATCHLIST_PATH, encoding="utf-8") as f:
+    with open(get_watchlist_path(), encoding="utf-8") as f:
         data = json.load(f)
     return list(data.get(market, []))
 
