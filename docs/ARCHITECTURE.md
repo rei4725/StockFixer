@@ -319,7 +319,7 @@ DDDフェーズ4完了により、共有型は各 BC の `types.py` に分散配
 
 #### `market_data/loader.py`
 - **`get_stock_data()`**: yfinance から株価データ取得
-- **`get_stock_data_from_db()`**: DuckDB から株価データ（特徴量含む）を取得
+- **`get_raw_ohlcv_from_db()`**: DB から生の OHLCV を取得（無ければ `None`）
 
 #### `market_data/saver.py`
 - 生データの DuckDB 保存

@@ -2,7 +2,8 @@
 YFinanceDataSource — yfinance を使ったデフォルトのデータソース実装。
 
 DataSourceBase を継承し、既存の yf_client を内部で使用する。
-loader.py の get_stock_data / get_forex_data と同等のロジックを提供する。
+get_stock_data は loader.py の get_stock_data と同等のロジックを提供する。
+yfinance からの為替の取得は get_forex_data が受け持つ（loader.py には無い）。
 """
 
 from datetime import timedelta

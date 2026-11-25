@@ -276,15 +276,6 @@ class TestReadersDropUndeterminedY(unittest.TestCase):
         self.assertEqual(len(df), 3)
         self.assertFalse(df["y"].isna().any())
 
-    def test_backtester_db_loader_drops_nan_y(self):
-        from src.market_data.loader import get_stock_data_from_db
-
-        with patch("src.market_data.loader.load_stock_features", return_value=self._stored_frame()):
-            df = get_stock_data_from_db("us", "AAPL")
-
-        self.assertEqual(len(df), 3)
-        self.assertFalse(df["y"].isna().any())
-
 
 if __name__ == "__main__":
     unittest.main()
