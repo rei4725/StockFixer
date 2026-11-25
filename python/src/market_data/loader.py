@@ -7,7 +7,7 @@ import yfinance as yf
 import src.market_data.yf_client as yf_client
 from src.market_data.macro_features import _fetch_close_columns
 from src.utils.data_path_utils import get_ticker
-from src.utils.db import load_raw_ohlcv, load_stock_features
+from src.utils.db import load_raw_ohlcv
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -69,62 +69,6 @@ def get_raw_ohlcv_from_db(
     return load_raw_ohlcv(market, symbol, start_date, end_date, timeframe)
 
 
-def get_stock_data_from_db(
-    market: str,
-    symbol: str,
-    start_date: Union[str, datetime] = None,
-    end_date: Union[str, datetime] = None,
-) -> pd.DataFrame:
-    """
-    DuckDB から株価データ（特徴量含む）を取得する
-
-    Args:
-        market (str): 市場名（例: "us"）
-        symbol (str): ティッカー（例: "AAPL"）
-        start_date (Union[str, datetime], optional): データ取得開始日
-        end_date (Union[str, datetime], optional): データ取得終了日
-
-    Returns:
-        pd.DataFrame: 株価データ
-    """
-    df = load_stock_features(market, symbol)
-    if df is None or df.empty:
-        raise FileNotFoundError(f"DBにデータが存在しません: {market}_{symbol}")
-
-    # 最新日の行は y（翌日変化率）が未確定の NaN で保存される（予測用）
-    if "y" in df.columns:
-        df = df[df["y"].notna()].copy()
-
-    # Date列があれば期間フィルタ
-    if "Date" in df.columns and start_date is not None and end_date is not None:
-        df["Date"] = pd.to_datetime(df["Date"])
-        df = df.set_index("Date")
-        df = df.loc[pd.to_datetime(start_date) : pd.to_datetime(end_date)]  # type: ignore[misc]
-
-    return df
-
-
-def get_stock_data_from_file(
-    market: str,
-    symbol: str,
-    start_date: Union[str, datetime],
-    end_date: Union[str, datetime],
-) -> pd.DataFrame:
-    """
-    DBから株価データを取得する（後方互換のため関数名を維持）
-
-    Args:
-        market (str): 市場名（例: "us"）
-        symbol (str): ティッカー（例: "AAPL"）
-        start_date (Union[str, datetime]): データ取得開始日
-        end_date (Union[str, datetime]): データ取得終了日
-
-    Returns:
-        pd.DataFrame: 株価データ (OHLCV)
-    """
-    return get_stock_data_from_db(market, symbol, start_date, end_date)
-
-
 def get_stock_data(
     market: str,
     ticker: str,
@@ -155,57 +99,6 @@ def get_stock_data(
     # リトライロジック付きでデータ取得
     data = yf_client.ticker_history(yf_ticker, start=str(start_date), end=end_date_adj)
 
-    return data
-
-
-def get_stock_data_auto(
-    market: str,
-    symbol: str,
-    start_date: Union[str, datetime],
-    end_date: Union[str, datetime],
-    source: str = "file",
-) -> pd.DataFrame:
-    """
-    APIまたはローカルファイルから株価データを取得するラッパー
-
-    Args:
-        market (str): 市場名（例: "us"）
-        symbol (str): ティッカー（例: "AAPL"）
-        start_date (Union[str, datetime]): データ取得開始日
-        end_date (Union[str, datetime]): データ取得終了日
-        source (str): "file" または "api"
-
-    Returns:
-        pd.DataFrame: 株価データ (OHLCV)
-    """
-    if source == "file":
-        return get_stock_data_from_file(market, symbol, start_date, end_date)
-    elif source == "api":
-        ticker = get_ticker(market, symbol)
-        return get_stock_data(market, ticker, start_date, end_date)
-    else:
-        raise ValueError(f"sourceは'file'または'api'のみ対応: {source}")
-
-
-def get_forex_data(
-    ticker: str, start_date: Union[str, datetime], end_date: Union[str, datetime]
-) -> pd.DataFrame:
-    """
-    指定された通貨ペアの為替レートを取得する（リトライ対応）
-
-    Args:
-        ticker (str): 通貨ペアのティッカー (例: "JPY=X")
-        start_date (Union[str, datetime]): データ取得開始日
-        end_date (Union[str, datetime]): データ取得終了日
-
-    Returns:
-        pd.DataFrame: 為替レートデータ
-    """
-    # リトライロジック付きでデータ取得
-    data = yf_client.download(ticker, start=str(start_date), end=str(end_date), auto_adjust=True)
-
-    if data.empty:
-        raise ValueError(f"No data found for forex ticker {ticker}")
     return data
 
 
