@@ -15,7 +15,7 @@ import pandas as pd
 
 from config.data import MAX_DATA_WORKERS
 from config.settings import SENTIMENT_LOOKBACK_DAYS, STALE_BARS_MAX_WEEKDAYS
-from src.domain.jp_market_holidays import is_jp_business_day
+from src.domain.business_days import count_business_days_behind
 from src.domain.ports import NotificationPort
 from src.market_data.adapters.wikipedia_pageviews import resolve_article
 from src.market_data.bar_close import drop_unclosed_bars
@@ -392,13 +392,7 @@ def _count_weekdays_behind(db_latest_date: pd.Timestamp, end_date: str, market: 
     end_date までに数えるのは、あるべき最新の営業日までに数えるのと同じ数になる。
     jp は東証の休場日も除き（#1105）、ほかの市場は土日だけを除く（祝日は数え分けない）。
     """
-    if db_latest_date.tzinfo is not None:
-        db_latest_date = db_latest_date.tz_localize(None)
-    next_day = db_latest_date.normalize() + timedelta(days=1)
-    days = pd.bdate_range(next_day, pd.Timestamp(end_date).normalize())
-    if market == "jp":
-        return sum(1 for day in days if is_jp_business_day(day.date()))
-    return len(days)
+    return count_business_days_behind(db_latest_date.date(), pd.Timestamp(end_date).date(), market)
 
 
 def save_stock_data_with_features(
