@@ -10,6 +10,13 @@
 - evaluation の無い回（skipped・failed など）は、評価の列をすべて欠け（pd.NA）にする
 - 値が null の数・鍵の無い数は欠けにし、0 と分ける
 - reason の基準ごとの有無は、evaluation のある回だけ True/False にし、無い回は欠けにする
+- 右端（reason_other の後ろ）に、判定に使う物差しの列を足す（#2162）。前からの列は変えない
+  - candidate_mae・production_mae・candidate_daily_rank_corr・production_daily_rank_corr（全体）
+  - <市場>_<candidate か production>_ の頭の daily_rank_corr・hit_rate_minus_majority・
+    predicted_up_rate（evaluation.markets。市場の並びは n_compared_ と同じ）
+  - daily_rank_corr の鍵の無い古い回・markets の無い回・evaluation の無い回は欠け
+  - 全体の daily_rank_corr は 2.88.0 までの回では日ごと、その後の回では市場と取引日ごとに
+    束ねた値である（#2157）。JSON の値をそのまま出し、計算し直さない
 """
 
 import json
@@ -43,6 +50,14 @@ METRIC_KEYS: tuple[str, ...] = (
 )
 SIDES: tuple[str, ...] = ("candidate", "production")
 METRIC_COLUMNS: tuple[str, ...] = tuple(f"{side}_{key}" for side in SIDES for key in METRIC_KEYS)
+# 判定（judge_win）に使う全体の物差しと、市場ごとに出す物差し（#2162）。表の右端に足す
+JUDGED_KEYS: tuple[str, ...] = ("mae", "daily_rank_corr")
+JUDGED_COLUMNS: tuple[str, ...] = tuple(f"{side}_{key}" for key in JUDGED_KEYS for side in SIDES)
+MARKET_METRIC_KEYS: tuple[str, ...] = (
+    "daily_rank_corr",
+    "hit_rate_minus_majority",
+    "predicted_up_rate",
+)
 N_COMPARED_PREFIX = "n_compared_"
 REASON_PREFIX = "reason_"
 # reason（"; " でつないだ落ちた基準）の1つずつを、含む語で基準に分ける。どれにも当たらなければ other
@@ -162,8 +177,34 @@ def _row(record: dict) -> tuple[dict, dict[str, Any] | None]:
     return row, n_compared
 
 
+def _child(value: Any, key: str) -> dict:
+    """dict の中の dict を返す。形が違う・鍵が無いときは空の dict。"""
+    child = value.get(key) if isinstance(value, dict) else None
+    return child if isinstance(child, dict) else {}
+
+
+def _judged_metrics(record: dict, markets: list[str]) -> dict[str, Any]:
+    """右端に足す列の値（全体の判定の物差しと、市場ごとの物差し）。無いものは欠け。"""
+    evaluation = _child(record, "evaluation")
+    values: dict[str, Any] = {}
+    for key in JUDGED_KEYS:
+        for side in SIDES:
+            values[f"{side}_{key}"] = _number(_child(evaluation, side).get(key))
+    by_market = _child(evaluation, "markets")
+    for market in markets:
+        for side in SIDES:
+            metrics = _child(_child(by_market, market), side)
+            for key in MARKET_METRIC_KEYS:
+                values[f"{market}_{side}_{key}"] = _number(metrics.get(key))
+    return values
+
+
 def build_backtest_promotion_trend(records: list[dict]) -> pd.DataFrame:
-    """回ごとに1行の表を返す。市場ごとの n_compared は n_compared_<市場> の列にする。"""
+    """回ごとに1行の表を返す。
+
+    市場ごとの n_compared は n_compared_<市場> の列に、判定の物差しと市場ごとの物差しは右端の
+    列（JUDGED_COLUMNS と <市場>_<candidate か production>_<MARKET_METRIC_KEYS>）にする。
+    """
     rows: list[dict] = []
     compared_by_row: list[dict[str, Any] | None] = []
     for record in records:
@@ -171,11 +212,18 @@ def build_backtest_promotion_trend(records: list[dict]) -> pd.DataFrame:
         rows.append(row)
         compared_by_row.append(n_compared)
     markets = sorted({m for compared in compared_by_row if compared for m in compared})
-    for row, compared in zip(rows, compared_by_row):
+    for record, row, compared in zip(records, rows, compared_by_row):
         for market in markets:
             row[N_COMPARED_PREFIX + market] = (
                 pd.NA if compared is None else compared.get(market, pd.NA)
             )
+        row.update(_judged_metrics(record, markets))
+    added_columns = list(JUDGED_COLUMNS) + [
+        f"{market}_{side}_{key}"
+        for market in markets
+        for side in SIDES
+        for key in MARKET_METRIC_KEYS
+    ]
     count_columns = list(VOTE_COLUMNS) + [N_COMPARED_PREFIX + m for m in markets]
     columns = (
         ["file"]
@@ -184,11 +232,12 @@ def build_backtest_promotion_trend(records: list[dict]) -> pd.DataFrame:
         + list(METRIC_COLUMNS)
         + [N_COMPARED_PREFIX + m for m in markets]
         + list(REASON_COLUMNS)
+        + added_columns
     )
     df = pd.DataFrame(rows, columns=columns)
     for column in count_columns:
         df[column] = df[column].astype("Int64")
-    for column in METRIC_COLUMNS:
+    for column in list(METRIC_COLUMNS) + added_columns:
         df[column] = df[column].astype("Float64")
     for column in _FLAG_COLUMNS:
         df[column] = df[column].astype("boolean")
