@@ -8,7 +8,13 @@ from datetime import datetime, timedelta, timezone
 
 from src.orchestration.jobs.alert_streaks import record_drift_warn_streak
 from src.orchestration.jobs.common import _drift_check_lock, skip_if_running
-from src.orchestration.jobs.drift_record import DriftCheckRecord, write_drift_check_record
+from src.orchestration.jobs.drift_record import (
+    DriftCheckRecord,
+    build_triggered_symbols,
+    elapsed_seconds,
+    read_timer,
+    write_drift_check_record,
+)
 from src.reporting.drift_thresholds import load_drift_thresholds, select_drifted_symbols
 from src.reporting.kpi import drop_stale_symbols
 from src.utils.logger import get_logger
@@ -145,6 +151,7 @@ def run_daily_drift_check():
 
     if triggered.empty:
         logger.info("ドリフトチェック: 閾値超過銘柄なし")
+        day_record.triggered_symbols = []
         write_drift_check_record(day_record)
         return
 
@@ -188,6 +195,7 @@ def run_daily_drift_check():
     all_tasks = {(t.market, t.symbol): t for t in load_target_symbols()}
     success_count = 0
     retrained_symbols: list = []
+    retrain_started = read_timer() if triggered_list else None
     for sym in triggered_list:
         task = all_tasks.get((sym["market"], sym["symbol"]))
         if task is None:
@@ -210,6 +218,7 @@ def run_daily_drift_check():
             logger.error(
                 "ドリフト再学習失敗 (%s/%s): %s", sym["market"], sym["symbol"], e, exc_info=True
             )
+    retrain_ended = read_timer() if triggered_list else None
 
     logger.info(
         "=== 日次ドリフトチェック完了: 再学習=%s/%s 件 ===", success_count, len(triggered_list)
@@ -217,6 +226,15 @@ def run_daily_drift_check():
     day_record.fresh_skipped = len(fresh_skipped)
     day_record.retrain_targets = len(triggered_list)
     day_record.retrain_success = success_count
+    day_record.retrain_seconds = elapsed_seconds(retrain_started, retrain_ended)
+    day_record.triggered_symbols = build_triggered_symbols(
+        ranked_list,
+        fresh_skipped,
+        triggered_list,
+        retrained_symbols,
+        mae_threshold,
+        hit_rate_threshold,
+    )
     write_drift_check_record(day_record)
 
     # 特徴量除外提案通知（再学習成功銘柄の最新 Permutation Importance を通知）
