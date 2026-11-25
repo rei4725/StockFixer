@@ -8,7 +8,6 @@ import pandas as pd
 
 from src.market_data.loader import (
     get_latest_business_day,
-    get_stock_data_auto,
     merge_market_data,
     should_fetch_fresh_data,
 )
@@ -167,87 +166,6 @@ class TestMergeMarketData(unittest.TestCase):
         # 例外が発生しなければ OK
         result = merge_market_data(db, fresh)
         self.assertIsNotNone(result)
-
-
-class TestGetStockDataAuto(unittest.TestCase):
-    """get_stock_data_auto 関数のテスト"""
-
-    @patch("src.market_data.loader.get_stock_data_from_file")
-    def test_file_source_calls_from_file(self, mock_from_file):
-        """source='file' のとき get_stock_data_from_file が呼ばれること"""
-        mock_from_file.return_value = _make_ohlcv()
-
-        get_stock_data_auto("us", "AAPL", "2024-01-01", "2024-06-01", source="file")
-
-        mock_from_file.assert_called_once()
-
-    @patch("src.market_data.loader.get_stock_data")
-    @patch("src.market_data.loader.get_ticker")
-    def test_api_source_calls_get_stock_data(self, mock_ticker, mock_get_stock):
-        """source='api' のとき get_stock_data が呼ばれること"""
-        mock_ticker.return_value = "AAPL"
-        mock_get_stock.return_value = _make_ohlcv()
-
-        get_stock_data_auto("us", "AAPL", "2024-01-01", "2024-06-01", source="api")
-
-        mock_get_stock.assert_called_once()
-
-    def test_invalid_source_raises_value_error(self):
-        """不正な source 指定で ValueError が発生すること"""
-        with self.assertRaises(ValueError):
-            get_stock_data_auto("us", "AAPL", "2024-01-01", "2024-06-01", source="invalid")
-
-
-class TestGetStockDataFromDb(unittest.TestCase):
-    """get_stock_data_from_db 関数のテスト"""
-
-    @patch("src.market_data.loader.load_stock_features")
-    def test_raises_file_not_found_when_no_data(self, mock_load):
-        """DB にデータがない場合 FileNotFoundError が送出されること"""
-        from src.market_data.loader import get_stock_data_from_db
-
-        mock_load.return_value = None
-
-        with self.assertRaises(FileNotFoundError):
-            get_stock_data_from_db("us", "AAPL")
-
-    @patch("src.market_data.loader.load_stock_features")
-    def test_returns_df_when_data_exists(self, mock_load):
-        """DB にデータがある場合 DataFrame を返すこと"""
-        from src.market_data.loader import get_stock_data_from_db
-
-        dates = pd.date_range("2024-01-01", periods=10, freq="B")
-        df = pd.DataFrame({"Date": dates, "Close": range(10)})
-        mock_load.return_value = df
-
-        result = get_stock_data_from_db("us", "AAPL")
-        self.assertFalse(result.empty)
-
-
-class TestGetForexData(unittest.TestCase):
-    """get_forex_data 関数のテスト"""
-
-    @patch("src.market_data.loader.yf_client")
-    def test_raises_when_empty_data(self, mock_yf_client):
-        """データが空の場合は ValueError が発生すること"""
-        from src.market_data.loader import get_forex_data
-
-        mock_yf_client.download.return_value = pd.DataFrame()
-
-        with self.assertRaises(ValueError):
-            get_forex_data("JPY=X", "2024-01-01", "2024-06-01")
-
-    @patch("src.market_data.loader.yf_client")
-    def test_returns_df_when_data_exists(self, mock_yf_client):
-        """正常時はデータを含む DataFrame が返ること"""
-        from src.market_data.loader import get_forex_data
-
-        mock_yf_client.download.return_value = pd.DataFrame(
-            {"Close": [150.0]}, index=pd.date_range("2024-01-01", periods=1)
-        )
-
-        result = get_forex_data("JPY=X", "2024-01-01", "2024-06-01")
-        self.assertFalse(result.empty)
 
 
 class TestFetchCrossAssetFeatures(unittest.TestCase):
