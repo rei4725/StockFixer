@@ -41,8 +41,8 @@ _REQUIRED_CONSTANT = (
 def required_market_constant_reason(markets: dict[str, dict]) -> Optional[str]:
     """発注する市場の中の日ごとの予想の標準偏差が線より小さいときの、勝ちにしない理由を返す。
 
-    全市場を混ぜた日ごとの標準偏差（#1602）は、jp の中で同じ値でも us と値がずれれば線を
-    越える（#1718）。jp の行が無い回は required_market_reasons が止め、2行以上の jp の日が
+    全体の標準偏差（#1602）は市場と取引日ごとの値の中央値（#2157）なので、jp の中で同じ値でも
+    us の中でばらつけば線を越え得る（#1718）。jp の行が無い回は required_market_reasons が止め、2行以上の jp の日が
     無く標準偏差が出ない回（None）はばらつきを測れないので理由にしない。
     """
     summary = markets.get(REQUIRED_MARKET)

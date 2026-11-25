@@ -2,12 +2,14 @@
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from src.prediction.backtest_promotion.judge import judge_rollback, judge_win
 from src.prediction.baseline_metrics import baseline_metrics
+from src.reporting.backtest_promotion_trend import build_backtest_promotion_trend
 
-GOOD = {"hit_rate_minus_majority": 0.03, "mae": 0.015, "rank_corr": 0.05, "n_baseline": 1000}
-PROD = {"hit_rate_minus_majority": -0.01, "mae": 0.06, "rank_corr": 0.01, "n_baseline": 1000}
+GOOD = {"hit_rate_minus_majority": 0.03, "mae": 0.015, "daily_rank_corr": 0.05, "n_baseline": 1000}
+PROD = {"hit_rate_minus_majority": -0.01, "mae": 0.06, "daily_rank_corr": 0.01, "n_baseline": 1000}
 LIVE = {"hit_rate_minus_majority": -0.02, "rank_corr": 0.01, "predicted_up_rate": 0.5}
 BT_CAND = {"hit_rate_minus_majority": 0.02}
 OLD_BETTER = {"hit_rate_minus_majority": 0.1, "rank_corr": 0.1}
@@ -30,7 +32,12 @@ def test_win_requires_all_three_metrics():
     assert d.won is True and d.reasons == []
     assert judge_win({**GOOD, "mae": 0.07}, PROD, [0.01] * 20, 1000).won is False
     assert (
-        judge_win({**GOOD, "rank_corr": -0.01}, {**PROD, "rank_corr": -0.05}, [0.01] * 20, 1000).won
+        judge_win(
+            {**GOOD, "daily_rank_corr": -0.01},
+            {**PROD, "daily_rank_corr": -0.05},
+            [0.01] * 20,
+            1000,
+        ).won
         is False
     )
     assert (
@@ -49,7 +56,7 @@ def test_win_requires_daily_majority_and_coverage():
 
 
 def test_none_metric_counts_as_lost_with_one_reason_each():
-    d = judge_win({**GOOD, "mae": None, "rank_corr": None}, PROD, [0.01] * 20, 1000)
+    d = judge_win({**GOOD, "mae": None, "daily_rank_corr": None}, PROD, [0.01] * 20, 1000)
     assert d.won is False and len(d.reasons) == 2
 
 
@@ -133,8 +140,50 @@ def test_rollback_triggers_on_jittered_constant_live_predictions():
     assert any("実測の順位相関が0以下" in t for t in d.triggered)
 
 
+def test_win_loses_when_only_pooled_rank_corr_is_better():
+    """束ねた rank_corr だけが上で、同じ市場・日の並べが負の候補は負ける（#2157 の本番の値）。"""
+    cand = {**GOOD, "rank_corr": 0.145, "daily_rank_corr": -0.037}
+    prod = {**PROD, "rank_corr": -0.013, "daily_rank_corr": 0.016}
+    d = judge_win(cand, prod, [0.01] * 20, 1000)
+    assert d.won is False
+    assert len(d.reasons) == 1
+    assert "daily_rank_corr" in d.reasons[0]
+    assert "-0.037" in d.reasons[0] and "0.016" in d.reasons[0]
+    # 負けの理由の流れの表が、順位相関の基準として見分ける
+    row = build_backtest_promotion_trend(
+        [{"_file": "20261123_220000", "evaluation": {}, "reason": "; ".join(d.reasons)}]
+    ).iloc[0]
+    assert row["reason_rank_corr"] and not row["reason_other"]
+
+
+@pytest.mark.parametrize(
+    "c_daily, p_daily, won",
+    [
+        (0.02, 0.01, True),
+        (0.01, 0.01, False),
+        (0.01, 0.02, False),
+        (0.0, -0.01, False),
+        (-0.01, -0.02, False),
+        (None, 0.01, False),
+        (0.02, None, False),
+        (None, None, False),
+    ],
+)
+def test_win_compares_daily_rank_corr(c_daily, p_daily, won):
+    """daily_rank_corr が production を上回り0より大きいときだけ勝つ。None は負け（#2157）。"""
+    cand = {**GOOD, "rank_corr": 0.2, "daily_rank_corr": c_daily}
+    prod = {**PROD, "rank_corr": 0.1, "daily_rank_corr": p_daily}
+    assert judge_win(cand, prod, [0.01] * 20, 1000).won is won
+
+
+def test_win_does_not_read_pooled_rank_corr():
+    cand = {**GOOD, "rank_corr": -0.1, "daily_rank_corr": 0.05}
+    prod = {**PROD, "rank_corr": 0.1, "daily_rank_corr": 0.01}
+    assert judge_win(cand, prod, [0.01] * 20, 1000).won is True
+
+
 def test_win_loses_on_rank_corr_not_above_production_or_tied_hit():
-    prod = {**PROD, "rank_corr": 0.08}
+    prod = {**PROD, "daily_rank_corr": 0.08}
     assert judge_win(GOOD, prod, [0.01] * 20, 1000).won is False  # 0 < 0.05 <= 0.08
     tied = {**GOOD, "hit_rate_minus_majority": PROD["hit_rate_minus_majority"]}
     assert judge_win(tied, PROD, [0.01] * 20, 1000).won is False

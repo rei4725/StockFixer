@@ -84,7 +84,7 @@
 |---|---|
 | `hit_rate_minus_majority`（的中率 − 常に多い方を言った場合の的中率） | 候補 > production |
 | `mae` | 候補 < production |
-| `rank_corr`（予想と実際の順位相関） | 候補 > production、かつ候補 > 0 |
+| `daily_rank_corr`（同じ市場・取引日の銘柄の間の順位相関の平均。2.88.0 までは全部の行を束ねた `rank_corr`。#2157） | 候補 > production、かつ候補 > 0 |
 
 さらに、件数が足りること（各モデルで `n_baseline` が 20 営業日 × 対象銘柄の 80% 以上）を求める。向きだけの的中率は記録はするが、勝ち負けには使わない。
 
