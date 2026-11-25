@@ -21,6 +21,7 @@ from src.prediction.backtest_promotion import (
     restore_backups,
     save_state,
 )
+from src.prediction.backtest_promotion.old_production import with_base_market_day
 from src.prediction.baseline_metrics import baseline_metrics
 from src.prediction.db import load_prediction_accuracy
 from src.prediction.types import BacktestPromotionState
@@ -120,7 +121,7 @@ def _check_watch(state: BacktestPromotionState, result: dict) -> None:
     # 入れ替えの後の、最初の5日だけで測る
     first_days = set(days[:WATCH_TRADING_DAYS])
     first_rows = rows[rows["_day"].isin(first_days)]
-    live = baseline_metrics(first_rows)
+    live = baseline_metrics(with_base_market_day(first_rows))
     # 旧 production は取っておいた20日でなく、同じ5日・同じ行で予想させて比べる（#1729）
     old = measure_old_production(watch.get("backups", []), first_rows)
     decision = judge_rollback(live, watch["backtest_candidate"], old["old"], old["new"])

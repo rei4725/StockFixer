@@ -17,7 +17,7 @@ from typing import Any, Optional
 
 import pandas as pd
 
-from src.prediction.backtest_promotion.holdout import _close_by_day
+from src.prediction.backtest_promotion.holdout import _close_by_day, _with_market_day
 from src.prediction.backtest_promotion.judge import MIN_COVERAGE
 from src.prediction.backtest_promotion.state import SWAP_PRODUCTION_NAMES, _production_for_backup
 from src.prediction.base_bar_date import _base_bar_date
@@ -36,6 +36,19 @@ UNREADABLE_BACKUPS = "旧 production の写しが読めない"
 MISSING_BACKUPS = "旧 production の写しがそろわない"
 NO_PREDICTIONS = "同じ行の旧 production の予想が出ない"
 SHORT_PREDICTIONS = "同じ行の旧 production の予想が足りない"
+
+
+def with_base_market_day(rows: pd.DataFrame) -> pd.DataFrame:
+    """日の鍵（date）を「市場:取引日」にした写しを返す（#2159）。取引日は _base_bar_date で決める。
+
+    jp と us は同じ predicted_at で書かれるので、時刻で束ねると市場の水準の差を銘柄の並べの腕に
+    数える。鍵は勝ちの判定（holdout、#2157）と同じ形で、daily_rank_corr と prediction_std だけに効く。
+    """
+    days = [
+        _base_bar_date(str(p), str(m)).strftime("%Y-%m-%d")
+        for p, m in zip(rows["predicted_at"], rows["market"])
+    ]
+    return _with_market_day(rows.assign(date=days))
 
 
 def load_backup_models(backups: list[str]) -> list[tuple[str, Any]]:
@@ -100,6 +113,8 @@ def _predict_symbol(
             continue
         out.append(
             {
+                "market": market,
+                "predicted_at": row["predicted_at"],
                 "actual_ratio": float(row["actual_ratio"]),
                 "new_ratio": float(row["predicted_ratio"]),
                 "old_ratio": old,
@@ -158,7 +173,7 @@ def measure_old_production(backups: list[str], rows: pd.DataFrame) -> dict:
             f"{SHORT_PREDICTIONS}（{len(compared)} 行、必要 {result['need_rows']:g} 行以上）"
         )
         return result
-    table = pd.DataFrame(compared)
+    table = with_base_market_day(pd.DataFrame(compared))
     result["old"] = baseline_metrics(table.rename(columns={"old_ratio": "predicted_ratio"}))
     result["new"] = baseline_metrics(table.rename(columns={"new_ratio": "predicted_ratio"}))
     return result

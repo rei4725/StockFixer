@@ -101,10 +101,12 @@ def judge_rollback(
     """入れ替え後の実測（採点済み5営業日）から、戻すかを判定する。
 
     見張りの条件のどれかに当たり、かつ同じ5日・同じ行の旧 production の
-    hit_rate_minus_majority と rank_corr がどちらも、同じ行の新 production を上回るときだけ戻す（#1729）。
+    hit_rate_minus_majority と daily_rank_corr がどちらも、同じ行の新 production を上回るときだけ戻す（#1729）。
     取っておいた20日の旧 production の数字とは比べない（窓が違うと相場の向きで上下が決まる）。
-    実測の rank_corr が None のときは 0.0 として扱う（予想が一定で順位が付かない場合を通さない）。
-    それ以外の実測の値が None の条件は当たりにしない（判断材料が無いまま戻さない）。
+    順位相関は daily_rank_corr（同じ市場・取引日の銘柄の並べの平均）で見る。2.88.1 までは市場と日を
+    混ぜて束ねた rank_corr で見ていて、水準の差を並べの腕に数えていた（#2159）。rank_corr は読まない。
+    実測・新 production の daily_rank_corr が None のときは 0.0 として扱う（予想が一定で順位が
+    付かない場合を通さない）。それ以外の実測の値が None の条件は当たりにしない（判断材料が無いまま戻さない）。
     旧 production を測れない（old_same_window が None）か、どちらかの値が None なら
     old_is_better は False（戻さない）。
 
@@ -128,11 +130,11 @@ def judge_rollback(
             f"実測の的中率がバックテストより {ROLLBACK_HIT_MARGIN} 以上低い（実測 {live_hit}、バックテスト {bt_hit}）"
         )
 
-    live_rc = _get(live, "rank_corr")
+    live_rc = _get(live, "daily_rank_corr")
     if live_rc is None:
         live_rc = 0.0  # 順位相関が出ない（予想が一定など）のは見張りを通さない
     if live_rc <= 0:
-        triggered.append(f"実測の順位相関が0以下（{live_rc}）")
+        triggered.append(f"実測の順位相関が0以下（daily_rank_corr {live_rc}）")
 
     up_rate = _get(live, "predicted_up_rate")
     if up_rate is not None and (up_rate > UP_RATE_HIGH or up_rate < UP_RATE_LOW):
@@ -140,12 +142,12 @@ def judge_rollback(
 
     new = live if new_same_window is None else new_same_window
     new_hit = _get(new, "hit_rate_minus_majority")
-    new_rc = _get(new, "rank_corr")
+    new_rc = _get(new, "daily_rank_corr")
     if new_rc is None:
         new_rc = 0.0  # 実測と同じく、順位が付かないのは 0 とする
     old = old_same_window or {}
     old_hit = _get(old, "hit_rate_minus_majority")
-    old_rc = _get(old, "rank_corr")
+    old_rc = _get(old, "daily_rank_corr")
     old_is_better = (
         old_hit is not None
         and old_rc is not None
