@@ -9,7 +9,7 @@ import os
 import warnings
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import datetime
 from functools import partial
 from threading import Event, Lock
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
@@ -18,7 +18,7 @@ import pandas as pd
 import yfinance as yf
 
 from config.settings import STALE_BARS_MAX_WEEKDAYS
-from src.domain.jp_market_holidays import is_jp_business_day
+from src.domain.business_days import count_business_days_behind
 from src.prediction.db import load_model_weights
 from src.prediction.prediction_run_stats import (
     collect_prediction_run_stats,
@@ -174,21 +174,13 @@ def preload_models(model_types: List[str] = None) -> List[str]:
     return loaded
 
 
-def _is_open_day(day: date, market: Optional[str]) -> bool:
-    """jp は東証の営業日（#1106）、それ以外は土日以外なら True。"""
-    if market == "jp":
-        return is_jp_business_day(day)
-    return day.weekday() < 5
-
-
 def count_weekdays_behind(
     last_date: pd.Timestamp, today: Optional[datetime] = None, market: Optional[str] = None
 ) -> int:
     """
     特徴量の最後の行の翌日から、あるべき最新の営業日までの営業日の数を返す。
 
-    数え方は market_data.pipeline の同名の関数（#815）に揃える。BC 同士は
-    import できないため写している。
+    数え方は domain.business_days にあり、market_data と rule_engine と共有する（#2163）。
 
     Args:
         last_date: 特徴量の最後の行の日付
@@ -198,14 +190,8 @@ def count_weekdays_behind(
     Returns:
         足りない営業日の数。
     """
-    expected_latest = pd.Timestamp(today if today is not None else datetime.now()).normalize()
-    while not _is_open_day(expected_latest.date(), market):
-        expected_latest -= timedelta(days=1)
-    if last_date.tzinfo is not None:
-        last_date = last_date.tz_localize(None)
-    next_day = last_date.normalize() + timedelta(days=1)
-    days = pd.date_range(next_day, expected_latest)
-    return sum(1 for day in days if _is_open_day(day.date(), market))
+    base = pd.Timestamp(today if today is not None else datetime.now())
+    return count_business_days_behind(last_date.date(), base.date(), market)
 
 
 def _last_feature_date(df: pd.DataFrame) -> Optional[pd.Timestamp]:
