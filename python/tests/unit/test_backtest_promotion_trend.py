@@ -162,6 +162,148 @@ def test_reason_flags_split_by_criterion():
     assert not any(won[c] for c in df.columns if c.startswith("reason_"))
 
 
+# 判定の物差しの列（#2162）を足す前の列の並びと型
+_BASE_DTYPES = {
+    "file": "object",
+    "started_at": "object",
+    "version": "object",
+    "force": "boolean",
+    "dry_run": "boolean",
+    "outcome": "object",
+    "swapped": "boolean",
+    "lock_timeout": "boolean",
+    "vote_wins": "Int64",
+    "vote_days": "Int64",
+    "candidate_hit_rate_minus_majority": "Float64",
+    "candidate_rank_corr": "Float64",
+    "candidate_predicted_up_rate": "Float64",
+    "candidate_prediction_std": "Float64",
+    "production_hit_rate_minus_majority": "Float64",
+    "production_rank_corr": "Float64",
+    "production_predicted_up_rate": "Float64",
+    "production_prediction_std": "Float64",
+    "n_compared_jp": "Int64",
+    "n_compared_us": "Int64",
+    "reason_coverage": "boolean",
+    "reason_hit_rate": "boolean",
+    "reason_mae": "boolean",
+    "reason_rank_corr": "boolean",
+    "reason_daily_vote": "boolean",
+    "reason_constant": "boolean",
+    "reason_degraded": "boolean",
+    "reason_path_check": "boolean",
+    "reason_other": "boolean",
+}
+_JUDGED = [
+    "candidate_mae",
+    "production_mae",
+    "candidate_daily_rank_corr",
+    "production_daily_rank_corr",
+]
+_MARKET_METRICS = [
+    f"{market}_{side}_{key}"
+    for market in ("jp", "us")
+    for side in ("candidate", "production")
+    for key in ("daily_rank_corr", "hit_rate_minus_majority", "predicted_up_rate")
+]
+
+
+def _judged(started_at, reason="x"):
+    """全体の mae・daily_rank_corr と、市場ごとの物差しのある回。"""
+    record = _evaluated(started_at, reason)
+    evaluation = record["evaluation"]
+    evaluation["candidate"].update(mae=0.011, daily_rank_corr=-0.037)
+    evaluation["production"].update(mae=0.012, daily_rank_corr=0.0)
+    evaluation["markets"]["jp"].update(
+        candidate=dict(_metrics(0.03, 0.5, 0.6, 0.1), daily_rank_corr=-0.054),
+        production=dict(_metrics(0.0, 0.5, 0.0, 0.1), daily_rank_corr=0.034),
+    )
+    evaluation["markets"]["us"].update(
+        candidate=dict(_metrics(-0.02, 0.5, 0.7, 0.1), daily_rank_corr=-0.06),
+        production=dict(_metrics(None, 0.5, 1.0, 0.1), daily_rank_corr=0.0),
+    )
+    return record
+
+
+def _table(*records):
+    return build_backtest_promotion_trend(
+        [dict(r, _file=f"2026110{i}_220000") for i, r in enumerate(records, start=1)]
+    )
+
+
+def test_added_columns_are_on_the_right_and_base_columns_are_kept():
+    df = _table(_judged("a", "MAE が production を上回らない"), _skipped("b"))
+
+    assert list(df.columns) == list(_BASE_DTYPES) + _JUDGED + _MARKET_METRICS
+    # 文字の列の型は pandas の版で object か str になるので、数と印の列だけを比べる
+    for column, dtype in _BASE_DTYPES.items():
+        if dtype != "object":
+            assert str(df[column].dtype) == dtype, column
+    assert all(str(df[c].dtype) == "Float64" for c in _JUDGED + _MARKET_METRICS)
+    base = df[list(_BASE_DTYPES)].astype(object)
+    assert [None if pd.isna(v) else v for v in base.iloc[0]] == (
+        ["20261101_220000", "a", "abc", False, False, "lost", False, False, 1, 3]
+        + [0.01, 0.05, 0.958, 0.002, 0.02, 0.06, 0.991, None, 0, 50]
+        + [False, False, True, False, False, False, False, False, False]
+    )
+    assert [None if pd.isna(v) else v for v in base.iloc[1]] == (
+        ["20261102_220000", "b", None, False, False, "failed", False, False] + [None] * 21
+    )
+
+
+def test_judged_and_market_metrics_are_read_and_zero_is_not_missing():
+    row = _table(_judged("a")).iloc[0]
+
+    assert [row[c] for c in _JUDGED] == [0.011, 0.012, -0.037, 0.0]
+    assert [row[c] for c in _MARKET_METRICS[:6]] == [-0.054, 0.03, 0.6, 0.034, 0.0, 0.0]
+    assert [row[c] for c in _MARKET_METRICS[6:9]] == [-0.06, -0.02, 0.7]
+    assert row["us_production_daily_rank_corr"] == 0.0
+    assert row["us_production_hit_rate_minus_majority"] is pd.NA
+    assert row["us_production_predicted_up_rate"] == 1.0
+
+
+def test_added_columns_are_missing_when_keys_are_missing():
+    no_markets = _judged("no_markets")
+    del no_markets["evaluation"]["markets"]
+    old = _evaluated("old", "x")  # mae・daily_rank_corr と、市場の candidate・production が無い
+    odd = _judged("odd")
+    odd["evaluation"]["markets"] = {"jp": None, "us": {"candidate": 1}}
+    df = _table(_judged("a"), old, no_markets, _skipped("b"), odd)
+
+    for index in (1, 3):
+        for column in _JUDGED + _MARKET_METRICS:
+            assert df.iloc[index][column] is pd.NA, (index, column)
+    for index in (2, 4):
+        assert [df.iloc[index][c] for c in _JUDGED] == [0.011, 0.012, -0.037, 0.0]
+        for column in _MARKET_METRICS:
+            assert df.iloc[index][column] is pd.NA, (index, column)
+
+
+def test_judged_columns_remain_without_any_market():
+    df = _table(_skipped("b"))
+    assert list(df.columns)[-4:] == _JUDGED
+    assert all(df.iloc[0][c] is pd.NA for c in _JUDGED)
+
+
+def test_added_columns_write_null_for_missing_and_zero_for_zero():
+    df = _table(_judged("a"), _skipped("b"))
+    n_added = len(_JUDGED + _MARKET_METRICS)
+
+    lines = format_backtest_promotion_markdown(df).splitlines()
+    cells = [[c.strip() for c in line.strip("|").split("|")][-n_added:] for line in lines]
+    assert cells[0] == _JUDGED + _MARKET_METRICS
+    assert cells[2][:4] == ["0.011", "0.012", "-0.037", "0"]
+    assert cells[2][-2:] == ["null", "1"]
+    assert cells[3] == ["null"] * n_added
+
+    csv_lines = format_backtest_promotion_csv(df).splitlines()
+    csv_cells = [line.split(",")[-n_added:] for line in csv_lines]
+    assert csv_cells[0] == _JUDGED + _MARKET_METRICS
+    assert csv_cells[1][:4] == ["0.011", "0.012", "-0.037", "0.0"]
+    assert csv_cells[1][-2:] == ["null", "1.0"]
+    assert csv_cells[2] == ["null"] * n_added
+
+
 def test_markdown_writes_null_for_missing():
     records = [dict(_skipped("b"), _file="20261105_220000")]
     text = format_backtest_promotion_markdown(build_backtest_promotion_trend(records))
