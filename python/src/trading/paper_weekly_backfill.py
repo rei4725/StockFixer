@@ -11,7 +11,7 @@ import json
 import os
 import re
 from datetime import date, timedelta
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Sequence
 
 from src.utils.logger import get_logger
 
@@ -22,6 +22,11 @@ WEEKS_TO_REVIEW = 3
 
 # 超過の騰落率の計算の印。これの無い週のファイルは、見る範囲に限らず全部を計算し直す（#1792）
 EXCESS_BASIS = "exposure_scaled"
+
+# 入金のある週の投資比率を、入金後の元手で割って書いた印（#2177）。入金のある週だけに書く。
+# 累計を分けないよう excess_basis の値は変えず、別の欄にする
+EXPOSURE_DEPOSIT_KEY = "exposure_deposit_basis"
+EXPOSURE_DEPOSIT_BASIS = "after_deposits"
 
 ComputeWeek = Callable[[date], dict[str, Any]]
 Notify = Callable[[str], bool]
@@ -99,6 +104,21 @@ def _is_old_basis(result: dict[str, Any]) -> bool:
     )
 
 
+def has_deposit_in_week(week_end: date, deposit_days: Sequence[date]) -> bool:
+    """前の週の金曜より後から week_end の金曜までに入金があれば True（土日の入金は次の週）。"""
+    return any(week_end - timedelta(weeks=1) < day <= week_end for day in deposit_days)
+
+
+def _is_old_deposit_basis(
+    result: dict[str, Any], week_end: date, deposit_days: Sequence[date]
+) -> bool:
+    """入金のある週なのに、投資比率が入金後の元手で割った印で書かれていなければ True（#2177）。"""
+    return (
+        has_deposit_in_week(week_end, deposit_days)
+        and result.get(EXPOSURE_DEPOSIT_KEY) != EXPOSURE_DEPOSIT_BASIS
+    )
+
+
 def _week_end_of(week: str) -> date:
     """ISO 週の名前（YYYY-Www）からその週の金曜を返す。"""
     year, number = week.split("-W")
@@ -106,12 +126,21 @@ def _week_end_of(week: str) -> date:
 
 
 def _review_week(
-    week: str, week_end: date, compute_week: ComputeWeek, output_dir: str
+    week: str,
+    week_end: date,
+    compute_week: ComputeWeek,
+    output_dir: str,
+    deposit_days: Sequence[date] = (),
 ) -> Optional[str]:
     """1つの週を見て、要れば計算し直して書く。欠けが残れば理由を返す。"""
     path = os.path.join(output_dir, f"{week}.json")
     current = _read_week_file(path)
-    if current is not None and not _week_defects(current) and not _is_old_basis(current):
+    if (
+        current is not None
+        and not _week_defects(current)
+        and not _is_old_basis(current)
+        and not _is_old_deposit_basis(current, week_end, deposit_days)
+    ):
         return None
 
     # 土曜を as_of にすると、直前に終わった週はその金曜の週になる
@@ -125,6 +154,7 @@ def _review_weeks(
     compute_week: ComputeWeek,
     output_dir: str,
     frozen_before: Optional[date] = None,
+    deposit_days: Sequence[date] = (),
 ) -> tuple[list[str], dict[str, str]]:
     """対象の週の前の週を見て、見た週の名前と、欠けが残る週の理由を返す。"""
     names = [name[:-5] for name in os.listdir(output_dir) if _WEEK_FILE.match(name)]
@@ -140,20 +170,23 @@ def _review_weeks(
         week = week_name(week_end)
         if week >= oldest:
             weeks[week] = week_end
-    # 前の計算の印のファイルは、見る範囲の外の週も計算し直す（#1792）
+    # 前の計算の印のファイルは、見る範囲の外の週も計算し直す（#1792・#2177）
     target = week_name(target_week_end)
     for week in names:
         if week < target and week not in weeks:
             current = _read_week_file(os.path.join(output_dir, f"{week}.json"))
-            if current is not None and _is_old_basis(current):
-                weeks[week] = _week_end_of(week)
+            if current is None:
+                continue
+            week_end = _week_end_of(week)
+            if _is_old_basis(current) or _is_old_deposit_basis(current, week_end, deposit_days):
+                weeks[week] = week_end
     for week, week_end in sorted(weeks.items()):
         if frozen_before is not None and week_end < frozen_before:
             # 元手の切り替えより前の週は、その時の元手で書いたまま残す（#1877）
             continue
         checked.append(week)
         try:
-            reason = _review_week(week, week_end, compute_week, output_dir)
+            reason = _review_week(week, week_end, compute_week, output_dir, deposit_days)
         except Exception as e:
             logger.error("紙の週の成績の書き直し失敗: %s", week, exc_info=True)
             reason = f"書き直しが落ちた（{type(e).__name__}）"
@@ -207,6 +240,7 @@ def backfill_previous_weeks(
     output_dir: str,
     notify: Optional[Notify] = None,
     frozen_before: Optional[date] = None,
+    deposit_days: Sequence[date] = (),
 ) -> None:
     """対象の週の前の週を見直す。例外は出さない（対象の週の書き出しの成否を変えない）。
 
@@ -218,9 +252,13 @@ def backfill_previous_weeks(
         compute_week: as_of -> その直前に終わった週の結果
         output_dir: 週のファイルの置き場
         notify: 知らせの文を送り、送れたかを返す関数。None なら知らせない
+        frozen_before: 元手の切り替えの日
+        deposit_days: 入金の日。入金のある週で印の無いファイルを計算し直す（#2177）
     """
     try:
-        checked, remaining = _review_weeks(target_week_end, compute_week, output_dir, frozen_before)
+        checked, remaining = _review_weeks(
+            target_week_end, compute_week, output_dir, frozen_before, deposit_days
+        )
         _notify_remaining(checked, remaining, output_dir, notify)
     except Exception:
         logger.error("紙の週の成績の前の週の見直し失敗", exc_info=True)
