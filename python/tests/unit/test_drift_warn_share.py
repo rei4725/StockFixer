@@ -6,16 +6,20 @@ from unittest.mock import Mock, patch
 
 import pandas as pd
 
+from src.utils import alert_service
 from src.utils.alert_service import (
     DRIFT_RENOTIFY_DAYS,
     DRIFT_WARN_THRESHOLD,
+    AlertDispatch,
     AlertResult,
+    _parse_fields,
     check_drift_warn_rule,
     decide_drift_notice,
     run_conditional_notification,
 )
 
 _KEY_DRIFT = "alert.drift_warn_streak"
+_KEY_STATS = "alert.drift_warn_streak.stats"
 _KEY_NOTIFIED = "alert.drift_warn_streak.notified"
 
 
@@ -227,6 +231,94 @@ class TestDecideDriftNotice(unittest.TestCase):
 
     def test_streak_restarted_counts_as_start(self):
         self.assertEqual(decide_drift_notice(DRIFT_WARN_THRESHOLD, 0.2, 9, 0.2), "start")
+
+
+class TestParseFields(unittest.TestCase):
+    def test_broken_short_long_and_empty_values(self):
+        cases = [
+            ("3|abc", 2, [0.0, 0.0]),
+            ("3", 2, [3.0, 0.0]),
+            ("0.2|4|20|9", 3, [0.2, 4.0, 20.0]),
+            ("", 2, [0.0, 0.0]),
+        ]
+        for raw, n, expected in cases:
+            with self.subTest(raw=raw, n=n):
+                self.assertEqual(_parse_fields(raw, n), expected)
+
+
+class TestBrokenStoredValues(_StoreTestCase):
+    """保存した値が壊れている・読めない・書けないときも、落ちずに知らせを続ける（#2171）。"""
+
+    def setUp(self):
+        super().setUp()
+        self.store.update({_KEY_DRIFT: "3", _KEY_STATS: "0.200000|4|20"})
+
+    def _check(self, *decide_args: float) -> AlertResult:
+        """評価して返す。decide_drift_notice に渡った値も確かめる。"""
+        with patch.object(
+            alert_service, "decide_drift_notice", wraps=decide_drift_notice
+        ) as decide:
+            result = check_drift_warn_rule()
+        decide.assert_called_once_with(*decide_args)
+        return result
+
+    def _assert_start(self, result: AlertResult) -> None:
+        self.assertTrue(result.triggered)
+        self.assertEqual(result.details["notice"], "start")
+        self.assertEqual(result.details["notified_mark"], "3|0.200000")
+        text = "\n".join(result.as_discord_lines())
+        self.assertIn("閾値超過 4 / 判定 20 銘柄（割合 20.0%）", text)
+        self.assertNotIn("前の知らせは", text)
+
+    def test_broken_mark_is_read_as_not_notified(self):
+        self.store[_KEY_NOTIFIED] = "broken"
+        self._assert_start(self._check(3, 0.2, 0, 0.0))
+
+    def test_unreadable_mark_is_read_as_not_notified(self):
+        # 読めていれば知らせない日の印を置き、例外の枝を通ったことが結果に出るようにする
+        self.store[_KEY_NOTIFIED] = "2|0.200000"
+
+        def get(key, default=None):
+            if key == _KEY_NOTIFIED:
+                raise RuntimeError("read failed")
+            return self.store.get(key, default)
+
+        with patch("src.utils.db.system_config.get_config_value", side_effect=get), self.assertLogs(
+            alert_service.logger, level="ERROR"
+        ) as logs:
+            result = self._check(3, 0.2, 0, 0.0)
+        self._assert_start(result)
+        self.assertEqual(len(logs.records), 1)
+        self.assertIn(f"key={_KEY_NOTIFIED}:", logs.records[0].getMessage())
+
+    def test_broken_stats_are_read_as_zero_share(self):
+        self.store.update({_KEY_STATS: "broken", _KEY_NOTIFIED: "2|0.200000"})
+        result = self._check(3, 0.0, 2, 0.2)
+        self.assertFalse(result.triggered)
+        self.assertNotIn("notified_mark", result.details)
+        text = "\n".join(result.as_discord_lines())
+        self.assertIn("閾値超過 0 / 判定 0 銘柄（割合 0.0%）", text)
+
+    def test_unwritable_mark_still_counts_as_sent(self):
+        self.store.update({_KEY_STATS: "0.300000|6|20", _KEY_NOTIFIED: "2|0.200000"})
+        result = self._check(3, 0.3, 2, 0.2)
+        self.assertEqual(result.details["notice"], "worse")
+
+        def put(key, value):
+            if key == _KEY_NOTIFIED:
+                raise RuntimeError("write failed")
+            self.store[key] = value
+
+        notifier = Mock(return_value=True)
+        with patch("src.utils.db.system_config.set_config_value", side_effect=put), self.assertLogs(
+            alert_service.logger, level="ERROR"
+        ) as logs:
+            dispatch = run_conditional_notification(results=[result], notifier=notifier)
+        self.assertIs(dispatch, AlertDispatch.SENT)
+        notifier.assert_called_once()
+        self.assertEqual(len(logs.records), 1)
+        self.assertIn(f"key={_KEY_NOTIFIED}:", logs.records[0].getMessage())
+        self.assertEqual(self.store[_KEY_NOTIFIED], "2|0.200000")
 
 
 if __name__ == "__main__":
