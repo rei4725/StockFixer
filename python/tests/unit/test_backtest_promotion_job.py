@@ -66,8 +66,10 @@ def _old_measure(
         "n_watch_rows": 20,
         "n_compared": n_compared,
         "need_rows": 16.0,
-        "old": {"hit_rate_minus_majority": old_hit, "rank_corr": old_rc} if measured else None,
-        "new": {"hit_rate_minus_majority": 0.0, "rank_corr": -0.4} if measured else None,
+        "old": (
+            {"hit_rate_minus_majority": old_hit, "daily_rank_corr": old_rc} if measured else None
+        ),
+        "new": {"hit_rate_minus_majority": 0.0, "daily_rank_corr": -0.4} if measured else None,
         "reason": reason,
         "skipped": {},
     }
