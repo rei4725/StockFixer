@@ -71,22 +71,28 @@ def _get_today_signal(
     rule_name: str,
     market_data_port: OHLCVWithIndicatorsPort,
     signal_date: date | None = None,
+    reasons: list[str] | None = None,
 ) -> tuple[int, float] | None:
     """当日のシグナルと終値を返す。Returns: (signal, price) signal は 1=buy, -1=sell, 0=hold
 
     未知のルール・データ不足・最後の足の終値が有限の正の数でない（#1409）、
     または signal_date を渡したときに最後の足が古すぎれば
     None を返す（シグナルを出さない。HOLD とは分ける #822）。
+    reasons を渡すと、None を返すときにその理由を1つ足す（#2173）。
     """
+    if reasons is None:
+        reasons = []
     rule = _RULE_INSTANCES.get(rule_name)
     if rule is None:
         logger.warning(f"未知のルール: {rule_name}")
+        reasons.append("未知のルール")
         return None
 
     ticker = get_ticker(market, symbol)
     df = market_data_port.get_ohlcv_with_indicators(ticker, _LOOKBACK_DAYS)
     if df is None or df.empty or len(df) < 20:
         logger.warning(f"データ不足: {ticker}")
+        reasons.append("データ不足")
         return None
 
     if signal_date is not None and isinstance(df.index, pd.DatetimeIndex):
@@ -98,6 +104,7 @@ def _get_today_signal(
                 f"（最後の足 {last_bar}、平日で {behind}日 > {_STALE_BARS_MAX_WEEKDAYS}日 古い。"
                 "取得の失敗か上場廃止の可能性）"
             )
+            reasons.append("足の停止")
             return None
 
     # 終値だけ欠けた足は取得の後も残る。HOLD や NaN の値段で渡さず、出せない銘柄にする（#1409）
@@ -107,6 +114,7 @@ def _get_today_signal(
             f"最後の足の終値が使えないためシグナルを出さない: {market}/{symbol} "
             f"（終値 {today_price}）"
         )
+        reasons.append("終値の欠け")
         return None
 
     signal_series = rule.generate_signal(df)
@@ -149,7 +157,7 @@ def generate_rule_signals(
     """
     run_rule_signal_pipeline と同じくシグナルを生成・保存し、出せなかった銘柄も返す（#822）。
 
-    データ不足・未知のルール・足の停止・例外の銘柄は HOLD として保存せず、
+    データ不足・未知のルール・足の停止・終値の欠け・例外の銘柄は HOLD として保存せず、
     unavailable に入れる。total は対象の銘柄数。
     売りだけの印の立った行（#1797）の BUY は、ルールの判定のまま保存し、返す signals では HOLD にする。
     """
@@ -176,9 +184,13 @@ def generate_rule_signals(
         logger.info(f"  {symbol} → [{rule_name}] シグナル計算中...")
 
         try:
-            today = _get_today_signal(market, symbol, rule_name, market_data_port, signal_date)
+            reasons: list[str] = []
+            today = _get_today_signal(
+                market, symbol, rule_name, market_data_port, signal_date, reasons=reasons
+            )
             if today is None:
-                unavailable.append(UnavailableRuleSymbol(symbol, rule_name, "シグナルなし"))
+                reason = reasons[-1] if reasons else "シグナルなし"
+                unavailable.append(UnavailableRuleSymbol(symbol, rule_name, reason))
                 continue
             signal, price = today
             # 記録はルールの判定のまま残す（ルールの採点の材料を変えない）

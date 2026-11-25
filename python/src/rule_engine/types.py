@@ -27,7 +27,11 @@ class RuleResult:
 
 @dataclass
 class UnavailableRuleSymbol:
-    """シグナルを出せなかった銘柄（データ不足・未知のルール・足の停止・例外）。HOLD とは別に数える。"""
+    """シグナルを出せなかった銘柄。HOLD とは別に数える。
+
+    reason は 未知のルール・データ不足・足の停止・終値の欠け・例外 のどれか（#2173）。
+    理由が分からなければ シグナルなし。
+    """
 
     symbol: str
     rule: str
