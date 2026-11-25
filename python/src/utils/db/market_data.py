@@ -121,6 +121,7 @@ def load_raw_closes(
     end_date=None,
     timeframe: str = "1d",
     with_volume: bool = False,
+    raise_on_error: bool = False,
 ) -> pd.DataFrame:
     """market の全銘柄の終値を 1 クエリで取得する。
 
@@ -134,6 +135,7 @@ def load_raw_closes(
         end_date: 終了日 (str or datetime, None なら全期間)
         timeframe: 時間軸 (default: "1d")
         with_volume: True なら volume 列を足す（動的スリッページ用）
+        raise_on_error: True なら読み込みの例外を空の表にせず投げ、足が無いことと分ける
 
     Returns:
         columns=[symbol, ts, close]（with_volume なら [symbol, ts, close, volume]）
@@ -161,6 +163,8 @@ def load_raw_closes(
             df = pd.read_sql(query, con, params=params)
         except Exception as e:
             logger.error(f"market_data_raw 一括読み込み失敗 [{market}]: {e}", exc_info=True)
+            if raise_on_error:
+                raise
             return pd.DataFrame(columns=columns)
 
     return df
