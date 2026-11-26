@@ -4,8 +4,10 @@
 """
 
 import sys
+from typing import Optional
 
 from src.reporting.paper_roundtrips import (
+    RoundTripGroup,
     build_roundtrips,
     count_phantom_sells,
     load_paper_roundtrip_orders,
@@ -16,6 +18,16 @@ from src.utils.db import get_readonly_connection
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+def _rate(value: Optional[float]) -> str:
+    return "-" if value is None else f"{value * 100:+.2f}%"
+
+
+def _pf_tail(g: RoundTripGroup) -> str:
+    """行の末尾に足すプロフィットファクターと勝ち・負けの平均の騰落率（None は -）"""
+    pf = "-" if g.profit_factor is None else f"{g.profit_factor:.2f}"
+    return f"  PF {pf}  勝ち平均 {_rate(g.avg_win_return)}  負け平均 {_rate(g.avg_loss_return)}"
 
 
 def main() -> None:
@@ -31,11 +43,14 @@ def main() -> None:
     for g in summary.by_route:
         print(
             f"  {g.route:<10} 往復 {g.trips:>4}  勝ち {g.wins:>4}  勝率 {g.win_rate * 100:5.1f}%"
-            f"  損益 {g.pnl:>14,.0f}  平均保有 {g.avg_holding_days:5.1f}日"
+            f"  損益 {g.pnl:>14,.0f}  平均保有 {g.avg_holding_days:5.1f}日{_pf_tail(g)}"
         )
     print("\n=== 紙の往復 道と月 ===")
     for g in summary.by_month:
-        print(f"  {g.route:<10} {g.key}  往復 {g.trips:>4}  勝ち {g.wins:>4}  損益 {g.pnl:>14,.0f}")
+        print(
+            f"  {g.route:<10} {g.key}  往復 {g.trips:>4}  勝ち {g.wins:>4}  損益 {g.pnl:>14,.0f}"
+            f"{_pf_tail(g)}"
+        )
     print(f"\n  往復の損益の合計: {summary.total_pnl:,.0f}")
     print(f"  開いたままの買い: {len(open_lots)} 件 {sum(lot.qty for lot in open_lots)} 株")
     print(f"  株数を動かさなかった売り（realized_pnl なし）: {count_phantom_sells(orders)} 件")

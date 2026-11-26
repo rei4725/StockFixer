@@ -74,10 +74,21 @@ class RoundTrip:
     def exit_month(self) -> str:
         return self.exited_at.strftime("%Y-%m")
 
+    @property
+    def return_rate(self) -> Optional[float]:
+        """出口 / 入口 - 1。入口が 0 以下なら None"""
+        if self.entry_price <= 0:
+            return None
+        return self.exit_price / self.entry_price - 1
+
 
 @dataclass(frozen=True)
 class RoundTripGroup:
-    """往復のまとめの1行（道別なら key は道、月別なら key は月）"""
+    """往復のまとめの1行（道別なら key は道、月別なら key は月）
+
+    gross_profit は勝ち（損益 > 0）の損益の合計、gross_loss は負け（損益 < 0）の
+    損益の合計の絶対値。損益が 0 の往復はどちらにも入れない（#2179）。
+    """
 
     route: str
     key: str
@@ -85,10 +96,19 @@ class RoundTripGroup:
     wins: int
     pnl: float
     avg_holding_days: float
+    gross_profit: float = 0.0
+    gross_loss: float = 0.0
+    avg_win_return: Optional[float] = None
+    avg_loss_return: Optional[float] = None
 
     @property
     def win_rate(self) -> float:
         return self.wins / self.trips if self.trips else 0.0
+
+    @property
+    def profit_factor(self) -> Optional[float]:
+        """総利益 / 総損失。総損失が 0 なら None"""
+        return self.gross_profit / self.gross_loss if self.gross_loss > 0 else None
 
 
 @dataclass(frozen=True)
@@ -211,8 +231,16 @@ def build_roundtrips(
     return trips, open_lots, unmatched
 
 
+def _mean_return(trips: list[RoundTrip]) -> Optional[float]:
+    """往復ごとの騰落率の単純平均。入口が 0 以下の往復は入れない。無ければ None"""
+    rates = [r for r in (t.return_rate for t in trips) if r is not None]
+    return sum(rates) / len(rates) if rates else None
+
+
 def _group(route: str, key: str, trips: list[RoundTrip]) -> RoundTripGroup:
     n = len(trips)
+    winners = [t for t in trips if t.pnl > 0]
+    losers = [t for t in trips if t.pnl < 0]
     return RoundTripGroup(
         route=route,
         key=key,
@@ -220,6 +248,10 @@ def _group(route: str, key: str, trips: list[RoundTrip]) -> RoundTripGroup:
         wins=sum(1 for t in trips if t.pnl > 0),
         pnl=float(sum(t.pnl for t in trips)),
         avg_holding_days=(sum(t.holding_days for t in trips) / n) if n else 0.0,
+        gross_profit=float(sum(t.pnl for t in winners)),
+        gross_loss=float(abs(sum(t.pnl for t in losers))),
+        avg_win_return=_mean_return(winners),
+        avg_loss_return=_mean_return(losers),
     )
 
 
