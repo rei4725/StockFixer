@@ -22,6 +22,12 @@ import pandas as pd
 
 from src.domain.jp_market_holidays import is_jp_business_day
 from src.prediction.backtest_promotion.daily_vote import split_vote_days, vote_need_symbols
+from src.prediction.backtest_promotion.holdout_rows import (
+    both_metrics,
+    close_by_day,
+    daily_metrics,
+    with_market_day,
+)
 from src.prediction.backtest_promotion.judge import (
     HOLDOUT_TRADING_DAYS,
     PATH_CHECK_SAMPLE,
@@ -35,7 +41,6 @@ from src.prediction.backtest_promotion.required_market import (
     required_market_reasons,
 )
 from src.prediction.base_bar_date import _base_bar_date
-from src.prediction.baseline_metrics import baseline_metrics
 from src.prediction.db import load_model_weights, load_prediction_accuracy
 from src.prediction.types import (
     UNIFIED_PREDICTION_MODEL_NAMES,
@@ -90,17 +95,6 @@ def holdout_dates(feature_dates: pd.Series, n: int = HOLDOUT_TRADING_DAYS) -> li
 def latest_holdout_dates(n: int = HOLDOUT_TRADING_DAYS) -> list[pd.Timestamp]:
     """stock_features で y が埋まった日付から、取っておく日を返す。"""
     return holdout_dates(pd.Series(get_target_dates()), n)
-
-
-def _close_by_day(ohlcv: Optional[pd.DataFrame]) -> dict:
-    """生の OHLCV から、日付（タイムゾーン無しの0時）→ 終値の dict を作る。"""
-    if ohlcv is None or ohlcv.empty or "Close" not in ohlcv.columns:
-        return {}
-    index = pd.DatetimeIndex(pd.to_datetime(ohlcv.index))
-    if index.tz is not None:
-        index = index.tz_localize(None)
-    closes = ohlcv["Close"].to_numpy()
-    return {pd.Timestamp(d): float(c) for d, c in zip(index.normalize(), closes) if pd.notna(c)}
 
 
 def _check_weight_names(models: list[tuple[str, Any]], label: str) -> None:
@@ -219,39 +213,6 @@ def _recorded_reference(backtest_production: pd.DataFrame, n_days: int) -> dict:
     }
 
 
-def _daily(rows: pd.DataFrame, dates: list[str]) -> list[dict]:
-    """日ごとの候補・production の hit_rate_minus_majority と差。"""
-    daily = []
-    for day in dates:
-        day_rows = rows[rows["date"] == day]
-        cand = baseline_metrics(day_rows.rename(columns={"candidate_ratio": "predicted_ratio"}))[
-            "hit_rate_minus_majority"
-        ]
-        prod = baseline_metrics(day_rows.rename(columns={"production_ratio": "predicted_ratio"}))[
-            "hit_rate_minus_majority"
-        ]
-        diff = None if cand is None or prod is None else cand - prod
-        daily.append({"date": day, "candidate": cand, "production": prod, "diff": diff})
-    return daily
-
-
-def _both_metrics(rows: pd.DataFrame) -> tuple[dict, dict]:
-    """同じ行での候補と production の baseline_metrics()。"""
-    return (
-        baseline_metrics(rows.rename(columns={"candidate_ratio": "predicted_ratio"})),
-        baseline_metrics(rows.rename(columns={"production_ratio": "predicted_ratio"})),
-    )
-
-
-def _with_market_day(rows: pd.DataFrame) -> pd.DataFrame:
-    """日の鍵（date）を「市場:取引日」にした写しを返す（#2157）。
-
-    日だけで束ねると、jp と us の水準の差を銘柄の並べの腕とばらつきに数える。影の比べ（#2072）と
-    採点の JSON（#2141）と同じ鍵で、全体の daily_rank_corr と prediction_std だけに効く。
-    """
-    return rows.assign(date=rows["market"].astype(str) + ":" + rows["date"])
-
-
 def _market_summaries(
     table: pd.DataFrame,
     universe: list[tuple[str, str]],
@@ -275,7 +236,7 @@ def _market_summaries(
     for market in sorted({m for m, _ in universe}):
         n_symbols = market_symbols.get(market, 0)
         n_dates = len(market_days.get(market, ()))
-        candidate, production = _both_metrics(table[table["market"] == market])
+        candidate, production = both_metrics(table[table["market"] == market])
         summaries[market] = {
             "n_universe_symbols": sum(1 for m, _ in universe if m == market),
             "n_symbols": n_symbols,
@@ -364,7 +325,7 @@ def evaluate_holdout(
         df = load_stock_features(market, symbol, raise_on_error=True)
         if df is None or df.empty or "date" not in df.columns or "y" not in df.columns:
             continue
-        closes = _close_by_day(load_raw_ohlcv(market, symbol, start_date=days[0]))
+        closes = close_by_day(load_raw_ohlcv(market, symbol, start_date=days[0]))
         row_days = pd.to_datetime(df["date"], errors="coerce").dt.normalize()
 
         # 同じ日の行が重なっていれば後ろの行を使う
@@ -441,8 +402,8 @@ def evaluate_holdout(
         raise ValueError("候補と production の予想がそろった行が無い")
 
     table = pd.DataFrame(rows)
-    candidate, production = _both_metrics(_with_market_day(table))
-    daily = _daily(table, date_strs)
+    candidate, production = both_metrics(with_market_day(table))
+    daily = daily_metrics(table, date_strs)
 
     max_abs_diff = max(path_diffs) if path_diffs else None
     required_compared = path_compared.get(_PATH_CHECK_REQUIRED_MARKET, 0) > 0
