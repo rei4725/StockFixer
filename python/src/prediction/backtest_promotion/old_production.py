@@ -17,7 +17,7 @@ from typing import Any, Optional
 
 import pandas as pd
 
-from src.prediction.backtest_promotion.holdout import _close_by_day, _with_market_day
+from src.prediction.backtest_promotion.holdout_rows import close_by_day, with_market_day
 from src.prediction.backtest_promotion.judge import MIN_COVERAGE
 from src.prediction.backtest_promotion.state import SWAP_PRODUCTION_NAMES, _production_for_backup
 from src.prediction.base_bar_date import _base_bar_date
@@ -48,7 +48,7 @@ def with_base_market_day(rows: pd.DataFrame) -> pd.DataFrame:
         _base_bar_date(str(p), str(m)).strftime("%Y-%m-%d")
         for p, m in zip(rows["predicted_at"], rows["market"])
     ]
-    return _with_market_day(rows.assign(date=days))
+    return with_market_day(rows.assign(date=days))
 
 
 def load_backup_models(backups: list[str]) -> list[tuple[str, Any]]:
@@ -95,7 +95,7 @@ def _predict_symbol(
         return []
     row_days = pd.to_datetime(df["date"], errors="coerce").dt.normalize()
     bases = [pd.Timestamp(_base_bar_date(str(p), market)) for p in group["predicted_at"]]
-    closes = _close_by_day(load_raw_ohlcv(market, symbol, start_date=min(bases)))
+    closes = close_by_day(load_raw_ohlcv(market, symbol, start_date=min(bases)))
     out = []
     for (_, row), base in zip(group.iterrows(), bases):
         candidates = [i for i, d in enumerate(row_days) if pd.notna(d) and d <= base]
