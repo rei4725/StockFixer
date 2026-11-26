@@ -30,8 +30,11 @@ from src.trading.paper_cash_events import (
 )
 from src.trading.paper_weekly_backfill import (
     EXCESS_BASIS,
+    EXPOSURE_DEPOSIT_BASIS,
+    EXPOSURE_DEPOSIT_KEY,
     Notify,
     backfill_previous_weeks,
+    has_deposit_in_week,
     week_name,
     write_week_file_unless_worse,
 )
@@ -295,14 +298,20 @@ def _build_equity_parts(
 
 
 def _weekly_exposure(
-    equity: pd.Series, gross: pd.Series, base_day: pd.Timestamp, week_end: pd.Timestamp
+    equity: pd.Series,
+    gross: pd.Series,
+    base_day: pd.Timestamp,
+    week_end: pd.Timestamp,
+    deposits: Sequence[Deposit] = (),
 ) -> Optional[float]:
     """週の各営業日の前日の引けの、保有の時価の絶対値の合計 ÷ 評価額 の平均を返す（#1792）。
 
     月曜の前日は前週の最終営業日。評価額が 0 以下の日は数えず、数える日が無ければ None。
+    週の騰落率と元手をそろえ、まだ入っていない週の終わりまでの入金を評価額に足す（#2177）。
     """
     days = (equity.index >= base_day) & (equity.index < week_end)
     value = equity[days]
+    value = value + [deposits_between(deposits, day, week_end) for day in value.index]
     valid = value > 0
     if not valid.any():
         return None
@@ -399,7 +408,8 @@ def compute_weekly_results(
         missing_week_end_close は、週の終わりに保有しているのに金曜以降の終値がまだ無い銘柄で、
         1つでもあれば partial_week を true にする（週の終わりの評価が古い終値のままの部分の週）
         exposure は週の投資比率、excess_return は weekly_return − exposure × benchmark_return、
-        excess_return_unscaled は全額のベンチマークとの差、excess_basis は計算の印（#1792）
+        excess_return_unscaled は全額のベンチマークとの差、excess_basis は計算の印（#1792）。
+        入金のある週だけ、投資比率を入金後の元手で割った印 exposure_deposit_basis を足す（#2177）
     """
     day = pd.Timestamp(as_of)
     # 直前の金曜（as_of が金曜なら1週前）
@@ -427,7 +437,7 @@ def compute_weekly_results(
             equity, gross, fallbacks, missing = _build_equity_parts(
                 market_orders, price_loader, initial_balance, index, split_loader, deposits
             )
-            exposure = _weekly_exposure(equity, gross, base_day, week_end)
+            exposure = _weekly_exposure(equity, gross, base_day, week_end, deposits)
             valued_at_fill_price = sorted(
                 symbol
                 for (_, symbol), days in fallbacks.items()
@@ -481,7 +491,7 @@ def compute_weekly_results(
             "missing_week_end_close": missing_week_end_close,
         }
 
-    return {
+    result: dict[str, Any] = {
         "week": week_name(week_end),
         "start": week_start.date().isoformat(),
         "end": week_end.date().isoformat(),
@@ -489,6 +499,14 @@ def compute_weekly_results(
         "initial_balance": float(initial_balance) + deposits_between(deposits, None, week_end),
         "markets": markets,
     }
+    if has_deposit_in_week(week_end.date(), _deposit_days(deposits)):
+        result[EXPOSURE_DEPOSIT_KEY] = EXPOSURE_DEPOSIT_BASIS
+    return result
+
+
+def _deposit_days(deposits: Sequence[Deposit]) -> list[date]:
+    """入金の日の一覧を返す。"""
+    return [pd.Timestamp(day).date() for day, _ in deposits]
 
 
 def write_paper_weekly_results(
@@ -535,5 +553,6 @@ def write_paper_weekly_results(
         output_dir,
         notify,
         frozen_before=None if switch_day is None else switch_day.date(),
+        deposit_days=_deposit_days(deposits),
     )
     return path
