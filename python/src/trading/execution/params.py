@@ -95,11 +95,16 @@ def _block_new_if_params_unreadable(
     """
     if _PARAMS_UNREADABLE_COL not in predictions.columns:
         return gate_status
-    if not predictions[_PARAMS_UNREADABLE_COL].astype(bool).any():
+    unreadable = predictions[_PARAMS_UNREADABLE_COL].astype(bool)
+    if not unreadable.any():
         return gate_status
     reason = "optimal_params.json が読めないため既定の閾値で決済だけ行う"
     logger.error("[exec] %s（新規は止める）", reason)
     stats["errors"] += 1
+    # 止めた理由を stats と 8:50 の記録に残し、注文の失敗と見分ける（#2191）
+    symbols = sorted({str(s) for s in predictions.loc[unreadable, "symbol"]})
+    head = f"、先頭 {symbols[0]}" if symbols else ""
+    stats["params_unreadable_reason"] = f"{reason}（読めない銘柄 {len(symbols)}件{head}）"
     return replace(gate_status, is_allowed=False, reason=gate_status.reason or reason)
 
 

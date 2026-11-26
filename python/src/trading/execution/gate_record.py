@@ -39,6 +39,7 @@ _GATE_KEYS = (
     "enc",
     "avg_correlation",
     "stale_prediction_reason",
+    "params_unreadable_reason",
     "threshold_scale",
     "buy_orders",
     "sell_orders",
