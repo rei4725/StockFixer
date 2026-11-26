@@ -5,8 +5,13 @@
 - Claude の発注の道は既定の Kelly 入力で株数を決める
 """
 
+import json
+import tempfile
 import unittest
+from datetime import datetime
+from pathlib import Path
 from unittest.mock import MagicMock, patch
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -69,6 +74,97 @@ def _predictions():
             },
         ]
     )
+
+
+def _order_patches(repo):
+    gate = TradingGateStatus(
+        is_allowed=True,
+        stop_active=False,
+        reason_code=None,
+        reason=None,
+        daily_loss=0.0,
+        daily_loss_limit=20_000.0,
+    )
+    return [
+        patch.object(repo, "get_latest_by_market", return_value=_predictions()),
+        patch("src.trading.execution.runner._record_order"),
+        patch("src.trading.execution.sl_tp._record_order"),
+        patch(
+            "src.trading.execution.runner._choose_order_params",
+            return_value=(OrderType.MARKET, 0.0, "market", "open"),
+        ),
+        patch("src.trading.execution.RiskManager.evaluate_trading_gate", return_value=gate),
+        patch("src.trading.execution.RiskManager.calc_position_size", return_value=100),
+        patch("src.trading.execution.RiskManager.update_peak_balance"),
+        patch(
+            "src.trading.execution.runner.evaluate_correlation_gate",
+            return_value=CorrelationGateResult(
+                is_allowed=True, enc=2.0, enc_threshold=2.0, avg_correlation=0.0, n_symbols=2
+            ),
+        ),
+        patch("src.trading.execution.runner._load_exit_model", return_value=None),
+    ]
+
+
+class TestParamsUnreadableReasonIsRecorded(unittest.TestCase):
+    """params の門で新規を止めた朝は、理由を stats と 8:50 の記録に残す（#2191）。"""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dest = Path(tmp.name) / "orders" / "2026-11-26.json"
+        for target, value in (
+            ("get_results_dir", tmp.name),
+            ("now_jst", datetime(2026, 11, 26, 8, 50, tzinfo=ZoneInfo("Asia/Tokyo"))),
+        ):
+            started = patch(f"src.trading.execution.gate_record.{target}", return_value=value)
+            started.start()
+            self.addCleanup(started.stop)
+
+    def _run(self, params_patches):
+        repo = InMemoryPredictionRepository()
+        patches = params_patches + _order_patches(repo)
+        for p in patches:
+            p.start()
+        try:
+            return run_daily_orders(
+                _make_broker(),
+                order_run_sink=InMemoryOrderRunSink(),
+                trade_diff_sink=InMemoryTradeDiffSink(),
+                prediction_repo=repo,
+                market="jp",
+                mode="paper",
+            )
+        finally:
+            for p in patches:
+                p.stop()
+
+    def test_unreadable_day_writes_reason_to_stats_and_record(self):
+        with self.assertLogs("src.trading.execution.params", level="ERROR"):
+            stats = self._run(_unreadable_everywhere())
+
+        reason = stats.get("params_unreadable_reason")
+        self.assertIsNotNone(reason)
+        self.assertIn("optimal_params.json", reason)
+        self.assertIn("2件", reason)  # 読めなかった銘柄の数
+        record = json.loads(self.dest.read_text(encoding="utf-8"))
+        self.assertEqual(record["params_unreadable_reason"], reason)
+        self.assertEqual(record["errors"], stats["errors"])
+
+    def test_readable_day_keeps_reason_null(self):
+        readable = [
+            patch("src.trading.risk_manager.get_optimal_params", return_value={}),
+            patch(
+                "src.trading.execution.params.get_optimal_params",
+                return_value={"threshold": 0.012},
+            ),
+        ]
+        stats = self._run(readable)
+
+        self.assertIsNone(stats["params_unreadable_reason"])
+        record = json.loads(self.dest.read_text(encoding="utf-8"))
+        self.assertIn("params_unreadable_reason", record)
+        self.assertIsNone(record["params_unreadable_reason"])
 
 
 class TestRunDailyOrdersUnreadableParams(unittest.TestCase):

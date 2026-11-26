@@ -39,6 +39,8 @@ class OrderExecutionStats(TypedDict):
     sl_tp_unevaluable_symbols: list[str]
     held_without_prediction_symbols: list[str] | None  # 判定をしなかった日は None（#1530）
     stale_prediction_reason: str | None
+    # optimal_params.json が読めず新規を止めた朝の理由。読めた朝は None（#2191）
+    params_unreadable_reason: str | None
     threshold_scale: float | None
     order_record_written: bool  # その回の記録を書きに行ったか。二重に書かない（#1548）
     order_details: list[OrderDetail]  # 出した注文の明細（#1876）
@@ -69,6 +71,7 @@ def _new_stats() -> OrderExecutionStats:
         "sl_tp_unevaluable_symbols": [],
         "held_without_prediction_symbols": None,
         "stale_prediction_reason": None,
+        "params_unreadable_reason": None,
         "threshold_scale": None,
         "order_record_written": False,
         "order_details": [],

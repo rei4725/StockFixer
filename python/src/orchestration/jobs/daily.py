@@ -350,6 +350,12 @@ def run_daily_auto_order():
     # 注文ごとの失敗（SL/TP の売りを含む）も知らせの後にジョブの失敗にする（#1074）。
     # daily_auto_order は max_retries: 0 のため、失敗にしても発注は呼び直されない。
     if stats.get("errors", 0) > 0:
+        # params の門の1件は注文の失敗と分けて書く（#2191）
+        if stats.get("params_unreadable_reason"):
+            raise RuntimeError(
+                f"自動発注で注文の失敗が {stats['errors'] - 1} 件、"
+                "optimal_params.json が読めず新規を止めた"
+            )
         raise RuntimeError(f"自動発注で注文の失敗が {stats['errors']} 件あった")
 
 

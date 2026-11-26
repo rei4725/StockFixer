@@ -100,6 +100,41 @@ class TestAutoOrderErrorsFailJob(unittest.TestCase):
         self.correlation_alert.assert_called_once()
         self.run_orders.assert_called_once()
 
+    def test_params_gate_only_error_says_params_not_order_failure(self):
+        # params の門の1件だけで失敗した朝は、注文の失敗と見分けられる文にする（#2191）
+        self.stats["errors"] = 1
+        self.stats["params_unreadable_reason"] = "optimal_params.json が読めない"
+        self.run_orders.side_effect = None
+        self.run_orders.return_value = self.stats
+
+        with self.assertRaises(RuntimeError) as ctx:
+            self.daily.run_daily_auto_order()
+
+        message = str(ctx.exception)
+        self.assertIn("注文の失敗が 0 件", message)
+        self.assertIn("optimal_params.json が読めず新規を止めた", message)
+
+    def test_order_errors_with_params_gate_counts_orders_apart(self):
+        self.stats["errors"] = 3
+        self.stats["params_unreadable_reason"] = "optimal_params.json が読めない"
+        self.run_orders.side_effect = None
+        self.run_orders.return_value = self.stats
+
+        with self.assertRaises(RuntimeError) as ctx:
+            self.daily.run_daily_auto_order()
+
+        self.assertIn("注文の失敗が 2 件", str(ctx.exception))
+
+    def test_order_error_without_params_gate_keeps_message(self):
+        self.stats["errors"] = 1
+        self.run_orders.side_effect = None
+        self.run_orders.return_value = self.stats
+
+        with self.assertRaises(RuntimeError) as ctx:
+            self.daily.run_daily_auto_order()
+
+        self.assertEqual(str(ctx.exception), "自動発注で注文の失敗が 1 件あった")
+
 
 if __name__ == "__main__":
     unittest.main()
