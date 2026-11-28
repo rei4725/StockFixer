@@ -280,7 +280,7 @@ class TestBuildEquitySeriesSplit(unittest.TestCase):
 class TestDefaultSplitLoader(unittest.TestCase):
     """_default_split_loader（yfinance の分割の記録）のテスト"""
 
-    @patch("src.trading.paper_equity.yf.Ticker")
+    @patch("src.trading.paper_equity_loaders.yf.Ticker")
     def test_returns_naive_normalized_index(self, mock_ticker):
         idx = pd.DatetimeIndex(["2026-01-12 00:00"]).tz_localize("Asia/Tokyo")
         mock_ticker.return_value.splits = pd.Series([2.0], index=idx)
@@ -290,13 +290,13 @@ class TestDefaultSplitLoader(unittest.TestCase):
         self.assertEqual(list(result.index), [pd.Timestamp("2026-01-12")])
         self.assertEqual(list(result), [2.0])
 
-    @patch("src.trading.paper_equity.yf.Ticker")
+    @patch("src.trading.paper_equity_loaders.yf.Ticker")
     def test_empty_splits_returns_none(self, mock_ticker):
         mock_ticker.return_value.splits = pd.Series(dtype=float)
 
         self.assertIsNone(_default_split_loader("us", "AAPL"))
 
-    @patch("src.trading.paper_equity.yf.Ticker", side_effect=RuntimeError("network"))
+    @patch("src.trading.paper_equity_loaders.yf.Ticker", side_effect=RuntimeError("network"))
     def test_error_returns_none(self, _mock_ticker):
         self.assertIsNone(_default_split_loader("us", "AAPL"))
 
