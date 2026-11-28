@@ -170,10 +170,44 @@ def _add_dates(values: Iterable[Any], dates: set[pd.Timestamp]) -> None:
             dates.add(ts.normalize())
 
 
-def _save_event_dates(market: str, symbol: str, dates: pd.DatetimeIndex) -> None:
-    """イベント日を DuckDB に保存する（既存レコードは fetched_at を更新）。"""
+def refresh_event_calendars(tasks: Iterable[Any], markets: tuple[str, ...] = ("jp",)) -> int:
+    """tasks の銘柄の決算日を yfinance から取り直し、earnings_calendar に書く（#2201）。
+
+    キャッシュの TTL を見ずに毎回取り直す。取れなかった銘柄・書けなかった銘柄は
+    warning を出して飛ばす。書けた銘柄の数を返す。
+    """
+    seen: set[tuple[str, str]] = set()
+    saved = 0
+    empty: list[str] = []
+    failed: list[str] = []
+    for task in tasks:
+        key = (str(getattr(task, "market", "")), str(getattr(task, "symbol", "")))
+        if key[0] not in markets or not key[1] or key in seen:
+            continue
+        seen.add(key)
+        dates = _fetch_event_dates_from_yfinance(*key)
+        if len(dates) == 0:
+            empty.append(key[1])
+            continue
+        if _save_event_dates(*key, dates):
+            saved += 1
+        else:
+            failed.append(key[1])
+    if empty:
+        logger.warning("決算日が取れなかった銘柄 %d 件: %s", len(empty), empty[:20])
+    if failed:
+        logger.warning("決算日を書けなかった銘柄 %d 件: %s", len(failed), failed[:20])
+    logger.info("earnings_calendar 更新: 書けた %d / 対象 %d 銘柄", saved, len(seen))
+    return saved
+
+
+def _save_event_dates(market: str, symbol: str, dates: pd.DatetimeIndex) -> bool:
+    """イベント日を DuckDB に保存する（既存レコードは fetched_at を更新）。
+
+    書けたら True、日付が空か書き込みに失敗したら False を返す。
+    """
     if len(dates) == 0:
-        return
+        return False
     rows = [
         {
             "market": market,
@@ -196,3 +230,5 @@ def _save_event_dates(market: str, symbol: str, dates: pd.DatetimeIndex) -> None
             )
     except Exception as exc:
         logger.warning("イベント日保存失敗 [%s/%s]: %s", market, symbol, exc, exc_info=True)
+        return False
+    return True

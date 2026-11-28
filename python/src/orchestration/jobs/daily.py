@@ -35,6 +35,7 @@ from src.orchestration.jobs.common import (
     is_today_jst,
 )
 from src.orchestration.jobs.drift_check import run_daily_drift_check
+from src.orchestration.jobs.earnings_calendar_stage import refresh_earnings_calendar_stage
 from src.orchestration.jobs.features_marker import (
     current_code_version,
     record_features_version_if_covered,
@@ -102,6 +103,7 @@ def run_daily_pipeline():
     from src.watchlist.batch_runner import load_target_symbols
 
     market_totals: Counter[str] = Counter()  # [3/6] の jp の欠けの線にも使う（#1438）
+    tasks: list = []  # 最後の決算日の取り直しにも使う（#2201）
     # stock_features を作り直すコードの版（夜間の仮の入れ替えが、今の版の特徴量かを見る）
     features_version = current_code_version()
     try:
@@ -263,6 +265,7 @@ def run_daily_pipeline():
     # 採点の JSON に業種の内訳を書き足す（NON_CRITICAL。[2/6] で作った材料を使う）
     append_accuracy_json_sectors(accuracy_report)
     daily_scoring_stage()
+    refresh_earnings_calendar_stage(tasks)  # earnings_calendar を毎日埋める（#2201）
     _raise_if_order_market_predictions_missing(market_totals, output_rows)  # 補完に乗せる（#1595）
 
     logger.info("=== 日次パイプライン完了 ===")

@@ -367,14 +367,20 @@ def _isolate_models_dir(monkeypatch, tmp_path_factory):
 
 @pytest.fixture(autouse=True)
 def _stub_scoring_stages(monkeypatch):
-    """日次・週次の道に足した採点の段（DB と results/ を触る）を、道のテストで空にする。
+    """日次・週次の道に足した採点の段と決算日の段（DB と results/ を触る）を、道のテストで空にする。
 
     段そのものは tests/unit/test_orchestration_scoring_stage.py で確かめる。
     """
     for module, names in (
         (
             "daily",
-            ("snapshot_predictions_stage", "daily_scoring_stage", "log_rule_signal_versions_stage"),
+            (
+                "snapshot_predictions_stage",
+                "daily_scoring_stage",
+                "log_rule_signal_versions_stage",
+                # 決算日の取り直し（yfinance と DB を触る。段は test_earnings_calendar_refresh.py）
+                "refresh_earnings_calendar_stage",
+            ),
         ),
         ("weekly", ("weekly_rule_scoring_stage",)),
     ):
