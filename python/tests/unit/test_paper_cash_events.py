@@ -91,20 +91,131 @@ def test_switch_week_return_does_not_jump_with_deposit() -> None:
     assert before["markets"]["jp"]["weekly_return"] == 0.0
 
 
-def test_backfill_does_not_rewrite_weeks_before_switch(tmp_path: Path) -> None:
-    # initial_balance の無い古い形の、欠けのある切り替えの前の週のファイル
-    old = {
+def test_backfill_does_not_rewrite_current_basis_weeks_before_switch(tmp_path: Path) -> None:
+    # 今の印で書かれた、欠けのある切り替えの前の週のファイル
+    current = {
         "week": "2026-W45",
         "start": "2026-11-02",
         "end": "2026-11-06",
-        "markets": {"jp": {"weekly_return": 0.01, "excess_return": None}},
+        "initial_balance": 1_000_000.0,
+        "markets": {
+            "jp": {"weekly_return": 0.01, "excess_return": None, "excess_basis": "exposure_scaled"}
+        },
     }
     path = tmp_path / "2026-W45.json"
-    path.write_text(json.dumps(old), encoding="utf-8")
+    path.write_text(json.dumps(current), encoding="utf-8")
     compute_week = MagicMock()
     backfill_previous_weeks(
-        date(2026, 11, 20), compute_week, str(tmp_path), frozen_before=date(2026, 11, 16)
+        date(2026, 11, 20),
+        compute_week,
+        str(tmp_path),
+        frozen_before=date(2026, 11, 16),
+        base_balance=1_000_000.0,
     )
     compute_week.assert_not_called()
-    assert json.loads(path.read_text(encoding="utf-8")) == old
+    assert json.loads(path.read_text(encoding="utf-8")) == current
     assert os.listdir(tmp_path) == ["2026-W45.json"]
+
+
+_OLD_W43 = {
+    "week": "2026-W43",
+    "start": "2026-10-19",
+    "end": "2026-10-23",
+    "initial_balance": 1_000_000.0,
+    "markets": {"jp": {"weekly_return": 0.01, "excess_return": 0.019244}},
+}
+
+
+def _write_old_w43(tmp_path: Path) -> Path:
+    path = tmp_path / "2026-W43.json"
+    path.write_text(json.dumps(_OLD_W43), encoding="utf-8")
+    return path
+
+
+def test_backfill_rewrites_old_basis_week_before_switch(tmp_path: Path) -> None:
+    # 印の無い、切り替えの前の週は、今の計算で書き直す（#2202）
+    orders = pd.DataFrame(
+        [("jp", "7203", int(OrderSide.BUY), 100, 1000.0, "2026-10-20")],
+        columns=["market", "symbol", "side", "qty", "fill_price", "filled_at"],
+    )
+    deposits = [(pd.Timestamp("2026-11-18"), 9_000_000.0)]
+    path = _write_old_w43(tmp_path)
+    calls: list[date] = []
+
+    def compute_week(day: date) -> dict:
+        calls.append(day)
+        return compute_weekly_results(
+            orders, _flat_prices, 1_000_000.0, day, _no_benchmark, deposits=deposits
+        )
+
+    backfill_previous_weeks(
+        date(2026, 11, 20),
+        compute_week,
+        str(tmp_path),
+        frozen_before=date(2026, 11, 18),
+        deposit_days=[date(2026, 11, 18)],
+        base_balance=1_000_000.0,
+    )
+    assert calls == [date(2026, 10, 24)]
+    written = json.loads(path.read_text(encoding="utf-8"))
+    assert written["week"] == "2026-W43"
+    assert written["initial_balance"] == 1_000_000.0
+    assert "exposure_deposit_basis" not in written
+    jp = written["markets"]["jp"]
+    assert jp["excess_basis"] == "exposure_scaled"
+    assert "exposure" in jp and "excess_return_unscaled" in jp
+
+
+def test_backfill_keeps_old_basis_week_before_switch_when_defects_grow(tmp_path: Path) -> None:
+    path = _write_old_w43(tmp_path)
+    worse = {
+        "week": "2026-W43",
+        "start": "2026-10-19",
+        "end": "2026-10-23",
+        "initial_balance": 1_000_000.0,
+        "markets": {"jp": {"excess_return": None, "excess_basis": "exposure_scaled"}},
+    }
+    compute_week = MagicMock(return_value=worse)
+    backfill_previous_weeks(
+        date(2026, 11, 20),
+        compute_week,
+        str(tmp_path),
+        frozen_before=date(2026, 11, 18),
+        base_balance=1_000_000.0,
+    )
+    compute_week.assert_called_once_with(date(2026, 10, 24))
+    assert json.loads(path.read_text(encoding="utf-8")) == _OLD_W43
+
+
+def test_backfill_keeps_old_basis_week_before_switch_when_balance_has_deposit(
+    tmp_path: Path,
+) -> None:
+    path = _write_old_w43(tmp_path)
+    with_deposit = {
+        "week": "2026-W43",
+        "start": "2026-10-19",
+        "end": "2026-10-23",
+        "initial_balance": 10_000_000.0,
+        "markets": {"jp": {"excess_return": 0.001, "excess_basis": "exposure_scaled"}},
+    }
+    compute_week = MagicMock(return_value=with_deposit)
+    backfill_previous_weeks(
+        date(2026, 11, 20),
+        compute_week,
+        str(tmp_path),
+        frozen_before=date(2026, 11, 18),
+        base_balance=1_000_000.0,
+    )
+    assert json.loads(path.read_text(encoding="utf-8")) == _OLD_W43
+
+
+def test_backfill_without_base_balance_keeps_old_basis_week_before_switch(
+    tmp_path: Path,
+) -> None:
+    path = _write_old_w43(tmp_path)
+    compute_week = MagicMock()
+    backfill_previous_weeks(
+        date(2026, 11, 20), compute_week, str(tmp_path), frozen_before=date(2026, 11, 18)
+    )
+    compute_week.assert_not_called()
+    assert json.loads(path.read_text(encoding="utf-8")) == _OLD_W43

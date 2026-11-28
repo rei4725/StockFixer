@@ -554,5 +554,6 @@ def write_paper_weekly_results(
         notify,
         frozen_before=None if switch_day is None else switch_day.date(),
         deposit_days=_deposit_days(deposits),
+        base_balance=float(PAPER_INITIAL_BALANCE),
     )
     return path

@@ -149,12 +149,43 @@ def _review_week(
     return "、".join(_week_defects(kept).values()) or None
 
 
+def _review_frozen_week(
+    week: str,
+    week_end: date,
+    compute_week: ComputeWeek,
+    output_dir: str,
+    base_balance: Optional[float],
+) -> None:
+    """元手の切り替えより前の週を見る。前の計算の印のファイルだけを計算し直す（#2202）。
+
+    今の印で書かれた週は、欠けがあっても書き直さない（#1877）。計算し直した週の元手が
+    入金を足さない元手 base_balance と違えば書かない。base_balance が None なら見ない。
+    欠けが増えるときは書かない決まり（write_week_file_unless_worse）は同じ。
+    """
+    if base_balance is None:
+        return
+    current = _read_week_file(os.path.join(output_dir, f"{week}.json"))
+    if current is None or not _is_old_basis(current):
+        return
+    result = compute_week(week_end + timedelta(days=1))
+    balance = result.get("initial_balance")
+    if not isinstance(balance, (int, float)) or abs(float(balance) - base_balance) > 1e-6:
+        logger.warning(
+            "切り替えの前の週の元手が入金を足さない元手と違うため元のまま残す: %s %s",
+            week,
+            balance,
+        )
+        return
+    write_week_file_unless_worse(output_dir, result)
+
+
 def _review_weeks(
     target_week_end: date,
     compute_week: ComputeWeek,
     output_dir: str,
     frozen_before: Optional[date] = None,
     deposit_days: Sequence[date] = (),
+    base_balance: Optional[float] = None,
 ) -> tuple[list[str], dict[str, str]]:
     """対象の週の前の週を見て、見た週の名前と、欠けが残る週の理由を返す。"""
     names = [name[:-5] for name in os.listdir(output_dir) if _WEEK_FILE.match(name)]
@@ -182,7 +213,11 @@ def _review_weeks(
                 weeks[week] = week_end
     for week, week_end in sorted(weeks.items()):
         if frozen_before is not None and week_end < frozen_before:
-            # 元手の切り替えより前の週は、その時の元手で書いたまま残す（#1877）
+            # 元手の切り替えより前の週は、前の計算の印のファイルだけを計算し直す（#1877・#2202）
+            try:
+                _review_frozen_week(week, week_end, compute_week, output_dir, base_balance)
+            except Exception:
+                logger.error("切り替えの前の紙の週の成績の書き直し失敗: %s", week, exc_info=True)
             continue
         checked.append(week)
         try:
@@ -241,11 +276,13 @@ def backfill_previous_weeks(
     notify: Optional[Notify] = None,
     frozen_before: Optional[date] = None,
     deposit_days: Sequence[date] = (),
+    base_balance: Optional[float] = None,
 ) -> None:
     """対象の週の前の週を見直す。例外は出さない（対象の週の書き出しの成否を変えない）。
 
     今ある一番古いファイルより前の週は作らない。金曜が frozen_before（元手の切り替えの日）
-    より前の週は、計算し直さず、ファイルも書き直さない（#1877）。
+    より前の週は、今の印で書かれていれば計算し直さず、ファイルも書き直さない（#1877）。
+    前の計算の印の週だけを計算し直し、元手が base_balance のときに書く（#2202）。
 
     Args:
         target_week_end: 対象の週の金曜
@@ -254,10 +291,16 @@ def backfill_previous_weeks(
         notify: 知らせの文を送り、送れたかを返す関数。None なら知らせない
         frozen_before: 元手の切り替えの日
         deposit_days: 入金の日。入金のある週で印の無いファイルを計算し直す（#2177）
+        base_balance: 入金を足さない元手。None なら切り替えの前の週は書き直さない
     """
     try:
         checked, remaining = _review_weeks(
-            target_week_end, compute_week, output_dir, frozen_before, deposit_days
+            target_week_end,
+            compute_week,
+            output_dir,
+            frozen_before,
+            deposit_days,
+            base_balance,
         )
         _notify_remaining(checked, remaining, output_dir, notify)
     except Exception:
