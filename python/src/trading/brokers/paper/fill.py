@@ -5,10 +5,58 @@
 
 from typing import Any
 
+from src.domain.ports import TradeDiffSink
+from src.domain.types import TradeDiffRecord
 from src.trading.brokers.base import OrderSide
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+def limit_fill_price(
+    side: int, limit_price: float, open_price: float, high_price: float, low_price: float
+) -> float | None:
+    """指値が足に届いたときの約定の値段を返す。届かないときは None（#2204 で paper_broker から移した）
+
+    買い・返済は安値が指値以下なら指値と始値の安い方、売り・空売りは高値が指値以上なら
+    指値と始値の高い方で約定する。
+    """
+    if side == int(OrderSide.BUY) and low_price <= limit_price:
+        return min(limit_price, open_price)
+    if side == int(OrderSide.SELL) and high_price >= limit_price:
+        return max(limit_price, open_price)
+    if side == int(OrderSide.SHORT) and high_price >= limit_price:
+        return max(limit_price, open_price)
+    if side == int(OrderSide.SHORT_COVER) and low_price <= limit_price:
+        return min(limit_price, open_price)
+    return None
+
+
+def record_trade_diff(
+    sink: TradeDiffSink, diff_key: tuple[Any, Any, Any, Any, Any, Any], fill_price: float
+) -> None:
+    """約定の値段とシグナルの値段の差を記録する。予想に紐づかない注文は記録しない
+
+    diff_key は注文の (market, symbol, predicted_at, side, signal_price, order_id)。
+    約定は確定済みで戻らないので、記録の失敗は ERROR で受けて約定に数える（#1573）。
+    """
+    market, symbol, predicted_at, side, signal_price, order_id = diff_key
+    if not (market and predicted_at and signal_price is not None):
+        return
+    diff = TradeDiffRecord(
+        market=str(market),
+        symbol=str(symbol),
+        predicted_at=str(predicted_at),
+        side=int(side),
+        signal_price=float(signal_price),
+        mode="paper",
+        order_id=str(order_id),
+        actual_price=fill_price,
+    )
+    try:
+        sink.record(diff)
+    except Exception:  # 約定は確定済みで戻らないので、約定に数える（#1573）
+        logger.error(f"[paper] 約定の差分の記録に失敗: {order_id}", exc_info=True)
 
 
 def claim_pending(con: Any, order_id: str, symbol: str) -> bool:

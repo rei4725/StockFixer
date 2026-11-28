@@ -18,7 +18,6 @@ import pandas as pd
 
 from config.settings import PAPER_INITIAL_BALANCE
 from src.domain.ports import MarketDataPort, TradeDiffSink
-from src.domain.types import TradeDiffRecord
 from src.trading.brokers.base import BrokerBase, OrderSide, OrderType
 from src.trading.brokers.paper import split_adjust as sa
 from src.trading.brokers.paper.bar_timing import bar_closed as _bar_closed
@@ -28,6 +27,7 @@ from src.trading.brokers.paper.bar_timing import held_limit_bar_position as _hel
 from src.trading.brokers.paper.bar_timing import parse_predicted_date as _parse_predicted_date
 from src.trading.brokers.paper.fill import apply_fill
 from src.trading.brokers.paper.fill import claim_pending as _claim_pending
+from src.trading.brokers.paper.fill import limit_fill_price, record_trade_diff
 from src.trading.brokers.paper.pending_short import read_pending_shorts
 from src.trading.brokers.paper.position_rows import long_position_row, short_position_row
 from src.trading.brokers.paper.short_registration import (
@@ -279,14 +279,11 @@ class PaperBroker(BrokerBase):
                 if order_type_val == int(OrderType.MARKET):
                     fill_price = open_price
                 else:  # 指値
-                    if side == int(OrderSide.BUY) and low_price <= limit_price:
-                        fill_price = min(limit_price, open_price)
-                    elif side == int(OrderSide.SELL) and high_price >= limit_price:
-                        fill_price = max(limit_price, open_price)
-                    elif side == int(OrderSide.SHORT) and high_price >= limit_price:
-                        fill_price = max(limit_price, open_price)
-                    elif side == int(OrderSide.SHORT_COVER) and low_price <= limit_price:
-                        fill_price = min(limit_price, open_price)
+                    limit_fill = limit_fill_price(
+                        side, limit_price, open_price, high_price, low_price
+                    )
+                    if limit_fill is not None:
+                        fill_price = limit_fill
                     elif market != "us" and not _bar_closed(bar_date, _now_jst()):
                         # 場中の足は寄りから数分の値動きしか持たない。引けた足で判定する（#2108）
                         logger.info(
@@ -343,21 +340,8 @@ class PaperBroker(BrokerBase):
                         "fill_price=%s, filled_at=CURRENT_TIMESTAMP WHERE order_id=%s",
                         [qty, fill_price, order_id],
                     )
-                if market and predicted_at and signal_price is not None:
-                    diff = TradeDiffRecord(
-                        market=str(market),
-                        symbol=str(symbol),
-                        predicted_at=str(predicted_at),
-                        side=int(side),
-                        signal_price=float(signal_price),
-                        mode="paper",
-                        order_id=str(order_id),
-                        actual_price=fill_price,
-                    )
-                    try:
-                        self._trade_diff_sink.record(diff)
-                    except Exception:  # 約定は確定済みで戻らないので、約定に数える（#1573）
-                        logger.error(f"[paper] 約定の差分の記録に失敗: {order_id}", exc_info=True)
+                diff_key = (market, symbol, predicted_at, side, signal_price, order_id)
+                record_trade_diff(self._trade_diff_sink, diff_key, fill_price)
                 logger.info(
                     f"[paper] 約定: {symbol} {OrderSide(side).name} {qty}株 @ {fill_price:.1f}円"
                 )
